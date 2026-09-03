@@ -29,6 +29,7 @@ is that those four are not usable by an OpenAPI consumer, and that is recorded b
 
 | Module | Holds |
 |---|---|
+| `dialog.ts` | pi's blocking dialogs as data: the question, the answer, and the answer-validation rule (#27) |
 | `guard.ts` | the Tier 0 guard policy |
 | `tool-result.ts` | the two-surface tool-result descriptor (#18) |
 | `observation.ts` | what a pi event becomes for a surface to render |
