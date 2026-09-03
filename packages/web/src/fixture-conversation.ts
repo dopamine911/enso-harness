@@ -51,10 +51,15 @@ export function createFixtureChat(): TanStackChat {
 					"layout first, then answer. This text streams into the collapsible Reasoning " +
 					"shell, which opens itself while streaming and closes when done.",
 			);
+			// ⚠ Output is a plain STRING, but the helper still wraps it in a one-element
+			// content ARRAY, so the textual fallback renders it quoted — a fixture-only
+			// artifact. Live results carry `content` as a bare string (receipt: the
+			// 2026-09-03 live `ls` run rendered unquoted), so do not "fix" the renderer
+			// to unwrap arrays on the fixture's account.
 			writer
 				.tool("bash", { input: { command: "ls -la" } })
 				.sleep(600)
-				.output({ content: "README.md\npackages/\nscripts/\ndocs/" });
+				.output("README.md\npackages/\nscripts/\ndocs/");
 			// ⚠ A tool name NOTHING registers, on purpose. pi's tool set is dynamic
 			// (extensions, MCP), and TanStack's own dispatcher renders an unregistered
 			// tool as NOTHING plus a console warning — which is why main.tsx dispatches
@@ -63,7 +68,7 @@ export function createFixtureChat(): TanStackChat {
 			writer
 				.tool("mcp_made_up_tool_nobody_registered", { input: { subject: "dynamic dispatch" } })
 				.sleep(300)
-				.output({ content: "an unregistered tool's result — visible, not vanished" });
+				.output("an unregistered tool's result — visible, not vanished");
 			writer.text("Four entries at the repo root — the layout is a standard npm workspace.");
 		})
 		.user("what does an error look like?")
