@@ -1,2 +1,8 @@
+node_modules/
+dist-types/
+.zen/
 .local/
 .inspiration/
+
+# pi's session exports, written to the cwd on demand — artifacts, not sources
+pi-session-*.html

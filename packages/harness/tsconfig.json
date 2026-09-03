@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "types": [
+      "bun"
+    ]
+  },
+  "include": [
+    "core/**/*.ts",
+    "extensions/**/*.ts"
+  ]
+}
