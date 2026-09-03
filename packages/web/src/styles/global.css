@@ -50,73 +50,87 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/*
+ * Kanagawa (rebelot/kanagawa.nvim) mapped onto the shadcn token structure.
+ * Hex values are verbatim from the upstream palette (lua/kanagawa/colors.lua,
+ * fetched 2026-09-03) — the mapping onto shadcn ROLES is ours:
+ *   :root  = Lotus (the light variant)
+ *   .dark  = Wave  (the default dark variant — index.html hardcodes class="dark",
+ *            matching kanagawa.nvim's own default; remove the class for Lotus)
+ * Two deliberate legibility swaps, both still kanagawa colors:
+ *   - wave muted-foreground is springViolet1 (#938AA9), not the comment color
+ *     fujiGray (#727169) — fujiGray is ~3.9:1 on sumiInk3 and muted-foreground
+ *     carries real UI text here (tool names, timestamps, the reasoning trigger)
+ *   - wave destructive is peachRed (#FF5D62), not samuraiRed (#E82424) —
+ *     samuraiRed is ~3.3:1 on sumiInk3 and destructive is TEXT in the Alert
+ */
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
+    --background: #f2ecbc;              /* lotusWhite3 */
+    --foreground: #545464;              /* lotusInk1 */
+    --card: #e5ddb0;                    /* lotusWhite2 */
+    --card-foreground: #545464;         /* lotusInk1 */
+    --popover: #dcd5ac;                 /* lotusWhite1 */
+    --popover-foreground: #545464;      /* lotusInk1 */
+    --primary: #4d699b;                 /* lotusBlue4 */
+    --primary-foreground: #f2ecbc;      /* lotusWhite3 */
+    --secondary: #d5cea3;               /* lotusWhite0 — the user bubble */
+    --secondary-foreground: #545464;    /* lotusInk1 */
+    --muted: #e7dba0;                   /* lotusWhite4 */
+    --muted-foreground: #716e61;        /* lotusGray2 */
+    --accent: #c7d7e0;                  /* lotusBlue1 — hover/selection wash */
+    --accent-foreground: #545464;       /* lotusInk1 */
+    --destructive: #c84053;             /* lotusRed */
+    --border: #d5cea3;                  /* lotusWhite0 */
+    --input: #d5cea3;                   /* lotusWhite0 */
+    --ring: #4d699b;                    /* lotusBlue4 */
+    --chart-1: #4d699b;                 /* lotusBlue4 */
+    --chart-2: #6f894e;                 /* lotusGreen */
+    --chart-3: #de9800;                 /* lotusYellow3 */
+    --chart-4: #624c83;                 /* lotusViolet4 */
+    --chart-5: #5e857a;                 /* lotusAqua2 */
     --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --sidebar: #e5ddb0;                 /* lotusWhite2 */
+    --sidebar-foreground: #545464;      /* lotusInk1 */
+    --sidebar-primary: #4d699b;         /* lotusBlue4 */
+    --sidebar-primary-foreground: #f2ecbc;
+    --sidebar-accent: #c7d7e0;          /* lotusBlue1 */
+    --sidebar-accent-foreground: #545464;
+    --sidebar-border: #d5cea3;          /* lotusWhite0 */
+    --sidebar-ring: #4d699b;            /* lotusBlue4 */
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --background: #1F1F28;              /* sumiInk3 — kanagawa's editor bg */
+    --foreground: #DCD7BA;              /* fujiWhite */
+    --card: #2A2A37;                    /* sumiInk4 */
+    --card-foreground: #DCD7BA;         /* fujiWhite */
+    --popover: #16161D;                 /* sumiInk0 — kanagawa floats */
+    --popover-foreground: #DCD7BA;      /* fujiWhite */
+    --primary: #7E9CD8;                 /* crystalBlue */
+    --primary-foreground: #181820;      /* sumiInk1 */
+    --secondary: #363646;               /* sumiInk5 — the user bubble */
+    --secondary-foreground: #DCD7BA;    /* fujiWhite */
+    --muted: #2A2A37;                   /* sumiInk4 */
+    --muted-foreground: #938AA9;        /* springViolet1 — see header note */
+    --accent: #223249;                  /* waveBlue1 — kanagawa's selection */
+    --accent-foreground: #DCD7BA;       /* fujiWhite */
+    --destructive: #FF5D62;             /* peachRed — see header note */
+    --border: #363646;                  /* sumiInk5 */
+    --input: #363646;                   /* sumiInk5 */
+    --ring: #7E9CD8;                    /* crystalBlue */
+    --chart-1: #7E9CD8;                 /* crystalBlue */
+    --chart-2: #98BB6C;                 /* springGreen */
+    --chart-3: #E6C384;                 /* carpYellow */
+    --chart-4: #957FB8;                 /* oniViolet */
+    --chart-5: #7AA89F;                 /* waveAqua2 */
+    --sidebar: #16161D;                 /* sumiInk0 */
+    --sidebar-foreground: #DCD7BA;      /* fujiWhite */
+    --sidebar-primary: #7E9CD8;         /* crystalBlue */
+    --sidebar-primary-foreground: #181820;
+    --sidebar-accent: #223249;          /* waveBlue1 */
+    --sidebar-accent-foreground: #DCD7BA;
+    --sidebar-border: #363646;          /* sumiInk5 */
+    --sidebar-ring: #7E9CD8;            /* crystalBlue */
 }
 
 @layer base {

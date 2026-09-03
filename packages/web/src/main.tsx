@@ -6,7 +6,7 @@ import { fetchServerSentEvents } from "@tanstack/ai-react";
 import type { GenericAGUIInterrupt } from "@tanstack/ai-client";
 import { automaticPartsForMessage, selectChatUI } from "@tanstack/ai-client/ui";
 import { createChatHook } from "@tanstack/ai-react/ui";
-import { ArrowUpIcon, MessageSquareIcon, SquareIcon } from "lucide-react";
+import { ArrowUpIcon, SquareIcon } from "lucide-react";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { isZenDialogSpec, ZEN_DIALOG_KEY, type ZenDialogSpec } from "@zen/core";
@@ -317,6 +317,9 @@ const { useAppChat, useChatContext } = createChatHook({
 			return (
 				<div className="flex h-dvh flex-col bg-background text-foreground">
 					<header className="flex items-center gap-2 border-b px-4 py-2">
+						{/* The ensō mark, cropped from .local/logo.png into public/enso.png —
+						    kanagawa fujiWhite cream, so it reads on the Wave background. */}
+						<img src="/enso.png" alt="" className="size-6" />
 						<h1 className="font-medium text-muted-foreground text-sm">zen-harness</h1>
 						{isFixtureMode ? (
 							<span className="rounded-full border px-2 py-0.5 text-muted-foreground text-xs">
@@ -328,8 +331,8 @@ const { useAppChat, useChatContext } = createChatHook({
 						<ConversationContent className="mx-auto w-full max-w-3xl">
 							{chat.messages.length === 0 ? (
 								<ConversationEmptyState
-									icon={<MessageSquareIcon className="size-8" />}
-									title="No messages yet"
+									icon={<img src="/logo-full.png" alt="zen-harness" className="w-44" />}
+									title=""
 									description="ask pi something to get started"
 								/>
 							) : (
