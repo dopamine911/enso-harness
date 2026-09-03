@@ -10,6 +10,7 @@
   "pi": {
     "extensions": [
       "./extensions/guards/index.ts",
+      "node_modules/@ladbabynpm/picc-permission-modes/index.ts",
       "node_modules/pi-multi-account/index.ts"
     ],
     "skills": [
@@ -24,6 +25,7 @@
     ]
   },
   "dependencies": {
+    "@ladbabynpm/picc-permission-modes": "0.1.1",
     "@mammothb/pi-tokyonight-storm": "0.2.1",
     "pi-multi-account": "1.21.0"
   },
