@@ -1,4 +1,6 @@
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 /**
@@ -10,7 +12,13 @@ import { defineConfig } from "vite";
  * `bash` unconfined (#9), the API must not be reachable from another host.
  */
 export default defineConfig({
-	plugins: [react()],
+	plugins: [react(), tailwindcss()],
+	resolve: {
+		// ⚠ The "@" alias MUST match tsconfig's `paths` exactly — they are two resolvers
+		// with no shared source of truth. If only tsconfig knows it, typecheck passes and
+		// the browser 404s; if only vite knows it, the app runs and `tsc -b` fails.
+		alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+	},
 	server: {
 		port: 5178,
 		host: "127.0.0.1",

@@ -26,7 +26,14 @@ function TextFallback({ result }: { result: ToolResultPart }): React.ReactNode {
 		typeof result.content === "string"
 			? result.content
 			: result.content.map((part) => JSON.stringify(part)).join("\n");
-	return <pre data-zen-tool-result="text">{text}</pre>;
+	return (
+		<pre
+			data-zen-tool-result="text"
+			className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs"
+		>
+			{text}
+		</pre>
+	);
 }
 
 function TruncationNote({
@@ -36,7 +43,7 @@ function TruncationNote({
 }): React.ReactNode {
 	// Rendered here, from data — the terminal renders the same fields differently.
 	return (
-		<p data-zen-truncation>
+		<p data-zen-truncation className="text-muted-foreground text-xs">
 			showing {truncated.shown} of {truncated.total} {truncated.unit}
 		</p>
 	);
@@ -55,11 +62,24 @@ export function ZenToolResult({
 	renderers: ZenRendererMap;
 }): React.ReactNode {
 	// No result yet — the call is in flight. Say so rather than rendering nothing.
-	if (result === undefined) return <p data-zen-tool-result="pending">running…</p>;
+	if (result === undefined) {
+		return (
+			<p data-zen-tool-result="pending" className="animate-pulse text-muted-foreground text-xs">
+				running…
+			</p>
+		);
+	}
 
 	// An errored result is the envelope's business, not the descriptor's.
 	if (result.error !== undefined) {
-		return <pre data-zen-tool-result="error">{result.error}</pre>;
+		return (
+			<pre
+				data-zen-tool-result="error"
+				className="overflow-x-auto rounded-md border border-destructive/50 bg-destructive/10 p-3 font-mono text-destructive text-xs"
+			>
+				{result.error}
+			</pre>
+		);
 	}
 
 	const descriptor = readZenToolResultDescriptor(result.metadata);

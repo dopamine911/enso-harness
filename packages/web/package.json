@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The zen-harness web surface. Outside the pi manifest \u2014 pi does nothing with a frontend.",
+  "description": "The zen-harness web surface. Outside the pi manifest — pi does nothing with a frontend.",
   "scripts": {
     "typecheck": "tsc -b --pretty false",
     "dev:server": "node --experimental-strip-types src/server/dev.ts",
@@ -11,18 +11,32 @@
   },
   "dependencies": {
     "@ag-ui/core": "*",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@radix-ui/react-use-controllable-state": "^1.2.6",
     "@tanstack/ai": "0.53.0",
     "@tanstack/ai-client": "0.31.0",
     "@tanstack/ai-react": "0.24.0",
     "@zen/core": "*",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.40.0",
+    "radix-ui": "^1.6.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "typebox": "^1.3.25"
+    "shadcn": "^4.20.1",
+    "tailwind-merge": "^3.6.0",
+    "tw-animate-css": "^1.4.0",
+    "typebox": "^1.3.25",
+    "use-stick-to-bottom": "^1.1.6"
   },
   "devDependencies": {
+    "@shadcn/helpers": "^0.2.0",
+    "@tailwindcss/typography": "^0.5.20",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.7.0",
     "vite": "^6.0.0"
   }

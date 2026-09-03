@@ -1,25 +1,30 @@
 {
-  "name": "zen-harness-foundation",
-  "private": true,
-  "type": "module",
-  "workspaces": [
-    "packages/*"
-  ],
-  "engines": {
-    "node": ">=22"
-  },
-  "scripts": {
-    "typecheck": "tsc -b --pretty false",
-    "test": "bun test",
-    "check": "npm run typecheck && npm run test",
-    "link:vendor": "node scripts/link-vendor-packages.mjs",
-    "zen": "node scripts/zen.mjs",
-    "dev": "node scripts/dev.mjs",
-    "dev:server": "npm run --silent dev:server -w @zen/web --",
-    "dev:web": "npm run --silent dev:web -w @zen/web"
-  },
-  "devDependencies": {
-    "@types/bun": "^1.4.0",
-    "typescript": "^5.7.0"
-  }
+	"name": "zen-harness-foundation",
+	"private": true,
+	"type": "module",
+	"workspaces": [
+		"packages/*"
+	],
+	"engines": {
+		"node": ">=22"
+	},
+	"scripts": {
+		"typecheck": "tsc -b --pretty false",
+		"test": "bun test",
+		"check": "npm run typecheck && npm run test",
+		"link:vendor": "node scripts/link-vendor-packages.mjs",
+		"zen": "node scripts/zen.mjs",
+		"dev": "node scripts/dev.mjs",
+		"dev:server": "npm run --silent dev:server -w @zen/web --",
+		"dev:web": "npm run --silent dev:web -w @zen/web"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.4.0",
+		"typescript": "^5.7.0"
+	},
+	"overrides": {
+		"@tanstack/ai": "0.53.0",
+		"@tanstack/ai-client": "0.31.0",
+		"@tanstack/ai-utils": "0.4.0"
+	}
 }
