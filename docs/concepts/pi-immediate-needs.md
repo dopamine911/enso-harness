@@ -164,22 +164,51 @@ work rather than a gap to patch.
 
 ## Tier 3 — recoverability
 
-### 10. No checkpoint or rewind
+### 10. No filesystem snapshot before a mutating call
 
-Nothing snapshots the tree before a mutating call. Recovery is git, and for uncommitted work git is
-nothing.
+Nothing snapshots the working tree before a mutating call. Recovery is git, and for uncommitted work git
+is nothing.
 
 This is the highest-leverage item on the whole list *after* Tier 0, for the reason argued in the
 boundaries doc: recoverability has no false positives, while prevention misclassifies and every wrong
 block trains you to widen the rule.
 
-**Seam:** `oh-my-pi`'s `src/tools/checkpoint.ts` — 131 lines, nine imports including three omp packages
-and two markdown prompt files. **Effort:** moderate port. Its git log also shows in-place rewind that
-branches within a session, which is the shape worth having.
+⚠ **Corrected 2026-09-03.** This item previously read "No checkpoint or rewind" and named
+`oh-my-pi`'s `src/tools/checkpoint.ts` as the seam. Both halves were wrong, and the error came from
+reading a definition instead of an execution path — the class this project keeps hitting.
+
+**Conversation rewind already exists, natively, and is better than the thing that was recommended.**
+pi sessions are trees: every entry has an `id` and a `parentId`, the current position is the active
+leaf, and `/tree` (branch in place, with an optional summary of the abandoned branch), `/fork` (new
+session from an earlier user message) and `/clone` (duplicate the active branch) navigate it. There is
+a `--fork <path|id>` startup flag and a `SessionManager` API. Nothing to port.
+
+**omp's `checkpoint`/`rewind` is a context-cost tool, not a recoverability tool.** Its own tool
+description is explicit: check-point before exploratory work, do the work, then `rewind(report)` so the
+intermediate tool calls leave the active context and are replaced by a concise report. The
+implementation matches — `CheckpointState` holds a message count and a session entry id, and rewind
+truncates in-memory messages and calls `sessionManager.branchWithSummary`. It performs no git and no
+filesystem operation on any path. The class's `summary` field calls it "a git-based checkpoint to save
+and restore session state"; that string is what this item was originally written from, and it does not
+describe what the tool does. Worth adopting **for its real purpose** — exploratory-work context
+compaction — and it is unrelated to this item.
+
+**What is actually missing is the filesystem half, and it is missing in both harnesses.** pi's sessions
+persist message history only — the format carries message entries, model and thinking-level changes,
+labels, compactions, branch summaries and extension entries, and no filesystem state. So this is ours
+to build. The design that falls out of the above: key a working-tree snapshot to pi's session entry id,
+so `/tree` navigation and tree restoration move together rather than being two unrelated rewinds.
+
+**Seam:** a `tool_call` handler that snapshots before mutating calls, plus the `SessionManager` API for
+the entry id to key on. **Effort:** moderate, and it is now a build rather than a port.
 
 ### 11. No worktree isolation
 
-Concurrent agents share a checkout. Worth pairing with checkpointing rather than treating separately.
+Concurrent agents share a checkout. Worth pairing with item 10 rather than treating separately.
+
+omp has real machinery here — `src/task/worktree.ts` — but it is not liftable: it imports
+`@oh-my-pi/pi-natives` (Rust), both `utils/git` and `utils/jj`, and its own isolation-ownership module.
+Read it for the shape, not as a port. Harness-level either way.
 
 ---
 
@@ -206,11 +235,21 @@ Start deny-by-default with a narrow allow set and let it accrete.
 | 5 | `write` requires prior read or a non-existent path | `tool_call` precondition | Small |
 | 6 | Stale-write detection | port omp `conflict-detect.ts` | Small port |
 | 8 | An ask tool, so halting is possible | `registerTool` | Small |
-| 10 | Checkpoint / rewind | port omp `checkpoint.ts` | Moderate |
-| 11 | Worktree isolation | harness-level | Moderate |
+| 10 | Filesystem snapshot keyed to the session entry id | build — pi's `/tree` covers conversation rewind, neither harness covers the tree | Moderate |
+| 11 | Worktree isolation | harness-level (omp's is Rust-bound, read only for shape) | Moderate |
 | — | Command classification | build and accrete | Last |
 
 Items 1, 2, 3 and 8 together are perhaps a day's work and they move pi from *unsafe to leave alone* to
 *safe to leave alone within a workspace*. That is the whole Tier 0 argument: the gap between pi and a
 usable harness is smaller than the exclusion list suggests, because the extension API is genuinely good —
 what is missing is not capability, it is four guards nobody has written yet.
+
+---
+
+## Out of scope here: provider auth
+
+pi's credential handling has two gaps of the same character — a session that cannot authenticate exits 0
+with no output, and a retired credential carries no record of why it was retired. They are not safety
+guards, so they are not tiered above; they live in
+[`provider-auth-and-client-identity.md`](./provider-auth-and-client-identity.md) § Observability, which
+also covers why zen-harness will not follow omp's route to subscription billing.
