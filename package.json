@@ -12,6 +12,7 @@
     "typecheck": "tsc -b --pretty false",
     "test": "bun test",
     "check": "npm run typecheck && npm run test",
+    "link:vendor": "node scripts/link-vendor-packages.mjs",
     "zen": "node scripts/zen.mjs"
   },
   "devDependencies": {

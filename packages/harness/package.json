@@ -4,14 +4,28 @@
   "description": "A pi package: guarded tools, shared state, and two surfaces over one agent loop.",
   "type": "module",
   "license": "MIT",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "pi": {
     "extensions": [
-      "./extensions/guards/index.ts"
+      "./extensions/guards/index.ts",
+      "node_modules/pi-multi-account/index.ts"
     ],
-    "skills": ["./skills"],
-    "prompts": ["./prompts"],
-    "themes": ["./themes"]
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ],
+    "themes": [
+      "./themes",
+      "node_modules/@mammothb/pi-tokyonight-storm/themes"
+    ]
+  },
+  "dependencies": {
+    "@mammothb/pi-tokyonight-storm": "0.2.1",
+    "pi-multi-account": "1.21.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.84.0"
