@@ -31,8 +31,6 @@ stand on.
 
 ## What pi does
 
-pi ships an Anthropic OAuth provider and identifies itself as pi.
-
 - OAuth client id, authorize endpoint, and scopes: `@earendil-works/pi-ai/dist/auth/oauth/anthropic.js:13-14`.
   The client id is the one Claude Code uses, stored base64-obfuscated. The scope set includes
   `user:inference` and `user:sessions:claude_code`.
@@ -40,13 +38,31 @@ pi ships an Anthropic OAuth provider and identifies itself as pi.
 - Inference requests carry the bundled Anthropic SDK's own `X-Stainless-*` headers with that SDK's real
   values. There is no `claude-cli` user agent anywhere in pi's bundle — checked by grep across `dist/`
   and its vendored `pi-ai`.
+- ⚠ **On the OAuth path, pi prepends a Claude Code identity system block.**
+  `@earendil-works/pi-ai/dist/api/anthropic-messages.js:746-753`: `if (isOAuthToken)` sets
+  `params.system` to `"You are Claude Code, Anthropic's official CLI for Claude."` as the first block,
+  ahead of the caller's own system prompt, under the comment *"For OAuth tokens, we MUST include Claude
+  Code identity."* The user's system prompt is appended after it.
+- pi does **not** construct the `x-anthropic-billing-header` block or any `cch` attestation — the string
+  does not appear anywhere in its bundle.
 - When subscription auth is active, pi prints a warning that third-party harness usage draws from extra
   usage and is billed per token rather than against plan limits. `ANTHROPIC_SUBSCRIPTION_AUTH_WARNING`
   silences the warning; it does not change the billing.
 
-So pi borrows the client id but presents itself honestly at the transport layer, and tells the user what
-the billing consequence is. Whether that is a coherent position is arguable — the client id is not pi's
-to use — but it stops well short of the next section.
+⚠ **Corrected 2026-09-03.** This section previously opened *"pi ships an Anthropic OAuth provider and
+identifies itself as pi"* and concluded that pi *"presents itself honestly at the transport layer."* The
+transport-layer half is accurate and verified. The framing was not: pi asserts Claude Code identity in
+the **system prompt** on every OAuth request, which the original text missed and which the layer table
+below therefore mis-attributed to omp alone.
+
+The correct statement is narrower. pi borrows the client id **and** asserts the client identity in the
+prompt; what it does not do is forge the transport fingerprint or reproduce the billing attestation. That
+is still a real distinction from the next section, and a smaller one than this document first claimed.
+
+The error was found from the outside: `pi-multi-account`'s source checks whether *pi* already marked a
+request with a Claude Code identity block, which is a claim about pi that this document contradicted.
+Reading a competitor's assumptions about a dependency turned out to be a faster route to a defect than
+re-reading the dependency.
 
 **Credential storage.** A flat `auth.json` under the agent directory, four fields per provider:
 `{access, refresh, expires, type}`. No account identity, no grant anchor, no failure record. This has
@@ -92,6 +108,31 @@ Layer 4 is attestation defeat: the value exists so the server can verify a reque
 genuine client, and reproducing it requires having recovered the algorithm and its constants by reverse
 engineering. There is no reading of layer 4 on which it is anything other than deliberate circumvention
 of an integrity control.
+
+⚠ **Who does which layer** — corrected 2026-09-03, because the original text implied all four were
+omp's alone.
+
+| Layer | pi | omp | `pi-multi-account` |
+|---|---|---|---|
+| 1. Claude Code OAuth client id | ✅ | ✅ | uses pi's — imports `loginAnthropic` |
+| 2. Transport fingerprint (UA, `X-Stainless-*`, `x-app`) | ✕ | ✅ | ✕ |
+| 3a. Claude Code identity system block | ✅ | ✅ | detects, does not add |
+| 3b. `x-anthropic-billing-header` + version fingerprint | ✕ | ✅ | ✅ |
+| 4. `cch` body attestation | ✕ | ✅ | ✅ (computed **differently**) |
+
+⚠⚠ **The two attestation implementations disagree, and that is the strongest available argument against
+depending on any of this.** omp derives `cch` from a seeded hash over the *serialized request body*.
+`pi-multi-account` derives it from a SHA-256 of the *first user message text*, truncated to five hex
+characters. These are not the same value and cannot both be correct. Neither package can tell you which
+one is — the value is undocumented, so both are reverse-engineering guesses, and a wrong guess produces
+a request that is accepted or rejected for reasons no error message explains. Two independent
+reimplementations of one undocumented field, disagreeing, is what "pinned to a moving target with an
+invisible failure mode" looks like in practice.
+
+⚠ There is also collision between packages: `pi-multi-account` checks whether the billing header is
+already present before adding one, with a comment naming `pi-anthropic-auth` as another package that
+injects it. So the layer-3b/4 behaviour is an ecosystem pattern, several packages implement it, they
+step on each other, and the mitigation is a string check on a header nobody documents.
 
 **Credential storage.** SQLite at `~/.omp/agent/agent.db`, table `auth_credentials`, via
 `SqliteAuthCredentialStore`. Eight columns; the credential blob carries `accountId`, `email`, `orgId`,
@@ -149,6 +190,52 @@ first appears to.
 
 **If plan-rate access from a custom harness is a requirement, it is a conversation with Anthropic.** That
 is a real option and it is not this one.
+
+## Multi-account rotation, as `pi-multi-account` does it
+
+Read 2026-09-03 from the installed v1.13.8 (`~/.pi/agent/npm/node_modules/pi-multi-account`, one 183 KB
+`index.ts`, zero runtime dependencies). Repo: `github.com/Sarrius/pi-multi-account`. Relevant here
+because zen-harness needs a multi-account credential model and this is the only worked example.
+
+**It implements no login flow of its own.** It imports pi's `loginAnthropic` and
+`refreshAnthropicToken` and wraps them. No client id, no authorize URL, no token endpoint appears in its
+source — the login is pi's, with pi's client id and pi's endpoint.
+
+**Each account is a synthetic provider.** `registerAnthropicSlot` calls `pi.registerProvider("anthropic-account-N", …)`
+with `baseUrl: "https://api.anthropic.com"`, `api: "anthropic-messages"`, and an `oauth` block of
+`{login, refreshToken, getApiKey}`. So an "account slot" is a first-class provider with its own entry in
+`auth.json`, and the base `anthropic` provider stays pi's. The same pattern is applied to Codex slots.
+
+**Accounts are discovered, not configured.** It reads `~/.pi/agent/auth.json` directly and builds the
+rotation from whatever is authenticated. Config (`provider-failover.json`) and state
+(`provider-failover-state.json`) hold policy and cooldowns, not credentials.
+
+**Duplicate-login rejection via an identity function.** `rejectDuplicateLogin` compares
+`accountIdentity()` against existing entries so the same account cannot occupy two slots. Precedence:
+a stored `accountId`, then a subject extracted from the access token (Codex, Cursor), then
+`hash12(access)`, then `hash12(key)`.
+
+⚠ **For Anthropic that identity is volatile.** Its own comment concedes Anthropic accounts "are not
+deterministically identifiable from `auth.json` alone", so Anthropic falls through to hashing the
+**access token** — which changes on every refresh. Duplicate detection therefore degrades for exactly
+the provider the rotation exists to serve. This is the same root cause as
+[Observability](#observability-what-pi-cannot-tell-you): pi's credential record carries no account
+identity, so anything downstream has to invent one.
+
+**Worth taking for zen-harness**, and separable from the attestation layers above:
+
+- the provider-slot pattern — N synthetic providers over one base URL, each with its own credential row
+- discovery from the credential store rather than hand-maintained config
+- an explicit identity function with a documented precedence order, so duplicate detection is testable
+- cooldown state separate from config, and an anti-bounce guard (its comment records failover
+  ping-ponging "every 1-9s forever" as an observed failure)
+- a decision log that states it excludes credentials, so a rotation can be explained after the fact
+
+**Not worth taking:** layers 3b and 4 per the table above, and the volatile-token identity fallback —
+which is a symptom of pi's credential shape, and zen-harness storing `accountId` removes the need for it.
+
+⚠ Note this is also the package that is **fatal at startup** against pi 0.84.4 while declaring
+`peerDependencies: "*"` — see `pi-extension-survey.md`. Read it for the shape; do not depend on it.
 
 ## Observability: what pi cannot tell you
 
