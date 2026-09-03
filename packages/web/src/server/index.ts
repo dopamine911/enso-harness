@@ -219,6 +219,22 @@ export function startZenServer(options: ZenServerOptions) {
 	});
 
 	const port = options.port ?? DEFAULT_PORT;
+
+	// ⚠ Without this, a port clash surfaces as an unhandled 'error' event and a Node stack
+	// trace — which is what happened, and which reads as "the server is broken" rather than
+	// "something else is already listening". Observed while restarting during development,
+	// and it cost a minute of reading a trace to learn a one-line fact.
+	server.on("error", (error: NodeJS.ErrnoException) => {
+		if (error.code === "EADDRINUSE") {
+			options.onProblem?.(
+				`port ${port} is already in use — another zen server is probably running. ` +
+					`Stop it, or pass a different port.`,
+			);
+			return;
+		}
+		options.onProblem?.(error);
+	});
+
 	server.listen(port, LOOPBACK_ONLY);
 	return {
 		server,
