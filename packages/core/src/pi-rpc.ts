@@ -121,6 +121,35 @@ export function isPiLaunchConfig(value: unknown): value is PiLaunchConfig {
 }
 
 /**
+ * One entry from pi's `get_commands`.
+ *
+ * ⚠ `source` matters for a reason the field name does not convey: these are the ONLY
+ * commands invokable over rpc. pi's docs are explicit that built-in TUI commands
+ * (`/settings`, `/hotkeys`, …) are excluded and "would not execute if sent via `prompt`" —
+ * so a `/`-prefixed message absent from this list is not a command at all, it is prose the
+ * model will try to answer. See `session.ts` for why that has to be refused rather than
+ * forwarded.
+ */
+export const PiCommand = Type.Object({
+	name: Type.String(),
+	source: Type.Union([
+		Type.Literal("extension"),
+		Type.Literal("prompt"),
+		Type.Literal("skill"),
+	]),
+	description: Type.Optional(Type.String()),
+	location: Type.Optional(Type.String()),
+	path: Type.Optional(Type.String()),
+});
+export type PiCommand = Static<typeof PiCommand>;
+
+const commandValidator = Compile(PiCommand);
+
+export function isPiCommand(value: unknown): value is PiCommand {
+	return commandValidator.Check(value);
+}
+
+/**
  * ── The function-bearing schemas ─────────────────────────────────────────────────────────
  *
  * ⚠ These four serialise to `{"type": "function"}`, which is a TypeBox extension rather

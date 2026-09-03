@@ -1,7 +1,8 @@
 import { EventType } from "@ag-ui/core";
 import { expect, test } from "bun:test";
 import type { PiTransport } from "@zen/core";
-import { runChat } from "../session.ts";
+import { PiRpcClient } from "../../rpc/client.ts";
+import { fetchPiCommands, runChat } from "../session.ts";
 
 /** A scripted pi: replies to the prompt, then emits whatever the test lists. */
 function scriptedPi(events: string[]) {
@@ -131,4 +132,101 @@ test("an unmodelled pi event still reaches the client, as CUSTOM", async () => {
 	]);
 	const custom = chunks.find((c) => c.type === EventType.CUSTOM);
 	expect(custom).toMatchObject({ name: "zen.unmapped" });
+});
+
+/**
+ * ⚠ Slash-command handling. Observed in a real session: `/settings` was forwarded as an
+ * ordinary prompt and the MODEL answered it by reading config files — a plausible,
+ * unauthoritative guess that looked like the command had worked. pi's docs are explicit
+ * that built-in TUI commands cannot execute over rpc, so they must be refused locally.
+ */
+function piWithCommands(commandNames: string[], events: string[] = ['{"type":"agent_settled"}']) {
+	let consumeData: ((chunk: string) => void) | undefined;
+	const sent: string[] = [];
+	const transport: PiTransport = {
+		write: (line) => {
+			sent.push(line);
+			const parsed = JSON.parse(line) as { id: string; type: string };
+			queueMicrotask(() => {
+				if (parsed.type === "get_commands") {
+					const commands = commandNames.map((name) => ({ name, source: "extension" }));
+					consumeData?.(
+						`${JSON.stringify({ id: parsed.id, type: "response", command: "get_commands", success: true, data: { commands } })}\n`,
+					);
+					return;
+				}
+				consumeData?.(`{"id":"${parsed.id}","type":"response","command":"prompt","success":true}\n`);
+				for (const event of events) consumeData?.(`${event}\n`);
+			});
+		},
+		onData: (consume) => { consumeData = consume; },
+		onClose: () => undefined,
+	};
+	return { transport, sent };
+}
+
+async function runWith(pi: { transport: PiTransport }, prompt: string) {
+	const chunks = [];
+	for await (const chunk of runChat({ transport: pi.transport, ids, prompt, onProblem: undefined })) {
+		chunks.push(chunk);
+	}
+	return chunks;
+}
+
+test("⚠ an unknown slash command is REFUSED, not forwarded to the model", async () => {
+	const pi = piWithCommands(["mode", "plan"]);
+	const chunks = await runWith(pi, "/settings");
+	const error = chunks.find((chunk) => chunk.type === EventType.RUN_ERROR);
+	expect(error).toBeDefined();
+	// the refusal explains WHY, not just that it failed
+	expect((error as { message: string }).message).toContain("terminal-only");
+	// and names what does work, so the user is not left guessing
+	expect((error as { message: string }).message).toContain("/mode");
+	// ⚠ the decisive assertion: no prompt was ever sent
+	expect(pi.sent.some((line) => line.includes('"type":"prompt"'))).toBe(false);
+});
+
+test("a KNOWN slash command is forwarded, because pi can run it", async () => {
+	const pi = piWithCommands(["mode", "plan"]);
+	const chunks = await runWith(pi, "/mode auto");
+	expect(chunks.some((chunk) => chunk.type === EventType.RUN_ERROR)).toBe(false);
+	expect(pi.sent.some((line) => line.includes('"type":"prompt"'))).toBe(true);
+	expect(chunks.at(-1)?.type).toBe(EventType.RUN_FINISHED);
+});
+
+test("ordinary prose never triggers a get_commands round trip", async () => {
+	const pi = piWithCommands(["mode"]);
+	await runWith(pi, "what is in this repo?");
+	expect(pi.sent.some((line) => line.includes("get_commands"))).toBe(false);
+});
+
+test("the refusal says 'none' rather than an empty list when pi has no commands", async () => {
+	const pi = piWithCommands([]);
+	const chunks = await runWith(pi, "/anything");
+	expect((chunks.find((c) => c.type === EventType.RUN_ERROR) as { message: string }).message).toContain("none");
+});
+
+test("a bare slash is treated as prose, not a command lookup", async () => {
+	const pi = piWithCommands(["mode"]);
+	await runWith(pi, "/");
+	expect(pi.sent.some((line) => line.includes("get_commands"))).toBe(false);
+});
+
+test("fetchPiCommands filters malformed entries rather than trusting the payload", async () => {
+	let consumeData: ((chunk: string) => void) | undefined;
+	const transport: PiTransport = {
+		write: (line) => {
+			const id = (JSON.parse(line) as { id: string }).id;
+			queueMicrotask(() =>
+				consumeData?.(
+					`${JSON.stringify({ id, type: "response", command: "get_commands", success: true, data: { commands: [{ name: "ok", source: "extension" }, { name: "bad" }, "nope", null] } })}\n`,
+				),
+			);
+		},
+		onData: (consume) => { consumeData = consume; },
+		onClose: () => undefined,
+	};
+	const client = new PiRpcClient({ transport });
+	const commands = await fetchPiCommands(client);
+	expect(commands.map((command) => command.name)).toEqual(["ok"]);
 });
