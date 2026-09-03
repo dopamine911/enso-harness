@@ -1,25 +1,49 @@
+import { Type, type Static } from "typebox";
+import { Compile } from "typebox/compile";
+
 /**
- * pi rpc wire types (#24), transcribed from `docs/rpc.md` of pi 0.84.4.
+ * pi rpc wire types (#24), as TypeBox schemas — transcribed from `docs/rpc.md` of pi 0.84.4.
  *
- * Deliberately NOT exhaustive. Only what the transport must understand to route a record
- * is typed here; event payloads stay `unknown` until the mapping layer claims them, so an
- * unmodelled event is forwarded rather than dropped.
+ * These describe input from another process, so they are the one place in the web package
+ * where runtime validation is not optional. TypeBox gives the schema, the TypeScript type
+ * and the validator from a single declaration, which is why there is no hand-written guard
+ * beside a hand-written interface here.
  *
- * ⚠ That is the important property. pi's event list will grow, and a transport that
- * narrowed every event to a closed union would silently discard whatever it did not
- * recognise — the failure this project keeps finding. Routing needs `type` and `id`; it
- * does not need to understand `compaction_start`.
+ * ⚠ DELIBERATELY NOT EXHAUSTIVE, AND THE SCHEMAS ARE OPEN.
+ * Only what the transport must understand to ROUTE a record is described. Event payloads
+ * stay unconstrained, so an unmodelled event validates and is forwarded rather than
+ * rejected. pi's event list will grow, and a schema that closed every event would turn a
+ * new event type into a parse failure — converting "we don't render this yet" into "the
+ * transport is broken".
  */
 
 /** Base64 image content, accepted by `prompt`, `steer` and `follow_up`. */
-export interface PiImageContent {
-	type: "image";
-	data: string;
-	mimeType: string;
-}
+export const PiImageContent = Type.Object({
+	type: Type.Literal("image"),
+	data: Type.String(),
+	mimeType: Type.String(),
+});
+export type PiImageContent = Static<typeof PiImageContent>;
 
 /** What to do when a prompt arrives while the agent is already streaming. */
-export type PiStreamingBehavior = "steer" | "followUp";
+export const PiStreamingBehavior = Type.Union([
+	Type.Literal("steer"),
+	Type.Literal("followUp"),
+]);
+export type PiStreamingBehavior = Static<typeof PiStreamingBehavior>;
+
+/**
+ * ⚠ Open-object types need an explicit intersection.
+ *
+ * `additionalProperties: Type.Unknown()` makes the SCHEMA accept extra fields, but
+ * `Static<>` does not synthesise an index signature from it — verified against typebox
+ * 1.3.25. So the runtime shape comes from the schema and the open-record ergonomics come
+ * from the intersection. Both halves are needed; neither alone is enough.
+ */
+type OpenRecord = Record<string, unknown>;
+
+const openObject = <T extends Parameters<typeof Type.Object>[0]>(properties: T) =>
+	Type.Object(properties, { additionalProperties: Type.Unknown() });
 
 /**
  * A command written to pi's stdin, one JSON object per line.
@@ -27,44 +51,62 @@ export type PiStreamingBehavior = "steer" | "followUp";
  * `id` is optional in the protocol but mandatory here: the client assigns one so every
  * command is correlatable. An uncorrelated command's failure is unattributable.
  */
-export interface PiRpcCommand {
-	id: string;
-	type: string;
-	[field: string]: unknown;
-}
+export const PiRpcCommandSchema = openObject({
+	id: Type.String({ minLength: 1 }),
+	type: Type.String({ minLength: 1 }),
+});
+export type PiRpcCommand = Static<typeof PiRpcCommandSchema> & OpenRecord;
 
 /**
  * A command as a caller supplies it — the client assigns `id`.
  *
- * ⚠ Declared explicitly rather than as `Omit<PiRpcCommand, "id">`. `PiRpcCommand` carries
- * an index signature, so `keyof` it is `string | number` and `Exclude<string | number,
- * "id">` removes nothing — `Omit` silently discards the named `type` field instead of the
- * `id` one. The typechecker caught it; the shape is spelled out so it cannot recur.
+ * ⚠ Declared as its own schema rather than an `Omit` of the above. When this was a plain
+ * interface, `Omit<PiRpcCommand, "id">` silently discarded the wrong field: the interface
+ * carried an index signature, so `keyof` it was `string | number` and
+ * `Exclude<string | number, "id">` removed nothing — `Omit` dropped the named `type`
+ * instead. Two declarations, no derivation, no recurrence.
  */
-export interface PiRpcCommandInput {
-	type: string;
-	[field: string]: unknown;
-}
+export const PiRpcCommandInputSchema = openObject({
+	type: Type.String({ minLength: 1 }),
+});
+export type PiRpcCommandInput = Static<typeof PiRpcCommandInputSchema> & OpenRecord;
 
 /** A command acknowledgement. Emitted once per `id`. */
-export interface PiRpcResponse {
-	type: "response";
-	command: string;
-	success: boolean;
-	id?: string;
-	error?: string;
-}
+export const PiRpcResponseSchema = openObject({
+	type: Type.Literal("response"),
+	command: Type.String(),
+	success: Type.Boolean(),
+	id: Type.Optional(Type.String()),
+	error: Type.Optional(Type.String()),
+});
+export type PiRpcResponse = Static<typeof PiRpcResponseSchema> & OpenRecord;
 
-/** Anything else pi writes to stdout. */
-export interface PiRpcEvent {
-	type: string;
-	[field: string]: unknown;
-}
+/** Anything else pi writes to stdout. Only `type` is constrained — see the header. */
+export const PiRpcEventSchema = openObject({
+	type: Type.String({ minLength: 1 }),
+});
+export type PiRpcEvent = Static<typeof PiRpcEventSchema> & OpenRecord;
 
 export type PiRpcRecord = PiRpcResponse | PiRpcEvent;
 
-export function isPiRpcResponse(record: PiRpcRecord): record is PiRpcResponse {
+/** Compiled once at module load — this runs on every record pi emits. */
+const responseValidator = Compile(PiRpcResponseSchema);
+const recordValidator = Compile(PiRpcEventSchema);
+
+/**
+ * Does this record CLAIM to be a response?
+ *
+ * ⚠ Separate from validating one, and the split matters. A record with
+ * `type: "response"` but no `command` is a MALFORMED RESPONSE, not an event — routing it
+ * to the event stream because it failed full validation would hide a protocol violation
+ * inside normal traffic. The discriminant decides the route; the schema decides validity.
+ */
+export function claimsToBeResponse(record: PiRpcRecord): boolean {
 	return record.type === "response";
+}
+
+export function isPiRpcResponse(record: PiRpcRecord): record is PiRpcResponse {
+	return responseValidator.Check(record);
 }
 
 /**
@@ -107,8 +149,10 @@ export function parsePiRpcRecord(raw: string): PiRpcRecord {
 	} catch (cause) {
 		throw new PiRpcParseError(raw, cause);
 	}
-	if (typeof parsed !== "object" || parsed === null || typeof (parsed as PiRpcRecord).type !== "string") {
-		throw new PiRpcParseError(raw, new Error("record has no string `type`"));
+	// Validated against the schema rather than by hand-checking `typeof`, so the shape
+	// requirement lives in one place and the error message can name what failed.
+	if (!recordValidator.Check(parsed)) {
+		throw new PiRpcParseError(raw, new Error("record does not match the pi rpc record schema"));
 	}
-	return parsed as PiRpcRecord;
+	return parsed;
 }

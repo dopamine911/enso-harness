@@ -1,21 +1,32 @@
+import { Type, type Static } from "typebox";
+import { Compile } from "typebox/compile";
+
 /**
- * The web half of the tool-result payload contract (#18).
+ * The tool-result payload contract (#18), as a TypeBox schema.
+ *
+ * WHY TYPEBOX AND NOT A PLAIN INTERFACE
+ * The repo's convention, and #18's acceptance: one schema library, no bridge, no conversion
+ * step. A TypeBox schema literally IS a JSON Schema object, so the same declaration serves
+ * three consumers that would otherwise each need their own copy — TypeScript types via
+ * `Static<>`, the HTTP contract and its OpenAPI description, and a runtime validator. A
+ * hand-written type guard beside a hand-written interface is two things to keep in step,
+ * and the drift between them is silent.
  *
  * WHY THIS SHAPE, AND WHY IT IS NOT A NEW ENVELOPE
  * TanStack AI's `ToolResultPart` already mandates the two properties #18 spent its
  * acceptance criteria on, so we ride inside it rather than wrapping it:
  *
- *   content:   string | ContentPart[]        — MANDATORY. The textual form. A surface with
- *                                             no renderer for our descriptor shows this, so
- *                                             an unknown descriptor renders visibly rather
- *                                             than empty. #18's sharpest requirement is
- *                                             satisfied by the envelope, not by us.
- *   metadata?: Record<string, unknown>       — OPTIONAL. Where the descriptor lives. Being
- *                                             optional is what makes this a two-surface
- *                                             contract instead of a web contract with a
- *                                             terminal fallback: the TUI can ignore metadata
- *                                             entirely and still render a correct result.
- *   state / error                            — the outcome fields #18 said we would have to add.
+ *   content:   string | ContentPart[]   — MANDATORY. The textual form. A surface with no
+ *                                        renderer for our descriptor shows this, so an
+ *                                        unknown descriptor renders visibly rather than
+ *                                        empty. #18's sharpest requirement is satisfied by
+ *                                        the envelope, not by us.
+ *   metadata?: Record<string, unknown>  — OPTIONAL. Where the descriptor lives. Being
+ *                                        optional is what makes this a two-surface contract
+ *                                        rather than a web contract with a terminal
+ *                                        fallback: the TUI can ignore metadata entirely and
+ *                                        still render a correct result.
+ *   state / error                       — the outcome fields #18 said we would have to add.
  *
  * ⚠ So the descriptor is deliberately NOT self-sufficient. It carries only what a richer
  * renderer needs on top of the text. Anything a reader must see in every surface belongs in
@@ -30,39 +41,55 @@
 /** The metadata key our descriptor occupies. Namespaced: `metadata` is a shared bag. */
 export const ZEN_TOOL_RESULT_KEY = "zen.toolResult" as const;
 
-/** How confident a surface can be that it understood the payload. */
-export type ZenRenderTier = "descriptor" | "text-only";
+/** Units a truncation can be counted in. Closed, because a surface must render each one. */
+export const ZenTruncationUnit = Type.Union([
+	Type.Literal("lines"),
+	Type.Literal("bytes"),
+	Type.Literal("items"),
+]);
+export type ZenTruncationUnit = Static<typeof ZenTruncationUnit>;
+
+/**
+ * Truncation carried as data, never pre-rendered (#18).
+ *
+ * A terminal and a browser make different decisions about how to show "and 4,000 more
+ * lines", and a pre-truncated string forces the terminal's choice onto the browser.
+ */
+export const ZenTruncation = Type.Object({
+	shown: Type.Integer({ minimum: 0 }),
+	total: Type.Integer({ minimum: 0 }),
+	unit: ZenTruncationUnit,
+});
+export type ZenTruncation = Static<typeof ZenTruncation>;
 
 /**
  * A tool result, described rather than rendered.
  *
- * `kind` is the type tag a surface resolves to a renderer. It is a plain string rather than
- * a closed union on purpose: a vendor extension can emit a kind we have never seen, and the
- * unknown-kind path must be a visible fallback rather than a type error at the boundary.
+ * ⚠ `kind` is `Type.String()` rather than a closed union on purpose: a vendor extension can
+ * emit a kind we have never seen, and the unknown-kind path must be a visible fallback
+ * rather than a validation failure at the boundary. Closing this union would turn an
+ * unrecognised renderer into a dropped result.
  */
-export interface ZenToolResultDescriptor {
+export const ZenToolResultDescriptor = Type.Object({
 	/** Renderer selector. Unknown values MUST fall back to the envelope's `content`. */
-	kind: string;
+	kind: Type.String({ minLength: 1 }),
 	/** Serializable props for the selected renderer. Never a rendered element. */
-	props: Record<string, unknown>;
-	/**
-	 * Truncation carried as data, never pre-rendered (#18). A terminal and a browser make
-	 * different decisions about how to show "and 4,000 more lines", and a pre-truncated
-	 * string forces the terminal's choice onto the browser.
-	 */
-	truncated?: { shown: number; total: number; unit: "lines" | "bytes" | "items" };
-}
+	props: Type.Record(Type.String(), Type.Unknown()),
+	truncated: Type.Optional(ZenTruncation),
+});
+export type ZenToolResultDescriptor = Static<typeof ZenToolResultDescriptor>;
 
-/** Runtime shape check. Deliberately permissive on `props` — see `kind` above. */
+/**
+ * JIT validator, compiled once at module load.
+ *
+ * `Compile` rather than `Check` because this runs on every tool result that crosses the
+ * wire; `Check` re-walks the schema per call.
+ */
+const descriptorValidator = Compile(ZenToolResultDescriptor);
+
+/** Runtime shape check, from the schema rather than beside it. */
 export function isZenToolResultDescriptor(value: unknown): value is ZenToolResultDescriptor {
-	if (typeof value !== "object" || value === null) return false;
-	const candidate = value as Record<string, unknown>;
-	return (
-		typeof candidate.kind === "string" &&
-		candidate.kind.length > 0 &&
-		typeof candidate.props === "object" &&
-		candidate.props !== null
-	);
+	return descriptorValidator.Check(value);
 }
 
 /**

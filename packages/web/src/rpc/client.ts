@@ -1,5 +1,6 @@
 import { JsonLinesSplitter } from "./jsonl.ts";
 import {
+	claimsToBeResponse,
 	isPiRpcResponse,
 	parsePiRpcRecord,
 	type PiRpcCommand,
@@ -112,8 +113,14 @@ export class PiRpcClient {
 			return;
 		}
 
-		if (!isPiRpcResponse(record)) {
+		// Route on the discriminant, validate after. A malformed response must be reported
+		// as a protocol violation, not delivered into the event stream as if it were one.
+		if (!claimsToBeResponse(record)) {
 			this.#onEvent?.(record);
+			return;
+		}
+		if (!isPiRpcResponse(record)) {
+			this.#onParseError?.(record);
 			return;
 		}
 

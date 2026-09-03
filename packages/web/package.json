@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The zen-harness web surface. Outside the pi manifest — pi does nothing with a frontend.",
+  "description": "The zen-harness web surface. Outside the pi manifest \u2014 pi does nothing with a frontend.",
   "scripts": {
     "typecheck": "tsc -b --pretty false"
   },
@@ -12,7 +12,8 @@
     "@tanstack/ai-client": "0.31.0",
     "@tanstack/ai-react": "0.24.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "typebox": "^1.3.25"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
