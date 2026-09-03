@@ -177,7 +177,7 @@ Paths verified 2026-09-02 against the repo.
 
 | # | Artefact | Path | Why |
 |---|---|---|---|
-| 1 | **zqlite** | `packages/zqlite/` — 16 files, ~2,000 lines | *"Schema-first SQLite for TypeScript. Write a Zod schema once — get the DDL, the TypeScript types, and validated queries from it, with no redundancy and no ORM."* **Not agent-specific at all.** The most reusable thing in the repo and the easiest to lift whole. |
+| ~~1~~ | ~~**zqlite**~~ — **retired 2026-09-03** | `packages/zqlite/` | Was top of this list. Dropped when zen-harness standardised on **TypeBox** (pi's tool API requires it and it *is* JSON Schema at the HTTP boundary), which makes zqlite's Zod dependency a port rather than a lift. Persistence goes to **Kysely** instead — typed SQL over `Static<>`-derived types, with hand-written migrations. See `../architecture.md` § Persistence. |
 | 2 | **The struggle extractors** | `packages/core/src/struggle.ts` | Pure functions over an event stream. Take the extractors and the per-signal docs; leave the weights. Apply the field verdicts above. |
 | 3 | **The signal docs** | `docs/signals/*.md` + `dropped/` | The per-doc structure (pattern / detection / window / weight rationale / false positives / evidence shape) is a reusable template for any behavioural indicator, and keeping dropped signals with their reason is the right archival habit. |
 | 4 | **Cost-analysis panels** | `packages/dashboard/src/components/panels/tokens/CompactionCliffPanel.tsx`, `CacheLeveragePanel.tsx`, `EffectiveVsRawPanel.tsx` | These measure precisely what [`prompt-cache-architecture.md`](./prompt-cache-architecture.md) says is invisible to an agent. The instrument already exists. |
