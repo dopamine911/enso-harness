@@ -11,6 +11,13 @@
  *                        .pi/settings.json in this repo (it installs zen-harness as a
  *                        package). Without it the package would load twice — once
  *                        from discovery, once from -e.
+ *   --no-skills          ⚠ REQUIRED, and neither flag above covers it. pi discovers
+ *                        skills from `~/.agents/skills/` as well as `~/.pi/agent/skills/`,
+ *                        and the `~/.agents/` path is NOT under the agent dir — so
+ *                        PI_CODING_AGENT_DIR does not redirect it and --no-extensions
+ *                        does not touch skills. Found 2026-09-03 from a screenshot: a
+ *                        session advertising itself as vanilla listed four of the user's
+ *                        global skills (find-skills, herdr, mastra, shadcn).
  *
  * ⚠ `-e` receives the PACKAGE DIRECTORY, not each extension file. pi loads a directory
  *   using package rules, so the manifest drives everything — extensions, skills, prompts
@@ -73,7 +80,7 @@ if (missingVendorPaths.length > 0) {
 const agentDir = process.env.ZEN_AGENT_DIR ?? join(repoRoot, ".zen", "pi-agent");
 mkdirSync(agentDir, { recursive: true });
 
-const args = ["--no-extensions", "-e", packageRoot, ...process.argv.slice(2)];
+const args = ["--no-extensions", "--no-skills", "-e", packageRoot, ...process.argv.slice(2)];
 
 console.error(
 	`zen: vanilla pi | agent-dir=${agentDir} | package=${packageRoot} | ${declaredResources.length} declared resource path(s)`,
