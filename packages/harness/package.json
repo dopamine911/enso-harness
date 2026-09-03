@@ -1,0 +1,23 @@
+{
+  "name": "zen-harness",
+  "version": "0.0.0",
+  "description": "A pi package: guarded tools, shared state, and two surfaces over one agent loop.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": [
+      "./extensions/guards/index.ts"
+    ],
+    "skills": ["./skills"],
+    "prompts": ["./prompts"],
+    "themes": ["./themes"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.84.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "typebox": "^1.3.25"
+  }
+}

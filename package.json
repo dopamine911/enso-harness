@@ -1,0 +1,21 @@
+{
+  "name": "zen-harness-foundation",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc -b --pretty false",
+    "test": "bun test",
+    "check": "npm run typecheck && npm run test",
+    "zen": "node scripts/zen.mjs"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "typescript": "^5.7.0"
+  }
+}
