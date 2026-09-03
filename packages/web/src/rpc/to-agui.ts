@@ -1,0 +1,181 @@
+import { EventType } from "@ag-ui/core";
+import type { StreamChunk } from "@tanstack/ai";
+import { ZEN_TOOL_RESULT_KEY, type ZenObservation } from "@zen/core";
+
+/**
+ * `ZenObservation` → AG-UI `StreamChunk` (#24).
+ *
+ * WHY THIS LAYER EXISTS AT ALL
+ * TanStack AI's chat client does not accept a protocol of our choosing.
+ * `ConnectConnectionAdapter.connect` returns `AsyncIterable<StreamChunk>`, and
+ * `StreamChunk = AGUIEvent` — the Agent Client protocol from `@ag-ui/core`. So the pipeline
+ * is three hops, not two:
+ *
+ *     pi rpc event  →  ZenObservation  →  AG-UI StreamChunk  →  TanStack client
+ *                   ^ map-events.ts    ^ this module
+ *
+ * ⚠ I estimated this route at "80 lines and a WebSocket" before reading the contract. That
+ * was wrong: the transport is a specified protocol with its own event vocabulary, and
+ * matching it is what buys TanStack's reconnect, hydration and `joinRun` machinery instead
+ * of reimplementing them.
+ *
+ * ⚠⚠ WHERE #18's DESCRIPTOR RIDES, AND WHY IT IS NOT `metadata`
+ * `ToolCallResultEvent` declares `content: string` and NOTHING ELSE — no metadata field. So
+ * the two-surface descriptor cannot travel as metadata on the result the way it does inside
+ * TanStack's own `ToolResultPart`.
+ *
+ * What makes it work is that AG-UI's `BaseEvent` declares `[k: string]: unknown`, so every
+ * event accepts extra fields by design rather than by accident. The descriptor rides under
+ * the same namespaced key it uses everywhere else, on the result event itself — so a
+ * renderer receives text and descriptor together and needs no correlation.
+ *
+ * ⓘ If an intermediary ever strips unknown fields, the fallback is a `CUSTOM` event
+ * (`{name, value}`) correlated by `toolCallId`. Not built, because it costs the renderer a
+ * correlation step and nothing today strips them.
+ */
+
+/**
+ * Identifiers AG-UI requires that pi does not supply.
+ *
+ * ⚠ AG-UI keys text and reasoning content by `messageId`, and pi's `message_update` carries
+ * a `contentIndex` but no message id. A caller therefore has to supply the id for the
+ * assistant message currently streaming — which is state this module deliberately does not
+ * hold, so that it stays a pure function and the session owner stays the single source of
+ * truth for what "the current message" is.
+ */
+export interface AguiIdentifiers {
+	/** The assistant message being streamed. */
+	messageId: string;
+	/** The run these events belong to. Required on RUN_FINISHED and RUN_ERROR. */
+	runId: string;
+	threadId: string;
+}
+
+/**
+ * Map one observation.
+ *
+ * ⚠ Returns an ARRAY, because the mapping is not one-to-one: a `tool-call` becomes both a
+ * `TOOL_CALL_START` and a `TOOL_CALL_ARGS`, and an in-flight tool result becomes nothing at
+ * all — AG-UI has no partial-result event, so accumulated output before completion has
+ * nowhere to go.
+ *
+ * ⚠⚠ That last point is a real loss and it is not worked around here. pi streams
+ * `tool_execution_update` with accumulated output; AG-UI's tool vocabulary is
+ * start/args/end/result with no progress event. Emitting a `TOOL_CALL_RESULT` per update
+ * would tell the client the tool finished repeatedly. So partial output is dropped on this
+ * hop, and long-running bash output will appear only when the tool completes. The fix is a
+ * `CUSTOM` progress event the renderer understands; it is not built, and pretending
+ * otherwise by faking a result would be worse than the gap.
+ */
+export function observationToAguiEvents(
+	observation: ZenObservation,
+	ids: AguiIdentifiers,
+): StreamChunk[] {
+	switch (observation.kind) {
+		case "text-delta":
+			return [
+				{
+					type: EventType.TEXT_MESSAGE_CONTENT,
+					messageId: ids.messageId,
+					delta: observation.delta,
+				},
+			];
+
+		case "thinking-delta":
+			// REASONING_*, not THINKING_* — the latter is deprecated in @ag-ui/core and slated
+			// for removal in 1.0.0.
+			return [
+				{
+					type: EventType.REASONING_MESSAGE_CONTENT,
+					messageId: ids.messageId,
+					delta: observation.delta,
+				},
+			];
+
+		case "tool-call":
+			return [
+				{
+					type: EventType.TOOL_CALL_START,
+					toolCallId: observation.toolCallId,
+					toolCallName: observation.toolName,
+					parentMessageId: ids.messageId,
+				},
+				{
+					type: EventType.TOOL_CALL_ARGS,
+					toolCallId: observation.toolCallId,
+					delta: JSON.stringify(observation.args ?? {}),
+				},
+			];
+
+		case "tool-result": {
+			// ⚠ Partial results are dropped — see the function header. Emitting a result per
+			// update would tell the client the tool finished, repeatedly.
+			if (!observation.complete) return [];
+			return [
+				{
+					type: EventType.TOOL_CALL_RESULT,
+					messageId: ids.messageId,
+					toolCallId: observation.toolCallId,
+					content: observation.text,
+					role: "tool",
+					// The descriptor, under the same namespaced key it uses everywhere else.
+					// Legal because AG-UI's BaseEvent declares `[k: string]: unknown`.
+					...(observation.descriptor === undefined
+						? {}
+						: { [ZEN_TOOL_RESULT_KEY]: observation.descriptor }),
+					// ⚠ `isError` has no AG-UI field on a tool result, and it is the only signal a
+					// REFUSED call has (a guard block). Carried as an extra field for the same
+					// reason as the descriptor — dropping it would render a denial as a success.
+					...(observation.isError ? { zenIsError: true } : {}),
+				},
+			];
+		}
+
+		case "extension-error":
+			return [
+				{
+					type: EventType.RUN_ERROR,
+					runId: ids.runId,
+					message: `${observation.extensionPath} failed on ${observation.event}: ${observation.error}`,
+				},
+			];
+
+		case "run-ended":
+			// ⚠ NOT RUN_FINISHED. `agent_end` is one low-level run and may be followed by an
+			// automatic retry; telling the client the run finished here would show completion
+			// mid-retry. STEP_FINISHED is the closest honest mapping.
+			return [
+				{
+					type: EventType.STEP_FINISHED,
+					stepName: observation.willRetry ? "agent-run-will-retry" : "agent-run",
+				},
+			];
+
+		case "settled":
+			return [
+				{
+					type: EventType.RUN_FINISHED,
+					threadId: ids.threadId,
+					runId: ids.runId,
+				},
+			];
+
+		case "unmapped":
+			// ⚠ CUSTOM, not RAW. `@ag-ui/core` defines a RAW event and it looks made for this —
+			// but TanStack NARROWS `AGUIEvent`, and RAW is not in the narrowed union, so a RAW
+			// event is not a valid `StreamChunk`. Found by removing an `as unknown as
+			// StreamChunk` cast: the cast compiled and would have put an event on the wire that
+			// TanStack's client does not accept. CUSTOM is in the union and is the documented
+			// extension point.
+			//
+			// The design rule from map-events.ts therefore survives the second hop: an
+			// unrecognised event is carried, never discarded.
+			return [
+				{
+					type: EventType.CUSTOM,
+					name: "zen.unmapped",
+					value: observation.event,
+				},
+			];
+	}
+}
