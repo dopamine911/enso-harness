@@ -9,11 +9,21 @@
  *                        credentials are visible. Verified: 16 packages -> 0.
  *   --no-extensions      disables discovery, which also suppresses the PROJECT-local
  *                        .pi/settings.json in this repo (it installs zen-harness as a
- *                        package). Without it the extension would load twice — once
- *                        from the package, once from -e.
+ *                        package). Without it the package would load twice — once
+ *                        from discovery, once from -e.
+ *   --no-skills          ⚠ REQUIRED, and neither flag above covers it. pi discovers
+ *                        skills from `~/.agents/skills/` as well as `~/.pi/agent/skills/`,
+ *                        and the `~/.agents/` path is NOT under the agent dir — so
+ *                        PI_CODING_AGENT_DIR does not redirect it and --no-extensions
+ *                        does not touch skills. Found 2026-09-03 from a screenshot: a
+ *                        session advertising itself as vanilla listed four of the user's
+ *                        global skills (find-skills, herdr, mastra, shadcn).
  *
- * The -e list is derived from the package manifest rather than hardcoded, so it cannot
- * drift from what ships and it exercises the manifest's declared order on every run.
+ * ⚠ `-e` receives the PACKAGE DIRECTORY, not each extension file. pi loads a directory
+ *   using package rules, so the manifest drives everything — extensions, skills, prompts
+ *   AND themes. Passing extension files individually (the original shape here) loaded the
+ *   extensions and silently dropped every other resource kind, which is how a declared
+ *   theme can appear to be wired and never load.
  *
  * ⚠ The scratch config dir has no credentials. Either `/login` inside it once, or export
  *   ANTHROPIC_API_KEY — which works here precisely because there is no auth.json to
@@ -30,7 +40,7 @@
  *         ZEN_AGENT_DIR=/somewhere/else npm run zen
  */
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,19 +48,43 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageRoot = join(repoRoot, "packages", "harness");
 const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 
-const declared = manifest.pi?.extensions ?? [];
-if (declared.length === 0) {
-	console.error("zen: packages/harness/package.json declares no pi.extensions");
+const VENDOR_PATH_PREFIX = "node_modules/";
+
+const declaredResources = Object.values(manifest.pi ?? {}).flatMap((paths) =>
+	Array.isArray(paths) ? paths : [paths],
+);
+if (declaredResources.length === 0) {
+	console.error("zen: packages/harness/package.json declares no pi resources");
+	process.exit(1);
+}
+
+/**
+ * ⚠ pi does NOT error on a manifest resource path that does not exist — it skips it
+ * silently (verified 2026-09-03: the vendor extension did not load and nothing was
+ * reported). npm workspaces hoist our vendor packages to the repo root, so those paths
+ * are missing until `npm run link:vendor` materializes them. Check here and refuse to
+ * launch, because the alternative is a session that looks correct and is missing
+ * whatever the vendor package was supposed to provide.
+ */
+const missingVendorPaths = declaredResources
+	.filter((entry) => typeof entry === "string" && entry.startsWith(VENDOR_PATH_PREFIX))
+	.filter((entry) => !existsSync(resolve(packageRoot, entry)));
+
+if (missingVendorPaths.length > 0) {
+	console.error("zen: vendor package paths are missing from the harness package:");
+	for (const missing of missingVendorPaths) console.error(`  - ${missing}`);
+	console.error("zen: run `npm install && npm run link:vendor`");
 	process.exit(1);
 }
 
 const agentDir = process.env.ZEN_AGENT_DIR ?? join(repoRoot, ".zen", "pi-agent");
 mkdirSync(agentDir, { recursive: true });
 
-const extensionFlags = declared.flatMap((entry) => ["-e", resolve(packageRoot, entry)]);
-const args = ["--no-extensions", ...extensionFlags, ...process.argv.slice(2)];
+const args = ["--no-extensions", "--no-skills", "-e", packageRoot, ...process.argv.slice(2)];
 
-console.error(`zen: vanilla pi | agent-dir=${agentDir} | ${declared.length} extension(s): ${declared.join(", ")}`);
+console.error(
+	`zen: vanilla pi | agent-dir=${agentDir} | package=${packageRoot} | ${declaredResources.length} declared resource path(s)`,
+);
 
 spawn("pi", args, {
 	stdio: "inherit",
