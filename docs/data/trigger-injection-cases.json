@@ -1,0 +1,97 @@
+{
+  "extracted_at": "2026-09-02T18:19:48",
+  "source_archive": "/home/daniel/claude.backup.05082026.zip",
+  "archive_coverage": "2026-01-09 .. 2026-05-08 \u2014 374 main session transcripts (plus 3,508 subagent logs, which are not injection sites)",
+  "note": "Genuine user-side trigger-phrase injections recovered from a pre-retention backup. The live ~/.claude set only reaches back to 2026-07-07, so these exist nowhere else. Case 1 is the session in the author's evidence screenshot.",
+  "case_count": 7,
+  "cases": [
+    {
+      "timestamp": "2026-04-09T15:43:56.058Z",
+      "session_file": "44f05218-5c5e-46db-9d00-87392a264da0.jsonl",
+      "project": "-home-daniel-work-viaanix-barf-ts",
+      "record_index": 1299,
+      "total_records": 2688,
+      "injection_text": "remember collaborative session delegate partnership, remember no broken windows",
+      "has_remember_prefix": true,
+      "phrases": [
+        "no broken windows",
+        "collaborative session delegate partnership"
+      ]
+    },
+    {
+      "timestamp": "2026-04-09T19:54:30.213Z",
+      "session_file": "4acff00d-5797-4282-b823-9fcbe97c715f.jsonl",
+      "project": "-home-daniel-work-viaanix-barf-ts",
+      "record_index": 914,
+      "total_records": 2751,
+      "injection_text": "Remeber collaborative session delegate partnership and no broken windows. Lets do phase 2!",
+      "has_remember_prefix": true,
+      "phrases": [
+        "no broken windows"
+      ]
+    },
+    {
+      "timestamp": "2026-04-10T16:59:41.754Z",
+      "session_file": "2aaad9ea-de43-46bc-bfd2-cf8891469695.jsonl",
+      "project": "-home-daniel-work-viaanix-barf-ts",
+      "record_index": 806,
+      "total_records": 2100,
+      "injection_text": "remeber no broken windows",
+      "has_remember_prefix": true,
+      "phrases": [
+        "no broken windows"
+      ]
+    },
+    {
+      "timestamp": "2026-04-15T20:31:04.877Z",
+      "session_file": "4d6b5ba6-dcde-49fd-a917-23f2816bf1dd.jsonl",
+      "project": "-home-daniel-work-viaanix-barf-ts",
+      "record_index": 1128,
+      "total_records": 2351,
+      "injection_text": "remember no broken windows",
+      "has_remember_prefix": true,
+      "phrases": [
+        "no broken windows"
+      ]
+    },
+    {
+      "timestamp": "2026-04-17T00:01:12.447Z",
+      "session_file": "5652247b-37c4-4554-8a04-1c219966d344.jsonl",
+      "project": "-home-daniel-work-viaanix-barf-ts",
+      "record_index": 1033,
+      "total_records": 1123,
+      "injection_text": "remeber no broken windows",
+      "has_remember_prefix": true,
+      "phrases": [
+        "no broken windows"
+      ]
+    },
+    {
+      "timestamp": "2026-04-30T04:04:53.481Z",
+      "session_file": "97be72b5-4fb8-4778-854f-9b878c861be4.jsonl",
+      "project": "-home-daniel-work-viaanix-barf-ts",
+      "record_index": 8220,
+      "total_records": 12157,
+      "injection_text": "no broken windows",
+      "has_remember_prefix": false,
+      "phrases": [
+        "no broken windows"
+      ]
+    },
+    {
+      "timestamp": "2026-05-05T00:55:59.955Z",
+      "session_file": "f56e9dd3-355f-41b3-9bbb-56d875ef06d5.jsonl",
+      "project": "-home-daniel-work-viaanix-barf-ts",
+      "record_index": 6382,
+      "total_records": 8376,
+      "injection_text": "remember no broken windows",
+      "has_remember_prefix": true,
+      "phrases": [
+        "no broken windows"
+      ]
+    }
+  ],
+  "correction": "An earlier note said '3,883 transcripts'. That was the recursive file count; 3,508 of those are subagent logs under <session>/subagents/. The scan scope (main sessions only) was correct, the stated denominator was not.",
+  "size_context": "All 7 injections fall in the top 14% of main sessions by size. Cases 6 and 7 rank 2nd and 3rd of 374. Median main session is 0.1 MB; case 6 is 35 MB. A control group must be matched on session size/length or the comparison is confounded by duration.",
+  "subagent_phrase_hits": 4
+}

@@ -1,0 +1,97 @@
+{
+  "extracted_at": "2026-09-02T18:15:10",
+  "source_db": "/home/daniel/Projects/ai-projects/command-center/data/command-centre.db",
+  "source_table": "signal_labels",
+  "row_count": 11,
+  "note": "Hand-judged ground truth on struggle-signal fires. The only human-labelled calibration data in the Magpie/quill-works toolchain. Extracted before the retired database is disposed of.",
+  "rows": [
+    {
+      "session_id": "df9c9a29-4ef0-4e45-9e6d-6f292d76d2aa",
+      "signal_kind": "time-gap",
+      "anchor_uuid": "2dc2fa7d-07b1-42c6-8ff0-f92c9fb69392",
+      "judgment": "false-positive",
+      "judged_at": "2026-05-15T18:41:52.963Z",
+      "notes": null
+    },
+    {
+      "session_id": "df9c9a29-4ef0-4e45-9e6d-6f292d76d2aa",
+      "signal_kind": "time-gap",
+      "anchor_uuid": "f714cdb3-b198-44d4-acc7-342ad5b39ac6",
+      "judgment": "false-positive",
+      "judged_at": "2026-05-15T18:41:53.606Z",
+      "notes": null
+    },
+    {
+      "session_id": "df9c9a29-4ef0-4e45-9e6d-6f292d76d2aa",
+      "signal_kind": "time-gap",
+      "anchor_uuid": "a29e5cbe-1670-46c3-8967-0016ab1b9489",
+      "judgment": "false-positive",
+      "judged_at": "2026-05-15T18:41:56.182Z",
+      "notes": null
+    },
+    {
+      "session_id": "df9c9a29-4ef0-4e45-9e6d-6f292d76d2aa",
+      "signal_kind": "time-gap",
+      "anchor_uuid": "8260eb02-df42-4d3f-8eda-39c0368b8225",
+      "judgment": "false-positive",
+      "judged_at": "2026-05-15T18:41:56.639Z",
+      "notes": null
+    },
+    {
+      "session_id": "df9c9a29-4ef0-4e45-9e6d-6f292d76d2aa",
+      "signal_kind": "time-gap",
+      "anchor_uuid": "11bccd2c-7090-410f-9559-c011b26bf16e",
+      "judgment": "false-positive",
+      "judged_at": "2026-05-15T18:41:57.135Z",
+      "notes": null
+    },
+    {
+      "session_id": "df9c9a29-4ef0-4e45-9e6d-6f292d76d2aa",
+      "signal_kind": "time-gap",
+      "anchor_uuid": "c26cdcac-52c2-4079-b78d-967ba108e019",
+      "judgment": "false-positive",
+      "judged_at": "2026-05-15T18:41:58.722Z",
+      "notes": null
+    },
+    {
+      "session_id": "df9c9a29-4ef0-4e45-9e6d-6f292d76d2aa",
+      "signal_kind": "time-gap",
+      "anchor_uuid": "c7125ec4-5255-4258-8103-667fac245550",
+      "judgment": "false-positive",
+      "judged_at": "2026-05-15T18:41:59.130Z",
+      "notes": null
+    },
+    {
+      "session_id": "df9c9a29-4ef0-4e45-9e6d-6f292d76d2aa",
+      "signal_kind": "time-gap",
+      "anchor_uuid": "e60633ca-975e-4bd7-8814-eb327eda84ba",
+      "judgment": "false-positive",
+      "judged_at": "2026-05-15T18:41:59.554Z",
+      "notes": null
+    },
+    {
+      "session_id": "df9c9a29-4ef0-4e45-9e6d-6f292d76d2aa",
+      "signal_kind": "time-gap",
+      "anchor_uuid": "91849b03-d97d-4809-ab5e-b7ff4c128d70",
+      "judgment": "false-positive",
+      "judged_at": "2026-05-15T18:42:00.130Z",
+      "notes": null
+    },
+    {
+      "session_id": "df9c9a29-4ef0-4e45-9e6d-6f292d76d2aa",
+      "signal_kind": "time-gap",
+      "anchor_uuid": "b7e88481-45e9-4f33-b4c1-1edec3f31292",
+      "judgment": "false-positive",
+      "judged_at": "2026-05-15T18:42:01.326Z",
+      "notes": null
+    },
+    {
+      "session_id": "df9c9a29-4ef0-4e45-9e6d-6f292d76d2aa",
+      "signal_kind": "rare-command",
+      "anchor_uuid": "c7125ec4-5255-4258-8103-667fac245550",
+      "judgment": "correct",
+      "judged_at": "2026-05-15T18:42:37.660Z",
+      "notes": null
+    }
+  ]
+}
