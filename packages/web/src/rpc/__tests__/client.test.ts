@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
-import { PiRpcClient, PiTransportClosedError, type PiTransport } from "../client.ts";
-import type { PiRpcEvent } from "../protocol.ts";
+import type { PiTransport } from "@zen/core";
+import { PiRpcClient, PiTransportClosedError } from "../client.ts";
+import type { PiRpcEvent } from "@zen/core";
 
 /** A fake transport: captures writes, lets a test push stdout and close the stream. */
 function fakeTransport() {
@@ -137,4 +138,14 @@ test("sending after close rejects rather than writing into a dead pipe", async (
 	h.close();
 	await expect(h.client.send({ type: "prompt", message: "a" })).rejects.toBeInstanceOf(PiTransportClosedError);
 	expect(h.written).toHaveLength(0);
+});
+
+// ⚠ A record claiming `type: "response"` but missing required fields is a MALFORMED
+// RESPONSE, not an event. Delivering it to onEvent would hide a protocol violation inside
+// normal traffic — which is why routing is on the discriminant and validation follows.
+test("a malformed response is reported, not delivered as an event", () => {
+	const h = harness();
+	h.emit('{"type":"response","id":"test-1"}\n');
+	expect(h.problems).toHaveLength(1);
+	expect(h.events).toHaveLength(0);
 });

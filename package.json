@@ -13,7 +13,10 @@
     "test": "bun test",
     "check": "npm run typecheck && npm run test",
     "link:vendor": "node scripts/link-vendor-packages.mjs",
-    "zen": "node scripts/zen.mjs"
+    "zen": "node scripts/zen.mjs",
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "npm run --silent dev:server -w @zen/web --",
+    "dev:web": "npm run --silent dev:web -w @zen/web"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",

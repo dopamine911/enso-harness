@@ -27,6 +27,7 @@
   "dependencies": {
     "@ladbabynpm/picc-permission-modes": "0.1.1",
     "@mammothb/pi-tokyonight-storm": "0.2.1",
+    "@zen/core": "*",
     "pi-multi-account": "1.21.0"
   },
   "peerDependencies": {

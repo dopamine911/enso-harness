@@ -29,9 +29,22 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageRoot = join(repoRoot, "packages", "harness");
 const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 
-/** Every manifest resource path that points into node_modules names a package to link. */
-function vendorPackageNames() {
-	const names = new Set();
+/**
+ * Every package that must exist inside the harness package's own node_modules.
+ *
+ * Two sources, and both are needed:
+ *
+ *  1. Manifest resource paths beginning `node_modules/` — pi reads those as literal paths
+ *     relative to the package root, so a missing one is a silently skipped resource.
+ *  2. EVERY entry in `dependencies` — because pi loads packages with separate module roots,
+ *     so a bare `import "@zen/core"` from an extension is not guaranteed to resolve by
+ *     walking up to the repo root the way plain Node would. ⚠ This is the case that made
+ *     the list insufficient: `@zen/core` appears nowhere in the manifest paths, only as an
+ *     import in the source, so a manifest-only sweep left it unlinked and the extension
+ *     failed at load rather than at typecheck.
+ */
+function requiredPackageNames() {
+	const names = new Set(Object.keys(manifest.dependencies ?? {}));
 	for (const paths of Object.values(manifest.pi ?? {})) {
 		for (const entry of Array.isArray(paths) ? paths : [paths]) {
 			if (typeof entry !== "string" || !entry.startsWith(VENDOR_PATH_PREFIX)) continue;
@@ -45,7 +58,7 @@ function vendorPackageNames() {
 }
 
 const linked = [];
-for (const packageName of vendorPackageNames()) {
+for (const packageName of requiredPackageNames()) {
 	const hoisted = join(repoRoot, "node_modules", packageName);
 	if (!existsSync(hoisted)) {
 		console.error(`link-vendor-packages: ${packageName} is not installed at the repo root — run npm install`);
@@ -64,4 +77,4 @@ for (const packageName of vendorPackageNames()) {
 	linked.push(packageName);
 }
 
-console.error(`link-vendor-packages: linked ${linked.length} vendor package(s): ${linked.join(", ") || "none"}`);
+console.error(`link-vendor-packages: linked ${linked.length} package(s): ${linked.join(", ") || "none"}`);

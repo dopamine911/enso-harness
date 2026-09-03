@@ -9,5 +9,10 @@
   "include": [
     "core/**/*.ts",
     "extensions/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../core"
+    }
   ]
 }

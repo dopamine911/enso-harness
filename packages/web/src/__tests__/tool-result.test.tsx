@@ -5,7 +5,7 @@ import {
 	isZenToolResultDescriptor,
 	readZenToolResultDescriptor,
 	ZEN_TOOL_RESULT_KEY,
-} from "../tool-result-descriptor.ts";
+} from "@zen/core";
 import { ZenToolResult, type ZenRendererMap } from "../ZenToolResult.tsx";
 
 const partWith = (overrides: Partial<ToolResultPart>): ToolResultPart => ({

@@ -1,70 +1,41 @@
-/**
- * pi rpc wire types (#24), transcribed from `docs/rpc.md` of pi 0.84.4.
- *
- * Deliberately NOT exhaustive. Only what the transport must understand to route a record
- * is typed here; event payloads stay `unknown` until the mapping layer claims them, so an
- * unmodelled event is forwarded rather than dropped.
- *
- * ⚠ That is the important property. pi's event list will grow, and a transport that
- * narrowed every event to a closed union would silently discard whatever it did not
- * recognise — the failure this project keeps finding. Routing needs `type` and `id`; it
- * does not need to understand `compaction_start`.
- */
-
-/** Base64 image content, accepted by `prompt`, `steer` and `follow_up`. */
-export interface PiImageContent {
-	type: "image";
-	data: string;
-	mimeType: string;
-}
-
-/** What to do when a prompt arrives while the agent is already streaming. */
-export type PiStreamingBehavior = "steer" | "followUp";
+import { Compile } from "typebox/compile";
+import {
+	PiRpcEventSchema,
+	PiRpcResponseSchema,
+	type PiRpcEvent,
+	type PiRpcRecord,
+	type PiRpcResponse,
+} from "@zen/core";
 
 /**
- * A command written to pi's stdin, one JSON object per line.
+ * Runtime behaviour over pi's rpc wire schemas.
  *
- * `id` is optional in the protocol but mandatory here: the client assigns one so every
- * command is correlatable. An uncorrelated command's failure is unattributable.
+ * ⚠ The SCHEMAS live in `@zen/core`, not here. This module holds only what cannot be a
+ * schema: compiled validators, the predicates that route a record, and the parse error.
+ * Declaring a shape here would put it in two places at once, which is what `@zen/core`
+ * exists to prevent.
  */
-export interface PiRpcCommand {
-	id: string;
-	type: string;
-	[field: string]: unknown;
-}
+
+export type { PiRpcEvent, PiRpcRecord, PiRpcResponse } from "@zen/core";
+
+/** Compiled once at module load — this runs on every record pi emits. */
+const responseValidator = Compile(PiRpcResponseSchema);
+const recordValidator = Compile(PiRpcEventSchema);
 
 /**
- * A command as a caller supplies it — the client assigns `id`.
+ * Does this record CLAIM to be a response?
  *
- * ⚠ Declared explicitly rather than as `Omit<PiRpcCommand, "id">`. `PiRpcCommand` carries
- * an index signature, so `keyof` it is `string | number` and `Exclude<string | number,
- * "id">` removes nothing — `Omit` silently discards the named `type` field instead of the
- * `id` one. The typechecker caught it; the shape is spelled out so it cannot recur.
+ * ⚠ Separate from validating one, and the split matters. A record with
+ * `type: "response"` but no `command` is a MALFORMED RESPONSE, not an event — routing it
+ * to the event stream because it failed full validation would hide a protocol violation
+ * inside normal traffic. The discriminant decides the route; the schema decides validity.
  */
-export interface PiRpcCommandInput {
-	type: string;
-	[field: string]: unknown;
+export function claimsToBeResponse(record: PiRpcRecord): boolean {
+	return record.type === "response";
 }
-
-/** A command acknowledgement. Emitted once per `id`. */
-export interface PiRpcResponse {
-	type: "response";
-	command: string;
-	success: boolean;
-	id?: string;
-	error?: string;
-}
-
-/** Anything else pi writes to stdout. */
-export interface PiRpcEvent {
-	type: string;
-	[field: string]: unknown;
-}
-
-export type PiRpcRecord = PiRpcResponse | PiRpcEvent;
 
 export function isPiRpcResponse(record: PiRpcRecord): record is PiRpcResponse {
-	return record.type === "response";
+	return responseValidator.Check(record);
 }
 
 /**
@@ -83,13 +54,14 @@ export function willRetryAfter(event: PiRpcEvent): boolean {
 
 /** Thrown when a record is not parseable JSON. Carries the raw line for diagnosis. */
 export class PiRpcParseError extends Error {
-	constructor(
-		readonly raw: string,
-		cause: unknown,
-	) {
+	/** Explicit field, not a parameter property — see `PiTransportClosedError` for why. */
+	readonly raw: string;
+
+	constructor(raw: string, cause: unknown) {
 		super(`pi rpc record was not valid JSON: ${raw.slice(0, 200)}`);
 		this.name = "PiRpcParseError";
 		this.cause = cause;
+		this.raw = raw;
 	}
 }
 
@@ -107,8 +79,10 @@ export function parsePiRpcRecord(raw: string): PiRpcRecord {
 	} catch (cause) {
 		throw new PiRpcParseError(raw, cause);
 	}
-	if (typeof parsed !== "object" || parsed === null || typeof (parsed as PiRpcRecord).type !== "string") {
-		throw new PiRpcParseError(raw, new Error("record has no string `type`"));
+	// Validated against the schema rather than by hand-checking `typeof`, so the shape
+	// requirement lives in one place and the error message can name what failed.
+	if (!recordValidator.Check(parsed)) {
+		throw new PiRpcParseError(raw, new Error("record does not match the pi rpc record schema"));
 	}
-	return parsed as PiRpcRecord;
+	return parsed;
 }
