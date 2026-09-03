@@ -18,16 +18,37 @@ import {
  * run, and `emitToolCall` returns immediately on the first `block`. So a block here is
  * final and cannot be un-blocked by a later extension, whatever the load order.
  *
+ * WHAT IT COVERS, AND HOW THE TOOL SET IS CHOSEN
+ * `write` and `edit` are an inclusion list — mutation is a small closed set worth naming.
+ * Every OTHER tool carrying a `path` is gated as a reader by EXCLUSION. That asymmetry is
+ * deliberate and it is the correct direction for a boundary: an over-broad reader set
+ * blocks something harmless and says so, while a too-narrow one permits a credential read
+ * in silence. pi ships `read`, `grep`, `find` and `ls` with a `path` today, and an
+ * inclusion list naming only `read` left `grep` over ~/.aws returning the credential line.
+ *
  * ⚠ WHAT THIS DOES NOT COVER
- * `bash` is only given a default timeout. It is NOT path-confined: `echo x > ~/.ssh/foo`
- * still escapes. Bash policy and egress are Tier 0 item 4 and deliberately not attempted
- * here — a partial bash filter reads as coverage and is worse than none.
+ * 1. `bash` is only given a default timeout. It is NOT path-confined: `echo x > ~/.ssh/foo`
+ *    still escapes, and `cat ~/.aws/credentials` bypasses the reader gate entirely. Bash
+ *    policy and egress are Tier 0 item 4, deliberately not attempted here — a partial bash
+ *    filter reads as coverage and is worse than none.
+ * 2. Shell-init and agent-config PERSISTENCE paths (`~/.bashrc`, `~/.gitconfig`,
+ *    `~/.claude.json`, `.mcp.json`). Those are not secrets — nothing is exfiltrated,
+ *    something is installed — so `looksLikeSecret` does not catch them and
+ *    `protectedWriteFragments` holds only `/.git/`.
+ * 3. Tool-name CASE. Matching is case-sensitive, so a tool registered as `Write` or
+ *    `Grep` is not recognised. Vendor packages in this ecosystem do register
+ *    Claude-Code-style capitalised names.
  */
 
-/** Tools whose `path` argument mutates the filesystem. */
+/**
+ * Tools whose `path` argument mutates the filesystem.
+ *
+ * ⚠ This is the ONLY inclusion list here, and it is deliberate: mutation is a small
+ * closed set worth naming, and a tool wrongly treated as a reader gets the weaker
+ * check. Everything else carrying a `path` is treated as a READER by exclusion — see
+ * the dispatch below for why that direction is the safe one.
+ */
 const MUTATING_PATH_TOOLS = new Set(["write", "edit"]);
-/** Tools whose `path` argument reads the filesystem. */
-const READING_PATH_TOOLS = new Set(["read"]);
 
 function pathArgumentOf(event: ToolCallEvent): string | undefined {
 	const input = event.input as Record<string, unknown>;
@@ -55,20 +76,8 @@ export default function guards(pi: ExtensionAPI): void {
 		if (candidate === undefined) return undefined;
 		const target = resolveAgainstCwd(candidate, cwd);
 
-		// --- reads: deny credential material.
-		if (READING_PATH_TOOLS.has(event.toolName)) {
-			if (looksLikeSecret(target, policy.secretPathFragments)) {
-				return {
-					block: true,
-					reason:
-						`Reading "${candidate}" is blocked: it matches a credential pattern. ` +
-						`A secret read is the precondition for exfiltration, so this is denied even for inspection.`,
-				};
-			}
-			return undefined;
-		}
-
-		// --- writes: confine to the workspace, and never into protected internals.
+		// --- writes first: `write` and `edit` also carry a `path`, so they must be
+		// claimed before the reader fallthrough or they would get the weaker check.
 		if (MUTATING_PATH_TOOLS.has(event.toolName)) {
 			const roots = policy.writeRoots.length > 0 ? policy.writeRoots : [cwd];
 
@@ -92,6 +101,23 @@ export default function guards(pi: ExtensionAPI): void {
 					reason: `Writing to "${candidate}" is blocked: it matches a credential pattern.`,
 				};
 			}
+			return undefined;
+		}
+
+		// --- every remaining tool carrying a `path` reads the filesystem: deny credential
+		// material. This is an EXCLUSION, never an inclusion list, and the asymmetry is the
+		// whole point for a boundary: an over-broad reader set blocks something harmless and
+		// says so, while a too-narrow one permits a credential read silently. pi ships `read`,
+		// `grep`, `find` and `ls` with a `path` today — an inclusion list naming only `read`
+		// left `grep` over ~/.aws returning the credential line, past a guard whose own header
+		// claimed it denied secret reads.
+		if (looksLikeSecret(target, policy.secretPathFragments)) {
+			return {
+				block: true,
+				reason:
+					`Reading "${candidate}" via ${event.toolName} is blocked: it matches a credential pattern. ` +
+					`A secret read is the precondition for exfiltration, so this is denied even for inspection.`,
+			};
 		}
 
 		return undefined;

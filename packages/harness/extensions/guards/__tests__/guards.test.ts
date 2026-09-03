@@ -43,3 +43,39 @@ test("an explicit bash timeout is preserved", () => {
 	expect(input.timeout).toBe(5);
 });
 test("a tool with no path argument is ignored", () => expect(call("grep", { pattern: "f" })).toBeUndefined());
+
+// --- #8: the reader set is an exclusion, so every path-bearing tool is gated.
+// pi ships read/grep/find/ls with a `path`; an inclusion list naming only `read`
+// left `grep` over a credential directory returning the secret line.
+for (const readingTool of ["read", "grep", "find", "ls"]) {
+	test(`${readingTool} of a credential path is blocked`, () => {
+		const result = call(readingTool, { path: ".env" });
+		expect(result?.block).toBe(true);
+		expect(result?.reason).toContain("credential");
+	});
+	test(`${readingTool} of ordinary source passes`, () => {
+		expect(call(readingTool, { path: "src/ordinary.ts" })).toBeUndefined();
+	});
+}
+
+// A tool pi does not ship today must still be gated — that is what "exclusion" buys,
+// and it is the case an inclusion list can never cover.
+test("an unknown path-bearing tool is gated as a reader", () => {
+	const result = call("someFutureSearchTool", { path: ".aws/credentials" });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("credential");
+});
+
+// The reason names the tool, so a denial is attributable without reading the guard.
+test("the denial names the tool that was refused", () => {
+	expect(call("grep", { path: ".ssh/id_rsa" })?.reason).toContain("grep");
+});
+
+// ⚠ Writes must be claimed BEFORE the reader fallthrough: write/edit also carry a
+// `path`, so a dispatch that checked readers first would give them the weaker check
+// and silently drop workspace confinement.
+test("write outside the workspace is still confined, not treated as a read", () => {
+	const result = call("write", { path: "/etc/passwd" });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("outside the workspace");
+});
