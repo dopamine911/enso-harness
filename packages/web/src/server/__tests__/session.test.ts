@@ -230,3 +230,178 @@ test("fetchPiCommands filters malformed entries rather than trusting the payload
 	const commands = await fetchPiCommands(client);
 	expect(commands.map((command) => command.name)).toEqual(["ok"]);
 });
+
+/**
+ * ⚠⚠ The no-progress guard. Observed with `/mode`: the command emitted RUN_ERROR and then
+ * left the SSE response OPEN FOREVER, because `runChat` terminates on `agent_settled` and
+ * an extension command that runs no inference never emits one. An HTTP stream that never
+ * closes shows a spinner with no error raised anywhere.
+ */
+test("a run that never settles ends itself rather than hanging", async () => {
+	// pi acknowledges the prompt, emits one event, then goes silent — never settling.
+	let consumeData: ((chunk: string) => void) | undefined;
+	const transport: PiTransport = {
+		write: (line) => {
+			const parsed = JSON.parse(line) as { id: string; type: string };
+			if (parsed.type !== "prompt") return;
+			queueMicrotask(() => {
+				consumeData?.(`{"id":"${parsed.id}","type":"response","command":"prompt","success":true}\n`);
+				consumeData?.('{"type":"turn_start"}\n');
+			});
+		},
+		onData: (consume) => { consumeData = consume; },
+		onClose: () => undefined,
+	};
+	const chunks = [];
+	for await (const chunk of runChat({
+		transport, ids, prompt: "hello", onProblem: undefined, noProgressTimeoutMs: 40,
+	})) {
+		chunks.push(chunk);
+	}
+	// It terminated — reaching this line at all is the assertion.
+	expect(chunks.at(-1)?.type).toBe(EventType.RUN_FINISHED);
+	// and the event that DID arrive was not discarded by the timeout
+	expect(chunks.some((chunk) => chunk.type === EventType.CUSTOM)).toBe(true);
+});
+
+test("a settled run is unaffected by the timeout", async () => {
+	const pi = piWithCommands([], ['{"type":"agent_settled"}']);
+	const chunks = [];
+	for await (const chunk of runChat({
+		transport: pi.transport, ids, prompt: "hi", onProblem: undefined, noProgressTimeoutMs: 40,
+	})) {
+		chunks.push(chunk);
+	}
+	expect(chunks.filter((chunk) => chunk.type === EventType.RUN_FINISHED)).toHaveLength(1);
+});
+
+// ⚠ A blocking dialog must be CANCELLED, or pi never acknowledges the prompt and the run
+// hangs before the drain loop is even entered — which is what `/mode` did.
+test("a blocking dialog is cancelled on the wire so pi can proceed", async () => {
+	let consumeData: ((chunk: string) => void) | undefined;
+	const written: string[] = [];
+	const transport: PiTransport = {
+		write: (line) => {
+			written.push(line);
+			const parsed = JSON.parse(line) as { id: string; type: string };
+			if (parsed.type !== "prompt") return;
+			queueMicrotask(() => {
+				// pi asks a question BEFORE acknowledging the prompt — the real ordering.
+				consumeData?.('{"type":"extension_ui_request","id":"d1","method":"select","title":"pick"}\n');
+				consumeData?.(`{"id":"${parsed.id}","type":"response","command":"prompt","success":true}\n`);
+				consumeData?.('{"type":"agent_settled"}\n');
+			});
+		},
+		onData: (consume) => { consumeData = consume; },
+		onClose: () => undefined,
+	};
+	const chunks = [];
+	// ⚠ Ordinary prose, not "/x". A slash prompt would trigger the command lookup, and this
+	// fake answers only `prompt` — so the test would hang on `get_commands` and look like a
+	// code defect. The dialog behaviour is independent of slash handling.
+	for await (const chunk of runChat({ transport, ids, prompt: "do a thing", onProblem: undefined })) {
+		chunks.push(chunk);
+	}
+	// the cancellation was written, keyed to the request id
+	const cancellation = written.find((line) => line.includes("extension_ui_response"));
+	expect(cancellation).toBeDefined();
+	expect(JSON.parse(cancellation as string)).toMatchObject({ id: "d1", cancelled: true });
+	// and the user is told why, rather than the dialog vanishing silently
+	const error = chunks.find((chunk) => chunk.type === EventType.RUN_ERROR);
+	expect((error as { message: string }).message).toContain("select");
+});
+
+test("a fire-and-forget UI request is NOT cancelled — nothing is waiting on it", async () => {
+	const written: string[] = [];
+	let consumeData: ((chunk: string) => void) | undefined;
+	const transport: PiTransport = {
+		write: (line) => {
+			written.push(line);
+			const parsed = JSON.parse(line) as { id: string; type: string };
+			if (parsed.type !== "prompt") return;
+			queueMicrotask(() => {
+				consumeData?.('{"type":"extension_ui_request","id":"n1","method":"setStatus","statusKey":"x"}\n');
+				consumeData?.(`{"id":"${parsed.id}","type":"response","command":"prompt","success":true}\n`);
+				consumeData?.('{"type":"agent_settled"}\n');
+			});
+		},
+		onData: (consume) => { consumeData = consume; },
+		onClose: () => undefined,
+	};
+	for await (const _chunk of runChat({ transport, ids, prompt: "hi", onProblem: undefined })) {
+		// drain
+	}
+	expect(written.some((line) => line.includes("extension_ui_response"))).toBe(false);
+});
+
+/**
+ * ⚠⚠ The guard must measure PROGRESS, not traffic.
+ *
+ * The first version reset its deadline on any incoming event, which made it inert against
+ * the real case: pi-multi-account emits periodic `setStatus` heartbeats that we DROP
+ * without emitting anything, so they renewed the deadline forever and `/mode` still hung
+ * past 120 seconds with the guard "in place".
+ */
+test("dropped status heartbeats do NOT keep a stalled run alive", async () => {
+	let consumeData: ((chunk: string) => void) | undefined;
+	let heartbeat: ReturnType<typeof setInterval> | undefined;
+	const transport: PiTransport = {
+		write: (line) => {
+			const parsed = JSON.parse(line) as { id: string; type: string };
+			if (parsed.type !== "prompt") return;
+			queueMicrotask(() => {
+				consumeData?.(`{"id":"${parsed.id}","type":"response","command":"prompt","success":true}\n`);
+				// Traffic that produces no chunks, faster than the deadline — exactly the
+				// shape that defeated the first implementation.
+				heartbeat = setInterval(() => {
+					consumeData?.(
+						'{"type":"extension_ui_request","id":"h","method":"setStatus","statusKey":"quota"}\n',
+					);
+				}, 10);
+			});
+		},
+		onData: (consume) => { consumeData = consume; },
+		onClose: () => undefined,
+	};
+	const chunks = [];
+	for await (const chunk of runChat({
+		transport, ids, prompt: "hello", onProblem: undefined, noProgressTimeoutMs: 80,
+	})) {
+		chunks.push(chunk);
+	}
+	if (heartbeat !== undefined) clearInterval(heartbeat);
+	// Terminating at all is the assertion — the old version looped forever here.
+	expect(chunks.at(-1)?.type).toBe(EventType.RUN_FINISHED);
+});
+
+test("real output DOES renew the deadline, so a slow answer is not cut off", async () => {
+	let consumeData: ((chunk: string) => void) | undefined;
+	const transport: PiTransport = {
+		write: (line) => {
+			const parsed = JSON.parse(line) as { id: string; type: string };
+			if (parsed.type !== "prompt") return;
+			queueMicrotask(async () => {
+				consumeData?.(`{"id":"${parsed.id}","type":"response","command":"prompt","success":true}\n`);
+				// Four deltas at 30ms with a 60ms window: each renews, so none is cut off.
+				for (let index = 0; index < 4; index += 1) {
+					await new Promise((resolve) => setTimeout(resolve, 30));
+					consumeData?.(
+						`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"x"}}\n`,
+					);
+				}
+				consumeData?.('{"type":"agent_settled"}\n');
+			});
+		},
+		onData: (consume) => { consumeData = consume; },
+		onClose: () => undefined,
+	};
+	const chunks = [];
+	for await (const chunk of runChat({
+		transport, ids, prompt: "hello", onProblem: undefined, noProgressTimeoutMs: 60,
+	})) {
+		chunks.push(chunk);
+	}
+	// All four deltas arrived and the run settled normally rather than timing out.
+	expect(chunks.filter((chunk) => chunk.type === EventType.TEXT_MESSAGE_CONTENT)).toHaveLength(4);
+	expect(chunks.at(-1)?.type).toBe(EventType.RUN_FINISHED);
+});

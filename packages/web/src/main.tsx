@@ -50,6 +50,33 @@ const descriptorRenderers: ZenRendererMap = {};
 
 const chatOptions = { connection: fetchServerSentEvents("/api/chat") };
 
+/**
+ * Renders a run-level error.
+ *
+ * ⚠ Declared before the factory but calls `useChatContext` from it — legal because the
+ * binding is only read at RENDER time, long after the destructuring completes. Placing it
+ * here keeps the layout readable.
+ */
+function RunProblem(): React.ReactNode {
+	const chat = useChatContext();
+	if (chat.error === undefined || chat.error === null) return null;
+	return (
+		<pre
+			role="alert"
+			style={{
+				whiteSpace: "pre-wrap",
+				border: "1px solid crimson",
+				color: "crimson",
+				padding: "0.6rem",
+				fontSize: 12,
+				margin: "1rem 0",
+			}}
+		>
+			{chat.error instanceof Error ? chat.error.message : String(chat.error)}
+		</pre>
+	);
+}
+
 const { useAppChat, useChatContext } = createChatHook({
 	options: chatOptions,
 	components: {
@@ -92,6 +119,18 @@ const { useAppChat, useChatContext } = createChatHook({
 				</form>
 			);
 		},
+		/**
+		 * ⚠⚠ A RUN_ERROR HAD NOWHERE TO RENDER, WHICH IS HOW `/mode` LOOKED LIKE NOTHING.
+		 *
+		 * Daniel typed `/mode`, the server correctly emitted RUN_ERROR explaining that pi was
+		 * blocked on an interactive dialog — and the page showed an empty assistant turn,
+		 * because the layout mounted Messages, Interrupts, Queue and Input and nothing read
+		 * `chat.error`. The transcript he pasted back was the INPUT PLACEHOLDER, which was
+		 * simply the next visible text on the page.
+		 *
+		 * Errors are not a message part, so no `partsComponents` entry catches them. They
+		 * live on the chat instance and have to be rendered deliberately.
+		 */
 		layout: ({ Messages, Interrupts, Queue, Input }) => (
 			<main style={{ font: "14px/1.6 system-ui", maxWidth: 820, margin: "2rem auto", padding: "0 1rem" }}>
 				<h1 style={{ fontSize: 15, fontWeight: 500, opacity: 0.55, margin: "0 0 1.5rem" }}>zen-harness</h1>
@@ -101,6 +140,7 @@ const { useAppChat, useChatContext } = createChatHook({
 				    approval would silently never appear. */}
 				<Interrupts />
 				<Queue />
+				<RunProblem />
 				<Input />
 			</main>
 		),
