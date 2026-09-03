@@ -2,8 +2,8 @@
 
 **Status:** foundational. Written 2026-09-03. This is the document a fresh session reads first.
 
-Research that informs these decisions lives in [`concepts/`](./concepts/) — eight documents on
-boundaries, tooling, failure modes, prompt caching, support systems, and what to harvest from prior
+Research that informs these decisions lives in [`concepts/`](./concepts/) — documents on boundaries,
+tooling, failure modes, prompt caching, support systems, provider auth, and what to harvest from prior
 projects. This document is the *shape*; those are the *why*.
 
 ---

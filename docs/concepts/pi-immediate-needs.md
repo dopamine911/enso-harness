@@ -214,3 +214,13 @@ Items 1, 2, 3 and 8 together are perhaps a day's work and they move pi from *uns
 *safe to leave alone within a workspace*. That is the whole Tier 0 argument: the gap between pi and a
 usable harness is smaller than the exclusion list suggests, because the extension API is genuinely good —
 what is missing is not capability, it is four guards nobody has written yet.
+
+---
+
+## Out of scope here: provider auth
+
+pi's credential handling has two gaps of the same character — a session that cannot authenticate exits 0
+with no output, and a retired credential carries no record of why it was retired. They are not safety
+guards, so they are not tiered above; they live in
+[`provider-auth-and-client-identity.md`](./provider-auth-and-client-identity.md) § Observability, which
+also covers why zen-harness will not follow omp's route to subscription billing.
