@@ -231,8 +231,27 @@ identity, so anything downstream has to invent one.
   ping-ponging "every 1-9s forever" as an observed failure)
 - a decision log that states it excludes credentials, so a rotation can be explained after the fact
 
-**Not worth taking:** layers 3b and 4 per the table above, and the volatile-token identity fallback —
-which is a symptom of pi's credential shape, and zen-harness storing `accountId` removes the need for it.
+**Not worth reimplementing:** the volatile-token identity fallback — it is a symptom of pi's credential
+shape, and zen-harness storing `accountId` removes the need for it.
+
+⚠ **On layers 3b and 4: zen-harness depends on them, by decision.** `pi-multi-account` is vendored into
+the harness package (PR #6), and it supplies both. Daniel's call, made 2026-09-03 with the tradeoff on
+the table: he is a reverse engineer, the risk is his account, and the alternative was no subscription
+access from zen at all.
+
+So state the position precisely rather than letting this document imply a purity it does not have:
+
+- zen-harness does not **author** the transport fingerprint or the attestation. That line holds.
+- zen-harness **inherits** layers 1 and 3a from pi itself, on every OAuth request, unavoidably — see
+  § What pi does. There is no opt-out short of patching pi.
+- zen-harness **depends on** layers 3b and 4 through a vendored third-party package, deliberately.
+
+The engineering objections in § Why zen-harness will not do this are unchanged and now apply to a
+dependency rather than to our own code: eight constants pinned to something Anthropic ships on its own
+schedule, no version-checkable pin, and a failure mode that surfaces as inference errors far from the
+cause. The disagreeing `cch` implementations above are the sharpest evidence. What changes is who is
+holding the liability — an upstream maintainer rather than us — which lowers the maintenance cost and
+does nothing about the account risk.
 
 ⚠ Note this is also the package that is **fatal at startup** against pi 0.84.4 while declaring
 `peerDependencies: "*"` — see `pi-extension-survey.md`. Read it for the shape; do not depend on it.
