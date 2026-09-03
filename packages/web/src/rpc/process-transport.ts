@@ -1,4 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { Type, type Static } from "typebox";
+import { Compile } from "typebox/compile";
 import type { PiTransport } from "./client.ts";
 
 /**
@@ -20,20 +22,59 @@ const DEFAULT_PI_COMMAND = "pi";
 /** `--mode rpc` is the whole reason this transport exists; it is not caller-overridable. */
 const RPC_MODE_ARGS = ["--mode", "rpc"] as const;
 
-export interface PiProcessOptions {
+/**
+ * WHERE PI RUNS, as data — a TypeBox schema because this is the half that can arrive from
+ * a config file, a settings UI, or a request, and therefore the half that needs validating
+ * at a boundary rather than trusting.
+ *
+ * ⚠ `cwd` is the tree pi will read and write. With no sandbox (#24), this value IS the
+ * blast radius, so it is the last field that should be accepted unvalidated. `minLength`
+ * is the floor, not the check — a caller still has to decide the path is one it meant.
+ */
+export const PiLaunchConfig = Type.Object({
 	/** Executable. Defaults to `pi` on PATH; override to reach a container or wrapper. */
-	command?: string;
+	command: Type.Optional(Type.String({ minLength: 1 })),
 	/** Extra args appended after `--mode rpc` — e.g. `--model`, `--session-dir`. */
-	args?: readonly string[];
+	args: Type.Optional(Type.Array(Type.String())),
 	/** Working directory for the agent. This is the tree pi will read and write. */
-	cwd: string;
+	cwd: Type.String({ minLength: 1 }),
 	/** Environment for the child. Passed through verbatim; the caller decides what leaks. */
-	env?: Record<string, string>;
+	env: Type.Optional(Type.Record(Type.String(), Type.String())),
+});
+export type PiLaunchConfig = Static<typeof PiLaunchConfig>;
+
+const launchConfigValidator = Compile(PiLaunchConfig);
+
+/** Validate a launch config from an untrusted source. */
+export function isPiLaunchConfig(value: unknown): value is PiLaunchConfig {
+	return launchConfigValidator.Check(value);
+}
+
+/**
+ * The callbacks. A plain interface, deliberately.
+ *
+ * ⚠ WHY THESE ARE NOT A SCHEMA, WHILE THE CONFIG ABOVE IS
+ * TypeBox can express a function — `Type.Function([...], ...)` — and its validator does
+ * check `typeof === "function"`. But it emits `{"type": "function"}`, which is NOT standard
+ * JSON Schema. So converting a callback bag costs the single property that made TypeBox the
+ * right choice for this repo (a schema IS a JSON Schema, usable for the HTTP contract and
+ * OpenAPI without a conversion step) and buys a `typeof` check.
+ *
+ * The rule, so the next session does not re-derive it: **data that crosses a boundary gets
+ * a schema; behaviour wired at a composition root stays an interface.** By that rule
+ * `PiTransport`, `PiRpcClientOptions` and `PiProcessHandle` are interfaces — they carry
+ * methods and callbacks, never serialised state. `PiLaunchConfig` is a schema because it is
+ * pure data that can come from outside the process.
+ */
+export interface PiProcessCallbacks {
 	/** Notified for anything pi writes to stderr. */
 	onStderr?: (chunk: string) => void;
 	/** Notified once the child exits, with its code and signal. */
 	onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
 }
+
+/** What `spawnPiRpcProcess` takes: validated launch data plus unvalidatable behaviour. */
+export type PiProcessOptions = PiLaunchConfig & PiProcessCallbacks;
 
 export interface PiProcessHandle {
 	transport: PiTransport;
@@ -60,7 +101,7 @@ export interface PiProcessHandle {
  */
 export function piTransportFromChild(
 	child: ChildProcessWithoutNullStreams,
-	options: Pick<PiProcessOptions, "onStderr" | "onExit"> = {},
+	options: PiProcessCallbacks = {},
 ): PiTransport {
 	child.stdout.setEncoding("utf8");
 	child.stderr.setEncoding("utf8");

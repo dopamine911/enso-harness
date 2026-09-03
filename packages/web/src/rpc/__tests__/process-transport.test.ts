@@ -1,7 +1,12 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { expect, test } from "bun:test";
 import { PiRpcClient } from "../client.ts";
-import { piTransportFromChild, spawnPiRpcProcess, type SpawnLike } from "../process-transport.ts";
+import {
+	isPiLaunchConfig,
+	piTransportFromChild,
+	spawnPiRpcProcess,
+	type SpawnLike,
+} from "../process-transport.ts";
 import type { PiRpcEvent } from "../protocol.ts";
 
 /**
@@ -127,3 +132,27 @@ test("the default executable is `pi` on PATH", () => {
 	spawnPiRpcProcess({ cwd: "/tmp" }, fakeSpawn);
 	expect(capturedCommand).toBe("pi");
 });
+
+// --- PiLaunchConfig: the data half, validated because it can come from outside
+test("a valid launch config passes", () =>
+	expect(isPiLaunchConfig({ cwd: "/work/repo", command: "pi", args: ["--model", "x"] })).toBe(true));
+
+test("cwd is required — it is the blast radius with no sandbox", () => {
+	expect(isPiLaunchConfig({ command: "pi" })).toBe(false);
+	expect(isPiLaunchConfig({ cwd: "" })).toBe(false);
+});
+
+test("an empty command is rejected rather than silently defaulting", () =>
+	expect(isPiLaunchConfig({ cwd: "/w", command: "" })).toBe(false));
+
+test("args must be strings, so a number cannot reach the command line", () =>
+	expect(isPiLaunchConfig({ cwd: "/w", args: ["--model", 7] })).toBe(false));
+
+test("env values must be strings", () => {
+	expect(isPiLaunchConfig({ cwd: "/w", env: { PATH: "/usr/bin" } })).toBe(true);
+	expect(isPiLaunchConfig({ cwd: "/w", env: { PATH: 7 } })).toBe(false);
+});
+
+test("callbacks are absent from the schema, so passing them does not fail validation", () =>
+	// they live on PiProcessCallbacks, an interface — the schema is open, so extra keys pass
+	expect(isPiLaunchConfig({ cwd: "/w", onStderr: () => undefined })).toBe(true));
