@@ -1,7 +1,6 @@
 import type { ExtensionAPI, ToolCallEvent, ToolCallEventResult } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_GUARD_POLICY, type GuardPolicy } from "@zen/core";
 import {
-	DEFAULT_GUARD_POLICY,
-	type GuardPolicy,
 	isInsideAnyRoot,
 	isProtectedForWrite,
 	looksLikeSecret,

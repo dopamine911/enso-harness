@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
-import { PiRpcClient, PiTransportClosedError, type PiTransport } from "../client.ts";
-import type { PiRpcEvent } from "../protocol.ts";
+import type { PiTransport } from "@zen/core";
+import { PiRpcClient, PiTransportClosedError } from "../client.ts";
+import type { PiRpcEvent } from "@zen/core";
 
 /** A fake transport: captures writes, lets a test push stdout and close the stream. */
 function fakeTransport() {

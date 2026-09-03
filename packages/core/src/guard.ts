@@ -1,9 +1,12 @@
 import { Type, type Static } from "typebox";
 
 /**
- * Guard policy. TypeBox because it is the one schema language in this package:
- * pi's `registerTool` requires `TSchema`, and a TypeBox schema *is* a JSON Schema
- * object, which is the wire format when the web surface arrives.
+ * The Tier 0 guard policy.
+ *
+ * ⚠ The regex constants at the bottom are not schemas, and they live here anyway. Splitting
+ * the policy — schema in `@zen/core`, patterns beside the extension — would put half of one
+ * decision in each of two packages, which is the duplication this package exists to prevent.
+ * The policy is one thing; it is declared in one place.
  */
 export const GuardPolicy = Type.Object({
 	/** Absolute roots a mutating tool may write inside. Empty means "the session cwd only". */

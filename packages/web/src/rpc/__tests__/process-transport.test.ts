@@ -1,13 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { expect, test } from "bun:test";
 import { PiRpcClient } from "../client.ts";
-import {
-	isPiLaunchConfig,
-	piTransportFromChild,
-	spawnPiRpcProcess,
-	type SpawnLike,
-} from "../process-transport.ts";
-import type { PiRpcEvent } from "../protocol.ts";
+import { isPiLaunchConfig } from "@zen/core";
+import { piTransportFromChild, spawnPiRpcProcess, type SpawnLike } from "../process-transport.ts";
+import type { PiRpcEvent } from "@zen/core";
 
 /**
  * These drive a REAL child process (`node -e`) rather than a fake, so they exercise real

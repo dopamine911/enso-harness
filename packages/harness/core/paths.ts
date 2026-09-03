@@ -1,6 +1,6 @@
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
-import { SECRET_BASENAME_PATTERNS } from "./policy.ts";
+import { SECRET_BASENAME_PATTERNS } from "@zen/core";
 
 /** Resolve a tool-supplied path against the session cwd. Does NOT confine — see {@link isInsideAnyRoot}. */
 export function resolveAgainstCwd(candidate: string, cwd: string): string {

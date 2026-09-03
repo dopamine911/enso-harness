@@ -1,13 +1,13 @@
+import type {
+	PiRpcClientOptions as PiRpcClientOptionsSchema,
+	PiRpcCommand,
+	PiRpcCommandInput,
+	PiRpcEvent,
+	PiRpcResponse,
+	PiTransport,
+} from "@zen/core";
 import { JsonLinesSplitter } from "./jsonl.ts";
-import {
-	claimsToBeResponse,
-	isPiRpcResponse,
-	parsePiRpcRecord,
-	type PiRpcCommand,
-	type PiRpcCommandInput,
-	type PiRpcEvent,
-	type PiRpcResponse,
-} from "./protocol.ts";
+import { claimsToBeResponse, isPiRpcResponse, parsePiRpcRecord } from "./protocol.ts";
 
 /**
  * Correlating client for pi's rpc mode (#24).
@@ -24,30 +24,14 @@ import {
  * stays a parameter"). That is what makes the deferred sandbox decision cheap.
  */
 
-/** The complete IO surface. Implemented over a child process at the composition root. */
-export interface PiTransport {
-	/** Write one framed command line. */
-	write(line: string): void;
-	/** Register the stdout consumer. Called once. */
-	onData(consume: (chunk: string) => void): void;
-	/** Register the close consumer, so a pending command can be rejected rather than hang. */
-	onClose(consume: () => void): void;
-}
+/**
+ * ⓘ Re-exported so a consumer of the client does not need two imports. The DECLARATIONS
+ * live in `@zen/core` — see its README for why even the function-bearing shapes are schemas.
+ */
+export type { PiRpcClientOptions, PiTransport } from "@zen/core";
 
-export interface PiRpcClientOptions {
-	transport: PiTransport;
-	/** Injected so tests are deterministic and ids stay greppable in a log. */
-	nextCommandId?: () => string;
-	/** Notified for every non-response record, including types we do not model. */
-	onEvent?: (event: PiRpcEvent) => void;
-	/**
-	 * Notified when a record fails to parse.
-	 *
-	 * ⚠ Separate from `onEvent` and never silent: a dropped record looks exactly like pi
-	 * having nothing to say, which is the failure shape #24 exists to avoid.
-	 */
-	onParseError?: (error: unknown) => void;
-}
+/** What the constructor takes, as a local alias over the shared schema's inferred type. */
+type PiRpcClientOptions = PiRpcClientOptionsSchema;
 
 /** Rejection when pi closes with a command still outstanding. */
 export class PiTransportClosedError extends Error {

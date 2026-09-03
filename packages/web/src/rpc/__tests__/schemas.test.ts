@@ -1,18 +1,17 @@
 import { expect, test } from "bun:test";
 import { Check } from "typebox/value";
 import {
-	ZenToolResultDescriptor,
 	isZenToolResultDescriptor,
-} from "../../tool-result-descriptor.ts";
-import { mapPiEvent, ZenObservation, ZenUsage } from "../map-events.ts";
-import {
-	claimsToBeResponse,
-	isPiRpcResponse,
 	PiImageContent,
 	PiRpcCommandInputSchema,
 	PiRpcEventSchema,
 	PiRpcResponseSchema,
-} from "../protocol.ts";
+	ZenObservation,
+	ZenToolResultDescriptor,
+	ZenUsage,
+} from "@zen/core";
+import { mapPiEvent } from "../map-events.ts";
+import { claimsToBeResponse, isPiRpcResponse } from "../protocol.ts";
 
 /**
  * These prove the TypeBox conversion bought RUNTIME VALIDATION and a JSON Schema, not just

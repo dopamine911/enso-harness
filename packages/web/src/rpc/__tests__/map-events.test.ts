@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { ZEN_TOOL_RESULT_KEY } from "../../tool-result-descriptor.ts";
-import { mapPiEvent, toolResultMetadata, type ZenObservation } from "../map-events.ts";
+import { ZEN_TOOL_RESULT_KEY, type ZenObservation } from "@zen/core";
+import { mapPiEvent, toolResultMetadata } from "../map-events.ts";
 
 const kindOf = (event: Parameters<typeof mapPiEvent>[0]): ZenObservation["kind"] =>
 	mapPiEvent(event).kind;

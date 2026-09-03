@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
-import { DEFAULT_GUARD_POLICY } from "../policy.ts";
+import { DEFAULT_GUARD_POLICY } from "@zen/core";
 import { isInsideAnyRoot, looksLikeSecret, resolveAgainstCwd } from "../paths.ts";
 
 const root = mkdtempSync(join(tmpdir(), "zen-guard-"));

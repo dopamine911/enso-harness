@@ -1,8 +1,5 @@
 import type { ToolResultPart } from "@tanstack/ai";
-import {
-	readZenToolResultDescriptor,
-	type ZenToolResultDescriptor,
-} from "./tool-result-descriptor.ts";
+import { readZenToolResultDescriptor, type ZenToolResultDescriptor } from "@zen/core";
 
 /**
  * The web renderer for a zen tool result — the React half of #18's contract.
