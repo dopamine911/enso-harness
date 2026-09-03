@@ -1,4 +1,4 @@
-import { ZEN_TOOL_RESULT_KEY, type PiRpcEvent, type ZenObservation, type ZenToolResultDescriptor, type ZenUsage } from "@zen/core";
+import { ZEN_TOOL_RESULT_KEY, isZenDialogSpec, type PiRpcEvent, type ZenDialogSpec, type ZenObservation, type ZenToolResultDescriptor, type ZenUsage } from "@zen/core";
 
 /**
  * pi rpc events → the observations a surface renders (#24).
@@ -163,16 +163,31 @@ export function mapPiEvent(event: PiRpcEvent): ZenObservation {
 			//   FIRE-AND-FORGET   notify | setStatus | setWidget | setTitle | set_editor_text
 			//                     emit and continue; a client may ignore them.
 			//
-			// ⚠⚠ We do not answer dialogs yet, so one arriving means pi is BLOCKED and will
-			// stay blocked — a hung agent with no error anywhere. It is surfaced as its own
-			// observation so a caller can fail loudly instead of waiting forever. Answering
-			// them is the escalation channel from #12, and it is the missing half.
+			// ⚠⚠ A blocking request means pi is WAITING and stays blocked until an
+			// `extension_ui_response` with this id is written to its stdin. The session
+			// layer answers dialogs by handing them to the browser as AG-UI interrupts
+			// (#27), and what it needs from this hop is the QUESTION — so the dialog fields
+			// are read here, defensively, into the one shared `ZenDialogSpec` shape.
+			//
+			// ⚠ Defensively means: a blocking request whose fields do not form a
+			// well-shaped question still maps as `blocking: true` with `dialog` absent.
+			// The session layer declines those on the wire (the pre-#27 behaviour) —
+			// mapping them as unmapped or non-blocking instead would hang pi silently,
+			// which is the bug this observation kind exists to make inexpressible.
 			const method = String(event.method ?? "unknown");
+			const dialogCandidate: Record<string, unknown> = { method };
+			for (const field of ["title", "options", "message", "placeholder", "prefill", "timeout"]) {
+				if (event[field] !== undefined) dialogCandidate[field] = event[field];
+			}
+			const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate)
+				? dialogCandidate
+				: undefined;
 			return {
 				kind: "extension-ui-request",
 				id: String(event.id ?? ""),
 				method,
 				blocking: DIALOG_UI_METHODS.has(method),
+				...(dialog === undefined ? {} : { dialog }),
 			};
 		}
 

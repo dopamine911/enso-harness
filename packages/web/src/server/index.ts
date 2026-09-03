@@ -5,7 +5,8 @@ import { EventType } from "@ag-ui/core";
 import type { StreamChunk } from "@tanstack/ai";
 import { isPiLaunchConfig, type PiLaunchConfig } from "@zen/core";
 import { spawnPiRpcProcess } from "../rpc/process-transport.ts";
-import { runChat } from "./session.ts";
+import { createDialogRegistry } from "./dialog-registry.ts";
+import { resumeChat, runChat, type ChatRunOutcome } from "./session.ts";
 
 /**
  * The dev backend: one SSE endpoint TanStack AI's `fetchServerSentEvents` can talk to (#24).
@@ -30,10 +31,19 @@ const SSE_HEADERS = {
 	"X-Accel-Buffering": "no",
 } as const;
 
-/** AG-UI's `RunAgentInput`, reduced to the fields this endpoint uses. */
+/**
+ * AG-UI's `RunAgentInput`, reduced to the fields this endpoint uses.
+ *
+ * `resume` + `parentRunId` mark a RESUME request — the browser answering a dialog that
+ * interrupted an earlier run (#27). TanStack puts both in the POST body
+ * (`connection-adapters.js:573-574`); their presence is what routes the request to the
+ * parked process instead of a fresh spawn.
+ */
 interface RunAgentInputBody {
 	threadId?: string;
 	runId?: string;
+	parentRunId?: string;
+	resume?: unknown;
 	messages?: Array<{ role?: string; content?: unknown }>;
 }
 
@@ -156,6 +166,10 @@ export function startZenServer(options: ZenServerOptions) {
 	}
 	assertVendorLinks(options.harnessPackageDir);
 
+	// Parked pi processes awaiting a human's answer to a dialog (#27). Owned by the server,
+	// shared by every request; evicted whole on close.
+	const registry = createDialogRegistry({ onProblem: options.onProblem });
+
 	const server = createServer(async (request, response) => {
 		if (request.method === "POST" && request.url?.startsWith("/api/chat")) {
 			let body: RunAgentInputBody = {};
@@ -174,11 +188,54 @@ export function startZenServer(options: ZenServerOptions) {
 				messageId: crypto.randomUUID(),
 			};
 
+			// ⚠ Read by BOTH paths after their stream completes: `parkedAwaitingAnswer` means
+			// the run handed its process to the registry mid-stream, so the teardown that
+			// normally follows a response must not run — a human's answer is coming back for
+			// that process on a later request.
+			const outcome: ChatRunOutcome = { parkedAwaitingAnswer: false };
+
+			// ── The resume path: an answer to a parked dialog. No spawn — the process this
+			// request addresses has been alive since the run it interrupted (#27).
+			if (Array.isArray(body.resume) && body.resume.length > 0) {
+				// Captured BEFORE resumeChat can take the entry — this closure is the only
+				// stop handle the handler will ever hold for a process it did not spawn.
+				const stopParked = registry.peek(ids.threadId)?.stopPi;
+				response.writeHead(200, SSE_HEADERS);
+				request.on("close", () => {
+					if (!outcome.parkedAwaitingAnswer) stopParked?.();
+				});
+				try {
+					for await (const chunk of resumeChat({
+						registry,
+						ids,
+						parentRunId: body.parentRunId,
+						resume: body.resume,
+						outcome,
+						onProblem: options.onProblem,
+					})) {
+						writeSseEvent(response, chunk);
+					}
+				} catch (error) {
+					options.onProblem?.(error);
+					writeSseEvent(response, {
+						type: EventType.RUN_ERROR,
+						runId: ids.runId,
+						message: error instanceof Error ? error.message : String(error),
+					});
+				} finally {
+					if (!outcome.parkedAwaitingAnswer) stopParked?.();
+					response.end();
+				}
+				return;
+			}
+
 			response.writeHead(200, SSE_HEADERS);
 
-			// ⚠ One pi process per run, torn down in `finally`. Session reuse is what
-			// `modelOptions.sessionId` and pi's own session tree are for, and doing it here
-			// before the lifecycle is designed would leak a process per abandoned tab.
+			// ⚠ One pi process per run, torn down in `finally` — UNLESS a dialog parked it
+			// (#27), in which case the registry owns it until the answer or the TTL. Session
+			// reuse beyond that is what `modelOptions.sessionId` and pi's own session tree
+			// are for, and doing it here before the lifecycle is designed would leak a
+			// process per abandoned tab.
 			const pi = spawnPiRpcProcess({
 				...options.launch,
 				args: [...isolatedLaunchArgs(options.harnessPackageDir), ...(options.launch.args ?? [])],
@@ -186,14 +243,21 @@ export function startZenServer(options: ZenServerOptions) {
 				onStderr: (chunk) => options.onProblem?.(`pi stderr: ${chunk}`),
 			});
 
-			// A client that navigates away must not leave pi running.
-			request.on("close", () => pi.stop());
+			// A client that navigates away must not leave pi running — but a PARKED process
+			// belongs to the registry, and this close event also fires on normal completion,
+			// AFTER a park. Stopping here would kill the process whose answer is pending.
+			request.on("close", () => {
+				if (!outcome.parkedAwaitingAnswer) pi.stop();
+			});
 
 			try {
 				for await (const chunk of runChat({
 					transport: pi.transport,
 					ids,
 					prompt: latestUserPrompt(body),
+					registry,
+					stopPi: () => pi.stop(),
+					outcome,
 					onProblem: options.onProblem,
 				})) {
 					writeSseEvent(response, chunk);
@@ -208,7 +272,7 @@ export function startZenServer(options: ZenServerOptions) {
 					message: error instanceof Error ? error.message : String(error),
 				});
 			} finally {
-				pi.stop();
+				if (!outcome.parkedAwaitingAnswer) pi.stop();
 				response.end();
 			}
 			return;
@@ -217,6 +281,9 @@ export function startZenServer(options: ZenServerOptions) {
 		response.writeHead(404, { "Content-Type": "text/plain" });
 		response.end("not found");
 	});
+
+	// Parked processes must not outlive the server that parked them.
+	server.on("close", () => registry.shutdown());
 
 	const port = options.port ?? DEFAULT_PORT;
 

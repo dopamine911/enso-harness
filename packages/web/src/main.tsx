@@ -1,7 +1,9 @@
 import { fetchServerSentEvents } from "@tanstack/ai-react";
+import type { GenericAGUIInterrupt } from "@tanstack/ai-client";
 import { createChatHook, TextPart, ThinkingPart } from "@tanstack/ai-react/ui";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { isZenDialogSpec, ZEN_DIALOG_KEY, type ZenDialogSpec } from "@zen/core";
 import { ZenToolResult, type ZenRendererMap } from "./ZenToolResult.tsx";
 
 /**
@@ -74,6 +76,120 @@ function RunProblem(): React.ReactNode {
 		>
 			{chat.error instanceof Error ? chat.error.message : String(chat.error)}
 		</pre>
+	);
+}
+
+/**
+ * pi asked a question; this is where a human answers it (#27).
+ *
+ * The question travels as a generic AG-UI interrupt whose `metadata["zen:dialog"]` is the
+ * `ZenDialogSpec` — validated here with the same schema the server used to build it, so a
+ * malformed one degrades to the visible debug block instead of a broken form.
+ *
+ * ⚠ The payloads handed to `resolveInterrupt` are EXACTLY pi's wire shapes minus the
+ * envelope (`{value}` / `{confirmed}`) — the server validates them against the dialog spec
+ * (`validateDialogAnswer`) and forwards them verbatim, so inventing a richer shape here
+ * would be refused there. Cancel goes through `interrupt.cancel()`, which the client sends
+ * as `status:"cancelled"` and the server writes as pi's `{cancelled:true}`.
+ */
+function ZenDialogInterrupt({
+	interrupt,
+}: {
+	interrupt: GenericAGUIInterrupt;
+}): React.ReactNode {
+	const dialogCandidate: unknown = interrupt.metadata?.[ZEN_DIALOG_KEY];
+	const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate)
+		? dialogCandidate
+		: undefined;
+	const canAnswer = interrupt.canResolve === true;
+
+	if (dialog === undefined || !canAnswer) {
+		// Not a pi dialog (or not resolvable): render it VISIBLY rather than dropping it —
+		// a silently skipped interrupt is indistinguishable from one that was never sent.
+		return (
+			<pre style={{ fontSize: 12, border: "1px solid currentColor", padding: "0.5rem", opacity: 0.8 }}>
+				interrupt (unhandled): {JSON.stringify(interrupt)}
+			</pre>
+		);
+	}
+
+	const answer = (payload: { value: string } | { confirmed: boolean }): void => {
+		interrupt.resolveInterrupt(payload);
+	};
+	const buttonStyle = { padding: "0.4rem 0.9rem", font: "inherit" } as const;
+
+	return (
+		<section
+			style={{
+				border: "1px solid currentColor",
+				borderRadius: 6,
+				padding: "0.75rem 1rem",
+				margin: "1rem 0",
+			}}
+		>
+			<div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, opacity: 0.45 }}>
+				pi is asking
+			</div>
+			<p style={{ margin: "0.5rem 0 0.75rem", fontWeight: 500 }}>{dialog.title}</p>
+			{dialog.method === "confirm" ? (
+				<>
+					<p style={{ margin: "0 0 0.75rem" }}>{dialog.message}</p>
+					<div style={{ display: "flex", gap: "0.5rem" }}>
+						<button type="button" style={buttonStyle} onClick={() => answer({ confirmed: true })}>
+							Yes
+						</button>
+						<button type="button" style={buttonStyle} onClick={() => answer({ confirmed: false })}>
+							No
+						</button>
+					</div>
+				</>
+			) : dialog.method === "select" ? (
+				<div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+					{dialog.options.map((option) => (
+						<button key={option} type="button" style={buttonStyle} onClick={() => answer({ value: option })}>
+							{option}
+						</button>
+					))}
+				</div>
+			) : (
+				<form
+					onSubmit={(event) => {
+						event.preventDefault();
+						const field = event.currentTarget.elements.namedItem("answer");
+						if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+							answer({ value: field.value });
+						}
+					}}
+					style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start" }}
+				>
+					{dialog.method === "editor" ? (
+						<textarea
+							name="answer"
+							defaultValue={dialog.prefill ?? ""}
+							rows={6}
+							style={{ flex: 1, padding: "0.5rem", font: "inherit" }}
+						/>
+					) : (
+						<input
+							name="answer"
+							placeholder={dialog.placeholder ?? ""}
+							autoComplete="off"
+							style={{ flex: 1, padding: "0.5rem", font: "inherit" }}
+						/>
+					)}
+					<button type="submit" style={buttonStyle}>
+						Answer
+					</button>
+				</form>
+			)}
+			<button
+				type="button"
+				style={{ ...buttonStyle, marginTop: "0.75rem", opacity: 0.6 }}
+				onClick={() => interrupt.cancel()}
+			>
+				Cancel — decline the question
+			</button>
+		</section>
 	);
 }
 
@@ -174,14 +290,23 @@ const { useAppChat, useChatContext } = createChatHook({
 	},
 	interruptsComponents: {
 		// ⚠ Application-owned, because `ToolApproval` is deprecated too. A generic `fallback`
-		// rather than named ids: nothing emits an interrupt yet, and a fallback means the
-		// first one to arrive is VISIBLE rather than silently unhandled.
+		// rather than named ids: the server stamps every pi dialog as a plain generic
+		// interrupt (no `defineInterrupt` registration), so the fallback IS the dialog
+		// renderer — and anything that is not a pi dialog still renders visibly below
+		// rather than vanishing.
 		generic: {
-			fallback: ({ interrupt }) => (
-				<pre style={{ fontSize: 12, border: "1px solid currentColor", padding: "0.5rem", opacity: 0.8 }}>
-					interrupt (unhandled): {JSON.stringify(interrupt)}
-				</pre>
-			),
+			// ⚠ Narrowed HERE, on the discriminant, because the slot's union also carries
+			// tool-approval interrupts whose `resolveInterrupt` takes (approved, options) —
+			// a different call shape. Only `kind:"generic"` has the payload-taking resolver
+			// the pi-dialog answers use.
+			fallback: ({ interrupt }) =>
+				interrupt.kind === "generic" ? (
+					<ZenDialogInterrupt interrupt={interrupt} />
+				) : (
+					<pre style={{ fontSize: 12, border: "1px solid currentColor", padding: "0.5rem", opacity: 0.8 }}>
+						interrupt (unhandled): {JSON.stringify(interrupt)}
+					</pre>
+				),
 		},
 	},
 });

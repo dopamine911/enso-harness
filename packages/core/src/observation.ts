@@ -1,4 +1,5 @@
 import { Type, type Static } from "typebox";
+import { ZenDialogSpec } from "./dialog.ts";
 import { ZenToolResultDescriptor } from "./tool-result.ts";
 
 /**
@@ -66,16 +67,23 @@ export const ZenToolResultObservation = Type.Object({
  * pi asked the client for UI.
  *
  * ⚠ `blocking: true` means pi is WAITING and will not proceed until an
- * `extension_ui_response` is written to its stdin with the matching `id`. Nothing writes
- * one yet, so a blocking request is a hung agent — which is why this is a distinct
- * observation rather than folded into `unmapped`: a caller has to be able to fail loudly
- * instead of waiting forever. Answering these is #12's escalation channel.
+ * `extension_ui_response` is written to its stdin with the matching `id`. The session
+ * layer answers these by handing them to the browser as AG-UI interrupts (#27); a caller
+ * that cannot do that has to fail loudly instead of waiting forever — which is why this is
+ * a distinct observation rather than folded into `unmapped`.
+ *
+ * `dialog` carries the question itself for the four blocking methods. It is optional
+ * because the mapper reads it defensively off the wire: a blocking request whose fields do
+ * not form a well-shaped question still surfaces as blocking, and the session layer's
+ * answer to an unreadable question is to decline it — the pre-#27 behaviour, kept as the
+ * degenerate case.
  */
 export const ZenExtensionUiRequest = Type.Object({
 	kind: Type.Literal("extension-ui-request"),
 	id: Type.String(),
 	method: Type.String(),
 	blocking: Type.Boolean(),
+	dialog: Type.Optional(ZenDialogSpec),
 });
 
 /** An extension threw. Surfaced, never swallowed. */
