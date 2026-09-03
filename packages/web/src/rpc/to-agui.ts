@@ -132,18 +132,28 @@ export function observationToAguiEvents(
 		}
 
 		case "extension-ui-request":
-			// ⚠⚠ A BLOCKING dialog means pi is waiting on an `extension_ui_response` we never
-			// write, so it will wait forever. That is a hung agent, and the client must be
-			// told rather than left watching an idle stream — which is why this is RUN_ERROR
-			// and not a quiet drop. Answering dialogs is #12's escalation channel.
+			// ⚠⚠ A BLOCKING dialog is one pi will wait on until an `extension_ui_response`
+			// arrives. `runChat` DECLINES it the moment it sees it (`cancelDialogIfBlocking`),
+			// because this surface has no way to ask the user anything yet (#12) — so by the
+			// time this mapping runs, pi is unblocked and the command has completed as a
+			// no-op. The user still has to be told, or a command that silently did nothing
+			// reads as a command that worked.
+			//
+			// ⚠ THE TENSE IS LOAD-BEARING AND IT WAS WRONG ONCE. An earlier version told the
+			// user pi was STILL waiting — true of the state that motivated the fix, false of
+			// the state after it, because the declining happens upstream of this line. So it
+			// reported a hung agent at the exact moment the run was completing normally.
+			// Describe the state a reader is in, not the one that made the code necessary.
+			// If #12 lands and dialogs get answered for real, this text moves again.
 			if (observation.blocking) {
 				return [
 					{
 						type: EventType.RUN_ERROR,
 						runId: ids.runId,
 						message:
-							`pi is blocked on an interactive '${observation.method}' request (id ${observation.id}) ` +
-							`and this surface cannot answer it yet. See #12.`,
+							`pi asked an interactive '${observation.method}' question (id ${observation.id}) ` +
+							`that this surface cannot answer yet, so it was declined and the command did ` +
+							`nothing. See #12.`,
 					},
 				];
 			}

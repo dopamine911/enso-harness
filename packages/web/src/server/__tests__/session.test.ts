@@ -309,6 +309,12 @@ test("a blocking dialog is cancelled on the wire so pi can proceed", async () =>
 	// and the user is told why, rather than the dialog vanishing silently
 	const error = chunks.find((chunk) => chunk.type === EventType.RUN_ERROR);
 	expect((error as { message: string }).message).toContain("select");
+	// ⚠ The message must describe the state AFTER the cancellation — declined, the command
+	// did nothing — not the pre-fix state the text was originally written for. The first
+	// wording said pi "is blocked", which told the user the agent was hung at the exact
+	// moment the run was completing normally.
+	expect((error as { message: string }).message).toContain("declined");
+	expect((error as { message: string }).message).not.toContain("is blocked");
 });
 
 test("a fire-and-forget UI request is NOT cancelled — nothing is waiting on it", async () => {
