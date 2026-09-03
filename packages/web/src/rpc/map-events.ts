@@ -16,6 +16,9 @@ import { ZEN_TOOL_RESULT_KEY, type PiRpcEvent, type ZenObservation, type ZenTool
  * function cannot return undefined.
  */
 
+/** Methods that block pi until a response arrives — see the `extension_ui_request` case. */
+const DIALOG_UI_METHODS = new Set(["select", "confirm", "input", "editor"]);
+
 interface PiContentPart {
 	type?: string;
 	text?: string;
@@ -147,6 +150,29 @@ export function mapPiEvent(event: PiRpcEvent): ZenObservation {
 				// covers it either way — see also `extension_error` below.
 				isError: event.isError === true,
 				...(descriptor === undefined ? {} : { descriptor }),
+			};
+		}
+
+		case "extension_ui_request": {
+			// ⚠ pi's Extension UI sub-protocol, and it splits in two (`docs/rpc.md` § Extension
+			// UI Protocol):
+			//
+			//   DIALOG methods    select | confirm | input | editor
+			//                     emit a request and BLOCK until the client writes an
+			//                     `extension_ui_response` on stdin with the matching id.
+			//   FIRE-AND-FORGET   notify | setStatus | setWidget | setTitle | set_editor_text
+			//                     emit and continue; a client may ignore them.
+			//
+			// ⚠⚠ We do not answer dialogs yet, so one arriving means pi is BLOCKED and will
+			// stay blocked — a hung agent with no error anywhere. It is surfaced as its own
+			// observation so a caller can fail loudly instead of waiting forever. Answering
+			// them is the escalation channel from #12, and it is the missing half.
+			const method = String(event.method ?? "unknown");
+			return {
+				kind: "extension-ui-request",
+				id: String(event.id ?? ""),
+				method,
+				blocking: DIALOG_UI_METHODS.has(method),
 			};
 		}
 

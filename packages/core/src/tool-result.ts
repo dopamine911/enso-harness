@@ -38,8 +38,18 @@ import { Compile } from "typebox/compile";
  *   TanStack AI           `metadata` alongside a mandatory `content`
  */
 
-/** The metadata key our descriptor occupies. Namespaced: `metadata` is a shared bag. */
-export const ZEN_TOOL_RESULT_KEY = "zen.toolResult" as const;
+/**
+ * The metadata key our descriptor occupies. Namespaced, because `metadata` is a shared bag.
+ *
+ * ⚠ NO DOT, DELIBERATELY. The first version was `"zen.toolResult"`, and a dot inside a key
+ * is legal JSON but collides with every path-based accessor — `expect(...).toHaveProperty()`,
+ * lodash `get`, JSONPath — all of which read `a.b` as "property b of property a". That cost
+ * a failing test within minutes of the key being used, and it would have cost a consumer
+ * the same confusion later, further from the cause.
+ *
+ * A colon namespaces just as well and is not path syntax anywhere.
+ */
+export const ZEN_TOOL_RESULT_KEY = "zen:toolResult" as const;
 
 /** Units a truncation can be counted in. Closed, because a surface must render each one. */
 export const ZenTruncationUnit = Type.Union([

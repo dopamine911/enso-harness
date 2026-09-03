@@ -54,13 +54,14 @@ export function willRetryAfter(event: PiRpcEvent): boolean {
 
 /** Thrown when a record is not parseable JSON. Carries the raw line for diagnosis. */
 export class PiRpcParseError extends Error {
-	constructor(
-		readonly raw: string,
-		cause: unknown,
-	) {
+	/** Explicit field, not a parameter property — see `PiTransportClosedError` for why. */
+	readonly raw: string;
+
+	constructor(raw: string, cause: unknown) {
 		super(`pi rpc record was not valid JSON: ${raw.slice(0, 200)}`);
 		this.name = "PiRpcParseError";
 		this.cause = cause;
+		this.raw = raw;
 	}
 }
 

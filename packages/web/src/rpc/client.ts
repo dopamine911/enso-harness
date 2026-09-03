@@ -35,9 +35,19 @@ type PiRpcClientOptions = PiRpcClientOptionsSchema;
 
 /** Rejection when pi closes with a command still outstanding. */
 export class PiTransportClosedError extends Error {
-	constructor(readonly pendingCommandIds: readonly string[]) {
+	/**
+	 * ⚠ An explicit field and assignment, NOT a `constructor(readonly …)` parameter property.
+	 * Node's `--experimental-strip-types` is strip-only: it removes type annotations but
+	 * performs no codegen, and a parameter property requires generated assignment. So the
+	 * sugar makes the module unloadable by plain Node — which is where this server runs.
+	 * Verified by it throwing `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` at startup.
+	 */
+	readonly pendingCommandIds: readonly string[];
+
+	constructor(pendingCommandIds: readonly string[]) {
 		super(`pi rpc transport closed with ${pendingCommandIds.length} command(s) outstanding`);
 		this.name = "PiTransportClosedError";
+		this.pendingCommandIds = pendingCommandIds;
 	}
 }
 

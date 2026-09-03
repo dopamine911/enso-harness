@@ -5,7 +5,9 @@
   "type": "module",
   "description": "The zen-harness web surface. Outside the pi manifest \u2014 pi does nothing with a frontend.",
   "scripts": {
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "dev:server": "node --experimental-strip-types src/server/dev.ts",
+    "dev:web": "vite"
   },
   "dependencies": {
     "@ag-ui/core": "*",
@@ -20,6 +22,8 @@
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "typescript": "^5.7.0"
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
   }
 }

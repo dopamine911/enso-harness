@@ -62,6 +62,22 @@ export const ZenToolResultObservation = Type.Object({
 	descriptor: Type.Optional(ZenToolResultDescriptor),
 });
 
+/**
+ * pi asked the client for UI.
+ *
+ * ⚠ `blocking: true` means pi is WAITING and will not proceed until an
+ * `extension_ui_response` is written to its stdin with the matching `id`. Nothing writes
+ * one yet, so a blocking request is a hung agent — which is why this is a distinct
+ * observation rather than folded into `unmapped`: a caller has to be able to fail loudly
+ * instead of waiting forever. Answering these is #12's escalation channel.
+ */
+export const ZenExtensionUiRequest = Type.Object({
+	kind: Type.Literal("extension-ui-request"),
+	id: Type.String(),
+	method: Type.String(),
+	blocking: Type.Boolean(),
+});
+
 /** An extension threw. Surfaced, never swallowed. */
 export const ZenExtensionError = Type.Object({
 	kind: Type.Literal("extension-error"),
@@ -97,6 +113,7 @@ export const ZenObservation = Type.Union([
 	ZenToolCall,
 	ZenToolResultObservation,
 	ZenExtensionError,
+	ZenExtensionUiRequest,
 	ZenRunEnded,
 	ZenSettled,
 	ZenUnmapped,

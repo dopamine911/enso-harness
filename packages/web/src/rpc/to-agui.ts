@@ -131,6 +131,37 @@ export function observationToAguiEvents(
 			];
 		}
 
+		case "extension-ui-request":
+			// ⚠⚠ A BLOCKING dialog means pi is waiting on an `extension_ui_response` we never
+			// write, so it will wait forever. That is a hung agent, and the client must be
+			// told rather than left watching an idle stream — which is why this is RUN_ERROR
+			// and not a quiet drop. Answering dialogs is #12's escalation channel.
+			if (observation.blocking) {
+				return [
+					{
+						type: EventType.RUN_ERROR,
+						runId: ids.runId,
+						message:
+							`pi is blocked on an interactive '${observation.method}' request (id ${observation.id}) ` +
+							`and this surface cannot answer it yet. See #12.`,
+					},
+				];
+			}
+			// `notify` carries a message meant for a HUMAN, so it crosses.
+			if (observation.method === "notify") {
+				return [{ type: EventType.CUSTOM, name: "zen.notify", value: observation }];
+			}
+			// ⚠ Everything else fire-and-forget — setStatus, setWidget, setTitle,
+			// set_editor_text — is dropped, and the justification is NOT "we do not recognise
+			// it". These are addressed to a TERMINAL: powerline widgets, LSP status lines,
+			// editor text. A browser has no use for them, and forwarding them floods the
+			// stream — measured at 40 of 43 events for a one-word prompt.
+			//
+			// That is the one legitimate reason to drop: the event is addressed to a different
+			// surface. It is not the `unmapped` case, which exists for events we simply do not
+			// model yet and which are always carried.
+			return [];
+
 		case "extension-error":
 			return [
 				{
