@@ -201,7 +201,12 @@ export function startZenServer(options: ZenServerOptions) {
 				// stop handle the handler will ever hold for a process it did not spawn.
 				const stopParked = registry.peek(ids.threadId)?.stopPi;
 				response.writeHead(200, SSE_HEADERS);
-				request.on("close", () => {
+				// ⚠ `response`, NOT `request` (#34). Under bun's node:http compat the REQUEST
+				// 'close' event fires when the request BODY has been consumed — the start of
+				// every run, before this listener is registered — so a request-close hook is
+				// INERT and a mid-run disconnect never tore pi down. The RESPONSE 'close' is
+				// what fires on a client abort (and on normal end, where stop is a no-op).
+				response.on("close", () => {
 					if (!outcome.parkedAwaitingAnswer) stopParked?.();
 				});
 				try {
@@ -246,7 +251,14 @@ export function startZenServer(options: ZenServerOptions) {
 			// A client that navigates away must not leave pi running — but a PARKED process
 			// belongs to the registry, and this close event also fires on normal completion,
 			// AFTER a park. Stopping here would kill the process whose answer is pending.
-			request.on("close", () => {
+			// ⚠ `response`, NOT `request` (#34). Under bun's node:http compat the REQUEST
+			// 'close' event fires when the request BODY has been consumed — the start of
+			// every run, before this listener is registered — so the request-close hook this
+			// used to be was INERT and a mid-run disconnect never tore pi down (found by the
+			// disconnect receipt lingering exactly until the no-progress guard's `finally`).
+			// The RESPONSE 'close' fires on a client abort; on normal end, stop() has
+			// already run in `finally` and is an idempotent no-op.
+			response.on("close", () => {
 				if (!outcome.parkedAwaitingAnswer) pi.stop();
 			});
 

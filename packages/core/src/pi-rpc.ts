@@ -199,7 +199,11 @@ export type PiTransport = Static<typeof PiTransport>;
 /** A spawned pi process, as its owner sees it. */
 export const PiProcessHandle = Type.Object({
 	transport: PiTransport,
-	/** Ask pi to stop. Returns once the signal is sent, not once it has exited. */
+	/**
+	 * Ask pi to stop. Returns once the signal is sent, not once it has exited — and the
+	 * implementation escalates to SIGKILL after a grace period, so a pi that ignores
+	 * SIGTERM cannot outlive its run (#34). Idempotent: later calls are no-ops.
+	 */
 	stop: Type.Function([], Type.Void()),
 	/** ⓘ Data, unlike its siblings — which is why this type fell on both sides of the
 	 *  data-versus-behaviour rule that used to govern this file. */

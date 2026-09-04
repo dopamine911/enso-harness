@@ -183,6 +183,69 @@ test("onExit is delivered as (code, signal), without Bun's leading subprocess ar
 	expect(received).toEqual([143, 15]);
 });
 
+// --- stop() escalation (#34): pi catches SIGTERM and defers it mid-tool, so stop() must
+// follow up with SIGKILL after a grace — and must be idempotent, because it has three
+// callers per run and stacked timers would mean stacked signals.
+
+const STOP_TEST_GRACE_MS = 10;
+const STOP_TEST_SETTLE_MS = 40;
+
+function stoppableFakeChild(exited: Promise<number>): {
+	child: PiChildProcess;
+	signalsSent: (number | NodeJS.Signals | undefined)[];
+} {
+	const signalsSent: (number | NodeJS.Signals | undefined)[] = [];
+	const emptyStream = () =>
+		new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.close();
+			},
+		});
+	const child: PiChildProcess = {
+		stdin: { write: () => 0, flush: () => 0, end: () => 0 },
+		stdout: emptyStream(),
+		stderr: emptyStream(),
+		pid: 4242,
+		exited,
+		kill: (signal) => {
+			signalsSent.push(signal);
+		},
+	};
+	return { child, signalsSent };
+}
+
+const settle = () => new Promise<void>((resolve) => setTimeout(resolve, STOP_TEST_SETTLE_MS));
+
+test("stop() on a pi that exits within the grace sends SIGTERM only", async () => {
+	const { child, signalsSent } = stoppableFakeChild(Promise.resolve(0));
+	const handle = spawnPiRpcProcess({ cwd: "/tmp" }, () => child, STOP_TEST_GRACE_MS);
+	handle.stop();
+	await settle();
+	expect(signalsSent).toEqual(["SIGTERM"]);
+});
+
+test("stop() on a pi that ignores SIGTERM escalates to SIGKILL after the grace", async () => {
+	const neverExits = new Promise<number>(() => {});
+	const { child, signalsSent } = stoppableFakeChild(neverExits);
+	const handle = spawnPiRpcProcess({ cwd: "/tmp" }, () => child, STOP_TEST_GRACE_MS);
+	handle.stop();
+	expect(signalsSent).toEqual(["SIGTERM"]);
+	await settle();
+	expect(signalsSent).toEqual(["SIGTERM", "SIGKILL"]);
+});
+
+test("stop() is idempotent — a second call adds no signal and no second timer", async () => {
+	const neverExits = new Promise<number>(() => {});
+	const { child, signalsSent } = stoppableFakeChild(neverExits);
+	const handle = spawnPiRpcProcess({ cwd: "/tmp" }, () => child, STOP_TEST_GRACE_MS);
+	handle.stop();
+	handle.stop();
+	expect(signalsSent).toEqual(["SIGTERM"]);
+	await settle();
+	// Exactly one escalation, not one per call.
+	expect(signalsSent).toEqual(["SIGTERM", "SIGKILL"]);
+});
+
 // --- PiLaunchConfig: the data half, validated because it can come from outside
 test("a valid launch config passes", () =>
 	expect(isPiLaunchConfig({ cwd: "/work/repo", command: "pi", args: ["--model", "x"] })).toBe(

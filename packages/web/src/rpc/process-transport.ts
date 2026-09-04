@@ -48,6 +48,8 @@ export interface PiChildProcess {
 	readonly stdout: ReadableStream<Uint8Array>;
 	readonly stderr: ReadableStream<Uint8Array>;
 	readonly pid: number;
+	/** Resolves when the process exits — what tells the stop escalation to stand down. */
+	readonly exited: Promise<number>;
 	kill(signal?: number | NodeJS.Signals): void;
 }
 
@@ -157,9 +159,23 @@ export type SpawnLike = (
 /** The real spawn, adapted once so the seam type stays narrower than `typeof Bun.spawn`. */
 const spawnWithBun: SpawnLike = (cmd, options) => Bun.spawn(cmd, options);
 
+/**
+ * How long `stop()` gives pi to exit on its own before SIGKILL (#34).
+ *
+ * Measured: a healthy pi exits on SIGTERM within ~2s, idle or mid-tool (⚠ an earlier
+ * "pi defers SIGTERM mid-tool" reading was FALSE — the signal it appeared to defer was
+ * never delivered, because the request-close hook that should have sent it was inert
+ * under bun; see the response-close comment in server/index.ts). The escalation is
+ * therefore insurance against a WEDGED pi — SIGTERM is caught by a handler (SigCgt
+ * receipt) and needs pi's cooperation; SIGKILL does not. 5s is comfortably past the
+ * healthy exit, not a tuning knob.
+ */
+const STOP_ESCALATION_GRACE_MS = 5_000;
+
 export function spawnPiRpcProcess(
 	options: PiProcessOptions,
 	spawnImpl: SpawnLike = spawnWithBun,
+	stopEscalationGraceMs: number = STOP_ESCALATION_GRACE_MS,
 ): PiProcessHandle {
 	const child = spawnImpl(
 		[options.command ?? DEFAULT_PI_COMMAND, ...RPC_MODE_ARGS, ...(options.args ?? [])],
@@ -177,12 +193,32 @@ export function spawnPiRpcProcess(
 		},
 	);
 
+	// ⚠ Idempotent, and that is load-bearing (#34): stop() has THREE callers per run — the
+	// response-close handler, the run's `finally`, and the dialog registry's TTL eviction —
+	// and the first call owns the whole shutdown. Later calls must not stack more timers
+	// or signals.
+	let stopHasRun = false;
+	const stop = (): void => {
+		if (stopHasRun) return;
+		stopHasRun = true;
+		child.stdin.end();
+		child.kill("SIGTERM");
+		// pi installs a SIGTERM handler (/proc/<pid>/status SigCgt receipt) and exits
+		// promptly through it when healthy — but a handler means the exit is COOPERATIVE,
+		// and a wedged pi would simply keep running. SIGKILL after the grace needs no
+		// cooperation.
+		const escalation = setTimeout(() => {
+			child.kill("SIGKILL");
+		}, stopEscalationGraceMs);
+		// `unref` so a pending escalation never holds the server open on shutdown; cleared
+		// on exit so the timer does not fire into a dead pid.
+		escalation.unref?.();
+		void child.exited.then(() => clearTimeout(escalation));
+	};
+
 	return {
 		transport: piTransportFromChild(child, options),
-		stop: () => {
-			child.stdin.end();
-			child.kill("SIGTERM");
-		},
+		stop,
 		get pid() {
 			return child.pid;
 		},
