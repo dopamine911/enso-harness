@@ -1,11 +1,15 @@
 import { expect, test } from "bun:test";
-import {
-	isPiRpcResponse,
-	isRunComplete,
-	parsePiRpcRecord,
-	PiRpcParseError,
-	willRetryAfter,
-} from "../protocol.ts";
+import { isPiRpcResponse, isRunComplete, PiRpcParseError, parsePiRpcRecord, willRetryAfter } from "../protocol.ts";
+
+/** Run `operation` and hand back what it threw — `undefined` when it did not throw. */
+function captureThrown(operation: () => unknown): unknown {
+	try {
+		operation();
+		return undefined;
+	} catch (error) {
+		return error;
+	}
+}
 
 test("a response is distinguished from an event", () => {
 	expect(isPiRpcResponse({ type: "response", command: "prompt", success: true })).toBe(true);
@@ -17,13 +21,11 @@ test("valid JSON with a string type parses", () => {
 });
 
 test("malformed JSON throws with the raw line attached", () => {
-	try {
-		parsePiRpcRecord("{nope}");
-		throw new Error("should have thrown");
-	} catch (error) {
-		expect(error).toBeInstanceOf(PiRpcParseError);
-		expect((error as PiRpcParseError).raw).toBe("{nope}");
-	}
+	// Capture-then-assert, so the assertions sit outside any conditional path: a run that
+	// does NOT throw leaves `thrown` undefined and the instanceof assertion fails loudly.
+	const thrown = captureThrown(() => parsePiRpcRecord("{nope}"));
+	expect(thrown).toBeInstanceOf(PiRpcParseError);
+	expect((thrown as PiRpcParseError).raw).toBe("{nope}");
 });
 
 test("valid JSON without a string type is rejected", () => {

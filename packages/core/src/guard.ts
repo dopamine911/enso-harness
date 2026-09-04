@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 
 /**
  * The Tier 0 guard policy.
@@ -79,12 +79,7 @@ export const PERSISTENCE_WRITE_BASENAMES: readonly string[] = [
  * {@link PERSISTENCE_WRITE_BASENAMES}. `.git` overlaps `protectedWriteFragments`'
  * `/.git/` deliberately; the fragment also catches the bare repo case and predates this.
  */
-export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [
-	".git",
-	".vscode",
-	".idea",
-	".claude",
-];
+export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [".git", ".vscode", ".idea", ".claude"];
 
 /**
  * ZEN ADDITIONS — NOT from picc. Kept as a separate constant so the vendored block above
@@ -103,11 +98,7 @@ export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [
  *                scripts/zen.mjs writes `.zen/print-harness` through node fs, which never
  *                passes this guard.
  */
-export const ZEN_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [
-	".pi",
-	".agents",
-	".zen",
-];
+export const ZEN_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [".pi", ".agents", ".zen"];
 
 /** Basenames that deny a read outright, regardless of directory. */
 export const SECRET_BASENAME_PATTERNS: readonly RegExp[] = [

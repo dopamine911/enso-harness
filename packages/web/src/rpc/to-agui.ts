@@ -67,10 +67,7 @@ export interface AguiIdentifiers {
  * `CUSTOM` progress event the renderer understands; it is not built, and pretending
  * otherwise by faking a result would be worse than the gap.
  */
-export function observationToAguiEvents(
-	observation: ZenObservation,
-	ids: AguiIdentifiers,
-): StreamChunk[] {
+export function observationToAguiEvents(observation: ZenObservation, ids: AguiIdentifiers): StreamChunk[] {
 	switch (observation.kind) {
 		case "text-delta":
 			return [
@@ -120,9 +117,7 @@ export function observationToAguiEvents(
 					role: "tool",
 					// The descriptor, under the same namespaced key it uses everywhere else.
 					// Legal because AG-UI's BaseEvent declares `[k: string]: unknown`.
-					...(observation.descriptor === undefined
-						? {}
-						: { [ZEN_TOOL_RESULT_KEY]: observation.descriptor }),
+					...(observation.descriptor === undefined ? {} : { [ZEN_TOOL_RESULT_KEY]: observation.descriptor }),
 					// ⚠ `isError` has no AG-UI field on a tool result, and it is the only signal a
 					// REFUSED call has (a guard block). Carried as an extra field for the same
 					// reason as the descriptor — dropping it would render a denial as a success.

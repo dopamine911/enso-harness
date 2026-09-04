@@ -1,7 +1,7 @@
+import { expect, test } from "bun:test";
 import { mkdtempSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "bun:test";
 import { createSessionReadTracker } from "../read-tracker.ts";
 
 const root = mkdtempSync(join(tmpdir(), "zen-read-tracker-"));

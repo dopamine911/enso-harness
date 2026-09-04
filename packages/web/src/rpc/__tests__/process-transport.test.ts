@@ -1,12 +1,7 @@
 import { expect, test } from "bun:test";
 import { isPiLaunchConfig, type PiRpcEvent } from "@zen/core";
 import { PiRpcClient } from "../client.ts";
-import {
-	type PiChildProcess,
-	piTransportFromChild,
-	type SpawnLike,
-	spawnPiRpcProcess,
-} from "../process-transport.ts";
+import { type PiChildProcess, piTransportFromChild, type SpawnLike, spawnPiRpcProcess } from "../process-transport.ts";
 
 /**
  * These drive a REAL child process (`bun -e`, since `process.execPath` under `bun test` is
@@ -40,9 +35,7 @@ function collect(child: PiChildProcess) {
 }
 
 test("records written by a real process arrive parsed and in order", async () => {
-	const child = bunEmitting(
-		`process.stdout.write('{"type":"agent_start"}\\n{"type":"turn_start"}\\n')`,
-	);
+	const child = bunEmitting(`process.stdout.write('{"type":"agent_start"}\\n{"type":"turn_start"}\\n')`);
 	const { events, closed } = collect(child);
 	await closed;
 	expect(events.map((event) => event.type)).toEqual(["agent_start", "turn_start"]);
@@ -71,9 +64,7 @@ test("an unterminated final record survives process exit", async () => {
 
 // ⚠⚠ The separator case, end to end through a real pipe rather than a string in a test.
 test("U+2028 inside a real process's JSON output is data, not a boundary", async () => {
-	const child = bunEmitting(
-		`process.stdout.write('{"type":"message_update","text":"a\\u2028b"}\\n')`,
-	);
+	const child = bunEmitting(`process.stdout.write('{"type":"message_update","text":"a\\u2028b"}\\n')`);
 	const { events, closed } = collect(child);
 	await closed;
 	expect(events).toHaveLength(1);
@@ -130,8 +121,8 @@ test("stderr is surfaced to its consumer", async () => {
 
 test("`--mode rpc` is always first and is not caller-overridable", () => {
 	let captured: readonly string[] = [];
-	const fakeSpawn: SpawnLike = (cmd) => {
-		captured = cmd;
+	const fakeSpawn: SpawnLike = (spawnedCommand) => {
+		captured = spawnedCommand;
 		return bunEmitting("");
 	};
 	spawnPiRpcProcess({ cwd: "/tmp", args: ["--model", "x", "--mode", "text"] }, fakeSpawn);
@@ -143,8 +134,8 @@ test("`--mode rpc` is always first and is not caller-overridable", () => {
 test("the executable and cwd are parameters, so pi's location is not assumed", () => {
 	let capturedCommand = "";
 	let capturedCwd: string | undefined;
-	const fakeSpawn: SpawnLike = (cmd, options) => {
-		capturedCommand = cmd[0] ?? "";
+	const fakeSpawn: SpawnLike = (spawnedCommand, options) => {
+		capturedCommand = spawnedCommand[0] ?? "";
 		capturedCwd = options.cwd;
 		return bunEmitting("");
 	};
@@ -155,8 +146,8 @@ test("the executable and cwd are parameters, so pi's location is not assumed", (
 
 test("the default executable is `pi` on PATH", () => {
 	let capturedCommand = "";
-	const fakeSpawn: SpawnLike = (cmd) => {
-		capturedCommand = cmd[0] ?? "";
+	const fakeSpawn: SpawnLike = (spawnedCommand) => {
+		capturedCommand = spawnedCommand[0] ?? "";
 		return bunEmitting("");
 	};
 	spawnPiRpcProcess({ cwd: "/tmp" }, fakeSpawn);
@@ -166,18 +157,13 @@ test("the default executable is `pi` on PATH", () => {
 // Bun's own onExit leads with the subprocess; the `PiProcessCallbacks` contract is
 // (code, signal). This asserts the adapter drops the extra argument rather than shifting it.
 test("onExit is delivered as (code, signal), without Bun's leading subprocess argument", () => {
-	let capturedOnExit:
-		| ((child: unknown, exitCode: number | null, signalCode: number | null) => void)
-		| undefined;
+	let capturedOnExit: ((child: unknown, exitCode: number | null, signalCode: number | null) => void) | undefined;
 	const fakeSpawn: SpawnLike = (_cmd, options) => {
 		capturedOnExit = options.onExit;
 		return bunEmitting("");
 	};
 	const received: unknown[] = [];
-	spawnPiRpcProcess(
-		{ cwd: "/tmp", onExit: (code, signal) => received.push(code, signal) },
-		fakeSpawn,
-	);
+	spawnPiRpcProcess({ cwd: "/tmp", onExit: (code, signal) => received.push(code, signal) }, fakeSpawn);
 	expect(capturedOnExit).toBeDefined();
 	capturedOnExit?.({ notTheCode: true }, 143, 15);
 	expect(received).toEqual([143, 15]);
@@ -225,7 +211,9 @@ test("stop() on a pi that exits within the grace sends SIGTERM only", async () =
 });
 
 test("stop() on a pi that ignores SIGTERM escalates to SIGKILL after the grace", async () => {
-	const neverExits = new Promise<number>(() => {});
+	const neverExits = new Promise<number>(() => {
+		/* never settles — this fake child never exits */
+	});
 	const { child, signalsSent } = stoppableFakeChild(neverExits);
 	const handle = spawnPiRpcProcess({ cwd: "/tmp" }, () => child, STOP_TEST_GRACE_MS);
 	handle.stop();
@@ -235,7 +223,9 @@ test("stop() on a pi that ignores SIGTERM escalates to SIGKILL after the grace",
 });
 
 test("stop() is idempotent — a second call adds no signal and no second timer", async () => {
-	const neverExits = new Promise<number>(() => {});
+	const neverExits = new Promise<number>(() => {
+		/* never settles — this fake child never exits */
+	});
 	const { child, signalsSent } = stoppableFakeChild(neverExits);
 	const handle = spawnPiRpcProcess({ cwd: "/tmp" }, () => child, STOP_TEST_GRACE_MS);
 	handle.stop();
@@ -248,9 +238,7 @@ test("stop() is idempotent — a second call adds no signal and no second timer"
 
 // --- PiLaunchConfig: the data half, validated because it can come from outside
 test("a valid launch config passes", () =>
-	expect(isPiLaunchConfig({ cwd: "/work/repo", command: "pi", args: ["--model", "x"] })).toBe(
-		true,
-	));
+	expect(isPiLaunchConfig({ cwd: "/work/repo", command: "pi", args: ["--model", "x"] })).toBe(true));
 
 test("cwd is required — it is the blast radius with no sandbox", () => {
 	expect(isPiLaunchConfig({ command: "pi" })).toBe(false);

@@ -1,0 +1,137 @@
+#!/usr/bin/env node
+/**
+ * Ported from slop-factory's bun example (examples/bun/scripts/gate.ts) — the shape is
+ * deliberately identical so improvements travel in either direction.
+ *
+ * The single repo-wide gate. One ordered list of checks; `check:all` delegates
+ * here, and both the pre-commit hook and CI invoke `check:all` — so one list is
+ * the single source of what "green" means everywhere. Add a check here and every
+ * caller inherits it.
+ *
+ * Ordering is cheap-first: a fast Biome failure surfaces before the slower
+ * typecheck and test gates run.
+ *
+ * The checks:
+ *   1. biome     — lint + format + import-organize (check-only, no writes). This
+ *                  also enforces the discipline rules Biome can express, e.g.
+ *                  `noTsIgnore` is set to error in biome.json, so a banned
+ *                  suppression directive fails the gate rather than merely warning.
+ *   2. typecheck — `tsc --noEmit` over the package.
+ *   3. test      — `vitest run`.
+ *
+ * ADDING A GATE. This is the extension point a project adopting the blueprint is
+ * expected to use: append an entry to GATES and every caller (the pre-commit hook,
+ * CI, a developer running `npm run check:all`) inherits it with no other edit. Put
+ * expensive behavioural checks LAST so the cheap ones fail fast — e.g. a build, an
+ * IaC synth, a container smoke test, a schema-compatibility check.
+ *
+ * Runtime is node — `check:all` runs `node scripts/gate.ts`, and Node strips the
+ * TypeScript types at load. Each gate shells out through `npm run <script>`, so a
+ * command's definition lives in exactly one place: package.json.
+ */
+import { spawnSync } from "node:child_process";
+
+const GREEN = "\x1b[32m";
+const RED = "\x1b[31m";
+const DIM = "\x1b[2m";
+const BOLD = "\x1b[1m";
+const RESET = "\x1b[0m";
+
+/**
+ * The package managers this gate knows how to shell out to. Each runs a package.json script with
+ * `<manager> run <script>`, so the invocation shape is identical and only the binary differs.
+ */
+const KNOWN_PACKAGE_MANAGERS = ["npm", "bun", "pnpm", "yarn"] as const;
+type PackageManager = (typeof KNOWN_PACKAGE_MANAGERS)[number];
+
+const DEFAULT_PACKAGE_MANAGER: PackageManager = "npm";
+
+/**
+ * Which package manager to shell out to for each gate.
+ *
+ * Hardcoding `npm` here was a real portability bug: `bun scripts/gate.ts` runs the TypeScript fine
+ * (Bun executes `.ts` natively) and then dies with `Executable not found in $PATH: "npm"` on a
+ * machine that has only Bun. Two signals, in order:
+ *
+ *   1. `npm_config_user_agent` — every major package manager sets it when running a script, and its
+ *      first token is the manager's name (`bun/1.3.14 …`, `npm/11.17.0 …`). This is authoritative
+ *      when the gate was reached via `<manager> run check:all`, which is the normal path.
+ *   2. The runtime itself — when the script is invoked DIRECTLY (`bun scripts/gate.ts`) no user
+ *      agent is set, but a `Bun` global means we are under Bun and should use it.
+ *
+ * Falls back to npm, which is correct for `node scripts/gate.ts` on a normal Node install.
+ */
+function detectPackageManager(): PackageManager {
+	const userAgent = process.env.npm_config_user_agent;
+	if (userAgent !== undefined) {
+		const managerName = userAgent.split("/")[0];
+		const knownManager = KNOWN_PACKAGE_MANAGERS.find((candidate) => candidate === managerName);
+		if (knownManager !== undefined) {
+			return knownManager;
+		}
+	}
+	// Reading the global this way (rather than declaring `Bun`) keeps the check dependency-free and
+	// avoids `any` — the repo bans it, and pulling in @types/bun for one truthiness test is worse.
+	const isBunRuntime = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
+	return isBunRuntime ? "bun" : DEFAULT_PACKAGE_MANAGER;
+}
+
+const PACKAGE_MANAGER = detectPackageManager();
+
+/** One child-process gate: a display name, a one-line description, and the script it runs. */
+interface Gate {
+	readonly name: string;
+	readonly describe: string;
+	/** The package.json script name — run as `<package manager> run <script>`. */
+	readonly script: string;
+}
+
+const GATES: readonly Gate[] = [
+	{
+		name: "biome",
+		describe: "lint + format + import-organize (check-only)",
+		script: "lint",
+	},
+	{
+		name: "typecheck",
+		describe: "tsc --noEmit",
+		script: "typecheck",
+	},
+	{
+		name: "test",
+		describe: "bun test",
+		script: "test",
+	},
+];
+
+/**
+ * Runs one gate to completion, inheriting stdio so the underlying tool's colored
+ * output and progress reach the terminal unchanged. Returns the child's exit code
+ * (non-zero = failure); a child killed by a signal (status null) counts as failure.
+ */
+function runGate(gate: Gate): number {
+	process.stdout.write(`\n${BOLD}▶ ${gate.name}${RESET} ${DIM}— ${gate.describe}${RESET}\n`);
+	const result = spawnSync(PACKAGE_MANAGER, ["run", gate.script], { stdio: "inherit" });
+	if (result.error) {
+		process.stderr.write(`${RED}gate "${gate.name}" failed to spawn: ${result.error.message}${RESET}\n`);
+		return 1;
+	}
+	return result.status ?? 1;
+}
+
+process.stdout.write(`${DIM}gate: running via ${PACKAGE_MANAGER}${RESET}\n`);
+
+let failedGate: string | null = null;
+for (const gate of GATES) {
+	if (runGate(gate) !== 0) {
+		failedGate = gate.name;
+		break;
+	}
+}
+
+if (failedGate) {
+	process.stdout.write(`\n${RED}✗ gate "${failedGate}" failed.${RESET}\n`);
+	process.exit(1);
+}
+
+process.stdout.write(`\n${GREEN}✓ All gates passed.${RESET}\n`);

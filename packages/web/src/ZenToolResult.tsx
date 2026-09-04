@@ -15,22 +15,14 @@ import { readZenToolResultDescriptor, type ZenToolResultDescriptor } from "@zen/
  */
 
 /** Renderers keyed by descriptor `kind`. Absent keys are not an error — see the fallback. */
-export type ZenRendererMap = Record<
-	string,
-	(props: Record<string, unknown>) => React.ReactNode
->;
+export type ZenRendererMap = Record<string, (props: Record<string, unknown>) => React.ReactNode>;
 
 function TextFallback({ result }: { result: ToolResultPart }): React.ReactNode {
 	// `content` is `string | ContentPart[]`; only the string form is safe to print directly.
 	const text =
-		typeof result.content === "string"
-			? result.content
-			: result.content.map((part) => JSON.stringify(part)).join("\n");
+		typeof result.content === "string" ? result.content : result.content.map((part) => JSON.stringify(part)).join("\n");
 	return (
-		<pre
-			data-zen-tool-result="text"
-			className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs"
-		>
+		<pre data-zen-tool-result="text" className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">
 			{text}
 		</pre>
 	);
@@ -93,9 +85,7 @@ export function ZenToolResult({
 	return (
 		<div data-zen-tool-result="descriptor" data-zen-kind={descriptor.kind}>
 			{render(descriptor.props)}
-			{descriptor.truncated !== undefined ? (
-				<TruncationNote truncated={descriptor.truncated} />
-			) : null}
+			{descriptor.truncated !== undefined ? <TruncationNote truncated={descriptor.truncated} /> : null}
 		</div>
 	);
 }

@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 import { ZenDialogSpec } from "./dialog.ts";
 import { ZenToolResultDescriptor } from "./tool-result.ts";
 
@@ -85,11 +85,7 @@ export const ZenToolResultObservation = Type.Object({
  * copies `notifyType` only when it is one of pi's three declared values, so an unknown
  * value degrades to an untyped notification rather than failing validation.
  */
-export const ZenNotifyType = Type.Union([
-	Type.Literal("info"),
-	Type.Literal("warning"),
-	Type.Literal("error"),
-]);
+export const ZenNotifyType = Type.Union([Type.Literal("info"), Type.Literal("warning"), Type.Literal("error")]);
 export type ZenNotifyType = Static<typeof ZenNotifyType>;
 
 export const ZenExtensionUiRequest = Type.Object({

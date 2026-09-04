@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
 
 /**
@@ -52,11 +52,7 @@ import { Compile } from "typebox/compile";
 export const ZEN_TOOL_RESULT_KEY = "zen:toolResult" as const;
 
 /** Units a truncation can be counted in. Closed, because a surface must render each one. */
-export const ZenTruncationUnit = Type.Union([
-	Type.Literal("lines"),
-	Type.Literal("bytes"),
-	Type.Literal("items"),
-]);
+export const ZenTruncationUnit = Type.Union([Type.Literal("lines"), Type.Literal("bytes"), Type.Literal("items")]);
 export type ZenTruncationUnit = Static<typeof ZenTruncationUnit>;
 
 /**

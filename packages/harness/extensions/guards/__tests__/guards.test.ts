@@ -1,10 +1,10 @@
+import { expect, test } from "bun:test";
 import { mkdtempSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "bun:test";
 import guards from "../index.ts";
 
-type Handler = (event: unknown, ctx: unknown) => { block?: boolean; reason?: string } | undefined;
+type Handler = (event: unknown, extensionContext: unknown) => { block?: boolean; reason?: string } | undefined;
 
 /** ONE guard instance's captured handlers — the #10 sequences need state across calls. */
 interface GuardRuntime {
@@ -20,7 +20,7 @@ function loadGuardRuntime(): GuardRuntime {
 	const toolCall = handlers.get("tool_call");
 	const toolResult = handlers.get("tool_result");
 	const sessionStart = handlers.get("session_start");
-	if (!toolCall || !toolResult || !sessionStart) {
+	if (!(toolCall && toolResult && sessionStart)) {
 		throw new Error("guards did not register tool_call + tool_result + session_start");
 	}
 	return { toolCall, toolResult, sessionStart };
@@ -240,46 +240,43 @@ test("re-reading the changed file clears the staleness and the write passes", ()
 // contents are the SAME LENGTH deliberately, so only the mtime leg of the stamp can catch
 // the restore — this test is what pins that git's restore actually moves mtime.
 const isGitAvailable = Bun.which("git") !== null;
-test.skipIf(!isGitAvailable)(
-	"the incident shape: staged, mutated, restored from index — the write is refused",
-	() => {
-		const repo = mkdtempSync(join(tmpdir(), "zen-guard-incident-"));
-		const runGit = (...args: string[]) => {
-			const result = Bun.spawnSync(["git", ...args], { cwd: repo });
-			if (result.exitCode !== 0) {
-				throw new Error(`git ${args[0]} failed: ${result.stderr.toString()}`);
-			}
-		};
-		runGit("init", "-q");
-		runGit("config", "user.email", "test@example.invalid");
-		runGit("config", "user.name", "guard-test");
-		const filePath = join(repo, "work.ts");
-		writeFileSync(filePath, "version-one\n");
-		runGit("add", "work.ts");
-		// The session's work: a tracked-but-unstaged mutation, same byte length.
-		writeFileSync(filePath, "version-two\n");
-		// ⚠ Backdate the mutation two seconds: in the real incident the observation and the
-		// restore are separated by wall-clock time, and compressing them into one test tick
-		// put both inside the SAME mtimeMs — the restore classified fresh and this test
-		// failed. That was the documented same-size-same-millisecond gap manifesting, not a
-		// broken guard; backdating restores the realistic separation deterministically.
-		const twoSecondsAgo = new Date(Date.now() - 2000);
-		utimesSync(filePath, twoSecondsAgo, twoSecondsAgo);
-		const runtime = loadGuardRuntime();
-		runtime.toolResult(toolResultEvent("read", "work.ts", false), { cwd: repo });
-		const observed = statSync(filePath);
-		// The concurrent agent's restore.
-		runGit("checkout", "--", "work.ts");
-		const restored = statSync(filePath);
-		// Assert the CAUSE before the effect: the restore moved mtime while size is equal,
-		// so a pass below is attributable to the mtime leg, not to a size difference.
-		expect(restored.size).toBe(observed.size);
-		expect(restored.mtimeMs).not.toBe(observed.mtimeMs);
-		const result = runtime.toolCall(toolCallEvent("write", "work.ts"), { cwd: repo });
-		expect(result?.block).toBe(true);
-		expect(result?.reason).toContain("CHANGED");
-	},
-);
+test.skipIf(!isGitAvailable)("the incident shape: staged, mutated, restored from index — the write is refused", () => {
+	const repo = mkdtempSync(join(tmpdir(), "zen-guard-incident-"));
+	const runGit = (...args: string[]) => {
+		const result = Bun.spawnSync(["git", ...args], { cwd: repo });
+		if (result.exitCode !== 0) {
+			throw new Error(`git ${args[0]} failed: ${result.stderr.toString()}`);
+		}
+	};
+	runGit("init", "-q");
+	runGit("config", "user.email", "test@example.invalid");
+	runGit("config", "user.name", "guard-test");
+	const filePath = join(repo, "work.ts");
+	writeFileSync(filePath, "version-one\n");
+	runGit("add", "work.ts");
+	// The session's work: a tracked-but-unstaged mutation, same byte length.
+	writeFileSync(filePath, "version-two\n");
+	// ⚠ Backdate the mutation two seconds: in the real incident the observation and the
+	// restore are separated by wall-clock time, and compressing them into one test tick
+	// put both inside the SAME mtimeMs — the restore classified fresh and this test
+	// failed. That was the documented same-size-same-millisecond gap manifesting, not a
+	// broken guard; backdating restores the realistic separation deterministically.
+	const twoSecondsAgo = new Date(Date.now() - 2000);
+	utimesSync(filePath, twoSecondsAgo, twoSecondsAgo);
+	const runtime = loadGuardRuntime();
+	runtime.toolResult(toolResultEvent("read", "work.ts", false), { cwd: repo });
+	const observed = statSync(filePath);
+	// The concurrent agent's restore.
+	runGit("checkout", "--", "work.ts");
+	const restored = statSync(filePath);
+	// Assert the CAUSE before the effect: the restore moved mtime while size is equal,
+	// so a pass below is attributable to the mtime leg, not to a size difference.
+	expect(restored.size).toBe(observed.size);
+	expect(restored.mtimeMs).not.toBe(observed.mtimeMs);
+	const result = runtime.toolCall(toolCallEvent("write", "work.ts"), { cwd: repo });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("CHANGED");
+});
 
 // ⚠ The session's OWN successful edit must not make the file stale to itself: an edit
 // moves mtime/size, confers no whole-file knowledge (#10), but must refresh the stamp of

@@ -1,8 +1,8 @@
-import { EventType } from "@ag-ui/core";
 import { expect, test } from "bun:test";
+import { EventType } from "@ag-ui/core";
 import { isZenToolResultDescriptor, ZEN_TOOL_RESULT_KEY, type ZenObservation } from "@zen/core";
 import { mapPiEvent } from "../map-events.ts";
-import { observationToAguiEvents, type AguiIdentifiers } from "../to-agui.ts";
+import { type AguiIdentifiers, observationToAguiEvents } from "../to-agui.ts";
 
 const ids: AguiIdentifiers = { messageId: "m1", runId: "r1", threadId: "t1" };
 const toAgui = (observation: ZenObservation) => observationToAguiEvents(observation, ids);
@@ -26,10 +26,7 @@ test("a thinking delta uses REASONING_MESSAGE_CONTENT, not the deprecated THINKI
 // ⚠ One observation, two events — which is why the mapper returns an array.
 test("a tool call becomes TOOL_CALL_START followed by TOOL_CALL_ARGS", () => {
 	const events = toAgui({ kind: "tool-call", toolCallId: "c1", toolName: "bash", args: { command: "ls" } });
-	expect(events.map((event) => event.type)).toEqual([
-		EventType.TOOL_CALL_START,
-		EventType.TOOL_CALL_ARGS,
-	]);
+	expect(events.map((event) => event.type)).toEqual([EventType.TOOL_CALL_START, EventType.TOOL_CALL_ARGS]);
 	expect(events[0]).toMatchObject({ toolCallId: "c1", toolCallName: "bash" });
 	// args are serialised, because AG-UI streams them as a string delta
 	expect(events[1]).toMatchObject({ delta: '{"command":"ls"}' });
@@ -44,12 +41,24 @@ test("absent args serialise to an empty object rather than undefined", () =>
 // completion has nowhere to go. Emitting a result per update would say "finished" repeatedly.
 test("an INCOMPLETE tool result maps to nothing, deliberately", () =>
 	expect(
-		toAgui({ kind: "tool-result", toolCallId: "c1", toolName: "bash", text: "partial…", complete: false, isError: false }),
+		toAgui({
+			kind: "tool-result",
+			toolCallId: "c1",
+			toolName: "bash",
+			text: "partial…",
+			complete: false,
+			isError: false,
+		}),
 	).toEqual([]));
 
 test("a completed tool result becomes TOOL_CALL_RESULT with its text", () => {
 	const [event] = toAgui({
-		kind: "tool-result", toolCallId: "c1", toolName: "bash", text: "total 48", complete: true, isError: false,
+		kind: "tool-result",
+		toolCallId: "c1",
+		toolName: "bash",
+		text: "total 48",
+		complete: true,
+		isError: false,
 	});
 	expect(event).toMatchObject({
 		type: EventType.TOOL_CALL_RESULT,
@@ -62,11 +71,21 @@ test("a completed tool result becomes TOOL_CALL_RESULT with its text", () => {
 // ⚠ `isError` has no AG-UI field on a tool result and is the only signal a REFUSED call has.
 test("an errored result carries the error flag, so a denial cannot render as success", () => {
 	const [errored] = toAgui({
-		kind: "tool-result", toolCallId: "c1", toolName: "write", text: "blocked", complete: true, isError: true,
+		kind: "tool-result",
+		toolCallId: "c1",
+		toolName: "write",
+		text: "blocked",
+		complete: true,
+		isError: true,
 	});
 	expect(errored).toMatchObject({ zenIsError: true });
 	const [fine] = toAgui({
-		kind: "tool-result", toolCallId: "c1", toolName: "read", text: "ok", complete: true, isError: false,
+		kind: "tool-result",
+		toolCallId: "c1",
+		toolName: "read",
+		text: "ok",
+		complete: true,
+		isError: false,
 	});
 	expect(fine).not.toHaveProperty("zenIsError");
 });
@@ -90,7 +109,10 @@ test("only a settle becomes RUN_FINISHED", () =>
 
 test("an extension error becomes RUN_ERROR naming the extension and the hook", () => {
 	const [event] = toAgui({
-		kind: "extension-error", extensionPath: "/x/guards.ts", event: "tool_call", error: "boom",
+		kind: "extension-error",
+		extensionPath: "/x/guards.ts",
+		event: "tool_call",
+		error: "boom",
 	});
 	expect(event).toMatchObject({ type: EventType.RUN_ERROR, runId: "r1" });
 	expect((event as { message: string }).message).toContain("/x/guards.ts");
@@ -181,8 +203,11 @@ test("the tool-result descriptor survives pi → observation → AG-UI intact", 
 
 test("a result with no descriptor carries no descriptor key at all", () => {
 	const observation = mapPiEvent({
-		type: "tool_execution_end", toolCallId: "c1", toolName: "bash",
-		result: { content: "plain" }, isError: false,
+		type: "tool_execution_end",
+		toolCallId: "c1",
+		toolName: "bash",
+		result: { content: "plain" },
+		isError: false,
 	});
 	expect(observationToAguiEvents(observation, ids)[0]).not.toHaveProperty(ZEN_TOOL_RESULT_KEY);
 });

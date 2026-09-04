@@ -18,7 +18,7 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SERVER_HEAD_START_MS = 1_200;
+const SERVER_HEAD_START_MS = 1200;
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const webPackageDir = join(repoRoot, "packages", "web");
@@ -51,9 +51,7 @@ function run(label, command, args) {
 		// worse than none: the web surface serving a page whose API is gone looks like an app bug.
 		onExit(_child, code, signalCode) {
 			if (shuttingDown) return;
-			console.error(
-				`[dev] ${label} exited (${code ?? signalCode ?? "signal"}) — stopping the other surface`,
-			);
+			console.error(`[dev] ${label} exited (${code ?? signalCode ?? "signal"}) — stopping the other surface`);
 			shutdown();
 		},
 	});

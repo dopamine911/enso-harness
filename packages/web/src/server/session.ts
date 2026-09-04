@@ -3,15 +3,15 @@ import { INTERRUPT_BINDING_METADATA_KEY, type StreamChunk } from "@tanstack/ai";
 import {
 	isPiCommand,
 	isZenDialogResumeEntry,
-	validateDialogAnswer,
-	ZEN_DIALOG_KEY,
 	type PiCommand,
 	type PiTransport,
+	validateDialogAnswer,
+	ZEN_DIALOG_KEY,
 	type ZenDialogSpec,
 } from "@zen/core";
 import { PiRpcClient } from "../rpc/client.ts";
 import { mapPiEvent } from "../rpc/map-events.ts";
-import { observationToAguiEvents, type AguiIdentifiers } from "../rpc/to-agui.ts";
+import { type AguiIdentifiers, observationToAguiEvents } from "../rpc/to-agui.ts";
 import type { DialogRegistry, PiSessionPump } from "./dialog-registry.ts";
 
 /**
@@ -69,7 +69,7 @@ const NO_PROGRESS_TIMEOUT_MS = 90_000;
  * applied ONLY to slash-command runs — an ordinary prompt's ack means ACCEPTED, not done,
  * and closing on it would cut a real inference off at the knees.
  */
-const SLASH_COMMAND_COMPLETION_GRACE_MS = 1_000;
+const SLASH_COMMAND_COMPLETION_GRACE_MS = 1000;
 
 /** AG-UI requires RUN_STARTED first: "the first event in any streaming response". */
 function runStarted(ids: AguiIdentifiers): StreamChunk {
@@ -115,6 +115,7 @@ function runFinishedWithDialogInterrupt(
 		expiresAt: new Date(expiresAt).toISOString(),
 		metadata: {
 			[INTERRUPT_BINDING_METADATA_KEY]: {
+				// biome-ignore lint: `v` is TanStack's interruptBinding WIRE FORMAT (`tanstack:interruptBinding` {v, kind, interruptId, …}) — renaming it breaks resume resolution.
 				v: 1,
 				kind: "generic",
 				interruptId: dialogId,
@@ -243,6 +244,7 @@ interface StreamRunOptions {
  * dialog. So the prompt acknowledgement is observed from a callback (`pump.promptError`),
  * never awaited in front of this loop.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the session pump — one loop owning progress timeouts, dialog parking, and settle detection in ORDER; the ordering is the #27 contract, and helper-splitting it is how a parked process would leak past a teardown.
 async function* streamRun(options: StreamRunOptions): AsyncGenerator<StreamChunk> {
 	const { pump, ids, registry, stopPi, outcome, noProgressTimeoutMs } = options;
 	const { isExtensionCommand, slashCommandGraceMs } = options;
@@ -311,8 +313,7 @@ async function* streamRun(options: StreamRunOptions): AsyncGenerator<StreamChunk
 		// ⚠ The slash-command quick close — see SLASH_COMMAND_COMPLETION_GRACE_MS. The ack
 		// is the command's completion signal, so once it has arrived and the queue has
 		// stayed drained for the grace, the run is over; `agent_settled` is never coming.
-		const isCommandComplete =
-			isExtensionCommand && pump.promptAcknowledged && pump.pending.length === 0;
+		const isCommandComplete = isExtensionCommand && pump.promptAcknowledged && pump.pending.length === 0;
 		if (!isCommandComplete) {
 			commandQuietSince = undefined;
 		} else {
@@ -415,9 +416,7 @@ export async function* runChat(options: ChatRunOptions): AsyncGenerator<StreamCh
 				`/${requestedCommand} is not available on this surface. ` +
 					`pi's built-in commands (/settings, /hotkeys, …) are terminal-only and cannot ` +
 					`run over rpc. Available here: ${
-						available.length === 0
-							? "none"
-							: available.map((command) => `/${command.name}`).join(", ")
+						available.length === 0 ? "none" : available.map((command) => `/${command.name}`).join(", ")
 					}`,
 			);
 			return;

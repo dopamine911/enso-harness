@@ -31,9 +31,7 @@ const toolResultWith = (overrides: Partial<ToolResultPart>): ToolResultPart => (
 });
 
 const html = (selected: ChatUISelectedPart, isStreaming = false) =>
-	renderToStaticMarkup(
-		<SelectedMessagePart selected={selected} isStreaming={isStreaming} renderers={{}} />,
-	);
+	renderToStaticMarkup(<SelectedMessagePart selected={selected} isStreaming={isStreaming} renderers={{}} />);
 
 test("a tool call from an UNREGISTERED name renders its name and result text", () => {
 	const rendered = html({

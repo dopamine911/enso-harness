@@ -1,4 +1,13 @@
-import { ZEN_TOOL_RESULT_KEY, isZenDialogSpec, type PiRpcEvent, type ZenDialogSpec, type ZenNotifyType, type ZenObservation, type ZenToolResultDescriptor, type ZenUsage } from "@zen/core";
+import {
+	isZenDialogSpec,
+	type PiRpcEvent,
+	ZEN_TOOL_RESULT_KEY,
+	type ZenDialogSpec,
+	type ZenNotifyType,
+	type ZenObservation,
+	type ZenToolResultDescriptor,
+	type ZenUsage,
+} from "@zen/core";
 
 /**
  * pi rpc events → the observations a surface renders (#24).
@@ -34,8 +43,7 @@ interface PiToolDetails {
 function readUsage(raw: unknown): ZenUsage | undefined {
 	if (typeof raw !== "object" || raw === null) return undefined;
 	const usage = raw as Record<string, unknown>;
-	const numberAt = (key: string): number =>
-		typeof usage[key] === "number" ? (usage[key] as number) : 0;
+	const numberAt = (key: string): number => (typeof usage[key] === "number" ? (usage[key] as number) : 0);
 	const cost = usage.cost as Record<string, unknown> | undefined;
 	const totalCost = typeof cost?.total === "number" ? (cost.total as number) : undefined;
 	return {
@@ -53,9 +61,7 @@ function contentToText(content: unknown): string {
 	if (!Array.isArray(content)) return "";
 	return (content as PiContentPart[])
 		.map((part) =>
-			part.type === "text" && typeof part.text === "string"
-				? part.text
-				: `[${part.type ?? "unknown"} content]`,
+			part.type === "text" && typeof part.text === "string" ? part.text : `[${part.type ?? "unknown"} content]`,
 		)
 		.join("");
 }
@@ -92,12 +98,11 @@ export function toolResultMetadata(
 }
 
 /** Map one pi rpc event. Never returns undefined — see the design rule above. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one switch arm per pi event type, read top-to-bottom against pi's protocol doc — the complexity IS the protocol's, and splitting arms into helpers would break the side-by-side read.
 export function mapPiEvent(event: PiRpcEvent): ZenObservation {
 	switch (event.type) {
 		case "message_update": {
-			const delta = event.assistantMessageEvent as
-				| { type?: string; contentIndex?: number; delta?: string }
-				| undefined;
+			const delta = event.assistantMessageEvent as { type?: string; contentIndex?: number; delta?: string } | undefined;
 			const usage = readUsage(event.usage);
 			const contentIndex = typeof delta?.contentIndex === "number" ? delta.contentIndex : 0;
 			const text = typeof delta?.delta === "string" ? delta.delta : "";
@@ -179,9 +184,7 @@ export function mapPiEvent(event: PiRpcEvent): ZenObservation {
 			for (const field of ["title", "options", "message", "placeholder", "prefill", "timeout"]) {
 				if (event[field] !== undefined) dialogCandidate[field] = event[field];
 			}
-			const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate)
-				? dialogCandidate
-				: undefined;
+			const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate) ? dialogCandidate : undefined;
 			// ⚠ A notify's `message` IS the request (#29): pi's wire shape is
 			// `{method: "notify", message, notifyType?}`, and dropping the message here is
 			// how a mode change once completed with nothing visible. Copied for notify ONLY —
@@ -194,11 +197,7 @@ export function mapPiEvent(event: PiRpcEvent): ZenObservation {
 			if (method === "notify") {
 				notifyFields.message = String(event.message ?? "");
 				const notifyTypeCandidate = event.notifyType;
-				if (
-					notifyTypeCandidate === "info" ||
-					notifyTypeCandidate === "warning" ||
-					notifyTypeCandidate === "error"
-				) {
+				if (notifyTypeCandidate === "info" || notifyTypeCandidate === "warning" || notifyTypeCandidate === "error") {
 					notifyFields.notifyType = notifyTypeCandidate;
 				}
 			}
@@ -219,9 +218,7 @@ export function mapPiEvent(event: PiRpcEvent): ZenObservation {
 			// its updateStatus is a stub and its setMode never notifies). Every other entry
 			// kind (messages, compaction, labels) duplicates information that already flows
 			// as first-class observations, so those stay unmapped, exactly as before.
-			const entry = event.entry as
-				| { type?: string; customType?: string; data?: unknown }
-				| undefined;
+			const entry = event.entry as { type?: string; customType?: string; data?: unknown } | undefined;
 			if (entry?.type === "custom" && typeof entry.customType === "string") {
 				return { kind: "custom-entry", customType: entry.customType, data: entry.data };
 			}

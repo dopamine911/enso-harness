@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
-import type { PiTransport } from "@zen/core";
+import type { PiRpcEvent, PiTransport } from "@zen/core";
 import { PiRpcClient, PiTransportClosedError } from "../client.ts";
-import type { PiRpcEvent } from "@zen/core";
 
 /** A fake transport: captures writes, lets a test push stdout and close the stream. */
 function fakeTransport() {
@@ -10,8 +9,12 @@ function fakeTransport() {
 	let consumeClose: (() => void) | undefined;
 	const transport: PiTransport = {
 		write: (line) => written.push(line),
-		onData: (consume) => { consumeData = consume; },
-		onClose: (consume) => { consumeClose = consume; },
+		onData: (consume) => {
+			consumeData = consume;
+		},
+		onClose: (consume) => {
+			consumeClose = consume;
+		},
 	};
 	return {
 		transport,

@@ -1,0 +1,227 @@
+// Naming gate — flags abbreviations and single-character bindings that Biome's
+// `useNamingConvention` can't catch (it checks case, not length/abbreviation).
+// Detection-only: agents see the diagnostic and rename. No autofix.
+//
+// Structure (named patterns + shared predicates, all in ONE plugin file so
+// Biome compiles them into a single AST walk):
+//
+//   predicate is_abbreviation($id)               — the abbreviation dictionary, defined ONCE.
+//                                                  Called by both the binding tier and the
+//                                                  property-key tier, so the dictionary has a
+//                                                  single source of truth (the prior form kept
+//                                                  two byte-for-byte-identical regex copies that
+//                                                  had to be hand-synced; that hazard is gone).
+//   predicate flag_generic_iteration_name($id)   — the generic iteration-name list + the shared
+//                                                  `info` diagnostic, defined ONCE. Called by both
+//                                                  advisory patterns below.
+//   pattern abbreviation_binding()               — dictionary hit on a const/let/var/param name.
+//   pattern abbreviation_key()                   — dictionary hit on an object/type/class member key.
+//   pattern single_char_binding()                — one-letter const/let/var/param name.
+//   pattern single_char_key()                    — one-letter object/type/class member key.
+//   pattern generic_iteration_callback_var()     — advisory: generic names in .map/.filter/… callbacks.
+//   pattern generic_iteration_loop_var()         — advisory: generic names in for / for-of loop headers.
+//   or { … }                                     — root: the six patterns composed together.
+//
+// `JsIdentifierBinding` is the declaration node, so the binding tiers are
+// keyword-agnostic — const/let/var and function/callback parameters are covered
+// uniformly. `JsLiteralMemberName` reaches the property-key shapes the binding
+// node structurally cannot see (`{ n: … }`, `{ cnt: … }`, type/interface/class
+// members). Registered repo-wide via the `plugins` key in biome.json. To adopt it
+// gradually in an existing codebase instead, move it under a scoped `overrides`
+// entry and widen the glob as each directory is swept clean (the ratchet).
+//
+// The abbreviation set is ported from eslint-plugin-unicorn's prevent-
+// abbreviations dictionary, MINUS a few sanctioned conventions (`err` catch
+// bindings, `opts` options-object params) and a few ambiguous/high-false-positive
+// short names that produce more noise than signal (`args`/`env` and similar).
+// Single letters are handled by the single-char patterns below.
+//
+// TUNING — three separate knobs, do not confuse them:
+//   • Project vocabulary  → the `is_allowlisted` predicate. Exempts a name from
+//     EVERY tier. This is the one you want for a domain term or a public API field.
+//     It ships empty; see the long note above it before adding anything.
+//   • Abbreviation coverage → the `is_abbreviation` dictionary regex. One copy.
+//   • Single-char exemptions → the `not $x <: r"…"` regex inside `single_char_binding`
+//     / `single_char_key`. The binding tier exempts `_` and the conventional
+//     single-char binding `z`; the key tier also exempts `e`. `i`/`j`/`k` are NOT
+//     exempt in either tier — they are flagged everywhere (see naming-and-style.md
+//     "Index and Counter Variables").
+engine biome(1.0)
+language js(typescript, jsx)
+
+// **PERFORMANCE NOTE.** Every pattern below walks each identifier in every file.
+// Optimisations applied:
+//
+//   1. The dictionary is a single anchored regex alternation `^(a|b|c)$`, not
+//      `or { r"^a$", r"^b$", … }`. Modern regex engines build one DFA from the
+//      alternation and match in one pass; the `or { … }` form evaluated each
+//      alternative sequentially per identifier and was the single biggest hot spot.
+//   2. That dictionary lives in ONE predicate (`is_abbreviation`) rather than being
+//      duplicated across the binding and key tiers — one regex, compiled once.
+//   3. Each single-char tier's exemption regex is anchored once.
+//
+// If a name slips that should be flagged, add it to the `^(...|...)$` alternation
+// in `is_abbreviation` — DO NOT split it back into `or { r"...", r"..." }` because
+// that re-introduces per-alternative evaluation cost.
+
+// ── Shared predicates ────────────────────────────────────────────────────────
+// Single source of truth for the abbreviation set. Called by both
+// `abbreviation_binding` and `abbreviation_key`.
+predicate is_abbreviation($identifier) {
+  $identifier <: r"^(?:acc|amt|arr|attr|attrs|attType|auth|btn|buf|cb|cc|cfg|cn|cnt|conf|cr|ctx|cur|curr|cx|df|dir|dirs|dist|doc|docs|dst|el|elem|elems|ev|evt|ext|exts|func|hdr|idx|inp|len|lib|mod|msg|num|obj|out|pkg|qs|qty|req|res|ret|retval|sep|sig|sn|src|stdDev|str|tbl|td|temp|tit|tmp|ts|util|utils|val|vars|ver|win|bx|cmd|dec|dur|hi|lo|mem|prs|wf|sk|er)$"
+}
+
+// The gate's allowlist. Identifiers that must NEVER be flagged, regardless of the
+// dictionary or the single-char tiers. Checked by every flagging tier via
+// `not is_allowlisted(...)`, so a name here is exempt EVERYWHERE — bindings and
+// keys, single- and multi-char.
+//
+// EMPTY BY DEFAULT, on purpose. This is the one part of the gate that cannot be
+// shipped pre-filled: an allowlist is a list of a specific project's sanctioned
+// vocabulary, and inheriting another project's list silently permits abbreviations
+// that mean nothing here. (This blueprint's ancestor arrived carrying a LoRaWAN
+// decoder's list — `rssi`, `fPort`, `gwId`, `ts`, `temp` — which would have made
+// `ts` and `temp` legal everywhere in every project built from it.)
+//
+// The sentinel below matches no realistic identifier, so the allowlist starts
+// closed. Two kinds of name legitimately belong here once your project has them:
+//
+//   • Domain vocabulary — an acronym that IS the correct name and has no longer
+//     form to expand to (a protocol or standards term, not a shortening).
+//   • Names fixed by an external contract — a public API field, a wire-format key,
+//     or a map key that is itself parsed (e.g. `{ s: 1000, m: 60_000 }` where the
+//     key string is the unit suffix). Renaming these breaks callers you cannot see.
+//
+// Add a name only with a RECEIPT — the published field, the spec term — never a
+// guess, and never merely because the gate flagged it. Match the canonical name
+// exactly (case-sensitive), and note that an entry exempts the name as a BINDING
+// too, not just as a property key.
+// `cn` is shadcn/ui's class-merge helper, imported under that exact name by the vendored
+// components under packages/web/src/components (which are lint-excluded but resolve the
+// import from our lib/utils.ts) — renaming it forks an ecosystem-wide convention.
+predicate is_allowlisted($name) { $name <: r"^(?:cn)$" }
+
+// Single source of truth for the advisory tier: the generic iteration-name list
+// AND the `info` diagnostic it emits. Called by both `generic_iteration_callback_var`
+// and `generic_iteration_loop_var`, so the name list and the message live in ONE
+// place (the prior form inlined the list in the callback tier only; the loop tier
+// would otherwise have to re-state both).
+predicate flag_generic_iteration_name($name) {
+  $name <: r"^(?:index|count|value|result|data|item|entry|text|name|id|obj|arr)$",
+  register_diagnostic(span=$name, message="Generic iteration variable — name what it walks (`sessions.map((s) => …)` → `(session) => …`, `for (let i = 0; i < rows.length; ...)` → `rowIndex`). Greppability wins in an agent codebase. See naming-and-style.md.", severity="info")
+}
+
+// ── Abbreviation tiers ───────────────────────────────────────────────────────
+// A dictionary hit on a declared name (const/let/var/param/function/class).
+pattern abbreviation_binding() {
+  JsIdentifierBinding() as $name where {
+    is_abbreviation($name),
+    not is_allowlisted($name),
+    register_diagnostic(span=$name, message="Abbreviated name — use the full word (config, context, request, response, message, callback, index, element, …). See naming-and-style.md.", severity="error")
+  }
+}
+
+// A dictionary hit on an object-literal key, type/interface member, or class
+// member name — the shapes the binding tier structurally cannot see (`{ ts: … }`).
+pattern abbreviation_key() {
+  JsLiteralMemberName() as $key where {
+    is_abbreviation($key),
+    not is_allowlisted($key),
+    register_diagnostic(span=$key, message="Abbreviated property key — use the full word (`ts` → `timestamp`, `dir` → `directory`, `cmd` → `command`, `cnt` → `count`). See naming-and-style.md.", severity="error")
+  }
+}
+
+// ── Single-character tiers ───────────────────────────────────────────────────
+// One-letter declared name. Exempt: `_` and the conventional single-char binding
+// `z`. `i`/`j`/`k` are flagged (not exempt) — name what the loop walks.
+pattern single_char_binding() {
+  JsIdentifierBinding() as $name where {
+    $name <: r"^[a-z]$",
+    not $name <: r"^(?:_|z)$",
+    not is_allowlisted($name),
+    register_diagnostic(span=$name, message="Single-character name — use a descriptive name. Exempt: underscore, z. See naming-and-style.md.", severity="warn")
+  }
+}
+
+// One-letter object/type/class member key. Exempt: `_`, `z`, and `e`. `i`/`j`/`k`
+// are flagged (not exempt) — a one-letter field name carries no meaning to a
+// downstream reader (`{ n: … }` → `{ count: … }`).
+pattern single_char_key() {
+  JsLiteralMemberName() as $key where {
+    $key <: r"^[a-z]$",
+    not $key <: r"^(?:_|z|e)$",
+    not is_allowlisted($key),
+    register_diagnostic(span=$key, message="Single-character property key — use a descriptive field name (`{ n: … }` → `{ count: … }`). Exempt: _, z, e. See naming-and-style.md.", severity="error")
+  }
+}
+
+// ── Advisory tier ────────────────────────────────────────────────────────────
+// Generic iteration-variable names where the surrounding AST names a better one
+// for free. Surfaces as `info` (does NOT fail CI) and is consumed by the
+// PR-review workflow as a nit: the author acknowledges each (fix OR explicit
+// wontfix) but is not required to act. Greppability wins in an agent-driven
+// codebase, even at the cost of a few extra chars.
+//
+// Scoped to **iteration contexts** specifically: `.map(...)` / `.filter(...)` /
+// `.find(...)` / `.forEach(...)` / `.some(...)` / `.every(...)` / `.flatMap(...)`
+// callback params, the second param of `.reduce(...)` (the accumulated element,
+// not the accumulator), and `for (…)` / `for (… of …)` loop headers. These are
+// the shapes where the surrounding collection NAMES the better variable
+// (`sessions.map((s) => …)` → `sessions.map((session) => …)`).
+//
+// Two patterns, because the two shapes match differently:
+//   • Callbacks are matched with backtick code-snippet templates (expression
+//     context — the snippet parser handles call expressions).
+//   • Loop headers are matched with AST node patterns (`JsForStatement` /
+//     `JsForOfStatement`). The snippet form `for (let $name = $_; …) $_` does NOT
+//     match for-statements in Biome 2.4.16 — it parses without error but silently
+//     fails to match (verified). Do NOT "simplify" these back to snippet templates.
+//     `$init <: contains JsIdentifierBinding()` is scoped to the initializer
+//     subtree, so it binds the loop variable and never the loop body's bindings.
+//
+// Kept intentionally narrow. A broader `JsIdentifierBinding` match was tried
+// earlier and produced a high library-idiom false-positive floor (mostly
+// framework/destructure idioms the iteration shape deliberately doesn't reach).
+// If a new shape turns out to be high-signal and not covered here, add a template
+// or node pattern rather than reverting to the broad binding match.
+pattern generic_iteration_callback_var() {
+  or {
+    `$_.map(($name) => $_)`,
+    `$_.map($name => $_)`,
+    `$_.map(($name, $_) => $_)`,
+    `$_.filter(($name) => $_)`,
+    `$_.filter($name => $_)`,
+    `$_.filter(($name, $_) => $_)`,
+    `$_.find(($name) => $_)`,
+    `$_.find($name => $_)`,
+    `$_.find(($name, $_) => $_)`,
+    `$_.forEach(($name) => $_)`,
+    `$_.forEach($name => $_)`,
+    `$_.forEach(($name, $_) => $_)`,
+    `$_.some(($name) => $_)`,
+    `$_.some($name => $_)`,
+    `$_.every(($name) => $_)`,
+    `$_.every($name => $_)`,
+    `$_.flatMap(($name) => $_)`,
+    `$_.flatMap($name => $_)`,
+    `$_.reduce(($_, $name) => $_, $_)`,
+    `$_.reduce(($_, $name) => $_)`
+  } where { flag_generic_iteration_name($name) }
+}
+
+pattern generic_iteration_loop_var() {
+  or {
+    JsForStatement(initializer=$init),
+    JsForOfStatement(initializer=$init)
+  } where { $init <: contains JsIdentifierBinding() as $name, flag_generic_iteration_name($name) }
+}
+
+// ── Root composition ─────────────────────────────────────────────────────────
+or {
+  abbreviation_binding(),
+  abbreviation_key(),
+  single_char_binding(),
+  single_char_key(),
+  generic_iteration_callback_var(),
+  generic_iteration_loop_var()
+}

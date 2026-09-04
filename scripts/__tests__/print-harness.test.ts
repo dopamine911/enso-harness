@@ -3,11 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-	buildPrintManifest,
-	materializePrintHarness,
-	PrintHarnessShapeError,
-} from "../print-harness.mjs";
+import { buildPrintManifest, materializePrintHarness, PrintHarnessShapeError } from "../print-harness.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const harnessPackageRoot = join(repoRoot, "packages", "harness");
@@ -44,9 +40,7 @@ test("buildPrintManifest removes exactly the picc extension and keeps everything
 // removing picc there turns THIS test red instead of turning a print launch into a loud
 // runtime refusal (or worse, a silent no-op filter).
 test("the real harness manifest matches the shape the print filter expects", () => {
-	const realManifest = JSON.parse(
-		readFileSync(join(harnessPackageRoot, "package.json"), "utf8"),
-	);
+	const realManifest = JSON.parse(readFileSync(join(harnessPackageRoot, "package.json"), "utf8"));
 	const printManifest = buildPrintManifest(realManifest);
 	expect(printManifest.pi.extensions.join("\n")).not.toContain("picc-permission-modes");
 	expect(printManifest.pi.extensions.join("\n")).toContain("guards");
@@ -72,11 +66,7 @@ test("a manifest where picc is the only extension refuses rather than launching 
 test("materializePrintHarness writes the filtered manifest and symlinks into the real package", () => {
 	const printDir = mkdtempSync(join(tmpdir(), "zen-print-harness-test-"));
 	try {
-		const returned = materializePrintHarness(
-			printDir,
-			harnessPackageRoot,
-			buildPrintManifest(exampleManifest),
-		);
+		const returned = materializePrintHarness(printDir, harnessPackageRoot, buildPrintManifest(exampleManifest));
 		expect(returned).toBe(printDir);
 		const written = JSON.parse(readFileSync(join(printDir, "package.json"), "utf8"));
 		expect(JSON.stringify(written)).not.toContain("picc-permission-modes");

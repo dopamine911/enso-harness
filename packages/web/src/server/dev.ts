@@ -5,9 +5,10 @@
  * sandbox and `bash` unconfined (#9), whatever this value is becomes the blast radius, so
  * it is set by whoever starts the server rather than by whoever opens the page.
  */
+
+import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdirSync } from "node:fs";
 import { startZenServer } from "./index.ts";
 
 const cwdArgument = process.argv[2];

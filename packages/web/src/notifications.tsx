@@ -36,14 +36,8 @@ let notifications: ReadonlyArray<ZenNotification> = [];
 let nextNotificationId = 1;
 const listeners = new Set<() => void>();
 
-export function pushZenNotification(
-	message: string,
-	notifyType: ZenNotifyType | undefined,
-): void {
-	const appended = [
-		...notifications,
-		{ id: nextNotificationId++, message, notifyType, at: new Date() },
-	];
+export function pushZenNotification(message: string, notifyType: ZenNotifyType | undefined): void {
+	const appended = [...notifications, { id: nextNotificationId++, message, notifyType, at: new Date() }];
 	notifications = appended.slice(-MAX_KEPT_NOTIFICATIONS);
 	for (const listener of listeners) listener();
 }
@@ -77,11 +71,7 @@ const NOTIFY_TYPE_ICONS = {
  * it stays muted with the triangle icon carrying the distinction; an absent type renders
  * as info. The full timestamp lives in `title` (hover) — the visible line stays short.
  */
-export function NotificationLine({
-	notification,
-}: {
-	notification: ZenNotification;
-}): React.ReactNode {
+export function NotificationLine({ notification }: { notification: ZenNotification }): React.ReactNode {
 	const Icon = NOTIFY_TYPE_ICONS[notification.notifyType ?? "info"];
 	return (
 		<div
