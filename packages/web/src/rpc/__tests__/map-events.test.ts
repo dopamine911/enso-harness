@@ -194,6 +194,30 @@ test("agent_end is a run ending, not a settle — and carries willRetry", () => 
 test("agent_settled is the only completion", () =>
 	expect(mapPiEvent({ type: "agent_settled" })).toEqual({ kind: "settled" }));
 
+// --- #29's remaining half: custom session entries are promoted, other entries are not
+test("a custom session entry maps with its type and data", () =>
+	expect(
+		mapPiEvent({
+			type: "entry_appended",
+			entry: { type: "custom", customType: "modes", data: { mode: "acceptEdits" } },
+		}),
+	).toEqual({ kind: "custom-entry", customType: "modes", data: { mode: "acceptEdits" } }));
+
+test("a custom entry with no data still maps — the shape belongs to its extension", () =>
+	expect(
+		mapPiEvent({ type: "entry_appended", entry: { type: "custom", customType: "modes" } }),
+	).toEqual({ kind: "custom-entry", customType: "modes", data: undefined }));
+
+// ⚠ Non-custom entries duplicate first-class observations (messages stream as
+// message_update), so they stay unmapped exactly as before this case existed.
+test("a non-custom session entry stays unmapped", () =>
+	expect(
+		kindOf({ type: "entry_appended", entry: { type: "message", message: { role: "user" } } }),
+	).toBe("unmapped"));
+
+test("an entry_appended with no readable entry stays unmapped", () =>
+	expect(kindOf({ type: "entry_appended" })).toBe("unmapped"));
+
 // ⚠ The design rule: there is no skip case.
 test("an unmodelled event is carried through with its payload intact", () => {
 	const observed = mapPiEvent({ type: "some_future_event", detail: 42 });

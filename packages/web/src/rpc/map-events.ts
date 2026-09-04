@@ -212,6 +212,22 @@ export function mapPiEvent(event: PiRpcEvent): ZenObservation {
 			};
 		}
 
+		case "entry_appended": {
+			// ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via
+			// `pi.appendEntry(customType, data)` is a receipt a surface may want (picc's
+			// "modes" entry is the only RPC-observable artifact of a successful mode change —
+			// its updateStatus is a stub and its setMode never notifies). Every other entry
+			// kind (messages, compaction, labels) duplicates information that already flows
+			// as first-class observations, so those stay unmapped, exactly as before.
+			const entry = event.entry as
+				| { type?: string; customType?: string; data?: unknown }
+				| undefined;
+			if (entry?.type === "custom" && typeof entry.customType === "string") {
+				return { kind: "custom-entry", customType: entry.customType, data: entry.data };
+			}
+			return { kind: "unmapped", event };
+		}
+
 		case "extension_error":
 			return {
 				kind: "extension-error",

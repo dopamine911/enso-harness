@@ -30,6 +30,7 @@ import {
 import { Input } from "./components/ui/input.tsx";
 import { Textarea } from "./components/ui/textarea.tsx";
 import { createFixtureChat } from "./fixture-conversation.ts";
+import { applyZenCustomEntry } from "./mode-lines.ts";
 import { pushZenNotification, SessionNotifications } from "./notifications.tsx";
 import { SelectedMessagePart } from "./selected-message-part.tsx";
 import type { ZenRendererMap } from "./ZenToolResult.tsx";
@@ -94,10 +95,16 @@ const chatOptions = {
 	 * stream processor: every CUSTOM chunk fires this with `(chunk.name, chunk.value)`.
 	 * `zen.notify`'s value is the `extension-ui-request` observation, read defensively
 	 * here the way every wire crossing in this file is: a malformed value renders as
-	 * nothing rather than throwing inside the stream loop. Other CUSTOM names
-	 * (`zen.unmapped`) stay deliberately unrendered — see the to-agui mapper.
+	 * nothing rather than throwing inside the stream loop. `zen.entry` carries a custom
+	 * session entry — the mode lines read picc's "modes" entries off it (mode-lines.ts,
+	 * #29's remaining half). Other CUSTOM names (`zen.unmapped`) stay deliberately
+	 * unrendered — see the to-agui mapper.
 	 */
 	onCustomEvent: (eventType: string, data: unknown): void => {
+		if (eventType === "zen.entry") {
+			applyZenCustomEntry(data);
+			return;
+		}
 		if (eventType !== "zen.notify") return;
 		if (typeof data !== "object" || data === null) return;
 		const observation = data as { message?: unknown; notifyType?: unknown };

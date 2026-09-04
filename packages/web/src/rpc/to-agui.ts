@@ -201,6 +201,20 @@ export function observationToAguiEvents(
 				},
 			];
 
+		case "custom-entry":
+			// An extension persisted state (#29) — a receipt the browser may render (the mode
+			// indicator reads picc's "modes" entries from this). Rides CUSTOM for the same
+			// reason unmapped does, below. ⚠ The value is the whole observation, so a consumer
+			// dispatches on `customType` rather than on a per-type chunk name — one chunk name
+			// per vendor entry type would put vendor knowledge in the transport.
+			return [
+				{
+					type: EventType.CUSTOM,
+					name: "zen.entry",
+					value: observation,
+				},
+			];
+
 		case "unmapped":
 			// ⚠ CUSTOM, not RAW. `@ag-ui/core` defines a RAW event and it looks made for this —
 			// but TanStack NARROWS `AGUIEvent`, and RAW is not in the narrowed union, so a RAW
