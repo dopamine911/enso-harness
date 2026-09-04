@@ -17,6 +17,13 @@ export const GuardPolicy = Type.Object({
 	protectedWriteFragments: Type.Array(Type.String()),
 	/** Seconds injected into a `bash` call that arrives without a timeout. */
 	defaultBashTimeoutSeconds: Type.Number({ minimum: 1 }),
+	/**
+	 * Ad-hoc network client names denied in `bash`/`powershell` commands (#9). Matched at
+	 * command position per shell segment (coarse word-scan on unparseable or PS input).
+	 * ⚠ A BAR, not a boundary: `git` and interpreters are deliberately absent — see
+	 * `network-egress.ts` for the stated non-coverage.
+	 */
+	deniedNetworkBinaries: Type.Array(Type.String()),
 });
 
 export type GuardPolicy = Static<typeof GuardPolicy>;
@@ -40,6 +47,26 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
 	],
 	protectedWriteFragments: ["/.git/"],
 	defaultBashTimeoutSeconds: 120,
+	// The ad-hoc HTTP/TCP clients plus the PowerShell fetch cmdlets (the raw scan sees
+	// those; a POSIX segment never will). git and interpreters deliberately absent (#9).
+	deniedNetworkBinaries: [
+		"curl",
+		"wget",
+		"nc",
+		"ncat",
+		"netcat",
+		"socat",
+		"ssh",
+		"scp",
+		"sftp",
+		"rsync",
+		"telnet",
+		"ftp",
+		"invoke-webrequest",
+		"invoke-restmethod",
+		"iwr",
+		"irm",
+	],
 };
 
 /**
@@ -97,8 +124,13 @@ export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [".git", ".vscod
  *                auth.json). No agent task legitimately writes there via write/edit;
  *                scripts/zen.mjs writes `.zen/print-harness` through node fs, which never
  *                passes this guard.
+ *   `.cc-safety-net` — cc-safety-net's own policy dir (#9). Probed 2026-09-04: its
+ *                checkCommand DENIES `rm -rf .cc-safety-net` but ALLOWS a shell redirect
+ *                into it (`echo x > .cc-safety-net/rules.json`), and pi's write/edit
+ *                tools never pass through checkCommand at all — so this guard is the only
+ *                layer that can keep the agent from editing the policy that gates it.
  */
-export const ZEN_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [".pi", ".agents", ".zen"];
+export const ZEN_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [".pi", ".agents", ".zen", ".cc-safety-net"];
 
 /** Basenames that deny a read outright, regardless of directory. */
 export const SECRET_BASENAME_PATTERNS: readonly RegExp[] = [

@@ -6,9 +6,11 @@ import type {
 	ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_GUARD_POLICY, type GuardPolicy } from "@zen/core";
+import { type CheckCommandResult, checkCommand } from "cc-safety-net/api";
 import {
 	canonicalToolName,
 	createSessionReadTracker,
+	findDeniedNetworkEgress,
 	isInsideAnyRoot,
 	isPersistenceWriteTarget,
 	isProtectedForWrite,
@@ -34,12 +36,25 @@ import {
  * in silence. pi ships `read`, `grep`, `find` and `ls` with a `path` today, and an
  * inclusion list naming only `read` left `grep` over ~/.aws returning the credential line.
  *
- * ⚠ WHAT THIS DOES NOT COVER
- * `bash` is only given a default timeout. It is NOT path-confined: `echo x > ~/.ssh/foo`
- * still escapes, `cat ~/.aws/credentials` bypasses the reader gate entirely, and
- * `echo x >> ~/.bashrc` bypasses the #21 persistence denial the same way. Bash
- * policy and egress are Tier 0 item 4, deliberately not attempted here — a partial bash
- * filter reads as coverage and is worse than none.
+ * BASH POLICY (#9) — two layers inside this one handler, and the boundary stated honestly:
+ * 1. `cc-safety-net@2.3.3` (exact pin, declared `./api` export, MIT) analyzes every bash
+ *    command: destructive git (`reset --hard`, `push --force`, `checkout --`), `rm -rf`
+ *    on protected paths, and — the half that closes "every other guard is bypassable via
+ *    bash" — SECRET ACCESS through the shell (`cat ~/.aws/credentials`, `.env` even as a
+ *    curl data argument). Adopted as a LIBRARY, not a registered extension, so the
+ *    tool_call participant count stays at two and #4's arbiter trigger stays unfired.
+ *    Its contract: a throw means the command must not run — so a throw IS a deny.
+ *    A contract test pins the verdict matrix; a vendor bump that shifts the boundary
+ *    goes red instead of silently moving it.
+ * 2. The network deny — ad-hoc HTTP/TCP clients at command position per shell segment,
+ *    `/dev/tcp|udp` anywhere (`core/network-egress.ts`).
+ *
+ * ⚠ WHAT BASH POLICY STILL DOES NOT COVER, deliberately, so it never reads as confinement:
+ * `git` remotes (push is this harness's job — the largest egress stays open), interpreters
+ * (`python -c` / `node -e` can open sockets — the unbounded long tail), and persistence
+ * writes through the shell (`echo x >> ~/.bashrc` — cc-safety-net allows it; #21's denial
+ * gates only write/edit). Full path-confinement of bash remains #9's option-4 non-goal:
+ * a parser that claimed it would read as coverage and not be coverage.
  *
  * TOOL IDENTITY (#4, gap 2): every tool-name comparison goes through `canonicalToolName`
  * on both sides, so a Claude-Code-style capitalised registration (`Write`, `Grep` —
@@ -136,7 +151,26 @@ function pathArgumentOf(event: ToolCallEvent | ToolResultEvent): string | undefi
 	return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-export default function guards(pi: ExtensionAPI): void {
+/**
+ * The bash analyzer seam (#9). Production wires cc-safety-net's `checkCommand`; tests
+ * inject known verdicts — `checkCommand` reads LOCAL policy per call, so a guard test
+ * that touched the real library would vary with the machine's cc-safety-net config
+ * (the contract test alone exercises the real one, and pins defaults explicitly).
+ */
+export interface GuardDependencies {
+	analyzeBashCommand: (input: { command: string; cwd: string }) => CheckCommandResult;
+}
+
+export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI) => void {
+	return function guards(pi: ExtensionAPI): void {
+		guardsWithDependencies(pi, dependencies);
+	};
+}
+
+/** The pi entry point — the real analyzer, wired at the composition root. */
+export default createGuards({ analyzeBashCommand: checkCommand });
+
+function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencies): void {
 	const policy: GuardPolicy = DEFAULT_GUARD_POLICY;
 
 	// #10: which files this session has seen. Session-scoped twice over: pi tears the
@@ -222,10 +256,57 @@ export default function guards(pi: ExtensionAPI): void {
 			};
 		}
 
-		// --- bash: patch, do not block. `event.input` is mutable by contract, and a
-		// missing timeout means a hung command holds the session indefinitely.
+		// --- bash/powershell (#9): deny first, patch last — a denied command must never
+		// have had its input mutated.
 		if (toolName === TOOL_BASH || toolName === TOOL_POWERSHELL) {
 			const input = event.input as Record<string, unknown>;
+			const command = typeof input.command === "string" ? input.command : "";
+
+			// 1. cc-safety-net (destructive commands + secret access THROUGH bash) — as a
+			// LIBRARY inside this one handler, so the tool_call participant count stays at
+			// two and #4's third-participant trigger stays unfired. bash only: checkCommand
+			// parses POSIX shell, and feeding it PowerShell would produce verdicts about a
+			// command it misread in either direction. Its own contract: "If this function
+			// throws, the caller must not execute the command" — so a throw IS a deny.
+			if (toolName === TOOL_BASH && command.length > 0) {
+				let safetyNetVerdict: CheckCommandResult;
+				try {
+					safetyNetVerdict = dependencies.analyzeBashCommand({ command, cwd });
+				} catch (error) {
+					console.error("guards: cc-safety-net checkCommand threw — denying per its contract", error);
+					safetyNetVerdict = {
+						kind: "deny",
+						reason: `the safety analyzer failed (${String(error)}), and its contract is that an unanalyzed command must not run`,
+					};
+				}
+				if (safetyNetVerdict.kind === "deny") {
+					return {
+						block: true,
+						reason:
+							`Bash command blocked by cc-safety-net${"ruleId" in safetyNetVerdict && safetyNetVerdict.ruleId !== undefined ? ` (${safetyNetVerdict.ruleId})` : ""}: ` +
+							safetyNetVerdict.reason,
+					};
+				}
+			}
+
+			// 2. The network deny (#9) — a bar, not a boundary; `network-egress.ts` states
+			// the non-coverage (git remotes, interpreters). PowerShell always takes the
+			// coarse raw scan: the segmenter speaks POSIX, not PS.
+			const egress = findDeniedNetworkEgress(command, policy.deniedNetworkBinaries, {
+				coarse: toolName === TOOL_POWERSHELL,
+			});
+			if (egress !== undefined) {
+				return {
+					block: true,
+					reason:
+						`${toolName} network egress is blocked: "${egress.matched}" (matched by ${egress.via}). ` +
+						`Ad-hoc network clients are denied in shell commands (#9); there is no fetch tool yet, ` +
+						`so web access is unavailable to this session by policy — do not try to work around it.`,
+				};
+			}
+
+			// 3. Patch, do not block: a missing timeout means a hung command holds the
+			// session indefinitely. LAST, so no denied command gets mutated input.
 			if (input.timeout === undefined) {
 				input.timeout = policy.defaultBashTimeoutSeconds;
 			}
