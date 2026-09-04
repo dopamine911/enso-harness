@@ -93,7 +93,8 @@
 			}
 		},
 		"domains": {
-			"test": "all"
+			"test": "all",
+			"react": "recommended"
 		}
 	},
 	"javascript": {
