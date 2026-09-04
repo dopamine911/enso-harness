@@ -153,9 +153,13 @@ type WrappedWordFinding =
 
 /**
  * Scan every word of a wrapper-led segment with the command-word treatment. A word's
- * LITERAL value is checked by its first internal whitespace token (so a quoted payload
- * like `bash -c "curl https://x"` is caught by its leading token), basename'd and
- * case-folded; `NAME=value` words (env's assignments) and the exempted `[`/`{}` are
+ * LITERAL value is checked by EVERY internal whitespace token — a quoted `-c`/`eval`
+ * payload is a full shell script (`bash -c "echo hi && curl …"`), and checking only its
+ * first token was PR #55 review round 4: the word resolved cleanly to the wrong token
+ * and, having resolved, never escalated — the round-1 shape again, a clean-but-wrong
+ * value silencing the fallback that would have caught it. All-token scanning is the
+ * wrapper-mode philosophy applied inside the payload; each token is basename'd and
+ * case-folded. `NAME=value` words (env's assignments) and the exempted `[`/`{}` are
  * skipped; synthesis and runtime-expansion words report as themselves so the caller
  * denies or escalates exactly as it would at command position.
  */
@@ -172,10 +176,11 @@ function deniedWordInWrappedSegment(segmentText: string, denied: Set<string>): W
 			sawUnresolvable = true;
 			continue;
 		}
-		const firstToken = resolved.value.trim().split(/\s/, 1)[0] ?? "";
-		if (firstToken.length === 0) continue;
-		const canonical = canonicalToolName(basename(firstToken));
-		if (denied.has(canonical)) return { kind: "denied", word: canonical };
+		for (const token of resolved.value.trim().split(/\s+/)) {
+			if (token.length === 0) continue;
+			const canonical = canonicalToolName(basename(token));
+			if (denied.has(canonical)) return { kind: "denied", word: canonical };
+		}
 	}
 	return sawUnresolvable ? { kind: "unresolvable" } : undefined;
 }
