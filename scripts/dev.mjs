@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Run both dev surfaces with one command.
  *
@@ -11,10 +11,9 @@
  * refused connection, it returns 500 to the browser, and that reads as "the app is broken"
  * rather than "the API is not up yet". So the server is started first and given a moment.
  *
- * Usage:  npm run dev                 # pi runs in the repo root
- *         npm run dev -- /some/path   # pi runs there instead
+ * Usage:  bun run dev                 # pi runs in the repo root
+ *         bun run dev /some/path      # pi runs there instead
  */
-import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,23 +26,38 @@ const piCwd = process.argv[2] ?? repoRoot;
 const children = [];
 let shuttingDown = false;
 
-function run(label, command, args) {
-	const child = spawn(command, args, { cwd: webPackageDir, stdio: ["ignore", "pipe", "pipe"] });
-	const prefix = (chunk) =>
-		String(chunk)
+/** Prefix every line a stdio stream produces; resolves when the stream ends. */
+async function prefixStream(stream, label, emit) {
+	const decoder = new TextDecoder();
+	for await (const chunk of stream) {
+		const lines = decoder
+			.decode(chunk, { stream: true })
 			.split("\n")
 			.filter((line) => line.length > 0)
 			.map((line) => `[${label}] ${line}`)
 			.join("\n");
-	child.stdout.on("data", (chunk) => console.log(prefix(chunk)));
-	child.stderr.on("data", (chunk) => console.error(prefix(chunk)));
-	// ⚠ If either surface dies, take the other down. A half-running dev environment is
-	// worse than none: vite serving a page whose API is gone looks like an app bug.
-	child.on("exit", (code) => {
-		if (shuttingDown) return;
-		console.error(`[dev] ${label} exited (${code ?? "signal"}) — stopping the other surface`);
-		shutdown();
+		if (lines.length > 0) emit(lines);
+	}
+}
+
+function run(label, command, args) {
+	const child = Bun.spawn([command, ...args], {
+		cwd: webPackageDir,
+		stdin: "ignore",
+		stdout: "pipe",
+		stderr: "pipe",
+		// ⚠ If either surface dies, take the other down. A half-running dev environment is
+		// worse than none: vite serving a page whose API is gone looks like an app bug.
+		onExit(_child, code, signalCode) {
+			if (shuttingDown) return;
+			console.error(
+				`[dev] ${label} exited (${code ?? signalCode ?? "signal"}) — stopping the other surface`,
+			);
+			shutdown();
+		},
 	});
+	void prefixStream(child.stdout, label, (lines) => console.log(lines));
+	void prefixStream(child.stderr, label, (lines) => console.error(lines));
 	children.push(child);
 	return child;
 }
@@ -60,8 +74,10 @@ process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 console.error(`[dev] pi will run in ${piCwd}`);
-run("server", "node", ["--experimental-strip-types", "src/server/dev.ts", piCwd]);
+// ⚠ bun runs the server (#30): the runtime the tests exercise (`bun test`) is now the
+// runtime that ships. Node's strip-types flag — and its strip-ONLY constraint — is gone.
+run("server", "bun", ["src/server/dev.ts", piCwd]);
 
 setTimeout(() => {
-	if (!shuttingDown) run("web", "npx", ["vite"]);
+	if (!shuttingDown) run("web", "bunx", ["vite"]);
 }, SERVER_HEAD_START_MS).unref();

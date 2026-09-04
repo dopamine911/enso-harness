@@ -153,7 +153,7 @@ function assertVendorLinks(harnessPackageDir: string): void {
 		throw new Error(
 			`zen-server: vendor package paths are missing from the harness package:\n` +
 				`${missing.map((entry) => `  - ${entry}`).join("\n")}\n` +
-				`Run \`npm install && npm run link:vendor\`.`,
+				`Run \`bun install\` (its postinstall relinks the vendor packages).`,
 		);
 	}
 }

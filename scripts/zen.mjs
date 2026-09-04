@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Launch a VANILLA pi with only zen-harness loaded.
  *
@@ -36,10 +36,9 @@
  *   bare `invalid_grant: "Refresh token expired"`. That is the cost of the isolation
  *   working, not a bug in it — see docs/concepts/provider-auth-and-client-identity.md.
  *
- * Usage:  npm run zen -- -p "hello"
- *         ZEN_AGENT_DIR=/somewhere/else npm run zen
+ * Usage:  bun run zen -p "hello"
+ *         ZEN_AGENT_DIR=/somewhere/else bun run zen
  */
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,7 +61,7 @@ if (declaredResources.length === 0) {
  * ⚠ pi does NOT error on a manifest resource path that does not exist — it skips it
  * silently (verified 2026-09-03: the vendor extension did not load and nothing was
  * reported). npm workspaces hoist our vendor packages to the repo root, so those paths
- * are missing until `npm run link:vendor` materializes them. Check here and refuse to
+ * are missing until `bun run link:vendor` materializes them. Check here and refuse to
  * launch, because the alternative is a session that looks correct and is missing
  * whatever the vendor package was supposed to provide.
  */
@@ -73,7 +72,7 @@ const missingVendorPaths = declaredResources
 if (missingVendorPaths.length > 0) {
 	console.error("zen: vendor package paths are missing from the harness package:");
 	for (const missing of missingVendorPaths) console.error(`  - ${missing}`);
-	console.error("zen: run `npm install && npm run link:vendor`");
+	console.error("zen: run `bun install` (its postinstall relinks the vendor packages)");
 	process.exit(1);
 }
 
@@ -86,7 +85,9 @@ console.error(
 	`zen: vanilla pi | agent-dir=${agentDir} | package=${packageRoot} | ${declaredResources.length} declared resource path(s)`,
 );
 
-spawn("pi", args, {
-	stdio: "inherit",
+const pi = Bun.spawn(["pi", ...args], {
+	stdio: ["inherit", "inherit", "inherit"],
 	env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
-}).on("exit", (code) => process.exit(code ?? 0));
+});
+// `exited` resolves with the exit code (never null, unlike Node's `exit` event).
+process.exit(await pi.exited);
