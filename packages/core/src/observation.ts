@@ -102,6 +102,29 @@ export const ZenExtensionUiRequest = Type.Object({
 	notifyType: Type.Optional(ZenNotifyType),
 });
 
+/**
+ * A CUSTOM session entry was appended (#29) — an extension persisted state via
+ * `pi.appendEntry(customType, data)`.
+ *
+ * This is a STATE receipt, not an event narration: the entry says "this extension's
+ * persisted state is now `data`", and it may be re-appended without anything having
+ * changed (picc persists on session start and on rule updates, not only on a mode
+ * change). A renderer that wants to show a change must diff against the previous value
+ * itself. `data` is `Type.Unknown()` for the same reason `ZenUnmapped.event` is: the
+ * shape belongs to the extension that wrote it, and constraining it here would turn
+ * "we do not render this yet" into "the transport is broken".
+ *
+ * ⚠ Only `type: "custom"` entries map here. Other session entries (messages, compaction,
+ * labels) duplicate information that already flows as first-class observations, so they
+ * stay `unmapped`.
+ */
+export const ZenCustomSessionEntry = Type.Object({
+	kind: Type.Literal("custom-entry"),
+	customType: Type.String(),
+	data: Type.Unknown(),
+});
+export type ZenCustomSessionEntry = Static<typeof ZenCustomSessionEntry>;
+
 /** An extension threw. Surfaced, never swallowed. */
 export const ZenExtensionError = Type.Object({
 	kind: Type.Literal("extension-error"),
@@ -136,6 +159,7 @@ export const ZenObservation = Type.Union([
 	ZenThinkingDelta,
 	ZenToolCall,
 	ZenToolResultObservation,
+	ZenCustomSessionEntry,
 	ZenExtensionError,
 	ZenExtensionUiRequest,
 	ZenRunEnded,
