@@ -29,6 +29,12 @@ import { findRepoRoot, harnessPackageDir } from "@zen/core";
  * handler (the cc-safety-net pattern), or the deferred arbiter (#4) is now due: read that
  * issue's comments first — the design is already worked out there, including the shipped
  * shapes it merges and the fail-mode lessons it must carry.
+ *
+ * ⚠ Accepted tradeoff (PR #62 review): detection is a literal-string scan, the same
+ * tradeoff every anchor here makes — a registration through a constant
+ * (`pi.on(TOOL_CALL_EVENT, …)`) would evade it. The anchor guards against DRIFT by
+ * honest collaborators, not evasion; an in-repo evader is a review problem, not a scan
+ * problem.
  */
 
 const repositoryRoot = findRepoRoot(import.meta.url);
@@ -102,4 +108,18 @@ test("the vendored participant list itself is current — every declared vendor 
 	for (const { root } of vendorTrees) {
 		expect(() => realpathSync(root)).not.toThrow();
 	}
+});
+
+test("every LOCAL manifest extension lives under the scanned extensions/ tree — the local half of the width pin", () => {
+	// Same vacuous-pass shape from the other direction (PR #62 review): the local scan is
+	// one fixed tree, so a future manifest entry like ./tools/foo.ts would sit in front of
+	// pi without ever being scanned. Offenders named; whoever moves an extension out of
+	// extensions/ extends the scan consciously, in this file.
+	const manifest = JSON.parse(readFileSync(join(harnessRoot, "package.json"), "utf8")) as {
+		pi?: { extensions?: string[] };
+	};
+	const unscannedLocalEntries = (manifest.pi?.extensions ?? [])
+		.filter((extensionEntry) => !extensionEntry.startsWith("node_modules/"))
+		.filter((extensionEntry) => !extensionEntry.startsWith("./extensions/"));
+	expect(unscannedLocalEntries).toEqual([]);
 });
