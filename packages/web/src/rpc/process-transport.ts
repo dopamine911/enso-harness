@@ -1,14 +1,12 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import {
-	isPiLaunchConfig,
-	type PiProcessCallbacks,
-	type PiProcessHandle,
-	type PiProcessOptions,
-	type PiTransport,
+import type {
+	PiProcessCallbacks,
+	PiProcessHandle,
+	PiProcessOptions,
+	PiTransport,
 } from "@zen/core";
 
 /**
- * `PiTransport` over a real pi process (#24).
+ * `PiTransport` over a real pi process (#24), spawned with `Bun.spawn` (#30).
  *
  * ⚠ WHERE PI RUNS IS A PARAMETER, NOT AN ASSUMPTION
  * `command` and `args` are supplied, so this launches `pi` on PATH today and a container
@@ -20,68 +18,147 @@ import {
  * no `--acp` flag — it prints help and exits 0. pi speaks `--mode rpc`, which is what this
  * launches, and that choice is what keeps images and streamed usage (both unsupported by
  * `@tanstack/ai-acp`).
+ *
+ * ⚠ WHY `Bun.spawn` AND NOT `node:child_process` (#30)
+ * The old transport listened for Node's `close` event over `exit` to avoid dropping a final
+ * record still buffered at exit — and its own comment admitted that choice was REASONED,
+ * NOT PROVEN, then #30 moved the process onto bun where the claim was about a compat shim
+ * nobody had read. Here the ordering is structural instead of evented: `onClose` consumers
+ * fire only after BOTH stdio pumps have read their streams to end-of-stream, so everything
+ * pi wrote — including an unterminated final record — has already been delivered to the
+ * data consumers by the time close is announced. There is no event to pick wrongly.
  */
 
 const DEFAULT_PI_COMMAND = "pi";
 /** `--mode rpc` is the whole reason this transport exists; it is not caller-overridable. */
 const RPC_MODE_ARGS = ["--mode", "rpc"] as const;
 
-export function piTransportFromChild(
-	child: ChildProcessWithoutNullStreams,
-	options: PiProcessCallbacks = {},
-): PiTransport {
-	child.stdout.setEncoding("utf8");
-	child.stderr.setEncoding("utf8");
+/**
+ * The slice of `Bun.Subprocess` the transport touches, named so a test can hand in a fake
+ * without reproducing the full `Subprocess` surface (ipc, ref-counting, resource usage).
+ * A real `Subprocess<"pipe", "pipe", "pipe">` satisfies it structurally.
+ */
+export interface PiChildProcess {
+	/** Bun's `FileSink`: writes are buffered until `flush()`; `end()` closes the pipe. */
+	readonly stdin: {
+		write(chunk: string): number | Promise<number>;
+		flush(): number | Promise<number>;
+		end(): number | Promise<number>;
+	};
+	readonly stdout: ReadableStream<Uint8Array>;
+	readonly stderr: ReadableStream<Uint8Array>;
+	readonly pid: number;
+	kill(signal?: number | NodeJS.Signals): void;
+}
 
-	if (options.onStderr !== undefined) {
-		child.stderr.on("data", (chunk: string) => options.onStderr?.(chunk));
+/**
+ * Decode a stdio stream as UTF-8 and hand each non-empty text chunk to `consume`; resolves
+ * once the stream ends (the child closed that pipe and everything buffered was read).
+ *
+ * ⚠ ONE `TextDecoder` PER STREAM, IN STREAMING MODE. A multibyte character can be split
+ * across pipe chunks; `decode(value, { stream: true })` holds the partial sequence instead
+ * of emitting U+FFFD into the middle of a JSON line. The final bare `decode()` flushes a
+ * sequence left dangling by a child that died mid-character.
+ */
+async function pumpUtf8Stream(
+	stream: ReadableStream<Uint8Array>,
+	consume: (text: string) => void,
+): Promise<void> {
+	const decoder = new TextDecoder();
+	const reader = stream.getReader();
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		const text = decoder.decode(value, { stream: true });
+		if (text.length > 0) consume(text);
 	}
-	if (options.onExit !== undefined) {
-		child.on("exit", (code, signal) => options.onExit?.(code, signal));
-	}
+	const tail = decoder.decode();
+	if (tail.length > 0) consume(tail);
+}
+
+export function piTransportFromChild(
+	child: PiChildProcess,
+	callbacks: Pick<PiProcessCallbacks, "onStderr"> = {},
+): PiTransport {
+	const dataConsumers: Array<(chunk: string) => void> = [];
+	const closeConsumers: Array<() => void> = [];
+
+	// ⚠ The pumps start NOW, but no chunk can be delivered before the caller's synchronous
+	// code finishes — the first `await` inside the pump defers everything past it to a later
+	// task. Both consumers of this transport (`PiRpcClient`, and the test harness) register
+	// their callbacks synchronously after construction, which is the contract: register in
+	// the same tick you receive the transport, or the first chunks race your registration.
+	const stdoutDrained = pumpUtf8Stream(child.stdout, (text) => {
+		for (const consume of dataConsumers) consume(text);
+	});
+	const stderrDrained = pumpUtf8Stream(child.stderr, (text) => callbacks.onStderr?.(text));
+
+	// Close = both pipes fully drained, matching what Node's `close` event promised — but as
+	// an ordering guarantee of this code, not a property of someone else's event scheduling.
+	void Promise.all([stdoutDrained, stderrDrained]).then(() => {
+		for (const consume of closeConsumers) consume();
+	});
 
 	return {
 		write: (line) => {
-			// A dead pipe throws EPIPE asynchronously; the client's close handling reports
-			// outstanding commands, so swallowing here would hide the cause.
+			// A FileSink buffers; flush pushes the frame down the pipe now. An rpc command
+			// must not sit in a buffer waiting for later writes that may never come.
+			//
+			// ⚠ A write to a DEAD pipe is silent under bun — no sync throw, no async EPIPE
+			// (observed 2026-09-03: write/flush after child exit return normally). Node threw
+			// EPIPE here; bun reports nothing, so the close handling above is the ONLY signal
+			// that a command went to a pi that is gone. Do not add error handling here
+			// expecting one.
 			child.stdin.write(line);
+			child.stdin.flush();
 		},
 		onData: (consume) => {
-			child.stdout.on("data", (chunk: string) => consume(chunk));
+			dataConsumers.push(consume);
 		},
 		onClose: (consume) => {
-			// `close` rather than `exit`, because Node fires `close` only once every stdio
-			// stream is done while `exit` can fire with stdout still buffered — which would
-			// drop the final records the splitter holds.
-			//
-			// ⚠ REASONED, NOT PROVEN. Mutating this to `exit` leaves the whole suite green:
-			// the tests here write little enough that the two events coalesce, and forcing a
-			// buffered-at-exit race reliably is not something a test can promise. Kept
-			// because it is the documented-correct listener, not because a test defends it —
-			// so do not "simplify" it to `exit` on the strength of a passing suite.
-			child.on("close", () => consume());
+			closeConsumers.push(consume);
 		},
 	};
 }
 
-/** The spawn call, injectable so argument construction is assertable without launching pi. */
-export type SpawnLike = typeof spawn;
+/**
+ * The spawn call, injectable so argument construction is assertable without launching pi.
+ * The options shape is the subset of `Bun.SpawnOptions` this module actually passes.
+ */
+export type SpawnLike = (
+	cmd: string[],
+	options: {
+		cwd: string;
+		env?: Record<string, string | undefined>;
+		stdin: "pipe";
+		stdout: "pipe";
+		stderr: "pipe";
+		onExit?: (child: unknown, exitCode: number | null, signalCode: number | null) => void;
+	},
+) => PiChildProcess;
+
+/** The real spawn, adapted once so the seam type stays narrower than `typeof Bun.spawn`. */
+const spawnWithBun: SpawnLike = (cmd, options) => Bun.spawn(cmd, options);
 
 export function spawnPiRpcProcess(
 	options: PiProcessOptions,
-	spawnImpl: SpawnLike = spawn,
+	spawnImpl: SpawnLike = spawnWithBun,
 ): PiProcessHandle {
-	const child: ChildProcessWithoutNullStreams = spawnImpl(
-		options.command ?? DEFAULT_PI_COMMAND,
-		[...RPC_MODE_ARGS, ...(options.args ?? [])],
+	const child = spawnImpl(
+		[options.command ?? DEFAULT_PI_COMMAND, ...RPC_MODE_ARGS, ...(options.args ?? [])],
 		{
 			cwd: options.cwd,
-			// `spawn` inherits the parent environment when `env` is omitted; passing an
+			// `Bun.spawn` inherits the parent environment when `env` is omitted; passing an
 			// explicit object replaces it entirely. Both are legitimate — the caller chooses.
 			...(options.env === undefined ? {} : { env: options.env }),
-			stdio: ["pipe", "pipe", "pipe"],
+			stdin: "pipe",
+			stdout: "pipe",
+			stderr: "pipe",
+			// Bun's callback leads with the subprocess itself; the `PiProcessCallbacks`
+			// contract is (code, signal), so the extra argument is dropped here.
+			onExit: (_child, exitCode, signalCode) => options.onExit?.(exitCode, signalCode),
 		},
-	) as ChildProcessWithoutNullStreams;
+	);
 
 	return {
 		transport: piTransportFromChild(child, options),

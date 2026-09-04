@@ -39,7 +39,6 @@
  * Usage:  bun run zen -p "hello"
  *         ZEN_AGENT_DIR=/somewhere/else bun run zen
  */
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,7 +85,9 @@ console.error(
 	`zen: vanilla pi | agent-dir=${agentDir} | package=${packageRoot} | ${declaredResources.length} declared resource path(s)`,
 );
 
-spawn("pi", args, {
-	stdio: "inherit",
+const pi = Bun.spawn(["pi", ...args], {
+	stdio: ["inherit", "inherit", "inherit"],
 	env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
-}).on("exit", (code) => process.exit(code ?? 0));
+});
+// `exited` resolves with the exit code (never null, unlike Node's `exit` event).
+process.exit(await pi.exited);
