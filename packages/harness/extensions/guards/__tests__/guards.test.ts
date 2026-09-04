@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
@@ -193,3 +193,90 @@ test("session_start resets the read-set on a live instance", () => {
 	runtime.sessionStart({ type: "session_start", reason: "resume" }, { cwd });
 	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })?.block).toBe(true);
 });
+
+// ── #11: a file changed underneath the session is refused, loudly and distinctly ─────────
+
+/** Move a file's mtime one full second forward — unambiguous at any stat resolution. */
+function touchForward(filePath: string): void {
+	const later = new Date(Date.now() + 1000);
+	utimesSync(filePath, later, later);
+}
+
+test("write to a file that changed after the session read it is blocked as CHANGED", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	runtime.toolResult(toolResultEvent("read", existingFile, false), { cwd });
+	touchForward(join(cwd, existingFile));
+	const result = runtime.toolCall(toolCallEvent("write", existingFile), { cwd });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("CHANGED");
+	expect(result?.reason).toContain(existingFile);
+	// ⚠ The acceptance asks for DISTINCT causes: this is not #10's never-read message.
+	expect(result?.reason).not.toContain("has not read");
+});
+
+// ⚠ The asymmetry with #10: edit passes on an UNKNOWN file (above) but is refused on a
+// STALE one — an exact-match can survive an external change and clobber around it.
+test("edit of a file that changed after the session read it is blocked too", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	runtime.toolResult(toolResultEvent("read", existingFile, false), { cwd });
+	touchForward(join(cwd, existingFile));
+	const result = runtime.toolCall(toolCallEvent("edit", existingFile), { cwd });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("CHANGED");
+});
+
+test("re-reading the changed file clears the staleness and the write passes", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	runtime.toolResult(toolResultEvent("read", existingFile, false), { cwd });
+	touchForward(join(cwd, existingFile));
+	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })?.block).toBe(true);
+	runtime.toolResult(toolResultEvent("read", existingFile, false), { cwd });
+	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })).toBeUndefined();
+});
+
+// ⚠ THE RECORDED INCIDENT, replayed with real git: a tracked-but-unstaged mutation
+// restored from the index (`git checkout -- <file>`) destroys the unstaged work with no
+// error anywhere — untracked files fail loudly, and that asymmetry is the trap. The two
+// contents are the SAME LENGTH deliberately, so only the mtime leg of the stamp can catch
+// the restore — this test is what pins that git's restore actually moves mtime.
+const isGitAvailable = Bun.which("git") !== null;
+test.skipIf(!isGitAvailable)(
+	"the incident shape: staged, mutated, restored from index — the write is refused",
+	() => {
+		const repo = mkdtempSync(join(tmpdir(), "zen-guard-incident-"));
+		const runGit = (...args: string[]) => {
+			const result = Bun.spawnSync(["git", ...args], { cwd: repo });
+			if (result.exitCode !== 0) {
+				throw new Error(`git ${args[0]} failed: ${result.stderr.toString()}`);
+			}
+		};
+		runGit("init", "-q");
+		runGit("config", "user.email", "test@example.invalid");
+		runGit("config", "user.name", "guard-test");
+		const filePath = join(repo, "work.ts");
+		writeFileSync(filePath, "version-one\n");
+		runGit("add", "work.ts");
+		// The session's work: a tracked-but-unstaged mutation, same byte length.
+		writeFileSync(filePath, "version-two\n");
+		// ⚠ Backdate the mutation two seconds: in the real incident the observation and the
+		// restore are separated by wall-clock time, and compressing them into one test tick
+		// put both inside the SAME mtimeMs — the restore classified fresh and this test
+		// failed. That was the documented same-size-same-millisecond gap manifesting, not a
+		// broken guard; backdating restores the realistic separation deterministically.
+		const twoSecondsAgo = new Date(Date.now() - 2000);
+		utimesSync(filePath, twoSecondsAgo, twoSecondsAgo);
+		const runtime = loadGuardRuntime();
+		runtime.toolResult(toolResultEvent("read", "work.ts", false), { cwd: repo });
+		const observed = statSync(filePath);
+		// The concurrent agent's restore.
+		runGit("checkout", "--", "work.ts");
+		const restored = statSync(filePath);
+		// Assert the CAUSE before the effect: the restore moved mtime while size is equal,
+		// so a pass below is attributable to the mtime leg, not to a size difference.
+		expect(restored.size).toBe(observed.size);
+		expect(restored.mtimeMs).not.toBe(observed.mtimeMs);
+		const result = runtime.toolCall(toolCallEvent("write", "work.ts"), { cwd: repo });
+		expect(result?.block).toBe(true);
+		expect(result?.reason).toContain("CHANGED");
+	},
+);

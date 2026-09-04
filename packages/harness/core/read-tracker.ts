@@ -1,18 +1,38 @@
+import { existsSync, statSync } from "node:fs";
 import { realpathOfNearestExisting } from "./paths.ts";
 
 /**
- * Session-scoped record of files whose content this session has seen (#10).
+ * Session-scoped record of files whose content this session has seen (#10), and of the
+ * on-disk state they had when it saw them (#11).
  *
  * `write` replaces a whole file knowing nothing of what it destroys — pi's own description:
- * "overwrites if it does [exist]". `edit` is accidentally safe (a blind edit fails its
- * exact-match), so `write` is the one mutating tool with no knowledge precondition. This
- * tracker supplies that precondition's state: the guard blocks a `write` to an EXISTING
- * file unless the session has read it (or authored it — see the guard's knowledge set).
+ * "overwrites if it does [exist]". `edit` is accidentally safe against a *blind* edit (its
+ * exact-match fails), so `write` is the one mutating tool with no knowledge precondition
+ * (#10). Neither tool notices that a file CHANGED UNDERNEATH the session (#11): nothing in
+ * pi checks mtime or content between the read the model saw and the mutation it issues.
+ * The recorded incident this closes is a concurrent agent in the same checkout restoring a
+ * tracked-but-unstaged file from the index — the work vanished with no error anywhere.
+ *
+ * So each recorded file carries a STAMP — `{mtimeMs, size}` from `statSync` at the moment
+ * of observation — and {@link SessionReadTracker.classifyPath} reports one of three states:
+ *
+ *   "unknown"  never observed this session (#10 blocks `write` to an existing unknown file)
+ *   "fresh"    observed, and the current stat still matches the stamp
+ *   "stale"    observed, but mtimeMs or size moved — something else touched the file
+ *              (#11 blocks `write` AND `edit`, with a message naming the cause)
+ *
+ * ⚠ Known gap, accepted: a same-size rewrite landing in the same millisecond escapes
+ * mtime+size. The incident class this exists for (`git checkout --` restores, another
+ * agent's writes) always moves mtime; closing the residue would mean hashing the full
+ * file on every stamp and every check. ⚠ A second small window: the stamp is taken at
+ * `tool_result` time, marginally after the tool's own filesystem access — an external
+ * write landing inside that gap is stamped as if the session saw it. Both are the cost
+ * of stat-based detection, stated rather than hidden.
  *
  * Identity is the realpath (via {@link realpathOfNearestExisting}), so a read through a
  * symlink or a `../` spelling and a write through the direct path count as the same file.
- * Both record and check happen on paths that exist at the time (a read succeeded; a write
- * targets an existing file), so the realpath is fully resolved in both directions.
+ * If the file cannot be statted at record time (deleted between the tool's execution and
+ * its result), NOTHING is recorded — an unstamped entry could never be classified later.
  *
  * ⚠ The state must be SESSION-scoped, never process-scoped — a closure that outlives the
  * session permits writes on stale knowledge. Two mechanisms keep it session-scoped: pi
@@ -21,26 +41,69 @@ import { realpathOfNearestExisting } from "./paths.ts";
  * (which additionally fires for "reload" and "resume", where the runtime survives but the
  * conversation context does not carry the old reads).
  */
+
+/** What the session knew of a file when it last observed it. */
+interface ObservedFileStamp {
+	mtimeMs: number;
+	size: number;
+}
+
+export type KnownPathState = "unknown" | "fresh" | "stale";
+
 export interface SessionReadTracker {
-	/** Record that the session has seen this file's content (a successful read or write). */
+	/**
+	 * Record that the session has seen this file's content (a successful read or write),
+	 * stamping the file's current stat. A file that cannot be statted records nothing.
+	 */
 	recordKnownPath(absolutePath: string): void;
-	/** True when the session has seen the content of the file this path resolves to. */
-	isKnownPath(absolutePath: string): boolean;
+	/** How the file this path resolves to relates to what the session last saw of it. */
+	classifyPath(absolutePath: string): KnownPathState;
 	/** Forget everything — called on session_start. */
 	reset(): void;
 }
 
 export function createSessionReadTracker(): SessionReadTracker {
-	const knownRealpaths = new Set<string>();
+	const stampsByRealpath = new Map<string, ObservedFileStamp>();
+
+	function statStampOf(realpath: string): ObservedFileStamp | undefined {
+		try {
+			const stats = statSync(realpath);
+			return { mtimeMs: stats.mtimeMs, size: stats.size };
+		} catch {
+			return undefined;
+		}
+	}
+
 	return {
 		recordKnownPath(absolutePath: string): void {
-			knownRealpaths.add(realpathOfNearestExisting(absolutePath));
+			// ⚠ Only a path that EXISTS may be recorded: for a missing file,
+			// realpathOfNearestExisting degrades to the nearest existing ANCESTOR, and
+			// stamping that directory poisons the map — a directory's mtime moves on any
+			// entry creation, so the stamp would later classify unrelated paths under it
+			// as "stale" and block ordinary file creation. Found by the record-nothing test.
+			if (!existsSync(absolutePath)) return;
+			const realpath = realpathOfNearestExisting(absolutePath);
+			const stamp = statStampOf(realpath);
+			if (stamp === undefined) return;
+			stampsByRealpath.set(realpath, stamp);
 		},
-		isKnownPath(absolutePath: string): boolean {
-			return knownRealpaths.has(realpathOfNearestExisting(absolutePath));
+		classifyPath(absolutePath: string): KnownPathState {
+			const realpath = realpathOfNearestExisting(absolutePath);
+			const recorded = stampsByRealpath.get(realpath);
+			if (recorded === undefined) return "unknown";
+			const current = statStampOf(realpath);
+			// ⓘ A recorded file DELETED underneath us never reaches this line: its realpath
+			// degrades to the nearest existing ancestor above, misses the map, and returns
+			// "unknown" — so a write to the now-absent path takes the ordinary creation
+			// route. This branch is the narrow remainder (a stat race, a permission flip):
+			// the disk no longer matches what the session saw, so fail toward stale.
+			if (current === undefined) return "stale";
+			return current.mtimeMs === recorded.mtimeMs && current.size === recorded.size
+				? "fresh"
+				: "stale";
 		},
 		reset(): void {
-			knownRealpaths.clear();
+			stampsByRealpath.clear();
 		},
 	};
 }

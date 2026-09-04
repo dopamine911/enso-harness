@@ -57,6 +57,18 @@ import {
  * state lives in a session-scoped tracker reset on `session_start`. ⚠ Known limit, accepted:
  * the tracker survives context compaction, the model's memory of the file may not — the
  * SESSION has seen the file even when the model no longer has the bytes in context.
+ *
+ * STALE-WRITE DETECTION (#11, Tier 1 item 6): each observation also stamps the file's
+ * `{mtimeMs, size}`, and a `write` OR `edit` whose target no longer matches its stamp is
+ * refused as "changed underneath us" — distinct from #10's "never read", because the
+ * remedy differs: the on-disk content is newer than the session's picture, so re-applying
+ * the old intent unchanged may itself be the mistake. ⚠ The `edit` asymmetry is deliberate
+ * and easy to misread: `edit` on an UNKNOWN file passes (its exact-match is its own guard
+ * against blindness), but `edit` on a STALE file is refused — an exact-match can succeed
+ * against a fragment that survived the external change and then silently clobber
+ * everything around it. The incident this closes: a concurrent agent in this checkout
+ * restored a tracked-but-unstaged file from the index, and the unstaged work vanished
+ * with no error anywhere.
  */
 
 /**
@@ -164,12 +176,30 @@ export default function guards(pi: ExtensionAPI): void {
 					reason: `Writing to "${candidate}" is blocked: it matches a credential pattern.`,
 				};
 			}
-			// --- #10: `write` replaces a whole file knowing nothing of what it destroys, so an
-			// EXISTING file may only be written once this session has seen its content. A path
-			// that does not exist is unaffected — creation is the common case, and a rule that
-			// fights it gets turned off. `edit` is exempt: its exact-match precondition already
-			// fails a blind edit rather than corrupting.
-			if (event.toolName === "write" && existsSync(target) && !readTracker.isKnownPath(target)) {
+			// --- #10 + #11: the session's knowledge of the target, in two distinct refusals.
+			//
+			// "stale" (#11) gates BOTH mutating tools: the file changed underneath the session
+			// (another agent, a `git checkout --` restore), and an `edit` whose exact-match
+			// happens to survive the external change would silently clobber everything AROUND
+			// the matched fragment — the exact-match guards against a blind edit, not a moved
+			// file. "unknown" (#10) gates `write` only: an edit of a never-read file fails
+			// safe on its own, and a write to a path that does not exist is creation — the
+			// common case a rule must not fight. The two messages stay distinct because the
+			// reader's next move differs: both say re-read, but "changed underneath" warns
+			// that the on-disk content is NEWER than the session's picture, so re-applying
+			// the old intent unchanged may itself be the mistake.
+			const knownState = readTracker.classifyPath(target);
+			if (knownState === "stale") {
+				return {
+					block: true,
+					reason:
+						`Mutating "${candidate}" is blocked: the file CHANGED on disk after this session ` +
+						`last observed it — something outside this session (another agent, a git ` +
+						`restore) modified it. Read "${candidate}" again to see the current content, ` +
+						`then reconsider the change before re-applying it.`,
+				};
+			}
+			if (event.toolName === "write" && knownState === "unknown" && existsSync(target)) {
 				return {
 					block: true,
 					reason:
