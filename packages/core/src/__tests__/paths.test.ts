@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -93,6 +93,11 @@ test("the derived directories assemble from one root", () => {
 });
 
 test("this checkout's own root is findable from this test file", () => {
+	// ⚠ Assert properties of the root, never its NAME — the directory is machine-specific
+	// (locally `zen-harness`, on CI `zen-harness-foundation`; caught by CI on PR #60).
 	const root = findRepoRoot(import.meta.url);
-	expect(root.endsWith("zen-harness")).toBe(true);
+	const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as Record<string, unknown>;
+	expect("workspaces" in manifest).toBe(true);
+	// The root is an ancestor of this very file (both realpath'd).
+	expect(realpathSync(import.meta.dir).startsWith(realpathSync(root))).toBe(true);
 });
