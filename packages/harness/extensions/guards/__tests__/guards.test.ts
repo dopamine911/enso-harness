@@ -280,3 +280,36 @@ test.skipIf(!isGitAvailable)(
 		expect(result?.reason).toContain("CHANGED");
 	},
 );
+
+// ⚠ The session's OWN successful edit must not make the file stale to itself: an edit
+// moves mtime/size, confers no whole-file knowledge (#10), but must refresh the stamp of
+// an already-known file — read → edit → edit refused the second edit before this, live,
+// blaming an external actor for the session's own work.
+test("the session's own edit refreshes a known file's stamp — read → edit → edit passes", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	runtime.toolResult(toolResultEvent("read", existingFile, false), { cwd });
+	// The edit tool's own successful mutation: content changes, then its result arrives.
+	writeFileSync(join(cwd, existingFile), "content after the session's first edit");
+	touchForward(join(cwd, existingFile));
+	runtime.toolResult(toolResultEvent("edit", existingFile, false), { cwd });
+	expect(runtime.toolCall(toolCallEvent("edit", existingFile), { cwd })).toBeUndefined();
+	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })).toBeUndefined();
+});
+
+// The refresh is IF-KNOWN only: an edit of a never-read file still confers nothing, so a
+// later whole-file write is still gated by #10.
+test("an edit result on an UNKNOWN file still confers no knowledge", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	runtime.toolResult(toolResultEvent("edit", existingFile, false), { cwd });
+	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })?.block).toBe(true);
+});
+
+// A FAILED edit refreshes nothing: pi reports isError before mutating, so the stamp must
+// keep describing the file the session last actually observed.
+test("a failed edit result does not refresh the stamp", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	runtime.toolResult(toolResultEvent("read", existingFile, false), { cwd });
+	touchForward(join(cwd, existingFile));
+	runtime.toolResult(toolResultEvent("edit", existingFile, true), { cwd });
+	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })?.block).toBe(true);
+});

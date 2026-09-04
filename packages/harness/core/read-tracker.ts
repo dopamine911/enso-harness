@@ -56,6 +56,15 @@ export interface SessionReadTracker {
 	 * stamping the file's current stat. A file that cannot be statted records nothing.
 	 */
 	recordKnownPath(absolutePath: string): void;
+	/**
+	 * Re-stamp a file that is ALREADY known — for the session's own successful `edit`,
+	 * which moves mtime and size without conferring whole-file knowledge (#10's decision).
+	 * Knowledge and stamp currency are separate concerns: an edit proves the session knew
+	 * one fragment, so an unknown file stays unknown, but a KNOWN file's stamp must follow
+	 * the session's own mutation or the next mutation classifies the session's own work as
+	 * "changed underneath us" (found live: read → edit → edit refused the second edit).
+	 */
+	refreshStampIfKnown(absolutePath: string): void;
 	/** How the file this path resolves to relates to what the session last saw of it. */
 	classifyPath(absolutePath: string): KnownPathState;
 	/** Forget everything — called on session_start. */
@@ -83,6 +92,13 @@ export function createSessionReadTracker(): SessionReadTracker {
 			// as "stale" and block ordinary file creation. Found by the record-nothing test.
 			if (!existsSync(absolutePath)) return;
 			const realpath = realpathOfNearestExisting(absolutePath);
+			const stamp = statStampOf(realpath);
+			if (stamp === undefined) return;
+			stampsByRealpath.set(realpath, stamp);
+		},
+		refreshStampIfKnown(absolutePath: string): void {
+			const realpath = realpathOfNearestExisting(absolutePath);
+			if (!stampsByRealpath.has(realpath)) return;
 			const stamp = statStampOf(realpath);
 			if (stamp === undefined) return;
 			stampsByRealpath.set(realpath, stamp);

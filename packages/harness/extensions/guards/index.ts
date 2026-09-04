@@ -63,12 +63,15 @@ import {
  * refused as "changed underneath us" — distinct from #10's "never read", because the
  * remedy differs: the on-disk content is newer than the session's picture, so re-applying
  * the old intent unchanged may itself be the mistake. ⚠ The `edit` asymmetry is deliberate
- * and easy to misread: `edit` on an UNKNOWN file passes (its exact-match is its own guard
- * against blindness), but `edit` on a STALE file is refused — an exact-match can succeed
- * against a fragment that survived the external change and then silently clobber
- * everything around it. The incident this closes: a concurrent agent in this checkout
- * restored a tracked-but-unstaged file from the index, and the unstaged work vanished
- * with no error anywhere.
+ * and easy to misread, and it has THREE legs: `edit` on an UNKNOWN file passes (its
+ * exact-match is its own guard against blindness) and confers no knowledge; `edit` on a
+ * STALE file is refused — an exact-match can succeed against a fragment that survived the
+ * external change and then silently clobber everything around it; and a successful `edit`
+ * on a KNOWN file REFRESHES the stamp without conferring knowledge, or the session's own
+ * read → edit → edit would refuse the second edit as changed-underneath (found live).
+ * The incident this closes: a concurrent agent in this checkout restored a
+ * tracked-but-unstaged file from the index, and the unstaged work vanished with no error
+ * anywhere.
  */
 
 /**
@@ -117,10 +120,20 @@ export default function guards(pi: ExtensionAPI): void {
 	// afterToolCall), and a failed one arrives with isError, so neither can record.
 	pi.on("tool_result", (event, ctx): void => {
 		if (event.isError) return;
-		if (!KNOWLEDGE_CONFERRING_TOOLS.has(event.toolName)) return;
 		const candidate = pathArgumentOf(event);
 		if (candidate === undefined) return;
-		readTracker.recordKnownPath(resolveAgainstCwd(candidate, ctx.cwd));
+		const target = resolveAgainstCwd(candidate, ctx.cwd);
+		if (KNOWLEDGE_CONFERRING_TOOLS.has(event.toolName)) {
+			readTracker.recordKnownPath(target);
+			return;
+		}
+		// ⚠ The session's own successful `edit` moves mtime/size without conferring
+		// whole-file knowledge (#10): a KNOWN file's stamp follows the mutation (or the
+		// next edit/write refuses the session's own work as "changed underneath us" —
+		// found live, read → edit → edit), while an unknown file stays unknown.
+		if (event.toolName === "edit") {
+			readTracker.refreshStampIfKnown(target);
+		}
 	});
 
 	pi.on("tool_call", (event, ctx): ToolCallEventResult | undefined => {
@@ -194,8 +207,8 @@ export default function guards(pi: ExtensionAPI): void {
 					block: true,
 					reason:
 						`Mutating "${candidate}" is blocked: the file CHANGED on disk after this session ` +
-						`last observed it — something outside this session (another agent, a git ` +
-						`restore) modified it. Read "${candidate}" again to see the current content, ` +
+						`last observed it — another agent, a git restore, or this session's own bash ` +
+						`command modified it. Read "${candidate}" again to see the current content, ` +
 						`then reconsider the change before re-applying it.`,
 				};
 			}
