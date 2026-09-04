@@ -14,15 +14,14 @@
  * only (see `src/server/index.ts`), and this server does too: with no sandbox and `bash`
  * unconfined (#9), neither surface may be reachable from another host.
  */
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { findRepoRoot, webPackageDir } from "@zen/core";
 import homepage from "../../index.html";
 
 const WEB_PORT = 5178;
 const API_UPSTREAM_ORIGIN = "http://127.0.0.1:5179";
 
-const webPackageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const publicDir = join(webPackageRoot, "public");
+const publicDir = join(webPackageDir(findRepoRoot(import.meta.url)), "public");
 
 /**
  * Forward an `/api/*` request to the zen server, streaming both directions.

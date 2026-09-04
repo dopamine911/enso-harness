@@ -1,16 +1,18 @@
 import { lookup } from "node:dns/promises";
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { isIP } from "node:net";
-import { fileURLToPath } from "node:url";
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	EXTERNAL_WEB_CONTENT_NOTICE,
-	parseWebFetchAllowlist,
-	WEB_FETCH_ALLOWLIST_EXAMPLE,
+	findRepoRoot,
+	parseZenConfig,
 	WEB_FETCH_MAX_RESPONSE_BYTES,
 	WEB_FETCH_TIMEOUT_MS,
 	WEB_FETCH_TOOL_NAME,
 	WebFetchToolParameters,
+	ZEN_CONFIG_EXAMPLE,
+	ZEN_CONFIG_FILENAME,
+	zenConfigPath,
 } from "@zen/core";
 import { isFetchableContentType, isHostAllowed, isPublicIpAddress, parseWebFetchUrl } from "../../core/index.ts";
 
@@ -18,14 +20,17 @@ import { isFetchableContentType, isHostAllowed, isPublicIpAddress, parseWebFetch
  * The web_fetch tool (#54) — the sanctioned web access that replaces the ad-hoc network
  * clients #9 denies in bash. Three properties the shell path could never have:
  *
- * 1. **A committed, empty-by-default host allowlist.** `web-allowlist.json` beside this
- *    package's manifest names every fetchable host; it ships EMPTY as the recorded policy,
- *    and each host a human adds is one reviewable diff line. ⚠ Read ONCE at extension
- *    load, deliberately: the running session cannot widen its own egress by editing the
- *    file — an edit takes effect next session, after it has sat in `git status` where a
- *    human sees it. (write/edit on the file are also denied by the guard's
- *    `protectedWriteFragments`; a bash redirect into it is the stated residual, made inert
- *    within the session by the load-once read.)
+ * 1. **A committed, empty-by-default host allowlist.** The `webFetch.allowedHosts`
+ *    section of `zen.config.json` at the REPOSITORY root (#59) names every fetchable
+ *    host; it ships EMPTY as the recorded policy, and each host a human adds is one
+ *    reviewable diff line. ⚠ Read ONCE at extension load, deliberately: the running
+ *    session cannot widen its own egress by editing the file — an edit takes effect next
+ *    session, after it has sat in `git status` where a human sees it. (write/edit on the
+ *    file are also denied by the guard's `protectedWriteFragments`; a bash redirect into
+ *    it is the stated residual, made inert within the session by the load-once read.)
+ *    ⚠ The config belongs to the zen-harness INSTALL: located via `findRepoRoot` from
+ *    this module's own tree, never from the session cwd — a foreign checkout's
+ *    `zen.config.json` must not become this session's allowlist (see config.ts).
  * 2. **An audit line per call** — every outcome, refusals included, prints one stderr line
  *    naming the URL and what happened.
  * 3. **Bounded response handling** — http(s) only, no credentials in URLs, redirects
@@ -40,13 +45,16 @@ import { isFetchableContentType, isHostAllowed, isPublicIpAddress, parseWebFetch
  */
 
 /**
- * The IO seams, injected so tests never touch the network, DNS or the real allowlist
- * file — same pattern as the guards' `analyzeBashCommand`.
+ * The IO seams, injected so tests never touch the network, DNS or the real config file —
+ * same pattern as the guards' `analyzeBashCommand`.
  */
 export interface WebFetchDependencies {
-	/** Absolute path of the allowlist file — read from AND named in refusal messages. */
-	allowlistPath: string;
-	readAllowlistText: (path: string) => string;
+	/**
+	 * Where `zen.config.json` lives — read from AND named in refusal messages. May throw
+	 * (a broken install has no findable root); the extension fails CLOSED on that.
+	 */
+	locateConfigFile: () => string;
+	readConfigText: (path: string) => string;
 	fetchUrl: (
 		url: string,
 		init: { redirect: "manual"; signal: AbortSignal; headers: Record<string, string> },
@@ -59,23 +67,28 @@ const USER_AGENT = "zen-harness-web-fetch";
 
 export function createWebFetch(dependencies: WebFetchDependencies): (pi: ExtensionAPI) => void {
 	return function webFetch(pi: ExtensionAPI): void {
-		// Load ONCE at extension load — see the header's property 1 for why. Both failure
-		// modes (unreadable file, wrong shape) fail CLOSED: the tool still registers, and
-		// every call refuses with the reason, because "could not read the policy" must
-		// never render as "no policy" (and a throw here could wedge pi's load, the way a
-		// throwing session_start handler wedges print mode).
+		// Load ONCE at extension load — see the header's property 1 for why. Every failure
+		// mode (unfindable root, unreadable file, wrong shape) fails CLOSED: the tool still
+		// registers, and every call refuses with the reason, because "could not read the
+		// policy" must never render as "no policy" (and a throw here could wedge pi's load,
+		// the way a throwing session_start handler wedges print mode).
 		let allowedHosts: readonly string[] = [];
-		let allowlistProblem: string | undefined;
+		let configProblem: string | undefined;
+		let configPath: string | undefined;
 		try {
-			const parsed = parseWebFetchAllowlist(dependencies.readAllowlistText(dependencies.allowlistPath));
+			configPath = dependencies.locateConfigFile();
+			const parsed = parseZenConfig(dependencies.readConfigText(configPath));
 			if (parsed.kind === "ok") {
-				allowedHosts = parsed.allowedHosts;
+				allowedHosts = parsed.config.webFetch.allowedHosts;
 			} else {
-				allowlistProblem = parsed.reason;
+				configProblem = parsed.reason;
 			}
 		} catch (error) {
-			allowlistProblem = `the allowlist file could not be read: ${String(error)}`;
+			configProblem = `the config file could not be read: ${String(error)}`;
 		}
+		// A locate failure leaves no path to name; the filename plus its home still tells
+		// the human where to look.
+		const configDisplayPath = configPath ?? `${ZEN_CONFIG_FILENAME} (at the zen-harness repository root)`;
 
 		pi.registerTool({
 			name: WEB_FETCH_TOOL_NAME,
@@ -96,12 +109,12 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
 				if (urlDecision.kind === "refused") return refusal(rawUrl, urlDecision.reason);
 				const url = urlDecision.url;
 
-				if (allowlistProblem !== undefined) {
+				if (configProblem !== undefined) {
 					return refusal(
 						rawUrl,
-						`the ${WEB_FETCH_TOOL_NAME} host allowlist could not be used — ${allowlistProblem}. ` +
-							`Nothing is fetchable until a human fixes ${dependencies.allowlistPath} ` +
-							`(expected shape: ${WEB_FETCH_ALLOWLIST_EXAMPLE}) and restarts the session.`,
+						`the ${WEB_FETCH_TOOL_NAME} host allowlist could not be used — ${configProblem}. ` +
+							`Nothing is fetchable until a human fixes ${configDisplayPath} ` +
+							`(expected shape: ${ZEN_CONFIG_EXAMPLE}) and restarts the session.`,
 					);
 				}
 				if (allowedHosts.length === 0) {
@@ -109,7 +122,7 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
 						rawUrl,
 						`the ${WEB_FETCH_TOOL_NAME} host allowlist is EMPTY — the recorded default policy (#54), ` +
 							`not an accident. No host is fetchable until a human adds one: edit ` +
-							`${dependencies.allowlistPath} to name exact hostnames, e.g. ${WEB_FETCH_ALLOWLIST_EXAMPLE}, ` +
+							`${configDisplayPath} to name exact hostnames, e.g. ${ZEN_CONFIG_EXAMPLE}, ` +
 							`commit the change so it is reviewed like code, and restart the session — the allowlist ` +
 							`is read once at session start. Do not edit that file from this session; ask the human.`,
 					);
@@ -119,7 +132,7 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
 						rawUrl,
 						`"${url.hostname}" is not on the ${WEB_FETCH_TOOL_NAME} host allowlist ` +
 							`(allowed: ${allowedHosts.join(", ")}). Hosts match exactly — no wildcards, no subdomain ` +
-							`inheritance. A human can add it in ${dependencies.allowlistPath} and restart the session.`,
+							`inheritance. A human can add it in ${configDisplayPath} and restart the session.`,
 					);
 				}
 
@@ -320,25 +333,14 @@ async function readBodyUpTo(response: Response, maxBytes: number): Promise<{ tex
 }
 
 /**
- * The allowlist's true path. Realpath matters for the refusal messages: the print harness
- * (#20) runs this extension through a `.zen/print-harness/` SYMLINK mirror, and naming the
- * symlink would send the human to edit a gitignored-looking path (observed live 2026-09-04)
- * — the file behind it is the committed one either way. Falls back to the computed path
- * when the file does not exist yet, so the unreadable-allowlist refusal still names it.
+ * The pi entry point — real filesystem, DNS and fetch, wired at the composition root.
+ * `findRepoRoot` realpaths before walking, which is what keeps the named path the
+ * COMMITTED file even when the print harness (#20) runs this extension through its
+ * `.zen/print-harness/` symlink mirror (observed live 2026-09-04, PR #58).
  */
-function resolveAllowlistPath(): string {
-	const computedPath = fileURLToPath(new URL("../../web-allowlist.json", import.meta.url));
-	try {
-		return realpathSync(computedPath);
-	} catch {
-		return computedPath;
-	}
-}
-
-/** The pi entry point — real filesystem, DNS and fetch, wired at the composition root. */
 export default createWebFetch({
-	allowlistPath: resolveAllowlistPath(),
-	readAllowlistText: (path) => readFileSync(path, "utf8"),
+	locateConfigFile: () => zenConfigPath(findRepoRoot(import.meta.url)),
+	readConfigText: (path) => readFileSync(path, "utf8"),
 	fetchUrl: (url, init) => fetch(url, init),
 	resolveHostAddresses: async (hostname) => (await lookup(hostname, { all: true })).map((entry) => entry.address),
 });

@@ -45,12 +45,12 @@
  *         ZEN_AGENT_DIR=/somewhere/else bun run zen
  */
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
+import { findRepoRoot, harnessPackageDir, printHarnessDir, zenAgentDir } from "../packages/core/src/index.ts";
 import { buildPrintManifest, materializePrintHarness } from "./print-harness.mjs";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const packageRoot = join(repoRoot, "packages", "harness");
+const repoRoot = findRepoRoot(import.meta.url);
+const packageRoot = harnessPackageDir(repoRoot);
 const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 
 const VENDOR_PATH_PREFIX = "node_modules/";
@@ -80,7 +80,7 @@ if (missingVendorPaths.length > 0) {
 	process.exit(1);
 }
 
-const agentDir = process.env.ZEN_AGENT_DIR ?? join(repoRoot, ".zen", "pi-agent");
+const agentDir = process.env.ZEN_AGENT_DIR ?? zenAgentDir(repoRoot);
 mkdirSync(agentDir, { recursive: true });
 
 const passthroughArgs = process.argv.slice(2);
@@ -101,7 +101,7 @@ const passthroughArgs = process.argv.slice(2);
 const isPrintRun = passthroughArgs.includes("-p") || passthroughArgs.includes("--print") || !process.stdin.isTTY;
 
 const packageToLoad = isPrintRun
-	? materializePrintHarness(join(repoRoot, ".zen", "print-harness"), packageRoot, buildPrintManifest(manifest))
+	? materializePrintHarness(printHarnessDir(repoRoot), packageRoot, buildPrintManifest(manifest))
 	: packageRoot;
 
 const args = ["--no-extensions", "--no-skills", "-e", packageToLoad, ...passthroughArgs];
