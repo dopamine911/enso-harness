@@ -36,12 +36,18 @@
  *   bare `invalid_grant: "Refresh token expired"`. That is the cost of the isolation
  *   working, not a bug in it — see docs/concepts/provider-auth-and-client-identity.md.
  *
+ * ⚠ A NON-INTERACTIVE RUN (`-p`, or piped stdin) loads a PRINT VARIANT of the package —
+ *   the harness minus picc-permission-modes, which would otherwise fail closed and deny
+ *   every mutating tool where no prompt can be shown. See the `isPrintRun` block below
+ *   and scripts/print-harness.mjs (#20). Interactive runs keep the full permission model.
+ *
  * Usage:  bun run zen -p "hello"
  *         ZEN_AGENT_DIR=/somewhere/else bun run zen
  */
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildPrintManifest, materializePrintHarness } from "./print-harness.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const packageRoot = join(repoRoot, "packages", "harness");
@@ -79,10 +85,40 @@ if (missingVendorPaths.length > 0) {
 const agentDir = process.env.ZEN_AGENT_DIR ?? join(repoRoot, ".zen", "pi-agent");
 mkdirSync(agentDir, { recursive: true });
 
-const args = ["--no-extensions", "--no-skills", "-e", packageRoot, ...process.argv.slice(2)];
+const passthroughArgs = process.argv.slice(2);
+
+/**
+ * ⚠ PRINT RUNS LOAD A VARIANT PACKAGE WITHOUT picc-permission-modes (#20).
+ * picc fails closed when it cannot prompt — every mutating tool denied, no escape hatch —
+ * so a `-p` run under the full package can chat and nothing else. The variant (built by
+ * scripts/print-harness.mjs) is the harness minus that one extension: guards and
+ * multi-account still load, skills/prompts/themes still load, and the run has OUR guards
+ * only — bash unconfined (#9), the pre-picc posture. Launch-time mode selection upstream
+ * (#13) is the durable fix; this is the honest interim.
+ *
+ * The trigger is "this run cannot prompt": an explicit `-p`/`--print`, or stdin that is
+ * not a TTY (piped input cannot answer a permission dialog even without -p). Interactive
+ * runs keep the full package and the full permission model.
+ */
+const isPrintRun =
+	passthroughArgs.includes("-p") ||
+	passthroughArgs.includes("--print") ||
+	!process.stdin.isTTY;
+
+const packageToLoad = isPrintRun
+	? materializePrintHarness(
+			join(repoRoot, ".zen", "print-harness"),
+			packageRoot,
+			buildPrintManifest(manifest),
+		)
+	: packageRoot;
+
+const args = ["--no-extensions", "--no-skills", "-e", packageToLoad, ...passthroughArgs];
 
 console.error(
-	`zen: vanilla pi | agent-dir=${agentDir} | package=${packageRoot} | ${declaredResources.length} declared resource path(s)`,
+	`zen: vanilla pi | agent-dir=${agentDir} | package=${packageToLoad}` +
+		`${isPrintRun ? " (print variant, no permission modes — #20)" : ""} | ` +
+		`${declaredResources.length} declared resource path(s)`,
 );
 
 const pi = Bun.spawn(["pi", ...args], {
