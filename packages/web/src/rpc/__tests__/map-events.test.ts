@@ -232,6 +232,47 @@ test("a non-custom session entry stays unmapped", () =>
 test("an entry_appended with no readable entry stays unmapped", () =>
 	expect(kindOf({ type: "entry_appended" })).toBe("unmapped"));
 
+// --- #45: one completed request's accounting, off message_end
+test("an assistant message_end becomes a message-usage with its role and usage", () =>
+	expect(
+		mapPiEvent({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				usage: { input: 1200, output: 40, cacheRead: 300, cacheWrite: 50, cost: { total: 0.0132 } },
+			},
+		}),
+	).toEqual({
+		kind: "message-usage",
+		role: "assistant",
+		usage: { input: 1200, output: 40, cacheRead: 300, cacheWrite: 50, totalCost: 0.0132 },
+	}));
+
+// pi's attribution rule: a toolResult carries usage only when a model summarized the output.
+test("a toolResult message_end WITH usage is counted spend", () =>
+	expect(
+		mapPiEvent({
+			type: "message_end",
+			message: { role: "toolResult", usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0 } },
+		}),
+	).toMatchObject({ kind: "message-usage", role: "toolResult" }));
+
+test("a toolResult message_end WITHOUT usage stays unmapped — no spend to count", () =>
+	expect(kindOf({ type: "message_end", message: { role: "toolResult" } })).toBe("unmapped"));
+
+// ⚠ The role gate is load-bearing: without it, any future message shape carrying a
+// usage-like object would inflate the cost sum outside pi's own attribution rule.
+test("a message_end with usage but an unattributable role stays unmapped", () =>
+	expect(
+		kindOf({
+			type: "message_end",
+			message: { role: "user", usage: { input: 9, output: 0, cacheRead: 0, cacheWrite: 0 } },
+		}),
+	).toBe("unmapped"));
+
+test("a message_end with no readable message stays unmapped", () =>
+	expect(kindOf({ type: "message_end" })).toBe("unmapped"));
+
 // ⚠ The design rule: there is no skip case.
 test("an unmodelled event is carried through with its payload intact", () => {
 	const observed = mapPiEvent({ type: "some_future_event", detail: 42 });

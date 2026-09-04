@@ -116,6 +116,24 @@ export function mapPiEvent(event: PiRpcEvent): ZenObservation {
 			return { kind: "unmapped", event };
 		}
 
+		case "message_end": {
+			// One completed model request (#45). ⚠ The per-delta `usage` above is CUMULATIVE
+			// for the in-flight message — summing it would multiply cost by the delta count —
+			// so the completed message is the one honest accounting unit, emitted exactly once.
+			//
+			// The role gate copies pi's own attribution rule (`core/usage-totals.js`
+			// getUsageCostBreakdown): assistant messages and toolResult messages WITH usage are
+			// attributable spend; every other message (user turns, usage-less tool results)
+			// carries no spend and stays unmapped — carried, not dropped, per the design rule.
+			const message = event.message as { role?: unknown; usage?: unknown } | undefined;
+			const role = typeof message?.role === "string" ? message.role : "";
+			const usage = readUsage(message?.usage);
+			if (usage !== undefined && (role === "assistant" || role === "toolResult")) {
+				return { kind: "message-usage", role, usage };
+			}
+			return { kind: "unmapped", event };
+		}
+
 		case "tool_execution_start":
 			return {
 				kind: "tool-call",

@@ -121,6 +121,33 @@ export const ZenCustomSessionEntry = Type.Object({
 });
 export type ZenCustomSessionEntry = Static<typeof ZenCustomSessionEntry>;
 
+/**
+ * A completed message's token/cost accounting (#45) — one per finished model request.
+ *
+ * ⚠ WHY `message_end` AND NOT THE PER-DELTA `usage`. Every `message_update` carries the
+ * SAME cumulative usage for the in-flight message, so summing deltas would multiply cost
+ * by the delta count; the honest unit is the completed message, emitted exactly once.
+ *
+ * ⚠ WHICH MESSAGES COUNT — pi's own attribution rule, copied so our total matches pi's
+ * `/stats` (`core/usage-totals.js` getUsageCostBreakdown): `assistant` messages always
+ * carry usage; a `toolResult` carries it only when a model summarized the output. Other
+ * roles carry none and stay `unmapped`. (pi also attributes compaction/branch-summary
+ * entries; those cross as session entries, not `message_end`, and are not counted here —
+ * a stated undercount, not a bug.)
+ */
+export const ZenMessageUsage = Type.Object({
+	kind: Type.Literal("message-usage"),
+	/**
+	 * pi's message role; the consumer keys behaviour on it (a toolResult adds cost but
+	 * never moves the last-request tokens). A closed union rather than a bare string so a
+	 * third attributable role fails at the CONSTRUCTION site in map-events, not silently
+	 * in every consumer's string comparison (PR #51 review).
+	 */
+	role: Type.Union([Type.Literal("assistant"), Type.Literal("toolResult")]),
+	usage: ZenUsage,
+});
+export type ZenMessageUsage = Static<typeof ZenMessageUsage>;
+
 /** An extension threw. Surfaced, never swallowed. */
 export const ZenExtensionError = Type.Object({
 	kind: Type.Literal("extension-error"),
@@ -156,6 +183,7 @@ export const ZenObservation = Type.Union([
 	ZenToolCall,
 	ZenToolResultObservation,
 	ZenCustomSessionEntry,
+	ZenMessageUsage,
 	ZenExtensionError,
 	ZenExtensionUiRequest,
 	ZenRunEnded,

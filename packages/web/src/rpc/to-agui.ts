@@ -196,6 +196,18 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 				},
 			];
 
+		case "message-usage":
+			// One completed request's accounting (#45) — the session-stats bar sums these.
+			// CUSTOM because AG-UI has no usage vocabulary; the value is the whole observation
+			// so the consumer reads `role` and `usage` off one shape declared in @zen/core.
+			return [
+				{
+					type: EventType.CUSTOM,
+					name: "zen.usage",
+					value: observation,
+				},
+			];
+
 		case "custom-entry":
 			// An extension persisted state (#29) — a receipt the browser may render (the mode
 			// indicator reads picc's "modes" entries from this). Rides CUSTOM for the same

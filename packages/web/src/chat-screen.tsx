@@ -21,6 +21,7 @@ import { createFixtureChat } from "./fixture-conversation.ts";
 import { applyZenCustomEntry } from "./mode-lines.ts";
 import { pushZenNotification, SessionNotifications } from "./notifications.tsx";
 import { SelectedMessagePart } from "./selected-message-part.tsx";
+import { applyZenMessageUsage, SessionStatsBar } from "./session-stats.tsx";
 import type { ZenRendererMap } from "./ZenToolResult.tsx";
 
 /**
@@ -96,6 +97,11 @@ const chatOptions = {
 	onCustomEvent: (eventType: string, data: unknown): void => {
 		if (eventType === "zen.entry") {
 			applyZenCustomEntry(data);
+			return;
+		}
+		// `zen.usage` carries one completed request's accounting (#45) — the stats bar's feed.
+		if (eventType === "zen.usage") {
+			applyZenMessageUsage(data);
 			return;
 		}
 		if (eventType !== "zen.notify") return;
@@ -369,6 +375,9 @@ const { useAppChat, useChatContext } = createChatHook({
 						</ConversationContent>
 						<ConversationScrollButton />
 					</Conversation>
+					{/* The session-stats line (#45): cost so far + last request's prompt size.
+					    Hidden until the first counted request — see session-stats.tsx. */}
+					<SessionStatsBar />
 					<Input />
 				</div>
 			);
