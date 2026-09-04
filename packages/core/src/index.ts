@@ -99,3 +99,9 @@ export {
 	WebFetchConfig,
 	WebFetchToolParameters,
 } from "./web-fetch.ts";
+export {
+	WEB_SEARCH_TIMEOUT_MS,
+	WEB_SEARCH_TOOL_NAME,
+	WebSearchConfig,
+	WebSearchToolParameters,
+} from "./web-search.ts";
