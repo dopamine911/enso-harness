@@ -1,6 +1,13 @@
-import type { ExtensionAPI, ToolCallEvent, ToolCallEventResult } from "@earendil-works/pi-coding-agent";
+import { existsSync } from "node:fs";
+import type {
+	ExtensionAPI,
+	ToolCallEvent,
+	ToolCallEventResult,
+	ToolResultEvent,
+} from "@earendil-works/pi-coding-agent";
 import { DEFAULT_GUARD_POLICY, type GuardPolicy } from "@zen/core";
 import {
+	createSessionReadTracker,
 	isInsideAnyRoot,
 	isPersistenceWriteTarget,
 	isProtectedForWrite,
@@ -43,6 +50,13 @@ import {
  * every mode, every surface, including print runs where picc is absent entirely (#20).
  * picc reaches at most "ask" for the same set, and an ask is mode-shaped (auto's
  * classifier may approve one); this layer is the always-on floor beneath that.
+ *
+ * READ-BEFORE-WRITE (#10, Tier 1 item 5): `write` to an EXISTING file requires that this
+ * session has seen its content — a successful `read` (or its own successful `write`; see
+ * KNOWLEDGE_CONFERRING_TOOLS for why `edit` does not count). Creation is untouched. The
+ * state lives in a session-scoped tracker reset on `session_start`. ⚠ Known limit, accepted:
+ * the tracker survives context compaction, the model's memory of the file may not — the
+ * SESSION has seen the file even when the model no longer has the bytes in context.
  */
 
 /**
@@ -55,7 +69,20 @@ import {
  */
 const MUTATING_PATH_TOOLS = new Set(["write", "edit"]);
 
-function pathArgumentOf(event: ToolCallEvent): string | undefined {
+/**
+ * Tools whose successful RESULT means the session has seen the target file's content (#10).
+ *
+ * `read` is the obvious member. `write` is a deliberate widening of the issue's rule
+ * ("already read, or does not exist"): after a successful write the session authored every
+ * byte, and without it the common create-then-revise flow would block on its own second
+ * write. ⚠ `edit` is deliberately NOT a member: a successful edit proves knowledge of one
+ * matched fragment (which could have come from grep output), not of the whole file — and
+ * whole-file knowledge is exactly what a follow-up `write` claims. The cost is one `read`
+ * before a wholesale rewrite of an edited file, which is the rule working.
+ */
+const KNOWLEDGE_CONFERRING_TOOLS = new Set(["read", "write"]);
+
+function pathArgumentOf(event: ToolCallEvent | ToolResultEvent): string | undefined {
 	const input = event.input as Record<string, unknown>;
 	const value = input.path;
 	return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -63,6 +90,26 @@ function pathArgumentOf(event: ToolCallEvent): string | undefined {
 
 export default function guards(pi: ExtensionAPI): void {
 	const policy: GuardPolicy = DEFAULT_GUARD_POLICY;
+
+	// #10: which files this session has seen. Session-scoped twice over: pi tears the
+	// extension runtime down on session replacement (fresh closure), and session_start —
+	// which also fires for "reload" and "resume", where the runtime survives — resets it.
+	const readTracker = createSessionReadTracker();
+
+	pi.on("session_start", (): void => {
+		readTracker.reset();
+	});
+
+	// Record knowledge from RESULTS, never from calls: a blocked call produces no
+	// tool_result at all (verified in pi's agent-loop — the "immediate" path skips
+	// afterToolCall), and a failed one arrives with isError, so neither can record.
+	pi.on("tool_result", (event, ctx): void => {
+		if (event.isError) return;
+		if (!KNOWLEDGE_CONFERRING_TOOLS.has(event.toolName)) return;
+		const candidate = pathArgumentOf(event);
+		if (candidate === undefined) return;
+		readTracker.recordKnownPath(resolveAgainstCwd(candidate, ctx.cwd));
+	});
 
 	pi.on("tool_call", (event, ctx): ToolCallEventResult | undefined => {
 		const cwd = ctx.cwd;
@@ -115,6 +162,20 @@ export default function guards(pi: ExtensionAPI): void {
 				return {
 					block: true,
 					reason: `Writing to "${candidate}" is blocked: it matches a credential pattern.`,
+				};
+			}
+			// --- #10: `write` replaces a whole file knowing nothing of what it destroys, so an
+			// EXISTING file may only be written once this session has seen its content. A path
+			// that does not exist is unaffected — creation is the common case, and a rule that
+			// fights it gets turned off. `edit` is exempt: its exact-match precondition already
+			// fails a blind edit rather than corrupting.
+			if (event.toolName === "write" && existsSync(target) && !readTracker.isKnownPath(target)) {
+				return {
+					block: true,
+					reason:
+						`Writing to "${candidate}" is blocked: the file exists and this session has not ` +
+						`read it, so a whole-file write would replace content the session has never seen. ` +
+						`Read "${candidate}" first, then write.`,
 				};
 			}
 			return undefined;
