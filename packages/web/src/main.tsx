@@ -30,6 +30,7 @@ import {
 import { Input } from "./components/ui/input.tsx";
 import { Textarea } from "./components/ui/textarea.tsx";
 import { createFixtureChat } from "./fixture-conversation.ts";
+import { pushZenNotification, SessionNotifications } from "./notifications.tsx";
 import { SelectedMessagePart } from "./selected-message-part.tsx";
 import type { ZenRendererMap } from "./ZenToolResult.tsx";
 
@@ -88,6 +89,27 @@ const descriptorRenderers: ZenRendererMap = {};
 const isFixtureMode = new URLSearchParams(window.location.search).has("fixture");
 const chatOptions = {
 	connection: isFixtureMode ? createFixtureChat().transport() : fetchServerSentEvents("/api/chat"),
+	/**
+	 * TanStack's designated path for AG-UI CUSTOM chunks (#29) — verified against the
+	 * stream processor: every CUSTOM chunk fires this with `(chunk.name, chunk.value)`.
+	 * `zen.notify`'s value is the `extension-ui-request` observation, read defensively
+	 * here the way every wire crossing in this file is: a malformed value renders as
+	 * nothing rather than throwing inside the stream loop. Other CUSTOM names
+	 * (`zen.unmapped`) stay deliberately unrendered — see the to-agui mapper.
+	 */
+	onCustomEvent: (eventType: string, data: unknown): void => {
+		if (eventType !== "zen.notify") return;
+		if (typeof data !== "object" || data === null) return;
+		const observation = data as { message?: unknown; notifyType?: unknown };
+		if (typeof observation.message !== "string") return;
+		const notifyType =
+			observation.notifyType === "info" ||
+			observation.notifyType === "warning" ||
+			observation.notifyType === "error"
+				? observation.notifyType
+				: undefined;
+		pushZenNotification(observation.message, notifyType);
+	},
 };
 
 /**
@@ -338,6 +360,9 @@ const { useAppChat, useChatContext } = createChatHook({
 							) : (
 								<Messages />
 							)}
+							{/* pi's notify lines (#29) — the transcript tail, above the interrupts,
+							    so "Mode set to X" reads next to the run it belongs to. */}
+							<SessionNotifications />
 							{/* ⚠ Mounted before anything emits one, deliberately. This is where #4's
 							    `ask` verdict reaches the browser, and an unmounted slot is precisely
 							    why an approval would silently never appear. */}
@@ -426,7 +451,14 @@ function ChatScreen(): React.ReactNode {
 
 const rootElement = document.getElementById("root");
 if (rootElement === null) throw new Error("zen-harness: #root is missing from index.html");
-createRoot(rootElement).render(
+// ⚠ The root is cached across module re-evaluations. This file cannot Fast Refresh (vite
+// says so on every edit), so an HMR invalidate re-runs the whole module — and a bare
+// `createRoot()` here then re-roots the same container, which React reports as an error
+// (seen live while verifying #29). Dev-only, but the cache is three lines and makes an
+// HMR edit render through the ONE root instead of racing two.
+const globalWithRoot = globalThis as { __zenReactRoot?: ReturnType<typeof createRoot> };
+const reactRoot = (globalWithRoot.__zenReactRoot ??= createRoot(rootElement));
+reactRoot.render(
 	<StrictMode>
 		<ChatScreen />
 	</StrictMode>,

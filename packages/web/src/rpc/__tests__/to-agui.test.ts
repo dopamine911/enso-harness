@@ -97,6 +97,25 @@ test("an extension error becomes RUN_ERROR naming the extension and the hook", (
 	expect((event as { message: string }).message).toContain("tool_call");
 });
 
+// #29: the notify payload must survive the LAST hop too — the browser's onCustomEvent
+// receives exactly this event's `value`, so a message dropped here is a message dropped
+// on screen. The full pipeline pin: pi wire event → mapPiEvent → toAgui, message intact.
+test("a notify observation rides CUSTOM as zen.notify with its message intact", () => {
+	const observation = mapPiEvent({
+		type: "extension_ui_request",
+		id: "n1",
+		method: "notify",
+		message: "Mode set to Plan Mode",
+		notifyType: "warning",
+	});
+	const [event] = toAgui(observation);
+	expect(event).toMatchObject({ type: EventType.CUSTOM, name: "zen.notify" });
+	expect((event as { value: unknown }).value).toMatchObject({
+		message: "Mode set to Plan Mode",
+		notifyType: "warning",
+	});
+});
+
 // ⚠ CUSTOM, not RAW. @ag-ui/core defines RAW and it looks made for this, but TanStack
 // NARROWS AGUIEvent and RAW is not in the narrowed union — found only by removing a cast.
 test("an unmapped observation rides CUSTOM, because RAW is not a valid StreamChunk", () => {

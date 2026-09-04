@@ -123,6 +123,61 @@ test("the descriptor is wrapped under the namespaced metadata key", () => {
 	expect(toolResultMetadata(undefined)).toBeUndefined();
 });
 
+// --- extension UI requests: the notify payload (#29)
+// The envelope always crossed; these pin that the MESSAGE now crosses with it — the gap
+// that made a mode change complete silently.
+test("a notify carries its message and a declared notifyType", () =>
+	expect(
+		mapPiEvent({
+			type: "extension_ui_request",
+			id: "n1",
+			method: "notify",
+			message: "Mode set to Plan Mode",
+			notifyType: "info",
+		}),
+	).toMatchObject({
+		kind: "extension-ui-request",
+		method: "notify",
+		blocking: false,
+		message: "Mode set to Plan Mode",
+		notifyType: "info",
+	}));
+
+test("an unrecognised notifyType degrades to an untyped notification, not a failure", () => {
+	const observed = mapPiEvent({
+		type: "extension_ui_request",
+		id: "n2",
+		method: "notify",
+		message: "odd",
+		notifyType: "sparkle",
+	});
+	expect(observed).toMatchObject({ kind: "extension-ui-request", message: "odd" });
+	expect((observed as { notifyType?: unknown }).notifyType).toBeUndefined();
+});
+
+test("a notify with no message maps to an empty string, never undefined", () =>
+	expect(
+		mapPiEvent({ type: "extension_ui_request", id: "n3", method: "notify" }),
+	).toMatchObject({ kind: "extension-ui-request", method: "notify", message: "" }));
+
+// ⚠ A dialog's `message` is part of the QUESTION and travels inside `dialog` — it must not
+// gain a second home on the observation root, or the two copies drift.
+test("a confirm dialog's message stays inside dialog and off the observation root", () => {
+	const observed = mapPiEvent({
+		type: "extension_ui_request",
+		id: "d1",
+		method: "confirm",
+		title: "Proceed?",
+		message: "Really?",
+	});
+	expect(observed).toMatchObject({
+		kind: "extension-ui-request",
+		blocking: true,
+		dialog: { method: "confirm", title: "Proceed?", message: "Really?" },
+	});
+	expect((observed as { message?: unknown }).message).toBeUndefined();
+});
+
 // --- errors and lifecycle
 test("extension_error surfaces with its origin", () =>
 	expect(

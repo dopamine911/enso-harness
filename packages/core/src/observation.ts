@@ -77,13 +77,29 @@ export const ZenToolResultObservation = Type.Object({
  * not form a well-shaped question still surfaces as blocking, and the session layer's
  * answer to an unreadable question is to decline it — the pre-#27 behaviour, kept as the
  * degenerate case.
+ *
+ * `message`/`notifyType` carry a `notify` request's payload (#29). A notify's message IS
+ * the request — pi's wire shape is `{method: "notify", message, notifyType?}` — and until
+ * #29 the envelope crossed while the message was dropped, which is how a mode change
+ * completed with nothing visible. Optional because only `notify` carries them; the mapper
+ * copies `notifyType` only when it is one of pi's three declared values, so an unknown
+ * value degrades to an untyped notification rather than failing validation.
  */
+export const ZenNotifyType = Type.Union([
+	Type.Literal("info"),
+	Type.Literal("warning"),
+	Type.Literal("error"),
+]);
+export type ZenNotifyType = Static<typeof ZenNotifyType>;
+
 export const ZenExtensionUiRequest = Type.Object({
 	kind: Type.Literal("extension-ui-request"),
 	id: Type.String(),
 	method: Type.String(),
 	blocking: Type.Boolean(),
 	dialog: Type.Optional(ZenDialogSpec),
+	message: Type.Optional(Type.String()),
+	notifyType: Type.Optional(ZenNotifyType),
 });
 
 /** An extension threw. Surfaced, never swallowed. */
