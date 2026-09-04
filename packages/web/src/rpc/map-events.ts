@@ -1,4 +1,4 @@
-import { ZEN_TOOL_RESULT_KEY, isZenDialogSpec, type PiRpcEvent, type ZenDialogSpec, type ZenObservation, type ZenToolResultDescriptor, type ZenUsage } from "@zen/core";
+import { ZEN_TOOL_RESULT_KEY, isZenDialogSpec, type PiRpcEvent, type ZenDialogSpec, type ZenNotifyType, type ZenObservation, type ZenToolResultDescriptor, type ZenUsage } from "@zen/core";
 
 /**
  * pi rpc events → the observations a surface renders (#24).
@@ -182,12 +182,33 @@ export function mapPiEvent(event: PiRpcEvent): ZenObservation {
 			const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate)
 				? dialogCandidate
 				: undefined;
+			// ⚠ A notify's `message` IS the request (#29): pi's wire shape is
+			// `{method: "notify", message, notifyType?}`, and dropping the message here is
+			// how a mode change once completed with nothing visible. Copied for notify ONLY —
+			// a dialog's `message` is part of the QUESTION and travels inside `dialog` above,
+			// and giving it a second home would invite the two to drift. `notifyType` is
+			// copied only when it is one of pi's three declared values (info|warning|error);
+			// an unrecognised value degrades to an untyped notification, never a validation
+			// failure.
+			const notifyFields: { message?: string; notifyType?: ZenNotifyType } = {};
+			if (method === "notify") {
+				notifyFields.message = String(event.message ?? "");
+				const notifyTypeCandidate = event.notifyType;
+				if (
+					notifyTypeCandidate === "info" ||
+					notifyTypeCandidate === "warning" ||
+					notifyTypeCandidate === "error"
+				) {
+					notifyFields.notifyType = notifyTypeCandidate;
+				}
+			}
 			return {
 				kind: "extension-ui-request",
 				id: String(event.id ?? ""),
 				method,
 				blocking: DIALOG_UI_METHODS.has(method),
 				...(dialog === undefined ? {} : { dialog }),
+				...notifyFields,
 			};
 		}
 
