@@ -38,3 +38,31 @@ export {
 	parseWebFetchUrl,
 	type WebFetchUrlDecision,
 } from "./web-fetch-policy.ts";
+export { ANTHROPIC_WEB_SEARCH_TOOL_TYPE, runAnthropicWireSearch } from "./web-search/anthropic-wire.ts";
+export { type ModelAuthSource, resolveModelAuth } from "./web-search/auth.ts";
+export { runAnthropicProviderSearch } from "./web-search/providers/anthropic.ts";
+export {
+	DEEPSEEK_API_KEY_VARIABLE,
+	DEEPSEEK_SEARCH_BASE_URL,
+	DEEPSEEK_SEARCH_MODEL_ID,
+	type DeepseekSearchRequest,
+	runDeepseekProviderSearch,
+} from "./web-search/providers/deepseek.ts";
+export { runGoogleProviderSearch } from "./web-search/providers/google.ts";
+export { runOpenAiProviderSearch } from "./web-search/providers/openai.ts";
+export {
+	runTavilyProviderSearch,
+	TAVILY_API_KEY_VARIABLE,
+	type TavilySearchRequest,
+} from "./web-search/providers/tavily.ts";
+export {
+	type FetchUrl,
+	type ModelSearchRequest,
+	type ResolvedProviderAuth,
+	routedProviderIdForModel,
+	type WebSearchOutcome,
+	WebSearchProviderError,
+	type WebSearchProviderId,
+	type WebSearchSnippet,
+	type WebSource,
+} from "./web-search/vocabulary.ts";

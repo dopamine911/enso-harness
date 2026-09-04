@@ -129,7 +129,7 @@ The deny's reason points the model at the sanctioned path — verbatim from a li
 
 > bash network egress is blocked: "curl" (matched by command-position). Ad-hoc network clients are
 > denied in shell commands (#9) — use the web_fetch tool instead (#54): it fetches http(s) URLs from
-> hosts on the committed allowlist and is the only sanctioned web access. Do not try to work around
+> hosts on the committed allowlist. web_fetch and web_search (#63) are the only sanctioned web access. Do not try to work around
 > the deny.
 
 ⚠ **Stated non-coverage**, each pinned by a test so it reads as a record, not a gap nobody noticed:
@@ -179,10 +179,49 @@ egress policy — a **committed allowlist that accretes from real denials** can.
    again (a rebinding window), and hex-form embedded IPv6 is not decoded — closing either needs a
    resolve-once pinned transport, deliberately not built at MVP.
 
+## `web_search` (`packages/harness/extensions/web-search/`, #63)
+
+Provider-native search with a retrieval fallback, **consumed** from
+[pi-web-search 1.4.0](https://github.com/ttttmr/pi-web-search) (© ttttmr, MIT) rather than depended on —
+every consumed file is retyped to this repo's rules and carries the attribution header. One
+zen-owned `web_search` tool over independent provider modules (`packages/harness/core/web-search/`),
+structured so a later split into provider packages is mechanical: providers never import each other,
+and the tool alone owns selection.
+
+1. **Primary selection.** The CURRENT model routes to its own native search API — Anthropic Messages
+   `web_search` server tool, Google Gemini grounding, or the OpenAI Responses family (OpenAI, Azure,
+   Codex/Copilot) — billing the same identity the conversation does, OAuth included. Alternatively
+   `webSearch.backend: "deepseek"` in `zen.config.json` pins the dedicated DeepSeek backend (its
+   Anthropic-compatible endpoint; pi registers DeepSeek chat models as `openai-completions`, so
+   routing can never select it — only the committed config can, and no provider is ever billed that
+   the config never named). Key via `DEEPSEEK_API_KEY`, env-only.
+2. **The Tavily fallback**, armed solely by `TAVILY_API_KEY` being present in the environment — no
+   config knob, because a key is a secret and secrets never enter the committed file. It fires when
+   the primary is unavailable (no native search for the model), fails, or answers **without
+   searching**. Domain include/exclude lists are its only knobs (`webSearch.tavily`).
+3. **The accurate response.** Outcomes are a typed union keyed on native search-activity blocks in
+   the stream (`server_tool_use` on the Anthropic wire), **never on source count** — upstream called
+   an answer "grounded" if it had sources, which a hallucinated URL satisfies. Every result's first
+   line names the backend that answered and, on fallback, why; an answer the model produced without
+   searching is returned labeled *"No web search was performed … this is NOT a search result"* and
+   never carries the untrusted-content banner (it is not web content). Searched results carry the
+   same banner as web_fetch.
+4. **One stderr audit line per call** — provider, outcome, query, fallback reason, never a key:
+   `web_search audit: searched provider=anthropic query=… — primary`.
+
+Hard-won wire fact, live-diagnosed: a Claude Code **OAuth** credential is rejected (HTTP 429
+`rate_limit_error` with the generic message "Error") unless the request's first system block is the
+Claude Code identity line — pi-ai's own provider says "For OAuth tokens, we MUST include Claude Code
+identity". The anthropic provider sends it on the OAuth branch only; a regression test pins it.
+
+Recorded non-coverage, pinned in the fixture suites: the Google/OpenAI/Azure/Codex providers ship
+fixture-tested but **without a live receipt** — no key for them exists in this install; the fixtures
+say so and ask to be extended from a captured transcript the day a key appears.
+
 ## `zen.config.json` and the path helpers (`@zen/core`, #59)
 
 **One committed config file** for zen-harness — separate from pi's settings and agent dir, one section
-per consumer (web_fetch's allowlist is the first occupant), TypeBox-validated with a loading contract
+per consumer (web_fetch's allowlist, then web_search's optional backend pin and Tavily domain filters — optional because a REQUIRED new section would render every already-committed config unreadable), TypeBox-validated with a loading contract
 every future section inherits: parse fails **closed** (`unreadable` is never "no policy"), and the
 schema is **strict on unknown keys** — a typo like `"allowedHost"` refuses loudly instead of silently
 configuring nothing. The flip side, accepted on purpose: an older harness refuses a newer config, which
@@ -206,7 +245,7 @@ module.
 hatch — so a `-p` run under the full package could chat and do nothing else. Non-interactive runs
 (explicit `-p`, or stdin that is not a TTY) therefore load a **print variant** materialized under
 `.zen/print-harness/`: the harness manifest minus that one extension, with every other package-root
-entry symlinked in place so relative imports keep resolving. Guards, web_fetch, skills, prompts and
+entry symlinked in place so relative imports keep resolving. Guards, web_fetch, web_search, skills, prompts and
 themes all still load — a print run has the harness's own floor, minus the interactive permission
 model that cannot exist without a human to ask. The mirror is rebuilt idempotently on every launch, so
 a moved repo heals and a renamed sibling does not leave a dead link pi would skip in silence.
@@ -250,10 +289,10 @@ dependency into the harness's own `node_modules` — a missing one is a *silentl
 | Path | What it is |
 |---|---|
 | `packages/core/` | `@zen/core` — every TypeBox schema, the config loader, the path helpers ([its README](packages/core/README.md)) |
-| `packages/harness/` | the pi package: `extensions/` (guards, web-fetch), `core/` (pure logic: egress, shell segments, read tracker, fetch policy), skills/prompts/themes |
+| `packages/harness/` | the pi package: `extensions/` (guards, web-fetch, web-search), `core/` (pure logic: egress, shell segments, read tracker, fetch policy, the web-search provider modules), skills/prompts/themes |
 | `packages/web/` | the web surface: server (pi rpc transport, dialog registry), client (TanStack AI chat) |
 | `scripts/` | `zen.mjs` (the launcher), `dev.mjs`, `print-harness.mjs`, `gate.ts`, `check-coverage.ts`, `link-vendor-packages.mjs` |
-| `zen.config.json` | the committed config — web_fetch's host allowlist lives here |
+| `zen.config.json` | the committed config — web_fetch's host allowlist and web_search's optional section live here |
 | `docs/` | `architecture.md` (the vision) and `concepts/` (the research) |
 | `.zen/` | machine-local runtime state (pi agent dir, print variant) — gitignored |
 | `.inspiration/` | read-only vendored codebases surveyed for design (oh-my-pi, pi, deepseek-harness, …) |

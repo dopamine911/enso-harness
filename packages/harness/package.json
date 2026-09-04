@@ -11,6 +11,7 @@
     "extensions": [
       "./extensions/guards/index.ts",
       "./extensions/web-fetch/index.ts",
+      "./extensions/web-search/index.ts",
       "node_modules/@ladbabynpm/picc-permission-modes/index.ts",
       "node_modules/pi-multi-account/index.ts"
     ],

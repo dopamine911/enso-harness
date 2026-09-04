@@ -301,8 +301,9 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
 					reason:
 						`${toolName} network egress is blocked: "${egress.matched}" (matched by ${egress.via}). ` +
 						`Ad-hoc network clients are denied in shell commands (#9) — use the ${WEB_FETCH_TOOL_NAME} ` +
-						`tool instead (#54): it fetches http(s) URLs from hosts on the committed allowlist and is ` +
-						`the only sanctioned web access. Do not try to work around the deny.`,
+						`tool instead (#54): it fetches http(s) URLs from hosts on the committed allowlist. ` +
+						`web_fetch and web_search (#63) are the only sanctioned web access. ` +
+						`Do not try to work around the deny.`,
 				};
 			}
 

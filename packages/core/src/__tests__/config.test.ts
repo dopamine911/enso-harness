@@ -43,6 +43,36 @@ test("an unknown top-level key is unreadable — strict schema", () => {
 	expect(result.kind).toBe("unreadable");
 });
 
+// ⚠ The webSearch section is OPTIONAL and must stay optional (#63): a required section
+// would render every already-committed config unreadable, and unreadable fails CLOSED
+// for every consumer at once — web_fetch would refuse everything until a human edit.
+test("the webSearch section is optional — the pre-#63 committed shape still parses", () => {
+	expect(parseZenConfig(`{ "webFetch": { "allowedHosts": [] } }`).kind).toBe("ok");
+});
+
+test("a full webSearch section parses: the deepseek pin and the tavily domain filters", () => {
+	const result = parseZenConfig(
+		JSON.stringify({
+			webFetch: { allowedHosts: [] },
+			webSearch: { backend: "deepseek", tavily: { includeDomains: ["example.com"], excludeDomains: [] } },
+		}),
+	);
+	expect(result.kind).toBe("ok");
+	const backend = result.kind === "ok" ? result.config.webSearch?.backend : undefined;
+	expect(backend).toBe("deepseek");
+});
+
+test("webSearch is strict like every section: an unknown backend or a typo key is unreadable", () => {
+	const unknownBackend = parseZenConfig(
+		JSON.stringify({ webFetch: { allowedHosts: [] }, webSearch: { backend: "google" } }),
+	);
+	expect(unknownBackend.kind).toBe("unreadable");
+	const typoKey = parseZenConfig(
+		JSON.stringify({ webFetch: { allowedHosts: [] }, webSearch: { tavily: { includeDomain: [] } } }),
+	);
+	expect(typoKey.kind).toBe("unreadable");
+});
+
 test("zenConfigPath joins the filename onto the root", () => {
 	expect(zenConfigPath("/repo")).toBe("/repo/zen.config.json");
 });

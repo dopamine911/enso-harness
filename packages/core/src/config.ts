@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
 import { WebFetchConfig } from "./web-fetch.ts";
+import { WebSearchConfig } from "./web-search.ts";
 
 /**
  * zen-harness's ONE committed config file (#59): `zen.config.json` at the repository
@@ -29,10 +30,16 @@ export const ZEN_CONFIG_FILENAME = "zen.config.json";
 /** The example a refusal message shows a human who needs to change the config. */
 export const ZEN_CONFIG_EXAMPLE = `{ "webFetch": { "allowedHosts": ["docs.example.com"] } }`;
 
-/** The whole config file. One section per consumer; every section's schema lives with its owner. */
+/**
+ * The whole config file. One section per consumer; every section's schema lives with its
+ * owner. ⚠ New sections are added `Type.Optional`, load-bearing (#63): a required section
+ * would make every already-committed config unreadable, and unreadable fails CLOSED for
+ * every consumer at once.
+ */
 export const ZenConfig = Type.Object(
 	{
 		webFetch: WebFetchConfig,
+		webSearch: Type.Optional(WebSearchConfig),
 	},
 	{ additionalProperties: false },
 );
