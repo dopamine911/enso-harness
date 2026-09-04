@@ -73,8 +73,10 @@ export function buildPrintManifest(manifest) {
 
 /**
  * Write the variant package to `printHarnessDir`: the filtered manifest plus symlinks to
- * the real package's resource directories. Idempotent — links are recreated every launch,
- * so a moved repo or a stale link self-heals. Returns the directory to pass to `-e`.
+ * the real package's resource directories. Idempotent and self-healing in BOTH directions
+ * — links are recreated every launch (a moved repo heals), and entries the harness no
+ * longer has are REMOVED (a renamed or deleted sibling does not leave a dead link that pi
+ * would skip in silence). Returns the directory to pass to `-e`.
  */
 export function materializePrintHarness(printHarnessDir, harnessPackageRoot, printManifest) {
 	mkdirSync(printHarnessDir, { recursive: true });
@@ -85,6 +87,10 @@ export function materializePrintHarness(printHarnessDir, harnessPackageRoot, pri
 	const packageEntries = readdirSync(harnessPackageRoot).filter(
 		(entry) => entry !== MANIFEST_FILENAME,
 	);
+	const wantedEntries = new Set([...packageEntries, MANIFEST_FILENAME]);
+	for (const stale of readdirSync(printHarnessDir)) {
+		if (!wantedEntries.has(stale)) rmSync(join(printHarnessDir, stale), { recursive: true, force: true });
+	}
 	for (const entry of packageEntries) {
 		const linkPath = join(printHarnessDir, entry);
 		const targetPath = join(harnessPackageRoot, entry);

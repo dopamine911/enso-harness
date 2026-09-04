@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, readlinkSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +87,12 @@ test("materializePrintHarness writes the filtered manifest and symlinks into the
 		}
 		// Idempotent: a second materialize over existing links must not throw.
 		materializePrintHarness(printDir, harnessPackageRoot, buildPrintManifest(exampleManifest));
+		// Self-healing the other way: an entry the harness no longer has is removed, so pi
+		// cannot silently skip a dead link.
+		symlinkSync("/nowhere-real", join(printDir, "renamed-away"), "dir");
+		materializePrintHarness(printDir, harnessPackageRoot, buildPrintManifest(exampleManifest));
+		expect(existsSync(join(printDir, "renamed-away"))).toBe(false);
+		expect(() => readlinkSync(join(printDir, "renamed-away"))).toThrow();
 	} finally {
 		rmSync(printDir, { recursive: true, force: true });
 	}
