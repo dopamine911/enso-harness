@@ -151,7 +151,26 @@ function pathArgumentOf(event: ToolCallEvent | ToolResultEvent): string | undefi
 	return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-export default function guards(pi: ExtensionAPI): void {
+/**
+ * The bash analyzer seam (#9). Production wires cc-safety-net's `checkCommand`; tests
+ * inject known verdicts — `checkCommand` reads LOCAL policy per call, so a guard test
+ * that touched the real library would vary with the machine's cc-safety-net config
+ * (the contract test alone exercises the real one, and pins defaults explicitly).
+ */
+export interface GuardDependencies {
+	analyzeBashCommand: (input: { command: string; cwd: string }) => CheckCommandResult;
+}
+
+export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI) => void {
+	return function guards(pi: ExtensionAPI): void {
+		guardsWithDependencies(pi, dependencies);
+	};
+}
+
+/** The pi entry point — the real analyzer, wired at the composition root. */
+export default createGuards({ analyzeBashCommand: checkCommand });
+
+function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencies): void {
 	const policy: GuardPolicy = DEFAULT_GUARD_POLICY;
 
 	// #10: which files this session has seen. Session-scoped twice over: pi tears the
@@ -252,7 +271,7 @@ export default function guards(pi: ExtensionAPI): void {
 			if (toolName === TOOL_BASH && command.length > 0) {
 				let safetyNetVerdict: CheckCommandResult;
 				try {
-					safetyNetVerdict = checkCommand({ command, cwd });
+					safetyNetVerdict = dependencies.analyzeBashCommand({ command, cwd });
 				} catch (error) {
 					console.error("guards: cc-safety-net checkCommand threw — denying per its contract", error);
 					safetyNetVerdict = {

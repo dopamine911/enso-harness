@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import guards from "../index.ts";
+import { createGuards, type GuardDependencies } from "../index.ts";
 
 type Handler = (event: unknown, extensionContext: unknown) => { block?: boolean; reason?: string } | undefined;
 
@@ -17,14 +17,25 @@ interface GuardRuntime {
 const PI_SHIPPED_TOOL_NAMES = ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"];
 
 /**
+ * Analyzer default for THESE tests: allow everything. ⚠ Deliberately not the real
+ * cc-safety-net — `checkCommand` reads the MACHINE's local policy per call, so guard
+ * tests touching it would vary with developer config (the "verify against the original"
+ * trap: CI and this machine agree today by accident of both having no config). The
+ * contract test is the one place the real library runs, with that pinning stated.
+ */
+const ALLOW_ALL_ANALYZER: GuardDependencies["analyzeBashCommand"] = () => ({ kind: "allow" });
+
+/**
  * Minimal stand-in for pi's ExtensionAPI — captures every registered handler.
  * `getAllTools` defaults to pi's real shipped set so session_start's policy check (#4)
  * passes; the mismatch tests inject their own list, or a throwing implementation.
  */
 function loadGuardRuntime(
 	getAllTools: () => { name: string }[] = () => PI_SHIPPED_TOOL_NAMES.map((name) => ({ name })),
+	analyzeBashCommand: GuardDependencies["analyzeBashCommand"] = ALLOW_ALL_ANALYZER,
 ): GuardRuntime {
 	const handlers = new Map<string, Handler>();
+	const guards = createGuards({ analyzeBashCommand });
 	guards({ on: (e: string, h: Handler) => handlers.set(e, h), getAllTools } as never);
 	const toolCall = handlers.get("tool_call");
 	const toolResult = handlers.get("tool_result");
@@ -409,17 +420,39 @@ test("the lazy check runs once — a healthy registry is not re-enumerated per c
 
 // ── #9: bash policy — cc-safety-net as a library, then the network deny, then the patch ───
 
-test("a destructive git command is blocked with cc-safety-net's rule identity", () => {
-	const result = call("bash", { command: "git reset --hard HEAD~3" });
+const toolCallEvent2 = (toolName: string, command: string) =>
+	({ type: "tool_call", toolCallId: "t", toolName, input: { command } }) as const;
+
+// These test OUR WIRING of the analyzer verdict, with injected verdicts — the real
+// library's behaviour is pinned by the contract test, and the live receipt pairs the two.
+test("an analyzer deny is blocked with its rule identity in the reason", () => {
+	const runtime = loadGuardRuntime(undefined, () => ({
+		kind: "deny",
+		reason: "git reset --hard destroys all uncommitted changes permanently.",
+		ruleId: "git.reset-hard",
+	}));
+	const result = runtime.toolCall(toolCallEvent2("bash", "git reset --hard HEAD~3"), { cwd });
 	expect(result?.block).toBe(true);
 	expect(result?.reason).toContain("cc-safety-net");
 	expect(result?.reason).toContain("git.reset-hard");
 });
 
-test("a secret read THROUGH bash is blocked — the bypass this issue names", () => {
-	const result = call("bash", { command: "cat ~/.aws/credentials" });
+// ⚠ The analyzer's own contract: "If this function throws, the caller must not execute
+// the command" — so a throw is a DENY, never a pass-through.
+test("an analyzer THROW is a deny, per its contract", () => {
+	const runtime = loadGuardRuntime(undefined, () => {
+		throw new Error("policy read failed");
+	});
+	const result = runtime.toolCall(toolCallEvent2("bash", "ls -la"), { cwd });
 	expect(result?.block).toBe(true);
-	expect(result?.reason).toContain("cc-safety-net");
+	expect(result?.reason).toContain("must not run");
+});
+
+test("an analyzer deny without a ruleId still blocks, without inventing one", () => {
+	const runtime = loadGuardRuntime(undefined, () => ({ kind: "deny", reason: "protected path" }));
+	const result = runtime.toolCall(toolCallEvent2("bash", "rm -rf /"), { cwd });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).not.toContain("(undefined)");
 });
 
 test("a network client at command position is blocked, naming the match", () => {
@@ -451,11 +484,13 @@ test("powershell egress is blocked by the coarse scan; cc-safety-net does not ru
 	expect(result?.reason).toContain("invoke-webrequest");
 });
 
-test("a git command cc-safety-net misreads under PS syntax is not denied on powershell", () => {
-	// `git reset --hard` IS valid PS too and dangerous — but checkCommand is bash-only by
-	// design here; this pins that division so a future "just run it on PS too" change is
-	// a conscious one, not a drive-by.
-	expect(call("powershell", { command: "git reset --hard" })).toBeUndefined();
+test("powershell commands are NEVER analyzed by cc-safety-net — the division, pinned", () => {
+	// `git reset --hard` IS valid PS too and dangerous — but the analyzer parses POSIX
+	// only, so it never runs on powershell (an analyzer that would deny everything proves
+	// it was not consulted). This pins the division so a future "just run it on PS too"
+	// change is a conscious one, not a drive-by.
+	const runtime = loadGuardRuntime(undefined, () => ({ kind: "deny", reason: "should never be consulted" }));
+	expect(runtime.toolCall(toolCallEvent2("powershell", "git reset --hard"), { cwd })).toBeUndefined();
 });
 
 test("write/edit into .cc-safety-net is a persistence denial — the door checkCommand leaves open", () => {
