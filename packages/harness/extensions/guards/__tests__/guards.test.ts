@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
@@ -6,12 +6,29 @@ import guards from "../index.ts";
 
 type Handler = (event: unknown, ctx: unknown) => { block?: boolean; reason?: string } | undefined;
 
-/** Minimal stand-in for pi's ExtensionAPI — captures the registered tool_call handler. */
+/** ONE guard instance's captured handlers — the #10 sequences need state across calls. */
+interface GuardRuntime {
+	toolCall: Handler;
+	toolResult: Handler;
+	sessionStart: Handler;
+}
+
+/** Minimal stand-in for pi's ExtensionAPI — captures every registered handler. */
+function loadGuardRuntime(): GuardRuntime {
+	const handlers = new Map<string, Handler>();
+	guards({ on: (e: string, h: Handler) => handlers.set(e, h) } as never);
+	const toolCall = handlers.get("tool_call");
+	const toolResult = handlers.get("tool_result");
+	const sessionStart = handlers.get("session_start");
+	if (!toolCall || !toolResult || !sessionStart) {
+		throw new Error("guards did not register tool_call + tool_result + session_start");
+	}
+	return { toolCall, toolResult, sessionStart };
+}
+
+/** The original single-handler loader — per-call tests that need no cross-call state. */
 function loadGuard(): Handler {
-	let handler: Handler | undefined;
-	guards({ on: (e: string, h: Handler) => { if (e === "tool_call") handler = h; } } as never);
-	if (!handler) throw new Error("guards registered no tool_call handler");
-	return handler;
+	return loadGuardRuntime().toolCall;
 }
 
 const cwd = mkdtempSync(join(tmpdir(), "zen-guard-live-"));
@@ -93,3 +110,86 @@ test("edit of a .vscode task inside the workspace is blocked", () => {
 });
 test("READING a persistence path is not blocked — the danger is installation", () =>
 	expect(call("read", { path: ".mcp.json" })).toBeUndefined());
+
+// ── #10: write requires knowledge of the file it replaces ─────────────────────────────────
+// These share ONE runtime instance across calls, deliberately — the read-set is state, and
+// a suite that rebuilds the instance per call can never see stale or leaking state.
+
+/** A fresh workspace with one pre-existing file the session has NOT read. */
+function readPreconditionFixture(): { runtime: GuardRuntime; cwd: string; existingFile: string } {
+	const workspace = mkdtempSync(join(tmpdir(), "zen-guard-10-"));
+	writeFileSync(join(workspace, "existing.ts"), "content the session has never seen");
+	return { runtime: loadGuardRuntime(), cwd: workspace, existingFile: "existing.ts" };
+}
+
+const toolCallEvent = (toolName: string, path: string) =>
+	({ type: "tool_call", toolCallId: "t", toolName, input: { path } }) as const;
+const toolResultEvent = (toolName: string, path: string, isError: boolean) =>
+	({ type: "tool_result", toolCallId: "t", toolName, input: { path }, content: [], isError }) as const;
+
+test("write to an EXISTING file the session has not read is blocked, naming file and remedy", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	const result = runtime.toolCall(toolCallEvent("write", existingFile), { cwd });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain(existingFile);
+	expect(result?.reason).toContain("Read");
+});
+
+test("write to a path that does not exist is unaffected — creation is the common case", () => {
+	const { runtime, cwd } = readPreconditionFixture();
+	expect(runtime.toolCall(toolCallEvent("write", "brand-new.ts"), { cwd })).toBeUndefined();
+});
+
+test("a successful read permits a later write of the same file, on the same instance", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	runtime.toolResult(toolResultEvent("read", existingFile, false), { cwd });
+	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })).toBeUndefined();
+});
+
+// ⚠ isError gates recording: a FAILED read saw nothing.
+test("a failed read confers no knowledge", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	runtime.toolResult(toolResultEvent("read", existingFile, true), { cwd });
+	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })?.block).toBe(true);
+});
+
+// Identity is resolved, not spelled: read via a `sub/../` spelling, write via the plain one.
+test("a read via a dotted spelling permits a write via the plain spelling", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	runtime.toolResult(toolResultEvent("read", `sub/../${existingFile}`, false), { cwd });
+	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })).toBeUndefined();
+});
+
+// The deliberate widening: the session's own successful write authored every byte.
+test("the session's own write confers knowledge — create-then-revise never self-blocks", () => {
+	const { runtime, cwd } = readPreconditionFixture();
+	expect(runtime.toolCall(toolCallEvent("write", "created.ts"), { cwd })).toBeUndefined();
+	// The tool executes between the call and the result — by tool_result time the file exists.
+	writeFileSync(join(cwd, "created.ts"), "v1");
+	runtime.toolResult(toolResultEvent("write", "created.ts", false), { cwd });
+	expect(runtime.toolCall(toolCallEvent("write", "created.ts"), { cwd })).toBeUndefined();
+});
+
+// ⚠ edit is NOT knowledge-conferring: a successful edit proved one matched fragment
+// (liftable from grep output), not the whole file a follow-up `write` would claim.
+test("a successful edit does NOT permit a whole-file write", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	runtime.toolResult(toolResultEvent("edit", existingFile, false), { cwd });
+	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })?.block).toBe(true);
+});
+
+// edit itself stays un-gated by this rule — its exact-match already fails a blind edit.
+test("edit of an unread existing file is not gated by the read precondition", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	expect(runtime.toolCall(toolCallEvent("edit", existingFile), { cwd })).toBeUndefined();
+});
+
+// ⚠ The session-scope proof, both halves on one instance: knowledge persists across calls
+// within a session, and session_start clears it (reload/resume keep the runtime alive).
+test("session_start resets the read-set on a live instance", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	runtime.toolResult(toolResultEvent("read", existingFile, false), { cwd });
+	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })).toBeUndefined();
+	runtime.sessionStart({ type: "session_start", reason: "resume" }, { cwd });
+	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })?.block).toBe(true);
+});
