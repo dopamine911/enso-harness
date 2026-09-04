@@ -1,7 +1,7 @@
+import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "bun:test";
 import { startZenServer } from "../index.ts";
 
 /**
@@ -17,10 +17,7 @@ import { startZenServer } from "../index.ts";
 
 function fakeHarness(manifestPi: Record<string, string[]>, createLinks: boolean) {
 	const directory = mkdtempSync(join(tmpdir(), "zen-harness-fake-"));
-	writeFileSync(
-		join(directory, "package.json"),
-		JSON.stringify({ name: "zen-harness", pi: manifestPi }),
-	);
+	writeFileSync(join(directory, "package.json"), JSON.stringify({ name: "zen-harness", pi: manifestPi }));
 	if (createLinks) {
 		for (const entry of Object.values(manifestPi).flat()) {
 			if (!entry.startsWith("node_modules/")) continue;
@@ -39,28 +36,34 @@ test("refuses to start when a vendor manifest path is missing", () => {
 		{ extensions: ["./extensions/guards/index.ts", "node_modules/pi-multi-account/index.ts"] },
 		false,
 	);
-	expect(() =>
-		startZenServer({ launch, harnessPackageDir: harness, agentDir: tmpdir() }),
-	).toThrow(/vendor package paths are missing/);
+	expect(() => startZenServer({ launch, harnessPackageDir: harness, agentDir: tmpdir() })).toThrow(
+		/vendor package paths are missing/,
+	);
 });
 
 test("the refusal NAMES the missing path and the fix", () => {
 	const harness = fakeHarness({ extensions: ["node_modules/pi-multi-account/index.ts"] }, false);
+	// Capture-then-assert keeps the assertions unconditional: no refusal leaves `thrown`
+	// undefined, and the message assertions fail on `undefined` rather than being skipped.
+	let thrown: unknown;
 	try {
 		startZenServer({ launch, harnessPackageDir: harness, agentDir: tmpdir() });
-		throw new Error("should have refused");
 	} catch (error) {
-		const message = (error as Error).message;
-		// Named, not counted — a count cannot say which link to recreate.
-		expect(message).toContain("node_modules/pi-multi-account/index.ts");
-		expect(message).toContain("bun install");
+		thrown = error;
 	}
+	const message = (thrown as Error | undefined)?.message ?? "";
+	// Named, not counted — a count cannot say which link to recreate.
+	expect(message).toContain("node_modules/pi-multi-account/index.ts");
+	expect(message).toContain("bun install");
 });
 
 test("starts when every vendor path resolves", async () => {
 	const harness = fakeHarness({ extensions: ["node_modules/pi-multi-account/index.ts"] }, true);
 	const started = startZenServer({
-		launch, harnessPackageDir: harness, agentDir: tmpdir(), port: 0,
+		launch,
+		harnessPackageDir: harness,
+		agentDir: tmpdir(),
+		port: 0,
 	});
 	expect(started.url).toContain("127.0.0.1");
 	await started.close();
@@ -70,7 +73,10 @@ test("a non-vendor manifest path is not required to exist", async () => {
 	// `./extensions/...` is our own source; only `node_modules/` entries are link-dependent.
 	const harness = fakeHarness({ extensions: ["./extensions/guards/index.ts"] }, false);
 	const started = startZenServer({
-		launch, harnessPackageDir: harness, agentDir: tmpdir(), port: 0,
+		launch,
+		harnessPackageDir: harness,
+		agentDir: tmpdir(),
+		port: 0,
 	});
 	await started.close();
 	expect(true).toBe(true);

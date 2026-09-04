@@ -13,7 +13,12 @@
 	"scripts": {
 		"typecheck": "tsc -b --pretty false",
 		"test": "bun test",
-		"check": "bun run typecheck && bun run test",
+		"lint": "biome check",
+		"lint:fix": "biome check --write",
+		"format": "biome format --write",
+		"check:all": "bun scripts/gate.ts",
+		"check": "bun scripts/gate.ts",
+		"prepare": "git config core.hooksPath .githooks || true",
 		"link:vendor": "bun scripts/link-vendor-packages.mjs",
 		"postinstall": "bun scripts/link-vendor-packages.mjs",
 		"zen": "bun scripts/zen.mjs",
@@ -22,6 +27,7 @@
 		"dev:web": "bun run --silent --cwd packages/web dev:web"
 	},
 	"devDependencies": {
+		"@biomejs/biome": "2.5.12",
 		"@types/bun": "^1.4.0",
 		"typescript": "^5.7.0"
 	},

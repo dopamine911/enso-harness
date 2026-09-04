@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, sep as pathSeparator, resolve } from "node:path";
 import {
 	PERSISTENCE_WRITE_BASENAMES,
 	PERSISTENCE_WRITE_DIRECTORIES,
@@ -48,7 +48,9 @@ export function realpathOfNearestExisting(absolutePath: string): string {
 export function isInsideRoot(absolutePath: string, root: string): boolean {
 	const normalizedRoot = resolve(root);
 	if (absolutePath === normalizedRoot) return true;
-	return absolutePath.startsWith(normalizedRoot.endsWith(sep) ? normalizedRoot : normalizedRoot + sep);
+	return absolutePath.startsWith(
+		normalizedRoot.endsWith(pathSeparator) ? normalizedRoot : normalizedRoot + pathSeparator,
+	);
 }
 
 /** True when the path is inside at least one root, checking both the literal path and its realpath. */
@@ -90,12 +92,8 @@ export function isPersistenceWriteTarget(absolutePath: string): boolean {
 	for (const candidate of [absolutePath, realpathOfNearestExisting(absolutePath)]) {
 		const name = basename(candidate).toLowerCase();
 		if (PERSISTENCE_WRITE_BASENAMES.some((dangerous) => dangerous === name)) return true;
-		const segments = candidate.toLowerCase().split(sep);
-		if (
-			segments.some((segment) =>
-				ALL_PERSISTENCE_WRITE_DIRECTORIES.some((dangerous) => dangerous === segment),
-			)
-		) {
+		const segments = candidate.toLowerCase().split(pathSeparator);
+		if (segments.some((segment) => ALL_PERSISTENCE_WRITE_DIRECTORIES.some((dangerous) => dangerous === segment))) {
 			return true;
 		}
 	}

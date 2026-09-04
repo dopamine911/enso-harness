@@ -6,7 +6,7 @@ import type { StreamChunk } from "@tanstack/ai";
 import { isPiLaunchConfig, type PiLaunchConfig } from "@zen/core";
 import { spawnPiRpcProcess } from "../rpc/process-transport.ts";
 import { createDialogRegistry } from "./dialog-registry.ts";
-import { resumeChat, runChat, type ChatRunOutcome } from "./session.ts";
+import { type ChatRunOutcome, resumeChat, runChat } from "./session.ts";
 
 /**
  * The dev backend: one SSE endpoint TanStack AI's `fetchServerSentEvents` can talk to (#24).
@@ -69,9 +69,7 @@ function latestUserPrompt(body: RunAgentInputBody): string {
 		if (Array.isArray(message.content)) {
 			return message.content
 				.map((part) =>
-					typeof part === "object" && part !== null && "text" in part
-						? String((part as { text: unknown }).text)
-						: "",
+					typeof part === "object" && part !== null && "text" in part ? String((part as { text: unknown }).text) : "",
 				)
 				.join("");
 		}
@@ -143,9 +141,7 @@ function assertVendorLinks(harnessPackageDir: string): void {
 	const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
 		pi?: Record<string, string | string[]>;
 	};
-	const declared = Object.values(manifest.pi ?? {}).flatMap((paths) =>
-		Array.isArray(paths) ? paths : [paths],
-	);
+	const declared = Object.values(manifest.pi ?? {}).flatMap((paths) => (Array.isArray(paths) ? paths : [paths]));
 	const missing = declared
 		.filter((entry) => entry.startsWith("node_modules/"))
 		.filter((entry) => !existsSync(resolve(harnessPackageDir, entry)));
@@ -170,6 +166,7 @@ export function startZenServer(options: ZenServerOptions) {
 	// shared by every request; evicted whole on close.
 	const registry = createDialogRegistry({ onProblem: options.onProblem });
 
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the one HTTP handler, kept as a single top-to-bottom route read (parse → resume-vs-run → stream → teardown); the #27/#34 teardown ordering lives in its control flow and fragmenting it is how the response-close bug hid.
 	const server = createServer(async (request, response) => {
 		if (request.method === "POST" && request.url?.startsWith("/api/chat")) {
 			let body: RunAgentInputBody = {};

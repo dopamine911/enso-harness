@@ -1,9 +1,9 @@
-import { EventType } from "@ag-ui/core";
 import { expect, test } from "bun:test";
+import { EventType } from "@ag-ui/core";
 import type { PiTransport } from "@zen/core";
 import { PiRpcClient } from "../../rpc/client.ts";
 import { createDialogRegistry } from "../dialog-registry.ts";
-import { fetchPiCommands, resumeChat, runChat, type ChatRunOutcome } from "../session.ts";
+import { type ChatRunOutcome, fetchPiCommands, resumeChat, runChat } from "../session.ts";
 
 /** A scripted pi: replies to the prompt, then emits whatever the test lists. */
 function scriptedPi(events: string[]) {
@@ -19,7 +19,9 @@ function scriptedPi(events: string[]) {
 				for (const event of events) consumeData?.(`${event}\n`);
 			});
 		},
-		onData: (consume) => { consumeData = consume; },
+		onData: (consume) => {
+			consumeData = consume;
+		},
 		onClose: () => undefined,
 	};
 	return { transport, written };
@@ -36,7 +38,7 @@ function runWiring() {
 	const wiring = {
 		registry: createDialogRegistry({
 			onProblem: (problem: unknown) => problems.push(problem),
-			answerTimeoutMs: 5_000,
+			answerTimeoutMs: 5000,
 			evictionGraceMs: 5,
 		}),
 		outcome: { parkedAwaitingAnswer: false } as ChatRunOutcome,
@@ -53,7 +55,14 @@ async function collect(events: string[], images?: ChatImages) {
 	const pi = scriptedPi(events);
 	const wiring = runWiring();
 	const chunks = [];
-	for await (const chunk of runChat({ transport: pi.transport, ids, prompt: "hello", onProblem: undefined, ...wiring, ...(images ? { images } : {}) })) {
+	for await (const chunk of runChat({
+		transport: pi.transport,
+		ids,
+		prompt: "hello",
+		onProblem: undefined,
+		...wiring,
+		...(images ? { images } : {}),
+	})) {
 		chunks.push(chunk);
 	}
 	return { chunks, written: pi.written };
@@ -62,10 +71,7 @@ type ChatImages = ReadonlyArray<{ type: "image"; data: string; mimeType: string 
 
 test("a run opens with RUN_STARTED then TEXT_MESSAGE_START", async () => {
 	const { chunks } = await collect(['{"type":"agent_settled"}']);
-	expect(chunks.slice(0, 2).map((c) => c.type)).toEqual([
-		EventType.RUN_STARTED,
-		EventType.TEXT_MESSAGE_START,
-	]);
+	expect(chunks.slice(0, 2).map((c) => c.type)).toEqual([EventType.RUN_STARTED, EventType.TEXT_MESSAGE_START]);
 });
 
 test("text deltas stream through as AG-UI content events", async () => {
@@ -109,9 +115,10 @@ test("the stream does NOT end on agent_end, only on agent_settled", async () => 
 });
 
 test("images are forwarded verbatim on the prompt command", async () => {
-	const { written } = await collect(['{"type":"agent_settled"}'], [
-		{ type: "image", data: "aGk=", mimeType: "image/png" },
-	]);
+	const { written } = await collect(
+		['{"type":"agent_settled"}'],
+		[{ type: "image", data: "aGk=", mimeType: "image/png" }],
+	);
 	const sent = JSON.parse(written[0] as string) as { images: Array<{ mimeType: string }> };
 	expect(sent.images[0]).toMatchObject({ mimeType: "image/png" });
 });
@@ -123,14 +130,19 @@ test("a rejected prompt yields RUN_ERROR rather than throwing", async () => {
 		write: (line) => {
 			const id = (JSON.parse(line) as { id: string }).id;
 			queueMicrotask(() =>
-				consumeData?.(`{"id":"${id}","type":"response","command":"prompt","success":false,"error":"already streaming"}\n`),
+				consumeData?.(
+					`{"id":"${id}","type":"response","command":"prompt","success":false,"error":"already streaming"}\n`,
+				),
 			);
 		},
-		onData: (consume) => { consumeData = consume; },
+		onData: (consume) => {
+			consumeData = consume;
+		},
 		onClose: () => undefined,
 	};
 	const chunks = [];
-	for await (const chunk of runChat({ transport, ids, prompt: "x", onProblem: undefined, ...runWiring() })) chunks.push(chunk);
+	for await (const chunk of runChat({ transport, ids, prompt: "x", onProblem: undefined, ...runWiring() }))
+		chunks.push(chunk);
 	const error = chunks.find((c) => c.type === EventType.RUN_ERROR);
 	expect(error).toMatchObject({ runId: "r1", message: "already streaming" });
 });
@@ -141,7 +153,11 @@ test("a malformed record is reported and does not hang the run", async () => {
 	const pi = scriptedPi(["{not json}", '{"type":"agent_settled"}']);
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport: pi.transport, ids, prompt: "x", onProblem: (p) => problems.push(p), ...runWiring(),
+		transport: pi.transport,
+		ids,
+		prompt: "x",
+		onProblem: (p) => problems.push(p),
+		...runWiring(),
 	})) {
 		chunks.push(chunk);
 	}
@@ -150,10 +166,7 @@ test("a malformed record is reported and does not hang the run", async () => {
 });
 
 test("an unmodelled pi event still reaches the client, as CUSTOM", async () => {
-	const { chunks } = await collect([
-		'{"type":"queue_update","depth":3}',
-		'{"type":"agent_settled"}',
-	]);
+	const { chunks } = await collect(['{"type":"queue_update","depth":3}', '{"type":"agent_settled"}']);
 	const custom = chunks.find((c) => c.type === EventType.CUSTOM);
 	expect(custom).toMatchObject({ name: "zen.unmapped" });
 });
@@ -183,7 +196,9 @@ function piWithCommands(commandNames: string[], events: string[] = ['{"type":"ag
 				for (const event of events) consumeData?.(`${event}\n`);
 			});
 		},
-		onData: (consume) => { consumeData = consume; },
+		onData: (consume) => {
+			consumeData = consume;
+		},
 		onClose: () => undefined,
 	};
 	return { transport, sent };
@@ -247,7 +262,9 @@ test("fetchPiCommands filters malformed entries rather than trusting the payload
 				),
 			);
 		},
-		onData: (consume) => { consumeData = consume; },
+		onData: (consume) => {
+			consumeData = consume;
+		},
 		onClose: () => undefined,
 	};
 	const client = new PiRpcClient({ transport });
@@ -273,12 +290,19 @@ test("a run that never settles ends itself rather than hanging", async () => {
 				consumeData?.('{"type":"turn_start"}\n');
 			});
 		},
-		onData: (consume) => { consumeData = consume; },
+		onData: (consume) => {
+			consumeData = consume;
+		},
 		onClose: () => undefined,
 	};
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport, ids, prompt: "hello", onProblem: undefined, noProgressTimeoutMs: 40, ...runWiring(),
+		transport,
+		ids,
+		prompt: "hello",
+		onProblem: undefined,
+		noProgressTimeoutMs: 40,
+		...runWiring(),
 	})) {
 		chunks.push(chunk);
 	}
@@ -292,7 +316,12 @@ test("a settled run is unaffected by the timeout", async () => {
 	const pi = piWithCommands([], ['{"type":"agent_settled"}']);
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport: pi.transport, ids, prompt: "hi", onProblem: undefined, noProgressTimeoutMs: 40, ...runWiring(),
+		transport: pi.transport,
+		ids,
+		prompt: "hi",
+		onProblem: undefined,
+		noProgressTimeoutMs: 40,
+		...runWiring(),
 	})) {
 		chunks.push(chunk);
 	}
@@ -336,7 +365,9 @@ function dialogPi(dialogEvent: string, afterAnswer: string[] = ['{"type":"agent_
 				});
 			}
 		},
-		onData: (consume) => { consumeData = consume; },
+		onData: (consume) => {
+			consumeData = consume;
+		},
 		onClose: () => undefined,
 	};
 	return { transport, written };
@@ -364,7 +395,11 @@ async function runIntoDialog(pi: ReturnType<typeof dialogPi>, wiring = runWiring
 	// ⚠ Ordinary prose, not "/x" — a slash prompt would trigger the command lookup, which
 	// this fake does not answer. Dialog behaviour is independent of slash handling.
 	for await (const chunk of runChat({
-		transport: pi.transport, ids, prompt: "do a thing", onProblem: undefined, ...wiring,
+		transport: pi.transport,
+		ids,
+		prompt: "do a thing",
+		onProblem: undefined,
+		...wiring,
 	})) {
 		chunks.push(chunk);
 	}
@@ -386,11 +421,18 @@ test("⚠⚠ a blocking dialog interrupts the run: parked, stamped, nothing decl
 	// ⚠ The binding stamp is what makes the interrupt RESOLVABLE — without it TanStack
 	// classifies it unbound/canResolve:false. interruptedRunId must be THIS run.
 	expect(interrupt?.metadata["tanstack:interruptBinding"]).toEqual({
-		v: 1, kind: "generic", interruptId: "d1", interruptedRunId: "r1", generation: 0,
+		// biome-ignore lint: `v` is TanStack's interruptBinding wire format — the assertion must spell the stamp exactly.
+		v: 1,
+		kind: "generic",
+		interruptId: "d1",
+		interruptedRunId: "r1",
+		generation: 0,
 	});
 	// the question itself rides under the zen key, whole
 	expect(interrupt?.metadata["zen:dialog"]).toEqual({
-		method: "select", title: "Select permission mode", options: ["ask", "auto", "deny"],
+		method: "select",
+		title: "Select permission mode",
+		options: ["ask", "auto", "deny"],
 	});
 
 	// nothing was declined, the process was parked rather than stopped
@@ -410,7 +452,11 @@ async function resumeWith(
 	const outcome = { parkedAwaitingAnswer: false };
 	const chunks = [];
 	for await (const chunk of resumeChat({
-		registry: wiring.registry, ids: resumeIds, parentRunId, resume, outcome,
+		registry: wiring.registry,
+		ids: resumeIds,
+		parentRunId,
+		resume,
+		outcome,
 		onProblem: undefined,
 	})) {
 		chunks.push(chunk);
@@ -479,9 +525,7 @@ test("cancel from the UI is delivered as pi's cancellation and the run completes
 
 test("a resume with no parked question is told so instead of hanging or crashing", async () => {
 	const wiring = runWiring();
-	const { chunks } = await resumeWith(wiring, [
-		{ interruptId: "d1", status: "resolved", payload: { value: "auto" } },
-	]);
+	const { chunks } = await resumeWith(wiring, [{ interruptId: "d1", status: "resolved", payload: { value: "auto" } }]);
 	const error = chunks.find((c) => c.type === EventType.RUN_ERROR);
 	expect((error as { message: string }).message).toContain("no open question");
 });
@@ -573,7 +617,9 @@ test("a fire-and-forget UI request is NOT cancelled — nothing is waiting on it
 				consumeData?.('{"type":"agent_settled"}\n');
 			});
 		},
-		onData: (consume) => { consumeData = consume; },
+		onData: (consume) => {
+			consumeData = consume;
+		},
 		onClose: () => undefined,
 	};
 	for await (const _chunk of runChat({ transport, ids, prompt: "hi", onProblem: undefined, ...runWiring() })) {
@@ -602,18 +648,23 @@ test("dropped status heartbeats do NOT keep a stalled run alive", async () => {
 				// Traffic that produces no chunks, faster than the deadline — exactly the
 				// shape that defeated the first implementation.
 				heartbeat = setInterval(() => {
-					consumeData?.(
-						'{"type":"extension_ui_request","id":"h","method":"setStatus","statusKey":"quota"}\n',
-					);
+					consumeData?.('{"type":"extension_ui_request","id":"h","method":"setStatus","statusKey":"quota"}\n');
 				}, 10);
 			});
 		},
-		onData: (consume) => { consumeData = consume; },
+		onData: (consume) => {
+			consumeData = consume;
+		},
 		onClose: () => undefined,
 	};
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport, ids, prompt: "hello", onProblem: undefined, noProgressTimeoutMs: 80, ...runWiring(),
+		transport,
+		ids,
+		prompt: "hello",
+		onProblem: undefined,
+		noProgressTimeoutMs: 80,
+		...runWiring(),
 	})) {
 		chunks.push(chunk);
 	}
@@ -640,12 +691,19 @@ test("real output DOES renew the deadline, so a slow answer is not cut off", asy
 				consumeData?.('{"type":"agent_settled"}\n');
 			});
 		},
-		onData: (consume) => { consumeData = consume; },
+		onData: (consume) => {
+			consumeData = consume;
+		},
 		onClose: () => undefined,
 	};
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport, ids, prompt: "hello", onProblem: undefined, noProgressTimeoutMs: 60, ...runWiring(),
+		transport,
+		ids,
+		prompt: "hello",
+		onProblem: undefined,
+		noProgressTimeoutMs: 60,
+		...runWiring(),
 	})) {
 		chunks.push(chunk);
 	}
@@ -666,14 +724,19 @@ test("a slash-command run closes shortly after its ack, not at the no-progress g
 	const startedAt = Date.now();
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport: pi.transport, ids, prompt: "/mode auto", onProblem: undefined,
-		noProgressTimeoutMs: 5_000, slashCommandGraceMs: 30, ...runWiring(),
+		transport: pi.transport,
+		ids,
+		prompt: "/mode auto",
+		onProblem: undefined,
+		noProgressTimeoutMs: 5000,
+		slashCommandGraceMs: 30,
+		...runWiring(),
 	})) {
 		chunks.push(chunk);
 	}
 	expect(chunks.at(-1)?.type).toBe(EventType.RUN_FINISHED);
 	// well inside the 5s guard — the grace closed it, not the guard
-	expect(Date.now() - startedAt).toBeLessThan(1_000);
+	expect(Date.now() - startedAt).toBeLessThan(1000);
 });
 
 test("⚠ an ordinary prompt is NOT closed by its ack — ack means accepted, not done", async () => {
@@ -682,8 +745,13 @@ test("⚠ an ordinary prompt is NOT closed by its ack — ack means accepted, no
 	const startedAt = Date.now();
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport: pi.transport, ids, prompt: "hello", onProblem: undefined,
-		noProgressTimeoutMs: 120, slashCommandGraceMs: 5, ...runWiring(),
+		transport: pi.transport,
+		ids,
+		prompt: "hello",
+		onProblem: undefined,
+		noProgressTimeoutMs: 120,
+		slashCommandGraceMs: 5,
+		...runWiring(),
 	})) {
 		chunks.push(chunk);
 	}
@@ -698,8 +766,13 @@ test("an answered slash-command dialog closes its continuation at the grace too"
 	const wiring = runWiring();
 	const chunks1 = [];
 	for await (const chunk of runChat({
-		transport: pi.transport, ids, prompt: "/mode", onProblem: undefined,
-		noProgressTimeoutMs: 5_000, slashCommandGraceMs: 25, ...wiring,
+		transport: pi.transport,
+		ids,
+		prompt: "/mode",
+		onProblem: undefined,
+		noProgressTimeoutMs: 5000,
+		slashCommandGraceMs: 25,
+		...wiring,
 	})) {
 		chunks1.push(chunk);
 	}
@@ -711,13 +784,17 @@ test("an answered slash-command dialog closes its continuation at the grace too"
 	const resumeIds = { messageId: "m2", runId: "r2", threadId: "t1" };
 	const chunks2 = [];
 	for await (const chunk of resumeChat({
-		registry: wiring.registry, ids: resumeIds, parentRunId: "r1",
+		registry: wiring.registry,
+		ids: resumeIds,
+		parentRunId: "r1",
 		resume: [{ interruptId: "d1", status: "resolved", payload: { value: "auto" } }],
-		outcome: { parkedAwaitingAnswer: false }, onProblem: undefined,
-		noProgressTimeoutMs: 5_000, slashCommandGraceMs: 25,
+		outcome: { parkedAwaitingAnswer: false },
+		onProblem: undefined,
+		noProgressTimeoutMs: 5000,
+		slashCommandGraceMs: 25,
 	})) {
 		chunks2.push(chunk);
 	}
 	expect(chunks2.at(-1)?.type).toBe(EventType.RUN_FINISHED);
-	expect(Date.now() - startedAt).toBeLessThan(1_000);
+	expect(Date.now() - startedAt).toBeLessThan(1000);
 });

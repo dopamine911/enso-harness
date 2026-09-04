@@ -106,7 +106,7 @@ const DIALOG_ANSWER_TIMEOUT_MS = 10 * 60 * 1000;
  * honestly (a declined `select` resolves `undefined`); the stop is what guarantees the
  * process does not outlive the registry's promise to have dealt with it.
  */
-const EVICTION_GRACE_MS = 5_000;
+const EVICTION_GRACE_MS = 5000;
 
 export interface DialogRegistryOptions {
 	onProblem: ((problem: unknown) => void) | undefined;

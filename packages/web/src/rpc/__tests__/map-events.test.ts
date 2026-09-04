@@ -2,8 +2,7 @@ import { expect, test } from "bun:test";
 import { ZEN_TOOL_RESULT_KEY, type ZenObservation } from "@zen/core";
 import { mapPiEvent, toolResultMetadata } from "../map-events.ts";
 
-const kindOf = (event: Parameters<typeof mapPiEvent>[0]): ZenObservation["kind"] =>
-	mapPiEvent(event).kind;
+const kindOf = (event: Parameters<typeof mapPiEvent>[0]): ZenObservation["kind"] => mapPiEvent(event).kind;
 
 // --- streaming deltas, and the usage that rides on every one
 test("a text delta maps, carrying usage", () => {
@@ -26,9 +25,9 @@ test("a thinking delta is distinguished from text", () =>
 	).toBe("thinking-delta"));
 
 test("a start/end marker is carried as unmapped, never dropped", () =>
-	expect(
-		kindOf({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } }),
-	).toBe("unmapped"));
+	expect(kindOf({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } })).toBe(
+		"unmapped",
+	));
 
 // --- tool lifecycle
 test("tool_execution_start becomes a tool call", () =>
@@ -76,7 +75,12 @@ test("non-text content parts are named, not silently dropped", () =>
 			type: "tool_execution_end",
 			toolCallId: "c1",
 			toolName: "read",
-			result: { content: [{ type: "image", data: "…" }, { type: "text", text: " ok" }] },
+			result: {
+				content: [
+					{ type: "image", data: "…" },
+					{ type: "text", text: " ok" },
+				],
+			},
 			isError: false,
 		}),
 	).toMatchObject({ text: "[image content] ok" }));
@@ -97,13 +101,19 @@ test("truncation in details becomes a descriptor with structured fields", () => 
 
 test("absent or null truncation yields no descriptor", () => {
 	const withNull = mapPiEvent({
-		type: "tool_execution_end", toolCallId: "c1", toolName: "bash",
-		result: { content: "x", details: { truncation: null } }, isError: false,
+		type: "tool_execution_end",
+		toolCallId: "c1",
+		toolName: "bash",
+		result: { content: "x", details: { truncation: null } },
+		isError: false,
 	});
 	expect(withNull).not.toHaveProperty("descriptor");
 	const withoutDetails = mapPiEvent({
-		type: "tool_execution_end", toolCallId: "c1", toolName: "bash",
-		result: { content: "x" }, isError: false,
+		type: "tool_execution_end",
+		toolCallId: "c1",
+		toolName: "bash",
+		result: { content: "x" },
+		isError: false,
 	});
 	expect(withoutDetails).not.toHaveProperty("descriptor");
 });
@@ -111,7 +121,9 @@ test("absent or null truncation yields no descriptor", () => {
 test("an unknown truncation unit falls back to lines rather than propagating garbage", () =>
 	expect(
 		mapPiEvent({
-			type: "tool_execution_end", toolCallId: "c1", toolName: "bash",
+			type: "tool_execution_end",
+			toolCallId: "c1",
+			toolName: "bash",
 			result: { content: "x", details: { truncation: { shown: 1, total: 2, unit: "furlongs" } } },
 			isError: false,
 		}),
@@ -156,9 +168,11 @@ test("an unrecognised notifyType degrades to an untyped notification, not a fail
 });
 
 test("a notify with no message maps to an empty string, never undefined", () =>
-	expect(
-		mapPiEvent({ type: "extension_ui_request", id: "n3", method: "notify" }),
-	).toMatchObject({ kind: "extension-ui-request", method: "notify", message: "" }));
+	expect(mapPiEvent({ type: "extension_ui_request", id: "n3", method: "notify" })).toMatchObject({
+		kind: "extension-ui-request",
+		method: "notify",
+		message: "",
+	}));
 
 // ⚠ A dialog's `message` is part of the QUESTION and travels inside `dialog` — it must not
 // gain a second home on the observation root, or the two copies drift.
@@ -204,16 +218,16 @@ test("a custom session entry maps with its type and data", () =>
 	).toEqual({ kind: "custom-entry", customType: "modes", data: { mode: "acceptEdits" } }));
 
 test("a custom entry with no data still maps — the shape belongs to its extension", () =>
-	expect(
-		mapPiEvent({ type: "entry_appended", entry: { type: "custom", customType: "modes" } }),
-	).toEqual({ kind: "custom-entry", customType: "modes", data: undefined }));
+	expect(mapPiEvent({ type: "entry_appended", entry: { type: "custom", customType: "modes" } })).toEqual({
+		kind: "custom-entry",
+		customType: "modes",
+		data: undefined,
+	}));
 
 // ⚠ Non-custom entries duplicate first-class observations (messages stream as
 // message_update), so they stay unmapped exactly as before this case existed.
 test("a non-custom session entry stays unmapped", () =>
-	expect(
-		kindOf({ type: "entry_appended", entry: { type: "message", message: { role: "user" } } }),
-	).toBe("unmapped"));
+	expect(kindOf({ type: "entry_appended", entry: { type: "message", message: { role: "user" } } })).toBe("unmapped"));
 
 test("an entry_appended with no readable entry stays unmapped", () =>
 	expect(kindOf({ type: "entry_appended" })).toBe("unmapped"));

@@ -8,5 +8,18 @@
  *
  * Import schemas from `@zen/core` directly. Import path helpers from here.
  */
-export * from "./paths.ts";
-export * from "./read-tracker.ts";
+// Named for the same reason as @zen/core's barrel: the list IS the public inventory.
+export {
+	isInsideAnyRoot,
+	isInsideRoot,
+	isPersistenceWriteTarget,
+	isProtectedForWrite,
+	looksLikeSecret,
+	realpathOfNearestExisting,
+	resolveAgainstCwd,
+} from "./paths.ts";
+export {
+	createSessionReadTracker,
+	type KnownPathState,
+	type SessionReadTracker,
+} from "./read-tracker.ts";

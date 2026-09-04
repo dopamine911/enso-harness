@@ -1,23 +1,14 @@
 // ⚠ Only `TextPart` crosses from the package's renderers. `ThinkingPart` looked like its
 // sibling but renders PLAIN text inside hardcoded off-theme chrome — the Reasoning shell
 // in `ai-elements/reasoning.tsx` replaces it (see that file's header).
-import { TextPart } from "@tanstack/ai-react/ui";
+
 import type { ChatUISelectedPart } from "@tanstack/ai-client/ui";
-import {
-	Reasoning,
-	ReasoningContent,
-	ReasoningTrigger,
-} from "./components/ai-elements/reasoning.tsx";
-import { ZenToolResult, type ZenRendererMap } from "./ZenToolResult.tsx";
+import { TextPart } from "@tanstack/ai-react/ui";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "./components/ai-elements/reasoning.tsx";
+import { type ZenRendererMap, ZenToolResult } from "./ZenToolResult.tsx";
 
 /** The collapsible Reasoning shell around the thinking text. */
-function ThinkingBlock({
-	content,
-	isStreaming,
-}: {
-	content: string;
-	isStreaming: boolean;
-}): React.ReactNode {
+function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming: boolean }): React.ReactNode {
 	return (
 		<Reasoning isStreaming={isStreaming}>
 			<ReasoningTrigger />

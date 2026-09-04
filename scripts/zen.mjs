@@ -55,9 +55,7 @@ const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf
 
 const VENDOR_PATH_PREFIX = "node_modules/";
 
-const declaredResources = Object.values(manifest.pi ?? {}).flatMap((paths) =>
-	Array.isArray(paths) ? paths : [paths],
-);
+const declaredResources = Object.values(manifest.pi ?? {}).flatMap((paths) => (Array.isArray(paths) ? paths : [paths]));
 if (declaredResources.length === 0) {
 	console.error("zen: packages/harness/package.json declares no pi resources");
 	process.exit(1);
@@ -100,17 +98,10 @@ const passthroughArgs = process.argv.slice(2);
  * not a TTY (piped input cannot answer a permission dialog even without -p). Interactive
  * runs keep the full package and the full permission model.
  */
-const isPrintRun =
-	passthroughArgs.includes("-p") ||
-	passthroughArgs.includes("--print") ||
-	!process.stdin.isTTY;
+const isPrintRun = passthroughArgs.includes("-p") || passthroughArgs.includes("--print") || !process.stdin.isTTY;
 
 const packageToLoad = isPrintRun
-	? materializePrintHarness(
-			join(repoRoot, ".zen", "print-harness"),
-			packageRoot,
-			buildPrintManifest(manifest),
-		)
+	? materializePrintHarness(join(repoRoot, ".zen", "print-harness"), packageRoot, buildPrintManifest(manifest))
 	: packageRoot;
 
 const args = ["--no-extensions", "--no-skills", "-e", packageToLoad, ...passthroughArgs];

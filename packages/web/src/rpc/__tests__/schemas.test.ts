@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test";
-import { Check } from "typebox/value";
 import {
 	isZenToolResultDescriptor,
 	PiImageContent,
@@ -10,6 +9,7 @@ import {
 	ZenToolResultDescriptor,
 	ZenUsage,
 } from "@zen/core";
+import { Check } from "typebox/value";
 import { mapPiEvent } from "../map-events.ts";
 import { claimsToBeResponse, isPiRpcResponse } from "../protocol.ts";
 
@@ -28,8 +28,7 @@ test("a schema is literally a JSON Schema object", () => {
 	expect(ZenToolResultDescriptor.required).not.toContain("truncated");
 });
 
-test("the observation union is expressed as a JSON Schema union", () =>
-	expect(ZenObservation).toHaveProperty("anyOf"));
+test("the observation union is expressed as a JSON Schema union", () => expect(ZenObservation).toHaveProperty("anyOf"));
 
 // --- and the validators actually reject
 test("the descriptor validator rejects every malformed shape", () => {
@@ -42,14 +41,14 @@ test("the descriptor validator rejects every malformed shape", () => {
 });
 
 test("a negative truncation count is rejected, not silently rendered", () =>
-	expect(
-		isZenToolResultDescriptor({ kind: "d", props: {}, truncated: { shown: -1, total: 5, unit: "lines" } }),
-	).toBe(false));
+	expect(isZenToolResultDescriptor({ kind: "d", props: {}, truncated: { shown: -1, total: 5, unit: "lines" } })).toBe(
+		false,
+	));
 
 test("an unknown truncation unit is rejected by the schema", () =>
-	expect(
-		isZenToolResultDescriptor({ kind: "d", props: {}, truncated: { shown: 1, total: 5, unit: "furlongs" } }),
-	).toBe(false));
+	expect(isZenToolResultDescriptor({ kind: "d", props: {}, truncated: { shown: 1, total: 5, unit: "furlongs" } })).toBe(
+		false,
+	));
 
 test("usage rejects non-integer token counts", () => {
 	expect(Check(ZenUsage, { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 })).toBe(true);
@@ -86,12 +85,27 @@ test("a response missing required fields fails validation while still claiming t
 // --- the mapper's output validates against the union it claims to produce
 test("EVERY observation the mapper can emit validates against ZenObservation", () => {
 	const events = [
-		{ type: "message_update", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.1 } }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "a" } },
+		{
+			type: "message_update",
+			usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.1 } },
+			assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "a" },
+		},
 		{ type: "message_update", assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "b" } },
 		{ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } },
 		{ type: "tool_execution_start", toolCallId: "c", toolName: "bash", args: { command: "ls" } },
-		{ type: "tool_execution_update", toolCallId: "c", toolName: "bash", partialResult: { content: [{ type: "text", text: "x" }] } },
-		{ type: "tool_execution_end", toolCallId: "c", toolName: "bash", result: { content: "y", details: { truncation: { shown: 1, total: 9, unit: "lines" } } }, isError: false },
+		{
+			type: "tool_execution_update",
+			toolCallId: "c",
+			toolName: "bash",
+			partialResult: { content: [{ type: "text", text: "x" }] },
+		},
+		{
+			type: "tool_execution_end",
+			toolCallId: "c",
+			toolName: "bash",
+			result: { content: "y", details: { truncation: { shown: 1, total: 9, unit: "lines" } } },
+			isError: false,
+		},
 		{ type: "tool_execution_end", toolCallId: "c", toolName: "write", result: { content: "denied" }, isError: true },
 		{ type: "extension_error", extensionPath: "/g.ts", event: "tool_call", error: "boom" },
 		{ type: "agent_end", willRetry: true },

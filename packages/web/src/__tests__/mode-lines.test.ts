@@ -17,8 +17,7 @@ afterEach(() => {
 });
 
 const modesEntry = (mode: unknown) => ({ customType: "modes", data: { mode } });
-const renderedMessages = () =>
-	getZenNotificationsSnapshot().map((notification) => notification.message);
+const renderedMessages = () => getZenNotificationsSnapshot().map((notification) => notification.message);
 
 // ⚠ The first value RENDERS, deliberately: picc persists on every session start, so the
 // opening line tells the user which mode the session is actually in. State wording

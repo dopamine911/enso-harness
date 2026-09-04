@@ -1,11 +1,11 @@
-import { Compile } from "typebox/compile";
 import {
-	PiRpcEventSchema,
-	PiRpcResponseSchema,
 	type PiRpcEvent,
+	PiRpcEventSchema,
 	type PiRpcRecord,
 	type PiRpcResponse,
+	PiRpcResponseSchema,
 } from "@zen/core";
+import { Compile } from "typebox/compile";
 
 /**
  * Runtime behaviour over pi's rpc wire schemas.

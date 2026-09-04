@@ -2,14 +2,14 @@
 // and this is the ONE stylesheet — shadcn's theme variables are injected into it by the
 // CLI (`components.json` points here). Do not add a second css entry point.
 import "./styles/global.css";
-import { fetchServerSentEvents } from "@tanstack/ai-react";
 import type { GenericAGUIInterrupt } from "@tanstack/ai-client";
 import { automaticPartsForMessage, selectChatUI } from "@tanstack/ai-client/ui";
+import { fetchServerSentEvents } from "@tanstack/ai-react";
 import { createChatHook } from "@tanstack/ai-react/ui";
+import { isZenDialogSpec, ZEN_DIALOG_KEY, type ZenDialogSpec } from "@zen/core";
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { isZenDialogSpec, ZEN_DIALOG_KEY, type ZenDialogSpec } from "@zen/core";
 import {
 	Conversation,
 	ConversationContent,
@@ -19,14 +19,7 @@ import {
 import { Message, MessageContent } from "./components/ai-elements/message.tsx";
 import { Alert, AlertDescription, AlertTitle } from "./components/ui/alert.tsx";
 import { Button } from "./components/ui/button.tsx";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardFooter,
-	CardHeader,
-	CardTitle,
-} from "./components/ui/card.tsx";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card.tsx";
 import { Input } from "./components/ui/input.tsx";
 import { Textarea } from "./components/ui/textarea.tsx";
 import { createFixtureChat } from "./fixture-conversation.ts";
@@ -110,9 +103,7 @@ const chatOptions = {
 		const observation = data as { message?: unknown; notifyType?: unknown };
 		if (typeof observation.message !== "string") return;
 		const notifyType =
-			observation.notifyType === "info" ||
-			observation.notifyType === "warning" ||
-			observation.notifyType === "error"
+			observation.notifyType === "info" || observation.notifyType === "warning" || observation.notifyType === "error"
 				? observation.notifyType
 				: undefined;
 		pushZenNotification(observation.message, notifyType);
@@ -162,15 +153,69 @@ function UnhandledInterrupt({ interrupt }: { interrupt: unknown }): React.ReactN
  * would be refused there. Cancel goes through `interrupt.cancel()`, which the client sends
  * as `status:"cancelled"` and the server writes as pi's `{cancelled:true}`.
  */
-function ZenDialogInterrupt({
-	interrupt,
+
+/**
+ * The per-method answer controls, one early return per dialog method — extracted from a
+ * ternary chain so each shape reads on its own. `input` and `editor` share the form; the
+ * only difference is the field element.
+ */
+function DialogAnswerControls({
+	dialog,
+	answer,
 }: {
-	interrupt: GenericAGUIInterrupt;
+	dialog: ZenDialogSpec;
+	answer: (payload: { value: string } | { confirmed: boolean }) => void;
 }): React.ReactNode {
+	if (dialog.method === "confirm") {
+		return (
+			<div className="flex flex-col gap-3">
+				<p className="text-sm">{dialog.message}</p>
+				<div className="flex gap-2">
+					<Button type="button" onClick={() => answer({ confirmed: true })}>
+						Yes
+					</Button>
+					<Button type="button" variant="outline" onClick={() => answer({ confirmed: false })}>
+						No
+					</Button>
+				</div>
+			</div>
+		);
+	}
+	if (dialog.method === "select") {
+		return (
+			<div className="flex flex-wrap gap-2">
+				{dialog.options.map((option) => (
+					<Button key={option} type="button" variant="outline" onClick={() => answer({ value: option })}>
+						{option}
+					</Button>
+				))}
+			</div>
+		);
+	}
+	return (
+		<form
+			onSubmit={(event) => {
+				event.preventDefault();
+				const field = event.currentTarget.elements.namedItem("answer");
+				if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+					answer({ value: field.value });
+				}
+			}}
+			className="flex items-start gap-2"
+		>
+			{dialog.method === "editor" ? (
+				<Textarea name="answer" defaultValue={dialog.prefill ?? ""} rows={6} className="flex-1" />
+			) : (
+				<Input name="answer" placeholder={dialog.placeholder ?? ""} autoComplete="off" className="flex-1" />
+			)}
+			<Button type="submit">Answer</Button>
+		</form>
+	);
+}
+
+function ZenDialogInterrupt({ interrupt }: { interrupt: GenericAGUIInterrupt }): React.ReactNode {
 	const dialogCandidate: unknown = interrupt.metadata?.[ZEN_DIALOG_KEY];
-	const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate)
-		? dialogCandidate
-		: undefined;
+	const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate) ? dialogCandidate : undefined;
 	const canAnswer = interrupt.canResolve === true;
 
 	if (dialog === undefined || !canAnswer) {
@@ -190,55 +235,7 @@ function ZenDialogInterrupt({
 				<CardTitle className="text-base">{dialog.title}</CardTitle>
 			</CardHeader>
 			<CardContent>
-				{dialog.method === "confirm" ? (
-					<div className="flex flex-col gap-3">
-						<p className="text-sm">{dialog.message}</p>
-						<div className="flex gap-2">
-							<Button type="button" onClick={() => answer({ confirmed: true })}>
-								Yes
-							</Button>
-							<Button type="button" variant="outline" onClick={() => answer({ confirmed: false })}>
-								No
-							</Button>
-						</div>
-					</div>
-				) : dialog.method === "select" ? (
-					<div className="flex flex-wrap gap-2">
-						{dialog.options.map((option) => (
-							<Button
-								key={option}
-								type="button"
-								variant="outline"
-								onClick={() => answer({ value: option })}
-							>
-								{option}
-							</Button>
-						))}
-					</div>
-				) : (
-					<form
-						onSubmit={(event) => {
-							event.preventDefault();
-							const field = event.currentTarget.elements.namedItem("answer");
-							if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
-								answer({ value: field.value });
-							}
-						}}
-						className="flex items-start gap-2"
-					>
-						{dialog.method === "editor" ? (
-							<Textarea name="answer" defaultValue={dialog.prefill ?? ""} rows={6} className="flex-1" />
-						) : (
-							<Input
-								name="answer"
-								placeholder={dialog.placeholder ?? ""}
-								autoComplete="off"
-								className="flex-1"
-							/>
-						)}
-						<Button type="submit">Answer</Button>
-					</form>
-				)}
+				<DialogAnswerControls dialog={dialog} answer={answer} />
 			</CardContent>
 			<CardFooter>
 				<Button type="button" variant="ghost" size="sm" onClick={() => interrupt.cancel()}>
@@ -316,12 +313,7 @@ const { useAppChat, useChatContext } = createChatHook({
 								<SquareIcon />
 							</Button>
 						) : (
-							<Button
-								type="submit"
-								size="icon"
-								aria-label="send message"
-								disabled={draft.trim().length === 0}
-							>
+							<Button type="submit" size="icon" aria-label="send message" disabled={draft.trim().length === 0}>
 								<ArrowUpIcon />
 							</Button>
 						)}
@@ -351,9 +343,7 @@ const { useAppChat, useChatContext } = createChatHook({
 						<img src="/enso.png" alt="" className="size-6" />
 						<h1 className="font-medium text-muted-foreground text-sm">zen-harness</h1>
 						{isFixtureMode ? (
-							<span className="rounded-full border px-2 py-0.5 text-muted-foreground text-xs">
-								fixture
-							</span>
+							<span className="rounded-full border px-2 py-0.5 text-muted-foreground text-xs">fixture</span>
 						) : null}
 					</header>
 					<Conversation>
@@ -398,14 +388,14 @@ const { useAppChat, useChatContext } = createChatHook({
 			const selectedMessage = selectChatUI({ messages: chat.messages }).messages.find(
 				(entry) => entry.message.id === message.id,
 			);
-			const selectedParts =
-				selectedMessage === undefined ? [] : automaticPartsForMessage(selectedMessage);
+			const selectedParts = selectedMessage === undefined ? [] : automaticPartsForMessage(selectedMessage);
 			const isLastMessage = chat.messages.at(-1)?.id === message.id;
 			return (
 				<Message from={message.role} data-role={message.role}>
 					<MessageContent>
 						{selectedParts.map((selected, partIndex) => (
 							<SelectedMessagePart
+								// biome-ignore lint/suspicious/noArrayIndexKey: `selected.key` is the part KIND (toolCall/text/…), not an identity — two parts of one kind in a message need the position, and TanStack yields parts in stable document order.
 								key={`${message.id}-${selected.key}-${partIndex}`}
 								selected={selected}
 								// ⚠ Part-level, not chat-level: true only for the TRAILING part of
@@ -414,9 +404,7 @@ const { useAppChat, useChatContext } = createChatHook({
 								// every later send (the Reasoning shell's auto-close latches after
 								// its first close, so they also never closed again) and overwrote
 								// each block's "Thought for N seconds" with the later run's timing.
-								isStreaming={
-									chat.isLoading && isLastMessage && partIndex === selectedParts.length - 1
-								}
+								isStreaming={chat.isLoading && isLastMessage && partIndex === selectedParts.length - 1}
 								renderers={descriptorRenderers}
 							/>
 						))}
@@ -465,7 +453,10 @@ if (rootElement === null) throw new Error("zen-harness: #root is missing from in
 // (seen live while verifying #29). Dev-only, but the cache is three lines and makes an
 // HMR edit render through the ONE root instead of racing two.
 const globalWithRoot = globalThis as { __zenReactRoot?: ReturnType<typeof createRoot> };
-const reactRoot = (globalWithRoot.__zenReactRoot ??= createRoot(rootElement));
+if (globalWithRoot.__zenReactRoot === undefined) {
+	globalWithRoot.__zenReactRoot = createRoot(rootElement);
+}
+const reactRoot = globalWithRoot.__zenReactRoot;
 reactRoot.render(
 	<StrictMode>
 		<ChatScreen />

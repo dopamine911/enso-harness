@@ -57,9 +57,7 @@ export function buildPrintManifest(manifest) {
 		(entry) => typeof entry !== "string" || !entry.includes(PICC_EXTENSION_FRAGMENT),
 	);
 	if (keptExtensions.length === extensions.length) {
-		throw new PrintHarnessShapeError(
-			`no extension entry contains "${PICC_EXTENSION_FRAGMENT}" — the filter is stale`,
-		);
+		throw new PrintHarnessShapeError(`no extension entry contains "${PICC_EXTENSION_FRAGMENT}" — the filter is stale`);
 	}
 	if (keptExtensions.length === 0) {
 		throw new PrintHarnessShapeError("the filter removed every extension");
@@ -84,9 +82,7 @@ export function materializePrintHarness(printHarnessDir, harnessPackageRoot, pri
 	// siblings by relative path (guards reaches `../../core/index.ts`), and pi resolves
 	// those against the variant's path — a missing sibling is a launch-time module error.
 	// readdir keeps the mirror complete as the package grows.
-	const packageEntries = readdirSync(harnessPackageRoot).filter(
-		(entry) => entry !== MANIFEST_FILENAME,
-	);
+	const packageEntries = readdirSync(harnessPackageRoot).filter((entry) => entry !== MANIFEST_FILENAME);
 	const wantedEntries = new Set([...packageEntries, MANIFEST_FILENAME]);
 	for (const stale of readdirSync(printHarnessDir)) {
 		if (!wantedEntries.has(stale)) rmSync(join(printHarnessDir, stale), { recursive: true, force: true });
@@ -103,9 +99,6 @@ export function materializePrintHarness(printHarnessDir, harnessPackageRoot, pri
 		}
 		symlinkSync(relative(printHarnessDir, targetPath), linkPath, "dir");
 	}
-	writeFileSync(
-		join(printHarnessDir, MANIFEST_FILENAME),
-		`${JSON.stringify(printManifest, null, "\t")}\n`,
-	);
+	writeFileSync(join(printHarnessDir, MANIFEST_FILENAME), `${JSON.stringify(printManifest, null, "\t")}\n`);
 	return printHarnessDir;
 }

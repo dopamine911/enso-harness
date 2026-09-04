@@ -11,7 +11,7 @@ test("holds a partial record until its delimiter arrives", () => {
 	const s = splitter();
 	expect(s.push('{"a":')).toEqual([]);
 	expect(s.hasPartialRecord).toBe(true);
-	expect(s.push('1}\n')).toEqual(['{"a":1}']);
+	expect(s.push("1}\n")).toEqual(['{"a":1}']);
 	expect(s.hasPartialRecord).toBe(false);
 });
 
@@ -37,11 +37,11 @@ test("blank lines between records are framing, not records", () => {
 // splits on both. A splitter that used it would emit two unparseable fragments here.
 test("U+2028 inside a JSON string is DATA, not a record boundary", () => {
 	const record = '{"type":"prompt","message":"line one line two"}';
-	const out = splitter().push(`${record}\n`);
-	expect(out).toEqual([record]);
-	expect(out).toHaveLength(1);
+	const emitted = splitter().push(`${record}\n`);
+	expect(emitted).toEqual([record]);
+	expect(emitted).toHaveLength(1);
 	// and it still parses, which is the actual claim
-	expect((JSON.parse(out[0] as string) as { message: string }).message).toContain(" ");
+	expect((JSON.parse(emitted[0] as string) as { message: string }).message).toContain(" ");
 });
 
 test("U+2029 inside a JSON string is DATA, not a record boundary", () => {
@@ -51,9 +51,9 @@ test("U+2029 inside a JSON string is DATA, not a record boundary", () => {
 
 test("both separators in one record survive together", () => {
 	const record = '{"message":"a b c"}';
-	const out = splitter().push(`${record}\n`);
-	expect(out).toHaveLength(1);
-	expect((JSON.parse(out[0] as string) as { message: string }).message).toBe("a b c");
+	const emitted = splitter().push(`${record}\n`);
+	expect(emitted).toHaveLength(1);
+	expect((JSON.parse(emitted[0] as string) as { message: string }).message).toBe("a b c");
 });
 
 // --- flush: pi may exit without a trailing newline

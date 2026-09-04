@@ -27,7 +27,7 @@
  * Symlinks, not copies: `pi update` and `bun install` stay authoritative over the real
  * package, and there is no second copy to go stale.
  */
-import { readFileSync, mkdirSync, symlinkSync, rmSync, existsSync, lstatSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -77,9 +77,7 @@ for (const packageName of requiredPackageNames()) {
 	}
 	const hoisted = join(repoRoot, "node_modules", packageName);
 	if (!existsSync(hoisted)) {
-		console.error(
-			`link-vendor-packages: ${packageName} is at neither ${target} nor the repo root — run bun install`,
-		);
+		console.error(`link-vendor-packages: ${packageName} is at neither ${target} nor the repo root — run bun install`);
 		process.exit(1);
 	}
 	mkdirSync(dirname(target), { recursive: true });

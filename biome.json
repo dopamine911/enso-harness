@@ -1,0 +1,156 @@
+{
+	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+	"plugins": [
+		"./.biome/naming.grit"
+	],
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true,
+		"defaultBranch": "main"
+	},
+	"files": {
+		"ignoreUnknown": true,
+		"includes": [
+			"**",
+			"!**/node_modules",
+			"!**/dist",
+			"!**/dist-types",
+			"!**/coverage",
+			"!.claude",
+			"!.biome",
+			"!.inspiration",
+			"!.local",
+			"!.zen",
+			"!.playwright-mcp",
+			"!.codegraph",
+			"!packages/web/src/components"
+		]
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab",
+		"lineWidth": 120,
+		"lineEnding": "lf"
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended",
+			"complexity": {
+				"noUselessTernary": "error",
+				"noUselessTypeConstraint": "error",
+				"noExcessiveNestedTestSuites": "error",
+				"useSimplifiedLogicExpression": "error",
+				"noImplicitCoercions": "error",
+				"noUselessStringConcat": "error",
+				"useMaxParams": "error",
+				"noExcessiveCognitiveComplexity": {
+					"level": "error",
+					"options": {
+						"maxAllowedComplexity": 25
+					}
+				}
+			},
+			"correctness": {
+				"noUnusedImports": "error"
+			},
+			"suspicious": {
+				"noConsole": "warn",
+				"noUnknownAtRules": "error",
+				"noTsIgnore": "error",
+				"noExplicitAny": "error",
+				"noEmptyBlockStatements": "error",
+				"useAwait": "off"
+			},
+			"style": {
+				"noNestedTernary": "error",
+				"useNodejsImportProtocol": "off",
+				"useNumericSeparators": "error",
+				"useThrowOnlyError": "error",
+				"noProcessEnv": "error",
+				"useThrowNewError": "error",
+				"noNonNullAssertion": "error",
+				"useExplicitLengthCheck": "error"
+			},
+			"nursery": {
+				"useSortedClasses": "error",
+				"noFloatingPromises": "error",
+				"useExhaustiveSwitchCases": "error",
+				"useExplicitType": "warn",
+				"noConditionalExpect": "error",
+				"noUselessTypeConversion": "error",
+				"noMisusedPromises": "error",
+				"useAwaitThenable": "error",
+				"noImpliedEval": "error",
+				"noUnmodifiedLoopCondition": "error",
+				"noIdenticalTestTitle": "error",
+				"useNullishCoalescing": "error",
+				"noMisleadingReturnType": "error"
+			},
+			"performance": {
+				"noReExportAll": "error"
+			}
+		},
+		"domains": {
+			"test": "all"
+		}
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "double",
+			"semicolons": "always"
+		}
+	},
+	"json": {
+		"formatter": {
+			"enabled": false
+		},
+		"linter": {
+			"enabled": false
+		}
+	},
+	"overrides": [
+		{
+			"includes": [
+				"**/*.ts",
+				"**/*.tsx",
+				"!**/*.test.ts",
+				"!**/*.test.tsx"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noProcessEnv": "off"
+					}
+				}
+			}
+		},
+		{
+			"includes": [
+				"scripts/**"
+			],
+			"linter": {
+				"rules": {
+					"style": {
+						"noProcessEnv": "off"
+					}
+				}
+			}
+		}
+	],
+	"assist": {
+		"enabled": true,
+		"actions": {
+			"source": {
+				"noDuplicateClasses": "on",
+				"organizeImports": "on"
+			}
+		}
+	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
+		}
+	}
+}

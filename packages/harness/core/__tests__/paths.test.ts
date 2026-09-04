@@ -1,7 +1,7 @@
+import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "bun:test";
 import { DEFAULT_GUARD_POLICY } from "@zen/core";
 import { isInsideAnyRoot, isPersistenceWriteTarget, looksLikeSecret, resolveAgainstCwd } from "../paths.ts";
 

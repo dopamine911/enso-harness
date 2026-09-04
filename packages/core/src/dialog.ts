@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
 
 /**
@@ -123,9 +123,7 @@ export function validateDialogAnswer(spec: ZenDialogSpec, payload: unknown): str
 			if (!("value" in payload)) {
 				return `a 'select' dialog takes { value: string }, got a 'confirmed' answer`;
 			}
-			return spec.options.includes(payload.value)
-				? undefined
-				: `'${payload.value}' is not one of the offered options`;
+			return spec.options.includes(payload.value) ? undefined : `'${payload.value}' is not one of the offered options`;
 		case "input":
 		case "editor":
 			return "value" in payload

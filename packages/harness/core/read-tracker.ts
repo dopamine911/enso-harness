@@ -114,9 +114,7 @@ export function createSessionReadTracker(): SessionReadTracker {
 			// route. This branch is the narrow remainder (a stat race, a permission flip):
 			// the disk no longer matches what the session saw, so fail toward stale.
 			if (current === undefined) return "stale";
-			return current.mtimeMs === recorded.mtimeMs && current.size === recorded.size
-				? "fresh"
-				: "stale";
+			return current.mtimeMs === recorded.mtimeMs && current.size === recorded.size ? "fresh" : "stale";
 		},
 		reset(): void {
 			stampsByRealpath.clear();

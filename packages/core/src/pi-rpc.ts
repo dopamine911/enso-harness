@@ -1,4 +1,4 @@
-import { Type, type Static } from "typebox";
+import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
 
 /**
@@ -29,10 +29,7 @@ export const PiImageContent = Type.Object({
 export type PiImageContent = Static<typeof PiImageContent>;
 
 /** What to do when a prompt arrives while the agent is already streaming. */
-export const PiStreamingBehavior = Type.Union([
-	Type.Literal("steer"),
-	Type.Literal("followUp"),
-]);
+export const PiStreamingBehavior = Type.Union([Type.Literal("steer"), Type.Literal("followUp")]);
 export type PiStreamingBehavior = Static<typeof PiStreamingBehavior>;
 
 /**
@@ -132,11 +129,7 @@ export function isPiLaunchConfig(value: unknown): value is PiLaunchConfig {
  */
 export const PiCommand = Type.Object({
 	name: Type.String(),
-	source: Type.Union([
-		Type.Literal("extension"),
-		Type.Literal("prompt"),
-		Type.Literal("skill"),
-	]),
+	source: Type.Union([Type.Literal("extension"), Type.Literal("prompt"), Type.Literal("skill")]),
 	description: Type.Optional(Type.String()),
 	location: Type.Optional(Type.String()),
 	path: Type.Optional(Type.String()),
@@ -170,9 +163,7 @@ export function isPiCommand(value: unknown): value is PiCommand {
 /** Notified for anything pi writes to stderr, and once the child exits. */
 export const PiProcessCallbacks = Type.Object({
 	onStderr: Type.Optional(Type.Function([Type.String()], Type.Void())),
-	onExit: Type.Optional(
-		Type.Function([Type.Union([Type.Number(), Type.Null()]), Type.Unknown()], Type.Void()),
-	),
+	onExit: Type.Optional(Type.Function([Type.Union([Type.Number(), Type.Null()]), Type.Unknown()], Type.Void())),
 });
 export type PiProcessCallbacks = Static<typeof PiProcessCallbacks>;
 
@@ -235,12 +226,8 @@ export const PiRpcClientOptions = Type.Object({
 	 * type for consumers. It is named "unsafe" because the two are no longer derived from
 	 * one another — so if the schema changes, this annotation must change with it.
 	 */
-	onEvent: Type.Optional(
-		Type.Unsafe<(event: PiRpcEvent) => void>(Type.Function([PiRpcEventSchema], Type.Void())),
-	),
+	onEvent: Type.Optional(Type.Unsafe<(event: PiRpcEvent) => void>(Type.Function([PiRpcEventSchema], Type.Void()))),
 	/** Notified when a record fails to parse, or when a response cannot be correlated. */
-	onParseError: Type.Optional(
-		Type.Unsafe<(error: unknown) => void>(Type.Function([Type.Unknown()], Type.Void())),
-	),
+	onParseError: Type.Optional(Type.Unsafe<(error: unknown) => void>(Type.Function([Type.Unknown()], Type.Void()))),
 });
 export type PiRpcClientOptions = Static<typeof PiRpcClientOptions>;

@@ -118,11 +118,11 @@ export default function guards(pi: ExtensionAPI): void {
 	// Record knowledge from RESULTS, never from calls: a blocked call produces no
 	// tool_result at all (verified in pi's agent-loop — the "immediate" path skips
 	// afterToolCall), and a failed one arrives with isError, so neither can record.
-	pi.on("tool_result", (event, ctx): void => {
+	pi.on("tool_result", (event, extensionContext): void => {
 		if (event.isError) return;
 		const candidate = pathArgumentOf(event);
 		if (candidate === undefined) return;
-		const target = resolveAgainstCwd(candidate, ctx.cwd);
+		const target = resolveAgainstCwd(candidate, extensionContext.cwd);
 		if (KNOWLEDGE_CONFERRING_TOOLS.has(event.toolName)) {
 			readTracker.recordKnownPath(target);
 			return;
@@ -136,8 +136,9 @@ export default function guards(pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("tool_call", (event, ctx): ToolCallEventResult | undefined => {
-		const cwd = ctx.cwd;
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the guard dispatch is ONE linear read — bash patch, then the write denials in precedence order, then the reader gate. Splitting it would scatter the precedence order this file's header documents.
+	pi.on("tool_call", (event, extensionContext): ToolCallEventResult | undefined => {
+		const cwd = extensionContext.cwd;
 
 		// --- bash: patch, do not block. `event.input` is mutable by contract, and a
 		// missing timeout means a hung command holds the session indefinitely.

@@ -1,9 +1,4 @@
-import type {
-	PiProcessCallbacks,
-	PiProcessHandle,
-	PiProcessOptions,
-	PiTransport,
-} from "@zen/core";
+import type { PiProcessCallbacks, PiProcessHandle, PiProcessOptions, PiTransport } from "@zen/core";
 
 /**
  * `PiTransport` over a real pi process (#24), spawned with `Bun.spawn` (#30).
@@ -62,10 +57,7 @@ export interface PiChildProcess {
  * of emitting U+FFFD into the middle of a JSON line. The final bare `decode()` flushes a
  * sequence left dangling by a child that died mid-character.
  */
-async function pumpUtf8Stream(
-	stream: ReadableStream<Uint8Array>,
-	consume: (text: string) => void,
-): Promise<void> {
+async function pumpUtf8Stream(stream: ReadableStream<Uint8Array>, consume: (text: string) => void): Promise<void> {
 	const decoder = new TextDecoder();
 	const reader = stream.getReader();
 	while (true) {
@@ -120,8 +112,8 @@ export function piTransportFromChild(
 			// EPIPE here; bun reports nothing, so the close handling above is the ONLY signal
 			// that a command went to a pi that is gone. Do not add error handling here
 			// expecting one.
-			child.stdin.write(line);
-			child.stdin.flush();
+			void child.stdin.write(line);
+			void child.stdin.flush();
 		},
 		onData: (consume) => {
 			dataConsumers.push(consume);
@@ -145,7 +137,7 @@ export function piTransportFromChild(
  * The options shape is the subset of `Bun.SpawnOptions` this module actually passes.
  */
 export type SpawnLike = (
-	cmd: string[],
+	command: string[],
 	options: {
 		cwd: string;
 		env?: Record<string, string | undefined>;
@@ -157,7 +149,7 @@ export type SpawnLike = (
 ) => PiChildProcess;
 
 /** The real spawn, adapted once so the seam type stays narrower than `typeof Bun.spawn`. */
-const spawnWithBun: SpawnLike = (cmd, options) => Bun.spawn(cmd, options);
+const spawnWithBun: SpawnLike = (command, options) => Bun.spawn(command, options);
 
 /**
  * How long `stop()` gives pi to exit on its own before SIGKILL (#34).
@@ -170,28 +162,25 @@ const spawnWithBun: SpawnLike = (cmd, options) => Bun.spawn(cmd, options);
  * receipt) and needs pi's cooperation; SIGKILL does not. 5s is comfortably past the
  * healthy exit, not a tuning knob.
  */
-const STOP_ESCALATION_GRACE_MS = 5_000;
+const STOP_ESCALATION_GRACE_MS = 5000;
 
 export function spawnPiRpcProcess(
 	options: PiProcessOptions,
 	spawnImpl: SpawnLike = spawnWithBun,
 	stopEscalationGraceMs: number = STOP_ESCALATION_GRACE_MS,
 ): PiProcessHandle {
-	const child = spawnImpl(
-		[options.command ?? DEFAULT_PI_COMMAND, ...RPC_MODE_ARGS, ...(options.args ?? [])],
-		{
-			cwd: options.cwd,
-			// `Bun.spawn` inherits the parent environment when `env` is omitted; passing an
-			// explicit object replaces it entirely. Both are legitimate — the caller chooses.
-			...(options.env === undefined ? {} : { env: options.env }),
-			stdin: "pipe",
-			stdout: "pipe",
-			stderr: "pipe",
-			// Bun's callback leads with the subprocess itself; the `PiProcessCallbacks`
-			// contract is (code, signal), so the extra argument is dropped here.
-			onExit: (_child, exitCode, signalCode) => options.onExit?.(exitCode, signalCode),
-		},
-	);
+	const child = spawnImpl([options.command ?? DEFAULT_PI_COMMAND, ...RPC_MODE_ARGS, ...(options.args ?? [])], {
+		cwd: options.cwd,
+		// `Bun.spawn` inherits the parent environment when `env` is omitted; passing an
+		// explicit object replaces it entirely. Both are legitimate — the caller chooses.
+		...(options.env === undefined ? {} : { env: options.env }),
+		stdin: "pipe",
+		stdout: "pipe",
+		stderr: "pipe",
+		// Bun's callback leads with the subprocess itself; the `PiProcessCallbacks`
+		// contract is (code, signal), so the extra argument is dropped here.
+		onExit: (_child, exitCode, signalCode) => options.onExit?.(exitCode, signalCode),
+	});
 
 	// ⚠ Idempotent, and that is load-bearing (#34): stop() has THREE callers per run — the
 	// response-close handler, the run's `finally`, and the dialog registry's TTL eviction —
@@ -201,7 +190,7 @@ export function spawnPiRpcProcess(
 	const stop = (): void => {
 		if (stopHasRun) return;
 		stopHasRun = true;
-		child.stdin.end();
+		void child.stdin.end();
 		child.kill("SIGTERM");
 		// pi installs a SIGTERM handler (/proc/<pid>/status SigCgt receipt) and exits
 		// promptly through it when healthy — but a handler means the exit is COOPERATIVE,

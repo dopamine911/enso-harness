@@ -1,0 +1,28 @@
+#!/bin/sh
+# Pre-commit gate — runs the full check:all (lint + tsc --noEmit + tests), the single source of
+# "green" (scripts/gate.ts). Wired via core.hooksPath, set by the package.json `prepare` script on
+# install. For a deliberate work-in-progress commit, bypass with `git commit --no-verify`.
+#
+# Git runs hooks from the repo root, which is where package.json lives, so `run check:all` resolves
+# without changing directory.
+#
+# WHY THE MANAGER IS DETECTED RATHER THAN NAMED. This file is copied VERBATIM into the generated
+# project — it is not a template — so the package manager cannot be interpolated into it. Hardcoding
+# `npm` was the previous behaviour and it was wrong two ways: on a Bun-only machine the hook died with
+# "npm: not found", and in a pnpm project it ran npm against a pnpm-installed tree.
+#
+# The lockfile is a RELIABLE signal here rather than a guess: this project commits exactly one
+# lockfile and gitignores every other manager's. That invariant is enforced by .gitignore and asserted
+# by the factory's generation tests, so the committed lockfile identifies the manager unambiguously.
+#
+# npm is the fallback rather than a hard error so that a tree with no lockfile yet — a fresh
+# `git init` before the first install — still gets a comprehensible failure from the gate itself.
+set -e
+
+if [ -f bun.lock ] || [ -f bun.lockb ]; then
+  bun run check:all
+elif [ -f pnpm-lock.yaml ]; then
+  pnpm run check:all
+else
+  npm run check:all
+fi

@@ -57,9 +57,7 @@ export class JsonLinesSplitter {
 	 * nothing more to say.
 	 */
 	flush(): string[] {
-		const remainder = this.#pending.endsWith(CARRIAGE_RETURN)
-			? this.#pending.slice(0, -1)
-			: this.#pending;
+		const remainder = this.#pending.endsWith(CARRIAGE_RETURN) ? this.#pending.slice(0, -1) : this.#pending;
 		this.#pending = "";
 		return remainder.length > 0 ? [remainder] : [];
 	}
