@@ -28,13 +28,13 @@
  * package, and there is no second copy to go stale.
  */
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join, relative } from "node:path";
+import { findRepoRoot, harnessPackageDir } from "../packages/core/src/index.ts";
 
 const VENDOR_PATH_PREFIX = "node_modules/";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const packageRoot = join(repoRoot, "packages", "harness");
+const repoRoot = findRepoRoot(import.meta.url);
+const packageRoot = harnessPackageDir(repoRoot);
 const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 
 /**

@@ -63,20 +63,21 @@ test("write outside the workspace is blocked", () => {
 	expect(r?.reason).toContain("outside the workspace");
 });
 test("write into .git is blocked", () => expect(call("write", { path: ".git/config" })?.block).toBe(true));
-// #54: web-allowlist.json is web_fetch's committed egress policy — the guard is the only
-// layer keeping the agent from editing the policy that gates it (same shape as .cc-safety-net).
-test("write and edit to the web_fetch allowlist are blocked", () => {
-	expect(call("write", { path: "packages/harness/web-allowlist.json" })?.block).toBe(true);
-	expect(call("edit", { path: "packages/harness/web-allowlist.json" })?.block).toBe(true);
+// #54/#59: zen.config.json carries web_fetch's committed host allowlist — the guard is the
+// only layer keeping the agent from editing the policy that gates it (same shape as
+// .cc-safety-net).
+test("write and edit to zen.config.json are blocked", () => {
+	expect(call("write", { path: "zen.config.json" })?.block).toBe(true);
+	expect(call("edit", { path: "zen.config.json" })?.block).toBe(true);
 });
-// ⚠ STATED RESIDUAL, pinned (#54): a bash REDIRECT into the allowlist is allowed — the
+// ⚠ STATED RESIDUAL, pinned (#54/#59): a bash REDIRECT into the config is allowed — the
 // write/edit denial above and cc-safety-net both miss it. Accepted because the extension
 // reads the file ONCE at load (an in-session edit is inert for this session) and the edit
 // then sits in `git status` where a human sees it. If this goes red, a layer started
 // denying it — update this record, don't re-open the gap.
-test("recorded residual: a bash redirect into the allowlist passes the guard", () => {
+test("recorded residual: a bash redirect into zen.config.json passes the guard", () => {
 	expect(
-		call("bash", { command: 'echo \'{"allowedHosts":["evil.example"]}\' > packages/harness/web-allowlist.json' }),
+		call("bash", { command: 'echo \'{"webFetch":{"allowedHosts":["evil.example"]}}\' > zen.config.json' }),
 	).toBeUndefined();
 });
 test("read of .env is blocked", () => {

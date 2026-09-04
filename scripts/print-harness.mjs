@@ -81,7 +81,10 @@ export function materializePrintHarness(printHarnessDir, harnessPackageRoot, pri
 	// ⚠ EVERY package-root entry is mirrored, not a curated list: extensions import their
 	// siblings by relative path (guards reaches `../../core/index.ts`), and pi resolves
 	// those against the variant's path — a missing sibling is a launch-time module error.
-	// readdir keeps the mirror complete as the package grows.
+	// readdir keeps the mirror complete as the package grows. ⓘ `zen.config.json` (#59) is
+	// NOT mirrored and does not need to be: it lives at the REPO root, and web-fetch finds
+	// it via `findRepoRoot`, which realpaths out of this mirror before walking (paths.ts) —
+	// do not "fix" the mirror to carry it.
 	const packageEntries = readdirSync(harnessPackageRoot).filter((entry) => entry !== MANIFEST_FILENAME);
 	const wantedEntries = new Set([...packageEntries, MANIFEST_FILENAME]);
 	for (const stale of readdirSync(printHarnessDir)) {

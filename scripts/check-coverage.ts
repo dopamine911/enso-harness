@@ -22,11 +22,12 @@
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { findRepoRoot } from "../packages/core/src/index.ts";
 
 export const TOTAL_LINE_COVERAGE_FLOOR = 0.71;
 export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.82;
 
-const LCOV_PATH = join(import.meta.dir, "..", "coverage", "lcov.info");
+const LCOV_PATH = join(findRepoRoot(import.meta.url), "coverage", "lcov.info");
 
 export interface CoverageTotals {
 	lineRate: number;

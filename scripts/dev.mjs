@@ -15,13 +15,12 @@
  * Usage:  bun run dev                 # pi runs in the repo root
  *         bun run dev /some/path      # pi runs there instead
  */
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { findRepoRoot, webPackageDir } from "../packages/core/src/index.ts";
 
 const SERVER_HEAD_START_MS = 1200;
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const webPackageDir = join(repoRoot, "packages", "web");
+const repoRoot = findRepoRoot(import.meta.url);
+const webPackageRunDir = webPackageDir(repoRoot);
 const piCwd = process.argv[2] ?? repoRoot;
 
 const children = [];
@@ -43,7 +42,7 @@ async function prefixStream(stream, label, emit) {
 
 function run(label, command, args) {
 	const child = Bun.spawn([command, ...args], {
-		cwd: webPackageDir,
+		cwd: webPackageRunDir,
 		stdin: "ignore",
 		stdout: "pipe",
 		stderr: "pipe",

@@ -7,22 +7,20 @@
  */
 
 import { mkdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { findRepoRoot, harnessPackageDir, zenAgentDir } from "@zen/core";
 import { startZenServer } from "./index.ts";
 
 const cwdArgument = process.argv[2];
 const cwd = cwdArgument === undefined || cwdArgument.length === 0 ? process.cwd() : cwdArgument;
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
-const harnessPackageDir = join(repoRoot, "packages", "harness");
+const repoRoot = findRepoRoot(import.meta.url);
 // Same scratch dir the TUI launcher uses, so both surfaces share one isolated config.
-const agentDir = join(repoRoot, ".zen", "pi-agent");
+const agentDir = zenAgentDir(repoRoot);
 mkdirSync(agentDir, { recursive: true });
 
 const { url } = startZenServer({
 	launch: { cwd },
-	harnessPackageDir,
+	harnessPackageDir: harnessPackageDir(repoRoot),
 	agentDir,
 	onProblem: (problem) => console.error("[zen-server]", problem),
 });

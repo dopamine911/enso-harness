@@ -45,13 +45,14 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
 		"/.pgpass",
 		"/.kube/config",
 	],
-	// `web-allowlist.json` is web_fetch's committed host allowlist (#54): a write there
-	// widens the harness's egress for every FUTURE session (it is read once at extension
-	// load, so the running session cannot re-read its own edit). Same rationale as
-	// `.cc-safety-net` below — the guard is the only layer keeping the agent from editing
-	// the policy that gates it. Fragment matching is deliberately loose (any path whose
-	// name contains it is refused) — over-blocking a lookalike file fails safe and says so.
-	protectedWriteFragments: ["/.git/", "web-allowlist.json"],
+	// `zen.config.json` is zen-harness's committed config (#59) and carries web_fetch's
+	// host allowlist (#54): a write there widens the harness's egress for every FUTURE
+	// session (it is read once at extension load, so the running session cannot re-read
+	// its own edit). Same rationale as `.cc-safety-net` below — the guard is the only
+	// layer keeping the agent from editing the policy that gates it. Fragment matching is
+	// deliberately loose (any path whose name contains it is refused) — over-blocking a
+	// lookalike file fails safe and says so.
+	protectedWriteFragments: ["/.git/", "zen.config.json"],
 	defaultBashTimeoutSeconds: 120,
 	// The ad-hoc HTTP/TCP clients plus the PowerShell fetch cmdlets (the raw scan sees
 	// those; a POSIX segment never will). git and interpreters deliberately absent (#9).

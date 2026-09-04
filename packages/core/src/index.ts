@@ -9,6 +9,15 @@
 // inventory — every shape this package declares is literally listed here — and named lists
 // are what lets a bundler tree-shake the web surface. Adding an export to a module means
 // adding its name here too; forgetting is caught at the consumer's import, loudly.
+
+export {
+	parseZenConfig,
+	ZEN_CONFIG_EXAMPLE,
+	ZEN_CONFIG_FILENAME,
+	ZenConfig,
+	type ZenConfigParseResult,
+	zenConfigPath,
+} from "./config.ts";
 export {
 	isZenDialogResumeEntry,
 	isZenDialogSpec,
@@ -43,6 +52,15 @@ export {
 	ZenUsage,
 } from "./observation.ts";
 export {
+	findRepoRoot,
+	harnessPackageDir,
+	printHarnessDir,
+	RepoRootNotFoundError,
+	realpathOrSelf,
+	webPackageDir,
+	zenAgentDir,
+} from "./paths.ts";
+export {
 	isPiCommand,
 	isPiLaunchConfig,
 	PiCommand,
@@ -74,13 +92,10 @@ export {
 } from "./tool-result.ts";
 export {
 	EXTERNAL_WEB_CONTENT_NOTICE,
-	parseWebFetchAllowlist,
-	WEB_FETCH_ALLOWLIST_EXAMPLE,
 	WEB_FETCH_MAX_RESPONSE_BYTES,
 	WEB_FETCH_MAX_URL_LENGTH,
 	WEB_FETCH_TIMEOUT_MS,
 	WEB_FETCH_TOOL_NAME,
-	WebFetchAllowlist,
-	type WebFetchAllowlistParseResult,
+	WebFetchConfig,
 	WebFetchToolParameters,
 } from "./web-fetch.ts";
