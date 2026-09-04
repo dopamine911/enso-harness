@@ -44,6 +44,12 @@ const EMPTY_STATS: SessionStats = { totalCost: 0, lastRequestInputTokens: undefi
 let stats: SessionStats = EMPTY_STATS;
 const listeners = new Set<() => void>();
 
+/**
+ * ⓘ Looks like map-events' `readUsage` but parses a DIFFERENT shape, deliberately: that
+ * one reads pi's wire usage (`{cost: {total}}`), this one reads our own `ZenUsage`
+ * (`{totalCost}`) after it crossed the CUSTOM chunk. One shared helper would need a shape
+ * switch, which costs more than the ~10 lines it saves (PR #51 review, nit 2).
+ */
 function readUsageShape(raw: unknown): ZenUsageShape | undefined {
 	if (typeof raw !== "object" || raw === null) return undefined;
 	const usage = raw as Record<string, unknown>;
@@ -115,6 +121,11 @@ function formatTokens(tokens: number): string {
 /**
  * The slim line above the composer. Hidden until the first counted request — an all-zero
  * bar before anything ran would read as a broken meter, not an empty one.
+ *
+ * ⓘ No `role="status"`/live region, deliberately (PR #51 review, nit 3): unlike a notify
+ * line, this is a persistent readout that updates on EVERY completed request, and a live
+ * region would interrupt a screen reader mid-task each time. The numbers stay poll-able,
+ * never announced.
  */
 export function SessionStatsBar(): React.ReactNode {
 	const currentStats = useSyncExternalStore(subscribeToSessionStats, getSessionStatsSnapshot, getSessionStatsSnapshot);

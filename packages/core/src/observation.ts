@@ -137,8 +137,13 @@ export type ZenCustomSessionEntry = Static<typeof ZenCustomSessionEntry>;
  */
 export const ZenMessageUsage = Type.Object({
 	kind: Type.Literal("message-usage"),
-	/** pi's message role — "assistant" or "toolResult"; the consumer keys behaviour on it. */
-	role: Type.String(),
+	/**
+	 * pi's message role; the consumer keys behaviour on it (a toolResult adds cost but
+	 * never moves the last-request tokens). A closed union rather than a bare string so a
+	 * third attributable role fails at the CONSTRUCTION site in map-events, not silently
+	 * in every consumer's string comparison (PR #51 review).
+	 */
+	role: Type.Union([Type.Literal("assistant"), Type.Literal("toolResult")]),
 	usage: ZenUsage,
 });
 export type ZenMessageUsage = Static<typeof ZenMessageUsage>;
