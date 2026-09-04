@@ -28,9 +28,10 @@ const publicDir = join(webPackageRoot, "public");
  * Forward an `/api/*` request to the zen server, streaming both directions.
  *
  * ⚠ `signal: request.signal` is LOAD-BEARING, not hygiene. The zen server tears pi down
- * from `request.on("close")`, and that close only happens if a browser abort propagates
- * through this hop as an upstream disconnect — vite's http-proxy did this implicitly; a
- * bare `fetch` would hold the upstream open and silently disable the teardown.
+ * from its response 'close' (#34), which fires only if a browser abort propagates through
+ * this hop as an upstream disconnect — vite's http-proxy did this implicitly; a bare
+ * `fetch` would hold the upstream open and starve the teardown of its trigger. Receipt:
+ * a timeout-curl through 5178 reaps pi within 3s (#38).
  */
 function proxyToApiServer(request: Request): Promise<Response> {
 	const requestUrl = new URL(request.url);
