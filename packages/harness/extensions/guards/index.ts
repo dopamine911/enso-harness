@@ -92,7 +92,13 @@ const TOOL_EDIT = "edit";
 const TOOL_BASH = "bash";
 const TOOL_POWERSHELL = "powershell";
 
-/** Every tool name the guard's policy references — the session_start check's input. */
+/**
+ * Every tool name the guard's policy references — the policy/tool-list check's input.
+ * ⚠ Deliberately NOT the full tool surface: the reader gate (`grep`, `find`, `ls`, and any
+ * future path-bearing tool) works by EXCLUSION, so a renamed or newly registered reader is
+ * still gated without being named here — only the tools matched BY NAME can silently
+ * un-gate on a rename, and those are exactly the names this list carries.
+ */
 export const GUARD_POLICY_TOOL_NAMES: readonly string[] = [
 	TOOL_READ,
 	TOOL_WRITE,
@@ -140,13 +146,20 @@ export default function guards(pi: ExtensionAPI): void {
 
 	// #4 gap 2, half two: a policy naming a tool pi does not register is a silent no-op —
 	// the guard compiles, loads, and never fires. Checked against the LIVE tool list each
-	// session_start (extensions can register tools, so the list is per-session state).
+	// session_start (extensions can register tools, so the list is per-session state) —
+	// AND lazily on the first tool_call if session_start has not fired yet, so the floor
+	// never depends on pi's event ordering: a lifecycle that delivered a tool_call first
+	// would otherwise fail OPEN through this very window (PR #52 review). The check cannot
+	// run at extension load — pi refuses action methods there ("Extension runtime not
+	// initialized") — but by the first tool_call the registry is certainly populated.
 	// ⚠ Deny-all via this variable, NEVER a throw: a throwing session_start handler wedges
 	// print mode outright (probed 2026-09-04 — 120s hang, zero output). The unreadable-list
 	// case fails closed the same way: "could not check" must not render as "checked, fine".
+	let policyToolsChecked = false;
 	let policyToolMismatch: string | undefined;
 
 	function verifyPolicyToolNames(): void {
+		policyToolsChecked = true;
 		try {
 			const registered = new Set(pi.getAllTools().map((tool) => canonicalToolName(tool.name)));
 			const missing = GUARD_POLICY_TOOL_NAMES.filter((policyName) => !registered.has(policyName));
@@ -156,6 +169,9 @@ export default function guards(pi: ExtensionAPI): void {
 					: `the guard policy names tools pi does not register: ${missing.join(", ")} ` +
 						`(registered: ${[...registered].join(", ")})`;
 		} catch (error) {
+			// The denial reason below is for the operator; the raw error (with stack) goes to
+			// stderr for whoever has to debug WHY enumeration failed after the fact.
+			console.error("guards: getAllTools() failed during the policy check", error);
 			policyToolMismatch = `the guard could not enumerate pi's tools: ${String(error)}`;
 		}
 	}
@@ -194,6 +210,11 @@ export default function guards(pi: ExtensionAPI): void {
 
 		// --- #4's fail-closed floor: a policy/tool-list mismatch denies EVERYTHING, first.
 		// One reason per denial, so an unattended run's transcript names the mismatch.
+		// The lazy leg: an unchecked state here means this call arrived before session_start
+		// ever fired, and unchecked must not read as "checked, fine" — verify now.
+		if (!policyToolsChecked) {
+			verifyPolicyToolNames();
+		}
 		if (policyToolMismatch !== undefined) {
 			return {
 				block: true,

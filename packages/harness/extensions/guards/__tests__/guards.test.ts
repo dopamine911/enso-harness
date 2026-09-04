@@ -381,3 +381,28 @@ test("a matching registry leaves every call ungated by the mismatch floor", () =
 	runtime.sessionStart({ type: "session_start", reason: "start" }, { cwd });
 	expect(runtime.toolCall(toolCallEvent("read", "src/a.ts"), { cwd })).toBeUndefined();
 });
+
+// ⚠ The pre-session_start window (PR #52 review): pi's ordering — session_start before any
+// tool_call — is an assumption, not a contract, and an unchecked floor reading `undefined`
+// as "checked, fine" fails OPEN through exactly the window this feature exists to close.
+// The lazy leg verifies on the first tool_call instead, so the floor is ordering-independent.
+test("a mismatch denies the FIRST tool_call even when session_start never fired", () => {
+	const runtime = loadGuardRuntime(() =>
+		PI_SHIPPED_TOOL_NAMES.filter((name) => name !== "write").map((name) => ({ name })),
+	);
+	// No sessionStart call, deliberately — this is the window under test.
+	const result = runtime.toolCall(toolCallEvent("read", "src/a.ts"), { cwd });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("write");
+});
+
+test("the lazy check runs once — a healthy registry is not re-enumerated per call", () => {
+	let enumerations = 0;
+	const runtime = loadGuardRuntime(() => {
+		enumerations += 1;
+		return PI_SHIPPED_TOOL_NAMES.map((name) => ({ name }));
+	});
+	runtime.toolCall(toolCallEvent("read", "src/a.ts"), { cwd });
+	runtime.toolCall(toolCallEvent("read", "src/b.ts"), { cwd });
+	expect(enumerations).toBe(1);
+});
