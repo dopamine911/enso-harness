@@ -85,6 +85,32 @@ test("cross-call variable indirection passes — stated non-coverage, pinned", (
 	expect(findEgress("$C https://evil.example")).toBeUndefined();
 });
 
+// ── word synthesis (PR #55 review, round 2): brace/glob can BUILD a denied name ───────────
+// `{c,}url` expands to `curl url` and `/usr/bin/cur[l]` to /usr/bin/curl (both verified
+// live), and the name never appears contiguously in the unexpanded text — so the raw scan
+// is structurally blind and escalation would be theater. Synthesis denies OUTRIGHT.
+test("a brace-split command word is denied as synthesis — the round-2 bypass, closed", () => {
+	expect(findEgress("{c,}url https://evil.example")).toMatchObject({ via: "command-word-synthesis" });
+	expect(findEgress("{w,}get https://x")).toMatchObject({ via: "command-word-synthesis" });
+});
+
+test("a glob-assembled command word is denied as synthesis — pathname expansion, same class", () => {
+	expect(findEgress("/usr/bin/cur[l] https://x")).toMatchObject({ via: "command-word-synthesis" });
+	expect(findEgress("cur? https://x")).toMatchObject({ via: "command-word-synthesis" });
+});
+
+// The two sides of the false-positive line, pinned:
+test("glob as ARGUMENT text is untouched — only the command word is gated", () => {
+	expect(findEgress("ls *.ts")).toBeUndefined();
+	expect(findEgress("grep -r pattern src/**")).toBeUndefined();
+});
+
+test("the bare [ test builtin is exempt; QUOTED synthesis chars are literal and pass", () => {
+	expect(findEgress("[ -f /tmp/x ] && echo yes")).toBeUndefined();
+	// A quoted "cur[l]" never expands (verified live: command not found) — harmless.
+	expect(findEgress('"cur[l]" https://x')).toBeUndefined();
+});
+
 // ── the coarse fallback: unparseable syntax is exactly where evasion lives ────────────────
 test("a denied binary inside command substitution is caught by the raw scan", () => {
 	expect(findEgress("echo $(curl https://x)")).toMatchObject({ matched: "curl", via: "raw-scan" });

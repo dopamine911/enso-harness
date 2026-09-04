@@ -188,15 +188,38 @@ function skipShellWord(command: string, start: number): number | null {
  * quote removal and backslash-escape resolution, exactly the transformations bash applies
  * before command lookup. `"curl"`, `\curl`, `cu"rl"` and `'cu'r'l'` all resolve to `curl`.
  *
- * Returns null when the word's value cannot be known statically: an unquoted (or
- * double-quoted) `$` or backtick means expansion decides the command at runtime, and
- * incomplete quoting means the shell would not accept the input as written. ⚠ Null is a
- * FAIL-CLOSED signal to the caller (PR #55 review): an unresolvable command word must
- * escalate to the coarse whole-command scan, never silently compare unequal — comparing
- * the raw text is how `"curl"` bypassed the network deny.
+ * Three ways the value can be unknowable, and they are NOT interchangeable for a caller
+ * gating on the result (both found on PR #55 review, one round each):
+ *
+ *   `runtime-expansion`  an unquoted (or double-quoted) `$` or backtick — expansion
+ *                        decides the value at runtime. A coarse scan of the raw string
+ *                        MAY still catch a sibling assignment (`C=curl; $C …`), so the
+ *                        right escalation is the whole-command raw scan.
+ *   `word-synthesis`     an UNQUOTED brace or glob character (`{ } * ? [`) — bash's
+ *                        brace/pathname expansion can assemble a denied name from pieces
+ *                        (`{c,}url` executes curl; `/usr/bin/cur[l]` too — both verified
+ *                        live), and the raw scan is STRUCTURALLY BLIND to them: the name
+ *                        never appears contiguously in the unexpanded text. Escalating to
+ *                        the raw scan is therefore not a safety net; a gate must refuse
+ *                        outright. Quoted braces/globs are literal characters and flow
+ *                        into `literal` (a quoted "cur[l]" expands to nothing — verified:
+ *                        command not found).
+ *   `malformed`          incomplete syntax (trailing backslash, unterminated quote) —
+ *                        the shell would not accept the input as written.
+ *
+ * ⚠ The one legitimate `[` at command position is the test builtin — the word that IS
+ * exactly `[`. The CALLER owns that exception; this function reports what it saw.
  */
+export type LiteralShellWordResult =
+	| { kind: "literal"; value: string }
+	| { kind: "runtime-expansion" }
+	| { kind: "word-synthesis" }
+	| { kind: "malformed" };
+
+const WORD_SYNTHESIS_CHARACTERS = new Set(["{", "}", "*", "?", "["]);
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the same character-scanner shape as the rest of this module — one linear read of quote/escape state.
-export function literalShellWord(text: string): string | null {
+export function literalShellWord(text: string): LiteralShellWordResult {
 	let literal = "";
 	let inSingle = false;
 	let inDouble = false;
@@ -213,7 +236,7 @@ export function literalShellWord(text: string): string | null {
 		if (inDouble) {
 			if (character === "\\") {
 				const next = text[characterIndex + 1];
-				if (next === undefined) return null;
+				if (next === undefined) return { kind: "malformed" };
 				if (next === '"' || next === "\\" || next === "$" || next === "`") {
 					literal += next;
 					characterIndex++;
@@ -226,7 +249,7 @@ export function literalShellWord(text: string): string | null {
 				inDouble = false;
 				continue;
 			}
-			if (character === "$" || character === "`") return null;
+			if (character === "$" || character === "`") return { kind: "runtime-expansion" };
 			literal += character;
 			continue;
 		}
@@ -240,17 +263,18 @@ export function literalShellWord(text: string): string | null {
 		}
 		if (character === "\\") {
 			const next = text[characterIndex + 1];
-			if (next === undefined) return null;
+			if (next === undefined) return { kind: "malformed" };
 			literal += next;
 			characterIndex++;
 			continue;
 		}
-		if (character === "$" || character === "`") return null;
+		if (character === "$" || character === "`") return { kind: "runtime-expansion" };
+		if (WORD_SYNTHESIS_CHARACTERS.has(character ?? "")) return { kind: "word-synthesis" };
 		if (character === " " || character === "\t") break;
 		literal += character;
 	}
-	if (inSingle || inDouble) return null;
-	return literal;
+	if (inSingle || inDouble) return { kind: "malformed" };
+	return { kind: "literal", value: literal };
 }
 
 /**

@@ -20,18 +20,23 @@ import { canonicalToolName } from "./tool-identity.ts";
  *   #9's option-4 warning is about. A list that chased it would read as coverage and
  *   not be coverage.
  *
- * Two match modes, chosen by parseability:
+ * Three match modes, chosen by what the command word turned out to be:
  * - PARSEABLE commands (the segmenter returned segments): the denied name must be the
  *   segment's command word — leading env assignments stripped, then resolved to the
  *   LITERAL value the shell would execute (quote/escape removal: `"curl"`, `\curl` and
- *   `cu"rl"` all resolve to `curl` — PR #55 review), path prefix ignored, case-folded.
- *   `echo "curl is a tool"` passes — the word is quoted argument text.
+ *   `cu"rl"` all resolve to `curl` — PR #55 review, round 1), path prefix ignored,
+ *   case-folded. `echo "curl is a tool"` passes — the word is quoted argument text.
  * - UNPARSEABLE commands (the segmenter returned [] — command substitution, backticks,
- *   heredocs) AND commands whose command word is UNRESOLVABLE (`$C https://…` — expansion
- *   decides the binary at runtime) fall back to a word-boundary scan of the RAW string.
- *   Coarser on purpose: substitution and indirection are exactly where evasion lives, so
- *   a false positive there is friction toward safety ("rewrite without the substitution"),
- *   not a broken gate.
+ *   heredocs) AND runtime-expanded command words (`$C https://…`) fall back to a
+ *   word-boundary scan of the RAW string. Coarser on purpose: substitution and
+ *   indirection are exactly where evasion lives, so a false positive there is friction
+ *   toward safety ("rewrite without the substitution"), not a broken gate.
+ * - SYNTHESIZED command words (PR #55 review, round 2) — unquoted brace/glob characters
+ *   (`{c,}url`, `/usr/bin/cur[l]`, both of which execute curl, verified live) — are
+ *   DENIED OUTRIGHT: expansion assembles the name from pieces, so no scan of the
+ *   unexpanded text can ever see it, and escalating to the raw scan would be theater.
+ *   Glob/brace as ARGUMENTS (`ls *.ts`) are untouched — only the command word is gated —
+ *   and the bare `[` test builtin is exempt.
  * PowerShell commands always take the raw scan — the segmenter speaks POSIX, not PS.
  *
  * ⚠ Third stated non-coverage, with git and the interpreters: variable indirection ACROSS
@@ -44,8 +49,12 @@ import { canonicalToolName } from "./tool-identity.ts";
 export interface NetworkEgressMatch {
 	/** The denied name (or device path) that matched. */
 	matched: string;
-	/** Which mode found it — segment-precise, the coarse raw scan, or the bash socket device. */
-	via: "command-position" | "raw-scan" | "dev-socket";
+	/**
+	 * Which mode found it — segment-precise, the coarse raw scan, the bash socket device,
+	 * or a brace/glob-synthesized command word (denied without knowing the final name,
+	 * because expansion assembles it from pieces no scan can see contiguously).
+	 */
+	via: "command-position" | "raw-scan" | "dev-socket" | "command-word-synthesis";
 }
 
 /** bash's built-in TCP/UDP redirection devices — no legitimate use in this harness. */
@@ -53,24 +62,34 @@ const BASH_SOCKET_DEVICE_PATTERN = /\/dev\/(?:tcp|udp)\//i;
 
 /**
  * The segment's command word, resolved to the LITERAL value the shell would execute —
- * or null when that value cannot be known statically.
+ * or the reason it cannot be, which decides the caller's move.
  *
- * ⚠ Literal resolution is load-bearing (PR #55 review): `"curl"`, `\curl` and `cu"rl"`
- * are all `curl` to bash but were unequal to it as raw text, and because a balanced-quoted
- * command is fully PARSEABLE, the segmenter happily returned segments and the coarse
- * fallback never ran — a one-character bypass of the whole deny. Comparing the resolved
- * word closes the quoting family; a word whose value expansion decides at runtime
- * (`$C https://…`) resolves to null, which the caller escalates to the coarse scan.
+ * ⚠ Literal resolution is load-bearing (PR #55 review, round 1): `"curl"`, `\curl` and
+ * `cu"rl"` are all `curl` to bash but were unequal to it as raw text — and because a
+ * balanced-quoted command is fully PARSEABLE, the coarse fallback never ran. Round 2 of
+ * the same review found the second class: brace/glob SYNTHESIS (`{c,}url`), where the
+ * raw scan is no net at all — see LiteralShellWordResult's doc for the split.
  */
-// Return type inferred (`string | null`): the nursery noMisleadingReturnType rule
-// misreads the annotated union as wider than the returns, which include both members.
-function commandWordOf(segmentText: string) {
-	const withoutAssignments = withoutLeadingEnvironmentAssignments(segmentText) ?? segmentText;
-	const literalWord = literalShellWord(withoutAssignments.trim());
-	if (literalWord === null) return null;
-	if (literalWord.length === 0) return "";
+type CommandWordResult =
+	| { kind: "word"; canonical: string }
+	| { kind: "escalate-to-raw-scan" }
+	| { kind: "deny-synthesis"; rawWord: string };
+
+function commandWordOf(segmentText: string): CommandWordResult {
+	const withoutAssignments = (withoutLeadingEnvironmentAssignments(segmentText) ?? segmentText).trim();
+	const resolved = literalShellWord(withoutAssignments);
+	if (resolved.kind === "word-synthesis") {
+		// ⚠ The one legitimate synthesis character at command position: a word that IS
+		// exactly `[` is the test builtin (`[ -f x ] && …`), everywhere in shell scripts.
+		// Only the BARE bracket is exempt — `cur[l]` and `[foo` stay synthesis.
+		const rawWord = withoutAssignments.split(/[ \t]/, 1)[0] ?? "";
+		if (rawWord === "[") return { kind: "word", canonical: "[" };
+		return { kind: "deny-synthesis", rawWord };
+	}
+	if (resolved.kind !== "literal") return { kind: "escalate-to-raw-scan" };
+	if (resolved.value.length === 0) return { kind: "word", canonical: "" };
 	// `/usr/bin/curl` and `curl` are the same binary.
-	return canonicalToolName(basename(literalWord));
+	return { kind: "word", canonical: canonicalToolName(basename(resolved.value)) };
 }
 
 function rawScanFor(command: string, deniedBinaries: readonly string[]): string | undefined {
@@ -99,20 +118,30 @@ export function findDeniedNetworkEgress(
 		const segments = extractFlatShellCommandSegments(command);
 		if (segments.length > 0) {
 			const denied = new Set(deniedBinaries.map((binary) => canonicalToolName(binary)));
-			// ⚠ An UNRESOLVABLE command word (null — `$C https://…`) escalates the WHOLE
-			// command to the coarse scan rather than comparing unequal and passing: the
-			// expansion's value may sit in a sibling segment (`C=curl; $C …`), which the
-			// raw scan sees. What it cannot see is a value set in an EARLIER tool call —
-			// stated non-coverage, with the interpreters.
+			// Two distinct unknowable-word escalations (PR #55 review, one round each),
+			// and they must NOT share a path:
+			// - runtime-expansion (`$C https://…`): the coarse scan of the WHOLE command
+			//   may catch a sibling assignment (`C=curl; $C …`), so escalate to it. What
+			//   it cannot see is a value set in an EARLIER tool call — stated
+			//   non-coverage, with the interpreters.
+			// - word-synthesis (`{c,}url`, `/usr/bin/cur[l]` — both execute curl,
+			//   verified live): brace/pathname expansion assembles the name from pieces,
+			//   so it never appears contiguously and the raw scan is STRUCTURALLY BLIND.
+			//   Escalation is not a net here — deny outright. The false-positive cost is
+			//   glob/brace AT COMMAND POSITION, which legitimate commands essentially
+			//   never need (the bare `[` test builtin is exempted in commandWordOf).
 			let hasUnresolvableCommandWord = false;
 			for (const segment of segments) {
 				const commandWord = commandWordOf(segment.text);
-				if (commandWord === null) {
+				if (commandWord.kind === "deny-synthesis") {
+					return { matched: commandWord.rawWord, via: "command-word-synthesis" };
+				}
+				if (commandWord.kind === "escalate-to-raw-scan") {
 					hasUnresolvableCommandWord = true;
 					continue;
 				}
-				if (denied.has(commandWord)) {
-					return { matched: commandWord, via: "command-position" };
+				if (denied.has(commandWord.canonical)) {
+					return { matched: commandWord.canonical, via: "command-position" };
 				}
 			}
 			if (!hasUnresolvableCommandWord) return undefined;
