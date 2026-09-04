@@ -79,3 +79,17 @@ test("write outside the workspace is still confined, not treated as a read", () 
 	expect(result?.block).toBe(true);
 	expect(result?.reason).toContain("outside the workspace");
 });
+
+// ── #21: persistence vectors are denied on the write path, allowed on the read path ──────
+test("write to .mcp.json inside the workspace is blocked", () => {
+	const r = call("write", { path: ".mcp.json" });
+	expect(r?.block).toBe(true);
+	expect(r?.reason).toContain("persistence");
+});
+test("edit of a .vscode task inside the workspace is blocked", () => {
+	const r = call("edit", { path: ".vscode/tasks.json" });
+	expect(r?.block).toBe(true);
+	expect(r?.reason).toContain("persistence");
+});
+test("READING a persistence path is not blocked — the danger is installation", () =>
+	expect(call("read", { path: ".mcp.json" })).toBeUndefined());

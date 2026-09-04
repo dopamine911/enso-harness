@@ -42,6 +42,50 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
 	defaultBashTimeoutSeconds: 120,
 };
 
+/**
+ * Basenames whose WRITE is a persistence vector (#21): the write itself is harmless, and
+ * the execution happens later, outside the session, under the user's own identity — a
+ * shell rc runs on the next login, `.gitconfig` hooks run on the next git command, agent
+ * config hijacks the next agent session. Not secrets, so `looksLikeSecret` cannot catch
+ * them: nothing is exfiltrated, something is installed.
+ *
+ * ⚠ Matched by EXACT basename (case-insensitive), never as a fragment — `.profile` as a
+ * fragment would catch `~/work/.profile-notes/x.ts`.
+ *
+ * Vendored from `@ladbabynpm/picc-permission-modes` v0.1.1 (`permissionContext.ts`
+ * `DANGEROUS_FILES` / `DANGEROUS_DIRECTORIES`, MIT, © 2026 Ladbaby), as a COPY rather
+ * than a deep import: the lists are a corpus, not logic, and an unversioned deep import
+ * into a v0.1.1 package is the risk #7 names. Kept in upstream's order so a divergence
+ * is visible in a diff. ⚠ This layer must stay UNCONDITIONAL: picc reaches at most "ask"
+ * for these paths (mode-shaped — an auto-mode classifier may approve one), and print
+ * runs load no picc at all (#20), so here is the only always-on denial.
+ */
+export const PERSISTENCE_WRITE_BASENAMES: readonly string[] = [
+	".gitconfig",
+	".gitmodules",
+	".bashrc",
+	".bash_profile",
+	".zshrc",
+	".zprofile",
+	".profile",
+	".ripgreprc",
+	".mcp.json",
+	".claude.json",
+];
+
+/**
+ * Directory names (any single path segment) whose CONTENTS are write-persistence vectors
+ * — editor tasks, agent settings, git internals. Same provenance and matching rules as
+ * {@link PERSISTENCE_WRITE_BASENAMES}. `.git` overlaps `protectedWriteFragments`'
+ * `/.git/` deliberately; the fragment also catches the bare repo case and predates this.
+ */
+export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [
+	".git",
+	".vscode",
+	".idea",
+	".claude",
+];
+
 /** Basenames that deny a read outright, regardless of directory. */
 export const SECRET_BASENAME_PATTERNS: readonly RegExp[] = [
 	/^\.env(\..+)?$/i,
