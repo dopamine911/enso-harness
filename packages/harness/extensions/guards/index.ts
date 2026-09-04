@@ -2,6 +2,7 @@ import type { ExtensionAPI, ToolCallEvent, ToolCallEventResult } from "@earendil
 import { DEFAULT_GUARD_POLICY, type GuardPolicy } from "@zen/core";
 import {
 	isInsideAnyRoot,
+	isPersistenceWriteTarget,
 	isProtectedForWrite,
 	looksLikeSecret,
 	resolveAgainstCwd,
@@ -27,16 +28,21 @@ import {
  *
  * ⚠ WHAT THIS DOES NOT COVER
  * 1. `bash` is only given a default timeout. It is NOT path-confined: `echo x > ~/.ssh/foo`
- *    still escapes, and `cat ~/.aws/credentials` bypasses the reader gate entirely. Bash
+ *    still escapes, `cat ~/.aws/credentials` bypasses the reader gate entirely, and
+ *    `echo x >> ~/.bashrc` bypasses the #21 persistence denial the same way. Bash
  *    policy and egress are Tier 0 item 4, deliberately not attempted here — a partial bash
  *    filter reads as coverage and is worse than none.
- * 2. Shell-init and agent-config PERSISTENCE paths (`~/.bashrc`, `~/.gitconfig`,
- *    `~/.claude.json`, `.mcp.json`). Those are not secrets — nothing is exfiltrated,
- *    something is installed — so `looksLikeSecret` does not catch them and
- *    `protectedWriteFragments` holds only `/.git/`.
- * 3. Tool-name CASE. Matching is case-sensitive, so a tool registered as `Write` or
+ * 2. Tool-name CASE. Matching is case-sensitive, so a tool registered as `Write` or
  *    `Grep` is not recognised. Vendor packages in this ecosystem do register
  *    Claude-Code-style capitalised names.
+ *
+ * ⚠ Shell-init and agent-config PERSISTENCE paths (`~/.bashrc`, `~/.gitconfig`,
+ * `~/.claude.json`, `.mcp.json`, …) were gap 2 here until #21: they are not secrets —
+ * nothing is exfiltrated, something is installed — so `looksLikeSecret` never caught
+ * them. `isPersistenceWriteTarget` now denies `write`/`edit` on them UNCONDITIONALLY —
+ * every mode, every surface, including print runs where picc is absent entirely (#20).
+ * picc reaches at most "ask" for the same set, and an ask is mode-shaped (auto's
+ * classifier may approve one); this layer is the always-on floor beneath that.
  */
 
 /**
@@ -92,6 +98,17 @@ export default function guards(pi: ExtensionAPI): void {
 				return {
 					block: true,
 					reason: `Writing to "${candidate}" is blocked: it targets protected internals.`,
+				};
+			}
+			// ⚠ Checked on the write path ONLY, deliberately: READING ~/.bashrc or .mcp.json is
+			// routine and harmless. The danger is installation, not disclosure (#21).
+			if (isPersistenceWriteTarget(target)) {
+				return {
+					block: true,
+					reason:
+						`Writing to "${candidate}" is blocked: it targets a shell-init, git, editor or ` +
+						`agent-config persistence path — a write there is harmless now and executes ` +
+						`later, outside this session, as the user.`,
 				};
 			}
 			if (looksLikeSecret(target, policy.secretPathFragments)) {

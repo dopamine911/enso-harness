@@ -1,6 +1,20 @@
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
-import { SECRET_BASENAME_PATTERNS } from "@zen/core";
+import {
+	PERSISTENCE_WRITE_BASENAMES,
+	PERSISTENCE_WRITE_DIRECTORIES,
+	SECRET_BASENAME_PATTERNS,
+	ZEN_PERSISTENCE_WRITE_DIRECTORIES,
+} from "@zen/core";
+
+/**
+ * The full directory-segment deny set: picc's vendored corpus plus the zen additions
+ * (pi's own persistence surfaces — see the constants' comments in @zen/core guard.ts).
+ */
+const ALL_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [
+	...PERSISTENCE_WRITE_DIRECTORIES,
+	...ZEN_PERSISTENCE_WRITE_DIRECTORIES,
+];
 
 /** Resolve a tool-supplied path against the session cwd. Does NOT confine — see {@link isInsideAnyRoot}. */
 export function resolveAgainstCwd(candidate: string, cwd: string): string {
@@ -56,4 +70,34 @@ export function looksLikeSecret(absolutePath: string, fragments: readonly string
 export function isProtectedForWrite(absolutePath: string, fragments: readonly string[]): boolean {
 	const lowered = absolutePath.toLowerCase();
 	return fragments.some((fragment) => lowered.includes(fragment.toLowerCase()));
+}
+
+/**
+ * True when writing the path would plant a persistence vector (#21) — a shell-init file,
+ * git/agent/editor config, or anything inside such a directory.
+ *
+ * Two candidates are checked: the literal path, and the realpath of its nearest existing
+ * ancestor. The second is what catches symlinks — an existing symlink named `notes.txt`
+ * pointing at `~/.bashrc` resolves to the true basename, and a NEW file created through a
+ * symlinked directory (`innocent/` → `~/.claude/`) resolves to a path whose segments carry
+ * the dangerous directory. (A new file's own basename never changes through a directory
+ * symlink, so the literal candidate covers that half.)
+ *
+ * ⚠ Basenames match EXACTLY (case-insensitive, for case-folding filesystems), never as
+ * fragments — `.profile-notes/x.ts` and `my.bashrc` must not be caught.
+ */
+export function isPersistenceWriteTarget(absolutePath: string): boolean {
+	for (const candidate of [absolutePath, realpathOfNearestExisting(absolutePath)]) {
+		const name = basename(candidate).toLowerCase();
+		if (PERSISTENCE_WRITE_BASENAMES.some((dangerous) => dangerous === name)) return true;
+		const segments = candidate.toLowerCase().split(sep);
+		if (
+			segments.some((segment) =>
+				ALL_PERSISTENCE_WRITE_DIRECTORIES.some((dangerous) => dangerous === segment),
+			)
+		) {
+			return true;
+		}
+	}
+	return false;
 }
