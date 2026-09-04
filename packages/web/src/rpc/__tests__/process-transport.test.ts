@@ -94,6 +94,27 @@ test("a command written to a real process reaches its stdin", async () => {
 	expect(response.command).toBe("prompt");
 });
 
+// ⚠ The parity Node's paused-mode streams gave for free: output that arrives before any
+// consumer registers must be HELD, not dropped — pi writes unsolicited stdout at startup
+// (the multi-account extension's notify), and a consumer one task late must still see it.
+// This test fails on a transport whose pump dispatches into an empty consumer list.
+test("output arriving before onData registers is buffered, not dropped", async () => {
+	const child = bunEmitting(`process.stdout.write('{"type":"agent_start"}\\n')`);
+	const transport = piTransportFromChild(child);
+	// Close fires only after both pumps drained — so at this point EVERYTHING the child
+	// wrote has been pumped, and no data consumer existed to receive it: held, or gone.
+	await new Promise<void>((resolve) => transport.onClose(resolve));
+	const chunks: string[] = [];
+	transport.onData((chunk) => chunks.push(chunk));
+	expect(chunks.join("")).toContain('"agent_start"');
+	// And a consumer arriving after close must see the close (synchronous replay), not hang.
+	let lateCloseSeen = false;
+	transport.onClose(() => {
+		lateCloseSeen = true;
+	});
+	expect(lateCloseSeen).toBe(true);
+});
+
 // Deterministic, not a coalescing accident: close waits for BOTH stdio pumps, so by the
 // time it fires the stderr chunk has been delivered.
 test("stderr is surfaced to its consumer", async () => {

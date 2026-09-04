@@ -83,19 +83,28 @@ export function piTransportFromChild(
 	const dataConsumers: Array<(chunk: string) => void> = [];
 	const closeConsumers: Array<() => void> = [];
 
-	// ⚠ The pumps start NOW, but no chunk can be delivered before the caller's synchronous
-	// code finishes — the first `await` inside the pump defers everything past it to a later
-	// task. Both consumers of this transport (`PiRpcClient`, and the test harness) register
-	// their callbacks synchronously after construction, which is the contract: register in
-	// the same tick you receive the transport, or the first chunks race your registration.
+	// ⚠ The stdout pump starts NOW, possibly before any consumer has registered. Node's
+	// paused-mode streams buffered early output until a 'data' listener attached; a pump has
+	// no such courtesy, and pi DOES write unsolicited stdout at startup (the multi-account
+	// extension's notify). So chunks that arrive consumer-less are held here and flushed to
+	// the first `onData` registration — dropped-on-the-floor is not an acceptable default.
+	const chunksBeforeFirstConsumer: string[] = [];
 	const stdoutDrained = pumpUtf8Stream(child.stdout, (text) => {
+		if (dataConsumers.length === 0) {
+			chunksBeforeFirstConsumer.push(text);
+			return;
+		}
 		for (const consume of dataConsumers) consume(text);
 	});
 	const stderrDrained = pumpUtf8Stream(child.stderr, (text) => callbacks.onStderr?.(text));
 
 	// Close = both pipes fully drained, matching what Node's `close` event promised — but as
 	// an ordering guarantee of this code, not a property of someone else's event scheduling.
+	// The flag makes a LATE `onClose` registration see the close instead of hanging forever,
+	// the same courtesy the held-chunk buffer extends to a late `onData`.
+	let isClosed = false;
 	void Promise.all([stdoutDrained, stderrDrained]).then(() => {
+		isClosed = true;
 		for (const consume of closeConsumers) consume();
 	});
 
@@ -114,8 +123,16 @@ export function piTransportFromChild(
 		},
 		onData: (consume) => {
 			dataConsumers.push(consume);
+			// Flush anything that arrived before a consumer existed, preserving order. Splice
+			// first so a consumer that triggers more pump activity cannot double-deliver.
+			const held = chunksBeforeFirstConsumer.splice(0);
+			for (const chunk of held) consume(chunk);
 		},
 		onClose: (consume) => {
+			if (isClosed) {
+				consume();
+				return;
+			}
 			closeConsumers.push(consume);
 		},
 	};
