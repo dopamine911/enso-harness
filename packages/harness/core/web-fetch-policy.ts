@@ -98,15 +98,20 @@ function ipv4OctetsOf(address: string): number[] | undefined {
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the range table IS the function — one boolean per reserved block, in RFC order; splitting it would scatter the table.
 function isPublicIpv4(octets: readonly number[]): boolean {
-	const [first, second] = octets;
-	if (first === undefined || second === undefined) return false;
+	const [first, second, third] = octets;
+	if (first === undefined || second === undefined || third === undefined) return false;
 	if (first === 0) return false; // 0.0.0.0/8 "this network"
 	if (first === 10) return false; // 10.0.0.0/8 private
 	if (first === 100 && second >= 64 && second <= 127) return false; // 100.64.0.0/10 CGNAT
 	if (first === 127) return false; // loopback
 	if (first === 169 && second === 254) return false; // link-local
 	if (first === 172 && second >= 16 && second <= 31) return false; // 172.16.0.0/12 private
+	if (first === 192 && second === 0 && third === 0) return false; // 192.0.0.0/24 IETF assignments
+	if (first === 192 && second === 0 && third === 2) return false; // 192.0.2.0/24 TEST-NET-1
 	if (first === 192 && second === 168) return false; // private
+	if (first === 198 && (second === 18 || second === 19)) return false; // 198.18.0.0/15 benchmarking
+	if (first === 198 && second === 51 && third === 100) return false; // TEST-NET-2
+	if (first === 203 && second === 0 && third === 113) return false; // TEST-NET-3
 	if (first >= 224) return false; // multicast + reserved (224.0.0.0/4, 240.0.0.0/4)
 	return true;
 }

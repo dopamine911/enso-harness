@@ -127,7 +127,13 @@ const NON_PUBLIC_ADDRESSES = [
 	"169.254.169.254", // link-local (the cloud metadata endpoint)
 	"172.16.0.1", // 172.16/12 low edge
 	"172.31.255.254", // 172.16/12 high edge
+	"192.0.0.170", // 192.0.0.0/24 IETF assignments (PR #58 review, nit 1)
+	"192.0.2.1", // TEST-NET-1
 	"192.168.1.1", // private
+	"198.18.0.1", // 198.18.0.0/15 benchmarking low edge
+	"198.19.255.254", // benchmarking high edge
+	"198.51.100.7", // TEST-NET-2
+	"203.0.113.9", // TEST-NET-3
 	"224.0.0.1", // multicast
 	"255.255.255.255", // reserved
 	"::", // unspecified
@@ -153,6 +159,14 @@ const PUBLIC_ADDRESSES = [
 	"172.32.0.1", // one above it
 	"9.255.255.255", // one below 10/8
 	"11.0.0.1", // one above it
+	"192.0.1.1", // between 192.0.0/24 and TEST-NET-1
+	"192.0.3.1", // one /24 above TEST-NET-1
+	"198.17.255.254", // one below the benchmarking range
+	"198.20.0.1", // one above it
+	"198.51.99.254", // one /24 below TEST-NET-2
+	"198.51.101.1", // one /24 above it
+	"203.0.112.254", // one /24 below TEST-NET-3
+	"203.0.114.1", // one /24 above it
 	"223.255.255.254", // one below multicast
 	"2607:f8b0:4004:c07::66", // public v6
 	"::ffff:8.8.8.8", // v4-mapped PUBLIC — the embedded address decides

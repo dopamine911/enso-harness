@@ -183,7 +183,14 @@ async function fetchUnderDeadline(
 		WEB_FETCH_TIMEOUT_MS,
 	);
 	const abortWithCaller = (): void => controller.abort(signal?.reason);
-	signal?.addEventListener("abort", abortWithCaller, { once: true });
+	// A signal that is ALREADY aborted never fires the event (addEventListener is not
+	// retroactive), so an execute() entered post-abort would otherwise run until the
+	// deadline (PR #58 review, nit 3).
+	if (signal?.aborted === true) {
+		abortWithCaller();
+	} else {
+		signal?.addEventListener("abort", abortWithCaller, { once: true });
+	}
 	try {
 		let response: Response;
 		try {

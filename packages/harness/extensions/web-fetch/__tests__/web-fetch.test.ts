@@ -260,6 +260,32 @@ test("a body over the cap is truncated AT the cap, with a marker", async () => {
 	expect(keptBody.length).toBe(WEB_FETCH_MAX_RESPONSE_BYTES);
 });
 
+test("a truncation cut inside a multi-byte character ends on a CLEAN boundary — no U+FFFD", async () => {
+	// The cap lands one byte into "é" (0xC3 0xA9). The truncation branch decodes with
+	// {stream: true} and never flushes, so the partial sequence is BUFFERED and dropped —
+	// probed live 2026-09-04: a final flush emits U+FFFD, the stream path does not.
+	// Pins PR #58 review nit 2 as already-correct behavior.
+	const body = "a".repeat(WEB_FETCH_MAX_RESPONSE_BYTES - 1) + "é";
+	const loaded = loadWebFetch({ fetchUrl: async () => textResponse(body) });
+	const text = await run(loaded, "https://docs.example.com/multibyte");
+	expect(text).toContain("TRUNCATED");
+	expect(text).not.toContain("�");
+});
+
+test("a signal that is ALREADY aborted propagates immediately — addEventListener is not retroactive", async () => {
+	const abortedController = new AbortController();
+	abortedController.abort(new Error("caller gave up before execute ran"));
+	let observedSignalAborted = false;
+	const loaded = loadWebFetch({
+		fetchUrl: async (_url, init) => {
+			observedSignalAborted = init.signal.aborted;
+			return textResponse("late");
+		},
+	});
+	await loaded.tool.execute("t", { url: "https://docs.example.com/" }, abortedController.signal, undefined, {});
+	expect(observedSignalAborted).toBe(true);
+});
+
 test("a non-2xx status is still returned — a 404 body is information", async () => {
 	const loaded = loadWebFetch({ fetchUrl: async () => textResponse("not here", { status: 404 }) });
 	const text = await run(loaded, "https://docs.example.com/missing");
