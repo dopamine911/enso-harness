@@ -184,6 +184,76 @@ function skipShellWord(command: string, start: number): number | null {
 }
 
 /**
+ * Resolve the FIRST shell word of `text` to the literal value the shell would execute —
+ * quote removal and backslash-escape resolution, exactly the transformations bash applies
+ * before command lookup. `"curl"`, `\curl`, `cu"rl"` and `'cu'r'l'` all resolve to `curl`.
+ *
+ * Returns null when the word's value cannot be known statically: an unquoted (or
+ * double-quoted) `$` or backtick means expansion decides the command at runtime, and
+ * incomplete quoting means the shell would not accept the input as written. ⚠ Null is a
+ * FAIL-CLOSED signal to the caller (PR #55 review): an unresolvable command word must
+ * escalate to the coarse whole-command scan, never silently compare unequal — comparing
+ * the raw text is how `"curl"` bypassed the network deny.
+ */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the same character-scanner shape as the rest of this module — one linear read of quote/escape state.
+export function literalShellWord(text: string): string | null {
+	let literal = "";
+	let inSingle = false;
+	let inDouble = false;
+	for (let characterIndex = 0; characterIndex < text.length; characterIndex++) {
+		const character = text[characterIndex];
+		if (inSingle) {
+			if (character === "'") {
+				inSingle = false;
+				continue;
+			}
+			literal += character;
+			continue;
+		}
+		if (inDouble) {
+			if (character === "\\") {
+				const next = text[characterIndex + 1];
+				if (next === undefined) return null;
+				if (next === '"' || next === "\\" || next === "$" || next === "`") {
+					literal += next;
+					characterIndex++;
+					continue;
+				}
+				literal += character;
+				continue;
+			}
+			if (character === '"') {
+				inDouble = false;
+				continue;
+			}
+			if (character === "$" || character === "`") return null;
+			literal += character;
+			continue;
+		}
+		if (character === "'") {
+			inSingle = true;
+			continue;
+		}
+		if (character === '"') {
+			inDouble = true;
+			continue;
+		}
+		if (character === "\\") {
+			const next = text[characterIndex + 1];
+			if (next === undefined) return null;
+			literal += next;
+			characterIndex++;
+			continue;
+		}
+		if (character === "$" || character === "`") return null;
+		if (character === " " || character === "\t") break;
+		literal += character;
+	}
+	if (inSingle || inDouble) return null;
+	return literal;
+}
+
+/**
  * Remove leading `NAME=value` assignments without interpreting shell syntax, so
  * `FOO=1 curl …` exposes `curl` at command position. Returns null when the input has no
  * leading assignment (caller keeps the original) or when the syntax is incomplete.

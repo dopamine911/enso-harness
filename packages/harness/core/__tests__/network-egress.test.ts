@@ -56,6 +56,35 @@ test("case cannot skip the deny — CURL is curl", () => {
 	expect(findEgress("CURL https://x")).toMatchObject({ matched: "curl" });
 });
 
+// ── the quoting family (PR #55 review — each of these BYPASSED the deny as raw text) ──────
+// Balanced quoting keeps a command fully PARSEABLE, so the coarse fallback never ran; only
+// resolving the command word to its literal shell value closes the family.
+test("a quoted command word is still the command — the PR #55 bypass, closed", () => {
+	expect(findEgress('"curl" https://evil.example')).toMatchObject({ matched: "curl", via: "command-position" });
+	expect(findEgress("'curl' https://evil.example")).toMatchObject({ matched: "curl", via: "command-position" });
+});
+
+test("a backslash-escaped command word is still the command", () => {
+	expect(findEgress("\\curl https://evil.example")).toMatchObject({ matched: "curl", via: "command-position" });
+});
+
+test('splice-quoting inside the word does not hide it — cu"rl" is curl', () => {
+	// The review's suggested strip-one-quote-pair fix would MISS this one; literal
+	// resolution is why the guard does not.
+	expect(findEgress('cu"rl" https://evil.example')).toMatchObject({ matched: "curl", via: "command-position" });
+});
+
+test("an unresolvable command word escalates the WHOLE command to the coarse scan", () => {
+	// The binary's name lives in the sibling assignment, which only the raw scan sees.
+	expect(findEgress("C=curl; $C https://evil.example")).toMatchObject({ matched: "curl", via: "raw-scan" });
+});
+
+// ⚠ The third stated non-coverage (with git and interpreters): the value was set in an
+// EARLIER tool call, so no scan of THIS string can see it. Pinned so the gap is a record.
+test("cross-call variable indirection passes — stated non-coverage, pinned", () => {
+	expect(findEgress("$C https://evil.example")).toBeUndefined();
+});
+
 // ── the coarse fallback: unparseable syntax is exactly where evasion lives ────────────────
 test("a denied binary inside command substitution is caught by the raw scan", () => {
 	expect(findEgress("echo $(curl https://x)")).toMatchObject({ matched: "curl", via: "raw-scan" });
