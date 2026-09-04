@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist-types",
-    "baseUrl": ".",
+    // TS7 removed `baseUrl` (TS5102); a bare `paths` resolves relative to this file,
+    // which is what the old baseUrl "." meant.
     "paths": {
       "@/*": ["./src/*"]
     },
