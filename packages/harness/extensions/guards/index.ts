@@ -7,6 +7,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_GUARD_POLICY, type GuardPolicy } from "@zen/core";
 import {
+	canonicalToolName,
 	createSessionReadTracker,
 	isInsideAnyRoot,
 	isPersistenceWriteTarget,
@@ -34,14 +35,21 @@ import {
  * inclusion list naming only `read` left `grep` over ~/.aws returning the credential line.
  *
  * ⚠ WHAT THIS DOES NOT COVER
- * 1. `bash` is only given a default timeout. It is NOT path-confined: `echo x > ~/.ssh/foo`
- *    still escapes, `cat ~/.aws/credentials` bypasses the reader gate entirely, and
- *    `echo x >> ~/.bashrc` bypasses the #21 persistence denial the same way. Bash
- *    policy and egress are Tier 0 item 4, deliberately not attempted here — a partial bash
- *    filter reads as coverage and is worse than none.
- * 2. Tool-name CASE. Matching is case-sensitive, so a tool registered as `Write` or
- *    `Grep` is not recognised. Vendor packages in this ecosystem do register
- *    Claude-Code-style capitalised names.
+ * `bash` is only given a default timeout. It is NOT path-confined: `echo x > ~/.ssh/foo`
+ * still escapes, `cat ~/.aws/credentials` bypasses the reader gate entirely, and
+ * `echo x >> ~/.bashrc` bypasses the #21 persistence denial the same way. Bash
+ * policy and egress are Tier 0 item 4, deliberately not attempted here — a partial bash
+ * filter reads as coverage and is worse than none.
+ *
+ * TOOL IDENTITY (#4, gap 2): every tool-name comparison goes through `canonicalToolName`
+ * on both sides, so a Claude-Code-style capitalised registration (`Write`, `Grep` —
+ * picc's own types carry `tool: "Bash"`) can never skip a branch by case. And on
+ * `session_start` the policy's tool names are checked against pi's live `getAllTools()`:
+ * a policy naming a tool pi no longer registers (a rename upstream) would otherwise turn
+ * this guard into a silent no-op with nothing anywhere reporting it. ⚠ The check FAILS
+ * CLOSED by denying every subsequent tool call — it must never throw, because a throwing
+ * `session_start` handler WEDGES print mode outright (probed 2026-09-04: 120s hang, zero
+ * output), which is a hang, not a refusal.
  *
  * ⚠ Shell-init and agent-config PERSISTENCE paths (`~/.bashrc`, `~/.gitconfig`,
  * `~/.claude.json`, `.mcp.json`, …) were gap 2 here until #21: they are not secrets —
@@ -74,6 +82,31 @@ import {
  * anywhere.
  */
 
+// The tools this policy names, each declared ONCE in canonical (lowercase) form. Every
+// set below and every literal comparison in the dispatch uses these constants, and the
+// session_start check iterates GUARD_POLICY_TOOL_NAMES — derived from the same constants,
+// never a copy, so the check cannot drift from the policy it verifies (#4).
+const TOOL_READ = "read";
+const TOOL_WRITE = "write";
+const TOOL_EDIT = "edit";
+const TOOL_BASH = "bash";
+const TOOL_POWERSHELL = "powershell";
+
+/**
+ * Every tool name the guard's policy references — the policy/tool-list check's input.
+ * ⚠ Deliberately NOT the full tool surface: the reader gate (`grep`, `find`, `ls`, and any
+ * future path-bearing tool) works by EXCLUSION, so a renamed or newly registered reader is
+ * still gated without being named here — only the tools matched BY NAME can silently
+ * un-gate on a rename, and those are exactly the names this list carries.
+ */
+export const GUARD_POLICY_TOOL_NAMES: readonly string[] = [
+	TOOL_READ,
+	TOOL_WRITE,
+	TOOL_EDIT,
+	TOOL_BASH,
+	TOOL_POWERSHELL,
+];
+
 /**
  * Tools whose `path` argument mutates the filesystem.
  *
@@ -82,7 +115,7 @@ import {
  * check. Everything else carrying a `path` is treated as a READER by exclusion — see
  * the dispatch below for why that direction is the safe one.
  */
-const MUTATING_PATH_TOOLS = new Set(["write", "edit"]);
+const MUTATING_PATH_TOOLS = new Set([TOOL_WRITE, TOOL_EDIT]);
 
 /**
  * Tools whose successful RESULT means the session has seen the target file's content (#10).
@@ -95,7 +128,7 @@ const MUTATING_PATH_TOOLS = new Set(["write", "edit"]);
  * whole-file knowledge is exactly what a follow-up `write` claims. The cost is one `read`
  * before a wholesale rewrite of an edited file, which is the rule working.
  */
-const KNOWLEDGE_CONFERRING_TOOLS = new Set(["read", "write"]);
+const KNOWLEDGE_CONFERRING_TOOLS = new Set([TOOL_READ, TOOL_WRITE]);
 
 function pathArgumentOf(event: ToolCallEvent | ToolResultEvent): string | undefined {
 	const input = event.input as Record<string, unknown>;
@@ -111,8 +144,41 @@ export default function guards(pi: ExtensionAPI): void {
 	// which also fires for "reload" and "resume", where the runtime survives — resets it.
 	const readTracker = createSessionReadTracker();
 
+	// #4 gap 2, half two: a policy naming a tool pi does not register is a silent no-op —
+	// the guard compiles, loads, and never fires. Checked against the LIVE tool list each
+	// session_start (extensions can register tools, so the list is per-session state) —
+	// AND lazily on the first tool_call if session_start has not fired yet, so the floor
+	// never depends on pi's event ordering: a lifecycle that delivered a tool_call first
+	// would otherwise fail OPEN through this very window (PR #52 review). The check cannot
+	// run at extension load — pi refuses action methods there ("Extension runtime not
+	// initialized") — but by the first tool_call the registry is certainly populated.
+	// ⚠ Deny-all via this variable, NEVER a throw: a throwing session_start handler wedges
+	// print mode outright (probed 2026-09-04 — 120s hang, zero output). The unreadable-list
+	// case fails closed the same way: "could not check" must not render as "checked, fine".
+	let policyToolsChecked = false;
+	let policyToolMismatch: string | undefined;
+
+	function verifyPolicyToolNames(): void {
+		policyToolsChecked = true;
+		try {
+			const registered = new Set(pi.getAllTools().map((tool) => canonicalToolName(tool.name)));
+			const missing = GUARD_POLICY_TOOL_NAMES.filter((policyName) => !registered.has(policyName));
+			policyToolMismatch =
+				missing.length === 0
+					? undefined
+					: `the guard policy names tools pi does not register: ${missing.join(", ")} ` +
+						`(registered: ${[...registered].join(", ")})`;
+		} catch (error) {
+			// The denial reason below is for the operator; the raw error (with stack) goes to
+			// stderr for whoever has to debug WHY enumeration failed after the fact.
+			console.error("guards: getAllTools() failed during the policy check", error);
+			policyToolMismatch = `the guard could not enumerate pi's tools: ${String(error)}`;
+		}
+	}
+
 	pi.on("session_start", (): void => {
 		readTracker.reset();
+		verifyPolicyToolNames();
 	});
 
 	// Record knowledge from RESULTS, never from calls: a blocked call produces no
@@ -123,7 +189,8 @@ export default function guards(pi: ExtensionAPI): void {
 		const candidate = pathArgumentOf(event);
 		if (candidate === undefined) return;
 		const target = resolveAgainstCwd(candidate, extensionContext.cwd);
-		if (KNOWLEDGE_CONFERRING_TOOLS.has(event.toolName)) {
+		const toolName = canonicalToolName(event.toolName);
+		if (KNOWLEDGE_CONFERRING_TOOLS.has(toolName)) {
 			readTracker.recordKnownPath(target);
 			return;
 		}
@@ -131,7 +198,7 @@ export default function guards(pi: ExtensionAPI): void {
 		// whole-file knowledge (#10): a KNOWN file's stamp follows the mutation (or the
 		// next edit/write refuses the session's own work as "changed underneath us" —
 		// found live, read → edit → edit), while an unknown file stays unknown.
-		if (event.toolName === "edit") {
+		if (toolName === TOOL_EDIT) {
 			readTracker.refreshStampIfKnown(target);
 		}
 	});
@@ -139,10 +206,25 @@ export default function guards(pi: ExtensionAPI): void {
 	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the guard dispatch is ONE linear read — bash patch, then the write denials in precedence order, then the reader gate. Splitting it would scatter the precedence order this file's header documents.
 	pi.on("tool_call", (event, extensionContext): ToolCallEventResult | undefined => {
 		const cwd = extensionContext.cwd;
+		const toolName = canonicalToolName(event.toolName);
+
+		// --- #4's fail-closed floor: a policy/tool-list mismatch denies EVERYTHING, first.
+		// One reason per denial, so an unattended run's transcript names the mismatch.
+		// The lazy leg: an unchecked state here means this call arrived before session_start
+		// ever fired, and unchecked must not read as "checked, fine" — verify now.
+		if (!policyToolsChecked) {
+			verifyPolicyToolNames();
+		}
+		if (policyToolMismatch !== undefined) {
+			return {
+				block: true,
+				reason: `All tool calls are blocked until the guard policy matches pi's tools: ${policyToolMismatch}`,
+			};
+		}
 
 		// --- bash: patch, do not block. `event.input` is mutable by contract, and a
 		// missing timeout means a hung command holds the session indefinitely.
-		if (event.toolName === "bash" || event.toolName === "powershell") {
+		if (toolName === TOOL_BASH || toolName === TOOL_POWERSHELL) {
 			const input = event.input as Record<string, unknown>;
 			if (input.timeout === undefined) {
 				input.timeout = policy.defaultBashTimeoutSeconds;
@@ -156,7 +238,7 @@ export default function guards(pi: ExtensionAPI): void {
 
 		// --- writes first: `write` and `edit` also carry a `path`, so they must be
 		// claimed before the reader fallthrough or they would get the weaker check.
-		if (MUTATING_PATH_TOOLS.has(event.toolName)) {
+		if (MUTATING_PATH_TOOLS.has(toolName)) {
 			const roots = policy.writeRoots.length > 0 ? policy.writeRoots : [cwd];
 
 			if (!isInsideAnyRoot(target, roots)) {
@@ -213,7 +295,7 @@ export default function guards(pi: ExtensionAPI): void {
 						`then reconsider the change before re-applying it.`,
 				};
 			}
-			if (event.toolName === "write" && knownState === "unknown" && existsSync(target)) {
+			if (toolName === TOOL_WRITE && knownState === "unknown" && existsSync(target)) {
 				return {
 					block: true,
 					reason:
