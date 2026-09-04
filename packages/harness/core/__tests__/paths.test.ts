@@ -75,6 +75,20 @@ test("anything inside a dangerous directory is a persistence write target", () =
 	expect(isPersistenceWriteTarget(join(root, ".git", "hooks", "pre-commit"))).toBe(true);
 });
 
+// ⚠ The ZEN ADDITIONS: pi's OWN persistence surfaces, which picc's Claude-Code corpus
+// cannot know about. Each line is a real load path (receipts in scripts/zen.mjs's header).
+test("pi's own persistence surfaces are write targets — the zen additions", () => {
+	// A project-local .pi/settings.json installs an extension for the next plain `pi` run.
+	expect(isPersistenceWriteTarget(join(root, ".pi", "settings.json"))).toBe(true);
+	// pi discovers skills from ~/.agents/skills/ even under a redirected agent dir.
+	expect(isPersistenceWriteTarget("/home/u/.agents/skills/evil/SKILL.md")).toBe(true);
+	// The harness's own agent dir holds settings, extensions and auth for future sessions.
+	expect(isPersistenceWriteTarget(join(root, ".zen", "pi-agent", "settings.json"))).toBe(true);
+	// Segment-anchored, like the vendored list: a name merely containing one is NOT caught.
+	expect(isPersistenceWriteTarget(join(root, "api", "spec.ts"))).toBe(false);
+	expect(isPersistenceWriteTarget(join(root, "pi-tools", "x.ts"))).toBe(false);
+});
+
 test("matching is case-insensitive, for case-folding filesystems", () => {
 	expect(isPersistenceWriteTarget("/home/u/.BASHRC")).toBe(true);
 	expect(isPersistenceWriteTarget(join(root, ".VSCode", "tasks.json"))).toBe(true);

@@ -4,7 +4,17 @@ import {
 	PERSISTENCE_WRITE_BASENAMES,
 	PERSISTENCE_WRITE_DIRECTORIES,
 	SECRET_BASENAME_PATTERNS,
+	ZEN_PERSISTENCE_WRITE_DIRECTORIES,
 } from "@zen/core";
+
+/**
+ * The full directory-segment deny set: picc's vendored corpus plus the zen additions
+ * (pi's own persistence surfaces — see the constants' comments in @zen/core guard.ts).
+ */
+const ALL_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [
+	...PERSISTENCE_WRITE_DIRECTORIES,
+	...ZEN_PERSISTENCE_WRITE_DIRECTORIES,
+];
 
 /** Resolve a tool-supplied path against the session cwd. Does NOT confine — see {@link isInsideAnyRoot}. */
 export function resolveAgainstCwd(candidate: string, cwd: string): string {
@@ -83,7 +93,7 @@ export function isPersistenceWriteTarget(absolutePath: string): boolean {
 		const segments = candidate.toLowerCase().split(sep);
 		if (
 			segments.some((segment) =>
-				PERSISTENCE_WRITE_DIRECTORIES.some((dangerous) => dangerous === segment),
+				ALL_PERSISTENCE_WRITE_DIRECTORIES.some((dangerous) => dangerous === segment),
 			)
 		) {
 			return true;

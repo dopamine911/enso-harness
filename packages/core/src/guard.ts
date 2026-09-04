@@ -86,6 +86,29 @@ export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [
 	".claude",
 ];
 
+/**
+ * ZEN ADDITIONS — NOT from picc. Kept as a separate constant so the vendored block above
+ * stays byte-comparable against upstream. picc's corpus protects the agent picc ships in
+ * (Claude Code: `.claude`, `.claude.json`, `.mcp.json`); the agent running THIS harness is
+ * pi, whose persistence surfaces upstream has no reason to know:
+ *
+ *   `.pi`      — a project-local `.pi/settings.json` installs an extension package that
+ *                loads on the user's next plain `pi` session in that repo (the exact
+ *                mechanism scripts/zen.mjs suppresses with --no-extensions).
+ *   `.agents`  — pi discovers skills from `~/.agents/skills/` even under a redirected
+ *                agent dir (scripts/zen.mjs's --no-skills note); a written skill loads
+ *                next session.
+ *   `.zen`     — the harness's own agent dir (`.zen/pi-agent`: settings, extensions,
+ *                auth.json). No agent task legitimately writes there via write/edit;
+ *                scripts/zen.mjs writes `.zen/print-harness` through node fs, which never
+ *                passes this guard.
+ */
+export const ZEN_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [
+	".pi",
+	".agents",
+	".zen",
+];
+
 /** Basenames that deny a read outright, regardless of directory. */
 export const SECRET_BASENAME_PATTERNS: readonly RegExp[] = [
 	/^\.env(\..+)?$/i,
