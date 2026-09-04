@@ -278,6 +278,27 @@ export function literalShellWord(text: string): LiteralShellWordResult {
 }
 
 /**
+ * Split `text` into its RAW shell words — quote-aware slices with quoting preserved —
+ * or null when the syntax is incomplete. The wrapper-mode scan (network-egress.ts) maps
+ * `literalShellWord` over these: a transparent process wrapper (`timeout 30 curl …`)
+ * moves the effective command PAST word 1, so every word needs the command-word
+ * treatment there (PR #55 review, round 3).
+ */
+export function shellWordsOf(text: string): string[] | null {
+	const words: string[] = [];
+	let index = 0;
+	while (index < text.length) {
+		while (text[index] === " " || text[index] === "\t") index++;
+		if (index >= text.length) break;
+		const wordEnd = skipShellWord(text, index);
+		if (wordEnd === null) return null;
+		words.push(text.slice(index, wordEnd));
+		index = wordEnd;
+	}
+	return words;
+}
+
+/**
  * Remove leading `NAME=value` assignments without interpreting shell syntax, so
  * `FOO=1 curl …` exposes `curl` at command position. Returns null when the input has no
  * leading assignment (caller keeps the original) or when the syntax is incomplete.

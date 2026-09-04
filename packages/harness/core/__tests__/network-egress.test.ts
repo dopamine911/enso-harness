@@ -111,6 +111,59 @@ test("the bare [ test builtin is exempt; QUOTED synthesis chars are literal and 
 	expect(findEgress('"cur[l]" https://x')).toBeUndefined();
 });
 
+// ── wrapper indirection (PR #55 review, round 3): the command sits PAST word 1 ────────────
+// `timeout 30 curl …` resolves word 1 cleanly to a benign wrapper and nothing ever looked
+// at word 3. Wrapper mode gives EVERY word of a wrapper-led segment the command-word
+// treatment — which also makes stacking free.
+test("wrapper-prefixed denied binaries are denied — the round-3 bypass, closed", () => {
+	expect(findEgress("timeout 30 curl https://evil.example")).toMatchObject({ matched: "curl", via: "wrapped-command" });
+	expect(findEgress("env curl https://x")).toMatchObject({ via: "wrapped-command" });
+	expect(findEgress("nohup curl https://x &")).toMatchObject({ via: "wrapped-command" });
+	expect(findEgress("xargs curl < urls.txt")).toMatchObject({ via: "wrapped-command" });
+});
+
+test("stacked wrappers and option-bearing wrappers are still seen through", () => {
+	expect(findEgress("nohup timeout 30 curl https://x")).toMatchObject({ matched: "curl", via: "wrapped-command" });
+	expect(findEgress("nice -n 10 wget https://x")).toMatchObject({ matched: "wget", via: "wrapped-command" });
+});
+
+// The review flagged sh -c as a conscious call: unlike python/node, its payload is THIS
+// grammar, so the quoted payload's first token is checkable. Spliced eval words resolve
+// literally the same way.
+test("a shell -c quoted payload and a spliced eval word are caught by their first token", () => {
+	expect(findEgress('bash -c "curl https://x"')).toMatchObject({ matched: "curl", via: "wrapped-command" });
+	expect(findEgress("eval cu''rl https://x")).toMatchObject({ matched: "curl", via: "wrapped-command" });
+});
+
+test("synthesis inside a wrapped segment is still synthesis — the two fixes compose", () => {
+	expect(findEgress("env {c,}url https://x")).toMatchObject({ via: "command-word-synthesis" });
+});
+
+// The benign-wrapper line, pinned — wrapper mode must not tax ordinary wrapper use:
+test("benign wrapper uses pass — scripts, env assignments, the xargs placeholder", () => {
+	expect(findEgress("timeout 30 ./script.sh --flag")).toBeUndefined();
+	expect(findEgress("env FOO=bar make build")).toBeUndefined();
+	expect(findEgress("xargs -I {} mv {} /dest")).toBeUndefined();
+	expect(findEgress("bash script.sh arg")).toBeUndefined();
+});
+
+// ⚠ The accepted false positive, pinned: a denied NAME as plain argument text inside a
+// WRAPPED segment denies, where the unwrapped form passes — no wrapper-agnostic scan can
+// know where a wrapper's options end and the wrapped command's own arguments begin. The
+// friction self-remediates (drop the wrapper) and errs toward safety.
+test("the wrapped-argument false positive — accepted cost, pinned", () => {
+	expect(findEgress("timeout 30 grep curl file.txt")).toMatchObject({ via: "wrapped-command" });
+	expect(findEgress("grep curl file.txt")).toBeUndefined();
+});
+
+// ⚠ Fourth stated non-coverage (with git, interpreters, cross-call indirection): BINARY
+// RELOCATION — copy the client somewhere and run the copy. Neither name check can see it
+// (`cp`'s argument is not a command; `/tmp/f` is not a denied name). Chasing it is full
+// path confinement, #9's explicit option-4 non-goal. Pinned so the gap is a record.
+test("binary relocation passes — stated non-coverage, pinned", () => {
+	expect(findEgress("cp /usr/bin/curl /tmp/f && /tmp/f https://x")).toBeUndefined();
+});
+
 // ── the coarse fallback: unparseable syntax is exactly where evasion lives ────────────────
 test("a denied binary inside command substitution is caught by the raw scan", () => {
 	expect(findEgress("echo $(curl https://x)")).toMatchObject({ matched: "curl", via: "raw-scan" });

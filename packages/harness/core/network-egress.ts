@@ -2,6 +2,7 @@ import { basename } from "node:path";
 import {
 	extractFlatShellCommandSegments,
 	literalShellWord,
+	shellWordsOf,
 	withoutLeadingEnvironmentAssignments,
 } from "./shell-segments.ts";
 import { canonicalToolName } from "./tool-identity.ts";
@@ -43,6 +44,13 @@ import { canonicalToolName } from "./tool-identity.ts";
  * tool calls (`export C=curl` in one call, `$C …` in the next) — the second call's raw
  * scan sees no denied name, because the value lives in session state no string scan can
  * reach. Same-command indirection (`C=curl; $C …`) IS caught, via the escalation.
+ *
+ * ⚠ Fourth stated non-coverage: BINARY RELOCATION (`cp /usr/bin/curl /tmp/f && /tmp/f …`)
+ * — no name check can see it, and chasing it is full path confinement, #9's explicit
+ * option-4 non-goal. Wrapper indirection, by contrast, IS covered (round 3): a segment
+ * led by a transparent process wrapper (`timeout`, `env`, `nohup`, `xargs`, `sudo`,
+ * `sh -c`, …) gets every word checked, since the wrapped command sits verbatim past
+ * word 1 at an offset no wrapper-agnostic scan can know.
  */
 
 /** How the deny matched — carried into the block reason so a denial is explainable. */
@@ -54,7 +62,7 @@ export interface NetworkEgressMatch {
 	 * or a brace/glob-synthesized command word (denied without knowing the final name,
 	 * because expansion assembles it from pieces no scan can see contiguously).
 	 */
-	via: "command-position" | "raw-scan" | "dev-socket" | "command-word-synthesis";
+	via: "command-position" | "raw-scan" | "dev-socket" | "command-word-synthesis" | "wrapped-command";
 }
 
 /** bash's built-in TCP/UDP redirection devices — no legitimate use in this harness. */
@@ -75,6 +83,52 @@ type CommandWordResult =
 	| { kind: "escalate-to-raw-scan" }
 	| { kind: "deny-synthesis"; rawWord: string };
 
+/**
+ * Commands that transparently exec their argument vector as the next command — no code
+ * interpretation, the wrapped command sits VERBATIM in later words (PR #55 review,
+ * round 3: `timeout 30 curl …`, `env curl …`). A segment led by one of these gets
+ * WRAPPER MODE: every subsequent word receives the command-word treatment, which also
+ * makes wrapper STACKING free (`nohup timeout 30 curl …` — the scan reaches curl without
+ * modelling any wrapper's own options). `sh -c "curl …"` rides the same list: unlike
+ * python/node, its payload is THIS grammar, and the quoted payload's first token is
+ * checkable — assembled eval payloads remain interpreter non-coverage.
+ */
+const TRANSPARENT_COMMAND_WRAPPERS = new Set([
+	"env",
+	"timeout",
+	"nohup",
+	"nice",
+	"ionice",
+	"setsid",
+	"stdbuf",
+	"taskset",
+	"chrt",
+	"numactl",
+	"flock",
+	"watch",
+	"xargs",
+	"command",
+	"exec",
+	"eval",
+	"time",
+	"sudo",
+	"doas",
+	"strace",
+	"ltrace",
+	"sh",
+	"bash",
+	"zsh",
+	"dash",
+	"ksh",
+]);
+
+/**
+ * Wrapper-word exemptions: `[` is the test builtin; `{}` is xargs's -I placeholder and
+ * expands to NOTHING in bash (brace expansion needs a comma or range), so neither can
+ * synthesize a name.
+ */
+const WRAPPER_WORD_EXEMPTIONS = new Set(["[", "{}"]);
+
 function commandWordOf(segmentText: string): CommandWordResult {
 	const withoutAssignments = (withoutLeadingEnvironmentAssignments(segmentText) ?? segmentText).trim();
 	const resolved = literalShellWord(withoutAssignments);
@@ -92,6 +146,40 @@ function commandWordOf(segmentText: string): CommandWordResult {
 	return { kind: "word", canonical: canonicalToolName(basename(resolved.value)) };
 }
 
+type WrappedWordFinding =
+	| { kind: "denied"; word: string }
+	| { kind: "synthesis"; word: string }
+	| { kind: "unresolvable" };
+
+/**
+ * Scan every word of a wrapper-led segment with the command-word treatment. A word's
+ * LITERAL value is checked by its first internal whitespace token (so a quoted payload
+ * like `bash -c "curl https://x"` is caught by its leading token), basename'd and
+ * case-folded; `NAME=value` words (env's assignments) and the exempted `[`/`{}` are
+ * skipped; synthesis and runtime-expansion words report as themselves so the caller
+ * denies or escalates exactly as it would at command position.
+ */
+function deniedWordInWrappedSegment(segmentText: string, denied: Set<string>): WrappedWordFinding | undefined {
+	const rawWords = shellWordsOf(segmentText);
+	if (rawWords === null) return { kind: "unresolvable" };
+	let sawUnresolvable = false;
+	for (const rawWord of rawWords.slice(1)) {
+		if (WRAPPER_WORD_EXEMPTIONS.has(rawWord)) continue;
+		if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(rawWord)) continue;
+		const resolved = literalShellWord(rawWord);
+		if (resolved.kind === "word-synthesis") return { kind: "synthesis", word: rawWord };
+		if (resolved.kind !== "literal") {
+			sawUnresolvable = true;
+			continue;
+		}
+		const firstToken = resolved.value.trim().split(/\s/, 1)[0] ?? "";
+		if (firstToken.length === 0) continue;
+		const canonical = canonicalToolName(basename(firstToken));
+		if (denied.has(canonical)) return { kind: "denied", word: canonical };
+	}
+	return sawUnresolvable ? { kind: "unresolvable" } : undefined;
+}
+
 function rawScanFor(command: string, deniedBinaries: readonly string[]): string | undefined {
 	for (const deniedBinary of deniedBinaries) {
 		// All list entries are [word-ish] names, so \b is well-defined at both ends;
@@ -100,6 +188,36 @@ function rawScanFor(command: string, deniedBinaries: readonly string[]): string 
 		if (new RegExp(`\\b${escaped}\\b`, "i").test(command)) return deniedBinary;
 	}
 	return undefined;
+}
+
+/**
+ * Gate ONE parseable segment: a match to deny on, "escalate" when a word's value is only
+ * knowable at runtime (the caller falls back to the whole-command raw scan), or undefined
+ * to pass. WRAPPER MODE (round 3) lives here: when the command word is a transparent
+ * process wrapper, the effective command sits past word 1 at an offset no wrapper-agnostic
+ * scan can know (each wrapper has its own options/operands) — so EVERY subsequent word
+ * gets the command-word treatment. ⚠ The accepted false positive, pinned in a test: a
+ * denied NAME as a plain argument inside a wrapped segment denies (`timeout 30 grep curl
+ * f`), where the unwrapped form passes — the friction self-remediates (drop the wrapper)
+ * and errs toward safety.
+ */
+function gateSegment(segmentText: string, denied: Set<string>): NetworkEgressMatch | "escalate" | undefined {
+	const commandWord = commandWordOf(segmentText);
+	if (commandWord.kind === "deny-synthesis") {
+		return { matched: commandWord.rawWord, via: "command-word-synthesis" };
+	}
+	if (commandWord.kind === "escalate-to-raw-scan") return "escalate";
+	if (denied.has(commandWord.canonical)) {
+		return { matched: commandWord.canonical, via: "command-position" };
+	}
+	if (!TRANSPARENT_COMMAND_WRAPPERS.has(commandWord.canonical)) return undefined;
+	const wrapped = deniedWordInWrappedSegment(segmentText, denied);
+	if (wrapped === undefined) return undefined;
+	if (wrapped.kind === "unresolvable") return "escalate";
+	return {
+		matched: wrapped.word,
+		via: wrapped.kind === "denied" ? "wrapped-command" : "command-word-synthesis",
+	};
 }
 
 /**
@@ -132,17 +250,12 @@ export function findDeniedNetworkEgress(
 			//   never need (the bare `[` test builtin is exempted in commandWordOf).
 			let hasUnresolvableCommandWord = false;
 			for (const segment of segments) {
-				const commandWord = commandWordOf(segment.text);
-				if (commandWord.kind === "deny-synthesis") {
-					return { matched: commandWord.rawWord, via: "command-word-synthesis" };
-				}
-				if (commandWord.kind === "escalate-to-raw-scan") {
+				const verdict = gateSegment(segment.text, denied);
+				if (verdict === "escalate") {
 					hasUnresolvableCommandWord = true;
 					continue;
 				}
-				if (denied.has(commandWord.canonical)) {
-					return { matched: commandWord.canonical, via: "command-position" };
-				}
+				if (verdict !== undefined) return verdict;
 			}
 			if (!hasUnresolvableCommandWord) return undefined;
 		}
