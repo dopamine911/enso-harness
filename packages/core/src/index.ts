@@ -30,6 +30,7 @@ export {
 	ZenCustomSessionEntry,
 	ZenExtensionError,
 	ZenExtensionUiRequest,
+	ZenMessageUsage,
 	ZenNotifyType,
 	ZenObservation,
 	ZenRunEnded,

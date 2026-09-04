@@ -153,6 +153,24 @@ test("a custom session entry rides CUSTOM as zen.entry with its data intact", ()
 	});
 });
 
+// --- #45: a completed request's accounting crosses as zen.usage, the whole observation
+test("a message-usage observation rides CUSTOM as zen.usage with role and usage intact", () => {
+	const observation = mapPiEvent({
+		type: "message_end",
+		message: {
+			role: "assistant",
+			usage: { input: 1200, output: 40, cacheRead: 300, cacheWrite: 50, cost: { total: 0.0132 } },
+		},
+	});
+	const [event] = toAgui(observation);
+	expect(event).toMatchObject({ type: EventType.CUSTOM, name: "zen.usage" });
+	expect((event as { value: unknown }).value).toEqual({
+		kind: "message-usage",
+		role: "assistant",
+		usage: { input: 1200, output: 40, cacheRead: 300, cacheWrite: 50, totalCost: 0.0132 },
+	});
+});
+
 // ⚠ CUSTOM, not RAW. @ag-ui/core defines RAW and it looks made for this, but TanStack
 // NARROWS AGUIEvent and RAW is not in the narrowed union — found only by removing a cast.
 test("an unmapped observation rides CUSTOM, because RAW is not a valid StreamChunk", () => {
@@ -168,6 +186,11 @@ test("nothing is silently dropped: every kind except an in-flight result yields 
 		{ kind: "tool-call", toolCallId: "c", toolName: "bash", args: {} },
 		{ kind: "tool-result", toolCallId: "c", toolName: "bash", text: "x", complete: true, isError: false },
 		{ kind: "extension-error", extensionPath: "/x", event: "e", error: "err" },
+		{
+			kind: "message-usage",
+			role: "assistant",
+			usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+		},
 		{ kind: "run-ended", willRetry: false },
 		{ kind: "settled" },
 		{ kind: "unmapped", event: { type: "z" } },
@@ -175,8 +198,8 @@ test("nothing is silently dropped: every kind except an in-flight result yields 
 	for (const observation of observations) {
 		expect(toAgui(observation).length).toBeGreaterThan(0);
 	}
-	// all eight members covered
-	expect(new Set(observations.map((o) => o.kind)).size).toBe(8);
+	// all nine members covered
+	expect(new Set(observations.map((o) => o.kind)).size).toBe(9);
 });
 
 // ⚠⚠ THE END-TO-END ASSERTION: #18's descriptor must survive BOTH hops.
