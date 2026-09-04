@@ -65,18 +65,24 @@ function readUsageShape(raw: unknown): ZenUsageShape | undefined {
  * attribution rule, see ZenMessageUsage in @zen/core), but "last request" reads ASSISTANT
  * messages only: a toolResult summary is a side model call whose prompt is the tool output,
  * not the conversation — letting it overwrite the number would show a misleading dip.
+ *
+ * ⚠ And only assistant messages whose prompt total is ABOVE ZERO. An errored or aborted
+ * request still emits an assistant `message_end`, with all-zero usage (observed on the
+ * wire: an empty-prompt run produced exactly that shape). A real request never sees zero
+ * prompt tokens, so a zero here means "the request failed", not "the context emptied" —
+ * the same misleading dip as toolResult, through a different door. Cost still adds its
+ * zero and the message still counts, so pi's attribution rule is untouched.
  */
 export function applyZenMessageUsage(data: unknown): void {
 	if (typeof data !== "object" || data === null) return;
 	const observation = data as { role?: unknown; usage?: unknown };
 	const usage = readUsageShape(observation.usage);
 	if (usage === undefined) return;
-	const isAssistantRequest = observation.role === "assistant";
+	const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+	const movesLastRequest = observation.role === "assistant" && promptTokens > 0;
 	stats = {
 		totalCost: stats.totalCost + (usage.totalCost ?? 0),
-		lastRequestInputTokens: isAssistantRequest
-			? usage.input + usage.cacheRead + usage.cacheWrite
-			: stats.lastRequestInputTokens,
+		lastRequestInputTokens: movesLastRequest ? promptTokens : stats.lastRequestInputTokens,
 		countedMessages: stats.countedMessages + 1,
 	};
 	for (const listener of listeners) listener();
@@ -119,7 +125,7 @@ export function SessionStatsBar(): React.ReactNode {
 				cost {formatCost(currentStats.totalCost)}
 			</span>
 			{currentStats.lastRequestInputTokens === undefined ? null : (
-				<span title="prompt tokens the model saw on the latest request (input + cache read + cache write) — not a context-window percentage; the window size does not cross the wire (#44)">
+				<span title="prompt tokens the model saw on the latest request (input + cache read + cache write) — not a context-window percentage; the window size does not cross the wire">
 					last request {formatTokens(currentStats.lastRequestInputTokens)} tokens in
 				</span>
 			)}

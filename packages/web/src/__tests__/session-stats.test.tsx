@@ -48,6 +48,21 @@ test("a toolResult summary adds cost but never moves the last-request tokens", (
 	expect(snapshot.lastRequestInputTokens).toBe(1000);
 });
 
+// ⚠ Observed on the wire: an errored/aborted request still emits an assistant message_end
+// with ALL-ZERO usage. The context did not drop to zero — the request failed — so the
+// number must hold while the cost (zero) and the count still register.
+test("a zero-usage assistant message never overwrites the last-request tokens", () => {
+	applyZenMessageUsage(assistantUsage(1000, 200, 0.01));
+	applyZenMessageUsage({
+		kind: "message-usage",
+		role: "assistant",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalCost: 0 },
+	});
+	const snapshot = getSessionStatsSnapshot();
+	expect(snapshot.lastRequestInputTokens).toBe(1200);
+	expect(snapshot.countedMessages).toBe(2);
+});
+
 test("a usage with no totalCost still counts tokens without poisoning the sum", () => {
 	applyZenMessageUsage({
 		kind: "message-usage",
