@@ -1,6 +1,7 @@
 import { cleanSources } from "../sources.ts";
 import type { FetchUrl, WebSearchOutcome, WebSearchSnippet } from "../vocabulary.ts";
 import { WebSearchProviderError } from "../vocabulary.ts";
+import { asRecord, asString } from "../wire-json.ts";
 
 /**
  * The `tavily` provider (#63): the FALLBACK — a dedicated retrieval API, not a model.
@@ -24,14 +25,6 @@ export interface TavilySearchRequest {
 	excludeDomains?: readonly string[] | undefined;
 	fetchUrl: FetchUrl;
 	signal: AbortSignal | undefined;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
-}
-
-function asString(value: unknown): string | undefined {
-	return typeof value === "string" ? value : undefined;
 }
 
 export async function runTavilyProviderSearch(request: TavilySearchRequest): Promise<WebSearchOutcome> {

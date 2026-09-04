@@ -53,7 +53,16 @@ function hasAuthHeader(headers: Record<string, string> | undefined): boolean {
 	});
 }
 
-export async function resolveModelAuth(authSource: ModelAuthSource, model: Model<Api>): Promise<ResolvedProviderAuth> {
+/**
+ * `readProviderEnvironmentKey` is a SEAM (PR #64 review): it defaults to pi-ai's
+ * `getEnvApiKey`, which reads the launching process environment — injectable so the
+ * fallback's POSITIVE path is testable without a test ever touching `process.env`.
+ */
+export async function resolveModelAuth(
+	authSource: ModelAuthSource,
+	model: Model<Api>,
+	readProviderEnvironmentKey: (provider: string) => string | undefined = getEnvApiKey,
+): Promise<ResolvedProviderAuth> {
 	const resolved = await authSource.getApiKeyAndHeaders(model);
 	if (!resolved.ok) return resolved;
 	const headers = withoutNullHeaders(resolved.headers);
@@ -62,7 +71,7 @@ export async function resolveModelAuth(authSource: ModelAuthSource, model: Model
 	if (headers !== undefined) normalized.headers = headers;
 	if (resolved.baseUrl !== undefined) normalized.baseUrl = resolved.baseUrl;
 	if (normalized.apiKey !== undefined || hasAuthHeader(headers)) return normalized;
-	const environmentApiKey = getEnvApiKey(model.provider);
+	const environmentApiKey = readProviderEnvironmentKey(model.provider);
 	if (environmentApiKey === undefined || environmentApiKey.length === 0) return normalized;
 	return { ...normalized, apiKey: environmentApiKey };
 }

@@ -3,6 +3,7 @@ import { cleanSources, normalizeSearchUrl, titleFromUrl } from "../sources.ts";
 import { readSseEvents } from "../sse.ts";
 import type { ModelSearchRequest, WebSearchOutcome } from "../vocabulary.ts";
 import { WebSearchProviderError } from "../vocabulary.ts";
+import { asRecord, asString, trimTrailingSlash } from "../wire-json.ts";
 
 /**
  * The `openai` provider (#63): the Responses API `web_search` tool, serving three model
@@ -20,20 +21,8 @@ import { WebSearchProviderError } from "../vocabulary.ts";
  * non-coverage record.
  */
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
-}
-
-function asString(value: unknown): string | undefined {
-	return typeof value === "string" ? value : undefined;
-}
-
 function isCodexModel(model: ModelSearchRequest["model"]): boolean {
 	return model.api === "openai-codex-responses";
-}
-
-function trimTrailingSlash(value: string): string {
-	return value.replace(/\/+$/, "");
 }
 
 /**

@@ -3,6 +3,7 @@ import { titleFromUrl } from "../sources.ts";
 import { readSseEvents } from "../sse.ts";
 import type { ModelSearchRequest, WebSearchOutcome, WebSource } from "../vocabulary.ts";
 import { WebSearchProviderError } from "../vocabulary.ts";
+import { asRecord, asString, trimTrailingSlash } from "../wire-json.ts";
 
 /**
  * The `google` provider (#63): Gemini "Grounding with Google Search" over the
@@ -23,14 +24,6 @@ import { WebSearchProviderError } from "../vocabulary.ts";
 const GOOGLE_GROUNDING_REDIRECT_PATTERN = /^https:\/\/vertexaisearch\.cloud\.google\.com\/grounding-api-redirect\//;
 /** Bound on redirect lookups per search — grounding rarely returns more chunks than this. */
 const MAX_REDIRECT_RESOLUTIONS = 20;
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
-}
-
-function asString(value: unknown): string | undefined {
-	return typeof value === "string" ? value : undefined;
-}
 
 interface GroundingDetails {
 	searchQueries: string[];
@@ -120,7 +113,9 @@ export async function runGoogleProviderSearch(request: ModelSearchRequest): Prom
 	};
 	if (credential.apiKey !== undefined && credential.apiKey.length > 0) headers["x-goog-api-key"] = credential.apiKey;
 
-	const endpointUrl = `${request.model.baseUrl}/models/${request.model.id}:streamGenerateContent?alt=sse`;
+	// trimTrailingSlash for the same reason the other wires normalize (PR #64 review):
+	// a registry baseUrl carrying a trailing slash must not emit a double-slash URL.
+	const endpointUrl = `${trimTrailingSlash(request.model.baseUrl)}/models/${request.model.id}:streamGenerateContent?alt=sse`;
 	const requestBody = {
 		contents: [{ role: "user", parts: [{ text: request.query }] }],
 		tools: [{ google_search: {} }],

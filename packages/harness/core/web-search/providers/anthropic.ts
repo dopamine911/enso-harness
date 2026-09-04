@@ -1,6 +1,7 @@
 import { ANTHROPIC_WEB_SEARCH_TOOL_TYPE, runAnthropicWireSearch } from "../anthropic-wire.ts";
 import type { ModelSearchRequest, WebSearchOutcome } from "../vocabulary.ts";
 import { WebSearchProviderError } from "../vocabulary.ts";
+import { trimTrailingSlash } from "../wire-json.ts";
 
 /**
  * The `anthropic` provider (#63): current-model routing onto the Anthropic Messages
@@ -39,7 +40,7 @@ const MAX_ANSWER_TOKENS = 8192;
 const MAX_SERVER_TOOL_USES = 10;
 
 function resolveMessagesUrl(baseUrl: string): string {
-	const base = baseUrl.replace(/\/+$/, "");
+	const base = trimTrailingSlash(baseUrl);
 	return base.endsWith("/v1") ? `${base}/messages` : `${base}/v1/messages`;
 }
 

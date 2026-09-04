@@ -271,3 +271,22 @@ test("both model providers surface a failed credential resolution without dispat
 	}
 	expect(fetchCalls).toBe(0);
 });
+
+test("google: a trailing slash on the model's baseUrl never emits a double-slash URL — PR #64 review", async () => {
+	const slashModel = fakeModel({
+		provider: "google-generative-ai",
+		api: "google-generative-ai",
+		id: "gemini-test",
+		baseUrl: "https://generativelanguage.test.example/v1beta/",
+	});
+	let capturedUrl: string | undefined;
+	await runGoogleProviderSearch(
+		modelRequest(slashModel, async (url) => {
+			capturedUrl = url;
+			return sseResponse(googleGroundedEvents());
+		}),
+	);
+	expect(capturedUrl).toBe(
+		"https://generativelanguage.test.example/v1beta/models/gemini-test:streamGenerateContent?alt=sse",
+	);
+});

@@ -186,3 +186,39 @@ test("tavily HTTP and body failures throw with the dispatched bit set", async ()
 	expect(bodyError).toBeInstanceOf(WebSearchProviderError);
 	expect(bodyError.message).toContain("unparseable");
 });
+
+// The POSITIVE half of the env fallback (PR #64 review gap): the reader is a seam, so
+// the test injects it instead of touching process.env.
+test("resolveModelAuth falls back to the provider env key — and only when nothing else authenticates", async () => {
+	const model = { provider: "some-provider" } as never;
+	const readerCalls: string[] = [];
+	const readKey = (provider: string): string | undefined => {
+		readerCalls.push(provider);
+		return "env-key-1";
+	};
+
+	// No key, no auth header → the reader's key is adopted.
+	const fellBack = await resolveModelAuth(
+		{ getApiKeyAndHeaders: async () => ({ ok: true, headers: { "x-unrelated": "1" } }) },
+		model,
+		readKey,
+	);
+	expect(fellBack).toEqual({ ok: true, headers: { "x-unrelated": "1" }, apiKey: "env-key-1" });
+	expect(readerCalls).toEqual(["some-provider"]);
+
+	// A resolved key wins — the reader is never consulted.
+	const withKey = await resolveModelAuth(
+		{ getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "resolved-key" }) },
+		model,
+		readKey,
+	);
+	expect(withKey).toEqual({ ok: true, apiKey: "resolved-key" });
+	// An auth-bearing header also wins.
+	const withHeader = await resolveModelAuth(
+		{ getApiKeyAndHeaders: async () => ({ ok: true, headers: { Authorization: "Bearer other" } }) },
+		model,
+		readKey,
+	);
+	expect(withHeader).toEqual({ ok: true, headers: { Authorization: "Bearer other" } });
+	expect(readerCalls).toEqual(["some-provider"]);
+});
