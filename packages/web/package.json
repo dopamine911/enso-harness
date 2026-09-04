@@ -7,7 +7,7 @@
   "scripts": {
     "typecheck": "tsc -b --pretty false",
     "dev:server": "bun src/server/dev.ts",
-    "dev:web": "vite"
+    "dev:web": "bun src/server/dev-web.ts"
   },
   "dependencies": {
     "@ag-ui/core": "0.1.1-canary.beta.0",
@@ -32,12 +32,11 @@
   "devDependencies": {
     "@shadcn/helpers": "^0.2.0",
     "@tailwindcss/typography": "^0.5.20",
-    "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.3.0",
+    "bun-plugin-tailwind": "0.1.2",
+    "react-refresh": "^0.18.0",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5.7.0",
-    "vite": "^6.0.0"
+    "typescript": "^5.7.0"
   }
 }

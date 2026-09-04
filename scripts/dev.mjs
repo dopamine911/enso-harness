@@ -7,9 +7,10 @@
  * would be a third-party package in the critical path of every dev session, and this repo
  * has spent the day cataloguing what unpinned third-party packages cost.
  *
- * ⚠ The server MUST come up before vite proxies to it — vite's proxy does not retry a
- * refused connection, it returns 500 to the browser, and that reads as "the app is broken"
- * rather than "the API is not up yet". So the server is started first and given a moment.
+ * ⚠ The server MUST come up before the web surface proxies to it — the `/api` proxy does
+ * not retry a refused connection, it surfaces an error to the browser, and that reads as
+ * "the app is broken" rather than "the API is not up yet". So the server is started first
+ * and given a moment.
  *
  * Usage:  bun run dev                 # pi runs in the repo root
  *         bun run dev /some/path      # pi runs there instead
@@ -47,7 +48,7 @@ function run(label, command, args) {
 		stdout: "pipe",
 		stderr: "pipe",
 		// ⚠ If either surface dies, take the other down. A half-running dev environment is
-		// worse than none: vite serving a page whose API is gone looks like an app bug.
+		// worse than none: the web surface serving a page whose API is gone looks like an app bug.
 		onExit(_child, code, signalCode) {
 			if (shuttingDown) return;
 			console.error(
@@ -79,5 +80,7 @@ console.error(`[dev] pi will run in ${piCwd}`);
 run("server", "bun", ["src/server/dev.ts", piCwd]);
 
 setTimeout(() => {
-	if (!shuttingDown) run("web", "bunx", ["vite"]);
+	// Bun's fullstack dev server (#36) — vite is gone, and with it the one dev-path tool
+	// that still executed under node (bunx honored vite's node shebang).
+	if (!shuttingDown) run("web", "bun", ["src/server/dev-web.ts"]);
 }, SERVER_HEAD_START_MS).unref();

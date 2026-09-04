@@ -451,8 +451,9 @@ function ChatScreen(): React.ReactNode {
 
 const rootElement = document.getElementById("root");
 if (rootElement === null) throw new Error("zen-harness: #root is missing from index.html");
-// ⚠ The root is cached across module re-evaluations. This file cannot Fast Refresh (vite
-// says so on every edit), so an HMR invalidate re-runs the whole module — and a bare
+// ⚠ The root is cached across module re-evaluations. This file cannot Fast Refresh (bun's
+// dev server warns "not accepted" and full-reloads on every edit here, as vite did before
+// #36 — an entry with side effects is never a refresh boundary), and a bare
 // `createRoot()` here then re-roots the same container, which React reports as an error
 // (seen live while verifying #29). Dev-only, but the cache is three lines and makes an
 // HMR edit render through the ONE root instead of racing two.
