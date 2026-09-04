@@ -9,6 +9,8 @@
  * Import schemas from `@zen/core` directly. Import path helpers from here.
  */
 // Named for the same reason as @zen/core's barrel: the list IS the public inventory.
+
+export { findDeniedNetworkEgress, type NetworkEgressMatch } from "./network-egress.ts";
 export {
 	isInsideAnyRoot,
 	isInsideRoot,
@@ -23,4 +25,9 @@ export {
 	type KnownPathState,
 	type SessionReadTracker,
 } from "./read-tracker.ts";
+export {
+	extractFlatShellCommandSegments,
+	type FlatShellCommandSegment,
+	withoutLeadingEnvironmentAssignments,
+} from "./shell-segments.ts";
 export { canonicalToolName } from "./tool-identity.ts";

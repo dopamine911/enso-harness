@@ -406,3 +406,60 @@ test("the lazy check runs once — a healthy registry is not re-enumerated per c
 	runtime.toolCall(toolCallEvent("read", "src/b.ts"), { cwd });
 	expect(enumerations).toBe(1);
 });
+
+// ── #9: bash policy — cc-safety-net as a library, then the network deny, then the patch ───
+
+test("a destructive git command is blocked with cc-safety-net's rule identity", () => {
+	const result = call("bash", { command: "git reset --hard HEAD~3" });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("cc-safety-net");
+	expect(result?.reason).toContain("git.reset-hard");
+});
+
+test("a secret read THROUGH bash is blocked — the bypass this issue names", () => {
+	const result = call("bash", { command: "cat ~/.aws/credentials" });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("cc-safety-net");
+});
+
+test("a network client at command position is blocked, naming the match", () => {
+	const result = call("bash", { command: "curl https://example.com/docs" });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("curl");
+	expect(result?.reason).toContain("network egress");
+});
+
+// ⚠ ORDER IS THE INVARIANT: deny first, patch last — a denied command must never have had
+// its input mutated (a later handler or a retry would see the rewritten input).
+test("a DENIED bash command does not receive the timeout patch", () => {
+	const input: Record<string, unknown> = { command: "curl https://x" };
+	const result = loadGuard()({ type: "tool_call", toolCallId: "t", toolName: "bash", input }, { cwd });
+	expect(result?.block).toBe(true);
+	expect(input.timeout).toBeUndefined();
+});
+
+test("an allowed bash command still gets the timeout patch, after both gates", () => {
+	const input: Record<string, unknown> = { command: "git status" };
+	expect(loadGuard()({ type: "tool_call", toolCallId: "t", toolName: "bash", input }, { cwd })).toBeUndefined();
+	expect(input.timeout).toBe(120);
+});
+
+test("powershell egress is blocked by the coarse scan; cc-safety-net does not run on PS", () => {
+	// Invoke-WebRequest would be POSIX-misparsed by checkCommand; the coarse scan owns PS.
+	const result = call("powershell", { command: "Invoke-WebRequest -Uri https://x" });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("invoke-webrequest");
+});
+
+test("a git command cc-safety-net misreads under PS syntax is not denied on powershell", () => {
+	// `git reset --hard` IS valid PS too and dangerous — but checkCommand is bash-only by
+	// design here; this pins that division so a future "just run it on PS too" change is
+	// a conscious one, not a drive-by.
+	expect(call("powershell", { command: "git reset --hard" })).toBeUndefined();
+});
+
+test("write/edit into .cc-safety-net is a persistence denial — the door checkCommand leaves open", () => {
+	const result = call("write", { path: ".cc-safety-net/rules.json" });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("persistence");
+});

@@ -28,6 +28,7 @@
     "@ladbabynpm/picc-permission-modes": "0.1.1",
     "@mammothb/pi-tokyonight-storm": "0.2.1",
     "@zen/core": "*",
+    "cc-safety-net": "2.3.3",
     "pi-multi-account": "1.21.0"
   },
   "peerDependencies": {
