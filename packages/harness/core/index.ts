@@ -31,3 +31,10 @@ export {
 	withoutLeadingEnvironmentAssignments,
 } from "./shell-segments.ts";
 export { canonicalToolName } from "./tool-identity.ts";
+export {
+	isFetchableContentType,
+	isHostAllowed,
+	isPublicIpAddress,
+	parseWebFetchUrl,
+	type WebFetchUrlDecision,
+} from "./web-fetch-policy.ts";

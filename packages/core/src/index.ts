@@ -72,3 +72,15 @@ export {
 	ZenTruncation,
 	ZenTruncationUnit,
 } from "./tool-result.ts";
+export {
+	EXTERNAL_WEB_CONTENT_NOTICE,
+	parseWebFetchAllowlist,
+	WEB_FETCH_ALLOWLIST_EXAMPLE,
+	WEB_FETCH_MAX_RESPONSE_BYTES,
+	WEB_FETCH_MAX_URL_LENGTH,
+	WEB_FETCH_TIMEOUT_MS,
+	WEB_FETCH_TOOL_NAME,
+	WebFetchAllowlist,
+	type WebFetchAllowlistParseResult,
+	WebFetchToolParameters,
+} from "./web-fetch.ts";

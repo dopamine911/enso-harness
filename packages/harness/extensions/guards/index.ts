@@ -5,7 +5,7 @@ import type {
 	ToolCallEventResult,
 	ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_GUARD_POLICY, type GuardPolicy } from "@zen/core";
+import { DEFAULT_GUARD_POLICY, type GuardPolicy, WEB_FETCH_TOOL_NAME } from "@zen/core";
 import { type CheckCommandResult, checkCommand } from "cc-safety-net/api";
 import {
 	canonicalToolName,
@@ -300,8 +300,9 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
 					block: true,
 					reason:
 						`${toolName} network egress is blocked: "${egress.matched}" (matched by ${egress.via}). ` +
-						`Ad-hoc network clients are denied in shell commands (#9); there is no fetch tool yet, ` +
-						`so web access is unavailable to this session by policy — do not try to work around it.`,
+						`Ad-hoc network clients are denied in shell commands (#9) — use the ${WEB_FETCH_TOOL_NAME} ` +
+						`tool instead (#54): it fetches http(s) URLs from hosts on the committed allowlist and is ` +
+						`the only sanctioned web access. Do not try to work around the deny.`,
 				};
 			}
 

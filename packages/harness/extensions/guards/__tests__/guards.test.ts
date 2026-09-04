@@ -63,6 +63,22 @@ test("write outside the workspace is blocked", () => {
 	expect(r?.reason).toContain("outside the workspace");
 });
 test("write into .git is blocked", () => expect(call("write", { path: ".git/config" })?.block).toBe(true));
+// #54: web-allowlist.json is web_fetch's committed egress policy — the guard is the only
+// layer keeping the agent from editing the policy that gates it (same shape as .cc-safety-net).
+test("write and edit to the web_fetch allowlist are blocked", () => {
+	expect(call("write", { path: "packages/harness/web-allowlist.json" })?.block).toBe(true);
+	expect(call("edit", { path: "packages/harness/web-allowlist.json" })?.block).toBe(true);
+});
+// ⚠ STATED RESIDUAL, pinned (#54): a bash REDIRECT into the allowlist is allowed — the
+// write/edit denial above and cc-safety-net both miss it. Accepted because the extension
+// reads the file ONCE at load (an in-session edit is inert for this session) and the edit
+// then sits in `git status` where a human sees it. If this goes red, a layer started
+// denying it — update this record, don't re-open the gap.
+test("recorded residual: a bash redirect into the allowlist passes the guard", () => {
+	expect(
+		call("bash", { command: 'echo \'{"allowedHosts":["evil.example"]}\' > packages/harness/web-allowlist.json' }),
+	).toBeUndefined();
+});
 test("read of .env is blocked", () => {
 	const r = call("read", { path: ".env" });
 	expect(r?.block).toBe(true);
@@ -460,6 +476,10 @@ test("a network client at command position is blocked, naming the match", () => 
 	expect(result?.block).toBe(true);
 	expect(result?.reason).toContain("curl");
 	expect(result?.reason).toContain("network egress");
+	// #54: the deny must point at the sanctioned path, not claim web access is gone —
+	// "there is no fetch tool yet" was true when #9 landed and is a stale premise now.
+	expect(result?.reason).toContain("web_fetch");
+	expect(result?.reason).not.toContain("no fetch tool");
 });
 
 // ⚠ ORDER IS THE INVARIANT: deny first, patch last — a denied command must never have had

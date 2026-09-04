@@ -10,9 +10,11 @@ import { canonicalToolName } from "./tool-identity.ts";
 /**
  * The bash network deny (#9) — a BAR, deliberately not a boundary.
  *
- * pi has no web tool, so the egress path is `bash` plus an ad-hoc client, and the guard
- * gates exactly that: the named HTTP/TCP client binaries at COMMAND POSITION per shell
- * segment, plus bash's own `/dev/tcp` / `/dev/udp` sockets anywhere in the string.
+ * pi itself ships no web tool, so the raw egress path is `bash` plus an ad-hoc client, and
+ * the guard gates exactly that: the named HTTP/TCP client binaries at COMMAND POSITION per
+ * shell segment, plus bash's own `/dev/tcp` / `/dev/udp` sockets anywhere in the string.
+ * The sanctioned path this deny funnels traffic toward is the harness's own `web_fetch`
+ * tool (#54) — allowlist-gated, audited per call (`extensions/web-fetch/`).
  *
  * ⚠ WHAT IT DELIBERATELY DOES NOT COVER, so nobody reads it as confinement:
  * - `git` remotes. git push IS this harness's job; git is the largest egress path and
