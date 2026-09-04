@@ -44,15 +44,19 @@ export function realpathOrSelf(path: string): string {
 
 /**
  * True when `directory` is the workspace root: its `package.json` parses and carries a
- * `workspaces` field. ⚠ A malformed `package.json` on the walk (a test fixture, a
- * scratch dir) means "not the root, keep walking" — never a throw.
+ * `workspaces` field of a shape npm actually accepts — an array of globs, or the object
+ * form (`{ "packages": [...] }`). A `"workspaces": null` (PR #60 review) is not a root.
+ * ⚠ A malformed `package.json` on the walk (a test fixture, a scratch dir) means "not
+ * the root, keep walking" — never a throw.
  */
 function isWorkspaceRoot(directory: string): boolean {
 	const manifestPath = join(directory, "package.json");
 	if (!existsSync(manifestPath)) return false;
 	try {
 		const manifest: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
-		return typeof manifest === "object" && manifest !== null && "workspaces" in manifest;
+		if (typeof manifest !== "object" || manifest === null || !("workspaces" in manifest)) return false;
+		const workspaces = (manifest as Record<string, unknown>).workspaces;
+		return Array.isArray(workspaces) || (typeof workspaces === "object" && workspaces !== null);
 	} catch {
 		return false;
 	}

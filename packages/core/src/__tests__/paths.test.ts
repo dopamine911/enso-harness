@@ -73,6 +73,17 @@ test("a package.json WITHOUT a workspaces field is not a root — the walk conti
 	expect(realpathSync(findRepoRoot(deepFile))).toBe(realpathSync(root));
 });
 
+test("a workspaces field with a shape npm rejects (null, string) is not a root either — PR #60 review", () => {
+	const root = makeWorkspaceFixture();
+	const middle = join(root, "packages", "harness");
+	writeFileSync(join(middle, "package.json"), JSON.stringify({ name: "x", workspaces: null }));
+	const deepFile = join(root, "packages", "harness", "extensions", "deep", "module.ts");
+	expect(realpathSync(findRepoRoot(deepFile))).toBe(realpathSync(root));
+	// The object form npm DOES accept still counts as a root.
+	writeFileSync(join(middle, "package.json"), JSON.stringify({ name: "x", workspaces: { packages: ["a"] } }));
+	expect(realpathSync(findRepoRoot(deepFile))).toBe(realpathSync(middle));
+});
+
 test("no workspace root anywhere above throws a NAMED error carrying the start path", () => {
 	const orphanDir = mkdtempSync(join(tmpdir(), "zen-paths-orphan-"));
 	const orphanFile = join(orphanDir, "module.ts");
