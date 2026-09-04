@@ -9,3 +9,20 @@
 # against. Revisit only as its own change, with the dual-identity check in hand.
 [install]
 linker = "hoisted"
+
+
+# ⚠ NO `coverageThreshold` HERE, deliberately. Measured 2026-09-04 on bun 1.4.0: the key is
+# enforced PER FILE, not on the total (bun's docs say total; a 0.23 floor passed and 0.24
+# failed with the worst file at 23.65% lines while the total sat at 86%). A per-file 0.83
+# would demand every file hit 83% today. The TOTAL floor lives in scripts/check-coverage.ts,
+# run as its own gate after the tests — see that file's header.
+[test]
+# Always collect, so the gate's `bun test` writes the lcov the coverage gate then reads.
+coverage = true
+coverageReporter = ["text", "lcov"]
+coverageDir = "coverage"
+# The vendored shadcn/ai-elements components share biome.json's exclusion boundary:
+# upstream's code, kept diffable, not held to our floor. chat-screen.tsx imports them
+# transitively, so test/coverage-manifest.test.ts not importing them is not enough — this
+# pattern is what keeps them out of the DENOMINATOR.
+coveragePathIgnorePatterns = ["**/src/components/**"]

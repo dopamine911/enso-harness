@@ -7,3 +7,4 @@ dist-types/
 # pi's session exports, written to the cwd on demand — artifacts, not sources
 pi-session-*.html
 .codegraph/
+coverage/

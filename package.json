@@ -24,7 +24,9 @@
 		"zen": "bun scripts/zen.mjs",
 		"dev": "bun scripts/dev.mjs",
 		"dev:server": "bun run --silent --cwd packages/web dev:server",
-		"dev:web": "bun run --silent --cwd packages/web dev:web"
+		"dev:web": "bun run --silent --cwd packages/web dev:web",
+		"coverage:check": "bun scripts/check-coverage.ts",
+		"doctor": "bunx react-doctor@latest --verbose"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.12",

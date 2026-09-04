@@ -1,0 +1,68 @@
+# CI — the enforced quality gate.
+#
+# Runs the SAME gate as the local pre-commit hook (`bun run check:all` = biome → tsc →
+# bun test → the total-coverage floor), so "green" means one thing whether it ran on a
+# machine or here. A commit made with `--no-verify`, or by someone without the hook
+# installed, is caught at the PR instead of slipping into main.
+#
+# The coverage floor needs no separate step: it is gate 4 inside check:all
+# (scripts/check-coverage.ts — the TOTAL floor bun's own per-file coverageThreshold
+# cannot express; see that file's header for the 2026-09-04 measurement).
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# A newer push to the same branch cancels an in-flight run — no point finishing stale CI.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4" # matches the `engines.bun` floor in package.json
+
+      # The frozen form, not a plain install: it fails when the lockfile and package.json
+      # disagree instead of silently resolving a different tree. `postinstall` runs
+      # scripts/link-vendor-packages.mjs, which materializes the vendor symlinks the
+      # harness manifest points at — the same step every local install runs.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Gate (biome + tsc + tests + coverage floor)
+        run: bun run check:all
+
+  # ADVISORY, deliberately: react-doctor scores the web surface (0-100) and its findings
+  # are guidance, not a contract — so the job reports without ever blocking a merge.
+  # Promote it to a required check only after its signal has earned that (drop the
+  # continue-on-error and mark it required in branch protection).
+  react-doctor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4"
+
+      # Full scan for now — once the baseline is stable, narrow to `--scope changed`
+      # (new findings only; needs fetch-depth: 0 for the base diff).
+      - name: React Doctor (advisory — never blocks)
+        working-directory: packages/web
+        run: bunx react-doctor@latest --verbose

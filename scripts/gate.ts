@@ -102,6 +102,14 @@ const GATES: readonly Gate[] = [
 		describe: "bun test",
 		script: "test",
 	},
+	{
+		// AFTER test, which writes coverage/lcov.info (bunfig keeps coverage always on).
+		// Enforces the TOTAL floor bun cannot: its own coverageThreshold is per-file
+		// (measured 2026-09-04 — see scripts/check-coverage.ts).
+		name: "coverage",
+		describe: "total coverage floor over the full denominator",
+		script: "coverage:check",
+	},
 ];
 
 /**
