@@ -16,7 +16,22 @@ import { WebSearchProviderError } from "../vocabulary.ts";
 const ANTHROPIC_API_VERSION = "2023-06-01";
 /** The beta flags the Claude Code OAuth credential requires on direct API calls. */
 const ANTHROPIC_OAUTH_BETA_FLAGS = "claude-code-20250219,oauth-2025-04-20";
+/**
+ * ⚠ A pinned Claude Code version string, matching pi-ai's own hardcoded
+ * `claudeCodeVersion = "2.1.75"` (anthropic-messages.js) — pi exposes no export for it,
+ * so this pin drifts in step with pi's, not with the real Claude Code.
+ */
 const ANTHROPIC_OAUTH_USER_AGENT = "claude-cli/2.1.75";
+/**
+ * ⚠ Load-bearing on the OAuth path, not branding: Anthropic rejects a Claude Code OAuth
+ * credential whose request lacks this exact identity as the first system block —
+ * observed live 2026-09-04 as HTTP 429 `rate_limit_error`/"Error" (request_id
+ * req_011CejDyvm41VXVA7BY1jHgw) while the same credential's conversation turns
+ * succeeded; with the block, the same credential searched (print receipt 4). pi-ai's
+ * provider carries the same line: "For OAuth tokens, we MUST include Claude Code
+ * identity".
+ */
+const ANTHROPIC_OAUTH_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
 /** Answer budget: a third of the model's output budget, clamped to a sane band. */
 const MIN_ANSWER_TOKENS = 1024;
 const DEFAULT_ANSWER_TOKENS = 4096;
@@ -47,8 +62,9 @@ export async function runAnthropicProviderSearch(request: ModelSearchRequest): P
 		...(request.model.headers ?? {}),
 		...(credential.headers ?? {}),
 	};
+	let isOAuthCredential = false;
 	if (credential.apiKey !== undefined && credential.apiKey.length > 0) {
-		const isOAuthCredential = credential.apiKey.includes("sk-ant-oat");
+		isOAuthCredential = credential.apiKey.includes("sk-ant-oat");
 		if (isOAuthCredential) {
 			if (headers.Authorization === undefined && headers.authorization === undefined) {
 				headers.Authorization = `Bearer ${credential.apiKey}`;
@@ -76,6 +92,7 @@ export async function runAnthropicProviderSearch(request: ModelSearchRequest): P
 		headers,
 		modelId: request.model.id,
 		prompt: request.query,
+		systemTextBlocks: isOAuthCredential ? [ANTHROPIC_OAUTH_IDENTITY] : undefined,
 		maxTokens: answerTokens,
 		maxServerToolUses: MAX_SERVER_TOOL_USES,
 		fetchUrl: request.fetchUrl,

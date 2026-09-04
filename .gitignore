@@ -8,3 +8,4 @@ dist-types/
 pi-session-*.html
 .codegraph/
 coverage/
+.env

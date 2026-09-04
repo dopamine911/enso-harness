@@ -38,6 +38,16 @@ export interface AnthropicWireSearchOptions {
 	modelId: string;
 	/** The user text sent to the searching model. */
 	prompt: string;
+	/**
+	 * System text blocks, in order. ⚠ Load-bearing for OAuth: Anthropic REJECTS a Claude
+	 * Code OAuth credential whose request lacks the Claude Code identity as the first
+	 * system block (observed live 2026-09-04 as HTTP 429 `rate_limit_error` with the
+	 * generic message "Error" — request_id req_011CejDyvm41VXVA7BY1jHgw — while the same
+	 * credential's ordinary conversation turns succeeded; pi-ai's own provider comments
+	 * "For OAuth tokens, we MUST include Claude Code identity"). The anthropic provider
+	 * passes it on the OAuth branch; API-key callers and DeepSeek send none.
+	 */
+	systemTextBlocks?: readonly string[] | undefined;
 	maxTokens: number;
 	maxServerToolUses: number;
 	fetchUrl: FetchUrl;
@@ -54,13 +64,16 @@ function asString(value: unknown): string | undefined {
 }
 
 export async function runAnthropicWireSearch(options: AnthropicWireSearchOptions): Promise<WebSearchOutcome> {
-	const requestBody = {
+	const requestBody: Record<string, unknown> = {
 		model: options.modelId,
 		max_tokens: options.maxTokens,
 		messages: [{ role: "user", content: options.prompt }],
 		tools: [{ type: ANTHROPIC_WEB_SEARCH_TOOL_TYPE, name: "web_search", max_uses: options.maxServerToolUses }],
 		stream: true,
 	};
+	if (options.systemTextBlocks !== undefined && options.systemTextBlocks.length > 0) {
+		requestBody.system = options.systemTextBlocks.map((text) => ({ type: "text", text }));
+	}
 
 	let response: Response;
 	try {

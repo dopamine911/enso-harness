@@ -287,3 +287,44 @@ test("readSseEvents stops early when the callback asks — the Codex never-closi
 	});
 	expect(seen).toEqual([{ first: true }]);
 });
+
+// --- the anthropic provider's OAuth branch (live-diagnosed 2026-09-04). ---
+
+test("⚠ an OAuth credential sends the Claude Code identity system block — its absence is a live 429", async () => {
+	// Observed live: without this block, Anthropic rejects the OAuth request as HTTP 429
+	// rate_limit_error/"Error" (request_id req_011CejDyvm41VXVA7BY1jHgw); with it, the same
+	// credential searched (audit line: `searched provider=anthropic — primary`).
+	const { runAnthropicProviderSearch } = await import("../web-search/providers/anthropic.ts");
+	let capturedBody: string | undefined;
+	const capturingFetch: FetchUrl = async (_url, init) => {
+		capturedBody = init.body;
+		return sseResponse(SEARCHED_EVENTS);
+	};
+	const oauthModel = {
+		id: "claude-test",
+		provider: "anthropic",
+		api: "anthropic-messages",
+		baseUrl: "https://api.anthropic.example",
+		maxTokens: 8192,
+	} as never;
+	await runAnthropicProviderSearch({
+		query: QUERY_TEXT,
+		model: oauthModel,
+		resolveAuth: async () => ({ ok: true, apiKey: "sk-ant-oat01-fake-oauth-token" }),
+		fetchUrl: capturingFetch,
+		signal: undefined,
+	});
+	const oauthBody = JSON.parse(capturedBody ?? "{}") as { system?: { type: string; text: string }[] };
+	expect(oauthBody.system?.[0]?.text).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
+
+	// The API-key branch sends NO system block — the identity is OAuth-only.
+	await runAnthropicProviderSearch({
+		query: QUERY_TEXT,
+		model: oauthModel,
+		resolveAuth: async () => ({ ok: true, apiKey: "sk-ant-api-key" }),
+		fetchUrl: capturingFetch,
+		signal: undefined,
+	});
+	const apiKeyBody = JSON.parse(capturedBody ?? "{}") as { system?: unknown };
+	expect(apiKeyBody.system).toBeUndefined();
+});

@@ -37,6 +37,7 @@ is that those four are not usable by an OpenAPI consumer, and that is recorded b
 | `observation.ts` | what a pi event becomes for a surface to render |
 | `pi-rpc.ts` | pi's rpc wire protocol, and the transport seams around it |
 | `web-fetch.ts` | web_fetch's config section, tool parameters, and caps (#54) |
+| `web-search.ts` | web_search's optional config section (backend pin + Tavily domain filters), tool parameters, and the per-attempt deadline (#63) |
 | `config.ts` | `zen.config.json`: the whole-file schema and the fail-closed loading contract (#59) |
 | `paths.ts` | the workspace path helpers — `findRepoRoot` (realpath-first) and the `.zen` dirs (#59); node/bun only, tree-shaken out of the browser bundle |
 
