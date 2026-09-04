@@ -1,22 +1,30 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
- * Materialize the vendor pi packages inside the harness package's own node_modules.
+ * Ensure the vendor pi packages exist inside the harness package's own node_modules.
  *
  * WHY THIS EXISTS
  * pi requires a package to reference bundled pi packages through `node_modules/` paths
  * relative to its own root (docs/packages.md § Dependencies), and a published tarball
- * built from `bundledDependencies` has exactly that layout. npm workspaces do not:
- * they hoist workspace dependencies to the repo root, so `packages/harness/node_modules`
- * comes back empty and every `node_modules/...` entry in our manifest fails to resolve.
+ * built from `bundledDependencies` has exactly that layout.
  *
- * ⚠ `install-strategy=nested` does NOT fix this — tested 2026-09-03; workspace
- * dependencies are hoisted regardless of install strategy. Do not reach for it again.
+ * ⚠ WHAT THE INSTALLER PROVIDES CHANGED WITH #30, so this script is verify-or-fix:
  *
- * So this script links the hoisted copies into place, making the local tree match the
- * layout a consumer installing from npm would get. It runs from the root `postinstall`,
- * so a clean clone plus `npm install` is enough — nothing here is manual.
+ *   bun (current)  bun's isolated linker puts a symlink for every workspace dependency in
+ *                  the workspace's OWN node_modules (→ the `.bun` store), so the layout pi
+ *                  needs exists NATIVELY after `bun install` and the loop below verifies
+ *                  it and links nothing.
+ *   npm (history)  npm hoisted workspace dependencies to the repo root and left
+ *                  `packages/harness/node_modules` empty — the fallback branch below (link
+ *                  the hoisted copy into place) was the script's whole job then, and it is
+ *                  KEPT because a bunfig `linker = "hoisted"` (or a future bun default
+ *                  flip) reproduces the npm shape. npm's `install-strategy=nested` did NOT
+ *                  avoid the need — tested 2026-09-03; hoisting ignored the strategy.
  *
- * Symlinks, not copies: `pi update` and `npm install` stay authoritative over the real
+ * It runs from the root `postinstall` (wired for real with #30 — the claim predated the
+ * wiring), so a clean clone plus `bun install` is enough — nothing here is manual. The
+ * server's own `assertVendorLinks` re-checks the effective layout at startup either way.
+ *
+ * Symlinks, not copies: `pi update` and `bun install` stay authoritative over the real
  * package, and there is no second copy to go stale.
  */
 import { readFileSync, mkdirSync, symlinkSync, rmSync, existsSync, lstatSync } from "node:fs";
@@ -57,14 +65,23 @@ function requiredPackageNames() {
 	return [...names];
 }
 
+const verified = [];
 const linked = [];
 for (const packageName of requiredPackageNames()) {
+	const target = join(packageRoot, "node_modules", packageName);
+	// existsSync FOLLOWS symlinks, so a bun-made link into the `.bun` store passes here
+	// while a broken link falls through to the fix branch below.
+	if (existsSync(target)) {
+		verified.push(packageName);
+		continue;
+	}
 	const hoisted = join(repoRoot, "node_modules", packageName);
 	if (!existsSync(hoisted)) {
-		console.error(`link-vendor-packages: ${packageName} is not installed at the repo root — run npm install`);
+		console.error(
+			`link-vendor-packages: ${packageName} is at neither ${target} nor the repo root — run bun install`,
+		);
 		process.exit(1);
 	}
-	const target = join(packageRoot, "node_modules", packageName);
 	mkdirSync(dirname(target), { recursive: true });
 	// lstat, not exists: a broken symlink must be replaced, and exists() follows links.
 	try {
@@ -77,4 +94,7 @@ for (const packageName of requiredPackageNames()) {
 	linked.push(packageName);
 }
 
-console.error(`link-vendor-packages: linked ${linked.length} package(s): ${linked.join(", ") || "none"}`);
+console.error(
+	`link-vendor-packages: ${verified.length} already in place (${verified.join(", ") || "none"}); ` +
+		`linked ${linked.length} (${linked.join(", ") || "none"})`,
+);

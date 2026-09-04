@@ -1,0 +1,11 @@
+# #30: pin the install layout, not just the runtime.
+#
+# ⚠ `linker = "hoisted"` is LOAD-BEARING, not taste. bun's isolated linker gives each
+# workspace its own node_modules symlink tree, which hands the SAME package two module
+# identities — packages/web's `@ag-ui/core` and the one inside @tanstack/ai-client stopped
+# being the same directory, and tsc failed with "EventType.RUN_FINISHED is not assignable
+# to EventType.RUN_FINISHED" (two copies of one enum; caught at the first bun install,
+# 2026-09-03). Hoisted reproduces the npm-era single tree the codebase was verified
+# against. Revisit only as its own change, with the dual-identity check in hand.
+[install]
+linker = "hoisted"

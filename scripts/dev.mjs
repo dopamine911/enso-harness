@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Run both dev surfaces with one command.
  *
@@ -11,8 +11,8 @@
  * refused connection, it returns 500 to the browser, and that reads as "the app is broken"
  * rather than "the API is not up yet". So the server is started first and given a moment.
  *
- * Usage:  npm run dev                 # pi runs in the repo root
- *         npm run dev -- /some/path   # pi runs there instead
+ * Usage:  bun run dev                 # pi runs in the repo root
+ *         bun run dev /some/path      # pi runs there instead
  */
 import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
@@ -60,8 +60,10 @@ process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 console.error(`[dev] pi will run in ${piCwd}`);
-run("server", "node", ["--experimental-strip-types", "src/server/dev.ts", piCwd]);
+// ⚠ bun runs the server (#30): the runtime the tests exercise (`bun test`) is now the
+// runtime that ships. Node's strip-types flag — and its strip-ONLY constraint — is gone.
+run("server", "bun", ["src/server/dev.ts", piCwd]);
 
 setTimeout(() => {
-	if (!shuttingDown) run("web", "npx", ["vite"]);
+	if (!shuttingDown) run("web", "bunx", ["vite"]);
 }, SERVER_HEAD_START_MS).unref();

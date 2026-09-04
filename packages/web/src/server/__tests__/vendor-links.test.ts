@@ -7,7 +7,9 @@ import { startZenServer } from "../index.ts";
 /**
  * ⚠ The precondition that was missing when a real run failed.
  *
- * `npm install` destroys the vendor symlinks, pi skips a missing manifest resource path
+ * A reinstall can destroy or omit the vendor links (npm did on every install; bun's
+ * hoisted linker leaves the harness tree to our postinstall), pi skips a missing
+ * manifest resource path
  * SILENTLY, and the visible symptom was an HTTP 400 from the provider several layers away.
  * `scripts/zen.mjs` already refused to launch on this; the server did not. These assert it
  * now does, at both launch points.
@@ -51,7 +53,7 @@ test("the refusal NAMES the missing path and the fix", () => {
 		const message = (error as Error).message;
 		// Named, not counted — a count cannot say which link to recreate.
 		expect(message).toContain("node_modules/pi-multi-account/index.ts");
-		expect(message).toContain("npm run link:vendor");
+		expect(message).toContain("bun install");
 	}
 });
 

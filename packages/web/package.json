@@ -6,11 +6,11 @@
   "description": "The zen-harness web surface. Outside the pi manifest — pi does nothing with a frontend.",
   "scripts": {
     "typecheck": "tsc -b --pretty false",
-    "dev:server": "node --experimental-strip-types src/server/dev.ts",
+    "dev:server": "bun src/server/dev.ts",
     "dev:web": "vite"
   },
   "dependencies": {
-    "@ag-ui/core": "*",
+    "@ag-ui/core": "0.1.1-canary.beta.0",
     "@fontsource-variable/geist": "^5.3.0",
     "@radix-ui/react-use-controllable-state": "^1.2.6",
     "@tanstack/ai": "0.53.0",
