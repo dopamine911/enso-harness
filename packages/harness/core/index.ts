@@ -23,3 +23,4 @@ export {
 	type KnownPathState,
 	type SessionReadTracker,
 } from "./read-tracker.ts";
+export { canonicalToolName } from "./tool-identity.ts";

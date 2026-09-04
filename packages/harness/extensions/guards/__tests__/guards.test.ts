@@ -13,10 +13,19 @@ interface GuardRuntime {
 	sessionStart: Handler;
 }
 
-/** Minimal stand-in for pi's ExtensionAPI — captures every registered handler. */
-function loadGuardRuntime(): GuardRuntime {
+/** pi's shipped tool set, as `getAllTools` returns it (probed live 2026-09-04). */
+const PI_SHIPPED_TOOL_NAMES = ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"];
+
+/**
+ * Minimal stand-in for pi's ExtensionAPI — captures every registered handler.
+ * `getAllTools` defaults to pi's real shipped set so session_start's policy check (#4)
+ * passes; the mismatch tests inject their own list, or a throwing implementation.
+ */
+function loadGuardRuntime(
+	getAllTools: () => { name: string }[] = () => PI_SHIPPED_TOOL_NAMES.map((name) => ({ name })),
+): GuardRuntime {
 	const handlers = new Map<string, Handler>();
-	guards({ on: (e: string, h: Handler) => handlers.set(e, h) } as never);
+	guards({ on: (e: string, h: Handler) => handlers.set(e, h), getAllTools } as never);
 	const toolCall = handlers.get("tool_call");
 	const toolResult = handlers.get("tool_result");
 	const sessionStart = handlers.get("session_start");
@@ -309,4 +318,66 @@ test("a failed edit result does not refresh the stamp", () => {
 	touchForward(join(cwd, existingFile));
 	runtime.toolResult(toolResultEvent("edit", existingFile, true), { cwd });
 	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })?.block).toBe(true);
+});
+
+// ── #4 gap 2: tool identity is case-insensitive, and the policy is checked live ───────────
+// Claude-Code-style vendors register capitalised tool names (picc's own types carry
+// `tool: "Bash"`), so two naming conventions are live in one process. Every branch must
+// match by canonical name — these are DISAGREEING vectors (event case ≠ policy case), or
+// they would assert x === x.
+
+test("a capitalised Write is still confined — case cannot skip the write branch", () => {
+	const result = call("Write", { path: "/etc/passwd" });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("outside the workspace");
+});
+
+test("a capitalised Bash still gets the timeout patch, not the reader fallthrough", () => {
+	const input: Record<string, unknown> = { command: "sleep 999" };
+	expect(loadGuard()({ type: "tool_call", toolCallId: "t", toolName: "BASH", input }, { cwd })).toBeUndefined();
+	expect(input.timeout).toBe(120);
+});
+
+test("a capitalised Read result confers knowledge for a later lowercase write", () => {
+	const { runtime, cwd: fixtureCwd, existingFile } = readPreconditionFixture();
+	runtime.toolResult(toolResultEvent("Read", existingFile, false), { cwd: fixtureCwd });
+	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd: fixtureCwd })).toBeUndefined();
+});
+
+// ── #4 gap 2, half two: a policy naming a tool pi does not register must FAIL CLOSED ──────
+// A mismatch is otherwise a silent no-op: the guard loads, never fires, nothing reports it.
+// ⚠ Deny-all, never a throw — a throwing session_start handler WEDGES print mode (probed
+// 2026-09-04: 120s hang, zero output), which is a hang, not a refusal.
+
+test("a policy tool missing from pi's registry denies every subsequent call, naming it", () => {
+	const runtime = loadGuardRuntime(() =>
+		PI_SHIPPED_TOOL_NAMES.filter((name) => name !== "write").map((name) => ({ name })),
+	);
+	runtime.sessionStart({ type: "session_start", reason: "start" }, { cwd });
+	const result = runtime.toolCall(toolCallEvent("read", "src/a.ts"), { cwd });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("write");
+});
+
+test("registry names are matched canonically — a capitalised registry entry is not a mismatch", () => {
+	const runtime = loadGuardRuntime(() => PI_SHIPPED_TOOL_NAMES.map((name) => ({ name: name.toUpperCase() })));
+	runtime.sessionStart({ type: "session_start", reason: "start" }, { cwd });
+	expect(runtime.toolCall(toolCallEvent("read", "src/a.ts"), { cwd })).toBeUndefined();
+});
+
+test("an unreadable tool list fails closed too — 'could not check' is not 'checked, fine'", () => {
+	const runtime = loadGuardRuntime(() => {
+		throw new Error("registry unavailable");
+	});
+	// The session_start handler itself must NOT throw (the print-mode wedge).
+	expect(() => runtime.sessionStart({ type: "session_start", reason: "start" }, { cwd })).not.toThrow();
+	const result = runtime.toolCall(toolCallEvent("read", "src/a.ts"), { cwd });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("enumerate");
+});
+
+test("a matching registry leaves every call ungated by the mismatch floor", () => {
+	const runtime = loadGuardRuntime();
+	runtime.sessionStart({ type: "session_start", reason: "start" }, { cwd });
+	expect(runtime.toolCall(toolCallEvent("read", "src/a.ts"), { cwd })).toBeUndefined();
 });
