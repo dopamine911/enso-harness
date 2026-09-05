@@ -3,7 +3,6 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { join, resolve } from "node:path";
 import { EventType } from "@ag-ui/core";
 import type { StreamChunk } from "@tanstack/ai";
-import { isPiLaunchConfig, type PiLaunchConfig } from "@zen/core";
 import { createAgentHost } from "../host/agent-host.ts";
 import { createDialogRegistry } from "./dialog-registry.ts";
 import { type ChatRunOutcome, resumeChat, runChat } from "./session.ts";
@@ -84,8 +83,11 @@ function writeSseEvent(response: ServerResponse, chunk: StreamChunk): void {
 }
 
 export interface ZenServerOptions {
-	/** Where pi runs. ⓘ Only `cwd` is consulted since #69 — pi is in-process, there is no command line. */
-	launch: PiLaunchConfig;
+	/**
+	 * Where pi runs — the tree it will read and write. With no sandbox (#24) this value IS
+	 * the blast radius; it comes from the launcher's own arguments, never from a request.
+	 */
+	cwd: string;
 	/**
 	 * The zen-harness pi package directory, loaded as the ONLY extension source.
 	 *
@@ -154,10 +156,10 @@ function assertVendorLinks(harnessPackageDir: string): void {
 }
 
 export function startZenServer(options: ZenServerOptions) {
-	if (!isPiLaunchConfig(options.launch)) {
+	if (options.cwd.length === 0) {
 		// ⚠ Fail at startup rather than on the first request. A bad `cwd` discovered mid-run
 		// is a confusing failure; discovered at boot it is a one-line message.
-		throw new Error("zen-server: invalid pi launch config");
+		throw new Error("zen-server: cwd must not be empty");
 	}
 	assertVendorLinks(options.harnessPackageDir);
 
@@ -165,7 +167,7 @@ export function startZenServer(options: ZenServerOptions) {
 	// multi-account config; sessions are created per chat THREAD below and live across runs
 	// (#43 — a mode chosen on prompt 1 is in force on prompt 2).
 	const host = createAgentHost({
-		cwd: options.launch.cwd,
+		cwd: options.cwd,
 		agentDir: options.agentDir,
 		harnessPackageDir: options.harnessPackageDir,
 		onProblem: options.onProblem,

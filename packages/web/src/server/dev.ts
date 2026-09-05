@@ -19,7 +19,7 @@ const agentDir = zenAgentDir(repoRoot);
 mkdirSync(agentDir, { recursive: true });
 
 const { url } = startZenServer({
-	launch: { cwd },
+	cwd,
 	harnessPackageDir: harnessPackageDir(repoRoot),
 	agentDir,
 	onProblem: (problem) => console.error("[zen-server]", problem),

@@ -380,7 +380,7 @@ export interface ChatRunOptions {
  *
  * ⚠ Terminates on `agent_settled`, NOT on `agent_end` — `agent_end` is one low-level run
  * and may be followed by an automatic retry, so ending the stream there would cut the
- * response off mid-retry. That distinction is asserted in `protocol.test.ts` and preserved
+ * response off mid-retry. That distinction is asserted in `map-events.test.ts` and preserved
  * through both mappers; here is where it decides when the HTTP response closes.
  */
 export async function* runChat(options: ChatRunOptions): AsyncGenerator<StreamChunk> {

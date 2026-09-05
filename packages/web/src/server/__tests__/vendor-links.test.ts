@@ -29,14 +29,14 @@ function fakeHarness(manifestPi: Record<string, string[]>, createLinks: boolean)
 	return directory;
 }
 
-const launch = { cwd: tmpdir() };
+const cwd = tmpdir();
 
 test("refuses to start when a vendor manifest path is missing", () => {
 	const harness = fakeHarness(
 		{ extensions: ["./extensions/guards/index.ts", "node_modules/pi-multi-account/index.ts"] },
 		false,
 	);
-	expect(() => startZenServer({ launch, harnessPackageDir: harness, agentDir: tmpdir() })).toThrow(
+	expect(() => startZenServer({ cwd, harnessPackageDir: harness, agentDir: tmpdir() })).toThrow(
 		/vendor package paths are missing/,
 	);
 });
@@ -47,7 +47,7 @@ test("the refusal NAMES the missing path and the fix", () => {
 	// undefined, and the message assertions fail on `undefined` rather than being skipped.
 	let thrown: unknown;
 	try {
-		startZenServer({ launch, harnessPackageDir: harness, agentDir: tmpdir() });
+		startZenServer({ cwd, harnessPackageDir: harness, agentDir: tmpdir() });
 	} catch (error) {
 		thrown = error;
 	}
@@ -60,7 +60,7 @@ test("the refusal NAMES the missing path and the fix", () => {
 test("starts when every vendor path resolves", async () => {
 	const harness = fakeHarness({ extensions: ["node_modules/pi-multi-account/index.ts"] }, true);
 	const started = startZenServer({
-		launch,
+		cwd,
 		harnessPackageDir: harness,
 		agentDir: tmpdir(),
 		port: 0,
@@ -73,7 +73,7 @@ test("a non-vendor manifest path is not required to exist", async () => {
 	// `./extensions/...` is our own source; only `node_modules/` entries are link-dependent.
 	const harness = fakeHarness({ extensions: ["./extensions/guards/index.ts"] }, false);
 	const started = startZenServer({
-		launch,
+		cwd,
 		harnessPackageDir: harness,
 		agentDir: tmpdir(),
 		port: 0,
@@ -84,16 +84,16 @@ test("a non-vendor manifest path is not required to exist", async () => {
 
 test("refuses when the harness package.json itself is absent", () => {
 	expect(() =>
-		startZenServer({ launch, harnessPackageDir: join(tmpdir(), "definitely-not-here"), agentDir: tmpdir() }),
+		startZenServer({ cwd, harnessPackageDir: join(tmpdir(), "definitely-not-here"), agentDir: tmpdir() }),
 	).toThrow(/no package.json/);
 });
 
-test("refuses an invalid launch config before touching the filesystem", () => {
+test("refuses an empty cwd before touching the filesystem", () => {
 	expect(() =>
 		startZenServer({
-			launch: { cwd: "" },
+			cwd: "",
 			harnessPackageDir: fakeHarness({ extensions: [] }, true),
 			agentDir: tmpdir(),
 		}),
-	).toThrow(/invalid pi launch config/);
+	).toThrow(/cwd must not be empty/);
 });

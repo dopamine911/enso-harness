@@ -64,7 +64,10 @@ import {
  * this guard into a silent no-op with nothing anywhere reporting it. ⚠ The check FAILS
  * CLOSED by denying every subsequent tool call — it must never throw, because a throwing
  * `session_start` handler WEDGES print mode outright (probed 2026-09-04: 120s hang, zero
- * output), which is a hang, not a refusal.
+ * output), which is a hang, not a refusal. In-process (#69, the web host) a throw does the
+ * opposite and is no better: pi routes it to `onError` and `bindExtensions` RESOLVES
+ * (pinned by `agent-host.test.ts`), so the session comes up usable with this guard's setup
+ * incomplete. Deny-all-via-variable is the one shape that fails closed on both hosts.
  *
  * ⚠ Shell-init and agent-config PERSISTENCE paths (`~/.bashrc`, `~/.gitconfig`,
  * `~/.claude.json`, `.mcp.json`, …) were gap 2 here until #21: they are not secrets —

@@ -20,12 +20,13 @@ be added *next to the original* — where it is obvious.
 A TypeBox schema **is** a JSON Schema object, so one declaration serves the TypeScript type
 (`Static<>`), the HTTP contract and its OpenAPI description, and a runtime validator.
 
-⚠ That is true of data schemas. It is **not** true of the function-bearing ones —
-`PiTransport`, `PiRpcClientOptions`, `PiProcessHandle`, `PiProcessCallbacks` — which
-serialise to `{"type": "function"}`, a TypeBox extension rather than standard JSON Schema.
-They are still declared here as schemas, by decision: a single rule the next session can
-follow without judgement beats a finer rule that is correct and needs explaining. The cost
-is that those four are not usable by an OpenAPI consumer, and that is recorded beside them.
+⚠ That is true of data schemas. It is **not** true of the function-bearing one —
+`PiSession`, the in-process session contract (#69) — which serialises to
+`{"type": "function"}`, a TypeBox extension rather than standard JSON Schema. It is still
+declared here as a schema, by decision: a single rule the next session can follow without
+judgement beats a finer rule that is correct and needs explaining. The cost is that it is
+not usable by an OpenAPI consumer, and that is recorded beside it. (Until #69 PR 3 there
+were four such schemas; the subprocess transport they described is deleted.)
 
 ## Layout
 
@@ -35,7 +36,7 @@ is that those four are not usable by an OpenAPI consumer, and that is recorded b
 | `guard.ts` | the Tier 0 guard policy |
 | `tool-result.ts` | the two-surface tool-result descriptor (#18) |
 | `observation.ts` | what a pi event becomes for a surface to render |
-| `pi-rpc.ts` | pi's rpc wire protocol, and the transport seams around it |
+| `pi-rpc.ts` | pi's event shape (the rpc-mode vocabulary the host reproduces in-process) and the `PiSession` contract |
 | `web-fetch.ts` | web_fetch's config section, tool parameters, and caps (#54) |
 | `web-search.ts` | web_search's optional config section (backend pin + Tavily domain filters), tool parameters, and the per-attempt deadline (#63) |
 | `config.ts` | `zen.config.json`: the whole-file schema and the fail-closed loading contract (#59) |

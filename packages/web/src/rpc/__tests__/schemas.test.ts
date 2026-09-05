@@ -2,16 +2,13 @@ import { expect, test } from "bun:test";
 import {
 	isZenToolResultDescriptor,
 	PiImageContent,
-	PiRpcCommandInputSchema,
 	PiRpcEventSchema,
-	PiRpcResponseSchema,
 	ZenObservation,
 	ZenToolResultDescriptor,
 	ZenUsage,
 } from "@zen/core";
 import { Check } from "typebox/value";
 import { mapPiEvent } from "../map-events.ts";
-import { claimsToBeResponse, isPiRpcResponse } from "../protocol.ts";
 import { observationKindsDeclaredByTheUnion } from "./observation-kinds.ts";
 
 /**
@@ -64,23 +61,12 @@ test("image content is validated, so a malformed attachment fails at the boundar
 	expect(Check(PiImageContent, { type: "image", data: "aGk=" })).toBe(false);
 });
 
-test("a command input requires a non-empty type", () => {
-	expect(Check(PiRpcCommandInputSchema, { type: "prompt", message: "x" })).toBe(true);
-	expect(Check(PiRpcCommandInputSchema, { type: "" })).toBe(false);
-	expect(Check(PiRpcCommandInputSchema, { message: "x" })).toBe(false);
-});
-
-// ⚠ The schemas are OPEN on purpose — an unmodelled field must not fail validation, or a
-// new pi event becomes "the transport is broken" instead of "we don't render this yet".
-test("extra fields are accepted, so a newer pi does not break the transport", () => {
+// ⚠ The event schema is OPEN on purpose — an unmodelled field must not fail validation, or a
+// new pi event becomes "the host is broken" instead of "we don't render this yet".
+test("extra fields are accepted, so a newer pi does not break the host", () => {
 	expect(Check(PiRpcEventSchema, { type: "some_future_event", brandNew: { nested: true } })).toBe(true);
-	expect(Check(PiRpcResponseSchema, { type: "response", command: "prompt", success: true, extra: 1 })).toBe(true);
-});
-
-test("a response missing required fields fails validation while still claiming the route", () => {
-	const malformed = { type: "response", id: "x" };
-	expect(claimsToBeResponse(malformed)).toBe(true);
-	expect(isPiRpcResponse(malformed)).toBe(false);
+	expect(Check(PiRpcEventSchema, { type: "" })).toBe(false);
+	expect(Check(PiRpcEventSchema, { delta: "x" })).toBe(false);
 });
 
 // --- the mapper's output validates against the union it claims to produce

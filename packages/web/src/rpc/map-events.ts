@@ -182,13 +182,14 @@ export function mapPiEvent(event: PiRpcEvent): ZenObservation {
 			// UI Protocol):
 			//
 			//   DIALOG methods    select | confirm | input | editor
-			//                     emit a request and BLOCK until the client writes an
-			//                     `extension_ui_response` on stdin with the matching id.
+			//                     emit a request and BLOCK until the client answers it (over
+			//                     rpc: an `extension_ui_response` line on stdin; in-process:
+			//                     `PiSession.answerDialog`) with the matching id.
 			//   FIRE-AND-FORGET   notify | setStatus | setWidget | setTitle | set_editor_text
 			//                     emit and continue; a client may ignore them.
 			//
-			// ⚠⚠ A blocking request means pi is WAITING and stays blocked until an
-			// `extension_ui_response` with this id is written to its stdin. The session
+			// ⚠⚠ A blocking request means pi is WAITING and stays blocked until an answer
+			// carrying this id reaches the extension's promise. The session
 			// layer answers dialogs by handing them to the browser as AG-UI interrupts
 			// (#27), and what it needs from this hop is the QUESTION — so the dialog fields
 			// are read here, defensively, into the one shared `ZenDialogSpec` shape.
