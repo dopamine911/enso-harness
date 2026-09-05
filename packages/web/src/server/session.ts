@@ -509,20 +509,16 @@ export async function* resumeChat(options: ResumeRunOptions): AsyncGenerator<Str
 		yield runError(ids, "this question is being answered by a concurrent request.");
 		return;
 	}
-	try {
-		if (first.status === "cancelled") {
-			writeDialogResponse(entry.pump.session, { id: entry.dialogId, cancelled: true });
-		} else {
-			// `validateDialogAnswer` proved the payload matches the dialog's method, so the
-			// narrowing here cannot disagree with what was checked.
-			const answer = first.payload as { value: string } | { confirmed: boolean };
-			writeDialogResponse(entry.pump.session, { id: entry.dialogId, ...answer });
-		}
-	} catch (error) {
-		onProblem?.(error);
-		entry.stopPi();
-		yield runError(ids, "the agent session is gone — the answer could not be delivered.");
-		return;
+	// `answerDialog` never throws (contract on `PiSession`): the subprocess era needed a
+	// broken-pipe catch here, but an in-process answer to a stale id is reported through the
+	// host's problem channel and returns normally. PR #70 review flagged the old catch as dead.
+	if (first.status === "cancelled") {
+		writeDialogResponse(entry.pump.session, { id: entry.dialogId, cancelled: true });
+	} else {
+		// `validateDialogAnswer` proved the payload matches the dialog's method, so the
+		// narrowing here cannot disagree with what was checked.
+		const answer = first.payload as { value: string } | { confirmed: boolean };
+		writeDialogResponse(entry.pump.session, { id: entry.dialogId, ...answer });
 	}
 
 	yield* streamRun({

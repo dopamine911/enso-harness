@@ -194,7 +194,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 				// ⚠ Fire-and-forget, exactly as pi's rpc mode does: `prompt()` resolves only when
 				// the whole run finishes, and awaiting it in front of the drain loop is the
 				// original `/mode` hang. Acceptance is the preflight callback; completion is the
-				// `agent_settled` event; a rejection after acceptance travels the event stream.
+				// `agent_settled` event. A rejection AFTER acceptance is dropped here on purpose —
+				// this is pi's own rpc-mode handler line for line (dist/modes/rpc/rpc-mode.js,
+				// `case "prompt"`), and pi's `_runAgentPrompt` emits `agent_settled` from a
+				// `finally`, so the run still terminates; only the error text is lost. Model and
+				// tool errors never reach this path — the agent loop turns them into an assistant
+				// message with `stopReason: "error"`, which the stream carries as usual.
 				void session
 					.prompt(request.message, {
 						...(request.images === undefined ? {} : { images: [...request.images] }),

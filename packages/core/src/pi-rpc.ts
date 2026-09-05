@@ -241,7 +241,11 @@ export const PiSession = Type.Object({
 	prompt: Type.Unsafe<(request: PiPromptRequest, outcome: PiPromptOutcome) => void>(
 		Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
 	),
-	/** Deliver a human's answer (or cancellation) to a pending blocking dialog. */
+	/**
+	 * Deliver a human's answer (or cancellation) to a pending blocking dialog. Never throws:
+	 * an unknown or already-settled id is reported through the host's problem channel, so
+	 * callers do not wrap this in a try/catch.
+	 */
 	answerDialog: Type.Unsafe<(response: PiDialogResponse) => void>(Type.Function([Type.Unknown()], Type.Void())),
 	/** The slash commands this session can run — extension commands, prompt templates, skills. Synchronous: read off the live registry, no round trip. */
 	listCommands: Type.Unsafe<() => PiCommand[]>(Type.Function([], Type.Unknown())),
