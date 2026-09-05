@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
 import { EventType } from "@ag-ui/core";
-import { isZenToolResultDescriptor, ZEN_TOOL_RESULT_KEY, ZenObservation } from "@zen/core";
+import { isZenToolResultDescriptor, ZEN_TOOL_RESULT_KEY, type ZenObservation } from "@zen/core";
 import { mapPiEvent } from "../map-events.ts";
 import { type AguiIdentifiers, observationToAguiEvents } from "../to-agui.ts";
+import { observationKindsDeclaredByTheUnion } from "./observation-kinds.ts";
 
 const ids: AguiIdentifiers = { messageId: "m1", runId: "r1", threadId: "t1" };
 const toAgui = (observation: ZenObservation) => observationToAguiEvents(observation, ids);
@@ -205,8 +206,7 @@ test("nothing is silently dropped: every kind except an in-flight result yields 
 	// every member covered — the oracle is the union itself, never a hard-coded count (the
 	// count here and in schemas.test.ts drifted apart once; a set diff names the missing kind)
 	const coveredKinds: string[] = [...new Set(observations.map((observation) => observation.kind))];
-	const declaredKinds: string[] = ZenObservation.anyOf.map((member) => String(member.properties.kind.const));
-	expect(coveredKinds.sort()).toEqual(declaredKinds.sort());
+	expect(coveredKinds.sort()).toEqual(observationKindsDeclaredByTheUnion());
 });
 
 // ⚠⚠ THE END-TO-END ASSERTION: #18's descriptor must survive BOTH hops.

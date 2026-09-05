@@ -12,6 +12,7 @@ import {
 import { Check } from "typebox/value";
 import { mapPiEvent } from "../map-events.ts";
 import { claimsToBeResponse, isPiRpcResponse } from "../protocol.ts";
+import { observationKindsDeclaredByTheUnion } from "./observation-kinds.ts";
 
 /**
  * These prove the TypeBox conversion bought RUNTIME VALIDATION and a JSON Schema, not just
@@ -129,9 +130,3 @@ test("EVERY observation the mapper can emit validates against ZenObservation", (
 	const coveredKinds: string[] = [...new Set(events.map((event) => mapPiEvent(event).kind))];
 	expect(coveredKinds.sort()).toEqual(observationKindsDeclaredByTheUnion());
 });
-
-/** Every `kind` literal the ZenObservation union declares, sorted — the sweep's oracle. */
-function observationKindsDeclaredByTheUnion(): string[] {
-	const kinds: string[] = ZenObservation.anyOf.map((member) => String(member.properties.kind.const));
-	return kinds.sort();
-}
