@@ -62,6 +62,25 @@ function isWorkspaceRoot(directory: string): boolean {
 	}
 }
 
+const FILE_URL_PREFIX = "file://";
+
+/** True when the string is a `file://` URL rather than a filesystem path. */
+export function isFileUrl(candidate: string): boolean {
+	return candidate.startsWith(FILE_URL_PREFIX);
+}
+
+/**
+ * Decode a `file://` URL to the filesystem path it names.
+ *
+ * The ONLY `fileURLToPath` call site in the repository (the anchor test enforces it). Two
+ * callers with different reasons share it: {@link findRepoRoot} accepts `import.meta.url`,
+ * and the harness guard decodes a `file://` path a tool was handed — pi's own tools decode
+ * one before touching the filesystem, so the guard must judge the decoded path (#53).
+ */
+export function fileUrlToPath(fileUrl: string): string {
+	return fileURLToPath(fileUrl);
+}
+
 /**
  * The repository root: the nearest ancestor whose `package.json` declares `workspaces`.
  *
@@ -74,7 +93,7 @@ function isWorkspaceRoot(directory: string): boolean {
  * distinction is what `config.ts` relies on; do not "fix" this to consult `process.cwd()`.
  */
 export function findRepoRoot(startPathOrFileUrl: string): string {
-	const startPath = startPathOrFileUrl.startsWith("file://") ? fileURLToPath(startPathOrFileUrl) : startPathOrFileUrl;
+	const startPath = isFileUrl(startPathOrFileUrl) ? fileUrlToPath(startPathOrFileUrl) : startPathOrFileUrl;
 	let current = realpathOrSelf(startPath);
 	for (;;) {
 		if (isWorkspaceRoot(current)) return current;
