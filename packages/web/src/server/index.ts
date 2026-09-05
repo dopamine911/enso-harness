@@ -200,6 +200,13 @@ export function startZenServer(options: ZenServerOptions) {
 			// normally follows a response must not run — a human's answer is coming back for
 			// that process on a later request.
 			const outcome: ChatRunOutcome = { parkedAwaitingAnswer: false };
+			// ⚠ Set in each path's `finally` BEFORE `response.end()`. The response 'close' event
+			// fires on normal completion too, and since #69 PR 2 "stop" is a real `abort()` on
+			// the thread's long-lived session (the subprocess era's stop was an idempotent
+			// dispose). Aborting an idle session after every settled run would set
+			// `abortInFlight` and make the very next prompt wait on it — so 'close' stops pi
+			// only when the stream did NOT end on its own, i.e. the client went away.
+			let streamEnded = false;
 
 			// ── The resume path: an answer to a parked dialog. No new session — the one this
 			// request addresses has been alive since the run it interrupted (#27).
@@ -212,9 +219,11 @@ export function startZenServer(options: ZenServerOptions) {
 				// 'close' event fires when the request BODY has been consumed — the start of
 				// every run, before this listener is registered — so a request-close hook is
 				// INERT and a mid-run disconnect never tore pi down. The RESPONSE 'close' is
-				// what fires on a client abort (and on normal end, where stop is a no-op).
+				// what fires on a client abort; on normal end `streamEnded` keeps it inert.
 				response.on("close", () => {
-					if (!outcome.parkedAwaitingAnswer) stopParked?.();
+					if (streamEnded) return;
+					if (outcome.parkedAwaitingAnswer) return;
+					stopParked?.();
 				});
 				try {
 					for await (const chunk of resumeChat({
@@ -237,6 +246,7 @@ export function startZenServer(options: ZenServerOptions) {
 				} finally {
 					// A resume that ended unparked is a finished run: the thread goes idle. A
 					// client that dropped mid-resume is handled by the 'close' hook above.
+					streamEnded = true;
 					if (!outcome.parkedAwaitingAnswer) threads.release(ids.threadId);
 					response.end();
 				}
@@ -268,10 +278,13 @@ export function startZenServer(options: ZenServerOptions) {
 			// every run, before this listener is registered — so the request-close hook this
 			// used to be was INERT and a mid-run disconnect never tore pi down (found by the
 			// disconnect receipt lingering exactly until the no-progress guard's `finally`).
-			// The RESPONSE 'close' fires on a client abort; on normal end, stop() has
-			// already run in `finally` and is an idempotent no-op.
+			// The RESPONSE 'close' fires on a client abort; on normal end `streamEnded` is
+			// already set by `finally` and this stays inert — see its declaration for why a
+			// stop here is no longer free.
 			response.on("close", () => {
-				if (!outcome.parkedAwaitingAnswer) threads.stop(ids.threadId);
+				if (streamEnded) return;
+				if (outcome.parkedAwaitingAnswer) return;
+				threads.stop(ids.threadId);
 			});
 
 			try {
@@ -301,6 +314,7 @@ export function startZenServer(options: ZenServerOptions) {
 					message: error instanceof Error ? error.message : String(error),
 				});
 			} finally {
+				streamEnded = true;
 				if (!outcome.parkedAwaitingAnswer) threads.release(ids.threadId);
 				response.end();
 			}

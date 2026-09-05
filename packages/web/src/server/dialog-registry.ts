@@ -11,10 +11,11 @@ import type { PiRpcEvent, PiSession, ZenDialogSpec } from "@zen/core";
  * on a promise our UI context holds — must outlive the HTTP request that surfaced its
  * question. This registry is that lifetime, and nothing more.
  *
- * ⚠ DELIBERATELY NOT SESSION REUSE. An entry exists ONLY while a dialog awaits its
- * answer; an ordinary run keeps the session-per-request lifecycle. Multi-turn reuse of one
- * session is #69's next step, with its own lifecycle questions (idle eviction, per-thread
- * cwd, cross-tab races), and it must not ride in on this.
+ * ⚠ NOT THE SESSION'S LIFETIME. An entry exists ONLY while a dialog awaits its answer.
+ * The session itself lives for the whole chat thread (`thread-sessions.ts`, #69 PR 2) and
+ * is disposed there after an idle window — this registry only keeps a thread from going
+ * idle while a question is open, and aborts the run (never the session) when the question
+ * times out.
  *
  * ⚠ SECURITY: a resume request's `threadId` resolves to a live pi with unconfined bash
  * (#9). That is the same shape as accepting `cwd` from the request body, which this
