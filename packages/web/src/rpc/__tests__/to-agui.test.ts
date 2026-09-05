@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { EventType } from "@ag-ui/core";
-import { isZenToolResultDescriptor, ZEN_TOOL_RESULT_KEY, type ZenObservation } from "@zen/core";
+import { isZenToolResultDescriptor, ZEN_TOOL_RESULT_KEY, ZenObservation } from "@zen/core";
 import { mapPiEvent } from "../map-events.ts";
 import { type AguiIdentifiers, observationToAguiEvents } from "../to-agui.ts";
 
@@ -186,6 +186,10 @@ test("nothing is silently dropped: every kind except an in-flight result yields 
 		{ kind: "tool-call", toolCallId: "c", toolName: "bash", args: {} },
 		{ kind: "tool-result", toolCallId: "c", toolName: "bash", text: "x", complete: true, isError: false },
 		{ kind: "extension-error", extensionPath: "/x", event: "e", error: "err" },
+		// The notify variant: the one ui-request shape that crosses (fire-and-forget ones are
+		// addressed to a terminal and are dropped by design — see the mapper).
+		{ kind: "extension-ui-request", id: "u1", method: "notify", blocking: false, message: "Mode: acceptEdits" },
+		{ kind: "custom-entry", customType: "modes", data: { mode: "acceptEdits" } },
 		{
 			kind: "message-usage",
 			role: "assistant",
@@ -198,8 +202,11 @@ test("nothing is silently dropped: every kind except an in-flight result yields 
 	for (const observation of observations) {
 		expect(toAgui(observation).length).toBeGreaterThan(0);
 	}
-	// all nine members covered
-	expect(new Set(observations.map((o) => o.kind)).size).toBe(9);
+	// every member covered — the oracle is the union itself, never a hard-coded count (the
+	// count here and in schemas.test.ts drifted apart once; a set diff names the missing kind)
+	const coveredKinds: string[] = [...new Set(observations.map((observation) => observation.kind))];
+	const declaredKinds: string[] = ZenObservation.anyOf.map((member) => String(member.properties.kind.const));
+	expect(coveredKinds.sort()).toEqual(declaredKinds.sort());
 });
 
 // ⚠⚠ THE END-TO-END ASSERTION: #18's descriptor must survive BOTH hops.
