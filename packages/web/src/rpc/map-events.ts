@@ -3,11 +3,12 @@ import {
 	type PiRpcEvent,
 	ZEN_TOOL_RESULT_KEY,
 	type ZenDialogSpec,
-	type ZenNotifyType,
+	ZenNotifyType,
 	type ZenObservation,
 	type ZenToolResultDescriptor,
 	type ZenUsage,
 } from "@zen/core";
+import { Check } from "typebox/value";
 
 /**
  * pi rpc events → the observations a surface renders (#24).
@@ -214,8 +215,10 @@ export function mapPiEvent(event: PiRpcEvent): ZenObservation {
 			const notifyFields: { message?: string; notifyType?: ZenNotifyType } = {};
 			if (method === "notify") {
 				notifyFields.message = String(event.message ?? "");
+				// The declared values come from the schema, not a literal list — the browser
+				// router (custom-event-router.ts) makes the same check the same way.
 				const notifyTypeCandidate = event.notifyType;
-				if (notifyTypeCandidate === "info" || notifyTypeCandidate === "warning" || notifyTypeCandidate === "error") {
+				if (Check(ZenNotifyType, notifyTypeCandidate)) {
 					notifyFields.notifyType = notifyTypeCandidate;
 				}
 			}
