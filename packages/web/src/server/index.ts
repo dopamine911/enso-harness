@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { EventType } from "@ag-ui/core";
 import type { StreamChunk } from "@tanstack/ai";
 import { isPiLaunchConfig, type PiLaunchConfig } from "@zen/core";
-import { spawnPiRpcProcess } from "../rpc/process-transport.ts";
+import { createAgentHost } from "../host/agent-host.ts";
 import { createDialogRegistry } from "./dialog-registry.ts";
 import { type ChatRunOutcome, resumeChat, runChat } from "./session.ts";
 
@@ -37,7 +37,7 @@ const SSE_HEADERS = {
  * `resume` + `parentRunId` mark a RESUME request — the browser answering a dialog that
  * interrupted an earlier run (#27). TanStack puts both in the POST body
  * (`connection-adapters.js:573-574`); their presence is what routes the request to the
- * parked process instead of a fresh spawn.
+ * parked session instead of a fresh one.
  */
 interface RunAgentInputBody {
 	threadId?: string;
@@ -83,9 +83,10 @@ function writeSseEvent(response: ServerResponse, chunk: StreamChunk): void {
 }
 
 export interface ZenServerOptions {
+	/** Where pi runs. ⓘ Only `cwd` is consulted since #69 — pi is in-process, there is no command line. */
 	launch: PiLaunchConfig;
 	/**
-	 * The zen-harness pi package directory, loaded with `-e`.
+	 * The zen-harness pi package directory, loaded as the ONLY extension source.
 	 *
 	 * ⚠ Required, not optional. An optional value here would make "no guards" the default
 	 * for anyone who forgot it, which is exactly the state the first live run was in.
@@ -98,25 +99,22 @@ export interface ZenServerOptions {
 	onProblem?: (problem: unknown) => void;
 }
 
-/**
- * ⚠⚠ THE FIRST LIVE RUN EXPOSED THIS, AND IT WAS A SECURITY DEFECT.
+/*
+ * ⚠⚠ THE FIRST LIVE RUN EXPOSED THIS, AND IT WAS A SECURITY DEFECT — kept as history because
+ * the in-process host inherits the same obligation.
  *
- * `spawnPiRpcProcess` inherits the environment, so pi loaded the OPERATOR'S GLOBAL CONFIG —
- * `~/.pi/agent`, all sixteen of their packages, and **not the zen harness**. Observed
- * directly in the first SSE stream: pi-lens status lines, powerline widgets and a
- * pi-multi-account advisor warning, none of which this package installs.
+ * The spawned `pi --mode rpc` inherited the environment, so pi loaded the OPERATOR'S GLOBAL
+ * CONFIG — `~/.pi/agent`, all sixteen of their packages, and **not the zen harness**.
+ * Observed directly in the first SSE stream: pi-lens status lines, powerline widgets and a
+ * pi-multi-account advisor warning, none of which this package installs. The web surface
+ * was running with **no Tier 0 guard at all**.
  *
- * The consequence is not cosmetic. The web surface was running with **no Tier 0 guard at
- * all** — no write confinement, no secret-path denial, no bash timeout — because the guards
- * extension lives in the zen package that was never loaded.
- *
- * So the server applies the same two isolation mechanisms `scripts/zen.mjs` does, for the
- * same reasons: `PI_CODING_AGENT_DIR` hides the operator's packages and credentials, and
- * `--no-extensions` stops discovery so only the explicitly named package loads.
+ * The in-process host (`host/agent-host.ts`, #69) applies the same isolation as loader
+ * options — `noExtensions`, `noSkills`, the harness dir as the only extension path — and
+ * sets `PI_CODING_AGENT_DIR` on this process before the first session, because
+ * pi-multi-account reads it at module import (spike receipt: unset, it read the operator's
+ * real credentials again).
  */
-function isolatedLaunchArgs(harnessPackageDir: string): readonly string[] {
-	return ["--no-extensions", "--no-skills", "-e", harnessPackageDir];
-}
 
 /**
  * Refuse to start if the harness package's vendor links are missing.
@@ -162,7 +160,16 @@ export function startZenServer(options: ZenServerOptions) {
 	}
 	assertVendorLinks(options.harnessPackageDir);
 
-	// Parked pi processes awaiting a human's answer to a dialog (#27). Owned by the server,
+	// pi, in this process (#69). Creating the host sets the isolation env and pins the
+	// multi-account config; sessions are created per run below.
+	const host = createAgentHost({
+		cwd: options.launch.cwd,
+		agentDir: options.agentDir,
+		harnessPackageDir: options.harnessPackageDir,
+		onProblem: options.onProblem,
+	});
+
+	// Parked pi sessions awaiting a human's answer to a dialog (#27). Owned by the server,
 	// shared by every request; evicted whole on close.
 	const registry = createDialogRegistry({ onProblem: options.onProblem });
 
@@ -191,11 +198,11 @@ export function startZenServer(options: ZenServerOptions) {
 			// that process on a later request.
 			const outcome: ChatRunOutcome = { parkedAwaitingAnswer: false };
 
-			// ── The resume path: an answer to a parked dialog. No spawn — the process this
+			// ── The resume path: an answer to a parked dialog. No new session — the one this
 			// request addresses has been alive since the run it interrupted (#27).
 			if (Array.isArray(body.resume) && body.resume.length > 0) {
 				// Captured BEFORE resumeChat can take the entry — this closure is the only
-				// stop handle the handler will ever hold for a process it did not spawn.
+				// stop handle the handler will ever hold for a session it did not create.
 				const stopParked = registry.peek(ids.threadId)?.stopPi;
 				response.writeHead(200, SSE_HEADERS);
 				// ⚠ `response`, NOT `request` (#34). Under bun's node:http compat the REQUEST
@@ -231,23 +238,25 @@ export function startZenServer(options: ZenServerOptions) {
 				return;
 			}
 
+			// ⚠ One pi session per run, disposed in `finally` — UNLESS a dialog parked it
+			// (#27), in which case the registry owns it until the answer or the TTL. One
+			// session per chat THREAD is #69's next step; it must not ride in on this.
+			// Created BEFORE the SSE head goes out, so a session that cannot be built is a
+			// plain HTTP failure and not a half-open stream.
+			let pi: Awaited<ReturnType<typeof host.createSession>>;
+			try {
+				pi = await host.createSession();
+			} catch (error) {
+				options.onProblem?.(error);
+				response.writeHead(500, { "Content-Type": "text/plain" });
+				response.end(`pi session could not be created: ${error instanceof Error ? error.message : String(error)}`);
+				return;
+			}
 			response.writeHead(200, SSE_HEADERS);
 
-			// ⚠ One pi process per run, torn down in `finally` — UNLESS a dialog parked it
-			// (#27), in which case the registry owns it until the answer or the TTL. Session
-			// reuse beyond that is what `modelOptions.sessionId` and pi's own session tree
-			// are for, and doing it here before the lifecycle is designed would leak a
-			// process per abandoned tab.
-			const pi = spawnPiRpcProcess({
-				...options.launch,
-				args: [...isolatedLaunchArgs(options.harnessPackageDir), ...(options.launch.args ?? [])],
-				env: { ...process.env, PI_CODING_AGENT_DIR: options.agentDir } as Record<string, string>,
-				onStderr: (chunk) => options.onProblem?.(`pi stderr: ${chunk}`),
-			});
-
-			// A client that navigates away must not leave pi running — but a PARKED process
+			// A client that navigates away must not leave pi running — but a PARKED session
 			// belongs to the registry, and this close event also fires on normal completion,
-			// AFTER a park. Stopping here would kill the process whose answer is pending.
+			// AFTER a park. Stopping here would dispose the session whose answer is pending.
 			// ⚠ `response`, NOT `request` (#34). Under bun's node:http compat the REQUEST
 			// 'close' event fires when the request BODY has been consumed — the start of
 			// every run, before this listener is registered — so the request-close hook this
@@ -256,16 +265,16 @@ export function startZenServer(options: ZenServerOptions) {
 			// The RESPONSE 'close' fires on a client abort; on normal end, stop() has
 			// already run in `finally` and is an idempotent no-op.
 			response.on("close", () => {
-				if (!outcome.parkedAwaitingAnswer) pi.stop();
+				if (!outcome.parkedAwaitingAnswer) pi.session.dispose();
 			});
 
 			try {
 				for await (const chunk of runChat({
-					transport: pi.transport,
+					session: pi.session,
 					ids,
 					prompt: latestUserPrompt(body),
 					registry,
-					stopPi: () => pi.stop(),
+					stopPi: () => pi.session.dispose(),
 					outcome,
 					onProblem: options.onProblem,
 				})) {
@@ -281,7 +290,7 @@ export function startZenServer(options: ZenServerOptions) {
 					message: error instanceof Error ? error.message : String(error),
 				});
 			} finally {
-				if (!outcome.parkedAwaitingAnswer) pi.stop();
+				if (!outcome.parkedAwaitingAnswer) pi.session.dispose();
 				response.end();
 			}
 			return;
@@ -291,7 +300,7 @@ export function startZenServer(options: ZenServerOptions) {
 		response.end("not found");
 	});
 
-	// Parked processes must not outlive the server that parked them.
+	// Parked sessions must not outlive the server that parked them.
 	server.on("close", () => registry.shutdown());
 
 	const port = options.port ?? DEFAULT_PORT;

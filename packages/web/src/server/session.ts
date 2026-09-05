@@ -1,37 +1,39 @@
 import { EventType, type Interrupt } from "@ag-ui/core";
 import { INTERRUPT_BINDING_METADATA_KEY, type StreamChunk } from "@tanstack/ai";
 import {
-	isPiCommand,
 	isZenDialogResumeEntry,
-	type PiCommand,
-	type PiTransport,
+	type PiDialogResponse,
+	type PiSession,
 	validateDialogAnswer,
 	ZEN_DIALOG_KEY,
 	type ZenDialogSpec,
 } from "@zen/core";
-import { PiRpcClient } from "../rpc/client.ts";
 import { mapPiEvent } from "../rpc/map-events.ts";
 import { type AguiIdentifiers, observationToAguiEvents } from "../rpc/to-agui.ts";
 import type { DialogRegistry, PiSessionPump } from "./dialog-registry.ts";
 
 /**
- * Chat runs against a pi process, as async iterables of AG-UI events (#24, #27).
+ * Chat runs against a pi session, as async iterables of AG-UI events (#24, #27, #69).
  *
  * This is where the three hops compose:
  *
- *     pi stdout → PiRpcClient → mapPiEvent → observationToAguiEvents → here
+ *     PiSession events → mapPiEvent → observationToAguiEvents → here
  *
  * Two entry points share one streaming loop:
  *
- *   `runChat`     a prompt against a freshly spawned pi
+ *   `runChat`     a prompt against a pi session the host created
  *   `resumeChat`  a human's answer to a dialog that interrupted an earlier run,
- *                 continuing the SAME parked process (#27)
+ *                 continuing the SAME parked session (#27)
  *
  * ⚠ WHY A SEPARATE OBJECT RATHER THAN LOGIC IN THE HTTP HANDLER
  * AG-UI requires identifiers pi does not supply (`messageId`, `runId`, `threadId`), and
  * the observation→AG-UI mapper is a pure function that must not hold them. So the
  * identifiers live here — which is also what makes this testable against a fake
- * transport, with no HTTP and no pi.
+ * `PiSession`, with no HTTP and no pi.
+ *
+ * ⚠ The events arrive in pi's rpc WIRE shape even though nothing is on a wire (#69): the
+ * in-process host translates `AgentSessionEvent`s into the records `map-events.ts` always
+ * consumed, so this file and the two mappers are unchanged by where pi runs.
  */
 
 /**
@@ -58,16 +60,16 @@ const NO_PROGRESS_TIMEOUT_MS = 90_000;
  * How long after an extension command's completion signal to keep the stream open.
  *
  * ⚠ An extension command never emits `agent_settled` — its completion signal is the PROMPT
- * ACKNOWLEDGEMENT, which pi sends only when the command finishes (`rpc-mode.js` case
- * "prompt": the response fires from `preflightResult`, which is why `/mode`'s unanswered
- * dialog blocked the ack for the whole pre-#27 hang). Without this rule every slash-command
- * run held its HTTP response open for the full 90-second guard AFTER the command had
- * visibly finished — observed live on the first answered `/mode`.
+ * ACCEPTANCE, which pi reports only when the command finishes (`preflightResult(true)`
+ * fires after an "immediately handled" command completes, which is why `/mode`'s
+ * unanswered dialog blocked it for the whole pre-#27 hang). Without this rule every
+ * slash-command run held its HTTP response open for the full 90-second guard AFTER the
+ * command had visibly finished — observed live on the first answered `/mode`.
  *
- * The grace exists because the acknowledgement and any trailing events travel the same
- * pipe: closing the instant the ack resolves could race a final line still in flight. It is
- * applied ONLY to slash-command runs — an ordinary prompt's ack means ACCEPTED, not done,
- * and closing on it would cut a real inference off at the knees.
+ * The grace exists because the acceptance callback and any trailing events are delivered
+ * independently: closing the instant acceptance lands could race a final event still being
+ * emitted. It is applied ONLY to slash-command runs — an ordinary prompt's acceptance means
+ * ACCEPTED, not done, and closing on it would cut a real inference off at the knees.
  */
 const SLASH_COMMAND_COMPLETION_GRACE_MS = 1000;
 
@@ -133,31 +135,9 @@ function runFinishedWithDialogInterrupt(
 	};
 }
 
-/**
- * pi's answer wire format, written straight to the transport: this is a RESPONSE keyed to
- * the request's id, not a command awaiting its own acknowledgement, so it must not go
- * through `client.send`.
- */
-function writeDialogResponse(
-	transport: PiTransport,
-	response: { id: string } & ({ cancelled: true } | { value: string } | { confirmed: boolean }),
-): void {
-	transport.write(`${JSON.stringify({ type: "extension_ui_response", ...response })}\n`);
-}
-
-/**
- * Ask pi what commands exist.
- *
- * ⚠ These are the ONLY `/`-prefixed inputs that do anything over rpc. pi's docs:
- * "Built-in TUI commands (`/settings`, `/hotkeys`, etc.) are not included. They are handled
- * only in interactive mode and would NOT EXECUTE if sent via `prompt`."
- */
-export async function fetchPiCommands(client: PiRpcClient): Promise<PiCommand[]> {
-	const response = await client.send({ type: "get_commands" });
-	if (!response.success) return [];
-	const data = (response as { data?: { commands?: unknown } }).data;
-	const commands = data?.commands;
-	return Array.isArray(commands) ? commands.filter(isPiCommand) : [];
+/** Deliver a dialog answer, keyed to the request id — the session resolves the blocked extension call. */
+function writeDialogResponse(session: PiSession, response: PiDialogResponse): void {
+	session.answerDialog(response);
 }
 
 /** Leading token of a slash input, without the slash. `/mode auto` -> `mode`. */
@@ -170,26 +150,18 @@ function slashCommandName(prompt: string): string | undefined {
 /**
  * Written by the generators, read by the HTTP handler AFTER the stream completes.
  *
- * ⚠ WHY AN OUT-PARAMETER: the handler owns the pi process and must know whether the run
+ * ⚠ WHY AN OUT-PARAMETER: the handler owns the pi session and must know whether the run
  * handed it to the registry (do not stop it — a human's answer is coming) or not (stop it,
  * as always). A generator's return value is invisible to `for await`, and asking the
  * registry "do you hold this thread?" is WRONG under concurrency: a second run on the same
- * thread would read the FIRST run's parked entry as its own and leak its process.
+ * thread would read the FIRST run's parked entry as its own and leak its session.
  */
 export interface ChatRunOutcome {
 	parkedAwaitingAnswer: boolean;
 }
 
-interface SessionPumpInternals {
-	pump: PiSessionPump;
-	client: PiRpcClient;
-}
-
-/** The queue between the callback-driven client and the streaming loop. */
-function createSessionPump(
-	transport: PiTransport,
-	onProblem: ((problem: unknown) => void) | undefined,
-): SessionPumpInternals {
+/** The queue between the session's event subscription and the streaming loop. */
+function createSessionPump(session: PiSession): PiSessionPump {
 	const pump: PiSessionPump = {
 		pending: [],
 		settled: false,
@@ -200,24 +172,16 @@ function createSessionPump(
 			pump.notify?.();
 			pump.notify = undefined;
 		},
-		transport,
+		session,
 	};
-	const client = new PiRpcClient({
-		transport,
-		onEvent: (event) => {
-			pump.pending.push(event);
-			if (event.type === "agent_settled") pump.settled = true;
-			pump.wake();
-		},
-		onParseError: (problem) => {
-			onProblem?.(problem);
-			// ⚠ A parse failure must not strand the stream. If pi is emitting garbage we will
-			// never see `agent_settled`, so waking the loop lets it drain and finish rather
-			// than hang on a promise nothing resolves.
-			pump.wake();
-		},
+	// Subscribed BEFORE the prompt is fired, so no event can slip between the two; events an
+	// extension emitted during the session's own start are replayed here by the host.
+	session.subscribe((event) => {
+		pump.pending.push(event);
+		if (event.type === "agent_settled") pump.settled = true;
+		pump.wake();
 	});
-	return { pump, client };
+	return pump;
 }
 
 interface StreamRunOptions {
@@ -235,14 +199,14 @@ interface StreamRunOptions {
 
 /**
  * The shared streaming loop: drain pi's events into AG-UI chunks until the run settles,
- * a blocking dialog hands the process to the registry, or progress stops.
+ * a blocking dialog hands the session to the registry, or progress stops.
  *
- * ⚠⚠ NOTHING MAY SIT BETWEEN THE TRANSPORT AND THIS LOOP. The original `/mode` hang was
- * exactly that shape: `await client.send(prompt)` stood in front of the drain loop, and
- * pi acknowledges a prompt only after the command completes — which the unanswered dialog
- * prevented. The guard that would have reported the dialog was unreachable BECAUSE of the
- * dialog. So the prompt acknowledgement is observed from a callback (`pump.promptError`),
- * never awaited in front of this loop.
+ * ⚠⚠ NOTHING MAY SIT BETWEEN THE SESSION AND THIS LOOP. The original `/mode` hang was
+ * exactly that shape: an `await` on the prompt's acceptance stood in front of the drain
+ * loop, and pi reports acceptance of an extension command only after the command completes
+ * — which the unanswered dialog prevented. The guard that would have reported the dialog
+ * was unreachable BECAUSE of the dialog. So acceptance is observed from a callback
+ * (`pump.promptAcknowledged` / `pump.promptError`), never awaited in front of this loop.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the session pump — one loop owning progress timeouts, dialog parking, and settle detection in ORDER; the ordering is the #27 contract, and helper-splitting it is how a parked process would leak past a teardown.
 async function* streamRun(options: StreamRunOptions): AsyncGenerator<StreamChunk> {
@@ -260,8 +224,9 @@ async function* streamRun(options: StreamRunOptions): AsyncGenerator<StreamChunk
 			const observation = mapPiEvent(event);
 
 			// ⚠⚠ A BLOCKING DIALOG IS INTERCEPTED HERE, BEFORE THE AG-UI MAPPER — it ends
-			// this response but not the RUN: pi stays alive, blocked on stdin, parked in the
-			// registry until the human's answer arrives as a resume request (#27).
+			// this response but not the RUN: the session stays alive, its extension blocked
+			// on our UI context's promise, parked in the registry until the human's answer
+			// arrives as a resume request (#27).
 			if (observation.kind === "extension-ui-request" && observation.blocking) {
 				if (observation.dialog !== undefined && observation.id.length > 0) {
 					const expiresAt = Date.now() + registry.answerTimeoutMs;
@@ -280,11 +245,11 @@ async function* streamRun(options: StreamRunOptions): AsyncGenerator<StreamChunk
 					return;
 				}
 				// The degenerate case: a blocking request whose question could not be read
-				// (or that carries no id to answer). Decline on the wire so pi is not left
+				// (or that carries no id to answer). Decline it so the extension is not left
 				// hanging — the pre-#27 behaviour — and let the mapper's RUN_ERROR tell the
 				// user. The run continues: the command completes as a no-op and settles.
 				if (observation.id.length > 0) {
-					writeDialogResponse(pump.transport, { id: observation.id, cancelled: true });
+					writeDialogResponse(pump.session, { id: observation.id, cancelled: true });
 				}
 			}
 
@@ -343,18 +308,19 @@ async function* streamRun(options: StreamRunOptions): AsyncGenerator<StreamChunk
 }
 
 export interface ChatRunOptions {
-	transport: PiTransport;
+	session: PiSession;
 	ids: AguiIdentifiers;
 	prompt: string;
-	/** Base64 images, forwarded verbatim — pi's rpc accepts them on `prompt`. */
+	/** Base64 images, forwarded verbatim — pi accepts them on `prompt`. */
 	images?: ReadonlyArray<{ type: "image"; data: string; mimeType: string }>;
 	registry: DialogRegistry;
-	/** Stops the pi process. Handed to the registry when a dialog parks the run. */
+	/** Stops the pi session. Handed to the registry when a dialog parks the run. */
 	stopPi: () => void;
 	/** See {@link ChatRunOutcome} — the handler reads it after the stream completes. */
 	outcome: ChatRunOutcome;
 	/**
-	 * Notified for a record that could not be parsed or correlated. Never silent.
+	 * Notified for anything the run could not deliver (a dialog answer to a gone session).
+	 * Never silent.
 	 *
 	 * ⚠ Explicitly `| undefined` rather than optional. `exactOptionalPropertyTypes` is on,
 	 * so `onProblem?: T` rejects a caller forwarding a handler it may not have — and "no
@@ -383,10 +349,10 @@ export interface ChatRunOptions {
  * through both mappers; here is where it decides when the HTTP response closes.
  */
 export async function* runChat(options: ChatRunOptions): AsyncGenerator<StreamChunk> {
-	const { transport, ids, prompt, images, registry, stopPi, outcome, onProblem } = options;
+	const { session, ids, prompt, images, registry, stopPi, outcome, onProblem } = options;
 	const noProgressTimeoutMs = options.noProgressTimeoutMs ?? NO_PROGRESS_TIMEOUT_MS;
 	const slashCommandGraceMs = options.slashCommandGraceMs ?? SLASH_COMMAND_COMPLETION_GRACE_MS;
-	const { pump, client } = createSessionPump(transport, onProblem);
+	const pump = createSessionPump(session);
 
 	yield runStarted(ids);
 	yield messageStarted(ids);
@@ -403,12 +369,12 @@ export async function* runChat(options: ChatRunOptions): AsyncGenerator<StreamCh
 	 * `/`-prefixed input that pi does not list is refused HERE, naming the commands that
 	 * do exist, instead of becoming prose for the model to interpret.
 	 *
-	 * ⓘ Awaiting `get_commands` in front of the loop is safe where awaiting the prompt was
-	 * not: pi answers it directly, no extension command runs, so nothing can block it.
+	 * ⓘ `listCommands` is a synchronous read off the live registry (#69 closed the one
+	 * unbounded await that used to stand here, #53 S2): no round trip, nothing to block.
 	 */
 	const requestedCommand = slashCommandName(prompt);
 	if (requestedCommand !== undefined) {
-		const available = await fetchPiCommands(client);
+		const available = session.listCommands();
 		const known = available.some((command) => command.name === requestedCommand);
 		if (!known) {
 			yield runError(
@@ -423,25 +389,24 @@ export async function* runChat(options: ChatRunOptions): AsyncGenerator<StreamCh
 		}
 	}
 
-	// ⚠⚠ SENT, NOT AWAITED. pi acknowledges a prompt only after the command it starts
-	// completes — so when that command opens a dialog, the acknowledgement arrives after
+	// ⚠⚠ FIRED, NOT AWAITED. pi reports acceptance of an extension command only after the
+	// command completes — so when that command opens a dialog, acceptance arrives after
 	// the ANSWER. Awaiting it here is the original `/mode` hang: the loop that would have
-	// surfaced the dialog sat behind an await the dialog was blocking. The outcome lands in
-	// `pump.promptError` and the loop reports it.
-	client
-		.send({ type: "prompt", message: prompt, ...(images === undefined ? {} : { images }) })
-		.then((response) => {
-			if (response.success) {
+	// surfaced the dialog sat behind an await the dialog was blocking. Acceptance and
+	// rejection land on the pump from callbacks, and the loop reports them.
+	session.prompt(
+		{ message: prompt, ...(images === undefined ? {} : { images }) },
+		{
+			onAccepted: () => {
 				pump.promptAcknowledged = true;
-			} else {
-				pump.promptError = response.error ?? "pi rejected the prompt";
-			}
-			pump.wake();
-		})
-		.catch((error: unknown) => {
-			pump.promptError = error instanceof Error ? error.message : String(error);
-			pump.wake();
-		});
+				pump.wake();
+			},
+			onRejected: (reason) => {
+				pump.promptError = reason;
+				pump.wake();
+			},
+		},
+	);
 
 	yield* streamRun({
 		pump,
@@ -544,20 +509,16 @@ export async function* resumeChat(options: ResumeRunOptions): AsyncGenerator<Str
 		yield runError(ids, "this question is being answered by a concurrent request.");
 		return;
 	}
-	try {
-		if (first.status === "cancelled") {
-			writeDialogResponse(entry.pump.transport, { id: entry.dialogId, cancelled: true });
-		} else {
-			// `validateDialogAnswer` proved the payload matches the dialog's method, so the
-			// narrowing here cannot disagree with what was checked.
-			const answer = first.payload as { value: string } | { confirmed: boolean };
-			writeDialogResponse(entry.pump.transport, { id: entry.dialogId, ...answer });
-		}
-	} catch (error) {
-		onProblem?.(error);
-		entry.stopPi();
-		yield runError(ids, "the agent process is gone — the answer could not be delivered.");
-		return;
+	// `answerDialog` never throws (contract on `PiSession`): the subprocess era needed a
+	// broken-pipe catch here, but an in-process answer to a stale id is reported through the
+	// host's problem channel and returns normally. PR #70 review flagged the old catch as dead.
+	if (first.status === "cancelled") {
+		writeDialogResponse(entry.pump.session, { id: entry.dialogId, cancelled: true });
+	} else {
+		// `validateDialogAnswer` proved the payload matches the dialog's method, so the
+		// narrowing here cannot disagree with what was checked.
+		const answer = first.payload as { value: string } | { confirmed: boolean };
+		writeDialogResponse(entry.pump.session, { id: entry.dialogId, ...answer });
 	}
 
 	yield* streamRun({

@@ -27,5 +27,5 @@ const { url } = startZenServer({
 
 console.error(`[zen-server] listening on ${url}`);
 console.error(`[zen-server]   pi cwd:   ${cwd}`);
-console.error(`[zen-server]   package:  ${harnessPackageDir}`);
+console.error(`[zen-server]   package:  ${harnessPackageDir(repoRoot)}`);
 console.error(`[zen-server]   agentDir: ${agentDir}`);

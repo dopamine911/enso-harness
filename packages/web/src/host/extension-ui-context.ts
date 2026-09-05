@@ -1,0 +1,297 @@
+import type { ExtensionUIContext, Theme as PiTheme } from "@earendil-works/pi-coding-agent";
+import { Theme } from "@earendil-works/pi-coding-agent";
+import type { PiDialogResponse, PiRpcEvent } from "@zen/core";
+
+/**
+ * The `ExtensionUIContext` the web server hands to an in-process `AgentSession` (#69).
+ *
+ * WHY THIS OBJECT EXISTS
+ * Over the rpc subprocess, an extension's `ctx.ui.confirm(...)` became an
+ * `extension_ui_request` line on stdout and the answer an `extension_ui_response` line on
+ * stdin — pi's rpc mode owned the pending-dialog map. In-process there is no wire: the host
+ * IS the UI, so it implements the interface pi's extensions call and turns each call into
+ * the SAME rpc-shaped record the browser pipeline already consumes (`map-events.ts`
+ * `extension_ui_request`, the #27 dialog park in `session.ts`). Replicated from pi 0.84.4
+ * `dist/modes/rpc/rpc-mode.js` `createExtensionUIContext` (MIT), which is the reference
+ * for "a UI with no terminal".
+ *
+ * ⚠ `ctx.hasUI` IS `true` THE MOMENT ANY OBJECT IS BOUND — pi's runner compares against its
+ * no-op context, not against `mode`. That is load-bearing for picc-permission-modes: with
+ * no UI it fails closed and denies every mutating tool (the #20 failure). So this object
+ * must be bound on every session, and the blocking methods must genuinely block until a
+ * human answers or the request is cancelled — never resolve a default eagerly.
+ *
+ * WHAT IS REAL AND WHAT IS A NO-OP
+ * `select`/`confirm`/`input`/`editor` block on a pending map keyed by request id. `notify`,
+ * `setStatus`, `setWidget`, `setTitle`, `setEditorText` emit fire-and-forget records (the
+ * mapper forwards `notify` and drops the terminal-addressed rest, as before). Everything
+ * else is a terminal concern with no browser equivalent and returns its inert value.
+ */
+
+/** The four dialog methods pi's rpc protocol names blocking. `map-events.ts` agrees (its `DIALOG_UI_METHODS`). */
+type BlockingDialogRequest =
+	| { method: "select"; title: string; options: string[]; timeout?: number }
+	| { method: "confirm"; title: string; message: string; timeout?: number }
+	| { method: "input"; title: string; placeholder?: string; timeout?: number }
+	| { method: "editor"; title: string; prefill?: string };
+
+interface PendingDialog {
+	resolve: (response: PiDialogResponse) => void;
+}
+
+export interface ZenExtensionUiContextOptions {
+	/** Where every record goes — the host's event emitter, so records interleave with session events in order. */
+	emit: (event: PiRpcEvent) => void;
+	/** Notified for an answer that names no pending dialog — a replay or a stale tab. Never silent. */
+	onProblem: ((problem: unknown) => void) | undefined;
+}
+
+export interface ZenExtensionUiContext {
+	readonly uiContext: ExtensionUIContext;
+	/** Deliver an answer. Unknown ids are reported, not thrown — the extension is not waiting on them. */
+	answerDialog(response: PiDialogResponse): void;
+	/** Cancel every pending dialog — session teardown. Each blocked extension call resolves to its cancel value. */
+	cancelAllDialogs(): void;
+	/** How many dialogs are blocked right now — observable state for tests and for the idle-timeout logic. */
+	pendingDialogCount(): number;
+}
+
+/**
+ * A neutral 256-colour theme for the `theme` getter. The interface requires a `Theme`
+ * instance and pi exports the class but not its singleton; no extension the harness loads
+ * renders through it on the web surface (`hasUI` gates picc's footer, and footers do not
+ * exist here), so the values only need to be complete — tsc enforces that — not pretty.
+ */
+const NEUTRAL_ANSI_256_FOREGROUND = 250;
+const NEUTRAL_ANSI_256_BACKGROUND = 236;
+function createNeutralTheme(): PiTheme {
+	const fg = NEUTRAL_ANSI_256_FOREGROUND;
+	const bg = NEUTRAL_ANSI_256_BACKGROUND;
+	return new Theme(
+		{
+			accent: fg,
+			border: fg,
+			borderAccent: fg,
+			borderMuted: fg,
+			success: fg,
+			error: fg,
+			warning: fg,
+			muted: fg,
+			dim: fg,
+			text: fg,
+			thinkingText: fg,
+			userMessageText: fg,
+			customMessageText: fg,
+			customMessageLabel: fg,
+			toolTitle: fg,
+			toolOutput: fg,
+			mdHeading: fg,
+			mdLink: fg,
+			mdLinkUrl: fg,
+			mdCode: fg,
+			mdCodeBlock: fg,
+			mdCodeBlockBorder: fg,
+			mdQuote: fg,
+			mdQuoteBorder: fg,
+			mdHr: fg,
+			mdListBullet: fg,
+			toolDiffAdded: fg,
+			toolDiffRemoved: fg,
+			toolDiffContext: fg,
+			syntaxComment: fg,
+			syntaxKeyword: fg,
+			syntaxFunction: fg,
+			syntaxVariable: fg,
+			syntaxString: fg,
+			syntaxNumber: fg,
+			syntaxType: fg,
+			syntaxOperator: fg,
+			syntaxPunctuation: fg,
+			thinkingOff: fg,
+			thinkingMinimal: fg,
+			thinkingLow: fg,
+			thinkingMedium: fg,
+			thinkingHigh: fg,
+			thinkingXhigh: fg,
+			bashMode: fg,
+		},
+		{
+			selectedBg: bg,
+			userMessageBg: bg,
+			customMessageBg: bg,
+			toolPendingBg: bg,
+			toolSuccessBg: bg,
+			toolErrorBg: bg,
+		},
+		"256color",
+		{ name: "zen-web-neutral" },
+	);
+}
+
+export function createZenExtensionUiContext(options: ZenExtensionUiContextOptions): ZenExtensionUiContext {
+	const { emit, onProblem } = options;
+	const pendingDialogs = new Map<string, PendingDialog>();
+	let neutralTheme: PiTheme | undefined;
+
+	/**
+	 * Block on a dialog until an answer, a cancellation, the caller's own abort signal, or
+	 * the caller's timeout. `mapResponse` turns the wire answer into the method's return type;
+	 * `cancelValue` is what the extension sees for every non-answer outcome — pi's own
+	 * contract (`select`/`input`/`editor` → `undefined`, `confirm` → `false`).
+	 */
+	function awaitDialog<T>(
+		request: BlockingDialogRequest,
+		dialogOptions: { signal?: AbortSignal; timeout?: number } | undefined,
+		cancelValue: T,
+		mapResponse: (response: PiDialogResponse) => T,
+	): Promise<T> {
+		return new Promise<T>((resolve) => {
+			const id = crypto.randomUUID();
+			let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+			const finish = (value: T): void => {
+				if (!pendingDialogs.delete(id)) return; // already settled by another path
+				if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+				dialogOptions?.signal?.removeEventListener("abort", onAbort);
+				resolve(value);
+			};
+			const onAbort = (): void => finish(cancelValue);
+			if (dialogOptions?.signal?.aborted) {
+				resolve(cancelValue);
+				return;
+			}
+			dialogOptions?.signal?.addEventListener("abort", onAbort);
+			if (dialogOptions?.timeout !== undefined) {
+				timeoutHandle = setTimeout(() => finish(cancelValue), dialogOptions.timeout);
+			}
+			pendingDialogs.set(id, {
+				resolve: (response) =>
+					finish("cancelled" in response && response.cancelled ? cancelValue : mapResponse(response)),
+			});
+			emit({ type: "extension_ui_request", id, ...request });
+		});
+	}
+
+	const uiContext: ExtensionUIContext = {
+		select: (title, options, dialogOptions) =>
+			awaitDialog(
+				{
+					method: "select",
+					title,
+					options,
+					...(dialogOptions?.timeout === undefined ? {} : { timeout: dialogOptions.timeout }),
+				},
+				dialogOptions,
+				undefined,
+				(response) => ("value" in response ? response.value : undefined),
+			),
+		confirm: (title, message, dialogOptions) =>
+			awaitDialog(
+				{
+					method: "confirm",
+					title,
+					message,
+					...(dialogOptions?.timeout === undefined ? {} : { timeout: dialogOptions.timeout }),
+				},
+				dialogOptions,
+				false,
+				(response) => ("confirmed" in response ? response.confirmed : false),
+			),
+		input: (title, placeholder, dialogOptions) =>
+			awaitDialog(
+				{
+					method: "input",
+					title,
+					...(placeholder === undefined ? {} : { placeholder }),
+					...(dialogOptions?.timeout === undefined ? {} : { timeout: dialogOptions.timeout }),
+				},
+				dialogOptions,
+				undefined,
+				(response) => ("value" in response ? response.value : undefined),
+			),
+		editor: (title, prefill) =>
+			awaitDialog(
+				{ method: "editor", title, ...(prefill === undefined ? {} : { prefill }) },
+				undefined,
+				undefined,
+				(response) => ("value" in response ? response.value : undefined),
+			),
+		notify(message, type) {
+			emit({ type: "extension_ui_request", id: crypto.randomUUID(), method: "notify", message, notifyType: type });
+		},
+		setStatus(key, text) {
+			emit({
+				type: "extension_ui_request",
+				id: crypto.randomUUID(),
+				method: "setStatus",
+				statusKey: key,
+				statusText: text,
+			});
+		},
+		setWidget(key, content, widgetOptions) {
+			// A component factory has no serialisable form; only string lines cross (pi's rule too).
+			if (typeof content === "function") return;
+			emit({
+				type: "extension_ui_request",
+				id: crypto.randomUUID(),
+				method: "setWidget",
+				widgetKey: key,
+				widgetLines: content,
+				widgetPlacement: widgetOptions?.placement,
+			});
+		},
+		setTitle(title) {
+			emit({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setTitle", title });
+		},
+		setEditorText(text) {
+			emit({ type: "extension_ui_request", id: crypto.randomUUID(), method: "set_editor_text", text });
+		},
+		// ── Terminal-only surface: inert on the web, exactly as in pi's rpc mode ──────────
+		onTerminalInput: () => () => undefined,
+		setWorkingMessage: () => undefined,
+		setWorkingVisible: () => undefined,
+		setWorkingIndicator: () => undefined,
+		setHiddenThinkingLabel: () => undefined,
+		setFooter: () => undefined,
+		setHeader: () => undefined,
+		// `custom<T>` promises a T the web surface can never produce. pi's own rpc mode resolves
+		// `undefined` here (untyped JS); the assertion states that contract in TypeScript — an
+		// extension awaiting a custom component gets the same "no component" it gets over rpc.
+		custom: <T>() => Promise.resolve(undefined as T),
+		pasteToEditor: () => undefined,
+		getEditorText: () => "",
+		addAutocompleteProvider: () => undefined,
+		setEditorComponent: () => undefined,
+		getEditorComponent: () => undefined,
+		get theme() {
+			neutralTheme ??= createNeutralTheme();
+			return neutralTheme;
+		},
+		getAllThemes: () => [],
+		getTheme: () => undefined,
+		setTheme: () => ({ success: false, error: "Theme switching is not available on the web surface" }),
+		getToolsExpanded: () => false,
+		setToolsExpanded: () => undefined,
+	};
+
+	return {
+		uiContext,
+		answerDialog(response) {
+			const pending = pendingDialogs.get(response.id);
+			if (pending === undefined) {
+				onProblem?.(
+					`dialog answer for unknown request id ${response.id} — already answered, cancelled, or never asked`,
+				);
+				return;
+			}
+			pending.resolve(response);
+		},
+		cancelAllDialogs() {
+			for (const [id, pending] of [...pendingDialogs]) {
+				pending.resolve({ id, cancelled: true });
+			}
+		},
+		pendingDialogCount() {
+			return pendingDialogs.size;
+		},
+	};
+}
