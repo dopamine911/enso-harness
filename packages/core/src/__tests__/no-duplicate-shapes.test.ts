@@ -54,10 +54,10 @@ test("the schemas the rest of the repo depends on are actually exported", () => 
 		"ZenToolResultDescriptor",
 		"ZenObservation",
 		"PiRpcEventSchema",
-		"PiLaunchConfig",
-		"PiTransport",
-		"PiRpcClientOptions",
-		"PiProcessHandle",
+		"PiSession",
+		"PiCommand",
+		"PiImageContent",
+		"PiStreamingBehavior",
 	]) {
 		expect(core).toHaveProperty(name);
 	}

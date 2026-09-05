@@ -290,7 +290,7 @@ dependency into the harness's own `node_modules` — a missing one is a *silentl
 |---|---|
 | `packages/core/` | `@zen/core` — every TypeBox schema, the config loader, the path helpers ([its README](packages/core/README.md)) |
 | `packages/harness/` | the pi package: `extensions/` (guards, web-fetch, web-search), `core/` (pure logic: egress, shell segments, read tracker, fetch policy, the web-search provider modules), skills/prompts/themes |
-| `packages/web/` | the web surface: server (pi rpc transport, dialog registry), client (TanStack AI chat) |
+| `packages/web/` | the web surface: server (in-process pi host, one session per chat thread, dialog registry), client (TanStack AI chat) |
 | `scripts/` | `zen.mjs` (the launcher), `dev.mjs`, `print-harness.mjs`, `gate.ts`, `check-coverage.ts`, `link-vendor-packages.mjs` |
 | `zen.config.json` | the committed config — web_fetch's host allowlist and web_search's optional section live here |
 | `docs/` | `architecture.md` (the vision) and `concepts/` (the research) |
