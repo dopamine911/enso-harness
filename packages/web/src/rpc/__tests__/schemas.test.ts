@@ -12,6 +12,7 @@ import {
 import { Check } from "typebox/value";
 import { mapPiEvent } from "../map-events.ts";
 import { claimsToBeResponse, isPiRpcResponse } from "../protocol.ts";
+import { observationKindsDeclaredByTheUnion } from "./observation-kinds.ts";
 
 /**
  * These prove the TypeBox conversion bought RUNTIME VALIDATION and a JSON Schema, not just
@@ -108,6 +109,12 @@ test("EVERY observation the mapper can emit validates against ZenObservation", (
 		},
 		{ type: "tool_execution_end", toolCallId: "c", toolName: "write", result: { content: "denied" }, isError: true },
 		{ type: "extension_error", extensionPath: "/g.ts", event: "tool_call", error: "boom" },
+		{ type: "extension_ui_request", id: "u1", method: "notify", message: "Mode: acceptEdits", notifyType: "info" },
+		{
+			type: "message_end",
+			message: { role: "assistant", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.1 } } },
+		},
+		{ type: "entry_appended", entry: { type: "custom", customType: "modes", data: { mode: "acceptEdits" } } },
 		{ type: "agent_end", willRetry: true },
 		{ type: "agent_settled" },
 		{ type: "totally_unknown", payload: [1, 2, 3] },
@@ -116,6 +123,10 @@ test("EVERY observation the mapper can emit validates against ZenObservation", (
 		const observation = mapPiEvent(event);
 		expect(Check(ZenObservation, observation)).toBe(true);
 	}
-	// and the set above actually covers every member of the union
-	expect(new Set(events.map((event) => mapPiEvent(event).kind)).size).toBe(8);
+	// and the set above actually covers every member of the union — derived from the union
+	// itself, never a hard-coded count: the count drifted once (566e8b1 bumped the sibling
+	// sweep in to-agui.test.ts to 9 and left this one at 8), and a count cannot say WHICH
+	// kind is missing.
+	const coveredKinds: string[] = [...new Set(events.map((event) => mapPiEvent(event).kind))];
+	expect(coveredKinds.sort()).toEqual(observationKindsDeclaredByTheUnion());
 });

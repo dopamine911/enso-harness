@@ -17,11 +17,11 @@ import { Button } from "./components/ui/button.tsx";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card.tsx";
 import { Input } from "./components/ui/input.tsx";
 import { Textarea } from "./components/ui/textarea.tsx";
+import { routeZenCustomEvent } from "./custom-event-router.ts";
 import { createFixtureChat } from "./fixture-conversation.ts";
-import { applyZenCustomEntry } from "./mode-lines.ts";
-import { pushZenNotification, SessionNotifications } from "./notifications.tsx";
+import { SessionNotifications } from "./notifications.tsx";
 import { SelectedMessagePart } from "./selected-message-part.tsx";
-import { applyZenMessageUsage, SessionStatsBar } from "./session-stats.tsx";
+import { SessionStatsBar } from "./session-stats.tsx";
 import type { ZenRendererMap } from "./ZenToolResult.tsx";
 
 /**
@@ -87,33 +87,10 @@ const chatOptions = {
 	/**
 	 * TanStack's designated path for AG-UI CUSTOM chunks (#29) — verified against the
 	 * stream processor: every CUSTOM chunk fires this with `(chunk.name, chunk.value)`.
-	 * `zen.notify`'s value is the `extension-ui-request` observation, read defensively
-	 * here the way every wire crossing in this file is: a malformed value renders as
-	 * nothing rather than throwing inside the stream loop. `zen.entry` carries a custom
-	 * session entry — the mode lines read picc's "modes" entries off it (mode-lines.ts,
-	 * #29's remaining half). Other CUSTOM names (`zen.unmapped`) stay deliberately
-	 * unrendered — see the to-agui mapper.
+	 * The dispatch itself lives in `custom-event-router.ts` so it is testable (#53 S1.3);
+	 * this stays a one-line handoff.
 	 */
-	onCustomEvent: (eventType: string, data: unknown): void => {
-		if (eventType === "zen.entry") {
-			applyZenCustomEntry(data);
-			return;
-		}
-		// `zen.usage` carries one completed request's accounting (#45) — the stats bar's feed.
-		if (eventType === "zen.usage") {
-			applyZenMessageUsage(data);
-			return;
-		}
-		if (eventType !== "zen.notify") return;
-		if (typeof data !== "object" || data === null) return;
-		const observation = data as { message?: unknown; notifyType?: unknown };
-		if (typeof observation.message !== "string") return;
-		const notifyType =
-			observation.notifyType === "info" || observation.notifyType === "warning" || observation.notifyType === "error"
-				? observation.notifyType
-				: undefined;
-		pushZenNotification(observation.message, notifyType);
-	},
+	onCustomEvent: routeZenCustomEvent,
 };
 
 /**

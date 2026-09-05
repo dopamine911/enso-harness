@@ -1,6 +1,12 @@
 import { EventType } from "@ag-ui/core";
 import type { StreamChunk } from "@tanstack/ai";
 import { ZEN_TOOL_RESULT_KEY, type ZenObservation } from "@zen/core";
+import {
+	ZEN_CUSTOM_EVENT_ENTRY,
+	ZEN_CUSTOM_EVENT_NOTIFY,
+	ZEN_CUSTOM_EVENT_UNMAPPED,
+	ZEN_CUSTOM_EVENT_USAGE,
+} from "./custom-event-names.ts";
 
 /**
  * `ZenObservation` → AG-UI `StreamChunk` (#24).
@@ -154,7 +160,7 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 			}
 			// `notify` carries a message meant for a HUMAN, so it crosses.
 			if (observation.method === "notify") {
-				return [{ type: EventType.CUSTOM, name: "zen.notify", value: observation }];
+				return [{ type: EventType.CUSTOM, name: ZEN_CUSTOM_EVENT_NOTIFY, value: observation }];
 			}
 			// ⚠ Everything else fire-and-forget — setStatus, setWidget, setTitle,
 			// set_editor_text — is dropped, and the justification is NOT "we do not recognise
@@ -203,7 +209,7 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 			return [
 				{
 					type: EventType.CUSTOM,
-					name: "zen.usage",
+					name: ZEN_CUSTOM_EVENT_USAGE,
 					value: observation,
 				},
 			];
@@ -217,7 +223,7 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 			return [
 				{
 					type: EventType.CUSTOM,
-					name: "zen.entry",
+					name: ZEN_CUSTOM_EVENT_ENTRY,
 					value: observation,
 				},
 			];
@@ -235,7 +241,7 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 			return [
 				{
 					type: EventType.CUSTOM,
-					name: "zen.unmapped",
+					name: ZEN_CUSTOM_EVENT_UNMAPPED,
 					value: observation.event,
 				},
 			];
