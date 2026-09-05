@@ -36,6 +36,10 @@ const WINDOWS_PLATFORM = "win32";
  * to the native Windows form pi would resolve. Only reached on win32 — kept so the
  * agreement with pi (see {@link normalizeLikePi}) holds on every platform, not just the
  * ones this harness is run on today.
+ *
+ * ⚠ NAMED NON-COVERAGE: replicated from pi but UNEXERCISED here — the corpus test runs on
+ * Linux, where this branch is never reached, so its agreement with pi is by transcription,
+ * not by receipt. The day the suite runs on Windows, the corpus test covers it for free.
  */
 function normalizeWindowsShellPath(filePath: string): string {
 	if (!filePath.startsWith("/") || filePath.startsWith("//") || filePath.includes("\\")) return filePath;
@@ -52,11 +56,15 @@ function normalizeWindowsShellPath(filePath: string): string {
  * Normalise a path string EXACTLY as pi's tools do before they resolve it.
  *
  * Replicated from pi-coding-agent 0.84.4 `dist/utils/paths.js` `normalizePath`
- * (github.com/earendil-works/pi, MIT), with the options pi's `resolveToCwd` passes
- * (`normalizeUnicodeSpaces: true, stripAtPrefix: true`) baked in — that is the function
- * every path-bearing pi tool (`read`, `write`, `edit`, `grep`, `find`, `ls`) resolves
- * through. It is not on the package's export map, so it is copied rather than imported;
- * the corpus test in `__tests__/paths.test.ts` reaches the real one and pins agreement.
+ * (github.com/earendil-works/pi, MIT) — the function every path-bearing pi tool (`read`,
+ * `write`, `edit`, `grep`, `find`, `ls`) resolves through via `resolveToCwd`. It is not on
+ * the package's export map, so it is copied rather than imported; the corpus test in
+ * `__tests__/paths.test.ts` reaches the real one and pins agreement.
+ *
+ * The two options are pi's and are PER CALL: `resolveToCwd` passes both as `true` for the
+ * tool's path argument, while the base directory goes through pi's defaults (both off) —
+ * a cwd containing a unicode space is left as-is by pi, and the corpus test proves the
+ * guard must leave it too.
  *
  * ⚠ WHY THIS EXISTS (#53 S1.1): the guard used to do plain `resolve(cwd, path)`, so
  * `@/etc/passwd`, `~/evil.sh` and `file:///etc/cron.d/x` were each judged as a path INSIDE
@@ -66,8 +74,8 @@ function normalizeWindowsShellPath(filePath: string): string {
  * ⚠ The ORDER of the steps is pi's and it matters for compound inputs: `@~/x` is `~/x`
  * after the strip and then `$HOME/x`; `@file:///x` decodes only because the `@` went first.
  */
-function normalizeLikePi(input: string, options: { stripAtPrefix: boolean }): string {
-	let normalized = input.replace(UNICODE_SPACES, " ");
+function normalizeLikePi(input: string, options: { stripAtPrefix: boolean; normalizeUnicodeSpaces: boolean }): string {
+	let normalized = options.normalizeUnicodeSpaces ? input.replace(UNICODE_SPACES, " ") : input;
 	if (options.stripAtPrefix && normalized.startsWith(AT_PREFIX)) {
 		normalized = normalized.slice(AT_PREFIX.length);
 	}
@@ -92,11 +100,12 @@ function normalizeLikePi(input: string, options: { stripAtPrefix: boolean }): st
  *
  * Mirrors pi's `resolveToCwd` → `resolvePath`: the candidate is normalised with the tool
  * options (see {@link normalizeLikePi}); the cwd is normalised with pi's DEFAULT options
- * (tilde and `file://` only — pi does not strip `@` from a base directory).
+ * (tilde and `file://` only — pi neither strips `@` from a base directory nor collapses
+ * its unicode spaces).
  */
 export function resolveAgainstCwd(candidate: string, cwd: string): string {
-	const normalizedCandidate = normalizeLikePi(candidate, { stripAtPrefix: true });
-	const normalizedCwd = normalizeLikePi(cwd, { stripAtPrefix: false });
+	const normalizedCandidate = normalizeLikePi(candidate, { stripAtPrefix: true, normalizeUnicodeSpaces: true });
+	const normalizedCwd = normalizeLikePi(cwd, { stripAtPrefix: false, normalizeUnicodeSpaces: false });
 	return isAbsolute(normalizedCandidate) ? resolve(normalizedCandidate) : resolve(normalizedCwd, normalizedCandidate);
 }
 

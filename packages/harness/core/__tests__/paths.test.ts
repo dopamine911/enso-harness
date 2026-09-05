@@ -165,11 +165,19 @@ test("the prefixes compose in pi's order: @ first, then ~ or file://", () => {
 });
 
 test("unicode spaces collapse to a plain space, as pi does", () => {
-	expect(resolveAgainstCwd("src/a b.ts", root)).toBe(join(root, "src", "a b.ts"));
+	// Written as escapes, never as literal characters — a literal NBSP is indistinguishable
+	// from a space in an editor, and a row that secretly holds a plain space tests nothing.
+	expect(resolveAgainstCwd("src/a\u00A0b.ts", root)).toBe(join(root, "src", "a b.ts"));
+	expect(resolveAgainstCwd("src/a\u3000b.ts", root)).toBe(join(root, "src", "a b.ts"));
 });
 
 test("a ~-prefixed cwd is expanded too — pi normalises the base directory as well", () => {
 	expect(resolveAgainstCwd("x.ts", "~/work")).toBe(join(homedir(), "work", "x.ts"));
+});
+
+test("⚠ a unicode space in the cwd is NOT collapsed — pi's base-directory options are the defaults", () => {
+	// Found by the corpus test: the first replication collapsed it and pi does not.
+	expect(resolveAgainstCwd("x.ts", join(root, "a\u00A0b"))).toBe(join(root, "a\u00A0b", "x.ts"));
 });
 
 /**
@@ -213,10 +221,12 @@ test("⚠ corpus: the guard resolver agrees with pi's resolveToCwd on every inpu
 		["~/@x", root],
 		["file:///etc/cron.d/x", root],
 		["@file:///tmp/x", root],
-		["src/a b.ts", root],
-		["src/a b　c.ts", root],
+		["src/a\u00A0b.ts", root],
+		["src/a\u2003b\u3000c.ts", root],
 		["x.ts", "~/work"],
 		["x.ts", "~"],
+		// pi normalises the BASE DIRECTORY with default options — no unicode-space collapse.
+		["x.ts", join(root, "a\u00A0b")],
 		["", root],
 		[".", root],
 	];
