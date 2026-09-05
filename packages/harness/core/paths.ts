@@ -37,11 +37,11 @@ const WINDOWS_PLATFORM = "win32";
  * agreement with pi (see {@link normalizeLikePi}) holds on every platform, not just the
  * ones this harness is run on today.
  *
- * ⚠ NAMED NON-COVERAGE: replicated from pi but UNEXERCISED here — the corpus test runs on
- * Linux, where this branch is never reached, so its agreement with pi is by transcription,
- * not by receipt. The day the suite runs on Windows, the corpus test covers it for free.
+ * Exported for the tests ONLY: the function is pure, so its agreement with pi's exported
+ * `normalizeWindowsShellPath` is pinned on Linux by a corpus of its own — the CALL above
+ * it is the only part that stays unexercised until the suite runs on Windows.
  */
-function normalizeWindowsShellPath(filePath: string): string {
+export function normalizeWindowsShellPath(filePath: string): string {
 	if (!filePath.startsWith("/") || filePath.startsWith("//") || filePath.includes("\\")) return filePath;
 	const match = filePath.match(/^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i);
 	if (match === null) return filePath;

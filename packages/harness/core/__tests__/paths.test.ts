@@ -9,6 +9,7 @@ import {
 	isPersistenceWriteTarget,
 	isProtectedForWrite,
 	looksLikeSecret,
+	normalizeWindowsShellPath,
 	resolveAgainstCwd,
 } from "../paths.ts";
 
@@ -188,8 +189,14 @@ test("⚠ a unicode space in the cwd is NOT collapsed — pi's base-directory op
  * package's entry point and walking to `utils/paths.js` beside it — the file pi's own
  * `core/tools/path-utils.js` imports. If pi grows a new normaliser rule, this goes red
  * BEFORE the guard silently disagrees with the tool it gates.
+ *
+ * Two failure shapes, read differently: an ASSERTION diff means pi changed how it
+ * normalises — update the replica in `paths.ts`; a `Cannot find module` means pi moved or
+ * renamed its internal `utils/paths.js` (no export-map contract covers it) — re-point the
+ * walk below, the replica is not implicated.
  */
 interface PiPathsModule {
+	normalizeWindowsShellPath: (filePath: string) => string;
 	resolvePath: (
 		input: string,
 		baseDir: string,
@@ -233,6 +240,38 @@ test("⚠ corpus: the guard resolver agrees with pi's resolveToCwd on every inpu
 	for (const [input, cwd] of corpus) {
 		expect(resolveAgainstCwd(input, cwd)).toBe(piResolveToCwd(input, cwd));
 	}
+});
+
+/**
+ * The Windows shell-path branch never runs on Linux, but the function is pure and pi
+ * exports its own — so the replica is pinned against the real one here, on every input
+ * shape: drive paths in the three spellings, a bare drive, and every early-return.
+ */
+test("⚠ corpus: normalizeWindowsShellPath agrees with pi's on every input", async () => {
+	const piEntryPoint = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+	const piPaths = (await import(join(dirname(piEntryPoint), "utils", "paths.js"))) as PiPathsModule;
+	const corpus = [
+		"/c/Users/x",
+		"/mnt/c/Users/x",
+		"/cygdrive/c/Users/x",
+		"/C/x",
+		"/c",
+		"/c/",
+		"/mnt/d",
+		"//unc/share/x",
+		"/etc/passwd",
+		"/mnt/cc/x",
+		"C:\\already\\native",
+		"/c/with\\backslash",
+		"relative/x",
+		"",
+	];
+	for (const input of corpus) {
+		expect(normalizeWindowsShellPath(input)).toBe(piPaths.normalizeWindowsShellPath(input));
+	}
+	// And the receipt that the corpus is not vacuous: the drive spellings really do convert.
+	expect(normalizeWindowsShellPath("/mnt/c/Users/x")).toBe("C:\\Users\\x");
+	expect(normalizeWindowsShellPath("/c")).toBe("C:\\");
 });
 
 // ── #53 S1.2: the credential DIRECTORY itself is credential material ──────────────────────
