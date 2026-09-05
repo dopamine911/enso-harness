@@ -9,3 +9,6 @@ pi-session-*.html
 .codegraph/
 coverage/
 .env
+
+# Playwright smoke output — screenshots and traces the PR author drags in by hand (#71)
+packages/web/e2e/output/
