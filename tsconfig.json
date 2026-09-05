@@ -9,6 +9,9 @@
     },
     {
       "path": "./packages/web"
+    },
+    {
+      "path": "./packages/web/e2e"
     }
   ]
 }

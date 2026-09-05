@@ -25,6 +25,8 @@
 		"dev": "bun scripts/dev.mjs",
 		"dev:server": "bun run --silent --cwd packages/web dev:server",
 		"dev:web": "bun run --silent --cwd packages/web dev:web",
+		"e2e": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep-invert @model",
+		"e2e:model": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep @model",
 		"coverage:check": "bun scripts/check-coverage.ts",
 		"doctor": "bunx react-doctor@latest --verbose"
 	},
