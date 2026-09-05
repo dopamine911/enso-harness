@@ -519,3 +519,30 @@ test("write/edit into .cc-safety-net is a persistence denial — the door checkC
 	expect(result?.block).toBe(true);
 	expect(result?.reason).toContain("persistence");
 });
+
+// ── #53 S1.1 + S1.2: the guard judges the path pi will ACTUALLY touch ─────────────────────
+// pi's tools resolve `path` through `resolveToCwd` (leading `@` stripped, `~` expanded,
+// `file://` decoded). A guard resolving with plain `resolve()` saw each of these as a
+// non-existent path INSIDE the workspace and permitted it; pi then wrote outside it.
+for (const escapingPath of ["@/etc/passwd", "~/evil.sh", "file:///etc/cron.d/x"]) {
+	test(`⚠ write to "${escapingPath}" is blocked as outside the workspace`, () => {
+		const result = call("write", { path: escapingPath });
+		expect(result?.block).toBe(true);
+		expect(result?.reason).toContain("outside the workspace");
+	});
+}
+
+test("⚠ grep over the credential DIRECTORY is blocked — the #8 incident shape, closed", () => {
+	const result = call("grep", { path: "~/.aws" });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("credential");
+});
+
+// The consuming-module spot check: `tool_result` resolves through the same function, so a
+// read of `@x` must confer knowledge of `x` for #10 — before the fix it recorded `<cwd>/@/x`
+// and the follow-up write was refused as "never read".
+test("a read through the @ prefix confers knowledge of the plain path (#10 agrees with pi)", () => {
+	const { runtime, cwd, existingFile } = readPreconditionFixture();
+	runtime.toolResult(toolResultEvent("read", `@${existingFile}`, false), { cwd });
+	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })).toBeUndefined();
+});

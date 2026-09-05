@@ -52,8 +52,10 @@ export {
 	ZenUsage,
 } from "./observation.ts";
 export {
+	fileUrlToPath,
 	findRepoRoot,
 	harnessPackageDir,
+	isFileUrl,
 	printHarnessDir,
 	RepoRootNotFoundError,
 	realpathOrSelf,

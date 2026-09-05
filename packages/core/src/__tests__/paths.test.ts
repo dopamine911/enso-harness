@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+	fileUrlToPath,
 	findRepoRoot,
 	harnessPackageDir,
+	isFileUrl,
 	printHarnessDir,
 	RepoRootNotFoundError,
 	realpathOrSelf,
@@ -111,4 +113,12 @@ test("this checkout's own root is findable from this test file", () => {
 	expect("workspaces" in manifest).toBe(true);
 	// The root is an ancestor of this very file (both realpath'd).
 	expect(realpathSync(import.meta.dir).startsWith(realpathSync(root))).toBe(true);
+});
+
+test("isFileUrl / fileUrlToPath — the one shared file:// decoder (#53 added its second caller)", () => {
+	expect(isFileUrl("file:///etc/cron.d/x")).toBe(true);
+	expect(isFileUrl("/etc/cron.d/x")).toBe(false);
+	expect(isFileUrl("https://example.test/x")).toBe(false);
+	expect(fileUrlToPath("file:///etc/cron.d/x")).toBe("/etc/cron.d/x");
+	expect(fileUrlToPath("file:///tmp/a%20b")).toBe("/tmp/a b");
 });
