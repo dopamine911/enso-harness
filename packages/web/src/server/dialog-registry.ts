@@ -11,10 +11,11 @@ import type { PiRpcEvent, PiSession, ZenDialogSpec } from "@zen/core";
  * on a promise our UI context holds — must outlive the HTTP request that surfaced its
  * question. This registry is that lifetime, and nothing more.
  *
- * ⚠ DELIBERATELY NOT SESSION REUSE. An entry exists ONLY while a dialog awaits its
- * answer; an ordinary run keeps the session-per-request lifecycle. Multi-turn reuse of one
- * session is #69's next step, with its own lifecycle questions (idle eviction, per-thread
- * cwd, cross-tab races), and it must not ride in on this.
+ * ⚠ NOT THE SESSION'S LIFETIME. An entry exists ONLY while a dialog awaits its answer.
+ * The session itself lives for the whole chat thread (`thread-sessions.ts`, #69 PR 2) and
+ * is disposed there after an idle window — this registry only keeps a thread from going
+ * idle while a question is open, and aborts the run (never the session) when the question
+ * times out.
  *
  * ⚠ SECURITY: a resume request's `threadId` resolves to a live pi with unconfined bash
  * (#9). That is the same shape as accepting `cwd` from the request body, which this
@@ -50,11 +51,22 @@ export interface PiSessionPump {
 	notify: (() => void) | undefined;
 	wake(): void;
 	readonly session: PiSession;
+	/**
+	 * Detach this pump's event subscription from the session. Called by the streaming loop
+	 * when a run ends NOT parked (#69 PR 2): the session now outlives the run, so a pump
+	 * left subscribed would keep filling `pending` forever and double-deliver every event
+	 * to the next run's pump. A PARKED pump keeps its subscription until its resume ends.
+	 */
+	readonly unsubscribe: () => void;
 }
 
 export interface ParkedDialog {
 	pump: PiSessionPump;
-	/** Stops the pi session. Handed over by the run that created it. */
+	/**
+	 * Aborts the thread's run in flight and lets the thread go idle. Handed over by the run
+	 * that created it. ⓘ Since #69 PR 2 this never disposes the session — the thread keeps
+	 * it for the next prompt.
+	 */
 	stopPi: () => void;
 	/** pi's dialog request id — the interrupt id, and the id the response must carry. */
 	dialogId: string;
@@ -98,7 +110,7 @@ export interface DialogRegistry {
  * abandoned tab must not hold a live pi forever. Eviction IS the pre-#27 behaviour
  * (decline on the wire), applied late instead of immediately.
  */
-const DIALOG_ANSWER_TIMEOUT_MS = 10 * 60 * 1000;
+export const DIALOG_ANSWER_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
  * After declining, the session gets this long to run the extension's cleanup path and
@@ -106,7 +118,7 @@ const DIALOG_ANSWER_TIMEOUT_MS = 10 * 60 * 1000;
  * honestly (a declined `select` resolves `undefined`); the stop is what guarantees the
  * session does not outlive the registry's promise to have dealt with it.
  */
-const EVICTION_GRACE_MS = 5000;
+export const EVICTION_GRACE_MS = 5000;
 
 export interface DialogRegistryOptions {
 	onProblem: ((problem: unknown) => void) | undefined;
@@ -125,7 +137,7 @@ export function createDialogRegistry(options: DialogRegistryOptions): DialogRegi
 	function decline(entry: ParkedDialog, why: string): void {
 		onProblem?.(
 			`dialog '${entry.dialog.title}' (${entry.dialog.method}, thread ${entry.threadId}) ${why} — ` +
-				`declined and the session will be stopped`,
+				`declined and the run will be aborted`,
 		);
 		try {
 			// pi's cancellation form: the extension receives `undefined` / `false` and the
@@ -152,6 +164,10 @@ export function createDialogRegistry(options: DialogRegistryOptions): DialogRegi
 		parked.delete(threadId);
 		clearTimeout(held.expiry);
 		decline(held.entry, why);
+		// No resume is coming for this pump, and the session outlives it (#69 PR 2): release
+		// the subscription here or it sits in the host's listener set for the rest of the
+		// thread's life, collecting every later run's events into a `pending` nobody drains.
+		held.entry.pump.unsubscribe();
 	}
 
 	return {

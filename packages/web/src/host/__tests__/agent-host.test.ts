@@ -204,3 +204,40 @@ test("listCommands is synchronous and names picc's /mode", async () => {
 	const commands = hosted.session.listCommands();
 	expect(commands.some((command) => command.name === "mode" && command.source === "extension")).toBe(true);
 });
+
+test("⚠ events are held only until the FIRST subscriber; with nobody listening afterwards they are dropped, not replayed", async () => {
+	// Per-thread sessions (#69 PR 2) subscribe one pump per run. If the host kept holding
+	// between runs, an aborted run's `agent_settled` would replay into the next run's pump
+	// and end it before its first token. The probe command emits a notify while no one is
+	// subscribed; the next subscriber must NOT see it.
+	const probe: InlineExtension = {
+		name: "zen-host-late-notify-probe",
+		factory: (pi) => {
+			pi.registerCommand("zen-late-notify", {
+				description: "emit a notify while nobody is listening",
+				handler: async (_args, extensionContext) => {
+					extensionContext.ui.notify("late notify", "info");
+				},
+			});
+		},
+	};
+	const hosted = await hostedSession([probe]);
+	const firstSubscriberEvents: PiRpcEvent[] = [];
+	const unsubscribeFirst = hosted.session.subscribe((event) => firstSubscriberEvents.push(event));
+	// Startup records were replayed to the first subscriber.
+	expect(firstSubscriberEvents.some((event) => event.method === "notify")).toBe(true);
+	unsubscribeFirst();
+
+	await new Promise<void>((resolve, reject) => {
+		hosted.session.prompt(
+			{ message: "/zen-late-notify" },
+			{ onAccepted: resolve, onRejected: (reason) => reject(new Error(reason)) },
+		);
+	});
+
+	const secondSubscriberEvents: PiRpcEvent[] = [];
+	hosted.session.subscribe((event) => secondSubscriberEvents.push(event));
+	expect(secondSubscriberEvents.filter((event) => String(event.message).includes("late notify"))).toHaveLength(0);
+	// And the startup records are not replayed a second time either.
+	expect(secondSubscriberEvents).toHaveLength(0);
+});

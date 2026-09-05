@@ -14,6 +14,8 @@ interface FakeSessionRecord {
 	answers: PiDialogResponse[];
 	commandLookups: number;
 	disposed: number;
+	/** Live `subscribe` handles — a run must leave none behind once it ends unparked (#69 PR 2). */
+	subscriberCount: () => number;
 }
 
 interface FakeSessionScript {
@@ -38,7 +40,13 @@ interface FakeSessionContext {
  */
 function fakeSession(script: FakeSessionScript): { session: PiSession; record: FakeSessionRecord } {
 	const listeners = new Set<(event: PiRpcEvent) => void>();
-	const record: FakeSessionRecord = { prompts: [], answers: [], commandLookups: 0, disposed: 0 };
+	const record: FakeSessionRecord = {
+		prompts: [],
+		answers: [],
+		commandLookups: 0,
+		disposed: 0,
+		subscriberCount: () => listeners.size,
+	};
 	const context: FakeSessionContext = {
 		emit: (eventJson) => {
 			const event = JSON.parse(eventJson) as PiRpcEvent;
@@ -497,7 +505,7 @@ test("a stale parentRunId is refused and the question stays open", async () => {
 	expect(wiring.registry.peek("t1")?.dialogId).toBe("d1");
 });
 
-test("⚠ an unanswered dialog is evicted: declined, session stopped", async () => {
+test("⚠ an unanswered dialog is evicted: declined, run stopped, pump released", async () => {
 	const pi = dialogPi(SELECT_DIALOG);
 	const wiring = runWiring();
 	wiring.registry = createDialogRegistry({
@@ -513,6 +521,9 @@ test("⚠ an unanswered dialog is evicted: declined, session stopped", async () 
 	expect(pi.record.answers).toEqual([{ id: "d1", cancelled: true }]);
 	expect(wiring.stopCount).toBe(1);
 	expect(wiring.registry.peek("t1")).toBeUndefined();
+	// The session outlives the evicted run (#69 PR 2): the parked pump must not stay
+	// subscribed for the thread's remaining lifetime, filling `pending` nobody drains.
+	expect(pi.record.subscriberCount()).toBe(0);
 	// eviction is reported, never silent
 	expect(wiring.problems.some((problem) => String(problem).includes("unanswered"))).toBe(true);
 });
@@ -726,4 +737,75 @@ test("an answered slash-command dialog closes its continuation at the grace too"
 	}
 	expect(chunks2.at(-1)?.type).toBe(EventType.RUN_FINISHED);
 	expect(Date.now() - startedAt).toBeLessThan(1000);
+});
+
+// ── Per-thread sessions (#69 PR 2): the session outlives the run, the pump must not ─────
+
+test("a settled run leaves no subscription on the session, and a second run on the same session streams cleanly", async () => {
+	// One fake session, two prompts — the shape a thread now has. The scripted events are
+	// identical, so a leaked subscriber from run 1 would show up as doubled chunks in run 2,
+	// and a stale `settled` would end run 2 with no text at all.
+	const events = [
+		'{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"hi"}}',
+		'{"type":"agent_settled"}',
+	];
+	const pi = scriptedPi(events);
+	const wiring = runWiring();
+	async function run(runId: string) {
+		const chunks = [];
+		for await (const chunk of runChat({
+			session: pi.session,
+			ids: { ...ids, runId },
+			prompt: "hello",
+			onProblem: undefined,
+			...wiring,
+		})) {
+			chunks.push(chunk);
+		}
+		return chunks;
+	}
+	expect(pi.record.subscriberCount()).toBe(0);
+	const first = await run("r1");
+	expect(pi.record.subscriberCount()).toBe(0);
+	const second = await run("r2");
+	expect(pi.record.subscriberCount()).toBe(0);
+	const textChunks = (chunks: typeof second) => chunks.filter((chunk) => chunk.type === EventType.TEXT_MESSAGE_CONTENT);
+	expect(textChunks(first)).toHaveLength(1);
+	expect(textChunks(second)).toHaveLength(1);
+	expect(second.at(-1)?.type).toBe(EventType.RUN_FINISHED);
+	expect(pi.record.disposed).toBe(0);
+});
+
+test("a parked run keeps its subscription until the resume ends, then releases it", async () => {
+	const pi = dialogPi(SELECT_DIALOG);
+	const wiring = runWiring();
+	for await (const _chunk of runChat({ session: pi.session, ids, prompt: "/mode", onProblem: undefined, ...wiring })) {
+		// drain
+	}
+	expect(wiring.outcome.parkedAwaitingAnswer).toBe(true);
+	// Parked: the pump is still listening, because pi's answer-side events must reach it.
+	expect(pi.record.subscriberCount()).toBe(1);
+	await resumeWith(wiring, [{ interruptId: "d1", status: "resolved", payload: { value: "auto" } }]);
+	expect(pi.record.subscriberCount()).toBe(0);
+});
+
+test("a client that abandons the stream mid-run also releases the subscription", async () => {
+	// The server's `for await` exits on a disconnect, which calls `return()` on the
+	// generator; the release must run from that path too or every dropped tab leaks one.
+	const pi = fakeSession({
+		onPrompt: (context, _request, outcome) => {
+			queueMicrotask(() => {
+				outcome.onAccepted();
+				context.emit(
+					'{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"a"}}',
+				);
+			});
+		},
+	});
+	const wiring = runWiring();
+	const stream = runChat({ session: pi.session, ids, prompt: "hello", onProblem: undefined, ...wiring });
+	for await (const chunk of stream) {
+		if (chunk.type === EventType.TEXT_MESSAGE_CONTENT) break;
+	}
+	expect(pi.record.subscriberCount()).toBe(0);
 });

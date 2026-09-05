@@ -252,8 +252,8 @@ a moved repo heals and a renamed sibling does not leave a dead link pi would ski
 
 ## The web surface (`packages/web/`)
 
-Bun's fullstack dev server end to end — no vite, no node. The backend embeds pi (spawned in
-`--mode rpc` per prompt), maps pi's event stream onto AG-UI events, and serves a TanStack AI chat
+Bun's fullstack dev server end to end — no vite, no node. The backend hosts pi in-process
+(one `AgentSession` per chat thread, #69), maps pi's event stream onto AG-UI events, and serves a TanStack AI chat
 client. Neither half has its own loop; the browser is a client of the same harness the TUI runs.
 
 Built so far:

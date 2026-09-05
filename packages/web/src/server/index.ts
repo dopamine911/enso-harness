@@ -7,6 +7,7 @@ import { isPiLaunchConfig, type PiLaunchConfig } from "@zen/core";
 import { createAgentHost } from "../host/agent-host.ts";
 import { createDialogRegistry } from "./dialog-registry.ts";
 import { type ChatRunOutcome, resumeChat, runChat } from "./session.ts";
+import { createThreadSessions } from "./thread-sessions.ts";
 
 /**
  * The dev backend: one SSE endpoint TanStack AI's `fetchServerSentEvents` can talk to (#24).
@@ -161,13 +162,15 @@ export function startZenServer(options: ZenServerOptions) {
 	assertVendorLinks(options.harnessPackageDir);
 
 	// pi, in this process (#69). Creating the host sets the isolation env and pins the
-	// multi-account config; sessions are created per run below.
+	// multi-account config; sessions are created per chat THREAD below and live across runs
+	// (#43 — a mode chosen on prompt 1 is in force on prompt 2).
 	const host = createAgentHost({
 		cwd: options.launch.cwd,
 		agentDir: options.agentDir,
 		harnessPackageDir: options.harnessPackageDir,
 		onProblem: options.onProblem,
 	});
+	const threads = createThreadSessions({ createSession: () => host.createSession(), onProblem: options.onProblem });
 
 	// Parked pi sessions awaiting a human's answer to a dialog (#27). Owned by the server,
 	// shared by every request; evicted whole on close.
@@ -197,21 +200,30 @@ export function startZenServer(options: ZenServerOptions) {
 			// normally follows a response must not run — a human's answer is coming back for
 			// that process on a later request.
 			const outcome: ChatRunOutcome = { parkedAwaitingAnswer: false };
+			// ⚠ Set in each path's `finally` BEFORE `response.end()`. The response 'close' event
+			// fires on normal completion too, and since #69 PR 2 "stop" is a real `abort()` on
+			// the thread's long-lived session (the subprocess era's stop was an idempotent
+			// dispose). Aborting an idle session after every settled run would set
+			// `abortInFlight` and make the very next prompt wait on it — so 'close' stops pi
+			// only when the stream did NOT end on its own, i.e. the client went away.
+			let streamEnded = false;
 
 			// ── The resume path: an answer to a parked dialog. No new session — the one this
 			// request addresses has been alive since the run it interrupted (#27).
 			if (Array.isArray(body.resume) && body.resume.length > 0) {
-				// Captured BEFORE resumeChat can take the entry — this closure is the only
-				// stop handle the handler will ever hold for a session it did not create.
+				// Captured BEFORE resumeChat can take the entry — the registry's stop handle
+				// aborts the run and releases the thread; the session itself stays alive.
 				const stopParked = registry.peek(ids.threadId)?.stopPi;
 				response.writeHead(200, SSE_HEADERS);
 				// ⚠ `response`, NOT `request` (#34). Under bun's node:http compat the REQUEST
 				// 'close' event fires when the request BODY has been consumed — the start of
 				// every run, before this listener is registered — so a request-close hook is
 				// INERT and a mid-run disconnect never tore pi down. The RESPONSE 'close' is
-				// what fires on a client abort (and on normal end, where stop is a no-op).
+				// what fires on a client abort; on normal end `streamEnded` keeps it inert.
 				response.on("close", () => {
-					if (!outcome.parkedAwaitingAnswer) stopParked?.();
+					if (streamEnded) return;
+					if (outcome.parkedAwaitingAnswer) return;
+					stopParked?.();
 				});
 				try {
 					for await (const chunk of resumeChat({
@@ -232,20 +244,24 @@ export function startZenServer(options: ZenServerOptions) {
 						message: error instanceof Error ? error.message : String(error),
 					});
 				} finally {
-					if (!outcome.parkedAwaitingAnswer) stopParked?.();
+					// A resume that ended unparked is a finished run: the thread goes idle. A
+					// client that dropped mid-resume is handled by the 'close' hook above.
+					streamEnded = true;
+					if (!outcome.parkedAwaitingAnswer) threads.release(ids.threadId);
 					response.end();
 				}
 				return;
 			}
 
-			// ⚠ One pi session per run, disposed in `finally` — UNLESS a dialog parked it
-			// (#27), in which case the registry owns it until the answer or the TTL. One
-			// session per chat THREAD is #69's next step; it must not ride in on this.
-			// Created BEFORE the SSE head goes out, so a session that cannot be built is a
-			// plain HTTP failure and not a half-open stream.
-			let pi: Awaited<ReturnType<typeof host.createSession>>;
+			// ⚠ One pi session per chat THREAD (#69 PR 2, closes #43): acquired here, RELEASED
+			// (not disposed) in `finally` so the idle clock starts — UNLESS a dialog parked
+			// the run (#27), in which case the registry holds it until the answer or the TTL
+			// and the resume path releases. Disposal happens only after the idle window or at
+			// shutdown (`thread-sessions.ts`). Acquired BEFORE the SSE head goes out, so a
+			// session that cannot be built is a plain HTTP failure and not a half-open stream.
+			let session: Awaited<ReturnType<typeof threads.acquire>>;
 			try {
-				pi = await host.createSession();
+				session = await threads.acquire(ids.threadId);
 			} catch (error) {
 				options.onProblem?.(error);
 				response.writeHead(500, { "Content-Type": "text/plain" });
@@ -256,25 +272,33 @@ export function startZenServer(options: ZenServerOptions) {
 
 			// A client that navigates away must not leave pi running — but a PARKED session
 			// belongs to the registry, and this close event also fires on normal completion,
-			// AFTER a park. Stopping here would dispose the session whose answer is pending.
+			// AFTER a park. Stopping here would abort the run whose answer is pending.
 			// ⚠ `response`, NOT `request` (#34). Under bun's node:http compat the REQUEST
 			// 'close' event fires when the request BODY has been consumed — the start of
 			// every run, before this listener is registered — so the request-close hook this
 			// used to be was INERT and a mid-run disconnect never tore pi down (found by the
 			// disconnect receipt lingering exactly until the no-progress guard's `finally`).
-			// The RESPONSE 'close' fires on a client abort; on normal end, stop() has
-			// already run in `finally` and is an idempotent no-op.
+			// The RESPONSE 'close' fires on a client abort; on normal end `streamEnded` is
+			// already set by `finally` and this stays inert — see its declaration for why a
+			// stop here is no longer free.
 			response.on("close", () => {
-				if (!outcome.parkedAwaitingAnswer) pi.session.dispose();
+				if (streamEnded) return;
+				if (outcome.parkedAwaitingAnswer) return;
+				threads.stop(ids.threadId);
 			});
 
 			try {
 				for await (const chunk of runChat({
-					session: pi.session,
+					session,
 					ids,
 					prompt: latestUserPrompt(body),
 					registry,
-					stopPi: () => pi.session.dispose(),
+					// Handed to the registry with a parked run: eviction aborts what is running
+					// and lets the thread go idle. The session survives for the next prompt.
+					stopPi: () => {
+						threads.stop(ids.threadId);
+						threads.release(ids.threadId);
+					},
 					outcome,
 					onProblem: options.onProblem,
 				})) {
@@ -290,7 +314,8 @@ export function startZenServer(options: ZenServerOptions) {
 					message: error instanceof Error ? error.message : String(error),
 				});
 			} finally {
-				if (!outcome.parkedAwaitingAnswer) pi.session.dispose();
+				streamEnded = true;
+				if (!outcome.parkedAwaitingAnswer) threads.release(ids.threadId);
 				response.end();
 			}
 			return;
@@ -300,8 +325,12 @@ export function startZenServer(options: ZenServerOptions) {
 		response.end("not found");
 	});
 
-	// Parked sessions must not outlive the server that parked them.
-	server.on("close", () => registry.shutdown());
+	// Parked sessions must not outlive the server that parked them — evicted first, so their
+	// declines reach a live session; then every thread's session is disposed.
+	server.on("close", () => {
+		registry.shutdown();
+		threads.shutdown();
+	});
 
 	const port = options.port ?? DEFAULT_PORT;
 

@@ -151,15 +151,23 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 		// and the transcript land where the TUI's would.
 		const { session } = await createAgentSessionFromServices({ services, sessionManager: SessionManager.create(cwd) });
 
-		// ── The event fan-out. Records emitted before the first subscriber (everything an
+		// ── The event fan-out. Records emitted before the FIRST subscriber (everything an
 		// extension says during session_start — multi-account's startup notify, a dialog a
 		// probe opens) are held and replayed, so the browser sees them exactly as it saw
 		// pi's unsolicited startup stdout over the pipe.
+		//
+		// ⚠ Held ONLY until the first subscriber, never between runs. The session now lives
+		// across runs (#69 PR 2) and each run subscribes its own pump. Holding between runs
+		// would replay an aborted run's `agent_settled` into the NEXT run's pump — which would
+		// end that run before its first token (the disconnect-then-prompt race). Events with
+		// nobody listening after the first subscriber are dropped, like status heartbeats
+		// were when no rpc client was reading the pipe.
 		const listeners = new Set<(event: PiRpcEvent) => void>();
 		const heldUntilFirstSubscriber: PiRpcEvent[] = [];
+		let hasHadSubscriber = false;
 		function emit(event: PiRpcEvent): void {
 			if (listeners.size === 0) {
-				heldUntilFirstSubscriber.push(event);
+				if (!hasHadSubscriber) heldUntilFirstSubscriber.push(event);
 				return;
 			}
 			for (const listener of listeners) listener(event);
@@ -235,6 +243,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 			},
 			subscribe(onEvent) {
 				listeners.add(onEvent);
+				hasHadSubscriber = true;
 				if (heldUntilFirstSubscriber.length > 0) {
 					const held = heldUntilFirstSubscriber.splice(0);
 					for (const event of held) onEvent(event);
