@@ -9,3 +9,5 @@ pi-session-*.html
 .codegraph/
 coverage/
 .env
+# Playwright MCP session artifacts (snapshots/console logs the browser plugin writes into the cwd)
+.playwright-mcp/

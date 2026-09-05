@@ -160,8 +160,23 @@ export interface ChatRunOutcome {
 	parkedAwaitingAnswer: boolean;
 }
 
-/** The queue between the session's event subscription and the streaming loop. */
+function noop(): void {
+	// Intentionally empty: the resting state of a released subscription handle.
+}
+
+/**
+ * The queue between the session's event subscription and the streaming loop.
+ *
+ * One pump per RUN, deliberately, even though the session now lives for the whole thread
+ * (#69 PR 2). The host holds events that arrive while nobody is subscribed and replays them
+ * to the next subscriber, so a per-thread pump would gain nothing and lose something: it
+ * would swallow the startup notifies extensions emit before the first prompt, and the
+ * previous run's `agent_settled` would leak into the next run's state. The run-scoped pump
+ * subscribes here and unsubscribes when its stream ends unparked (see `streamRun`).
+ */
 function createSessionPump(session: PiSession): PiSessionPump {
+	// Replaced by the real handle below; the placeholder makes a double `unsubscribe` harmless.
+	let unsubscribeFromSession: () => void = noop;
 	const pump: PiSessionPump = {
 		pending: [],
 		settled: false,
@@ -173,10 +188,14 @@ function createSessionPump(session: PiSession): PiSessionPump {
 			pump.notify = undefined;
 		},
 		session,
+		unsubscribe(): void {
+			unsubscribeFromSession();
+			unsubscribeFromSession = noop;
+		},
 	};
 	// Subscribed BEFORE the prompt is fired, so no event can slip between the two; events an
 	// extension emitted during the session's own start are replayed here by the host.
-	session.subscribe((event) => {
+	unsubscribeFromSession = session.subscribe((event) => {
 		pump.pending.push(event);
 		if (event.type === "agent_settled") pump.settled = true;
 		pump.wake();
@@ -208,8 +227,21 @@ interface StreamRunOptions {
  * was unreachable BECAUSE of the dialog. So acceptance is observed from a callback
  * (`pump.promptAcknowledged` / `pump.promptError`), never awaited in front of this loop.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the session pump — one loop owning progress timeouts, dialog parking, and settle detection in ORDER; the ordering is the #27 contract, and helper-splitting it is how a parked process would leak past a teardown.
 async function* streamRun(options: StreamRunOptions): AsyncGenerator<StreamChunk> {
+	const { pump, outcome } = options;
+	try {
+		yield* drainUntilRunEnds(options);
+	} finally {
+		// ⚠ Runs on every exit — settle, guard, error, AND the consumer abandoning the
+		// generator (a client disconnect ends the `for await` in `server/index.ts`, which
+		// calls `return()` here). A parked run is the one exception: its pump travels to the
+		// registry with the subscription attached, and the resume's own loop releases it.
+		if (!outcome.parkedAwaitingAnswer) pump.unsubscribe();
+	}
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the session pump — one loop owning progress timeouts, dialog parking, and settle detection in ORDER; the ordering is the #27 contract, and helper-splitting it is how a parked process would leak past a teardown.
+async function* drainUntilRunEnds(options: StreamRunOptions): AsyncGenerator<StreamChunk> {
 	const { pump, ids, registry, stopPi, outcome, noProgressTimeoutMs } = options;
 	const { isExtensionCommand, slashCommandGraceMs } = options;
 	let lastProgressAt = Date.now();
@@ -314,7 +346,10 @@ export interface ChatRunOptions {
 	/** Base64 images, forwarded verbatim — pi accepts them on `prompt`. */
 	images?: ReadonlyArray<{ type: "image"; data: string; mimeType: string }>;
 	registry: DialogRegistry;
-	/** Stops the pi session. Handed to the registry when a dialog parks the run. */
+	/**
+	 * Aborts the run and lets the thread go idle — never disposes the session (#69 PR 2).
+	 * Handed to the registry when a dialog parks the run, for eviction.
+	 */
 	stopPi: () => void;
 	/** See {@link ChatRunOutcome} — the handler reads it after the stream completes. */
 	outcome: ChatRunOutcome;
