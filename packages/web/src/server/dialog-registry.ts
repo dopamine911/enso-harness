@@ -1,20 +1,20 @@
-import type { PiRpcEvent, PiTransport, ZenDialogSpec } from "@zen/core";
+import type { PiRpcEvent, PiSession, ZenDialogSpec } from "@zen/core";
 
 /**
- * Parked pi processes, waiting for a human to answer a dialog (#27).
+ * Parked pi sessions, waiting for a human to answer a dialog (#27).
  *
  * WHY PARKING EXISTS AT ALL
  * A blocking dialog crosses to the browser as an AG-UI interrupt, and TanStack treats a
  * `RUN_FINISHED` with an interrupt outcome as TERMINAL — the answer arrives as a NEW POST
  * carrying `resume` + `parentRunId`, never on the open stream (verified against the real
- * `ChatClient`, `.local/interrupt-probe/`). So the pi process — alive, blocked on stdin —
- * must outlive the HTTP request that surfaced its question. This registry is that
- * lifetime, and nothing more.
+ * `ChatClient`, `.local/interrupt-probe/`). So the pi session — alive, its extension blocked
+ * on a promise our UI context holds — must outlive the HTTP request that surfaced its
+ * question. This registry is that lifetime, and nothing more.
  *
  * ⚠ DELIBERATELY NOT SESSION REUSE. An entry exists ONLY while a dialog awaits its
- * answer; an ordinary run keeps the spawn-per-request lifecycle. Multi-turn reuse of one
- * pi process is real future work with its own lifecycle questions (eviction under memory
- * pressure, per-thread cwd, cross-tab races) and it must not ride in on this.
+ * answer; an ordinary run keeps the session-per-request lifecycle. Multi-turn reuse of one
+ * session is #69's next step, with its own lifecycle questions (idle eviction, per-thread
+ * cwd, cross-tab races), and it must not ride in on this.
  *
  * ⚠ SECURITY: a resume request's `threadId` resolves to a live pi with unconfined bash
  * (#9). That is the same shape as accepting `cwd` from the request body, which this
@@ -23,10 +23,10 @@ import type { PiRpcEvent, PiTransport, ZenDialogSpec } from "@zen/core";
  */
 
 /**
- * The live pumping state runChat built around a pi process, handed over whole so the
+ * The live pumping state runChat built around a pi session, handed over whole so the
  * resume request can continue draining exactly where the interrupted run stopped.
  *
- * ⚠ The event callback stays attached while parked — pi may still emit fire-and-forget
+ * ⚠ The event subscription stays attached while parked — pi may still emit fire-and-forget
  * events (status heartbeats), and they accumulate in `pending` for the continuation to
  * drain. `notify` is whichever live stream loop is currently attached, or undefined while
  * parked; `wake()` on a parked pump is a deliberate no-op.
@@ -49,12 +49,12 @@ export interface PiSessionPump {
 	promptAcknowledged: boolean;
 	notify: (() => void) | undefined;
 	wake(): void;
-	readonly transport: PiTransport;
+	readonly session: PiSession;
 }
 
 export interface ParkedDialog {
 	pump: PiSessionPump;
-	/** Stops the pi process. Handed over by the run that spawned it. */
+	/** Stops the pi session. Handed over by the run that created it. */
 	stopPi: () => void;
 	/** pi's dialog request id — the interrupt id, and the id the response must carry. */
 	dialogId: string;
@@ -79,20 +79,20 @@ export interface ParkedDialog {
 export interface DialogRegistry {
 	readonly answerTimeoutMs: number;
 	/**
-	 * Park a process awaiting an answer. ⚠ Re-parking a thread that already holds an entry
+	 * Park a session awaiting an answer. ⚠ Re-parking a thread that already holds an entry
 	 * evicts the old one first (declined + stopped): one thread, one live question.
 	 */
 	park(entry: ParkedDialog): void;
 	/** Read without removing — validation happens against a peek, so a bad resume request cannot destroy the parked question. */
 	peek(threadId: string): ParkedDialog | undefined;
-	/** Remove and return. The caller now owns the process. */
+	/** Remove and return. The caller now owns the session. */
 	take(threadId: string): ParkedDialog | undefined;
 	/** Evict everything — server shutdown. */
 	shutdown(): void;
 }
 
 /**
- * How long an unanswered question holds its process before being declined.
+ * How long an unanswered question holds its session before being declined.
  *
  * A human answering is a pause measured in minutes, not a stream timeout — but an
  * abandoned tab must not hold a live pi forever. Eviction IS the pre-#27 behaviour
@@ -101,10 +101,10 @@ export interface DialogRegistry {
 const DIALOG_ANSWER_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
- * After declining, the process gets this long to run the extension's cleanup path and
- * settle before it is stopped regardless. The write is what lets the extension finish
+ * After declining, the session gets this long to run the extension's cleanup path and
+ * settle before it is stopped regardless. The answer is what lets the extension finish
  * honestly (a declined `select` resolves `undefined`); the stop is what guarantees the
- * process does not outlive the registry's promise to have dealt with it.
+ * session does not outlive the registry's promise to have dealt with it.
  */
 const EVICTION_GRACE_MS = 5000;
 
@@ -125,14 +125,12 @@ export function createDialogRegistry(options: DialogRegistryOptions): DialogRegi
 	function decline(entry: ParkedDialog, why: string): void {
 		onProblem?.(
 			`dialog '${entry.dialog.title}' (${entry.dialog.method}, thread ${entry.threadId}) ${why} — ` +
-				`declined and the process will be stopped`,
+				`declined and the session will be stopped`,
 		);
 		try {
 			// pi's cancellation form: the extension receives `undefined` / `false` and the
 			// command completes as a no-op — the pre-#27 behaviour, applied at eviction.
-			entry.pump.transport.write(
-				`${JSON.stringify({ type: "extension_ui_response", id: entry.dialogId, cancelled: true })}\n`,
-			);
+			entry.pump.session.answerDialog({ id: entry.dialogId, cancelled: true });
 		} catch (error) {
 			onProblem?.(error);
 		}

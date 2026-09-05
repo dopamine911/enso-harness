@@ -1,30 +1,87 @@
 import { expect, test } from "bun:test";
 import { EventType } from "@ag-ui/core";
-import type { PiTransport } from "@zen/core";
-import { PiRpcClient } from "../../rpc/client.ts";
+import type { PiCommand, PiDialogResponse, PiPromptOutcome, PiPromptRequest, PiRpcEvent, PiSession } from "@zen/core";
 import { createDialogRegistry } from "../dialog-registry.ts";
-import { type ChatRunOutcome, fetchPiCommands, resumeChat, runChat } from "../session.ts";
+import { type ChatRunOutcome, resumeChat, runChat } from "../session.ts";
 
-/** A scripted pi: replies to the prompt, then emits whatever the test lists. */
-function scriptedPi(events: string[]) {
-	let consumeData: ((chunk: string) => void) | undefined;
-	const written: string[] = [];
-	const transport: PiTransport = {
-		write: (line) => {
-			written.push(line);
-			const id = (JSON.parse(line) as { id: string }).id;
-			// Acknowledge, then emit the script — asynchronously, as a real process would.
+/**
+ * Everything a fake session records — the assertions read these instead of wire strings.
+ * `prompts` is what reached pi; `answers` are the dialog responses delivered; `commandLookups`
+ * counts `listCommands` calls (a prose prompt must never trigger one).
+ */
+interface FakeSessionRecord {
+	prompts: PiPromptRequest[];
+	answers: PiDialogResponse[];
+	commandLookups: number;
+	disposed: number;
+}
+
+interface FakeSessionScript {
+	/** What `listCommands` returns. */
+	commands?: string[];
+	/** Called when a prompt arrives — the fake decides when to accept, reject, and emit. */
+	onPrompt: (context: FakeSessionContext, request: PiPromptRequest, outcome: PiPromptOutcome) => void;
+	/** Called when a dialog answer arrives — the fake decides what pi does next. */
+	onAnswer?: (context: FakeSessionContext, response: PiDialogResponse) => void;
+}
+
+interface FakeSessionContext {
+	/** Emit one wire-shaped event, as a JSON string (the tests read like the old wire fixtures). */
+	emit: (eventJson: string) => void;
+	record: FakeSessionRecord;
+}
+
+/**
+ * A scripted `PiSession`. The events are still written as JSON strings so every fixture
+ * below reads exactly as it did over the subprocess wire — the host delivers the same
+ * shapes in-process (#69), which is the point these tests keep pinned.
+ */
+function fakeSession(script: FakeSessionScript): { session: PiSession; record: FakeSessionRecord } {
+	const listeners = new Set<(event: PiRpcEvent) => void>();
+	const record: FakeSessionRecord = { prompts: [], answers: [], commandLookups: 0, disposed: 0 };
+	const context: FakeSessionContext = {
+		emit: (eventJson) => {
+			const event = JSON.parse(eventJson) as PiRpcEvent;
+			for (const listener of listeners) listener(event);
+		},
+		record,
+	};
+	const session: PiSession = {
+		prompt: (request, outcome) => {
+			record.prompts.push(request);
+			script.onPrompt(context, request, outcome);
+		},
+		answerDialog: (response) => {
+			record.answers.push(response);
+			script.onAnswer?.(context, response);
+		},
+		listCommands: () => {
+			record.commandLookups += 1;
+			return (script.commands ?? []).map((name): PiCommand => ({ name, source: "extension" }));
+		},
+		subscribe: (onEvent) => {
+			listeners.add(onEvent);
+			return () => listeners.delete(onEvent);
+		},
+		abort: () => Promise.resolve(),
+		dispose: () => {
+			record.disposed += 1;
+		},
+	};
+	return { session, record };
+}
+
+/** A scripted pi: accepts the prompt, then emits whatever the test lists — asynchronously, as pi does. */
+function scriptedPi(events: string[], commands: string[] = []) {
+	return fakeSession({
+		commands,
+		onPrompt: (context, _request, outcome) => {
 			queueMicrotask(() => {
-				consumeData?.(`{"id":"${id}","type":"response","command":"prompt","success":true}\n`);
-				for (const event of events) consumeData?.(`${event}\n`);
+				outcome.onAccepted();
+				for (const event of events) context.emit(event);
 			});
 		},
-		onData: (consume) => {
-			consumeData = consume;
-		},
-		onClose: () => undefined,
-	};
-	return { transport, written };
+	});
 }
 
 const ids = { messageId: "m1", runId: "r1", threadId: "t1" };
@@ -56,7 +113,7 @@ async function collect(events: string[], images?: ChatImages) {
 	const wiring = runWiring();
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport: pi.transport,
+		session: pi.session,
 		ids,
 		prompt: "hello",
 		onProblem: undefined,
@@ -65,7 +122,7 @@ async function collect(events: string[], images?: ChatImages) {
 	})) {
 		chunks.push(chunk);
 	}
-	return { chunks, written: pi.written };
+	return { chunks, record: pi.record };
 }
 type ChatImages = ReadonlyArray<{ type: "image"; data: string; mimeType: string }>;
 
@@ -114,56 +171,29 @@ test("the stream does NOT end on agent_end, only on agent_settled", async () => 
 	expect(chunks.some((c) => c.type === EventType.STEP_FINISHED)).toBe(true);
 });
 
-test("images are forwarded verbatim on the prompt command", async () => {
-	const { written } = await collect(
+test("images are forwarded verbatim on the prompt", async () => {
+	const { record } = await collect(
 		['{"type":"agent_settled"}'],
 		[{ type: "image", data: "aGk=", mimeType: "image/png" }],
 	);
-	const sent = JSON.parse(written[0] as string) as { images: Array<{ mimeType: string }> };
-	expect(sent.images[0]).toMatchObject({ mimeType: "image/png" });
+	expect(record.prompts[0]?.images?.[0]).toMatchObject({ mimeType: "image/png", data: "aGk=" });
 });
 
 // A rejected prompt is a protocol outcome; the client must be told why, not disconnected.
 test("a rejected prompt yields RUN_ERROR rather than throwing", async () => {
-	let consumeData: ((chunk: string) => void) | undefined;
-	const transport: PiTransport = {
-		write: (line) => {
-			const id = (JSON.parse(line) as { id: string }).id;
-			queueMicrotask(() =>
-				consumeData?.(
-					`{"id":"${id}","type":"response","command":"prompt","success":false,"error":"already streaming"}\n`,
-				),
-			);
-		},
-		onData: (consume) => {
-			consumeData = consume;
-		},
-		onClose: () => undefined,
-	};
+	const pi = fakeSession({
+		onPrompt: (_context, _request, outcome) => queueMicrotask(() => outcome.onRejected("already streaming")),
+	});
 	const chunks = [];
-	for await (const chunk of runChat({ transport, ids, prompt: "x", onProblem: undefined, ...runWiring() }))
+	for await (const chunk of runChat({ session: pi.session, ids, prompt: "x", onProblem: undefined, ...runWiring() }))
 		chunks.push(chunk);
 	const error = chunks.find((c) => c.type === EventType.RUN_ERROR);
 	expect(error).toMatchObject({ runId: "r1", message: "already streaming" });
 });
 
-// ⚠ A parse failure must not strand the stream waiting for a settle that never comes.
-test("a malformed record is reported and does not hang the run", async () => {
-	const problems: unknown[] = [];
-	const pi = scriptedPi(["{not json}", '{"type":"agent_settled"}']);
-	const chunks = [];
-	for await (const chunk of runChat({
-		transport: pi.transport,
-		ids,
-		prompt: "x",
-		onProblem: (p) => problems.push(p),
-		...runWiring(),
-	})) {
-		chunks.push(chunk);
-	}
-	expect(problems).toHaveLength(1);
-	expect(chunks.at(-1)?.type).toBe(EventType.RUN_FINISHED);
-});
+// ⓘ The subprocess era had a "malformed record is reported and does not hang" case here.
+// In-process there is no wire to garble: the host translates typed events, and a
+// translation failure is reported by the host (`agent-host.ts`) rather than seen here.
 
 test("an unmodelled pi event still reaches the client, as CUSTOM", async () => {
 	const { chunks } = await collect(['{"type":"queue_update","depth":3}', '{"type":"agent_settled"}']);
@@ -178,35 +208,12 @@ test("an unmodelled pi event still reaches the client, as CUSTOM", async () => {
  * that built-in TUI commands cannot execute over rpc, so they must be refused locally.
  */
 function piWithCommands(commandNames: string[], events: string[] = ['{"type":"agent_settled"}']) {
-	let consumeData: ((chunk: string) => void) | undefined;
-	const sent: string[] = [];
-	const transport: PiTransport = {
-		write: (line) => {
-			sent.push(line);
-			const parsed = JSON.parse(line) as { id: string; type: string };
-			queueMicrotask(() => {
-				if (parsed.type === "get_commands") {
-					const commands = commandNames.map((name) => ({ name, source: "extension" }));
-					consumeData?.(
-						`${JSON.stringify({ id: parsed.id, type: "response", command: "get_commands", success: true, data: { commands } })}\n`,
-					);
-					return;
-				}
-				consumeData?.(`{"id":"${parsed.id}","type":"response","command":"prompt","success":true}\n`);
-				for (const event of events) consumeData?.(`${event}\n`);
-			});
-		},
-		onData: (consume) => {
-			consumeData = consume;
-		},
-		onClose: () => undefined,
-	};
-	return { transport, sent };
+	return scriptedPi(events, commandNames);
 }
 
-async function runWith(pi: { transport: PiTransport }, prompt: string) {
+async function runWith(pi: { session: PiSession }, prompt: string) {
 	const chunks = [];
-	for await (const chunk of runChat({ transport: pi.transport, ids, prompt, onProblem: undefined, ...runWiring() })) {
+	for await (const chunk of runChat({ session: pi.session, ids, prompt, onProblem: undefined, ...runWiring() })) {
 		chunks.push(chunk);
 	}
 	return chunks;
@@ -222,21 +229,21 @@ test("⚠ an unknown slash command is REFUSED, not forwarded to the model", asyn
 	// and names what does work, so the user is not left guessing
 	expect((error as { message: string }).message).toContain("/mode");
 	// ⚠ the decisive assertion: no prompt was ever sent
-	expect(pi.sent.some((line) => line.includes('"type":"prompt"'))).toBe(false);
+	expect(pi.record.prompts).toHaveLength(0);
 });
 
 test("a KNOWN slash command is forwarded, because pi can run it", async () => {
 	const pi = piWithCommands(["mode", "plan"]);
 	const chunks = await runWith(pi, "/mode auto");
 	expect(chunks.some((chunk) => chunk.type === EventType.RUN_ERROR)).toBe(false);
-	expect(pi.sent.some((line) => line.includes('"type":"prompt"'))).toBe(true);
+	expect(pi.record.prompts).toHaveLength(1);
 	expect(chunks.at(-1)?.type).toBe(EventType.RUN_FINISHED);
 });
 
-test("ordinary prose never triggers a get_commands round trip", async () => {
+test("ordinary prose never triggers a command lookup", async () => {
 	const pi = piWithCommands(["mode"]);
 	await runWith(pi, "what is in this repo?");
-	expect(pi.sent.some((line) => line.includes("get_commands"))).toBe(false);
+	expect(pi.record.commandLookups).toBe(0);
 });
 
 test("the refusal says 'none' rather than an empty list when pi has no commands", async () => {
@@ -248,28 +255,7 @@ test("the refusal says 'none' rather than an empty list when pi has no commands"
 test("a bare slash is treated as prose, not a command lookup", async () => {
 	const pi = piWithCommands(["mode"]);
 	await runWith(pi, "/");
-	expect(pi.sent.some((line) => line.includes("get_commands"))).toBe(false);
-});
-
-test("fetchPiCommands filters malformed entries rather than trusting the payload", async () => {
-	let consumeData: ((chunk: string) => void) | undefined;
-	const transport: PiTransport = {
-		write: (line) => {
-			const id = (JSON.parse(line) as { id: string }).id;
-			queueMicrotask(() =>
-				consumeData?.(
-					`${JSON.stringify({ id, type: "response", command: "get_commands", success: true, data: { commands: [{ name: "ok", source: "extension" }, { name: "bad" }, "nope", null] } })}\n`,
-				),
-			);
-		},
-		onData: (consume) => {
-			consumeData = consume;
-		},
-		onClose: () => undefined,
-	};
-	const client = new PiRpcClient({ transport });
-	const commands = await fetchPiCommands(client);
-	expect(commands.map((command) => command.name)).toEqual(["ok"]);
+	expect(pi.record.commandLookups).toBe(0);
 });
 
 /**
@@ -279,25 +265,11 @@ test("fetchPiCommands filters malformed entries rather than trusting the payload
  * closes shows a spinner with no error raised anywhere.
  */
 test("a run that never settles ends itself rather than hanging", async () => {
-	// pi acknowledges the prompt, emits one event, then goes silent — never settling.
-	let consumeData: ((chunk: string) => void) | undefined;
-	const transport: PiTransport = {
-		write: (line) => {
-			const parsed = JSON.parse(line) as { id: string; type: string };
-			if (parsed.type !== "prompt") return;
-			queueMicrotask(() => {
-				consumeData?.(`{"id":"${parsed.id}","type":"response","command":"prompt","success":true}\n`);
-				consumeData?.('{"type":"turn_start"}\n');
-			});
-		},
-		onData: (consume) => {
-			consumeData = consume;
-		},
-		onClose: () => undefined,
-	};
+	// pi accepts the prompt, emits one event, then goes silent — never settling.
+	const pi = scriptedPi(['{"type":"turn_start"}']);
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport,
+		session: pi.session,
 		ids,
 		prompt: "hello",
 		onProblem: undefined,
@@ -316,7 +288,7 @@ test("a settled run is unaffected by the timeout", async () => {
 	const pi = piWithCommands([], ['{"type":"agent_settled"}']);
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport: pi.transport,
+		session: pi.session,
 		ids,
 		prompt: "hi",
 		onProblem: undefined,
@@ -332,45 +304,26 @@ test("a settled run is unaffected by the timeout", async () => {
  * ⚠⚠ #27: a blocking dialog INTERRUPTS the run — the browser answers it, pi stays alive.
  *
  * The fake mirrors the real ordering, which is the load-bearing part: pi asks the question
- * BEFORE acknowledging the prompt (the command cannot complete while the dialog blocks),
- * and the acknowledgement plus everything after it arrive only once an
- * `extension_ui_response` is written. The pre-#27 code hung exactly here — an await on the
- * prompt acknowledgement stood in front of the drain loop.
+ * BEFORE reporting the prompt accepted (the command cannot complete while the dialog
+ * blocks), and acceptance plus everything after it arrive only once the dialog is answered.
+ * The pre-#27 code hung exactly here — an await on acceptance stood in front of the drain
+ * loop.
  */
 function dialogPi(dialogEvent: string, afterAnswer: string[] = ['{"type":"agent_settled"}']) {
-	let consumeData: ((chunk: string) => void) | undefined;
-	const written: string[] = [];
-	let promptId = "";
-	const transport: PiTransport = {
-		write: (line) => {
-			written.push(line);
-			const parsed = JSON.parse(line) as { id?: string; type: string };
-			if (parsed.type === "get_commands") {
-				queueMicrotask(() =>
-					consumeData?.(
-						`${JSON.stringify({ id: parsed.id, type: "response", command: "get_commands", success: true, data: { commands: [{ name: "mode", source: "extension" }] } })}\n`,
-					),
-				);
-				return;
-			}
-			if (parsed.type === "prompt") {
-				promptId = parsed.id ?? "";
-				queueMicrotask(() => consumeData?.(`${dialogEvent}\n`));
-				return;
-			}
-			if (parsed.type === "extension_ui_response") {
-				queueMicrotask(() => {
-					consumeData?.(`{"id":"${promptId}","type":"response","command":"prompt","success":true}\n`);
-					for (const event of afterAnswer) consumeData?.(`${event}\n`);
-				});
-			}
+	let pendingOutcome: PiPromptOutcome | undefined;
+	return fakeSession({
+		commands: ["mode"],
+		onPrompt: (context, _request, outcome) => {
+			pendingOutcome = outcome;
+			queueMicrotask(() => context.emit(dialogEvent));
 		},
-		onData: (consume) => {
-			consumeData = consume;
+		onAnswer: (context) => {
+			queueMicrotask(() => {
+				pendingOutcome?.onAccepted();
+				for (const event of afterAnswer) context.emit(event);
+			});
 		},
-		onClose: () => undefined,
-	};
-	return { transport, written };
+	});
 }
 
 const SELECT_DIALOG =
@@ -395,7 +348,7 @@ async function runIntoDialog(pi: ReturnType<typeof dialogPi>, wiring = runWiring
 	// ⚠ Ordinary prose, not "/x" — a slash prompt would trigger the command lookup, which
 	// this fake does not answer. Dialog behaviour is independent of slash handling.
 	for await (const chunk of runChat({
-		transport: pi.transport,
+		session: pi.session,
 		ids,
 		prompt: "do a thing",
 		onProblem: undefined,
@@ -435,8 +388,8 @@ test("⚠⚠ a blocking dialog interrupts the run: parked, stamped, nothing decl
 		options: ["ask", "auto", "deny"],
 	});
 
-	// nothing was declined, the process was parked rather than stopped
-	expect(pi.written.some((line) => line.includes("extension_ui_response"))).toBe(false);
+	// nothing was declined, the session was parked rather than stopped
+	expect(pi.record.answers).toHaveLength(0);
 	expect(wiring.outcome.parkedAwaitingAnswer).toBe(true);
 	expect(wiring.registry.peek("t1")?.dialogId).toBe("d1");
 	expect(wiring.stopCount).toBe(0);
@@ -475,9 +428,8 @@ test("an answered select is delivered verbatim and the run continues to completi
 		{ interruptId: "d1", status: "resolved", payload: { value: "auto" } },
 	]);
 
-	// pi received exactly its own wire format, keyed to the dialog id
-	const answer = pi.written.find((line) => line.includes("extension_ui_response"));
-	expect(JSON.parse(answer as string)).toEqual({ type: "extension_ui_response", id: "d1", value: "auto" });
+	// pi received exactly the answer, keyed to the dialog id
+	expect(pi.record.answers).toEqual([{ id: "d1", value: "auto" }]);
 	// the continuation streamed on the RESUME response and settled
 	expect(chunks.some((c) => c.type === EventType.TEXT_MESSAGE_CONTENT)).toBe(true);
 	expect(chunks.at(-1)?.type).toBe(EventType.RUN_FINISHED);
@@ -496,7 +448,7 @@ test("⚠ an answer outside the offered options is refused and the question re-p
 
 	// ⚠ Nothing reached pi — pi hands a select's value to the extension VERBATIM, so an
 	// unoffered value is an injection seam, closed server-side.
-	expect(pi.written.some((line) => line.includes("extension_ui_response"))).toBe(false);
+	expect(pi.record.answers).toHaveLength(0);
 	// the user sees the refusal as text, then the SAME question again
 	const text = chunks.find((c) => c.type === EventType.TEXT_MESSAGE_CONTENT);
 	expect((text as { delta: string }).delta).toContain("refused");
@@ -517,8 +469,7 @@ test("cancel from the UI is delivered as pi's cancellation and the run completes
 
 	const { chunks } = await resumeWith(wiring, [{ interruptId: "d1", status: "cancelled" }]);
 
-	const written = pi.written.find((line) => line.includes("extension_ui_response"));
-	expect(JSON.parse(written as string)).toEqual({ type: "extension_ui_response", id: "d1", cancelled: true });
+	expect(pi.record.answers).toEqual([{ id: "d1", cancelled: true }]);
 	expect(chunks.at(-1)?.type).toBe(EventType.RUN_FINISHED);
 	expect(wiring.registry.peek("t1")).toBeUndefined();
 });
@@ -541,12 +492,12 @@ test("a stale parentRunId is refused and the question stays open", async () => {
 	);
 
 	expect(chunks.some((c) => c.type === EventType.RUN_ERROR)).toBe(true);
-	expect(pi.written.some((line) => line.includes("extension_ui_response"))).toBe(false);
+	expect(pi.record.answers).toHaveLength(0);
 	// ⚠ the decisive half: a bad request must not destroy the parked question
 	expect(wiring.registry.peek("t1")?.dialogId).toBe("d1");
 });
 
-test("⚠ an unanswered dialog is evicted: declined on the wire, process stopped", async () => {
+test("⚠ an unanswered dialog is evicted: declined, session stopped", async () => {
 	const pi = dialogPi(SELECT_DIALOG);
 	const wiring = runWiring();
 	wiring.registry = createDialogRegistry({
@@ -559,8 +510,7 @@ test("⚠ an unanswered dialog is evicted: declined on the wire, process stopped
 
 	await new Promise((resolve) => setTimeout(resolve, 80));
 
-	const declined = pi.written.find((line) => line.includes("extension_ui_response"));
-	expect(JSON.parse(declined as string)).toMatchObject({ id: "d1", cancelled: true });
+	expect(pi.record.answers).toEqual([{ id: "d1", cancelled: true }]);
 	expect(wiring.stopCount).toBe(1);
 	expect(wiring.registry.peek("t1")).toBeUndefined();
 	// eviction is reported, never silent
@@ -573,8 +523,7 @@ test("a malformed blocking dialog is declined immediately rather than parked", a
 	const pi = dialogPi('{"type":"extension_ui_request","id":"d1","method":"select","title":"pick"}');
 	const { chunks, wiring } = await runIntoDialog(pi);
 
-	const declined = pi.written.find((line) => line.includes("extension_ui_response"));
-	expect(JSON.parse(declined as string)).toMatchObject({ id: "d1", cancelled: true });
+	expect(pi.record.answers).toEqual([{ id: "d1", cancelled: true }]);
 	const error = chunks.find((chunk) => chunk.type === EventType.RUN_ERROR);
 	expect((error as { message: string }).message).toContain("declined");
 	expect((error as { message: string }).message).not.toContain("is blocked");
@@ -604,28 +553,24 @@ test("a second dialog in the continuation re-interrupts on the new run", async (
 });
 
 test("a fire-and-forget UI request is NOT cancelled — nothing is waiting on it", async () => {
-	const written: string[] = [];
-	let consumeData: ((chunk: string) => void) | undefined;
-	const transport: PiTransport = {
-		write: (line) => {
-			written.push(line);
-			const parsed = JSON.parse(line) as { id: string; type: string };
-			if (parsed.type !== "prompt") return;
+	const pi = fakeSession({
+		onPrompt: (context, _request, outcome) =>
 			queueMicrotask(() => {
-				consumeData?.('{"type":"extension_ui_request","id":"n1","method":"setStatus","statusKey":"x"}\n');
-				consumeData?.(`{"id":"${parsed.id}","type":"response","command":"prompt","success":true}\n`);
-				consumeData?.('{"type":"agent_settled"}\n');
-			});
-		},
-		onData: (consume) => {
-			consumeData = consume;
-		},
-		onClose: () => undefined,
-	};
-	for await (const _chunk of runChat({ transport, ids, prompt: "hi", onProblem: undefined, ...runWiring() })) {
+				context.emit('{"type":"extension_ui_request","id":"n1","method":"setStatus","statusKey":"x"}');
+				outcome.onAccepted();
+				context.emit('{"type":"agent_settled"}');
+			}),
+	});
+	for await (const _chunk of runChat({
+		session: pi.session,
+		ids,
+		prompt: "hi",
+		onProblem: undefined,
+		...runWiring(),
+	})) {
 		// drain
 	}
-	expect(written.some((line) => line.includes("extension_ui_response"))).toBe(false);
+	expect(pi.record.answers).toHaveLength(0);
 });
 
 /**
@@ -637,29 +582,21 @@ test("a fire-and-forget UI request is NOT cancelled — nothing is waiting on it
  * past 120 seconds with the guard "in place".
  */
 test("dropped status heartbeats do NOT keep a stalled run alive", async () => {
-	let consumeData: ((chunk: string) => void) | undefined;
 	let heartbeat: ReturnType<typeof setInterval> | undefined;
-	const transport: PiTransport = {
-		write: (line) => {
-			const parsed = JSON.parse(line) as { id: string; type: string };
-			if (parsed.type !== "prompt") return;
+	const pi = fakeSession({
+		onPrompt: (context, _request, outcome) =>
 			queueMicrotask(() => {
-				consumeData?.(`{"id":"${parsed.id}","type":"response","command":"prompt","success":true}\n`);
+				outcome.onAccepted();
 				// Traffic that produces no chunks, faster than the deadline — exactly the
 				// shape that defeated the first implementation.
 				heartbeat = setInterval(() => {
-					consumeData?.('{"type":"extension_ui_request","id":"h","method":"setStatus","statusKey":"quota"}\n');
+					context.emit('{"type":"extension_ui_request","id":"h","method":"setStatus","statusKey":"quota"}');
 				}, 10);
-			});
-		},
-		onData: (consume) => {
-			consumeData = consume;
-		},
-		onClose: () => undefined,
-	};
+			}),
+	});
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport,
+		session: pi.session,
 		ids,
 		prompt: "hello",
 		onProblem: undefined,
@@ -674,31 +611,23 @@ test("dropped status heartbeats do NOT keep a stalled run alive", async () => {
 });
 
 test("real output DOES renew the deadline, so a slow answer is not cut off", async () => {
-	let consumeData: ((chunk: string) => void) | undefined;
-	const transport: PiTransport = {
-		write: (line) => {
-			const parsed = JSON.parse(line) as { id: string; type: string };
-			if (parsed.type !== "prompt") return;
+	const pi = fakeSession({
+		onPrompt: (context, _request, outcome) =>
 			queueMicrotask(async () => {
-				consumeData?.(`{"id":"${parsed.id}","type":"response","command":"prompt","success":true}\n`);
+				outcome.onAccepted();
 				// Four deltas at 30ms with a 60ms window: each renews, so none is cut off.
 				for (let index = 0; index < 4; index += 1) {
 					await new Promise((resolve) => setTimeout(resolve, 30));
-					consumeData?.(
-						`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"x"}}\n`,
+					context.emit(
+						'{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"x"}}',
 					);
 				}
-				consumeData?.('{"type":"agent_settled"}\n');
-			});
-		},
-		onData: (consume) => {
-			consumeData = consume;
-		},
-		onClose: () => undefined,
-	};
+				context.emit('{"type":"agent_settled"}');
+			}),
+	});
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport,
+		session: pi.session,
 		ids,
 		prompt: "hello",
 		onProblem: undefined,
@@ -724,7 +653,7 @@ test("a slash-command run closes shortly after its ack, not at the no-progress g
 	const startedAt = Date.now();
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport: pi.transport,
+		session: pi.session,
 		ids,
 		prompt: "/mode auto",
 		onProblem: undefined,
@@ -745,7 +674,7 @@ test("⚠ an ordinary prompt is NOT closed by its ack — ack means accepted, no
 	const startedAt = Date.now();
 	const chunks = [];
 	for await (const chunk of runChat({
-		transport: pi.transport,
+		session: pi.session,
 		ids,
 		prompt: "hello",
 		onProblem: undefined,
@@ -766,7 +695,7 @@ test("an answered slash-command dialog closes its continuation at the grace too"
 	const wiring = runWiring();
 	const chunks1 = [];
 	for await (const chunk of runChat({
-		transport: pi.transport,
+		session: pi.session,
 		ids,
 		prompt: "/mode",
 		onProblem: undefined,

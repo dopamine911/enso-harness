@@ -203,6 +203,65 @@ export const PiProcessHandle = Type.Object({
 export type PiProcessHandle = Static<typeof PiProcessHandle>;
 
 /**
+ * ── The in-process session contract (#69) ────────────────────────────────────────────────
+ *
+ * What the web server's streaming loop needs from a pi session, whatever hosts it. Today
+ * the host is an in-process `AgentSession` (`packages/web/src/host/agent-host.ts`); the
+ * shape is what `session.ts` used to obtain from the rpc subprocess through `PiRpcClient`,
+ * lifted one level: typed events in, typed commands out, no wire.
+ *
+ * ⚠ ACCEPTANCE AND COMPLETION ARE SEPARATE SIGNALS, deliberately. `prompt` reports
+ * acceptance through `onAccepted` — pi's `preflightResult(true)`, which fires when the
+ * prompt was accepted OR, for an extension command, when the command has COMPLETED (the
+ * command runs inside prompt preflight; `/mode`'s unanswered dialog once blocked it for the
+ * whole pre-#27 hang). Completion of an ordinary run is the `agent_settled` EVENT, never a
+ * callback. The streaming loop's slash-command quick-close depends on that exact split.
+ */
+
+/** An answer to a blocking dialog, keyed to the request id the `extension_ui_request` carried. */
+export type PiDialogResponse = { id: string } & ({ cancelled: true } | { value: string } | { confirmed: boolean });
+
+export interface PiPromptRequest {
+	message: string;
+	images?: readonly PiImageContent[];
+	/** Required by pi when the session is already streaming — otherwise `prompt` rejects. */
+	streamingBehavior?: PiStreamingBehavior;
+}
+
+export interface PiPromptOutcome {
+	/** Preflight accepted the prompt (or an extension command finished). NOT run completion. */
+	onAccepted: () => void;
+	/** Preflight rejected the prompt before acceptance; the run never started. */
+	onRejected: (reason: string) => void;
+}
+
+/** ⚠ Function-bearing, like `PiTransport` above — see that section's header for the rule. */
+export const PiSession = Type.Object({
+	/** Fire a prompt. Never awaits the run — see the section header. */
+	prompt: Type.Unsafe<(request: PiPromptRequest, outcome: PiPromptOutcome) => void>(
+		Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
+	),
+	/** Deliver a human's answer (or cancellation) to a pending blocking dialog. */
+	answerDialog: Type.Unsafe<(response: PiDialogResponse) => void>(Type.Function([Type.Unknown()], Type.Void())),
+	/** The slash commands this session can run — extension commands, prompt templates, skills. Synchronous: read off the live registry, no round trip. */
+	listCommands: Type.Unsafe<() => PiCommand[]>(Type.Function([], Type.Unknown())),
+	/**
+	 * Receive every event in pi's rpc wire shape (the shape `map-events.ts` consumes), plus
+	 * `extension_ui_request` and `extension_error` records the host synthesises. Events
+	 * emitted before the first subscriber are buffered and replayed to it, so nothing an
+	 * extension says at `session_start` is lost. Returns the unsubscribe.
+	 */
+	subscribe: Type.Unsafe<(onEvent: (event: PiRpcEvent) => void) => () => void>(
+		Type.Function([Type.Unknown()], Type.Unknown()),
+	),
+	/** Abort the in-flight run and wait until the agent is idle. The session survives. */
+	abort: Type.Unsafe<() => Promise<void>>(Type.Function([], Type.Unknown())),
+	/** Cancel pending dialogs, tell extensions the session is shutting down, release the session. Idempotent. */
+	dispose: Type.Unsafe<() => void>(Type.Function([], Type.Void())),
+});
+export type PiSession = Static<typeof PiSession>;
+
+/**
  * Everything `PiRpcClient` is constructed with.
  *
  * ⚠ `onParseError` is separate from `onEvent` and never silent: a dropped record looks
