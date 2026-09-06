@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createGuards, type GuardDependencies } from "../index.ts";
+import { createCodingTools, createPowerShellTool, createReadOnlyTools } from "@earendil-works/pi-coding-agent";
+import { createGuards, GUARD_POLICY_TOOL_NAMES, type GuardDependencies } from "../index.ts";
 
 type Handler = (event: unknown, extensionContext: unknown) => { block?: boolean; reason?: string } | undefined;
 
@@ -14,6 +15,11 @@ interface GuardRuntime {
 }
 
 /** pi's shipped tool set, as `getAllTools` returns it (probed live 2026-09-04). */
+/**
+ * Hand-copied from pi, and PINNED against pi's real tool factories by the test at the end
+ * of this file (#53 S2): a tool pi adds or renames fails there, instead of this list quietly
+ * describing a pi that no longer exists.
+ */
 const PI_SHIPPED_TOOL_NAMES = ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"];
 
 /**
@@ -545,4 +551,20 @@ test("a read through the @ prefix confers knowledge of the plain path (#10 agree
 	const { runtime, cwd, existingFile } = readPreconditionFixture();
 	runtime.toolResult(toolResultEvent("read", `@${existingFile}`, false), { cwd });
 	expect(runtime.toolCall(toolCallEvent("write", existingFile), { cwd })).toBeUndefined();
+});
+
+// ⚠ The list above is a copy of pi's registry. This is the receipt that it still matches:
+// the three exported factories (`createCodingTools`, `createReadOnlyTools`,
+// `createPowerShellTool`) together build every tool pi 0.84.4 ships (`allToolNames` in
+// dist/core/tools/index.js is not on the export map, so the factories are the reachable
+// source of truth). A new pi mutator would land in this diff, not fall to the reader gate
+// unnoticed — and `GUARD_POLICY_TOOL_NAMES` must name only tools pi actually registers.
+test("⚠ PI_SHIPPED_TOOL_NAMES matches the tools pi's factories build, and the guard policy names only real tools", () => {
+	const piTools = [...createCodingTools(cwd), ...createReadOnlyTools(cwd), createPowerShellTool(cwd)];
+	const realNames = [...new Set(piTools.map((tool) => tool.name))].sort();
+	expect(realNames).toEqual([...PI_SHIPPED_TOOL_NAMES].sort());
+	for (const policyName of GUARD_POLICY_TOOL_NAMES) expect(realNames).toContain(policyName);
+	// And the policy list is EXACTLY the gated set — the audit's mutation (drop `edit`) failed
+	// no test, because the session_start check iterates whatever the list happens to hold.
+	expect([...GUARD_POLICY_TOOL_NAMES].sort()).toEqual(["bash", "edit", "powershell", "read", "write"]);
 });
