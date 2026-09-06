@@ -844,3 +844,33 @@ test("a resume carrying two entries is refused and the question stays parked", a
 	expect(pi.record.answers).toHaveLength(0);
 	expect(wiring.registry.peek("t1")?.dialogId).toBe("d1");
 });
+
+test("⚠ a second question on a parked thread displaces the first: declined, reported, pump released", async () => {
+	const first = dialogPi(SELECT_DIALOG);
+	const wiring = runWiring();
+	await runIntoDialog(first, wiring);
+	expect(wiring.registry.peek("t1")?.dialogId).toBe("d1");
+
+	// A second run on the SAME thread (another tab, a retry) reaches its own dialog.
+	const second = dialogPi(SELECT_DIALOG.replace('"id":"d1"', '"id":"d2"'));
+	const secondOutcome = { parkedAwaitingAnswer: false };
+	for await (const _chunk of runChat({
+		session: second.session,
+		ids,
+		prompt: "/mode",
+		registry: wiring.registry,
+		stopPi: wiring.stopPi,
+		outcome: secondOutcome,
+		onProblem: undefined,
+	})) {
+		// drain
+	}
+
+	// One thread, one live question: the first was declined on the wire and reported.
+	expect(first.record.answers).toEqual([{ id: "d1", cancelled: true }]);
+	expect(wiring.problems.some((problem) => String(problem).includes("displaced"))).toBe(true);
+	expect(first.record.subscriberCount()).toBe(0);
+	expect(wiring.registry.peek("t1")?.dialogId).toBe("d2");
+	expect(second.record.subscriberCount()).toBe(1);
+	expect(secondOutcome.parkedAwaitingAnswer).toBe(true);
+});
