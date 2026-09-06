@@ -78,8 +78,9 @@ test("a non-vendor manifest path is not required to exist", async () => {
 		agentDir: tmpdir(),
 		port: 0,
 	});
+	// It started: the URL is bound. (Was `expect(true).toBe(true)` — #53 S3.)
+	expect(started.url).toContain("127.0.0.1");
 	await started.close();
-	expect(true).toBe(true);
 });
 
 test("refuses when the harness package.json itself is absent", () => {

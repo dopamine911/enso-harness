@@ -13,7 +13,9 @@ import * as core from "../index.ts";
  */
 
 const packagesDir = join(import.meta.dir, "..", "..", "..");
-const SCHEMA_DECLARATION = /^export const [A-Za-z][A-Za-z0-9]* = Type\./m;
+// Matches `export const X = Type.…` AND the annotated form `export const X: TSchema = Type.…`
+// (#53 S3: the bare regex let an annotated declaration through).
+const SCHEMA_DECLARATION = /^export const [A-Za-z][A-Za-z0-9]*(?:: [^=\n]+)? = Type\./m;
 
 /** Every `.ts`/`.tsx` under `packages/`, excluding node_modules and build output. */
 function sourceFiles(directory: string): string[] {
