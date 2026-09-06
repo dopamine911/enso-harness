@@ -111,3 +111,14 @@ test("the bar renders the cost and the last request's prompt size, labelled hone
 	const visibleText = rendered.replace(/<[^>]*>/g, " ");
 	expect(visibleText).not.toContain("context");
 });
+
+// ⚠ Every other fixture in this file sets cacheWrite: 0, so deleting the `+ usage.cacheWrite`
+// term from the prompt-token sum left the suite green (#53 S2). This one pins the term.
+test("last-request tokens include cacheWrite", () => {
+	applyZenMessageUsage({
+		kind: "message-usage",
+		role: "assistant",
+		usage: { input: 100, output: 1, cacheRead: 20, cacheWrite: 7, totalCost: 0 },
+	});
+	expect(getSessionStatsSnapshot().lastRequestInputTokens).toBe(127);
+});

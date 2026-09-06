@@ -30,10 +30,12 @@ test("a start/end marker is carried as unmapped, never dropped", () =>
 	));
 
 // --- tool lifecycle
+// ⓘ Full-envelope `toEqual` wherever the whole shape is known (#53 S2): a `toMatchObject`
+// on a subset let a renamed or extra field ride through unnoticed.
 test("tool_execution_start becomes a tool call", () =>
 	expect(
 		mapPiEvent({ type: "tool_execution_start", toolCallId: "c1", toolName: "bash", args: { command: "ls" } }),
-	).toMatchObject({ kind: "tool-call", toolCallId: "c1", toolName: "bash" }));
+	).toEqual({ kind: "tool-call", toolCallId: "c1", toolName: "bash", args: { command: "ls" } }));
 
 test("a partial result is incomplete and not an error", () => {
 	const observed = mapPiEvent({
@@ -42,7 +44,14 @@ test("a partial result is incomplete and not an error", () => {
 		toolName: "bash",
 		partialResult: { content: [{ type: "text", text: "partial…" }], details: { truncation: null } },
 	});
-	expect(observed).toMatchObject({ kind: "tool-result", text: "partial…", complete: false, isError: false });
+	expect(observed).toEqual({
+		kind: "tool-result",
+		toolCallId: "c1",
+		toolName: "bash",
+		text: "partial…",
+		complete: false,
+		isError: false,
+	});
 });
 
 test("a completed result is complete", () =>
@@ -54,7 +63,14 @@ test("a completed result is complete", () =>
 			result: { content: [{ type: "text", text: "total 48" }] },
 			isError: false,
 		}),
-	).toMatchObject({ kind: "tool-result", text: "total 48", complete: true, isError: false }));
+	).toEqual({
+		kind: "tool-result",
+		toolCallId: "c1",
+		toolName: "bash",
+		text: "total 48",
+		complete: true,
+		isError: false,
+	}));
 
 // ⚠ The only signal a refused call has. pi documents no distinct "blocked" event, so a
 // guard's `{block:true}` shape on the wire is unverified — any error result must display.
@@ -147,8 +163,9 @@ test("a notify carries its message and a declared notifyType", () =>
 			message: "Mode set to Plan Mode",
 			notifyType: "info",
 		}),
-	).toMatchObject({
+	).toEqual({
 		kind: "extension-ui-request",
+		id: "n1",
 		method: "notify",
 		blocking: false,
 		message: "Mode set to Plan Mode",
@@ -196,7 +213,7 @@ test("a confirm dialog's message stays inside dialog and off the observation roo
 test("extension_error surfaces with its origin", () =>
 	expect(
 		mapPiEvent({ type: "extension_error", extensionPath: "/x/guards.ts", event: "tool_call", error: "boom" }),
-	).toMatchObject({ kind: "extension-error", extensionPath: "/x/guards.ts", event: "tool_call", error: "boom" }));
+	).toEqual({ kind: "extension-error", extensionPath: "/x/guards.ts", event: "tool_call", error: "boom" }));
 
 // ⚠ #24 acceptance: agent_end with willRetry must not present as completion.
 test("agent_end is a run ending, not a settle — and carries willRetry", () => {
@@ -255,7 +272,11 @@ test("a toolResult message_end WITH usage is counted spend", () =>
 			type: "message_end",
 			message: { role: "toolResult", usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0 } },
 		}),
-	).toMatchObject({ kind: "message-usage", role: "toolResult" }));
+	).toEqual({
+		kind: "message-usage",
+		role: "toolResult",
+		usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0 },
+	}));
 
 test("a toolResult message_end WITHOUT usage stays unmapped — no spend to count", () =>
 	expect(kindOf({ type: "message_end", message: { role: "toolResult" } })).toBe("unmapped"));
@@ -276,6 +297,42 @@ test("a message_end with no readable message stays unmapped", () =>
 // ⚠ The design rule: there is no skip case.
 test("an unmodelled event is carried through with its payload intact", () => {
 	const observed = mapPiEvent({ type: "some_future_event", detail: 42 });
-	expect(observed.kind).toBe("unmapped");
-	expect(observed).toMatchObject({ event: { type: "some_future_event", detail: 42 } });
+	expect(observed).toEqual({ kind: "unmapped", event: { type: "some_future_event", detail: 42 } });
 });
+
+// --- usage: zero versus absent (#53 S2, adjacent to #45)
+// `usage: {}` is a real shape pi can emit (an errored request); absent means "this delta
+// carries no accounting". They must not collapse into one another: the browser's stats
+// treat an all-zero usage as a failed request and an absent one as nothing to fold.
+test("a delta with usage {} carries an all-zero usage; a delta without usage carries none", () => {
+	const withEmptyUsage = mapPiEvent({
+		type: "message_update",
+		usage: {},
+		assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "x" },
+	});
+	expect(withEmptyUsage).toEqual({
+		kind: "text-delta",
+		contentIndex: 0,
+		delta: "x",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	});
+	const withoutUsage = mapPiEvent({
+		type: "message_update",
+		assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "x" },
+	});
+	expect(withoutUsage).toEqual({ kind: "text-delta", contentIndex: 0, delta: "x" });
+});
+
+test("cacheWrite and cost.total are read from usage, not defaulted", () =>
+	expect(
+		mapPiEvent({
+			type: "message_update",
+			usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: { total: 0.5 } },
+			assistantMessageEvent: { type: "text_delta", contentIndex: 2, delta: "x" },
+		}),
+	).toEqual({
+		kind: "text-delta",
+		contentIndex: 2,
+		delta: "x",
+		usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, totalCost: 0.5 },
+	}));
