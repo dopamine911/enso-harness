@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, renameSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createSessionReadTracker } from "../read-tracker.ts";
@@ -85,4 +85,49 @@ test("reset forgets everything", () => {
 	tracker.recordKnownPath(filePath);
 	tracker.reset();
 	expect(tracker.classifyPath(filePath)).toBe("unknown");
+});
+
+// ⚠ pi's own revision stamp is `dev:ino:size:mtimeNs:ctimeNs` (dist/utils/paths.js
+// getFileRevision). A same-size rewrite with mtime pinned back defeated a stamp of
+// mtime+size alone (#53 S3); ctime cannot be pinned by `utimes`, and a replace-by-rename
+// changes the inode.
+// ⓘ The mtime is pinned to a whole-millisecond value BEFORE recording, because `utimes`
+// truncates to milliseconds — pinning "back" to a stat's sub-millisecond mtime would move
+// it, and the test would pass for the wrong reason (it did, on the first run).
+const PINNED_MTIME = new Date("2026-01-01T00:00:00.000Z");
+
+/**
+ * ⚠ `utimes` also stamps ctime with the CURRENT time, and the kernel's file-timestamp
+ * clock is coarse (one scheduler tick, up to 10 ms on Linux): two `utimes` calls inside
+ * one tick produce identical ctimes and a fresh-looking file. Waiting past a tick between
+ * record and rewrite is what makes the ctime move observable. Flaked once without it.
+ */
+const KERNEL_TIMESTAMP_TICK_MS = 25;
+const pastOneKernelTick = () => new Promise<void>((resolve) => setTimeout(resolve, KERNEL_TIMESTAMP_TICK_MS));
+
+test("a same-size rewrite with mtime pinned classifies as stale (ctime moved)", async () => {
+	const tracker = createSessionReadTracker();
+	const filePath = join(root, "same-size.ts");
+	writeFileSync(filePath, "content");
+	utimesSync(filePath, PINNED_MTIME, PINNED_MTIME);
+	tracker.recordKnownPath(filePath);
+	await pastOneKernelTick();
+	writeFileSync(filePath, "CONTENT");
+	utimesSync(filePath, PINNED_MTIME, PINNED_MTIME);
+	expect(statSync(filePath).mtimeMs).toBe(PINNED_MTIME.getTime());
+	expect(tracker.classifyPath(filePath)).toBe("stale");
+});
+
+test("a replace-by-rename with identical bytes and pinned mtime classifies as stale (inode moved)", () => {
+	const tracker = createSessionReadTracker();
+	const filePath = join(root, "renamed-over.ts");
+	writeFileSync(filePath, "content");
+	utimesSync(filePath, PINNED_MTIME, PINNED_MTIME);
+	tracker.recordKnownPath(filePath);
+	const replacement = join(root, "renamed-over.tmp");
+	writeFileSync(replacement, "content");
+	renameSync(replacement, filePath);
+	utimesSync(filePath, PINNED_MTIME, PINNED_MTIME);
+	expect(statSync(filePath).mtimeMs).toBe(PINNED_MTIME.getTime());
+	expect(tracker.classifyPath(filePath)).toBe("stale");
 });
