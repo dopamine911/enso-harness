@@ -18,14 +18,14 @@ const repoRoot = findRepoRoot(import.meta.url);
 const agentDir = zenAgentDir(repoRoot);
 mkdirSync(agentDir, { recursive: true });
 
-const { url } = startZenServer({
+const { listening } = startZenServer({
 	cwd,
 	harnessPackageDir: harnessPackageDir(repoRoot),
 	agentDir,
 	onProblem: (problem) => console.error("[zen-server]", problem),
 });
 
-console.error(`[zen-server] listening on ${url}`);
+console.error(`[zen-server] listening on ${await listening}`);
 console.error(`[zen-server]   pi cwd:   ${cwd}`);
 console.error(`[zen-server]   package:  ${harnessPackageDir(repoRoot)}`);
 console.error(`[zen-server]   agentDir: ${agentDir}`);
