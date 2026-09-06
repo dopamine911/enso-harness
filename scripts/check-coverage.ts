@@ -23,6 +23,11 @@
  * Ratchet 2026-09-05 (#49 first pass, 56 files): lcov 86.33% lines / 87.47% functions after
  * the dialog components gained static renders (chat-screen.tsx 14.89% → 40.89% lines).
  * Same margin as the original: ~2.5 points under the measurement, rounded down.
+ * ⓘ Functions DIPPED from 88.00% on main while lines rose: bun counts a function only once
+ * the code that declares it has run, so rendering the components materialised their
+ * inline onClick handlers (chat-screen FNF 9 → 16, FNH 0 → 4) without any click hitting
+ * them. The function metric is soft on this repo for exactly that reason; lines carry the
+ * gate.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
