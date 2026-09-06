@@ -19,13 +19,17 @@
  * table 86.58% / 85.57% — the table flatters line counts). Floored a margin under the lcov
  * measurement. The main line-coverage debt is chat-screen.tsx (the UI components have live
  * receipts, no unit renders). Ratchet UP as coverage grows; never down without its own PR.
+ *
+ * Ratchet 2026-09-05 (#49 first pass, 56 files): lcov 86.33% lines / 87.47% functions after
+ * the dialog components gained static renders (chat-screen.tsx 14.89% → 40.89% lines).
+ * Same margin as the original: ~2.5 points under the measurement, rounded down.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { findRepoRoot } from "../packages/core/src/index.ts";
 
-export const TOTAL_LINE_COVERAGE_FLOOR = 0.71;
-export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.82;
+export const TOTAL_LINE_COVERAGE_FLOOR = 0.83;
+export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.84;
 
 const LCOV_PATH = join(findRepoRoot(import.meta.url), "coverage", "lcov.info");
 
