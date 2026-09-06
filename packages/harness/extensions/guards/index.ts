@@ -148,9 +148,20 @@ const MUTATING_PATH_TOOLS = new Set([TOOL_WRITE, TOOL_EDIT]);
  */
 const KNOWLEDGE_CONFERRING_TOOLS = new Set([TOOL_READ, TOOL_WRITE]);
 
+/**
+ * The tool's arguments as a plain record, whatever actually arrived. pi's contract says
+ * `input` is an object, but this handler must never throw (a throwing hook wedges print
+ * mode; in-process it yields a session with the guard half-set-up — see the header), so
+ * a missing or non-object `input` reads as "no arguments" rather than as a TypeError.
+ */
+function inputRecordOf(event: ToolCallEvent | ToolResultEvent): Record<string, unknown> {
+	const input: unknown = event.input;
+	if (typeof input !== "object" || input === null) return {};
+	return input as Record<string, unknown>;
+}
+
 function pathArgumentOf(event: ToolCallEvent | ToolResultEvent): string | undefined {
-	const input = event.input as Record<string, unknown>;
-	const value = input.path;
+	const value = inputRecordOf(event).path;
 	return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
@@ -262,7 +273,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
 		// --- bash/powershell (#9): deny first, patch last — a denied command must never
 		// have had its input mutated.
 		if (toolName === TOOL_BASH || toolName === TOOL_POWERSHELL) {
-			const input = event.input as Record<string, unknown>;
+			const input = inputRecordOf(event);
 			const command = typeof input.command === "string" ? input.command : "";
 
 			// 1. cc-safety-net (destructive commands + secret access THROUGH bash) — as a
