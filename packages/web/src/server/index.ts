@@ -362,12 +362,17 @@ export function startZenServer(options: ZenServerOptions) {
 
 	// Resolves with the URL of the port the OS actually bound — the same as `url` unless the
 	// caller asked for port 0 (tests do), where `url` would name a port that does not exist.
-	const listening = new Promise<string>((resolve) => {
+	const listening = new Promise<string>((resolve, reject) => {
 		server.once("listening", () => {
 			const address = server.address();
 			const boundPort = typeof address === "object" && address !== null ? address.port : port;
 			resolve(`http://${LOOPBACK_ONLY}:${boundPort}`);
 		});
+		// A bind failure emits 'error' (handled above), never 'listening'. Under Bun the
+		// 'listening' event does not re-fire afterwards, so without this the promise would
+		// hang forever and any `await listening` caller (dev.ts) would dangle silently. The
+		// onProblem handler already reported the cause; this only settles the wait.
+		server.once("error", reject);
 	});
 	server.listen(port, LOOPBACK_ONLY);
 	return {

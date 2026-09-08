@@ -225,3 +225,79 @@ test("a malformed body is a plain 400, no session built", async () => {
 	expect(response.status).toBe(400);
 	expect(built).toHaveLength(0);
 });
+
+test("⚠ a bind conflict rejects `listening` instead of hanging, and reports the clash (#81 review)", async () => {
+	const { host } = fakeHost({ onPrompt: neverPrompted });
+	// Occupy a real port by letting the OS pick one (port 0).
+	const first = startZenServer({
+		cwd: tmpdir(),
+		harnessPackageDir: emptyHarnessDir(),
+		agentDir: mkdtempSync(join(tmpdir(), "zen-handler-agent-")),
+		port: 0,
+		host,
+	});
+	openServers.push(first);
+	const occupied = Number(new URL(await first.listening).port);
+
+	// Asking for the same port must not dangle: before the fix `listening` never settled
+	// (Bun does not re-fire 'listening' after an 'error'), so `await listening` hung forever.
+	// Now it rejects, and the human-readable clash still reaches `onProblem`.
+	const problems: unknown[] = [];
+	const second = startZenServer({
+		cwd: tmpdir(),
+		harnessPackageDir: emptyHarnessDir(),
+		agentDir: mkdtempSync(join(tmpdir(), "zen-handler-agent-")),
+		port: occupied,
+		host,
+		onProblem: (problem) => problems.push(problem),
+	});
+	openServers.push(second);
+	await expect(second.listening).rejects.toThrow();
+	expect(problems.some((problem) => typeof problem === "string" && problem.includes("already in use"))).toBe(true);
+});
+
+test("⚠ a client that drops mid-resume aborts the parked run's session exactly once and keeps it (#81 review)", async () => {
+	const { url, built } = await startWith({
+		onPrompt: (emit, _outcome, message) => {
+			if (message === "/mode") emit(SELECT_DIALOG);
+		},
+		onAnswer: (emit) => {
+			// One chunk so the client can observe the resume is live, then it never settles —
+			// the client walks away mid-resume.
+			emit(TEXT_DELTA);
+		},
+	});
+	// First run parks on a dialog; its own response has ended, so only the resume path's
+	// close hook (index.ts:234-238) can fire below.
+	const first = await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("/mode")] });
+	expect(first.at(-1)).toBe(EventType.RUN_FINISHED);
+	expect(built[0]?.aborts).toBe(0);
+
+	// Resume, read one real chunk (proving the loop is running and the close hook is
+	// registered), then drop the connection before the run settles.
+	const controller = new AbortController();
+	const response = await fetch(`${url}/api/chat`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			threadId: "t1",
+			runId: "r2",
+			parentRunId: "r1",
+			resume: [{ interruptId: "d1", status: "resolved", payload: { value: "a" } }],
+			messages: [],
+		}),
+		signal: controller.signal,
+	});
+	const reader = response.body?.getReader();
+	await reader?.read();
+	controller.abort();
+	// Poll the real server-side side effect (the fake session's abort count) rather than a
+	// fixed sleep: the response 'close' → stopParked → session.abort hop crosses the event
+	// loop over real HTTP, with no promise the handler exposes to await directly.
+	for (let attempt = 0; attempt < 50 && (built[0]?.aborts ?? 0) === 0; attempt += 1) {
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	expect(built).toHaveLength(1);
+	expect(built[0]?.aborts).toBe(1);
+	expect(built[0]?.disposed).toBe(0);
+});

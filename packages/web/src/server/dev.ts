@@ -25,7 +25,12 @@ const { listening } = startZenServer({
 	onProblem: (problem) => console.error("[zen-server]", problem),
 });
 
-console.error(`[zen-server] listening on ${await listening}`);
-console.error(`[zen-server]   pi cwd:   ${cwd}`);
-console.error(`[zen-server]   package:  ${harnessPackageDir(repoRoot)}`);
-console.error(`[zen-server]   agentDir: ${agentDir}`);
+try {
+	console.error(`[zen-server] listening on ${await listening}`);
+	console.error(`[zen-server]   pi cwd:   ${cwd}`);
+	console.error(`[zen-server]   package:  ${harnessPackageDir(repoRoot)}`);
+	console.error(`[zen-server]   agentDir: ${agentDir}`);
+} catch {
+	// The bind failed; onProblem already printed why. Exit non-zero instead of dangling.
+	process.exitCode = 1;
+}
