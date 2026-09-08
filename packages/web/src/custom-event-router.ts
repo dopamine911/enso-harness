@@ -28,6 +28,7 @@ import { applyZenMessageUsage } from "./session-stats.tsx";
  * (`zen.unmapped`) fall through untouched — see the mapper for why they exist at all.
  */
 export function routeZenCustomEvent(eventType: string, data: unknown): void {
+	recordCustomChunk(eventType, data);
 	if (eventType === ZEN_CUSTOM_EVENT_ENTRY) {
 		// One persisted entry, two views (#84): the transcript line (history) and the
 		// current-mode store (state). Both read picc's shape through the same core helper.
@@ -51,4 +52,40 @@ export function routeZenCustomEvent(eventType: string, data: unknown): void {
 	// unrecognised value degrades to an untyped notification, never a validation failure.
 	const notifyType = Check(ZenNotifyType, observation.notifyType) ? observation.notifyType : undefined;
 	pushZenNotification(observation.message, notifyType);
+}
+
+// ── the last N chunks, for the debug drawer (#86) ─────────────────────────────
+// This function is the ONE path every CUSTOM chunk crosses, which makes it the honest
+// place to keep "what the browser was actually told". A fixed-size ring: old chunks fall
+// off the front, and a long session costs nothing extra.
+
+export interface RecordedCustomChunk {
+	/** Monotonic per page load — the chunk's identity, since name + time can collide. */
+	readonly sequence: number;
+	readonly name: string;
+	readonly value: unknown;
+	/** ISO 8601, when the router saw it. */
+	readonly receivedAt: string;
+}
+
+/** Enough to see a whole run's worth (a receipt, a few entries, usage) without scrolling. */
+export const RECENT_CUSTOM_CHUNK_CAPACITY = 50;
+
+const recentChunks: RecordedCustomChunk[] = [];
+let nextSequence = 0;
+
+function recordCustomChunk(name: string, value: unknown): void {
+	nextSequence += 1;
+	recentChunks.push({ sequence: nextSequence, name, value, receivedAt: new Date().toISOString() });
+	if (recentChunks.length > RECENT_CUSTOM_CHUNK_CAPACITY) recentChunks.shift();
+}
+
+/** Oldest first. A copy, so a consumer cannot mutate the record. */
+export function getRecentCustomChunks(): readonly RecordedCustomChunk[] {
+	return [...recentChunks];
+}
+
+/** Test seam: forget the recorded chunks between cases. Never called from production code. */
+export function clearRecentCustomChunksForTest(): void {
+	recentChunks.length = 0;
 }

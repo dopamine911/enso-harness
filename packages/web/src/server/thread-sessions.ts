@@ -53,10 +53,27 @@ export interface ThreadSessions {
 	release(threadId: string): void;
 	/** Abort the thread's run in flight (client gone, dialog evicted). Never disposes. */
 	stop(threadId: string): void;
+	/**
+	 * The thread's hosted session IF it is live — never creates one (#86). Looking must
+	 * not be the thing that spins pi up; `acquire` is for runs.
+	 */
+	peek(threadId: string): ThreadView | undefined;
+	/** Every live thread, for the inspection listing. Never creates. */
+	list(): ThreadView[];
 	/** Dispose every session — server shutdown. */
 	shutdown(): void;
 	/** Observable state for tests. */
 	liveThreadCount(): number;
+}
+
+/** A live thread as inspection sees it: the session, and whether a run holds it. */
+export interface ThreadView {
+	readonly threadId: string;
+	readonly hosted: HostedSession;
+	/** Acquired and not yet released — a run in flight, or a dialog parked on it. */
+	readonly busy: boolean;
+	/** The last `acquire` or `release`, epoch milliseconds. */
+	readonly lastActivityAt: number;
 }
 
 interface ThreadEntry {
@@ -64,6 +81,13 @@ interface ThreadEntry {
 	idleTimer: ReturnType<typeof setTimeout> | undefined;
 	/** The abort currently running, awaited by the next `acquire`. */
 	abortInFlight: Promise<void> | undefined;
+	/** Set by `acquire`, cleared by `release` — so a parked thread reads busy until its resume releases. */
+	busy: boolean;
+	lastActivityAt: number;
+}
+
+function viewOf(threadId: string, thread: ThreadEntry): ThreadView {
+	return { threadId, hosted: thread.hosted, busy: thread.busy, lastActivityAt: thread.lastActivityAt };
 }
 
 export function createThreadSessions(options: ThreadSessionsOptions): ThreadSessions {
@@ -88,7 +112,13 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 
 	async function buildThread(threadId: string): Promise<ThreadEntry> {
 		const hosted = await createSession();
-		const thread: ThreadEntry = { hosted, idleTimer: undefined, abortInFlight: undefined };
+		const thread: ThreadEntry = {
+			hosted,
+			idleTimer: undefined,
+			abortInFlight: undefined,
+			busy: false,
+			lastActivityAt: Date.now(),
+		};
 		threads.set(threadId, thread);
 		return thread;
 	}
@@ -111,6 +141,8 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 			if (thread.abortInFlight !== undefined) {
 				await thread.abortInFlight;
 			}
+			thread.busy = true;
+			thread.lastActivityAt = Date.now();
 			return thread.hosted.session;
 		},
 		release(threadId: string): void {
@@ -127,6 +159,8 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 			// A pending disposal must never hold the process open on shutdown.
 			idleTimer.unref?.();
 			thread.idleTimer = idleTimer;
+			thread.busy = false;
+			thread.lastActivityAt = Date.now();
 		},
 		stop(threadId: string): void {
 			const thread = threads.get(threadId);
@@ -139,6 +173,13 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 					if (thread.abortInFlight === abort) thread.abortInFlight = undefined;
 				});
 			thread.abortInFlight = abort;
+		},
+		peek(threadId: string): ThreadView | undefined {
+			const thread = threads.get(threadId);
+			return thread === undefined ? undefined : viewOf(threadId, thread);
+		},
+		list(): ThreadView[] {
+			return [...threads.entries()].map(([threadId, thread]) => viewOf(threadId, thread));
 		},
 		shutdown(): void {
 			for (const threadId of [...threads.keys()]) disposeThread(threadId, "server shutdown");

@@ -3,8 +3,15 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventType } from "@ag-ui/core";
-import type { PiPromptOutcome, PiRpcEvent, PiSession } from "@zen/core";
-import type { AgentHost, HostedSession } from "../../host/agent-host.ts";
+import {
+	type PiPromptOutcome,
+	type PiRpcEvent,
+	type PiSession,
+	ZenThreadInspection,
+	ZenThreadSummary,
+} from "@zen/core";
+import { Check } from "typebox/value";
+import type { AgentHost, HostedSession, HostedSessionInspection } from "../../host/agent-host.ts";
 import { startZenServer } from "../index.ts";
 
 /**
@@ -60,7 +67,27 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
 			record.disposed += 1;
 		},
 	};
-	return { hosted: { session, loadedExtensionPaths: [] }, record };
+	// A branch shaped like pi's, with a picc `modes` entry, and NO file on disk — the
+	// unflushed state #86's inspection must report honestly rather than invent (#86).
+	const inspect = (): HostedSessionInspection => ({
+		sessionId: "session-1",
+		cwd: "/fake/cwd",
+		sessionDir: "/fake/agent/sessions/--fake-cwd--",
+		sessionFile: null,
+		entries: [
+			{ type: "session", id: "root", parentId: null, timestamp: "2026-09-08T00:00:00.000Z" },
+			{
+				type: "custom",
+				customType: "modes",
+				data: { mode: "plan" },
+				id: "m1",
+				parentId: "root",
+				timestamp: "2026-09-08T00:00:01.000Z",
+			},
+		],
+		commands: ["mode", "plan"],
+	});
+	return { hosted: { session, loadedExtensionPaths: [], inspect }, record };
 }
 
 function fakeHost(script: FakeSessionScript) {
@@ -238,6 +265,86 @@ test("GET /api/mode reports the fresh-thread mode and picc's modes, and builds n
 		available: ["default", "acceptEdits", "plan", "bypassPermissions", "auto"],
 	});
 	expect(built).toHaveLength(0);
+});
+
+// ── session inspection (#86) ─────────────────────────────────────────────────
+
+// ⚠ LOOKING MUST NOT BUILD. `peek`, never `acquire`: an inspection request for a thread
+// that has never run must be a 404, not the thing that spins pi up for it.
+test("⚠ inspecting an unknown thread is a 404 and builds no session", async () => {
+	const { url, built } = await startWith({ onPrompt: neverPrompted });
+	const listed = await fetch(`${url}/api/threads`);
+	expect(await listed.json()).toEqual([]);
+	const response = await fetch(`${url}/api/threads/never-ran`);
+	expect(response.status).toBe(404);
+	expect(built).toHaveLength(0);
+});
+
+// ⚠ A BAD URL MUST NOT KILL THE SERVER. `decodeURIComponent` throws on a malformed escape,
+// and before the guard that throw escaped the request listener and took the whole process
+// down — every live session with it — from one hand-typed URL (PR #87 review, reproduced).
+// The decisive assertion is the SECOND request: the server is still there to answer it.
+test("⚠ a malformed thread id is a 400, and the server survives to answer the next request", async () => {
+	const { url, built } = await startWith({ onPrompt: neverPrompted });
+	const malformed = await fetch(`${url}/api/threads/%`);
+	expect(malformed.status).toBe(400);
+	const afterwards = await fetch(`${url}/api/threads`);
+	expect(afterwards.status).toBe(200);
+	expect(built).toHaveLength(0);
+});
+
+test("a percent-encoded thread id round-trips to the same live thread", async () => {
+	const { url } = await startWith({
+		onPrompt: (emit, outcome) => {
+			outcome.onAccepted();
+			emit(SETTLED);
+		},
+	});
+	await postRun(url, { threadId: "thread with spaces", runId: "r1", messages: [userMessage("hi")] });
+	const response = await fetch(`${url}/api/threads/${encodeURIComponent("thread with spaces")}`);
+	expect(response.status).toBe(200);
+	expect(await response.json()).toMatchObject({ threadId: "thread with spaces" });
+});
+
+test("GET /api/threads/:id returns the branch as pi holds it, with sessionFile null while unflushed", async () => {
+	const { url } = await startWith({
+		onPrompt: (emit, outcome) => {
+			outcome.onAccepted();
+			emit(SETTLED);
+		},
+	});
+	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("hello")] });
+	const response = await fetch(`${url}/api/threads/t1`);
+	expect(response.status).toBe(200);
+	const inspection: unknown = await response.json();
+	// Closed schema: a host internal cannot leak by an accidental spread.
+	expect(Check(ZenThreadInspection, inspection)).toBe(true);
+	expect(inspection).toMatchObject({
+		threadId: "t1",
+		sessionId: "session-1",
+		sessionFile: null,
+		permissionMode: { mode: "default", available: ["default", "acceptEdits"] },
+		commands: ["mode", "plan"],
+		busy: false,
+		parked: false,
+	});
+	// The branch is verbatim — the picc `modes` entry a reader would cross-check against.
+	const entries = (inspection as ZenThreadInspection).entries;
+	expect(entries).toHaveLength(2);
+	expect(entries[1]).toMatchObject({ type: "custom", customType: "modes", data: { mode: "plan" } });
+});
+
+test("GET /api/threads lists live threads with busy and parked state", async () => {
+	const { url } = await startWith({
+		onPrompt: (emit, _outcome, message) => {
+			if (message === "/mode") emit(SELECT_DIALOG);
+		},
+	});
+	// A parked dialog holds the thread: acquired, never released, a question pending.
+	await postRun(url, { threadId: "parked-thread", runId: "r1", messages: [userMessage("/mode")] });
+	const summaries: unknown = await (await fetch(`${url}/api/threads`)).json();
+	expect(Array.isArray(summaries) && summaries.every((summary) => Check(ZenThreadSummary, summary))).toBe(true);
+	expect(summaries).toMatchObject([{ threadId: "parked-thread", busy: true, parked: true, sessionFile: null }]);
 });
 
 test("⚠ a bind conflict rejects `listening` instead of hanging, and reports the clash (#81 review)", async () => {
