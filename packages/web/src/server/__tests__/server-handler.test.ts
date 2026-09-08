@@ -345,17 +345,27 @@ test("⚠ a malformed thread id is a 400, and the server survives to answer the 
 	expect(built).toHaveLength(0);
 });
 
-test("a percent-encoded thread id round-trips to the same live thread", async () => {
-	const { url } = await startWith({
-		onPrompt: (emit, outcome) => {
-			outcome.onAccepted();
-			emit(SETTLED);
-		},
+// ⚠ THE ID IS A FILENAME. Since #95 pi names the session file after the thread id, so an id
+// from a request is a path component (Claude review on PR #104). Refused at both entry
+// points before anything is built; the traversal never reaches the host.
+test("⚠ a thread id that is not thread-id shaped is a 400 at both entry points, and builds nothing", async () => {
+	const { url, built, requested } = await startWith({ onPrompt: neverPrompted });
+	// The chat body: the id pi would put in a filename.
+	const chat = await fetch(`${url}/api/chat`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ threadId: "../../evil", runId: "r1", messages: [userMessage("hi")] }),
 	});
-	await postRun(url, { threadId: "thread with spaces", runId: "r1", messages: [userMessage("hi")] });
-	const response = await fetch(`${url}/api/threads/${encodeURIComponent("thread with spaces")}`);
-	expect(response.status).toBe(200);
-	expect(await response.json()).toMatchObject({ threadId: "thread with spaces" });
+	expect(chat.status).toBe(400);
+	// The routes: percent-encoding decodes to the same traversal.
+	for (const route of ["", "/history", "/events"]) {
+		const response = await fetch(`${url}/api/threads/${encodeURIComponent("../../evil")}${route}`);
+		expect(response.status).toBe(400);
+	}
+	expect(built).toHaveLength(0);
+	expect(requested).toEqual([]);
+	// And the server is still up.
+	expect((await fetch(`${url}/api/threads`)).status).toBe(200);
 });
 
 test("GET /api/threads/:id returns the branch as pi holds it, with sessionFile null while unflushed", async () => {

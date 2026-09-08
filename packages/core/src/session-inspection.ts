@@ -178,6 +178,24 @@ export function describeThreadEvent(event: ZenThreadEvent): string {
 }
 
 /**
+ * The shape a thread id must have to be trusted (#95, PR #104 review).
+ *
+ * ⚠ Since #95 the browser's thread id IS pi's session id, and pi puts the id in the session
+ * FILENAME (`<timestamp>_<id>.jsonl`). An unconstrained id from a request body or a URL
+ * segment is therefore a path component: `../` walks out of the session dir. The browser
+ * mints UUIDs (`crypto.randomUUID()`), so the accepted set is a strict superset of those
+ * and nothing that means anything to a filesystem — letters, digits, `_`, `-`; a leading
+ * alphanumeric so an id can never read as a flag; capped so it cannot be a filename-length
+ * attack. Checked by the server at BOTH entry points (the chat body and the thread routes);
+ * the host never sees an id that failed here.
+ */
+const ZEN_THREAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+export function isZenThreadId(value: unknown): value is string {
+	return typeof value === "string" && ZEN_THREAD_ID_PATTERN.test(value);
+}
+
+/**
  * One of pi's session files for this workspace (#95), as the rail lists it: a session the
  * user can come back to. `threadId` IS pi's session id — the host creates every session
  * with the browser's thread id (`NewSessionOptions.id`), so the two never need a mapping,

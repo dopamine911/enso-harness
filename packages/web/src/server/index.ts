@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { EventType } from "@ag-ui/core";
 import type { StreamChunk } from "@tanstack/ai";
 import {
+	isZenThreadId,
 	PICC_DEFAULT_PERMISSION_MODE,
 	PICC_PERMISSION_MODES,
 	persistedPermissionMode,
@@ -78,6 +79,26 @@ function readBody(request: IncomingMessage): Promise<string> {
 	});
 }
 
+/**
+ * The run body, parsed and shape-checked. Throws ONLY `Error`s, each carrying the message
+ * the 400 is written with — the handler forwards it without branching.
+ *
+ * ⚠ The thread id reaches the filesystem (pi names the session file after it, #95), so a
+ * body that supplies one that is not thread-id shaped is refused here, before any session
+ * is built. Absent is fine — a client that omits it gets a fresh id. Lives outside
+ * `handleChat` because that function sits at its complexity pin (biome.jsonc, #82).
+ */
+async function readRunBody(request: IncomingMessage): Promise<RunAgentInputBody> {
+	let body: RunAgentInputBody;
+	try {
+		body = JSON.parse(await readBody(request)) as RunAgentInputBody;
+	} catch (error) {
+		throw new Error(`malformed RunAgentInput body: ${String(error)}`);
+	}
+	if (body.threadId !== undefined && !isZenThreadId(body.threadId)) throw new Error("malformed thread id");
+	return body;
+}
+
 /** Last user message, flattened to text. Images are a later step — see the README. */
 function latestUserPrompt(body: RunAgentInputBody): string {
 	const messages = body.messages ?? [];
@@ -101,15 +122,22 @@ function latestUserPrompt(body: RunAgentInputBody): string {
  * request listener has nothing above it — it took the whole dev server down, every live
  * session with it, from one hand-typed URL (PR #87 review, reproduced). A bad id is the
  * caller's problem: 400 written here, `undefined` returned, and the server stays up.
+ *
+ * Since #95 the id is also pi's session id, which pi puts in a FILENAME — so a decoded id
+ * that is not thread-id shaped (`isZenThreadId`: `../x`, spaces, anything a filesystem could
+ * read) is the same 400. Nothing downstream ever sees an id that failed here.
  */
 function decodeThreadId(rawSegment: string, response: ServerResponse): string | undefined {
+	let decoded: string;
 	try {
-		return decodeURIComponent(rawSegment);
+		decoded = decodeURIComponent(rawSegment);
 	} catch {
-		response.writeHead(400, { "Content-Type": "text/plain" });
-		response.end("malformed thread id");
-		return undefined;
+		decoded = "";
 	}
+	if (isZenThreadId(decoded)) return decoded;
+	response.writeHead(400, { "Content-Type": "text/plain" });
+	response.end("malformed thread id");
+	return undefined;
 }
 
 function writeSseEvent(response: ServerResponse, chunk: StreamChunk, sent: EventTail | undefined): void {
@@ -423,11 +451,12 @@ export function startZenServer(options: ZenServerOptions) {
 		if (request.method === "POST" && request.url?.startsWith("/api/chat")) {
 			let body: RunAgentInputBody = {};
 			try {
-				body = JSON.parse(await readBody(request)) as RunAgentInputBody;
+				body = await readRunBody(request);
 			} catch (error) {
 				options.onProblem?.(error);
 				response.writeHead(400, { "Content-Type": "text/plain" });
-				response.end("malformed RunAgentInput body");
+				// `readRunBody` throws only `Error`s with the message the 400 carries.
+				response.end((error as Error).message);
 				return;
 			}
 

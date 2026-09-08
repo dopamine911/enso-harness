@@ -97,6 +97,7 @@ export {
 export {
 	describeSessionEntry,
 	describeThreadEvent,
+	isZenThreadId,
 	type ThreadEventColumns,
 	threadEventColumns,
 	ZenEventProvenance,
