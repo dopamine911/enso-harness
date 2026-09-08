@@ -61,6 +61,36 @@ export async function fetchThreadHistory(threadId: string): Promise<ZenThreadHis
 }
 
 /**
+ * The rail's resume clicks, with the LAST click winning — not the first response (PR #104
+ * review). Two earlier sessions clicked before the first history arrives would otherwise
+ * both apply, so response timing chose the active thread and, with it, where the next
+ * prompt went. A superseded response is dropped whole: not applied, its failure not shown.
+ * The fetcher is injected so the race is testable with controlled resolution order.
+ */
+export function createResumeRequests(
+	fetchHistory: (threadId: string) => Promise<ZenThreadHistory>,
+	onHistory: (history: ZenThreadHistory) => void,
+	onFailure: (message: string) => void,
+): (threadId: string) => void {
+	let latest: string | undefined;
+	return (threadId) => {
+		latest = threadId;
+		fetchHistory(threadId).then(
+			(history) => {
+				if (latest !== threadId) return;
+				latest = undefined;
+				onHistory(history);
+			},
+			(failure: unknown) => {
+				if (latest !== threadId) return;
+				latest = undefined;
+				onFailure(failure instanceof Error ? failure.message : String(failure));
+			},
+		);
+	};
+}
+
+/**
  * The rail's second list: stored sessions this page has NOT already got open. The thread id
  * is pi's session id, so "already open here" is a set lookup — the payoff of one identity.
  */

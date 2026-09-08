@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { createResumableSessionsStore, sessionsNotOnThisPage } from "../resumable-sessions.ts";
+import type { ZenThreadHistory } from "@zen/core";
+import { createResumableSessionsStore, createResumeRequests, sessionsNotOnThisPage } from "../resumable-sessions.ts";
 
 /** #95: a failed refresh remains visible without erasing the last known resumable sessions. */
 test("the resumable-session store validates listings and preserves the last good rows on failure", async () => {
@@ -47,4 +48,85 @@ test("the earlier list excludes every session already owned by this page", () =>
 		},
 	];
 	expect(sessionsNotOnThisPage(stored, new Set(["here"])).map((session) => session.threadId)).toEqual(["earlier"]);
+});
+
+// ── last click wins (PR #104 review) ─────────────────────────────────────────
+
+interface Deferred {
+	promise: Promise<ZenThreadHistory>;
+	resolve: (history: ZenThreadHistory) => void;
+	reject: (error: Error) => void;
+}
+
+/**
+ * A history fetch the test settles by hand, per thread id, in whatever order it wants.
+ * `settled(id)` resolves after the coordinator's own handlers have run — they were attached
+ * to the same promise first — so no timer stands in for "the response was processed".
+ */
+function controlledHistory(): {
+	fetch: (threadId: string) => Promise<ZenThreadHistory>;
+	resolve: (threadId: string) => Promise<void>;
+	reject: (threadId: string, message: string) => Promise<void>;
+} {
+	const pending = new Map<string, Deferred>();
+	const settled = (threadId: string): Promise<void> =>
+		(pending.get(threadId)?.promise ?? Promise.resolve()).then(
+			() => undefined,
+			() => undefined,
+		);
+	return {
+		fetch: (threadId) => {
+			const deferred = Promise.withResolvers<ZenThreadHistory>();
+			pending.set(threadId, deferred);
+			return deferred.promise;
+		},
+		resolve: (threadId) => {
+			pending.get(threadId)?.resolve({ threadId, messages: [], permissionMode: { mode: "default", available: [] } });
+			return settled(threadId);
+		},
+		reject: (threadId, message) => {
+			pending.get(threadId)?.reject(new Error(message));
+			return settled(threadId);
+		},
+	};
+}
+
+test("⚠ two clicks before the first history lands: the FIRST response is dropped even though it arrives last", async () => {
+	const history = controlledHistory();
+	const applied: string[] = [];
+	const failures: string[] = [];
+	const resume = createResumeRequests(
+		history.fetch,
+		(next) => applied.push(next.threadId),
+		(m) => failures.push(m),
+	);
+	resume("first");
+	resume("second");
+	// The slow first response arrives AFTER the second click: superseded, not applied.
+	await history.resolve("first");
+	expect(applied).toEqual([]);
+	await history.resolve("second");
+	expect(applied).toEqual(["second"]);
+	expect(failures).toEqual([]);
+});
+
+test("a superseded request's failure is not shown; the latest request's failure is", async () => {
+	const history = controlledHistory();
+	const applied: string[] = [];
+	const failures: string[] = [];
+	const resume = createResumeRequests(
+		history.fetch,
+		(next) => applied.push(next.threadId),
+		(m) => failures.push(m),
+	);
+	resume("first");
+	resume("second");
+	await history.reject("first", "first went away");
+	await history.reject("second", "409 second is running on this server");
+	expect(applied).toEqual([]);
+	expect(failures).toEqual(["409 second is running on this server"]);
+	// After the latest settles, a new click is a fresh request, not a stale one.
+	resume("third");
+	await history.resolve("third");
+	expect(applied).toEqual(["third"]);
 });

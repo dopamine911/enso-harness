@@ -10,7 +10,7 @@ import {
 } from "@tanstack/ai-react/ui";
 import { isZenDialogSpec, ZEN_DIALOG_KEY, type ZenDialogSpec } from "@zen/core";
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
 	Conversation,
 	ConversationContent,
@@ -27,7 +27,12 @@ import { routeZenCustomEvent } from "./custom-event-router.ts";
 import { createFixtureChat } from "./fixture-conversation.ts";
 import { SessionNotifications } from "./notifications.tsx";
 import { PermissionModeSelect, usePermissionMode } from "./permission-mode.tsx";
-import { createResumableSessionsStore, fetchThreadHistory, sessionsNotOnThisPage } from "./resumable-sessions.ts";
+import {
+	createResumableSessionsStore,
+	createResumeRequests,
+	fetchThreadHistory,
+	sessionsNotOnThisPage,
+} from "./resumable-sessions.ts";
 import { SelectedMessagePart } from "./selected-message-part.tsx";
 import { SessionDebugDrawer } from "./session-debug.tsx";
 import { SessionStatusBar } from "./session-status.tsx";
@@ -645,27 +650,20 @@ export function ChatScreen(): React.ReactNode {
 		if (!(anyBusy || isFixtureMode)) void resumableSessions.refresh();
 	}, [anyBusy]);
 	const pageThreadIds = new Set(threads.map((thread) => thread.threadId));
-	// ⚠ The LAST click wins, not the first response. Two earlier sessions clicked before the
-	// first history arrives would otherwise both apply, so response timing picked the active
-	// thread — and the next prompt went to whichever won (PR #104 review). A superseded
-	// response is dropped whole: not adopted, not activated, its failure not shown.
-	const latestResume = useRef<string | undefined>(undefined);
-	const resume = (threadId: string): void => {
-		latestResume.current = threadId;
-		fetchThreadHistory(threadId).then(
-			(history) => {
-				if (latestResume.current !== threadId) return;
-				latestResume.current = undefined;
-				setResumeError(undefined);
-				setActiveThreadId(adoptThread(history).threadId);
-			},
-			(failure: unknown) => {
-				if (latestResume.current !== threadId) return;
-				latestResume.current = undefined;
-				setResumeError(failure instanceof Error ? failure.message : String(failure));
-			},
-		);
-	};
+	// Last click wins (PR #104 review) — the race lives in `createResumeRequests`, tested there.
+	// The two setters are stable, so the coordinator is created once per page.
+	const resume = useMemo(
+		() =>
+			createResumeRequests(
+				fetchThreadHistory,
+				(history) => {
+					setResumeError(undefined);
+					setActiveThreadId(adoptThread(history).threadId);
+				},
+				setResumeError,
+			),
+		[],
+	);
 	// The debug column (#86) is a right-hand pane, not a bottom drawer: stacked under the
 	// transcript it took forty percent of the height and squeezed the conversation it
 	// exists to explain. Opt-in by `?debug`; open by default when it is, and collapsible
