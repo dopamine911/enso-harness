@@ -336,3 +336,26 @@ test("cacheWrite and cost.total are read from usage, not defaulted", () =>
 		delta: "x",
 		usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, totalCost: 0.5 },
 	}));
+
+// ⚠ All four dialog methods block pi (#53 S3): `input` and `editor` were never tested as
+// blocking, so dropping either from the dialog set would have let pi hang silently.
+test("input and editor dialogs are blocking, with their question read into dialog", () => {
+	expect(
+		mapPiEvent({ type: "extension_ui_request", id: "i1", method: "input", title: "Name?", placeholder: "x" }),
+	).toEqual({
+		kind: "extension-ui-request",
+		id: "i1",
+		method: "input",
+		blocking: true,
+		dialog: { method: "input", title: "Name?", placeholder: "x" },
+	});
+	expect(
+		mapPiEvent({ type: "extension_ui_request", id: "e1", method: "editor", title: "Edit", prefill: "draft" }),
+	).toEqual({
+		kind: "extension-ui-request",
+		id: "e1",
+		method: "editor",
+		blocking: true,
+		dialog: { method: "editor", title: "Edit", prefill: "draft" },
+	});
+});

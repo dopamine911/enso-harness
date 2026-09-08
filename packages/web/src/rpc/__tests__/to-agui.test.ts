@@ -245,3 +245,11 @@ test("a result with no descriptor carries no descriptor key at all", () => {
 	});
 	expect(observationToAguiEvents(observation, ids)[0]).not.toHaveProperty(ZEN_TOOL_RESULT_KEY);
 });
+
+// ⚠ The deliberate drop (#53 S3): terminal-addressed fire-and-forget requests produce NO
+// event — measured at 40 of 43 events for a one-word prompt when they were forwarded.
+test("setStatus, setWidget, setTitle and set_editor_text produce no AG-UI event", () => {
+	for (const method of ["setStatus", "setWidget", "setTitle", "set_editor_text"]) {
+		expect(toAgui({ kind: "extension-ui-request", id: "", method, blocking: false, message: "" })).toEqual([]);
+	}
+});

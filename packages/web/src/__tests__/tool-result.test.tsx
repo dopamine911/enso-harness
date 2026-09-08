@@ -80,3 +80,18 @@ test("truncation is rendered from data, not from a pre-rendered string", () => {
 	expect(rendered).toContain("4000");
 	expect(rendered).toContain("lines");
 });
+
+// `content` is `string | ContentPart[]` (#53 S3: the array branch was never rendered).
+test("array content renders every part as JSON, one per line, never dropped", () => {
+	const rendered = html(
+		partWith({
+			content: [
+				{ type: "text", content: "first" },
+				{ type: "image", source: { type: "data", value: "aGk=", mimeType: "image/png" } },
+			],
+		}),
+	);
+	expect(rendered).toContain("first");
+	expect(rendered).toContain("image/png");
+	expect(rendered).toContain('data-zen-tool-result="text"');
+});

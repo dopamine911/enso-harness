@@ -81,3 +81,11 @@ test("a thinking part renders inside the Reasoning shell", () => {
 	expect(rendered).toContain("the model reasoning text");
 	expect(rendered).toContain("Thinking...");
 });
+
+// The text branch is the markdown pipeline of record (#53 S3: never rendered in a test).
+test("a text part renders through the markdown pipeline inside the prose shell", () => {
+	const textPart: MessagePart = { type: "text", content: "plain **bold** text" };
+	const rendered = html({ key: "text", part: textPart });
+	expect(rendered).toContain("<strong>bold</strong>");
+	expect(rendered).toContain("prose");
+});

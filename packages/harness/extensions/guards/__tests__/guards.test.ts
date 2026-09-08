@@ -568,3 +568,21 @@ test("⚠ PI_SHIPPED_TOOL_NAMES matches the tools pi's factories build, and the 
 	// no test, because the session_start check iterates whatever the list happens to hold.
 	expect([...GUARD_POLICY_TOOL_NAMES].sort()).toEqual(["bash", "edit", "powershell", "read", "write"]);
 });
+
+// ── #53 S3: a tool event with no `input` must not throw out of a must-not-throw handler ──
+// pi's contract says `input` is an object, but the handler's own rule (a throwing hook
+// wedges print mode; in-process it yields a session with the guard half-set-up) means
+// "never throw" has to hold for the shape the contract forbids as well.
+test("a tool_call with no input is handled without throwing (write, bash, read)", () => {
+	const guard = loadGuard();
+	for (const toolName of ["write", "bash", "read", "edit", "powershell"]) {
+		expect(() => guard({ type: "tool_call", toolCallId: "t", toolName }, { cwd })).not.toThrow();
+	}
+});
+
+test("a tool_result with no input is handled without throwing", () => {
+	const runtime = loadGuardRuntime();
+	expect(() =>
+		runtime.toolResult({ type: "tool_result", toolCallId: "t", toolName: "read", isError: false }, { cwd }),
+	).not.toThrow();
+});

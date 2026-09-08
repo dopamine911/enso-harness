@@ -43,9 +43,28 @@ import { realpathOfNearestExisting } from "./paths.ts";
  */
 
 /** What the session knew of a file when it last observed it. */
+/**
+ * What "the file the session saw" is compared by. Mirrors pi's own `getFileRevision`
+ * (`dist/utils/paths.js`: `dev:ino:size:mtimeNs:ctimeNs`) minus `dev`, because a realpath
+ * already pins the device. ⚠ mtime and size alone were spoofable (#53 S3): a same-size
+ * rewrite with `utimes` pinning the mtime back read as fresh. ctime cannot be set from
+ * userland, and a replace-by-rename changes the inode.
+ */
 interface ObservedFileStamp {
-	mtimeMs: number;
-	size: number;
+	/** Nanoseconds, as pi reads them (`statSync(path, { bigint: true })`) — no float rounding. */
+	mtimeNs: bigint;
+	ctimeNs: bigint;
+	ino: bigint;
+	size: bigint;
+}
+
+function stampsMatch(current: ObservedFileStamp, recorded: ObservedFileStamp): boolean {
+	return (
+		current.mtimeNs === recorded.mtimeNs &&
+		current.ctimeNs === recorded.ctimeNs &&
+		current.ino === recorded.ino &&
+		current.size === recorded.size
+	);
 }
 
 export type KnownPathState = "unknown" | "fresh" | "stale";
@@ -76,8 +95,8 @@ export function createSessionReadTracker(): SessionReadTracker {
 
 	function statStampOf(realpath: string): ObservedFileStamp | undefined {
 		try {
-			const stats = statSync(realpath);
-			return { mtimeMs: stats.mtimeMs, size: stats.size };
+			const stats = statSync(realpath, { bigint: true });
+			return { mtimeNs: stats.mtimeNs, ctimeNs: stats.ctimeNs, ino: stats.ino, size: stats.size };
 		} catch {
 			return undefined;
 		}
@@ -114,7 +133,7 @@ export function createSessionReadTracker(): SessionReadTracker {
 			// route. This branch is the narrow remainder (a stat race, a permission flip):
 			// the disk no longer matches what the session saw, so fail toward stale.
 			if (current === undefined) return "stale";
-			return current.mtimeMs === recorded.mtimeMs && current.size === recorded.size ? "fresh" : "stale";
+			return stampsMatch(current, recorded) ? "fresh" : "stale";
 		},
 		reset(): void {
 			stampsByRealpath.clear();

@@ -23,6 +23,13 @@ test("a relative path inside the workspace is allowed", () => {
 	expect(isInsideAnyRoot(target, [root])).toBe(true);
 });
 
+// ⚠ FAIL CLOSED (#53 S3): no roots means nothing is inside — a misconfigured policy with an
+// empty root list must deny, not allow, every write.
+test("an empty root list refuses every path", () => {
+	expect(isInsideAnyRoot(resolveAgainstCwd("src/app.ts", root), [])).toBe(false);
+	expect(isInsideAnyRoot(root, [])).toBe(false);
+});
+
 test("an absolute path outside the workspace is refused", () => {
 	const target = resolveAgainstCwd(join(outside, "app.ts"), root);
 	expect(isInsideAnyRoot(target, [root])).toBe(false);
