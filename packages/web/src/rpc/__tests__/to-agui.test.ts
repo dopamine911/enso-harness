@@ -115,9 +115,13 @@ test("an extension error becomes RUN_ERROR naming the extension and the hook", (
 		event: "tool_call",
 		error: "boom",
 	});
-	expect(event).toMatchObject({ type: EventType.RUN_ERROR, runId: "r1" });
-	expect((event as { message: string }).message).toContain("/x/guards.ts");
-	expect((event as { message: string }).message).toContain("tool_call");
+	// The whole envelope, exactly: two `toContain`s used to pass with `${event}` and
+	// `${error}` swapped in the template (#53 S2, the 1f436dc class).
+	expect(event).toEqual({
+		type: EventType.RUN_ERROR,
+		runId: "r1",
+		message: "/x/guards.ts failed on tool_call: boom",
+	});
 });
 
 // #29: the notify payload must survive the LAST hop too — the browser's onCustomEvent
