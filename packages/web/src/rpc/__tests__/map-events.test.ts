@@ -168,6 +168,7 @@ test("a notify carries its message and a declared notifyType", () =>
 		id: "n1",
 		method: "notify",
 		blocking: false,
+		origin: "run",
 		message: "Mode set to Plan Mode",
 		notifyType: "info",
 	}));
@@ -347,6 +348,7 @@ test("input and editor dialogs are blocking, with their question read into dialo
 		id: "i1",
 		method: "input",
 		blocking: true,
+		origin: "run",
 		dialog: { method: "input", title: "Name?", placeholder: "x" },
 	});
 	expect(
@@ -356,6 +358,21 @@ test("input and editor dialogs are blocking, with their question read into dialo
 		id: "e1",
 		method: "editor",
 		blocking: true,
+		origin: "run",
 		dialog: { method: "editor", title: "Edit", prefill: "draft" },
 	});
+});
+
+// #96: the origin is the host's DELIVERY, never the event's position. A replayed request —
+// emitted during the session's own start — is `session-start`; live is `run`, and live is the
+// default because every caller but the pump maps a run's stream.
+test("⚠ a ui request's origin comes from how the host delivered it: replayed is session-start, live is run", () => {
+	const notify = { type: "extension_ui_request", id: "n1", method: "notify", message: "loaded", notifyType: "info" };
+	expect(mapPiEvent(notify, "replayed")).toMatchObject({ kind: "extension-ui-request", origin: "session-start" });
+	expect(mapPiEvent(notify, "live")).toMatchObject({ kind: "extension-ui-request", origin: "run" });
+	expect(mapPiEvent(notify)).toMatchObject({ kind: "extension-ui-request", origin: "run" });
+	// Every ui request is tagged, not only notifies: a dialog replayed from startup says so too.
+	expect(
+		mapPiEvent({ type: "extension_ui_request", id: "d1", method: "select", title: "Pick", options: ["a"] }, "replayed"),
+	).toMatchObject({ kind: "extension-ui-request", blocking: true, origin: "session-start" });
 });

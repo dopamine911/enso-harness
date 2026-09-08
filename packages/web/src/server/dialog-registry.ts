@@ -1,4 +1,4 @@
-import type { PiRpcEvent, PiSession, ZenDialogSpec } from "@zen/core";
+import type { PiEventDelivery, PiRpcEvent, PiSession, ZenDialogSpec } from "@zen/core";
 
 /**
  * Parked pi sessions, waiting for a human to answer a dialog (#27).
@@ -32,8 +32,14 @@ import type { PiRpcEvent, PiSession, ZenDialogSpec } from "@zen/core";
  * drain. `notify` is whichever live stream loop is currently attached, or undefined while
  * parked; `wake()` on a parked pump is a deliberate no-op.
  */
+/** One queued event with how the host delivered it — the mapper turns the delivery into `origin` (#96). */
+export interface PendingPiEvent {
+	readonly event: PiRpcEvent;
+	readonly delivery: PiEventDelivery;
+}
+
 export interface PiSessionPump {
-	readonly pending: PiRpcEvent[];
+	readonly pending: PendingPiEvent[];
 	settled: boolean;
 	/** A rejected prompt acknowledgement, surfaced by whichever loop drains next. */
 	promptError: string | undefined;

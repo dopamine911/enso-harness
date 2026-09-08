@@ -46,7 +46,9 @@ export function createModeLines(notifications: NotificationsStore): ModeLines {
 			if (mode === undefined) return;
 			if (mode === lastRenderedMode) return;
 			lastRenderedMode = mode;
-			notifications.push(`Mode: ${mode}`, "info");
+			// The harness's own line, not an extension's notice: never grouped with the startup
+			// chatter (#96), however early the entry was replayed — #84/#88 made it visible.
+			notifications.push(`Mode: ${mode}`, "info", "run");
 		},
 	};
 }

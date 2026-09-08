@@ -115,6 +115,13 @@ export interface PiPromptOutcome {
 }
 
 /** ⚠ Function-bearing — the one schema the module header's rule is written for. */
+/**
+ * How an event reached a subscriber (#96): `replayed` from the host's until-first-subscriber
+ * buffer (the session's own start), or `live`. The two deliveries a subscriber can see — the
+ * event tail's `held`/`dropped` provenances (#97) never reach one.
+ */
+export type PiEventDelivery = "live" | "replayed";
+
 export const PiSession = Type.Object({
 	/** Fire a prompt. Never awaits the run — see the section header. */
 	prompt: Type.Unsafe<(request: PiPromptRequest, outcome: PiPromptOutcome) => void>(
@@ -146,6 +153,11 @@ export const PiSession = Type.Object({
 	 * dropped (#69 PR 2 — a held `agent_settled` would end the next run). Returns the
 	 * unsubscribe.
 	 *
+	 * The subscriber is told HOW each event reached it (`delivery`, #96): `replayed` from
+	 * that held buffer — emitted during the session's own start — or `live`. The mapper turns
+	 * it into the observation's `origin`, so the browser can group startup chatter without
+	 * guessing from position in the stream.
+	 *
 	 * ⚠ `Type.Unsafe` rather than `Type.Function([PiRpcEventSchema], …)`, and the reason is
 	 * a cost of declaring behaviour as a schema worth recording: the latter infers its
 	 * parameter as `Static<typeof PiRpcEventSchema>`, which DROPS the `& Record<string,
@@ -155,7 +167,7 @@ export const PiSession = Type.Object({
 	 * because the two are no longer derived from one another, so a schema change must be
 	 * mirrored in the annotation by hand.
 	 */
-	subscribe: Type.Unsafe<(onEvent: (event: PiRpcEvent) => void) => () => void>(
+	subscribe: Type.Unsafe<(onEvent: (event: PiRpcEvent, delivery: PiEventDelivery) => void) => () => void>(
 		Type.Function([Type.Unknown()], Type.Unknown()),
 	),
 	/** Abort the in-flight run and wait until the agent is idle. The session survives. */

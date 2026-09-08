@@ -346,3 +346,29 @@ test("⚠ the emitted tail records each event's provenance: held at startup, rep
 		.map((event) => event.provenance);
 	expect(notifies).toEqual(["live", "dropped"]);
 });
+
+// #96's source tag: the subscriber is TOLD which events are a replay of the session's own
+// start. multi-account's two startup notices arrive `replayed`; a notice the same extension
+// emits during a run arrives `live`. This is what lets the browser group the first without
+// guessing from position — and the guess would have swallowed a run's early refusal.
+test("⚠ subscribe delivers startup records as `replayed` and a run's events as `live` (#96)", async () => {
+	const hosted = await hostedSession([lateNotifyProbe]);
+	const deliveries: Array<[string, string]> = [];
+	hosted.session.subscribe((event, delivery) => {
+		if (event.type === "extension_ui_request" && event.method === "notify") {
+			deliveries.push([String(event.message).slice(0, 16), delivery]);
+		}
+	});
+	// Everything replayed so far came from session_start — multi-account's notices among them.
+	expect(deliveries.length).toBeGreaterThan(0);
+	expect(deliveries.every(([, delivery]) => delivery === "replayed")).toBe(true);
+	expect(deliveries.some(([message]) => message.startsWith("pi-multi-account"))).toBe(true);
+
+	await new Promise<void>((resolve, reject) => {
+		hosted.session.prompt(
+			{ message: "/zen-late-notify" },
+			{ onAccepted: resolve, onRejected: (reason) => reject(new Error(reason)) },
+		);
+	});
+	expect(deliveries.at(-1)).toEqual(["late notify", "live"]);
+});

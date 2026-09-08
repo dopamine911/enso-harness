@@ -1,5 +1,6 @@
 import {
 	isZenDialogSpec,
+	type PiEventDelivery,
 	type PiRpcEvent,
 	ZEN_TOOL_RESULT_KEY,
 	type ZenDialogSpec,
@@ -98,8 +99,73 @@ export function toolResultMetadata(
 	return descriptor === undefined ? undefined : { [ZEN_TOOL_RESULT_KEY]: descriptor };
 }
 
-/** Map one pi rpc event. Never returns undefined — see the design rule above. */
-export function mapPiEvent(event: PiRpcEvent): ZenObservation {
+/** The `extension_ui_request` case of {@link mapPiEvent}, on its own because of its size. */
+function mapExtensionUiRequest(event: PiRpcEvent, delivery: PiEventDelivery): ZenObservation {
+	// ⚠ pi's Extension UI sub-protocol, and it splits in two (`docs/rpc.md` § Extension
+	// UI Protocol):
+	//
+	//   DIALOG methods    select | confirm | input | editor
+	//                     emit a request and BLOCK until the client answers it (over
+	//                     rpc: an `extension_ui_response` line on stdin; in-process:
+	//                     `PiSession.answerDialog`) with the matching id.
+	//   FIRE-AND-FORGET   notify | setStatus | setWidget | setTitle | set_editor_text
+	//                     emit and continue; a client may ignore them.
+	//
+	// ⚠⚠ A blocking request means pi is WAITING and stays blocked until an answer
+	// carrying this id reaches the extension's promise. The session
+	// layer answers dialogs by handing them to the browser as AG-UI interrupts
+	// (#27), and what it needs from this hop is the QUESTION — so the dialog fields
+	// are read here, defensively, into the one shared `ZenDialogSpec` shape.
+	//
+	// ⚠ Defensively means: a blocking request whose fields do not form a
+	// well-shaped question still maps as `blocking: true` with `dialog` absent.
+	// The session layer declines those on the wire (the pre-#27 behaviour) —
+	// mapping them as unmapped or non-blocking instead would hang pi silently,
+	// which is the bug this observation kind exists to make inexpressible.
+	const method = String(event.method ?? "unknown");
+	const dialogCandidate: Record<string, unknown> = { method };
+	for (const field of ["title", "options", "message", "placeholder", "prefill", "timeout"]) {
+		if (event[field] !== undefined) dialogCandidate[field] = event[field];
+	}
+	const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate) ? dialogCandidate : undefined;
+	// ⚠ A notify's `message` IS the request (#29): pi's wire shape is
+	// `{method: "notify", message, notifyType?}`, and dropping the message here is
+	// how a mode change once completed with nothing visible. Copied for notify ONLY —
+	// a dialog's `message` is part of the QUESTION and travels inside `dialog` above,
+	// and giving it a second home would invite the two to drift. `notifyType` is
+	// copied only when it is one of pi's three declared values (info|warning|error);
+	// an unrecognised value degrades to an untyped notification, never a validation
+	// failure.
+	const notifyFields: { message?: string; notifyType?: ZenNotifyType } = {};
+	if (method === "notify") {
+		notifyFields.message = String(event.message ?? "");
+		// The declared values come from the schema, not a literal list — the browser
+		// router (custom-event-router.ts) makes the same check the same way.
+		const notifyTypeCandidate = event.notifyType;
+		if (Check(ZenNotifyType, notifyTypeCandidate)) {
+			notifyFields.notifyType = notifyTypeCandidate;
+		}
+	}
+	return {
+		kind: "extension-ui-request",
+		id: String(event.id ?? ""),
+		method,
+		blocking: DIALOG_UI_METHODS.has(method),
+		// Tagged from the host's delivery, never inferred from position (#96).
+		origin: delivery === "replayed" ? "session-start" : "run",
+		...(dialog === undefined ? {} : { dialog }),
+		...notifyFields,
+	};
+}
+
+/**
+ * Map one pi rpc event. Never returns undefined — see the design rule above.
+ *
+ * `delivery` is how the host handed the event over (#96): `replayed` from its held buffer —
+ * the session's own start — becomes `origin: "session-start"` on a ui request; `live` is
+ * `"run"`. Defaults to live: every caller but the pump is mapping a run's stream.
+ */
+export function mapPiEvent(event: PiRpcEvent, delivery: PiEventDelivery = "live"): ZenObservation {
 	switch (event.type) {
 		case "message_update": {
 			const delta = event.assistantMessageEvent as { type?: string; contentIndex?: number; delta?: string } | undefined;
@@ -176,61 +242,8 @@ export function mapPiEvent(event: PiRpcEvent): ZenObservation {
 			};
 		}
 
-		case "extension_ui_request": {
-			// ⚠ pi's Extension UI sub-protocol, and it splits in two (`docs/rpc.md` § Extension
-			// UI Protocol):
-			//
-			//   DIALOG methods    select | confirm | input | editor
-			//                     emit a request and BLOCK until the client answers it (over
-			//                     rpc: an `extension_ui_response` line on stdin; in-process:
-			//                     `PiSession.answerDialog`) with the matching id.
-			//   FIRE-AND-FORGET   notify | setStatus | setWidget | setTitle | set_editor_text
-			//                     emit and continue; a client may ignore them.
-			//
-			// ⚠⚠ A blocking request means pi is WAITING and stays blocked until an answer
-			// carrying this id reaches the extension's promise. The session
-			// layer answers dialogs by handing them to the browser as AG-UI interrupts
-			// (#27), and what it needs from this hop is the QUESTION — so the dialog fields
-			// are read here, defensively, into the one shared `ZenDialogSpec` shape.
-			//
-			// ⚠ Defensively means: a blocking request whose fields do not form a
-			// well-shaped question still maps as `blocking: true` with `dialog` absent.
-			// The session layer declines those on the wire (the pre-#27 behaviour) —
-			// mapping them as unmapped or non-blocking instead would hang pi silently,
-			// which is the bug this observation kind exists to make inexpressible.
-			const method = String(event.method ?? "unknown");
-			const dialogCandidate: Record<string, unknown> = { method };
-			for (const field of ["title", "options", "message", "placeholder", "prefill", "timeout"]) {
-				if (event[field] !== undefined) dialogCandidate[field] = event[field];
-			}
-			const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate) ? dialogCandidate : undefined;
-			// ⚠ A notify's `message` IS the request (#29): pi's wire shape is
-			// `{method: "notify", message, notifyType?}`, and dropping the message here is
-			// how a mode change once completed with nothing visible. Copied for notify ONLY —
-			// a dialog's `message` is part of the QUESTION and travels inside `dialog` above,
-			// and giving it a second home would invite the two to drift. `notifyType` is
-			// copied only when it is one of pi's three declared values (info|warning|error);
-			// an unrecognised value degrades to an untyped notification, never a validation
-			// failure.
-			const notifyFields: { message?: string; notifyType?: ZenNotifyType } = {};
-			if (method === "notify") {
-				notifyFields.message = String(event.message ?? "");
-				// The declared values come from the schema, not a literal list — the browser
-				// router (custom-event-router.ts) makes the same check the same way.
-				const notifyTypeCandidate = event.notifyType;
-				if (Check(ZenNotifyType, notifyTypeCandidate)) {
-					notifyFields.notifyType = notifyTypeCandidate;
-				}
-			}
-			return {
-				kind: "extension-ui-request",
-				id: String(event.id ?? ""),
-				method,
-				blocking: DIALOG_UI_METHODS.has(method),
-				...(dialog === undefined ? {} : { dialog }),
-				...notifyFields,
-			};
-		}
+		case "extension_ui_request":
+			return mapExtensionUiRequest(event, delivery);
 
 		case "entry_appended": {
 			// ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via

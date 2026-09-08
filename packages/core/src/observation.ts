@@ -88,11 +88,29 @@ export const ZenToolResultObservation = Type.Object({
 export const ZenNotifyType = Type.Union([Type.Literal("info"), Type.Literal("warning"), Type.Literal("error")]);
 export type ZenNotifyType = Static<typeof ZenNotifyType>;
 
+/**
+ * Where a ui request came from (#96) — tagged at the SOURCE, never inferred.
+ *
+ *   session-start  emitted during the session's own start, before anyone subscribed, and
+ *                  replayed to the first run's pump (the host's held buffer, #69/#88). An
+ *                  infra fact about the process, true of every thread — the browser groups
+ *                  the informational ones.
+ *   run            emitted while a run was listening. Rendered as it always was: a guard
+ *                  refusal before the first token is a run notice, not startup chatter, and
+ *                  a browser-side "notifies before the first assistant message" rule would
+ *                  have swallowed it.
+ *
+ * A closed union: a third origin fails at the mapper, loudly, not silently in a consumer.
+ */
+export const ZenUiRequestOrigin = Type.Union([Type.Literal("session-start"), Type.Literal("run")]);
+export type ZenUiRequestOrigin = Static<typeof ZenUiRequestOrigin>;
+
 export const ZenExtensionUiRequest = Type.Object({
 	kind: Type.Literal("extension-ui-request"),
 	id: Type.String(),
 	method: Type.String(),
 	blocking: Type.Boolean(),
+	origin: ZenUiRequestOrigin,
 	dialog: Type.Optional(ZenDialogSpec),
 	message: Type.Optional(Type.String()),
 	notifyType: Type.Optional(ZenNotifyType),

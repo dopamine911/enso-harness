@@ -67,6 +67,21 @@ test("zen.notify pushes the message with each declared notify type", () => {
 	]);
 });
 
+// #96: the origin is the host's tag, carried as-is; when it cannot be read the notice is
+// shown OPEN (`run`), because the safe failure of a grouping rule is "not grouped".
+test("zen.notify carries the origin into the store; an unreadable origin degrades to run, never to hidden", () => {
+	route(ZEN_CUSTOM_EVENT_NOTIFY, { message: "startup", notifyType: "info", origin: "session-start" });
+	route(ZEN_CUSTOM_EVENT_NOTIFY, { message: "during", notifyType: "info", origin: "run" });
+	route(ZEN_CUSTOM_EVENT_NOTIFY, { message: "untagged", notifyType: "info" });
+	route(ZEN_CUSTOM_EVENT_NOTIFY, { message: "mistagged", notifyType: "info", origin: "elsewhere" });
+	expect(stores.notifications.get().map((notification) => [notification.message, notification.origin])).toEqual([
+		["startup", "session-start"],
+		["during", "run"],
+		["untagged", "run"],
+		["mistagged", "run"],
+	]);
+});
+
 test("an unrecognised notify type degrades to an untyped notification, never a drop", () => {
 	route(ZEN_CUSTOM_EVENT_NOTIFY, { message: "hello", notifyType: "loud" });
 	route(ZEN_CUSTOM_EVENT_NOTIFY, { message: "plain" });

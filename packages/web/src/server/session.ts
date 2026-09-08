@@ -210,8 +210,8 @@ function createSessionPump(session: PiSession): PiSessionPump {
 	};
 	// Subscribed BEFORE the prompt is fired, so no event can slip between the two; events an
 	// extension emitted during the session's own start are replayed here by the host.
-	unsubscribeFromSession = session.subscribe((event) => {
-		pump.pending.push(event);
+	unsubscribeFromSession = session.subscribe((event, delivery) => {
+		pump.pending.push({ event, delivery });
 		if (event.type === "agent_settled") pump.settled = true;
 		pump.wake();
 	});
@@ -265,9 +265,9 @@ async function* drainUntilRunEnds(options: StreamRunOptions): AsyncGenerator<Str
 	while (true) {
 		let emitted = false;
 		while (pump.pending.length > 0) {
-			const event = pump.pending.shift();
-			if (event === undefined) break;
-			const observation = mapPiEvent(event);
+			const pending = pump.pending.shift();
+			if (pending === undefined) break;
+			const observation = mapPiEvent(pending.event, pending.delivery);
 
 			// ⚠⚠ A BLOCKING DIALOG IS INTERCEPTED HERE, BEFORE THE AG-UI MAPPER — it ends
 			// this response but not the RUN: the session stays alive, its extension blocked
