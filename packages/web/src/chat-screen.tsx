@@ -30,7 +30,7 @@ import { PermissionModeSelect, usePermissionMode } from "./permission-mode.tsx";
 import { SelectedMessagePart } from "./selected-message-part.tsx";
 import { SessionDebugDrawer } from "./session-debug.tsx";
 import { SessionStatusBar } from "./session-status.tsx";
-import { SessionsRail } from "./sessions-rail.tsx";
+import { SessionsRail, UNTITLED_SESSION } from "./sessions-rail.tsx";
 import { ThreadStoresContext, useStore, useThreadStores } from "./store.ts";
 import {
 	getThreadStores,
@@ -146,7 +146,12 @@ function createThreadChatHook(stores: ThreadStores) {
 	return createChatHook({ options: threadChatOptions(stores), context: chatContexts, ...chatComponents });
 }
 
-/** Whether the `?debug` column is open — page state, read by every pane's layout. */
+/**
+ * Whether THIS pane shows the `?debug` column. Provided per pane as `debugOpen && active`:
+ * every live pane stays mounted, so gating on the page-level switch alone rendered the
+ * column — with its fixed `id` and its own inspection fetches — once per thread, hidden or
+ * not (PR #94 review). Exactly one pane is active, so exactly one column exists.
+ */
 const DebugOpenContext = createContext(false);
 
 /** One selected part paired with the React key that identifies it. */
@@ -581,8 +586,20 @@ const chatComponents = {
  * One thread's pane: its chat factory, its stores in context, its summary kept current for
  * the rail. Stays mounted while another thread is on screen — see `createThreadChatHook`
  * for why hiding, not unmounting, is load-bearing.
+ *
+ * ⓘ Exported for `__tests__/chat-screen.test.tsx` only, which mounts two of them to pin
+ * that a hidden pane renders no debug column. Nothing else imports it.
  */
-function ThreadPane({ threadId, active }: { threadId: string; active: boolean }): React.ReactNode {
+export function ThreadPane({
+	threadId,
+	active,
+	debugOpen,
+}: {
+	threadId: string;
+	active: boolean;
+	/** The page's `?debug` switch; the column itself opens only in the active pane. */
+	debugOpen: boolean;
+}): React.ReactNode {
 	const stores = getThreadStores(threadId);
 	const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores]);
 	const chat = useAppChat();
@@ -592,7 +609,9 @@ function ThreadPane({ threadId, active }: { threadId: string; active: boolean })
 	return (
 		<div className={active ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}>
 			<ThreadStoresContext.Provider value={stores}>
-				<chat.AppChat />
+				<DebugOpenContext.Provider value={debugOpen && active}>
+					<chat.AppChat />
+				</DebugOpenContext.Provider>
 			</ThreadStoresContext.Provider>
 		</div>
 	);
@@ -626,7 +645,7 @@ export function ChatScreen(): React.ReactNode {
 				) : null}
 				{/* Where you are: the active thread's title, the same one the rail shows. */}
 				<span className="min-w-0 flex-1 truncate text-sm" title={activeThreadId}>
-					{active?.title ?? "new session"}
+					{active?.title ?? UNTITLED_SESSION}
 				</span>
 				{isDebugMode ? (
 					<Button
@@ -649,11 +668,14 @@ export function ChatScreen(): React.ReactNode {
 					onSelect={setActiveThreadId}
 					onNew={() => setActiveThreadId(mintThread().threadId)}
 				/>
-				<DebugOpenContext.Provider value={isDebugMode && debugOpen}>
-					{threads.map((thread) => (
-						<ThreadPane key={thread.threadId} threadId={thread.threadId} active={thread.threadId === activeThreadId} />
-					))}
-				</DebugOpenContext.Provider>
+				{threads.map((thread) => (
+					<ThreadPane
+						key={thread.threadId}
+						threadId={thread.threadId}
+						active={thread.threadId === activeThreadId}
+						debugOpen={isDebugMode && debugOpen}
+					/>
+				))}
 			</div>
 		</div>
 	);
