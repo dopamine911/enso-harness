@@ -22,7 +22,7 @@
  */
 
 // The row formats are core's, shared with the drawer: one definition, so the two views cannot drift.
-import { describeSessionEntry, describeThreadEvent } from "../packages/core/src/index.ts";
+import { describeSessionEntry, threadEventColumns } from "../packages/core/src/index.ts";
 
 const serverUrl = process.env.ZEN_SERVER_URL ?? "http://127.0.0.1:5179";
 const [threadId, ...flags] = process.argv.slice(2);
@@ -55,6 +55,12 @@ if (threadId === undefined) {
 		console.log(`${thread.threadId}  mode=${thread.mode}  ${state}  last=${thread.lastActivityAt}  ${file}`);
 	}
 	process.exit(0);
+}
+
+/** The drawer's row, as a table: the provenance column padded so `held`/`dropped` line up down the page. */
+function describeThreadEvent(event) {
+	const columns = threadEventColumns(event);
+	return `${columns.when}  ${columns.provenance.padEnd(12)} ${columns.subject}`;
 }
 
 if (wantsEvents) {

@@ -149,9 +149,30 @@ export function describeSessionEntry(entry: unknown): string {
 	return `${when} ${kind}${custom}${role}${mode}`.trim();
 }
 
-/** One event of a tail as a row — `12:34:56 held ×3 entry_appended modes` — time, provenance, count when coalesced, type, inner name. */
+/** The three columns of an event row: `12:34:56` · `held ×3` · `entry_appended modes`. */
+export interface ThreadEventColumns {
+	readonly when: string;
+	/** Provenance, with the count when coalesced — the column a reader scans for `held`/`dropped`. */
+	readonly provenance: string;
+	/** Type, with the inner name when there is one. */
+	readonly subject: string;
+}
+
+/**
+ * THE definition of what each column holds — a new provenance value or inner name lands
+ * here once. How the columns are joined is layout, the surface's own: the drawer joins
+ * with a space (`describeThreadEvent`), `zen-session.mjs` pads them into a table.
+ */
+export function threadEventColumns(event: ZenThreadEvent): ThreadEventColumns {
+	return {
+		when: event.at.slice(11, 19),
+		provenance: event.count > 1 ? `${event.provenance} ×${event.count}` : event.provenance,
+		subject: event.name === undefined ? event.type : `${event.type} ${event.name}`,
+	};
+}
+
+/** One event of a tail as a row — `12:34:56 held ×3 entry_appended modes`. */
 export function describeThreadEvent(event: ZenThreadEvent): string {
-	const count = event.count > 1 ? ` ×${event.count}` : "";
-	const name = event.name === undefined ? "" : ` ${event.name}`;
-	return `${event.at.slice(11, 19)} ${event.provenance}${count} ${event.type}${name}`;
+	const columns = threadEventColumns(event);
+	return `${columns.when} ${columns.provenance} ${columns.subject}`;
 }

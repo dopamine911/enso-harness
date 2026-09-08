@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
-import { describeSessionEntry, describeThreadEvent, type ZenThreadEvent } from "../session-inspection.ts";
+import {
+	describeSessionEntry,
+	describeThreadEvent,
+	threadEventColumns,
+	type ZenThreadEvent,
+} from "../session-inspection.ts";
 
 // The row formats are shared by the `?debug` drawer and `zen-session.mjs` (PR #100 review: one
 // definition, after the #86 pair had drifted). What a human reads off either surface is pinned here.
@@ -42,4 +47,10 @@ test("an event row names its provenance, its coalesced count, and the inner name
 	expect(describeThreadEvent(threadEvent({ type: "RUN_STARTED", provenance: "sent" }))).toBe(
 		"12:34:56 sent RUN_STARTED",
 	);
+	// The columns are what a table lays out: the count rides with the provenance, the name with the type.
+	expect(threadEventColumns(threadEvent({ provenance: "held", count: 3, name: "modes" }))).toEqual({
+		when: "12:34:56",
+		provenance: "held ×3",
+		subject: "entry_appended modes",
+	});
 });
