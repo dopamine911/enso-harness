@@ -191,8 +191,14 @@ export const ZenResumableSession = Type.Object(
 		/** The file's mtime, ISO 8601 — when the session last grew. */
 		lastActivityAt: Type.String(),
 		messageCount: Type.Integer({ minimum: 0 }),
-		/** A live thread on THIS server holds the session — a run in flight, or idle but not yet evicted. */
-		live: Type.Boolean(),
+		/**
+		 * A thread on THIS server is running it right now — a run in flight or a dialog parked
+		 * (`ThreadView.busy`). Not "held": a released thread stays cached for the idle window,
+		 * and a page that reloaded must be able to come back to it before that expires (PR
+		 * #104 review). While busy, resuming is refused — pi refuses a second concurrent
+		 * prompt anyway; this is the readable, early form of that refusal.
+		 */
+		busy: Type.Boolean(),
 	},
 	{ additionalProperties: false },
 );

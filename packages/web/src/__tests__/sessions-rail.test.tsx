@@ -155,7 +155,7 @@ test("the rail names the active thread, titles the untitled honestly, and marks 
 	expect(rendered).toContain("running");
 });
 
-test("the earlier list distinguishes resumable, live-elsewhere, empty and failed states", () => {
+test("the earlier list distinguishes resumable, running-elsewhere, empty and failed states", () => {
 	const now = new Date("2026-09-08T12:00:00Z");
 	const baseProps = {
 		threads: [{ threadId: "here", title: "current", lastActivityAt: now, busy: false }],
@@ -174,13 +174,13 @@ test("the earlier list distinguishes resumable, live-elsewhere, empty and failed
 					title: "resume me",
 					lastActivityAt: new Date(now.getTime() - 2 * 3_600_000).toISOString(),
 					messageCount: 4,
-					live: false,
+					busy: false,
 				},
 				{
 					threadId: "elsewhere",
 					lastActivityAt: now.toISOString(),
 					messageCount: 2,
-					live: true,
+					busy: true,
 				},
 			]}
 			earlierError={undefined}
@@ -189,7 +189,7 @@ test("the earlier list distinguishes resumable, live-elsewhere, empty and failed
 	expect(rendered).toContain('aria-label="earlier sessions"');
 	expect(rendered).toContain("resume me");
 	expect(rendered).toContain("2h");
-	expect(rendered).toContain("open in another tab");
+	expect(rendered).toContain("running in another tab");
 	expect(rendered).toContain("disabled");
 	expect(rendered).toContain(UNTITLED_SESSION);
 

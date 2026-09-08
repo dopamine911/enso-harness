@@ -284,9 +284,9 @@ export function startZenServer(options: ZenServerOptions) {
 	}
 
 	/**
-	 * pi's session files for this workspace (#95) — what the rail can come back to. `live`
-	 * marks the ones a thread on THIS server holds; the browser refuses to adopt a session
-	 * another page is running (a live thread it did not mint) rather than attach to it.
+	 * pi's session files for this workspace (#95) — what the rail can come back to. `busy`
+	 * marks the ones a thread on THIS server is running right now; the rail shows those but
+	 * does not offer them, and `/history` refuses them below.
 	 */
 	async function respondWithSessions(response: ServerResponse): Promise<void> {
 		const stored = await host.listSessions();
@@ -295,25 +295,35 @@ export function startZenServer(options: ZenServerOptions) {
 			...(session.firstMessage.trim().length === 0 ? {} : { title: session.firstMessage.trim() }),
 			lastActivityAt: session.modified.toISOString(),
 			messageCount: session.messageCount,
-			live: threads.peek(session.id) !== undefined,
+			busy: threads.peek(session.id)?.busy === true,
 		}));
 		response.writeHead(200, { "Content-Type": "application/json" });
 		response.end(JSON.stringify(payload));
 	}
 
 	/**
-	 * A STORED thread's branch as the messages a chat mounts with (#95), plus the mode the
-	 * branch persists. Read-only — looking must not build (#86). A live thread is refused:
-	 * the caller may have fetched the rail just before another tab started that session,
-	 * so the server, not only the disabled button, owns the one-page-per-session invariant.
+	 * The thread's branch as the messages a chat mounts with (#95), plus its permission mode.
+	 * Read-only — looking must not build (#86).
+	 *
+	 * Three states, decided by what the server holds, not by whether it holds anything:
+	 *   • BUSY here (a run in flight, a dialog parked): 409. Two pages must never drive one pi
+	 *     session at once — pi refuses the second prompt with "already processing", and this
+	 *     is that refusal made readable before a prompt is typed. The server owns the check,
+	 *     not only the rail's disabled row: a rail fetched a moment before another tab
+	 *     prompted would otherwise get past it.
+	 *   • IDLE here (released, cached for the idle window): pi's memory and the session's own
+	 *     mode — fresher than the file, and RESUMABLE. A page that reloaded after a run must be
+	 *     able to come back to its session before the 30-minute eviction (PR #104 review).
+	 *   • NOT here: the file, with the mode its branch persists. Neither: 404.
 	 */
 	async function respondWithThreadHistory(threadId: string, response: ServerResponse): Promise<void> {
-		if (threads.peek(threadId) !== undefined) {
+		const live = threads.peek(threadId);
+		if (live?.busy === true) {
 			response.writeHead(409, { "Content-Type": "text/plain" });
-			response.end(`thread ${threadId} is live on this server`);
+			response.end(`thread ${threadId} is running on this server`);
 			return;
 		}
-		const branch = await host.readBranch(threadId);
+		const branch = live === undefined ? await host.readBranch(threadId) : live.hosted.inspect().entries;
 		if (branch === undefined) {
 			response.writeHead(404, { "Content-Type": "text/plain" });
 			response.end(`no session for thread ${threadId}`);
@@ -322,7 +332,10 @@ export function startZenServer(options: ZenServerOptions) {
 		const payload: ZenThreadHistory = {
 			threadId,
 			messages: branchToMessages(branch),
-			permissionMode: { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] },
+			permissionMode:
+				live === undefined
+					? { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] }
+					: live.hosted.session.permissionModeState(),
 		};
 		response.writeHead(200, { "Content-Type": "application/json" });
 		response.end(JSON.stringify(payload));

@@ -12,8 +12,9 @@ import type { ThreadSummary } from "./thread-stores.ts";
  * — they die with the page. "EARLIER SESSIONS" (#95): pi's session files for this
  * workspace that this page has not got open; a click resumes one, with its history and
  * its mode, under the same id — the thread id IS pi's session id. A session another page
- * on this server is running is shown but not clickable: resuming attaches to nothing, and
- * two pages driving one pi session was refused first (#95's semantics).
+ * is RUNNING right now (a run in flight, a dialog parked) is shown but not clickable:
+ * two pages must not drive one pi session at once. Idle is resumable, even when this
+ * server still holds it — a reload must get its own session back (PR #104 review).
  *
  * Presentational: the lists, the active id, and the callbacks arrive as props, so a static
  * render pins the wording and the active marker without any chat.
@@ -48,7 +49,7 @@ export interface SessionsRailProps {
 	readonly onNew: () => void;
 }
 
-/** One stored session's row: title, age, and — when another page holds it — why it cannot be clicked. */
+/** One stored session's row: title, age, and — when another page is running it — why it cannot be clicked. */
 function EarlierSessionRow({
 	session,
 	now,
@@ -63,17 +64,17 @@ function EarlierSessionRow({
 		<li>
 			<button
 				type="button"
-				disabled={session.live}
-				title={session.live ? "open in another tab — one page drives a session at a time" : at.toLocaleString()}
+				disabled={session.busy}
+				title={session.busy ? "running in another tab — resumable once that run settles" : at.toLocaleString()}
 				onClick={() => onResume(session.threadId)}
 				className={cn(
 					"flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground text-xs",
-					session.live ? "cursor-not-allowed opacity-60" : "hover:bg-muted",
+					session.busy ? "cursor-not-allowed opacity-60" : "hover:bg-muted",
 				)}
 			>
-				{session.live ? (
+				{session.busy ? (
 					<span className="size-1.5 shrink-0 animate-pulse rounded-full bg-foreground">
-						<span className="sr-only">open in another tab</span>
+						<span className="sr-only">running in another tab</span>
 					</span>
 				) : null}
 				<span className={cn("min-w-0 flex-1 truncate", session.title === undefined ? "italic" : "")}>

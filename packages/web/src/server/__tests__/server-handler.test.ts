@@ -457,7 +457,7 @@ test("⚠ a prompt on a thread passes THAT id to the host — the thread id is p
 	expect(requested).toEqual(["stored-1"]);
 });
 
-test("GET /api/sessions lists stored sessions with title, count and age, marking the ones a live thread here holds", async () => {
+test("GET /api/sessions lists stored sessions with title, count and age, marking the ones a thread here is RUNNING", async () => {
 	const stored = {
 		"stored-1": {
 			branch: STORED_BRANCH,
@@ -468,15 +468,14 @@ test("GET /api/sessions lists stored sessions with title, count and age, marking
 	};
 	const { url } = await startWith(
 		{
-			onPrompt: (emit, outcome) => {
-				outcome.onAccepted();
-				emit(SETTLED);
+			onPrompt: (emit, _outcome, message) => {
+				if (message === "/mode") emit(SELECT_DIALOG);
 			},
 		},
 		stored,
 	);
-	// A run makes stored-1 live on this server.
-	await postRun(url, { threadId: "stored-1", runId: "r1", messages: [userMessage("continue")] });
+	// A parked dialog holds stored-1 busy on this server: acquired, never released.
+	await postRun(url, { threadId: "stored-1", runId: "r1", messages: [userMessage("/mode")] });
 	const response = await fetch(`${url}/api/sessions`);
 	expect(response.status).toBe(200);
 	const listed: unknown = await response.json();
@@ -487,10 +486,10 @@ test("GET /api/sessions lists stored sessions with title, count and age, marking
 			title: "earlier question",
 			lastActivityAt: "2026-09-08T10:00:05.000Z",
 			messageCount: 2,
-			live: true,
+			busy: true,
 		},
 		// A blank first message is no title — the rail says "new session", not "   ".
-		{ threadId: "stored-2", lastActivityAt: "2026-09-08T11:00:00.000Z", messageCount: 0, live: false },
+		{ threadId: "stored-2", lastActivityAt: "2026-09-08T11:00:00.000Z", messageCount: 0, busy: false },
 	]);
 });
 
@@ -515,17 +514,43 @@ test("GET /api/threads/:id/history serves a STORED thread's branch as messages w
 	expect(built).toHaveLength(0);
 });
 
-test("⚠ GET /api/threads/:id/history refuses a LIVE thread, even if a stale rail made it clickable", async () => {
+// ⚠ HELD IS NOT BUSY (PR #104 review). A released thread stays cached for the idle window;
+// gating on presence locked a reloaded page out of its own session for thirty minutes.
+test("⚠ a thread this server holds IDLE is resumable — /history reads pi's memory, /sessions does not mark it busy", async () => {
+	const stored = { t1: { branch: STORED_BRANCH, modified: new Date(0), firstMessage: "earlier question" } };
+	const { url, built } = await startWith(
+		{
+			onPrompt: (emit, outcome) => {
+				outcome.onAccepted();
+				emit(SETTLED);
+			},
+		},
+		stored,
+	);
+	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("hello")] });
+	const listed = (await (await fetch(`${url}/api/sessions`)).json()) as ZenResumableSession[];
+	expect(listed.find((session) => session.threadId === "t1")?.busy).toBe(false);
+	const response = await fetch(`${url}/api/threads/t1/history`);
+	expect(response.status).toBe(200);
+	const history = (await response.json()) as ZenThreadHistory;
+	// The fake's LIVE mode is `default` while its stored file says `plan`: an idle live
+	// thread's history is what pi holds now, the session's own answer, not the file's.
+	expect(history.permissionMode).toEqual({ mode: "default", available: ["default", "acceptEdits"] });
+	// Its in-memory branch carries no messages (a session-start entry and picc's modes entry).
+	expect(history.messages).toEqual([]);
+	expect(built).toHaveLength(1);
+});
+
+test("⚠ GET /api/threads/:id/history refuses a thread that is BUSY here, even if a stale rail made it clickable", async () => {
 	const { url, built } = await startWith({
-		onPrompt: (emit, outcome) => {
-			outcome.onAccepted();
-			emit(SETTLED);
+		onPrompt: (emit, _outcome, message) => {
+			if (message === "/mode") emit(SELECT_DIALOG);
 		},
 	});
-	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("hello")] });
+	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("/mode")] });
 	const response = await fetch(`${url}/api/threads/t1/history`);
 	expect(response.status).toBe(409);
-	expect(await response.text()).toContain("live on this server");
+	expect(await response.text()).toContain("running on this server");
 	expect(built).toHaveLength(1);
 });
 

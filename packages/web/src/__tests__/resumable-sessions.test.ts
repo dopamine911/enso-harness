@@ -9,7 +9,7 @@ test("the resumable-session store validates listings and preserves the last good
 			title: "earlier work",
 			lastActivityAt: "2026-09-08T12:00:00.000Z",
 			messageCount: 2,
-			live: false,
+			busy: false,
 		},
 	];
 	const store = createResumableSessionsStore(async () => {
@@ -37,13 +37,13 @@ test("the earlier list excludes every session already owned by this page", () =>
 			threadId: "here",
 			lastActivityAt: "2026-09-08T12:00:00.000Z",
 			messageCount: 2,
-			live: true,
+			busy: true,
 		},
 		{
 			threadId: "earlier",
 			lastActivityAt: "2026-09-08T11:00:00.000Z",
 			messageCount: 4,
-			live: false,
+			busy: false,
 		},
 	];
 	expect(sessionsNotOnThisPage(stored, new Set(["here"])).map((session) => session.threadId)).toEqual(["earlier"]);
