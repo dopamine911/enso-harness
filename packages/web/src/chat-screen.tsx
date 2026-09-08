@@ -23,7 +23,7 @@ import { SessionNotifications } from "./notifications.tsx";
 import { PermissionModeSelect, seedPermissionMode, usePermissionMode } from "./permission-mode.tsx";
 import { SelectedMessagePart } from "./selected-message-part.tsx";
 import { SessionDebugDrawer } from "./session-debug.tsx";
-import { SessionStatsBar } from "./session-stats.tsx";
+import { SessionStatusBar } from "./session-status.tsx";
 import type { ZenRendererMap } from "./ZenToolResult.tsx";
 
 /**
@@ -468,9 +468,6 @@ const { useAppChat, useChatContext } = createChatHook({
 								</ConversationContent>
 								<ConversationScrollButton />
 							</Conversation>
-							{/* The session-stats line (#45): cost so far + last request's prompt size.
-							    Hidden until the first counted request — see session-stats.tsx. */}
-							<SessionStatsBar />
 							<Input />
 						</div>
 						{/* The session debug pane (#86): what the browser believes beside what pi's
@@ -482,6 +479,9 @@ const { useAppChat, useChatContext } = createChatHook({
 							</div>
 						) : null}
 					</div>
+					{/* The status bar (#90): activity, turns, tool calls, cost — always visible, full
+					    width under transcript AND debug pane, so it is the one place to look. */}
+					<SessionStatusBar messages={chat.messages} isLoading={chat.isLoading} />
 				</div>
 			);
 		},

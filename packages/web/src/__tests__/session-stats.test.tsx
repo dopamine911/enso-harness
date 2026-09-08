@@ -1,17 +1,16 @@
 import { afterEach, expect, test } from "bun:test";
-import { renderToStaticMarkup } from "react-dom/server";
 import {
 	applyZenMessageUsage,
 	clearSessionStatsForTest,
 	getSessionStatsSnapshot,
-	SessionStatsBar,
 	subscribeToSessionStats,
 } from "../session-stats.tsx";
 
 /**
- * #45's browser half: `zen.usage` chunks become the stats bar. The store is module-level
- * because TanStack's `onCustomEvent` is an option on an object built before any component
- * exists — same shape as notifications.tsx, tested the same way.
+ * #45's browser half: `zen.usage` chunks become the stats the status bar renders (#90,
+ * session-status.test.tsx). The store is module-level because TanStack's `onCustomEvent` is
+ * an option on an object built before any component exists — same shape as
+ * notifications.tsx, tested the same way.
  */
 
 afterEach(() => clearSessionStatsForTest());
@@ -92,24 +91,6 @@ test("subscribers are told about a counted message, and unsubscribe stops that",
 	unsubscribe();
 	applyZenMessageUsage(assistantUsage(10, 0, 0.001));
 	expect(notified).toBe(1);
-});
-
-test("the bar renders nothing before the first counted request", () => {
-	expect(renderToStaticMarkup(<SessionStatsBar />)).toBe("");
-});
-
-test("the bar renders the cost and the last request's prompt size, labelled honestly", () => {
-	applyZenMessageUsage(assistantUsage(12_000, 345, 0.0132));
-	const rendered = renderToStaticMarkup(<SessionStatsBar />);
-	expect(rendered).toContain("$0.0132");
-	// ⚠ "last request … tokens in", NOT "context": the window size does not cross the wire
-	// (#44), so a context label would claim a measurement this bar does not have.
-	expect(rendered).toContain("last request");
-	expect(rendered).toContain("12,345");
-	// ⚠ Assert over VISIBLE text only — the hover title legitimately says "not a
-	// context-window percentage", which is the disclaimer, not the claim.
-	const visibleText = rendered.replace(/<[^>]*>/g, " ");
-	expect(visibleText).not.toContain("context");
 });
 
 // ⚠ Every other fixture in this file sets cacheWrite: 0, so deleting the `+ usage.cacheWrite`
