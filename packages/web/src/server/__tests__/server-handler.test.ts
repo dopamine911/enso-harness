@@ -155,22 +155,6 @@ async function startWith(script: FakeSessionScript) {
 	return { url, built };
 }
 
-/** POST one AG-UI run and return the SSE chunk types in order. */
-async function postRun(url: string, body: Record<string, unknown>): Promise<string[]> {
-	const response = await fetch(`${url}/api/chat`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(body),
-	});
-	const text = await response.text();
-	return text
-		.split("\n")
-		.filter((line) => line.startsWith("data: "))
-		.map((line) => (JSON.parse(line.slice("data: ".length)) as { type: string }).type);
-}
-
-const userMessage = (content: string) => ({ role: "user", content });
-
 /** POST one AG-UI run and return every SSE chunk, parsed, in order. */
 async function postRunChunks(url: string, body: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
 	const response = await fetch(`${url}/api/chat`, {
@@ -183,6 +167,13 @@ async function postRunChunks(url: string, body: Record<string, unknown>): Promis
 		.filter((line) => line.startsWith("data: "))
 		.map((line) => JSON.parse(line.slice("data: ".length)) as Record<string, unknown>);
 }
+
+/** POST one AG-UI run and return the SSE chunk types in order. */
+async function postRun(url: string, body: Record<string, unknown>): Promise<string[]> {
+	return (await postRunChunks(url, body)).map((chunk) => String(chunk.type));
+}
+
+const userMessage = (content: string) => ({ role: "user", content });
 
 // #96: a notify the session emits while the run is listening crosses the wire tagged
 // `origin: "run"` — the browser renders it open. The session-start half of the tag rides the
