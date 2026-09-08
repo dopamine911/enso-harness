@@ -85,8 +85,8 @@ test("every library source file is importable and enters the coverage denominato
 // unplugging it is a red test rather than a quiet edit. (It lives in a SCRIPT rather than
 // bunfig's coverageThreshold because bun 1.4 enforces that key PER FILE — measured
 // 2026-09-04, docs disagree — see scripts/check-coverage.ts.)
-const INTENDED_LINE_FLOOR = 0.71;
-const INTENDED_FUNCTION_FLOOR = 0.82;
+const INTENDED_LINE_FLOOR = 0.83;
+const INTENDED_FUNCTION_FLOOR = 0.84;
 
 test("the total coverage floor is wired into the gate at the intended level", async () => {
 	const { TOTAL_LINE_COVERAGE_FLOOR, TOTAL_FUNCTION_COVERAGE_FLOOR } = await import(

@@ -1,8 +1,5 @@
 {
 	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-	"plugins": [
-		"./.biome/naming.grit"
-	],
 	"vcs": {
 		"enabled": true,
 		"clientKind": "git",
@@ -138,6 +135,16 @@
 					}
 				}
 			}
+		},
+		{
+			"includes": [
+				"**",
+				"!**/*.test.ts",
+				"!**/*.test.tsx"
+			],
+			"plugins": [
+				"./.biome/naming.grit"
+			]
 		}
 	],
 	"assist": {

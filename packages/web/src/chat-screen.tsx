@@ -113,9 +113,15 @@ function RunProblem(): React.ReactNode {
 	);
 }
 
+/*
+ * ⓘ `UnhandledInterrupt`, `DialogAnswerControls` and `ZenDialogInterrupt` are exported for
+ * `__tests__/chat-screen.test.tsx` (#49): static renders of each dialog method and the
+ * unreadable-metadata fallback. Nothing outside this file and that test imports them.
+ */
+
 /** The visible catch-all for an interrupt this page has no renderer for — see the note on
  * `interruptsComponents.generic.fallback` below for why it must render rather than vanish. */
-function UnhandledInterrupt({ interrupt }: { interrupt: unknown }): React.ReactNode {
+export function UnhandledInterrupt({ interrupt }: { interrupt: unknown }): React.ReactNode {
 	return (
 		<pre className="my-2 overflow-x-auto rounded-md border bg-muted/50 p-3 text-muted-foreground text-xs">
 			interrupt (unhandled): {JSON.stringify(interrupt)}
@@ -142,7 +148,7 @@ function UnhandledInterrupt({ interrupt }: { interrupt: unknown }): React.ReactN
  * ternary chain so each shape reads on its own. `input` and `editor` share the form; the
  * only difference is the field element.
  */
-function DialogAnswerControls({
+export function DialogAnswerControls({
 	dialog,
 	answer,
 }: {
@@ -196,7 +202,7 @@ function DialogAnswerControls({
 	);
 }
 
-function ZenDialogInterrupt({ interrupt }: { interrupt: GenericAGUIInterrupt }): React.ReactNode {
+export function ZenDialogInterrupt({ interrupt }: { interrupt: GenericAGUIInterrupt }): React.ReactNode {
 	const dialogCandidate: unknown = interrupt.metadata?.[ZEN_DIALOG_KEY];
 	const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate) ? dialogCandidate : undefined;
 	const canAnswer = interrupt.canResolve === true;
