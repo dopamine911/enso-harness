@@ -33,12 +33,13 @@ import { rootDotenvPath, zenSecretsPath } from "./paths.ts";
  * keys.
  *
  * ⚠ The name shape is the boundary, on purpose: `*_API_KEY`, `*_TOKEN`, `*_SECRET`,
- * `*_PASSWORD` (as whole underscore-delimited words, so `TOKENIZER_PATH` is untouched).
+ * `*_PASSWORD`, and their plurals (as whole underscore-delimited words, so `TOKENIZER_PATH`
+ * is untouched).
  * A tool that needs a token in a `bash` child must get it another way — `gh` has its
  * keyring — because the environment is exactly the channel this closes.
  */
 
-const SECRET_SHAPED_NAME = /(?:^|_)(?:API_KEY|TOKEN|SECRET|PASSWORD)(?:$|_)/;
+const SECRET_SHAPED_NAME = /(?:^|_)(?:API_KEY|TOKEN|SECRET|PASSWORD)S?(?:$|_)/;
 
 /** Whether an environment variable NAME looks like it carries a secret. Case-sensitive: env names are. */
 export function isSecretShapedName(name: string): boolean {
@@ -92,8 +93,14 @@ export interface QuarantineReport {
 }
 
 /**
- * Remove from `environment` every secret-shaped name and every name either secrets file
- * defines, and report a root `.env` that still holds secrets.
+ * Remove from `environment` every secret-shaped name and every name `.zen/secrets.env`
+ * defines (whatever its shape — everything in the secrets file is a secret by definition),
+ * and report a root `.env` that still holds secret-shaped names.
+ *
+ * ⚠ The root `.env` is NOT ours, so it is judged by shape only (PR #98 review): a project
+ * may keep `PORT` or `PUBLIC_URL` there, and deleting those from the process would break
+ * the very config bun loaded them for. Its secret-shaped names are already scrubbed by the
+ * shape rule; they are additionally reported as misplaced so the operator moves them.
  *
  * ⚠ Call it before the first session and before the first child process; both inherit the
  * environment as it is at that moment, and nothing removes a variable from a child after
@@ -101,7 +108,7 @@ export interface QuarantineReport {
  */
 export function quarantineSecrets(environment: Record<string, string | undefined>, repoRoot: string): QuarantineReport {
 	const rootDotenv = readDotenvFile(rootDotenvPath(repoRoot));
-	const doomed = new Set<string>([...readDotenvFile(zenSecretsPath(repoRoot)).keys(), ...rootDotenv.keys()]);
+	const doomed = new Set<string>(readDotenvFile(zenSecretsPath(repoRoot)).keys());
 	for (const variableName of Object.keys(environment)) if (isSecretShapedName(variableName)) doomed.add(variableName);
 	const removed: string[] = [];
 	for (const doomedName of doomed) {

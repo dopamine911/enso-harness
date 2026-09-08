@@ -20,7 +20,16 @@ function scratchRepoRoot(): string {
 }
 
 test("secret-shaped names are whole underscore-delimited words, so a look-alike is untouched", () => {
-	for (const name of ["TAVILY_API_KEY", "GH_TOKEN", "TOKEN", "CLIENT_SECRET", "DB_PASSWORD", "X_SECRET_Y"]) {
+	for (const name of [
+		"TAVILY_API_KEY",
+		"GH_TOKEN",
+		"TOKEN",
+		"CLIENT_SECRET",
+		"DB_PASSWORD",
+		"X_SECRET_Y",
+		"STRIPE_API_KEYS",
+		"AUTH_TOKENS",
+	]) {
 		expect(isSecretShapedName(name)).toBe(true);
 	}
 	for (const name of ["TOKENIZER_PATH", "PATH", "PI_CODING_AGENT_DIR", "SECRETARY", "api_key"]) {
@@ -90,9 +99,11 @@ test("⚠ the quarantine removes secret-shaped and file-defined names, and nothi
 });
 
 // ⚠ THE RESIDUAL bun AUTOLOAD. A root `.env` reaches every bun child from the cwd no matter
-// what the parent scrubbed (verified with `env -i`). The quarantine still scrubs what it
-// defines from THIS process, and names it as misplaced so the operator moves it.
-test("a root .env holding a secret is scrubbed from the environment AND reported as misplaced", () => {
+// what the parent scrubbed (verified with `env -i`). Its secret-shaped names are scrubbed
+// from THIS process and named as misplaced so the operator moves them — and its NON-secret
+// names are left alone: the root `.env` is the project's, not ours, and `PORT` or
+// `PUBLIC_URL` there is config bun loaded on purpose (PR #98 review).
+test("a root .env: its secret-shaped names are scrubbed and reported as misplaced; its other names stay", () => {
 	const root = scratchRepoRoot();
 	writeFileSync(rootDotenvPath(root), "TAVILY_API_KEY=in-the-wrong-place\nPUBLIC_URL=https://x\n");
 	const environment: Record<string, string | undefined> = {
@@ -100,9 +111,9 @@ test("a root .env holding a secret is scrubbed from the environment AND reported
 		PUBLIC_URL: "https://x",
 	};
 	const report = quarantineSecrets(environment, root);
-	expect(report.removed).toEqual(["PUBLIC_URL", "TAVILY_API_KEY"]);
+	expect(report.removed).toEqual(["TAVILY_API_KEY"]);
 	expect(report.misplaced).toEqual(["TAVILY_API_KEY"]);
-	expect(environment).toEqual({});
+	expect(environment).toEqual({ PUBLIC_URL: "https://x" });
 });
 
 test("with no secrets file the quarantine still removes secret-shaped names from the environment", () => {

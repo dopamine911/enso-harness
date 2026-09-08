@@ -521,6 +521,11 @@ test("⚠ an environment listing is blocked, naming #89 and the match, and gets 
 	expect(result?.block).toBe(true);
 	expect(result?.reason).toContain("environment listing");
 	expect(result?.reason).toContain("#89");
+	// ⚠ The reason is read by the model and lands in transcripts: it must point at the
+	// secrets file, never at the root .env this fix exists to get secrets OUT of (PR #98
+	// review — the first version said ".env" and no substring assertion caught it).
+	expect(result?.reason).toContain(".zen/secrets.env");
+	expect(result?.reason).not.toMatch(/from the gated \.env/);
 	expect(input.timeout).toBeUndefined();
 });
 

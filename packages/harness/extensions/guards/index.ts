@@ -251,7 +251,7 @@ function shellCommandDenial(
 				`Secrets are kept out of the tool environment (#89), so an environment dump or a ` +
 				`secret-shaped variable expansion is refused rather than trusted to be empty. ` +
 				`If a command needs a value from the environment, name a non-secret variable; ` +
-				`API keys are read by the harness's own tools from the gated .env file.`,
+				`API keys are read by the harness's own tools from .zen/secrets.env, never the root .env.`,
 		};
 	}
 	return undefined;
