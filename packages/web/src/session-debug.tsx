@@ -95,14 +95,10 @@ export function SessionDebugView({
 	const hostMode = session?.permissionMode.mode;
 	const branchMode = session === undefined ? undefined : lastPersistedMode(session.entries);
 	return (
-		<aside
-			aria-label="session debug"
-			className="mx-auto w-full max-w-3xl border-t px-4 py-2 font-mono text-muted-foreground text-xs"
-		>
-			<div className="flex items-center gap-2">
+		<aside aria-label="session debug" className="flex flex-col gap-3 p-3 font-mono text-muted-foreground text-xs">
+			<div className="flex flex-wrap items-center gap-2">
 				<span className="font-semibold text-foreground">session debug</span>
-				<span>thread {threadId}</span>
-				<span className="ml-auto flex gap-1">
+				<span className="flex gap-1">
 					<Button type="button" size="sm" variant="outline" onClick={onRefresh}>
 						refresh
 					</Button>
@@ -110,8 +106,9 @@ export function SessionDebugView({
 						copy as JSON
 					</Button>
 				</span>
+				<span className="w-full break-all">thread {threadId}</span>
 			</div>
-			<div className="mt-2 grid grid-cols-2 gap-4">
+			<div className="flex flex-col gap-3">
 				<section>
 					<h3 className="font-semibold text-foreground">browser believes</h3>
 					<div>
@@ -123,7 +120,7 @@ export function SessionDebugView({
 						stats: {browser.stats.countedMessages} counted, cost ${browser.stats.totalCost.toFixed(4)}
 					</div>
 					<h4 className="mt-1 text-foreground">last {browser.recentChunks.length} CUSTOM chunks</h4>
-					<ol className="max-h-40 overflow-y-auto">
+					<ol>
 						{browser.recentChunks.map((chunk) => (
 							<li key={chunk.sequence}>
 								{chunk.receivedAt.slice(11, 19)} {chunk.name}
@@ -138,10 +135,10 @@ export function SessionDebugView({
 						<div>{error === undefined ? "not fetched yet — press refresh" : null}</div>
 					) : (
 						<>
-							<div>session {session.sessionId}</div>
-							<div>cwd {session.cwd}</div>
-							<div>dir {session.sessionDir}</div>
-							<div>
+							<div className="break-all">session {session.sessionId}</div>
+							<div className="break-all">cwd {session.cwd}</div>
+							<div className="break-all">dir {session.sessionDir}</div>
+							<div className="break-all">
 								file{" "}
 								{session.sessionFile ?? (
 									<span title="pi flushes a session to disk only after its first assistant message; until then the branch below is the only copy">
@@ -160,7 +157,7 @@ export function SessionDebugView({
 							</div>
 							<div>commands: {session.commands.map((command) => `/${command}`).join(" ")}</div>
 							<h4 className="mt-1 text-foreground">branch ({session.entries.length} entries)</h4>
-							<ol className="max-h-40 overflow-y-auto">
+							<ol>
 								{session.entries.map((entry) => (
 									<li key={entryKey(entry)}>{describeEntry(entry)}</li>
 								))}

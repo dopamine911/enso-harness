@@ -414,6 +414,11 @@ const { useAppChat, useChatContext } = createChatHook({
 		 */
 		layout: function ChatLayout({ Messages, Interrupts, Queue, Input }) {
 			const chat = useChatContext();
+			// The debug column (#86) is a right-hand pane, not a bottom drawer: stacked under
+			// the transcript it took forty percent of the height and squeezed the conversation
+			// it exists to explain. Opt-in by `?debug`; open by default when it is, and
+			// collapsible from the header so it can get out of the way without a reload.
+			const [debugOpen, setDebugOpen] = useState(isDebugMode);
 			return (
 				<div className="flex h-dvh flex-col bg-background text-foreground">
 					<header className="flex items-center gap-2 border-b px-4 py-2">
@@ -425,38 +430,58 @@ const { useAppChat, useChatContext } = createChatHook({
 							<span className="rounded-full border px-2 py-0.5 text-muted-foreground text-xs">fixture</span>
 						) : null}
 						<PermissionModeControl />
+						{isDebugMode ? (
+							<Button
+								type="button"
+								size="sm"
+								variant={debugOpen ? "secondary" : "outline"}
+								aria-expanded={debugOpen}
+								aria-controls="session-debug-pane"
+								onClick={() => setDebugOpen((open) => !open)}
+							>
+								{debugOpen ? "hide debug" : "show debug"}
+							</Button>
+						) : null}
 					</header>
-					<Conversation>
-						<ConversationContent className="mx-auto w-full max-w-3xl">
-							{chat.messages.length === 0 ? (
-								<ConversationEmptyState
-									icon={<img src="/logo-full.png" alt="zen-harness" className="w-44" />}
-									title=""
-									description="ask pi something to get started"
-								/>
-							) : (
-								<Messages />
-							)}
-							{/* pi's notify lines (#29) — the transcript tail, above the interrupts,
-							    so "Mode set to X" reads next to the run it belongs to. */}
-							<SessionNotifications />
-							{/* ⚠ Mounted before anything emits one, deliberately. This is where #4's
-							    `ask` verdict reaches the browser, and an unmounted slot is precisely
-							    why an approval would silently never appear. */}
-							<Interrupts />
-							<Queue />
-							<RunProblem />
-						</ConversationContent>
-						<ConversationScrollButton />
-					</Conversation>
-					{/* The session-stats line (#45): cost so far + last request's prompt size.
-					    Hidden until the first counted request — see session-stats.tsx. */}
-					<SessionStatsBar />
-					{/* The session debug drawer (#86): what the browser believes beside what pi's
-					    session holds, for THIS thread. Opt-in by `?debug`, so it costs nothing in
-					    the normal layout. */}
-					{isDebugMode ? <SessionDebugDrawer threadId={PAGE_THREAD_ID} runInFlight={chat.isLoading} /> : null}
-					<Input />
+					<div className="flex min-h-0 flex-1">
+						<div className="flex min-w-0 flex-1 flex-col">
+							<Conversation>
+								<ConversationContent className="mx-auto w-full max-w-3xl">
+									{chat.messages.length === 0 ? (
+										<ConversationEmptyState
+											icon={<img src="/logo-full.png" alt="zen-harness" className="w-44" />}
+											title=""
+											description="ask pi something to get started"
+										/>
+									) : (
+										<Messages />
+									)}
+									{/* pi's notify lines (#29) — the transcript tail, above the interrupts,
+									    so "Mode set to X" reads next to the run it belongs to. */}
+									<SessionNotifications />
+									{/* ⚠ Mounted before anything emits one, deliberately. This is where #4's
+									    `ask` verdict reaches the browser, and an unmounted slot is precisely
+									    why an approval would silently never appear. */}
+									<Interrupts />
+									<Queue />
+									<RunProblem />
+								</ConversationContent>
+								<ConversationScrollButton />
+							</Conversation>
+							{/* The session-stats line (#45): cost so far + last request's prompt size.
+							    Hidden until the first counted request — see session-stats.tsx. */}
+							<SessionStatsBar />
+							<Input />
+						</div>
+						{/* The session debug pane (#86): what the browser believes beside what pi's
+						    session holds, for THIS thread. Scrolls on its own so a long branch never
+						    moves the composer. */}
+						{isDebugMode && debugOpen ? (
+							<div id="session-debug-pane" className="w-[30rem] shrink-0 overflow-y-auto border-l">
+								<SessionDebugDrawer threadId={PAGE_THREAD_ID} runInFlight={chat.isLoading} />
+							</div>
+						) : null}
+					</div>
 				</div>
 			);
 		},
