@@ -89,7 +89,13 @@ jobs:
       - name: Run Claude review
         id: claude
         if: steps.token.outputs.present == 'true'
-        uses: anthropics/claude-code-action@v1
+        # PINNED, NOT `@v1`. `v1` moved to v1.0.218 on 2026-09-08 (Claude Code 2.1.265) and every run on
+        # ubuntu-latest since fails before reading the diff: the native installer prints "successfully
+        # installed" while its own notes say `~/.local/bin/claude` is missing, so the SDK spawns a path that
+        # does not exist — anthropics/claude-code-action#1817, seen here on PR #104 three attempts running.
+        # This is v1.0.217, the last release before the bump. Unpin (or move the SHA forward) once #1817 is
+        # closed; a floating tag is what let the break arrive with no change on our side.
+        uses: anthropics/claude-code-action@9c5ddab2e6d17b83ea679153b31f1d5f023cf636 # v1.0.217
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Posts a progress comment the action updates as it works.
@@ -199,6 +205,11 @@ jobs:
         # Distinguishing the workflow-guard case from a real problem is the whole point: reporting the guard
         # as a failure trains people to ignore this comment.
         #
+        # `execution_file` alone is NOT "the review happened". On PR #104 the step FAILED (the binary was
+        # missing, #1817 above) and still set it, so this comment said "✅ ran" under a red check — the third
+        # false-green shape in this file, after the missing token and the workflow guard. The step's own
+        # outcome is read first; a set file with a failed outcome is a failure and says so.
+        #
         # Upserted by a hidden marker so repeated pushes update one comment instead of spamming the PR.
         if: ${{ always() && steps.token.outputs.present == 'true' && steps.claude.outcome != 'skipped' }}
         env:
@@ -207,10 +218,14 @@ jobs:
           NUMBER: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           MARKER='<!-- claude-run-status: pr-review -->'
-          if [ -n "${EXECUTION_FILE}" ]; then
+          if [ "${CLAUDE_OUTCOME}" != "success" ] && [ -n "${EXECUTION_FILE}" ]; then
+            body="${MARKER}"$'\n'"❌ **Claude PR review failed** on \`${SHA:0:7}\` — the step ran and exited non-zero; no verdict was posted. See the [run](${RUN_URL})."
+          elif [ -n "${EXECUTION_FILE}" ]; then
             body="${MARKER}"$'\n'"✅ **Claude PR review** ran on \`${SHA:0:7}\`."
           else
             changed_files="$(gh pr diff "${NUMBER}" --repo "${REPO}" --name-only 2>/dev/null || true)"
