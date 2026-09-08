@@ -83,6 +83,26 @@ test("⚠ childProxy is pinned off in the agent dir's multi-account config, othe
 	expect(JSON.parse(readFileSync(join(hostAgentDir, "provider-failover.json"), "utf8"))).toEqual({ childProxy: false });
 });
 
+// ⚠ #89. pi runs in this process and every `bash` child inherits its environment, so a
+// secret still in `process.env` at host creation reaches the model's tools. The host
+// quarantines at creation — before any session — and says which names it removed
+// (never values). This test plants a secret-shaped variable and checks it is gone.
+test("⚠ creating a host removes secret-shaped variables from its environment, naming them, before any session", () => {
+	const environment: Record<string, string | undefined> = { PATH: "/usr/bin", PLANTED_API_KEY: "must-not-survive" };
+	const problems: unknown[] = [];
+	createAgentHost({
+		cwd: repoRoot,
+		agentDir: mkdtempSync(join(tmpdir(), "zen-host-quarantine-")),
+		harnessPackageDir: harnessDir,
+		onProblem: (problem) => problems.push(problem),
+		environment,
+	});
+	expect(environment).toEqual({ PATH: "/usr/bin" });
+	const notice = problems.find((problem) => String(problem).includes("#89"));
+	expect(String(notice)).toContain("PLANTED_API_KEY");
+	expect(String(notice)).not.toContain("must-not-survive");
+});
+
 test("exactly the manifest's five extensions load, in order, with no load errors", async () => {
 	const hosted = await hostedSession();
 	const loaded = hosted.loadedExtensionPaths;

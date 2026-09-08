@@ -111,6 +111,22 @@ export function zenAgentDir(repoRoot: string): string {
 	return join(repoRoot, ZEN_RUNTIME_DIRECTORY, "pi-agent");
 }
 
+/**
+ * The harness's secrets file (#89): `.zen/secrets.env`, NOT `.env` at the root. bun
+ * auto-loads `.env*` from the cwd into EVERY bun process — including a `bun -e` the model
+ * runs from the repo root — so a root `.env` reaches a tool child no matter what the
+ * parent scrubbed (verified with `env -i`). `.zen/` is git-ignored, write-protected
+ * (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`), and read-gated by basename (`secrets.env`).
+ */
+export function zenSecretsPath(repoRoot: string): string {
+	return join(repoRoot, ZEN_RUNTIME_DIRECTORY, "secrets.env");
+}
+
+/** The root `.env` — where secrets must NOT live (#89); reported as misplaced when they do. */
+export function rootDotenvPath(repoRoot: string): string {
+	return join(repoRoot, ".env");
+}
+
 /** Where the print variant of the harness package is materialized (#20). */
 export function printHarnessDir(repoRoot: string): string {
 	return join(repoRoot, ZEN_RUNTIME_DIRECTORY, "print-harness");
