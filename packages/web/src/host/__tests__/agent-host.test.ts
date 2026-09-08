@@ -199,6 +199,34 @@ test("⚠ a throwing session_start becomes an extension_error record; the sessio
 	expect(String(error?.extensionPath)).toContain("zen-host-throwing-probe");
 });
 
+// ⚠ THE HOST MUST BE LISTENING WHILE session_start RUNS (#88). Extensions persist state
+// during that hook — picc writes its opening `modes` entry there — and pi emits
+// `entry_appended` for it to whoever is subscribed AT THAT MOMENT. Subscribing after
+// `bindExtensions` returned meant those entries were emitted to nobody: the held-until-
+// first-subscriber buffer sits behind the host's subscription, so nothing put them in it.
+// Found by the #86 drawer: two `modes` entries on the branch, one `zen.entry` in the browser.
+test("⚠ an entry an extension persists during session_start reaches the first subscriber (#88)", async () => {
+	const probe: InlineExtension = {
+		name: "zen-host-startup-entry-probe",
+		factory: (pi) => {
+			pi.on("session_start", () => {
+				pi.appendEntry("probe-startup", { seen: true }); // the same call picc makes for `modes`
+			});
+		},
+	};
+	const hosted = await hostedSession([probe]);
+	const events = collectEvents(hosted);
+	const entries = events
+		.filter((event) => event.type === "entry_appended")
+		.map((event) => (event as { entry?: { customType?: unknown; data?: unknown } }).entry ?? {});
+	const probeEntry = entries.find((entry) => entry.customType === "probe-startup");
+	expect(probeEntry?.data).toEqual({ seen: true });
+	// And the one that matters in production: picc's opening mode, persisted at session start,
+	// is the transcript's first `Mode:` line only if it crosses — it is what #88 was missing.
+	const openingMode = entries.find((entry) => entry.customType === "modes");
+	expect(openingMode?.data).toMatchObject({ mode: "default" });
+});
+
 test("listCommands is synchronous and names picc's /mode", async () => {
 	const hosted = await hostedSession();
 	const commands = hosted.session.listCommands();

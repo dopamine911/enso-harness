@@ -209,6 +209,22 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
 		const ui = createZenExtensionUiContext({ emit, onProblem });
 
+		// ⚠ SUBSCRIBE BEFORE BINDING (#88). Extensions persist state during `session_start` —
+		// picc writes its opening `modes` entry there — and pi emits `entry_appended` to whoever
+		// is listening at that moment. Subscribing after `bindExtensions` returned meant those
+		// entries went to nobody: the held-until-first-subscriber buffer sits behind THIS
+		// subscription, so nothing put them in it, and the browser saw one `modes` entry where
+		// the branch had two. The `ui` notifies always crossed because `ui` binds `emit` directly.
+		// Nothing session_start emits is run progress (`agent_settled` comes from the run loop
+		// only), so replaying it into the first run's pump is inert.
+		const unsubscribeSession = session.subscribe((event) => {
+			try {
+				emit(toRpcWireEvent(event));
+			} catch (error) {
+				onProblem?.(error);
+			}
+		});
+
 		// Bound ONCE — see the module header. Errors thrown by an extension handler arrive here
 		// (spike receipt: a throwing session_start is routed to onError and bindExtensions
 		// resolves; it neither hangs nor rejects), and cross as the same `extension_error`
@@ -219,14 +235,6 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 			onError: (error: ExtensionError) => {
 				emit({ type: "extension_error", extensionPath: error.extensionPath, event: error.event, error: error.error });
 			},
-		});
-
-		const unsubscribeSession = session.subscribe((event) => {
-			try {
-				emit(toRpcWireEvent(event));
-			} catch (error) {
-				onProblem?.(error);
-			}
 		});
 
 		let disposed = false;
