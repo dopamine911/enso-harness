@@ -1,23 +1,18 @@
-import { afterEach, expect, test } from "bun:test";
+import { beforeEach, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import {
-	applyZenPermissionMode,
-	applyZenPersistedModeEntry,
-	clearPermissionModeForTest,
-	getPermissionModeSnapshot,
-	PermissionModeSelect,
-	seedPermissionMode,
-	subscribeToPermissionMode,
-} from "../permission-mode.tsx";
+import { createPermissionModeStore, PermissionModeSelect, type PermissionModeStore } from "../permission-mode.tsx";
 
 /**
  * #84's browser half: the CURRENT permission mode as state, and the control that changes
- * it. Module-level store like session-stats and notifications, tested the same way. The
- * dropdown is rendered statically; its send wiring lives in chat-screen.tsx and is covered
- * by the live receipt (renderToStaticMarkup runs no handlers).
+ * it. One store per thread (#90 PR 3), so each case builds a fresh one. The dropdown is
+ * rendered statically; its send wiring lives in chat-screen.tsx and is covered by the live
+ * receipt (renderToStaticMarkup runs no handlers).
  */
 
-afterEach(() => clearPermissionModeForTest());
+let store: PermissionModeStore;
+beforeEach(() => {
+	store = createPermissionModeStore();
+});
 
 const receipt = (
 	mode: string,
@@ -34,85 +29,85 @@ const piccEntry = (mode: string): { customType: string; data: { mode: string } }
 // one case this store exists for (#73: refused in default mode, no change yet) is exactly
 // the one an assumed default would misreport if the receipt ever failed to arrive.
 test("⚠ the mode is UNKNOWN until a receipt arrives — never an assumed default", () => {
-	expect(getPermissionModeSnapshot()).toEqual({ mode: undefined, available: [] });
+	expect(store.get()).toEqual({ mode: undefined, available: [] });
 });
 
 test("a run-start receipt sets both the mode and the modes on offer", () => {
-	applyZenPermissionMode(receipt("default"));
-	expect(getPermissionModeSnapshot()).toEqual({ mode: "default", available: ["default", "acceptEdits", "plan"] });
+	store.applyReceipt(receipt("default"));
+	expect(store.get()).toEqual({ mode: "default", available: ["default", "acceptEdits", "plan"] });
 });
 
 // ⚠ THE TWO FEEDS COMPOSE. A change mid-run arrives as picc's persisted entry, which
 // carries no option list; it must move the mode WITHOUT wiping the list the receipt set.
 test("a persisted picc entry moves the mode and keeps the receipt's option list", () => {
-	applyZenPermissionMode(receipt("default"));
-	applyZenPersistedModeEntry(piccEntry("acceptEdits"));
-	expect(getPermissionModeSnapshot()).toEqual({ mode: "acceptEdits", available: ["default", "acceptEdits", "plan"] });
+	store.applyReceipt(receipt("default"));
+	store.applyPersistedEntry(piccEntry("acceptEdits"));
+	expect(store.get()).toEqual({ mode: "acceptEdits", available: ["default", "acceptEdits", "plan"] });
 });
 
 test("another extension's custom entry is not a mode change", () => {
-	applyZenPermissionMode(receipt("default"));
-	applyZenPersistedModeEntry({ customType: "someone-elses-state", data: { mode: "plan" } });
-	expect(getPermissionModeSnapshot().mode).toBe("default");
+	store.applyReceipt(receipt("default"));
+	store.applyPersistedEntry({ customType: "someone-elses-state", data: { mode: "plan" } });
+	expect(store.get().mode).toBe("default");
 });
 
 test("malformed values never throw and never move the store", () => {
-	applyZenPermissionMode(receipt("plan"));
+	store.applyReceipt(receipt("plan"));
 	for (const bad of [null, undefined, 42, "acceptEdits", {}, { mode: "" }, { mode: 7 }, { customType: "modes" }]) {
-		applyZenPermissionMode(bad);
-		applyZenPersistedModeEntry(bad);
+		store.applyReceipt(bad);
+		store.applyPersistedEntry(bad);
 	}
-	expect(getPermissionModeSnapshot().mode).toBe("plan");
+	expect(store.get().mode).toBe("plan");
 });
 
 test("a receipt with a malformed option list keeps the previous list rather than emptying it", () => {
-	applyZenPermissionMode(receipt("default"));
-	applyZenPermissionMode({ mode: "plan", available: "not-a-list" });
-	expect(getPermissionModeSnapshot()).toEqual({ mode: "plan", available: ["default", "acceptEdits", "plan"] });
+	store.applyReceipt(receipt("default"));
+	store.applyReceipt({ mode: "plan", available: "not-a-list" });
+	expect(store.get()).toEqual({ mode: "plan", available: ["default", "acceptEdits", "plan"] });
 });
 
 test("subscribers are told on every change, and unsubscribing stops it", () => {
 	let notified = 0;
-	const stop = subscribeToPermissionMode(() => {
+	const stop = store.subscribe(() => {
 		notified += 1;
 	});
-	applyZenPermissionMode(receipt("default"));
-	applyZenPersistedModeEntry(piccEntry("plan"));
+	store.applyReceipt(receipt("default"));
+	store.applyPersistedEntry(piccEntry("plan"));
 	stop();
-	applyZenPersistedModeEntry(piccEntry("auto"));
+	store.applyPersistedEntry(piccEntry("auto"));
 	expect(notified).toBe(2);
 });
 
 // ── the mount-time seed ──────────────────────────────────────────────────────
 
 test("the seed fills an unknown store from the server's fresh-thread state", async () => {
-	await seedPermissionMode(() => Promise.resolve(receipt("default", ["default", "plan"])));
-	expect(getPermissionModeSnapshot()).toEqual({ mode: "default", available: ["default", "plan"] });
+	await store.seed(() => Promise.resolve(receipt("default", ["default", "plan"])));
+	expect(store.get()).toEqual({ mode: "default", available: ["default", "plan"] });
 });
 
 // ⚠ THE REMOUNT HAZARD. The store outlives the component; a remount re-runs the seed. If
 // the thread already switched modes, the fresh-thread default must NOT overwrite it.
 test("⚠ the seed never clobbers a mode the store already holds", async () => {
-	applyZenPersistedModeEntry(piccEntry("acceptEdits"));
-	await seedPermissionMode(() => Promise.resolve(receipt("default")));
-	expect(getPermissionModeSnapshot().mode).toBe("acceptEdits");
+	store.applyPersistedEntry(piccEntry("acceptEdits"));
+	await store.seed(() => Promise.resolve(receipt("default")));
+	expect(store.get().mode).toBe("acceptEdits");
 });
 
 // A receipt that lands WHILE the fetch is in flight must also win: the seed re-checks
 // after resolving, not only before starting.
 test("a receipt arriving during the fetch beats the seed", async () => {
 	const { promise, resolve } = Promise.withResolvers<unknown>();
-	const seeding = seedPermissionMode(() => promise);
-	applyZenPermissionMode(receipt("plan"));
+	const seeding = store.seed(() => promise);
+	store.applyReceipt(receipt("plan"));
 	resolve(receipt("default"));
 	await seeding;
-	expect(getPermissionModeSnapshot().mode).toBe("plan");
+	expect(store.get().mode).toBe("plan");
 });
 
 test("a failed or malformed fetch leaves the store honestly unknown", async () => {
-	await seedPermissionMode(() => Promise.reject(new Error("no server")));
-	await seedPermissionMode(() => Promise.resolve({ nope: true }));
-	expect(getPermissionModeSnapshot().mode).toBeUndefined();
+	await store.seed(() => Promise.reject(new Error("no server")));
+	await store.seed(() => Promise.resolve({ nope: true }));
+	expect(store.get().mode).toBeUndefined();
 });
 
 // ⚠ STRICT MODE. main.tsx mounts under React StrictMode, which runs the mount effect twice
@@ -125,17 +120,17 @@ test("concurrent seeds share one fetch; a failed seed lets a later one retry", a
 		fetches += 1;
 		return promise;
 	};
-	const first = seedPermissionMode(fetcher);
-	const second = seedPermissionMode(fetcher);
+	const first = store.seed(fetcher);
+	const second = store.seed(fetcher);
 	resolve(receipt("default"));
 	await Promise.all([first, second]);
 	expect(fetches).toBe(1);
-	expect(getPermissionModeSnapshot().mode).toBe("default");
+	expect(store.get().mode).toBe("default");
 
-	clearPermissionModeForTest();
-	await seedPermissionMode(() => Promise.reject(new Error("first try failed")));
-	await seedPermissionMode(() => Promise.resolve(receipt("plan")));
-	expect(getPermissionModeSnapshot().mode).toBe("plan");
+	store = createPermissionModeStore();
+	await store.seed(() => Promise.reject(new Error("first try failed")));
+	await store.seed(() => Promise.resolve(receipt("plan")));
+	expect(store.get().mode).toBe("plan");
 });
 
 // ── the control ──────────────────────────────────────────────────────────────

@@ -1,15 +1,7 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { ZenThreadInspection } from "@zen/core";
 import { renderToStaticMarkup } from "react-dom/server";
-import {
-	clearRecentCustomChunksForTest,
-	getRecentCustomChunks,
-	RECENT_CUSTOM_CHUNK_CAPACITY,
-	routeZenCustomEvent,
-} from "../custom-event-router.ts";
-import { clearModeLinesForTest } from "../mode-lines.ts";
-import { clearZenNotificationsForTest } from "../notifications.tsx";
-import { clearPermissionModeForTest } from "../permission-mode.tsx";
+import { RECENT_CUSTOM_CHUNK_CAPACITY, routeZenCustomEvent } from "../custom-event-router.ts";
 import {
 	type BrowserBelief,
 	type CopyState,
@@ -20,7 +12,7 @@ import {
 	NO_SESSION_YET,
 	SessionDebugView,
 } from "../session-debug.tsx";
-import { clearSessionStatsForTest } from "../session-stats.tsx";
+import { clearThreadsForTest, mintThread, type ThreadStores } from "../thread-stores.ts";
 
 /**
  * #86: the drawer's one job is to NAME a disagreement between what the browser believes
@@ -29,13 +21,11 @@ import { clearSessionStatsForTest } from "../session-stats.tsx";
  * screen reader would see it. The fetch wiring is covered by the live receipt.
  */
 
-afterEach(() => {
-	clearRecentCustomChunksForTest();
-	clearPermissionModeForTest();
-	clearModeLinesForTest();
-	clearZenNotificationsForTest();
-	clearSessionStatsForTest();
+let stores: ThreadStores;
+beforeEach(() => {
+	stores = mintThread();
 });
+afterEach(() => clearThreadsForTest());
 
 const noop = (): void => {
 	// Static markup runs no handlers; the callbacks exist only to satisfy the props.
@@ -146,18 +136,18 @@ test("before the first fetch, and on a failed one, the session column says why",
 // ── the router's record ──────────────────────────────────────────────────────
 
 test("every CUSTOM chunk the router sees is recorded, oldest first, with a stable identity", () => {
-	routeZenCustomEvent("zen.mode", { mode: "default", available: [] });
-	routeZenCustomEvent("zen.unmapped", { type: "queue_update" });
-	const recorded = getRecentCustomChunks();
+	routeZenCustomEvent(stores, "zen.mode", { mode: "default", available: [] });
+	routeZenCustomEvent(stores, "zen.unmapped", { type: "queue_update" });
+	const recorded = stores.recentChunks.get();
 	expect(recorded.map((chunk) => chunk.name)).toEqual(["zen.mode", "zen.unmapped"]);
 	expect(recorded[0]?.sequence).toBeLessThan(recorded[1]?.sequence ?? 0);
 });
 
 test("the record is a ring: beyond capacity the oldest chunks fall off", () => {
 	for (let sent = 0; sent < RECENT_CUSTOM_CHUNK_CAPACITY + 5; sent += 1) {
-		routeZenCustomEvent("zen.unmapped", { sent });
+		routeZenCustomEvent(stores, "zen.unmapped", { sent });
 	}
-	const recorded = getRecentCustomChunks();
+	const recorded = stores.recentChunks.get();
 	expect(recorded).toHaveLength(RECENT_CUSTOM_CHUNK_CAPACITY);
 	expect(recorded[0]?.value).toEqual({ sent: 5 });
 });
@@ -165,9 +155,9 @@ test("the record is a ring: beyond capacity the oldest chunks fall off", () => {
 // A model turn is a run of `zen.unmapped` chunks; without the inner type they are
 // indistinguishable rows, which is the opposite of what a debug list is for.
 test("an unmapped chunk is described by the pi event it carries; a receipt just by its name", () => {
-	routeZenCustomEvent("zen.unmapped", { type: "tool_execution_start", toolName: "bash" });
-	routeZenCustomEvent("zen.mode", { mode: "plan", available: [] });
-	const [unmapped, receipt] = getRecentCustomChunks();
+	routeZenCustomEvent(stores, "zen.unmapped", { type: "tool_execution_start", toolName: "bash" });
+	routeZenCustomEvent(stores, "zen.mode", { mode: "plan", available: [] });
+	const [unmapped, receipt] = stores.recentChunks.get();
 	expect(unmapped && describeChunk(unmapped)).toBe("zen.unmapped (tool_execution_start)");
 	expect(receipt && describeChunk(receipt)).toBe("zen.mode");
 });

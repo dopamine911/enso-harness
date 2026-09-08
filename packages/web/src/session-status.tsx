@@ -1,7 +1,7 @@
 import type { UIMessage } from "@tanstack/ai-client";
 import { automaticPartsForMessage, selectChatUI } from "@tanstack/ai-client/ui";
-import { useSyncExternalStore } from "react";
-import { getSessionStatsSnapshot, type SessionStats, subscribeToSessionStats } from "./session-stats.tsx";
+import type { SessionStats } from "./session-stats.tsx";
+import { useStore, useThreadStores } from "./store.ts";
 import { toolResultState } from "./ZenToolResult.tsx";
 
 /**
@@ -141,12 +141,12 @@ export interface SessionStatusBarProps {
 }
 
 /**
- * The bar wired to the page: the chat's messages and in-flight flag come in as props
+ * The bar wired to its thread: the chat's messages and in-flight flag come in as props
  * (the chat hook is bound inside chat-screen.tsx, and this module stays free of it), the
- * usage store is subscribed here.
+ * thread's usage store is read from context.
  */
 export function SessionStatusBar({ messages, isLoading }: SessionStatusBarProps): React.ReactNode {
-	const stats = useSyncExternalStore(subscribeToSessionStats, getSessionStatsSnapshot, getSessionStatsSnapshot);
+	const stats = useStore(useThreadStores().stats);
 	return (
 		<SessionStatusView activity={describeActivity(messages, isLoading)} counts={countSession(messages)} stats={stats} />
 	);

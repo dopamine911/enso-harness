@@ -1,8 +1,5 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { routeZenCustomEvent } from "../custom-event-router.ts";
-import { clearModeLinesForTest } from "../mode-lines.ts";
-import { clearZenNotificationsForTest, getZenNotificationsSnapshot } from "../notifications.tsx";
-import { clearPermissionModeForTest, getPermissionModeSnapshot } from "../permission-mode.tsx";
 import {
 	ZEN_CUSTOM_EVENT_ENTRY,
 	ZEN_CUSTOM_EVENT_MODE,
@@ -10,59 +7,60 @@ import {
 	ZEN_CUSTOM_EVENT_UNMAPPED,
 	ZEN_CUSTOM_EVENT_USAGE,
 } from "../rpc/custom-event-names.ts";
-import { clearSessionStatsForTest, getSessionStatsSnapshot } from "../session-stats.tsx";
+import { clearThreadsForTest, mintThread, type ThreadStores } from "../thread-stores.ts";
 
 /**
  * #53 S1.3: the CUSTOM-chunk router was an inline closure no test reached — renaming
  * `zen.entry`, dropping the notify-type allowlist, or swapping the two `apply*` calls all
- * left the suite green. These drive the extracted function and read the stores.
+ * left the suite green. These drive the extracted function with a fresh thread's stores
+ * (#90 PR 3) and read them back.
  */
 
-afterEach(() => {
-	clearModeLinesForTest();
-	clearZenNotificationsForTest();
-	clearSessionStatsForTest();
-	clearPermissionModeForTest();
+let stores: ThreadStores;
+beforeEach(() => {
+	stores = mintThread();
 });
+afterEach(() => clearThreadsForTest());
 
-const notificationMessages = () => getZenNotificationsSnapshot().map((notification) => notification.message);
+const route = (eventType: string, data: unknown): void => routeZenCustomEvent(stores, eventType, data);
+const notificationMessages = (): string[] => stores.notifications.get().map((notification) => notification.message);
 
 // ⚠ ONE ENTRY, TWO VIEWS (#84). A picc modes entry is both history (the transcript line)
 // and state (the current-mode store). Dropping either `apply*` call from the entry branch
 // leaves the other view green, so both are read here.
 test("zen.entry reaches BOTH the mode-lines store and the current-mode store", () => {
-	routeZenCustomEvent(ZEN_CUSTOM_EVENT_ENTRY, {
+	route(ZEN_CUSTOM_EVENT_ENTRY, {
 		kind: "custom-entry",
 		customType: "modes",
 		data: { mode: "acceptEdits" },
 	});
 	expect(notificationMessages()).toEqual(["Mode: acceptEdits"]);
-	expect(getPermissionModeSnapshot().mode).toBe("acceptEdits");
+	expect(stores.permissionMode.get().mode).toBe("acceptEdits");
 	// and it did NOT land in the stats store (the swap-the-two-apply-calls mutation)
-	expect(getSessionStatsSnapshot().totalCost).toBe(0);
+	expect(stores.stats.get().totalCost).toBe(0);
 });
 
 test("zen.mode reaches the current-mode store and nothing else — it is state, not a transcript line", () => {
-	routeZenCustomEvent(ZEN_CUSTOM_EVENT_MODE, { mode: "default", available: ["default", "plan"] });
-	expect(getPermissionModeSnapshot()).toEqual({ mode: "default", available: ["default", "plan"] });
+	route(ZEN_CUSTOM_EVENT_MODE, { mode: "default", available: ["default", "plan"] });
+	expect(stores.permissionMode.get()).toEqual({ mode: "default", available: ["default", "plan"] });
 	expect(notificationMessages()).toEqual([]);
 });
 
 test("zen.usage reaches the session-stats store and nothing else", () => {
-	routeZenCustomEvent(ZEN_CUSTOM_EVENT_USAGE, {
+	route(ZEN_CUSTOM_EVENT_USAGE, {
 		kind: "message-usage",
 		role: "assistant",
 		usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalCost: 0.5 },
 	});
-	expect(getSessionStatsSnapshot().totalCost).toBe(0.5);
+	expect(stores.stats.get().totalCost).toBe(0.5);
 	expect(notificationMessages()).toEqual([]);
 });
 
 test("zen.notify pushes the message with each declared notify type", () => {
 	for (const notifyType of ["info", "warning", "error"] as const) {
-		routeZenCustomEvent(ZEN_CUSTOM_EVENT_NOTIFY, { message: `m-${notifyType}`, notifyType });
+		route(ZEN_CUSTOM_EVENT_NOTIFY, { message: `m-${notifyType}`, notifyType });
 	}
-	expect(getZenNotificationsSnapshot().map((notification) => notification.notifyType)).toEqual([
+	expect(stores.notifications.get().map((notification) => notification.notifyType)).toEqual([
 		"info",
 		"warning",
 		"error",
@@ -70,20 +68,20 @@ test("zen.notify pushes the message with each declared notify type", () => {
 });
 
 test("an unrecognised notify type degrades to an untyped notification, never a drop", () => {
-	routeZenCustomEvent(ZEN_CUSTOM_EVENT_NOTIFY, { message: "hello", notifyType: "loud" });
-	routeZenCustomEvent(ZEN_CUSTOM_EVENT_NOTIFY, { message: "plain" });
-	expect(getZenNotificationsSnapshot().map((notification) => [notification.message, notification.notifyType])).toEqual([
+	route(ZEN_CUSTOM_EVENT_NOTIFY, { message: "hello", notifyType: "loud" });
+	route(ZEN_CUSTOM_EVENT_NOTIFY, { message: "plain" });
+	expect(stores.notifications.get().map((notification) => [notification.message, notification.notifyType])).toEqual([
 		["hello", undefined],
 		["plain", undefined],
 	]);
 });
 
 test("a chunk name this surface does not render falls through untouched", () => {
-	routeZenCustomEvent(ZEN_CUSTOM_EVENT_UNMAPPED, { type: "some_future_event" });
-	routeZenCustomEvent("zen.entry-renamed", { customType: "modes", data: { mode: "plan" } });
-	routeZenCustomEvent("", { message: "x" });
+	route(ZEN_CUSTOM_EVENT_UNMAPPED, { type: "some_future_event" });
+	route("zen.entry-renamed", { customType: "modes", data: { mode: "plan" } });
+	route("", { message: "x" });
 	expect(notificationMessages()).toEqual([]);
-	expect(getSessionStatsSnapshot().totalCost).toBe(0);
+	expect(stores.stats.get().totalCost).toBe(0);
 });
 
 // ⚠ A throw here would end TanStack's stream loop — every malformed value must render as nothing.
@@ -100,9 +98,26 @@ test("malformed payloads never throw and never render", () => {
 	];
 	for (const eventType of [ZEN_CUSTOM_EVENT_NOTIFY, ZEN_CUSTOM_EVENT_ENTRY, ZEN_CUSTOM_EVENT_USAGE]) {
 		for (const value of malformed) {
-			expect(() => routeZenCustomEvent(eventType, value)).not.toThrow();
+			expect(() => route(eventType, value)).not.toThrow();
 		}
 	}
 	expect(notificationMessages()).toEqual([]);
-	expect(getSessionStatsSnapshot().totalCost).toBe(0);
+	expect(stores.stats.get().totalCost).toBe(0);
+});
+
+// ⚠ THE REASON THE ROUTER TAKES ITS STORES. TanStack hands `onCustomEvent` no thread id;
+// each pane's factory closes over its own stores, so a chunk routed through one thread's
+// callback must land in that thread and no other.
+test("⚠ a chunk routed to one thread never touches another thread's stores", () => {
+	const other = mintThread();
+	route(ZEN_CUSTOM_EVENT_USAGE, {
+		kind: "message-usage",
+		role: "assistant",
+		usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalCost: 0.5 },
+	});
+	route(ZEN_CUSTOM_EVENT_MODE, { mode: "plan", available: ["plan"] });
+	expect(stores.stats.get().totalCost).toBe(0.5);
+	expect(other.stats.get().totalCost).toBe(0);
+	expect(other.permissionMode.get().mode).toBeUndefined();
+	expect(other.recentChunks.get()).toEqual([]);
 });

@@ -1,19 +1,19 @@
 import { readPiccPersistedMode } from "@zen/core";
-import { useSyncExternalStore } from "react";
+import { createStore, type Store, useStore, useThreadStores } from "./store.ts";
 
 /**
  * The CURRENT permission mode, as state — and the control that changes it (#84).
  *
  * `mode-lines.ts` renders mode changes as transcript history. This is the other view: what
- * mode the thread is in NOW, kept in a module store like the session stats, so a user
+ * mode the thread is in NOW, kept in a per-thread store like the session stats, so a user
  * refused with `user dismissed dialog` (#73) can see they are in `default` instead of
  * reading the refusal as a bug.
  *
  * Two feeds, one store:
  *   • `zen.mode` — the receipt the server synthesises at every run start, carrying the mode
  *     the run begins in and the modes this session's picc registers. This is what makes
- *     `default` visible: picc persists a `modes` entry only on a CHANGE, so a fresh thread
- *     never announces its initial mode on its own.
+ *     `default` visible deterministically, whether or not picc's own session-start entry
+ *     crosses (it does since #88; it did not before).
  *   • `zen.entry` — picc's persisted `modes` entry when the mode CHANGES mid-run, read
  *     through the same `readPiccPersistedMode` the host uses, so both sides share one
  *     definition of picc's shape.
@@ -22,9 +22,9 @@ import { useSyncExternalStore } from "react";
  * arrived. Never assumed. Before the first prompt no session exists yet, and the one case
  * this control exists for is precisely the one a guess would get wrong.
  *
- * ⓘ The browser runs ONE thread per page (TanStack mints it; nothing here is keyed by
- * threadId), so a single value is the per-thread store. A reload is a new thread, and the
- * store starts over with it.
+ * ⓘ ONE STORE PER THREAD (#90 PR 3). A page holds several threads and switches between
+ * them; each thread's mode is its own. The store is created by `thread-stores.ts` and
+ * reaches components through `useThreadStores()`.
  */
 
 export interface PermissionModeState {
@@ -36,91 +36,82 @@ export interface PermissionModeState {
 
 const UNKNOWN: PermissionModeState = { mode: undefined, available: [] };
 
-let state: PermissionModeState = UNKNOWN;
-const listeners = new Set<() => void>();
-
-function publish(next: PermissionModeState): void {
-	state = next;
-	for (const listener of listeners) listener();
+export interface PermissionModeStore extends Store<PermissionModeState> {
+	/** Fold one `zen.mode` receipt's value in. Defensive like every wire crossing: a malformed value changes nothing. */
+	readonly applyReceipt: (data: unknown) => void;
+	/**
+	 * Fold one `zen.entry` chunk's value in — a mode CHANGE persisted by picc. Any other
+	 * extension's custom entry, or a malformed one, is ignored here: `readPiccPersistedMode`
+	 * is the one place that decides what counts as picc's.
+	 */
+	readonly applyPersistedEntry: (data: unknown) => void;
+	/**
+	 * Seed from the server's fresh-thread state (`GET /api/mode`) so the control reads
+	 * `default` from the first paint instead of `unknown` until the first run.
+	 *
+	 * ⚠ ONLY WHILE STILL UNKNOWN. The store outlives the component, so a remount (HMR, strict
+	 * mode, a re-render of the layout) would otherwise clobber a real mode the thread already
+	 * switched to with the fresh-thread default. Checked again AFTER the fetch resolves, not
+	 * just before: a run-start receipt can land in between.
+	 *
+	 * ⚠ ONE FETCH AT A TIME. `main.tsx` mounts under React StrictMode, which runs effects
+	 * twice in dev; both mounts pass the unknown-check before either fetch resolves, so
+	 * without this they would fire two identical requests (PR #85 review). Concurrent seeds
+	 * share the in-flight fetch; a failed one clears the slot so a later seed may retry.
+	 *
+	 * The fetcher is injected so the guard is testable without a network; a failed or
+	 * malformed fetch leaves the store untouched — `unknown` is the honest answer then.
+	 */
+	readonly seed: (fetchFreshThreadState: () => Promise<unknown>) => Promise<void>;
 }
 
-/** Fold one `zen.mode` receipt's value in. Defensive like every wire crossing: a malformed value changes nothing. */
-export function applyZenPermissionMode(data: unknown): void {
-	if (typeof data !== "object" || data === null) return;
-	const receipt = data as { mode?: unknown; available?: unknown };
-	if (typeof receipt.mode !== "string" || receipt.mode.length === 0) return;
-	const available = Array.isArray(receipt.available)
-		? receipt.available.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
-		: state.available;
-	publish({ mode: receipt.mode, available });
+export function createPermissionModeStore(): PermissionModeStore {
+	const store = createStore<PermissionModeState>(UNKNOWN);
+	let seeding: Promise<void> | undefined;
+
+	const applyReceipt = (data: unknown): void => {
+		if (typeof data !== "object" || data === null) return;
+		const receipt = data as { mode?: unknown; available?: unknown };
+		if (typeof receipt.mode !== "string" || receipt.mode.length === 0) return;
+		const available = Array.isArray(receipt.available)
+			? receipt.available.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+			: store.get().available;
+		store.set({ mode: receipt.mode, available });
+	};
+
+	const seedOnce = async (fetchFreshThreadState: () => Promise<unknown>): Promise<void> => {
+		let fresh: unknown;
+		try {
+			fresh = await fetchFreshThreadState();
+		} catch {
+			return;
+		}
+		if (store.get().mode !== undefined) return;
+		applyReceipt(fresh);
+	};
+
+	return {
+		get: store.get,
+		subscribe: store.subscribe,
+		applyReceipt,
+		applyPersistedEntry: (data) => {
+			const mode = readPiccPersistedMode(data);
+			if (mode === undefined) return;
+			store.set({ mode, available: store.get().available });
+		},
+		seed: (fetchFreshThreadState) => {
+			if (store.get().mode !== undefined) return Promise.resolve();
+			seeding ??= seedOnce(fetchFreshThreadState).finally(() => {
+				seeding = undefined;
+			});
+			return seeding;
+		},
+	};
 }
 
-/**
- * Fold one `zen.entry` chunk's value in — a mode CHANGE persisted by picc. Any other
- * extension's custom entry, or a malformed one, is ignored here: `readPiccPersistedMode`
- * is the one place that decides what counts as picc's.
- */
-export function applyZenPersistedModeEntry(data: unknown): void {
-	const mode = readPiccPersistedMode(data);
-	if (mode === undefined) return;
-	publish({ mode, available: state.available });
-}
-
-/**
- * Seed the store from the server's fresh-thread state (`GET /api/mode`) so the header
- * reads `default` from the first paint instead of `unknown` until the first run.
- *
- * ⚠ ONLY WHILE STILL UNKNOWN. The store is module-level and outlives the component, so a
- * remount (HMR, strict mode, a re-render of the layout) would otherwise clobber a real
- * mode the thread already switched to with the fresh-thread default. Checked again AFTER
- * the fetch resolves, not just before: a run-start receipt can land in between.
- *
- * ⚠ ONE FETCH AT A TIME. `main.tsx` mounts under React StrictMode, which runs effects
- * twice in dev; both mounts pass the unknown-check before either fetch resolves, so
- * without this they would fire two identical requests (PR #85 review). Concurrent seeds
- * share the in-flight fetch; a failed one clears the slot so a later seed may retry.
- *
- * The fetcher is injected so the guard is testable without a network; a failed or
- * malformed fetch leaves the store untouched — `unknown` is the honest answer then.
- */
-export function seedPermissionMode(fetchFreshThreadState: () => Promise<unknown>): Promise<void> {
-	if (state.mode !== undefined) return Promise.resolve();
-	seeding ??= seedOnce(fetchFreshThreadState).finally(() => {
-		seeding = undefined;
-	});
-	return seeding;
-}
-
-let seeding: Promise<void> | undefined;
-
-async function seedOnce(fetchFreshThreadState: () => Promise<unknown>): Promise<void> {
-	let fresh: unknown;
-	try {
-		fresh = await fetchFreshThreadState();
-	} catch {
-		return;
-	}
-	if (state.mode !== undefined) return;
-	applyZenPermissionMode(fresh);
-}
-
-export function subscribeToPermissionMode(listener: () => void): () => void {
-	listeners.add(listener);
-	return () => listeners.delete(listener);
-}
-
-export function getPermissionModeSnapshot(): PermissionModeState {
-	return state;
-}
-
-/** Test seam: reset the store between cases. Never called from production code. */
-export function clearPermissionModeForTest(): void {
-	state = UNKNOWN;
-	seeding = undefined;
-}
-
+/** The rendering thread's current mode. */
 export function usePermissionMode(): PermissionModeState {
-	return useSyncExternalStore(subscribeToPermissionMode, getPermissionModeSnapshot, getPermissionModeSnapshot);
+	return useStore(useThreadStores().permissionMode);
 }
 
 export interface PermissionModeSelectProps {
@@ -133,7 +124,7 @@ export interface PermissionModeSelectProps {
 }
 
 /**
- * The header control: current mode, and a native `<select>` of the modes picc offers.
+ * The composer-row control: current mode, and a native `<select>` of the modes picc offers.
  *
  * Presentational and chat-agnostic on purpose — it can be rendered statically in a test
  * with no chat context. `chat-screen.tsx` wraps it with the send + loading wiring. A native
@@ -152,7 +143,7 @@ export function PermissionModeSelect({
 	const known = mode !== undefined;
 	return (
 		<label
-			className="ml-auto flex items-center gap-1.5 text-muted-foreground text-xs"
+			className="flex items-center gap-1.5 text-muted-foreground text-xs"
 			title={
 				known
 					? "pi's permission mode for this thread — change it here or with /mode"
