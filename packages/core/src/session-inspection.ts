@@ -120,3 +120,38 @@ export const ZenThreadEvents = Type.Object(
 	{ additionalProperties: false },
 );
 export type ZenThreadEvents = Static<typeof ZenThreadEvents>;
+
+/**
+ * One entry of the branch as a row — `12:34:56 custom:modes mode=plan` — read defensively:
+ * pi's shapes are carried, not modelled. THE definition (PR #100 review): the drawer and
+ * `zen-session.mjs` had one each and they had already drifted apart.
+ */
+export function describeSessionEntry(entry: unknown): string {
+	if (typeof entry !== "object" || entry === null) return String(entry);
+	const fields = entry as {
+		type?: unknown;
+		customType?: unknown;
+		timestamp?: unknown;
+		message?: unknown;
+		data?: unknown;
+	};
+	const kind = typeof fields.type === "string" ? fields.type : "?";
+	const custom = typeof fields.customType === "string" ? `:${fields.customType}` : "";
+	const role =
+		typeof fields.message === "object" && fields.message !== null && "role" in fields.message
+			? ` ${String(fields.message.role)}`
+			: "";
+	const mode =
+		fields.customType === "modes" && typeof fields.data === "object" && fields.data !== null && "mode" in fields.data
+			? ` mode=${String(fields.data.mode)}`
+			: "";
+	const when = typeof fields.timestamp === "string" ? fields.timestamp.slice(11, 19) : "";
+	return `${when} ${kind}${custom}${role}${mode}`.trim();
+}
+
+/** One event of a tail as a row — `12:34:56 held ×3 entry_appended modes` — time, provenance, count when coalesced, type, inner name. */
+export function describeThreadEvent(event: ZenThreadEvent): string {
+	const count = event.count > 1 ? ` ×${event.count}` : "";
+	const name = event.name === undefined ? "" : ` ${event.name}`;
+	return `${event.at.slice(11, 19)} ${event.provenance}${count} ${event.type}${name}`;
+}

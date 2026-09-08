@@ -1,4 +1,6 @@
 import {
+	describeSessionEntry,
+	describeThreadEvent,
 	PICC_DEFAULT_PERMISSION_MODE,
 	readPiccPersistedMode,
 	type ZenThreadEvent,
@@ -89,21 +91,7 @@ export function describeChunk(chunk: RecordedCustomChunk): string {
  */
 function entryKey(entry: unknown, position: number): string {
 	if (typeof entry === "object" && entry !== null && "id" in entry && typeof entry.id === "string") return entry.id;
-	return `${position}:${describeEntry(entry)}`;
-}
-
-/** One entry of the branch, read defensively: pi's shapes are carried, not modelled. */
-function describeEntry(entry: unknown): string {
-	if (typeof entry !== "object" || entry === null) return String(entry);
-	const fields = entry as { type?: unknown; customType?: unknown; timestamp?: unknown; message?: unknown };
-	const kind = typeof fields.type === "string" ? fields.type : "?";
-	const custom = typeof fields.customType === "string" ? `:${fields.customType}` : "";
-	const role =
-		typeof fields.message === "object" && fields.message !== null && "role" in fields.message
-			? ` ${String(fields.message.role)}`
-			: "";
-	const when = typeof fields.timestamp === "string" ? fields.timestamp.slice(11, 19) : "";
-	return `${when} ${kind}${custom}${role}`.trim();
+	return `${position}:${describeSessionEntry(entry)}`;
 }
 
 function Mismatch({ when, says }: { when: boolean; says: string }): React.ReactNode {
@@ -111,13 +99,6 @@ function Mismatch({ when, says }: { when: boolean; says: string }): React.ReactN
 	return (
 		<span className="ml-2 rounded bg-destructive px-1 font-semibold text-destructive-foreground">MISMATCH: {says}</span>
 	);
-}
-
-/** `12:34:56 held ×3 entry_appended modes` — time, provenance, count when coalesced, type, inner name. */
-export function describeThreadEvent(event: ZenThreadEvent): string {
-	const count = event.count > 1 ? ` ×${event.count}` : "";
-	const name = event.name === undefined ? "" : ` ${event.name}`;
-	return `${event.at.slice(11, 19)} ${event.provenance}${count} ${event.type}${name}`;
 }
 
 function EventTailList({ events }: { events: readonly ZenThreadEvent[] }): React.ReactNode {
@@ -217,7 +198,7 @@ export function SessionDebugView({
 							<h4 className="mt-1 text-foreground">branch ({session.entries.length} entries)</h4>
 							<ol>
 								{session.entries.map((entry, position) => (
-									<li key={entryKey(entry, position)}>{describeEntry(entry)}</li>
+									<li key={entryKey(entry, position)}>{describeSessionEntry(entry)}</li>
 								))}
 							</ol>
 						</>

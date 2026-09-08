@@ -267,8 +267,8 @@ export function startZenServer(options: ZenServerOptions) {
 		}
 		const payload: ZenThreadEvents = {
 			threadId,
-			emitted: [...thread.hosted.emittedEvents()],
-			sent: [...thread.sent.recent()],
+			emitted: thread.hosted.emittedEvents(),
+			sent: thread.sent.recent(),
 		};
 		response.writeHead(200, { "Content-Type": "application/json" });
 		response.end(JSON.stringify(payload));

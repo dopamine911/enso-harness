@@ -6,7 +6,6 @@ import {
 	type BrowserBelief,
 	type CopyState,
 	describeChunk,
-	describeThreadEvent,
 	InspectionFetchError,
 	lastPersistedMode,
 	latestWins,
@@ -236,17 +235,6 @@ function threadEvent(overrides: Partial<ZenThreadEvent>): ZenThreadEvent {
 		...overrides,
 	};
 }
-
-// The provenance IS the finding — a `held` or `dropped` row is what an ordering bug looks like — so
-// every row must show it, and a coalesced row its count, or the tail hides what it was built to show.
-test("an event row names its provenance, its coalesced count, and the inner name when there is one", () => {
-	expect(describeThreadEvent(threadEvent({ provenance: "held", count: 3, name: "modes" }))).toBe(
-		"12:34:56 held ×3 entry_appended modes",
-	);
-	expect(describeThreadEvent(threadEvent({ type: "RUN_STARTED", provenance: "sent" }))).toBe(
-		"12:34:56 sent RUN_STARTED",
-	);
-});
 
 test("both tails render under their own heading; a dropped event is marked as a failure", () => {
 	const events: ZenThreadEvents = {

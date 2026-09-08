@@ -28,8 +28,8 @@ export const EVENT_TAIL_CAPACITY = 200;
 
 export interface EventTail {
 	readonly record: (type: string, name: string | undefined, provenance: ZenEventProvenance) => void;
-	/** Oldest first. A copy, so a consumer cannot mutate the ring. */
-	readonly recent: () => readonly ZenThreadEvent[];
+	/** Oldest first. A fresh copy per call — the caller's to keep or mutate; the ring is untouched. */
+	readonly recent: () => ZenThreadEvent[];
 }
 
 export function createEventTail(capacity = EVENT_TAIL_CAPACITY): EventTail {

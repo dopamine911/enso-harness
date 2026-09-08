@@ -21,6 +21,9 @@
  * The server address defaults to the dev server's; override with ZEN_SERVER_URL.
  */
 
+// The row formats are core's, shared with the drawer: one definition, so the two views cannot drift.
+import { describeSessionEntry, describeThreadEvent } from "../packages/core/src/index.ts";
+
 const serverUrl = process.env.ZEN_SERVER_URL ?? "http://127.0.0.1:5179";
 const [threadId, ...flags] = process.argv.slice(2);
 const wantsJson = flags.includes("--json");
@@ -41,17 +44,6 @@ async function fetchJson(path) {
 	return response.json();
 }
 
-/** pi's shapes are carried, not modelled — read the base fields defensively. */
-function describeEntry(entry) {
-	if (typeof entry !== "object" || entry === null) return String(entry);
-	const kind = typeof entry.type === "string" ? entry.type : "?";
-	const custom = typeof entry.customType === "string" ? `:${entry.customType}` : "";
-	const role = typeof entry.message?.role === "string" ? ` ${entry.message.role}` : "";
-	const when = typeof entry.timestamp === "string" ? entry.timestamp.slice(11, 19) : "        ";
-	const mode = entry.customType === "modes" && typeof entry.data?.mode === "string" ? ` mode=${entry.data.mode}` : "";
-	return `${when}  ${kind}${custom}${role}${mode}`;
-}
-
 if (threadId === undefined) {
 	const threads = await fetchJson("/api/threads");
 	if (threads.length === 0) {
@@ -63,13 +55,6 @@ if (threadId === undefined) {
 		console.log(`${thread.threadId}  mode=${thread.mode}  ${state}  last=${thread.lastActivityAt}  ${file}`);
 	}
 	process.exit(0);
-}
-
-/** `12:34:56  held ×3   entry_appended modes` — the same row the drawer shows, columned. */
-function describeThreadEvent(event) {
-	const count = event.count > 1 ? ` ×${event.count}` : "";
-	const name = event.name === undefined ? "" : ` ${event.name}`;
-	return `${event.at.slice(11, 19)}  ${(event.provenance + count).padEnd(12)} ${event.type}${name}`;
 }
 
 if (wantsEvents) {
@@ -107,4 +92,4 @@ console.log(
 );
 console.log(`commands    ${inspection.commands.map((commandName) => `/${commandName}`).join(" ")}`);
 console.log(`branch      ${inspection.entries.length} entries, root to leaf:`);
-for (const branchEntry of inspection.entries) console.log(`  ${describeEntry(branchEntry)}`);
+for (const branchEntry of inspection.entries) console.log(`  ${describeSessionEntry(branchEntry)}`);

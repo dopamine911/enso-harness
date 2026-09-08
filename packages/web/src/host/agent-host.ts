@@ -130,8 +130,8 @@ export interface HostedSession {
 	 * tests, and inspection is a host concern.
 	 */
 	inspect(): HostedSessionInspection;
-	/** The emitted tail (#97): what the host's `emit` funnel saw, with provenance. Read-only; a copy per call. */
-	emittedEvents(): readonly ZenThreadEvent[];
+	/** The emitted tail (#97): what the host's `emit` funnel saw, with provenance. A fresh copy per call. */
+	emittedEvents(): ZenThreadEvent[];
 }
 
 export interface AgentHost {

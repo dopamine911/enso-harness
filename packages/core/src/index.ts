@@ -92,6 +92,8 @@ export {
 	readSecret,
 } from "./secrets.ts";
 export {
+	describeSessionEntry,
+	describeThreadEvent,
 	ZenEventProvenance,
 	ZenThreadEvent,
 	ZenThreadEvents,
