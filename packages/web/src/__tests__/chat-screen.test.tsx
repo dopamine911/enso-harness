@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import type { GenericAGUIInterrupt } from "@tanstack/ai-client";
 import type { ChatUISelectedPart } from "@tanstack/ai-client/ui";
 import { ZEN_DIALOG_KEY, type ZenDialogSpec } from "@zen/core";
@@ -11,7 +11,7 @@ import {
 	UnhandledInterrupt,
 	ZenDialogInterrupt,
 } from "../chat-screen.tsx";
-import { mintThread } from "../thread-stores.ts";
+import { adoptThread, clearThreadsForTest, mintThread } from "../thread-stores.ts";
 
 /**
  * #49, first pass: the dialog components had live receipts (#27, the e2e smoke) and no unit
@@ -20,6 +20,8 @@ import { mintThread } from "../thread-stores.ts";
  * fallback for an interrupt the page cannot read. Click behaviour stays with the e2e smoke
  * (renderToStaticMarkup runs no handlers).
  */
+
+afterEach(() => clearThreadsForTest());
 
 const SELECT_DIALOG: ZenDialogSpec = {
 	method: "select",
@@ -169,4 +171,19 @@ test("⚠ two mounted panes with ?debug open render exactly ONE debug column, in
 	// And with the switch off, no pane shows one.
 	const closed = renderToStaticMarkup(<ThreadPane threadId={first.threadId} active={true} debugOpen={false} />);
 	expect(closed).not.toContain('id="session-debug-pane"');
+});
+
+test("a resumed pane mounts with the stored user and assistant messages already visible", () => {
+	const stored = adoptThread({
+		threadId: "stored-1",
+		messages: [
+			{ id: "u1", role: "user", parts: [{ type: "text", content: "Earlier question" }] },
+			{ id: "a1", role: "assistant", parts: [{ type: "text", content: "Earlier answer" }] },
+		],
+		permissionMode: { mode: "plan", available: ["default", "plan"] },
+	});
+	const rendered = renderToStaticMarkup(<ThreadPane threadId={stored.threadId} active={true} debugOpen={false} />);
+	expect(rendered).toContain("Earlier question");
+	expect(rendered).toContain("Earlier answer");
+	expect(rendered).toContain('<option value="plan" selected="">plan</option>');
 });

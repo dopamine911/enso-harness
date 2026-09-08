@@ -7,7 +7,6 @@ import {
 	type CopyState,
 	describeChunk,
 	InspectionFetchError,
-	lastPersistedMode,
 	latestWins,
 	NO_SESSION_YET,
 	SessionDebugView,
@@ -96,15 +95,6 @@ const renderWith = ({ browser, session, error, copyState = "idle", events }: Ren
 			onCopy={noop}
 		/>,
 	);
-
-// ── lastPersistedMode: picc's own restore rule, applied to the raw branch ─────
-
-test("the branch's LAST modes entry wins, and a branch with none is picc's initial default", () => {
-	expect(lastPersistedMode([piccEntry("acceptEdits", "a"), piccEntry("plan", "b")])).toBe("plan");
-	expect(lastPersistedMode([{ type: "message", id: "x", parentId: null, timestamp: "" }])).toBe("default");
-	// Another extension's custom entry is not a mode.
-	expect(lastPersistedMode([{ type: "custom", customType: "other", data: { mode: "plan" }, id: "o" }])).toBe("default");
-});
 
 // ── the mismatch highlight ───────────────────────────────────────────────────
 

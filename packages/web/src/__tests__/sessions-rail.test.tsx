@@ -3,8 +3,10 @@ import type { UIMessage } from "@tanstack/ai-client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { relativeAge, SessionsRail, UNTITLED_SESSION } from "../sessions-rail.tsx";
 import {
+	adoptThread,
 	clearThreadsForTest,
 	mintThread,
+	reviveHistoryMessages,
 	TITLE_MAX_CHARS,
 	threadListStore,
 	titleFromMessages,
@@ -82,6 +84,40 @@ test("a summary update reaches the list and moves the thread's activity clock; a
 	expect(threadListStore.get()).toHaveLength(1);
 });
 
+test("adopting stored history restores dates, title and mode under the stored session id exactly once", () => {
+	const history = {
+		threadId: "stored-1",
+		messages: [
+			{
+				id: "u1",
+				role: "user",
+				parts: [{ type: "text", content: "resume this work" }],
+				createdAt: "2026-09-08T10:00:00.000Z",
+			},
+			{ id: "a1", role: "assistant", parts: [{ type: "text", content: "continuing" }] },
+		],
+		permissionMode: { mode: "plan", available: ["default", "plan"] },
+	};
+	const adopted = adoptThread(history);
+	expect(adopted.threadId).toBe("stored-1");
+	expect(adopted.history[0]?.createdAt).toBeInstanceOf(Date);
+	expect(adopted.history[0]?.createdAt?.toISOString()).toBe("2026-09-08T10:00:00.000Z");
+	expect(adopted.permissionMode.get()).toEqual({ mode: "plan", available: ["default", "plan"] });
+	expect(threadListStore.get()).toMatchObject([{ threadId: "stored-1", title: "resume this work", busy: false }]);
+	expect(adoptThread({ ...history, messages: [] })).toBe(adopted);
+	expect(threadListStore.get()).toHaveLength(1);
+});
+
+test("history revival drops malformed rows and invalid dates instead of handing them to TanStack", () => {
+	const revived = reviveHistoryMessages([
+		null,
+		{ id: 3, role: "user", parts: [] },
+		{ id: "x", role: "tool", parts: [] },
+		{ id: "u", role: "user", parts: [{ type: "text", content: "visible" }], createdAt: "not-a-date" },
+	]);
+	expect(revived).toEqual([{ id: "u", role: "user", parts: [{ type: "text", content: "visible" }] }]);
+});
+
 // ── the rail ─────────────────────────────────────────────────────────────────
 
 test("the rail names the active thread, titles the untitled honestly, and marks a busy one", () => {
@@ -98,8 +134,11 @@ test("the rail names the active thread, titles the untitled honestly, and marks 
 				},
 			]}
 			activeThreadId="t1"
+			earlier={[]}
+			earlierError={undefined}
 			now={now}
 			onSelect={noop}
+			onResume={noop}
 			onNew={noop}
 		/>,
 	);
@@ -114,4 +153,50 @@ test("the rail names the active thread, titles the untitled honestly, and marks 
 	expect(currentRow.indexOf("fix the login bug")).toBeLessThan(currentRow.indexOf("</button>"));
 	// The busy row says so for assistive tech, not only with a dot.
 	expect(rendered).toContain("running");
+});
+
+test("the earlier list distinguishes resumable, live-elsewhere, empty and failed states", () => {
+	const now = new Date("2026-09-08T12:00:00Z");
+	const baseProps = {
+		threads: [{ threadId: "here", title: "current", lastActivityAt: now, busy: false }],
+		activeThreadId: "here",
+		now,
+		onSelect: noop,
+		onResume: noop,
+		onNew: noop,
+	};
+	const rendered = renderToStaticMarkup(
+		<SessionsRail
+			{...baseProps}
+			earlier={[
+				{
+					threadId: "stored",
+					title: "resume me",
+					lastActivityAt: new Date(now.getTime() - 2 * 3_600_000).toISOString(),
+					messageCount: 4,
+					live: false,
+				},
+				{
+					threadId: "elsewhere",
+					lastActivityAt: now.toISOString(),
+					messageCount: 2,
+					live: true,
+				},
+			]}
+			earlierError={undefined}
+		/>,
+	);
+	expect(rendered).toContain('aria-label="earlier sessions"');
+	expect(rendered).toContain("resume me");
+	expect(rendered).toContain("2h");
+	expect(rendered).toContain("open in another tab");
+	expect(rendered).toContain("disabled");
+	expect(rendered).toContain(UNTITLED_SESSION);
+
+	const empty = renderToStaticMarkup(<SessionsRail {...baseProps} earlier={[]} earlierError={undefined} />);
+	expect(empty).toContain("none yet");
+	const failed = renderToStaticMarkup(<SessionsRail {...baseProps} earlier={[]} earlierError="connection refused" />);
+	expect(failed).toContain('role="alert"');
+	expect(failed).toContain("could not list sessions: connection refused");
+	expect(failed).not.toContain("none yet");
 });

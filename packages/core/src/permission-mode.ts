@@ -58,3 +58,24 @@ export function readPiccPersistedMode(entry: unknown): string | undefined {
 	const { mode } = data as { mode?: unknown };
 	return typeof mode === "string" && mode.length > 0 ? mode : undefined;
 }
+
+/**
+ * picc's own `restoreState` rule, applied to a branch (#84): the LAST `modes` entry wins,
+ * and a branch with none is the initial mode. Walked from the end so the newest entry is
+ * the first hit. THE definition — the host's `permissionModeState`, the `?debug` drawer's
+ * cross-check, and a resumed thread's opening mode (#95) all read this one walk.
+ *
+ * ⚠ Deliberately NOT cached anywhere (PR #85 review): the branch is not append-only —
+ * `/tree`, `/fork` and `/branch` move the leaf onto a path whose last `modes` entry can
+ * differ, which is exactly why picc re-walks. Correctness under branch navigation is worth
+ * microseconds per run.
+ */
+export function persistedPermissionMode(branch: readonly unknown[]): string {
+	for (let position = branch.length - 1; position >= 0; position -= 1) {
+		const entry = branch[position];
+		if (typeof entry !== "object" || entry === null || !("type" in entry) || entry.type !== "custom") continue;
+		const persisted = readPiccPersistedMode(entry);
+		if (persisted !== undefined) return persisted;
+	}
+	return PICC_DEFAULT_PERMISSION_MODE;
+}

@@ -1,8 +1,7 @@
 import {
 	describeSessionEntry,
 	describeThreadEvent,
-	PICC_DEFAULT_PERMISSION_MODE,
-	readPiccPersistedMode,
+	persistedPermissionMode,
 	type ZenThreadEvent,
 	ZenThreadEvents,
 	ZenThreadInspection,
@@ -56,17 +55,6 @@ export interface SessionDebugViewProps {
 	readonly copyState: CopyState;
 	readonly onRefresh: () => void;
 	readonly onCopy: () => void;
-}
-
-/** The mode the branch's LAST picc `modes` entry carries — picc's own restore rule — else the initial default. */
-export function lastPersistedMode(entries: readonly unknown[]): string {
-	for (let position = entries.length - 1; position >= 0; position -= 1) {
-		const entry = entries[position];
-		if (typeof entry !== "object" || entry === null || !("type" in entry) || entry.type !== "custom") continue;
-		const mode = readPiccPersistedMode(entry);
-		if (mode !== undefined) return mode;
-	}
-	return PICC_DEFAULT_PERMISSION_MODE;
 }
 
 /**
@@ -126,7 +114,7 @@ export function SessionDebugView({
 }: SessionDebugViewProps): React.ReactNode {
 	const browserMode = browser.mode.mode ?? "unknown";
 	const hostMode = session?.permissionMode.mode;
-	const branchMode = session === undefined ? undefined : lastPersistedMode(session.entries);
+	const branchMode = session === undefined ? undefined : persistedPermissionMode(session.entries);
 	return (
 		<aside aria-label="session debug" className="flex flex-col gap-3 p-3 font-mono text-muted-foreground text-xs">
 			<div className="flex flex-wrap items-center gap-2">

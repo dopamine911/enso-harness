@@ -176,3 +176,40 @@ export function describeThreadEvent(event: ZenThreadEvent): string {
 	const columns = threadEventColumns(event);
 	return `${columns.when} ${columns.provenance} ${columns.subject}`;
 }
+
+/**
+ * One of pi's session files for this workspace (#95), as the rail lists it: a session the
+ * user can come back to. `threadId` IS pi's session id — the host creates every session
+ * with the browser's thread id (`NewSessionOptions.id`), so the two never need a mapping,
+ * and a page-owned thread finds its own file again after the server restarts.
+ */
+export const ZenResumableSession = Type.Object(
+	{
+		threadId: Type.String(),
+		/** The first user message, or undefined for a session with none — the rail's title, as deepseek does. */
+		title: Type.Optional(Type.String()),
+		/** The file's mtime, ISO 8601 — when the session last grew. */
+		lastActivityAt: Type.String(),
+		messageCount: Type.Integer({ minimum: 0 }),
+		/** A live thread on THIS server holds the session — a run in flight, or idle but not yet evicted. */
+		live: Type.Boolean(),
+	},
+	{ additionalProperties: false },
+);
+export type ZenResumableSession = Static<typeof ZenResumableSession>;
+
+/**
+ * A thread's history as the browser mounts it (#95): the branch as TanStack `UIMessage`s —
+ * built by the server's `branch-to-messages` mapper, the same way the live stream is
+ * mapped to AG-UI — plus the opening permission mode the branch persists. Carried as
+ * `Unknown` because the shape is TanStack's, not zen's; the durable form is pi's entries.
+ */
+export const ZenThreadHistory = Type.Object(
+	{
+		threadId: Type.String(),
+		messages: Type.Array(Type.Unknown()),
+		permissionMode: PiPermissionModeState,
+	},
+	{ additionalProperties: false },
+);
+export type ZenThreadHistory = Static<typeof ZenThreadHistory>;

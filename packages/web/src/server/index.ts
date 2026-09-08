@@ -6,12 +6,16 @@ import type { StreamChunk } from "@tanstack/ai";
 import {
 	PICC_DEFAULT_PERMISSION_MODE,
 	PICC_PERMISSION_MODES,
+	persistedPermissionMode,
+	type ZenResumableSession,
 	type ZenThreadEvents,
+	type ZenThreadHistory,
 	type ZenThreadInspection,
 	type ZenThreadSummary,
 } from "@zen/core";
 import { type AgentHost, createAgentHost } from "../host/agent-host.ts";
 import { describeStreamChunk, type EventTail } from "../host/event-tail.ts";
+import { branchToMessages } from "../rpc/branch-to-messages.ts";
 import { createDialogRegistry } from "./dialog-registry.ts";
 import { type ChatRunOutcome, resumeChat, runChat } from "./session.ts";
 import { createThreadSessions, type ThreadView } from "./thread-sessions.ts";
@@ -20,6 +24,8 @@ import { createThreadSessions, type ThreadView } from "./thread-sessions.ts";
 const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/;
 /** `GET /api/threads/<threadId>/events` — the thread's two event tails (#97). */
 const THREAD_EVENTS_ROUTE = /^\/api\/threads\/([^/?#]+)\/events$/;
+/** `GET /api/threads/<threadId>/history` — the branch as messages, live or stored (#95). */
+const THREAD_HISTORY_ROUTE = /^\/api\/threads\/([^/?#]+)\/history$/;
 
 /**
  * The dev backend: one SSE endpoint TanStack AI's `fetchServerSentEvents` can talk to (#24).
@@ -217,7 +223,10 @@ export function startZenServer(options: ZenServerOptions) {
 			harnessPackageDir: options.harnessPackageDir,
 			onProblem: options.onProblem,
 		});
-	const threads = createThreadSessions({ createSession: () => host.createSession(), onProblem: options.onProblem });
+	const threads = createThreadSessions({
+		createSession: (threadId) => host.createSession(threadId),
+		onProblem: options.onProblem,
+	});
 
 	// Parked pi sessions awaiting a human's answer to a dialog (#27). Owned by the server,
 	// shared by every request; evicted whole on close.
@@ -274,6 +283,64 @@ export function startZenServer(options: ZenServerOptions) {
 		response.end(JSON.stringify(payload));
 	}
 
+	/**
+	 * pi's session files for this workspace (#95) — what the rail can come back to. `live`
+	 * marks the ones a thread on THIS server holds; the browser refuses to adopt a session
+	 * another page is running (a live thread it did not mint) rather than attach to it.
+	 */
+	async function respondWithSessions(response: ServerResponse): Promise<void> {
+		const stored = await host.listSessions();
+		const payload: ZenResumableSession[] = stored.map((session) => ({
+			threadId: session.id,
+			...(session.firstMessage.trim().length === 0 ? {} : { title: session.firstMessage.trim() }),
+			lastActivityAt: session.modified.toISOString(),
+			messageCount: session.messageCount,
+			live: threads.peek(session.id) !== undefined,
+		}));
+		response.writeHead(200, { "Content-Type": "application/json" });
+		response.end(JSON.stringify(payload));
+	}
+
+	/**
+	 * A STORED thread's branch as the messages a chat mounts with (#95), plus the mode the
+	 * branch persists. Read-only — looking must not build (#86). A live thread is refused:
+	 * the caller may have fetched the rail just before another tab started that session,
+	 * so the server, not only the disabled button, owns the one-page-per-session invariant.
+	 */
+	async function respondWithThreadHistory(threadId: string, response: ServerResponse): Promise<void> {
+		if (threads.peek(threadId) !== undefined) {
+			response.writeHead(409, { "Content-Type": "text/plain" });
+			response.end(`thread ${threadId} is live on this server`);
+			return;
+		}
+		const branch = await host.readBranch(threadId);
+		if (branch === undefined) {
+			response.writeHead(404, { "Content-Type": "text/plain" });
+			response.end(`no session for thread ${threadId}`);
+			return;
+		}
+		const payload: ZenThreadHistory = {
+			threadId,
+			messages: branchToMessages(branch),
+			permissionMode: { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] },
+		};
+		response.writeHead(200, { "Content-Type": "application/json" });
+		response.end(JSON.stringify(payload));
+	}
+
+	/**
+	 * ⚠ The dispatcher is synchronous and a throw in the request listener has nothing above
+	 * it (PR #87). The two handlers that await the host run through here: a rejection is
+	 * reported and answered as a 500, and the server stays up.
+	 */
+	function answerOrFail(work: Promise<void>, response: ServerResponse): void {
+		work.catch((error: unknown) => {
+			options.onProblem?.(error);
+			if (!response.headersSent) response.writeHead(500, { "Content-Type": "text/plain" });
+			response.end("the session listing failed — see the server log");
+		});
+	}
+
 	function respondWithThread(threadId: string, response: ServerResponse): void {
 		const thread = threads.peek(threadId);
 		if (thread === undefined) {
@@ -312,11 +379,21 @@ export function startZenServer(options: ZenServerOptions) {
 			respondWithThreads(response);
 			return;
 		}
+		if (request.method === "GET" && url === "/api/sessions") {
+			answerOrFail(respondWithSessions(response), response);
+			return;
+		}
 		if (request.method === "GET") {
 			const eventsMatch = THREAD_EVENTS_ROUTE.exec(url);
 			if (eventsMatch?.[1] !== undefined) {
 				const threadId = decodeThreadId(eventsMatch[1], response);
 				if (threadId !== undefined) respondWithThreadEvents(threadId, response);
+				return;
+			}
+			const historyMatch = THREAD_HISTORY_ROUTE.exec(url);
+			if (historyMatch?.[1] !== undefined) {
+				const threadId = decodeThreadId(historyMatch[1], response);
+				if (threadId !== undefined) answerOrFail(respondWithThreadHistory(threadId, response), response);
 				return;
 			}
 			const threadMatch = THREAD_ROUTE.exec(url);
