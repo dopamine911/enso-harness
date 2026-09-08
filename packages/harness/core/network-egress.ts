@@ -95,7 +95,8 @@ type CommandWordResult =
  * python/node, its payload is THIS grammar, and the quoted payload's first token is
  * checkable — assembled eval payloads remain interpreter non-coverage.
  */
-const TRANSPARENT_COMMAND_WRAPPERS = new Set([
+/** Shared with `environment-dump.ts`: the same wrappers move a dumping command past word 1. */
+export const TRANSPARENT_COMMAND_WRAPPERS = new Set([
 	"env",
 	"timeout",
 	"nohup",

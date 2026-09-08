@@ -9,6 +9,7 @@ import {
 	EXTERNAL_WEB_CONTENT_NOTICE,
 	findRepoRoot,
 	parseZenConfig,
+	readSecret,
 	WEB_SEARCH_TIMEOUT_MS,
 	WEB_SEARCH_TOOL_NAME,
 	type WebSearchConfig,
@@ -45,8 +46,8 @@ import {
  *    native search API (anthropic / google / openai families), billing the same identity
  *    the conversation does. A model with no native search selects nothing.
  * 2. **The fallback.** When the primary is unavailable, fails, or answers WITHOUT
- *    searching (`ungrounded`), and `TAVILY_API_KEY` is present in the environment, one
- *    Tavily retrieval call answers instead. Key absent → the primary's own outcome is
+ *    searching (`ungrounded`), and `TAVILY_API_KEY` is present in the gated secrets file
+ *    `.zen/secrets.env` (#89 — never the process environment), one Tavily call answers instead. Key absent → the primary's own outcome is
  *    returned unchanged. No config knob arms this — a key is a secret and secrets never
  *    enter the committed config.
  * 3. **The ACCURATE response** (#63, the requirement this exists for): every result's
@@ -161,8 +162,8 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
 					auditLine("refused", failure.providerId, query, failure.reason);
 					return refusal(
 						`${failure.reason}. The Tavily fallback is not armed — a human can set ` +
-							`${TAVILY_API_KEY_VARIABLE} in the environment (never in ${ZEN_CONFIG_FILENAME}) ` +
-							`and restart the session.`,
+							`${TAVILY_API_KEY_VARIABLE} in .zen/secrets.env (never in ${ZEN_CONFIG_FILENAME}, never in ` +
+							`the root .env, never in the environment — #89). No restart needed; the file is read per call.`,
 					);
 				}
 
@@ -361,7 +362,12 @@ function auditLine(outcome: string, providerId: WebSearchProviderId | undefined,
 export default createWebSearch({
 	locateConfigFile: () => zenConfigPath(findRepoRoot(import.meta.url)),
 	readConfigText: (path) => readFileSync(path, "utf8"),
-	readEnvironmentVariable: (variableName) => process.env[variableName],
+	// ⚠ From the gated `.zen/secrets.env` FILE, never `process.env` (#89): the host
+	// quarantines every secret out of the environment before a session exists, precisely so
+	// a `bash` child cannot print it. Extension code is trusted to read the file the model's
+	// `read` cannot. The composition root keeps the dependency's name — the providers still
+	// receive values, never names, and never learn where they came from.
+	readEnvironmentVariable: (variableName) => readSecret(findRepoRoot(import.meta.url), variableName),
 	runProviders: {
 		anthropic: runAnthropicProviderSearch,
 		google: runGoogleProviderSearch,

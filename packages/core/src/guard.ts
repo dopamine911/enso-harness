@@ -142,7 +142,7 @@ export const ZEN_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [".pi", ".ag
 /** Basenames that deny a read outright, regardless of directory. */
 export const SECRET_BASENAME_PATTERNS: readonly RegExp[] = [
 	/^\.env(\..+)?$/i,
-	/^secrets?\.(json|ya?ml|toml|ini)$/i,
+	/^secrets?\.(env|json|ya?ml|toml|ini)$/i,
 	/^credentials?(\.(json|ya?ml|toml|ini))?$/i,
 	/^id_(rsa|dsa|ecdsa|ed25519)$/i,
 	/\.pem$/i,

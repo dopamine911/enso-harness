@@ -59,8 +59,10 @@ export {
 	printHarnessDir,
 	RepoRootNotFoundError,
 	realpathOrSelf,
+	rootDotenvPath,
 	webPackageDir,
 	zenAgentDir,
+	zenSecretsPath,
 } from "./paths.ts";
 export {
 	PICC_DEFAULT_PERMISSION_MODE,
@@ -81,6 +83,14 @@ export {
 	PiSession,
 	PiStreamingBehavior,
 } from "./pi-rpc.ts";
+export {
+	isSecretShapedName,
+	parseDotenv,
+	type QuarantineReport,
+	quarantineSecrets,
+	readDotenvFile,
+	readSecret,
+} from "./secrets.ts";
 export { ZenThreadInspection, ZenThreadSummary } from "./session-inspection.ts";
 export {
 	isZenToolResultDescriptor,

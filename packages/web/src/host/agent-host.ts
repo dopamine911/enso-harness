@@ -9,12 +9,14 @@ import {
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import {
+	findRepoRoot,
 	PICC_DEFAULT_PERMISSION_MODE,
 	PICC_PERMISSION_MODES,
 	type PiCommand,
 	type PiPermissionModeState,
 	type PiRpcEvent,
 	type PiSession,
+	quarantineSecrets,
 	readPiccPersistedMode,
 } from "@zen/core";
 import { createZenExtensionUiContext } from "./extension-ui-context.ts";
@@ -55,6 +57,13 @@ import { toRpcWireEvent } from "./session-events.ts";
  * ⚠ `bindExtensions` IS CALLED EXACTLY ONCE PER SESSION. Every call emits `session_start`
  * (the guards reset their read tracker on it; multi-account resets thirteen failover
  * guards). Without the call, `session_start` never fires and `ctx.hasUI` is false.
+ *
+ * ⚠⚠ SECRETS ARE QUARANTINED AT HOST CREATION, before the first session (#89). pi runs in
+ * this process and every `bash` child inherits this process's environment, which bun's
+ * `.env` autoload had filled with `TAVILY_API_KEY`; `bash env` printed it into a
+ * transcript. `quarantineSecrets` deletes every secret-shaped name and every name the
+ * secrets file defines. The extensions that need a key read `.zen/secrets.env` directly
+ * (`readSecret`) — see `@zen/core`'s secrets.ts for why the root `.env` is the wrong place.
  */
 
 /** The agent dir's multi-account config file, and the one key this host must pin in it. */
@@ -76,6 +85,13 @@ export interface AgentHostOptions {
 	harnessPackageDir: string;
 	/** Notified for load diagnostics, extension errors, and answers to unknown dialogs. Never swallowed. */
 	onProblem: ((problem: unknown) => void) | undefined;
+	/**
+	 * The environment the secrets quarantine (#89) scrubs — `process.env` in production, the
+	 * one pi and every `bash` child inherit. A seam so the quarantine is testable without a
+	 * test ever touching `process.env` (the repo's rule for tests). The agent-dir pin is not
+	 * on this seam: it is a process fact pi-multi-account reads at import.
+	 */
+	environment?: Record<string, string | undefined>;
 	/**
 	 * Test seam: inline extensions loaded BESIDE the harness. A test can register a probe that
 	 * asks a dialog on `session_start`, or throws there, and observe what the host does — with
@@ -146,10 +162,22 @@ function describeCommand(name: string, source: PiCommand["source"], description:
 export function createAgentHost(options: AgentHostOptions): AgentHost {
 	const { cwd, agentDir, harnessPackageDir, onProblem } = options;
 
-	// Order matters, and it is the module header's two ⚠⚠ items: env before any pi module
-	// can be imported by the loader, and the proxy pin before the first session_start.
+	// Order matters, and it is the module header's ⚠⚠ items: env before any pi module can
+	// be imported by the loader, the proxy pin before the first session_start, and the
+	// secrets out of the environment before anything can inherit it (#89).
 	process.env.PI_CODING_AGENT_DIR = agentDir;
 	seedMultiAccountChildProxyOff(agentDir);
+	// The secrets file is a fact about THIS checkout (the harness), not about the tree pi
+	// operates on — `cwd` may be anywhere, a tmpdir in tests — so it resolves from here.
+	const quarantine = quarantineSecrets(options.environment ?? process.env, findRepoRoot(import.meta.url));
+	if (quarantine.removed.length > 0)
+		onProblem?.(`secrets kept out of the tool environment (#89): ${quarantine.removed.join(", ")}`);
+	if (quarantine.misplaced.length > 0) {
+		onProblem?.(
+			`⚠ the root .env defines ${quarantine.misplaced.join(", ")} — bun autoloads .env into every bun child, ` +
+				`so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env.`,
+		);
+	}
 	// The theme registry pi's UI code consults; harmless without a terminal, required once.
 	initTheme();
 

@@ -46,7 +46,13 @@
  */
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { findRepoRoot, harnessPackageDir, printHarnessDir, zenAgentDir } from "../packages/core/src/index.ts";
+import {
+	findRepoRoot,
+	harnessPackageDir,
+	printHarnessDir,
+	quarantineSecrets,
+	zenAgentDir,
+} from "../packages/core/src/index.ts";
 import { buildPrintManifest, materializePrintHarness } from "./print-harness.mjs";
 
 const repoRoot = findRepoRoot(import.meta.url);
@@ -111,6 +117,23 @@ console.error(
 		`${isPrintRun ? " (print variant, no permission modes — #20)" : ""} | ` +
 		`${declaredResources.length} declared resource path(s)`,
 );
+
+/**
+ * ⚠ SECRETS OUT BEFORE THE SPAWN (#89). bun auto-loaded a root `.env` into THIS process's
+ * environment; the spread below would carry every key into pi and from there into every
+ * `bash` child — which is how `TAVILY_API_KEY` ended up in a transcript. The extensions
+ * that need a key read `.zen/secrets.env` directly (`readSecret`); the environment carries
+ * none, and a root `.env` that still holds a secret is reported as misplaced.
+ */
+const quarantine = quarantineSecrets(process.env, repoRoot);
+if (quarantine.removed.length > 0)
+	console.error(`zen: secrets kept out of pi's environment (#89): ${quarantine.removed.join(", ")}`);
+if (quarantine.misplaced.length > 0) {
+	console.error(
+		`zen: ⚠ the root .env defines ${quarantine.misplaced.join(", ")} — bun autoloads .env into every bun child, ` +
+			"so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env.",
+	);
+}
 
 const pi = Bun.spawn(["pi", ...args], {
 	stdio: ["inherit", "inherit", "inherit"],

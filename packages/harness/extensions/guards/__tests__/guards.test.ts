@@ -511,6 +511,36 @@ test("powershell egress is blocked by the coarse scan; cc-safety-net does not ru
 	expect(result?.reason).toContain("invoke-webrequest");
 });
 
+// ── the environment-dump deny (#89) ──────────────────────────────────────────
+// Depth behind the quarantine: secrets are already out of the environment, so this is
+// what makes a regression there loud. Same order invariant as egress: deny, then patch.
+
+test("⚠ an environment listing is blocked, naming #89 and the match, and gets no timeout patch", () => {
+	const input: Record<string, unknown> = { command: "env" };
+	const result = loadGuard()({ type: "tool_call", toolCallId: "t", toolName: "bash", input }, { cwd });
+	expect(result?.block).toBe(true);
+	expect(result?.reason).toContain("environment listing");
+	expect(result?.reason).toContain("#89");
+	// ⚠ The reason is read by the model and lands in transcripts: it must point at the
+	// secrets file, never at the root .env this fix exists to get secrets OUT of (PR #98
+	// review — the first version said ".env" and no substring assertion caught it).
+	expect(result?.reason).toContain(".zen/secrets.env");
+	expect(result?.reason).not.toMatch(/from the gated \.env/);
+	expect(input.timeout).toBeUndefined();
+});
+
+test("expanding a secret-shaped variable is blocked; env as a wrapper and a plain expansion pass", () => {
+	expect(call("bash", { command: "echo $TAVILY_API_KEY" })?.reason).toContain("TAVILY_API_KEY");
+	expect(call("bash", { command: "cat /proc/self/environ" })?.reason).toContain("environ");
+	expect(call("bash", { command: "env FOO=1 bun test" })).toBeUndefined();
+	expect(call("bash", { command: "echo $HOME" })).toBeUndefined();
+});
+
+test("powershell environment access takes the coarse path too", () => {
+	expect(call("powershell", { command: "Get-ChildItem Env:" })?.reason).toContain("environment listing");
+	expect(call("powershell", { command: "Write-Output $env:GH_TOKEN" })?.reason).toContain("GH_TOKEN");
+});
+
 test("powershell commands are NEVER analyzed by cc-safety-net — the division, pinned", () => {
 	// `git reset --hard` IS valid PS too and dangerous — but the analyzer parses POSIX
 	// only, so it never runs on powershell (an analyzer that would deny everything proves
