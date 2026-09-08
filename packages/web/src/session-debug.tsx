@@ -56,6 +56,19 @@ export function lastPersistedMode(entries: readonly unknown[]): string {
 	return PICC_DEFAULT_PERMISSION_MODE;
 }
 
+/**
+ * A chunk's name, plus what it carries when the name alone says nothing: a `zen.unmapped`
+ * is pi's raw event, and a model turn produces a run of them — tool starts, thinking,
+ * message ends — that read as identical rows without the inner `type`.
+ */
+export function describeChunk(chunk: RecordedCustomChunk): string {
+	const value = chunk.value;
+	if (typeof value !== "object" || value === null || !("type" in value) || typeof value.type !== "string") {
+		return chunk.name;
+	}
+	return `${chunk.name} (${value.type})`;
+}
+
 /** pi guarantees every session entry an `id`; read defensively, and fall back to the description for a malformed one. */
 function entryKey(entry: unknown): string {
 	if (typeof entry === "object" && entry !== null && "id" in entry && typeof entry.id === "string") return entry.id;
@@ -123,7 +136,7 @@ export function SessionDebugView({
 					<ol>
 						{browser.recentChunks.map((chunk) => (
 							<li key={chunk.sequence}>
-								{chunk.receivedAt.slice(11, 19)} {chunk.name}
+								{chunk.receivedAt.slice(11, 19)} {describeChunk(chunk)}
 							</li>
 						))}
 					</ol>

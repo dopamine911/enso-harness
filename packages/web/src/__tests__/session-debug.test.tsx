@@ -10,7 +10,13 @@ import {
 import { clearModeLinesForTest } from "../mode-lines.ts";
 import { clearZenNotificationsForTest } from "../notifications.tsx";
 import { clearPermissionModeForTest } from "../permission-mode.tsx";
-import { type BrowserBelief, lastPersistedMode, NO_SESSION_YET, SessionDebugView } from "../session-debug.tsx";
+import {
+	type BrowserBelief,
+	describeChunk,
+	lastPersistedMode,
+	NO_SESSION_YET,
+	SessionDebugView,
+} from "../session-debug.tsx";
 import { clearSessionStatsForTest } from "../session-stats.tsx";
 
 /**
@@ -138,4 +144,14 @@ test("the record is a ring: beyond capacity the oldest chunks fall off", () => {
 	const recorded = getRecentCustomChunks();
 	expect(recorded).toHaveLength(RECENT_CUSTOM_CHUNK_CAPACITY);
 	expect(recorded[0]?.value).toEqual({ sent: 5 });
+});
+
+// A model turn is a run of `zen.unmapped` chunks; without the inner type they are
+// indistinguishable rows, which is the opposite of what a debug list is for.
+test("an unmapped chunk is described by the pi event it carries; a receipt just by its name", () => {
+	routeZenCustomEvent("zen.unmapped", { type: "tool_execution_start", toolName: "bash" });
+	routeZenCustomEvent("zen.mode", { mode: "plan", available: [] });
+	const [unmapped, receipt] = getRecentCustomChunks();
+	expect(unmapped && describeChunk(unmapped)).toBe("zen.unmapped (tool_execution_start)");
+	expect(receipt && describeChunk(receipt)).toBe("zen.mode");
 });
