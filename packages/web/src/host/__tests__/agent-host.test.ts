@@ -2,9 +2,9 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { InlineExtension } from "@earendil-works/pi-coding-agent";
+import { type InlineExtension, SessionManager } from "@earendil-works/pi-coding-agent";
 import { findRepoRoot, harnessPackageDir, type PiRpcEvent } from "@zen/core";
-import { createAgentHost, type HostedSession, seedMultiAccountChildProxyOff } from "../agent-host.ts";
+import { type AgentHost, createAgentHost, type HostedSession, seedMultiAccountChildProxyOff } from "../agent-host.ts";
 
 /**
  * The in-process host against the REAL harness package (#69) — every extension the manifest
@@ -47,15 +47,18 @@ function collectEvents(hosted: HostedSession): PiRpcEvent[] {
 	return events;
 }
 
-async function hostedSession(extensionFactories: InlineExtension[] = []): Promise<HostedSession> {
-	const host = createAgentHost({
+function hostWith(extensionFactories: InlineExtension[] = []): AgentHost {
+	return createAgentHost({
 		cwd: repoRoot,
 		agentDir,
 		harnessPackageDir: harnessDir,
 		onProblem: (problem) => problems.push(problem),
 		extensionFactories,
 	});
-	const hosted = await host.createSession();
+}
+
+async function hostedSession(extensionFactories: InlineExtension[] = []): Promise<HostedSession> {
+	const hosted = await hostWith(extensionFactories).createSession(crypto.randomUUID());
 	openSessions.push(hosted);
 	return hosted;
 }
@@ -371,4 +374,87 @@ test("⚠ subscribe delivers startup records as `replayed` and a run's events as
 		);
 	});
 	expect(deliveries.at(-1)).toEqual(["late notify", "live"]);
+});
+
+// ── resume (#95): the thread id IS pi's session id ────────────────────────────
+
+/**
+ * A stored session under `threadId`, the way pi leaves one: created with the id, a user and
+ * an assistant message appended — pi flushes on the first assistant message, so the file
+ * exists after this.
+ *
+ * ⚠ IN THE SCRATCH AGENT DIR, EXPLICITLY. pi's default session dir comes from
+ * `PI_CODING_AGENT_DIR`, which the host sets when it is created; a test that stores a session
+ * before any host exists would otherwise write into the operator's real `~/.pi/agent` (it
+ * did, once, run in isolation). A host is created first so the env — and pi's own idea of the
+ * session dir — is the scratch one, then that dir is passed rather than assumed.
+ */
+function storeSession(threadId: string, userText: string, assistantText: string): string {
+	hostWith();
+	const sessionDir = SessionManager.inMemory(repoRoot).getSessionDir();
+	const stored = SessionManager.create(repoRoot, sessionDir, { id: threadId });
+	stored.appendMessage({ role: "user", content: userText, timestamp: Date.now() });
+	stored.appendMessage({
+		role: "assistant",
+		content: [{ type: "text", text: assistantText }],
+		api: "anthropic-messages",
+		provider: "anthropic",
+		model: "test",
+		usage: {
+			input: 1,
+			output: 1,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 2,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop",
+		timestamp: Date.now(),
+	} as never);
+	const file = stored.getSessionFile();
+	if (file === undefined) throw new Error("pi did not flush the stored session");
+	return file;
+}
+
+test("⚠ createSession(threadId) OPENS the session file already under that id — the branch is the stored one, not a fresh file", async () => {
+	const threadId = crypto.randomUUID();
+	const file = storeSession(threadId, "what was I doing?", "fixing the login bug");
+	const host = hostWith();
+	const hosted = await host.createSession(threadId);
+	openSessions.push(hosted);
+	const inspection = hosted.inspect();
+	expect(inspection.sessionId).toBe(threadId);
+	expect(inspection.sessionFile).toBe(file);
+	const messages = inspection.entries
+		.filter((entry) => (entry as { type?: unknown }).type === "message")
+		.map((entry) => (entry as { message: { role: string } }).message.role);
+	expect(messages.slice(0, 2)).toEqual(["user", "assistant"]);
+});
+
+test("createSession(threadId) with no file under that id CREATES the session under it, so the file it flushes is found next time", async () => {
+	const threadId = crypto.randomUUID();
+	const hosted = await hostWith().createSession(threadId);
+	openSessions.push(hosted);
+	expect(hosted.inspect().sessionId).toBe(threadId);
+	// Nothing flushed yet (no assistant message): not listed — there is nothing to come back to.
+	expect((await hostWith().listSessions()).some((stored) => stored.id === threadId)).toBe(false);
+});
+
+test("listSessions names stored sessions newest first with the first user message; readBranch reads one without building pi", async () => {
+	const older = crypto.randomUUID();
+	const newer = crypto.randomUUID();
+	storeSession(older, "older question", "older answer");
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	storeSession(newer, "newer question", "newer answer");
+	const host = hostWith();
+	const listed = await host.listSessions();
+	const ids = listed.map((stored) => stored.id);
+	expect(ids.indexOf(newer)).toBeLessThan(ids.indexOf(older));
+	expect(listed.find((stored) => stored.id === newer)).toMatchObject({
+		firstMessage: "newer question",
+		messageCount: 2,
+	});
+	const branch = await host.readBranch(older);
+	expect(branch?.some((entry) => (entry as { message?: { role?: string } }).message?.role === "assistant")).toBe(true);
+	expect(await host.readBranch("never-stored")).toBeUndefined();
 });

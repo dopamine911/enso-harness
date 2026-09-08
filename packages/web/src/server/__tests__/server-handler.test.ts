@@ -8,7 +8,9 @@ import {
 	type PiPromptOutcome,
 	type PiRpcEvent,
 	type PiSession,
+	ZenResumableSession,
 	ZenThreadEvents,
+	ZenThreadHistory,
 	ZenThreadInspection,
 	ZenThreadSummary,
 } from "@zen/core";
@@ -99,16 +101,37 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
 	return { hosted: { session, loadedExtensionPaths: [], inspect, emittedEvents: emitted.recent }, record };
 }
 
-function fakeHost(script: FakeSessionScript) {
+/** What the fake host "has on disk" (#95): stored sessions by thread id, with their branch. */
+interface FakeStoredSession {
+	readonly branch: unknown[];
+	readonly modified: Date;
+	readonly firstMessage: string;
+}
+
+function fakeHost(script: FakeSessionScript, stored: Record<string, FakeStoredSession> = {}) {
 	const built: FakeSessionRecord[] = [];
+	/** Thread ids the host was asked to build, in order — the resume path passes the id through. */
+	const requested: string[] = [];
 	const host: AgentHost = {
-		createSession: () => {
+		createSession: (threadId) => {
+			requested.push(threadId);
 			const next = fakeHostedSession(script);
 			built.push(next.record);
 			return Promise.resolve(next.hosted);
 		},
+		listSessions: () =>
+			Promise.resolve(
+				Object.entries(stored).map(([id, session]) => ({
+					id,
+					path: `/stored/${id}.jsonl`,
+					modified: session.modified,
+					messageCount: session.branch.filter((entry) => (entry as { type?: unknown }).type === "message").length,
+					firstMessage: session.firstMessage,
+				})),
+			),
+		readBranch: (threadId) => Promise.resolve(stored[threadId]?.branch),
 	};
-	return { host, built };
+	return { host, built, requested };
 }
 
 /** A harness dir with an empty pi manifest — enough for `assertVendorLinks` to pass. */
@@ -141,8 +164,8 @@ afterEach(async () => {
 	for (const started of openServers.splice(0)) await started.close();
 });
 
-async function startWith(script: FakeSessionScript) {
-	const { host, built } = fakeHost(script);
+async function startWith(script: FakeSessionScript, stored: Record<string, FakeStoredSession> = {}) {
+	const { host, built, requested } = fakeHost(script, stored);
 	const started = startZenServer({
 		cwd: tmpdir(),
 		harnessPackageDir: emptyHarnessDir(),
@@ -152,7 +175,7 @@ async function startWith(script: FakeSessionScript) {
 	});
 	openServers.push(started);
 	const url = await started.listening;
-	return { url, built };
+	return { url, built, requested };
 }
 
 /** POST one AG-UI run and return every SSE chunk, parsed, in order. */
@@ -322,17 +345,27 @@ test("⚠ a malformed thread id is a 400, and the server survives to answer the 
 	expect(built).toHaveLength(0);
 });
 
-test("a percent-encoded thread id round-trips to the same live thread", async () => {
-	const { url } = await startWith({
-		onPrompt: (emit, outcome) => {
-			outcome.onAccepted();
-			emit(SETTLED);
-		},
+// ⚠ THE ID IS A FILENAME. Since #95 pi names the session file after the thread id, so an id
+// from a request is a path component (Claude review on PR #104). Refused at both entry
+// points before anything is built; the traversal never reaches the host.
+test("⚠ a thread id that is not thread-id shaped is a 400 at both entry points, and builds nothing", async () => {
+	const { url, built, requested } = await startWith({ onPrompt: neverPrompted });
+	// The chat body: the id pi would put in a filename.
+	const chat = await fetch(`${url}/api/chat`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ threadId: "../../evil", runId: "r1", messages: [userMessage("hi")] }),
 	});
-	await postRun(url, { threadId: "thread with spaces", runId: "r1", messages: [userMessage("hi")] });
-	const response = await fetch(`${url}/api/threads/${encodeURIComponent("thread with spaces")}`);
-	expect(response.status).toBe(200);
-	expect(await response.json()).toMatchObject({ threadId: "thread with spaces" });
+	expect(chat.status).toBe(400);
+	// The routes: percent-encoding decodes to the same traversal.
+	for (const route of ["", "/history", "/events"]) {
+		const response = await fetch(`${url}/api/threads/${encodeURIComponent("../../evil")}${route}`);
+		expect(response.status).toBe(400);
+	}
+	expect(built).toHaveLength(0);
+	expect(requested).toEqual([]);
+	// And the server is still up.
+	expect((await fetch(`${url}/api/threads`)).status).toBe(200);
 });
 
 test("GET /api/threads/:id returns the branch as pi holds it, with sessionFile null while unflushed", async () => {
@@ -401,6 +434,134 @@ test("⚠ the events route of an unknown thread is a 404 and builds no session; 
 	expect((await fetch(`${url}/api/threads/%/events`)).status).toBe(400);
 	expect((await fetch(`${url}/api/threads`)).status).toBe(200);
 	expect(built).toHaveLength(0);
+});
+
+// ── resume (#95) ─────────────────────────────────────────────────────────────
+
+const STORED_BRANCH: unknown[] = [
+	{ type: "custom", customType: "modes", data: { mode: "plan" }, id: "p", parentId: null, timestamp: "" },
+	{
+		type: "message",
+		id: "u1",
+		parentId: "p",
+		timestamp: "2026-09-08T10:00:00.000Z",
+		message: { role: "user", content: "earlier question", timestamp: 1 },
+	},
+	{
+		type: "message",
+		id: "a1",
+		parentId: "u1",
+		timestamp: "2026-09-08T10:00:05.000Z",
+		message: { role: "assistant", content: [{ type: "text", text: "earlier answer" }] },
+	},
+];
+
+test("⚠ a prompt on a thread passes THAT id to the host — the thread id is pi's session id, so a stored one reopens", async () => {
+	const { url, requested } = await startWith({
+		onPrompt: (emit, outcome) => {
+			outcome.onAccepted();
+			emit(SETTLED);
+		},
+	});
+	await postRun(url, { threadId: "stored-1", runId: "r1", messages: [userMessage("continue")] });
+	expect(requested).toEqual(["stored-1"]);
+});
+
+test("GET /api/sessions lists stored sessions with title, count and age, marking the ones a thread here is RUNNING", async () => {
+	const stored = {
+		"stored-1": {
+			branch: STORED_BRANCH,
+			modified: new Date("2026-09-08T10:00:05.000Z"),
+			firstMessage: "earlier question",
+		},
+		"stored-2": { branch: [] as unknown[], modified: new Date("2026-09-08T11:00:00.000Z"), firstMessage: "   " },
+	};
+	const { url } = await startWith(
+		{
+			onPrompt: (emit, _outcome, message) => {
+				if (message === "/mode") emit(SELECT_DIALOG);
+			},
+		},
+		stored,
+	);
+	// A parked dialog holds stored-1 busy on this server: acquired, never released.
+	await postRun(url, { threadId: "stored-1", runId: "r1", messages: [userMessage("/mode")] });
+	const response = await fetch(`${url}/api/sessions`);
+	expect(response.status).toBe(200);
+	const listed: unknown = await response.json();
+	expect(Array.isArray(listed) && listed.every((session) => Check(ZenResumableSession, session))).toBe(true);
+	expect(listed).toEqual([
+		{
+			threadId: "stored-1",
+			title: "earlier question",
+			lastActivityAt: "2026-09-08T10:00:05.000Z",
+			messageCount: 2,
+			busy: true,
+		},
+		// A blank first message is no title — the rail says "new session", not "   ".
+		{ threadId: "stored-2", lastActivityAt: "2026-09-08T11:00:00.000Z", messageCount: 0, busy: false },
+	]);
+});
+
+test("GET /api/threads/:id/history serves a STORED thread's branch as messages with its persisted mode, and builds no session", async () => {
+	const stored = { "stored-1": { branch: STORED_BRANCH, modified: new Date(0), firstMessage: "earlier question" } };
+	const { url, built } = await startWith({ onPrompt: neverPrompted }, stored);
+	const response = await fetch(`${url}/api/threads/stored-1/history`);
+	expect(response.status).toBe(200);
+	const history: unknown = await response.json();
+	expect(Check(ZenThreadHistory, history)).toBe(true);
+	expect(history).toMatchObject({
+		threadId: "stored-1",
+		permissionMode: { mode: "plan" },
+		messages: [
+			{ id: "u1", role: "user", parts: [{ type: "text", content: "earlier question" }] },
+			{ id: "a1", role: "assistant", parts: [{ type: "text", content: "earlier answer" }] },
+		],
+	});
+	expect(built).toHaveLength(0);
+	// Neither live nor stored: 404, still nothing built.
+	expect((await fetch(`${url}/api/threads/never-existed/history`)).status).toBe(404);
+	expect(built).toHaveLength(0);
+});
+
+// ⚠ HELD IS NOT BUSY (PR #104 review). A released thread stays cached for the idle window;
+// gating on presence locked a reloaded page out of its own session for thirty minutes.
+test("⚠ a thread this server holds IDLE is resumable — /history reads pi's memory, /sessions does not mark it busy", async () => {
+	const stored = { t1: { branch: STORED_BRANCH, modified: new Date(0), firstMessage: "earlier question" } };
+	const { url, built } = await startWith(
+		{
+			onPrompt: (emit, outcome) => {
+				outcome.onAccepted();
+				emit(SETTLED);
+			},
+		},
+		stored,
+	);
+	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("hello")] });
+	const listed = (await (await fetch(`${url}/api/sessions`)).json()) as ZenResumableSession[];
+	expect(listed.find((session) => session.threadId === "t1")?.busy).toBe(false);
+	const response = await fetch(`${url}/api/threads/t1/history`);
+	expect(response.status).toBe(200);
+	const history = (await response.json()) as ZenThreadHistory;
+	// The fake's LIVE mode is `default` while its stored file says `plan`: an idle live
+	// thread's history is what pi holds now, the session's own answer, not the file's.
+	expect(history.permissionMode).toEqual({ mode: "default", available: ["default", "acceptEdits"] });
+	// Its in-memory branch carries no messages (a session-start entry and picc's modes entry).
+	expect(history.messages).toEqual([]);
+	expect(built).toHaveLength(1);
+});
+
+test("⚠ GET /api/threads/:id/history refuses a thread that is BUSY here, even if a stale rail made it clickable", async () => {
+	const { url, built } = await startWith({
+		onPrompt: (emit, _outcome, message) => {
+			if (message === "/mode") emit(SELECT_DIALOG);
+		},
+	});
+	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("/mode")] });
+	const response = await fetch(`${url}/api/threads/t1/history`);
+	expect(response.status).toBe(409);
+	expect(await response.text()).toContain("running on this server");
+	expect(built).toHaveLength(1);
 });
 
 test("GET /api/threads lists live threads with busy and parked state", async () => {

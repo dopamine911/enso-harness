@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
 	describeSessionEntry,
 	describeThreadEvent,
+	isZenThreadId,
 	threadEventColumns,
 	type ZenThreadEvent,
 } from "../session-inspection.ts";
@@ -25,6 +26,20 @@ test("a branch entry row: time, type, custom type, message role, and picc's mode
 	expect(describeSessionEntry({ type: "model_change" })).toBe("model_change");
 	expect(describeSessionEntry({})).toBe("?");
 	expect(describeSessionEntry(42)).toBe("42");
+});
+
+// The id names a FILE (#95): what a filesystem could read is out; what the browser mints is in.
+test("a thread id is a UUID or the like — never a path, never a flag, never unbounded", () => {
+	expect(isZenThreadId(crypto.randomUUID())).toBe(true);
+	expect(isZenThreadId("stored-1")).toBe(true);
+	expect(isZenThreadId("a".repeat(64))).toBe(true);
+	expect(isZenThreadId("a".repeat(65))).toBe(false);
+	expect(isZenThreadId("")).toBe(false);
+	expect(isZenThreadId("../../evil")).toBe(false);
+	expect(isZenThreadId("with space")).toBe(false);
+	expect(isZenThreadId("a.b")).toBe(false);
+	expect(isZenThreadId("-flag")).toBe(false);
+	expect(isZenThreadId(42)).toBe(false);
 });
 
 function threadEvent(overrides: Partial<ZenThreadEvent>): ZenThreadEvent {

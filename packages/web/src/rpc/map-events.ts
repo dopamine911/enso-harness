@@ -58,7 +58,7 @@ function readUsage(raw: unknown): ZenUsage | undefined {
 }
 
 /** Flatten pi's `content` array to text. Non-text parts are named, never dropped. */
-function contentToText(content: unknown): string {
+export function contentToText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	return (content as PiContentPart[])
@@ -75,7 +75,7 @@ function contentToText(content: unknown): string {
  * inventing a `kind` per tool here would put rendering decisions in the transport. A tool
  * that wants a richer descriptor should emit one; this is the floor, not the ceiling.
  */
-function descriptorFrom(toolName: string, details: unknown): ZenToolResultDescriptor | undefined {
+export function descriptorFrom(toolName: string, details: unknown): ZenToolResultDescriptor | undefined {
 	if (typeof details !== "object" || details === null) return undefined;
 	const truncation = (details as PiToolDetails).truncation;
 	if (truncation === null || truncation === undefined) return undefined;

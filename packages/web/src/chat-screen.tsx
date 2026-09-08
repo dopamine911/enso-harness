@@ -27,12 +27,19 @@ import { routeZenCustomEvent } from "./custom-event-router.ts";
 import { createFixtureChat } from "./fixture-conversation.ts";
 import { SessionNotifications } from "./notifications.tsx";
 import { PermissionModeSelect, usePermissionMode } from "./permission-mode.tsx";
+import {
+	createResumableSessionsStore,
+	createResumeRequests,
+	fetchThreadHistory,
+	sessionsNotOnThisPage,
+} from "./resumable-sessions.ts";
 import { SelectedMessagePart } from "./selected-message-part.tsx";
 import { SessionDebugDrawer } from "./session-debug.tsx";
 import { SessionStatusBar } from "./session-status.tsx";
 import { SessionsRail, UNTITLED_SESSION } from "./sessions-rail.tsx";
 import { ThreadStoresContext, useStore, useThreadStores } from "./store.ts";
 import {
+	adoptThread,
 	getThreadStores,
 	mintThread,
 	type ThreadStores,
@@ -130,6 +137,8 @@ const useChatContext = chatContexts.useChatContext;
 function threadChatOptions(stores: ThreadStores) {
 	return {
 		threadId: stores.threadId,
+		// A resumed thread mounts with its stored branch (#95); a minted one with nothing.
+		initialMessages: [...stores.history],
 		connection: isFixtureMode ? createFixtureChat().transport() : fetchServerSentEvents("/api/chat"),
 		/**
 		 * TanStack's designated path for AG-UI CUSTOM chunks (#29) — verified against the
@@ -623,10 +632,38 @@ export function ThreadPane({
  */
 const FIRST_THREAD_ID = mintThread().threadId;
 
+/**
+ * The stored sessions the rail can come back to (#95). Page-level, refreshed on load and
+ * whenever a run settles — the moments a session file appears or grows.
+ */
+const resumableSessions = createResumableSessionsStore();
+
 /** The page (#90): header, the sessions rail, and one mounted pane per live thread. */
 export function ChatScreen(): React.ReactNode {
 	const threads = useStore(threadListStore);
+	const stored = useStore(resumableSessions);
 	const [activeThreadId, setActiveThreadId] = useState(FIRST_THREAD_ID);
+	const [resumeError, setResumeError] = useState<string | undefined>(undefined);
+	const anyBusy = threads.some((thread) => thread.busy);
+	useEffect(() => {
+		// Load, and every time the page goes from a run in flight to none: something settled.
+		if (!(anyBusy || isFixtureMode)) void resumableSessions.refresh();
+	}, [anyBusy]);
+	const pageThreadIds = new Set(threads.map((thread) => thread.threadId));
+	// Last click wins (PR #104 review) — the race lives in `createResumeRequests`, tested there.
+	// The two setters are stable, so the coordinator is created once per page.
+	const resume = useMemo(
+		() =>
+			createResumeRequests(
+				fetchThreadHistory,
+				(history) => {
+					setResumeError(undefined);
+					setActiveThreadId(adoptThread(history).threadId);
+				},
+				setResumeError,
+			),
+		[],
+	);
 	// The debug column (#86) is a right-hand pane, not a bottom drawer: stacked under the
 	// transcript it took forty percent of the height and squeezed the conversation it
 	// exists to explain. Opt-in by `?debug`; open by default when it is, and collapsible
@@ -664,8 +701,11 @@ export function ChatScreen(): React.ReactNode {
 				<SessionsRail
 					threads={threads}
 					activeThreadId={activeThreadId}
+					earlier={sessionsNotOnThisPage(stored.sessions, pageThreadIds)}
+					earlierError={stored.error ?? resumeError}
 					now={new Date()}
 					onSelect={setActiveThreadId}
+					onResume={resume}
 					onNew={() => setActiveThreadId(mintThread().threadId)}
 				/>
 				{threads.map((thread) => (

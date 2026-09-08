@@ -34,8 +34,8 @@ import { createEventTail, type EventTail } from "../host/event-tail.ts";
 export const THREAD_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 export interface ThreadSessionsOptions {
-	/** Builds a hosted session — `AgentHost.createSession`. Injected so tests need no pi. */
-	createSession: () => Promise<HostedSession>;
+	/** Builds a hosted session for a thread — `AgentHost.createSession`. Injected so tests need no pi. */
+	createSession: (threadId: string) => Promise<HostedSession>;
 	onProblem: ((problem: unknown) => void) | undefined;
 	/** Injectable for tests — the default is minutes. */
 	idleTimeoutMs?: number;
@@ -125,7 +125,7 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 	}
 
 	async function buildThread(threadId: string): Promise<ThreadEntry> {
-		const hosted = await createSession();
+		const hosted = await createSession(threadId);
 		const thread: ThreadEntry = {
 			hosted,
 			idleTimer: undefined,

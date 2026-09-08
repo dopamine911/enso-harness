@@ -10,15 +10,14 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
 	findRepoRoot,
-	PICC_DEFAULT_PERMISSION_MODE,
 	PICC_PERMISSION_MODES,
 	type PiCommand,
 	type PiEventDelivery,
 	type PiPermissionModeState,
 	type PiRpcEvent,
 	type PiSession,
+	persistedPermissionMode,
 	quarantineSecrets,
-	readPiccPersistedMode,
 	type ZenThreadEvent,
 } from "@zen/core";
 import { createEventTail, describePiRpcEvent } from "./event-tail.ts";
@@ -135,9 +134,35 @@ export interface HostedSession {
 	emittedEvents(): ZenThreadEvent[];
 }
 
+/** One of pi's session files for this workspace, as pi lists it (#95). */
+export interface StoredSession {
+	/** pi's session id — the thread id it was created under. */
+	readonly id: string;
+	readonly path: string;
+	readonly modified: Date;
+	readonly messageCount: number;
+	/** The first user message, verbatim; empty for a session with none. */
+	readonly firstMessage: string;
+}
+
 export interface AgentHost {
-	/** A fresh session with its own services, extensions bound, events flowing. */
-	createSession(): Promise<HostedSession>;
+	/**
+	 * A session for this thread, with its own services, extensions bound, events flowing.
+	 *
+	 * ⚠ THE THREAD ID IS PI'S SESSION ID (#95). A session file already under that id is
+	 * OPENED — the thread idled out, or the server restarted, and the user came back;
+	 * otherwise a fresh session is CREATED with the id. So resume needs no id mapping and
+	 * no index file: pi's own listing is the one source, and a page-owned thread finds its
+	 * own file again across a server restart.
+	 */
+	createSession(threadId: string): Promise<HostedSession>;
+	/** pi's session files for this workspace, newest first — the resumable listing. */
+	listSessions(): Promise<StoredSession[]>;
+	/**
+	 * The branch of a stored session, read-only — no pi session is built, nothing is
+	 * written (#86's rule: looking must not build). `undefined` when no file has that id.
+	 */
+	readBranch(threadId: string): Promise<unknown[] | undefined>;
 }
 
 /**
@@ -186,7 +211,40 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 	// The theme registry pi's UI code consults; harmless without a terminal, required once.
 	initTheme();
 
-	async function createSession(): Promise<HostedSession> {
+	/**
+	 * pi's listing, through its API — never a directory scan: the file naming is pi's to
+	 * change, and `list` reads each file's header for the id. Cost is one parse per file,
+	 * paid per call; a workspace with dozens of sessions is milliseconds. Sessions pi has
+	 * not flushed yet (no assistant message) have no file and are not listed — there is
+	 * nothing to come back to.
+	 */
+	async function listSessions(): Promise<StoredSession[]> {
+		const listed = await SessionManager.list(cwd);
+		return listed
+			.map((info) => ({
+				id: info.id,
+				path: info.path,
+				modified: info.modified,
+				messageCount: info.messageCount,
+				firstMessage: info.firstMessage,
+			}))
+			.sort((first, second) => second.modified.getTime() - first.modified.getTime());
+	}
+
+	async function storedSessionPath(threadId: string): Promise<string | undefined> {
+		return (await listSessions()).find((stored) => stored.id === threadId)?.path;
+	}
+
+	async function readBranch(threadId: string): Promise<unknown[] | undefined> {
+		const path = await storedSessionPath(threadId);
+		if (path === undefined) return undefined;
+		// `open` loads the file into memory and writes nothing until an append.
+		return SessionManager.open(path).getBranch();
+	}
+
+	async function createSession(threadId: string): Promise<HostedSession> {
+		// Resolved BEFORE the services so a bad id fails before anything is built.
+		const storedPath = await storedSessionPath(threadId);
 		const services = await createAgentSessionServices({
 			cwd,
 			agentDir,
@@ -211,11 +269,15 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 			onProblem?.(`pi extension failed to load: ${loadError.path}: ${loadError.error}`);
 		}
 
-		// A fresh session file per hosted session, under the agent dir pi resolves from the env
-		// set above — the same default `pi --mode rpc` used, so picc's persisted "modes" entry
-		// and the transcript land where the TUI's would. Retained: `permissionMode()` below
-		// walks its branch, the same walk picc's `restoreState` does.
-		const sessionManager = SessionManager.create(cwd);
+		// One session file per thread, under the agent dir pi resolves from the env set above —
+		// the same default `pi --mode rpc` used, so picc's persisted "modes" entry and the
+		// transcript land where the TUI's would. Opened when the thread already has a file
+		// (#95), created under the thread's id when not. Retained: `permissionModeState()`
+		// below walks its branch, the same walk picc's `restoreState` does.
+		const sessionManager =
+			storedPath === undefined
+				? SessionManager.create(cwd, undefined, { id: threadId })
+				: SessionManager.open(storedPath);
 		const { session } = await createAgentSessionFromServices({ services, sessionManager });
 
 		// ── The event fan-out. Records emitted before the FIRST subscriber (everything an
@@ -329,29 +391,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 				return commands;
 			},
 			permissionModeState(): PiPermissionModeState {
-				// picc's own `restoreState` walk (#84): the LAST `modes` entry on the branch wins,
-				// and a branch with none is the initial mode by construction — this host creates a
-				// fresh session file per hosted session, so nothing precedes it. Walked from the
-				// end so the newest entry is the first hit.
-				//
-				// ⚠ Deliberately NOT cached (PR #85 review). A cache of "the last mode we saw"
-				// would have to skip `getBranch()` to change anything, and that assumes the branch
-				// is append-only — it is not: `/tree`, `/fork` and `/branch` move the leaf onto a
-				// path whose last `modes` entry can differ, which is exactly why picc re-walks in
-				// `restoreState`. `getBranch()` is itself one parent-pointer walk that builds a
-				// fresh array; this is a second linear pass of pointer comparisons over it.
-				// Correctness under branch navigation is worth microseconds per run.
-				let mode: string = PICC_DEFAULT_PERMISSION_MODE;
-				const branch = sessionManager.getBranch();
-				for (let position = branch.length - 1; position >= 0; position -= 1) {
-					const entry = branch[position];
-					if (entry?.type !== "custom") continue;
-					const persisted = readPiccPersistedMode(entry);
-					if (persisted !== undefined) {
-						mode = persisted;
-						break;
-					}
-				}
+				// picc's own `restoreState` walk (#84), re-run on every call — see the walk for why
+				// it is never cached. `getBranch()` is one parent-pointer walk that builds a fresh
+				// array; the walk is a second linear pass over it.
+				const mode = persistedPermissionMode(sessionManager.getBranch());
 				// The dropdown offers picc's modes AS REGISTERED HERE: picc names one command per
 				// mode, exactly after it, so the intersection is a name lookup. Read off the
 				// registry directly rather than through `listCommands` — that call's count is a
@@ -417,5 +460,5 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 		};
 	}
 
-	return { createSession };
+	return { createSession, listSessions, readBranch };
 }

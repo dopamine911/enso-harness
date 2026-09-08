@@ -70,6 +70,7 @@ export {
 	PICC_MODES_CUSTOM_TYPE,
 	PICC_PERMISSION_MODES,
 	PiPermissionModeState,
+	persistedPermissionMode,
 	readPiccPersistedMode,
 } from "./permission-mode.ts";
 export {
@@ -96,11 +97,14 @@ export {
 export {
 	describeSessionEntry,
 	describeThreadEvent,
+	isZenThreadId,
 	type ThreadEventColumns,
 	threadEventColumns,
 	ZenEventProvenance,
+	ZenResumableSession,
 	ZenThreadEvent,
 	ZenThreadEvents,
+	ZenThreadHistory,
 	ZenThreadInspection,
 	ZenThreadSummary,
 } from "./session-inspection.ts";

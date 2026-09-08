@@ -1,4 +1,5 @@
 import type { UIMessage } from "@tanstack/ai-client";
+import type { ZenThreadHistory } from "@zen/core";
 import { createRecentChunksStore, type RecentChunksStore } from "./custom-event-router.ts";
 import { createModeLines, type ModeLines } from "./mode-lines.ts";
 import { createNotificationsStore, type NotificationsStore } from "./notifications.tsx";
@@ -16,14 +17,19 @@ import { createStore, type Store } from "./store.ts";
  * ITS cost, not the visible thread's. So each thread gets its own set, created here, and
  * the pane that renders a thread provides them through `ThreadStoresContext`.
  *
- * ⚠ THE PAGE OWNS THE LIST, NOT THE SERVER. The rail lists the threads THIS PAGE minted:
- * only a page-owned chat instance can be switched to, and attaching to a thread some other
- * tab is running — or one from before a server restart — is a resume feature this issue
- * does not build. `GET /api/threads` (#86) stays the inspection view. Threads die with the
- * page; the rail says "live sessions" so that scope is on the label.
+ * ⚠ THE PAGE OWNS ITS LIVE LIST. The rail's first section is the threads this page minted
+ * or resumed — only those chat instances can be switched to. Stored sessions appear in the
+ * second section and become page-owned only after `/history` succeeds. A session another tab
+ * is running is refused by both the rail and the server; two pages never drive one pi session.
  */
 export interface ThreadStores {
 	readonly threadId: string;
+	/**
+	 * The messages the thread's chat mounts with (#95): a resumed thread's stored branch,
+	 * as the server mapped it; empty for a thread minted on this page. Read ONCE, by the
+	 * chat factory — TanStack owns the messages from there.
+	 */
+	readonly history: readonly UIMessage[];
 	readonly permissionMode: PermissionModeStore;
 	readonly stats: SessionStatsStore;
 	readonly notifications: NotificationsStore;
@@ -31,10 +37,11 @@ export interface ThreadStores {
 	readonly recentChunks: RecentChunksStore;
 }
 
-function createThreadStores(threadId: string): ThreadStores {
+function createThreadStores(threadId: string, history: readonly UIMessage[]): ThreadStores {
 	const notifications = createNotificationsStore();
 	return {
 		threadId,
+		history,
 		permissionMode: createPermissionModeStore(),
 		stats: createSessionStatsStore(),
 		notifications,
@@ -67,11 +74,63 @@ function publishThreadList(): void {
 
 /** Mint a new thread on this page and return its stores. The rail lists it at once, untitled. */
 export function mintThread(): ThreadStores {
-	const stores = createThreadStores(crypto.randomUUID());
+	const stores = createThreadStores(crypto.randomUUID(), []);
 	threads.set(stores.threadId, stores);
 	summaries.set(stores.threadId, {
 		threadId: stores.threadId,
 		title: undefined,
+		lastActivityAt: new Date(),
+		busy: false,
+	});
+	publishThreadList();
+	return stores;
+}
+
+/**
+ * JSON turns TanStack's `Date` into a string on the history route. Restore it at the browser
+ * boundary and reject rows that cannot be UI messages; `ZenThreadHistory.messages` is
+ * intentionally unknown because core must not own TanStack's transport shape.
+ */
+export function reviveHistoryMessages(messages: readonly unknown[]): UIMessage[] {
+	const revived: UIMessage[] = [];
+	for (const raw of messages) {
+		if (typeof raw !== "object" || raw === null) continue;
+		const message = raw as Record<string, unknown>;
+		if (typeof message.id !== "string") continue;
+		if (message.role !== "user" && message.role !== "assistant") continue;
+		if (!Array.isArray(message.parts)) continue;
+		// JSON carries the date as a string; anything else (absent, malformed) is no date.
+		const parsed = typeof message.createdAt === "string" ? new Date(message.createdAt) : undefined;
+		const createdAt = parsed !== undefined && !Number.isNaN(parsed.getTime()) ? parsed : undefined;
+		const { createdAt: _wireCreatedAt, ...rest } = message;
+		revived.push({
+			...rest,
+			id: message.id,
+			role: message.role,
+			parts: message.parts as UIMessage["parts"],
+			...(createdAt === undefined ? {} : { createdAt }),
+		});
+	}
+	return revived;
+}
+
+/**
+ * A stored session becomes a live thread on this page (#95): stores under ITS id (the
+ * thread id is pi's session id, so the next prompt reopens the same file), its branch as
+ * the history the chat mounts with, and its persisted mode as the control's first state —
+ * a plan-mode session must not read `default` until its first run (#84's lesson).
+ * Adopting a thread already on this page returns it — the rail cannot hold one twice.
+ */
+export function adoptThread(history: ZenThreadHistory): ThreadStores {
+	const existing = threads.get(history.threadId);
+	if (existing !== undefined) return existing;
+	const messages = reviveHistoryMessages(history.messages);
+	const stores = createThreadStores(history.threadId, messages);
+	stores.permissionMode.applyReceipt(history.permissionMode);
+	threads.set(stores.threadId, stores);
+	summaries.set(stores.threadId, {
+		threadId: stores.threadId,
+		title: titleFromMessages(messages),
 		lastActivityAt: new Date(),
 		busy: false,
 	});

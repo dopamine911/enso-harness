@@ -176,3 +176,64 @@ export function describeThreadEvent(event: ZenThreadEvent): string {
 	const columns = threadEventColumns(event);
 	return `${columns.when} ${columns.provenance} ${columns.subject}`;
 }
+
+/**
+ * The shape a thread id must have to be trusted (#95, PR #104 review).
+ *
+ * ⚠ Since #95 the browser's thread id IS pi's session id, and pi puts the id in the session
+ * FILENAME (`<timestamp>_<id>.jsonl`). An unconstrained id from a request body or a URL
+ * segment is therefore a path component: `../` walks out of the session dir. The browser
+ * mints UUIDs (`crypto.randomUUID()`), so the accepted set is a strict superset of those
+ * and nothing that means anything to a filesystem — letters, digits, `_`, `-`; a leading
+ * alphanumeric so an id can never read as a flag; capped so it cannot be a filename-length
+ * attack. Checked by the server at BOTH entry points (the chat body and the thread routes);
+ * the host never sees an id that failed here.
+ */
+const ZEN_THREAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+export function isZenThreadId(value: unknown): value is string {
+	return typeof value === "string" && ZEN_THREAD_ID_PATTERN.test(value);
+}
+
+/**
+ * One of pi's session files for this workspace (#95), as the rail lists it: a session the
+ * user can come back to. `threadId` IS pi's session id — the host creates every session
+ * with the browser's thread id (`NewSessionOptions.id`), so the two never need a mapping,
+ * and a page-owned thread finds its own file again after the server restarts.
+ */
+export const ZenResumableSession = Type.Object(
+	{
+		threadId: Type.String(),
+		/** The first user message, or undefined for a session with none — the rail's title, as deepseek does. */
+		title: Type.Optional(Type.String()),
+		/** The file's mtime, ISO 8601 — when the session last grew. */
+		lastActivityAt: Type.String(),
+		messageCount: Type.Integer({ minimum: 0 }),
+		/**
+		 * A thread on THIS server is running it right now — a run in flight or a dialog parked
+		 * (`ThreadView.busy`). Not "held": a released thread stays cached for the idle window,
+		 * and a page that reloaded must be able to come back to it before that expires (PR
+		 * #104 review). While busy, resuming is refused — pi refuses a second concurrent
+		 * prompt anyway; this is the readable, early form of that refusal.
+		 */
+		busy: Type.Boolean(),
+	},
+	{ additionalProperties: false },
+);
+export type ZenResumableSession = Static<typeof ZenResumableSession>;
+
+/**
+ * A thread's history as the browser mounts it (#95): the branch as TanStack `UIMessage`s —
+ * built by the server's `branch-to-messages` mapper, the same way the live stream is
+ * mapped to AG-UI — plus the opening permission mode the branch persists. Carried as
+ * `Unknown` because the shape is TanStack's, not zen's; the durable form is pi's entries.
+ */
+export const ZenThreadHistory = Type.Object(
+	{
+		threadId: Type.String(),
+		messages: Type.Array(Type.Unknown()),
+		permissionMode: PiPermissionModeState,
+	},
+	{ additionalProperties: false },
+);
+export type ZenThreadHistory = Static<typeof ZenThreadHistory>;
