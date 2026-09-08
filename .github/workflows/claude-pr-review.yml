@@ -207,8 +207,11 @@ jobs:
         #
         # `execution_file` alone is NOT "the review happened". On PR #104 the step FAILED (the binary was
         # missing, #1817 above) and still set it, so this comment said "✅ ran" under a red check — the third
-        # false-green shape in this file, after the missing token and the workflow guard. The step's own
-        # outcome is read first; a set file with a failed outcome is a failure and says so.
+        # false-green shape in this file, after the missing token and the workflow guard. So the step's own
+        # outcome is read FIRST and on its own: any non-success is a failure, whether or not a file was
+        # written (a failure before the file exists would otherwise fall through to the guard branch and
+        # read "auto-skipped" — PR #105 review). The guard itself reports SUCCESS with no file (PR #35), so
+        # that branch is reached only from a successful step.
         #
         # Upserted by a hidden marker so repeated pushes update one comment instead of spamming the PR.
         if: ${{ always() && steps.token.outputs.present == 'true' && steps.claude.outcome != 'skipped' }}
@@ -223,8 +226,8 @@ jobs:
         run: |
           set -euo pipefail
           MARKER='<!-- claude-run-status: pr-review -->'
-          if [ "${CLAUDE_OUTCOME}" != "success" ] && [ -n "${EXECUTION_FILE}" ]; then
-            body="${MARKER}"$'\n'"❌ **Claude PR review failed** on \`${SHA:0:7}\` — the step ran and exited non-zero; no verdict was posted. See the [run](${RUN_URL})."
+          if [ "${CLAUDE_OUTCOME}" != "success" ]; then
+            body="${MARKER}"$'\n'"❌ **Claude PR review failed** on \`${SHA:0:7}\` (step outcome: ${CLAUDE_OUTCOME}) — no verdict was posted. See the [run](${RUN_URL})."
           elif [ -n "${EXECUTION_FILE}" ]; then
             body="${MARKER}"$'\n'"✅ **Claude PR review** ran on \`${SHA:0:7}\`."
           else
