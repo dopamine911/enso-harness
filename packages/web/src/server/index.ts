@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { join, resolve } from "node:path";
 import { EventType } from "@ag-ui/core";
 import type { StreamChunk } from "@tanstack/ai";
+import { PICC_DEFAULT_PERMISSION_MODE, PICC_PERMISSION_MODES } from "@zen/core";
 import { type AgentHost, createAgentHost } from "../host/agent-host.ts";
 import { createDialogRegistry } from "./dialog-registry.ts";
 import { type ChatRunOutcome, resumeChat, runChat } from "./session.ts";
@@ -187,7 +188,29 @@ export function startZenServer(options: ZenServerOptions) {
 	// shared by every request; evicted whole on close.
 	const registry = createDialogRegistry({ onProblem: options.onProblem });
 
-	const server = createServer(async (request, response) => {
+	// The permission mode a FRESH thread starts in (#84). The browser asks once on mount,
+	// before any run exists, so the header can read `default` instead of `unknown` from the
+	// first paint. Honest by construction: every page load is a new thread, the host creates
+	// a fresh session file for it, and picc's initial mode is `default`; the option list is
+	// the set picc registers unconditionally (one command per mode). A thread's LIVE state —
+	// after a change — rides on the run-start receipt, never here.
+	function respondWithFreshThreadMode(response: ServerResponse): void {
+		response.writeHead(200, { "Content-Type": "application/json" });
+		response.end(JSON.stringify({ mode: PICC_DEFAULT_PERMISSION_MODE, available: [...PICC_PERMISSION_MODES] }));
+	}
+
+	// ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler sits at the
+	// complexity ceiling biome.jsonc pins for this file (#82), and its top-to-bottom shape is
+	// the #27/#34 teardown ordering. New routes are added to this dispatcher, not to it.
+	const server = createServer((request, response) => {
+		if (request.method === "GET" && request.url === "/api/mode") {
+			respondWithFreshThreadMode(response);
+			return;
+		}
+		void handleChat(request, response);
+	});
+
+	async function handleChat(request: IncomingMessage, response: ServerResponse): Promise<void> {
 		if (request.method === "POST" && request.url?.startsWith("/api/chat")) {
 			let body: RunAgentInputBody = {};
 			try {
@@ -333,7 +356,7 @@ export function startZenServer(options: ZenServerOptions) {
 
 		response.writeHead(404, { "Content-Type": "text/plain" });
 		response.end("not found");
-	});
+	}
 
 	// Parked sessions must not outlive the server that parked them — evicted first, so their
 	// declines reach a live session; then every thread's session is disposed.

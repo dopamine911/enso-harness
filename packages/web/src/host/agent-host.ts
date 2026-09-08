@@ -8,7 +8,15 @@ import {
 	initTheme,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import type { PiCommand, PiRpcEvent, PiSession } from "@zen/core";
+import {
+	PICC_DEFAULT_PERMISSION_MODE,
+	PICC_PERMISSION_MODES,
+	type PiCommand,
+	type PiPermissionModeState,
+	type PiRpcEvent,
+	type PiSession,
+	readPiccPersistedMode,
+} from "@zen/core";
 import { createZenExtensionUiContext } from "./extension-ui-context.ts";
 import { toRpcWireEvent } from "./session-events.ts";
 
@@ -148,8 +156,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
 		// A fresh session file per hosted session, under the agent dir pi resolves from the env
 		// set above — the same default `pi --mode rpc` used, so picc's persisted "modes" entry
-		// and the transcript land where the TUI's would.
-		const { session } = await createAgentSessionFromServices({ services, sessionManager: SessionManager.create(cwd) });
+		// and the transcript land where the TUI's would. Retained: `permissionMode()` below
+		// walks its branch, the same walk picc's `restoreState` does.
+		const sessionManager = SessionManager.create(cwd);
+		const { session } = await createAgentSessionFromServices({ services, sessionManager });
 
 		// ── The event fan-out. Records emitted before the FIRST subscriber (everything an
 		// extension says during session_start — multi-account's startup notify, a dialog a
@@ -240,6 +250,39 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 					commands.push(describeCommand(`skill:${skill.name}`, "skill", skill.description));
 				}
 				return commands;
+			},
+			permissionModeState(): PiPermissionModeState {
+				// picc's own `restoreState` walk (#84): the LAST `modes` entry on the branch wins,
+				// and a branch with none is the initial mode by construction — this host creates a
+				// fresh session file per hosted session, so nothing precedes it. Walked from the
+				// end so the newest entry is the first hit.
+				//
+				// ⚠ Deliberately NOT cached (PR #85 review). A cache of "the last mode we saw"
+				// would have to skip `getBranch()` to change anything, and that assumes the branch
+				// is append-only — it is not: `/tree`, `/fork` and `/branch` move the leaf onto a
+				// path whose last `modes` entry can differ, which is exactly why picc re-walks in
+				// `restoreState`. `getBranch()` is itself one parent-pointer walk that builds a
+				// fresh array; this is a second linear pass of pointer comparisons over it.
+				// Correctness under branch navigation is worth microseconds per run.
+				let mode: string = PICC_DEFAULT_PERMISSION_MODE;
+				const branch = sessionManager.getBranch();
+				for (let position = branch.length - 1; position >= 0; position -= 1) {
+					const entry = branch[position];
+					if (entry?.type !== "custom") continue;
+					const persisted = readPiccPersistedMode(entry);
+					if (persisted !== undefined) {
+						mode = persisted;
+						break;
+					}
+				}
+				// The dropdown offers picc's modes AS REGISTERED HERE: picc names one command per
+				// mode, exactly after it, so the intersection is a name lookup. Read off the
+				// registry directly rather than through `listCommands` — that call's count is a
+				// contract the refusal path's tests pin, and this is not a refusal lookup.
+				const registered = new Set(
+					session.extensionRunner.getRegisteredCommands().map((command) => command.invocationName),
+				);
+				return { mode, available: PICC_PERMISSION_MODES.filter((candidate) => registered.has(candidate)) };
 			},
 			subscribe(onEvent) {
 				listeners.add(onEvent);

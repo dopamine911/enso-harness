@@ -45,6 +45,7 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
 			script.onAnswer?.(emit);
 		},
 		listCommands: () => [{ name: "mode", source: "extension" }],
+		permissionModeState: () => ({ mode: "default", available: ["default", "acceptEdits"] }),
 		subscribe: (onEvent) => {
 			listeners.add(onEvent);
 			return () => {
@@ -223,6 +224,19 @@ test("a malformed body is a plain 400, no session built", async () => {
 	const { url, built } = await startWith({ onPrompt: neverPrompted });
 	const response = await fetch(`${url}/api/chat`, { method: "POST", body: "{not json" });
 	expect(response.status).toBe(400);
+	expect(built).toHaveLength(0);
+});
+
+// The header's first paint (#84): what a fresh thread starts in, answered WITHOUT building
+// a session — asking must not be the thing that spins pi up.
+test("GET /api/mode reports the fresh-thread mode and picc's modes, and builds no session", async () => {
+	const { url, built } = await startWith({ onPrompt: neverPrompted });
+	const response = await fetch(`${url}/api/mode`);
+	expect(response.status).toBe(200);
+	expect(await response.json()).toEqual({
+		mode: "default",
+		available: ["default", "acceptEdits", "plan", "bypassPermissions", "auto"],
+	});
 	expect(built).toHaveLength(0);
 });
 

@@ -4,7 +4,7 @@ import { fetchServerSentEvents } from "@tanstack/ai-react";
 import { createChatHook } from "@tanstack/ai-react/ui";
 import { isZenDialogSpec, ZEN_DIALOG_KEY, type ZenDialogSpec } from "@zen/core";
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
 	Conversation,
 	ConversationContent,
@@ -20,6 +20,7 @@ import { Textarea } from "./components/ui/textarea.tsx";
 import { routeZenCustomEvent } from "./custom-event-router.ts";
 import { createFixtureChat } from "./fixture-conversation.ts";
 import { SessionNotifications } from "./notifications.tsx";
+import { PermissionModeSelect, seedPermissionMode, usePermissionMode } from "./permission-mode.tsx";
 import { SelectedMessagePart } from "./selected-message-part.tsx";
 import { SessionStatsBar } from "./session-stats.tsx";
 import type { ZenRendererMap } from "./ZenToolResult.tsx";
@@ -155,6 +156,41 @@ function RunProblem(): React.ReactNode {
 				{chat.error instanceof Error ? chat.error.message : String(chat.error)}
 			</AlertDescription>
 		</Alert>
+	);
+}
+
+/**
+ * The header's permission-mode control (#84): the store's current mode, and a dropdown
+ * that switches it by sending picc's per-mode slash command — `/acceptEdits`, exactly what
+ * typing it does. Same `useChatContext` timing note as `RunProblem` above.
+ *
+ * ⚠ Sent as a prompt on purpose, not through a dedicated endpoint: picc's `setMode` is
+ * closure-private with no API, its registered commands are the only way in, and the
+ * server already routes a slash command down the no-model extension-command path. The
+ * indicator then updates from the `zen.entry` receipt that run carries — the mode picc
+ * actually set — never from the click.
+ *
+ * ⚠ Disabled while a run is in flight, the same rule the send button follows: a mode
+ * change mid-run would collide with the busy-thread semantics #75 is deciding.
+ *
+ * On mount it asks the server what a fresh thread starts in, so the header reads
+ * `default` from the first paint rather than `unknown` until the first run. In fixture
+ * mode there is no server; the fetch fails and the store honestly stays `unknown`.
+ */
+function PermissionModeControl(): React.ReactNode {
+	const chat = useChatContext();
+	const { mode, available } = usePermissionMode();
+	useEffect(() => {
+		void seedPermissionMode(async () => (await fetch("/api/mode")).json());
+	}, []);
+	return (
+		<PermissionModeSelect
+			mode={mode}
+			available={available}
+			disabled={chat.isLoading}
+			// picc registers one command per mode, named exactly the mode (index.ts:526-536).
+			onSelect={(next) => void chat.sendMessage(`/${next}`)}
+		/>
 	);
 }
 
@@ -379,6 +415,7 @@ const { useAppChat, useChatContext } = createChatHook({
 						{isFixtureMode ? (
 							<span className="rounded-full border px-2 py-0.5 text-muted-foreground text-xs">fixture</span>
 						) : null}
+						<PermissionModeControl />
 					</header>
 					<Conversation>
 						<ConversationContent className="mx-auto w-full max-w-3xl">

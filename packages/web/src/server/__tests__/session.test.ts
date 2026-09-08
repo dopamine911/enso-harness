@@ -67,6 +67,14 @@ function fakeSession(script: FakeSessionScript): { session: PiSession; record: F
 			record.commandLookups += 1;
 			return (script.commands ?? []).map((name): PiCommand => ({ name, source: "extension" }));
 		},
+		// A receipt shaped like the host's: default mode, and picc's modes as far as this
+		// fake's command list registers them (#84). Reads `script.commands` directly rather
+		// than through `listCommands`, mirroring the host — so `commandLookups` still counts
+		// only refusal-path lookups.
+		permissionModeState: () => ({
+			mode: "default",
+			available: (script.commands ?? []).filter((name) => name !== "mode"),
+		}),
 		subscribe: (onEvent) => {
 			listeners.add(onEvent);
 			return () => listeners.delete(onEvent);
@@ -134,9 +142,28 @@ async function collect(events: string[], images?: ChatImages) {
 }
 type ChatImages = ReadonlyArray<{ type: "image"; data: string; mimeType: string }>;
 
-test("a run opens with RUN_STARTED then TEXT_MESSAGE_START", async () => {
+test("a run opens with RUN_STARTED, then the mode receipt, then TEXT_MESSAGE_START (#84)", async () => {
 	const { chunks } = await collect(['{"type":"agent_settled"}']);
-	expect(chunks.slice(0, 2).map((c) => c.type)).toEqual([EventType.RUN_STARTED, EventType.TEXT_MESSAGE_START]);
+	expect(chunks.slice(0, 3).map((c) => c.type)).toEqual([
+		EventType.RUN_STARTED,
+		EventType.CUSTOM,
+		EventType.TEXT_MESSAGE_START,
+	]);
+	expect(chunks[1]).toMatchObject({ name: "zen.mode", value: { mode: "default" } });
+});
+
+test("⚠ the mode receipt carries the session's own state, and rides even on a REFUSED command (#84)", async () => {
+	// The dropdown's option list is what the session registers — here the fake registers
+	// two mode commands beside `/mode` — and a refused run must still tell the browser what
+	// mode it is in: that refusal IS the #73 scenario the receipt exists to make legible.
+	const pi = piWithCommands(["mode", "default", "acceptEdits"]);
+	const chunks = await runWith(pi, "/settings");
+	expect(chunks.some((c) => c.type === EventType.RUN_ERROR)).toBe(true);
+	expect(chunks[1]).toMatchObject({
+		type: EventType.CUSTOM,
+		name: "zen.mode",
+		value: { mode: "default", available: ["default", "acceptEdits"] },
+	});
 });
 
 test("text deltas stream through as AG-UI content events", async () => {
@@ -205,7 +232,8 @@ test("a rejected prompt yields RUN_ERROR rather than throwing", async () => {
 
 test("an unmodelled pi event still reaches the client, as CUSTOM", async () => {
 	const { chunks } = await collect(['{"type":"queue_update","depth":3}', '{"type":"agent_settled"}']);
-	const custom = chunks.find((c) => c.type === EventType.CUSTOM);
+	// Name-specific: the run's own `zen.mode` receipt is also a CUSTOM chunk (#84).
+	const custom = chunks.find((c) => c.type === EventType.CUSTOM && "name" in c && c.name === "zen.unmapped");
 	expect(custom).toMatchObject({ name: "zen.unmapped" });
 });
 

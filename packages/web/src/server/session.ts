@@ -8,6 +8,7 @@ import {
 	ZEN_DIALOG_KEY,
 	type ZenDialogSpec,
 } from "@zen/core";
+import { ZEN_CUSTOM_EVENT_MODE } from "../rpc/custom-event-names.ts";
 import { mapPiEvent } from "../rpc/map-events.ts";
 import { type AguiIdentifiers, observationToAguiEvents } from "../rpc/to-agui.ts";
 import type { DialogRegistry, PiSessionPump } from "./dialog-registry.ts";
@@ -81,6 +82,21 @@ function runStarted(ids: AguiIdentifiers): StreamChunk {
 /** Opens the assistant message the text deltas will attach to. */
 function messageStarted(ids: AguiIdentifiers): StreamChunk {
 	return { type: EventType.TEXT_MESSAGE_START, messageId: ids.messageId, role: "assistant" };
+}
+
+/**
+ * The permission mode this run STARTS in, and the modes the browser may offer (#84).
+ *
+ * ⚠ Synthesised here, not mapped from a pi event, because there is no event to map: picc
+ * persists a `modes` entry only on a CHANGE, so a fresh thread sitting in `default` never
+ * says so on its own — which is exactly the state #73's refusals happen in. Reading it off
+ * the session at run start is the one honest source; the browser renders `unknown` until
+ * this arrives rather than assuming. The host computes both halves (`permissionModeState`),
+ * so this stays a one-line handoff — and never touches `listCommands`, whose call count
+ * the refusal tests below pin for prose prompts.
+ */
+function modeReceipt(session: PiSession): StreamChunk {
+	return { type: EventType.CUSTOM, name: ZEN_CUSTOM_EVENT_MODE, value: session.permissionModeState() };
 }
 
 function runError(ids: AguiIdentifiers, message: string): StreamChunk {
@@ -388,6 +404,9 @@ export async function* runChat(options: ChatRunOptions): AsyncGenerator<StreamCh
 	const pump = createSessionPump(session);
 
 	yield runStarted(ids);
+	// The state receipt rides FIRST after RUN_STARTED, before the slash-command refusal
+	// below: even a refused run tells the browser what mode it is in.
+	yield modeReceipt(session);
 	yield messageStarted(ids);
 
 	/**

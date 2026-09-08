@@ -13,5 +13,12 @@ export const ZEN_CUSTOM_EVENT_NOTIFY = "zen.notify";
 export const ZEN_CUSTOM_EVENT_USAGE = "zen.usage";
 /** An extension persisted a custom session entry (#29). Value: the `custom-entry` observation. */
 export const ZEN_CUSTOM_EVENT_ENTRY = "zen.entry";
+/**
+ * The permission mode a run STARTS in, plus the modes the dropdown may offer (#84). A
+ * state receipt the SERVER synthesises at run start — not a pi event — because picc only
+ * persists a `modes` entry on a change, so a fresh thread's `default` never crosses on
+ * its own. Value: `{ mode: string, available: string[] }`.
+ */
+export const ZEN_CUSTOM_EVENT_MODE = "zen.mode";
 /** A pi event this surface does not model yet — carried, never dropped. Value: the raw event. */
 export const ZEN_CUSTOM_EVENT_UNMAPPED = "zen.unmapped";

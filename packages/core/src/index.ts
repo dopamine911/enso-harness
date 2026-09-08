@@ -63,6 +63,13 @@ export {
 	zenAgentDir,
 } from "./paths.ts";
 export {
+	PICC_DEFAULT_PERMISSION_MODE,
+	PICC_MODES_CUSTOM_TYPE,
+	PICC_PERMISSION_MODES,
+	PiPermissionModeState,
+	readPiccPersistedMode,
+} from "./permission-mode.ts";
+export {
 	isPiCommand,
 	PiCommand,
 	type PiDialogResponse,

@@ -2,8 +2,10 @@ import { afterEach, expect, test } from "bun:test";
 import { routeZenCustomEvent } from "../custom-event-router.ts";
 import { clearModeLinesForTest } from "../mode-lines.ts";
 import { clearZenNotificationsForTest, getZenNotificationsSnapshot } from "../notifications.tsx";
+import { clearPermissionModeForTest, getPermissionModeSnapshot } from "../permission-mode.tsx";
 import {
 	ZEN_CUSTOM_EVENT_ENTRY,
+	ZEN_CUSTOM_EVENT_MODE,
 	ZEN_CUSTOM_EVENT_NOTIFY,
 	ZEN_CUSTOM_EVENT_UNMAPPED,
 	ZEN_CUSTOM_EVENT_USAGE,
@@ -13,26 +15,37 @@ import { clearSessionStatsForTest, getSessionStatsSnapshot } from "../session-st
 /**
  * #53 S1.3: the CUSTOM-chunk router was an inline closure no test reached — renaming
  * `zen.entry`, dropping the notify-type allowlist, or swapping the two `apply*` calls all
- * left the suite green. These drive the extracted function and read the three stores.
+ * left the suite green. These drive the extracted function and read the stores.
  */
 
 afterEach(() => {
 	clearModeLinesForTest();
 	clearZenNotificationsForTest();
 	clearSessionStatsForTest();
+	clearPermissionModeForTest();
 });
 
 const notificationMessages = () => getZenNotificationsSnapshot().map((notification) => notification.message);
 
-test("zen.entry reaches the mode-lines store — a picc modes entry renders one Mode line", () => {
+// ⚠ ONE ENTRY, TWO VIEWS (#84). A picc modes entry is both history (the transcript line)
+// and state (the current-mode store). Dropping either `apply*` call from the entry branch
+// leaves the other view green, so both are read here.
+test("zen.entry reaches BOTH the mode-lines store and the current-mode store", () => {
 	routeZenCustomEvent(ZEN_CUSTOM_EVENT_ENTRY, {
 		kind: "custom-entry",
 		customType: "modes",
 		data: { mode: "acceptEdits" },
 	});
 	expect(notificationMessages()).toEqual(["Mode: acceptEdits"]);
+	expect(getPermissionModeSnapshot().mode).toBe("acceptEdits");
 	// and it did NOT land in the stats store (the swap-the-two-apply-calls mutation)
 	expect(getSessionStatsSnapshot().totalCost).toBe(0);
+});
+
+test("zen.mode reaches the current-mode store and nothing else — it is state, not a transcript line", () => {
+	routeZenCustomEvent(ZEN_CUSTOM_EVENT_MODE, { mode: "default", available: ["default", "plan"] });
+	expect(getPermissionModeSnapshot()).toEqual({ mode: "default", available: ["default", "plan"] });
+	expect(notificationMessages()).toEqual([]);
 });
 
 test("zen.usage reaches the session-stats store and nothing else", () => {
