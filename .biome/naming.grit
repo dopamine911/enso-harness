@@ -26,9 +26,11 @@
 // keyword-agnostic — const/let/var and function/callback parameters are covered
 // uniformly. `JsLiteralMemberName` reaches the property-key shapes the binding
 // node structurally cannot see (`{ n: … }`, `{ cnt: … }`, type/interface/class
-// members). Registered repo-wide via the `plugins` key in biome.json. To adopt it
-// gradually in an existing codebase instead, move it under a scoped `overrides`
-// entry and widen the glob as each directory is swept clean (the ratchet).
+// members). Registered via a scoped `overrides` entry in biome.json that includes
+// `**` but excludes `*.test.ts` / `*.test.tsx`: test files are intentionally exempt
+// from naming discipline (a test's throwaway bindings and wire-format fixtures are
+// not the code readers navigate). Widen or narrow that glob to change coverage — e.g.
+// add more excludes to adopt the gate gradually as each directory is swept clean.
 //
 // The abbreviation set is ported from eslint-plugin-unicorn's prevent-
 // abbreviations dictionary, MINUS a few sanctioned conventions (`err` catch

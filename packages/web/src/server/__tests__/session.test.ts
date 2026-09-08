@@ -382,7 +382,6 @@ test("⚠⚠ a blocking dialog interrupts the run: parked, stamped, nothing decl
 	// ⚠ The binding stamp is what makes the interrupt RESOLVABLE — without it TanStack
 	// classifies it unbound/canResolve:false. interruptedRunId must be THIS run.
 	expect(interrupt?.metadata["tanstack:interruptBinding"]).toEqual({
-		// biome-ignore lint: `v` is TanStack's interruptBinding wire format — the assertion must spell the stamp exactly.
 		v: 1,
 		kind: "generic",
 		interruptId: "d1",

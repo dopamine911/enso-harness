@@ -35,7 +35,6 @@ function genericInterrupt(overrides: Partial<GenericAGUIInterrupt> = {}): Generi
 		status: "pending",
 		errors: [],
 		canResolve: true,
-		// biome-ignore lint: `v` is TanStack's interruptBinding wire format — the fixture must spell the field as the type does.
 		binding: { v: 1, kind: "generic", interruptId: "d1", interruptedRunId: "r1", generation: 0 },
 		metadata: { [ZEN_DIALOG_KEY]: SELECT_DIALOG },
 		resolveInterrupt: neverCalled,
