@@ -73,10 +73,14 @@ export function describeChunk(chunk: RecordedCustomChunk): string {
 	return `${chunk.name} (${value.type})`;
 }
 
-/** pi guarantees every session entry an `id`; read defensively, and fall back to the description for a malformed one. */
-function entryKey(entry: unknown): string {
+/**
+ * pi guarantees every session entry an `id`; read defensively. A malformed entry without one
+ * keys by its position in the branch — two such entries in the same second with the same type
+ * would otherwise collide on the description and React would reuse the wrong row (PR #87 review).
+ */
+function entryKey(entry: unknown, position: number): string {
 	if (typeof entry === "object" && entry !== null && "id" in entry && typeof entry.id === "string") return entry.id;
-	return describeEntry(entry);
+	return `${position}:${describeEntry(entry)}`;
 }
 
 /** One entry of the branch, read defensively: pi's shapes are carried, not modelled. */
@@ -182,8 +186,8 @@ export function SessionDebugView({
 							<div>commands: {session.commands.map((command) => `/${command}`).join(" ")}</div>
 							<h4 className="mt-1 text-foreground">branch ({session.entries.length} entries)</h4>
 							<ol>
-								{session.entries.map((entry) => (
-									<li key={entryKey(entry)}>{describeEntry(entry)}</li>
+								{session.entries.map((entry, position) => (
+									<li key={entryKey(entry, position)}>{describeEntry(entry)}</li>
 								))}
 							</ol>
 						</>
