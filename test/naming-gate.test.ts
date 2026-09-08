@@ -19,38 +19,47 @@ const repositoryRoot = join(import.meta.dir, "..");
 const biomeBinary = join(repositoryRoot, "node_modules", ".bin", "biome");
 
 /**
- * Lints one fixture through the REPO's config and returns the report.
+ * Lints one fixture through the REPO's config and returns the 1-based line numbers at which
+ * the NAMING PLUGIN reported — not any other rule.
  *
  * ⚠ The fixture lives outside the repo tree on purpose. A temp file written under
  * `packages/` would be visible to the other source-walking tests (the coverage manifest, the
  * duplicate-shape gate) while it existed, and bun runs test files concurrently — that is a
  * flake waiting to happen. `--config-path` gives an out-of-tree file the repo's rules, and
  * the plugin override's `**` include still matches it.
+ *
+ * Positions, not message text (PR #83 review): the diagnostic wording is ours, in
+ * `naming.grit`, and a `not.toContain` on a reworded message would go silently green rather
+ * than red. Scoping to the `plugin` category also ignores unrelated rules (`useExplicitType`
+ * and the like) that may legitimately land on the same lines.
  */
-function lintFixture(source: string): string {
+function namingGateLines(source: string): number[] {
 	const directory = mkdtempSync(join(tmpdir(), "zen-naming-gate-"));
 	try {
 		const fixture = join(directory, "fixture.ts");
 		writeFileSync(fixture, source);
 		const linted = Bun.spawnSync([biomeBinary, "check", `--config-path=${repositoryRoot}`, fixture]);
-		return `${linted.stdout.toString()}${linted.stderr.toString()}`;
+		const report = `${linted.stdout.toString()}${linted.stderr.toString()}`;
+		// Biome heads each diagnostic with `<path>:<line>:<column> <category>`.
+		const flagged = new Set<number>();
+		for (const match of report.matchAll(/fixture\.ts:(\d+):\d+ plugin\b/g)) flagged.add(Number(match[1]));
+		return [...flagged].sort((left, right) => left - right);
 	} finally {
 		rmSync(directory, { recursive: true, force: true });
 	}
 }
 
 test("⚠ the externally-fixed names are exempt as KEYS but still refused as BINDINGS", () => {
-	const report = lintFixture(
+	const flagged = namingGateLines(
 		['export const stamp = { v: 1, dir: "static" };', "export const v = 1;", 'export const dir = "static";', ""].join(
 			"\n",
 		),
 	);
-	// Line 1 — the wire/API shapes we owe their spelling to. Neither key may be flagged.
-	expect(report).not.toContain("Single-character property key");
-	expect(report).not.toContain("Abbreviated property key");
-	// Lines 2 and 3 — our own identifiers. The exemption must NOT have reached them.
-	expect(report).toContain("Single-character name");
-	expect(report).toContain("Abbreviated name");
+	// Line 1 holds the two exempted keys — the wire/API shapes we owe their spelling to — and
+	// must be clean. Lines 2 and 3 hold the SAME words as our own bindings and must both be
+	// flagged: that is the split, and it is what breaks if the predicate is ever folded into
+	// `is_allowlisted`.
+	expect(flagged).toEqual([2, 3]);
 });
 
 // ── the exemption's blast radius, pinned ──────────────────────────────────────
@@ -62,11 +71,14 @@ test("⚠ the externally-fixed names are exempt as KEYS but still refused as BIN
 // Only property keys can slip through: `v` and `dir` as BINDINGS are still refused by the
 // tiers asserted above, so they cannot legally exist as identifiers to be mistaken for keys.
 
+// Alphabetical, because the comparison below sorts what it finds: what is asserted is
+// MEMBERSHIP, not order — `readdirSync` order is filesystem-defined and not stable across
+// runners (PR #83 review).
 const EXEMPTED_KEY_SITES = [
-	// TanStack's `tanstack:interruptBinding` stamp — {v, kind, interruptId, …}.
-	"packages/web/src/server/session.ts",
 	// Bun.serve's static directory-route option bag.
 	"packages/web/src/server/dev-web.ts",
+	// TanStack's `tanstack:interruptBinding` stamp — {v, kind, interruptId, …}.
+	"packages/web/src/server/session.ts",
 ] as const;
 const SCANNED_ROOTS = ["packages", "scripts"] as const;
 const SKIPPED_DIRECTORIES = new Set(["node_modules", "dist", "dist-types", "coverage"]);
@@ -86,17 +98,17 @@ function sourceFiles(directory: string): string[] {
 }
 
 test("⚠ only the two documented sites rely on the key exemption", () => {
-	const sites: string[] = [];
+	const relyingFiles = new Set<string>();
 	for (const root of SCANNED_ROOTS) {
 		for (const path of sourceFiles(join(repositoryRoot, root))) {
 			const repositoryRelative = path.slice(repositoryRoot.length + 1);
 			// Tests are excluded from the plugin entirely, so their fixtures rely on nothing.
 			if (repositoryRelative.includes(".test.")) continue;
-			for (const [lineIndex, line] of readFileSync(path, "utf8").split("\n").entries()) {
-				if (EXEMPTED_KEY.test(line)) sites.push(`${repositoryRelative}:${lineIndex + 1}`);
-			}
+			if (EXEMPTED_KEY.test(readFileSync(path, "utf8"))) relyingFiles.add(repositoryRelative);
 		}
 	}
-	// Named with line numbers — a count cannot say which file to open.
-	expect(sites.map((site) => site.split(":")[0])).toEqual([...EXEMPTED_KEY_SITES]);
+	// Named, not counted, so a failure says which file to open. Compared as a sorted SET of
+	// files: the receipt is per file (a second wire key in an already-receipted file is the
+	// same contract, not a new site), and `readdirSync` order is not something to assert on.
+	expect([...relyingFiles].sort()).toEqual([...EXEMPTED_KEY_SITES]);
 });
