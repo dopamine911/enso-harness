@@ -5,7 +5,7 @@
 import type { ChatUISelectedPart, ChatUISelectedToolPart } from "@tanstack/ai-client/ui";
 import { TextPart } from "@tanstack/ai-react/ui";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "./components/ai-elements/reasoning.tsx";
-import { type ZenRendererMap, ZenToolResult } from "./ZenToolResult.tsx";
+import { type ToolResultState, toolResultState, type ZenRendererMap, ZenToolResult } from "./ZenToolResult.tsx";
 
 /**
  * The argument a step row is summarised by, in precedence. Each of pi's built-ins and the
@@ -53,15 +53,7 @@ function readToolInput(selected: ChatUISelectedToolPart): unknown {
 	}
 }
 
-type StepStatus = "pending" | "done" | "error";
-
-/** Done/pending is whether the result has paired — the same rule the status bar uses. */
-function stepStatus(selected: ChatUISelectedToolPart): StepStatus {
-	if (selected.result === undefined) return "pending";
-	return selected.result.error === undefined ? "done" : "error";
-}
-
-const STEP_DOT: Record<StepStatus, string> = {
+const STEP_DOT: Record<ToolResultState["status"], string> = {
 	pending: "size-2 shrink-0 animate-pulse rounded-full bg-foreground",
 	done: "size-2 shrink-0 rounded-full bg-muted-foreground/60",
 	error: "size-2 shrink-0 rounded-full bg-destructive",
@@ -70,9 +62,9 @@ const STEP_DOT: Record<StepStatus, string> = {
 /**
  * A tool call as one compact row — `● read  packages/web/src/x.ts` — with IN and OUT folded
  * beneath it (#90 PR 2; Copilot Chat's step rows are the reference). What the agent is
- * doing reads step by step instead of as a wall of output. Done/pending is whether the
- * result has paired, the same rule the status bar uses; an error opens itself, because a
- * failure behind a click is a failure missed.
+ * doing reads step by step instead of as a wall of output. Done/pending/error is
+ * `toolResultState`, the one definition the status bar and `ZenToolResult` also read; an
+ * error opens itself, because a failure behind a click is a failure missed.
  */
 function ToolStep({
 	selected,
@@ -83,13 +75,15 @@ function ToolStep({
 }): React.ReactNode {
 	const input = readToolInput(selected);
 	const summary = summarizeToolInput(input);
-	const status = stepStatus(selected);
+	const { status } = toolResultState(selected.result);
 	return (
 		<details data-zen-tool-step={status} open={status === "error"} className="group my-1">
 			<summary className="flex cursor-pointer list-none items-center gap-2 font-mono text-muted-foreground text-xs marker:hidden">
 				<span aria-hidden="true" className={STEP_DOT[status]} />
 				<span className="text-foreground">{selected.part.name}</span>
-				{summary === undefined ? null : <span className="truncate">{summary}</span>}
+				{/* `min-w-0`: a flex child's default `min-width: auto` never shrinks below its
+				    content, so without it `truncate` cannot engage (PR #93 review). */}
+				{summary === undefined ? null : <span className="min-w-0 truncate">{summary}</span>}
 				{status === "pending" ? <span>running…</span> : null}
 				{status === "error" ? <span className="text-destructive">error</span> : null}
 			</summary>
