@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { join, resolve } from "node:path";
 import { EventType } from "@ag-ui/core";
 import type { StreamChunk } from "@tanstack/ai";
-import { createAgentHost } from "../host/agent-host.ts";
+import { type AgentHost, createAgentHost } from "../host/agent-host.ts";
 import { createDialogRegistry } from "./dialog-registry.ts";
 import { type ChatRunOutcome, resumeChat, runChat } from "./session.ts";
 import { createThreadSessions } from "./thread-sessions.ts";
@@ -100,6 +100,13 @@ export interface ZenServerOptions {
 	port?: number;
 	/** Notified for anything worth an operator's attention. Never swallowed. */
 	onProblem?: (problem: unknown) => void;
+	/**
+	 * The pi host to use instead of building one from `cwd` / `agentDir` /
+	 * `harnessPackageDir`. ⓘ Exists for `__tests__/server-handler.test.ts` (#76): a fake host
+	 * whose sessions record abort/dispose is the only way to observe the handler's
+	 * stop/release sequencing without a model. Production launchers never pass it.
+	 */
+	host?: AgentHost;
 }
 
 /*
@@ -166,12 +173,14 @@ export function startZenServer(options: ZenServerOptions) {
 	// pi, in this process (#69). Creating the host sets the isolation env and pins the
 	// multi-account config; sessions are created per chat THREAD below and live across runs
 	// (#43 — a mode chosen on prompt 1 is in force on prompt 2).
-	const host = createAgentHost({
-		cwd: options.cwd,
-		agentDir: options.agentDir,
-		harnessPackageDir: options.harnessPackageDir,
-		onProblem: options.onProblem,
-	});
+	const host: AgentHost =
+		options.host ??
+		createAgentHost({
+			cwd: options.cwd,
+			agentDir: options.agentDir,
+			harnessPackageDir: options.harnessPackageDir,
+			onProblem: options.onProblem,
+		});
 	const threads = createThreadSessions({ createSession: () => host.createSession(), onProblem: options.onProblem });
 
 	// Parked pi sessions awaiting a human's answer to a dialog (#27). Owned by the server,
@@ -351,10 +360,25 @@ export function startZenServer(options: ZenServerOptions) {
 		options.onProblem?.(error);
 	});
 
+	// Resolves with the URL of the port the OS actually bound — the same as `url` unless the
+	// caller asked for port 0 (tests do), where `url` would name a port that does not exist.
+	const listening = new Promise<string>((resolve, reject) => {
+		server.once("listening", () => {
+			const address = server.address();
+			const boundPort = typeof address === "object" && address !== null ? address.port : port;
+			resolve(`http://${LOOPBACK_ONLY}:${boundPort}`);
+		});
+		// A bind failure emits 'error' (handled above), never 'listening'. Under Bun the
+		// 'listening' event does not re-fire afterwards, so without this the promise would
+		// hang forever and any `await listening` caller (dev.ts) would dangle silently. The
+		// onProblem handler already reported the cause; this only settles the wait.
+		server.once("error", reject);
+	});
 	server.listen(port, LOOPBACK_ONLY);
 	return {
 		server,
 		url: `http://${LOOPBACK_ONLY}:${port}`,
+		listening,
 		close: () => new Promise<void>((resolve) => server.close(() => resolve())),
 	};
 }
