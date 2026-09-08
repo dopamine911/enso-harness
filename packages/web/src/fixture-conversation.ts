@@ -36,12 +36,17 @@ export function createFixtureChat(): TanStackChat {
 					"---\n\n" +
 					"**Sanitization tripwires — if any of these is live, the renderer regressed:**\n\n" +
 					"SENTINEL-BEFORE: the three tripwires sit between this sentence and SENTINEL-AFTER.\n\n" +
-					'<img src="x" onerror="alert(\'sanitize regression: img onerror fired\')">\n\n' +
+					// ⚠ The `<img>` element itself SURVIVES sanitization — only its `onerror` is stripped —
+					// and a dead `src` draws the browser's broken-image icon, which read as a bug the
+					// first time someone looked (2026-09-08). The alt text is what a healthy render
+					// shows in its place; the tripwire is the handler, not the element.
+					'<img src="x" alt="[inert image tripwire — its onerror handler was stripped, which is the healthy state]" ' +
+					"onerror=\"alert('sanitize regression: img onerror fired')\">\n\n" +
 					"[this link must be inert](javascript:alert('sanitize regression: javascript link fired'))\n\n" +
 					"<script>alert('sanitize regression: script tag executed')</script>\n\n" +
-					"SENTINEL-AFTER: seeing both sentinels with nothing between them means the sanitizer " +
-					"STRIPPED the tripwires (healthy). The regression signal is an alert firing or the " +
-					"link above being clickable — never mere invisibility.\n",
+					"SENTINEL-AFTER: healthy is an inert image note and the link as plain text between the " +
+					"sentinels, and no script anywhere. The regression signal is an alert firing or the " +
+					"link above being clickable — never how the residue looks.\n",
 			);
 		})
 		.user("now think about something and run a tool")
