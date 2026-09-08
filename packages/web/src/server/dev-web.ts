@@ -59,7 +59,6 @@ try {
 			// Everything else falls through to the public assets (favicon, logos). Bun's
 			// directory route rejects non-canonical paths and clamps symlink escapes, and a
 			// miss is a 404 — this app has no client-side routing to fall back for.
-			// biome-ignore lint: `dir` is Bun.serve's hardened directory-route API shape, not our naming.
 			"/*": { dir: publicDir },
 		},
 	});

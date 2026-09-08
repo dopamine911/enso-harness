@@ -99,7 +99,6 @@ export function toolResultMetadata(
 }
 
 /** Map one pi rpc event. Never returns undefined — see the design rule above. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one switch arm per pi event type, read top-to-bottom against pi's protocol doc — the complexity IS the protocol's, and splitting arms into helpers would break the side-by-side read.
 export function mapPiEvent(event: PiRpcEvent): ZenObservation {
 	switch (event.type) {
 		case "message_update": {

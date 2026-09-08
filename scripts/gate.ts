@@ -14,7 +14,7 @@
  * The checks:
  *   1. biome     — lint + format + import-organize (check-only, no writes). This
  *                  also enforces the discipline rules Biome can express, e.g.
- *                  `noTsIgnore` is set to error in biome.json, so a banned
+ *                  `noTsIgnore` is set to error in biome.jsonc, so a banned
  *                  suppression directive fails the gate rather than merely warning.
  *   2. typecheck — `tsc --noEmit` over the package.
  *   3. test      — `vitest run`.

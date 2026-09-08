@@ -13,7 +13,7 @@ import { join, relative, resolve } from "node:path";
  * ⚠ The cost, stated: importing a module runs its top-level code. Every library module
  * here is import-clean (chat-screen.tsx guards its one `window` read for exactly this
  * reason). The files that are NOT import-clean are the named ENTRY_POINTS below — modules
- * whose body IS the program — and the VENDORED components, which share biome.json's
+ * whose body IS the program — and the VENDORED components, which share biome.jsonc's
  * exclusion boundary: upstream's code, kept diffable, not held to our coverage.
  *
  * ⚠ Each entry-point exception is asserted to EXIST, so a renamed entry fails here instead
@@ -41,7 +41,7 @@ const ENTRY_POINT_EXCEPTIONS = [
 	"packages/web/src/server/dev-web.ts",
 ] as const;
 
-/** Vendored code — biome.json's exclusion boundary, applied to coverage for the same reason. */
+/** Vendored code — biome.jsonc's exclusion boundary, applied to coverage for the same reason. */
 const VENDORED_DIRECTORIES = ["packages/web/src/components"] as const;
 
 function isSourceFile(fileName: string): boolean {

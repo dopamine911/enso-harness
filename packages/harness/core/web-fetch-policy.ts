@@ -96,7 +96,6 @@ function ipv4OctetsOf(address: string): number[] | undefined {
 	return octets;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the range table IS the function — one boolean per reserved block, in RFC order; splitting it would scatter the table.
 function isPublicIpv4(octets: readonly number[]): boolean {
 	const [first, second, third] = octets;
 	if (first === undefined || second === undefined || third === undefined) return false;

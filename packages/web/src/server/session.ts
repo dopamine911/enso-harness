@@ -117,7 +117,6 @@ function runFinishedWithDialogInterrupt(
 		expiresAt: new Date(expiresAt).toISOString(),
 		metadata: {
 			[INTERRUPT_BINDING_METADATA_KEY]: {
-				// biome-ignore lint: `v` is TanStack's interruptBinding WIRE FORMAT (`tanstack:interruptBinding` {v, kind, interruptId, …}) — renaming it breaks resume resolution.
 				v: 1,
 				kind: "generic",
 				interruptId: dialogId,
@@ -240,7 +239,6 @@ async function* streamRun(options: StreamRunOptions): AsyncGenerator<StreamChunk
 	}
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the session pump — one loop owning progress timeouts, dialog parking, and settle detection in ORDER; the ordering is the #27 contract, and helper-splitting it is how a parked process would leak past a teardown.
 async function* drainUntilRunEnds(options: StreamRunOptions): AsyncGenerator<StreamChunk> {
 	const { pump, ids, registry, stopPi, outcome, noProgressTimeoutMs } = options;
 	const { isExtensionCommand, slashCommandGraceMs } = options;
