@@ -253,23 +253,29 @@ test("listCommands is synchronous and names picc's /mode", async () => {
 	expect(commands.some((command) => command.name === "mode" && command.source === "extension")).toBe(true);
 });
 
+function noopListener(): void {
+	// A subscriber that only exists so the host has one: the tail records the delivery, not this.
+}
+
+/** Emits a notify on command — used to produce an event while nobody is subscribed. */
+const lateNotifyProbe: InlineExtension = {
+	name: "zen-host-late-notify-probe",
+	factory: (pi) => {
+		pi.registerCommand("zen-late-notify", {
+			description: "emit a notify while nobody is listening",
+			handler: async (_args, extensionContext) => {
+				extensionContext.ui.notify("late notify", "info");
+			},
+		});
+	},
+};
+
 test("⚠ events are held only until the FIRST subscriber; with nobody listening afterwards they are dropped, not replayed", async () => {
 	// Per-thread sessions (#69 PR 2) subscribe one pump per run. If the host kept holding
 	// between runs, an aborted run's `agent_settled` would replay into the next run's pump
 	// and end it before its first token. The probe command emits a notify while no one is
 	// subscribed; the next subscriber must NOT see it.
-	const probe: InlineExtension = {
-		name: "zen-host-late-notify-probe",
-		factory: (pi) => {
-			pi.registerCommand("zen-late-notify", {
-				description: "emit a notify while nobody is listening",
-				handler: async (_args, extensionContext) => {
-					extensionContext.ui.notify("late notify", "info");
-				},
-			});
-		},
-	};
-	const hosted = await hostedSession([probe]);
+	const hosted = await hostedSession([lateNotifyProbe]);
 	const firstSubscriberEvents: PiRpcEvent[] = [];
 	const unsubscribeFirst = hosted.session.subscribe((event) => firstSubscriberEvents.push(event));
 	// Startup records were replayed to the first subscriber.
@@ -288,4 +294,55 @@ test("⚠ events are held only until the FIRST subscriber; with nobody listening
 	expect(secondSubscriberEvents.filter((event) => String(event.message).includes("late notify"))).toHaveLength(0);
 	// And the startup records are not replayed a second time either.
 	expect(secondSubscriberEvents).toHaveLength(0);
+});
+
+// #88 and #69 were both ordering bugs reconstructed from source. The tail (#97) is the record
+// that would have shown each in one glance: the provenance column says HOW every event through
+// the host's funnel was delivered, and a held/replayed pair or a dropped row is the finding.
+test("⚠ the emitted tail records each event's provenance: held at startup, replayed to the first subscriber, live, dropped (#97)", async () => {
+	const hosted = await hostedSession([lateNotifyProbe]);
+	const atStartup = hosted.emittedEvents();
+	// Before anyone subscribes every startup record is `held` — picc's `modes` entry among them.
+	expect(atStartup.length).toBeGreaterThan(0);
+	expect(atStartup.every((event) => event.provenance === "held")).toBe(true);
+	expect(atStartup.some((event) => event.type === "entry_appended" && event.name === "modes")).toBe(true);
+
+	const unsubscribe = hosted.session.subscribe(noopListener);
+	// The replay is recorded as it happens, in the held order, after the held rows.
+	const afterSubscribe = hosted.emittedEvents();
+	const heldModes = afterSubscribe.find((event) => event.provenance === "held" && event.name === "modes");
+	const replayedModes = afterSubscribe.find((event) => event.provenance === "replayed" && event.name === "modes");
+	expect(heldModes).toBeDefined();
+	expect(replayedModes).toBeDefined();
+	expect((replayedModes?.sequence ?? 0) > (heldModes?.sequence ?? 0)).toBe(true);
+	// Every held event is replayed exactly once: the two provenances carry the same total.
+	const totalOf = (provenance: string): number =>
+		afterSubscribe.filter((event) => event.provenance === provenance).reduce((total, event) => total + event.count, 0);
+	expect(totalOf("replayed")).toBe(totalOf("held"));
+
+	// With a subscriber attached the command's notify is `live`; with none, `dropped`.
+	await new Promise<void>((resolve, reject) => {
+		hosted.session.prompt(
+			{ message: "/zen-late-notify" },
+			{ onAccepted: resolve, onRejected: (reason) => reject(new Error(reason)) },
+		);
+	});
+	unsubscribe();
+	await new Promise<void>((resolve, reject) => {
+		hosted.session.prompt(
+			{ message: "/zen-late-notify" },
+			{ onAccepted: resolve, onRejected: (reason) => reject(new Error(reason)) },
+		);
+	});
+	const notifies = hosted
+		.emittedEvents()
+		.filter(
+			(event) =>
+				event.type === "extension_ui_request" &&
+				event.name === "notify" &&
+				event.provenance !== "held" &&
+				event.provenance !== "replayed",
+		)
+		.map((event) => event.provenance);
+	expect(notifies).toEqual(["live", "dropped"]);
 });

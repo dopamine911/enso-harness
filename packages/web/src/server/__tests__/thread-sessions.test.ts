@@ -35,6 +35,7 @@ function fakeHosted() {
 		session,
 		loadedExtensionPaths: [],
 		inspect: () => ({ sessionId: "s", cwd: "/", sessionDir: "/s", sessionFile: null, entries: [], commands: [] }),
+		emittedEvents: () => [],
 	};
 	return { hosted, record, finishAbort: () => finishAbort() };
 }

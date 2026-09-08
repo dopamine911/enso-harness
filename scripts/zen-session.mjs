@@ -13,6 +13,9 @@
  *
  * Usage:  bun scripts/zen-session.mjs                 # every live thread, one line each
  *         bun scripts/zen-session.mjs <threadId>      # one thread: summary, then the branch
+ *         bun scripts/zen-session.mjs <threadId> --events  # the event tails (#97): what the
+ *                                                          # host emitted, with provenance,
+ *                                                          # then what the server sent
  *         bun scripts/zen-session.mjs <threadId> --json   # the raw payload, for piping
  *
  * The server address defaults to the dev server's; override with ZEN_SERVER_URL.
@@ -21,6 +24,7 @@
 const serverUrl = process.env.ZEN_SERVER_URL ?? "http://127.0.0.1:5179";
 const [threadId, ...flags] = process.argv.slice(2);
 const wantsJson = flags.includes("--json");
+const wantsEvents = flags.includes("--events");
 
 async function fetchJson(path) {
 	let response;
@@ -58,6 +62,27 @@ if (threadId === undefined) {
 		const file = thread.sessionFile ?? "(in memory, not flushed yet)";
 		console.log(`${thread.threadId}  mode=${thread.mode}  ${state}  last=${thread.lastActivityAt}  ${file}`);
 	}
+	process.exit(0);
+}
+
+/** `12:34:56  held ×3   entry_appended modes` — the same row the drawer shows, columned. */
+function describeThreadEvent(event) {
+	const count = event.count > 1 ? ` ×${event.count}` : "";
+	const name = event.name === undefined ? "" : ` ${event.name}`;
+	return `${event.at.slice(11, 19)}  ${(event.provenance + count).padEnd(12)} ${event.type}${name}`;
+}
+
+if (wantsEvents) {
+	const events = await fetchJson(`/api/threads/${encodeURIComponent(threadId)}/events`);
+	if (wantsJson) {
+		console.log(JSON.stringify(events, null, 2));
+		process.exit(0);
+	}
+	console.log(`thread ${events.threadId}`);
+	console.log(`the host emitted (${events.emitted.length} events, oldest first):`);
+	for (const event of events.emitted) console.log(`  ${describeThreadEvent(event)}`);
+	console.log(`the server sent (${events.sent.length} chunks, oldest first):`);
+	for (const event of events.sent) console.log(`  ${describeThreadEvent(event)}`);
 	process.exit(0);
 }
 

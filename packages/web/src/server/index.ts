@@ -6,16 +6,20 @@ import type { StreamChunk } from "@tanstack/ai";
 import {
 	PICC_DEFAULT_PERMISSION_MODE,
 	PICC_PERMISSION_MODES,
+	type ZenThreadEvents,
 	type ZenThreadInspection,
 	type ZenThreadSummary,
 } from "@zen/core";
 import { type AgentHost, createAgentHost } from "../host/agent-host.ts";
+import { describeStreamChunk, type EventTail } from "../host/event-tail.ts";
 import { createDialogRegistry } from "./dialog-registry.ts";
 import { type ChatRunOutcome, resumeChat, runChat } from "./session.ts";
 import { createThreadSessions, type ThreadView } from "./thread-sessions.ts";
 
 /** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
 const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/;
+/** `GET /api/threads/<threadId>/events` — the thread's two event tails (#97). */
+const THREAD_EVENTS_ROUTE = /^\/api\/threads\/([^/?#]+)\/events$/;
 
 /**
  * The dev backend: one SSE endpoint TanStack AI's `fetchServerSentEvents` can talk to (#24).
@@ -86,7 +90,30 @@ function latestUserPrompt(body: RunAgentInputBody): string {
 	return "";
 }
 
-function writeSseEvent(response: ServerResponse, chunk: StreamChunk): void {
+/**
+ * ⚠ `decodeURIComponent` THROWS on a malformed escape (`/api/threads/%`), and a throw in the
+ * request listener has nothing above it — it took the whole dev server down, every live
+ * session with it, from one hand-typed URL (PR #87 review, reproduced). A bad id is the
+ * caller's problem: 400 written here, `undefined` returned, and the server stays up.
+ */
+function decodeThreadId(rawSegment: string, response: ServerResponse): string | undefined {
+	try {
+		return decodeURIComponent(rawSegment);
+	} catch {
+		response.writeHead(400, { "Content-Type": "text/plain" });
+		response.end("malformed thread id");
+		return undefined;
+	}
+}
+
+function writeSseEvent(response: ServerResponse, chunk: StreamChunk, sent: EventTail | undefined): void {
+	// The sent tail (#97) records here, at the one place every chunk crosses to the browser,
+	// so the record and the wire cannot disagree. `undefined` only when the thread is not
+	// live any more by the time a chunk is written — nothing to record it against.
+	if (sent !== undefined) {
+		const described = describeStreamChunk(chunk);
+		sent.record(described.type, described.name, "sent");
+	}
 	// One `data:` line per event, blank line terminated — the SSE framing the adapter reads.
 	response.write(`data: ${JSON.stringify(chunk)}\n\n`);
 }
@@ -231,6 +258,22 @@ export function startZenServer(options: ZenServerOptions) {
 		response.end(JSON.stringify(threads.list().map(summarize)));
 	}
 
+	function respondWithThreadEvents(threadId: string, response: ServerResponse): void {
+		const thread = threads.peek(threadId);
+		if (thread === undefined) {
+			response.writeHead(404, { "Content-Type": "text/plain" });
+			response.end(`no live session for thread ${threadId}`);
+			return;
+		}
+		const payload: ZenThreadEvents = {
+			threadId,
+			emitted: [...thread.hosted.emittedEvents()],
+			sent: [...thread.sent.recent()],
+		};
+		response.writeHead(200, { "Content-Type": "application/json" });
+		response.end(JSON.stringify(payload));
+	}
+
 	function respondWithThread(threadId: string, response: ServerResponse): void {
 		const thread = threads.peek(threadId);
 		if (thread === undefined) {
@@ -269,22 +312,19 @@ export function startZenServer(options: ZenServerOptions) {
 			respondWithThreads(response);
 			return;
 		}
-		const threadMatch = request.method === "GET" ? THREAD_ROUTE.exec(url) : null;
-		if (threadMatch?.[1] !== undefined) {
-			// ⚠ `decodeURIComponent` THROWS on a malformed escape (`/api/threads/%`), and a throw
-			// here is inside the request listener with nothing above it — it took the whole dev
-			// server down, every live session with it, from one hand-typed URL (PR #87 review,
-			// reproduced). A bad id is the caller's problem: 400, and the server stays up.
-			let threadId: string;
-			try {
-				threadId = decodeURIComponent(threadMatch[1]);
-			} catch {
-				response.writeHead(400, { "Content-Type": "text/plain" });
-				response.end("malformed thread id");
+		if (request.method === "GET") {
+			const eventsMatch = THREAD_EVENTS_ROUTE.exec(url);
+			if (eventsMatch?.[1] !== undefined) {
+				const threadId = decodeThreadId(eventsMatch[1], response);
+				if (threadId !== undefined) respondWithThreadEvents(threadId, response);
 				return;
 			}
-			respondWithThread(threadId, response);
-			return;
+			const threadMatch = THREAD_ROUTE.exec(url);
+			if (threadMatch?.[1] !== undefined) {
+				const threadId = decodeThreadId(threadMatch[1], response);
+				if (threadId !== undefined) respondWithThread(threadId, response);
+				return;
+			}
 		}
 		void handleChat(request, response);
 	});
@@ -346,15 +386,19 @@ export function startZenServer(options: ZenServerOptions) {
 						outcome,
 						onProblem: options.onProblem,
 					})) {
-						writeSseEvent(response, chunk);
+						writeSseEvent(response, chunk, threads.peek(ids.threadId)?.sent);
 					}
 				} catch (error) {
 					options.onProblem?.(error);
-					writeSseEvent(response, {
-						type: EventType.RUN_ERROR,
-						runId: ids.runId,
-						message: error instanceof Error ? error.message : String(error),
-					});
+					writeSseEvent(
+						response,
+						{
+							type: EventType.RUN_ERROR,
+							runId: ids.runId,
+							message: error instanceof Error ? error.message : String(error),
+						},
+						threads.peek(ids.threadId)?.sent,
+					);
 				} finally {
 					// A resume that ended unparked is a finished run: the thread goes idle. A
 					// client that dropped mid-resume is handled by the 'close' hook above.
@@ -414,17 +458,21 @@ export function startZenServer(options: ZenServerOptions) {
 					outcome,
 					onProblem: options.onProblem,
 				})) {
-					writeSseEvent(response, chunk);
+					writeSseEvent(response, chunk, threads.peek(ids.threadId)?.sent);
 				}
 			} catch (error) {
 				options.onProblem?.(error);
 				// The stream is already open, so an error has to travel as an event — a
 				// mid-stream HTTP status is not available and a silent close reads as success.
-				writeSseEvent(response, {
-					type: EventType.RUN_ERROR,
-					runId: ids.runId,
-					message: error instanceof Error ? error.message : String(error),
-				});
+				writeSseEvent(
+					response,
+					{
+						type: EventType.RUN_ERROR,
+						runId: ids.runId,
+						message: error instanceof Error ? error.message : String(error),
+					},
+					threads.peek(ids.threadId)?.sent,
+				);
 			} finally {
 				streamEnded = true;
 				if (!outcome.parkedAwaitingAnswer) threads.release(ids.threadId);
