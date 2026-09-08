@@ -19,6 +19,7 @@ function fakeHosted() {
 		prompt: ignore,
 		answerDialog: ignore,
 		listCommands: () => [],
+		permissionModeState: () => ({ mode: "default", available: [] }),
 		subscribe: () => ignore,
 		abort: () => {
 			record.aborts += 1;

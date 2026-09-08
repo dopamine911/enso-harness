@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
+import type { PiPermissionModeState } from "./permission-mode.ts";
 
 /**
  * The shapes pi hands the web surface, and the in-process session contract around them.
@@ -127,6 +128,16 @@ export const PiSession = Type.Object({
 	answerDialog: Type.Unsafe<(response: PiDialogResponse) => void>(Type.Function([Type.Unknown()], Type.Void())),
 	/** The slash commands this session can run — extension commands, prompt templates, skills. Synchronous: read off the live registry, no round trip. */
 	listCommands: Type.Unsafe<() => PiCommand[]>(Type.Function([], Type.Unknown())),
+	/**
+	 * The permission-mode receipt a run starts with (#84): picc's CURRENT mode for this
+	 * session, computed the way picc itself restores it — the last persisted `modes` entry
+	 * in the session branch, else the initial `default` — and the modes this session may
+	 * switch to, picc's set intersected with the commands actually registered. picc keeps
+	 * the live value in a closure with no getter, so this is the only honest read.
+	 * Synchronous: it walks the in-memory branch and registry, no round trip — and it is
+	 * deliberately NOT `listCommands`, whose call count the refusal path's tests pin.
+	 */
+	permissionModeState: Type.Unsafe<() => PiPermissionModeState>(Type.Function([], Type.Unknown())),
 	/**
 	 * Receive every event in pi's rpc wire shape (the shape `map-events.ts` consumes), plus
 	 * `extension_ui_request` and `extension_error` records the host synthesises. Events

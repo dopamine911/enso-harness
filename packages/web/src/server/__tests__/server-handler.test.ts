@@ -45,6 +45,7 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
 			script.onAnswer?.(emit);
 		},
 		listCommands: () => [{ name: "mode", source: "extension" }],
+		permissionModeState: () => ({ mode: "default", available: ["default", "acceptEdits"] }),
 		subscribe: (onEvent) => {
 			listeners.add(onEvent);
 			return () => {

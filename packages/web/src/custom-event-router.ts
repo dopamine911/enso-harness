@@ -2,7 +2,13 @@ import { ZenNotifyType } from "@zen/core";
 import { Check } from "typebox/value";
 import { applyZenCustomEntry } from "./mode-lines.ts";
 import { pushZenNotification } from "./notifications.tsx";
-import { ZEN_CUSTOM_EVENT_ENTRY, ZEN_CUSTOM_EVENT_NOTIFY, ZEN_CUSTOM_EVENT_USAGE } from "./rpc/custom-event-names.ts";
+import { applyZenPermissionMode, applyZenPersistedModeEntry } from "./permission-mode.tsx";
+import {
+	ZEN_CUSTOM_EVENT_ENTRY,
+	ZEN_CUSTOM_EVENT_MODE,
+	ZEN_CUSTOM_EVENT_NOTIFY,
+	ZEN_CUSTOM_EVENT_USAGE,
+} from "./rpc/custom-event-names.ts";
 import { applyZenMessageUsage } from "./session-stats.tsx";
 
 /**
@@ -23,7 +29,14 @@ import { applyZenMessageUsage } from "./session-stats.tsx";
  */
 export function routeZenCustomEvent(eventType: string, data: unknown): void {
 	if (eventType === ZEN_CUSTOM_EVENT_ENTRY) {
+		// One persisted entry, two views (#84): the transcript line (history) and the
+		// current-mode store (state). Both read picc's shape through the same core helper.
 		applyZenCustomEntry(data);
+		applyZenPersistedModeEntry(data);
+		return;
+	}
+	if (eventType === ZEN_CUSTOM_EVENT_MODE) {
+		applyZenPermissionMode(data);
 		return;
 	}
 	if (eventType === ZEN_CUSTOM_EVENT_USAGE) {
