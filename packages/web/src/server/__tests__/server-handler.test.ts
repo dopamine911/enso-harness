@@ -280,6 +280,32 @@ test("⚠ inspecting an unknown thread is a 404 and builds no session", async ()
 	expect(built).toHaveLength(0);
 });
 
+// ⚠ A BAD URL MUST NOT KILL THE SERVER. `decodeURIComponent` throws on a malformed escape,
+// and before the guard that throw escaped the request listener and took the whole process
+// down — every live session with it — from one hand-typed URL (PR #87 review, reproduced).
+// The decisive assertion is the SECOND request: the server is still there to answer it.
+test("⚠ a malformed thread id is a 400, and the server survives to answer the next request", async () => {
+	const { url, built } = await startWith({ onPrompt: neverPrompted });
+	const malformed = await fetch(`${url}/api/threads/%`);
+	expect(malformed.status).toBe(400);
+	const afterwards = await fetch(`${url}/api/threads`);
+	expect(afterwards.status).toBe(200);
+	expect(built).toHaveLength(0);
+});
+
+test("a percent-encoded thread id round-trips to the same live thread", async () => {
+	const { url } = await startWith({
+		onPrompt: (emit, outcome) => {
+			outcome.onAccepted();
+			emit(SETTLED);
+		},
+	});
+	await postRun(url, { threadId: "thread with spaces", runId: "r1", messages: [userMessage("hi")] });
+	const response = await fetch(`${url}/api/threads/${encodeURIComponent("thread with spaces")}`);
+	expect(response.status).toBe(200);
+	expect(await response.json()).toMatchObject({ threadId: "thread with spaces" });
+});
+
 test("GET /api/threads/:id returns the branch as pi holds it, with sessionFile null while unflushed", async () => {
 	const { url } = await startWith({
 		onPrompt: (emit, outcome) => {

@@ -12,8 +12,11 @@ import { clearZenNotificationsForTest } from "../notifications.tsx";
 import { clearPermissionModeForTest } from "../permission-mode.tsx";
 import {
 	type BrowserBelief,
+	type CopyState,
 	describeChunk,
+	InspectionFetchError,
 	lastPersistedMode,
+	latestWins,
 	NO_SESSION_YET,
 	SessionDebugView,
 } from "../session-debug.tsx";
@@ -75,9 +78,22 @@ function believing(mode: string | undefined): BrowserBelief {
 	};
 }
 
-const render = (browser: BrowserBelief, session: ZenThreadInspection | undefined, error?: string): string =>
+const render = (
+	browser: BrowserBelief,
+	session: ZenThreadInspection | undefined,
+	error?: string,
+	copyState: CopyState = "idle",
+): string =>
 	renderToStaticMarkup(
-		<SessionDebugView threadId="t1" browser={browser} session={session} error={error} onRefresh={noop} onCopy={noop} />,
+		<SessionDebugView
+			threadId="t1"
+			browser={browser}
+			session={session}
+			error={error}
+			copyState={copyState}
+			onRefresh={noop}
+			onCopy={noop}
+		/>,
 	);
 
 // ── lastPersistedMode: picc's own restore rule, applied to the raw branch ─────
@@ -154,4 +170,54 @@ test("an unmapped chunk is described by the pi event it carries; a receipt just 
 	const [unmapped, receipt] = getRecentCustomChunks();
 	expect(unmapped && describeChunk(unmapped)).toBe("zen.unmapped (tool_execution_start)");
 	expect(receipt && describeChunk(receipt)).toBe("zen.mode");
+});
+
+// ── the refetch race (PR #87 review) ─────────────────────────────────────────
+// The drawer refetches on open AND on every run settle, so two fetches overlap: the
+// mount-time 404 for a thread that has not run yet, and the post-run fetch once a fast
+// prompt settles. Whichever was ISSUED last must win, not whichever RESOLVES last.
+
+test("⚠ a request superseded by a later one is dropped even when it resolves last", async () => {
+	const pending: Array<{ resolve: (value: string) => void }> = [];
+	const fetchLatest = latestWins(
+		() =>
+			new Promise<string>((resolve) => {
+				pending.push({ resolve });
+			}),
+	);
+	const first = fetchLatest();
+	const second = fetchLatest();
+	// The LATER request settles first, then the earlier one arrives late.
+	pending[1]?.resolve("after the run");
+	pending[0]?.resolve("nothing has run yet");
+	expect(await second).toBe("after the run");
+	expect(await first).toBeUndefined();
+});
+
+test("a superseded request's failure is dropped too; the latest request's failure still throws", async () => {
+	let calls = 0;
+	const fetchLatest = latestWins(() => {
+		calls += 1;
+		return calls === 1 ? Promise.reject(new Error("stale failure")) : Promise.resolve("fresh");
+	});
+	const stale = fetchLatest();
+	const fresh = fetchLatest();
+	expect(await fresh).toBe("fresh");
+	await expect(stale).resolves.toBeUndefined();
+	const onlyFailure = latestWins(() => Promise.reject(new Error("real failure")));
+	await expect(onlyFailure()).rejects.toThrow("real failure");
+});
+
+test("a non-2xx carries its status as data, not as a prefix to parse", () => {
+	const notFound = new InspectionFetchError(404, "no live session for thread t1");
+	expect(notFound.status).toBe(404);
+	expect(notFound.message).toBe("404 no live session for thread t1");
+	expect(notFound).toBeInstanceOf(Error);
+});
+
+// A failed copy must not look identical to a successful one.
+test("the copy outcome is named beside the button", () => {
+	expect(render(believing("plan"), inspection(), undefined, "copied")).toContain("copied");
+	expect(render(believing("plan"), inspection(), undefined, "failed")).toContain("copy failed");
+	expect(render(believing("plan"), inspection(), undefined, "idle")).not.toContain("copy failed");
 });

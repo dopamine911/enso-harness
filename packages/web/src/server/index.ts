@@ -271,7 +271,19 @@ export function startZenServer(options: ZenServerOptions) {
 		}
 		const threadMatch = request.method === "GET" ? THREAD_ROUTE.exec(url) : null;
 		if (threadMatch?.[1] !== undefined) {
-			respondWithThread(decodeURIComponent(threadMatch[1]), response);
+			// ⚠ `decodeURIComponent` THROWS on a malformed escape (`/api/threads/%`), and a throw
+			// here is inside the request listener with nothing above it — it took the whole dev
+			// server down, every live session with it, from one hand-typed URL (PR #87 review,
+			// reproduced). A bad id is the caller's problem: 400, and the server stays up.
+			let threadId: string;
+			try {
+				threadId = decodeURIComponent(threadMatch[1]);
+			} catch {
+				response.writeHead(400, { "Content-Type": "text/plain" });
+				response.end("malformed thread id");
+				return;
+			}
+			respondWithThread(threadId, response);
 			return;
 		}
 		void handleChat(request, response);

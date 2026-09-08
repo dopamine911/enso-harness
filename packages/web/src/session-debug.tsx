@@ -1,5 +1,5 @@
 import { PICC_DEFAULT_PERMISSION_MODE, readPiccPersistedMode, ZenThreadInspection } from "@zen/core";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Check } from "typebox/value";
 import { Button } from "./components/ui/button.tsx";
 import { getRecentCustomChunks, type RecordedCustomChunk } from "./custom-event-router.ts";
@@ -41,6 +41,8 @@ export interface SessionDebugViewProps {
 	readonly session: ZenThreadInspection | undefined;
 	/** Why the last refresh produced nothing — a 404 for a thread that has not run yet, a down server. */
 	readonly error: string | undefined;
+	/** The last copy's outcome; the label beside the button says which. */
+	readonly copyState: CopyState;
 	readonly onRefresh: () => void;
 	readonly onCopy: () => void;
 }
@@ -57,9 +59,11 @@ export function lastPersistedMode(entries: readonly unknown[]): string {
 }
 
 /**
- * A chunk's name, plus what it carries when the name alone says nothing: a `zen.unmapped`
- * is pi's raw event, and a model turn produces a run of them — tool starts, thinking,
- * message ends — that read as identical rows without the inner `type`.
+ * A chunk's name, plus the inner `type` its value carries when there is one. The case that
+ * needs it is `zen.unmapped` — pi's raw event, and a model turn produces a run of them (tool
+ * starts, thinking, message ends) that read as identical rows without it. It is not special-
+ * cased to that name: a `zen.entry` value is a session entry with a `type` too, and reads as
+ * `zen.entry (custom)`, which is just as useful.
  */
 export function describeChunk(chunk: RecordedCustomChunk): string {
 	const value = chunk.value;
@@ -101,6 +105,7 @@ export function SessionDebugView({
 	browser,
 	session,
 	error,
+	copyState,
 	onRefresh,
 	onCopy,
 }: SessionDebugViewProps): React.ReactNode {
@@ -118,6 +123,12 @@ export function SessionDebugView({
 					<Button type="button" size="sm" variant="outline" onClick={onCopy}>
 						copy as JSON
 					</Button>
+					{copyState === "copied" ? <span role="status">copied</span> : null}
+					{copyState === "failed" ? (
+						<span role="status" className="text-destructive">
+							copy failed — clipboard needs a secure context or permission
+						</span>
+					) : null}
 				</span>
 				<span className="w-full break-all">thread {threadId}</span>
 			</div>
@@ -183,10 +194,21 @@ export function SessionDebugView({
 	);
 }
 
-/** Fetches one thread's inspection; a non-2xx becomes the error text the drawer shows. */
+/** A non-2xx from the inspection endpoint, with the status as data — not a prefix to parse out of a message. */
+export class InspectionFetchError extends Error {
+	constructor(
+		readonly status: number,
+		detail: string,
+	) {
+		super(`${status} ${detail}`);
+		this.name = "InspectionFetchError";
+	}
+}
+
+/** Fetches one thread's inspection; a non-2xx becomes an `InspectionFetchError`. */
 export async function fetchThreadInspection(threadId: string): Promise<ZenThreadInspection> {
 	const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}`);
-	if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+	if (!response.ok) throw new InspectionFetchError(response.status, await response.text());
 	const payload: unknown = await response.json();
 	if (!Check(ZenThreadInspection, payload)) throw new Error("the server's inspection payload did not match its schema");
 	return payload;
@@ -195,11 +217,39 @@ export async function fetchThreadInspection(threadId: string): Promise<ZenThread
 /** What a 404 means here: nothing has run on this thread yet, which is information, not a failure. */
 export const NO_SESSION_YET = "no live session yet — nothing has run on this thread";
 
+/**
+ * Only the LATEST request's outcome may be applied (PR #87 review). The drawer refetches
+ * on open and on every run settle, so two fetches can be in flight at once — the mount-time
+ * 404 for a thread that has not run yet, and the post-run fetch once a fast prompt settles.
+ * Without this, whichever resolves LAST wins regardless of which was ISSUED last, and a
+ * drawer built to catch inconsistency would briefly show "nothing has run" after a run.
+ *
+ * Returns a wrapper: each call issues a fresh request and resolves only if no later call has
+ * been made by the time it settles; a superseded result resolves `undefined` and is dropped.
+ */
+export function latestWins<T>(issue: () => Promise<T>): () => Promise<T | undefined> {
+	let latest = 0;
+	return async (): Promise<T | undefined> => {
+		latest += 1;
+		const mine = latest;
+		const outcome = await issue().then(
+			(value) => ({ value, failure: undefined }),
+			(failure: unknown) => ({ value: undefined, failure: failure ?? new Error("rejected without a reason") }),
+		);
+		if (mine !== latest) return undefined;
+		if (outcome.failure !== undefined) throw outcome.failure;
+		return outcome.value;
+	};
+}
+
 export interface SessionDebugDrawerProps {
 	readonly threadId: string;
 	/** The chat's `isLoading`: the drawer refetches when this turns false, i.e. when a run settles. */
 	readonly runInFlight: boolean;
 }
+
+/** The clipboard call's outcome, so a failed copy does not look identical to a successful one. */
+export type CopyState = "idle" | "copied" | "failed";
 
 /**
  * The drawer wired to the stores, the router's record, and the server. Mounted by `?debug`.
@@ -214,25 +264,35 @@ export function SessionDebugDrawer({ threadId, runInFlight }: SessionDebugDrawer
 	const stats = useSyncExternalStore(subscribeToSessionStats, getSessionStatsSnapshot, getSessionStatsSnapshot);
 	const [session, setSession] = useState<ZenThreadInspection | undefined>(undefined);
 	const [error, setError] = useState<string | undefined>(undefined);
+	const [copyState, setCopyState] = useState<CopyState>("idle");
 	const browser: BrowserBelief = { mode, stats, recentChunks: getRecentCustomChunks() };
+	// One sequencer per thread id: a new thread starts a new "latest".
+	const fetchLatest = useMemo(() => latestWins(() => fetchThreadInspection(threadId)), [threadId]);
 	const refresh = useCallback((): void => {
-		fetchThreadInspection(threadId).then(
+		fetchLatest().then(
 			(fetched) => {
+				if (fetched === undefined) return; // superseded by a later refresh
 				setSession(fetched);
 				setError(undefined);
 			},
 			(failure: unknown) => {
 				setSession(undefined);
-				const message = failure instanceof Error ? failure.message : String(failure);
-				setError(message.startsWith("404") ? NO_SESSION_YET : message);
+				if (failure instanceof InspectionFetchError && failure.status === 404) {
+					setError(NO_SESSION_YET);
+					return;
+				}
+				setError(failure instanceof Error ? failure.message : String(failure));
 			},
 		);
-	}, [threadId]);
+	}, [fetchLatest]);
 	useEffect(() => {
 		if (!runInFlight) refresh();
 	}, [runInFlight, refresh]);
 	const copy = (): void => {
-		void navigator.clipboard.writeText(JSON.stringify({ threadId, browser, session }, null, 2));
+		navigator.clipboard.writeText(JSON.stringify({ threadId, browser, session }, null, 2)).then(
+			() => setCopyState("copied"),
+			() => setCopyState("failed"),
+		);
 	};
 	return (
 		<SessionDebugView
@@ -240,6 +300,7 @@ export function SessionDebugDrawer({ threadId, runInFlight }: SessionDebugDrawer
 			browser={browser}
 			session={session}
 			error={error}
+			copyState={copyState}
 			onRefresh={refresh}
 			onCopy={copy}
 		/>
