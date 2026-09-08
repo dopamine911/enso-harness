@@ -51,6 +51,14 @@ export function createFixtureChat(): TanStackChat {
 		})
 		.user("now think about something and run a tool")
 		.assistant(({ writer }) => {
+			// ⚠ FIXTURE ARTIFACT (2026-09-08): this helper opens the reasoning BEFORE the
+			// message's TEXT_MESSAGE_START (`REASONING_MESSAGE_START`, role "reasoning"), so
+			// TanStack parks it as a reasoning row under a generated id and RE-IDS the message
+			// when the text starts — the whole row remounts, the Reasoning shell loses the
+			// duration it measured, and the label drops from `Thought for 2s` to `Thought`.
+			// The real wire yields TEXT_MESSAGE_START first and every delta under that one id
+			// (session.ts, to-agui.ts), so live runs keep their measurement. Do not "fix" the
+			// shell on the fixture's account.
 			writer.reasoning(
 				"The user wants to see the reasoning block. I should look at the repository " +
 					"layout first, then answer. This text streams into the collapsible Reasoning " +
