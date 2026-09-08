@@ -44,6 +44,13 @@ export type Activity =
  * model has the output and is composing — `working`, not `running`, because the tool is
  * done. Thinking and text are what they say. Anything else — no assistant message yet, a
  * user message as the tail, an image — is `working`: in flight, nothing more specific known.
+ *
+ * ⓘ The catch-all DIVERGES from `selected-message-part.tsx` on purpose (PR #92 review).
+ * The transcript renders every part kind it has no handler for visibly, because there a
+ * silently skipped part is indistinguishable from one never sent. This is a one-word
+ * summary with no room for per-kind detail, and `working` is TRUE of an image, a document,
+ * or an unmatched result at the tail — the run is in flight. The part itself is still on
+ * screen in the transcript; nothing is hidden by summarising it.
  */
 export function describeActivity(messages: ReadonlyArray<UIMessage>, isLoading: boolean): Activity {
 	if (!isLoading) return { kind: "idle" };

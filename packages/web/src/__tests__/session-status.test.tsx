@@ -59,6 +59,17 @@ test("a thinking tail is thinking; a text tail is responding", () => {
 	});
 });
 
+// ⓘ Diverges from the transcript's render-everything policy on purpose: a one-word summary
+// has no word for an image or an unmatched result, and `working` is true of both — the run
+// is in flight, and the part itself is still visible in the transcript.
+test("a tail the summary has no word for — an image, an unmatched result — is working", () => {
+	const image = assistant("a1", [{ type: "image", source: { type: "url", value: "x.png" } }]);
+	expect(describeActivity([user("u1", "hi"), image], true)).toEqual({ kind: "working" });
+	// A result whose call never crossed: TanStack keeps it as an unmatched `toolResult` part.
+	const orphanResult = assistant("a2", [result("never-called")]);
+	expect(describeActivity([user("u1", "hi"), orphanResult], true)).toEqual({ kind: "working" });
+});
+
 // ── counts ───────────────────────────────────────────────────────────────────
 
 test("turns count user messages; tool calls count every call, paired or not", () => {
