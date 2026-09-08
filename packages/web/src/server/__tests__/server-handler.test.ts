@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventType } from "@ag-ui/core";
 import {
+	type PiEventDelivery,
 	type PiPromptOutcome,
 	type PiRpcEvent,
 	type PiSession,
@@ -40,7 +41,7 @@ interface FakeSessionScript {
 }
 
 function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; record: FakeSessionRecord } {
-	const listeners = new Set<(event: PiRpcEvent) => void>();
+	const listeners = new Set<(event: PiRpcEvent, delivery: PiEventDelivery) => void>();
 	const record: FakeSessionRecord = { aborts: 0, disposed: 0, prompts: [] };
 	// The fake records into the same tail the real host does, so the events route sees the
 	// real shape (coalesced rows); it delivers only live, so every row is `live`. The real
@@ -49,7 +50,7 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
 	const emit = (event: PiRpcEvent): void => {
 		const described = describePiRpcEvent(event);
 		emitted.record(described.type, described.name, "live");
-		for (const listener of listeners) listener(event);
+		for (const listener of listeners) listener(event, "live");
 	};
 	const session: PiSession = {
 		prompt: (request, outcome) => {
@@ -154,21 +155,41 @@ async function startWith(script: FakeSessionScript) {
 	return { url, built };
 }
 
-/** POST one AG-UI run and return the SSE chunk types in order. */
-async function postRun(url: string, body: Record<string, unknown>): Promise<string[]> {
+/** POST one AG-UI run and return every SSE chunk, parsed, in order. */
+async function postRunChunks(url: string, body: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
 	const response = await fetch(`${url}/api/chat`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(body),
 	});
-	const text = await response.text();
-	return text
+	return (await response.text())
 		.split("\n")
 		.filter((line) => line.startsWith("data: "))
-		.map((line) => (JSON.parse(line.slice("data: ".length)) as { type: string }).type);
+		.map((line) => JSON.parse(line.slice("data: ".length)) as Record<string, unknown>);
+}
+
+/** POST one AG-UI run and return the SSE chunk types in order. */
+async function postRun(url: string, body: Record<string, unknown>): Promise<string[]> {
+	return (await postRunChunks(url, body)).map((chunk) => String(chunk.type));
 }
 
 const userMessage = (content: string) => ({ role: "user", content });
+
+// #96: a notify the session emits while the run is listening crosses the wire tagged
+// `origin: "run"` — the browser renders it open. The session-start half of the tag rides the
+// real host's replay, pinned in agent-host.test.ts and seen live in the fold.
+test("a notify emitted during a run reaches the wire as zen.notify with origin run", async () => {
+	const { url } = await startWith({
+		onPrompt: (emit, outcome) => {
+			outcome.onAccepted();
+			emit({ type: "extension_ui_request", id: "n1", method: "notify", message: "refused", notifyType: "warning" });
+			emit(SETTLED);
+		},
+	});
+	const chunks = await postRunChunks(url, { threadId: "t1", runId: "r1", messages: [userMessage("hi")] });
+	const notify = chunks.find((chunk) => chunk.type === EventType.CUSTOM && chunk.name === "zen.notify");
+	expect(notify?.value).toMatchObject({ message: "refused", notifyType: "warning", origin: "run" });
+});
 
 test("⚠ a normal completion releases the thread and does NOT abort the session (#74 review)", async () => {
 	const { url, built } = await startWith({

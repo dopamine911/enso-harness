@@ -1,4 +1,4 @@
-import { ZenNotifyType } from "@zen/core";
+import { ZenNotifyType, ZenUiRequestOrigin } from "@zen/core";
 import { Check } from "typebox/value";
 import {
 	ZEN_CUSTOM_EVENT_ENTRY,
@@ -50,12 +50,15 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
 	}
 	if (eventType !== ZEN_CUSTOM_EVENT_NOTIFY) return;
 	if (typeof data !== "object" || data === null) return;
-	const observation = data as { message?: unknown; notifyType?: unknown };
+	const observation = data as { message?: unknown; notifyType?: unknown; origin?: unknown };
 	if (typeof observation.message !== "string") return;
 	// The three declared notify types come from the schema, not a second literal list: an
 	// unrecognised value degrades to an untyped notification, never a validation failure.
 	const notifyType = Check(ZenNotifyType, observation.notifyType) ? observation.notifyType : undefined;
-	stores.notifications.push(observation.message, notifyType);
+	// An unreadable origin degrades to `run` — the OPEN rendering (#96): when the tag cannot
+	// be trusted, a notice is shown, never grouped away.
+	const origin = Check(ZenUiRequestOrigin, observation.origin) ? observation.origin : "run";
+	stores.notifications.push(observation.message, notifyType, origin);
 }
 
 // ── the last N chunks, for the debug drawer (#86) ─────────────────────────────

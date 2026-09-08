@@ -187,13 +187,15 @@
 			}
 		},
 		{
-			// `mapPiEvent` (48): one switch arm per pi event type, read side-by-side
-			// against pi's protocol doc. The complexity is the protocol's.
+			// `mapPiEvent` (31): one switch arm per pi event type, read side-by-side
+			// against pi's protocol doc. The complexity is the protocol's. Was 48 until
+			// the `extension_ui_request` arm moved to `mapExtensionUiRequest` (#96), which
+			// clears the default on its own; ratcheted down to the measured value.
 			"includes": ["packages/web/src/rpc/map-events.ts"],
 			"linter": {
 				"rules": {
 					"complexity": {
-						"noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 48 } }
+						"noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 31 } }
 					}
 				}
 			}

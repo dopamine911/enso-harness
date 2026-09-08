@@ -193,7 +193,14 @@ test("nothing is silently dropped: every kind except an in-flight result yields 
 		{ kind: "extension-error", extensionPath: "/x", event: "e", error: "err" },
 		// The notify variant: the one ui-request shape that crosses (fire-and-forget ones are
 		// addressed to a terminal and are dropped by design — see the mapper).
-		{ kind: "extension-ui-request", id: "u1", method: "notify", blocking: false, message: "Mode: acceptEdits" },
+		{
+			kind: "extension-ui-request",
+			id: "u1",
+			method: "notify",
+			blocking: false,
+			origin: "run",
+			message: "Mode: acceptEdits",
+		},
 		{ kind: "custom-entry", customType: "modes", data: { mode: "acceptEdits" } },
 		{
 			kind: "message-usage",
@@ -250,6 +257,8 @@ test("a result with no descriptor carries no descriptor key at all", () => {
 // event — measured at 40 of 43 events for a one-word prompt when they were forwarded.
 test("setStatus, setWidget, setTitle and set_editor_text produce no AG-UI event", () => {
 	for (const method of ["setStatus", "setWidget", "setTitle", "set_editor_text"]) {
-		expect(toAgui({ kind: "extension-ui-request", id: "", method, blocking: false, message: "" })).toEqual([]);
+		expect(
+			toAgui({ kind: "extension-ui-request", id: "", method, blocking: false, origin: "run", message: "" }),
+		).toEqual([]);
 	}
 });

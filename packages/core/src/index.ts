@@ -48,6 +48,7 @@ export {
 	ZenThinkingDelta,
 	ZenToolCall,
 	ZenToolResultObservation,
+	ZenUiRequestOrigin,
 	ZenUnmapped,
 	ZenUsage,
 } from "./observation.ts";
@@ -75,6 +76,7 @@ export {
 	isPiCommand,
 	PiCommand,
 	type PiDialogResponse,
+	type PiEventDelivery,
 	PiImageContent,
 	type PiPromptOutcome,
 	type PiPromptRequest,

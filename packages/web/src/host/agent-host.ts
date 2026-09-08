@@ -13,6 +13,7 @@ import {
 	PICC_DEFAULT_PERMISSION_MODE,
 	PICC_PERMISSION_MODES,
 	type PiCommand,
+	type PiEventDelivery,
 	type PiPermissionModeState,
 	type PiRpcEvent,
 	type PiSession,
@@ -228,7 +229,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 		// end that run before its first token (the disconnect-then-prompt race). Events with
 		// nobody listening after the first subscriber are dropped, like status heartbeats
 		// were when no rpc client was reading the pipe.
-		const listeners = new Set<(event: PiRpcEvent) => void>();
+		const listeners = new Set<(event: PiRpcEvent, delivery: PiEventDelivery) => void>();
 		const heldUntilFirstSubscriber: PiRpcEvent[] = [];
 		let hasHadSubscriber = false;
 		// The emitted tail (#97): every event through this funnel, with HOW it was delivered.
@@ -248,7 +249,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 				return;
 			}
 			emitted.record(described.type, described.name, "live");
-			for (const listener of listeners) listener(event);
+			for (const listener of listeners) listener(event, "live");
 		}
 
 		const ui = createZenExtensionUiContext({ emit, onProblem });
@@ -368,7 +369,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 					for (const event of held) {
 						const described = describePiRpcEvent(event);
 						emitted.record(described.type, described.name, "replayed");
-						onEvent(event);
+						// The subscriber learns it is a replay (#96): the tail's `replayed` and the
+						// observation's `origin: "session-start"` are the same fact, told once here.
+						onEvent(event, "replayed");
 					}
 				}
 				return () => {

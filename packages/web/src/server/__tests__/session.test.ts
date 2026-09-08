@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
 import { EventType } from "@ag-ui/core";
-import type { PiCommand, PiDialogResponse, PiPromptOutcome, PiPromptRequest, PiRpcEvent, PiSession } from "@zen/core";
+import type {
+	PiCommand,
+	PiDialogResponse,
+	PiEventDelivery,
+	PiPromptOutcome,
+	PiPromptRequest,
+	PiRpcEvent,
+	PiSession,
+} from "@zen/core";
 import { createDialogRegistry } from "../dialog-registry.ts";
 import { type ChatRunOutcome, resumeChat, runChat } from "../session.ts";
 
@@ -39,7 +47,7 @@ interface FakeSessionContext {
  * shapes in-process (#69), which is the point these tests keep pinned.
  */
 function fakeSession(script: FakeSessionScript): { session: PiSession; record: FakeSessionRecord } {
-	const listeners = new Set<(event: PiRpcEvent) => void>();
+	const listeners = new Set<(event: PiRpcEvent, delivery: PiEventDelivery) => void>();
 	const record: FakeSessionRecord = {
 		prompts: [],
 		answers: [],
@@ -50,7 +58,7 @@ function fakeSession(script: FakeSessionScript): { session: PiSession; record: F
 	const context: FakeSessionContext = {
 		emit: (eventJson) => {
 			const event = JSON.parse(eventJson) as PiRpcEvent;
-			for (const listener of listeners) listener(event);
+			for (const listener of listeners) listener(event, "live");
 		},
 		record,
 	};
