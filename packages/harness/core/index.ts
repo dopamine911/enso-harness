@@ -10,6 +10,7 @@
  */
 // Named for the same reason as @zen/core's barrel: the list IS the public inventory.
 
+export { type EnvironmentDumpMatch, findEnvironmentDump } from "./environment-dump.ts";
 export { findDeniedNetworkEgress, type NetworkEgressMatch } from "./network-egress.ts";
 export {
 	isInsideAnyRoot,

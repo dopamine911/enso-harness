@@ -11,6 +11,7 @@ import {
 	canonicalToolName,
 	createSessionReadTracker,
 	findDeniedNetworkEgress,
+	findEnvironmentDump,
 	isInsideAnyRoot,
 	isPersistenceWriteTarget,
 	isProtectedForWrite,
@@ -184,6 +185,78 @@ export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI
 /** The pi entry point — the real analyzer, wired at the composition root. */
 export default createGuards({ analyzeBashCommand: checkCommand });
 
+/**
+ * The shell-command denies, in order — a denied command must never have had its input
+ * mutated, so the timeout patch stays in the handler, after this returns undefined.
+ *
+ * 1. cc-safety-net (destructive commands + secret access THROUGH bash) — as a LIBRARY
+ *    inside the one handler, so the tool_call participant count stays at two and #4's
+ *    third-participant trigger stays unfired. bash only: checkCommand parses POSIX shell,
+ *    and feeding it PowerShell would produce verdicts about a command it misread in
+ *    either direction. Its own contract: "If this function throws, the caller must not
+ *    execute the command" — so a throw IS a deny.
+ * 2. The network deny (#9) — a bar, not a boundary; `network-egress.ts` states the
+ *    non-coverage (git remotes, interpreters). PowerShell always takes the coarse raw
+ *    scan: the segmenter speaks POSIX, not PS.
+ * 3. The environment-dump deny (#89) — depth behind the quarantine, which is the fix:
+ *    secrets are already out of the environment before a session exists. This makes a
+ *    regression there LOUD: the listing is refused with a reason, instead of quietly
+ *    printing a key into the transcript again. `environment-dump.ts` states its
+ *    non-coverage (the interpreters), the same as the egress deny.
+ */
+function shellCommandDenial(
+	call: { toolName: string; command: string; cwd: string },
+	dependencies: GuardDependencies,
+	policy: GuardPolicy,
+): ToolCallEventResult | undefined {
+	const { toolName, command, cwd } = call;
+	if (toolName === TOOL_BASH && command.length > 0) {
+		let safetyNetVerdict: CheckCommandResult;
+		try {
+			safetyNetVerdict = dependencies.analyzeBashCommand({ command, cwd });
+		} catch (error) {
+			console.error("guards: cc-safety-net checkCommand threw — denying per its contract", error);
+			safetyNetVerdict = {
+				kind: "deny",
+				reason: `the safety analyzer failed (${String(error)}), and its contract is that an unanalyzed command must not run`,
+			};
+		}
+		if (safetyNetVerdict.kind === "deny") {
+			const ruleId =
+				"ruleId" in safetyNetVerdict && safetyNetVerdict.ruleId !== undefined ? ` (${safetyNetVerdict.ruleId})` : "";
+			return { block: true, reason: `Bash command blocked by cc-safety-net${ruleId}: ${safetyNetVerdict.reason}` };
+		}
+	}
+
+	const coarse = toolName === TOOL_POWERSHELL;
+	const egress = findDeniedNetworkEgress(command, policy.deniedNetworkBinaries, { coarse });
+	if (egress !== undefined) {
+		return {
+			block: true,
+			reason:
+				`${toolName} network egress is blocked: "${egress.matched}" (matched by ${egress.via}). ` +
+				`Ad-hoc network clients are denied in shell commands (#9) — use the ${WEB_FETCH_TOOL_NAME} ` +
+				`tool instead (#54): it fetches http(s) URLs from hosts on the committed allowlist. ` +
+				`web_fetch and web_search (#63) are the only sanctioned web access. ` +
+				`Do not try to work around the deny.`,
+		};
+	}
+
+	const dump = findEnvironmentDump(command, { coarse });
+	if (dump !== undefined) {
+		return {
+			block: true,
+			reason:
+				`${toolName} environment listing is blocked: "${dump.matched}" (matched by ${dump.via}). ` +
+				`Secrets are kept out of the tool environment (#89), so an environment dump or a ` +
+				`secret-shaped variable expansion is refused rather than trusted to be empty. ` +
+				`If a command needs a value from the environment, name a non-secret variable; ` +
+				`API keys are read by the harness's own tools from the gated .env file.`,
+		};
+	}
+	return undefined;
+}
+
 function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencies): void {
 	const policy: GuardPolicy = DEFAULT_GUARD_POLICY;
 
@@ -270,57 +343,15 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
 		}
 
 		// --- bash/powershell (#9): deny first, patch last — a denied command must never
-		// have had its input mutated.
+		// have had its input mutated. The three denies live in `shellCommandDenial` so this
+		// handler stays under the complexity ceiling biome.jsonc pins.
 		if (toolName === TOOL_BASH || toolName === TOOL_POWERSHELL) {
 			const input = inputRecordOf(event);
 			const command = typeof input.command === "string" ? input.command : "";
+			const denial = shellCommandDenial({ toolName, command, cwd }, dependencies, policy);
+			if (denial !== undefined) return denial;
 
-			// 1. cc-safety-net (destructive commands + secret access THROUGH bash) — as a
-			// LIBRARY inside this one handler, so the tool_call participant count stays at
-			// two and #4's third-participant trigger stays unfired. bash only: checkCommand
-			// parses POSIX shell, and feeding it PowerShell would produce verdicts about a
-			// command it misread in either direction. Its own contract: "If this function
-			// throws, the caller must not execute the command" — so a throw IS a deny.
-			if (toolName === TOOL_BASH && command.length > 0) {
-				let safetyNetVerdict: CheckCommandResult;
-				try {
-					safetyNetVerdict = dependencies.analyzeBashCommand({ command, cwd });
-				} catch (error) {
-					console.error("guards: cc-safety-net checkCommand threw — denying per its contract", error);
-					safetyNetVerdict = {
-						kind: "deny",
-						reason: `the safety analyzer failed (${String(error)}), and its contract is that an unanalyzed command must not run`,
-					};
-				}
-				if (safetyNetVerdict.kind === "deny") {
-					return {
-						block: true,
-						reason:
-							`Bash command blocked by cc-safety-net${"ruleId" in safetyNetVerdict && safetyNetVerdict.ruleId !== undefined ? ` (${safetyNetVerdict.ruleId})` : ""}: ` +
-							safetyNetVerdict.reason,
-					};
-				}
-			}
-
-			// 2. The network deny (#9) — a bar, not a boundary; `network-egress.ts` states
-			// the non-coverage (git remotes, interpreters). PowerShell always takes the
-			// coarse raw scan: the segmenter speaks POSIX, not PS.
-			const egress = findDeniedNetworkEgress(command, policy.deniedNetworkBinaries, {
-				coarse: toolName === TOOL_POWERSHELL,
-			});
-			if (egress !== undefined) {
-				return {
-					block: true,
-					reason:
-						`${toolName} network egress is blocked: "${egress.matched}" (matched by ${egress.via}). ` +
-						`Ad-hoc network clients are denied in shell commands (#9) — use the ${WEB_FETCH_TOOL_NAME} ` +
-						`tool instead (#54): it fetches http(s) URLs from hosts on the committed allowlist. ` +
-						`web_fetch and web_search (#63) are the only sanctioned web access. ` +
-						`Do not try to work around the deny.`,
-				};
-			}
-
-			// 3. Patch, do not block: a missing timeout means a hung command holds the
+			// Patch, do not block: a missing timeout means a hung command holds the
 			// session indefinitely. LAST, so no denied command gets mutated input.
 			if (input.timeout === undefined) {
 				input.timeout = policy.defaultBashTimeoutSeconds;
