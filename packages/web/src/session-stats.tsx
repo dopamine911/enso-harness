@@ -1,15 +1,14 @@
-import { useSyncExternalStore } from "react";
-
 /**
- * The session-stats bar (#45, phase 1): cost so far + the last request's prompt size.
+ * The session-stats STORE (#45, phase 1): cost so far + the last request's prompt size.
+ * Rendered by the status bar in session-status.tsx (#90), which subscribes to it.
  *
  * Usage arrives as an AG-UI CUSTOM chunk (`zen.usage`) — one per COMPLETED model request,
  * emitted by map-events.ts off pi's `message_end` (never the per-delta cumulative usage,
  * which would multiply cost by the delta count). TanStack's path for CUSTOM chunks is the
  * `onCustomEvent` chat option, built at module scope before any component exists — so the
  * bridge to React state is this module-level store, the same shape notifications.tsx uses:
- * `applyZenMessageUsage` is called from `onCustomEvent`, and `SessionStatsBar` subscribes
- * via `useSyncExternalStore`.
+ * `applyZenMessageUsage` is called from `onCustomEvent`, and the bar subscribes via
+ * `useSyncExternalStore`.
  *
  * ⚠ THE SUM IS PAGE-LIVED, DELIBERATELY. pi is spawned per prompt (#43), so pi's own
  * session totals reset every turn; this store is the one place the whole chat thread's
@@ -35,7 +34,7 @@ export interface SessionStats {
 	totalCost: number;
 	/** input + cacheRead + cacheWrite of the LATEST assistant request, or undefined before the first. */
 	lastRequestInputTokens: number | undefined;
-	/** How many usage observations were counted — the bar hides until the first. */
+	/** How many usage observations were counted. */
 	countedMessages: number;
 }
 
@@ -106,40 +105,4 @@ export function getSessionStatsSnapshot(): SessionStats {
 /** Test seam: reset the store between cases. Never called from production code. */
 export function clearSessionStatsForTest(): void {
 	stats = EMPTY_STATS;
-}
-
-/** $0.0132 — four decimals because a single small request costs fractions of a cent. */
-function formatCost(cost: number): string {
-	return `$${cost.toFixed(4)}`;
-}
-
-/** 12,345 → "12,345"; grouping so a six-figure token count stays readable at a glance. */
-function formatTokens(tokens: number): string {
-	return tokens.toLocaleString("en-US");
-}
-
-/**
- * The slim line above the composer. Hidden until the first counted request — an all-zero
- * bar before anything ran would read as a broken meter, not an empty one.
- *
- * ⓘ No `role="status"`/live region, deliberately (PR #51 review, nit 3): unlike a notify
- * line, this is a persistent readout that updates on EVERY completed request, and a live
- * region would interrupt a screen reader mid-task each time. The numbers stay poll-able,
- * never announced.
- */
-export function SessionStatsBar(): React.ReactNode {
-	const currentStats = useSyncExternalStore(subscribeToSessionStats, getSessionStatsSnapshot, getSessionStatsSnapshot);
-	if (currentStats.countedMessages === 0) return null;
-	return (
-		<div className="mx-auto flex w-full max-w-3xl items-center justify-end gap-3 px-4 pb-1 text-muted-foreground text-xs">
-			<span title="sum of every model request this page has made (pi's own attribution rule)">
-				cost {formatCost(currentStats.totalCost)}
-			</span>
-			{currentStats.lastRequestInputTokens === undefined ? null : (
-				<span title="prompt tokens the model saw on the latest request (input + cache read + cache write) — not a context-window percentage; the window size does not cross the wire">
-					last request {formatTokens(currentStats.lastRequestInputTokens)} tokens in
-				</span>
-			)}
-		</div>
-	);
 }
