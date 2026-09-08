@@ -17,6 +17,25 @@ import { readZenToolResultDescriptor, type ZenToolResultDescriptor } from "@zen/
 /** Renderers keyed by descriptor `kind`. Absent keys are not an error — see the fallback. */
 export type ZenRendererMap = Record<string, (props: Record<string, unknown>) => React.ReactNode>;
 
+/**
+ * What one tool call is in, read off its result — the ONE definition (PR #93 review).
+ * Pending is "no result has paired yet" — TanStack's own selection pairs results to calls
+ * across the whole message list — and error is the envelope's `error`, not the descriptor's.
+ * The step row, the status bar's `running <tool>`, and this renderer all read this; a
+ * fourth state (an interrupt, say) is added here and nowhere else. The narrowed result
+ * rides along so a consumer that branches on `status` has it typed for that branch.
+ */
+export type ToolResultState =
+	| { readonly status: "pending" }
+	| { readonly status: "error"; readonly result: ToolResultPart; readonly error: string }
+	| { readonly status: "done"; readonly result: ToolResultPart };
+
+export function toolResultState(result: ToolResultPart | undefined): ToolResultState {
+	if (result === undefined) return { status: "pending" };
+	if (result.error !== undefined) return { status: "error", result, error: result.error };
+	return { status: "done", result };
+}
+
 function TextFallback({ result }: { result: ToolResultPart }): React.ReactNode {
 	// `content` is `string | ContentPart[]`; only the string form is safe to print directly.
 	const text =
@@ -53,8 +72,9 @@ export function ZenToolResult({
 	result: ToolResultPart | undefined;
 	renderers: ZenRendererMap;
 }): React.ReactNode {
+	const state = toolResultState(result);
 	// No result yet — the call is in flight. Say so rather than rendering nothing.
-	if (result === undefined) {
+	if (state.status === "pending") {
 		return (
 			<p data-zen-tool-result="pending" className="animate-pulse text-muted-foreground text-xs">
 				running…
@@ -63,24 +83,24 @@ export function ZenToolResult({
 	}
 
 	// An errored result is the envelope's business, not the descriptor's.
-	if (result.error !== undefined) {
+	if (state.status === "error") {
 		return (
 			<pre
 				data-zen-tool-result="error"
 				className="overflow-x-auto rounded-md border border-destructive/50 bg-destructive/10 p-3 font-mono text-destructive text-xs"
 			>
-				{result.error}
+				{state.error}
 			</pre>
 		);
 	}
 
-	const descriptor = readZenToolResultDescriptor(result.metadata);
-	if (descriptor === undefined) return <TextFallback result={result} />;
+	const descriptor = readZenToolResultDescriptor(state.result.metadata);
+	if (descriptor === undefined) return <TextFallback result={state.result} />;
 
 	const render = renderers[descriptor.kind];
 	// ⚠ Unknown kind: fall through to text. This is the branch that makes an unrecognised
 	// descriptor visible instead of blank, and it is the one worth a test.
-	if (render === undefined) return <TextFallback result={result} />;
+	if (render === undefined) return <TextFallback result={state.result} />;
 
 	return (
 		<div data-zen-tool-result="descriptor" data-zen-kind={descriptor.kind}>

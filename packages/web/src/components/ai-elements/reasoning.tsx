@@ -14,6 +14,9 @@
  * - `@repo/shadcn-ui/...` imports → `@/` aliases; removed `"use client"` (Vite SPA)
  * - `useControllableState`'s `onChange` is spread conditionally (this repo compiles with
  *   `exactOptionalPropertyTypes`; upstream does not)
+ * - the trigger label reads `Thought for 5s` (Copilot Chat's form), and `Thought` when no
+ *   duration was measured — upstream's "Thought for a few seconds" was a number it did not
+ *   have (#90 PR 2)
  *
  * Behaviour kept verbatim from upstream, because it is the part worth vendoring: opens
  * itself while streaming, measures how long the thinking took, and auto-closes ONCE a
@@ -159,14 +162,20 @@ export type ReasoningTriggerProps = ComponentProps<typeof CollapsibleTrigger> & 
 	getThinkingMessage?: (isStreaming: boolean, duration?: number) => ReactNode;
 };
 
+/**
+ * Modified from upstream (#90 PR 2): `Thought for 5s` in Copilot Chat's form, and when the
+ * duration is UNKNOWN — the block mounted after its streaming ended, so nothing measured
+ * it — just `Thought`. Upstream said "Thought for a few seconds" there, a number it did
+ * not have.
+ */
 const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
 	if (isStreaming || duration === 0) {
 		return <p className="animate-pulse">Thinking...</p>;
 	}
 	if (duration === undefined) {
-		return <p>Thought for a few seconds</p>;
+		return <p>Thought</p>;
 	}
-	return <p>Thought for {duration} seconds</p>;
+	return <p>Thought for {duration}s</p>;
 };
 
 export const ReasoningTrigger = memo(

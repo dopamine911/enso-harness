@@ -2,6 +2,7 @@ import type { UIMessage } from "@tanstack/ai-client";
 import { automaticPartsForMessage, selectChatUI } from "@tanstack/ai-client/ui";
 import { useSyncExternalStore } from "react";
 import { getSessionStatsSnapshot, type SessionStats, subscribeToSessionStats } from "./session-stats.tsx";
+import { toolResultState } from "./ZenToolResult.tsx";
 
 /**
  * The status bar (#90 PR 1): the always-on line that says what this session is doing and
@@ -58,8 +59,10 @@ export function describeActivity(messages: ReadonlyArray<UIMessage>, isLoading: 
 	if (last === undefined || last.message.role !== "assistant") return { kind: "working" };
 	const tail = automaticPartsForMessage(last).at(-1);
 	if (tail === undefined) return { kind: "working" };
-	if (tail.key === "toolCall")
-		return tail.result === undefined ? { kind: "running", tool: tail.part.name } : { kind: "working" };
+	if (tail.key === "toolCall") {
+		const pending = toolResultState(tail.result).status === "pending";
+		return pending ? { kind: "running", tool: tail.part.name } : { kind: "working" };
+	}
 	if (tail.key === "thinking") return { kind: "thinking" };
 	if (tail.key === "text") return { kind: "responding" };
 	return { kind: "working" };
