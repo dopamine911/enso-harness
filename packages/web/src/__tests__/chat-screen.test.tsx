@@ -7,9 +7,11 @@ import {
 	DialogAnswerControls,
 	type KeyedPart,
 	keyedParts,
+	ThreadPane,
 	UnhandledInterrupt,
 	ZenDialogInterrupt,
 } from "../chat-screen.tsx";
+import { mintThread } from "../thread-stores.ts";
 
 /**
  * #49, first pass: the dialog components had live receipts (#27, the e2e smoke) and no unit
@@ -144,4 +146,27 @@ test("only the final part is the trailing one — what gates the streaming indic
 		({ isTrailingPart }) => isTrailingPart,
 	);
 	expect(trailing).toEqual([false, false, true]);
+});
+
+// ── the panes (#90 PR 3) ─────────────────────────────────────────────────────
+// Every live thread's pane stays mounted (switching away must not abort its run), so
+// anything gated on a page-level switch alone renders once PER THREAD. The debug column
+// carries a fixed id and its own inspection fetches; it must exist in the active pane only.
+
+test("⚠ two mounted panes with ?debug open render exactly ONE debug column, in the active pane", () => {
+	const first = mintThread();
+	const second = mintThread();
+	const rendered = renderToStaticMarkup(
+		<>
+			<ThreadPane threadId={first.threadId} active={true} debugOpen={true} />
+			<ThreadPane threadId={second.threadId} active={false} debugOpen={true} />
+		</>,
+	);
+	expect(rendered.match(/id="session-debug-pane"/g)).toHaveLength(1);
+	// The active pane is laid out; the other is hidden, not gone — its chat stays mounted.
+	expect(rendered.match(/class="hidden"/g)).toHaveLength(1);
+	expect(rendered.match(/id="session-status"/g)).toHaveLength(2);
+	// And with the switch off, no pane shows one.
+	const closed = renderToStaticMarkup(<ThreadPane threadId={first.threadId} active={true} debugOpen={false} />);
+	expect(closed).not.toContain('id="session-debug-pane"');
 });

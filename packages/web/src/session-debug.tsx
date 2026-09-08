@@ -1,10 +1,11 @@
 import { PICC_DEFAULT_PERMISSION_MODE, readPiccPersistedMode, ZenThreadInspection } from "@zen/core";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check } from "typebox/value";
 import { Button } from "./components/ui/button.tsx";
-import { getRecentCustomChunks, type RecordedCustomChunk } from "./custom-event-router.ts";
+import type { RecordedCustomChunk } from "./custom-event-router.ts";
 import { type PermissionModeState, usePermissionMode } from "./permission-mode.tsx";
-import { getSessionStatsSnapshot, type SessionStats, subscribeToSessionStats } from "./session-stats.tsx";
+import type { SessionStats } from "./session-stats.tsx";
+import { useStore, useThreadStores } from "./store.ts";
 
 /**
  * The session debug drawer (#86): what the BROWSER believes next to what pi's SESSION
@@ -247,7 +248,6 @@ export function latestWins<T>(issue: () => Promise<T>): () => Promise<T | undefi
 }
 
 export interface SessionDebugDrawerProps {
-	readonly threadId: string;
 	/** The chat's `isLoading`: the drawer refetches when this turns false, i.e. when a run settles. */
 	readonly runInFlight: boolean;
 }
@@ -263,13 +263,16 @@ export type CopyState = "idle" | "copied" | "failed";
  * put no request in the trace a human is trying to read. Opening it on a fresh thread
  * reads "nothing has run yet", the honest state, rather than an error.
  */
-export function SessionDebugDrawer({ threadId, runInFlight }: SessionDebugDrawerProps): React.ReactNode {
+export function SessionDebugDrawer({ runInFlight }: SessionDebugDrawerProps): React.ReactNode {
+	const stores = useThreadStores();
+	const { threadId } = stores;
 	const mode = usePermissionMode();
-	const stats = useSyncExternalStore(subscribeToSessionStats, getSessionStatsSnapshot, getSessionStatsSnapshot);
+	const stats = useStore(stores.stats);
+	const recentChunks = useStore(stores.recentChunks);
 	const [session, setSession] = useState<ZenThreadInspection | undefined>(undefined);
 	const [error, setError] = useState<string | undefined>(undefined);
 	const [copyState, setCopyState] = useState<CopyState>("idle");
-	const browser: BrowserBelief = { mode, stats, recentChunks: getRecentCustomChunks() };
+	const browser: BrowserBelief = { mode, stats, recentChunks };
 	// One sequencer per thread id: a new thread starts a new "latest".
 	const fetchLatest = useMemo(() => latestWins(() => fetchThreadInspection(threadId)), [threadId]);
 	const refresh = useCallback((): void => {

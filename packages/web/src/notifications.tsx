@@ -1,16 +1,16 @@
 import type { ZenNotifyType } from "@zen/core";
 import { InfoIcon, OctagonAlertIcon, TriangleAlertIcon } from "lucide-react";
-import { useSyncExternalStore } from "react";
 import { cn } from "@/lib/utils.ts";
+import { createStore, type Store, useStore, useThreadStores } from "./store.ts";
 
 /**
  * pi's `notify` messages, rendered (#29).
  *
  * A notify arrives as an AG-UI CUSTOM chunk (`zen.notify`), and TanStack's designated
  * path for those is the `onCustomEvent` chat option — an imperative callback on the
- * OPTIONS object, which is built at module scope before any component exists. So the
- * bridge to React state is this module-level store: `pushZenNotification` is called from
- * `onCustomEvent`, and `SessionNotifications` subscribes via `useSyncExternalStore`.
+ * OPTIONS object. So the bridge to React state is this store, one per thread
+ * (`thread-stores.ts`): `custom-event-router.ts` pushes into it, and
+ * `SessionNotifications` subscribes to the rendering thread's.
  *
  * ⚠ Notifications are DURABLE lines, not toasts, on purpose: this harness's standing rule
  * is that a silent success is indistinguishable from a dropped one, and a toast that
@@ -32,29 +32,21 @@ export interface ZenNotification {
  */
 const MAX_KEPT_NOTIFICATIONS = 100;
 
-let notifications: ReadonlyArray<ZenNotification> = [];
-let nextNotificationId = 1;
-const listeners = new Set<() => void>();
-
-export function pushZenNotification(message: string, notifyType: ZenNotifyType | undefined): void {
-	const appended = [...notifications, { id: nextNotificationId++, message, notifyType, at: new Date() }];
-	notifications = appended.slice(-MAX_KEPT_NOTIFICATIONS);
-	for (const listener of listeners) listener();
+export interface NotificationsStore extends Store<ReadonlyArray<ZenNotification>> {
+	readonly push: (message: string, notifyType: ZenNotifyType | undefined) => void;
 }
 
-export function subscribeToZenNotifications(listener: () => void): () => void {
-	listeners.add(listener);
-	return () => listeners.delete(listener);
-}
-
-export function getZenNotificationsSnapshot(): ReadonlyArray<ZenNotification> {
-	return notifications;
-}
-
-/** Test seam: reset the store between cases. Never called from production code. */
-export function clearZenNotificationsForTest(): void {
-	notifications = [];
-	nextNotificationId = 1;
+export function createNotificationsStore(): NotificationsStore {
+	const store = createStore<ReadonlyArray<ZenNotification>>([]);
+	let nextNotificationId = 1;
+	return {
+		get: store.get,
+		subscribe: store.subscribe,
+		push: (message, notifyType) => {
+			const appended = [...store.get(), { id: nextNotificationId++, message, notifyType, at: new Date() }];
+			store.set(appended.slice(-MAX_KEPT_NOTIFICATIONS));
+		},
+	};
 }
 
 const NOTIFY_TYPE_ICONS = {
@@ -88,13 +80,9 @@ export function NotificationLine({ notification }: { notification: ZenNotificati
 	);
 }
 
-/** The transcript-tail block: every notification the session has received, in order. */
+/** The transcript-tail block: every notification the rendering thread has received, in order. */
 export function SessionNotifications(): React.ReactNode {
-	const currentNotifications = useSyncExternalStore(
-		subscribeToZenNotifications,
-		getZenNotificationsSnapshot,
-		getZenNotificationsSnapshot,
-	);
+	const currentNotifications = useStore(useThreadStores().notifications);
 	if (currentNotifications.length === 0) return null;
 	return (
 		<div className="flex flex-col gap-1.5">

@@ -1,10 +1,16 @@
 import type { GenericAGUIInterrupt } from "@tanstack/ai-client";
 import { automaticPartsForMessage, type ChatUISelectedPart, selectChatUI } from "@tanstack/ai-client/ui";
 import { fetchServerSentEvents } from "@tanstack/ai-react";
-import { createChatHook } from "@tanstack/ai-react/ui";
+import {
+	createChatHook,
+	createChatHookContexts,
+	type InterruptProps,
+	type LayoutProps,
+	type MessageProps,
+} from "@tanstack/ai-react/ui";
 import { isZenDialogSpec, ZEN_DIALOG_KEY, type ZenDialogSpec } from "@zen/core";
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
 	Conversation,
 	ConversationContent,
@@ -20,10 +26,20 @@ import { Textarea } from "./components/ui/textarea.tsx";
 import { routeZenCustomEvent } from "./custom-event-router.ts";
 import { createFixtureChat } from "./fixture-conversation.ts";
 import { SessionNotifications } from "./notifications.tsx";
-import { PermissionModeSelect, seedPermissionMode, usePermissionMode } from "./permission-mode.tsx";
+import { PermissionModeSelect, usePermissionMode } from "./permission-mode.tsx";
 import { SelectedMessagePart } from "./selected-message-part.tsx";
 import { SessionDebugDrawer } from "./session-debug.tsx";
 import { SessionStatusBar } from "./session-status.tsx";
+import { SessionsRail, UNTITLED_SESSION } from "./sessions-rail.tsx";
+import { ThreadStoresContext, useStore, useThreadStores } from "./store.ts";
+import {
+	getThreadStores,
+	mintThread,
+	type ThreadStores,
+	threadListStore,
+	titleFromMessages,
+	updateThreadSummary,
+} from "./thread-stores.ts";
 import type { ZenRendererMap } from "./ZenToolResult.tsx";
 
 /**
@@ -87,21 +103,56 @@ const isFixtureMode = typeof window !== "undefined" && new URLSearchParams(windo
 /** `?debug` opens the session debug drawer (#86) — same switch shape as `?fixture`. */
 const isDebugMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
 /**
- * The thread this page IS (#86). Minted here rather than left to TanStack, which keeps its
- * own id private: the page has to know its thread to ask the server about it, and every
- * page load is a new thread by design — a reload is a fresh session, mode and all.
+ * The chat contexts every widget below reads through — created ONCE and handed to every
+ * per-thread factory (`createThreadChatHook`), TanStack's escape hatch for "widgets in
+ * other files". One `useChatContext` serves every thread's tree because each pane's
+ * `AppChat` provides the same context, with its own chat instance.
  */
-const PAGE_THREAD_ID = crypto.randomUUID();
-const chatOptions = {
-	connection: isFixtureMode ? createFixtureChat().transport() : fetchServerSentEvents("/api/chat"),
-	/**
-	 * TanStack's designated path for AG-UI CUSTOM chunks (#29) — verified against the
-	 * stream processor: every CUSTOM chunk fires this with `(chunk.name, chunk.value)`.
-	 * The dispatch itself lives in `custom-event-router.ts` so it is testable (#53 S1.3);
-	 * this stays a one-line handoff.
-	 */
-	onCustomEvent: routeZenCustomEvent,
-};
+const chatContexts = createChatHookContexts();
+const useChatContext = chatContexts.useChatContext;
+
+/**
+ * ⚠ ONE CHAT FACTORY PER THREAD (#90 PR 3), built by the thread's pane. Two facts force it:
+ *
+ *   • TanStack hands `onCustomEvent` only `(name, value, { toolCallId })` — no thread id —
+ *     and the option is bound on the factory, not per call. The only way a `zen.usage`
+ *     chunk lands in the right thread's cost is a callback that belongs to exactly one
+ *     thread: this closure over its stores.
+ *   • Changing `threadId` on a single `useChat` disposes the old client — `stop()` then
+ *     `dispose()`, verified in `use-chat.js` — and a mid-run disconnect is how the server
+ *     learns the client LEFT, so it aborts pi (#34). Switching threads must therefore keep
+ *     every pane mounted and change only what is visible.
+ *
+ * `?fixture` swaps the live server connection for the scripted conversation in
+ * `fixture-conversation.ts` — the styling dev loop (#31). Everything downstream of the
+ * connection is identical on both paths, which is the point.
+ */
+function threadChatOptions(stores: ThreadStores) {
+	return {
+		threadId: stores.threadId,
+		connection: isFixtureMode ? createFixtureChat().transport() : fetchServerSentEvents("/api/chat"),
+		/**
+		 * TanStack's designated path for AG-UI CUSTOM chunks (#29) — verified against the
+		 * stream processor: every CUSTOM chunk fires this with `(chunk.name, chunk.value)`.
+		 * The dispatch itself lives in `custom-event-router.ts` so it is testable (#53 S1.3).
+		 */
+		onCustomEvent: (eventType: string, data: unknown): void => routeZenCustomEvent(stores, eventType, data),
+	};
+}
+/** The options type the widget map below is written against — one shape for every thread. */
+type ThreadChatOptions = ReturnType<typeof threadChatOptions>;
+
+function createThreadChatHook(stores: ThreadStores) {
+	return createChatHook({ options: threadChatOptions(stores), context: chatContexts, ...chatComponents });
+}
+
+/**
+ * Whether THIS pane shows the `?debug` column. Provided per pane as `debugOpen && active`:
+ * every live pane stays mounted, so gating on the page-level switch alone rendered the
+ * column — with its fixed `id` and its own inspection fetches — once per thread, hidden or
+ * not (PR #94 review). Exactly one pane is active, so exactly one column exists.
+ */
+const DebugOpenContext = createContext(false);
 
 /** One selected part paired with the React key that identifies it. */
 export interface KeyedPart {
@@ -149,11 +200,8 @@ function partIdentity(selected: ChatUISelectedPart): string | undefined {
 }
 
 /**
- * Renders a run-level error as a destructive Alert.
- *
- * ⚠ Declared before the factory but calls `useChatContext` from it — legal because the
- * binding is only read at RENDER time, long after the destructuring completes. Placing it
- * here keeps the layout readable.
+ * Renders a run-level error as a destructive Alert. Reads the thread's chat through the
+ * shared contexts declared above — the same `useChatContext` every widget here uses.
  */
 function RunProblem(): React.ReactNode {
 	const chat = useChatContext();
@@ -169,9 +217,11 @@ function RunProblem(): React.ReactNode {
 }
 
 /**
- * The header's permission-mode control (#84): the store's current mode, and a dropdown
- * that switches it by sending picc's per-mode slash command — `/acceptEdits`, exactly what
- * typing it does. Same `useChatContext` timing note as `RunProblem` above.
+ * The composer row's permission-mode control (#84): the thread's current mode, and a
+ * dropdown that switches it by sending picc's per-mode slash command — `/acceptEdits`,
+ * exactly what typing it does.
+ * Beside the composer rather than in the page header (#90 PR 3): it is per THREAD, and
+ * deepseek-harness keeps the mode selector in the composer chrome for the same reason.
  *
  * ⚠ Sent as a prompt on purpose, not through a dedicated endpoint: picc's `setMode` is
  * closure-private with no API, its registered commands are the only way in, and the
@@ -182,16 +232,17 @@ function RunProblem(): React.ReactNode {
  * ⚠ Disabled while a run is in flight, the same rule the send button follows: a mode
  * change mid-run would collide with the busy-thread semantics #75 is deciding.
  *
- * On mount it asks the server what a fresh thread starts in, so the header reads
+ * On mount it asks the server what a fresh thread starts in, so the control reads
  * `default` from the first paint rather than `unknown` until the first run. In fixture
  * mode there is no server; the fetch fails and the store honestly stays `unknown`.
  */
 function PermissionModeControl(): React.ReactNode {
 	const chat = useChatContext();
+	const stores = useThreadStores();
 	const { mode, available } = usePermissionMode();
 	useEffect(() => {
-		void seedPermissionMode(async () => (await fetch("/api/mode")).json());
-	}, []);
+		void stores.permissionMode.seed(async () => (await fetch("/api/mode")).json());
+	}, [stores]);
 	return (
 		<PermissionModeSelect
 			mode={mode}
@@ -325,8 +376,11 @@ export function ZenDialogInterrupt({ interrupt }: { interrupt: GenericAGUIInterr
 	);
 }
 
-const { useAppChat, useChatContext } = createChatHook({
-	options: chatOptions,
+/**
+ * The widget map every per-thread factory is built from — declared once, so all threads
+ * render identically. Type-annotated by inference through `createThreadChatHook`.
+ */
+const chatComponents = {
 	components: {
 		/**
 		 * ⚠ `input` MUST be declared before `layout`.
@@ -361,6 +415,10 @@ const { useAppChat, useChatContext } = createChatHook({
 					}}
 					className="mx-auto w-full max-w-3xl px-4 pb-4"
 				>
+					{/* The composer chrome (#90): the knobs at the point of use, deepseek's shape. */}
+					<div className="flex items-center justify-end px-1 pb-1">
+						<PermissionModeControl />
+					</div>
 					<div className="flex items-end gap-2 rounded-xl border bg-background p-2 shadow-sm focus-within:ring-1 focus-within:ring-ring">
 						<Textarea
 							name="message"
@@ -412,37 +470,11 @@ const { useAppChat, useChatContext } = createChatHook({
 		 * Errors are not a message part, so no `partsComponents` entry catches them. They
 		 * live on the chat instance and have to be rendered deliberately.
 		 */
-		layout: function ChatLayout({ Messages, Interrupts, Queue, Input }) {
+		layout: function ChatLayout({ Messages, Interrupts, Queue, Input }: LayoutProps<ThreadChatOptions>) {
 			const chat = useChatContext();
-			// The debug column (#86) is a right-hand pane, not a bottom drawer: stacked under
-			// the transcript it took forty percent of the height and squeezed the conversation
-			// it exists to explain. Opt-in by `?debug`; open by default when it is, and
-			// collapsible from the header so it can get out of the way without a reload.
-			const [debugOpen, setDebugOpen] = useState(isDebugMode);
+			const debugOpen = useContext(DebugOpenContext);
 			return (
-				<div className="flex h-dvh flex-col bg-background text-foreground">
-					<header className="flex items-center gap-2 border-b px-4 py-2">
-						{/* The ensō mark, cropped from .local/logo.png into public/enso.png —
-						    kanagawa fujiWhite cream, so it reads on the Wave background. */}
-						<img src="/enso.png" alt="" className="size-6" />
-						<h1 className="font-medium text-muted-foreground text-sm">zen-harness</h1>
-						{isFixtureMode ? (
-							<span className="rounded-full border px-2 py-0.5 text-muted-foreground text-xs">fixture</span>
-						) : null}
-						<PermissionModeControl />
-						{isDebugMode ? (
-							<Button
-								type="button"
-								size="sm"
-								variant={debugOpen ? "secondary" : "outline"}
-								aria-expanded={debugOpen}
-								aria-controls="session-debug-pane"
-								onClick={() => setDebugOpen((open) => !open)}
-							>
-								{debugOpen ? "hide debug" : "show debug"}
-							</Button>
-						) : null}
-					</header>
+				<div className="flex min-h-0 flex-1 flex-col">
 					<div className="flex min-h-0 flex-1">
 						<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 							<Conversation>
@@ -473,9 +505,9 @@ const { useAppChat, useChatContext } = createChatHook({
 						{/* The session debug pane (#86): what the browser believes beside what pi's
 						    session holds, for THIS thread. Scrolls on its own so a long branch never
 						    moves the composer. */}
-						{isDebugMode && debugOpen ? (
+						{debugOpen ? (
 							<div id="session-debug-pane" className="w-[30rem] shrink-0 overflow-y-auto border-l">
-								<SessionDebugDrawer threadId={PAGE_THREAD_ID} runInFlight={chat.isLoading} />
+								<SessionDebugDrawer runInFlight={chat.isLoading} />
 							</div>
 						) : null}
 					</div>
@@ -495,7 +527,7 @@ const { useAppChat, useChatContext } = createChatHook({
 		 * `selectMessageUI` was the first draft and would have shown such a call as
 		 * "running…" forever. O(messages²) per render is irrelevant at chat scale.
 		 */
-		message: function ChatMessageRow({ message }) {
+		message: function ChatMessageRow({ message }: MessageProps<ThreadChatOptions>) {
 			const chat = useChatContext();
 			const selectedMessage = selectChatUI({ messages: chat.messages }).messages.find(
 				(entry) => entry.message.id === message.id,
@@ -540,7 +572,7 @@ const { useAppChat, useChatContext } = createChatHook({
 			// tool-approval interrupts whose `resolveInterrupt` takes (approved, options) —
 			// a different call shape. Only `kind:"generic"` has the payload-taking resolver
 			// the pi-dialog answers use.
-			fallback: ({ interrupt }) =>
+			fallback: ({ interrupt }: InterruptProps<ThreadChatOptions>) =>
 				interrupt.kind === "generic" ? (
 					<ZenDialogInterrupt interrupt={interrupt} />
 				) : (
@@ -548,9 +580,103 @@ const { useAppChat, useChatContext } = createChatHook({
 				),
 		},
 	},
-});
+};
 
+/**
+ * One thread's pane: its chat factory, its stores in context, its summary kept current for
+ * the rail. Stays mounted while another thread is on screen — see `createThreadChatHook`
+ * for why hiding, not unmounting, is load-bearing.
+ *
+ * ⓘ Exported for `__tests__/chat-screen.test.tsx` only, which mounts two of them to pin
+ * that a hidden pane renders no debug column. Nothing else imports it.
+ */
+export function ThreadPane({
+	threadId,
+	active,
+	debugOpen,
+}: {
+	threadId: string;
+	active: boolean;
+	/** The page's `?debug` switch; the column itself opens only in the active pane. */
+	debugOpen: boolean;
+}): React.ReactNode {
+	const stores = getThreadStores(threadId);
+	const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores]);
+	const chat = useAppChat();
+	useEffect(() => {
+		updateThreadSummary(threadId, { title: titleFromMessages(chat.messages), busy: chat.isLoading });
+	}, [threadId, chat.messages, chat.isLoading]);
+	return (
+		<div className={active ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}>
+			<ThreadStoresContext.Provider value={stores}>
+				<DebugOpenContext.Provider value={debugOpen && active}>
+					<chat.AppChat />
+				</DebugOpenContext.Provider>
+			</ThreadStoresContext.Provider>
+		</div>
+	);
+}
+
+/**
+ * The first thread is minted when this module loads, as the page's single thread was
+ * (#86): every page load starts a fresh session, mode and all.
+ */
+const FIRST_THREAD_ID = mintThread().threadId;
+
+/** The page (#90): header, the sessions rail, and one mounted pane per live thread. */
 export function ChatScreen(): React.ReactNode {
-	const chat = useAppChat({ threadId: PAGE_THREAD_ID });
-	return <chat.AppChat />;
+	const threads = useStore(threadListStore);
+	const [activeThreadId, setActiveThreadId] = useState(FIRST_THREAD_ID);
+	// The debug column (#86) is a right-hand pane, not a bottom drawer: stacked under the
+	// transcript it took forty percent of the height and squeezed the conversation it
+	// exists to explain. Opt-in by `?debug`; open by default when it is, and collapsible
+	// from the header so it can get out of the way without a reload.
+	const [debugOpen, setDebugOpen] = useState(isDebugMode);
+	const active = threads.find((thread) => thread.threadId === activeThreadId);
+	return (
+		<div className="flex h-dvh flex-col bg-background text-foreground">
+			<header className="flex items-center gap-2 border-b px-4 py-2">
+				{/* The ensō mark, cropped from .local/logo.png into public/enso.png —
+				    kanagawa fujiWhite cream, so it reads on the Wave background. */}
+				<img src="/enso.png" alt="" className="size-6" />
+				<h1 className="font-medium text-muted-foreground text-sm">zen-harness</h1>
+				{isFixtureMode ? (
+					<span className="rounded-full border px-2 py-0.5 text-muted-foreground text-xs">fixture</span>
+				) : null}
+				{/* Where you are: the active thread's title, the same one the rail shows. */}
+				<span className="min-w-0 flex-1 truncate text-sm" title={activeThreadId}>
+					{active?.title ?? UNTITLED_SESSION}
+				</span>
+				{isDebugMode ? (
+					<Button
+						type="button"
+						size="sm"
+						variant={debugOpen ? "secondary" : "outline"}
+						aria-expanded={debugOpen}
+						aria-controls="session-debug-pane"
+						onClick={() => setDebugOpen((open) => !open)}
+					>
+						{debugOpen ? "hide debug" : "show debug"}
+					</Button>
+				) : null}
+			</header>
+			<div className="flex min-h-0 flex-1">
+				<SessionsRail
+					threads={threads}
+					activeThreadId={activeThreadId}
+					now={new Date()}
+					onSelect={setActiveThreadId}
+					onNew={() => setActiveThreadId(mintThread().threadId)}
+				/>
+				{threads.map((thread) => (
+					<ThreadPane
+						key={thread.threadId}
+						threadId={thread.threadId}
+						active={thread.threadId === activeThreadId}
+						debugOpen={isDebugMode && debugOpen}
+					/>
+				))}
+			</div>
+		</div>
+	);
 }

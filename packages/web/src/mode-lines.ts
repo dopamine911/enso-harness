@@ -1,5 +1,5 @@
 import { readPiccPersistedMode } from "@zen/core";
-import { pushZenNotification } from "./notifications.tsx";
+import type { NotificationsStore } from "./notifications.tsx";
 
 /**
  * Permission-mode lines in the transcript (#29, the remaining half).
@@ -32,18 +32,21 @@ import { pushZenNotification } from "./notifications.tsx";
  * other extension's state, not ours to render.
  */
 
-let lastRenderedMode: string | undefined;
-
-/** The `zen.entry` CUSTOM-chunk consumer — called from the chat options' onCustomEvent. */
-export function applyZenCustomEntry(value: unknown): void {
-	const mode = readPiccPersistedMode(value);
-	if (mode === undefined) return;
-	if (mode === lastRenderedMode) return;
-	lastRenderedMode = mode;
-	pushZenNotification(`Mode: ${mode}`, "info");
+export interface ModeLines {
+	/** The `zen.entry` CUSTOM-chunk consumer — called by the router with the chunk's value. */
+	readonly apply: (value: unknown) => void;
 }
 
-/** Test seam: reset the distinct-value gate between cases. Never called from production code. */
-export function clearModeLinesForTest(): void {
-	lastRenderedMode = undefined;
+/** One per thread: the distinct-value gate is the thread's, and the lines go to its notifications. */
+export function createModeLines(notifications: NotificationsStore): ModeLines {
+	let lastRenderedMode: string | undefined;
+	return {
+		apply: (value) => {
+			const mode = readPiccPersistedMode(value);
+			if (mode === undefined) return;
+			if (mode === lastRenderedMode) return;
+			lastRenderedMode = mode;
+			notifications.push(`Mode: ${mode}`, "info");
+		},
+	};
 }

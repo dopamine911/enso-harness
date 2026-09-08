@@ -1,3 +1,5 @@
+import { createStore, type Store } from "./store.ts";
+
 /**
  * The session-stats STORE (#45, phase 1): cost so far + the last request's prompt size.
  * Rendered by the status bar in session-status.tsx (#90), which subscribes to it.
@@ -5,14 +7,12 @@
  * Usage arrives as an AG-UI CUSTOM chunk (`zen.usage`) — one per COMPLETED model request,
  * emitted by map-events.ts off pi's `message_end` (never the per-delta cumulative usage,
  * which would multiply cost by the delta count). TanStack's path for CUSTOM chunks is the
- * `onCustomEvent` chat option, built at module scope before any component exists — so the
- * bridge to React state is this module-level store, the same shape notifications.tsx uses:
- * `applyZenMessageUsage` is called from `onCustomEvent`, and the bar subscribes via
- * `useSyncExternalStore`.
+ * `onCustomEvent` chat option — so the bridge to React state is this store, one per thread
+ * (`thread-stores.ts`), fed by `custom-event-router.ts`.
  *
- * ⚠ THE SUM IS PAGE-LIVED, DELIBERATELY. pi is spawned per prompt (#43), so pi's own
- * session totals reset every turn; this store is the one place the whole chat thread's
- * spend accumulates. It never resets between runs — that is the feature, not a leak.
+ * ⚠ THE SUM IS THREAD-LIVED, DELIBERATELY. This store is the one place a thread's whole
+ * spend accumulates; it never resets between runs — that is the feature, not a leak. A
+ * second thread on the same page has its own (#90 PR 3).
  *
  * ⚠ "LAST REQUEST", NOT "CONTEXT". input + cacheRead + cacheWrite is the prompt size the
  * model saw on the latest ASSISTANT request — a decent proxy for context growth, but the
@@ -40,9 +40,6 @@ export interface SessionStats {
 
 const EMPTY_STATS: SessionStats = { totalCost: 0, lastRequestInputTokens: undefined, countedMessages: 0 };
 
-let stats: SessionStats = EMPTY_STATS;
-const listeners = new Set<() => void>();
-
 /**
  * ⓘ Looks like map-events' `readUsage` but parses a DIFFERENT shape, deliberately: that
  * one reads pi's wire usage (`{cost: {total}}`), this one reads our own `ZenUsage`
@@ -62,47 +59,44 @@ function readUsageShape(raw: unknown): ZenUsageShape | undefined {
 	};
 }
 
-/**
- * Fold one `zen.usage` chunk's value into the stats. Defensive like every wire crossing in
- * chat-screen.tsx: a malformed value changes nothing rather than throwing in the stream loop.
- *
- * ⚠ Cost sums over EVERY counted message (assistant and toolResult summaries — pi's own
- * attribution rule, see ZenMessageUsage in @zen/core), but "last request" reads ASSISTANT
- * messages only: a toolResult summary is a side model call whose prompt is the tool output,
- * not the conversation — letting it overwrite the number would show a misleading dip.
- *
- * ⚠ And only assistant messages whose prompt total is ABOVE ZERO. An errored or aborted
- * request still emits an assistant `message_end`, with all-zero usage (observed on the
- * wire: an empty-prompt run produced exactly that shape). A real request never sees zero
- * prompt tokens, so a zero here means "the request failed", not "the context emptied" —
- * the same misleading dip as toolResult, through a different door. Cost still adds its
- * zero and the message still counts, so pi's attribution rule is untouched.
- */
-export function applyZenMessageUsage(data: unknown): void {
-	if (typeof data !== "object" || data === null) return;
-	const observation = data as { role?: unknown; usage?: unknown };
-	const usage = readUsageShape(observation.usage);
-	if (usage === undefined) return;
-	const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
-	const movesLastRequest = observation.role === "assistant" && promptTokens > 0;
-	stats = {
-		totalCost: stats.totalCost + (usage.totalCost ?? 0),
-		lastRequestInputTokens: movesLastRequest ? promptTokens : stats.lastRequestInputTokens,
-		countedMessages: stats.countedMessages + 1,
+export interface SessionStatsStore extends Store<SessionStats> {
+	/**
+	 * Fold one `zen.usage` chunk's value into the stats. Defensive like every wire crossing in
+	 * chat-screen.tsx: a malformed value changes nothing rather than throwing in the stream loop.
+	 *
+	 * ⚠ Cost sums over EVERY counted message (assistant and toolResult summaries — pi's own
+	 * attribution rule, see ZenMessageUsage in @zen/core), but "last request" reads ASSISTANT
+	 * messages only: a toolResult summary is a side model call whose prompt is the tool output,
+	 * not the conversation — letting it overwrite the number would show a misleading dip.
+	 *
+	 * ⚠ And only assistant messages whose prompt total is ABOVE ZERO. An errored or aborted
+	 * request still emits an assistant `message_end`, with all-zero usage (observed on the
+	 * wire: an empty-prompt run produced exactly that shape). A real request never sees zero
+	 * prompt tokens, so a zero here means "the request failed", not "the context emptied" —
+	 * the same misleading dip as toolResult, through a different door. Cost still adds its
+	 * zero and the message still counts, so pi's attribution rule is untouched.
+	 */
+	readonly applyUsage: (data: unknown) => void;
+}
+
+export function createSessionStatsStore(): SessionStatsStore {
+	const store = createStore<SessionStats>(EMPTY_STATS);
+	return {
+		get: store.get,
+		subscribe: store.subscribe,
+		applyUsage: (data) => {
+			if (typeof data !== "object" || data === null) return;
+			const observation = data as { role?: unknown; usage?: unknown };
+			const usage = readUsageShape(observation.usage);
+			if (usage === undefined) return;
+			const stats = store.get();
+			const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+			const movesLastRequest = observation.role === "assistant" && promptTokens > 0;
+			store.set({
+				totalCost: stats.totalCost + (usage.totalCost ?? 0),
+				lastRequestInputTokens: movesLastRequest ? promptTokens : stats.lastRequestInputTokens,
+				countedMessages: stats.countedMessages + 1,
+			});
+		},
 	};
-	for (const listener of listeners) listener();
-}
-
-export function subscribeToSessionStats(listener: () => void): () => void {
-	listeners.add(listener);
-	return () => listeners.delete(listener);
-}
-
-export function getSessionStatsSnapshot(): SessionStats {
-	return stats;
-}
-
-/** Test seam: reset the store between cases. Never called from production code. */
-export function clearSessionStatsForTest(): void {
-	stats = EMPTY_STATS;
 }
