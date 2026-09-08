@@ -10,7 +10,7 @@ import {
 import { clearModeLinesForTest } from "../mode-lines.ts";
 import { clearZenNotificationsForTest } from "../notifications.tsx";
 import { clearPermissionModeForTest } from "../permission-mode.tsx";
-import { type BrowserBelief, lastPersistedMode, SessionDebugView } from "../session-debug.tsx";
+import { type BrowserBelief, lastPersistedMode, NO_SESSION_YET, SessionDebugView } from "../session-debug.tsx";
 import { clearSessionStatsForTest } from "../session-stats.tsx";
 
 /**
@@ -114,9 +114,11 @@ test("an unflushed session says so instead of showing a path", () => {
 	);
 });
 
-test("before the first refresh, and on a failed one, the session column says why", () => {
+test("before the first fetch, and on a failed one, the session column says why", () => {
 	expect(render(believing(undefined), undefined)).toContain("not fetched yet");
-	expect(render(believing(undefined), undefined, "404 no live session for thread t1")).toContain("404 no live session");
+	// A fresh thread's 404 is information, not a failure — the drawer words it that way.
+	expect(render(believing(undefined), undefined, NO_SESSION_YET)).toContain("nothing has run on this thread");
+	expect(render(believing(undefined), undefined, "TypeError: fetch failed")).toContain("fetch failed");
 });
 
 // ── the router's record ──────────────────────────────────────────────────────

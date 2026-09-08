@@ -1,5 +1,5 @@
 import { PICC_DEFAULT_PERMISSION_MODE, readPiccPersistedMode, ZenThreadInspection } from "@zen/core";
-import { useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { Check } from "typebox/value";
 import { Button } from "./components/ui/button.tsx";
 import { getRecentCustomChunks, type RecordedCustomChunk } from "./custom-event-router.ts";
@@ -182,14 +182,30 @@ export async function fetchThreadInspection(threadId: string): Promise<ZenThread
 	return payload;
 }
 
-/** The drawer wired to the stores, the router's record, and the server. Mounted by `?debug`. */
-export function SessionDebugDrawer({ threadId }: { threadId: string }): React.ReactNode {
+/** What a 404 means here: nothing has run on this thread yet, which is information, not a failure. */
+export const NO_SESSION_YET = "no live session yet — nothing has run on this thread";
+
+export interface SessionDebugDrawerProps {
+	readonly threadId: string;
+	/** The chat's `isLoading`: the drawer refetches when this turns false, i.e. when a run settles. */
+	readonly runInFlight: boolean;
+}
+
+/**
+ * The drawer wired to the stores, the router's record, and the server. Mounted by `?debug`.
+ *
+ * Refetches on open and each time a run SETTLES — that is the moment the session changed
+ * and a human wants to compare — plus on demand. Not polled: a debugging surface should
+ * put no request in the trace a human is trying to read. Opening it on a fresh thread
+ * reads "nothing has run yet", the honest state, rather than an error.
+ */
+export function SessionDebugDrawer({ threadId, runInFlight }: SessionDebugDrawerProps): React.ReactNode {
 	const mode = usePermissionMode();
 	const stats = useSyncExternalStore(subscribeToSessionStats, getSessionStatsSnapshot, getSessionStatsSnapshot);
 	const [session, setSession] = useState<ZenThreadInspection | undefined>(undefined);
 	const [error, setError] = useState<string | undefined>(undefined);
 	const browser: BrowserBelief = { mode, stats, recentChunks: getRecentCustomChunks() };
-	const refresh = (): void => {
+	const refresh = useCallback((): void => {
 		fetchThreadInspection(threadId).then(
 			(fetched) => {
 				setSession(fetched);
@@ -197,10 +213,14 @@ export function SessionDebugDrawer({ threadId }: { threadId: string }): React.Re
 			},
 			(failure: unknown) => {
 				setSession(undefined);
-				setError(failure instanceof Error ? failure.message : String(failure));
+				const message = failure instanceof Error ? failure.message : String(failure);
+				setError(message.startsWith("404") ? NO_SESSION_YET : message);
 			},
 		);
-	};
+	}, [threadId]);
+	useEffect(() => {
+		if (!runInFlight) refresh();
+	}, [runInFlight, refresh]);
 	const copy = (): void => {
 		void navigator.clipboard.writeText(JSON.stringify({ threadId, browser, session }, null, 2));
 	};

@@ -455,7 +455,7 @@ const { useAppChat, useChatContext } = createChatHook({
 					{/* The session debug drawer (#86): what the browser believes beside what pi's
 					    session holds, for THIS thread. Opt-in by `?debug`, so it costs nothing in
 					    the normal layout. */}
-					{isDebugMode ? <SessionDebugDrawer threadId={PAGE_THREAD_ID} /> : null}
+					{isDebugMode ? <SessionDebugDrawer threadId={PAGE_THREAD_ID} runInFlight={chat.isLoading} /> : null}
 					<Input />
 				</div>
 			);
