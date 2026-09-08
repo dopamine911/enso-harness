@@ -26,7 +26,7 @@
 // keyword-agnostic — const/let/var and function/callback parameters are covered
 // uniformly. `JsLiteralMemberName` reaches the property-key shapes the binding
 // node structurally cannot see (`{ n: … }`, `{ cnt: … }`, type/interface/class
-// members). Registered via a scoped `overrides` entry in biome.json that includes
+// members). Registered via a scoped `overrides` entry in biome.jsonc that includes
 // `**` but excludes `*.test.ts` / `*.test.tsx`: test files are intentionally exempt
 // from naming discipline (a test's throwaway bindings and wire-format fixtures are
 // not the code readers navigate). Widen or narrow that glob to change coverage — e.g.
@@ -103,6 +103,30 @@ predicate is_abbreviation($identifier) {
 // import from our lib/utils.ts) — renaming it forks an ecosystem-wide convention.
 predicate is_allowlisted($name) { $name <: r"^(?:cn)$" }
 
+// Keys whose spelling is fixed by an EXTERNAL contract — a wire format or a
+// third-party API's option bag. Exempt as property KEYS only; the same word is
+// still flagged as a binding, so `const dir = …` in our own code keeps failing.
+// That is the whole reason this is separate from `is_allowlisted` above, which
+// exempts every tier: we owe the external shape its spelling, not ourselves.
+//
+// Each entry needs a RECEIPT naming the contract, same bar as the allowlist:
+//   • `v`   — TanStack's `tanstack:interruptBinding` stamp is `{v, kind, interruptId,
+//             interruptedRunId, generation}`; `v` is its schema-version field. Renaming
+//             it breaks resume resolution (packages/web/src/server/session.ts).
+//   • `dir` — `Bun.serve`'s static directory-route option bag is `{ dir }`
+//             (packages/web/src/server/dev-web.ts).
+//
+// Replaces two per-line `// biome-ignore lint:` comments (#82). Those suppressed
+// EVERY rule on their line; these exempt one name, in one tier, with a receipt.
+//
+// ⚠ Keyed on the NAME, so it reaches further than the two lines it replaced. That
+// blast radius is bounded by `test/naming-gate.test.ts`, which pins the exemption
+// to exactly the two files receipted above and fails on a third — so adding one is
+// a design conversation, not a silent pass (PR #83 review). That test also asserts
+// the key/binding split, which is what breaks if this is ever folded into
+// `is_allowlisted`.
+predicate is_external_contract_key($name) { $name <: r"^(?:v|dir)$" }
+
 // Single source of truth for the advisory tier: the generic iteration-name list
 // AND the `info` diagnostic it emits. Called by both `generic_iteration_callback_var`
 // and `generic_iteration_loop_var`, so the name list and the message live in ONE
@@ -129,6 +153,7 @@ pattern abbreviation_key() {
   JsLiteralMemberName() as $key where {
     is_abbreviation($key),
     not is_allowlisted($key),
+    not is_external_contract_key($key),
     register_diagnostic(span=$key, message="Abbreviated property key — use the full word (`ts` → `timestamp`, `dir` → `directory`, `cmd` → `command`, `cnt` → `count`). See naming-and-style.md.", severity="error")
   }
 }
@@ -153,6 +178,7 @@ pattern single_char_key() {
     $key <: r"^[a-z]$",
     not $key <: r"^(?:_|z|e)$",
     not is_allowlisted($key),
+    not is_external_contract_key($key),
     register_diagnostic(span=$key, message="Single-character property key — use a descriptive field name (`{ n: … }` → `{ count: … }`). Exempt: _, z, e. See naming-and-style.md.", severity="error")
   }
 }

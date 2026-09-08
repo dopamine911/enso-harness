@@ -1,8 +1,15 @@
 import { expect, test } from "bun:test";
 import type { GenericAGUIInterrupt } from "@tanstack/ai-client";
+import type { ChatUISelectedPart } from "@tanstack/ai-client/ui";
 import { ZEN_DIALOG_KEY, type ZenDialogSpec } from "@zen/core";
 import { renderToStaticMarkup } from "react-dom/server";
-import { DialogAnswerControls, UnhandledInterrupt, ZenDialogInterrupt } from "../chat-screen.tsx";
+import {
+	DialogAnswerControls,
+	type KeyedPart,
+	keyedParts,
+	UnhandledInterrupt,
+	ZenDialogInterrupt,
+} from "../chat-screen.tsx";
 
 /**
  * #49, first pass: the dialog components had live receipts (#27, the e2e smoke) and no unit
@@ -105,4 +112,36 @@ test("the unhandled block shows the interrupt as JSON so a reader can see what a
 	const rendered = renderToStaticMarkup(<UnhandledInterrupt interrupt={{ reason: "mystery", detail: 42 }} />);
 	expect(rendered).toContain("&quot;reason&quot;:&quot;mystery&quot;");
 	expect(rendered).toContain("42");
+});
+
+// ── part keys are identities, not positions (#82) ─────────────────────────────
+// The suppression these replace claimed the array index was fine because parts arrive in
+// stable document order. Tool parts do NOT: the selection runs over the whole message list,
+// so a result stamped onto another message re-pairs its call and shifts that call's index.
+
+const textPart = (content: string): ChatUISelectedPart => ({ key: "text", part: { type: "text", content } });
+const toolCallPart = (id: string): ChatUISelectedPart => ({
+	key: "toolCall",
+	part: { type: "tool-call", id, name: "read", arguments: "{}", state: "complete" },
+});
+
+test("⚠ a tool part keeps its key when its POSITION changes — an index key would remount it", () => {
+	const call = toolCallPart("call-1");
+	const first = keyedParts([call, textPart("after")]);
+	const shifted = keyedParts([textPart("before"), textPart("between"), call]);
+	const keyOf = (parts: KeyedPart[], id: string): string | undefined =>
+		parts.find(({ selected }) => selected.key === "toolCall" && selected.part.id === id)?.partKey;
+	expect(keyOf(first, "call-1")).toBe(keyOf(shifted, "call-1"));
+});
+
+test("two id-less parts of the same kind get distinct keys, so neither collides", () => {
+	const keys = keyedParts([textPart("one"), textPart("two")]).map(({ partKey }) => partKey);
+	expect(new Set(keys).size).toBe(2);
+});
+
+test("only the final part is the trailing one — what gates the streaming indicator", () => {
+	const trailing = keyedParts([textPart("one"), toolCallPart("call-1"), textPart("two")]).map(
+		({ isTrailingPart }) => isTrailingPart,
+	);
+	expect(trailing).toEqual([false, false, true]);
 });

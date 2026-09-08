@@ -187,7 +187,6 @@ export function startZenServer(options: ZenServerOptions) {
 	// shared by every request; evicted whole on close.
 	const registry = createDialogRegistry({ onProblem: options.onProblem });
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the one HTTP handler, kept as a single top-to-bottom route read (parse → resume-vs-run → stream → teardown); the #27/#34 teardown ordering lives in its control flow and fragmenting it is how the response-close bug hid.
 	const server = createServer(async (request, response) => {
 		if (request.method === "POST" && request.url?.startsWith("/api/chat")) {
 			let body: RunAgentInputBody = {};

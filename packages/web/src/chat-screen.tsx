@@ -1,5 +1,5 @@
 import type { GenericAGUIInterrupt } from "@tanstack/ai-client";
-import { automaticPartsForMessage, selectChatUI } from "@tanstack/ai-client/ui";
+import { automaticPartsForMessage, type ChatUISelectedPart, selectChatUI } from "@tanstack/ai-client/ui";
 import { fetchServerSentEvents } from "@tanstack/ai-react";
 import { createChatHook } from "@tanstack/ai-react/ui";
 import { isZenDialogSpec, ZEN_DIALOG_KEY, type ZenDialogSpec } from "@zen/core";
@@ -92,6 +92,51 @@ const chatOptions = {
 	 */
 	onCustomEvent: routeZenCustomEvent,
 };
+
+/** One selected part paired with the React key that identifies it. */
+export interface KeyedPart {
+	/** Stable across re-renders AND position changes — see `keyedParts` for why that matters. */
+	partKey: string;
+	selected: ChatUISelectedPart;
+	isTrailingPart: boolean;
+}
+
+/**
+ * Pairs each selected part with a React key that is an IDENTITY, not a position.
+ *
+ * ⚠ Tool parts MOVE. The selection runs over the whole message list (see `ChatMessageRow`'s
+ * header), so a result the server stamps onto a different message re-pairs its call and
+ * shifts that call's index. A key carrying the array index therefore changes identity for a
+ * part that did not change — React remounts it and the rendered tool block loses its state.
+ * `noArrayIndexKey` is right to refuse it, and this is the fix rather than a suppression:
+ * tool parts already carry a real id (`id` on tool-call, `toolCallId` on tool-result), so
+ * key by that. Text/thinking/image parts carry no id, but they are append-only within one
+ * message, so a per-KIND occurrence counter identifies them without borrowing the position
+ * of the whole list.
+ *
+ * `isTrailingPart` rides along so the caller needs no index either — see its use below.
+ *
+ * ⓘ Exported for `__tests__/chat-screen.test.tsx` only; nothing else imports it.
+ */
+export function keyedParts(parts: ChatUISelectedPart[]): KeyedPart[] {
+	const seenPerKind = new Map<string, number>();
+	return parts.map((selected, position) => {
+		const identity = partIdentity(selected);
+		if (identity !== undefined) {
+			return { partKey: `${selected.key}-${identity}`, selected, isTrailingPart: position === parts.length - 1 };
+		}
+		const seen = seenPerKind.get(selected.key) ?? 0;
+		seenPerKind.set(selected.key, seen + 1);
+		return { partKey: `${selected.key}#${seen}`, selected, isTrailingPart: position === parts.length - 1 };
+	});
+}
+
+/** The part's own stable id, or undefined for the kinds that carry none. */
+function partIdentity(selected: ChatUISelectedPart): string | undefined {
+	if (selected.key === "toolCall") return selected.part.id;
+	if (selected.key === "toolResult") return selected.part.toolCallId;
+	return undefined;
+}
 
 /**
  * Renders a run-level error as a destructive Alert.
@@ -385,10 +430,9 @@ const { useAppChat, useChatContext } = createChatHook({
 			return (
 				<Message from={message.role} data-role={message.role}>
 					<MessageContent>
-						{selectedParts.map((selected, partIndex) => (
+						{keyedParts(selectedParts).map(({ partKey, selected, isTrailingPart }) => (
 							<SelectedMessagePart
-								// biome-ignore lint/suspicious/noArrayIndexKey: `selected.key` is the part KIND (toolCall/text/…), not an identity — two parts of one kind in a message need the position, and TanStack yields parts in stable document order.
-								key={`${message.id}-${selected.key}-${partIndex}`}
+								key={`${message.id}-${partKey}`}
 								selected={selected}
 								// ⚠ Part-level, not chat-level: true only for the TRAILING part of
 								// the TRAILING message while a run is in flight. Passing bare
@@ -396,7 +440,7 @@ const { useAppChat, useChatContext } = createChatHook({
 								// every later send (the Reasoning shell's auto-close latches after
 								// its first close, so they also never closed again) and overwrote
 								// each block's "Thought for N seconds" with the later run's timing.
-								isStreaming={chat.isLoading && isLastMessage && partIndex === selectedParts.length - 1}
+								isStreaming={chat.isLoading && isLastMessage && isTrailingPart}
 								renderers={descriptorRenderers}
 							/>
 						))}

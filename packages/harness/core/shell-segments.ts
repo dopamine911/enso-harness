@@ -48,7 +48,6 @@ function isRedirectionOperator(command: string, characterIndex: number, characte
  * newlines, preserving each segment's original text. Returns `[]` for syntax it cannot
  * scope — see the module header for why that emptiness is a feature.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: a character scanner is one linear read against the shell grammar it recognises; splitting it into helpers would scatter the quote/operator state machine. Vendored shape kept close to upstream so a diff against oh-my-pi stays readable.
 export function extractFlatShellCommandSegments(command: string): FlatShellCommandSegment[] {
 	const segments: FlatShellCommandSegment[] = [];
 	let segmentStart = 0;
@@ -146,7 +145,6 @@ export function extractFlatShellCommandSegments(command: string): FlatShellComma
 }
 
 /** Finds the end of a shell word, respecting quotes and escapes; null for incomplete syntax. */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the same vendored character-scanner shape as the extractor above — one linear read of quote/escape state, kept close to upstream for diffability.
 function skipShellWord(command: string, start: number): number | null {
 	let inSingle = false;
 	let inDouble = false;
@@ -218,7 +216,6 @@ export type LiteralShellWordResult =
 
 const WORD_SYNTHESIS_CHARACTERS = new Set(["{", "}", "*", "?", "["]);
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the same character-scanner shape as the rest of this module — one linear read of quote/escape state.
 export function literalShellWord(text: string): LiteralShellWordResult {
 	let literal = "";
 	let inSingle = false;

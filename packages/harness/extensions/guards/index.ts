@@ -251,7 +251,6 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
 		}
 	});
 
-	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the guard dispatch is ONE linear read — bash patch, then the write denials in precedence order, then the reader gate. Splitting it would scatter the precedence order this file's header documents.
 	pi.on("tool_call", (event, extensionContext): ToolCallEventResult | undefined => {
 		const cwd = extensionContext.cwd;
 		const toolName = canonicalToolName(event.toolName);
