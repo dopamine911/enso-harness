@@ -118,6 +118,13 @@ predicate is_allowlisted($name) { $name <: r"^(?:cn)$" }
 //
 // Replaces two per-line `// biome-ignore lint:` comments (#82). Those suppressed
 // EVERY rule on their line; these exempt one name, in one tier, with a receipt.
+//
+// ⚠ Keyed on the NAME, so it reaches further than the two lines it replaced. That
+// blast radius is bounded by `test/naming-gate.test.ts`, which pins the exemption
+// to exactly the two files receipted above and fails on a third — so adding one is
+// a design conversation, not a silent pass (PR #83 review). That test also asserts
+// the key/binding split, which is what breaks if this is ever folded into
+// `is_allowlisted`.
 predicate is_external_contract_key($name) { $name <: r"^(?:v|dir)$" }
 
 // Single source of truth for the advisory tier: the generic iteration-name list
