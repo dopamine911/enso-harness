@@ -91,7 +91,17 @@ export {
 	readDotenvFile,
 	readSecret,
 } from "./secrets.ts";
-export { ZenThreadInspection, ZenThreadSummary } from "./session-inspection.ts";
+export {
+	describeSessionEntry,
+	describeThreadEvent,
+	type ThreadEventColumns,
+	threadEventColumns,
+	ZenEventProvenance,
+	ZenThreadEvent,
+	ZenThreadEvents,
+	ZenThreadInspection,
+	ZenThreadSummary,
+} from "./session-inspection.ts";
 export {
 	isZenToolResultDescriptor,
 	readZenToolResultDescriptor,

@@ -7,11 +7,13 @@ import {
 	type PiPromptOutcome,
 	type PiRpcEvent,
 	type PiSession,
+	ZenThreadEvents,
 	ZenThreadInspection,
 	ZenThreadSummary,
 } from "@zen/core";
 import { Check } from "typebox/value";
 import type { AgentHost, HostedSession, HostedSessionInspection } from "../../host/agent-host.ts";
+import { createEventTail, describePiRpcEvent } from "../../host/event-tail.ts";
 import { startZenServer } from "../index.ts";
 
 /**
@@ -40,7 +42,13 @@ interface FakeSessionScript {
 function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; record: FakeSessionRecord } {
 	const listeners = new Set<(event: PiRpcEvent) => void>();
 	const record: FakeSessionRecord = { aborts: 0, disposed: 0, prompts: [] };
+	// The fake records into the same tail the real host does, so the events route sees the
+	// real shape (coalesced rows); it delivers only live, so every row is `live`. The real
+	// host's held/replayed/dropped provenance is pinned in agent-host.test.ts.
+	const emitted = createEventTail();
 	const emit = (event: PiRpcEvent): void => {
+		const described = describePiRpcEvent(event);
+		emitted.record(described.type, described.name, "live");
 		for (const listener of listeners) listener(event);
 	};
 	const session: PiSession = {
@@ -87,7 +95,7 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
 		],
 		commands: ["mode", "plan"],
 	});
-	return { hosted: { session, loadedExtensionPaths: [], inspect }, record };
+	return { hosted: { session, loadedExtensionPaths: [], inspect, emittedEvents: emitted.recent }, record };
 }
 
 function fakeHost(script: FakeSessionScript) {
@@ -332,6 +340,46 @@ test("GET /api/threads/:id returns the branch as pi holds it, with sessionFile n
 	const entries = (inspection as ZenThreadInspection).entries;
 	expect(entries).toHaveLength(2);
 	expect(entries[1]).toMatchObject({ type: "custom", customType: "modes", data: { mode: "plan" } });
+});
+
+// #97: the two tails of one run, read after it — what the host emitted and what the server wrote,
+// each in its own order. The sent tail is recorded at the SSE writer, so it is the wire's order by
+// construction; the test pins that the record matches what the client actually received.
+test("GET /api/threads/:id/events returns the emitted and sent tails of a run, in wire order, deltas coalesced", async () => {
+	const { url } = await startWith({
+		onPrompt: (emit, outcome) => {
+			outcome.onAccepted();
+			emit(TEXT_DELTA);
+			emit(TEXT_DELTA);
+			emit(TEXT_DELTA);
+			emit(SETTLED);
+		},
+	});
+	const received = await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("hello")] });
+	const response = await fetch(`${url}/api/threads/t1/events`);
+	expect(response.status).toBe(200);
+	const events: unknown = await response.json();
+	expect(Check(ZenThreadEvents, events)).toBe(true);
+	const { emitted, sent } = events as ZenThreadEvents;
+	// The host's funnel: three deltas fold into one row with an exact count, then the settle.
+	expect(emitted.map((event) => [event.type, event.count])).toEqual([
+		["message_update", 3],
+		["agent_settled", 1],
+	]);
+	// The wire: the sent tail, expanded by its counts, IS the chunk sequence the client got.
+	const sentExpanded = sent.flatMap((event) => Array.from({ length: event.count }, () => event.type));
+	expect(sentExpanded).toEqual(received);
+	expect(sent.every((event) => event.provenance === "sent")).toBe(true);
+	expect(sent[0]).toMatchObject({ type: EventType.RUN_STARTED, count: 1 });
+	expect(sent.at(-1)).toMatchObject({ type: EventType.RUN_FINISHED, count: 1 });
+});
+
+test("⚠ the events route of an unknown thread is a 404 and builds no session; a malformed id is a 400", async () => {
+	const { url, built } = await startWith({ onPrompt: neverPrompted });
+	expect((await fetch(`${url}/api/threads/never-ran/events`)).status).toBe(404);
+	expect((await fetch(`${url}/api/threads/%/events`)).status).toBe(400);
+	expect((await fetch(`${url}/api/threads`)).status).toBe(200);
+	expect(built).toHaveLength(0);
 });
 
 test("GET /api/threads lists live threads with busy and parked state", async () => {

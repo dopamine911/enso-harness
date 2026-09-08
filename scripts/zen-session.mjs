@@ -13,14 +13,21 @@
  *
  * Usage:  bun scripts/zen-session.mjs                 # every live thread, one line each
  *         bun scripts/zen-session.mjs <threadId>      # one thread: summary, then the branch
+ *         bun scripts/zen-session.mjs <threadId> --events  # the event tails (#97): what the
+ *                                                          # host emitted, with provenance,
+ *                                                          # then what the server sent
  *         bun scripts/zen-session.mjs <threadId> --json   # the raw payload, for piping
  *
  * The server address defaults to the dev server's; override with ZEN_SERVER_URL.
  */
 
+// The row formats are core's, shared with the drawer: one definition, so the two views cannot drift.
+import { describeSessionEntry, threadEventColumns } from "../packages/core/src/index.ts";
+
 const serverUrl = process.env.ZEN_SERVER_URL ?? "http://127.0.0.1:5179";
 const [threadId, ...flags] = process.argv.slice(2);
 const wantsJson = flags.includes("--json");
+const wantsEvents = flags.includes("--events");
 
 async function fetchJson(path) {
 	let response;
@@ -37,17 +44,6 @@ async function fetchJson(path) {
 	return response.json();
 }
 
-/** pi's shapes are carried, not modelled — read the base fields defensively. */
-function describeEntry(entry) {
-	if (typeof entry !== "object" || entry === null) return String(entry);
-	const kind = typeof entry.type === "string" ? entry.type : "?";
-	const custom = typeof entry.customType === "string" ? `:${entry.customType}` : "";
-	const role = typeof entry.message?.role === "string" ? ` ${entry.message.role}` : "";
-	const when = typeof entry.timestamp === "string" ? entry.timestamp.slice(11, 19) : "        ";
-	const mode = entry.customType === "modes" && typeof entry.data?.mode === "string" ? ` mode=${entry.data.mode}` : "";
-	return `${when}  ${kind}${custom}${role}${mode}`;
-}
-
 if (threadId === undefined) {
 	const threads = await fetchJson("/api/threads");
 	if (threads.length === 0) {
@@ -58,6 +54,26 @@ if (threadId === undefined) {
 		const file = thread.sessionFile ?? "(in memory, not flushed yet)";
 		console.log(`${thread.threadId}  mode=${thread.mode}  ${state}  last=${thread.lastActivityAt}  ${file}`);
 	}
+	process.exit(0);
+}
+
+/** The drawer's row, as a table: the provenance column padded so `held`/`dropped` line up down the page. */
+function describeThreadEvent(event) {
+	const columns = threadEventColumns(event);
+	return `${columns.when}  ${columns.provenance.padEnd(12)} ${columns.subject}`;
+}
+
+if (wantsEvents) {
+	const events = await fetchJson(`/api/threads/${encodeURIComponent(threadId)}/events`);
+	if (wantsJson) {
+		console.log(JSON.stringify(events, null, 2));
+		process.exit(0);
+	}
+	console.log(`thread ${events.threadId}`);
+	console.log(`the host emitted (${events.emitted.length} events, oldest first):`);
+	for (const event of events.emitted) console.log(`  ${describeThreadEvent(event)}`);
+	console.log(`the server sent (${events.sent.length} chunks, oldest first):`);
+	for (const event of events.sent) console.log(`  ${describeThreadEvent(event)}`);
 	process.exit(0);
 }
 
@@ -82,4 +98,4 @@ console.log(
 );
 console.log(`commands    ${inspection.commands.map((commandName) => `/${commandName}`).join(" ")}`);
 console.log(`branch      ${inspection.entries.length} entries, root to leaf:`);
-for (const branchEntry of inspection.entries) console.log(`  ${describeEntry(branchEntry)}`);
+for (const branchEntry of inspection.entries) console.log(`  ${describeSessionEntry(branchEntry)}`);

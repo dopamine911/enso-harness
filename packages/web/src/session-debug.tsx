@@ -1,4 +1,12 @@
-import { PICC_DEFAULT_PERMISSION_MODE, readPiccPersistedMode, ZenThreadInspection } from "@zen/core";
+import {
+	describeSessionEntry,
+	describeThreadEvent,
+	PICC_DEFAULT_PERMISSION_MODE,
+	readPiccPersistedMode,
+	type ZenThreadEvent,
+	ZenThreadEvents,
+	ZenThreadInspection,
+} from "@zen/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check } from "typebox/value";
 import { Button } from "./components/ui/button.tsx";
@@ -40,6 +48,8 @@ export interface SessionDebugViewProps {
 	readonly browser: BrowserBelief;
 	/** The server's answer, or undefined before the first refresh. */
 	readonly session: ZenThreadInspection | undefined;
+	/** The thread's two event tails (#97), fetched alongside the inspection; undefined before the first refresh. */
+	readonly events: ZenThreadEvents | undefined;
 	/** Why the last refresh produced nothing — a 404 for a thread that has not run yet, a down server. */
 	readonly error: string | undefined;
 	/** The last copy's outcome; the label beside the button says which. */
@@ -81,21 +91,7 @@ export function describeChunk(chunk: RecordedCustomChunk): string {
  */
 function entryKey(entry: unknown, position: number): string {
 	if (typeof entry === "object" && entry !== null && "id" in entry && typeof entry.id === "string") return entry.id;
-	return `${position}:${describeEntry(entry)}`;
-}
-
-/** One entry of the branch, read defensively: pi's shapes are carried, not modelled. */
-function describeEntry(entry: unknown): string {
-	if (typeof entry !== "object" || entry === null) return String(entry);
-	const fields = entry as { type?: unknown; customType?: unknown; timestamp?: unknown; message?: unknown };
-	const kind = typeof fields.type === "string" ? fields.type : "?";
-	const custom = typeof fields.customType === "string" ? `:${fields.customType}` : "";
-	const role =
-		typeof fields.message === "object" && fields.message !== null && "role" in fields.message
-			? ` ${String(fields.message.role)}`
-			: "";
-	const when = typeof fields.timestamp === "string" ? fields.timestamp.slice(11, 19) : "";
-	return `${when} ${kind}${custom}${role}`.trim();
+	return `${position}:${describeSessionEntry(entry)}`;
 }
 
 function Mismatch({ when, says }: { when: boolean; says: string }): React.ReactNode {
@@ -105,10 +101,24 @@ function Mismatch({ when, says }: { when: boolean; says: string }): React.ReactN
 	);
 }
 
+function EventTailList({ events }: { events: readonly ZenThreadEvent[] }): React.ReactNode {
+	if (events.length === 0) return <div>nothing yet</div>;
+	return (
+		<ol>
+			{events.map((event) => (
+				<li key={event.sequence} className={event.provenance === "dropped" ? "text-destructive" : ""}>
+					{describeThreadEvent(event)}
+				</li>
+			))}
+		</ol>
+	);
+}
+
 export function SessionDebugView({
 	threadId,
 	browser,
 	session,
+	events,
 	error,
 	copyState,
 	onRefresh,
@@ -188,11 +198,20 @@ export function SessionDebugView({
 							<h4 className="mt-1 text-foreground">branch ({session.entries.length} entries)</h4>
 							<ol>
 								{session.entries.map((entry, position) => (
-									<li key={entryKey(entry, position)}>{describeEntry(entry)}</li>
+									<li key={entryKey(entry, position)}>{describeSessionEntry(entry)}</li>
 								))}
 							</ol>
 						</>
 					)}
+				</section>
+				{/* The event tails (#97): the ordering view. `emitted` is what the host's funnel saw,
+				    with how each was delivered; `sent` is what the server wrote to this browser.
+				    A disagreement with the two sections above names the layer a bug lives in. */}
+				<section>
+					<h3 className="font-semibold text-foreground">the host emitted</h3>
+					{events === undefined ? <div>not fetched yet</div> : <EventTailList events={events.emitted} />}
+					<h3 className="mt-2 font-semibold text-foreground">the server sent</h3>
+					{events === undefined ? <div>not fetched yet</div> : <EventTailList events={events.sent} />}
 				</section>
 			</div>
 		</aside>
@@ -217,6 +236,21 @@ export async function fetchThreadInspection(threadId: string): Promise<ZenThread
 	const payload: unknown = await response.json();
 	if (!Check(ZenThreadInspection, payload)) throw new Error("the server's inspection payload did not match its schema");
 	return payload;
+}
+
+/** Fetches one thread's event tails (#97); the same 404 rule as the inspection. */
+export async function fetchThreadEvents(threadId: string): Promise<ZenThreadEvents> {
+	const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/events`);
+	if (!response.ok) throw new InspectionFetchError(response.status, await response.text());
+	const payload: unknown = await response.json();
+	if (!Check(ZenThreadEvents, payload)) throw new Error("the server's events payload did not match its schema");
+	return payload;
+}
+
+/** One refresh = both payloads, so the three columns describe the same moment. */
+async function fetchThreadDebug(threadId: string): Promise<{ session: ZenThreadInspection; events: ZenThreadEvents }> {
+	const [session, events] = await Promise.all([fetchThreadInspection(threadId), fetchThreadEvents(threadId)]);
+	return { session, events };
 }
 
 /** What a 404 means here: nothing has run on this thread yet, which is information, not a failure. */
@@ -270,20 +304,23 @@ export function SessionDebugDrawer({ runInFlight }: SessionDebugDrawerProps): Re
 	const stats = useStore(stores.stats);
 	const recentChunks = useStore(stores.recentChunks);
 	const [session, setSession] = useState<ZenThreadInspection | undefined>(undefined);
+	const [events, setEvents] = useState<ZenThreadEvents | undefined>(undefined);
 	const [error, setError] = useState<string | undefined>(undefined);
 	const [copyState, setCopyState] = useState<CopyState>("idle");
 	const browser: BrowserBelief = { mode, stats, recentChunks };
 	// One sequencer per thread id: a new thread starts a new "latest".
-	const fetchLatest = useMemo(() => latestWins(() => fetchThreadInspection(threadId)), [threadId]);
+	const fetchLatest = useMemo(() => latestWins(() => fetchThreadDebug(threadId)), [threadId]);
 	const refresh = useCallback((): void => {
 		fetchLatest().then(
 			(fetched) => {
 				if (fetched === undefined) return; // superseded by a later refresh
-				setSession(fetched);
+				setSession(fetched.session);
+				setEvents(fetched.events);
 				setError(undefined);
 			},
 			(failure: unknown) => {
 				setSession(undefined);
+				setEvents(undefined);
 				if (failure instanceof InspectionFetchError && failure.status === 404) {
 					setError(NO_SESSION_YET);
 					return;
@@ -296,7 +333,7 @@ export function SessionDebugDrawer({ runInFlight }: SessionDebugDrawerProps): Re
 		if (!runInFlight) refresh();
 	}, [runInFlight, refresh]);
 	const copy = (): void => {
-		navigator.clipboard.writeText(JSON.stringify({ threadId, browser, session }, null, 2)).then(
+		navigator.clipboard.writeText(JSON.stringify({ threadId, browser, session, events }, null, 2)).then(
 			() => setCopyState("copied"),
 			() => setCopyState("failed"),
 		);
@@ -306,6 +343,7 @@ export function SessionDebugDrawer({ runInFlight }: SessionDebugDrawerProps): Re
 			threadId={threadId}
 			browser={browser}
 			session={session}
+			events={events}
 			error={error}
 			copyState={copyState}
 			onRefresh={refresh}

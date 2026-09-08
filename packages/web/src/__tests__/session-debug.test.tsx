@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import type { ZenThreadInspection } from "@zen/core";
+import type { ZenThreadEvent, ZenThreadEvents, ZenThreadInspection } from "@zen/core";
 import { renderToStaticMarkup } from "react-dom/server";
 import { RECENT_CUSTOM_CHUNK_CAPACITY, routeZenCustomEvent } from "../custom-event-router.ts";
 import {
@@ -73,12 +73,23 @@ const render = (
 	session: ZenThreadInspection | undefined,
 	error?: string,
 	copyState: CopyState = "idle",
-): string =>
+): string => renderWith({ browser, session, error, copyState });
+
+interface RenderOverrides {
+	readonly browser: BrowserBelief;
+	readonly session: ZenThreadInspection | undefined;
+	readonly error?: string | undefined;
+	readonly copyState?: CopyState;
+	readonly events?: ZenThreadEvents;
+}
+
+const renderWith = ({ browser, session, error, copyState = "idle", events }: RenderOverrides): string =>
 	renderToStaticMarkup(
 		<SessionDebugView
 			threadId="t1"
 			browser={browser}
 			session={session}
+			events={events}
 			error={error}
 			copyState={copyState}
 			onRefresh={noop}
@@ -210,4 +221,33 @@ test("the copy outcome is named beside the button", () => {
 	expect(render(believing("plan"), inspection(), undefined, "copied")).toContain("copied");
 	expect(render(believing("plan"), inspection(), undefined, "failed")).toContain("copy failed");
 	expect(render(believing("plan"), inspection(), undefined, "idle")).not.toContain("copy failed");
+});
+
+// ── the event tails (#97): the ordering view ────────────────────────────────────
+
+function threadEvent(overrides: Partial<ZenThreadEvent>): ZenThreadEvent {
+	return {
+		sequence: 1,
+		type: "entry_appended",
+		provenance: "live",
+		at: "2026-09-08T12:34:56.000Z",
+		count: 1,
+		...overrides,
+	};
+}
+
+test("both tails render under their own heading; a dropped event is marked as a failure", () => {
+	const events: ZenThreadEvents = {
+		threadId: "t1",
+		emitted: [threadEvent({ provenance: "dropped", type: "notify" })],
+		sent: [threadEvent({ provenance: "sent", type: "RUN_FINISHED" })],
+	};
+	const rendered = renderWith({ browser: believing("plan"), session: inspection(), events });
+	expect(rendered).toContain("the host emitted");
+	expect(rendered).toContain("the server sent");
+	expect(rendered).toContain("dropped notify");
+	expect(rendered).toContain("sent RUN_FINISHED");
+	expect(rendered).toMatch(/text-destructive[^>]*>[^<]*dropped notify/);
+	// Before the first refresh the tails say so, rather than rendering as an empty thread.
+	expect(render(believing("plan"), inspection())).toContain("not fetched yet");
 });

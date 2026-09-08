@@ -24,6 +24,7 @@
  */
 import type { PiSession } from "@zen/core";
 import type { HostedSession } from "../host/agent-host.ts";
+import { createEventTail, type EventTail } from "../host/event-tail.ts";
 
 /**
  * How long a thread's session outlives its last run. Long enough for a human to read a
@@ -74,6 +75,12 @@ export interface ThreadView {
 	readonly busy: boolean;
 	/** The last `acquire` or `release`, epoch milliseconds. */
 	readonly lastActivityAt: number;
+	/**
+	 * The sent tail (#97): every AG-UI chunk the server wrote to this thread's browser, in
+	 * the wire's order. The SAME instance as the entry's, so the chat handler records into
+	 * it through a `peek` — the one server-owned record, beside the host's emitted tail.
+	 */
+	readonly sent: EventTail;
 }
 
 interface ThreadEntry {
@@ -84,10 +91,17 @@ interface ThreadEntry {
 	/** Set by `acquire`, cleared by `release` — so a parked thread reads busy until its resume releases. */
 	busy: boolean;
 	lastActivityAt: number;
+	sent: EventTail;
 }
 
 function viewOf(threadId: string, thread: ThreadEntry): ThreadView {
-	return { threadId, hosted: thread.hosted, busy: thread.busy, lastActivityAt: thread.lastActivityAt };
+	return {
+		threadId,
+		hosted: thread.hosted,
+		busy: thread.busy,
+		lastActivityAt: thread.lastActivityAt,
+		sent: thread.sent,
+	};
 }
 
 export function createThreadSessions(options: ThreadSessionsOptions): ThreadSessions {
@@ -118,6 +132,7 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 			abortInFlight: undefined,
 			busy: false,
 			lastActivityAt: Date.now(),
+			sent: createEventTail(),
 		};
 		threads.set(threadId, thread);
 		return thread;

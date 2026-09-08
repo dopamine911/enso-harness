@@ -18,7 +18,9 @@ import {
 	type PiSession,
 	quarantineSecrets,
 	readPiccPersistedMode,
+	type ZenThreadEvent,
 } from "@zen/core";
+import { createEventTail, describePiRpcEvent } from "./event-tail.ts";
 import { createZenExtensionUiContext } from "./extension-ui-context.ts";
 import { toRpcWireEvent } from "./session-events.ts";
 
@@ -128,6 +130,8 @@ export interface HostedSession {
 	 * tests, and inspection is a host concern.
 	 */
 	inspect(): HostedSessionInspection;
+	/** The emitted tail (#97): what the host's `emit` funnel saw, with provenance. A fresh copy per call. */
+	emittedEvents(): ZenThreadEvent[];
 }
 
 export interface AgentHost {
@@ -227,11 +231,23 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 		const listeners = new Set<(event: PiRpcEvent) => void>();
 		const heldUntilFirstSubscriber: PiRpcEvent[] = [];
 		let hasHadSubscriber = false;
+		// The emitted tail (#97): every event through this funnel, with HOW it was delivered.
+		// Recorded at the one place all of them pass, so the record and the delivery cannot
+		// disagree — a held record's later replay is recorded again, as `replayed`, when it
+		// actually reaches a subscriber (see `subscribe`).
+		const emitted = createEventTail();
 		function emit(event: PiRpcEvent): void {
+			const described = describePiRpcEvent(event);
 			if (listeners.size === 0) {
-				if (!hasHadSubscriber) heldUntilFirstSubscriber.push(event);
+				if (!hasHadSubscriber) {
+					heldUntilFirstSubscriber.push(event);
+					emitted.record(described.type, described.name, "held");
+					return;
+				}
+				emitted.record(described.type, described.name, "dropped");
 				return;
 			}
+			emitted.record(described.type, described.name, "live");
 			for (const listener of listeners) listener(event);
 		}
 
@@ -349,7 +365,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 				hasHadSubscriber = true;
 				if (heldUntilFirstSubscriber.length > 0) {
 					const held = heldUntilFirstSubscriber.splice(0);
-					for (const event of held) onEvent(event);
+					for (const event of held) {
+						const described = describePiRpcEvent(event);
+						emitted.record(described.type, described.name, "replayed");
+						onEvent(event);
+					}
 				}
 				return () => {
 					listeners.delete(onEvent);
@@ -376,6 +396,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 		return {
 			session: piSession,
 			loadedExtensionPaths: extensionsResult.extensions.map((extension) => extension.path),
+			emittedEvents: () => emitted.recent(),
 			inspect(): HostedSessionInspection {
 				// ⚠ `getSessionFile()` names the path pi WILL write, from creation — but pi flushes
 				// lazily, holding every entry until the first assistant message. So the path is
