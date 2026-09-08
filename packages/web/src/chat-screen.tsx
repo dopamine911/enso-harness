@@ -22,6 +22,7 @@ import { createFixtureChat } from "./fixture-conversation.ts";
 import { SessionNotifications } from "./notifications.tsx";
 import { PermissionModeSelect, seedPermissionMode, usePermissionMode } from "./permission-mode.tsx";
 import { SelectedMessagePart } from "./selected-message-part.tsx";
+import { SessionDebugDrawer } from "./session-debug.tsx";
 import { SessionStatsBar } from "./session-stats.tsx";
 import type { ZenRendererMap } from "./ZenToolResult.tsx";
 
@@ -83,6 +84,14 @@ const descriptorRenderers: ZenRendererMap = {};
 // test`, where no DOM exists — fixture mode is a browser concern, so headless is never
 // fixture mode. The ENTRY (main.tsx) stays the only module that touches the DOM freely.
 const isFixtureMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("fixture");
+/** `?debug` opens the session debug drawer (#86) — same switch shape as `?fixture`. */
+const isDebugMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
+/**
+ * The thread this page IS (#86). Minted here rather than left to TanStack, which keeps its
+ * own id private: the page has to know its thread to ask the server about it, and every
+ * page load is a new thread by design — a reload is a fresh session, mode and all.
+ */
+const PAGE_THREAD_ID = crypto.randomUUID();
 const chatOptions = {
 	connection: isFixtureMode ? createFixtureChat().transport() : fetchServerSentEvents("/api/chat"),
 	/**
@@ -443,6 +452,10 @@ const { useAppChat, useChatContext } = createChatHook({
 					{/* The session-stats line (#45): cost so far + last request's prompt size.
 					    Hidden until the first counted request — see session-stats.tsx. */}
 					<SessionStatsBar />
+					{/* The session debug drawer (#86): what the browser believes beside what pi's
+					    session holds, for THIS thread. Opt-in by `?debug`, so it costs nothing in
+					    the normal layout. */}
+					{isDebugMode ? <SessionDebugDrawer threadId={PAGE_THREAD_ID} /> : null}
 					<Input />
 				</div>
 			);
@@ -513,6 +526,6 @@ const { useAppChat, useChatContext } = createChatHook({
 });
 
 export function ChatScreen(): React.ReactNode {
-	const chat = useAppChat();
+	const chat = useAppChat({ threadId: PAGE_THREAD_ID });
 	return <chat.AppChat />;
 }

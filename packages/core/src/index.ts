@@ -81,6 +81,7 @@ export {
 	PiSession,
 	PiStreamingBehavior,
 } from "./pi-rpc.ts";
+export { ZenThreadInspection, ZenThreadSummary } from "./session-inspection.ts";
 export {
 	isZenToolResultDescriptor,
 	readZenToolResultDescriptor,

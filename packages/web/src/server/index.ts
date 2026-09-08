@@ -3,11 +3,19 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { join, resolve } from "node:path";
 import { EventType } from "@ag-ui/core";
 import type { StreamChunk } from "@tanstack/ai";
-import { PICC_DEFAULT_PERMISSION_MODE, PICC_PERMISSION_MODES } from "@zen/core";
+import {
+	PICC_DEFAULT_PERMISSION_MODE,
+	PICC_PERMISSION_MODES,
+	type ZenThreadInspection,
+	type ZenThreadSummary,
+} from "@zen/core";
 import { type AgentHost, createAgentHost } from "../host/agent-host.ts";
 import { createDialogRegistry } from "./dialog-registry.ts";
 import { type ChatRunOutcome, resumeChat, runChat } from "./session.ts";
-import { createThreadSessions } from "./thread-sessions.ts";
+import { createThreadSessions, type ThreadView } from "./thread-sessions.ts";
+
+/** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
+const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/;
 
 /**
  * The dev backend: one SSE endpoint TanStack AI's `fetchServerSentEvents` can talk to (#24).
@@ -199,12 +207,71 @@ export function startZenServer(options: ZenServerOptions) {
 		response.end(JSON.stringify({ mode: PICC_DEFAULT_PERMISSION_MODE, available: [...PICC_PERMISSION_MODES] }));
 	}
 
+	// ── Session inspection (#86): what a live thread's session ACTUALLY contains, for a
+	// human (the debug drawer) or an agent (`scripts/zen-session.mjs`) to cross-check the
+	// derived views against. Read-only. Never creates a session — `threads.peek`, never
+	// `acquire`: looking must not be the thing that spins pi up. Loopback-only by the
+	// server's bind; the branch is conversation and tool output, which is the point.
+	function summarize(thread: ThreadView): ZenThreadSummary {
+		const inspection = thread.hosted.inspect();
+		return {
+			threadId: thread.threadId,
+			sessionId: inspection.sessionId,
+			sessionDir: inspection.sessionDir,
+			sessionFile: inspection.sessionFile,
+			mode: thread.hosted.session.permissionModeState().mode,
+			busy: thread.busy,
+			parked: registry.peek(thread.threadId) !== undefined,
+			lastActivityAt: new Date(thread.lastActivityAt).toISOString(),
+		};
+	}
+
+	function respondWithThreads(response: ServerResponse): void {
+		response.writeHead(200, { "Content-Type": "application/json" });
+		response.end(JSON.stringify(threads.list().map(summarize)));
+	}
+
+	function respondWithThread(threadId: string, response: ServerResponse): void {
+		const thread = threads.peek(threadId);
+		if (thread === undefined) {
+			response.writeHead(404, { "Content-Type": "text/plain" });
+			response.end(`no live session for thread ${threadId}`);
+			return;
+		}
+		const inspection = thread.hosted.inspect();
+		const payload: ZenThreadInspection = {
+			threadId,
+			sessionId: inspection.sessionId,
+			cwd: inspection.cwd,
+			sessionDir: inspection.sessionDir,
+			sessionFile: inspection.sessionFile,
+			permissionMode: thread.hosted.session.permissionModeState(),
+			commands: [...inspection.commands],
+			busy: thread.busy,
+			parked: registry.peek(threadId) !== undefined,
+			lastActivityAt: new Date(thread.lastActivityAt).toISOString(),
+			entries: [...inspection.entries],
+		};
+		response.writeHead(200, { "Content-Type": "application/json" });
+		response.end(JSON.stringify(payload));
+	}
+
 	// ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler sits at the
 	// complexity ceiling biome.jsonc pins for this file (#82), and its top-to-bottom shape is
 	// the #27/#34 teardown ordering. New routes are added to this dispatcher, not to it.
 	const server = createServer((request, response) => {
-		if (request.method === "GET" && request.url === "/api/mode") {
+		const url = request.url ?? "";
+		if (request.method === "GET" && url === "/api/mode") {
 			respondWithFreshThreadMode(response);
+			return;
+		}
+		if (request.method === "GET" && url === "/api/threads") {
+			respondWithThreads(response);
+			return;
+		}
+		const threadMatch = request.method === "GET" ? THREAD_ROUTE.exec(url) : null;
+		if (threadMatch?.[1] !== undefined) {
+			respondWithThread(decodeURIComponent(threadMatch[1]), response);
 			return;
 		}
 		void handleChat(request, response);

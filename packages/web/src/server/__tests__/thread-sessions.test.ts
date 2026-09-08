@@ -31,7 +31,11 @@ function fakeHosted() {
 			record.disposed += 1;
 		},
 	};
-	const hosted: HostedSession = { session, loadedExtensionPaths: [] };
+	const hosted: HostedSession = {
+		session,
+		loadedExtensionPaths: [],
+		inspect: () => ({ sessionId: "s", cwd: "/", sessionDir: "/s", sessionFile: null, entries: [], commands: [] }),
+	};
 	return { hosted, record, finishAbort: () => finishAbort() };
 }
 

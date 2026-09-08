@@ -84,10 +84,34 @@ export interface AgentHostOptions {
 	extensionFactories?: readonly InlineExtension[];
 }
 
+/**
+ * What pi's session for one hosted thread actually contains, read straight off the
+ * `SessionManager` (#86). Everything a run shows the browser is derived from the event
+ * stream; this is the source those views derive from, for a human or an agent to
+ * cross-check against.
+ */
+export interface HostedSessionInspection {
+	readonly sessionId: string;
+	readonly cwd: string;
+	readonly sessionDir: string;
+	/** The session file once pi has flushed it; null while the session lives only in memory. */
+	readonly sessionFile: string | null;
+	/** The branch, root to leaf, verbatim — pi's own entry shapes. */
+	readonly entries: readonly unknown[];
+	/** Slash commands this session registers. */
+	readonly commands: readonly string[];
+}
+
 export interface HostedSession {
 	readonly session: PiSession;
 	/** How many extensions the loader found — the load receipt a caller may assert. */
 	readonly loadedExtensionPaths: readonly string[];
+	/**
+	 * Read-only view of the session as pi holds it. Deliberately here and NOT on
+	 * `PiSession`: that is the run contract, pinned by three fakes and the refusal-path
+	 * tests, and inspection is a host concern.
+	 */
+	inspect(): HostedSessionInspection;
 }
 
 export interface AgentHost {
@@ -316,6 +340,20 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 		return {
 			session: piSession,
 			loadedExtensionPaths: extensionsResult.extensions.map((extension) => extension.path),
+			inspect(): HostedSessionInspection {
+				// ⚠ `getSessionFile()` names the path pi WILL write, from creation — but pi flushes
+				// lazily, holding every entry until the first assistant message. So the path is
+				// reported only once the file exists; before that the branch below is the only copy.
+				const plannedFile = sessionManager.getSessionFile();
+				return {
+					sessionId: sessionManager.getSessionId(),
+					cwd: sessionManager.getCwd(),
+					sessionDir: sessionManager.getSessionDir(),
+					sessionFile: plannedFile !== undefined && existsSync(plannedFile) ? plannedFile : null,
+					entries: sessionManager.getBranch(),
+					commands: piSession.listCommands().map((command) => command.name),
+				};
+			},
 		};
 	}
 
