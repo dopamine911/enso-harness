@@ -256,6 +256,14 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 				// and a branch with none is the initial mode by construction — this host creates a
 				// fresh session file per hosted session, so nothing precedes it. Walked from the
 				// end so the newest entry is the first hit.
+				//
+				// ⚠ Deliberately NOT cached (PR #85 review). A cache of "the last mode we saw"
+				// would have to skip `getBranch()` to change anything, and that assumes the branch
+				// is append-only — it is not: `/tree`, `/fork` and `/branch` move the leaf onto a
+				// path whose last `modes` entry can differ, which is exactly why picc re-walks in
+				// `restoreState`. `getBranch()` is itself one parent-pointer walk that builds a
+				// fresh array; this is a second linear pass of pointer comparisons over it.
+				// Correctness under branch navigation is worth microseconds per run.
 				let mode: string = PICC_DEFAULT_PERMISSION_MODE;
 				const branch = sessionManager.getBranch();
 				for (let position = branch.length - 1; position >= 0; position -= 1) {

@@ -115,6 +115,29 @@ test("a failed or malformed fetch leaves the store honestly unknown", async () =
 	expect(getPermissionModeSnapshot().mode).toBeUndefined();
 });
 
+// ⚠ STRICT MODE. main.tsx mounts under React StrictMode, which runs the mount effect twice
+// in dev; both pass the unknown-check before either fetch resolves. They must share ONE
+// request, and a failed one must not poison the slot for a later retry.
+test("concurrent seeds share one fetch; a failed seed lets a later one retry", async () => {
+	let fetches = 0;
+	const { promise, resolve } = Promise.withResolvers<unknown>();
+	const fetcher = (): Promise<unknown> => {
+		fetches += 1;
+		return promise;
+	};
+	const first = seedPermissionMode(fetcher);
+	const second = seedPermissionMode(fetcher);
+	resolve(receipt("default"));
+	await Promise.all([first, second]);
+	expect(fetches).toBe(1);
+	expect(getPermissionModeSnapshot().mode).toBe("default");
+
+	clearPermissionModeForTest();
+	await seedPermissionMode(() => Promise.reject(new Error("first try failed")));
+	await seedPermissionMode(() => Promise.resolve(receipt("plan")));
+	expect(getPermissionModeSnapshot().mode).toBe("plan");
+});
+
 // ── the control ──────────────────────────────────────────────────────────────
 
 const noop = (): void => {

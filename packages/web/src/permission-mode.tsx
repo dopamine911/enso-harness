@@ -75,11 +75,25 @@ export function applyZenPersistedModeEntry(data: unknown): void {
  * mode the thread already switched to with the fresh-thread default. Checked again AFTER
  * the fetch resolves, not just before: a run-start receipt can land in between.
  *
+ * ⚠ ONE FETCH AT A TIME. `main.tsx` mounts under React StrictMode, which runs effects
+ * twice in dev; both mounts pass the unknown-check before either fetch resolves, so
+ * without this they would fire two identical requests (PR #85 review). Concurrent seeds
+ * share the in-flight fetch; a failed one clears the slot so a later seed may retry.
+ *
  * The fetcher is injected so the guard is testable without a network; a failed or
  * malformed fetch leaves the store untouched — `unknown` is the honest answer then.
  */
-export async function seedPermissionMode(fetchFreshThreadState: () => Promise<unknown>): Promise<void> {
-	if (state.mode !== undefined) return;
+export function seedPermissionMode(fetchFreshThreadState: () => Promise<unknown>): Promise<void> {
+	if (state.mode !== undefined) return Promise.resolve();
+	seeding ??= seedOnce(fetchFreshThreadState).finally(() => {
+		seeding = undefined;
+	});
+	return seeding;
+}
+
+let seeding: Promise<void> | undefined;
+
+async function seedOnce(fetchFreshThreadState: () => Promise<unknown>): Promise<void> {
 	let fresh: unknown;
 	try {
 		fresh = await fetchFreshThreadState();
@@ -102,6 +116,7 @@ export function getPermissionModeSnapshot(): PermissionModeState {
 /** Test seam: reset the store between cases. Never called from production code. */
 export function clearPermissionModeForTest(): void {
 	state = UNKNOWN;
+	seeding = undefined;
 }
 
 export function usePermissionMode(): PermissionModeState {
