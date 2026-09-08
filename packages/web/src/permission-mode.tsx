@@ -66,6 +66,30 @@ export function applyZenPersistedModeEntry(data: unknown): void {
 	publish({ mode, available: state.available });
 }
 
+/**
+ * Seed the store from the server's fresh-thread state (`GET /api/mode`) so the header
+ * reads `default` from the first paint instead of `unknown` until the first run.
+ *
+ * ⚠ ONLY WHILE STILL UNKNOWN. The store is module-level and outlives the component, so a
+ * remount (HMR, strict mode, a re-render of the layout) would otherwise clobber a real
+ * mode the thread already switched to with the fresh-thread default. Checked again AFTER
+ * the fetch resolves, not just before: a run-start receipt can land in between.
+ *
+ * The fetcher is injected so the guard is testable without a network; a failed or
+ * malformed fetch leaves the store untouched — `unknown` is the honest answer then.
+ */
+export async function seedPermissionMode(fetchFreshThreadState: () => Promise<unknown>): Promise<void> {
+	if (state.mode !== undefined) return;
+	let fresh: unknown;
+	try {
+		fresh = await fetchFreshThreadState();
+	} catch {
+		return;
+	}
+	if (state.mode !== undefined) return;
+	applyZenPermissionMode(fresh);
+}
+
 export function subscribeToPermissionMode(listener: () => void): () => void {
 	listeners.add(listener);
 	return () => listeners.delete(listener);

@@ -227,6 +227,19 @@ test("a malformed body is a plain 400, no session built", async () => {
 	expect(built).toHaveLength(0);
 });
 
+// The header's first paint (#84): what a fresh thread starts in, answered WITHOUT building
+// a session — asking must not be the thing that spins pi up.
+test("GET /api/mode reports the fresh-thread mode and picc's modes, and builds no session", async () => {
+	const { url, built } = await startWith({ onPrompt: neverPrompted });
+	const response = await fetch(`${url}/api/mode`);
+	expect(response.status).toBe(200);
+	expect(await response.json()).toEqual({
+		mode: "default",
+		available: ["default", "acceptEdits", "plan", "bypassPermissions", "auto"],
+	});
+	expect(built).toHaveLength(0);
+});
+
 test("⚠ a bind conflict rejects `listening` instead of hanging, and reports the clash (#81 review)", async () => {
 	const { host } = fakeHost({ onPrompt: neverPrompted });
 	// Occupy a real port by letting the OS pick one (port 0).

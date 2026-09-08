@@ -4,7 +4,7 @@ import { fetchServerSentEvents } from "@tanstack/ai-react";
 import { createChatHook } from "@tanstack/ai-react/ui";
 import { isZenDialogSpec, ZEN_DIALOG_KEY, type ZenDialogSpec } from "@zen/core";
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
 	Conversation,
 	ConversationContent,
@@ -20,7 +20,7 @@ import { Textarea } from "./components/ui/textarea.tsx";
 import { routeZenCustomEvent } from "./custom-event-router.ts";
 import { createFixtureChat } from "./fixture-conversation.ts";
 import { SessionNotifications } from "./notifications.tsx";
-import { PermissionModeSelect, usePermissionMode } from "./permission-mode.tsx";
+import { PermissionModeSelect, seedPermissionMode, usePermissionMode } from "./permission-mode.tsx";
 import { SelectedMessagePart } from "./selected-message-part.tsx";
 import { SessionStatsBar } from "./session-stats.tsx";
 import type { ZenRendererMap } from "./ZenToolResult.tsx";
@@ -172,10 +172,17 @@ function RunProblem(): React.ReactNode {
  *
  * ⚠ Disabled while a run is in flight, the same rule the send button follows: a mode
  * change mid-run would collide with the busy-thread semantics #75 is deciding.
+ *
+ * On mount it asks the server what a fresh thread starts in, so the header reads
+ * `default` from the first paint rather than `unknown` until the first run. In fixture
+ * mode there is no server; the fetch fails and the store honestly stays `unknown`.
  */
 function PermissionModeControl(): React.ReactNode {
 	const chat = useChatContext();
 	const { mode, available } = usePermissionMode();
+	useEffect(() => {
+		void seedPermissionMode(async () => (await fetch("/api/mode")).json());
+	}, []);
 	return (
 		<PermissionModeSelect
 			mode={mode}

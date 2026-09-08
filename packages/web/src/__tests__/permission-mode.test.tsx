@@ -6,6 +6,7 @@ import {
 	clearPermissionModeForTest,
 	getPermissionModeSnapshot,
 	PermissionModeSelect,
+	seedPermissionMode,
 	subscribeToPermissionMode,
 } from "../permission-mode.tsx";
 
@@ -80,6 +81,38 @@ test("subscribers are told on every change, and unsubscribing stops it", () => {
 	stop();
 	applyZenPersistedModeEntry(piccEntry("auto"));
 	expect(notified).toBe(2);
+});
+
+// ── the mount-time seed ──────────────────────────────────────────────────────
+
+test("the seed fills an unknown store from the server's fresh-thread state", async () => {
+	await seedPermissionMode(() => Promise.resolve(receipt("default", ["default", "plan"])));
+	expect(getPermissionModeSnapshot()).toEqual({ mode: "default", available: ["default", "plan"] });
+});
+
+// ⚠ THE REMOUNT HAZARD. The store outlives the component; a remount re-runs the seed. If
+// the thread already switched modes, the fresh-thread default must NOT overwrite it.
+test("⚠ the seed never clobbers a mode the store already holds", async () => {
+	applyZenPersistedModeEntry(piccEntry("acceptEdits"));
+	await seedPermissionMode(() => Promise.resolve(receipt("default")));
+	expect(getPermissionModeSnapshot().mode).toBe("acceptEdits");
+});
+
+// A receipt that lands WHILE the fetch is in flight must also win: the seed re-checks
+// after resolving, not only before starting.
+test("a receipt arriving during the fetch beats the seed", async () => {
+	const { promise, resolve } = Promise.withResolvers<unknown>();
+	const seeding = seedPermissionMode(() => promise);
+	applyZenPermissionMode(receipt("plan"));
+	resolve(receipt("default"));
+	await seeding;
+	expect(getPermissionModeSnapshot().mode).toBe("plan");
+});
+
+test("a failed or malformed fetch leaves the store honestly unknown", async () => {
+	await seedPermissionMode(() => Promise.reject(new Error("no server")));
+	await seedPermissionMode(() => Promise.resolve({ nope: true }));
+	expect(getPermissionModeSnapshot().mode).toBeUndefined();
 });
 
 // ── the control ──────────────────────────────────────────────────────────────
