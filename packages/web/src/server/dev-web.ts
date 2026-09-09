@@ -15,8 +15,8 @@
  * unconfined (#9), neither surface may be reachable from another host.
  */
 import { join } from "node:path";
-import { findRepoRoot, webPackageDir, zenLogger, zenLogsDir } from "@zen/core";
-import { configureProcessLogging, parseZenLogLevels } from "@zen/core/log-process";
+import { findRepoRoot, webPackageDir, zenLogger } from "@zen/core";
+import { configureProcessLogging, logsDirFrom, parseZenLogLevels } from "@zen/core/log-process";
 import homepage from "../../index.html";
 
 const WEB_PORT = 5178;
@@ -28,7 +28,7 @@ const publicDir = join(webPackageDir(repoRoot), "public");
 // Its own process, the same day's file (#132) — nothing of substance happens here, but a
 // proxy that cannot reach the zen server is exactly the line a bundle needs.
 const disposeLogging = await configureProcessLogging({
-	logsDir: zenLogsDir(repoRoot),
+	logsDir: logsDirFrom(process.env, repoRoot),
 	process: "web",
 	levels: parseZenLogLevels(process.env, { console: "info" }),
 });

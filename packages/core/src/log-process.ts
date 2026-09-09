@@ -18,6 +18,7 @@ import {
 import { getPrettyFormatter } from "@logtape/pretty";
 import { redactByField } from "@logtape/redaction";
 import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS } from "./log.ts";
+import { zenLogsDir } from "./paths.ts";
 
 /**
  * A process's sink (#132 item 2): ONE log for the harness — `.zen/logs/zen-YYYY-MM-DD.jsonl`,
@@ -169,6 +170,16 @@ export interface ProcessLoggingOptions {
 	readonly process: string;
 	/** From `parseZenLogLevels`; the defaults when omitted: file `info`, no console. */
 	readonly levels?: ZenLogLevels;
+}
+
+/**
+ * Where this process writes: `ZEN_LOGS_DIR` when set — a user keeping logs elsewhere, a test
+ * keeping them out of the checkout — else `.zen/logs` under the repo (`zenLogsDir`). One
+ * rule for every launcher and for the extension, so they land in the same file.
+ */
+export function logsDirFrom(environment: Readonly<Record<string, string | undefined>>, repoRoot: string): string {
+	const configured = environment.ZEN_LOGS_DIR;
+	return configured === undefined || configured.length === 0 ? zenLogsDir(repoRoot) : configured;
 }
 
 /** `zen-2026-09-09.jsonl`: the harness's one log for that day. */

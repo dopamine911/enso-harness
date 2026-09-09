@@ -101,6 +101,11 @@ export function zenLogger(layer: ZenLogLayer, ...subcategory: readonly string[])
  * `{ threadId }`, the prompt route adds `{ generation }` after the acquire. ⚠ Only when the
  * process's configurator installed a `contextLocalStorage`; without one the properties are
  * silently absent — the browser has no `AsyncLocalStorage` and binds them explicitly.
+ *
+ * ⚠ The context follows the async chain, not the module graph: pi's in-process extension
+ * handlers (the guard's `tool_call`) run inside the prompt route's chain and inherit the
+ * thread without being told it. That holds only while pi is in-process — see the note on
+ * `guards/index.ts`'s logger.
  */
 export function withZenLogContext<T>(properties: ZenLogProperties, callback: () => T): T {
 	return withContext(properties, callback);

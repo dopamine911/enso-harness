@@ -147,6 +147,14 @@ const MUTATING_PATH_TOOLS = new Set([TOOL_WRITE, TOOL_EDIT]);
  * whole-file knowledge is exactly what a follow-up `write` claims. The cost is one `read`
  * before a wholesale rewrite of an edited file, which is the rule working.
  */
+/**
+ * ⚠ `threadId` on these records is INHERITED, never passed: in the web host pi runs
+ * in-process, the prompt route binds `{ threadId }` in `AsyncLocalStorage`
+ * (`withZenLogContext`), and the agent loop that reaches this handler is still inside that
+ * async chain — proven by the slice-2 receipt, not designed. Move extensions to a worker or
+ * a child (the TUI already runs pi as one) and every verdict loses its thread with no test
+ * going red; a record here would then need the id handed to it explicitly.
+ */
 const log = zenLogger("extension", "guards");
 
 const KNOWLEDGE_CONFERRING_TOOLS = new Set([TOOL_READ, TOOL_WRITE]);
@@ -331,10 +339,11 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
 	// this says WHEN, on which call, in the file beside every other layer's line about it.
 	pi.on("tool_call", (event, extensionContext): ToolCallEventResult | undefined => {
 		const verdict = decide(event, extensionContext.cwd);
+		const path = pathArgumentOf(event);
 		const properties = {
 			toolCallId: event.toolCallId,
 			toolName: event.toolName,
-			...(pathArgumentOf(event) === undefined ? {} : { path: pathArgumentOf(event) }),
+			...(path === undefined ? {} : { path }),
 		};
 		if (verdict?.block === true) log.warn("{toolName} denied: {reason}", { ...properties, reason: verdict.reason });
 		else log.debug("{toolName} allowed", properties);

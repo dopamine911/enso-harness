@@ -297,6 +297,7 @@ ZEN_LOG_LEVEL=debug   bun run dev   # every observation, one compact line each (
 ZEN_LOG_LEVEL=trace   bun run dev   # the same, plus each observation's payload
 ZEN_LOG_LEVEL="info,zen.server.events=trace,zen.extension.guards=debug" bun run dev   # one subtree up
 ZEN_LOG_CONSOLE=warning bun run dev  # the terminal's level; the file is unaffected
+ZEN_LOGS_DIR=/somewhere/else bun run dev   # the directory, for every process; default .zen/logs
 ```
 
 A value that is not a level is a startup error naming it. The first record of every process says

@@ -12,8 +12,8 @@
  */
 
 import { mkdirSync } from "node:fs";
-import { findRepoRoot, harnessPackageDir, zenAgentDir, zenLogger, zenLogsDir } from "@zen/core";
-import { configureProcessLogging, parseZenLogLevels } from "@zen/core/log-process";
+import { findRepoRoot, harnessPackageDir, zenAgentDir, zenLogger } from "@zen/core";
+import { configureProcessLogging, logsDirFrom, parseZenLogLevels } from "@zen/core/log-process";
 import { startZenServer } from "./index.ts";
 
 const cwdArgument = process.argv[2];
@@ -24,8 +24,9 @@ const repoRoot = findRepoRoot(import.meta.url);
 const agentDir = zenAgentDir(repoRoot);
 mkdirSync(agentDir, { recursive: true });
 
+const logsDir = logsDirFrom(process.env, repoRoot);
 const disposeLogging = await configureProcessLogging({
-	logsDir: zenLogsDir(repoRoot),
+	logsDir,
 	process: "server",
 	levels: parseZenLogLevels(process.env, { console: "info" }),
 });
@@ -54,7 +55,7 @@ try {
 		cwd,
 		harnessPackageDir: harnessPackageDir(repoRoot),
 		agentDir,
-		logsDir: zenLogsDir(repoRoot),
+		logsDir,
 	});
 } catch {
 	// The bind failed; the server already logged why. Exit non-zero instead of dangling.
