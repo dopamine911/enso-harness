@@ -54,8 +54,8 @@ export type Activity =
  * or an unmatched result at the tail — the run is in flight. The part itself is still on
  * screen in the transcript; nothing is hidden by summarising it.
  */
-export function describeActivity(messages: ReadonlyArray<UIMessage>, isLoading: boolean): Activity {
-	if (!isLoading) return { kind: "idle" };
+export function describeActivity(messages: ReadonlyArray<UIMessage>, generating: boolean): Activity {
+	if (!generating) return { kind: "idle" };
 	const last = selectChatUI({ messages }).messages.at(-1);
 	if (last === undefined || last.message.role !== "assistant") return { kind: "working" };
 	const tail = automaticPartsForMessage(last).at(-1);
@@ -138,7 +138,7 @@ export function SessionStatusView({ activity, counts, stats }: SessionStatusView
 
 export interface SessionStatusBarProps {
 	readonly messages: ReadonlyArray<UIMessage>;
-	readonly isLoading: boolean;
+	readonly generating: boolean;
 }
 
 /**
@@ -146,9 +146,13 @@ export interface SessionStatusBarProps {
  * (the chat hook is bound inside chat-screen.tsx, and this module stays free of it), the
  * thread's usage store is read from context.
  */
-export function SessionStatusBar({ messages, isLoading }: SessionStatusBarProps): React.ReactNode {
+export function SessionStatusBar({ messages, generating }: SessionStatusBarProps): React.ReactNode {
 	const stats = useStore(useThreadStores().stats);
 	return (
-		<SessionStatusView activity={describeActivity(messages, isLoading)} counts={countSession(messages)} stats={stats} />
+		<SessionStatusView
+			activity={describeActivity(messages, generating)}
+			counts={countSession(messages)}
+			stats={stats}
+		/>
 	);
 }

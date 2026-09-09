@@ -536,7 +536,7 @@ const chatComponents = {
 					</div>
 					{/* The status bar (#90): activity, turns, tool calls, cost — always visible, full
 					    width under transcript AND debug pane, so it is the one place to look. */}
-					<SessionStatusBar messages={chat.messages} isLoading={chat.sessionGenerating} />
+					<SessionStatusBar messages={chat.messages} generating={chat.sessionGenerating} />
 				</div>
 			);
 		},
