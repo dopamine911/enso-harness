@@ -9,8 +9,10 @@
 
 /** A `notify` ui-request: a message meant for a human. Value: the `extension-ui-request` observation. */
 export const ZEN_CUSTOM_EVENT_NOTIFY = "zen.notify";
-/** One completed request's accounting (#45). Value: the `message-usage` observation. */
+/** One completed message's accounting (#45). Value: a `message-end` observation that carries `usage`. */
 export const ZEN_CUSTOM_EVENT_USAGE = "zen.usage";
+/** What waits behind the run in flight (#75). Value: the `queue` observation. */
+export const ZEN_CUSTOM_EVENT_QUEUE = "zen.queue";
 /** An extension persisted a custom session entry (#29). Value: the `custom-entry` observation. */
 export const ZEN_CUSTOM_EVENT_ENTRY = "zen.entry";
 /**

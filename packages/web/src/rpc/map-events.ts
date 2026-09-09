@@ -158,6 +158,49 @@ function mapExtensionUiRequest(event: PiRpcEvent, delivery: PiEventDelivery): Ze
 	};
 }
 
+/** pi's message role off a `message_start` / `message_end`, or `unknown` when the record has none. */
+function roleOf(message: { role?: unknown } | undefined): string {
+	return typeof message?.role === "string" ? message.role : "unknown";
+}
+
+/** The length of an array field pi carries, or 0 — `toolResults`, `steering`, `followUp`. */
+function countOf(value: unknown): number {
+	return Array.isArray(value) ? value.length : 0;
+}
+
+/**
+ * A message began (#112). A USER message carries its text so a second follower sees the
+ * prompt another tab sent; every other role's content arrives by its own events.
+ */
+function mapMessageStart(event: PiRpcEvent): ZenObservation {
+	const message = event.message as { role?: unknown; content?: unknown } | undefined;
+	const role = roleOf(message);
+	return role === "user"
+		? { kind: "message-start", role, text: contentToText(message?.content) }
+		: { kind: "message-start", role };
+}
+
+/**
+ * One completed message (#45, #112), with its accounting when pi attributes any.
+ *
+ * ⚠ The per-delta `usage` on `message_update` is CUMULATIVE for the in-flight message —
+ * summing it would multiply cost by the delta count — so the completed message is the one
+ * honest accounting unit, emitted exactly once.
+ *
+ * The role gate copies pi's own attribution rule (`core/usage-totals.js`
+ * getUsageCostBreakdown): assistant messages and toolResult messages WITH usage are
+ * attributable spend; every other completed message is a boundary without it.
+ */
+function mapMessageEnd(event: PiRpcEvent): ZenObservation {
+	const message = event.message as { role?: unknown; usage?: unknown } | undefined;
+	const role = roleOf(message);
+	const usage = readUsage(message?.usage);
+	if (usage !== undefined && (role === "assistant" || role === "toolResult")) {
+		return { kind: "message-end", role, usage };
+	}
+	return { kind: "message-end", role };
+}
+
 /**
  * Map one pi rpc event. Never returns undefined — see the design rule above.
  *
@@ -182,23 +225,21 @@ export function mapPiEvent(event: PiRpcEvent, delivery: PiEventDelivery = "live"
 			return { kind: "unmapped", event };
 		}
 
-		case "message_end": {
-			// One completed model request (#45). ⚠ The per-delta `usage` above is CUMULATIVE
-			// for the in-flight message — summing it would multiply cost by the delta count —
-			// so the completed message is the one honest accounting unit, emitted exactly once.
-			//
-			// The role gate copies pi's own attribution rule (`core/usage-totals.js`
-			// getUsageCostBreakdown): assistant messages and toolResult messages WITH usage are
-			// attributable spend; every other message (user turns, usage-less tool results)
-			// carries no spend and stays unmapped — carried, not dropped, per the design rule.
-			const message = event.message as { role?: unknown; usage?: unknown } | undefined;
-			const role = typeof message?.role === "string" ? message.role : "";
-			const usage = readUsage(message?.usage);
-			if (usage !== undefined && (role === "assistant" || role === "toolResult")) {
-				return { kind: "message-usage", role, usage };
-			}
-			return { kind: "unmapped", event };
-		}
+		case "message_start":
+			return mapMessageStart(event);
+
+		case "message_end":
+			return mapMessageEnd(event);
+
+		case "turn_start":
+			return { kind: "turn-start" };
+
+		case "turn_end":
+			// pi's turn: one model request and its tool results (dsh's step — see @zen/core).
+			return { kind: "turn-end", toolResults: countOf(event.toolResults) };
+
+		case "queue_update":
+			return { kind: "queue", steering: countOf(event.steering), followUp: countOf(event.followUp) };
 
 		case "tool_execution_start":
 			return {

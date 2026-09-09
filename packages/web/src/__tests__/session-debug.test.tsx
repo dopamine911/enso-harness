@@ -159,7 +159,7 @@ test("before the first fetch, and on a failed one, the session column says why",
 
 test("every CUSTOM chunk the router sees is recorded, oldest first, with a stable identity", () => {
 	routeZenCustomEvent(stores, "zen.mode", { mode: "default", available: [] });
-	routeZenCustomEvent(stores, "zen.unmapped", { type: "queue_update" });
+	routeZenCustomEvent(stores, "zen.unmapped", { type: "some_future_event" });
 	const recorded = stores.recentChunks.get();
 	expect(recorded.map((chunk) => chunk.name)).toEqual(["zen.mode", "zen.unmapped"]);
 	expect(recorded[0]?.sequence).toBeLessThan(recorded[1]?.sequence ?? 0);

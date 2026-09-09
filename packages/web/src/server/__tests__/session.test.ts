@@ -78,6 +78,7 @@ function fakeSession(script: FakeSessionScript): { session: PiSession; record: F
 			record.answers.push(response);
 			script.onAnswer?.(context, response);
 		},
+		openDialog: () => undefined,
 		listCommands: () => {
 			record.commandLookups += 1;
 			return (script.commands ?? []).map((name): PiCommand => ({ name, source: "extension" }));
@@ -259,7 +260,7 @@ test("a rejected prompt yields RUN_ERROR rather than throwing", async () => {
 // translation failure is reported by the host (`agent-host.ts`) rather than seen here.
 
 test("an unmodelled pi event still reaches the client, as CUSTOM", async () => {
-	const { chunks } = await collect(['{"type":"queue_update","depth":3}', '{"type":"agent_settled"}']);
+	const { chunks } = await collect(['{"type":"some_future_event","depth":3}', '{"type":"agent_settled"}']);
 	// Name-specific: the run's own `zen.mode` receipt is also a CUSTOM chunk (#84).
 	const custom = chunks.find((c) => c.type === EventType.CUSTOM && "name" in c && c.name === "zen.unmapped");
 	expect(custom).toMatchObject({ name: "zen.unmapped" });

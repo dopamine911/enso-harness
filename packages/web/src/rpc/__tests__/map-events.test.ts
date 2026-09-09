@@ -251,7 +251,7 @@ test("an entry_appended with no readable entry stays unmapped", () =>
 	expect(kindOf({ type: "entry_appended" })).toBe("unmapped"));
 
 // --- #45: one completed request's accounting, off message_end
-test("an assistant message_end becomes a message-usage with its role and usage", () =>
+test("an assistant message_end becomes a message-end with its role and usage", () =>
 	expect(
 		mapPiEvent({
 			type: "message_end",
@@ -261,7 +261,7 @@ test("an assistant message_end becomes a message-usage with its role and usage",
 			},
 		}),
 	).toEqual({
-		kind: "message-usage",
+		kind: "message-end",
 		role: "assistant",
 		usage: { input: 1200, output: 40, cacheRead: 300, cacheWrite: 50, totalCost: 0.0132 },
 	}));
@@ -274,26 +274,58 @@ test("a toolResult message_end WITH usage is counted spend", () =>
 			message: { role: "toolResult", usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0 } },
 		}),
 	).toEqual({
-		kind: "message-usage",
+		kind: "message-end",
 		role: "toolResult",
 		usage: { input: 5, output: 2, cacheRead: 0, cacheWrite: 0 },
 	}));
 
-test("a toolResult message_end WITHOUT usage stays unmapped — no spend to count", () =>
-	expect(kindOf({ type: "message_end", message: { role: "toolResult" } })).toBe("unmapped"));
+test("a toolResult message_end WITHOUT usage is a boundary with no spend to count", () =>
+	expect(mapPiEvent({ type: "message_end", message: { role: "toolResult" } })).toEqual({
+		kind: "message-end",
+		role: "toolResult",
+	}));
 
 // ⚠ The role gate is load-bearing: without it, any future message shape carrying a
 // usage-like object would inflate the cost sum outside pi's own attribution rule.
-test("a message_end with usage but an unattributable role stays unmapped", () =>
+test("a message_end with usage but an unattributable role is a boundary WITHOUT that usage", () =>
 	expect(
-		kindOf({
+		mapPiEvent({
 			type: "message_end",
 			message: { role: "user", usage: { input: 9, output: 0, cacheRead: 0, cacheWrite: 0 } },
 		}),
-	).toBe("unmapped"));
+	).toEqual({ kind: "message-end", role: "user" }));
 
-test("a message_end with no readable message stays unmapped", () =>
-	expect(kindOf({ type: "message_end" })).toBe("unmapped"));
+test("a message_end with no readable message is a boundary of unknown role", () =>
+	expect(mapPiEvent({ type: "message_end" })).toEqual({ kind: "message-end", role: "unknown" }));
+
+// --- #112: the boundaries and counters AG-UI supplied and the vocabulary lacked
+test("a user message_start carries its text; an assistant one is a bare boundary", () => {
+	expect(mapPiEvent({ type: "message_start", message: { role: "user", content: "fix it" } })).toEqual({
+		kind: "message-start",
+		role: "user",
+		text: "fix it",
+	});
+	expect(mapPiEvent({ type: "message_start", message: { role: "assistant", content: [] } })).toEqual({
+		kind: "message-start",
+		role: "assistant",
+	});
+});
+
+test("pi's turn boundaries cross with the tool-result count, not the results", () => {
+	expect(mapPiEvent({ type: "turn_start" })).toEqual({ kind: "turn-start" });
+	expect(mapPiEvent({ type: "turn_end", message: {}, toolResults: [{}, {}] })).toEqual({
+		kind: "turn-end",
+		toolResults: 2,
+	});
+	expect(mapPiEvent({ type: "turn_end" })).toEqual({ kind: "turn-end", toolResults: 0 });
+});
+
+test("queue_update crosses as counts (#75)", () =>
+	expect(mapPiEvent({ type: "queue_update", steering: ["a"], followUp: ["b", "c"] })).toEqual({
+		kind: "queue",
+		steering: 1,
+		followUp: 2,
+	}));
 
 // ⚠ The design rule: there is no skip case.
 test("an unmodelled event is carried through with its payload intact", () => {

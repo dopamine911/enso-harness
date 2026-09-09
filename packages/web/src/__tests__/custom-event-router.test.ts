@@ -60,7 +60,7 @@ test("zen.run sets the thread's run generation; a malformed value leaves the las
 
 test("zen.usage reaches the session-stats store and nothing else", () => {
 	route(ZEN_CUSTOM_EVENT_USAGE, {
-		kind: "message-usage",
+		kind: "message-end",
 		role: "assistant",
 		usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalCost: 0.5 },
 	});
@@ -138,7 +138,7 @@ test("malformed payloads never throw and never render", () => {
 test("⚠ a chunk routed to one thread never touches another thread's stores", () => {
 	const other = mintThread();
 	route(ZEN_CUSTOM_EVENT_USAGE, {
-		kind: "message-usage",
+		kind: "message-end",
 		role: "assistant",
 		usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalCost: 0.5 },
 	});

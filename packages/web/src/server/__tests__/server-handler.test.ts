@@ -62,6 +62,7 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
 		answerDialog: () => {
 			script.onAnswer?.(emit);
 		},
+		openDialog: () => undefined,
 		listCommands: () => [{ name: "mode", source: "extension" }],
 		permissionModeState: () => ({ mode: "default", available: ["default", "acceptEdits"] }),
 		subscribe: (onEvent) => {

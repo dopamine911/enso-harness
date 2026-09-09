@@ -12,7 +12,7 @@ beforeEach(() => {
 });
 
 const assistantUsage = (input: number, cacheRead: number, totalCost: number) => ({
-	kind: "message-usage",
+	kind: "message-end",
 	role: "assistant",
 	usage: { input, output: 10, cacheRead, cacheWrite: 0, totalCost },
 });
@@ -34,7 +34,7 @@ test("cost accumulates across messages; last-request tokens follow the latest as
 test("a toolResult summary adds cost but never moves the last-request tokens", () => {
 	store.applyUsage(assistantUsage(1000, 0, 0.01));
 	store.applyUsage({
-		kind: "message-usage",
+		kind: "message-end",
 		role: "toolResult",
 		usage: { input: 50, output: 5, cacheRead: 0, cacheWrite: 0, totalCost: 0.001 },
 	});
@@ -49,7 +49,7 @@ test("a toolResult summary adds cost but never moves the last-request tokens", (
 test("a zero-usage assistant message never overwrites the last-request tokens", () => {
 	store.applyUsage(assistantUsage(1000, 200, 0.01));
 	store.applyUsage({
-		kind: "message-usage",
+		kind: "message-end",
 		role: "assistant",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalCost: 0 },
 	});
@@ -60,7 +60,7 @@ test("a zero-usage assistant message never overwrites the last-request tokens", 
 
 test("a usage with no totalCost still counts tokens without poisoning the sum", () => {
 	store.applyUsage({
-		kind: "message-usage",
+		kind: "message-end",
 		role: "assistant",
 		usage: { input: 100, output: 1, cacheRead: 0, cacheWrite: 0 },
 	});
@@ -93,7 +93,7 @@ test("subscribers are told about a counted message, and unsubscribe stops that",
 // term from the prompt-token sum left the suite green (#53 S2). This one pins the term.
 test("last-request tokens include cacheWrite", () => {
 	store.applyUsage({
-		kind: "message-usage",
+		kind: "message-end",
 		role: "assistant",
 		usage: { input: 100, output: 1, cacheRead: 20, cacheWrite: 7, totalCost: 0 },
 	});

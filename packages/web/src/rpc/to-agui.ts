@@ -4,6 +4,7 @@ import { ZEN_TOOL_RESULT_KEY, type ZenObservation } from "@zen/core";
 import {
 	ZEN_CUSTOM_EVENT_ENTRY,
 	ZEN_CUSTOM_EVENT_NOTIFY,
+	ZEN_CUSTOM_EVENT_QUEUE,
 	ZEN_CUSTOM_EVENT_UNMAPPED,
 	ZEN_CUSTOM_EVENT_USAGE,
 } from "./custom-event-names.ts";
@@ -202,14 +203,39 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 				},
 			];
 
-		case "message-usage":
-			// One completed request's accounting (#45) — the session-stats bar sums these.
+		case "message-start":
+			// The AG-UI view opens ONE assistant message per run (`TEXT_MESSAGE_START` at run
+			// start) and closes it at settle, so per-message boundaries have no place in it —
+			// the same acknowledged loss as partial tool output above. The follow carries them.
+			return [];
+
+		case "message-end":
+			// One completed message's accounting (#45) — the session-stats bar sums these.
 			// CUSTOM because AG-UI has no usage vocabulary; the value is the whole observation
-			// so the consumer reads `role` and `usage` off one shape declared in @zen/core.
+			// so the consumer reads `role` and `usage` off one shape declared in @zen/core. A
+			// boundary without spend has nothing for this view.
+			return observation.usage === undefined
+				? []
+				: [
+						{
+							type: EventType.CUSTOM,
+							name: ZEN_CUSTOM_EVENT_USAGE,
+							value: observation,
+						},
+					];
+
+		case "turn-start":
+			return [{ type: EventType.STEP_STARTED, stepName: "turn" }];
+
+		case "turn-end":
+			return [{ type: EventType.STEP_FINISHED, stepName: "turn" }];
+
+		case "queue":
+			// Queue depth (#75). CUSTOM: AG-UI has no queue vocabulary.
 			return [
 				{
 					type: EventType.CUSTOM,
-					name: ZEN_CUSTOM_EVENT_USAGE,
+					name: ZEN_CUSTOM_EVENT_QUEUE,
 					value: observation,
 				},
 			];

@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
+import type { ZenDialogSpec } from "./dialog.ts";
 import type { PiPermissionModeState } from "./permission-mode.ts";
 
 /**
@@ -133,6 +134,13 @@ export const PiSession = Type.Object({
 	 * callers do not wrap this in a try/catch.
 	 */
 	answerDialog: Type.Unsafe<(response: PiDialogResponse) => void>(Type.Function([Type.Unknown()], Type.Void())),
+	/**
+	 * The question a pending blocking dialog asked, by its request id — so an answer can be
+	 * validated against what was offered (#112: a select's value handed to the extension
+	 * VERBATIM is an injection seam unless the server checks it). Undefined once answered,
+	 * cancelled, or never asked.
+	 */
+	openDialog: Type.Unsafe<(id: string) => ZenDialogSpec | undefined>(Type.Function([Type.Unknown()], Type.Unknown())),
 	/** The slash commands this session can run — extension commands, prompt templates, skills. Synchronous: read off the live registry, no round trip. */
 	listCommands: Type.Unsafe<() => PiCommand[]>(Type.Function([], Type.Unknown())),
 	/**
