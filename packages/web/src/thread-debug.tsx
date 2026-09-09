@@ -11,15 +11,15 @@ import { Check } from "typebox/value";
 import { Button } from "./components/ui/button.tsx";
 import type { RecordedCustomChunk } from "./custom-event-router.ts";
 import { type PermissionModeState, usePermissionMode } from "./permission-mode.tsx";
-import { boundedFailureDetail } from "./resumable-sessions.ts";
 import {
 	ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
 	ZEN_CUSTOM_EVENT_ENTRY,
 	ZEN_CUSTOM_EVENT_FOLLOW_ENDED,
 	ZEN_CUSTOM_EVENT_RUN,
 } from "./rpc/custom-event-names.ts";
-import type { SessionStats } from "./session-stats.tsx";
 import { useStore, useThreadStores } from "./store.ts";
+import { boundedFailureDetail } from "./stored-threads.ts";
+import type { ThreadStats } from "./thread-stats.tsx";
 
 /**
  * The session debug drawer (#86): what the BROWSER believes next to what pi's SESSION
@@ -45,7 +45,7 @@ import { useStore, useThreadStores } from "./store.ts";
 
 export interface BrowserBelief {
 	readonly mode: PermissionModeState;
-	readonly stats: SessionStats;
+	readonly stats: ThreadStats;
 	readonly recentChunks: readonly RecordedCustomChunk[];
 	/** The acquisition this page's last run held (`zen.run`, #109); undefined before a run. */
 	readonly generation: number | undefined;
@@ -79,7 +79,7 @@ export function describeLostSession(browser: number | undefined, sessionMissing:
 	return `this page ran #${browser} here, and the server holds no session for the thread — it restarted, or evicted the thread`;
 }
 
-export interface SessionDebugViewProps {
+export interface ThreadDebugViewProps {
 	readonly threadId: string;
 	readonly browser: BrowserBelief;
 	/** The server's answer, or undefined before the first refresh. */
@@ -139,7 +139,7 @@ function EventTailList({ events }: { events: readonly ZenThreadEvent[] }): React
 	);
 }
 
-export function SessionDebugView({
+export function ThreadDebugView({
 	threadId,
 	browser,
 	session,
@@ -148,7 +148,7 @@ export function SessionDebugView({
 	copyState,
 	onRefresh,
 	onCopy,
-}: SessionDebugViewProps): React.ReactNode {
+}: ThreadDebugViewProps): React.ReactNode {
 	const browserMode = browser.mode.mode ?? "unknown";
 	const hostMode = session?.permissionMode.mode;
 	const branchMode = session === undefined ? undefined : persistedPermissionMode(session.entries);
@@ -335,7 +335,7 @@ const SERVER_STATE_CHUNKS: ReadonlySet<string> = new Set([
 ]);
 /**
  * The sequence of the latest server-state chunk, or undefined before any: the drawer
- * refreshes when this moves. Exported for `__tests__/session-debug.test.tsx`.
+ * refreshes when this moves. Exported for `__tests__/thread-debug.test.tsx`.
  */
 export function latestServerStateSequence(chunks: readonly RecordedCustomChunk[]): number | undefined {
 	for (let position = chunks.length - 1; position >= 0; position -= 1) {
@@ -360,7 +360,7 @@ export type CopyState = "idle" | "copied" | "failed";
  * debugging surface should put no request in the trace a human is trying to read. Opening
  * it on a fresh thread reads "nothing has run yet", the honest state, rather than an error.
  */
-export function SessionDebugDrawer(): React.ReactNode {
+export function ThreadDebugDrawer(): React.ReactNode {
 	const stores = useThreadStores();
 	const { threadId } = stores;
 	const mode = usePermissionMode();
@@ -412,7 +412,7 @@ export function SessionDebugDrawer(): React.ReactNode {
 		);
 	};
 	return (
-		<SessionDebugView
+		<ThreadDebugView
 			threadId={threadId}
 			browser={browser}
 			session={session}

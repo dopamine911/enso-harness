@@ -10,8 +10,8 @@ import {
 	latestServerStateSequence,
 	latestWins,
 	NO_SESSION_YET,
-	SessionDebugView,
-} from "../session-debug.tsx";
+	ThreadDebugView,
+} from "../thread-debug.tsx";
 import { clearThreadsForTest, mintThread, type ThreadStores } from "../thread-stores.ts";
 
 /**
@@ -86,7 +86,7 @@ interface RenderOverrides {
 
 const renderWith = ({ browser, session, error, copyState = "idle", events }: RenderOverrides): string =>
 	renderToStaticMarkup(
-		<SessionDebugView
+		<ThreadDebugView
 			threadId="t1"
 			browser={browser}
 			session={session}

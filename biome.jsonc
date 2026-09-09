@@ -212,19 +212,6 @@
 					}
 				}
 			}
-		},
-		{
-			// `drainUntilRunEnds` (39): one loop owning progress timeouts, dialog
-			// parking, and settle detection IN ORDER — the #27 contract. Helper-
-			// splitting it is how a parked process leaks past a teardown.
-			"includes": ["packages/web/src/server/session.ts"],
-			"linter": {
-				"rules": {
-					"complexity": {
-						"noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 39 } }
-					}
-				}
-			}
 		}
 	],
 	"assist": {

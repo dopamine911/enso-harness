@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test";
 import type { ZenThreadHistory } from "@zen/core";
 import {
-	createResumableSessionsStore,
 	createResumeRequests,
+	createStoredThreadsStore,
 	describeFailedResponse,
 	FAILURE_DETAIL_MAX_LENGTH,
-	sessionsNotOnThisPage,
-} from "../resumable-sessions.ts";
+	storedThreadsNotOnThisPage,
+} from "../stored-threads.ts";
 
 // #103 receipt, step 8: the dev proxy answered a dead API with Bun's whole HTML error page,
 // and quoting it filled the rail. One line, bounded, status first.
@@ -33,22 +33,22 @@ test("the resumable-session store validates listings and preserves the last good
 			busy: false,
 		},
 	];
-	const store = createResumableSessionsStore(async () => {
+	const store = createStoredThreadsStore(async () => {
 		if (answer instanceof Error) throw answer;
 		return answer;
 	});
 
 	await store.refresh();
-	expect(store.get()).toMatchObject({ sessions: [{ threadId: "stored-1", title: "earlier work" }], error: undefined });
+	expect(store.get()).toMatchObject({ threads: [{ threadId: "stored-1", title: "earlier work" }], error: undefined });
 
 	answer = new Error("connection refused");
 	await store.refresh();
-	expect(store.get().sessions).toHaveLength(1);
+	expect(store.get().threads).toHaveLength(1);
 	expect(store.get().error).toBe("connection refused");
 
 	answer = [{ threadId: "missing-fields" }];
 	await store.refresh();
-	expect(store.get().sessions).toHaveLength(1);
+	expect(store.get().threads).toHaveLength(1);
 	expect(store.get().error).toContain("did not match its schema");
 });
 
@@ -67,7 +67,7 @@ test("the earlier list excludes every session already owned by this page", () =>
 			busy: false,
 		},
 	];
-	expect(sessionsNotOnThisPage(stored, new Set(["here"])).map((session) => session.threadId)).toEqual(["earlier"]);
+	expect(storedThreadsNotOnThisPage(stored, new Set(["here"])).map((session) => session.threadId)).toEqual(["earlier"]);
 });
 
 // ── last click wins (PR #104 review) ─────────────────────────────────────────

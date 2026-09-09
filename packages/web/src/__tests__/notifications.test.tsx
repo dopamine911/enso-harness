@@ -4,7 +4,7 @@ import {
 	createNotificationsStore,
 	NotificationLine,
 	type NotificationsStore,
-	SessionNotifications,
+	ThreadNotifications,
 } from "../notifications.tsx";
 import { ThreadStoresContext } from "../store.ts";
 import { clearThreadsForTest, mintThread } from "../thread-stores.ts";
@@ -79,7 +79,7 @@ test("the session block renders nothing while the thread's store is empty, then 
 	const block = (): string =>
 		renderToStaticMarkup(
 			<ThreadStoresContext.Provider value={thread}>
-				<SessionNotifications />
+				<ThreadNotifications />
 			</ThreadStoresContext.Provider>,
 		);
 	expect(block()).toBe("");
@@ -98,7 +98,7 @@ test("⚠ a notification belongs to its thread: another thread's block does not 
 	first.notifications.push("only in the first", "info", "run");
 	const rendered = renderToStaticMarkup(
 		<ThreadStoresContext.Provider value={second}>
-			<SessionNotifications />
+			<ThreadNotifications />
 		</ThreadStoresContext.Provider>,
 	);
 	expect(rendered).toBe("");
@@ -115,7 +115,7 @@ const STARTUP_TWO = "pi-multi-account v1.21.0 loaded (enabled). 1 account(s) in 
 function blockOf(thread: ReturnType<typeof mintThread>): string {
 	return renderToStaticMarkup(
 		<ThreadStoresContext.Provider value={thread}>
-			<SessionNotifications />
+			<ThreadNotifications />
 		</ThreadStoresContext.Provider>,
 	);
 }

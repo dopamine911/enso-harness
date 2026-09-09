@@ -1,7 +1,7 @@
 import type { UIMessage } from "@tanstack/ai-client";
 import { automaticPartsForMessage, selectChatUI } from "@tanstack/ai-client/ui";
-import type { SessionStats } from "./session-stats.tsx";
 import { useStore, useThreadStores } from "./store.ts";
+import type { ThreadStats } from "./thread-stats.tsx";
 import { toolResultState } from "./ZenToolResult.tsx";
 
 /**
@@ -20,7 +20,7 @@ import { toolResultState } from "./ZenToolResult.tsx";
  * ⚠ EVERYTHING HERE IS DERIVED FROM STATE THE PAGE ALREADY HOLDS — no new wire. Activity
  * from `chat.sessionGenerating` (the shared run flag — `isLoading` is request-local and the
  * follow adapter never raises it, #103 receipt) and the shape of the last message; counts from the message list;
- * cost and prompt size from the `zen.usage` store (session-stats.tsx). Timing — LLM time,
+ * cost and prompt size from the `zen.usage` store (thread-stats.tsx). Timing — LLM time,
  * TTFT, tok/s — is NOT on the wire and is not invented here; the host would have to stamp
  * events. That is a later slice of #90, named there.
  *
@@ -80,7 +80,7 @@ export function describeActivity(
 	return { kind: "working" };
 }
 
-export interface SessionCounts {
+export interface ThreadCounts {
 	/** User messages — one per thing the human asked. */
 	readonly turns: number;
 	/** Tool calls across the whole transcript, paired or not. */
@@ -88,7 +88,7 @@ export interface SessionCounts {
 }
 
 /** Count the transcript. Cheap enough to run per render; the list is what is on screen. */
-export function countSession(messages: ReadonlyArray<UIMessage>): SessionCounts {
+export function countThread(messages: ReadonlyArray<UIMessage>): ThreadCounts {
 	let turns = 0;
 	let toolCalls = 0;
 	for (const message of messages) {
@@ -103,10 +103,10 @@ export function activityLabel(activity: Activity): string {
 	return activity.kind === "running" ? `running ${activity.tool}` : activity.kind;
 }
 
-export interface SessionStatusViewProps {
+export interface ThreadStatusViewProps {
 	readonly activity: Activity;
-	readonly counts: SessionCounts;
-	readonly stats: SessionStats;
+	readonly counts: ThreadCounts;
+	readonly stats: ThreadStats;
 }
 
 const DOT_DISCONNECTED = "size-2 rounded-full bg-destructive";
@@ -121,11 +121,11 @@ function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof 
 }
 
 /** Pure view — everything it shows arrives as props, so a static render pins the wording. */
-export function SessionStatusView({ activity, counts, stats }: SessionStatusViewProps): React.ReactNode {
+export function ThreadStatusView({ activity, counts, stats }: ThreadStatusViewProps): React.ReactNode {
 	const dotClass = activityDotClass(activity);
 	return (
 		<footer
-			id="session-status"
+			id="thread-status"
 			className="flex items-center gap-3 border-t px-4 py-1 font-mono text-muted-foreground text-xs"
 		>
 			<span
@@ -157,7 +157,7 @@ export function SessionStatusView({ activity, counts, stats }: SessionStatusView
 	);
 }
 
-export interface SessionStatusBarProps {
+export interface ThreadStatusBarProps {
 	readonly messages: ReadonlyArray<UIMessage>;
 	readonly generating: boolean;
 }
@@ -167,14 +167,14 @@ export interface SessionStatusBarProps {
  * (the chat hook is bound inside chat-screen.tsx, and this module stays free of it), the
  * thread's usage store and its disconnected flag (#119) are read from context.
  */
-export function SessionStatusBar({ messages, generating }: SessionStatusBarProps): React.ReactNode {
+export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps): React.ReactNode {
 	const stores = useThreadStores();
 	const stats = useStore(stores.stats);
 	const disconnected = useStore(stores.disconnected);
 	return (
-		<SessionStatusView
+		<ThreadStatusView
 			activity={describeActivity(messages, generating, disconnected)}
-			counts={countSession(messages)}
+			counts={countThread(messages)}
 			stats={stats}
 		/>
 	);

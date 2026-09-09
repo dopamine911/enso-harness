@@ -1,4 +1,4 @@
-import type { ZenResumableSession } from "@zen/core";
+import type { ZenStoredThread } from "@zen/core";
 import { Button } from "./components/ui/button.tsx";
 import { cn } from "./lib/utils.ts";
 import type { ThreadSummary } from "./thread-stores.ts";
@@ -33,13 +33,13 @@ export function relativeAge(from: Date, now: Date): string {
 }
 
 /** What an untitled thread reads as — a thread that has not been asked anything yet. */
-export const UNTITLED_SESSION = "new session";
+export const UNTITLED_THREAD = "new session";
 
-export interface SessionsRailProps {
+export interface ThreadsRailProps {
 	readonly threads: readonly ThreadSummary[];
 	readonly activeThreadId: string;
 	/** Stored sessions not open on this page, newest first — already filtered by the caller. */
-	readonly earlier: readonly ZenResumableSession[];
+	readonly earlier: readonly ZenStoredThread[];
 	/** Why the earlier list could not be fetched, or undefined. Shown where the rows would be. */
 	readonly earlierError: string | undefined;
 	/** For the relative ages; injected so a static render is deterministic. */
@@ -56,12 +56,12 @@ export interface SessionsRailProps {
  * from here. Before #113 a run belonged to the tab's HTTP response and a second page could
  * not join it, which is what the old `disabled` protected.
  */
-function EarlierSessionRow({
+function EarlierThreadRow({
 	session,
 	now,
 	onResume,
 }: {
-	session: ZenResumableSession;
+	session: ZenStoredThread;
 	now: Date;
 	onResume: (threadId: string) => void;
 }): React.ReactNode {
@@ -80,7 +80,7 @@ function EarlierSessionRow({
 					</span>
 				) : null}
 				<span className={cn("min-w-0 flex-1 truncate", session.title === undefined ? "italic" : "")}>
-					{session.title ?? UNTITLED_SESSION}
+					{session.title ?? UNTITLED_THREAD}
 				</span>
 				<span className="shrink-0 tabular-nums">{relativeAge(at, now)}</span>
 			</button>
@@ -88,7 +88,7 @@ function EarlierSessionRow({
 	);
 }
 
-export function SessionsRail({
+export function ThreadsRail({
 	threads,
 	activeThreadId,
 	earlier,
@@ -97,7 +97,7 @@ export function SessionsRail({
 	onSelect,
 	onResume,
 	onNew,
-}: SessionsRailProps): React.ReactNode {
+}: ThreadsRailProps): React.ReactNode {
 	return (
 		<nav aria-label="sessions" className="flex w-56 shrink-0 flex-col gap-2 border-r p-2">
 			<Button type="button" size="sm" variant="outline" onClick={onNew}>
@@ -125,7 +125,7 @@ export function SessionsRail({
 									</span>
 								) : null}
 								<span className={cn("min-w-0 flex-1 truncate", thread.title === undefined ? "italic" : "")}>
-									{thread.title ?? UNTITLED_SESSION}
+									{thread.title ?? UNTITLED_THREAD}
 								</span>
 								<span className="shrink-0 tabular-nums" title={thread.lastActivityAt.toLocaleString()}>
 									{relativeAge(thread.lastActivityAt, now)}
@@ -146,7 +146,7 @@ export function SessionsRail({
 					<li className="px-2 py-1.5 text-muted-foreground text-xs italic">none yet</li>
 				) : null}
 				{earlier.map((session) => (
-					<EarlierSessionRow key={session.threadId} session={session} now={now} onResume={onResume} />
+					<EarlierThreadRow key={session.threadId} session={session} now={now} onResume={onResume} />
 				))}
 			</ol>
 		</nav>

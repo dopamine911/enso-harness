@@ -1,8 +1,8 @@
 import { createStore, type Store } from "./store.ts";
 
 /**
- * The session-stats STORE (#45, phase 1): cost so far + the last request's prompt size.
- * Rendered by the status bar in session-status.tsx (#90), which subscribes to it.
+ * The thread-stats STORE (#45, phase 1): cost so far + the last request's prompt size.
+ * Rendered by the status bar in thread-status.tsx (#90), which subscribes to it.
  *
  * Usage arrives as an AG-UI CUSTOM chunk (`zen.usage`) — one per COMPLETED model request,
  * emitted by map-events.ts off pi's `message_end` (never the per-delta cumulative usage,
@@ -29,7 +29,7 @@ interface ZenUsageShape {
 	totalCost?: number;
 }
 
-export interface SessionStats {
+export interface ThreadStats {
 	/** Sum of `totalCost` across every counted request this page has seen. */
 	totalCost: number;
 	/** input + cacheRead + cacheWrite of the LATEST assistant request, or undefined before the first. */
@@ -38,7 +38,7 @@ export interface SessionStats {
 	countedMessages: number;
 }
 
-const EMPTY_STATS: SessionStats = { totalCost: 0, lastRequestInputTokens: undefined, countedMessages: 0 };
+const EMPTY_STATS: ThreadStats = { totalCost: 0, lastRequestInputTokens: undefined, countedMessages: 0 };
 
 /**
  * ⓘ Looks like map-events' `readUsage` but parses a DIFFERENT shape, deliberately: that
@@ -59,7 +59,7 @@ function readUsageShape(raw: unknown): ZenUsageShape | undefined {
 	};
 }
 
-export interface SessionStatsStore extends Store<SessionStats> {
+export interface ThreadStatsStore extends Store<ThreadStats> {
 	/**
 	 * Fold one `zen.usage` chunk's value into the stats. Defensive like every wire crossing in
 	 * chat-screen.tsx: a malformed value changes nothing rather than throwing in the stream loop.
@@ -79,8 +79,8 @@ export interface SessionStatsStore extends Store<SessionStats> {
 	readonly applyUsage: (data: unknown) => void;
 }
 
-export function createSessionStatsStore(): SessionStatsStore {
-	const store = createStore<SessionStats>(EMPTY_STATS);
+export function createThreadStatsStore(): ThreadStatsStore {
+	const store = createStore<ThreadStats>(EMPTY_STATS);
 	return {
 		get: store.get,
 		subscribe: store.subscribe,

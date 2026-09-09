@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
 import type { UIMessage } from "@tanstack/ai-client";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { SessionStats } from "../session-stats.tsx";
-import { countSession, describeActivity, SessionStatusView } from "../session-status.tsx";
+import type { ThreadStats } from "../thread-stats.tsx";
+import { countThread, describeActivity, ThreadStatusView } from "../thread-status.tsx";
 
 /**
  * #90 PR 1: the always-on status bar. Activity and counts are derived from the message
  * list the page already holds; cost from the #45 store. Tested as the two pure functions
- * plus a static render of the view, the session-debug.test.tsx pattern.
+ * plus a static render of the view, the thread-debug.test.tsx pattern.
  */
 
 const user = (id: string, content: string): UIMessage => ({ id, role: "user", parts: [{ type: "text", content }] });
@@ -26,7 +26,7 @@ const result = (toolCallId: string): UIMessage["parts"][number] => ({
 	state: "complete",
 });
 
-const NO_STATS: SessionStats = { totalCost: 0, lastRequestInputTokens: undefined, countedMessages: 0 };
+const NO_STATS: ThreadStats = { totalCost: 0, lastRequestInputTokens: undefined, countedMessages: 0 };
 
 // ── activity ─────────────────────────────────────────────────────────────────
 
@@ -88,15 +88,15 @@ test("turns count user messages; tool calls count every call, paired or not", ()
 		user("u2", "two"),
 		assistant("a2", [{ type: "text", content: "done" }]),
 	];
-	expect(countSession(messages)).toEqual({ turns: 2, toolCalls: 2 });
-	expect(countSession([])).toEqual({ turns: 0, toolCalls: 0 });
+	expect(countThread(messages)).toEqual({ turns: 2, toolCalls: 2 });
+	expect(countThread([])).toEqual({ turns: 0, toolCalls: 0 });
 });
 
 // ── the view ─────────────────────────────────────────────────────────────────
 
-const render = (props: Partial<Parameters<typeof SessionStatusView>[0]>): string =>
+const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string =>
 	renderToStaticMarkup(
-		<SessionStatusView
+		<ThreadStatusView
 			activity={props.activity ?? { kind: "idle" }}
 			counts={props.counts ?? { turns: 0, toolCalls: 0 }}
 			stats={props.stats ?? NO_STATS}

@@ -220,7 +220,7 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 			return [];
 
 		case "message-end":
-			// One completed message's accounting (#45) — the session-stats bar sums these.
+			// One completed message's accounting (#45) — the thread-stats bar sums these.
 			// CUSTOM because AG-UI has no usage vocabulary; the value is the whole observation
 			// so the consumer reads `role` and `usage` off one shape declared in @zen/core. A
 			// boundary without spend has nothing for this view.

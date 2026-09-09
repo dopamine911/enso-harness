@@ -17,19 +17,18 @@ import { Input } from "./components/ui/input.tsx";
 import { Textarea } from "./components/ui/textarea.tsx";
 import { routeZenCustomEvent } from "./custom-event-router.ts";
 import { createFixtureChat } from "./fixture-conversation.ts";
-import { SessionNotifications } from "./notifications.tsx";
+import { ThreadNotifications } from "./notifications.tsx";
 import { PermissionModeSelect, usePermissionMode } from "./permission-mode.tsx";
-import {
-	createResumableSessionsStore,
-	createResumeRequests,
-	fetchThreadHistory,
-	sessionsNotOnThisPage,
-} from "./resumable-sessions.ts";
 import { SelectedMessagePart } from "./selected-message-part.tsx";
-import { SessionDebugDrawer } from "./session-debug.tsx";
-import { SessionStatusBar } from "./session-status.tsx";
-import { SessionsRail, UNTITLED_SESSION } from "./sessions-rail.tsx";
 import { ThreadStoresContext, useStore, useThreadStores } from "./store.ts";
+import {
+	createResumeRequests,
+	createStoredThreadsStore,
+	fetchThreadHistory,
+	storedThreadsNotOnThisPage,
+} from "./stored-threads.ts";
+import { ThreadDebugDrawer } from "./thread-debug.tsx";
+import { ThreadStatusBar } from "./thread-status.tsx";
 import {
 	adoptThread,
 	getThreadStores,
@@ -39,6 +38,7 @@ import {
 	titleFromMessages,
 	updateThreadSummary,
 } from "./thread-stores.ts";
+import { ThreadsRail, UNTITLED_THREAD } from "./threads-rail.tsx";
 import type { ZenRendererMap } from "./ZenToolResult.tsx";
 
 /**
@@ -535,7 +535,7 @@ const chatComponents = {
 									)}
 									{/* pi's notify lines (#29) — the transcript tail, above the question,
 									    so "Mode set to X" reads next to the run it belongs to. */}
-									<SessionNotifications />
+									<ThreadNotifications />
 									{/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
 									    `ask` verdict reaches the browser, and an unmounted slot is precisely
 									    why an approval would silently never appear. */}
@@ -551,14 +551,14 @@ const chatComponents = {
 						    session holds, for THIS thread. Scrolls on its own so a long branch never
 						    moves the composer. */}
 						{debugOpen ? (
-							<div id="session-debug-pane" className="w-[30rem] shrink-0 overflow-y-auto border-l">
-								<SessionDebugDrawer />
+							<div id="thread-debug-pane" className="w-[30rem] shrink-0 overflow-y-auto border-l">
+								<ThreadDebugDrawer />
 							</div>
 						) : null}
 					</div>
 					{/* The status bar (#90): activity, turns, tool calls, cost — always visible, full
 					    width under transcript AND debug pane, so it is the one place to look. */}
-					<SessionStatusBar messages={chat.messages} generating={chat.sessionGenerating} />
+					<ThreadStatusBar messages={chat.messages} generating={chat.sessionGenerating} />
 				</div>
 			);
 		},
@@ -655,18 +655,18 @@ const FIRST_THREAD_ID = mintThread().threadId;
  * The stored sessions the rail can come back to (#95). Page-level, refreshed on load and
  * whenever a run settles — the moments a session file appears or grows.
  */
-const resumableSessions = createResumableSessionsStore();
+const storedThreads = createStoredThreadsStore();
 
 /** The page (#90): header, the sessions rail, and one mounted pane per live thread. */
 export function ChatScreen(): React.ReactNode {
 	const threads = useStore(threadListStore);
-	const stored = useStore(resumableSessions);
+	const stored = useStore(storedThreads);
 	const [activeThreadId, setActiveThreadId] = useState(FIRST_THREAD_ID);
 	const [resumeError, setResumeError] = useState<string | undefined>(undefined);
 	const anyBusy = threads.some((thread) => thread.busy);
 	useEffect(() => {
 		// Load, and every time the page goes from a run in flight to none: something settled.
-		if (!(anyBusy || isFixtureMode)) void resumableSessions.refresh();
+		if (!(anyBusy || isFixtureMode)) void storedThreads.refresh();
 	}, [anyBusy]);
 	const pageThreadIds = new Set(threads.map((thread) => thread.threadId));
 	// Last click wins (PR #104 review) — the race lives in `createResumeRequests`, tested there.
@@ -701,7 +701,7 @@ export function ChatScreen(): React.ReactNode {
 				) : null}
 				{/* Where you are: the active thread's title, the same one the rail shows. */}
 				<span className="min-w-0 flex-1 truncate text-sm" title={activeThreadId}>
-					{active?.title ?? UNTITLED_SESSION}
+					{active?.title ?? UNTITLED_THREAD}
 				</span>
 				{isDebugMode ? (
 					<Button
@@ -709,7 +709,7 @@ export function ChatScreen(): React.ReactNode {
 						size="sm"
 						variant={debugOpen ? "secondary" : "outline"}
 						aria-expanded={debugOpen}
-						aria-controls="session-debug-pane"
+						aria-controls="thread-debug-pane"
 						onClick={() => setDebugOpen((open) => !open)}
 					>
 						{debugOpen ? "hide debug" : "show debug"}
@@ -717,10 +717,10 @@ export function ChatScreen(): React.ReactNode {
 				) : null}
 			</header>
 			<div className="flex min-h-0 flex-1">
-				<SessionsRail
+				<ThreadsRail
 					threads={threads}
 					activeThreadId={activeThreadId}
-					earlier={sessionsNotOnThisPage(stored.sessions, pageThreadIds)}
+					earlier={storedThreadsNotOnThisPage(stored.threads, pageThreadIds)}
 					earlierError={stored.error ?? resumeError}
 					now={new Date()}
 					onSelect={setActiveThreadId}

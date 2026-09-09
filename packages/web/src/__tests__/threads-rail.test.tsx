@@ -1,7 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import type { UIMessage } from "@tanstack/ai-client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { relativeAge, SessionsRail, UNTITLED_SESSION } from "../sessions-rail.tsx";
 import {
 	adoptThread,
 	clearThreadsForTest,
@@ -12,6 +11,7 @@ import {
 	titleFromMessages,
 	updateThreadSummary,
 } from "../thread-stores.ts";
+import { relativeAge, ThreadsRail, UNTITLED_THREAD } from "../threads-rail.tsx";
 
 /**
  * #90 PR 3: the sessions rail and the page's thread list behind it. The rail is rendered
@@ -141,7 +141,7 @@ test("history revival drops malformed rows and invalid dates instead of handing 
 test("the rail names the active thread, titles the untitled honestly, and marks a busy one", () => {
 	const now = new Date("2026-09-08T12:00:00Z");
 	const rendered = renderToStaticMarkup(
-		<SessionsRail
+		<ThreadsRail
 			threads={[
 				{ threadId: "t2", title: undefined, lastActivityAt: now, busy: true },
 				{
@@ -162,7 +162,7 @@ test("the rail names the active thread, titles the untitled honestly, and marks 
 	);
 	expect(rendered).toContain("live sessions");
 	expect(rendered).toContain("New session");
-	expect(rendered).toContain(UNTITLED_SESSION);
+	expect(rendered).toContain(UNTITLED_THREAD);
 	expect(rendered).toContain("fix the login bug");
 	expect(rendered).toContain("6d");
 	// Exactly one row is current, and it is the active one.
@@ -184,7 +184,7 @@ test("the earlier list distinguishes resumable, running-elsewhere, empty and fai
 		onNew: noop,
 	};
 	const rendered = renderToStaticMarkup(
-		<SessionsRail
+		<ThreadsRail
 			{...baseProps}
 			earlier={[
 				{
@@ -210,11 +210,11 @@ test("the earlier list distinguishes resumable, running-elsewhere, empty and fai
 	// Running is shown, not locked (#114): the row is how a reloaded page gets back to an open question.
 	expect(rendered).toContain("running");
 	expect(rendered).not.toContain('disabled=""');
-	expect(rendered).toContain(UNTITLED_SESSION);
+	expect(rendered).toContain(UNTITLED_THREAD);
 
-	const empty = renderToStaticMarkup(<SessionsRail {...baseProps} earlier={[]} earlierError={undefined} />);
+	const empty = renderToStaticMarkup(<ThreadsRail {...baseProps} earlier={[]} earlierError={undefined} />);
 	expect(empty).toContain("none yet");
-	const failed = renderToStaticMarkup(<SessionsRail {...baseProps} earlier={[]} earlierError="connection refused" />);
+	const failed = renderToStaticMarkup(<ThreadsRail {...baseProps} earlier={[]} earlierError="connection refused" />);
 	expect(failed).toContain('role="alert"');
 	expect(failed).toContain("could not list sessions: connection refused");
 	expect(failed).not.toContain("none yet");

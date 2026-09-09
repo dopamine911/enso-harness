@@ -171,13 +171,13 @@ test("⚠ two mounted panes with ?debug open render exactly ONE debug column, in
 			<ThreadPane threadId={second.threadId} active={false} debugOpen={true} />
 		</>,
 	);
-	expect(rendered.match(/id="session-debug-pane"/g)).toHaveLength(1);
+	expect(rendered.match(/id="thread-debug-pane"/g)).toHaveLength(1);
 	// The active pane is laid out; the other is hidden, not gone — its chat stays mounted.
 	expect(rendered.match(/class="hidden"/g)).toHaveLength(1);
-	expect(rendered.match(/id="session-status"/g)).toHaveLength(2);
+	expect(rendered.match(/id="thread-status"/g)).toHaveLength(2);
 	// And with the switch off, no pane shows one.
 	const closed = renderToStaticMarkup(<ThreadPane threadId={first.threadId} active={true} debugOpen={false} />);
-	expect(closed).not.toContain('id="session-debug-pane"');
+	expect(closed).not.toContain('id="thread-debug-pane"');
 });
 
 test("a resumed pane mounts with the stored user and assistant messages already visible", () => {

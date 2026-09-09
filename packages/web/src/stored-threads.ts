@@ -1,4 +1,4 @@
-import { ZenResumableSession, ZenThreadHistory } from "@zen/core";
+import { ZenStoredThread, ZenThreadHistory } from "@zen/core";
 import { Check } from "typebox/value";
 import { createStore, type Store } from "./store.ts";
 
@@ -15,31 +15,31 @@ import { createStore, type Store } from "./store.ts";
  * error where the rows would be; the last good rows are kept beneath it.
  */
 
-export interface ResumableSessionsState {
-	readonly sessions: readonly ZenResumableSession[];
+export interface StoredThreadsState {
+	readonly threads: readonly ZenStoredThread[];
 	/** Why the last refresh produced nothing — a down server, a payload off its schema. */
 	readonly error: string | undefined;
 }
 
-export interface ResumableSessionsStore extends Store<ResumableSessionsState> {
+export interface StoredThreadsStore extends Store<StoredThreadsState> {
 	readonly refresh: () => Promise<void>;
 }
 
-export function createResumableSessionsStore(
-	fetchSessions: () => Promise<unknown> = fetchSessionList,
-): ResumableSessionsStore {
-	const store = createStore<ResumableSessionsState>({ sessions: [], error: undefined });
+export function createStoredThreadsStore(
+	fetchStoredThreads: () => Promise<unknown> = fetchStoredThreadList,
+): StoredThreadsStore {
+	const store = createStore<StoredThreadsState>({ threads: [], error: undefined });
 	return {
 		get: store.get,
 		subscribe: store.subscribe,
 		refresh: async () => {
 			try {
-				const listed = await fetchSessions();
-				const wellFormed = Array.isArray(listed) && listed.every((session) => Check(ZenResumableSession, session));
+				const listed = await fetchStoredThreads();
+				const wellFormed = Array.isArray(listed) && listed.every((session) => Check(ZenStoredThread, session));
 				if (!wellFormed) throw new Error("the server's session listing did not match its schema");
-				store.set({ sessions: listed as ZenResumableSession[], error: undefined });
+				store.set({ threads: listed as ZenStoredThread[], error: undefined });
 			} catch (error) {
-				store.set({ sessions: store.get().sessions, error: error instanceof Error ? error.message : String(error) });
+				store.set({ threads: store.get().threads, error: error instanceof Error ? error.message : String(error) });
 			}
 		},
 	};
@@ -64,8 +64,8 @@ export async function describeFailedResponse(response: Response): Promise<string
 	return detail.length === 0 ? String(response.status) : `${response.status} ${detail}`;
 }
 
-async function fetchSessionList(): Promise<unknown> {
-	const response = await fetch("/api/sessions");
+async function fetchStoredThreadList(): Promise<unknown> {
+	const response = await fetch("/api/stored-threads");
 	if (!response.ok) throw new Error(await describeFailedResponse(response));
 	return response.json();
 }
@@ -113,9 +113,9 @@ export function createResumeRequests(
  * The rail's second list: stored sessions this page has NOT already got open. The thread id
  * is pi's session id, so "already open here" is a set lookup — the payoff of one identity.
  */
-export function sessionsNotOnThisPage(
-	stored: readonly ZenResumableSession[],
+export function storedThreadsNotOnThisPage(
+	stored: readonly ZenStoredThread[],
 	pageThreadIds: ReadonlySet<string>,
-): ZenResumableSession[] {
+): ZenStoredThread[] {
 	return stored.filter((session) => !pageThreadIds.has(session.threadId));
 }

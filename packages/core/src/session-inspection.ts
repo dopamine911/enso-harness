@@ -207,7 +207,7 @@ export function isZenThreadId(value: unknown): value is string {
  * with the browser's thread id (`NewSessionOptions.id`), so the two never need a mapping,
  * and a page-owned thread finds its own file again after the server restarts.
  */
-export const ZenResumableSession = Type.Object(
+export const ZenStoredThread = Type.Object(
 	{
 		threadId: Type.String(),
 		/** The first user message, or undefined for a session with none — the rail's title, as deepseek does. */
@@ -226,7 +226,7 @@ export const ZenResumableSession = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-export type ZenResumableSession = Static<typeof ZenResumableSession>;
+export type ZenStoredThread = Static<typeof ZenStoredThread>;
 
 /**
  * How a stored branch ends when its last turn did not settle (#109): a prompt the
