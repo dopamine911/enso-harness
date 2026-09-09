@@ -65,7 +65,7 @@ export interface SessionStatsStore extends Store<SessionStats> {
 	 * chat-screen.tsx: a malformed value changes nothing rather than throwing in the stream loop.
 	 *
 	 * ⚠ Cost sums over EVERY counted message (assistant and toolResult summaries — pi's own
-	 * attribution rule, see ZenMessageUsage in @zen/core), but "last request" reads ASSISTANT
+	 * attribution rule, see ZenMessageEnd in @zen/core), but "last request" reads ASSISTANT
 	 * messages only: a toolResult summary is a side model call whose prompt is the tool output,
 	 * not the conversation — letting it overwrite the number would show a misleading dip.
 	 *

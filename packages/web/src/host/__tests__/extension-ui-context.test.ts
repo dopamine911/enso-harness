@@ -37,6 +37,17 @@ test("select emits a request and resolves to the answered value", async () => {
 	expect(pendingDialogCount()).toBe(0);
 });
 
+test("openDialog returns the pending question as the browser's dialog spec, and nothing once it is settled (#112)", async () => {
+	const { uiContext, answerDialog, openDialog, events } = contextUnderTest();
+	const pending = uiContext.select("Mode?", ["ask", "auto"], { timeout: 50_000 });
+	const id = requestId(events[0]);
+	expect(openDialog(id)).toEqual({ method: "select", title: "Mode?", options: ["ask", "auto"], timeout: 50_000 });
+	expect(openDialog("nope")).toBeUndefined();
+	answerDialog({ id, value: "auto" });
+	await pending;
+	expect(openDialog(id)).toBeUndefined();
+});
+
 test("confirm resolves true/false on the answer, and false on cancel — pi's cancel value", async () => {
 	const { uiContext, answerDialog, events } = contextUnderTest();
 	const yes = uiContext.confirm("Apply?", "It is reversible");

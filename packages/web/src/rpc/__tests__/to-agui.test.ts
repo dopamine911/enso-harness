@@ -159,7 +159,7 @@ test("a custom session entry rides CUSTOM as zen.entry with its data intact", ()
 });
 
 // --- #45: a completed request's accounting crosses as zen.usage, the whole observation
-test("a message-usage observation rides CUSTOM as zen.usage with role and usage intact", () => {
+test("a message-end observation rides CUSTOM as zen.usage with role and usage intact", () => {
 	const observation = mapPiEvent({
 		type: "message_end",
 		message: {
@@ -170,7 +170,7 @@ test("a message-usage observation rides CUSTOM as zen.usage with role and usage 
 	const [event] = toAgui(observation);
 	expect(event).toMatchObject({ type: EventType.CUSTOM, name: "zen.usage" });
 	expect((event as { value: unknown }).value).toEqual({
-		kind: "message-usage",
+		kind: "message-end",
 		role: "assistant",
 		usage: { input: 1200, output: 40, cacheRead: 300, cacheWrite: 50, totalCost: 0.0132 },
 	});
@@ -184,7 +184,7 @@ test("an unmapped observation rides CUSTOM, because RAW is not a valid StreamChu
 	expect((event as { value: unknown }).value).toEqual({ type: "some_future_event", detail: 1 });
 });
 
-test("nothing is silently dropped: every kind except an in-flight result yields an event", () => {
+test("nothing is silently dropped: every kind except an in-flight result and a bare message boundary yields an event", () => {
 	const observations: ZenObservation[] = [
 		{ kind: "text-delta", contentIndex: 0, delta: "a" },
 		{ kind: "thinking-delta", contentIndex: 0, delta: "b" },
@@ -203,10 +203,13 @@ test("nothing is silently dropped: every kind except an in-flight result yields 
 		},
 		{ kind: "custom-entry", customType: "modes", data: { mode: "acceptEdits" } },
 		{
-			kind: "message-usage",
+			kind: "message-end",
 			role: "assistant",
 			usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
 		},
+		{ kind: "turn-start" },
+		{ kind: "turn-end", toolResults: 1 },
+		{ kind: "queue", steering: 0, followUp: 1 },
 		{ kind: "run-ended", willRetry: false },
 		{ kind: "settled" },
 		{ kind: "unmapped", event: { type: "z" } },
@@ -214,6 +217,16 @@ test("nothing is silently dropped: every kind except an in-flight result yields 
 	for (const observation of observations) {
 		expect(toAgui(observation).length).toBeGreaterThan(0);
 	}
+	// The AG-UI view opens one message per run, so a per-message boundary has no event in
+	// it (#112) — the follow carries boundaries; this view's loss is stated, not silent.
+	const bareBoundaries: ZenObservation[] = [
+		{ kind: "message-start", role: "user", text: "hi" },
+		{ kind: "message-end", role: "user" },
+	];
+	for (const boundary of bareBoundaries) {
+		expect(toAgui(boundary)).toEqual([]);
+	}
+	observations.push(...bareBoundaries);
 	// every member covered — the oracle is the union itself, never a hard-coded count (the
 	// count here and in schemas.test.ts drifted apart once; a set diff names the missing kind)
 	const coveredKinds: string[] = [...new Set(observations.map((observation) => observation.kind))];

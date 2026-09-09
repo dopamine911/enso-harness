@@ -2,16 +2,19 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type {
-	PiDialogResponse,
-	PiEventDelivery,
-	PiPromptOutcome,
-	PiPromptRequest,
-	PiRpcEvent,
-	PiSession,
+import {
+	isZenDialogSpec,
+	type PiDialogResponse,
+	type PiEventDelivery,
+	type PiPromptOutcome,
+	type PiPromptRequest,
+	type PiRpcEvent,
+	type PiSession,
+	type ZenDialogSpec,
+	ZenFollowFrame,
 } from "@zen/core";
+import { Check } from "typebox/value";
 import type { AgentHost, HostedSession } from "../../host/agent-host.ts";
-import type { ZenFollowFrame } from "../follow.ts";
 import { startZenServer } from "../index.ts";
 
 /**
@@ -48,7 +51,13 @@ function fakeHost(commands: string[] = ["mode"]): FakeHost {
 			const listeners = new Set<(event: PiRpcEvent, delivery: PiEventDelivery) => void>();
 			const record: FakeRecord = { prompts: [], answers: [], aborts: 0, disposed: 0 };
 			built.push(record);
+			/** Every blocking question this fake has emitted and not yet had answered — what the real host's `openDialog` reads. */
+			const open = new Map<string, ZenDialogSpec>();
 			emit = (event) => {
+				if (event.type === "extension_ui_request" && typeof event.id === "string") {
+					const { type: _type, id: _id, ...request } = event;
+					if (isZenDialogSpec(request)) open.set(event.id, request);
+				}
 				for (const listener of listeners) listener(event, "live");
 			};
 			const session: PiSession = {
@@ -58,7 +67,9 @@ function fakeHost(commands: string[] = ["mode"]): FakeHost {
 				},
 				answerDialog: (response) => {
 					record.answers.push(response);
+					open.delete(response.id);
 				},
+				openDialog: (id) => open.get(id),
 				listCommands: () => commands.map((name) => ({ name, source: "extension" as const })),
 				permissionModeState: () => ({ mode: "default", available: ["default", "plan"] }),
 				subscribe: (onEvent) => {
@@ -152,8 +163,12 @@ async function openFollow(url: string, threadId: string): Promise<OpenFollow> {
 				const lines = buffered.split("\n");
 				buffered = lines.pop() ?? "";
 				for (const line of lines) {
-					if (line.startsWith("data: ")) frames.push(JSON.parse(line.slice("data: ".length)) as ZenFollowFrame);
-					else if (line.startsWith(":")) comments += 1;
+					if (line.startsWith("data: ")) {
+						const frame: unknown = JSON.parse(line.slice("data: ".length));
+						// The wire contract, checked on every frame — a shape the browser could not read is a failure here.
+						if (!Check(ZenFollowFrame, frame)) throw new Error(`frame off the wire fails ZenFollowFrame: ${line}`);
+						frames.push(frame);
+					} else if (line.startsWith(":")) comments += 1;
 				}
 				wake();
 			}
@@ -263,13 +278,26 @@ test("⚠ a blocking dialog is an observation on the follow and a unary answer b
 	// The thread is busy and NOT parked: the registry never heard of this question.
 	expect(await threadSummary(url, "t1")).toMatchObject({ busy: true, parked: false });
 
-	const answered = await fetch(`${url}/api/threads/t1/dialog`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ id: "d1", value: "a" }),
-	});
+	// An unoffered value is refused at the door (#112) — the seam the old resume path
+	// closed with the same check; the question stays open, nothing reaches pi.
+	const answerWith = (body: Record<string, unknown>) =>
+		fetch(`${url}/api/threads/t1/dialog`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(body),
+		});
+	const refused = await answerWith({ id: "d1", value: "zzz" });
+	expect(refused.status).toBe(422);
+	expect(await refused.text()).toContain("refused");
+	const unknown = await answerWith({ id: "nope", value: "a" });
+	expect(unknown.status).toBe(404);
+	expect(fake.built[0]?.answers).toEqual([]);
+
+	const answered = await answerWith({ id: "d1", value: "a" });
 	expect(answered.status).toBe(204);
 	expect(fake.built[0]?.answers).toEqual([{ id: "d1", value: "a" }]);
+	// Answered: the question is spent, a replay is refused.
+	expect((await answerWith({ id: "d1", value: "a" })).status).toBe(404);
 
 	// A slash command's completion is its acceptance (it never settles) — the lease follows it.
 	fake.accept();

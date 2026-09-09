@@ -477,10 +477,10 @@ export function startZenServer(options: ZenServerOptions) {
 			response.end((error as Error).message);
 			return;
 		}
-		const status = answerThreadDialog(followDeps, threadId, answer);
-		if (status === 404) {
-			response.writeHead(404, { "Content-Type": "text/plain" });
-			response.end(`no live session for thread ${threadId}`);
+		const outcome = answerThreadDialog(followDeps, threadId, answer);
+		if (outcome.status !== 204) {
+			response.writeHead(outcome.status, { "Content-Type": "text/plain" });
+			response.end(outcome.reason);
 			return;
 		}
 		response.writeHead(204);

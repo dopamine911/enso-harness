@@ -1,7 +1,7 @@
 import type { ExtensionUIContext, KeybindingsManager, Theme as PiTheme } from "@earendil-works/pi-coding-agent";
 import { Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
-import type { PiDialogResponse, PiRpcEvent } from "@zen/core";
+import { isZenDialogSpec, type PiDialogResponse, type PiRpcEvent, type ZenDialogSpec } from "@zen/core";
 import { type LiftedPermissionDialog, liftPermissionDialog } from "./permission-dialog.ts";
 
 /** The factory `ExtensionUIContext.custom` receives, named so the method can be written without `Parameters<>`. */
@@ -60,6 +60,8 @@ const INERT_KEYBINDINGS = {} as unknown as KeybindingsManager;
 
 interface PendingDialog {
 	resolve: (response: PiDialogResponse) => void;
+	/** What was asked — the `extension_ui_request` minus its id — so an answer can be checked against it (#112). */
+	request: BlockingDialogRequest;
 }
 
 export interface ZenExtensionUiContextOptions {
@@ -90,6 +92,8 @@ export interface ZenExtensionUiContext {
 	readonly uiContext: ExtensionUIContext;
 	/** Deliver an answer. Unknown ids are reported, not thrown — the extension is not waiting on them. */
 	answerDialog(response: PiDialogResponse): void;
+	/** The pending dialog's question, or undefined once it is settled or if it was never asked. */
+	openDialog(id: string): ZenDialogSpec | undefined;
 	/** Cancel every pending dialog — session teardown. Each blocked extension call resolves to its cancel value. */
 	cancelAllDialogs(): void;
 	/** How many dialogs are blocked right now — observable state for tests and for the idle-timeout logic. */
@@ -254,6 +258,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 			pendingDialogs.set(id, {
 				resolve: (response) =>
 					finish("cancelled" in response && response.cancelled ? cancelValue : mapResponse(response)),
+				request,
 			});
 			emit({ type: "extension_ui_request", id, ...request });
 		});
@@ -405,6 +410,13 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 				return;
 			}
 			pending.resolve(response);
+		},
+		openDialog(id) {
+			const request = pendingDialogs.get(id)?.request;
+			// The request IS a dialog spec structurally (the mapper builds the browser's spec
+			// from the same fields); checked rather than cast, so a request shape the spec
+			// does not admit (a select with no options) reads as "no question" here too.
+			return request !== undefined && isZenDialogSpec(request) ? request : undefined;
 		},
 		cancelAllDialogs() {
 			for (const [id, pending] of [...pendingDialogs]) {

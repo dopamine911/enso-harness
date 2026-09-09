@@ -2,11 +2,11 @@ import type { ServerResponse } from "node:http";
 import {
 	PICC_PERMISSION_MODES,
 	type PiDialogResponse,
-	type PiPermissionModeState,
 	type PiStreamingBehavior,
 	persistedPermissionMode,
-	type ZenInterruptedTail,
-	type ZenObservation,
+	validateDialogAnswer,
+	type ZenFollowFrame,
+	type ZenPromptReceipt,
 } from "@zen/core";
 import type { AgentHost } from "../host/agent-host.ts";
 import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
@@ -15,7 +15,8 @@ import { SSE_HEADERS, startSseKeepalive } from "./sse.ts";
 import type { ThreadFeedFrame, ThreadSessions } from "./thread-sessions.ts";
 
 /**
- * SPIKE #109 — deepseek-harness's prompt/follow split, beside the `/api/chat` run path.
+ * The prompt/follow split (#112) — the server↔browser wire, beside the `/api/chat` run
+ * path until the cutover retires it.
  *
  * Three routes, none of which is a run:
  *
@@ -26,58 +27,16 @@ import type { ThreadFeedFrame, ThreadSessions } from "./thread-sessions.ts";
  *                                  frames for as long as the client stays. Observation
  *                                  only: never builds a session; a thread that is not live
  *                                  is served cold from its file and followed from build.
- *   POST /api/threads/:id/dialog   unary. A human's answer to a blocking dialog, delivered
- *                                  to the live session. Nothing parks: the extension's
- *                                  promise is still pending inside pi, the run keeps
- *                                  going on the follow.
+ *   POST /api/threads/:id/dialog   unary. A human's answer to a blocking dialog, checked
+ *                                  against the question and delivered to the live session.
+ *                                  Nothing parks: the extension's promise is still pending
+ *                                  inside pi, the run keeps going on the follow.
  *
- * What this exists to MEASURE — see the receipt on #109: which of `dialog-registry.ts`,
- * `parentRunId`, `expiresAt`, `ChatRunOutcome.parkedAwaitingAnswer`, the no-progress
- * cutoff-as-run-ender and the slash-command grace are consequences of the run being the
- * HTTP response, and disappear once it is not.
- *
- * ⚠ Wire shapes are TS types here, not `@zen/core` TypeBox schemas — a spike's shortcut,
- * named so it is not mistaken for the rule.
+ * The wire shapes — `ZenFollowFrame`, `ZenPromptReceipt` — are TypeBox in `@zen/core`
+ * (`follow.ts` there), like every other crossing; the payload is `ZenObservation`, and AG-UI
+ * is not on this wire (`docs/architecture.md`, decided constraints). The receipt of what the
+ * split retires is on #109; the decision and its sequence are #112.
  */
-
-/** The first frame of every follow: the thread as of `asOfSeq`. Every later observation's `seq` is greater. */
-export interface ZenFollowSnapshot {
-	readonly type: "snapshot";
-	readonly threadId: string;
-	readonly asOfSeq: number;
-	readonly live: boolean;
-	readonly busy: boolean;
-	readonly generation: number;
-	readonly permissionMode: PiPermissionModeState;
-	readonly messages: readonly unknown[];
-	readonly interrupted?: ZenInterruptedTail;
-}
-
-export interface ZenFollowObservation {
-	readonly type: "observation";
-	readonly seq: number;
-	readonly observation: ZenObservation;
-}
-
-export interface ZenFollowStatus {
-	readonly type: "status";
-	readonly live: boolean;
-	readonly busy: boolean;
-	readonly generation: number;
-}
-
-export type ZenFollowFrame = ZenFollowSnapshot | ZenFollowObservation | ZenFollowStatus;
-
-/** What `POST …/prompt` answers with: admission, not a result (dsh: `followup()` returns void). */
-export interface ZenPromptReceipt {
-	readonly threadId: string;
-	/** Minted here — the admission identity of this message, for a client to correlate. */
-	readonly messageId: string;
-	/** The acquisition this prompt took, or the one it queued behind. */
-	readonly generation: number;
-	/** The thread was busy: pi queued the message (`followUp`) behind the run in flight (#75). */
-	readonly queued: boolean;
-}
 
 export interface FollowRouteDeps {
 	readonly threads: ThreadSessions;
@@ -253,10 +212,31 @@ export function readDialogBody(raw: string): PiDialogResponse {
 	throw new Error("dialog body needs cancelled, value, or confirmed");
 }
 
-/** Deliver the answer to the LIVE session — a thread that is not live has no question to answer. */
-export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answer: PiDialogResponse): 204 | 404 {
+export type DialogOutcome =
+	| { readonly status: 204 }
+	| { readonly status: 404; readonly reason: string }
+	| { readonly status: 422; readonly reason: string };
+
+/**
+ * Deliver the answer to the LIVE session's OPEN question. Validated against what was
+ * asked (#112): pi hands a select's value to the extension VERBATIM, so an unoffered value
+ * is an injection seam the server closes — the same check the run path's resume made. A
+ * refused answer leaves the question open; a cancellation needs no validation.
+ */
+export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answer: PiDialogResponse): DialogOutcome {
 	const live = deps.threads.peek(threadId);
-	if (live === undefined) return 404;
+	if (live === undefined) return { status: 404, reason: `no live session for thread ${threadId}` };
+	const question = live.hosted.session.openDialog(answer.id);
+	if (question === undefined) {
+		return {
+			status: 404,
+			reason: `no open question ${answer.id} on thread ${threadId} — answered, expired, or never asked`,
+		};
+	}
+	if (!("cancelled" in answer)) {
+		const refusal = validateDialogAnswer(question, answer);
+		if (refusal !== undefined) return { status: 422, reason: `answer refused: ${refusal}` };
+	}
 	live.hosted.session.answerDialog(answer);
-	return 204;
+	return { status: 204 };
 }

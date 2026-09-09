@@ -28,6 +28,13 @@ export {
 	ZenDialogSpec,
 } from "./dialog.ts";
 export {
+	ZenFollowFrame,
+	ZenFollowObservation,
+	ZenFollowSnapshot,
+	ZenFollowStatus,
+	ZenPromptReceipt,
+} from "./follow.ts";
+export {
 	DEFAULT_GUARD_POLICY,
 	GuardPolicy,
 	PERSISTENCE_WRITE_BASENAMES,
@@ -39,9 +46,11 @@ export {
 	ZenCustomSessionEntry,
 	ZenExtensionError,
 	ZenExtensionUiRequest,
-	ZenMessageUsage,
+	ZenMessageEnd,
+	ZenMessageStart,
 	ZenNotifyType,
 	ZenObservation,
+	ZenQueue,
 	ZenRunEnded,
 	ZenSettled,
 	ZenTextDelta,

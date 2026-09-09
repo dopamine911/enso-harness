@@ -376,6 +376,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 			answerDialog(response) {
 				ui.answerDialog(response);
 			},
+			openDialog(id) {
+				return ui.openDialog(id);
+			},
 			listCommands(): PiCommand[] {
 				// The three sources pi's rpc `get_commands` assembles, in its order.
 				const commands: PiCommand[] = [];

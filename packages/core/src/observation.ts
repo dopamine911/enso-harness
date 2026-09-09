@@ -140,31 +140,66 @@ export const ZenCustomSessionEntry = Type.Object({
 export type ZenCustomSessionEntry = Static<typeof ZenCustomSessionEntry>;
 
 /**
- * A completed message's token/cost accounting (#45) — one per finished model request.
+ * A message began — pi's `message_start` (#112). The boundary AG-UI's `TEXT_MESSAGE_START`
+ * supplied and the observation vocabulary lacked. `text` rides only on a USER message: a
+ * second follower of the same thread sees the prompt another tab sent (dsh's
+ * `user/message`); assistant text arrives as deltas.
+ */
+export const ZenMessageStart = Type.Object({
+	kind: Type.Literal("message-start"),
+	/** pi's message role, carried as pi names it. */
+	role: Type.String(),
+	text: Type.Optional(Type.String()),
+});
+export type ZenMessageStart = Static<typeof ZenMessageStart>;
+
+/**
+ * A message completed — pi's `message_end` — with its accounting when it has any (#45).
  *
  * ⚠ WHY `message_end` AND NOT THE PER-DELTA `usage`. Every `message_update` carries the
  * SAME cumulative usage for the in-flight message, so summing deltas would multiply cost
  * by the delta count; the honest unit is the completed message, emitted exactly once.
  *
- * ⚠ WHICH MESSAGES COUNT — pi's own attribution rule, copied so our total matches pi's
- * `/stats` (`core/usage-totals.js` getUsageCostBreakdown): `assistant` messages always
- * carry usage; a `toolResult` carries it only when a model summarized the output. Other
- * roles carry none and stay `unmapped`. (pi also attributes compaction/branch-summary
- * entries; those cross as session entries, not `message_end`, and are not counted here —
- * a stated undercount, not a bug.)
+ * ⚠ WHICH MESSAGES CARRY `usage` — pi's own attribution rule, copied so our total matches
+ * pi's `/stats` (`core/usage-totals.js` getUsageCostBreakdown): `assistant` messages always;
+ * a `toolResult` only when a model summarized the output. Every other completed message
+ * is a boundary with no spend, and `usage` is absent. (pi also attributes compaction and
+ * branch-summary entries; those cross as session entries, not `message_end`, and are not
+ * counted here — a stated undercount, not a bug.) One event per durable fact: the
+ * accounting travels with the message it belongs to, never as a side record.
  */
-export const ZenMessageUsage = Type.Object({
-	kind: Type.Literal("message-usage"),
-	/**
-	 * pi's message role; the consumer keys behaviour on it (a toolResult adds cost but
-	 * never moves the last-request tokens). A closed union rather than a bare string so a
-	 * third attributable role fails at the CONSTRUCTION site in map-events, not silently
-	 * in every consumer's string comparison (PR #51 review).
-	 */
-	role: Type.Union([Type.Literal("assistant"), Type.Literal("toolResult")]),
-	usage: ZenUsage,
+export const ZenMessageEnd = Type.Object({
+	kind: Type.Literal("message-end"),
+	role: Type.String(),
+	usage: Type.Optional(ZenUsage),
 });
-export type ZenMessageUsage = Static<typeof ZenMessageUsage>;
+export type ZenMessageEnd = Static<typeof ZenMessageEnd>;
+
+/**
+ * pi's `turn_start` / `turn_end` (#112). ⚠ pi's "turn" is ONE model request plus the tool
+ * results it produced — what deepseek-harness calls a *step*; dsh's *turn* (input claimed
+ * through nothing owed) is pi's whole run, `settled`. Carried under pi's name so a reader
+ * of pi's docs and a reader of this stream agree; the dsh mapping is this comment.
+ */
+export const ZenTurnStart = Type.Object({ kind: Type.Literal("turn-start") });
+export const ZenTurnEnd = Type.Object({
+	kind: Type.Literal("turn-end"),
+	/** How many tool results the request produced — the step row's count, without the results themselves (they crossed as `tool-result`). */
+	toolResults: Type.Integer({ minimum: 0 }),
+});
+
+/**
+ * pi's `queue_update` (#75, #112): what is waiting behind the run in flight — steering
+ * messages enter at the next step boundary, follow-ups after the run settles (dsh's
+ * `next-step` / `next-turn`). Counts only: the texts are the user's prompts, and they
+ * cross as `message-start` when pi claims them.
+ */
+export const ZenQueue = Type.Object({
+	kind: Type.Literal("queue"),
+	steering: Type.Integer({ minimum: 0 }),
+	followUp: Type.Integer({ minimum: 0 }),
+});
+export type ZenQueue = Static<typeof ZenQueue>;
 
 /** An extension threw. Surfaced, never swallowed. */
 export const ZenExtensionError = Type.Object({
@@ -201,7 +236,11 @@ export const ZenObservation = Type.Union([
 	ZenToolCall,
 	ZenToolResultObservation,
 	ZenCustomSessionEntry,
-	ZenMessageUsage,
+	ZenMessageStart,
+	ZenMessageEnd,
+	ZenTurnStart,
+	ZenTurnEnd,
+	ZenQueue,
 	ZenExtensionError,
 	ZenExtensionUiRequest,
 	ZenRunEnded,
