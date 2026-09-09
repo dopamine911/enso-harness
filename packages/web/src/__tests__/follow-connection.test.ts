@@ -116,28 +116,29 @@ const SNAPSHOT_IDLE: ZenFollowFrame = {
 	generation: 0,
 	permissionMode: { mode: "default", available: ["default", "plan"] },
 	messages: [],
+	openDialogs: [],
 };
 
 test("⚠ a released status ends the run — the slash-command case, which never settles", async () => {
 	const server = scripted();
 	server.frame(SNAPSHOT_IDLE);
-	await server.untilChunks(2);
+	await server.untilChunks(3);
 	await send(server, "/mode");
-	await server.untilChunks(4);
+	await server.untilChunks(5);
 	server.frame({ type: "status", live: true, busy: true, generation: 1 });
 	server.frame({ type: "status", live: true, busy: false, generation: 1 });
-	await server.untilChunks(7);
-	expect(server.chunks[6]).toEqual({ type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" });
+	await server.untilChunks(8);
+	expect(server.chunks[7]).toEqual({ type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" });
 	server.abort();
 });
 
 test("⚠ an earlier run's ending frames cannot close a run whose receipt is still pending; the receipt closes it if the server already moved past it", async () => {
 	const server = scripted();
 	server.frame(SNAPSHOT_IDLE);
-	await server.untilChunks(2);
+	await server.untilChunks(3);
 	const release = server.holdPrompt();
 	const sending = send(server, "/mode");
-	await server.untilChunks(4); // RUN_STARTED r1 at admission, receipt still out
+	await server.untilChunks(5); // RUN_STARTED r1 at admission, receipt still out
 	// The server took and released generation 1 before the receipt came back.
 	server.frame({ type: "status", live: true, busy: true, generation: 1 });
 	server.frame({ type: "status", live: true, busy: false, generation: 1 });
@@ -145,8 +146,8 @@ test("⚠ an earlier run's ending frames cannot close a run whose receipt is sti
 	expect(server.chunks.some((chunk) => chunk.type === EventType.RUN_FINISHED)).toBe(false);
 	release();
 	await sending;
-	await server.untilChunks(7);
-	expect(server.chunks[6]).toEqual({ type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" });
+	await server.untilChunks(8);
+	expect(server.chunks[7]).toEqual({ type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" });
 	server.abort();
 });
 
@@ -163,12 +164,13 @@ const send = (server: ScriptedServer, message: string, runId = "r1") =>
 		},
 	);
 
-test("the snapshot becomes the mode and run receipts the stores already read", async () => {
+test("the snapshot becomes the mode, open-question and run receipts the stores already read", async () => {
 	const server = scripted();
 	server.frame(SNAPSHOT_IDLE);
-	await server.untilChunks(2);
+	await server.untilChunks(3);
 	expect(server.chunks).toEqual([
 		{ type: EventType.CUSTOM, name: "zen.mode", value: { mode: "default", available: ["default", "plan"] } },
+		{ type: EventType.CUSTOM, name: "zen.open-dialogs", value: { open: [] } },
 		{ type: EventType.CUSTOM, name: "zen.run", value: { generation: 0 } },
 	]);
 	server.abort();
@@ -177,16 +179,16 @@ test("the snapshot becomes the mode and run receipts the stores already read", a
 test("send opens TanStack's own run at admission; the thread's settle closes it", async () => {
 	const server = scripted();
 	server.frame(SNAPSHOT_IDLE);
-	await server.untilChunks(2);
+	await server.untilChunks(3);
 
 	await send(server, "hello");
 	expect(server.prompts).toEqual([{ message: "hello" }]);
-	await server.untilChunks(4);
-	expect(server.chunks.slice(2)).toEqual([
+	await server.untilChunks(5);
+	expect(server.chunks.slice(3)).toEqual([
 		{ type: EventType.RUN_STARTED, threadId: "t1", runId: "r1" },
 		{ type: EventType.TEXT_MESSAGE_START, messageId: expect.any(String), role: "assistant" },
 	]);
-	const opened = server.chunks[3];
+	const opened = server.chunks[4];
 	const messageId = opened !== undefined && "messageId" in opened ? String(opened.messageId) : "";
 
 	// The server's status for OUR generation is not a second run.
@@ -194,8 +196,8 @@ test("send opens TanStack's own run at admission; the thread's settle closes it"
 	server.frame({ type: "observation", seq: 1, observation: { kind: "text-delta", contentIndex: 0, delta: "hi" } });
 	server.frame({ type: "observation", seq: 2, observation: { kind: "settled" } });
 	server.frame({ type: "status", live: true, busy: false, generation: 1 });
-	await server.untilChunks(8);
-	expect(server.chunks.slice(4)).toEqual([
+	await server.untilChunks(9);
+	expect(server.chunks.slice(5)).toEqual([
 		{ type: EventType.CUSTOM, name: "zen.run", value: { generation: 1 } },
 		{ type: EventType.TEXT_MESSAGE_CONTENT, messageId, delta: "hi" },
 		{ type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" },
@@ -207,24 +209,24 @@ test("send opens TanStack's own run at admission; the thread's settle closes it"
 test("⚠ a run another client started is synthesised so this tab renders what it is watching", async () => {
 	const server = scripted();
 	server.frame({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 4 });
-	await server.untilChunks(4);
-	expect(server.chunks.slice(2)).toEqual([
+	await server.untilChunks(5);
+	expect(server.chunks.slice(3)).toEqual([
 		{ type: EventType.RUN_STARTED, threadId: "t1", runId: "external-4" },
 		{ type: EventType.TEXT_MESSAGE_START, messageId: expect.any(String), role: "assistant" },
 	]);
 	server.frame({ type: "observation", seq: 1, observation: { kind: "settled" } });
-	await server.untilChunks(5);
-	expect(server.chunks[4]).toEqual({ type: EventType.RUN_FINISHED, threadId: "t1", runId: "external-4" });
+	await server.untilChunks(6);
+	expect(server.chunks[5]).toEqual({ type: EventType.RUN_FINISHED, threadId: "t1", runId: "external-4" });
 	server.abort();
 });
 
 test("a refused prompt (400) is a run error with the server's reason, and no run stays open", async () => {
 	const server = scripted({ status: 400, body: "/settings is not available on this surface" });
 	server.frame(SNAPSHOT_IDLE);
-	await server.untilChunks(2);
+	await server.untilChunks(3);
 	await send(server, "/settings");
-	await server.untilChunks(5);
-	expect(server.chunks[4]).toEqual({
+	await server.untilChunks(6);
+	expect(server.chunks[5]).toEqual({
 		type: EventType.RUN_ERROR,
 		runId: "r1",
 		message: "/settings is not available on this surface",
@@ -235,16 +237,16 @@ test("a refused prompt (400) is a run error with the server's reason, and no run
 test("⚠ a prompt pi rejects after admission reaches the run as an error, by the receipt's message id", async () => {
 	const server = scripted();
 	server.frame(SNAPSHOT_IDLE);
-	await server.untilChunks(2);
+	await server.untilChunks(3);
 	await send(server, "hello");
-	await server.untilChunks(4);
+	await server.untilChunks(5);
 	server.frame({
 		type: "observation",
 		seq: 1,
 		observation: { kind: "prompt-rejected", messageId: "pm1", reason: "Agent is already processing" },
 	});
-	await server.untilChunks(5);
-	expect(server.chunks[4]).toEqual({ type: EventType.RUN_ERROR, runId: "r1", message: "Agent is already processing" });
+	await server.untilChunks(6);
+	expect(server.chunks[5]).toEqual({ type: EventType.RUN_ERROR, runId: "r1", message: "Agent is already processing" });
 	server.abort();
 });
 
@@ -253,10 +255,10 @@ test("⚠ a prompt pi rejects after admission reaches the run as an error, by th
 test("⚠ a rejection that beats its own receipt is held and still ends the run with its reason", async () => {
 	const server = scripted();
 	server.frame(SNAPSHOT_IDLE);
-	await server.untilChunks(2);
+	await server.untilChunks(3);
 	const release = server.holdPrompt();
 	const sending = send(server, "hello");
-	await server.untilChunks(4);
+	await server.untilChunks(5);
 	server.frame({
 		type: "observation",
 		seq: 1,
@@ -264,11 +266,11 @@ test("⚠ a rejection that beats its own receipt is held and still ends the run 
 	});
 	// Nothing yet: no run is named pm1 until the receipt lands.
 	await new Promise<void>((resolve) => queueMicrotask(resolve));
-	expect(server.chunks).toHaveLength(4);
+	expect(server.chunks).toHaveLength(5);
 	release();
 	await sending;
-	await server.untilChunks(5);
-	expect(server.chunks[4]).toEqual({ type: EventType.RUN_ERROR, runId: "r1", message: "Agent is already processing" });
+	await server.untilChunks(6);
+	expect(server.chunks[5]).toEqual({ type: EventType.RUN_ERROR, runId: "r1", message: "Agent is already processing" });
 	server.abort();
 });
 
@@ -284,9 +286,9 @@ test("answerDialog names what the server did: answered (204), gone (404), refuse
 test("⚠ a blocking question crosses as zen.dialog — no interrupt, no run boundary — and the answer is one POST", async () => {
 	const server = scripted();
 	server.frame(SNAPSHOT_IDLE);
-	await server.untilChunks(2);
+	await server.untilChunks(3);
 	await send(server, "/mode");
-	await server.untilChunks(4);
+	await server.untilChunks(5);
 	server.frame({
 		type: "observation",
 		seq: 1,
@@ -299,8 +301,8 @@ test("⚠ a blocking question crosses as zen.dialog — no interrupt, no run bou
 			dialog: { method: "select", title: "Pick", options: ["a", "b"] },
 		},
 	});
-	await server.untilChunks(5);
-	expect(server.chunks[4]).toEqual({
+	await server.untilChunks(6);
+	expect(server.chunks[5]).toEqual({
 		type: EventType.CUSTOM,
 		name: "zen.dialog",
 		value: { id: "d1", dialog: { method: "select", title: "Pick", options: ["a", "b"] } },
@@ -315,16 +317,16 @@ test("⚠ a blocking question crosses as zen.dialog — no interrupt, no run bou
 test("an unreadable blocking request is declined on pi's behalf and told to the user", async () => {
 	const server = scripted();
 	server.frame(SNAPSHOT_IDLE);
-	await server.untilChunks(2);
+	await server.untilChunks(3);
 	await send(server, "/mode");
-	await server.untilChunks(4);
+	await server.untilChunks(5);
 	server.frame({
 		type: "observation",
 		seq: 1,
 		observation: { kind: "extension-ui-request", id: "d9", method: "custom", blocking: true, origin: "run" },
 	});
-	await server.untilChunks(5);
-	expect(server.chunks[4]).toMatchObject({ type: EventType.RUN_ERROR, runId: "r1" });
+	await server.untilChunks(6);
+	expect(server.chunks[5]).toMatchObject({ type: EventType.RUN_ERROR, runId: "r1" });
 	// The decline is a real POST, awaited through the same seam.
 	await new Promise<void>((resolve) => queueMicrotask(resolve));
 	expect(server.dialogs).toEqual([{ id: "d9", cancelled: true }]);
@@ -334,12 +336,12 @@ test("an unreadable blocking request is declined on pi's behalf and told to the 
 test("⚠ the follow closing under an open run is a run error, not a spinner forever", async () => {
 	const server = scripted();
 	server.frame(SNAPSHOT_IDLE);
-	await server.untilChunks(2);
+	await server.untilChunks(3);
 	await send(server, "hello");
-	await server.untilChunks(4);
-	server.closeFollow();
 	await server.untilChunks(5);
-	expect(server.chunks[4]).toMatchObject({
+	server.closeFollow();
+	await server.untilChunks(6);
+	expect(server.chunks[5]).toMatchObject({
 		type: EventType.RUN_ERROR,
 		runId: "r1",
 		message: expect.stringContaining("closed"),
@@ -350,7 +352,7 @@ test("a frame that fails the wire schema is reported and skipped, never rendered
 	const server = scripted();
 	server.frame({ type: "status", live: true, busy: "yes", generation: 1 } as unknown as ZenFollowFrame);
 	server.frame(SNAPSHOT_IDLE);
-	await server.untilChunks(2);
+	await server.untilChunks(3);
 	expect(server.problems).toEqual([expect.stringContaining("fails ZenFollowFrame")]);
 	expect(server.chunks[0]).toMatchObject({ name: "zen.mode" });
 	server.abort();

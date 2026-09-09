@@ -19,6 +19,18 @@ export const ZEN_CUSTOM_EVENT_QUEUE = "zen.queue";
  * ends or resumes for it.
  */
 export const ZEN_CUSTOM_EVENT_DIALOG = "zen.dialog";
+/**
+ * A blocking question stopped waiting (#114). Value: `{ id, outcome: ZenDialogOutcome }`.
+ * The browser drops the card if it shows this id — whoever answered, by whatever path.
+ */
+export const ZEN_CUSTOM_EVENT_DIALOG_SETTLED = "zen.dialog-settled";
+/**
+ * The questions pi is blocked on as of a snapshot (#114) — the COMPLETE list, so the
+ * browser replaces what it shows rather than adds to it: a reconnect's snapshot is the
+ * resync, and a card for a question settled while the page was away must not survive it.
+ * Value: `{ open: ZenOpenDialog[] }`.
+ */
+export const ZEN_CUSTOM_EVENT_OPEN_DIALOGS = "zen.open-dialogs";
 /** An extension persisted a custom session entry (#29). Value: the `custom-entry` observation. */
 export const ZEN_CUSTOM_EVENT_ENTRY = "zen.entry";
 /**

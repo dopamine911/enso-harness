@@ -3,6 +3,7 @@ import {
 	type PiEventDelivery,
 	type PiRpcEvent,
 	ZEN_TOOL_RESULT_KEY,
+	ZenDialogOutcome,
 	type ZenDialogSpec,
 	ZenNotifyType,
 	type ZenObservation,
@@ -285,6 +286,16 @@ export function mapPiEvent(event: PiRpcEvent, delivery: PiEventDelivery = "live"
 
 		case "extension_ui_request":
 			return mapExtensionUiRequest(event, delivery);
+
+		case "extension_ui_settled": {
+			// The host's own record (#114) — emitted by `extension-ui-context.ts` at the one
+			// point every settle path crosses, in stream order with the request it closes.
+			// An outcome the union does not name is a host/mapper drift, not a pi event to
+			// carry through: it stays unmapped so the debug pane shows it.
+			const { id, outcome } = event;
+			if (typeof id === "string" && Check(ZenDialogOutcome, outcome)) return { kind: "dialog-settled", id, outcome };
+			return { kind: "unmapped", event };
+		}
 
 		case "entry_appended": {
 			// ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via

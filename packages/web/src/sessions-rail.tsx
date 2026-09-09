@@ -49,7 +49,13 @@ export interface SessionsRailProps {
 	readonly onNew: () => void;
 }
 
-/** One stored session's row: title, age, and — when another page is running it — why it cannot be clicked. */
+/**
+ * One stored session's row: title, age, and — when it is running — a pulse. Running is
+ * shown, not locked (#114): under the follow transport (#112) a resume MOUNTS the thread
+ * and follows it, so a page that reloaded under pi's open question comes back to the card
+ * from here. Before #113 a run belonged to the tab's HTTP response and a second page could
+ * not join it, which is what the old `disabled` protected.
+ */
 function EarlierSessionRow({
 	session,
 	now,
@@ -64,17 +70,13 @@ function EarlierSessionRow({
 		<li>
 			<button
 				type="button"
-				disabled={session.busy}
-				title={session.busy ? "running in another tab — resumable once that run settles" : at.toLocaleString()}
+				title={session.busy ? "running — resume to follow it" : at.toLocaleString()}
 				onClick={() => onResume(session.threadId)}
-				className={cn(
-					"flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground text-xs",
-					session.busy ? "cursor-not-allowed opacity-60" : "hover:bg-muted",
-				)}
+				className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground text-xs hover:bg-muted"
 			>
 				{session.busy ? (
 					<span className="size-1.5 shrink-0 animate-pulse rounded-full bg-foreground">
-						<span className="sr-only">running in another tab</span>
+						<span className="sr-only">running</span>
 					</span>
 				) : null}
 				<span className={cn("min-w-0 flex-1 truncate", session.title === undefined ? "italic" : "")}>

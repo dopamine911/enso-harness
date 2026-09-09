@@ -1,4 +1,5 @@
 import { type Static, Type } from "typebox";
+import { ZenOpenDialog } from "./dialog.ts";
 import { ZenObservation } from "./observation.ts";
 import { PiPermissionModeState } from "./permission-mode.ts";
 import { ZenInterruptedTail } from "./session-inspection.ts";
@@ -31,6 +32,8 @@ export const ZenFollowSnapshot = Type.Object(
 		permissionMode: PiPermissionModeState,
 		/** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not zen's. */
 		messages: Type.Array(Type.Unknown()),
+		/** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */
+		openDialogs: Type.Array(ZenOpenDialog),
 		interrupted: Type.Optional(ZenInterruptedTail),
 	},
 	{ additionalProperties: false },

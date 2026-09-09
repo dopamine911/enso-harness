@@ -11,6 +11,7 @@ import {
 	type PiRpcEvent,
 	type PiSession,
 	type ZenDialogSpec,
+	type ZenFollowFrame,
 } from "@zen/core";
 import type { AgentHost, HostedSession } from "../../host/agent-host.ts";
 import { startZenServer } from "../index.ts";
@@ -66,9 +67,16 @@ function fakeHost(commands: string[] = ["mode"]): FakeHost {
 				},
 				answerDialog: (response) => {
 					record.answers.push(response);
-					open.delete(response.id);
+					// What the real host does at `finish` (#114): the settle is a record on the stream.
+					if (open.delete(response.id)) {
+						emit({
+							type: "extension_ui_settled",
+							id: response.id,
+							outcome: "cancelled" in response ? "cancelled" : "answered",
+						});
+					}
 				},
-				openDialog: (id) => open.get(id),
+				openDialogs: () => [...open].map(([id, dialog]) => ({ id, dialog })),
 				listCommands: () => commands.map((name) => ({ name, source: "extension" as const })),
 				permissionModeState: () => ({ mode: "default", available: ["default", "plan"] }),
 				subscribe: (onEvent) => {
@@ -238,11 +246,61 @@ test("⚠ a blocking dialog is an observation on the follow and a unary answer b
 	expect((await answerWith({ id: "d1", value: "a" })).status).toBe(404);
 
 	// A slash command's completion is its acceptance (it never settles) — the lease follows it.
+	// Before it: the answer's own settle (#114), so this tab's card drops by the feed, not by faith.
 	fake.accept();
-	await follow.untilFrames(5);
-	expect(follow.frames[4]).toEqual({ type: "status", live: true, busy: false, generation: 1 });
+	await follow.untilFrames(6);
+	expect(follow.frames[4]).toEqual({
+		type: "observation",
+		seq: 2,
+		observation: { kind: "dialog-settled", id: "d1", outcome: "answered" },
+	});
+	expect(follow.frames[5]).toEqual({ type: "status", live: true, busy: false, generation: 1 });
 	expect(fake.built[0]?.aborts).toBe(0);
 	follow.close();
+});
+
+test("⚠ a question answered in one tab is settled on every follower's feed, and a follow opened under it gets it in the snapshot (#114)", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	const first = await openFollow(url, "t1");
+	const second = await openFollow(url, "t1");
+	await prompt(url, "t1", "/mode");
+	fake.emit(SELECT_DIALOG);
+	await first.untilFrames(4);
+	await second.untilFrames(4);
+
+	// A third follower arrives while pi waits: the question is in ITS snapshot — a reload
+	// under an open question renders the card, not a busy thread with nothing to answer.
+	const late = await openFollow(url, "t1");
+	await late.untilFrames(1);
+	expect(late.frames[0]).toMatchObject({
+		type: "snapshot",
+		busy: true,
+		openDialogs: [{ id: "d1", dialog: { method: "select", title: "Pick", options: ["a", "b"] } }],
+	});
+
+	// The first tab answers; the second and the late one learn it without touching the route.
+	const answered = await fetch(`${url}/api/threads/t1/dialog`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ id: "d1", value: "a" }),
+	});
+	expect(answered.status).toBe(204);
+	const settled: ZenFollowFrame = {
+		type: "observation",
+		seq: 2,
+		observation: { kind: "dialog-settled", id: "d1", outcome: "answered" },
+	};
+	await second.untilFrames(5);
+	await late.untilFrames(2);
+	expect(second.frames[4]).toEqual(settled);
+	expect(late.frames[1]).toEqual(settled);
+
+	// And a follow opened after the settle lists nothing.
+	const after = await openFollow(url, "t1");
+	await after.untilFrames(1);
+	expect(after.frames[0]).toMatchObject({ type: "snapshot", openDialogs: [] });
+	for (const follow of [first, second, late, after]) follow.close();
 });
 
 // ── 3. silence ends nothing ───────────────────────────────────────────────────────────

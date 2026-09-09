@@ -9,7 +9,11 @@ import {
 	ZenPromptReceipt,
 } from "@zen/core";
 import { Check } from "typebox/value";
-import { ZEN_CUSTOM_EVENT_MODE, ZEN_CUSTOM_EVENT_RUN } from "./rpc/custom-event-names.ts";
+import {
+	ZEN_CUSTOM_EVENT_MODE,
+	ZEN_CUSTOM_EVENT_OPEN_DIALOGS,
+	ZEN_CUSTOM_EVENT_RUN,
+} from "./rpc/custom-event-names.ts";
 import { type AguiIdentifiers, observationToAguiEvents } from "./rpc/to-agui.ts";
 
 /**
@@ -198,6 +202,9 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 	function observe(frame: ZenFollowFrame): void {
 		if (frame.type === "snapshot") {
 			push({ type: EventType.CUSTOM, name: ZEN_CUSTOM_EVENT_MODE, value: frame.permissionMode });
+			// The complete list, every snapshot (#114): a reconnect's snapshot is the resync,
+			// so an empty list is a fact ("nothing is waiting") the browser must apply too.
+			push({ type: EventType.CUSTOM, name: ZEN_CUSTOM_EVENT_OPEN_DIALOGS, value: { open: frame.openDialogs } });
 			observeStatus(frame.busy, frame.generation);
 			return;
 		}

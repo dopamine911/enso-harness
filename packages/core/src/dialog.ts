@@ -72,6 +72,14 @@ export const ZenDialogAnswer = Type.Union([
 ]);
 export type ZenDialogAnswer = Static<typeof ZenDialogAnswer>;
 
+/**
+ * One question pi is blocked on, as the follow's snapshot lists it (#114) — so a follow
+ * opened while pi waits renders the card at once, instead of a busy thread with nothing to
+ * answer. `id` is the request id the answer is keyed by.
+ */
+export const ZenOpenDialog = Type.Object({ id: Type.String({ minLength: 1 }), dialog: ZenDialogSpec });
+export type ZenOpenDialog = Static<typeof ZenOpenDialog>;
+
 const dialogSpecValidator = Compile(ZenDialogSpec);
 const dialogAnswerValidator = Compile(ZenDialogAnswer);
 

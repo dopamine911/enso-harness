@@ -268,24 +268,19 @@ export function startZenServer(options: ZenServerOptions) {
 	 * The thread's branch as the messages a chat mounts with (#95), plus its permission mode.
 	 * Read-only — looking must not build (#86).
 	 *
-	 * Three states, decided by what the server holds, not by whether it holds anything:
-	 *   • BUSY here (a run in flight, a dialog parked): 409. Two pages must never drive one pi
-	 *     session at once — pi refuses the second prompt with "already processing", and this
-	 *     is that refusal made readable before a prompt is typed. The server owns the check,
-	 *     not only the rail's disabled row: a rail fetched a moment before another tab
-	 *     prompted would otherwise get past it.
-	 *   • IDLE here (released, cached for the idle window): pi's memory and the session's own
-	 *     mode — fresher than the file, and RESUMABLE. A page that reloaded after a run must be
-	 *     able to come back to its session before the 30-minute eviction (PR #104 review).
+	 * Decided by what the server holds, not by whether it holds anything:
+	 *   • HERE (a run in flight, a dialog open, or idle within the eviction window): pi's
+	 *     memory and the session's own mode — fresher than the file, and RESUMABLE. A page
+	 *     that reloaded after a run must be able to come back before the 30-minute eviction
+	 *     (PR #104 review); a page that reloaded UNDER pi's open question must be able to
+	 *     come back to the card (#114). Busy is not a refusal any more: under the follow
+	 *     transport (#112) a resumed pane follows the run in flight, and a prompt to a busy
+	 *     thread queues through pi (#75) — the 409 that guarded the old per-response run
+	 *     path guarded nothing here and locked the operator out of their own question.
 	 *   • NOT here: the file, with the mode its branch persists. Neither: 404.
 	 */
 	async function respondWithThreadHistory(threadId: string, response: ServerResponse): Promise<void> {
 		const live = threads.peek(threadId);
-		if (live?.busy === true) {
-			response.writeHead(409, { "Content-Type": "text/plain" });
-			response.end(`thread ${threadId} is running on this server`);
-			return;
-		}
 		const branch = live === undefined ? await host.readBranch(threadId) : live.hosted.inspect().entries;
 		if (branch === undefined) {
 			response.writeHead(404, { "Content-Type": "text/plain" });

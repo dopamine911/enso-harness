@@ -96,6 +96,7 @@ test("EVERY observation the mapper can emit validates against ZenObservation", (
 		{ type: "tool_execution_end", toolCallId: "c", toolName: "write", result: { content: "denied" }, isError: true },
 		{ type: "extension_error", extensionPath: "/g.ts", event: "tool_call", error: "boom" },
 		{ type: "extension_ui_request", id: "u1", method: "notify", message: "Mode: acceptEdits", notifyType: "info" },
+		{ type: "extension_ui_settled", id: "u1", outcome: "answered" },
 		{
 			type: "message_end",
 			message: { role: "assistant", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0.1 } } },

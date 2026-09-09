@@ -207,8 +207,9 @@ test("the earlier list distinguishes resumable, running-elsewhere, empty and fai
 	expect(rendered).toContain('aria-label="earlier sessions"');
 	expect(rendered).toContain("resume me");
 	expect(rendered).toContain("2h");
-	expect(rendered).toContain("running in another tab");
-	expect(rendered).toContain("disabled");
+	// Running is shown, not locked (#114): the row is how a reloaded page gets back to an open question.
+	expect(rendered).toContain("running");
+	expect(rendered).not.toContain('disabled=""');
 	expect(rendered).toContain(UNTITLED_SESSION);
 
 	const empty = renderToStaticMarkup(<SessionsRail {...baseProps} earlier={[]} earlierError={undefined} />);

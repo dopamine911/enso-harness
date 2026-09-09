@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import type { ZenDialogSpec } from "@zen/core";
 import { routeZenCustomEvent } from "../custom-event-router.ts";
 import {
 	ZEN_CUSTOM_EVENT_DIALOG,
+	ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
 	ZEN_CUSTOM_EVENT_ENTRY,
 	ZEN_CUSTOM_EVENT_MODE,
 	ZEN_CUSTOM_EVENT_NOTIFY,
+	ZEN_CUSTOM_EVENT_OPEN_DIALOGS,
 	ZEN_CUSTOM_EVENT_RUN,
 	ZEN_CUSTOM_EVENT_UNMAPPED,
 	ZEN_CUSTOM_EVENT_USAGE,
@@ -65,6 +68,31 @@ test("zen.dialog opens the thread's question; a malformed one opens nothing and 
 	route(ZEN_CUSTOM_EVENT_DIALOG, { id: "", dialog: { method: "select" } });
 	expect(stores.dialog.get()?.id).toBe("d1");
 	expect(notificationMessages()).toEqual([expect.stringContaining("could not read")]);
+});
+
+const CONFIRM: ZenDialogSpec = { method: "confirm", title: "Apply?", message: "m" };
+
+test("zen.dialog-settled drops the card for ITS id and no other (#114)", () => {
+	route(ZEN_CUSTOM_EVENT_DIALOG, { id: "d1", dialog: CONFIRM });
+	route(ZEN_CUSTOM_EVENT_DIALOG_SETTLED, { id: "d0", outcome: "answered" });
+	expect(stores.dialog.get()?.id).toBe("d1");
+	route(ZEN_CUSTOM_EVENT_DIALOG_SETTLED, { id: "d1", outcome: "timeout" });
+	expect(stores.dialog.get()).toBeUndefined();
+	// nothing shown: a settle for anything is nothing to do
+	route(ZEN_CUSTOM_EVENT_DIALOG_SETTLED, { id: "d1", outcome: "answered" });
+	expect(stores.dialog.get()).toBeUndefined();
+	expect(notificationMessages()).toEqual([]);
+});
+
+test("zen.open-dialogs is the snapshot's complete list: it replaces the card, an empty list clears it, a malformed one is ignored (#114)", () => {
+	route(ZEN_CUSTOM_EVENT_DIALOG, { id: "stale", dialog: CONFIRM });
+	route(ZEN_CUSTOM_EVENT_OPEN_DIALOGS, { open: [{ id: "d2", dialog: CONFIRM }] });
+	expect(stores.dialog.get()).toEqual({ id: "d2", dialog: CONFIRM });
+	route(ZEN_CUSTOM_EVENT_OPEN_DIALOGS, { open: "nope" });
+	expect(stores.dialog.get()?.id).toBe("d2");
+	route(ZEN_CUSTOM_EVENT_OPEN_DIALOGS, { open: [] });
+	expect(stores.dialog.get()).toBeUndefined();
+	expect(notificationMessages()).toEqual([]);
 });
 
 test("zen.usage reaches the session-stats store and nothing else", () => {

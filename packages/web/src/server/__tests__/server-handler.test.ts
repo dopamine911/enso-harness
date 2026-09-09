@@ -56,7 +56,7 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
 			script.onPrompt(emit, outcome, request.message);
 		},
 		answerDialog: () => undefined,
-		openDialog: () => undefined,
+		openDialogs: () => [],
 		listCommands: () => [{ name: "mode", source: "extension" }],
 		permissionModeState: () => ({ mode: "default", available: ["default", "acceptEdits"] }),
 		subscribe: (onEvent) => {
@@ -435,12 +435,13 @@ test("⚠ a thread this server holds IDLE is resumable — /history reads pi's m
 	expect(built).toHaveLength(1);
 });
 
-test("⚠ GET /api/threads/:id/history refuses a thread that is BUSY here, even if a stale rail made it clickable", async () => {
+test("⚠ GET /api/threads/:id/history serves a thread that is BUSY here — a reload under an open question can come back (#114)", async () => {
 	const { url, built } = await startWith(asksAndWaits);
 	await prompt(url, "t1", "/mode");
 	const response = await fetch(`${url}/api/threads/t1/history`);
-	expect(response.status).toBe(409);
-	expect(await response.text()).toContain("running on this server");
+	expect(response.status).toBe(200);
+	expect(((await response.json()) as ZenThreadHistory).threadId).toBe("t1");
+	// Looking did not build a second session.
 	expect(built).toHaveLength(1);
 });
 
