@@ -6,10 +6,10 @@ import type { ThreadSummary } from "./thread-stores.ts";
 /**
  * The sessions rail (#90 PR 3): which conversation am I in, what else is live on this
  * page, how do I start over. deepseek-harness's left rail is the reference — a title, a
- * relative age, a New session button.
+ * relative age, a New Session button.
  *
- * Two lists, each labelled for what it is. "LIVE SESSIONS": the threads this page has open
- * — they die with the page. "EARLIER SESSIONS" (#95): pi's session files for this
+ * Two lists, each labelled for what it is. "ACTIVE SESSIONS": the threads this page has open
+ * — they die with the page. "PREVIOUS SESSIONS" (#95): pi's session files for this
  * workspace that this page has not got open; a click resumes one, with its history and
  * its mode, under the same id — the thread id IS pi's session id. A session another page
  * is RUNNING right now (a run in flight, a dialog parked) is shown but not clickable:
@@ -101,10 +101,10 @@ export function ThreadsRail({
 	return (
 		<nav aria-label="sessions" className="flex w-56 shrink-0 flex-col gap-2 border-r p-2">
 			<Button type="button" size="sm" variant="outline" onClick={onNew}>
-				New session
+				New Session
 			</Button>
-			<h2 className="px-1 pt-1 font-medium text-muted-foreground text-xs">live sessions</h2>
-			<ol aria-label="live sessions" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+			<h2 className="px-1 pt-1 font-medium text-muted-foreground text-xs">Active Sessions</h2>
+			<ol aria-label="Active Sessions" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
 				{threads.map((thread) => {
 					const active = thread.threadId === activeThreadId;
 					return (
@@ -135,13 +135,13 @@ export function ThreadsRail({
 					);
 				})}
 			</ol>
-			<h2 className="px-1 pt-1 font-medium text-muted-foreground text-xs">earlier sessions</h2>
+			<h2 className="px-1 pt-1 font-medium text-muted-foreground text-xs">Previous Sessions</h2>
 			{earlierError !== undefined ? (
 				<div role="alert" className="px-2 text-destructive text-xs">
-					could not list sessions: {earlierError}
+					could not list previous sessions: {earlierError}
 				</div>
 			) : null}
-			<ol aria-label="earlier sessions" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+			<ol aria-label="Previous Sessions" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
 				{earlier.length === 0 && earlierError === undefined ? (
 					<li className="px-2 py-1.5 text-muted-foreground text-xs italic">none yet</li>
 				) : null}
