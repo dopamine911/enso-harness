@@ -481,7 +481,8 @@ const chatComponents = {
 						    so this button changes nothing itself; the feed does. Read off
 						    `sessionGenerating`, the shared run flag — `isLoading` never rises here
 						    (#103 receipt). Not offered once the follow has ended (#119): the flag
-						    is then as of that moment, and a stop that may stop nothing is the #4 shape. */}
+						    is then as of that moment, and a stop that may stop nothing is issue #4's shape -
+						    `docs/architecture.md`, The control plane, invariant 5. */}
 						{chat.sessionGenerating && !disconnected ? (
 							<Button
 								type="button"
