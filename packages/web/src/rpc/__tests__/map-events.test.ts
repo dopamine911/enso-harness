@@ -320,12 +320,18 @@ test("pi's turn boundaries cross with the tool-result count, not the results", (
 	expect(mapPiEvent({ type: "turn_end" })).toEqual({ kind: "turn-end", toolResults: 0 });
 });
 
-test("queue_update crosses as counts (#75)", () =>
+test("queue_update crosses with the texts, in order; a non-string entry is dropped, an absent list is empty (#75)", () => {
 	expect(mapPiEvent({ type: "queue_update", steering: ["a"], followUp: ["b", "c"] })).toEqual({
 		kind: "queue",
-		steering: 1,
-		followUp: 2,
-	}));
+		steering: ["a"],
+		followUp: ["b", "c"],
+	});
+	expect(mapPiEvent({ type: "queue_update", steering: [1, "x"], followUp: undefined })).toEqual({
+		kind: "queue",
+		steering: ["x"],
+		followUp: [],
+	});
+});
 
 // --- #114: the host's settle record ---------------------------------------------------
 test("the host's extension_ui_settled maps to dialog-settled; an outcome the union does not name stays unmapped", () => {

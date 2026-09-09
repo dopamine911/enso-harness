@@ -26,6 +26,7 @@ export {
 	ZenOpenDialog,
 } from "./dialog.ts";
 export {
+	ZenAbortReceipt,
 	ZenFollowFrame,
 	ZenFollowObservation,
 	ZenFollowSnapshot,

@@ -427,6 +427,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 			abort() {
 				return session.abort();
 			},
+			clearQueue() {
+				return session.clearQueue();
+			},
 			dispose() {
 				if (disposed) return;
 				disposed = true;

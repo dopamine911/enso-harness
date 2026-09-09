@@ -2,7 +2,7 @@ import { automaticPartsForMessage, type ChatUISelectedPart, selectChatUI } from 
 import { createChatHook, createChatHookContexts, type LayoutProps, type MessageProps } from "@tanstack/ai-react/ui";
 import type { PiDialogResponse, ZenDialogSpec } from "@zen/core";
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
 	Conversation,
 	ConversationContent,
@@ -10,6 +10,17 @@ import {
 	ConversationScrollButton,
 } from "./components/ai-elements/conversation.tsx";
 import { Message, MessageContent } from "./components/ai-elements/message.tsx";
+import {
+	QueueItem,
+	QueueItemContent,
+	QueueItemIndicator,
+	QueueList,
+	QueueSection,
+	QueueSectionContent,
+	QueueSectionLabel,
+	QueueSectionTrigger,
+	Queue as QueueShell,
+} from "./components/ai-elements/queue.tsx";
 import { Alert, AlertDescription, AlertTitle } from "./components/ui/alert.tsx";
 import { Button } from "./components/ui/button.tsx";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card.tsx";
@@ -407,6 +418,52 @@ function PendingDialog(): React.ReactNode {
 	);
 }
 
+/** The composer's draft with more text appended — restored prompts after what was already typed, one blank line between. */
+export function joinDrafts(current: string, ...more: readonly string[]): string {
+	return [current, ...more].filter((part) => part.trim().length > 0).join("\n\n");
+}
+
+/**
+ * What waits behind the run, as pi holds it (#75) — the `zen.queue` list, rendered above the
+ * composer with ai-elements' Queue shell (#121). Every follower sees the same list; a stop
+ * hands the texts back to the composer of the tab that stopped. Nothing when nothing waits.
+ * ⓘ Exported for `__tests__/chat-screen.test.tsx`.
+ */
+export function PendingQueue(): React.ReactNode {
+	const stores = useThreadStores();
+	const queued = useStore(stores.queue);
+	if (queued.length === 0) return null;
+	// pi's queue is texts without ids; the same text may wait twice. Key by text and its
+	// occurrence so a duplicate keeps its own row and a removal from the head does not remount.
+	const seen = new Map<string, number>();
+	const keyed = queued.map((text) => {
+		const occurrence = seen.get(text) ?? 0;
+		seen.set(text, occurrence + 1);
+		return { text, key: `${text}\u0000${occurrence}` };
+	});
+	return (
+		<QueueShell aria-label="queued prompts" className="mx-auto mb-2 w-full max-w-3xl">
+			<QueueSection>
+				<QueueSectionTrigger>
+					<QueueSectionLabel count={queued.length} label={queued.length === 1 ? "prompt queued" : "prompts queued"} />
+				</QueueSectionTrigger>
+				<QueueSectionContent>
+					<QueueList>
+						{keyed.map(({ text, key }) => (
+							<QueueItem key={key}>
+								<span className="flex items-start gap-2">
+									<QueueItemIndicator />
+									<QueueItemContent title={text}>{text}</QueueItemContent>
+								</span>
+							</QueueItem>
+						))}
+					</QueueList>
+				</QueueSectionContent>
+			</QueueSection>
+		</QueueShell>
+	);
+}
+
 /**
  * The widget map every per-thread factory is built from — declared once, so all threads
  * render identically. Type-annotated by inference through `createThreadChatHook`.
@@ -438,10 +495,61 @@ const chatComponents = {
 			// server that rebuilds the thread, but this page's follow is gone, so the reply would
 			// land nowhere this page can see. Same shape as the missing stop; the placeholder says why.
 			const canSend = draft.trim().length > 0 && !disconnected;
+			// The user messages this composer put in the transcript for prompts pi is still
+			// HOLDING (#75): a stop hands those texts back, and the bubble that was never asked
+			// leaves with them — pi's TUI does the same. A claimed prompt's bubble stays.
+			const heldLocally = useRef<Array<{ id: string; text: string }>>([]);
+			// ⚠ `takeBack` runs after a network round trip, from a closure made by an older render.
+			// `chat.messages` there is that render's snapshot; filtering it would replace the
+			// transcript with the snapshot minus one — reverting every delta that streamed in
+			// between (PR #129 review). The ref is the transcript as of the latest COMMITTED
+			// render — written in an effect, never during render (react-doctor, and React's rule).
+			const latestMessages = useRef(chat.messages);
+			useEffect(() => {
+				latestMessages.current = chat.messages;
+			}, [chat.messages]);
 			const sendDraft = (): void => {
 				if (!canSend) return;
-				void chat.sendMessage(draft);
+				const text = draft;
 				setDraft("");
+				if (!chat.sessionGenerating) {
+					void chat.sendMessage(text);
+					return;
+				}
+				// A prompt DURING a run queues through pi (#75). ⚠ Not `chat.sendMessage`: TanStack
+				// holds a send in its own queue while the run it started is open and delivers it at
+				// settle — the browser's queue, invisible to other tabs, lost on reload. So the user
+				// message goes into the transcript here, and the text goes to pi now: pi lists it on
+				// the follow for every follower (`zen.queue`, the list above this composer) and claims
+				// it when the run's turn ends. Refused or unreachable, the words come back to the draft.
+				const id = crypto.randomUUID();
+				heldLocally.current.push({ id, text });
+				chat.setMessages([
+					...chat.messages,
+					{ id, role: "user", parts: [{ type: "text", content: text }], createdAt: new Date() },
+				]);
+				void stores.connection.prompt(text).then((outcome) => {
+					if (outcome === "refused" || outcome === "unreachable") takeBack([text]);
+				});
+			};
+			/** Texts pi never took come back to the draft, and their never-asked bubbles leave the transcript. */
+			const takeBack = (texts: readonly string[]): void => {
+				const leaving = new Set<string>();
+				for (const text of texts) {
+					const position = heldLocally.current.findIndex((held) => held.text === text);
+					if (position === -1) continue;
+					leaving.add(heldLocally.current[position]?.id ?? "");
+					heldLocally.current.splice(position, 1);
+				}
+				if (leaving.size > 0) chat.setMessages(latestMessages.current.filter((message) => !leaving.has(message.id)));
+				setDraft((current) => joinDrafts(current, ...texts));
+			};
+			// Stop (#116) hands back what was queued behind the run (#75, clear-and-restore): the
+			// abort receipt's texts become the draft, in order, after anything already typed.
+			const stopRun = (): void => {
+				void stores.connection.abort().then(({ restored }) => {
+					if (restored.length > 0) takeBack(restored);
+				});
 			};
 
 			return (
@@ -490,15 +598,13 @@ const chatComponents = {
 								variant="outline"
 								aria-label="stop the run"
 								title="stop the run in flight — pi is told; the run ends on the feed"
-								onClick={() => void stores.connection.abort()}
+								onClick={stopRun}
 							>
 								<SquareIcon />
 							</Button>
 						) : null}
-						{/* Send stays offered in flight. ⚠ Today a prompt sent during a run is held by
-						    TanStack's ChatClient (`whenBusy: "queue"`) and POSTed when the run settles —
-						    the browser's queue, not pi's (#75 decision 3 is the gap; pinned in
-						    `thread-pane.test.tsx`). Not lost, but invisible to other tabs and to a reload. */}
+						{/* Send stays offered in flight: a prompt during a run queues through pi (#75) —
+						    `sendDraft` above takes the direct route past TanStack's own queue. */}
 						<Button type="submit" size="icon" aria-label="send message" disabled={!canSend}>
 							<ArrowUpIcon />
 						</Button>
@@ -518,7 +624,7 @@ const chatComponents = {
 		 * Errors are not a message part, so no `partsComponents` entry catches them. They
 		 * live on the chat instance and have to be rendered deliberately.
 		 */
-		layout: function ChatLayout({ Messages, Queue, Input }: LayoutProps<ThreadChatOptions>) {
+		layout: function ChatLayout({ Messages, Input }: LayoutProps<ThreadChatOptions>) {
 			const chat = useChatContext();
 			const debugOpen = useContext(DebugOpenContext);
 			return (
@@ -543,11 +649,13 @@ const chatComponents = {
 									    `ask` verdict reaches the browser, and an unmounted slot is precisely
 									    why an approval would silently never appear. */}
 									<PendingDialog />
-									<Queue />
 									<RunProblem />
 								</ConversationContent>
 								<ConversationScrollButton />
 							</Conversation>
+							{/* pi's queue, not TanStack's `Queue` slot (#75): a prompt sent during a run goes to
+							    pi and is listed here for every follower; TanStack's own queue is bypassed. */}
+							<PendingQueue />
 							<Input />
 						</div>
 						{/* The session debug pane (#86): what the browser believes beside what pi's

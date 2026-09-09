@@ -31,6 +31,8 @@ interface FakeRecord {
 	answers: PiDialogResponse[];
 	aborts: number;
 	disposed: number;
+	/** What pi holds behind the run; a stop clears it and the route hands it back (#75). */
+	queue: { steering: string[]; followUp: string[] };
 }
 
 interface FakeHost {
@@ -49,7 +51,13 @@ function fakeHost(commands: string[] = ["mode"]): FakeHost {
 	const host: AgentHost = {
 		createSession: () => {
 			const listeners = new Set<(event: PiRpcEvent, delivery: PiEventDelivery) => void>();
-			const record: FakeRecord = { prompts: [], answers: [], aborts: 0, disposed: 0 };
+			const record: FakeRecord = {
+				prompts: [],
+				answers: [],
+				aborts: 0,
+				disposed: 0,
+				queue: { steering: [], followUp: [] },
+			};
 			built.push(record);
 			/** Every blocking question this fake has emitted and not yet had answered — what the real host's `openDialog` reads. */
 			const open = new Map<string, ZenDialogSpec>();
@@ -88,6 +96,13 @@ function fakeHost(commands: string[] = ["mode"]): FakeHost {
 				abort: () => {
 					record.aborts += 1;
 					return Promise.resolve();
+				},
+				clearQueue: () => {
+					const cleared = { steering: [...record.queue.steering], followUp: [...record.queue.followUp] };
+					record.queue = { steering: [], followUp: [] };
+					// pi emits the emptied queue to every follower.
+					emit({ type: "queue_update", steering: [], followUp: [] });
+					return cleared;
 				},
 				dispose: () => {
 					record.disposed += 1;
@@ -205,7 +220,7 @@ test("prompt answers at admission with a message id; the run is released by pi's
 	follow.close();
 });
 
-test("⚠ POST …/abort tells pi once and answers 204; the run still ends on the follow by its settle, not by the route (#116)", async () => {
+test("⚠ POST …/abort tells pi once and answers with the restored queue; the run still ends on the follow by its settle, not by the route (#116, #75)", async () => {
 	const fake = fakeHost();
 	const url = await startWith(fake);
 	const follow = await openFollow(url, "t1");
@@ -216,15 +231,29 @@ test("⚠ POST …/abort tells pi once and answers 204; the run still ends on th
 	expect((await abortWith("never")).status).toBe(404);
 	await prompt(url, "t1", "hello");
 	await follow.untilFrames(3);
+	// Two prompts wait behind the run (pi's queue); the stop hands them back, steering first.
+	const built = fake.built[0];
+	if (built === undefined) throw new Error("no session built");
+	built.queue.followUp.push("then this");
+	built.queue.steering.push("wait — stop at the tests");
 	const told = await abortWith("t1");
-	expect(told.status).toBe(204);
-	expect(fake.built[0]?.aborts).toBe(1);
+	expect(told.status).toBe(200);
+	expect(await told.json()).toEqual({ threadId: "t1", restored: ["wait — stop at the tests", "then this"] });
+	expect(built.aborts).toBe(1);
+	expect(built.queue).toEqual({ steering: [], followUp: [] });
 	// The route released nothing: the thread is still busy until pi's own settle arrives.
 	expect(await threadSummary(url, "t1")).toMatchObject({ busy: true, generation: 1 });
+	// Every follower saw the queue empty (pi's queue_update from clearQueue), then the settle.
+	await follow.untilFrames(4);
+	expect(follow.frames[3]).toEqual({
+		type: "observation",
+		seq: 1,
+		observation: { kind: "queue", steering: [], followUp: [] },
+	});
 	fake.emit(SETTLED);
-	await follow.untilFrames(5);
-	expect(follow.frames.slice(3)).toEqual([
-		{ type: "observation", seq: 1, observation: { kind: "settled" } },
+	await follow.untilFrames(6);
+	expect(follow.frames.slice(4)).toEqual([
+		{ type: "observation", seq: 2, observation: { kind: "settled" } },
 		{ type: "status", live: true, busy: false, generation: 1 },
 	]);
 	const idle = await abortWith("t1");

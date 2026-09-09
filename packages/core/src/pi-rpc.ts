@@ -180,6 +180,13 @@ export const PiSession = Type.Object({
 	),
 	/** Abort the in-flight run and wait until the agent is idle. The session survives. */
 	abort: Type.Unsafe<() => Promise<void>>(Type.Function([], Type.Unknown())),
+	/**
+	 * Drop every prompt waiting behind the run and return the texts, steering first (#75,
+	 * clear-and-restore): pi's `AgentSession.clearQueue()`, which also emits the
+	 * `queue_update` every follower reads. The stop route hands the texts back to the tab
+	 * that stopped, so nothing typed is lost and nothing runs unasked on the next turn.
+	 */
+	clearQueue: Type.Unsafe<() => { steering: string[]; followUp: string[] }>(Type.Function([], Type.Unknown())),
 	/** Cancel pending dialogs, tell extensions the session is shutting down, release the session. Idempotent. */
 	dispose: Type.Unsafe<() => void>(Type.Function([], Type.Void())),
 });

@@ -221,13 +221,15 @@ export type ZenTurnEnd = Static<typeof ZenTurnEnd>;
 /**
  * pi's `queue_update` (#75, #112): what is waiting behind the run in flight — steering
  * messages enter at the next step boundary, follow-ups after the run settles (dsh's
- * `next-step` / `next-turn`). Counts only: the texts are the user's prompts, and they
- * cross as `message-start` when pi claims them.
+ * `next-step` / `next-turn`). The TEXTS, in order, as pi holds them: the page shows what is
+ * waiting (the queue list above the composer), every follower sees the same list, and a
+ * stop hands them back to the composer (#75, clear-and-restore). Empty lists when nothing
+ * waits — the frame pi emits after it claims or clears.
  */
 export const ZenQueue = Type.Object({
 	kind: Type.Literal("queue"),
-	steering: Type.Integer({ minimum: 0 }),
-	followUp: Type.Integer({ minimum: 0 }),
+	steering: Type.Array(Type.String()),
+	followUp: Type.Array(Type.String()),
 });
 export type ZenQueue = Static<typeof ZenQueue>;
 

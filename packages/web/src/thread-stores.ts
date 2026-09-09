@@ -61,6 +61,14 @@ export interface ThreadStores {
 	 * whatever the run flag still holds: the page cannot know what the server is doing.
 	 */
 	readonly disconnected: WritableStore<boolean>;
+	/**
+	 * What waits behind the run in flight, as pi holds it (#75): the texts, steering first,
+	 * from every `zen.queue` frame — one list for every follower, so a second tab sees what
+	 * the first queued. Empty when nothing waits. Rendered above the composer; a stop hands
+	 * these back to the composer through the abort receipt, not from here (the frame that
+	 * empties this can beat the receipt).
+	 */
+	readonly queue: WritableStore<readonly string[]>;
 	/** The thread's transport: TanStack's connection over prompt/follow, and the dialog answer beside it. */
 	readonly connection: FollowConnection;
 }
@@ -87,6 +95,7 @@ function createThreadStores(threadId: string, history: readonly UIMessage[], fet
 		generation: createStore<number | undefined>(undefined),
 		dialog: createStore<ZenPendingDialog | undefined>(undefined),
 		disconnected: createStore(false),
+		queue: createStore<readonly string[]>([]),
 		connection: createFollowConnection({
 			threadId,
 			...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),

@@ -169,6 +169,11 @@ function countOf(value: unknown): number {
 	return Array.isArray(value) ? value.length : 0;
 }
 
+/** The strings of an array field pi carries, in order; anything that is not a string is dropped, an absent field is empty. */
+function textsOf(value: unknown): string[] {
+	return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
 /**
  * A message began (#112). A USER message carries its text so a second follower sees the
  * prompt another tab sent; every other role's content arrives by its own events.
@@ -240,7 +245,7 @@ export function mapPiEvent(event: PiRpcEvent, delivery: PiEventDelivery = "live"
 			return { kind: "turn-end", toolResults: countOf(event.toolResults) };
 
 		case "queue_update":
-			return { kind: "queue", steering: countOf(event.steering), followUp: countOf(event.followUp) };
+			return { kind: "queue", steering: textsOf(event.steering), followUp: textsOf(event.followUp) };
 
 		case "tool_execution_start":
 			return {

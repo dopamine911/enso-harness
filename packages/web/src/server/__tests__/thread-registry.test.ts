@@ -12,7 +12,11 @@ function ignore(): void {
  * says so — the disconnect-then-prompt race is about the gap between abort and idle.
  */
 function fakeHosted() {
-	const record = { disposed: 0, aborts: 0 };
+	const record = { disposed: 0, aborts: 0, queueClears: 0 };
+	/** What pi holds behind the run — a test fills it to see the stop hand it back (#75). */
+	const queue = { steering: [] as string[], followUp: [] as string[] };
+	/** Set by a test to make the next `clearQueue` throw — pi emits to listeners inside it. */
+	const failClear = { with: undefined as Error | undefined };
 	let finishAbort: () => void = ignore;
 	const session: PiSession = {
 		prompt: ignore,
@@ -27,6 +31,14 @@ function fakeHosted() {
 				finishAbort = resolve;
 			});
 		},
+		clearQueue: () => {
+			record.queueClears += 1;
+			if (failClear.with !== undefined) throw failClear.with;
+			const cleared = { steering: [...queue.steering], followUp: [...queue.followUp] };
+			queue.steering = [];
+			queue.followUp = [];
+			return cleared;
+		},
 		dispose: () => {
 			record.disposed += 1;
 		},
@@ -37,7 +49,7 @@ function fakeHosted() {
 		inspect: () => ({ sessionId: "s", cwd: "/", sessionDir: "/s", sessionFile: null, entries: [], commands: [] }),
 		emittedEvents: () => [],
 	};
-	return { hosted, record, finishAbort: () => finishAbort() };
+	return { hosted, record, queue, failClear, finishAbort: () => finishAbort() };
 }
 
 function fakeHost() {
@@ -104,13 +116,13 @@ test("acquire within the idle window cancels the disposal — #43's fix in one a
 test("abort stops the run and never disposes; a repeat while it is pending is the same answer, not a second call; the next acquire waits for it (#116)", async () => {
 	const { threads, built } = fakeHost();
 	await threads.acquire("t1");
-	expect(threads.abort("t1")).toBe("aborted");
+	expect(threads.abort("t1")).toEqual({ outcome: "aborted", restored: [] });
 	const hosted = built[0];
 	if (hosted === undefined) throw new Error("no session built");
 	expect(hosted.record.aborts).toBe(1);
 	expect(hosted.record.disposed).toBe(0);
 	// The double click (PR #120 review): busy until pi's settle, so only the in-flight abort tells.
-	expect(threads.abort("t1")).toBe("aborted");
+	expect(threads.abort("t1")).toEqual({ outcome: "aborted", restored: [] });
 	expect(hosted.record.aborts).toBe(1);
 
 	let acquired = false;
@@ -126,11 +138,46 @@ test("abort stops the run and never disposes; a repeat while it is pending is th
 
 test("abort on an idle thread or an unknown one touches nothing, and says which (#116)", async () => {
 	const { threads, built } = fakeHost();
-	expect(threads.abort("never")).toBe("unknown");
+	expect(threads.abort("never")).toEqual({ outcome: "unknown", restored: [] });
 	const lease = await threads.acquire("t1");
 	lease.release();
-	expect(threads.abort("t1")).toBe("idle");
+	expect(threads.abort("t1")).toEqual({ outcome: "idle", restored: [] });
 	expect(built[0]?.record.aborts).toBe(0);
+	expect(built[0]?.record.queueClears).toBe(0);
+});
+
+// #75, clear-and-restore: what waited behind the stopped run comes back, steering first, and
+// pi's queue is emptied BEFORE pi is told — so nothing rides into the next prompt unasked.
+test("⚠ abort hands back the queued prompts in order and clears pi's queue; a repeat restores nothing", async () => {
+	const { threads, built } = fakeHost();
+	await threads.acquire("t1");
+	const hosted = built[0];
+	if (hosted === undefined) throw new Error("no session built");
+	hosted.queue.followUp.push("and then this", "and this last");
+	hosted.queue.steering.push("actually, stop at the tests");
+	expect(threads.abort("t1")).toEqual({
+		outcome: "aborted",
+		restored: ["actually, stop at the tests", "and then this", "and this last"],
+	});
+	expect(hosted.record.queueClears).toBe(1);
+	expect(hosted.queue).toEqual({ steering: [], followUp: [] });
+	// The second click: same answer, the queue was already taken.
+	expect(threads.abort("t1")).toEqual({ outcome: "aborted", restored: [] });
+	expect(hosted.record.queueClears).toBe(1);
+});
+
+test("⚠ a stop must stop: if clearing the queue throws, pi is still told to abort and the loss is said (PR #129 review)", async () => {
+	const { threads, built, problems } = fakeHost();
+	await threads.acquire("t1");
+	const hosted = built[0];
+	if (hosted === undefined) throw new Error("no session built");
+	hosted.queue.followUp.push("would have been restored");
+	hosted.failClear.with = new Error("a queue listener threw");
+	expect(threads.abort("t1")).toEqual({ outcome: "aborted", restored: [] });
+	expect(hosted.record.aborts).toBe(1);
+	expect(problems.map(String)).toEqual([
+		expect.stringContaining("clearing the queue failed, queued prompts lost: Error: a queue listener threw"),
+	]);
 });
 
 // ── the lease fence (#109) ─────────────────────────────────────────────────────
@@ -151,7 +198,7 @@ test("⚠ a lease superseded by a later acquire is stale: its release touches no
 	]);
 
 	// An operator's abort is by thread, not by lease: it stops whatever runs NOW (#116).
-	expect(threads.abort("t1")).toBe("aborted");
+	expect(threads.abort("t1").outcome).toBe("aborted");
 	expect(built[0]?.record.aborts).toBe(1);
 });
 

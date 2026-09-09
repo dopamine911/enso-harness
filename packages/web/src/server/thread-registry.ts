@@ -98,9 +98,10 @@ export interface ThreadRegistry {
 	 * Abort the run in flight on a thread (#116) — the operator's stop, addressed by thread
 	 * because the lease that took the run lives in the prompt route's closure and a later
 	 * request cannot reach it. `aborted`: pi was told; the run ends on the feed as any run
-	 * does. `idle`: nothing in flight. `unknown`: no live thread.
+	 * does, and `restored` holds the prompts that were waiting behind it (#75,
+	 * clear-and-restore). `idle`: nothing in flight. `unknown`: no live thread.
 	 */
-	abort(threadId: string): AbortOutcome;
+	abort(threadId: string): AbortResult;
 	/**
 	 * The thread's hosted session IF it is live — never creates one (#86). Looking must
 	 * not be the thing that spins pi up; `acquire` is for runs.
@@ -122,6 +123,12 @@ export interface ThreadFollow {
 
 /** What {@link ThreadRegistry.abort} did. */
 export type AbortOutcome = "aborted" | "idle" | "unknown";
+
+/** {@link ThreadRegistry.abort}'s answer: the outcome, and the queued prompts handed back (empty unless `aborted`). */
+export interface AbortResult {
+	readonly outcome: AbortOutcome;
+	readonly restored: readonly string[];
+}
 
 /**
  * One run's hold on a thread (#109, deepseek-harness's `openGeneration` on the server).
@@ -329,13 +336,27 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 	 *
 	 * One abort per run: `busy` stays true until that settle lands, so a second click (PR
 	 * #120 review) would reach pi again. pi's `abort()` is re-entrant (`agent.abort()` +
-	 * `waitForIdle()`), but the second call is the same answer, so it is not made.
+	 * `waitForIdle()`), but the second call is the same answer, so it is not made — and it
+	 * restores nothing: the first stop already took the queue.
+	 *
+	 * The queue is cleared BEFORE pi is told (#75): pi's loop leaves on `aborted` before its
+	 * follow-up drain, so anything waiting would otherwise ride into the next prompt unasked.
+	 * `clearQueue()` returns the texts and emits the `queue_update` every follower reads.
 	 */
-	function abort(threadId: string): AbortOutcome {
+	function abort(threadId: string): AbortResult {
 		const thread = threads.get(threadId);
-		if (thread === undefined) return "unknown";
-		if (!thread.busy) return "idle";
-		if (thread.abortInFlight !== undefined) return "aborted";
+		if (thread === undefined) return { outcome: "unknown", restored: [] };
+		if (!thread.busy) return { outcome: "idle", restored: [] };
+		if (thread.abortInFlight !== undefined) return { outcome: "aborted", restored: [] };
+		// A stop must stop (PR #129 review): if clearing the queue throws — pi emits the
+		// emptied queue to its listeners inside it — the texts are lost and said, and pi is
+		// still told to abort. Never the other way round.
+		let cleared: { steering: string[]; followUp: string[] } = { steering: [], followUp: [] };
+		try {
+			cleared = thread.hosted.session.clearQueue();
+		} catch (error: unknown) {
+			onProblem?.(`thread ${threadId}: clearing the queue failed, queued prompts lost: ${String(error)}`);
+		}
 		const inFlight = thread.hosted.session
 			.abort()
 			.catch((error: unknown) => onProblem?.(`thread ${threadId}: abort failed: ${String(error)}`))
@@ -343,7 +364,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 				if (thread.abortInFlight === inFlight) thread.abortInFlight = undefined;
 			});
 		thread.abortInFlight = inFlight;
-		return "aborted";
+		return { outcome: "aborted", restored: [...cleared.steering, ...cleared.followUp] };
 	}
 
 	function leaseOf(threadId: string, thread: ThreadEntry): ThreadLease {

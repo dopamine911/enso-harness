@@ -9,6 +9,7 @@ import {
 	ZEN_CUSTOM_EVENT_MODE,
 	ZEN_CUSTOM_EVENT_NOTIFY,
 	ZEN_CUSTOM_EVENT_OPEN_DIALOGS,
+	ZEN_CUSTOM_EVENT_QUEUE,
 	ZEN_CUSTOM_EVENT_RUN,
 	ZEN_CUSTOM_EVENT_UNMAPPED,
 	ZEN_CUSTOM_EVENT_USAGE,
@@ -131,6 +132,20 @@ test("zen.open-dialogs is the snapshot's complete list: it replaces the card, an
 	route(ZEN_CUSTOM_EVENT_OPEN_DIALOGS, { open: [] });
 	expect(stores.dialog.get()).toBeUndefined();
 	expect(notificationMessages()).toEqual([]);
+});
+
+test("zen.queue is pi's whole queue, steering first; a malformed frame leaves the last list standing (#75)", () => {
+	expect(stores.queue.get()).toEqual([]);
+	route(ZEN_CUSTOM_EVENT_QUEUE, {
+		kind: "queue",
+		steering: ["stop at the tests"],
+		followUp: ["then this", "and this"],
+	});
+	expect(stores.queue.get()).toEqual(["stop at the tests", "then this", "and this"]);
+	route(ZEN_CUSTOM_EVENT_QUEUE, { kind: "queue", steering: "not a list" });
+	expect(stores.queue.get()).toEqual(["stop at the tests", "then this", "and this"]);
+	route(ZEN_CUSTOM_EVENT_QUEUE, { kind: "queue", steering: [], followUp: [] });
+	expect(stores.queue.get()).toEqual([]);
 });
 
 test("zen.usage reaches the thread-stats store and nothing else", () => {

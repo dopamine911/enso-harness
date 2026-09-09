@@ -242,10 +242,86 @@ test("an input dialog: what is typed is the answer, one POST …/dialog, uncontr
 	await pane.unmount();
 });
 
+// PR #129 review: the take-back runs after a network round trip, from a closure an older
+// render made. It must act on the transcript as it is THEN — not revert what streamed in between.
+test("⚠ a queued prompt refused after a delay takes back only its own bubble; deltas that streamed meanwhile stay", async () => {
+	const server = createScriptedFetch();
+	let releaseSecondPrompt: () => void = () => undefined;
+	let prompts = 0;
+	// The second `/prompt` (the queued one) is held, then refused with a 400.
+	const gated = ((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+		const path = new URL(String(input), "http://localhost").pathname;
+		if (path.endsWith("/prompt")) {
+			prompts += 1;
+			if (prompts === 2) {
+				return new Promise<Response>((resolve) => {
+					releaseSecondPrompt = () => resolve(new Response("pi would not take it", { status: 400 }));
+				});
+			}
+		}
+		return server.fetch(input, init);
+	}) as typeof fetch;
+	globalThis.fetch = gated;
+	const stores = mintThread(gated);
+	const container = document.createElement("div");
+	document.body.appendChild(container);
+	const root: Root = createRoot(container);
+	await flush(async () => {
+		root.render(<ThreadPane threadId={stores.threadId} active={true} debugOpen={false} />);
+	});
+	await flush(tick);
+	const composer = (): HTMLTextAreaElement => {
+		const found = container.querySelector<HTMLTextAreaElement>('textarea[name="message"]');
+		if (found === null) throw new Error("expected the composer");
+		return found;
+	};
+	await flush(async () => {
+		server.frame(SNAPSHOT_IDLE);
+		await tick();
+	});
+	await flush(async () => {
+		typeInto(composer(), "first");
+		pressEnter(composer());
+		await tick();
+	});
+	// Mid-run: the queued prompt goes out and is held by the server.
+	await flush(async () => {
+		typeInto(composer(), "second, queued");
+		await tick();
+	});
+	await flush(async () => {
+		pressEnter(composer());
+		await tick();
+	});
+	expect(container.textContent).toContain("second, queued");
+	// Meanwhile the first answer streams.
+	await flush(async () => {
+		server.frame({ type: "observation", seq: 1, observation: { kind: "message-start", role: "assistant" } });
+		server.frame({
+			type: "observation",
+			seq: 2,
+			observation: { kind: "text-delta", contentIndex: 0, delta: "streamed while held" },
+		});
+		await tick();
+	});
+	expect(container.textContent).toContain("streamed while held");
+	// Now the refusal lands: its bubble leaves, its text returns to the draft — and the delta STAYS.
+	await flush(async () => {
+		releaseSecondPrompt();
+		await tick();
+	});
+	expect(composer().value).toBe("second, queued");
+	expect((container.textContent?.match(/second, queued/g) ?? []).length).toBe(1); // the composer only
+	expect(container.textContent).toContain("streamed while held");
+	expect(container.textContent).toContain("first");
+	await flush(async () => root.unmount());
+	container.remove();
+});
+
 // ── the follow ending under the page (#103 receipt, #119) ───────────────────────────────
 
-test("Enter or the button: one POST …/prompt each, the draft clears; during a run the prompt waits in the BROWSER until settle (#75 gap)", async () => {
-	const pane = await mountPane();
+test("Enter or the button: one POST …/prompt each and the draft clears; DURING a run the prompt goes to pi now, listed above the composer, and a stop hands it back (#75)", async () => {
+	const pane = await mountPane({ server: { queued: ["by the button, mid-run"] } });
 	await pane.settle(SNAPSHOT_IDLE);
 	await flush(async () => {
 		typeInto(pane.composer(), "hello pi");
@@ -257,12 +333,8 @@ test("Enter or the button: one POST …/prompt each, the draft clears; during a 
 	// The receipt opened OUR run (generation 1); the bar says so and the server is busy.
 	expect(pane.status()).toContain("working");
 
-	// ⚠ FOUND BY THIS TEST (2026-09-09): a prompt sent while our run is open is queued by
-	// TanStack's ChatClient (`whenBusy: "queue"`, `isSendBusy()` is true while the run it
-	// started is open) and POSTed only when the run settles. It is NOT pi's follow-up queue
-	// (#75 decision 3): another tab sees nothing, a reload loses it, and pi's `queue_update`
-	// never fires. The user-observable contract pinned here is the weaker one that holds
-	// today — the prompt is not lost — with the timing named. #75 changes this test on purpose.
+	// A prompt during the run: to pi NOW as a follow-up — not TanStack's browser queue (which
+	// held it until settle before #75) — with the user message in the transcript at once.
 	await flush(async () => {
 		typeInto(pane.composer(), "by the button, mid-run");
 		await tick();
@@ -273,13 +345,37 @@ test("Enter or the button: one POST …/prompt each, the draft clears; during a 
 		await tick();
 	});
 	expect(pane.composer().value).toBe("");
-	expect(pane.server.prompts).toEqual([{ message: "hello pi" }]); // held in the browser
-	await pane.settle(
-		{ type: "observation", seq: 1, observation: { kind: "settled" } },
-		{ type: "status", live: true, busy: false, generation: 1 },
-	);
-	await flush(tick);
-	expect(pane.server.prompts).toEqual([{ message: "hello pi" }, { message: "by the button, mid-run" }]);
+	expect(pane.server.prompts).toEqual([
+		{ message: "hello pi" },
+		{ message: "by the button, mid-run", streamingBehavior: "followUp" },
+	]);
+	expect(pane.container.textContent).toContain("by the button, mid-run");
+	// pi lists it for every follower; this pane shows the list above the composer.
+	await pane.settle({
+		type: "observation",
+		seq: 1,
+		observation: { kind: "queue", steering: [], followUp: ["by the button, mid-run"] },
+	});
+	const queueList = pane.container.querySelector('[aria-label="queued prompts"]');
+	expect(queueList?.textContent).toContain("1 prompt queued");
+	expect(queueList?.textContent).toContain("by the button, mid-run");
+
+	// Stop: pi is told, its queue is cleared (the frame every follower reads), and the words
+	// come back to THIS composer — clear-and-restore, pi's TUI's behaviour.
+	const stop = pane.stopButton();
+	if (stop === null) throw new Error("expected the stop button during the run");
+	await flush(async () => {
+		stop.click();
+		await tick();
+	});
+	expect(pane.server.abortCount()).toBe(1);
+	expect(pane.composer().value).toBe("by the button, mid-run");
+	await pane.settle({ type: "observation", seq: 2, observation: { kind: "queue", steering: [], followUp: [] } });
+	expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull();
+	// The bubble that was never asked leaves with its text (pi's TUI does the same): with the
+	// queue list gone, the ONLY place the words remain is the composer. The first prompt's bubble stays.
+	expect((pane.container.textContent?.match(/by the button, mid-run/g) ?? []).length).toBe(1);
+	expect(pane.container.textContent).toContain("hello pi");
 	await pane.unmount();
 });
 

@@ -27,11 +27,13 @@ function scripted(
 	promptStatus?: { status: number; body: unknown },
 	dialogStatus?: number,
 	abortStatus?: number,
+	queued?: string[],
 ): ScriptedServer {
 	const server = createScriptedFetch({
 		...(promptStatus === undefined ? {} : { promptStatus }),
 		...(dialogStatus === undefined ? {} : { dialogStatus }),
 		...(abortStatus === undefined ? {} : { abortStatus }),
+		...(queued === undefined ? {} : { queued }),
 	});
 	const problems: string[] = [];
 	const connection = createFollowConnection({
@@ -238,7 +240,7 @@ test("abort is one POST to …/abort and names what the server did; it closes no
 	await server.untilChunks(3);
 	await send(server, "hello");
 	await server.untilChunks(5);
-	expect(await server.connection.abort()).toBe("aborted");
+	expect(await server.connection.abort()).toEqual({ outcome: "aborted", restored: [] });
 	expect(server.abortCount()).toBe(1);
 	// Nothing closed here: the run ends when the server's settle arrives, like any run.
 	expect(server.chunks.some((chunk) => chunk.type === EventType.RUN_FINISHED)).toBe(false);
@@ -248,10 +250,104 @@ test("abort is one POST to …/abort and names what the server did; it closes no
 	expect(server.chunks).toContainEqual({ type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" });
 	server.abort();
 
-	expect(await scripted(undefined, 204, 409).connection.abort()).toBe("idle");
+	expect(await scripted(undefined, 204, 409).connection.abort()).toEqual({ outcome: "idle", restored: [] });
 	const gone = scripted(undefined, 204, 404);
-	expect(await gone.connection.abort()).toBe("gone");
+	expect(await gone.connection.abort()).toEqual({ outcome: "gone", restored: [] });
 	expect(gone.problems).toEqual([expect.stringContaining("abort gone: 404")]);
+});
+
+// ── #75: prompts during a run go to pi's queue now; a stop hands them back ─────────────
+
+const QUEUED_RECEIPT = { status: 202, body: { threadId: "t1", messageId: "pm1", generation: 2, queued: true } };
+
+test("⚠ prompt() during a run is one POST with streamingBehavior followUp, and opens no run of its own", async () => {
+	const server = scripted(QUEUED_RECEIPT);
+	server.frame({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 2 });
+	await server.untilChunks(5); // mode, open-dialogs, run, then RUN_STARTED + TEXT_MESSAGE_START (another tab's run)
+	const before = server.chunks.length;
+	expect(await server.connection.prompt("and then this")).toBe("queued");
+	expect(server.prompts).toEqual([{ message: "and then this", streamingBehavior: "followUp" }]);
+	// No RUN_STARTED, no TEXT_MESSAGE_START: the run in flight is the one it queued behind.
+	expect(server.chunks.length).toBe(before);
+	server.abort();
+});
+
+test("prompt() names what the server did: taken when the run had ended, refused on a non-202 or a rejection, unreachable on no answer", async () => {
+	const taken = scripted({ status: 202, body: { threadId: "t1", messageId: "q1", generation: 3, queued: false } });
+	expect(await taken.connection.prompt("late")).toBe("taken");
+	taken.abort();
+	const refused = scripted({ status: 400, body: "message must be a string" });
+	expect(await refused.connection.prompt("")).toBe("refused");
+	expect(refused.problems).toEqual([expect.stringContaining("queued prompt refused: 400")]);
+	refused.abort();
+	// pi's refusal can cross on the follow before the receipt names it.
+	const early = scripted({ status: 202, body: { threadId: "t1", messageId: "q2", generation: 1, queued: true } });
+	early.frame(SNAPSHOT_IDLE);
+	await early.untilChunks(3);
+	early.frame({ type: "observation", seq: 1, observation: { kind: "prompt-rejected", messageId: "q2", reason: "no" } });
+	await early.untilChunks(3);
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	expect(await early.connection.prompt("x")).toBe("refused");
+	expect(early.problems).toEqual([expect.stringContaining("queued prompt refused: no")]);
+	early.abort();
+	const problems: string[] = [];
+	const dead = createFollowConnection({
+		threadId: "t1",
+		fetch: (() => Promise.reject(new TypeError("fetch failed"))) as unknown as typeof fetch,
+		onProblem: (problem) => problems.push(String(problem)),
+	});
+	expect(await dead.prompt("x")).toBe("unreachable");
+});
+
+test("⚠ abort() hands back what pi had queued; a later rejection of a queued prompt is said, not matched to a run", async () => {
+	const server = scripted(QUEUED_RECEIPT, 204, 200, ["and then this", "and this"]);
+	server.frame({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 1 });
+	await server.untilChunks(4);
+	expect(await server.connection.prompt("and then this")).toBe("queued");
+	expect(await server.connection.abort()).toEqual({ outcome: "aborted", restored: ["and then this", "and this"] });
+	server.frame({
+		type: "observation",
+		seq: 1,
+		observation: { kind: "prompt-rejected", messageId: "pm1", reason: "aborted" },
+	});
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	expect(server.problems).toEqual([expect.stringContaining("queued prompt refused: aborted")]);
+	expect(server.chunks.some((chunk) => chunk.type === EventType.RUN_ERROR)).toBe(false);
+	server.abort();
+});
+
+test("⚠ when pi CLAIMS a queued prompt (a user message-start after an assistant one), the view ends the assistant bubble and opens a new one — the reply lands after its question", async () => {
+	const server = scripted();
+	server.frame(SNAPSHOT_IDLE);
+	await server.untilChunks(3);
+	await send(server, "first");
+	await server.untilChunks(5); // RUN_STARTED, TEXT_MESSAGE_START
+	const firstMessageId = (server.chunks[4] as { messageId: string }).messageId;
+	// The run's OWN prompt: user message-start before any assistant one. Nothing rotates.
+	server.frame({ type: "observation", seq: 1, observation: { kind: "message-start", role: "user", text: "first" } });
+	server.frame({ type: "observation", seq: 2, observation: { kind: "message-start", role: "assistant" } });
+	server.frame({ type: "observation", seq: 3, observation: { kind: "text-delta", contentIndex: 0, delta: "one" } });
+	await server.untilChunks(6);
+	expect(server.chunks.filter((chunk) => chunk.type === EventType.TEXT_MESSAGE_START)).toHaveLength(1);
+	// pi claims the queued follow-up: user message-start AFTER an assistant message.
+	server.frame({ type: "observation", seq: 4, observation: { kind: "message-start", role: "user", text: "second" } });
+	server.frame({ type: "observation", seq: 5, observation: { kind: "message-start", role: "assistant" } });
+	server.frame({ type: "observation", seq: 6, observation: { kind: "text-delta", contentIndex: 0, delta: "two" } });
+	await server.untilChunks(9);
+	const starts = server.chunks.filter((chunk) => chunk.type === EventType.TEXT_MESSAGE_START) as Array<{
+		messageId: string;
+	}>;
+	expect(starts).toHaveLength(2);
+	expect(server.chunks).toContainEqual({ type: EventType.TEXT_MESSAGE_END, messageId: firstMessageId });
+	const secondMessageId = starts[1]?.messageId;
+	expect(secondMessageId).not.toBe(firstMessageId);
+	// The second answer's text streams into the NEW message.
+	const lastDelta = [...server.chunks].reverse().find((chunk) => chunk.type === EventType.TEXT_MESSAGE_CONTENT) as {
+		messageId: string;
+		delta: string;
+	};
+	expect(lastDelta).toMatchObject({ messageId: secondMessageId, delta: "two" });
+	server.abort();
 });
 
 // PR #120 review: the callers fire-and-forget (`void connection.abort()`), so a network
@@ -263,7 +359,7 @@ test("a unary POST that never gets an answer is `unreachable` — reported once,
 		fetch: (() => Promise.reject(new TypeError("fetch failed"))) as unknown as typeof fetch,
 		onProblem: (problem) => problems.push(String(problem)),
 	});
-	expect(await connection.abort()).toBe("unreachable");
+	expect(await connection.abort()).toEqual({ outcome: "unreachable", restored: [] });
 	expect(await connection.answerDialog({ id: "d1", value: "a" })).toBe("unreachable");
 	expect(problems).toEqual([
 		expect.stringContaining("abort unreachable: TypeError: fetch failed"),
