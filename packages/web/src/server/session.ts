@@ -8,10 +8,11 @@ import {
 	ZEN_DIALOG_KEY,
 	type ZenDialogSpec,
 } from "@zen/core";
-import { ZEN_CUSTOM_EVENT_MODE } from "../rpc/custom-event-names.ts";
+import { ZEN_CUSTOM_EVENT_MODE, ZEN_CUSTOM_EVENT_RUN } from "../rpc/custom-event-names.ts";
 import { mapPiEvent } from "../rpc/map-events.ts";
 import { type AguiIdentifiers, observationToAguiEvents } from "../rpc/to-agui.ts";
 import type { DialogRegistry, PiSessionPump } from "./dialog-registry.ts";
+import type { ThreadLease } from "./thread-sessions.ts";
 
 /**
  * Chat runs against a pi session, as async iterables of AG-UI events (#24, #27, #69).
@@ -97,6 +98,11 @@ function messageStarted(ids: AguiIdentifiers): StreamChunk {
  */
 function modeReceipt(session: PiSession): StreamChunk {
 	return { type: EventType.CUSTOM, name: ZEN_CUSTOM_EVENT_MODE, value: session.permissionModeState() };
+}
+
+/** The run's hold on its thread, as a number the browser can hold up against the server's (#109). */
+function runReceipt(lease: ThreadLease): StreamChunk {
+	return { type: EventType.CUSTOM, name: ZEN_CUSTOM_EVENT_RUN, value: { generation: lease.generation } };
 }
 
 function runError(ids: AguiIdentifiers, message: string): StreamChunk {
@@ -228,7 +234,7 @@ interface StreamRunOptions {
 	pump: PiSessionPump;
 	ids: AguiIdentifiers;
 	registry: DialogRegistry;
-	stopPi: () => void;
+	lease: ThreadLease;
 	outcome: ChatRunOutcome;
 	onProblem: ((problem: unknown) => void) | undefined;
 	noProgressTimeoutMs: number;
@@ -262,7 +268,7 @@ async function* streamRun(options: StreamRunOptions): AsyncGenerator<StreamChunk
 }
 
 async function* drainUntilRunEnds(options: StreamRunOptions): AsyncGenerator<StreamChunk> {
-	const { pump, ids, registry, stopPi, outcome, noProgressTimeoutMs } = options;
+	const { pump, ids, registry, lease, outcome, noProgressTimeoutMs } = options;
 	const { isExtensionCommand, slashCommandGraceMs } = options;
 	let lastProgressAt = Date.now();
 	/** When the extension-command completion state was first observed, or undefined. */
@@ -284,7 +290,7 @@ async function* drainUntilRunEnds(options: StreamRunOptions): AsyncGenerator<Str
 					const expiresAt = Date.now() + registry.answerTimeoutMs;
 					registry.park({
 						pump,
-						stopPi,
+						lease,
 						dialogId: observation.id,
 						dialog: observation.dialog,
 						interruptedRunId: ids.runId,
@@ -363,17 +369,17 @@ async function* drainUntilRunEnds(options: StreamRunOptions): AsyncGenerator<Str
 }
 
 export interface ChatRunOptions {
-	session: PiSession;
+	/**
+	 * The run's hold on its thread (#109): the session it prompts, and the stop the
+	 * registry uses if a dialog parks the run and the answer never comes. Never disposes
+	 * the session (#69 PR 2).
+	 */
+	lease: ThreadLease;
 	ids: AguiIdentifiers;
 	prompt: string;
 	/** Base64 images, forwarded verbatim — pi accepts them on `prompt`. */
 	images?: ReadonlyArray<{ type: "image"; data: string; mimeType: string }>;
 	registry: DialogRegistry;
-	/**
-	 * Aborts the run and lets the thread go idle — never disposes the session (#69 PR 2).
-	 * Handed to the registry when a dialog parks the run, for eviction.
-	 */
-	stopPi: () => void;
 	/** See {@link ChatRunOutcome} — the handler reads it after the stream completes. */
 	outcome: ChatRunOutcome;
 	/**
@@ -407,15 +413,18 @@ export interface ChatRunOptions {
  * through both mappers; here is where it decides when the HTTP response closes.
  */
 export async function* runChat(options: ChatRunOptions): AsyncGenerator<StreamChunk> {
-	const { session, ids, prompt, images, registry, stopPi, outcome, onProblem } = options;
+	const { lease, ids, prompt, images, registry, outcome, onProblem } = options;
+	const { session } = lease;
 	const noProgressTimeoutMs = options.noProgressTimeoutMs ?? NO_PROGRESS_TIMEOUT_MS;
 	const slashCommandGraceMs = options.slashCommandGraceMs ?? SLASH_COMMAND_COMPLETION_GRACE_MS;
 	const pump = createSessionPump(session);
 
 	yield runStarted(ids);
-	// The state receipt rides FIRST after RUN_STARTED, before the slash-command refusal
-	// below: even a refused run tells the browser what mode it is in.
+	// The state receipts ride FIRST after RUN_STARTED, before the slash-command refusal
+	// below: even a refused run tells the browser what mode it is in and which
+	// acquisition it holds.
 	yield modeReceipt(session);
+	yield runReceipt(lease);
 	yield messageStarted(ids);
 
 	/**
@@ -473,7 +482,7 @@ export async function* runChat(options: ChatRunOptions): AsyncGenerator<StreamCh
 		pump,
 		ids,
 		registry,
-		stopPi,
+		lease,
 		outcome,
 		onProblem,
 		noProgressTimeoutMs,
@@ -586,7 +595,7 @@ export async function* resumeChat(options: ResumeRunOptions): AsyncGenerator<Str
 		pump: entry.pump,
 		ids,
 		registry,
-		stopPi: entry.stopPi,
+		lease: entry.lease,
 		outcome,
 		onProblem,
 		noProgressTimeoutMs,

@@ -101,6 +101,7 @@ export {
 	type ThreadEventColumns,
 	threadEventColumns,
 	ZenEventProvenance,
+	ZenInterruptedTail,
 	ZenResumableSession,
 	ZenThreadEvent,
 	ZenThreadEvents,

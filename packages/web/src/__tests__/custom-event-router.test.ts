@@ -4,6 +4,7 @@ import {
 	ZEN_CUSTOM_EVENT_ENTRY,
 	ZEN_CUSTOM_EVENT_MODE,
 	ZEN_CUSTOM_EVENT_NOTIFY,
+	ZEN_CUSTOM_EVENT_RUN,
 	ZEN_CUSTOM_EVENT_UNMAPPED,
 	ZEN_CUSTOM_EVENT_USAGE,
 } from "../rpc/custom-event-names.ts";
@@ -43,6 +44,17 @@ test("zen.entry reaches BOTH the mode-lines store and the current-mode store", (
 test("zen.mode reaches the current-mode store and nothing else — it is state, not a transcript line", () => {
 	route(ZEN_CUSTOM_EVENT_MODE, { mode: "default", available: ["default", "plan"] });
 	expect(stores.permissionMode.get()).toEqual({ mode: "default", available: ["default", "plan"] });
+	expect(notificationMessages()).toEqual([]);
+});
+
+test("zen.run sets the thread's run generation; a malformed value leaves the last one standing (#109)", () => {
+	expect(stores.generation.get()).toBeUndefined();
+	route(ZEN_CUSTOM_EVENT_RUN, { generation: 3 });
+	expect(stores.generation.get()).toBe(3);
+	route(ZEN_CUSTOM_EVENT_RUN, { generation: -1 });
+	route(ZEN_CUSTOM_EVENT_RUN, { generation: "4" });
+	route(ZEN_CUSTOM_EVENT_RUN, null);
+	expect(stores.generation.get()).toBe(3);
 	expect(notificationMessages()).toEqual([]);
 });
 

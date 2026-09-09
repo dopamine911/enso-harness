@@ -16,10 +16,10 @@ import {
 } from "@zen/core";
 import { type AgentHost, createAgentHost } from "../host/agent-host.ts";
 import { describeStreamChunk, type EventTail } from "../host/event-tail.ts";
-import { branchToMessages } from "../rpc/branch-to-messages.ts";
+import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
 import { createDialogRegistry } from "./dialog-registry.ts";
 import { type ChatRunOutcome, resumeChat, runChat } from "./session.ts";
-import { createThreadSessions, type ThreadView } from "./thread-sessions.ts";
+import { createThreadSessions, type ThreadLease, type ThreadView } from "./thread-sessions.ts";
 
 /** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
 const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/;
@@ -336,6 +336,7 @@ export function startZenServer(options: ZenServerOptions) {
 			mode: thread.hosted.session.permissionModeState().mode,
 			busy: thread.busy,
 			parked: registry.peek(thread.threadId) !== undefined,
+			generation: thread.generation,
 			lastActivityAt: new Date(thread.lastActivityAt).toISOString(),
 		};
 	}
@@ -407,13 +408,16 @@ export function startZenServer(options: ZenServerOptions) {
 			response.end(`no session for thread ${threadId}`);
 			return;
 		}
+		const messages = branchToMessages(branch);
+		const interrupted = interruptedTail(messages);
 		const payload: ZenThreadHistory = {
 			threadId,
-			messages: branchToMessages(branch),
+			messages,
 			permissionMode:
 				live === undefined
 					? { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] }
 					: live.hosted.session.permissionModeState(),
+			...(interrupted === undefined ? {} : { interrupted }),
 		};
 		response.writeHead(200, { "Content-Type": "application/json" });
 		response.end(JSON.stringify(payload));
@@ -450,6 +454,7 @@ export function startZenServer(options: ZenServerOptions) {
 			commands: [...inspection.commands],
 			busy: thread.busy,
 			parked: registry.peek(threadId) !== undefined,
+			generation: thread.generation,
 			lastActivityAt: new Date(thread.lastActivityAt).toISOString(),
 			entries: [...inspection.entries],
 		};
@@ -530,11 +535,12 @@ export function startZenServer(options: ZenServerOptions) {
 			let streamEnded = false;
 
 			// ── The resume path: an answer to a parked dialog. No new session — the one this
-			// request addresses has been alive since the run it interrupted (#27).
+			// request addresses has been alive since the run it interrupted (#27). The parked
+			// run's LEASE is what this request acts through: its stop if the client drops, its
+			// release once the question is spent (#109).
 			if (Array.isArray(body.resume) && body.resume.length > 0) {
-				// Captured BEFORE resumeChat can take the entry — the registry's stop handle
-				// aborts the run and releases the thread; the session itself stays alive.
-				const stopParked = registry.peek(ids.threadId)?.stopPi;
+				// Captured BEFORE resumeChat can take the entry.
+				const parked = registry.peek(ids.threadId);
 				response.writeHead(200, SSE_HEADERS);
 				const stopKeepalive = startSseKeepalive(response, sseKeepaliveMs, options.onProblem);
 				// ⚠ `response`, NOT `request` (#34). Under bun's node:http compat the REQUEST
@@ -545,7 +551,7 @@ export function startZenServer(options: ZenServerOptions) {
 				response.on("close", () => {
 					if (streamEnded) return;
 					if (outcome.parkedAwaitingAnswer) return;
-					stopParked?.();
+					parked?.lease.stop();
 				});
 				try {
 					for await (const chunk of resumeChat({
@@ -570,11 +576,12 @@ export function startZenServer(options: ZenServerOptions) {
 						threads.peek(ids.threadId)?.sent,
 					);
 				} finally {
-					// A resume that ended unparked is a finished run: the thread goes idle. A
-					// client that dropped mid-resume is handled by the 'close' hook above.
 					streamEnded = true;
 					stopKeepalive();
-					if (!outcome.parkedAwaitingAnswer) threads.release(ids.threadId);
+					// The thread goes idle only once NO question is open on it: a resume that
+					// settled the run, not one that was refused (the question stays parked) or
+					// re-parked. A parked thread is never released — eviction releases it.
+					if (registry.peek(ids.threadId) === undefined) parked?.lease.release();
 					response.end();
 				}
 				return;
@@ -586,9 +593,9 @@ export function startZenServer(options: ZenServerOptions) {
 			// and the resume path releases. Disposal happens only after the idle window or at
 			// shutdown (`thread-sessions.ts`). Acquired BEFORE the SSE head goes out, so a
 			// session that cannot be built is a plain HTTP failure and not a half-open stream.
-			let session: Awaited<ReturnType<typeof threads.acquire>>;
+			let lease: ThreadLease;
 			try {
-				session = await threads.acquire(ids.threadId);
+				lease = await threads.acquire(ids.threadId);
 			} catch (error) {
 				options.onProblem?.(error);
 				response.writeHead(500, { "Content-Type": "text/plain" });
@@ -612,21 +619,15 @@ export function startZenServer(options: ZenServerOptions) {
 			response.on("close", () => {
 				if (streamEnded) return;
 				if (outcome.parkedAwaitingAnswer) return;
-				threads.stop(ids.threadId);
+				lease.stop();
 			});
 
 			try {
 				for await (const chunk of runChat({
-					session,
+					lease,
 					ids,
 					prompt: latestUserPrompt(body),
 					registry,
-					// Handed to the registry with a parked run: eviction aborts what is running
-					// and lets the thread go idle. The session survives for the next prompt.
-					stopPi: () => {
-						threads.stop(ids.threadId);
-						threads.release(ids.threadId);
-					},
 					outcome,
 					onProblem: options.onProblem,
 				})) {
@@ -648,7 +649,7 @@ export function startZenServer(options: ZenServerOptions) {
 			} finally {
 				streamEnded = true;
 				stopKeepalive();
-				if (!outcome.parkedAwaitingAnswer) threads.release(ids.threadId);
+				if (!outcome.parkedAwaitingAnswer) lease.release();
 				response.end();
 			}
 			return;

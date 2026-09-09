@@ -50,6 +50,7 @@ function inspection(overrides: Partial<ZenThreadInspection> = {}): ZenThreadInsp
 		commands: ["mode", "plan"],
 		busy: false,
 		parked: false,
+		generation: 1,
 		lastActivityAt: "2026-09-08T10:00:05.000Z",
 		entries: [
 			{ type: "session", id: "root", parentId: null, timestamp: "2026-09-08T10:00:00.000Z" },
@@ -59,11 +60,12 @@ function inspection(overrides: Partial<ZenThreadInspection> = {}): ZenThreadInsp
 	};
 }
 
-function believing(mode: string | undefined): BrowserBelief {
+function believing(mode: string | undefined, generation: number | undefined = 1): BrowserBelief {
 	return {
 		mode: { mode, available: ["default", "plan"] },
 		stats: { totalCost: 0, lastRequestInputTokens: undefined, countedMessages: 0 },
 		recentChunks: [],
+		generation,
 	};
 }
 
@@ -118,6 +120,25 @@ test("⚠ the host disagreeing with the branch's last modes entry is named as a 
 		inspection({ permissionMode: { mode: "acceptEdits", available: [] }, entries: [piccEntry("plan", "m1")] }),
 	);
 	expect(rendered).toContain("MISMATCH: branch says plan");
+});
+
+// The run fence (#109): the page's last run number against the server's current one.
+test("⚠ a server ahead of this page's last run is named as a MISMATCH — a run this page did not make", () => {
+	const rendered = render(believing("plan", 1), inspection({ generation: 3 }));
+	expect(rendered).toContain("last run: #1");
+	expect(rendered).toContain("MISMATCH: server is at run #3 — 2 runs this page did not make");
+	expect(rendered).toContain("run #3");
+});
+
+test("⚠ a server BEHIND this page's last run is named as a restart", () => {
+	const rendered = render(believing("plan", 4), inspection({ generation: 2 }));
+	expect(rendered).toContain("MISMATCH: server is at run #2, behind this page — the server restarted");
+});
+
+test("no run yet on this page compares nothing: no MISMATCH, and it says so", () => {
+	const rendered = render({ ...believing("plan"), generation: undefined }, inspection({ generation: 2 }));
+	expect(rendered).toContain("last run: none from this page");
+	expect(rendered).not.toContain("MISMATCH");
 });
 
 test("an unflushed session says so instead of showing a path", () => {

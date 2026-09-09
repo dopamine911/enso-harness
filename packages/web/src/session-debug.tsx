@@ -40,6 +40,24 @@ export interface BrowserBelief {
 	readonly mode: PermissionModeState;
 	readonly stats: SessionStats;
 	readonly recentChunks: readonly RecordedCustomChunk[];
+	/** The acquisition this page's last run held (`zen.run`, #109); undefined before a run. */
+	readonly generation: number | undefined;
+}
+
+/**
+ * What a difference between the two run numbers means, in words — or undefined when they
+ * agree or cannot be compared yet (#109). The server's number moves on every acquisition
+ * of the thread; this page's moves only with its own runs. So a server ahead of the page
+ * is a run made elsewhere; a page ahead of the server can only be a server that restarted
+ * (its count begins again) — and either is the wrong-session class of bug made visible.
+ */
+export function describeGenerationDrift(browser: number | undefined, server: number | undefined): string | undefined {
+	if (browser === undefined || server === undefined || browser === server) return undefined;
+	if (server > browser) {
+		const runs = server - browser;
+		return `server is at run #${server} — ${runs} run${runs === 1 ? "" : "s"} this page did not make (another tab or client)`;
+	}
+	return `server is at run #${server}, behind this page — the server restarted since this page's last run`;
 }
 
 export interface SessionDebugViewProps {
@@ -115,6 +133,7 @@ export function SessionDebugView({
 	const browserMode = browser.mode.mode ?? "unknown";
 	const hostMode = session?.permissionMode.mode;
 	const branchMode = session === undefined ? undefined : persistedPermissionMode(session.entries);
+	const generationDrift = describeGenerationDrift(browser.generation, session?.generation);
 	return (
 		<aside aria-label="session debug" className="flex flex-col gap-3 p-3 font-mono text-muted-foreground text-xs">
 			<div className="flex flex-wrap items-center gap-2">
@@ -143,6 +162,10 @@ export function SessionDebugView({
 						<Mismatch when={hostMode !== undefined && hostMode !== browserMode} says={`host says ${hostMode}`} />
 					</div>
 					<div>available: {browser.mode.available.join(", ") || "(none yet)"}</div>
+					<div>
+						last run: {browser.generation === undefined ? "none from this page" : `#${browser.generation}`}
+						<Mismatch when={generationDrift !== undefined} says={generationDrift ?? ""} />
+					</div>
 					<div>
 						stats: {browser.stats.countedMessages} counted, cost ${browser.stats.totalCost.toFixed(4)}
 					</div>
@@ -180,7 +203,8 @@ export function SessionDebugView({
 							<div>branch mode: {branchMode}</div>
 							<div>
 								{session.busy ? "busy" : "idle"}
-								{session.parked ? ", dialog parked" : ""}, last activity {session.lastActivityAt.slice(11, 19)}
+								{session.parked ? ", dialog parked" : ""}, run #{session.generation}, last activity{" "}
+								{session.lastActivityAt.slice(11, 19)}
 							</div>
 							<div>commands: {session.commands.map((command) => `/${command}`).join(" ")}</div>
 							<h4 className="mt-1 text-foreground">branch ({session.entries.length} entries)</h4>
@@ -291,11 +315,12 @@ export function SessionDebugDrawer({ runInFlight }: SessionDebugDrawerProps): Re
 	const mode = usePermissionMode();
 	const stats = useStore(stores.stats);
 	const recentChunks = useStore(stores.recentChunks);
+	const generation = useStore(stores.generation);
 	const [session, setSession] = useState<ZenThreadInspection | undefined>(undefined);
 	const [events, setEvents] = useState<ZenThreadEvents | undefined>(undefined);
 	const [error, setError] = useState<string | undefined>(undefined);
 	const [copyState, setCopyState] = useState<CopyState>("idle");
-	const browser: BrowserBelief = { mode, stats, recentChunks };
+	const browser: BrowserBelief = { mode, stats, recentChunks, generation };
 	// One sequencer per thread id: a new thread starts a new "latest".
 	const fetchLatest = useMemo(() => latestWins(() => fetchThreadDebug(threadId)), [threadId]);
 	const refresh = useCallback((): void => {

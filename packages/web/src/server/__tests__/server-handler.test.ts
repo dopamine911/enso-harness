@@ -648,7 +648,7 @@ test("⚠ GET /api/threads/:id/history refuses a thread that is BUSY here, even 
 	expect(built).toHaveLength(1);
 });
 
-test("GET /api/threads lists live threads with busy and parked state", async () => {
+test("GET /api/threads lists live threads with busy, parked state and the run number", async () => {
 	const { url } = await startWith({
 		onPrompt: (emit, _outcome, message) => {
 			if (message === "/mode") emit(SELECT_DIALOG);
@@ -658,7 +658,32 @@ test("GET /api/threads lists live threads with busy and parked state", async () 
 	await postRun(url, { threadId: "parked-thread", runId: "r1", messages: [userMessage("/mode")] });
 	const summaries: unknown = await (await fetch(`${url}/api/threads`)).json();
 	expect(Array.isArray(summaries) && summaries.every((summary) => Check(ZenThreadSummary, summary))).toBe(true);
-	expect(summaries).toMatchObject([{ threadId: "parked-thread", busy: true, parked: true, sessionFile: null }]);
+	expect(summaries).toMatchObject([
+		{ threadId: "parked-thread", busy: true, parked: true, generation: 1, sessionFile: null },
+	]);
+});
+
+// ⚠ Before #109 a refused resume released the thread by id in the handler's `finally`,
+// so a thread read IDLE while its question was still parked — the state a resume then
+// answered was one the listing said did not exist.
+test("⚠ a refused resume leaves the thread busy AND parked — the question is still open", async () => {
+	const { url, built } = await startWith({
+		onPrompt: (emit, _outcome, message) => {
+			if (message === "/mode") emit(SELECT_DIALOG);
+		},
+	});
+	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("/mode")] });
+	const refused = await postRun(url, {
+		threadId: "t1",
+		runId: "r2",
+		parentRunId: "not-r1",
+		resume: [{ interruptId: "d1", status: "resolved", payload: { value: "a" } }],
+		messages: [],
+	});
+	expect(refused).toContain(EventType.RUN_ERROR);
+	const summaries: unknown = await (await fetch(`${url}/api/threads`)).json();
+	expect(summaries).toMatchObject([{ threadId: "t1", busy: true, parked: true }]);
+	expect(built[0]?.aborts).toBe(0);
 });
 
 test("⚠ a bind conflict rejects `listening` instead of hanging, and reports the clash (#81 review)", async () => {
