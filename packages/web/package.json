@@ -12,6 +12,7 @@
   "dependencies": {
     "@ag-ui/core": "0.1.1-canary.beta.0",
     "@fontsource-variable/geist": "^5.3.0",
+    "@ladbabynpm/picc-permission-modes": "0.1.1",
     "@radix-ui/react-use-controllable-state": "^1.2.6",
     "@tanstack/ai": "0.53.0",
     "@tanstack/ai-client": "0.31.0",

@@ -322,12 +322,21 @@ export function DialogAnswerControls({
 	}
 	if (dialog.method === "select") {
 		return (
-			<div className="flex flex-wrap gap-2">
-				{dialog.options.map((option) => (
-					<Button key={option} type="button" variant="outline" onClick={() => answer({ value: option })}>
-						{option}
-					</Button>
-				))}
+			<div className="flex flex-col gap-3">
+				{/* The detail behind the question (#73): a file preview, a diff, a command. Preformatted,
+				    never markdown — model-chosen file content must not render as HTML. */}
+				{dialog.message === undefined ? null : (
+					<pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/50 p-3 text-xs">
+						{dialog.message}
+					</pre>
+				)}
+				<div className="flex flex-wrap gap-2">
+					{dialog.options.map((option) => (
+						<Button key={option} type="button" variant="outline" onClick={() => answer({ value: option })}>
+							{option}
+						</Button>
+					))}
+				</div>
 			</div>
 		);
 	}

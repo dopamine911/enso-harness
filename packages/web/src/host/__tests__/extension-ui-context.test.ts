@@ -1,6 +1,7 @@
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import type { PiRpcEvent } from "@zen/core";
-import { createZenExtensionUiContext } from "../extension-ui-context.ts";
+import { type CustomComponentFactory, createZenExtensionUiContext } from "../extension-ui-context.ts";
+import { PICC_PERMISSION_DIALOG_MODULE } from "../permission-dialog.ts";
 
 /**
  * The `ExtensionUIContext` the host binds (#69), driven directly: the blocking methods
@@ -144,4 +145,71 @@ test("the terminal-only surface is inert, exactly as in pi's rpc mode", async ()
 	expect(uiContext.theme).toBe(uiContext.theme);
 	// none of that emitted anything
 	expect(events).toEqual([]);
+});
+
+// ── picc's permission prompt, through `custom` (#73) ─────────────────────────
+
+/** picc's `createFilePermissionDialogFactory(opts)` — the value it hands `ctx.ui.custom`. */
+type PermissionFactoryBuilder = (options: Record<string, unknown>) => CustomComponentFactory<string | null>;
+
+let createFilePermissionDialogFactory: PermissionFactoryBuilder;
+
+beforeAll(async () => {
+	// Runtime import, as the host does it: picc's sources must not enter this package's type graph.
+	const loaded = (await import(PICC_PERMISSION_DIALOG_MODULE)) as {
+		createFilePermissionDialogFactory: PermissionFactoryBuilder;
+	};
+	createFilePermissionDialogFactory = loaded.createFilePermissionDialogFactory;
+});
+
+/** Drain microtasks until `count` records exist — the lift awaits a cached module promise, so depth is not one tick. */
+async function untilEmitted(events: PiRpcEvent[], count: number): Promise<void> {
+	for (let drained = 0; drained < 100 && events.length < count; drained += 1) await Promise.resolve();
+}
+
+const WRITE_PROMPT = {
+	options: ["Yes", "Yes, allow all edits during this session (shift+tab)", "No"],
+	title: "Create file",
+	subtitle: "receipt-73.txt",
+	question: "Do you want to create this file: receipt-73.txt?",
+	previewLines: ["ok"],
+	showPanel: true,
+};
+
+test("⚠⚠ picc's permission prompt reaches the browser as a select with its options and detail, and the answer is the option string", async () => {
+	const { uiContext, answerDialog, events, pendingDialogCount } = contextUnderTest();
+	// Exactly picc's call: `ctx.ui.custom<FilePermissionChoice>(createFilePermissionDialogFactory(opts), {overlay…})`.
+	const pending = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT), { overlay: true });
+	await untilEmitted(events, 1); // the factory and the lift are awaited before the request is emitted
+	expect(events).toHaveLength(1);
+	expect(events[0]).toMatchObject({
+		type: "extension_ui_request",
+		method: "select",
+		title: "Create file",
+		options: WRITE_PROMPT.options,
+	});
+	expect(String(events[0]?.message)).toContain("Do you want to create this file: receipt-73.txt?");
+	expect(String(events[0]?.message)).toContain("ok");
+	expect(pendingDialogCount()).toBe(1);
+	answerDialog({ id: requestId(events[0]), value: "Yes" });
+	// picc's own check is `choice === "Yes"` — the string it offered, back verbatim.
+	expect(await pending).toBe("Yes");
+	expect(pendingDialogCount()).toBe(0);
+});
+
+test("cancelling the lifted prompt resolves picc's 'dismissed' value; a non-picc component still resolves undefined at once", async () => {
+	const { uiContext, answerDialog, cancelAllDialogs, events } = contextUnderTest();
+	const dismissed = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT));
+	await untilEmitted(events, 1);
+	answerDialog({ id: requestId(events[0]), cancelled: true });
+	expect(await dismissed).toBeUndefined();
+	// teardown while a prompt is open: the extension is released, not left hanging
+	const torn = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT));
+	await untilEmitted(events, 2);
+	cancelAllDialogs();
+	expect(await torn).toBeUndefined();
+	// and pi's rpc contract for anything else is untouched: no request, undefined
+	const before = events.length;
+	expect(await uiContext.custom(() => ({ render: () => [], invalidate: () => undefined }))).toBeUndefined();
+	expect(events).toHaveLength(before);
 });

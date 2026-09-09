@@ -45,6 +45,13 @@ export const ZenDialogSpec = Type.Union([
 		method: Type.Literal("select"),
 		title: Type.String(),
 		options: Type.Array(Type.String(), { minItems: 1 }),
+		/**
+		 * The detail behind the question — a file preview, a diff, a command. pi's own
+		 * `select` has none; the host adds it when it lifts a component dialog to a select
+		 * (#73: picc's permission prompt), because a permission decision needs to see what it
+		 * is deciding about. Preformatted text: rendered as-is, never as markdown.
+		 */
+		message: Type.Optional(Type.String()),
 		timeout: Type.Optional(Type.Number({ minimum: 0 })),
 	}),
 	Type.Object({

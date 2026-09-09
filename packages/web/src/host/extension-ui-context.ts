@@ -1,6 +1,16 @@
-import type { ExtensionUIContext, Theme as PiTheme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionUIContext, KeybindingsManager, Theme as PiTheme } from "@earendil-works/pi-coding-agent";
 import { Theme } from "@earendil-works/pi-coding-agent";
+import type { Component, TUI } from "@earendil-works/pi-tui";
 import type { PiDialogResponse, PiRpcEvent } from "@zen/core";
+import { type LiftedPermissionDialog, liftPermissionDialog } from "./permission-dialog.ts";
+
+/** The factory `ExtensionUIContext.custom` receives, named so the method can be written without `Parameters<>`. */
+export type CustomComponentFactory<T> = (
+	tui: TUI,
+	theme: PiTheme,
+	keybindings: KeybindingsManager,
+	done: (result: T) => void,
+) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>;
 
 /**
  * The `ExtensionUIContext` the web server hands to an in-process `AgentSession` (#69).
@@ -22,18 +32,31 @@ import type { PiDialogResponse, PiRpcEvent } from "@zen/core";
  * human answers or the request is cancelled — never resolve a default eagerly.
  *
  * WHAT IS REAL AND WHAT IS A NO-OP
- * `select`/`confirm`/`input`/`editor` block on a pending map keyed by request id. `notify`,
- * `setStatus`, `setWidget`, `setTitle`, `setEditorText` emit fire-and-forget records (the
- * mapper forwards `notify` and drops the terminal-addressed rest, as before). Everything
- * else is a terminal concern with no browser equivalent and returns its inert value.
+ * `select`/`confirm`/`input`/`editor` block on a pending map keyed by request id. `custom`
+ * builds the extension's component and, when it is one this surface knows (#73: picc's
+ * permission prompt), lifts it to a blocking `select`; any other component resolves
+ * `undefined`, pi's rpc contract. `notify`, `setStatus`, `setWidget`, `setTitle`,
+ * `setEditorText` emit fire-and-forget records (the mapper forwards `notify` and drops the
+ * terminal-addressed rest, as before). Everything else is a terminal concern with no
+ * browser equivalent and returns its inert value.
  */
 
 /** The four dialog methods pi's rpc protocol names blocking. `map-events.ts` agrees (its `DIALOG_UI_METHODS`). */
 type BlockingDialogRequest =
-	| { method: "select"; title: string; options: string[]; timeout?: number }
+	| { method: "select"; title: string; options: string[]; message?: string; timeout?: number }
 	| { method: "confirm"; title: string; message: string; timeout?: number }
 	| { method: "input"; title: string; placeholder?: string; timeout?: number }
 	| { method: "editor"; title: string; prefill?: string };
+
+/**
+ * What a component factory is handed in place of a terminal. picc's factory reads only
+ * `tui.terminal.rows` (inside a try) to size its panel and never touches the keybindings;
+ * nothing else on the web path touches either. Typed as pi's parameter types because that
+ * is what the factory declares — the casts are the one place the "no terminal" fact meets
+ * a terminal-shaped signature.
+ */
+const INERT_TUI = { terminal: { rows: 24, columns: 80 } } as unknown as TUI;
+const INERT_KEYBINDINGS = {} as unknown as KeybindingsManager;
 
 interface PendingDialog {
 	resolve: (response: PiDialogResponse) => void;
@@ -253,10 +276,43 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 		setHiddenThinkingLabel: () => undefined,
 		setFooter: () => undefined,
 		setHeader: () => undefined,
-		// `custom<T>` promises a T the web surface can never produce. pi's own rpc mode resolves
-		// `undefined` here (untyped JS); the assertion states that contract in TypeScript — an
-		// extension awaiting a custom component gets the same "no component" it gets over rpc.
-		custom: <T>() => Promise.resolve(undefined as T),
+		/**
+		 * Build the component the extension asked for and lift it if it is one this surface
+		 * knows (#73). `done` is the same callback picc's own dialog would call on a keypress;
+		 * here the lifted select's answer is what calls it, so the extension's `await` settles
+		 * with a string it offered — or `undefined` on cancel/dismiss, its "no" path. An
+		 * unknown component resolves `undefined` at once, exactly as pi's rpc mode does.
+		 */
+		async custom<T>(factory: CustomComponentFactory<T>): Promise<T> {
+			const { promise, resolve } = Promise.withResolvers<T>();
+			const component = await factory(INERT_TUI, uiContext.theme, INERT_KEYBINDINGS, resolve);
+			let lifted: LiftedPermissionDialog | undefined;
+			try {
+				lifted = await liftPermissionDialog(component);
+			} catch (error) {
+				// picc's module did not load: the prompt cannot be lifted. Fail closed the way
+				// pi's rpc mode does (the extension sees "dismissed"), and say why — silently
+				// refusing every write is the #73 state this exists to end.
+				onProblem?.(`custom dialog could not be lifted (#73): ${String(error)}`);
+			}
+			if (lifted === undefined) {
+				component.dispose?.();
+				// pi's rpc contract, stated in TypeScript: an unknown component is "no component".
+				resolve(undefined as T);
+				return promise;
+			}
+			const choice = await awaitDialog(
+				{ method: "select", title: lifted.title, options: [...lifted.options], message: lifted.message },
+				undefined,
+				undefined,
+				(response) => ("value" in response ? response.value : undefined),
+			);
+			component.dispose?.();
+			// The lifted select's value is one of the strings picc offered — `T` for picc is
+			// `FilePermissionChoice = string | null`, and cancel is `undefined`, its "no" path.
+			resolve(choice as T);
+			return promise;
+		},
 		pasteToEditor: () => undefined,
 		getEditorText: () => "",
 		addAutocompleteProvider: () => undefined,
