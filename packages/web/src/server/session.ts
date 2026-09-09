@@ -179,6 +179,13 @@ function slashCommandName(prompt: string): string | undefined {
  */
 export interface ChatRunOutcome {
 	parkedAwaitingAnswer: boolean;
+	/**
+	 * THIS request took the parked run's continuation (`registry.take` succeeded), so its
+	 * lease is this request's to release — and only this request's. A resume refused
+	 * before the take (a stale `parentRunId`, a malformed entry, a concurrent loser) leaves
+	 * it false and must release nothing: the winner is running through that same lease.
+	 */
+	resumedRun: boolean;
 }
 
 function noop(): void {
@@ -557,8 +564,13 @@ export async function* resumeChat(options: ResumeRunOptions): AsyncGenerator<Str
 		if (refusal !== undefined) {
 			// Re-present rather than error out: move the open question onto THIS run so the
 			// next resume's parentRunId matches, and hand the browser the same interrupt
-			// again with the refusal as visible text.
-			registry.take(ids.threadId);
+			// again with the refusal as visible text. ⚠ The take is checked: a concurrent
+			// resume that won between the peek and here must not be displaced by a re-park.
+			if (registry.take(ids.threadId) === undefined) {
+				yield runError(ids, "this question is being answered by a concurrent request.");
+				return;
+			}
+			outcome.resumedRun = true;
 			const expiresAt = Date.now() + registry.answerTimeoutMs;
 			registry.park({ ...parked, interruptedRunId: ids.runId, expiresAt });
 			outcome.parkedAwaitingAnswer = true;
@@ -579,6 +591,7 @@ export async function* resumeChat(options: ResumeRunOptions): AsyncGenerator<Str
 		yield runError(ids, "this question is being answered by a concurrent request.");
 		return;
 	}
+	outcome.resumedRun = true;
 	// `answerDialog` never throws (contract on `PiSession`): the subprocess era needed a
 	// broken-pipe catch here, but an in-process answer to a stale id is reported through the
 	// host's problem channel and returns normally. PR #70 review flagged the old catch as dead.

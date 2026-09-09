@@ -686,6 +686,46 @@ test("⚠ a refused resume leaves the thread busy AND parked — the question is
 	expect(built[0]?.aborts).toBe(0);
 });
 
+test("⚠ a refused ANSWER re-parks the question on the new run: thread still busy and parked, then the corrected answer completes", async () => {
+	const { url, built } = await startWith({
+		onPrompt: (emit, _outcome, message) => {
+			if (message === "/mode") emit(SELECT_DIALOG);
+		},
+		onAnswer: (emit) => {
+			emit(SETTLED);
+		},
+	});
+	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("/mode")] });
+	// A value the select never offered: refused server-side, question re-presented on r2.
+	const refused = await postRun(url, {
+		threadId: "t1",
+		runId: "r2",
+		parentRunId: "r1",
+		resume: [{ interruptId: "d1", status: "resolved", payload: { value: "zzz" } }],
+		messages: [],
+	});
+	expect(refused).toContain(EventType.TEXT_MESSAGE_CONTENT);
+	expect(refused.at(-1)).toBe(EventType.RUN_FINISHED);
+	expect(await (await fetch(`${url}/api/threads`)).json()).toMatchObject([
+		{ threadId: "t1", busy: true, parked: true },
+	]);
+
+	// The corrected answer names the RE-PARKED run, r2, and settles the thread.
+	const answered = await postRun(url, {
+		threadId: "t1",
+		runId: "r3",
+		parentRunId: "r2",
+		resume: [{ interruptId: "d1", status: "resolved", payload: { value: "a" } }],
+		messages: [],
+	});
+	expect(answered.at(-1)).toBe(EventType.RUN_FINISHED);
+	expect(await (await fetch(`${url}/api/threads`)).json()).toMatchObject([
+		{ threadId: "t1", busy: false, parked: false },
+	]);
+	expect(built).toHaveLength(1);
+	expect(built[0]?.aborts).toBe(0);
+});
+
 test("⚠ a bind conflict rejects `listening` instead of hanging, and reports the clash (#81 review)", async () => {
 	const { host } = fakeHost({ onPrompt: neverPrompted });
 	// Occupy a real port by letting the OS pick one (port 0).

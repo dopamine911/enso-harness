@@ -142,6 +142,9 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 	/**
 	 * Per thread id, surviving disposal: a thread rebuilt after its idle window continues
 	 * the count, so a lease from before the rebuild can never match the new entry by number.
+	 * ⓘ Never pruned — one integer per thread id this server has ever run, the same named
+	 * non-coverage as the thread map itself (header): loopback, dev-only, ids minted by the
+	 * page. Pruning would reopen the rebuild case for a thread that comes back after it.
 	 */
 	const generations = new Map<string, number>();
 

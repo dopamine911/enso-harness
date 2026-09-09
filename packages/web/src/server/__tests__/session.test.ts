@@ -144,7 +144,7 @@ function runWiring() {
 			answerTimeoutMs: 5000,
 			evictionGraceMs: 5,
 		}),
-		outcome: { parkedAwaitingAnswer: false } as ChatRunOutcome,
+		outcome: { parkedAwaitingAnswer: false, resumedRun: false } as ChatRunOutcome,
 		problems,
 	};
 }
@@ -506,7 +506,7 @@ async function resumeWith(
 	parentRunId: string | undefined = "r1",
 ) {
 	const resumeIds = { messageId: "m2", runId: "r2", threadId: "t1" };
-	const outcome = { parkedAwaitingAnswer: false };
+	const outcome: ChatRunOutcome = { parkedAwaitingAnswer: false, resumedRun: false };
 	const chunks = [];
 	for await (const chunk of resumeChat({
 		registry: wiring.registry,
@@ -537,9 +537,10 @@ test("an answered select is delivered verbatim and the run continues to completi
 	// the continuation streamed on the RESUME response and settled
 	expect(chunks.some((c) => c.type === EventType.TEXT_MESSAGE_CONTENT)).toBe(true);
 	expect(chunks.at(-1)?.type).toBe(EventType.RUN_FINISHED);
-	// and the question is spent: nothing parked, no second park
+	// and the question is spent: nothing parked, no second park — THIS request took the
+	// run, so the handler releases its lease through this outcome (#110 review).
 	expect(wiring.registry.peek("t1")).toBeUndefined();
-	expect(outcome.parkedAwaitingAnswer).toBe(false);
+	expect(outcome).toEqual({ parkedAwaitingAnswer: false, resumedRun: true });
 });
 
 test("⚠ an answer outside the offered options is refused and the question re-presented", async () => {
@@ -564,7 +565,8 @@ test("⚠ an answer outside the offered options is refused and the question re-p
 	};
 	expect(binding.interruptedRunId).toBe("r2");
 	expect(wiring.registry.peek("t1")?.interruptedRunId).toBe("r2");
-	expect(outcome.parkedAwaitingAnswer).toBe(true);
+	// Took the run AND re-parked it: the handler must release nothing.
+	expect(outcome).toEqual({ parkedAwaitingAnswer: true, resumedRun: true });
 });
 
 test("cancel from the UI is delivered as pi's cancellation and the run completes", async () => {
@@ -589,7 +591,7 @@ test("a stale parentRunId is refused and the question stays open", async () => {
 	const pi = dialogPi(SELECT_DIALOG);
 	const { wiring } = await runIntoDialog(pi);
 
-	const { chunks } = await resumeWith(
+	const { chunks, outcome } = await resumeWith(
 		wiring,
 		[{ interruptId: "d1", status: "resolved", payload: { value: "auto" } }],
 		"r0",
@@ -599,6 +601,8 @@ test("a stale parentRunId is refused and the question stays open", async () => {
 	expect(pi.record.answers).toHaveLength(0);
 	// ⚠ the decisive half: a bad request must not destroy the parked question
 	expect(wiring.registry.peek("t1")?.dialogId).toBe("d1");
+	// … and it never took the run: the lease is not this request's to stop or release.
+	expect(outcome).toEqual({ parkedAwaitingAnswer: false, resumedRun: false });
 });
 
 test("⚠ an unanswered dialog is evicted: declined, run stopped, pump released", async () => {
@@ -820,7 +824,7 @@ test("an answered slash-command dialog closes its continuation at the grace too"
 		ids: resumeIds,
 		parentRunId: "r1",
 		resume: [{ interruptId: "d1", status: "resolved", payload: { value: "auto" } }],
-		outcome: { parkedAwaitingAnswer: false },
+		outcome: { parkedAwaitingAnswer: false, resumedRun: false },
 		onProblem: undefined,
 		noProgressTimeoutMs: 5000,
 		slashCommandGraceMs: 25,
@@ -945,7 +949,7 @@ test("⚠ a second question on a parked thread displaces the first: declined, re
 
 	// A second run on the SAME thread (another tab, a retry) reaches its own dialog.
 	const second = dialogPi(SELECT_DIALOG.replace('"id":"d1"', '"id":"d2"'));
-	const secondOutcome = { parkedAwaitingAnswer: false };
+	const secondOutcome = { parkedAwaitingAnswer: false, resumedRun: false };
 	for await (const _chunk of runChat({
 		lease: leaseOf(second),
 		ids,
@@ -1010,7 +1014,7 @@ test("⚠ a displaced park's late stop and release do not touch the run that now
 	const runB = await threads.acquire("t1");
 	const second = dialogPi(SELECT_DIALOG.replace('"id":"d1"', '"id":"d2"'));
 	const leaseB: ThreadLease = { ...runB, session: second.session };
-	const outcomeB = { parkedAwaitingAnswer: false };
+	const outcomeB = { parkedAwaitingAnswer: false, resumedRun: false };
 	for await (const _chunk of runChat({
 		lease: leaseB,
 		ids: { ...ids, runId: "r2" },

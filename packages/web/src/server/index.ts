@@ -525,7 +525,7 @@ export function startZenServer(options: ZenServerOptions) {
 			// the run handed its process to the registry mid-stream, so the teardown that
 			// normally follows a response must not run — a human's answer is coming back for
 			// that process on a later request.
-			const outcome: ChatRunOutcome = { parkedAwaitingAnswer: false };
+			const outcome: ChatRunOutcome = { parkedAwaitingAnswer: false, resumedRun: false };
 			// ⚠ Set in each path's `finally` BEFORE `response.end()`. The response 'close' event
 			// fires on normal completion too, and since #69 PR 2 "stop" is a real `abort()` on
 			// the thread's long-lived session (the subprocess era's stop was an idempotent
@@ -541,6 +541,13 @@ export function startZenServer(options: ZenServerOptions) {
 			if (Array.isArray(body.resume) && body.resume.length > 0) {
 				// Captured BEFORE resumeChat can take the entry.
 				const parked = registry.peek(ids.threadId);
+				/**
+				 * The parked run is THIS request's to stop or release only if it took the
+				 * continuation and did not re-park it. Never decided by asking the registry: a
+				 * concurrent loser would read the winner's take as "nothing parked" and act on
+				 * the lease the winner runs through (#110 review).
+				 */
+				const ownsRun = (): boolean => outcome.resumedRun && !outcome.parkedAwaitingAnswer;
 				response.writeHead(200, SSE_HEADERS);
 				const stopKeepalive = startSseKeepalive(response, sseKeepaliveMs, options.onProblem);
 				// ⚠ `response`, NOT `request` (#34). Under bun's node:http compat the REQUEST
@@ -549,9 +556,7 @@ export function startZenServer(options: ZenServerOptions) {
 				// INERT and a mid-run disconnect never tore pi down. The RESPONSE 'close' is
 				// what fires on a client abort; on normal end `streamEnded` keeps it inert.
 				response.on("close", () => {
-					if (streamEnded) return;
-					if (outcome.parkedAwaitingAnswer) return;
-					parked?.lease.stop();
+					if (!streamEnded && ownsRun()) parked?.lease.stop();
 				});
 				try {
 					for await (const chunk of resumeChat({
@@ -578,10 +583,7 @@ export function startZenServer(options: ZenServerOptions) {
 				} finally {
 					streamEnded = true;
 					stopKeepalive();
-					// The thread goes idle only once NO question is open on it: a resume that
-					// settled the run, not one that was refused (the question stays parked) or
-					// re-parked. A parked thread is never released — eviction releases it.
-					if (registry.peek(ids.threadId) === undefined) parked?.lease.release();
+					if (ownsRun()) parked?.lease.release();
 					response.end();
 				}
 				return;
