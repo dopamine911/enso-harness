@@ -146,9 +146,8 @@ stateDiagram-v2
   [*] --> idle: acquire() builds the pi session
   idle --> busy: acquire() · generation++ · awaits any abort in flight
   busy --> idle: agent_settled → release() · idle timer armed (30 min)
-  busy --> busy: POST …/abort → pi.abort() · settle still ends it
   busy --> busy: POST …/prompt → queued behind the run, listed for every follower (#75)
-  busy --> busy: POST …/abort → pi's queue cleared, texts back to the stopping tab (#75)
+  busy --> busy: POST …/abort → pi's queue cleared, texts back to the stopping tab (#75) · pi.abort() · settle still ends it
   idle --> [*]: idle timer → dispose · generation counter kept
 ```
 
