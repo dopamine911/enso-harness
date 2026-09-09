@@ -7,10 +7,12 @@ import {
 	type KeyedPart,
 	keyedParts,
 	PendingDialog,
+	settleDialog,
 	ThreadPane,
 	ZenDialogCard,
 } from "../chat-screen.tsx";
-import { ThreadStoresContext } from "../store.ts";
+import type { DialogAnswerOutcome, FollowConnection } from "../follow-connection.ts";
+import { createStore, ThreadStoresContext } from "../store.ts";
 import { adoptThread, clearThreadsForTest, mintThread } from "../thread-stores.ts";
 
 /**
@@ -105,6 +107,20 @@ test("PendingDialog renders nothing without an open question, and the card once 
 	expect(render()).toBe("");
 	stores.dialog.set({ id: "d1", dialog: SELECT_DIALOG });
 	expect(render()).toContain("Select permission mode");
+});
+
+// PR #113 review: a REFUSED answer (422) leaves the question open on the server, so the card
+// must stay; answered and gone (404) spend it.
+test("⚠ settleDialog clears the question when it is spent and keeps it when the answer was refused", async () => {
+	const settle = async (outcome: DialogAnswerOutcome): Promise<boolean> => {
+		const dialog = createStore<{ id: string; dialog: ZenDialogSpec } | undefined>({ id: "d1", dialog: SELECT_DIALOG });
+		const connection = { answerDialog: () => Promise.resolve(outcome) } as unknown as FollowConnection;
+		await settleDialog({ connection, dialog }, { id: "d1", value: "Default" });
+		return dialog.get() !== undefined;
+	};
+	expect(await settle("answered")).toBe(false);
+	expect(await settle("gone")).toBe(false);
+	expect(await settle("refused")).toBe(true);
 });
 
 // ── part keys are identities, not positions (#82) ─────────────────────────────

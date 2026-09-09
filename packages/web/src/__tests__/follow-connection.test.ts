@@ -33,6 +33,7 @@ function scripted(
 		status: 202,
 		body: { threadId: "t1", messageId: "pm1", generation: 1, queued: false },
 	},
+	dialogStatus = 204,
 ): ScriptedServer {
 	let write: (text: string) => void = () => undefined;
 	let close: () => void = () => undefined;
@@ -60,7 +61,7 @@ function scripted(
 		}
 		if (url.endsWith("/dialog")) {
 			dialogs.push(JSON.parse(String(init?.body)));
-			return Promise.resolve(new Response(null, { status: 204 }));
+			return Promise.resolve(new Response(dialogStatus === 204 ? null : "no", { status: dialogStatus }));
 		}
 		return Promise.resolve(new Response("not found", { status: 404 }));
 	}) as typeof fetch;
@@ -247,6 +248,39 @@ test("⚠ a prompt pi rejects after admission reaches the run as an error, by th
 	server.abort();
 });
 
+// PR #113 review: the queued-prompt path rejects the instant `session.prompt` runs, before
+// the 202 body is written — the follow can deliver the rejection before the receipt names the run.
+test("⚠ a rejection that beats its own receipt is held and still ends the run with its reason", async () => {
+	const server = scripted();
+	server.frame(SNAPSHOT_IDLE);
+	await server.untilChunks(2);
+	const release = server.holdPrompt();
+	const sending = send(server, "hello");
+	await server.untilChunks(4);
+	server.frame({
+		type: "observation",
+		seq: 1,
+		observation: { kind: "prompt-rejected", messageId: "pm1", reason: "Agent is already processing" },
+	});
+	// Nothing yet: no run is named pm1 until the receipt lands.
+	await new Promise<void>((resolve) => queueMicrotask(resolve));
+	expect(server.chunks).toHaveLength(4);
+	release();
+	await sending;
+	await server.untilChunks(5);
+	expect(server.chunks[4]).toEqual({ type: EventType.RUN_ERROR, runId: "r1", message: "Agent is already processing" });
+	server.abort();
+});
+
+test("answerDialog names what the server did: answered (204), gone (404), refused (422)", async () => {
+	expect(await scripted(undefined, 204).connection.answerDialog({ id: "d1", value: "a" })).toBe("answered");
+	const gone = scripted(undefined, 404);
+	expect(await gone.connection.answerDialog({ id: "d1", value: "a" })).toBe("gone");
+	const refused = scripted(undefined, 422);
+	expect(await refused.connection.answerDialog({ id: "d1", value: "zzz" })).toBe("refused");
+	expect(refused.problems).toEqual([expect.stringContaining("refused: 422")]);
+});
+
 test("⚠ a blocking question crosses as zen.dialog — no interrupt, no run boundary — and the answer is one POST", async () => {
 	const server = scripted();
 	server.frame(SNAPSHOT_IDLE);
@@ -271,7 +305,7 @@ test("⚠ a blocking question crosses as zen.dialog — no interrupt, no run bou
 		name: "zen.dialog",
 		value: { id: "d1", dialog: { method: "select", title: "Pick", options: ["a", "b"] } },
 	});
-	expect(await server.connection.answerDialog({ id: "d1", value: "a" })).toBe(true);
+	expect(await server.connection.answerDialog({ id: "d1", value: "a" })).toBe("answered");
 	expect(server.dialogs).toEqual([{ id: "d1", value: "a" }]);
 	// The run is still open — nothing finished for the question.
 	expect(server.chunks.some((chunk) => chunk.type === EventType.RUN_FINISHED)).toBe(false);

@@ -94,13 +94,18 @@ async function* readSseFrames(body: ReadableStream<Uint8Array>, signal: AbortSig
 	}
 }
 
+/**
+ * What the server did with a dialog answer (#112, PR #113 review):
+ *   `answered`  taken (204) — the question is spent.
+ *   `gone`      no such open question (404) — answered from another tab, or expired. Spent too.
+ *   `refused`   the answer did not fit the question (422: an unoffered value). The question is
+ *               STILL OPEN on the server and must stay on screen.
+ */
+export type DialogAnswerOutcome = "answered" | "gone" | "refused";
+
 export interface FollowConnection extends SubscribeConnectionAdapter {
-	/**
-	 * Answer the thread's open question (#112). `true` once the server took it; `false` when
-	 * the server refused it (already answered — from another tab — expired, or an unoffered
-	 * value), with the reason reported.
-	 */
-	readonly answerDialog: (answer: PiDialogResponse) => Promise<boolean>;
+	/** Answer the thread's open question. A non-`answered` outcome is also reported with the server's reason. */
+	readonly answerDialog: (answer: PiDialogResponse) => Promise<DialogAnswerOutcome>;
 }
 
 export function createFollowConnection(options: FollowConnectionOptions): FollowConnection {
@@ -115,6 +120,8 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 	const runs = new Map<string, OpenRun>();
 	/** The run observation chunks attach to: the most recently opened. */
 	let current: OpenRun | undefined;
+	/** `prompt-rejected` reasons that arrived before the receipt naming their run, by the receipt's `messageId`. */
+	const rejectedBeforeReceipt = new Map<string, string>();
 
 	function push(...chunks: StreamChunk[]): void {
 		queue.push(...chunks);
@@ -182,8 +189,10 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 	}
 
 	async function declineUnreadable(id: string): Promise<void> {
-		const ok = await answerDialog({ id, cancelled: true });
-		if (!ok) onProblem?.(`thread ${threadId}: could not decline unreadable dialog ${id}`);
+		// `gone` is fine — someone else settled it; only a refusal of a cancel is a problem.
+		if ((await answerDialog({ id, cancelled: true })) === "refused") {
+			onProblem?.(`thread ${threadId}: could not decline unreadable dialog ${id}`);
+		}
 	}
 
 	function observe(frame: ZenFollowFrame): void {
@@ -203,7 +212,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		}
 		if (observation.kind === "prompt-rejected") {
 			const run = [...runs.values()].find((open) => open.promptMessageId === observation.messageId);
-			if (run === undefined) return;
+			if (run === undefined) {
+				// ⚠ The rejection can beat the receipt that names the run (the queued-prompt
+				// path rejects the instant `session.prompt` runs, before the 202 body is even
+				// written). Keep it; `send` looks here when its receipt lands.
+				rejectedBeforeReceipt.set(observation.messageId, observation.reason);
+				return;
+			}
 			closeRun(run, { type: EventType.RUN_ERROR, runId: run.runId, message: observation.reason });
 			return;
 		}
@@ -304,6 +319,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		}
 		run.promptMessageId = receipt.messageId;
 		run.generation = receipt.generation;
+		// The rejection may already have crossed on the follow, before this receipt named the run.
+		const rejection = rejectedBeforeReceipt.get(receipt.messageId);
+		if (rejection !== undefined) {
+			rejectedBeforeReceipt.delete(receipt.messageId);
+			closeRun(run, { type: EventType.RUN_ERROR, runId: run.runId, message: rejection });
+			return;
+		}
 		// A run so quick the server released it before its receipt came back (a slash
 		// command that answered in the same tick): the status that ended it has already
 		// passed through, so nothing later will close this run. Close it now.
@@ -312,15 +334,16 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		}
 	}
 
-	async function answerDialog(answer: PiDialogResponse): Promise<boolean> {
+	async function answerDialog(answer: PiDialogResponse): Promise<DialogAnswerOutcome> {
 		const response = await fetchImpl(`${base}/dialog`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(answer),
 		});
-		if (response.status === 204) return true;
-		onProblem?.(`thread ${threadId}: dialog ${answer.id} answer refused: ${response.status} ${await response.text()}`);
-		return false;
+		if (response.status === 204) return "answered";
+		const outcome: DialogAnswerOutcome = response.status === 404 ? "gone" : "refused";
+		onProblem?.(`thread ${threadId}: dialog ${answer.id} ${outcome}: ${response.status} ${await response.text()}`);
+		return outcome;
 	}
 
 	return { subscribe, send, answerDialog };

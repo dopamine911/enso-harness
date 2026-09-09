@@ -374,16 +374,28 @@ export function ZenDialogCard({
 }
 
 /**
- * The thread's open question, if any, answered through its connection. The slot is
- * cleared on the server's `204`; a refusal (another tab answered first, or the question
- * expired) clears it too, with the reason as a notice — the question is gone either way.
+ * Answer the thread's open question through its connection. The slot clears once the
+ * question is SPENT — taken by the server (`answered`), or already settled from another
+ * tab or expired (`gone`). A `refused` answer (an unoffered value, 422) leaves the question
+ * open on the server, so it stays on screen with the reason as a notice: nothing would
+ * re-show it otherwise, and the thread would sit busy behind a card that vanished (PR #113
+ * review). ⓘ Exported for `__tests__/chat-screen.test.tsx`.
  */
+export async function settleDialog(
+	stores: Pick<ThreadStores, "connection" | "dialog">,
+	response: PiDialogResponse,
+): Promise<void> {
+	const outcome = await stores.connection.answerDialog(response);
+	if (outcome !== "refused") stores.dialog.set(undefined);
+}
+
+/** The thread's open question, if any — see {@link settleDialog}. */
 export function PendingDialog(): React.ReactNode {
 	const stores = useThreadStores();
 	const pending = useStore(stores.dialog);
 	if (pending === undefined) return null;
 	const settle = (response: PiDialogResponse): void => {
-		void stores.connection.answerDialog(response).then(() => stores.dialog.set(undefined));
+		void settleDialog(stores, response);
 	};
 	return (
 		<ZenDialogCard
