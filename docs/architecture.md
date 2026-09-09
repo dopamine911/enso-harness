@@ -197,7 +197,8 @@ What is durable, and where:
 | `.zen/pi-agent/provider-failover.json` | — | seeded at host creation | pi's multi-account extension |
 
 Not durable, by design: `ZenObservation` (derived from pi events in memory, never written); AG-UI
-(derived in the adapter, never on the wire); `generation` and the rest of `ThreadEntry`.
+(derived in the adapter, never on the wire); `generation` and the rest of the registry's `ThreadEntry`
+(`packages/web/src/server/thread-sessions.ts` — busy, idle timer, abort in flight, the sent tail).
 
 **Run provenance (#102 §3).** pi's log already carries `SessionHeader {id, cwd, timestamp,
 parentSession}`, `model_change {provider, modelId}`, `thinking_level_change`, and picc's mode — so a
