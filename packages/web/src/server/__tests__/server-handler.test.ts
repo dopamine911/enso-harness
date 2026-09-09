@@ -2,7 +2,6 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventType } from "@ag-ui/core";
 import {
 	type PiEventDelivery,
 	type PiPromptOutcome,
@@ -18,16 +17,14 @@ import { Check } from "typebox/value";
 import type { AgentHost, HostedSession, HostedSessionInspection } from "../../host/agent-host.ts";
 import { createEventTail, describePiRpcEvent } from "../../host/event-tail.ts";
 import { startZenServer } from "../index.ts";
+import { openFollow } from "./follow-reader.ts";
 
 /**
- * The chat handler's stop / release sequencing, over real HTTP (#76 — promised on #74).
- *
- * `server/index.ts` had no test: whether a normal completion aborts the thread's session
- * (it must not — #74's review found it did), whether a client abort does (it must), whether
- * a parked dialog keeps the session, and whether a second prompt on the same thread reuses
- * the session (#43) were all receipt-by-reasoning. A fake host whose sessions record
- * `abort` / `dispose` calls, handed in through `ZenServerOptions.host`, makes each one an
- * assertion. The server binds port 0; `listening` yields the bound URL.
+ * The server's routes beside the wire, over real HTTP (#76, #86, #95, #97): what the
+ * inspection, history and session-listing routes report about threads the prompt route
+ * built. A fake host whose sessions record `abort` / `dispose` calls, handed in through
+ * `ZenServerOptions.host`, makes each contract an assertion. The server binds port 0;
+ * `listening` yields the bound URL. The wire itself is `follow.test.ts`.
  */
 
 interface FakeSessionRecord {
@@ -39,7 +36,6 @@ interface FakeSessionRecord {
 interface FakeSessionScript {
 	/** Called on every prompt; emit events through `emit`, signal acceptance via `outcome`. */
 	onPrompt: (emit: (event: PiRpcEvent) => void, outcome: PiPromptOutcome, message: string) => void;
-	onAnswer?: (emit: (event: PiRpcEvent) => void) => void;
 }
 
 function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; record: FakeSessionRecord } {
@@ -59,9 +55,7 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
 			record.prompts.push(request.message);
 			script.onPrompt(emit, outcome, request.message);
 		},
-		answerDialog: () => {
-			script.onAnswer?.(emit);
-		},
+		answerDialog: () => undefined,
 		openDialog: () => undefined,
 		listCommands: () => [{ name: "mode", source: "extension" }],
 		permissionModeState: () => ({ mode: "default", available: ["default", "acceptEdits"] }),
@@ -111,7 +105,7 @@ interface FakeStoredSession {
 
 function fakeHost(script: FakeSessionScript, stored: Record<string, FakeStoredSession> = {}) {
 	const built: FakeSessionRecord[] = [];
-	/** Thread ids the host was asked to build, in order — the resume path passes the id through. */
+	/** Thread ids the host was asked to build, in order — the prompt route passes the id through. */
 	const requested: string[] = [];
 	const host: AgentHost = {
 		createSession: (threadId) => {
@@ -160,16 +154,29 @@ function neverPrompted(): void {
 	// The 400 path must reject before any prompt reaches a session.
 }
 
+/** A prompt that settles synchronously — the run is over by the time the receipt is read. */
+const settlesAtOnce: FakeSessionScript = {
+	onPrompt: (emit, outcome) => {
+		outcome.onAccepted();
+		emit(SETTLED);
+	},
+};
+
+/** A prompt that asks a question and never settles — the thread stays busy. */
+const asksAndWaits: FakeSessionScript = {
+	onPrompt: (emit, _outcome, message) => {
+		if (message === "/mode") emit(SELECT_DIALOG);
+	},
+};
+
 const openServers: Array<{ close: () => Promise<void> }> = [];
+const openFollows: AbortController[] = [];
 afterEach(async () => {
+	for (const follow of openFollows.splice(0)) follow.abort();
 	for (const started of openServers.splice(0)) await started.close();
 });
 
-async function startWith(
-	script: FakeSessionScript,
-	stored: Record<string, FakeStoredSession> = {},
-	serverOptions: { sseKeepaliveMs?: number } = {},
-) {
+async function startWith(script: FakeSessionScript, stored: Record<string, FakeStoredSession> = {}) {
 	const { host, built, requested } = fakeHost(script, stored);
 	const started = startZenServer({
 		cwd: tmpdir(),
@@ -177,218 +184,35 @@ async function startWith(
 		agentDir: mkdtempSync(join(tmpdir(), "zen-handler-agent-")),
 		port: 0,
 		host,
-		...serverOptions,
 	});
 	openServers.push(started);
 	const url = await started.listening;
 	return { url, built, requested };
 }
 
-/** POST one AG-UI run and return every SSE chunk, parsed, in order. */
-async function postRunChunks(url: string, body: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
-	const response = await fetch(`${url}/api/chat`, {
+async function prompt(url: string, threadId: string, message: string): Promise<number> {
+	const response = await fetch(`${url}/api/threads/${encodeURIComponent(threadId)}/prompt`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(body),
+		body: JSON.stringify({ message }),
 	});
-	return (await response.text())
-		.split("\n")
-		.filter((line) => line.startsWith("data: "))
-		.map((line) => JSON.parse(line.slice("data: ".length)) as Record<string, unknown>);
+	await response.text();
+	return response.status;
 }
-
-/** POST one AG-UI run and return the SSE chunk types in order. */
-async function postRun(url: string, body: Record<string, unknown>): Promise<string[]> {
-	return (await postRunChunks(url, body)).map((chunk) => String(chunk.type));
-}
-
-const userMessage = (content: string) => ({ role: "user", content });
-
-// ⚠⚠ #98/#99's ACTUAL cause: a run whose tool produced no AG-UI event for 10 s put no byte on
-// the wire, and Bun's proxy closed the idle connection. The response now carries an SSE
-// comment while nothing else flows — bytes for every intermediary, ignored by every client.
-test("⚠ a run that goes silent carries SSE keepalive comments, which parse to no event", async () => {
-	const { url } = await startWith(
-		{
-			onPrompt: (emit, outcome) => {
-				outcome.onAccepted();
-				emit(TEXT_DELTA);
-				// A tool working in silence for several keepalive intervals, then the settle.
-				setTimeout(() => emit(SETTLED), 60);
-			},
-		},
-		{},
-		{ sseKeepaliveMs: 10 },
-	);
-	const response = await fetch(`${url}/api/chat`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ threadId: "t1", runId: "r1", messages: [userMessage("search")] }),
-	});
-	const raw = await response.text();
-	const keepalives = raw.split("\n").filter((line) => line === ": keepalive");
-	expect(keepalives.length).toBeGreaterThanOrEqual(2);
-	// The real events are intact and the comments contribute none.
-	const events = raw
-		.split("\n")
-		.filter((line) => line.startsWith("data: "))
-		.map((line) => JSON.parse(line.slice("data: ".length)) as Record<string, unknown>)
-		.map((chunk) => String(chunk.type));
-	expect(events.at(-1)).toBe(EventType.RUN_FINISHED);
-	expect(events).toContain(EventType.TEXT_MESSAGE_CONTENT);
-});
-
-// ⚠ The keepalive fires in the window between a client's disconnect and the handler's
-// `finally`; a write on a destroyed response emits 'error', which with no listener is an
-// uncaught exception in the server (PR #108 review). The decisive assertion is the request
-// AFTER the disconnect: the server is still there to answer it, and nothing was reported as
-// an unhandled write.
-test("⚠ a client that drops while the keepalive is ticking does not take the server down", async () => {
-	const problems: unknown[] = [];
-	const { host, built } = fakeHost({
-		onPrompt: (emit, outcome) => {
-			outcome.onAccepted();
-			emit(TEXT_DELTA);
-			// never settles — the client walks away, the keepalive keeps ticking until the close
-		},
-	});
-	const started = startZenServer({
-		cwd: tmpdir(),
-		harnessPackageDir: emptyHarnessDir(),
-		agentDir: mkdtempSync(join(tmpdir(), "zen-handler-agent-")),
-		port: 0,
-		host,
-		sseKeepaliveMs: 5,
-		onProblem: (problem) => problems.push(problem),
-	});
-	openServers.push(started);
-	const url = await started.listening;
-	const controller = new AbortController();
-	const response = await fetch(`${url}/api/chat`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ threadId: "t1", runId: "r1", messages: [userMessage("hello")] }),
-		signal: controller.signal,
-	});
-	const reader = response.body?.getReader();
-	await reader?.read();
-	controller.abort();
-	// Let several keepalive intervals pass after the disconnect, while pi is being stopped.
-	for (let attempt = 0; attempt < 50 && (built[0]?.aborts ?? 0) === 0; attempt += 1) {
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
-	await new Promise((resolve) => setTimeout(resolve, 30));
-	expect(built[0]?.aborts).toBe(1);
-	expect((await fetch(`${url}/api/threads`)).status).toBe(200);
-	expect(problems.filter((problem) => String(problem).includes("SSE response error"))).toEqual([]);
-});
-
-// #96: a notify the session emits while the run is listening crosses the wire tagged
-// `origin: "run"` — the browser renders it open. The session-start half of the tag rides the
-// real host's replay, pinned in agent-host.test.ts and seen live in the fold.
-test("a notify emitted during a run reaches the wire as zen.notify with origin run", async () => {
-	const { url } = await startWith({
-		onPrompt: (emit, outcome) => {
-			outcome.onAccepted();
-			emit({ type: "extension_ui_request", id: "n1", method: "notify", message: "refused", notifyType: "warning" });
-			emit(SETTLED);
-		},
-	});
-	const chunks = await postRunChunks(url, { threadId: "t1", runId: "r1", messages: [userMessage("hi")] });
-	const notify = chunks.find((chunk) => chunk.type === EventType.CUSTOM && chunk.name === "zen.notify");
-	expect(notify?.value).toMatchObject({ message: "refused", notifyType: "warning", origin: "run" });
-});
-
-test("⚠ a normal completion releases the thread and does NOT abort the session (#74 review)", async () => {
-	const { url, built } = await startWith({
-		onPrompt: (emit, outcome) => {
-			outcome.onAccepted();
-			emit(TEXT_DELTA);
-			emit(SETTLED);
-		},
-	});
-	const types = await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("hello")] });
-	expect(types.at(-1)).toBe(EventType.RUN_FINISHED);
-	expect(built).toHaveLength(1);
-	expect(built[0]?.aborts).toBe(0);
-	expect(built[0]?.disposed).toBe(0);
-});
 
 test("⚠ two prompts on one thread reuse ONE session; a second thread gets its own (#43 over HTTP)", async () => {
-	const { url, built } = await startWith({
-		onPrompt: (emit, outcome) => {
-			outcome.onAccepted();
-			emit(SETTLED);
-		},
-	});
-	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("one")] });
-	await postRun(url, { threadId: "t1", runId: "r2", messages: [userMessage("two")] });
+	const { url, built } = await startWith(settlesAtOnce);
+	expect(await prompt(url, "t1", "one")).toBe(202);
+	expect(await prompt(url, "t1", "two")).toBe(202);
 	expect(built).toHaveLength(1);
 	expect(built[0]?.prompts).toEqual(["one", "two"]);
-	await postRun(url, { threadId: "t2", runId: "r3", messages: [userMessage("three")] });
+	await prompt(url, "t2", "three");
 	expect(built).toHaveLength(2);
-	expect(built.map((record) => record.aborts)).toEqual([0, 0]);
-});
-
-test("⚠ a client that aborts mid-run makes the server abort the session's run, exactly once, and never dispose it", async () => {
-	const { url, built } = await startWith({
-		onPrompt: (emit, outcome) => {
-			outcome.onAccepted();
-			emit(TEXT_DELTA);
-			// never settles — the client will walk away
-		},
-	});
-	const controller = new AbortController();
-	const request = fetch(`${url}/api/chat`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ threadId: "t1", runId: "r1", messages: [userMessage("hello")] }),
-		signal: controller.signal,
-	});
-	// Let the first chunk flow, then drop the connection.
-	const response = await request;
-	const reader = response.body?.getReader();
-	await reader?.read();
-	controller.abort();
-	// The response 'close' fires on the server; give it a moment.
-	for (let attempt = 0; attempt < 50 && (built[0]?.aborts ?? 0) === 0; attempt += 1) {
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
-	expect(built[0]?.aborts).toBe(1);
-	expect(built[0]?.disposed).toBe(0);
-});
-
-test("⚠ a parked dialog neither aborts nor disposes; the resume completes on the same session", async () => {
-	const { url, built } = await startWith({
-		onPrompt: (emit, _outcome, message) => {
-			if (message === "/mode") emit(SELECT_DIALOG);
-		},
-		onAnswer: (emit) => {
-			emit(SETTLED);
-		},
-	});
-	const first = await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("/mode")] });
-	expect(first.at(-1)).toBe(EventType.RUN_FINISHED);
-	expect(built[0]?.aborts).toBe(0);
-
-	const resumed = await postRun(url, {
-		threadId: "t1",
-		runId: "r2",
-		parentRunId: "r1",
-		resume: [{ interruptId: "d1", status: "resolved", payload: { value: "a" } }],
-		messages: [],
-	});
-	expect(resumed.at(-1)).toBe(EventType.RUN_FINISHED);
-	expect(built).toHaveLength(1);
-	expect(built[0]?.aborts).toBe(0);
-	expect(built[0]?.disposed).toBe(0);
-});
-
-test("a malformed body is a plain 400, no session built", async () => {
-	const { url, built } = await startWith({ onPrompt: neverPrompted });
-	const response = await fetch(`${url}/api/chat`, { method: "POST", body: "{not json" });
-	expect(response.status).toBe(400);
-	expect(built).toHaveLength(0);
+	// A settled run releases the thread and never aborts or disposes the session.
+	expect(built.map((record) => [record.aborts, record.disposed])).toEqual([
+		[0, 0],
+		[0, 0],
+	]);
 });
 
 // The header's first paint (#84): what a fresh thread starts in, answered WITHOUT building
@@ -431,21 +255,14 @@ test("⚠ a malformed thread id is a 400, and the server survives to answer the 
 });
 
 // ⚠ THE ID IS A FILENAME. Since #95 pi names the session file after the thread id, so an id
-// from a request is a path component (Claude review on PR #104). Refused at both entry
-// points before anything is built; the traversal never reaches the host.
-test("⚠ a thread id that is not thread-id shaped is a 400 at both entry points, and builds nothing", async () => {
+// from a request is a path component (Claude review on PR #104). Refused at every entry
+// point before anything is built; the traversal never reaches the host.
+test("⚠ a thread id that is not thread-id shaped is a 400 at every entry point, and builds nothing", async () => {
 	const { url, built, requested } = await startWith({ onPrompt: neverPrompted });
-	// The chat body: the id pi would put in a filename.
-	const chat = await fetch(`${url}/api/chat`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ threadId: "../../evil", runId: "r1", messages: [userMessage("hi")] }),
-	});
-	expect(chat.status).toBe(400);
-	// The routes: percent-encoding decodes to the same traversal.
-	for (const route of ["", "/history", "/events"]) {
-		const response = await fetch(`${url}/api/threads/${encodeURIComponent("../../evil")}${route}`);
-		expect(response.status).toBe(400);
+	const evil = encodeURIComponent("../../evil");
+	expect(await prompt(url, "../../evil", "hi")).toBe(400);
+	for (const route of ["", "/history", "/events", "/follow"]) {
+		expect((await fetch(`${url}/api/threads/${evil}${route}`)).status).toBe(400);
 	}
 	expect(built).toHaveLength(0);
 	expect(requested).toEqual([]);
@@ -454,13 +271,8 @@ test("⚠ a thread id that is not thread-id shaped is a 400 at both entry points
 });
 
 test("GET /api/threads/:id returns the branch as pi holds it, with sessionFile null while unflushed", async () => {
-	const { url } = await startWith({
-		onPrompt: (emit, outcome) => {
-			outcome.onAccepted();
-			emit(SETTLED);
-		},
-	});
-	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("hello")] });
+	const { url } = await startWith(settlesAtOnce);
+	await prompt(url, "t1", "hello");
 	const response = await fetch(`${url}/api/threads/t1`);
 	expect(response.status).toBe(200);
 	const inspection: unknown = await response.json();
@@ -473,7 +285,7 @@ test("GET /api/threads/:id returns the branch as pi holds it, with sessionFile n
 		permissionMode: { mode: "default", available: ["default", "acceptEdits"] },
 		commands: ["mode", "plan"],
 		busy: false,
-		parked: false,
+		generation: 1,
 	});
 	// The branch is verbatim — the picc `modes` entry a reader would cross-check against.
 	const entries = (inspection as ZenThreadInspection).entries;
@@ -481,9 +293,10 @@ test("GET /api/threads/:id returns the branch as pi holds it, with sessionFile n
 	expect(entries[1]).toMatchObject({ type: "custom", customType: "modes", data: { mode: "plan" } });
 });
 
-// #97: the two tails of one run, read after it — what the host emitted and what the server wrote,
-// each in its own order. The sent tail is recorded at the SSE writer, so it is the wire's order by
-// construction; the test pins that the record matches what the client actually received.
+// #97: the two tails of one run, read after it — what the host emitted and what the server
+// wrote to the follower, each in its own order. The sent tail is recorded at the frame
+// writer, so it is the wire's order by construction; the test pins that the record matches
+// what the follower actually received.
 test("GET /api/threads/:id/events returns the emitted and sent tails of a run, in wire order, deltas coalesced", async () => {
 	const { url } = await startWith({
 		onPrompt: (emit, outcome) => {
@@ -494,7 +307,12 @@ test("GET /api/threads/:id/events returns the emitted and sent tails of a run, i
 			emit(SETTLED);
 		},
 	});
-	const received = await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("hello")] });
+	const controller = new AbortController();
+	openFollows.push(controller);
+	const follow = await openFollow(url, "t1", controller);
+	await prompt(url, "t1", "hello");
+	// snapshot, status(built), status(taken), 3 deltas, settled, status(released)
+	await follow.untilFrames(8);
 	const response = await fetch(`${url}/api/threads/t1/events`);
 	expect(response.status).toBe(200);
 	const events: unknown = await response.json();
@@ -505,12 +323,13 @@ test("GET /api/threads/:id/events returns the emitted and sent tails of a run, i
 		["message_update", 3],
 		["agent_settled", 1],
 	]);
-	// The wire: the sent tail, expanded by its counts, IS the chunk sequence the client got.
+	// The wire: the sent tail, expanded by its counts, IS the frame sequence the follower got
+	// — from the first frame the thread was live for (the snapshot went out before it was).
 	const sentExpanded = sent.flatMap((event) => Array.from({ length: event.count }, () => event.type));
+	const received = follow.frames.slice(1).map((frame) => frame.type);
 	expect(sentExpanded).toEqual(received);
 	expect(sent.every((event) => event.provenance === "sent")).toBe(true);
-	expect(sent[0]).toMatchObject({ type: EventType.RUN_STARTED, count: 1 });
-	expect(sent.at(-1)).toMatchObject({ type: EventType.RUN_FINISHED, count: 1 });
+	expect(sent.find((event) => event.type === "observation")).toMatchObject({ name: "text-delta", count: 3 });
 });
 
 test("⚠ the events route of an unknown thread is a 404 and builds no session; a malformed id is a 400", async () => {
@@ -542,13 +361,8 @@ const STORED_BRANCH: unknown[] = [
 ];
 
 test("⚠ a prompt on a thread passes THAT id to the host — the thread id is pi's session id, so a stored one reopens", async () => {
-	const { url, requested } = await startWith({
-		onPrompt: (emit, outcome) => {
-			outcome.onAccepted();
-			emit(SETTLED);
-		},
-	});
-	await postRun(url, { threadId: "stored-1", runId: "r1", messages: [userMessage("continue")] });
+	const { url, requested } = await startWith(settlesAtOnce);
+	await prompt(url, "stored-1", "continue");
 	expect(requested).toEqual(["stored-1"]);
 });
 
@@ -561,16 +375,9 @@ test("GET /api/sessions lists stored sessions with title, count and age, marking
 		},
 		"stored-2": { branch: [] as unknown[], modified: new Date("2026-09-08T11:00:00.000Z"), firstMessage: "   " },
 	};
-	const { url } = await startWith(
-		{
-			onPrompt: (emit, _outcome, message) => {
-				if (message === "/mode") emit(SELECT_DIALOG);
-			},
-		},
-		stored,
-	);
-	// A parked dialog holds stored-1 busy on this server: acquired, never released.
-	await postRun(url, { threadId: "stored-1", runId: "r1", messages: [userMessage("/mode")] });
+	const { url } = await startWith(asksAndWaits, stored);
+	// An open question holds stored-1 busy on this server: taken, never released.
+	await prompt(url, "stored-1", "/mode");
 	const response = await fetch(`${url}/api/sessions`);
 	expect(response.status).toBe(200);
 	const listed: unknown = await response.json();
@@ -613,16 +420,8 @@ test("GET /api/threads/:id/history serves a STORED thread's branch as messages w
 // gating on presence locked a reloaded page out of its own session for thirty minutes.
 test("⚠ a thread this server holds IDLE is resumable — /history reads pi's memory, /sessions does not mark it busy", async () => {
 	const stored = { t1: { branch: STORED_BRANCH, modified: new Date(0), firstMessage: "earlier question" } };
-	const { url, built } = await startWith(
-		{
-			onPrompt: (emit, outcome) => {
-				outcome.onAccepted();
-				emit(SETTLED);
-			},
-		},
-		stored,
-	);
-	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("hello")] });
+	const { url, built } = await startWith(settlesAtOnce, stored);
+	await prompt(url, "t1", "hello");
 	const listed = (await (await fetch(`${url}/api/sessions`)).json()) as ZenResumableSession[];
 	expect(listed.find((session) => session.threadId === "t1")?.busy).toBe(false);
 	const response = await fetch(`${url}/api/threads/t1/history`);
@@ -637,94 +436,21 @@ test("⚠ a thread this server holds IDLE is resumable — /history reads pi's m
 });
 
 test("⚠ GET /api/threads/:id/history refuses a thread that is BUSY here, even if a stale rail made it clickable", async () => {
-	const { url, built } = await startWith({
-		onPrompt: (emit, _outcome, message) => {
-			if (message === "/mode") emit(SELECT_DIALOG);
-		},
-	});
-	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("/mode")] });
+	const { url, built } = await startWith(asksAndWaits);
+	await prompt(url, "t1", "/mode");
 	const response = await fetch(`${url}/api/threads/t1/history`);
 	expect(response.status).toBe(409);
 	expect(await response.text()).toContain("running on this server");
 	expect(built).toHaveLength(1);
 });
 
-test("GET /api/threads lists live threads with busy, parked state and the run number", async () => {
-	const { url } = await startWith({
-		onPrompt: (emit, _outcome, message) => {
-			if (message === "/mode") emit(SELECT_DIALOG);
-		},
-	});
-	// A parked dialog holds the thread: acquired, never released, a question pending.
-	await postRun(url, { threadId: "parked-thread", runId: "r1", messages: [userMessage("/mode")] });
+test("GET /api/threads lists live threads with busy state and the run number", async () => {
+	const { url } = await startWith(asksAndWaits);
+	// An open question holds the thread: taken, never released.
+	await prompt(url, "held-thread", "/mode");
 	const summaries: unknown = await (await fetch(`${url}/api/threads`)).json();
 	expect(Array.isArray(summaries) && summaries.every((summary) => Check(ZenThreadSummary, summary))).toBe(true);
-	expect(summaries).toMatchObject([
-		{ threadId: "parked-thread", busy: true, parked: true, generation: 1, sessionFile: null },
-	]);
-});
-
-// ⚠ Before #109 a refused resume released the thread by id in the handler's `finally`,
-// so a thread read IDLE while its question was still parked — the state a resume then
-// answered was one the listing said did not exist.
-test("⚠ a refused resume leaves the thread busy AND parked — the question is still open", async () => {
-	const { url, built } = await startWith({
-		onPrompt: (emit, _outcome, message) => {
-			if (message === "/mode") emit(SELECT_DIALOG);
-		},
-	});
-	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("/mode")] });
-	const refused = await postRun(url, {
-		threadId: "t1",
-		runId: "r2",
-		parentRunId: "not-r1",
-		resume: [{ interruptId: "d1", status: "resolved", payload: { value: "a" } }],
-		messages: [],
-	});
-	expect(refused).toContain(EventType.RUN_ERROR);
-	const summaries: unknown = await (await fetch(`${url}/api/threads`)).json();
-	expect(summaries).toMatchObject([{ threadId: "t1", busy: true, parked: true }]);
-	expect(built[0]?.aborts).toBe(0);
-});
-
-test("⚠ a refused ANSWER re-parks the question on the new run: thread still busy and parked, then the corrected answer completes", async () => {
-	const { url, built } = await startWith({
-		onPrompt: (emit, _outcome, message) => {
-			if (message === "/mode") emit(SELECT_DIALOG);
-		},
-		onAnswer: (emit) => {
-			emit(SETTLED);
-		},
-	});
-	await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("/mode")] });
-	// A value the select never offered: refused server-side, question re-presented on r2.
-	const refused = await postRun(url, {
-		threadId: "t1",
-		runId: "r2",
-		parentRunId: "r1",
-		resume: [{ interruptId: "d1", status: "resolved", payload: { value: "zzz" } }],
-		messages: [],
-	});
-	expect(refused).toContain(EventType.TEXT_MESSAGE_CONTENT);
-	expect(refused.at(-1)).toBe(EventType.RUN_FINISHED);
-	expect(await (await fetch(`${url}/api/threads`)).json()).toMatchObject([
-		{ threadId: "t1", busy: true, parked: true },
-	]);
-
-	// The corrected answer names the RE-PARKED run, r2, and settles the thread.
-	const answered = await postRun(url, {
-		threadId: "t1",
-		runId: "r3",
-		parentRunId: "r2",
-		resume: [{ interruptId: "d1", status: "resolved", payload: { value: "a" } }],
-		messages: [],
-	});
-	expect(answered.at(-1)).toBe(EventType.RUN_FINISHED);
-	expect(await (await fetch(`${url}/api/threads`)).json()).toMatchObject([
-		{ threadId: "t1", busy: false, parked: false },
-	]);
-	expect(built).toHaveLength(1);
-	expect(built[0]?.aborts).toBe(0);
+	expect(summaries).toMatchObject([{ threadId: "held-thread", busy: true, generation: 1, sessionFile: null }]);
 });
 
 test("⚠ a bind conflict rejects `listening` instead of hanging, and reports the clash (#81 review)", async () => {
@@ -755,50 +481,4 @@ test("⚠ a bind conflict rejects `listening` instead of hanging, and reports th
 	openServers.push(second);
 	await expect(second.listening).rejects.toThrow();
 	expect(problems.some((problem) => typeof problem === "string" && problem.includes("already in use"))).toBe(true);
-});
-
-test("⚠ a client that drops mid-resume aborts the parked run's session exactly once and keeps it (#81 review)", async () => {
-	const { url, built } = await startWith({
-		onPrompt: (emit, _outcome, message) => {
-			if (message === "/mode") emit(SELECT_DIALOG);
-		},
-		onAnswer: (emit) => {
-			// One chunk so the client can observe the resume is live, then it never settles —
-			// the client walks away mid-resume.
-			emit(TEXT_DELTA);
-		},
-	});
-	// First run parks on a dialog; its own response has ended, so only the resume path's
-	// close hook (index.ts:234-238) can fire below.
-	const first = await postRun(url, { threadId: "t1", runId: "r1", messages: [userMessage("/mode")] });
-	expect(first.at(-1)).toBe(EventType.RUN_FINISHED);
-	expect(built[0]?.aborts).toBe(0);
-
-	// Resume, read one real chunk (proving the loop is running and the close hook is
-	// registered), then drop the connection before the run settles.
-	const controller = new AbortController();
-	const response = await fetch(`${url}/api/chat`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({
-			threadId: "t1",
-			runId: "r2",
-			parentRunId: "r1",
-			resume: [{ interruptId: "d1", status: "resolved", payload: { value: "a" } }],
-			messages: [],
-		}),
-		signal: controller.signal,
-	});
-	const reader = response.body?.getReader();
-	await reader?.read();
-	controller.abort();
-	// Poll the real server-side side effect (the fake session's abort count) rather than a
-	// fixed sleep: the response 'close' → stopParked → session.abort hop crosses the event
-	// loop over real HTTP, with no promise the handler exposes to await directly.
-	for (let attempt = 0; attempt < 50 && (built[0]?.aborts ?? 0) === 0; attempt += 1) {
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
-	expect(built).toHaveLength(1);
-	expect(built[0]?.aborts).toBe(1);
-	expect(built[0]?.disposed).toBe(0);
 });

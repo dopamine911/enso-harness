@@ -19,12 +19,9 @@ export {
 	zenConfigPath,
 } from "./config.ts";
 export {
-	isZenDialogResumeEntry,
 	isZenDialogSpec,
 	validateDialogAnswer,
-	ZEN_DIALOG_KEY,
 	ZenDialogAnswer,
-	ZenDialogResumeEntry,
 	ZenDialogSpec,
 } from "./dialog.ts";
 export {
@@ -50,6 +47,7 @@ export {
 	ZenMessageStart,
 	ZenNotifyType,
 	ZenObservation,
+	ZenPromptRejected,
 	ZenQueue,
 	ZenRunEnded,
 	ZenSettled,

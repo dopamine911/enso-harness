@@ -1,8 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join, resolve } from "node:path";
-import { EventType } from "@ag-ui/core";
-import type { StreamChunk } from "@tanstack/ai";
 import {
 	isZenThreadId,
 	PICC_DEFAULT_PERMISSION_MODE,
@@ -16,9 +14,7 @@ import {
 	type ZenThreadSummary,
 } from "@zen/core";
 import { type AgentHost, createAgentHost } from "../host/agent-host.ts";
-import { describeStreamChunk, type EventTail } from "../host/event-tail.ts";
 import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
-import { createDialogRegistry } from "./dialog-registry.ts";
 import {
 	answerThreadDialog,
 	type FollowRouteDeps,
@@ -28,9 +24,8 @@ import {
 	readDialogBody,
 	readPromptBody,
 } from "./follow.ts";
-import { type ChatRunOutcome, resumeChat, runChat } from "./session.ts";
-import { SSE_HEADERS, SSE_KEEPALIVE_MS, startSseKeepalive } from "./sse.ts";
-import { createThreadSessions, type ThreadLease, type ThreadView } from "./thread-sessions.ts";
+import { SSE_KEEPALIVE_MS } from "./sse.ts";
+import { createThreadSessions, type ThreadView } from "./thread-sessions.ts";
 
 /** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
 const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/;
@@ -38,13 +33,14 @@ const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/;
 const THREAD_EVENTS_ROUTE = /^\/api\/threads\/([^/?#]+)\/events$/;
 /** `GET /api/threads/<threadId>/history` — the branch as messages, live or stored (#95). */
 const THREAD_HISTORY_ROUTE = /^\/api\/threads\/([^/?#]+)\/history$/;
-/** SPIKE #109 — the prompt/follow split's three routes. See `follow.ts`. */
+/** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`. See `follow.ts`. */
 const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/;
 const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/;
 const THREAD_DIALOG_ROUTE = /^\/api\/threads\/([^/?#]+)\/dialog$/;
 
 /**
- * The dev backend: one SSE endpoint TanStack AI's `fetchServerSentEvents` can talk to (#24).
+ * The dev backend: the thread routes the browser's `FollowConnection` talks to (#112), and
+ * the inspection routes beside them.
  *
  * ⚠ DEV ONLY, AND THE REASON IS NOT POLISH.
  * There is no sandbox (#24), `bash` is unconfined (#9), and `cwd` is the tree pi reads and
@@ -54,25 +50,8 @@ const THREAD_DIALOG_ROUTE = /^\/api\/threads\/([^/?#]+)\/dialog$/;
  * should not happen by default, and doing it before #9 closes would mean a page could point
  * an unconfined agent at any path on the machine.
  */
-
 const DEFAULT_PORT = 5179;
 const LOOPBACK_ONLY = "127.0.0.1";
-
-/**
- * AG-UI's `RunAgentInput`, reduced to the fields this endpoint uses.
- *
- * `resume` + `parentRunId` mark a RESUME request — the browser answering a dialog that
- * interrupted an earlier run (#27). TanStack puts both in the POST body
- * (`connection-adapters.js:573-574`); their presence is what routes the request to the
- * parked session instead of a fresh one.
- */
-interface RunAgentInputBody {
-	threadId?: string;
-	runId?: string;
-	parentRunId?: string;
-	resume?: unknown;
-	messages?: Array<{ role?: string; content?: unknown }>;
-}
 
 function readBody(request: IncomingMessage): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -84,44 +63,6 @@ function readBody(request: IncomingMessage): Promise<string> {
 		request.on("end", () => resolve(body));
 		request.on("error", reject);
 	});
-}
-
-/**
- * The run body, parsed and shape-checked. Throws ONLY `Error`s, each carrying the message
- * the 400 is written with — the handler forwards it without branching.
- *
- * ⚠ The thread id reaches the filesystem (pi names the session file after it, #95), so a
- * body that supplies one that is not thread-id shaped is refused here, before any session
- * is built. Absent is fine — a client that omits it gets a fresh id. Lives outside
- * `handleChat` because that function sits at its complexity pin (biome.jsonc, #82).
- */
-async function readRunBody(request: IncomingMessage): Promise<RunAgentInputBody> {
-	let body: RunAgentInputBody;
-	try {
-		body = JSON.parse(await readBody(request)) as RunAgentInputBody;
-	} catch (error) {
-		throw new Error(`malformed RunAgentInput body: ${String(error)}`);
-	}
-	if (body.threadId !== undefined && !isZenThreadId(body.threadId)) throw new Error("malformed thread id");
-	return body;
-}
-
-/** Last user message, flattened to text. Images are a later step — see the README. */
-function latestUserPrompt(body: RunAgentInputBody): string {
-	const messages = body.messages ?? [];
-	for (let index = messages.length - 1; index >= 0; index -= 1) {
-		const message = messages[index];
-		if (message?.role !== "user") continue;
-		if (typeof message.content === "string") return message.content;
-		if (Array.isArray(message.content)) {
-			return message.content
-				.map((part) =>
-					typeof part === "object" && part !== null && "text" in part ? String((part as { text: unknown }).text) : "",
-				)
-				.join("");
-		}
-	}
-	return "";
 }
 
 /**
@@ -145,18 +86,6 @@ function decodeThreadId(rawSegment: string, response: ServerResponse): string | 
 	response.writeHead(400, { "Content-Type": "text/plain" });
 	response.end("malformed thread id");
 	return undefined;
-}
-
-function writeSseEvent(response: ServerResponse, chunk: StreamChunk, sent: EventTail | undefined): void {
-	// The sent tail (#97) records here, at the one place every chunk crosses to the browser,
-	// so the record and the wire cannot disagree. `undefined` only when the thread is not
-	// live any more by the time a chunk is written — nothing to record it against.
-	if (sent !== undefined) {
-		const described = describeStreamChunk(chunk);
-		sent.record(described.type, described.name, "sent");
-	}
-	// One `data:` line per event, blank line terminated — the SSE framing the adapter reads.
-	response.write(`data: ${JSON.stringify(chunk)}\n\n`);
 }
 
 export interface ZenServerOptions {
@@ -266,10 +195,6 @@ export function startZenServer(options: ZenServerOptions) {
 		onProblem: options.onProblem,
 	});
 
-	// Parked pi sessions awaiting a human's answer to a dialog (#27). Owned by the server,
-	// shared by every request; evicted whole on close.
-	const registry = createDialogRegistry({ onProblem: options.onProblem });
-
 	// The permission mode a FRESH thread starts in (#84). The browser asks once on mount,
 	// before any run exists, so the header can read `default` instead of `unknown` from the
 	// first paint. Honest by construction: every page load is a new thread, the host creates
@@ -295,7 +220,6 @@ export function startZenServer(options: ZenServerOptions) {
 			sessionFile: inspection.sessionFile,
 			mode: thread.hosted.session.permissionModeState().mode,
 			busy: thread.busy,
-			parked: registry.peek(thread.threadId) !== undefined,
 			generation: thread.generation,
 			lastActivityAt: new Date(thread.lastActivityAt).toISOString(),
 		};
@@ -413,7 +337,6 @@ export function startZenServer(options: ZenServerOptions) {
 			permissionMode: thread.hosted.session.permissionModeState(),
 			commands: [...inspection.commands],
 			busy: thread.busy,
-			parked: registry.peek(threadId) !== undefined,
 			generation: thread.generation,
 			lastActivityAt: new Date(thread.lastActivityAt).toISOString(),
 			entries: [...inspection.entries],
@@ -422,10 +345,10 @@ export function startZenServer(options: ZenServerOptions) {
 		response.end(JSON.stringify(payload));
 	}
 
-	// ── SPIKE #109: prompt / follow / dialog, beside the run path ─────────────────────
+	// ── The wire (#112): prompt / follow / dialog ────────────────────────────────────
 	const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs, onProblem: options.onProblem };
 
-	/** The spike's routes; true when the request was one of them. A bad body is a 400 here, never a throw. */
+	/** The thread routes; true when the request was one of them. A bad body is a 400 here, never a throw. */
 	function dispatchFollowRoutes(request: IncomingMessage, response: ServerResponse): boolean {
 		const url = request.url ?? "";
 		const followMatch = request.method === "GET" ? THREAD_FOLLOW_ROUTE.exec(url) : null;
@@ -525,172 +448,12 @@ export function startZenServer(options: ZenServerOptions) {
 			}
 		}
 		if (dispatchFollowRoutes(request, response)) return;
-		void handleChat(request, response);
-	});
-
-	async function handleChat(request: IncomingMessage, response: ServerResponse): Promise<void> {
-		if (request.method === "POST" && request.url?.startsWith("/api/chat")) {
-			let body: RunAgentInputBody = {};
-			try {
-				body = await readRunBody(request);
-			} catch (error) {
-				options.onProblem?.(error);
-				response.writeHead(400, { "Content-Type": "text/plain" });
-				// `readRunBody` throws only `Error`s with the message the 400 carries.
-				response.end((error as Error).message);
-				return;
-			}
-
-			const ids = {
-				threadId: body.threadId ?? crypto.randomUUID(),
-				runId: body.runId ?? crypto.randomUUID(),
-				messageId: crypto.randomUUID(),
-			};
-
-			// ⚠ Read by BOTH paths after their stream completes: `parkedAwaitingAnswer` means
-			// the run handed its process to the registry mid-stream, so the teardown that
-			// normally follows a response must not run — a human's answer is coming back for
-			// that process on a later request.
-			const outcome: ChatRunOutcome = { parkedAwaitingAnswer: false, resumedRun: false };
-			// ⚠ Set in each path's `finally` BEFORE `response.end()`. The response 'close' event
-			// fires on normal completion too, and since #69 PR 2 "stop" is a real `abort()` on
-			// the thread's long-lived session (the subprocess era's stop was an idempotent
-			// dispose). Aborting an idle session after every settled run would set
-			// `abortInFlight` and make the very next prompt wait on it — so 'close' stops pi
-			// only when the stream did NOT end on its own, i.e. the client went away.
-			let streamEnded = false;
-
-			// ── The resume path: an answer to a parked dialog. No new session — the one this
-			// request addresses has been alive since the run it interrupted (#27). The parked
-			// run's LEASE is what this request acts through: its stop if the client drops, its
-			// release once the question is spent (#109).
-			if (Array.isArray(body.resume) && body.resume.length > 0) {
-				// Captured BEFORE resumeChat can take the entry.
-				const parked = registry.peek(ids.threadId);
-				/**
-				 * The parked run is THIS request's to stop or release only if it took the
-				 * continuation and did not re-park it. Never decided by asking the registry: a
-				 * concurrent loser would read the winner's take as "nothing parked" and act on
-				 * the lease the winner runs through (#110 review).
-				 */
-				const ownsRun = (): boolean => outcome.resumedRun && !outcome.parkedAwaitingAnswer;
-				response.writeHead(200, SSE_HEADERS);
-				const stopKeepalive = startSseKeepalive(response, sseKeepaliveMs, options.onProblem);
-				// ⚠ `response`, NOT `request` (#34). Under bun's node:http compat the REQUEST
-				// 'close' event fires when the request BODY has been consumed — the start of
-				// every run, before this listener is registered — so a request-close hook is
-				// INERT and a mid-run disconnect never tore pi down. The RESPONSE 'close' is
-				// what fires on a client abort; on normal end `streamEnded` keeps it inert.
-				response.on("close", () => {
-					if (!streamEnded && ownsRun()) parked?.lease.stop();
-				});
-				try {
-					for await (const chunk of resumeChat({
-						registry,
-						ids,
-						parentRunId: body.parentRunId,
-						resume: body.resume,
-						outcome,
-						onProblem: options.onProblem,
-					})) {
-						writeSseEvent(response, chunk, threads.peek(ids.threadId)?.sent);
-					}
-				} catch (error) {
-					options.onProblem?.(error);
-					writeSseEvent(
-						response,
-						{
-							type: EventType.RUN_ERROR,
-							runId: ids.runId,
-							message: error instanceof Error ? error.message : String(error),
-						},
-						threads.peek(ids.threadId)?.sent,
-					);
-				} finally {
-					streamEnded = true;
-					stopKeepalive();
-					if (ownsRun()) parked?.lease.release();
-					response.end();
-				}
-				return;
-			}
-
-			// ⚠ One pi session per chat THREAD (#69 PR 2, closes #43): acquired here, RELEASED
-			// (not disposed) in `finally` so the idle clock starts — UNLESS a dialog parked
-			// the run (#27), in which case the registry holds it until the answer or the TTL
-			// and the resume path releases. Disposal happens only after the idle window or at
-			// shutdown (`thread-sessions.ts`). Acquired BEFORE the SSE head goes out, so a
-			// session that cannot be built is a plain HTTP failure and not a half-open stream.
-			let lease: ThreadLease;
-			try {
-				lease = await threads.acquire(ids.threadId);
-			} catch (error) {
-				options.onProblem?.(error);
-				response.writeHead(500, { "Content-Type": "text/plain" });
-				response.end(`pi session could not be created: ${error instanceof Error ? error.message : String(error)}`);
-				return;
-			}
-			response.writeHead(200, SSE_HEADERS);
-			const stopKeepalive = startSseKeepalive(response, sseKeepaliveMs, options.onProblem);
-
-			// A client that navigates away must not leave pi running — but a PARKED session
-			// belongs to the registry, and this close event also fires on normal completion,
-			// AFTER a park. Stopping here would abort the run whose answer is pending.
-			// ⚠ `response`, NOT `request` (#34). Under bun's node:http compat the REQUEST
-			// 'close' event fires when the request BODY has been consumed — the start of
-			// every run, before this listener is registered — so the request-close hook this
-			// used to be was INERT and a mid-run disconnect never tore pi down (found by the
-			// disconnect receipt lingering exactly until the no-progress guard's `finally`).
-			// The RESPONSE 'close' fires on a client abort; on normal end `streamEnded` is
-			// already set by `finally` and this stays inert — see its declaration for why a
-			// stop here is no longer free.
-			response.on("close", () => {
-				if (streamEnded) return;
-				if (outcome.parkedAwaitingAnswer) return;
-				lease.stop();
-			});
-
-			try {
-				for await (const chunk of runChat({
-					lease,
-					ids,
-					prompt: latestUserPrompt(body),
-					registry,
-					outcome,
-					onProblem: options.onProblem,
-				})) {
-					writeSseEvent(response, chunk, threads.peek(ids.threadId)?.sent);
-				}
-			} catch (error) {
-				options.onProblem?.(error);
-				// The stream is already open, so an error has to travel as an event — a
-				// mid-stream HTTP status is not available and a silent close reads as success.
-				writeSseEvent(
-					response,
-					{
-						type: EventType.RUN_ERROR,
-						runId: ids.runId,
-						message: error instanceof Error ? error.message : String(error),
-					},
-					threads.peek(ids.threadId)?.sent,
-				);
-			} finally {
-				streamEnded = true;
-				stopKeepalive();
-				if (!outcome.parkedAwaitingAnswer) lease.release();
-				response.end();
-			}
-			return;
-		}
-
 		response.writeHead(404, { "Content-Type": "text/plain" });
 		response.end("not found");
-	}
+	});
 
-	// Parked sessions must not outlive the server that parked them — evicted first, so their
-	// declines reach a live session; then every thread's session is disposed.
+	// Every thread's session is disposed with the server.
 	server.on("close", () => {
-		registry.shutdown();
 		threads.shutdown();
 	});
 

@@ -1,6 +1,7 @@
 import type { UIMessage } from "@tanstack/ai-client";
-import type { ZenInterruptedTail, ZenThreadHistory } from "@zen/core";
+import type { ZenDialogSpec, ZenInterruptedTail, ZenThreadHistory } from "@zen/core";
 import { createRecentChunksStore, type RecentChunksStore } from "./custom-event-router.ts";
+import { createFollowConnection, type FollowConnection } from "./follow-connection.ts";
 import { createModeLines, type ModeLines } from "./mode-lines.ts";
 import { createNotificationsStore, type NotificationsStore } from "./notifications.tsx";
 import { createPermissionModeStore, type PermissionModeStore } from "./permission-mode.tsx";
@@ -42,6 +43,19 @@ export interface ThreadStores {
 	 * make — another tab, or a rebuild after the idle window.
 	 */
 	readonly generation: WritableStore<number | undefined>;
+	/**
+	 * The question pi is blocked on, from the `zen.dialog` chunk (#112); undefined when
+	 * none is open. pi asks one at a time, so one slot. Cleared by the answer this page
+	 * sends, or by the server refusing it because another tab already answered.
+	 */
+	readonly dialog: WritableStore<ZenPendingDialog | undefined>;
+	/** The thread's transport: TanStack's connection over prompt/follow, and the dialog answer beside it. */
+	readonly connection: FollowConnection;
+}
+
+export interface ZenPendingDialog {
+	readonly id: string;
+	readonly dialog: ZenDialogSpec;
 }
 
 function createThreadStores(threadId: string, history: readonly UIMessage[]): ThreadStores {
@@ -55,6 +69,11 @@ function createThreadStores(threadId: string, history: readonly UIMessage[]): Th
 		modeLines: createModeLines(notifications),
 		recentChunks: createRecentChunksStore(),
 		generation: createStore<number | undefined>(undefined),
+		dialog: createStore<ZenPendingDialog | undefined>(undefined),
+		connection: createFollowConnection({
+			threadId,
+			onProblem: (problem) => notifications.push(String(problem), "warning", "run"),
+		}),
 	};
 }
 

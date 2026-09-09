@@ -11,16 +11,15 @@ import {
 	type PiRpcEvent,
 	type PiSession,
 	type ZenDialogSpec,
-	ZenFollowFrame,
 } from "@zen/core";
-import { Check } from "typebox/value";
 import type { AgentHost, HostedSession } from "../../host/agent-host.ts";
 import { startZenServer } from "../index.ts";
+import { type OpenFollow, openFollow as openSharedFollow } from "./follow-reader.ts";
 
 /**
- * SPIKE #109 — THE RECEIPT. Each test is one measurement of what deepseek-harness's
- * prompt/follow split changes for this server, over the same fake host
- * `server-handler.test.ts` drives the run path with. Read the test names as the findings.
+ * The wire, measured (#109's receipt, kept as the contract — #112). Each test is one
+ * property of the prompt/follow split over a scripted host. Read the test names as the
+ * findings.
  *
  * The fake's `emit` is exposed to the test, so every scenario advances by emitting the pi
  * event that would arrive and awaiting the frame it produces — never a guessed delay.
@@ -128,71 +127,10 @@ async function startWith(fake: FakeHost, sseKeepaliveMs = 1000) {
 	return await started.listening;
 }
 
-/** A follow as the test reads it: frames and keepalive comments as they arrive, awaited by count. */
-interface OpenFollow {
-	readonly frames: ZenFollowFrame[];
-	readonly comments: () => number;
-	/** Resolves once at least `count` frames have arrived. */
-	readonly untilFrames: (count: number) => Promise<void>;
-	/** Resolves once at least `count` keepalive comments have arrived. */
-	readonly untilComments: (count: number) => Promise<void>;
-	readonly close: () => void;
-}
-
 async function openFollow(url: string, threadId: string): Promise<OpenFollow> {
 	const controller = new AbortController();
 	openFollows.push(controller);
-	const response = await fetch(`${url}/api/threads/${threadId}/follow`, { signal: controller.signal });
-	expect(response.status).toBe(200);
-	const frames: ZenFollowFrame[] = [];
-	let comments = 0;
-	const waiters: Array<() => void> = [];
-	const wake = (): void => {
-		for (const waiter of waiters.splice(0)) waiter();
-	};
-	const reader = response.body?.getReader();
-	if (reader === undefined) throw new Error("no body");
-	void (async () => {
-		const decoder = new TextDecoder();
-		let buffered = "";
-		try {
-			while (true) {
-				const { value, done } = await reader.read();
-				if (done) break;
-				buffered += decoder.decode(value, { stream: true });
-				const lines = buffered.split("\n");
-				buffered = lines.pop() ?? "";
-				for (const line of lines) {
-					if (line.startsWith("data: ")) {
-						const frame: unknown = JSON.parse(line.slice("data: ".length));
-						// The wire contract, checked on every frame — a shape the browser could not read is a failure here.
-						if (!Check(ZenFollowFrame, frame)) throw new Error(`frame off the wire fails ZenFollowFrame: ${line}`);
-						frames.push(frame);
-					} else if (line.startsWith(":")) comments += 1;
-				}
-				wake();
-			}
-		} catch {
-			// the test closed the follow
-		}
-	})();
-	const until = (ready: () => boolean): Promise<void> => {
-		if (ready()) return Promise.resolve();
-		const { promise, resolve } = Promise.withResolvers<void>();
-		const check = (): void => {
-			if (ready()) resolve();
-			else waiters.push(check);
-		};
-		waiters.push(check);
-		return promise;
-	};
-	return {
-		frames,
-		comments: () => comments,
-		untilFrames: (count) => until(() => frames.length >= count),
-		untilComments: (count) => until(() => comments >= count),
-		close: () => controller.abort(),
-	};
+	return await openSharedFollow(url, threadId, controller);
 }
 
 async function prompt(url: string, threadId: string, message: string) {
@@ -275,8 +213,8 @@ test("⚠ a blocking dialog is an observation on the follow and a unary answer b
 		type: "observation",
 		observation: { kind: "extension-ui-request", id: "d1", blocking: true, dialog: expect.anything() },
 	});
-	// The thread is busy and NOT parked: the registry never heard of this question.
-	expect(await threadSummary(url, "t1")).toMatchObject({ busy: true, parked: false });
+	// The thread is busy; nothing anywhere holds the question but pi itself.
+	expect(await threadSummary(url, "t1")).toMatchObject({ busy: true });
 
 	// An unoffered value is refused at the door (#112) — the seam the old resume path
 	// closed with the same check; the question stays open, nothing reaches pi.

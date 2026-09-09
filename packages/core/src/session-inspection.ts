@@ -32,10 +32,8 @@ export const ZenThreadSummary = Type.Object(
 		sessionFile: Type.Union([Type.String(), Type.Null()]),
 		/** picc's current mode, computed the way picc restores it. */
 		mode: Type.String(),
-		/** A run has acquired the session and not released it (in flight, or parked on a dialog). */
+		/** A run has taken the session and not released it — in flight, or blocked on a question. */
 		busy: Type.Boolean(),
-		/** A dialog is parked on this thread awaiting a human's answer. */
-		parked: Type.Boolean(),
 		/**
 		 * How many runs have taken this thread since the server started (#109) — the fence a
 		 * late run handle is checked against on the server, and the number a run's `zen.run`
@@ -62,7 +60,6 @@ export const ZenThreadInspection = Type.Object(
 		/** Slash commands this session registers — extensions, prompt templates, skills. */
 		commands: Type.Array(Type.String()),
 		busy: Type.Boolean(),
-		parked: Type.Boolean(),
 		/** See {@link ZenThreadSummary}. */
 		generation: Type.Integer({ minimum: 0 }),
 		lastActivityAt: Type.String(),

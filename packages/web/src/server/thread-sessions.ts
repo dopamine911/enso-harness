@@ -89,6 +89,12 @@ export interface ThreadSessions {
 	 */
 	observe(threadId: string, listener: ThreadFeedListener): ThreadFollow;
 	/**
+	 * Put a SERVER-synthesised observation on the thread's feed, in sequence with pi's —
+	 * a prompt pi refused after its receipt went out (`prompt-rejected`). No feed (nobody
+	 * following): nothing to tell, and the problem channel already has it.
+	 */
+	announce(threadId: string, observation: ZenObservation): void;
+	/**
 	 * The thread's hosted session IF it is live — never creates one (#86). Looking must
 	 * not be the thing that spins pi up; `acquire` is for runs.
 	 */
@@ -237,9 +243,13 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 		const feed = feeds.get(threadId);
 		if (feed === undefined || feed.detach !== undefined) return;
 		feed.detach = thread.hosted.session.subscribe((event, delivery) => {
-			feed.seq += 1;
-			publish(feed, { kind: "observation", seq: feed.seq, observation: mapPiEvent(event, delivery) });
+			publishObservation(feed, mapPiEvent(event, delivery));
 		});
+	}
+
+	function publishObservation(feed: ThreadFeed, observation: ZenObservation): void {
+		feed.seq += 1;
+		publish(feed, { kind: "observation", seq: feed.seq, observation });
 	}
 
 	function detachFeed(threadId: string): void {
@@ -363,6 +373,10 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 			thread.lastActivityAt = Date.now();
 			publishStatus(threadId, thread);
 			return leaseOf(threadId, thread);
+		},
+		announce(threadId: string, observation: ZenObservation): void {
+			const feed = feeds.get(threadId);
+			if (feed !== undefined) publishObservation(feed, observation);
 		},
 		observe(threadId: string, listener: ThreadFeedListener): ThreadFollow {
 			let feed = feeds.get(threadId);

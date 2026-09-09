@@ -49,7 +49,6 @@ function inspection(overrides: Partial<ZenThreadInspection> = {}): ZenThreadInsp
 		permissionMode: { mode: "plan", available: ["default", "plan"] },
 		commands: ["mode", "plan"],
 		busy: false,
-		parked: false,
 		generation: 1,
 		lastActivityAt: "2026-09-08T10:00:05.000Z",
 		entries: [

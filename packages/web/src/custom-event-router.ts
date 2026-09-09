@@ -1,6 +1,7 @@
-import { ZenNotifyType, ZenUiRequestOrigin } from "@zen/core";
+import { isZenDialogSpec, ZenNotifyType, ZenUiRequestOrigin } from "@zen/core";
 import { Check } from "typebox/value";
 import {
+	ZEN_CUSTOM_EVENT_DIALOG,
 	ZEN_CUSTOM_EVENT_ENTRY,
 	ZEN_CUSTOM_EVENT_MODE,
 	ZEN_CUSTOM_EVENT_NOTIFY,
@@ -48,6 +49,19 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
 	if (eventType === ZEN_CUSTOM_EVENT_RUN) {
 		const generation = readGeneration(data);
 		if (generation !== undefined) stores.generation.set(generation);
+		return;
+	}
+	if (eventType === ZEN_CUSTOM_EVENT_DIALOG) {
+		// One open question per thread (#112). A malformed value opens nothing — and says
+		// so, because a question that vanished silently is the #4 failure shape.
+		if (typeof data === "object" && data !== null && "id" in data && "dialog" in data) {
+			const { id, dialog } = data;
+			if (typeof id === "string" && id.length > 0 && isZenDialogSpec(dialog)) {
+				stores.dialog.set({ id, dialog });
+				return;
+			}
+		}
+		stores.notifications.push("pi asked a question this page could not read; it was left unanswered", "error", "run");
 		return;
 	}
 	if (eventType === ZEN_CUSTOM_EVENT_USAGE) {

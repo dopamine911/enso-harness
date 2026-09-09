@@ -1,14 +1,6 @@
-import type { GenericAGUIInterrupt } from "@tanstack/ai-client";
 import { automaticPartsForMessage, type ChatUISelectedPart, selectChatUI } from "@tanstack/ai-client/ui";
-import { fetchServerSentEvents } from "@tanstack/ai-react";
-import {
-	createChatHook,
-	createChatHookContexts,
-	type InterruptProps,
-	type LayoutProps,
-	type MessageProps,
-} from "@tanstack/ai-react/ui";
-import { isZenDialogSpec, ZEN_DIALOG_KEY, type ZenDialogSpec } from "@zen/core";
+import { createChatHook, createChatHookContexts, type LayoutProps, type MessageProps } from "@tanstack/ai-react/ui";
+import type { PiDialogResponse, ZenDialogSpec } from "@zen/core";
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
@@ -126,9 +118,12 @@ const useChatContext = chatContexts.useChatContext;
  *     chunk lands in the right thread's cost is a callback that belongs to exactly one
  *     thread: this closure over its stores.
  *   • Changing `threadId` on a single `useChat` disposes the old client — `stop()` then
- *     `dispose()`, verified in `use-chat.js` — and a mid-run disconnect is how the server
- *     learns the client LEFT, so it aborts pi (#34). Switching threads must therefore keep
- *     every pane mounted and change only what is visible.
+ *     `dispose()`, verified in `use-chat.js` — and the follow it holds open. Switching
+ *     threads must therefore keep every pane mounted and change only what is visible.
+ *
+ * `connection` is the thread's `FollowConnection` (#112): TanStack's `SubscribeConnectionAdapter`
+ * over prompt/follow. `live: true` opens the follow at mount rather than on the first send,
+ * so a run another tab started on this thread renders here without prompting first.
  *
  * `?fixture` swaps the live server connection for the scripted conversation in
  * `fixture-conversation.ts` — the styling dev loop (#31). Everything downstream of the
@@ -139,7 +134,8 @@ function threadChatOptions(stores: ThreadStores) {
 		threadId: stores.threadId,
 		// A resumed thread mounts with its stored branch (#95); a minted one with nothing.
 		initialMessages: [...stores.history],
-		connection: isFixtureMode ? createFixtureChat().transport() : fetchServerSentEvents("/api/chat"),
+		connection: isFixtureMode ? createFixtureChat().transport() : stores.connection,
+		live: !isFixtureMode,
 		/**
 		 * TanStack's designated path for AG-UI CUSTOM chunks (#29) — verified against the
 		 * stream processor: every CUSTOM chunk fires this with `(chunk.name, chunk.value)`.
@@ -264,35 +260,24 @@ function PermissionModeControl(): React.ReactNode {
 }
 
 /*
- * ⓘ `UnhandledInterrupt`, `DialogAnswerControls` and `ZenDialogInterrupt` are exported for
- * `__tests__/chat-screen.test.tsx` (#49): static renders of each dialog method and the
- * unreadable-metadata fallback. Nothing outside this file and that test imports them.
+ * ⓘ `DialogAnswerControls`, `ZenDialogCard` and `PendingDialog` are exported for
+ * `__tests__/chat-screen.test.tsx` (#49): static renders of each dialog method. Nothing
+ * outside this file and that test imports them.
  */
-
-/** The visible catch-all for an interrupt this page has no renderer for — see the note on
- * `interruptsComponents.generic.fallback` below for why it must render rather than vanish. */
-export function UnhandledInterrupt({ interrupt }: { interrupt: unknown }): React.ReactNode {
-	return (
-		<pre className="my-2 overflow-x-auto rounded-md border bg-muted/50 p-3 text-muted-foreground text-xs">
-			interrupt (unhandled): {JSON.stringify(interrupt)}
-		</pre>
-	);
-}
 
 /**
- * pi asked a question; this is where a human answers it (#27).
+ * pi's blocking dialogs — `select`, `confirm`, `input`, `editor` — answered from the page (#27, #112).
  *
- * The question travels as a generic AG-UI interrupt whose `metadata["zen:dialog"]` is the
- * `ZenDialogSpec` — validated here with the same schema the server used to build it, so a
- * malformed one degrades to the visible debug block instead of a broken form.
+ * The question arrives on the follow as a `zen.dialog` chunk (the `ZenDialogSpec` the
+ * server built, validated again by the router before it reaches the store), and the answer
+ * is one `POST /api/threads/:id/dialog`. No interrupt: the run keeps going on the follow
+ * while the human decides, and nothing on the server is parked.
  *
- * ⚠ The payloads handed to `resolveInterrupt` are EXACTLY pi's wire shapes minus the
- * envelope (`{value}` / `{confirmed}`) — the server validates them against the dialog spec
+ * ⚠ The payloads handed to `answer` are EXACTLY pi's wire shapes minus the envelope
+ * (`{value}` / `{confirmed}`) — the server validates them against the question
  * (`validateDialogAnswer`) and forwards them verbatim, so inventing a richer shape here
- * would be refused there. Cancel goes through `interrupt.cancel()`, which the client sends
- * as `status:"cancelled"` and the server writes as pi's `{cancelled:true}`.
+ * would be refused there. Cancel is pi's `{cancelled: true}`.
  */
-
 /**
  * The per-method answer controls, one early return per dialog method — extracted from a
  * ternary chain so each shape reads on its own. `input` and `editor` share the form; the
@@ -361,21 +346,15 @@ export function DialogAnswerControls({
 	);
 }
 
-export function ZenDialogInterrupt({ interrupt }: { interrupt: GenericAGUIInterrupt }): React.ReactNode {
-	const dialogCandidate: unknown = interrupt.metadata?.[ZEN_DIALOG_KEY];
-	const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate) ? dialogCandidate : undefined;
-	const canAnswer = interrupt.canResolve === true;
-
-	if (dialog === undefined || !canAnswer) {
-		// Not a pi dialog (or not resolvable): render it VISIBLY rather than dropping it —
-		// a silently skipped interrupt is indistinguishable from one that was never sent.
-		return <UnhandledInterrupt interrupt={interrupt} />;
-	}
-
-	const answer = (payload: { value: string } | { confirmed: boolean }): void => {
-		interrupt.resolveInterrupt(payload);
-	};
-
+export function ZenDialogCard({
+	dialog,
+	answer,
+	cancel,
+}: {
+	dialog: ZenDialogSpec;
+	answer: (payload: { value: string } | { confirmed: boolean }) => void;
+	cancel: () => void;
+}): React.ReactNode {
 	return (
 		<Card className="my-4">
 			<CardHeader>
@@ -386,11 +365,44 @@ export function ZenDialogInterrupt({ interrupt }: { interrupt: GenericAGUIInterr
 				<DialogAnswerControls dialog={dialog} answer={answer} />
 			</CardContent>
 			<CardFooter>
-				<Button type="button" variant="ghost" size="sm" onClick={() => interrupt.cancel()}>
+				<Button type="button" variant="ghost" size="sm" onClick={cancel}>
 					Cancel — decline the question
 				</Button>
 			</CardFooter>
 		</Card>
+	);
+}
+
+/**
+ * Answer the thread's open question through its connection. The slot clears once the
+ * question is SPENT — taken by the server (`answered`), or already settled from another
+ * tab or expired (`gone`). A `refused` answer (an unoffered value, 422) leaves the question
+ * open on the server, so it stays on screen with the reason as a notice: nothing would
+ * re-show it otherwise, and the thread would sit busy behind a card that vanished (PR #113
+ * review). ⓘ Exported for `__tests__/chat-screen.test.tsx`.
+ */
+export async function settleDialog(
+	stores: Pick<ThreadStores, "connection" | "dialog">,
+	response: PiDialogResponse,
+): Promise<void> {
+	const outcome = await stores.connection.answerDialog(response);
+	if (outcome !== "refused") stores.dialog.set(undefined);
+}
+
+/** The thread's open question, if any — see {@link settleDialog}. */
+export function PendingDialog(): React.ReactNode {
+	const stores = useThreadStores();
+	const pending = useStore(stores.dialog);
+	if (pending === undefined) return null;
+	const settle = (response: PiDialogResponse): void => {
+		void settleDialog(stores, response);
+	};
+	return (
+		<ZenDialogCard
+			dialog={pending.dialog}
+			answer={(payload) => settle({ id: pending.id, ...payload })}
+			cancel={() => settle({ id: pending.id, cancelled: true })}
+		/>
 	);
 }
 
@@ -488,7 +500,7 @@ const chatComponents = {
 		 * Errors are not a message part, so no `partsComponents` entry catches them. They
 		 * live on the chat instance and have to be rendered deliberately.
 		 */
-		layout: function ChatLayout({ Messages, Interrupts, Queue, Input }: LayoutProps<ThreadChatOptions>) {
+		layout: function ChatLayout({ Messages, Queue, Input }: LayoutProps<ThreadChatOptions>) {
 			const chat = useChatContext();
 			const debugOpen = useContext(DebugOpenContext);
 			return (
@@ -506,13 +518,13 @@ const chatComponents = {
 									) : (
 										<Messages />
 									)}
-									{/* pi's notify lines (#29) — the transcript tail, above the interrupts,
+									{/* pi's notify lines (#29) — the transcript tail, above the question,
 									    so "Mode set to X" reads next to the run it belongs to. */}
 									<SessionNotifications />
-									{/* ⚠ Mounted before anything emits one, deliberately. This is where #4's
+									{/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
 									    `ask` verdict reaches the browser, and an unmounted slot is precisely
 									    why an approval would silently never appear. */}
-									<Interrupts />
+									<PendingDialog />
 									<Queue />
 									<RunProblem />
 								</ConversationContent>
@@ -579,25 +591,8 @@ const chatComponents = {
 	// written here is dead code that LOOKS live — which is precisely the state this
 	// arrangement replaced (`partsComponents.toolCall` sat here for weeks, unreachable).
 	partsComponents: {},
-	interruptsComponents: {
-		// ⚠ Application-owned, because `ToolApproval` is deprecated too. A generic `fallback`
-		// rather than named ids: the server stamps every pi dialog as a plain generic
-		// interrupt (no `defineInterrupt` registration), so the fallback IS the dialog
-		// renderer — and anything that is not a pi dialog still renders visibly below
-		// rather than vanishing.
-		generic: {
-			// ⚠ Narrowed HERE, on the discriminant, because the slot's union also carries
-			// tool-approval interrupts whose `resolveInterrupt` takes (approved, options) —
-			// a different call shape. Only `kind:"generic"` has the payload-taking resolver
-			// the pi-dialog answers use.
-			fallback: ({ interrupt }: InterruptProps<ThreadChatOptions>) =>
-				interrupt.kind === "generic" ? (
-					<ZenDialogInterrupt interrupt={interrupt} />
-				) : (
-					<UnhandledInterrupt interrupt={interrupt} />
-				),
-		},
-	},
+	// No `interruptsComponents`: pi's questions are not AG-UI interrupts on this surface
+	// (#112) — they arrive as `zen.dialog` chunks and render through `PendingDialog` above.
 };
 
 /**

@@ -253,19 +253,26 @@ a moved repo heals and a renamed sibling does not leave a dead link pi would ski
 ## The web surface (`packages/web/`)
 
 Bun's fullstack dev server end to end — no vite, no node. The backend hosts pi in-process
-(one `AgentSession` per chat thread, #69), maps pi's event stream onto AG-UI events, and serves a TanStack AI chat
-client. Neither half has its own loop; the browser is a client of the same harness the TUI runs.
+(one `AgentSession` per chat thread, #69) and serves a TanStack AI chat client. Neither half has its
+own loop; the browser is a client of the same harness the TUI runs.
+
+**The wire is `ZenObservation`, not AG-UI (#112).** pi's events become observations (`@zen/core`) and
+cross as a per-thread *follow* — `GET /api/threads/:id/follow`, one snapshot then observations with a
+sequence number — while a prompt is a unary `POST …/prompt` that answers at admission. The browser's
+connection adapter (`follow-connection.ts`) derives AG-UI in memory for TanStack's renderer; it is never
+on the wire or stored. Same reason ACP is kept off the pi seam: AG-UI carries chat and interrupts, not
+entries, partial tool output, mode, usage or queue state. `docs/architecture.md`, decided constraints.
 
 Built so far:
 
 - **Streaming chat** with tool-call rendering over one structured payload (`@zen/core`'s observation
   and tool-result descriptor schemas — the data/renderer split that lets the TUI and web render the
   same result their own way).
-- **pi's blocking dialogs, answered from the browser (#27).** pi's `select`/`confirm`/`input` dialogs
-  block its process; the backend parks the blocked pi in a registry, ends the HTTP run as an AG-UI
-  *interrupt*, and the browser's answer arrives as a resume that validates against the parked question
-  (out-of-options answers are re-presented, cancel propagates, TTL eviction declines and stops the
-  orphan). This is what makes `/mode` and similar flows work from a web page at all.
+- **pi's blocking dialogs, answered from the browser (#27, #112).** pi's `select`/`confirm`/`input`
+  dialogs block its process; the question crosses on the follow as a `zen.dialog` chunk, the page renders
+  it, and the answer is one `POST …/dialog` validated against the question (out-of-options answers are
+  refused, cancel propagates). Nothing parks and no run ends for it: the run keeps going on the follow.
+  This is what makes `/mode` and similar flows work from a web page at all.
 - **A session-stats bar (#45 phase 1):** running cost plus the last request's token split.
 - **Mode-change notifications** rendered as chat-adjacent lines rather than lost to stderr.
 

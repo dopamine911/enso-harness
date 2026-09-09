@@ -203,6 +203,19 @@ export const ZenQueue = Type.Object({
 });
 export type ZenQueue = Static<typeof ZenQueue>;
 
+/**
+ * pi refused a prompt at preflight (#112) — the one observation the SERVER synthesises,
+ * because the refusal arrives on the prompt's callback, after `POST …/prompt` has already
+ * answered 202: the follow is the only place a client can learn of it. `messageId` is the
+ * receipt's, so the client can name which prompt.
+ */
+export const ZenPromptRejected = Type.Object({
+	kind: Type.Literal("prompt-rejected"),
+	messageId: Type.String(),
+	reason: Type.String(),
+});
+export type ZenPromptRejected = Static<typeof ZenPromptRejected>;
+
 /** An extension threw. Surfaced, never swallowed. */
 export const ZenExtensionError = Type.Object({
 	kind: Type.Literal("extension-error"),
@@ -243,6 +256,7 @@ export const ZenObservation = Type.Union([
 	ZenTurnStart,
 	ZenTurnEnd,
 	ZenQueue,
+	ZenPromptRejected,
 	ZenExtensionError,
 	ZenExtensionUiRequest,
 	ZenRunEnded,
