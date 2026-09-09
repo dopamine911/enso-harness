@@ -85,8 +85,9 @@ test("a select with detail renders it preformatted above the options — file co
 	expect(rendered).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
 	expect(rendered).not.toContain("<script>");
 	expect(rendered.indexOf("<pre")).toBeLessThan(rendered.indexOf(">Yes<"));
-	// and a plain select still renders no detail block
+	// and a plain select — or one whose detail is empty — renders no detail block
 	expect(answerControls(SELECT_DIALOG)).not.toContain("<pre");
+	expect(answerControls({ ...SELECT_DIALOG, message: "" })).not.toContain("<pre");
 });
 
 test("input renders a single-line field with the placeholder and an Answer button", () => {

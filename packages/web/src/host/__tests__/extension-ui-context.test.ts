@@ -213,3 +213,29 @@ test("cancelling the lifted prompt resolves picc's 'dismissed' value; a non-picc
 	expect(await uiContext.custom(() => ({ render: () => [], invalidate: () => undefined }))).toBeUndefined();
 	expect(events).toHaveLength(before);
 });
+
+// ⚠ The catch that exists so a picc module that fails to load can never silently reopen #73:
+// the extension is released with "dismissed", the operator is told why, no request is emitted.
+test("⚠ a lift that rejects (picc's module did not load) fails closed: undefined to the extension, a report to onProblem, no request", async () => {
+	const events: PiRpcEvent[] = [];
+	const problems: unknown[] = [];
+	const { uiContext } = createZenExtensionUiContext({
+		emit: (event) => events.push(event),
+		onProblem: (problem) => problems.push(problem),
+		liftDialog: () => Promise.reject(new Error("Cannot find module filePermissionDialog.ts")),
+	});
+	const answer = await uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT));
+	expect(answer).toBeUndefined();
+	expect(events).toEqual([]);
+	expect(problems).toHaveLength(1);
+	expect(String(problems[0])).toContain("#73");
+	expect(String(problems[0])).toContain("Cannot find module");
+});
+
+test("a factory that resolves no component degrades to undefined instead of throwing on dispose", async () => {
+	const { uiContext, events } = contextUnderTest();
+	// Outside the declared type on purpose: a buggy extension, not a typed caller.
+	const noComponent = (() => undefined) as unknown as CustomComponentFactory<unknown>;
+	expect(await uiContext.custom(noComponent)).toBeUndefined();
+	expect(events).toEqual([]);
+});

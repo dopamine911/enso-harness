@@ -325,7 +325,7 @@ export function DialogAnswerControls({
 			<div className="flex flex-col gap-3">
 				{/* The detail behind the question (#73): a file preview, a diff, a command. Preformatted,
 				    never markdown — model-chosen file content must not render as HTML. */}
-				{dialog.message === undefined ? null : (
+				{dialog.message === undefined || dialog.message.length === 0 ? null : (
 					<pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/50 p-3 text-xs">
 						{dialog.message}
 					</pre>

@@ -67,6 +67,12 @@ export interface ZenExtensionUiContextOptions {
 	emit: (event: PiRpcEvent) => void;
 	/** Notified for an answer that names no pending dialog — a replay or a stale tab. Never silent. */
 	onProblem: ((problem: unknown) => void) | undefined;
+	/**
+	 * How a `custom` component becomes a select (#73). Defaults to `liftPermissionDialog`;
+	 * ⓘ injectable so `__tests__/extension-ui-context.test.ts` can exercise the fail-closed
+	 * path (the lift rejecting because picc's module did not load) without unloading picc.
+	 */
+	liftDialog?: (component: unknown) => Promise<LiftedPermissionDialog | undefined>;
 }
 
 export interface ZenExtensionUiContext {
@@ -153,6 +159,7 @@ function createNeutralTheme(): PiTheme {
 
 export function createZenExtensionUiContext(options: ZenExtensionUiContextOptions): ZenExtensionUiContext {
 	const { emit, onProblem } = options;
+	const liftDialog = options.liftDialog ?? liftPermissionDialog;
 	const pendingDialogs = new Map<string, PendingDialog>();
 	let neutralTheme: PiTheme | undefined;
 
@@ -288,7 +295,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 			const component = await factory(INERT_TUI, uiContext.theme, INERT_KEYBINDINGS, resolve);
 			let lifted: LiftedPermissionDialog | undefined;
 			try {
-				lifted = await liftPermissionDialog(component);
+				lifted = await liftDialog(component);
 			} catch (error) {
 				// picc's module did not load: the prompt cannot be lifted. Fail closed the way
 				// pi's rpc mode does (the extension sees "dismissed"), and say why — silently
@@ -296,7 +303,9 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 				onProblem?.(`custom dialog could not be lifted (#73): ${String(error)}`);
 			}
 			if (lifted === undefined) {
-				component.dispose?.();
+				// `?.` on the component too: this is the compatibility path for ANY extension's
+				// `custom`, and a factory that resolved nothing must degrade, not throw (PR #107 review).
+				component?.dispose?.();
 				// pi's rpc contract, stated in TypeScript: an unknown component is "no component".
 				resolve(undefined as T);
 				return promise;
@@ -307,7 +316,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 				undefined,
 				(response) => ("value" in response ? response.value : undefined),
 			);
-			component.dispose?.();
+			component?.dispose?.();
 			// The lifted select's value is one of the strings picc offered — `T` for picc is
 			// `FilePermissionChoice = string | null`, and cancel is `undefined`, its "no" path.
 			resolve(choice as T);
