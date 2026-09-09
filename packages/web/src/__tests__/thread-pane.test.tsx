@@ -49,12 +49,19 @@ const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 2
 const flush = (work: () => Promise<void>): Promise<void> => act(work);
 
 /**
+ * How long `eventually` keeps trying before a failing probe is a failure. It bounds a REAL
+ * failure's report time, never a pass — a passing probe returns on its first true reading
+ * (usually the first). The one knob if a slower runner ever loses the race again (#131 CI).
+ */
+const EVENTUALLY_DEADLINE_MS = 2000;
+
+/**
  * Retry `probe` — assertions, or a lookup that throws when its element is not there yet —
  * until it holds, yielding a tick inside `act` between tries so React flushes what the
- * adapter routed. The last failure is the report. 2 s bounds a real failure, not the wait.
+ * adapter routed. The last failure is the report.
  */
 async function eventually<T>(probe: () => T): Promise<T> {
-	const deadline = Date.now() + 2000;
+	const deadline = Date.now() + EVENTUALLY_DEADLINE_MS;
 	for (;;) {
 		try {
 			return probe();

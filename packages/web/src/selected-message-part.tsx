@@ -80,6 +80,9 @@ function ToolStep({
 	const summary = summarizeToolInput(input);
 	const { status } = toolResultState(selected.result, runOpen);
 	return (
+		// Only an error opens itself: its body is a reason the reader needs (the guard's refusal,
+		// the command's stderr). `aborted` has nothing more inside — its whole story is the one
+		// word on the row (the run ended first), so opening it would show a static line.
 		<details data-zen-tool-step={status} open={status === "error"} className="group my-1">
 			<summary className="flex cursor-pointer list-none items-center gap-2 font-mono text-muted-foreground text-xs marker:hidden">
 				<span aria-hidden="true" className={STEP_DOT[status]} />
