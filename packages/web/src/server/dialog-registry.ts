@@ -54,6 +54,15 @@ export interface PiSessionPump {
 	 * extension-command runs promptly instead of at the 90s guard.
 	 */
 	promptAcknowledged: boolean;
+	/**
+	 * Epoch ms of the last `tool_execution_start` / `tool_execution_update` this pump received
+	 * — 0 until one has (#99). Recorded on ARRIVAL, by the pump, because the streaming loop
+	 * cannot see it: an update maps to a partial tool-result that `to-agui.ts` drops (AG-UI
+	 * has no progress event), so a long tool call streamed output and produced no chunk, and
+	 * the no-progress guard, unable to tell a working tool from a hung run, ended the run at
+	 * the cutoff mid-search (web_search, #98). The guard reads this as progress.
+	 */
+	lastToolActivityAt: number;
 	notify: (() => void) | undefined;
 	wake(): void;
 	readonly session: PiSession;

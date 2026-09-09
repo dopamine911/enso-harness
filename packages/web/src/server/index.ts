@@ -46,10 +46,34 @@ const SSE_HEADERS = {
 	"Content-Type": "text/event-stream",
 	"Cache-Control": "no-cache, no-transform",
 	Connection: "keep-alive",
-	// Vite proxies in dev, so this is the same origin — but a stray buffering proxy would
-	// hold the stream open and silent, which looks exactly like a hung agent.
+	// The dev web surface proxies `/api` in dev, so this is the same origin — but a stray
+	// buffering proxy would hold the stream open and silent, which looks exactly like a hung agent.
 	"X-Accel-Buffering": "no",
 } as const;
+
+/**
+ * How often an open run's response carries an SSE comment while no event is flowing.
+ *
+ * ⚠⚠ THE ACTUAL CAUSE OF #98/#99. `Bun.serve` closes an HTTP connection after 10 s of
+ * inactivity by default (`idleTimeout`), and the dev web surface proxies `/api` through one.
+ * A tool call has NO AG-UI event for its progress (`to-agui.ts`), so a search that took
+ * 12 s put no byte on the wire for 12 s, the proxy dropped the connection, the browser saw
+ * "Stream response body read failed", and the server's close hook aborted pi mid-call —
+ * which is the `AbortError` the tool's audit line showed. The 90 s no-progress cutoff was
+ * never reached; it would have ended the run cleanly with RUN_FINISHED, not a read failure.
+ *
+ * An SSE comment line (`: keepalive`) is the protocol's own answer: every intermediary sees
+ * bytes, every client ignores it (TanStack's parser skips `:` lines). Well under the 10 s
+ * default so a missed tick does not matter; cleared when the response ends.
+ */
+export const SSE_KEEPALIVE_MS = 5000;
+
+/** Start the keepalive for one open response; returns the stop. Not an event, so not in the sent tail. */
+function startSseKeepalive(response: ServerResponse, intervalMs: number): () => void {
+	const timer = setInterval(() => response.write(": keepalive\n\n"), intervalMs);
+	timer.unref?.();
+	return () => clearInterval(timer);
+}
 
 /**
  * AG-UI's `RunAgentInput`, reduced to the fields this endpoint uses.
@@ -177,6 +201,8 @@ export interface ZenServerOptions {
 	 * stop/release sequencing without a model. Production launchers never pass it.
 	 */
 	host?: AgentHost;
+	/** SSE keepalive interval; defaults to `SSE_KEEPALIVE_MS`. ⓘ Injectable for `server-handler.test.ts`. */
+	sseKeepaliveMs?: number;
 }
 
 /*
@@ -243,6 +269,7 @@ export function startZenServer(options: ZenServerOptions) {
 	// pi, in this process (#69). Creating the host sets the isolation env and pins the
 	// multi-account config; sessions are created per chat THREAD below and live across runs
 	// (#43 — a mode chosen on prompt 1 is in force on prompt 2).
+	const sseKeepaliveMs = options.sseKeepaliveMs ?? SSE_KEEPALIVE_MS;
 	const host: AgentHost =
 		options.host ??
 		createAgentHost({
@@ -486,6 +513,7 @@ export function startZenServer(options: ZenServerOptions) {
 				// aborts the run and releases the thread; the session itself stays alive.
 				const stopParked = registry.peek(ids.threadId)?.stopPi;
 				response.writeHead(200, SSE_HEADERS);
+				const stopKeepalive = startSseKeepalive(response, sseKeepaliveMs);
 				// ⚠ `response`, NOT `request` (#34). Under bun's node:http compat the REQUEST
 				// 'close' event fires when the request BODY has been consumed — the start of
 				// every run, before this listener is registered — so a request-close hook is
@@ -522,6 +550,7 @@ export function startZenServer(options: ZenServerOptions) {
 					// A resume that ended unparked is a finished run: the thread goes idle. A
 					// client that dropped mid-resume is handled by the 'close' hook above.
 					streamEnded = true;
+					stopKeepalive();
 					if (!outcome.parkedAwaitingAnswer) threads.release(ids.threadId);
 					response.end();
 				}
@@ -544,6 +573,7 @@ export function startZenServer(options: ZenServerOptions) {
 				return;
 			}
 			response.writeHead(200, SSE_HEADERS);
+			const stopKeepalive = startSseKeepalive(response, sseKeepaliveMs);
 
 			// A client that navigates away must not leave pi running — but a PARKED session
 			// belongs to the registry, and this close event also fires on normal completion,
@@ -594,6 +624,7 @@ export function startZenServer(options: ZenServerOptions) {
 				);
 			} finally {
 				streamEnded = true;
+				stopKeepalive();
 				if (!outcome.parkedAwaitingAnswer) threads.release(ids.threadId);
 				response.end();
 			}

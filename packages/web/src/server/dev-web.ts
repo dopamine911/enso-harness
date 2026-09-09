@@ -49,6 +49,13 @@ try {
 	const server = Bun.serve({
 		hostname: "127.0.0.1",
 		port: WEB_PORT,
+		// ⚠ Bun's default is 10 s of inactivity, and a proxied SSE run that carried no byte for
+		// 10 s — a tool call, whose progress has no AG-UI event — was closed HERE, which the
+		// browser saw as "Stream response body read failed" and the zen server as a client
+		// disconnect (#98/#99). The zen server now sends an SSE keepalive every 5 s
+		// (`SSE_KEEPALIVE_MS`), so a healthy stream never goes idle; this is the backstop for
+		// a dead one, set well above the keepalive so a missed tick cannot cut a live run.
+		idleTimeout: 60,
 		// hmr defaults on outside production; explicit so the intent survives an env change.
 		// `console: true` mirrors browser console lines into this terminal, which the dev
 		// wrapper prefixes — a page error is visible without opening devtools.

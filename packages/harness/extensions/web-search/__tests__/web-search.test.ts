@@ -290,3 +290,92 @@ test("the tool's self-description names the accuracy contract", () => {
 	expect(loaded.tool.description).toContain("names");
 	expect(loaded.tool.description).toContain("WITHOUT searching");
 });
+
+// ── one deadline for the whole call (#99) ────────────────────────────────────
+// Per-attempt deadlines let primary + fallback run 2× the budget with nothing crossing to
+// the browser; the server's no-progress guard read that as a hung run and cut it (#98).
+
+/** A provider that never answers: it rejects only when its deadline signal aborts it. */
+function stalledUntilAborted(providerId: "anthropic") {
+	return (request: { signal?: AbortSignal | undefined }): Promise<WebSearchOutcome> =>
+		new Promise((_resolve, reject) => {
+			request.signal?.addEventListener("abort", () =>
+				reject(new WebSearchProviderError(providerId, String(request.signal?.reason), { requestDispatched: true })),
+			);
+		});
+}
+
+test("⚠ a primary that stalls for the whole budget leaves the fallback NO time — it is refused with the deadline, not run for another budget", async () => {
+	const tavilySignals: boolean[] = [];
+	const loaded = loadWebSearch(
+		{
+			timeoutMs: 30,
+			runProviders: {
+				anthropic: stalledUntilAborted("anthropic"),
+				google: async () => {
+					throw new Error("unexpected");
+				},
+				openai: async () => {
+					throw new Error("unexpected");
+				},
+				deepseek: async () => {
+					throw new Error("unexpected");
+				},
+				tavily: async (request) => {
+					tavilySignals.push(request.signal?.aborted === true);
+					if (request.signal?.aborted === true) throw request.signal.reason;
+					return TAVILY_RESULTS;
+				},
+			},
+		},
+		{ TAVILY_API_KEY: "tvly-test" },
+	);
+	const startedAt = Date.now();
+	const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
+	// Bounded by ONE budget, not two: well under 2 × 30ms even with scheduling slack.
+	expect(Date.now() - startedAt).toBeLessThan(55);
+	// The fallback was handed an already-dead signal, so it never really searched.
+	expect(tavilySignals).toEqual([true]);
+	expect(text.startsWith("Not searched:")).toBe(true);
+	expect(text).toContain("passed its deadline");
+	expect(text).toContain("the Tavily fallback then failed too");
+});
+
+test("a primary that fails FAST leaves the fallback the rest of the budget, and the fallback is announced as progress", async () => {
+	const progress: string[] = [];
+	const loaded = loadWebSearch(
+		{
+			timeoutMs: 500,
+			runProviders: {
+				anthropic: async () => {
+					throw new WebSearchProviderError("anthropic", "HTTP 529 overloaded", { requestDispatched: true });
+				},
+				google: async () => {
+					throw new Error("unexpected");
+				},
+				openai: async () => {
+					throw new Error("unexpected");
+				},
+				deepseek: async () => {
+					throw new Error("unexpected");
+				},
+				tavily: async (request) => {
+					expect(request.signal?.aborted).toBe(false);
+					return TAVILY_RESULTS;
+				},
+			},
+		},
+		{ TAVILY_API_KEY: "tvly-test" },
+	);
+	const onUpdate = (update: { content: { type: string; text: string }[] }): void => {
+		const first = update.content[0];
+		if (first !== undefined) progress.push(first.text);
+	};
+	const { value: result } = await withAuditCapture(() =>
+		loaded.tool.execute("t", { query: QUERY }, undefined, onUpdate as never, { model: ANTHROPIC_MODEL }),
+	);
+	expect(result.content[0]?.text.startsWith("Searched the web via tavily")).toBe(true);
+	// The one otherwise-silent moment in the chain now reports itself — the server's no-progress
+	// guard counts a tool update as progress (#99).
+	expect(progress.some((text) => text.includes("trying the Tavily fallback"))).toBe(true);
+});

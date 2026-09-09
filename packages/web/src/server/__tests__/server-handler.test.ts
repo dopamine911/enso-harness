@@ -164,7 +164,11 @@ afterEach(async () => {
 	for (const started of openServers.splice(0)) await started.close();
 });
 
-async function startWith(script: FakeSessionScript, stored: Record<string, FakeStoredSession> = {}) {
+async function startWith(
+	script: FakeSessionScript,
+	stored: Record<string, FakeStoredSession> = {},
+	serverOptions: { sseKeepaliveMs?: number } = {},
+) {
 	const { host, built, requested } = fakeHost(script, stored);
 	const started = startZenServer({
 		cwd: tmpdir(),
@@ -172,6 +176,7 @@ async function startWith(script: FakeSessionScript, stored: Record<string, FakeS
 		agentDir: mkdtempSync(join(tmpdir(), "zen-handler-agent-")),
 		port: 0,
 		host,
+		...serverOptions,
 	});
 	openServers.push(started);
 	const url = await started.listening;
@@ -197,6 +202,40 @@ async function postRun(url: string, body: Record<string, unknown>): Promise<stri
 }
 
 const userMessage = (content: string) => ({ role: "user", content });
+
+// ⚠⚠ #98/#99's ACTUAL cause: a run whose tool produced no AG-UI event for 10 s put no byte on
+// the wire, and Bun's proxy closed the idle connection. The response now carries an SSE
+// comment while nothing else flows — bytes for every intermediary, ignored by every client.
+test("⚠ a run that goes silent carries SSE keepalive comments, which parse to no event", async () => {
+	const { url } = await startWith(
+		{
+			onPrompt: (emit, outcome) => {
+				outcome.onAccepted();
+				emit(TEXT_DELTA);
+				// A tool working in silence for several keepalive intervals, then the settle.
+				setTimeout(() => emit(SETTLED), 60);
+			},
+		},
+		{},
+		{ sseKeepaliveMs: 10 },
+	);
+	const response = await fetch(`${url}/api/chat`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ threadId: "t1", runId: "r1", messages: [userMessage("search")] }),
+	});
+	const raw = await response.text();
+	const keepalives = raw.split("\n").filter((line) => line === ": keepalive");
+	expect(keepalives.length).toBeGreaterThanOrEqual(2);
+	// The real events are intact and the comments contribute none.
+	const events = raw
+		.split("\n")
+		.filter((line) => line.startsWith("data: "))
+		.map((line) => JSON.parse(line.slice("data: ".length)) as Record<string, unknown>)
+		.map((chunk) => String(chunk.type));
+	expect(events.at(-1)).toBe(EventType.RUN_FINISHED);
+	expect(events).toContain(EventType.TEXT_MESSAGE_CONTENT);
+});
 
 // #96: a notify the session emits while the run is listening crosses the wire tagged
 // `origin: "run"` — the browser renders it open. The session-start half of the tag rides the
