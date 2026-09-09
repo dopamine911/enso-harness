@@ -111,6 +111,17 @@ test("zen.follow-ended is said where the human looks, as an error of this run (#
 	expect(stores.notifications.get().at(-1)).toMatchObject({ notifyType: "error", origin: "run" });
 });
 
+// #119: the notice scrolls away; the status bar's own state must say it too. Only a live
+// follow delivers a status frame, so `zen.run` is the honest "connected again".
+test("zen.follow-ended marks the thread disconnected; the next zen.run clears it (#119)", () => {
+	expect(stores.disconnected.get()).toBe(false);
+	route(ZEN_CUSTOM_EVENT_FOLLOW_ENDED, { threadId: "t1" });
+	expect(stores.disconnected.get()).toBe(true);
+	// A malformed status frame is still a frame from a live follow.
+	route(ZEN_CUSTOM_EVENT_RUN, { generation: "x" });
+	expect(stores.disconnected.get()).toBe(false);
+});
+
 test("zen.open-dialogs is the snapshot's complete list: it replaces the card, an empty list clears it, a malformed one is ignored (#114)", () => {
 	route(ZEN_CUSTOM_EVENT_DIALOG, { id: "stale", dialog: CONFIRM });
 	route(ZEN_CUSTOM_EVENT_OPEN_DIALOGS, { open: [{ id: "d2", dialog: CONFIRM }] });

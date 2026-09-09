@@ -53,6 +53,14 @@ export interface ThreadStores {
 	 * or reports gone.
 	 */
 	readonly dialog: WritableStore<ZenPendingDialog | undefined>;
+	/**
+	 * The follow ended under this page (#119): the server closed, restarted, or dropped the
+	 * connection, and nothing here reconnects — the thread's state on this page is as of that
+	 * moment. Set by `zen.follow-ended`; cleared by the next `zen.run`, which only a live
+	 * follow delivers. While true the status bar says `disconnected` and no stop is offered,
+	 * whatever the run flag still holds: the page cannot know what the server is doing.
+	 */
+	readonly disconnected: WritableStore<boolean>;
 	/** The thread's transport: TanStack's connection over prompt/follow, and the dialog answer beside it. */
 	readonly connection: FollowConnection;
 }
@@ -74,6 +82,7 @@ function createThreadStores(threadId: string, history: readonly UIMessage[]): Th
 		recentChunks: createRecentChunksStore(),
 		generation: createStore<number | undefined>(undefined),
 		dialog: createStore<ZenPendingDialog | undefined>(undefined),
+		disconnected: createStore(false),
 		connection: createFollowConnection({
 			threadId,
 			onProblem: (problem) => notifications.push(String(problem), "warning", "run"),

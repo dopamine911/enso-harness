@@ -429,6 +429,7 @@ const chatComponents = {
 			// binding is initialised by then.
 			const chat = useChatContext();
 			const stores = useThreadStores();
+			const disconnected = useStore(stores.disconnected);
 			// Controlled, so the send button can disable on empty — the ai-elements chatbot
 			// example's PromptInput does the same.
 			const [draft, setDraft] = useState("");
@@ -475,8 +476,9 @@ const chatComponents = {
 						    server. The run ends on the follow (`settled`, `status`) like any other,
 						    so this button changes nothing itself; the feed does. Read off
 						    `sessionGenerating`, the shared run flag — `isLoading` never rises here
-						    (#103 receipt). */}
-						{chat.sessionGenerating ? (
+						    (#103 receipt). Not offered once the follow has ended (#119): the flag
+						    is then as of that moment, and a stop that may stop nothing is the #4 shape. */}
+						{chat.sessionGenerating && !disconnected ? (
 							<Button
 								type="button"
 								size="icon"
