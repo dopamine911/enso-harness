@@ -1,9 +1,11 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type InlineExtension, SessionManager } from "@earendil-works/pi-coding-agent";
+import type { LogRecorder } from "@logtape/testing/recorder";
 import { findRepoRoot, harnessPackageDir, type PiRpcEvent } from "@zen/core";
+import { recordZenLogs, releaseZenLogs } from "../../__tests__/log-recorder.ts";
 import { type AgentHost, createAgentHost, type HostedSession, seedMultiAccountChildProxyOff } from "../agent-host.ts";
 
 /**
@@ -24,11 +26,15 @@ import { type AgentHost, createAgentHost, type HostedSession, seedMultiAccountCh
 const repoRoot = findRepoRoot(import.meta.url);
 const harnessDir = harnessPackageDir(repoRoot);
 const agentDir = mkdtempSync(join(tmpdir(), "zen-host-agent-"));
-const problems: unknown[] = [];
 const openSessions: HostedSession[] = [];
 
-afterAll(() => {
+let logs: LogRecorder;
+beforeAll(async () => {
+	logs = await recordZenLogs();
+});
+afterAll(async () => {
 	for (const hosted of openSessions) hosted.session.dispose();
+	await releaseZenLogs();
 });
 
 /** The five extension path suffixes the harness manifest declares, in load order. */
@@ -52,7 +58,6 @@ function hostWith(extensionFactories: InlineExtension[] = []): AgentHost {
 		cwd: repoRoot,
 		agentDir,
 		harnessPackageDir: harnessDir,
-		onProblem: (problem) => problems.push(problem),
 		extensionFactories,
 	});
 }
@@ -81,7 +86,7 @@ test("⚠ childProxy is pinned off in the agent dir's multi-account config, othe
 	});
 	// and creating a host seeds it in the host's own agent dir — before any session exists
 	const hostAgentDir = mkdtempSync(join(tmpdir(), "zen-host-seed-at-boot-"));
-	createAgentHost({ cwd: repoRoot, agentDir: hostAgentDir, harnessPackageDir: harnessDir, onProblem: undefined });
+	createAgentHost({ cwd: repoRoot, agentDir: hostAgentDir, harnessPackageDir: harnessDir });
 	expect(existsSync(join(hostAgentDir, "provider-failover.json"))).toBe(true);
 	expect(JSON.parse(readFileSync(join(hostAgentDir, "provider-failover.json"), "utf8"))).toEqual({ childProxy: false });
 });
@@ -92,18 +97,18 @@ test("⚠ childProxy is pinned off in the agent dir's multi-account config, othe
 // (never values). This test plants a secret-shaped variable and checks it is gone.
 test("⚠ creating a host removes secret-shaped variables from its environment, naming them, before any session", () => {
 	const environment: Record<string, string | undefined> = { PATH: "/usr/bin", PLANTED_API_KEY: "must-not-survive" };
-	const problems: unknown[] = [];
+	logs.clear();
 	createAgentHost({
 		cwd: repoRoot,
 		agentDir: mkdtempSync(join(tmpdir(), "zen-host-quarantine-")),
 		harnessPackageDir: harnessDir,
-		onProblem: (problem) => problems.push(problem),
 		environment,
 	});
 	expect(environment).toEqual({ PATH: "/usr/bin" });
-	const notice = problems.find((problem) => String(problem).includes("#89"));
-	expect(String(notice)).toContain("PLANTED_API_KEY");
-	expect(String(notice)).not.toContain("must-not-survive");
+	const notice = logs.find({ rawMessage: /#89/ });
+	expect(notice?.properties.removed).toEqual(["PLANTED_API_KEY"]);
+	// The NAME is the record; the value never was.
+	expect(JSON.stringify(notice)).not.toContain("must-not-survive");
 });
 
 test("exactly the manifest's five extensions load, in order, with no load errors", async () => {
@@ -113,7 +118,7 @@ test("exactly the manifest's five extensions load, in order, with no load errors
 	MANIFEST_EXTENSION_MARKERS.forEach((marker, index) => {
 		expect(loaded[index]?.endsWith(marker)).toBe(true);
 	});
-	expect(problems.filter((problem) => String(problem).includes("failed to load"))).toEqual([]);
+	logs.assertNotLogged({ rawMessage: /failed to load/ });
 });
 
 test("⚠ multi-account resolved its config inside the scratch agent dir, not ~/.pi/agent — the env was set first", async () => {
@@ -201,9 +206,9 @@ test("a cancelled dialog resolves to pi's cancel value, and dispose cancels what
 
 test("an answer naming no pending dialog is reported, never thrown", async () => {
 	const hosted = await hostedSession();
-	const before = problems.length;
+	logs.clear();
 	expect(() => hosted.session.answerDialog({ id: "never-asked", cancelled: true })).not.toThrow();
-	expect(problems.slice(before).some((problem) => String(problem).includes("never-asked"))).toBe(true);
+	logs.assertLogged({ level: "warning", rawMessage: /unknown request id/, properties: { dialogId: "never-asked" } });
 });
 
 test("⚠ a throwing session_start becomes an extension_error record; the session is still created", async () => {

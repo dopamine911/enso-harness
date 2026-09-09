@@ -14,6 +14,7 @@
       "name": "@zen/core",
       "version": "0.0.0",
       "dependencies": {
+        "@logtape/logtape": "2.3.4",
         "typebox": "^1.3.25",
       },
       "devDependencies": {
@@ -45,6 +46,10 @@
         "@ag-ui/core": "0.1.1-canary.beta.0",
         "@fontsource-variable/geist": "^5.3.0",
         "@ladbabynpm/picc-permission-modes": "0.1.1",
+        "@logtape/file": "2.3.4",
+        "@logtape/logtape": "2.3.4",
+        "@logtape/pretty": "2.3.4",
+        "@logtape/redaction": "2.3.4",
         "@radix-ui/react-use-controllable-state": "^1.2.6",
         "@tanstack/ai": "0.53.0",
         "@tanstack/ai-client": "0.31.0",
@@ -64,6 +69,7 @@
       },
       "devDependencies": {
         "@happy-dom/global-registrator": "20.14.0",
+        "@logtape/testing": "2.3.4",
         "@playwright/test": "1.63.0",
         "@shadcn/helpers": "^0.2.0",
         "@tailwindcss/typography": "^0.5.20",
@@ -259,6 +265,16 @@
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "@ladbabynpm/picc-permission-modes": ["@ladbabynpm/picc-permission-modes@0.1.1", "", { "dependencies": { "diff": "^5.2.0", "shell-quote": "^1.10.0" }, "peerDependencies": { "@earendil-works/pi-ai": "*", "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*", "typebox": "*" } }, "sha512-6tHgmNGa7fpQAtCkB7W58s1unXo8k1QO8lEg2eMzcxrvydzbywisyqFBafC0Qaa4V+SvSX1z2Au2JbPHidSlig=="],
+
+    "@logtape/file": ["@logtape/file@2.3.4", "", { "peerDependencies": { "@logtape/logtape": "^2.3.4" } }, "sha512-4jXkntOowasyo5qrAjV1RdL9iEbP80xYLcSgnorRgBaxkBVtN0kiYdtMC/975Sj6ATmCuuTrnWlvcO0tyrY/9w=="],
+
+    "@logtape/logtape": ["@logtape/logtape@2.3.4", "", {}, "sha512-oW5Q6EOdjemL94c324j2fUn+2nRGuODwmOKmrwY6YAVkjqNWYVgkzpfbckFc4CKmDDCMk+GiwNfPybMZB3QqNQ=="],
+
+    "@logtape/pretty": ["@logtape/pretty@2.3.4", "", { "peerDependencies": { "@logtape/logtape": "^2.3.4" } }, "sha512-l4g4/9+6FoqVWsdmC8qqHt7a1VchL6YYkxWeNuQEGu11ewSE2Ng04/56xjRrkCictGgSjG/T66kRVi/SP+tYyA=="],
+
+    "@logtape/redaction": ["@logtape/redaction@2.3.4", "", { "peerDependencies": { "@logtape/logtape": "^2.3.4" } }, "sha512-Mdn4yPczbwxlLRkMiFrNuvalCa+Z0mdACkswete67K6jV9xP+faBR/Ht1Y8YRXZbg3piV08N23bFkQoblYyu8Q=="],
+
+    "@logtape/testing": ["@logtape/testing@2.3.4", "", { "peerDependencies": { "@logtape/logtape": "^2.3.4" } }, "sha512-brRoiggYWOrU/oxuOV5FLzB8k/A7P9/pR2Rs258WaeCg5J/RGfR+adn3rEpKEhy/wUGvhqaGy6EgrzgP2I754w=="],
 
     "@mammothb/pi-tokyonight-storm": ["@mammothb/pi-tokyonight-storm@0.2.1", "", { "peerDependencies": { "@earendil-works/pi-coding-agent": "*" } }, "sha512-UVVQjWf/g8jT001vPcXHE0mcmJpTP7RmwTaRcVrlfEUwryTdhuhCW/27sd8eZhPJjq1KPXB5YvS3glaMwyHXsg=="],
 

@@ -8,6 +8,7 @@ import {
 	type ZenAbortReceipt,
 	type ZenFollowFrame,
 	type ZenPromptReceipt,
+	zenLogger,
 } from "@zen/core";
 import type { AgentHost } from "../host/agent-host.ts";
 import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
@@ -46,11 +47,12 @@ import type { ThreadFeedFrame, ThreadRegistry } from "./thread-registry.ts";
  * split retires is on #109; the decision and its sequence are #112.
  */
 
+const log = zenLogger("server", "follow");
+
 export interface FollowRouteDeps {
 	readonly threads: ThreadRegistry;
 	readonly host: AgentHost;
 	readonly sseKeepaliveMs: number;
-	readonly onProblem: ((problem: unknown) => void) | undefined;
 }
 
 export interface PromptBody {
@@ -95,7 +97,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
 	const branch = nowLive === undefined ? (storedBranch ?? []) : nowLive.hosted.inspect().entries;
 
 	response.writeHead(200, SSE_HEADERS);
-	const stopKeepalive = startSseKeepalive(response, deps.sseKeepaliveMs, deps.onProblem);
+	const stopKeepalive = startSseKeepalive(response, deps.sseKeepaliveMs);
 	const follow = threads.observe(threadId, (frame: ThreadFeedFrame) => {
 		if (response.destroyed || response.writableEnded) return;
 		writeFrame(
@@ -163,11 +165,11 @@ export function readPromptBody(raw: string): PromptBody {
  * response is open for any of this.
  */
 export async function promptThread(deps: FollowRouteDeps, threadId: string, body: PromptBody): Promise<PromptOutcome> {
-	const { threads, onProblem } = deps;
+	const { threads } = deps;
 	const messageId = crypto.randomUUID();
 	/** pi refused the prompt after the receipt went out: the feed is the client's only way to hear it. */
 	const rejected = (reason: string): void => {
-		onProblem?.(`thread ${threadId}: prompt ${messageId} rejected: ${reason}`);
+		log.warn("prompt {messageId} rejected: {reason}", { threadId, messageId, reason });
 		threads.announce(threadId, { kind: "prompt-rejected", messageId, reason });
 	};
 

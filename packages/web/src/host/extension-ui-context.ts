@@ -7,6 +7,7 @@ import {
 	type PiRpcEvent,
 	type ZenDialogOutcome,
 	type ZenOpenDialog,
+	zenLogger,
 } from "@zen/core";
 import { type LiftedPermissionDialog, liftPermissionDialog } from "./permission-dialog.ts";
 
@@ -73,8 +74,8 @@ interface PendingDialog {
 export interface ZenExtensionUiContextOptions {
 	/** Where every record goes — the host's event emitter, so records interleave with session events in order. */
 	emit: (event: PiRpcEvent) => void;
-	/** Notified for an answer that names no pending dialog — a replay or a stale tab. Never silent. */
-	onProblem: ((problem: unknown) => void) | undefined;
+	/** The thread this context serves — on every record it writes. */
+	threadId: string;
 	/**
 	 * How a `custom` component becomes a select (#73). Defaults to `liftPermissionDialog`;
 	 * ⓘ injectable so `__tests__/extension-ui-context.test.ts` can exercise the fail-closed
@@ -93,6 +94,8 @@ export interface ZenExtensionUiContextOptions {
  * never answer. Past the budget the call falls back to pi's rpc contract (`undefined`).
  */
 export const CUSTOM_COMPONENT_BUILD_TIMEOUT_MS = 2000;
+
+const hostLog = zenLogger("host", "ui");
 
 export interface ZenExtensionUiContext {
 	readonly uiContext: ExtensionUIContext;
@@ -179,7 +182,8 @@ function createNeutralTheme(): PiTheme {
 }
 
 export function createZenExtensionUiContext(options: ZenExtensionUiContextOptions): ZenExtensionUiContext {
-	const { emit, onProblem } = options;
+	const { emit } = options;
+	const log = hostLog.with({ threadId: options.threadId });
 	const liftDialog = options.liftDialog ?? liftPermissionDialog;
 	const componentBuildTimeoutMs = options.componentBuildTimeoutMs ?? CUSTOM_COMPONENT_BUILD_TIMEOUT_MS;
 
@@ -192,7 +196,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 		try {
 			component?.dispose?.();
 		} catch (error) {
-			onProblem?.(`custom component's dispose() threw on the web surface: ${String(error)}`);
+			log.warn("custom component's dispose() threw on the web surface: {error}", { error });
 		}
 	}
 
@@ -222,8 +226,11 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 				clearTimeout(timer);
 			}
 		} catch (error) {
-			onProblem?.(
-				`custom component could not be built on the web surface — resolving undefined, pi's rpc contract: ${String(error)}`,
+			log.warn(
+				"custom component could not be built on the web surface — resolving undefined, pi's rpc contract: {error}",
+				{
+					error,
+				},
 			);
 			return undefined;
 		}
@@ -376,7 +383,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 				// picc's module did not load: the prompt cannot be lifted. Fail closed the way
 				// pi's rpc mode does (the extension sees "dismissed"), and say why — silently
 				// refusing every write is the #73 state this exists to end.
-				onProblem?.(`custom dialog could not be lifted (#73): ${String(error)}`);
+				log.error("custom dialog could not be lifted (#73): {error}", { error });
 			}
 			if (lifted === undefined) {
 				disposeQuietly(component);
@@ -417,9 +424,9 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 		answerDialog(response) {
 			const pending = pendingDialogs.get(response.id);
 			if (pending === undefined) {
-				onProblem?.(
-					`dialog answer for unknown request id ${response.id} — already answered, cancelled, or never asked`,
-				);
+				log.warn("dialog answer for unknown request id {dialogId} — already answered, cancelled, or never asked", {
+					dialogId: response.id,
+				});
 				return;
 			}
 			pending.resolve(response);

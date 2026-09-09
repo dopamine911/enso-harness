@@ -19,10 +19,13 @@ import {
 	persistedPermissionMode,
 	quarantineSecrets,
 	type ZenThreadEvent,
+	zenLogger,
 } from "@zen/core";
 import { createEventTail, describePiRpcEvent } from "./event-tail.ts";
 import { createZenExtensionUiContext } from "./extension-ui-context.ts";
 import { toRpcWireEvent } from "./session-events.ts";
+
+const log = zenLogger("host");
 
 /**
  * pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning
@@ -85,8 +88,6 @@ export interface AgentHostOptions {
 	agentDir: string;
 	/** The zen harness pi package directory; loaded as the ONLY extension source. */
 	harnessPackageDir: string;
-	/** Notified for load diagnostics, extension errors, and answers to unknown dialogs. Never swallowed. */
-	onProblem: ((problem: unknown) => void) | undefined;
 	/**
 	 * The environment the secrets quarantine (#89) scrubs — `process.env` in production, the
 	 * one pi and every `bash` child inherit. A seam so the quarantine is testable without a
@@ -190,7 +191,7 @@ function describeCommand(name: string, source: PiCommand["source"], description:
 }
 
 export function createAgentHost(options: AgentHostOptions): AgentHost {
-	const { cwd, agentDir, harnessPackageDir, onProblem } = options;
+	const { cwd, agentDir, harnessPackageDir } = options;
 
 	// Order matters, and it is the module header's ⚠⚠ items: env before any pi module can
 	// be imported by the loader, the proxy pin before the first session_start, and the
@@ -200,12 +201,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 	// The secrets file is a fact about THIS checkout (the harness), not about the tree pi
 	// operates on — `cwd` may be anywhere, a tmpdir in tests — so it resolves from here.
 	const quarantine = quarantineSecrets(options.environment ?? process.env, findRepoRoot(import.meta.url));
-	if (quarantine.removed.length > 0)
-		onProblem?.(`secrets kept out of the tool environment (#89): ${quarantine.removed.join(", ")}`);
+	if (quarantine.removed.length > 0) {
+		log.info("secrets kept out of the tool environment (#89): {removed}", { removed: quarantine.removed });
+	}
 	if (quarantine.misplaced.length > 0) {
-		onProblem?.(
-			`⚠ the root .env defines ${quarantine.misplaced.join(", ")} — bun autoloads .env into every bun child, ` +
-				`so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env.`,
+		log.warn(
+			"the root .env defines {misplaced} — bun autoloads .env into every bun child, so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env",
+			{ misplaced: quarantine.misplaced },
 		);
 	}
 	// The theme registry pi's UI code consults; harmless without a terminal, required once.
@@ -260,13 +262,17 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 			},
 		});
 		for (const diagnostic of services.diagnostics) {
-			onProblem?.(`pi ${diagnostic.type}: ${diagnostic.message}`);
+			log.warn("pi {type}: {message}", { threadId, type: diagnostic.type, message: diagnostic.message });
 		}
 		const extensionsResult = services.resourceLoader.getExtensions();
 		for (const loadError of extensionsResult.errors) {
 			// pi does not throw on a resource that fails to load; the failure would otherwise be
 			// silent and the symptom unrelated (the vendor-links incident, `server/index.ts`).
-			onProblem?.(`pi extension failed to load: ${loadError.path}: ${loadError.error}`);
+			log.error("pi extension failed to load: {path}: {error}", {
+				threadId,
+				path: loadError.path,
+				error: loadError.error,
+			});
 		}
 
 		// One session file per thread, under the agent dir pi resolves from the env set above —
@@ -314,7 +320,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 			for (const listener of listeners) listener(event, "live");
 		}
 
-		const ui = createZenExtensionUiContext({ emit, onProblem });
+		const ui = createZenExtensionUiContext({ emit, threadId });
 
 		// ⚠ SUBSCRIBE BEFORE BINDING (#88). Extensions persist state during `session_start` —
 		// picc writes its opening `modes` entry there — and pi emits `entry_appended` to whoever
@@ -328,7 +334,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 			try {
 				emit(toRpcWireEvent(event));
 			} catch (error) {
-				onProblem?.(error);
+				log.error("a session event could not be emitted: {error}", { threadId, error });
 			}
 		});
 
@@ -440,7 +446,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 				// host emits it the way `AgentSessionRuntime.dispose` does, then releases.
 				void session.extensionRunner
 					.emit({ type: "session_shutdown", reason: "quit" })
-					.catch((error: unknown) => onProblem?.(error))
+					.catch((error: unknown) => log.error("session_shutdown threw: {error}", { threadId, error }))
 					.finally(() => session.dispose());
 			},
 		};

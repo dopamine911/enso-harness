@@ -1,7 +1,16 @@
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import type { LogRecorder } from "@logtape/testing/recorder";
 import type { PiSession } from "@zen/core";
+import { recordZenLogs, releaseZenLogs } from "../../__tests__/log-recorder.ts";
 import type { HostedSession } from "../../host/agent-host.ts";
 import { createThreadRegistry } from "../thread-registry.ts";
+
+let logs: LogRecorder;
+beforeAll(async () => {
+	logs = await recordZenLogs();
+});
+beforeEach(() => logs.clear());
+afterAll(releaseZenLogs);
 
 function ignore(): void {
 	// The lifecycle tests never prompt, answer, or subscribe — only acquire/release/stop/dispose matter.
@@ -54,17 +63,15 @@ function fakeHosted() {
 
 function fakeHost() {
 	const built: ReturnType<typeof fakeHosted>[] = [];
-	const problems: unknown[] = [];
 	const threads = createThreadRegistry({
 		createSession: () => {
 			const next = fakeHosted();
 			built.push(next);
 			return Promise.resolve(next.hosted);
 		},
-		onProblem: (problem) => problems.push(problem),
 		idleTimeoutMs: 20,
 	});
-	return { threads, built, problems };
+	return { threads, built };
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -167,7 +174,7 @@ test("⚠ abort hands back the queued prompts in order and clears pi's queue; a 
 });
 
 test("⚠ a stop must stop: if clearing the queue throws, pi is still told to abort and the loss is said (PR #129 review)", async () => {
-	const { threads, built, problems } = fakeHost();
+	const { threads, built } = fakeHost();
 	await threads.acquire("t1");
 	const hosted = built[0];
 	if (hosted === undefined) throw new Error("no session built");
@@ -175,9 +182,12 @@ test("⚠ a stop must stop: if clearing the queue throws, pi is still told to ab
 	hosted.failClear.with = new Error("a queue listener threw");
 	expect(threads.abort("t1")).toEqual({ outcome: "aborted", restored: [] });
 	expect(hosted.record.aborts).toBe(1);
-	expect(problems.map(String)).toEqual([
-		expect.stringContaining("clearing the queue failed, queued prompts lost: Error: a queue listener threw"),
-	]);
+	logs.assertLogged({
+		level: "error",
+		rawMessage: "clearing the queue failed, queued prompts lost: {error}",
+		properties: (properties) =>
+			properties.threadId === "t1" && String(properties.error).includes("a queue listener threw"),
+	});
 });
 
 // ── the lease fence (#109) ─────────────────────────────────────────────────────
@@ -186,16 +196,23 @@ test("⚠ a stop must stop: if clearing the queue throws, pi is still told to ab
 // other half; since #116 abort is the operator's, by thread, on purpose — see below.)
 
 test("⚠ a lease superseded by a later acquire is stale: its release touches nothing, and says so", async () => {
-	const { threads, built, problems } = fakeHost();
+	const { threads, built } = fakeHost();
 	const first = await threads.acquire("t1");
 	const second = await threads.acquire("t1");
 	expect(second.generation).toBe(first.generation + 1);
 
 	first.release();
 	expect(threads.peek("t1")?.busy).toBe(true);
-	expect(problems.map(String)).toEqual([
-		expect.stringContaining(`release from run ${first.generation} ignored — run ${second.generation} holds it now`),
-	]);
+	logs.assertLogged({
+		level: "warning",
+		rawMessage: "{operation} from run {generation} ignored: {because}",
+		properties: {
+			threadId: "t1",
+			generation: first.generation,
+			operation: "release",
+			because: `run ${second.generation} holds it now`,
+		},
+	});
 
 	// An operator's abort is by thread, not by lease: it stops whatever runs NOW (#116).
 	expect(threads.abort("t1").outcome).toBe("aborted");
@@ -203,13 +220,16 @@ test("⚠ a lease superseded by a later acquire is stale: its release touches no
 });
 
 test("⚠ a lease from before a rebuild is stale, and the rebuilt thread continues the count", async () => {
-	const { threads, built, problems } = fakeHost();
+	const { threads, built } = fakeHost();
 	const before = await threads.acquire("t1");
 	before.release();
 	await sleep(30); // idle window: disposed
 	expect(threads.liveThreadCount()).toBe(0);
 	before.release();
-	expect(problems.map(String)).toEqual([expect.stringContaining("the thread was disposed")]);
+	logs.assertLogged({
+		level: "warning",
+		properties: { threadId: "t1", operation: "release", because: "the thread was disposed" },
+	});
 
 	const after = await threads.acquire("t1");
 	expect(after.generation).toBe(before.generation + 1);
@@ -225,7 +245,6 @@ test("a failed build leaves no entry, so the next request retries", async () => 
 			if (attempts === 1) return Promise.reject(new Error("loader exploded"));
 			return Promise.resolve(fakeHosted().hosted);
 		},
-		onProblem: undefined,
 		idleTimeoutMs: 20,
 	});
 	await expect(threads.acquire("t1")).rejects.toThrow("loader exploded");
@@ -256,7 +275,6 @@ test("⚠ a build in flight at shutdown is disposed on arrival, never published;
 			new Promise<HostedSession>((resolve) => {
 				finishBuild = () => resolve(hosted.hosted);
 			}),
-		onProblem: undefined,
 		idleTimeoutMs: 20,
 	});
 	const pending = threads.acquire("t1");
@@ -270,18 +288,23 @@ test("⚠ a build in flight at shutdown is disposed on arrival, never published;
 });
 
 test("a dispose that throws is reported, not thrown", async () => {
-	const problems: unknown[] = [];
 	const broken = fakeHosted();
 	broken.hosted.session.dispose = () => {
 		throw new Error("already gone");
 	};
 	const threads = createThreadRegistry({
 		createSession: () => Promise.resolve(broken.hosted),
-		onProblem: (problem) => problems.push(problem),
 		idleTimeoutMs: 20,
 	});
 	await threads.acquire("t1");
 	threads.shutdown();
-	expect(problems).toHaveLength(1);
-	expect(String(problems[0])).toContain("already gone");
+	expect(logs.records).toHaveLength(1);
+	logs.assertLogged({
+		level: "error",
+		rawMessage: "dispose after {why} failed: {error}",
+		properties: (properties) =>
+			properties.threadId === "t1" &&
+			properties.why === "server shutdown" &&
+			String(properties.error).includes("already gone"),
+	});
 });

@@ -132,6 +132,16 @@ export function printHarnessDir(repoRoot: string): string {
 	return join(repoRoot, ZEN_RUNTIME_DIRECTORY, "print-harness");
 }
 
+/**
+ * Where the harness's log lives (#132): `.zen/logs/zen-YYYY-MM-DD.jsonl`, ONE file per day
+ * that every process appends to (dated, never renamed, so a second writer is safe — see
+ * `web/server/logging.ts`). Under `.zen/` so bun never autoloads from it and the write gate
+ * already knows it (guard.ts).
+ */
+export function zenLogsDir(repoRoot: string): string {
+	return join(repoRoot, ZEN_RUNTIME_DIRECTORY, "logs");
+}
+
 /** The harness package — the directory `zen.mjs` hands to pi's `-e`. */
 export function harnessPackageDir(repoRoot: string): string {
 	return join(repoRoot, "packages", "harness");

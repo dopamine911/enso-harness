@@ -13,6 +13,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@logtape/logtape": "2.3.4",
     "typebox": "^1.3.25"
   },
   "devDependencies": {

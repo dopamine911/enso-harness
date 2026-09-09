@@ -430,6 +430,7 @@ Settled. Each carries its reason so a later session can tell when the reason has
 | **One thread id, pi's session id** (#95) | The browser mints it, pi stores under it, the rail finds it again after a restart. Validated as a filename component at every entry point. |
 | **`AgentHost` is the storage seam** | The only file that touches `SessionManager` or the session-file layout. Keeps a later store a one-file change. |
 | **Run provenance lives in pi's log as custom entries**, never a side file | picc's `modes` entry is the pattern; a fork inherits provenance by construction. Fields beyond what pi records are deferred to the lineage phase. |
+| **Logging is one file for the harness, off the loop, and the file is the export** (#132) | LogTape under a typed `zenLogger`; every process appends to the same day's `.zen/logs/zen-YYYY-MM-DD.jsonl` (`process` on every record; dated so nothing is ever renamed under another writer — measured with two processes, 800 lines, none torn), unbuffered (measured: the buffered sink held the last record until the next one), redacted by field name **at write** — the canonical record this harness never rewrites is pi's session log, and a file that is safe at rest is what a user can hand over. A record is an event with properties (`threadId`, `generation`, `toolCallId`), never a sentence with the values baked in. `test/logging-gate.test.ts` holds the line: no production `console.*`, `@logtape/*` named only where the schema and the configurators live. |
 | **Presentation is ported from ai-elements**, not built (#31, #121) | Three files ported so far; the composer is the one hand-rolled divergence, to be reconciled. Hand-rolling needs its reason in the file header. |
 | Load-bearing decisions are **written where the code is**, with the issue number | The issue is the discussion; the comment is the decision. The table below is the index. |
 
@@ -458,6 +459,7 @@ so a reader knows where to look before touching the file.
 | #112 | The wire is `ZenObservation`; AG-UI is made in exactly one place, the adapter | `core/follow.ts`, `web/follow-connection.ts` |
 | #114 | The host synthesises `dialog-settled` at the one point every settle path crosses; the snapshot lists every open question | `web/host/extension-ui-context.ts`, `core/follow.ts` |
 | #116 | `POST …/abort` tells pi; the run ends on the feed; one abort per run; a failed unary POST is an outcome, not a rejection | `server/thread-registry.ts`, `web/follow-connection.ts` |
+| #132 | One `zenLogger`, one dated file for every process, redaction at write, the route binds `threadId` for everything under it; the `onProblem` callbacks are gone | `core/log.ts`, `web/server/logging.ts`, `test/logging-gate.test.ts` |
 
 ---
 

@@ -15,13 +15,34 @@
  * unconfined (#9), neither surface may be reachable from another host.
  */
 import { join } from "node:path";
-import { findRepoRoot, webPackageDir } from "@zen/core";
+import { findRepoRoot, webPackageDir, zenLogger, zenLogsDir } from "@zen/core";
 import homepage from "../../index.html";
+import { configureProcessLogging } from "./logging.ts";
 
 const WEB_PORT = 5178;
 const API_UPSTREAM_ORIGIN = "http://127.0.0.1:5179";
 
-const publicDir = join(webPackageDir(findRepoRoot(import.meta.url)), "public");
+const repoRoot = findRepoRoot(import.meta.url);
+const publicDir = join(webPackageDir(repoRoot), "public");
+
+// Its own process, the same day's file (#132) — nothing of substance happens here, but a
+// proxy that cannot reach the zen server is exactly the line a bundle needs.
+const disposeLogging = await configureProcessLogging({
+	logsDir: zenLogsDir(repoRoot),
+	process: "web",
+	console: "info",
+});
+const log = zenLogger("server", "web");
+// A stop from the hub or a terminal: flush the file, then exit the way the signal would
+// have (128 + its number: 130 for SIGINT, 143 for SIGTERM), so a supervisor reads it right.
+for (const [signal, code] of [
+	["SIGINT", 130],
+	["SIGTERM", 143],
+] as const) {
+	process.once(signal, () => {
+		void disposeLogging().finally(() => process.exit(code));
+	});
+}
 
 /**
  * Forward an `/api/*` request to the zen server, streaming both directions.
@@ -42,6 +63,11 @@ function proxyToApiServer(request: Request): Promise<Response> {
 		signal: request.signal,
 		// The zen server never redirects; surfacing one un-followed would be a bug report.
 		redirect: "manual",
+	}).catch((error: unknown) => {
+		// A browser's own abort is not a failure; the zen server being down is.
+		if (!request.signal.aborted)
+			log.error("proxy to {upstream} failed: {error}", { upstream: API_UPSTREAM_ORIGIN, error });
+		throw error;
 	});
 }
 
@@ -69,15 +95,19 @@ try {
 			"/*": { dir: publicDir },
 		},
 	});
-	console.error(`[zen-web] serving ${server.url} (bun ${Bun.version}, hmr on)`);
-	console.error(`[zen-web]   /api -> ${API_UPSTREAM_ORIGIN}`);
+	log.info("serving {url} (bun {bun}, hmr on) · /api -> {upstream}", {
+		url: String(server.url),
+		bun: Bun.version,
+		upstream: API_UPSTREAM_ORIGIN,
+	});
 } catch (error) {
 	// The same courtesy the zen server extends on its port: a clash is a one-line
 	// diagnosis, not a stack trace.
 	if (error instanceof Error && error.message.includes("in use")) {
-		console.error(
-			`[zen-web] port ${WEB_PORT} is already in use — another web dev server is probably running. Stop it first.`,
-		);
+		log.error("port {port} is already in use — another web dev server is probably running; stop it first", {
+			port: WEB_PORT,
+		});
+		await disposeLogging();
 		process.exit(1);
 	}
 	throw error;

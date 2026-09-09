@@ -42,6 +42,16 @@ export {
 	ZEN_PERSISTENCE_WRITE_DIRECTORIES,
 } from "./guard.ts";
 export {
+	withZenLogContext,
+	ZEN_LOG_ROOT,
+	ZEN_REDACT_FIELDS,
+	type ZenLogger,
+	type ZenLogLayer,
+	ZenLogLine,
+	type ZenLogProperties,
+	zenLogger,
+} from "./log.ts";
+export {
 	ZenCustomSessionEntry,
 	ZenDialogOutcome,
 	ZenDialogSettled,
@@ -76,6 +86,7 @@ export {
 	rootDotenvPath,
 	webPackageDir,
 	zenAgentDir,
+	zenLogsDir,
 	zenSecretsPath,
 } from "./paths.ts";
 export {

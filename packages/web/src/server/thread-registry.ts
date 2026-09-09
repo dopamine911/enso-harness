@@ -22,7 +22,7 @@
  * ⓘ Named non-coverage: the map is unbounded, and a client that omits `threadId` gets a
  * fresh session per request that lives for the idle window. Loopback-only, dev-only server.
  */
-import type { PiSession, ZenObservation } from "@zen/core";
+import { type PiSession, type ZenObservation, zenLogger } from "@zen/core";
 import type { HostedSession } from "../host/agent-host.ts";
 import { createEventTail, type EventTail } from "../host/event-tail.ts";
 import { mapPiEvent } from "../rpc/map-events.ts";
@@ -42,6 +42,7 @@ export type ThreadFeedListener = (frame: ThreadFeedFrame) => void;
 
 /** A thread's observers and their attachment to whichever session the thread currently has. */
 interface ThreadFeed {
+	readonly threadId: string;
 	readonly listeners: Set<ThreadFeedListener>;
 	seq: number;
 	/** The session subscription while the thread is live; undefined while it is not. */
@@ -62,10 +63,11 @@ interface ThreadFeed {
  */
 export const THREAD_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
+const log = zenLogger("server", "threads");
+
 export interface ThreadRegistryOptions {
 	/** Builds a hosted session for a thread — `AgentHost.createSession`. Injected so tests need no pi. */
 	createSession: (threadId: string) => Promise<HostedSession>;
-	onProblem: ((problem: unknown) => void) | undefined;
 	/** Injectable for tests — the default is minutes. */
 	idleTimeoutMs?: number;
 }
@@ -197,7 +199,7 @@ function viewOf(threadId: string, thread: ThreadEntry): ThreadView {
 }
 
 export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegistry {
-	const { createSession, onProblem } = options;
+	const { createSession } = options;
 	const idleTimeoutMs = options.idleTimeoutMs ?? THREAD_IDLE_TIMEOUT_MS;
 
 	const threads = new Map<string, ThreadEntry>();
@@ -229,7 +231,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 						listener(next);
 					} catch (error) {
 						// One bad follower never breaks the feed for the others, nor the session.
-						onProblem?.(`thread feed: a listener threw: ${String(error)}`);
+						log.warn("thread feed: a listener threw: {error}", { threadId: feed.threadId, error });
 					}
 				}
 			}
@@ -285,7 +287,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 		try {
 			thread.hosted.session.dispose();
 		} catch (error) {
-			onProblem?.(`thread ${threadId}: dispose after ${why} failed: ${String(error)}`);
+			log.error("dispose after {why} failed: {error}", { threadId, why, error });
 		}
 		publishStatus(threadId, undefined);
 	}
@@ -355,11 +357,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 		try {
 			cleared = thread.hosted.session.clearQueue();
 		} catch (error: unknown) {
-			onProblem?.(`thread ${threadId}: clearing the queue failed, queued prompts lost: ${String(error)}`);
+			log.error("clearing the queue failed, queued prompts lost: {error}", { threadId, error });
 		}
 		const inFlight = thread.hosted.session
 			.abort()
-			.catch((error: unknown) => onProblem?.(`thread ${threadId}: abort failed: ${String(error)}`))
+			.catch((error: unknown) => log.error("abort failed: {error}", { threadId, error }))
 			.finally(() => {
 				if (thread.abortInFlight === inFlight) thread.abortInFlight = undefined;
 			});
@@ -372,10 +374,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 		/** Current: the same entry, and no acquisition since. Stale is information, never a throw. */
 		function current(operation: string): boolean {
 			if (threads.get(threadId) === thread && thread.generation === generation) return true;
-			onProblem?.(
-				`thread ${threadId}: ${operation} from run ${generation} ignored — ` +
-					(threads.get(threadId) === undefined ? "the thread was disposed" : `run ${thread.generation} holds it now`),
-			);
+			log.warn("{operation} from run {generation} ignored: {because}", {
+				threadId,
+				generation,
+				operation,
+				because:
+					threads.get(threadId) === undefined ? "the thread was disposed" : `run ${thread.generation} holds it now`,
+			});
 			return false;
 		}
 		return {
@@ -421,7 +426,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 		observe(threadId: string, listener: ThreadFeedListener): ThreadFollow {
 			let feed = feeds.get(threadId);
 			if (feed === undefined) {
-				feed = { listeners: new Set(), seq: 0, detach: undefined, queued: [], publishing: false };
+				feed = { threadId, listeners: new Set(), seq: 0, detach: undefined, queued: [], publishing: false };
 				feeds.set(threadId, feed);
 			}
 			feed.listeners.add(listener);
