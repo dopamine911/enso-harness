@@ -333,19 +333,31 @@ test("an unreadable blocking request is declined on pi's behalf and told to the 
 	server.abort();
 });
 
-test("⚠ the follow closing under an open run is a run error, not a spinner forever", async () => {
+test("⚠ the follow closing under an open run is a run error, then the ending is said as a chunk — not when this page leaves", async () => {
 	const server = scripted();
 	server.frame(SNAPSHOT_IDLE);
 	await server.untilChunks(3);
 	await send(server, "hello");
 	await server.untilChunks(5);
 	server.closeFollow();
-	await server.untilChunks(6);
+	await server.untilChunks(7);
 	expect(server.chunks[5]).toMatchObject({
 		type: EventType.RUN_ERROR,
 		runId: "r1",
 		message: expect.stringContaining("closed"),
 	});
+	// #103 receipt, step 8: the server went away; the page is told even with no run open.
+	expect(server.chunks[6]).toEqual({ type: EventType.CUSTOM, name: "zen.follow-ended", value: { threadId: "t1" } });
+
+	// This page leaving (abort) is not the server ending: no chunk.
+	const leaving = scripted();
+	leaving.frame(SNAPSHOT_IDLE);
+	await leaving.untilChunks(3);
+	leaving.abort();
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	expect(leaving.chunks.some((chunk) => chunk.type === EventType.CUSTOM && chunk.name === "zen.follow-ended")).toBe(
+		false,
+	);
 });
 
 test("a frame that fails the wire schema is reported and skipped, never rendered", async () => {

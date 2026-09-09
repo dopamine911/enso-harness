@@ -11,6 +11,13 @@ import { Check } from "typebox/value";
 import { Button } from "./components/ui/button.tsx";
 import type { RecordedCustomChunk } from "./custom-event-router.ts";
 import { type PermissionModeState, usePermissionMode } from "./permission-mode.tsx";
+import { boundedFailureDetail } from "./resumable-sessions.ts";
+import {
+	ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
+	ZEN_CUSTOM_EVENT_ENTRY,
+	ZEN_CUSTOM_EVENT_FOLLOW_ENDED,
+	ZEN_CUSTOM_EVENT_RUN,
+} from "./rpc/custom-event-names.ts";
 import type { SessionStats } from "./session-stats.tsx";
 import { useStore, useThreadStores } from "./store.ts";
 
@@ -58,6 +65,18 @@ export function describeGenerationDrift(browser: number | undefined, server: num
 		return `server is at run #${server} — ${runs} run${runs === 1 ? "" : "s"} this page did not make (another tab or client)`;
 	}
 	return `server is at run #${server}, behind this page — the server restarted since this page's last run`;
+}
+
+/**
+ * The server holds no session for a thread this page ran on (#103 receipt, step 8): the
+ * server restarted, or evicted the thread. Undefined when the page never ran here (a
+ * fresh thread's 404 is information, not a disagreement) or while the server still
+ * answers for the thread.
+ */
+export function describeLostSession(browser: number | undefined, sessionMissing: boolean): string | undefined {
+	// #0 is the snapshot's "no acquisition yet" — a fresh thread's receipt, not a run this page made.
+	if (browser === undefined || browser === 0 || !sessionMissing) return undefined;
+	return `this page ran #${browser} here, and the server holds no session for the thread — it restarted, or evicted the thread`;
 }
 
 export interface SessionDebugViewProps {
@@ -133,7 +152,10 @@ export function SessionDebugView({
 	const browserMode = browser.mode.mode ?? "unknown";
 	const hostMode = session?.permissionMode.mode;
 	const branchMode = session === undefined ? undefined : persistedPermissionMode(session.entries);
-	const generationDrift = describeGenerationDrift(browser.generation, session?.generation);
+	const sessionMissing = error === NO_SESSION_YET;
+	const generationDrift =
+		describeGenerationDrift(browser.generation, session?.generation) ??
+		describeLostSession(browser.generation, sessionMissing);
 	return (
 		<aside aria-label="session debug" className="flex flex-col gap-3 p-3 font-mono text-muted-foreground text-xs">
 			<div className="flex flex-wrap items-center gap-2">
@@ -243,7 +265,7 @@ export class InspectionFetchError extends Error {
 /** Fetches one thread's inspection; a non-2xx becomes an `InspectionFetchError`. */
 export async function fetchThreadInspection(threadId: string): Promise<ZenThreadInspection> {
 	const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}`);
-	if (!response.ok) throw new InspectionFetchError(response.status, await response.text());
+	if (!response.ok) throw new InspectionFetchError(response.status, boundedFailureDetail(await response.text()));
 	const payload: unknown = await response.json();
 	if (!Check(ZenThreadInspection, payload)) throw new Error("the server's inspection payload did not match its schema");
 	return payload;
@@ -252,7 +274,7 @@ export async function fetchThreadInspection(threadId: string): Promise<ZenThread
 /** Fetches one thread's event tails (#97); the same 404 rule as the inspection. */
 export async function fetchThreadEvents(threadId: string): Promise<ZenThreadEvents> {
 	const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/events`);
-	if (!response.ok) throw new InspectionFetchError(response.status, await response.text());
+	if (!response.ok) throw new InspectionFetchError(response.status, boundedFailureDetail(await response.text()));
 	const payload: unknown = await response.json();
 	if (!Check(ZenThreadEvents, payload)) throw new Error("the server's events payload did not match its schema");
 	return payload;
@@ -264,8 +286,13 @@ async function fetchThreadDebug(threadId: string): Promise<{ session: ZenThreadI
 	return { session, events };
 }
 
-/** What a 404 means here: nothing has run on this thread yet, which is information, not a failure. */
-export const NO_SESSION_YET = "no live session yet — nothing has run on this thread";
+/**
+ * What a 404 means here: the server holds no session for the thread — nothing has run on
+ * it on this server, or the server no longer holds it (restarted, evicted). Which of the
+ * two is the page's to say, against its own run count — see {@link describeLostSession}.
+ */
+export const NO_SESSION_YET =
+	"no live session on this server — nothing has run on this thread here, or the server no longer holds it";
 
 /**
  * Only the LATEST request's outcome may be applied (PR #87 review). The drawer refetches
@@ -292,9 +319,30 @@ export function latestWins<T>(issue: () => Promise<T>): () => Promise<T | undefi
 	};
 }
 
-export interface SessionDebugDrawerProps {
-	/** The chat's `isLoading`: the drawer refetches when this turns false, i.e. when a run settles. */
-	readonly runInFlight: boolean;
+/**
+ * The chunks that mean "the server's view of this thread changed" — the moments the pane's
+ * server columns can be stale (#103): a status frame (`zen.run`, sent at every busy
+ * transition, this page's run or another tab's), a persisted mode change (`zen.entry`), a
+ * question settling (`zen.dialog-settled`), and the follow ending under this page
+ * (`zen.follow-ended`) — after which the last fetch describes a session the server may no
+ * longer hold.
+ */
+const SERVER_STATE_CHUNKS: ReadonlySet<string> = new Set([
+	ZEN_CUSTOM_EVENT_RUN,
+	ZEN_CUSTOM_EVENT_ENTRY,
+	ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
+	ZEN_CUSTOM_EVENT_FOLLOW_ENDED,
+]);
+/**
+ * The sequence of the latest server-state chunk, or undefined before any: the drawer
+ * refreshes when this moves. Exported for `__tests__/session-debug.test.tsx`.
+ */
+export function latestServerStateSequence(chunks: readonly RecordedCustomChunk[]): number | undefined {
+	for (let position = chunks.length - 1; position >= 0; position -= 1) {
+		const chunk = chunks[position];
+		if (chunk !== undefined && SERVER_STATE_CHUNKS.has(chunk.name)) return chunk.sequence;
+	}
+	return undefined;
 }
 
 /** The clipboard call's outcome, so a failed copy does not look identical to a successful one. */
@@ -303,12 +351,16 @@ export type CopyState = "idle" | "copied" | "failed";
 /**
  * The drawer wired to the stores, the router's record, and the server. Mounted by `?debug`.
  *
- * Refetches on open and each time a run SETTLES — that is the moment the session changed
- * and a human wants to compare — plus on demand. Not polled: a debugging surface should
- * put no request in the trace a human is trying to read. Opening it on a fresh thread
- * reads "nothing has run yet", the honest state, rather than an error.
+ * Refetches on open and each time the SERVER says the thread changed — a status frame, a
+ * persisted mode, a settled question — plus on demand. ⚠ Not this page's `isLoading`
+ * (#103 receipt): a run another tab started never toggles it, so a pane that followed a
+ * `/mode` answered elsewhere sat on its mount-time fetch and showed MISMATCH against a
+ * browser belief that was correct — the pane was stale, not the belief. The status frame
+ * is the server's own word and arrives for every run, whoever started it. Not polled: a
+ * debugging surface should put no request in the trace a human is trying to read. Opening
+ * it on a fresh thread reads "nothing has run yet", the honest state, rather than an error.
  */
-export function SessionDebugDrawer({ runInFlight }: SessionDebugDrawerProps): React.ReactNode {
+export function SessionDebugDrawer(): React.ReactNode {
 	const stores = useThreadStores();
 	const { threadId } = stores;
 	const mode = usePermissionMode();
@@ -342,8 +394,17 @@ export function SessionDebugDrawer({ runInFlight }: SessionDebugDrawerProps): Re
 		);
 	}, [fetchLatest]);
 	useEffect(() => {
-		if (!runInFlight) refresh();
-	}, [runInFlight, refresh]);
+		refresh(); // on open, and again for a new thread
+		// Then on every server-state chunk: a subscription rather than a render dependency,
+		// so a `zen.usage` or an unmapped delta re-renders the list without refetching.
+		let seen = latestServerStateSequence(stores.recentChunks.get());
+		return stores.recentChunks.subscribe(() => {
+			const latest = latestServerStateSequence(stores.recentChunks.get());
+			if (latest === seen) return;
+			seen = latest;
+			refresh();
+		});
+	}, [stores, refresh]);
 	const copy = (): void => {
 		navigator.clipboard.writeText(JSON.stringify({ threadId, browser, session, events }, null, 2)).then(
 			() => setCopyState("copied"),

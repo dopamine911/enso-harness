@@ -18,7 +18,8 @@ import { toolResultState } from "./ZenToolResult.tsx";
  * a bar you never learn to look at.
  *
  * ⚠ EVERYTHING HERE IS DERIVED FROM STATE THE PAGE ALREADY HOLDS — no new wire. Activity
- * from `chat.isLoading` and the shape of the last message; counts from the message list;
+ * from `chat.sessionGenerating` (the shared run flag — `isLoading` is request-local and the
+ * follow adapter never raises it, #103 receipt) and the shape of the last message; counts from the message list;
  * cost and prompt size from the `zen.usage` store (session-stats.tsx). Timing — LLM time,
  * TTFT, tok/s — is NOT on the wire and is not invented here; the host would have to stamp
  * events. That is a later slice of #90, named there.

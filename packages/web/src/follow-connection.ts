@@ -10,6 +10,7 @@ import {
 } from "@zen/core";
 import { Check } from "typebox/value";
 import {
+	ZEN_CUSTOM_EVENT_FOLLOW_ENDED,
 	ZEN_CUSTOM_EVENT_MODE,
 	ZEN_CUSTOM_EVENT_OPEN_DIALOGS,
 	ZEN_CUSTOM_EVENT_RUN,
@@ -265,6 +266,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 						runId: run.runId,
 						message: "the follow closed before the run settled",
 					});
+				}
+				// The server went away under this page (#103 receipt, step 8) — not this page
+				// leaving. Said as a chunk so the page can show it and the debug pane refetches:
+				// with no run open nothing else would mention it, and the pane would keep
+				// presenting its last fetch of a session that may no longer exist as current.
+				if (!abort.aborted) {
+					push({ type: EventType.CUSTOM, name: ZEN_CUSTOM_EVENT_FOLLOW_ENDED, value: { threadId } });
 				}
 				wake?.();
 				wake = undefined;

@@ -5,6 +5,7 @@ import {
 	ZEN_CUSTOM_EVENT_DIALOG,
 	ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
 	ZEN_CUSTOM_EVENT_ENTRY,
+	ZEN_CUSTOM_EVENT_FOLLOW_ENDED,
 	ZEN_CUSTOM_EVENT_MODE,
 	ZEN_CUSTOM_EVENT_NOTIFY,
 	ZEN_CUSTOM_EVENT_OPEN_DIALOGS,
@@ -102,6 +103,12 @@ test("two questions open: a settle for the one NOT shown leaves the card; the sn
 	route(ZEN_CUSTOM_EVENT_OPEN_DIALOGS, { open: [{ id: "third", dialog: SELECT }] });
 	expect(stores.dialog.get()).toEqual({ id: "third", dialog: SELECT });
 	expect(notificationMessages()).toEqual([]);
+});
+
+test("zen.follow-ended is said where the human looks, as an error of this run (#103 receipt)", () => {
+	route(ZEN_CUSTOM_EVENT_FOLLOW_ENDED, { threadId: "t1" });
+	expect(notificationMessages()).toEqual([expect.stringContaining("the connection to the server ended")]);
+	expect(stores.notifications.get().at(-1)).toMatchObject({ notifyType: "error", origin: "run" });
 });
 
 test("zen.open-dialogs is the snapshot's complete list: it replaces the card, an empty list clears it, a malformed one is ignored (#114)", () => {

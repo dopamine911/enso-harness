@@ -45,16 +45,35 @@ export function createResumableSessionsStore(
 	};
 }
 
+/**
+ * A failed response's body as one readable line: its first line, bounded. The dev proxy
+ * answers a dead API with Bun's whole HTML error page (#103 receipt, step 8), and quoting
+ * it verbatim filled the rail and squeezed the live list out of view — the moment the
+ * operator most needed to see which thread they were on. Shared with the debug pane's
+ * fetchers, which had the same page in their session column.
+ */
+export const FAILURE_DETAIL_MAX_LENGTH = 120;
+export function boundedFailureDetail(body: string): string {
+	const line = body.split("\n", 1)[0]?.trim() ?? "";
+	return line.length > FAILURE_DETAIL_MAX_LENGTH ? `${line.slice(0, FAILURE_DETAIL_MAX_LENGTH)}…` : line;
+}
+
+/** The status and the bounded body, as one line. */
+export async function describeFailedResponse(response: Response): Promise<string> {
+	const detail = boundedFailureDetail(await response.text());
+	return detail.length === 0 ? String(response.status) : `${response.status} ${detail}`;
+}
+
 async function fetchSessionList(): Promise<unknown> {
 	const response = await fetch("/api/sessions");
-	if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+	if (!response.ok) throw new Error(await describeFailedResponse(response));
 	return response.json();
 }
 
 /** A stored thread's history, for `adoptThread`; a non-2xx throws with the status in the message. */
 export async function fetchThreadHistory(threadId: string): Promise<ZenThreadHistory> {
 	const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/history`);
-	if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+	if (!response.ok) throw new Error(await describeFailedResponse(response));
 	const payload: unknown = await response.json();
 	if (!Check(ZenThreadHistory, payload)) throw new Error("the server's history payload did not match its schema");
 	return payload;
