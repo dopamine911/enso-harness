@@ -24,6 +24,8 @@ interface ScriptedServer {
 	/** Resolves once at least `count` chunks have been yielded. */
 	readonly untilChunks: (count: number) => Promise<void>;
 	readonly abort: () => void;
+	/** How many `POST …/abort` the server saw (#116). */
+	readonly abortCount: () => number;
 	/** Hold the next prompt's answer; returns the release. */
 	readonly holdPrompt: () => () => void;
 }
@@ -34,7 +36,9 @@ function scripted(
 		body: { threadId: "t1", messageId: "pm1", generation: 1, queued: false },
 	},
 	dialogStatus = 204,
+	abortStatus = 204,
 ): ScriptedServer {
+	let aborts = 0;
 	let write: (text: string) => void = () => undefined;
 	let close: () => void = () => undefined;
 	/** The prompt route answers only once this resolves — open by default; a test may hold it. */
@@ -62,6 +66,10 @@ function scripted(
 		if (url.endsWith("/dialog")) {
 			dialogs.push(JSON.parse(String(init?.body)));
 			return Promise.resolve(new Response(dialogStatus === 204 ? null : "no", { status: dialogStatus }));
+		}
+		if (url.endsWith("/abort") && init?.method === "POST") {
+			aborts += 1;
+			return Promise.resolve(new Response(abortStatus === 204 ? null : "no", { status: abortStatus }));
 		}
 		return Promise.resolve(new Response("not found", { status: 404 }));
 	}) as typeof fetch;
@@ -99,6 +107,7 @@ function scripted(
 			return promise;
 		},
 		abort: () => controller.abort(),
+		abortCount: () => aborts,
 		holdPrompt: () => {
 			const gate = Promise.withResolvers<void>();
 			promptGate = gate;
@@ -281,6 +290,28 @@ test("answerDialog names what the server did: answered (204), gone (404), refuse
 	const refused = scripted(undefined, 422);
 	expect(await refused.connection.answerDialog({ id: "d1", value: "zzz" })).toBe("refused");
 	expect(refused.problems).toEqual([expect.stringContaining("refused: 422")]);
+});
+
+test("abort is one POST to …/abort and names what the server did; it closes no run itself — the feed does (#116)", async () => {
+	const server = scripted();
+	server.frame(SNAPSHOT_IDLE);
+	await server.untilChunks(3);
+	await send(server, "hello");
+	await server.untilChunks(5);
+	expect(await server.connection.abort()).toBe("aborted");
+	expect(server.abortCount()).toBe(1);
+	// Nothing closed here: the run ends when the server's settle arrives, like any run.
+	expect(server.chunks.some((chunk) => chunk.type === EventType.RUN_FINISHED)).toBe(false);
+	server.frame({ type: "observation", seq: 1, observation: { kind: "settled" } });
+	server.frame({ type: "status", live: true, busy: false, generation: 1 });
+	await server.untilChunks(7);
+	expect(server.chunks).toContainEqual({ type: EventType.RUN_FINISHED, threadId: "t1", runId: "r1" });
+	server.abort();
+
+	expect(await scripted(undefined, 204, 409).connection.abort()).toBe("idle");
+	const gone = scripted(undefined, 204, 404);
+	expect(await gone.connection.abort()).toBe("gone");
+	expect(gone.problems).toEqual([expect.stringContaining("abort gone: 404")]);
 });
 
 test("⚠ a blocking question crosses as zen.dialog — no interrupt, no run boundary — and the answer is one POST", async () => {

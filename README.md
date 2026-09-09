@@ -258,7 +258,8 @@ own loop; the browser is a client of the same harness the TUI runs.
 
 **The wire is `ZenObservation`, not AG-UI (#112).** pi's events become observations (`@zen/core`) and
 cross as a per-thread *follow* — `GET /api/threads/:id/follow`, one snapshot then observations with a
-sequence number — while a prompt is a unary `POST …/prompt` that answers at admission. The browser's
+sequence number — while a prompt is a unary `POST …/prompt` that answers at admission, and a stop is a
+unary `POST …/abort` (#116) whose effect arrives on the follow like any run's end. The browser's
 connection adapter (`follow-connection.ts`) derives AG-UI in memory for TanStack's renderer; it is never
 on the wire or stored. Same reason ACP is kept off the pi seam: AG-UI carries chat and interrupts, not
 entries, partial tool output, mode, usage or queue state. `docs/architecture.md`, decided constraints.

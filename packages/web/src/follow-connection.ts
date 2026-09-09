@@ -108,9 +108,23 @@ async function* readSseFrames(body: ReadableStream<Uint8Array>, signal: AbortSig
  */
 export type DialogAnswerOutcome = "answered" | "gone" | "refused";
 
+/**
+ * What the server did with an abort (#116):
+ *   `aborted`  pi was told (204). The run ends ON THE FOLLOW — `settled`, then `status` — so
+ *              nothing here closes it; the same frames close it for every follower.
+ *   `idle`     nothing was running (409): the run ended between the click and the request.
+ *   `gone`     no live thread (404): restarted or evicted.
+ */
+export type AbortOutcome = "aborted" | "idle" | "gone";
+
 export interface FollowConnection extends SubscribeConnectionAdapter {
 	/** Answer the thread's open question. A non-`answered` outcome is also reported with the server's reason. */
 	readonly answerDialog: (answer: PiDialogResponse) => Promise<DialogAnswerOutcome>;
+	/**
+	 * Stop the run in flight (#116). ⚠ Not TanStack's `stop()`: that aborts this client's
+	 * in-flight POST, which returned at admission long ago, and touches nothing on the server.
+	 */
+	readonly abort: () => Promise<AbortOutcome>;
 }
 
 export function createFollowConnection(options: FollowConnectionOptions): FollowConnection {
@@ -361,5 +375,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		return outcome;
 	}
 
-	return { subscribe, send, answerDialog };
+	async function abort(): Promise<AbortOutcome> {
+		const response = await fetchImpl(`${base}/abort`, { method: "POST" });
+		if (response.status === 204) return "aborted";
+		const outcome: AbortOutcome = response.status === 409 ? "idle" : "gone";
+		onProblem?.(`thread ${threadId}: abort ${outcome}: ${response.status} ${await response.text()}`);
+		return outcome;
+	}
+
+	return { subscribe, send, answerDialog, abort };
 }

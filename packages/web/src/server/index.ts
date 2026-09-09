@@ -16,6 +16,7 @@ import {
 import { type AgentHost, createAgentHost } from "../host/agent-host.ts";
 import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
 import {
+	abortThread,
 	answerThreadDialog,
 	type FollowRouteDeps,
 	followThread,
@@ -33,10 +34,11 @@ const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/;
 const THREAD_EVENTS_ROUTE = /^\/api\/threads\/([^/?#]+)\/events$/;
 /** `GET /api/threads/<threadId>/history` — the branch as messages, live or stored (#95). */
 const THREAD_HISTORY_ROUTE = /^\/api\/threads\/([^/?#]+)\/history$/;
-/** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`. See `follow.ts`. */
+/** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
 const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/;
 const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/;
 const THREAD_DIALOG_ROUTE = /^\/api\/threads\/([^/?#]+)\/dialog$/;
+const THREAD_ABORT_ROUTE = /^\/api\/threads\/([^/?#]+)\/abort$/;
 
 /**
  * The dev backend: the thread routes the browser's `FollowConnection` talks to (#112), and
@@ -364,6 +366,12 @@ export function startZenServer(options: ZenServerOptions) {
 			if (threadId !== undefined) answerOrFail(respondToDialog(threadId, request, response), response);
 			return true;
 		}
+		const abortMatch = request.method === "POST" ? THREAD_ABORT_ROUTE.exec(url) : null;
+		if (abortMatch?.[1] !== undefined) {
+			const threadId = decodeThreadId(abortMatch[1], response);
+			if (threadId !== undefined) respondToAbort(threadId, response);
+			return true;
+		}
 		return false;
 	}
 
@@ -384,6 +392,18 @@ export function startZenServer(options: ZenServerOptions) {
 		}
 		response.writeHead(202, { "Content-Type": "application/json" });
 		response.end(JSON.stringify(outcome.receipt));
+	}
+
+	/** No body to read: the thread id is the whole request (#116). */
+	function respondToAbort(threadId: string, response: ServerResponse): void {
+		const outcome = abortThread(followDeps, threadId);
+		if (outcome.status !== 204) {
+			response.writeHead(outcome.status, { "Content-Type": "text/plain" });
+			response.end(outcome.reason);
+			return;
+		}
+		response.writeHead(204);
+		response.end();
 	}
 
 	async function respondToDialog(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
