@@ -1,7 +1,7 @@
 import { automaticPartsForMessage, type ChatUISelectedPart, selectChatUI } from "@tanstack/ai-client/ui";
 import { createChatHook, createChatHookContexts, type LayoutProps, type MessageProps } from "@tanstack/ai-react/ui";
 import type { PiDialogResponse, ZenDialogSpec } from "@zen/core";
-import { ArrowUpIcon, SquareIcon } from "lucide-react";
+import { ArrowUpIcon } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
 	Conversation,
@@ -252,7 +252,7 @@ function PermissionModeControl(): React.ReactNode {
 		<PermissionModeSelect
 			mode={mode}
 			available={available}
-			disabled={chat.isLoading}
+			disabled={chat.sessionGenerating}
 			// picc registers one command per mode, named exactly the mode (index.ts:526-536).
 			onSelect={(next) => void chat.sendMessage(`/${next}`)}
 		/>
@@ -467,23 +467,16 @@ const chatComponents = {
 							rows={1}
 							className="max-h-40 min-h-9 flex-1 resize-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
 						/>
-						{chat.isLoading ? (
-							// A run is in flight: the affordance is stop, not send. `stop()` is
-							// request-local on the hook return (verified in `types.d.ts`).
-							<Button
-								type="button"
-								size="icon"
-								variant="outline"
-								aria-label="stop the current response"
-								onClick={() => chat.stop()}
-							>
-								<SquareIcon />
-							</Button>
-						) : (
-							<Button type="submit" size="icon" aria-label="send message" disabled={draft.trim().length === 0}>
-								<ArrowUpIcon />
-							</Button>
-						)}
+						{/* Send, in flight or not (#103 receipt). Under the follow transport a prompt
+						    during a run QUEUES through pi (#75) — a follow-up is the right thing to
+						    offer. The stop button that stood here read `chat.isLoading`, which the
+						    adapter never raises (`send()` returns at admission), so it had not
+						    rendered since #113 — and `chat.stop()` aborts only the in-flight POST,
+						    not pi; there is no abort route on this wire yet (#116). A control that
+						    looks like stop and stops nothing is the #4 shape, so none is offered. */}
+						<Button type="submit" size="icon" aria-label="send message" disabled={draft.trim().length === 0}>
+							<ArrowUpIcon />
+						</Button>
 					</div>
 				</form>
 			);
@@ -537,13 +530,13 @@ const chatComponents = {
 						    moves the composer. */}
 						{debugOpen ? (
 							<div id="session-debug-pane" className="w-[30rem] shrink-0 overflow-y-auto border-l">
-								<SessionDebugDrawer runInFlight={chat.isLoading} />
+								<SessionDebugDrawer />
 							</div>
 						) : null}
 					</div>
 					{/* The status bar (#90): activity, turns, tool calls, cost — always visible, full
 					    width under transcript AND debug pane, so it is the one place to look. */}
-					<SessionStatusBar messages={chat.messages} isLoading={chat.isLoading} />
+					<SessionStatusBar messages={chat.messages} generating={chat.sessionGenerating} />
 				</div>
 			);
 		},
@@ -577,7 +570,7 @@ const chatComponents = {
 								// every later send (the Reasoning shell's auto-close latches after
 								// its first close, so they also never closed again) and overwrote
 								// each block's "Thought for N seconds" with the later run's timing.
-								isStreaming={chat.isLoading && isLastMessage && isTrailingPart}
+								isStreaming={chat.sessionGenerating && isLastMessage && isTrailingPart}
 								renderers={descriptorRenderers}
 							/>
 						))}
@@ -617,8 +610,8 @@ export function ThreadPane({
 	const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores]);
 	const chat = useAppChat();
 	useEffect(() => {
-		updateThreadSummary(threadId, { title: titleFromMessages(chat.messages), busy: chat.isLoading });
-	}, [threadId, chat.messages, chat.isLoading]);
+		updateThreadSummary(threadId, { title: titleFromMessages(chat.messages), busy: chat.sessionGenerating });
+	}, [threadId, chat.messages, chat.sessionGenerating]);
 	return (
 		<div className={active ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}>
 			<ThreadStoresContext.Provider value={stores}>

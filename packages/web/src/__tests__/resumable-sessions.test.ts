@@ -1,6 +1,26 @@
 import { expect, test } from "bun:test";
 import type { ZenThreadHistory } from "@zen/core";
-import { createResumableSessionsStore, createResumeRequests, sessionsNotOnThisPage } from "../resumable-sessions.ts";
+import {
+	createResumableSessionsStore,
+	createResumeRequests,
+	describeFailedResponse,
+	FAILURE_DETAIL_MAX_LENGTH,
+	sessionsNotOnThisPage,
+} from "../resumable-sessions.ts";
+
+// #103 receipt, step 8: the dev proxy answered a dead API with Bun's whole HTML error page,
+// and quoting it filled the rail. One line, bounded, status first.
+test("a failed response is described as its status and a bounded first line of the body", async () => {
+	expect(await describeFailedResponse(new Response("thread t1 is running\nsecond line", { status: 409 }))).toBe(
+		"409 thread t1 is running",
+	);
+	expect(await describeFailedResponse(new Response("", { status: 502 }))).toBe("502");
+	const page = `<!doctype html>${"x".repeat(500)}`;
+	const described = await describeFailedResponse(new Response(page, { status: 500 }));
+	expect(described.startsWith("500 <!doctype html>")).toBe(true);
+	expect(described.length).toBe("500 ".length + FAILURE_DETAIL_MAX_LENGTH + 1);
+	expect(described.endsWith("…")).toBe(true);
+});
 
 /** #95: a failed refresh remains visible without erasing the last known resumable sessions. */
 test("the resumable-session store validates listings and preserves the last good rows on failure", async () => {

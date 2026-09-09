@@ -4,6 +4,7 @@ import {
 	ZEN_CUSTOM_EVENT_DIALOG,
 	ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
 	ZEN_CUSTOM_EVENT_ENTRY,
+	ZEN_CUSTOM_EVENT_FOLLOW_ENDED,
 	ZEN_CUSTOM_EVENT_MODE,
 	ZEN_CUSTOM_EVENT_NOTIFY,
 	ZEN_CUSTOM_EVENT_OPEN_DIALOGS,
@@ -63,6 +64,16 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
 	}
 	if (eventType === ZEN_CUSTOM_EVENT_USAGE) {
 		stores.stats.applyUsage(data);
+		return;
+	}
+	if (eventType === ZEN_CUSTOM_EVENT_FOLLOW_ENDED) {
+		// The server went away under this page (#103 receipt): said where the human looks,
+		// because with no run open nothing else on the page would change.
+		stores.notifications.push(
+			"the connection to the server ended — the thread's state here is as of that moment; reload and resume it from the rail to reconnect",
+			"error",
+			"run",
+		);
 		return;
 	}
 	if (eventType !== ZEN_CUSTOM_EVENT_NOTIFY) return;

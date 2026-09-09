@@ -7,6 +7,7 @@ import {
 	type CopyState,
 	describeChunk,
 	InspectionFetchError,
+	latestServerStateSequence,
 	latestWins,
 	NO_SESSION_YET,
 	SessionDebugView,
@@ -140,6 +141,18 @@ test("no run yet on this page compares nothing: no MISMATCH, and it says so", ()
 	expect(rendered).not.toContain("MISMATCH");
 });
 
+// #103 receipt, step 8: the server restarted under a run. The pane must name the boundary,
+// not show a fresh thread's "nothing has run" as if the page had never run here.
+test("⚠ a 404 on a thread this page ran on is named as a lost session; on a fresh thread it is not a MISMATCH", () => {
+	const lost = render(believing("plan", 3), undefined, NO_SESSION_YET);
+	expect(lost).toContain("MISMATCH: this page ran #3 here, and the server holds no session");
+	const fresh = render({ ...believing("plan"), generation: undefined }, undefined, NO_SESSION_YET);
+	expect(fresh).not.toContain("MISMATCH");
+	expect(fresh).toContain("no live session on this server");
+	// A fresh thread's snapshot receipt is #0 — "no acquisition yet", not a run this page made.
+	expect(render(believing("plan", 0), undefined, NO_SESSION_YET)).not.toContain("MISMATCH");
+});
+
 test("an unflushed session says so instead of showing a path", () => {
 	expect(render(believing("plan"), inspection({ sessionFile: null }))).toContain("in memory, not flushed yet");
 	expect(render(believing("plan"), inspection({ sessionFile: "/agent/sessions/x.jsonl" }))).toContain(
@@ -162,6 +175,31 @@ test("every CUSTOM chunk the router sees is recorded, oldest first, with a stabl
 	const recorded = stores.recentChunks.get();
 	expect(recorded.map((chunk) => chunk.name)).toEqual(["zen.mode", "zen.unmapped"]);
 	expect(recorded[0]?.sequence).toBeLessThan(recorded[1]?.sequence ?? 0);
+});
+
+// #103 receipt: the pane refreshes when the SERVER says the thread changed, not when this
+// page's own run flag toggles — a run another tab started never toggles it.
+test("⚠ the refresh trigger moves on a status frame, a persisted mode or a settled question — and on nothing else", () => {
+	expect(latestServerStateSequence(stores.recentChunks.get())).toBeUndefined();
+	routeZenCustomEvent(stores, "zen.mode", { mode: "default", available: [] });
+	routeZenCustomEvent(stores, "zen.usage", {});
+	expect(latestServerStateSequence(stores.recentChunks.get())).toBeUndefined();
+	routeZenCustomEvent(stores, "zen.run", { generation: 1 });
+	const afterStatus = latestServerStateSequence(stores.recentChunks.get());
+	expect(afterStatus).toBeDefined();
+	// Chunks that do not mean "the server changed" leave the trigger where it was.
+	routeZenCustomEvent(stores, "zen.unmapped", { type: "message_update" });
+	routeZenCustomEvent(stores, "zen.notify", { message: "m" });
+	expect(latestServerStateSequence(stores.recentChunks.get())).toBe(afterStatus);
+	routeZenCustomEvent(stores, "zen.dialog-settled", { id: "d1", outcome: "answered" });
+	expect(latestServerStateSequence(stores.recentChunks.get())).toBeGreaterThan(afterStatus ?? 0);
+	const afterSettle = latestServerStateSequence(stores.recentChunks.get());
+	routeZenCustomEvent(stores, "zen.entry", { type: "custom", customType: "modes", data: { mode: "plan" } });
+	const afterEntry = latestServerStateSequence(stores.recentChunks.get());
+	expect(afterEntry).toBeGreaterThan(afterSettle ?? 0);
+	// The follow ending under the page (step 8): the last fetch may describe a session that is gone.
+	routeZenCustomEvent(stores, "zen.follow-ended", { threadId: "t1" });
+	expect(latestServerStateSequence(stores.recentChunks.get())).toBeGreaterThan(afterEntry ?? 0);
 });
 
 test("the record is a ring: beyond capacity the oldest chunks fall off", () => {

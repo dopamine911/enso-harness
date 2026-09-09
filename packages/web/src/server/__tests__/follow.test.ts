@@ -413,6 +413,45 @@ test("a prompt on a busy thread is queued through pi as a followUp, not refused 
 	expect(await threadSummary(url, "t1")).toMatchObject({ busy: true, generation: 1 });
 });
 
+// ── 7. two threads are two feeds (#103 invariant 1) ────────────────────────────────
+
+test("⚠ what happens on thread A is on A's feed only: B's follow, snapshot, summary and dialog route see none of it", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	// B first, then A, so the fake's emitter targets A's session (it follows the latest build).
+	await prompt(url, "b", "hello from b");
+	const followB = await openFollow(url, "b");
+	await followB.untilFrames(1);
+	await prompt(url, "a", "/mode");
+	const followA = await openFollow(url, "a");
+	await followA.untilFrames(1);
+	fake.emit(SELECT_DIALOG);
+	fake.emit(TEXT_DELTA);
+	await followA.untilFrames(3);
+	expect(
+		followA.frames.slice(1).map((frame) => (frame.type === "observation" ? frame.observation.kind : frame.type)),
+	).toEqual(["extension-ui-request", "text-delta"]);
+	// B's feed: its own snapshot, nothing after — no seq advanced, no question, no text.
+	await followB.untilComments(2);
+	expect(followB.frames).toHaveLength(1);
+	expect(followB.frames[0]).toMatchObject({ type: "snapshot", threadId: "b", busy: true, openDialogs: [] });
+	// A follow opened on B NOW still lists no question; the summaries are per thread.
+	const lateB = await openFollow(url, "b");
+	await lateB.untilFrames(1);
+	expect(lateB.frames[0]).toMatchObject({ type: "snapshot", threadId: "b", openDialogs: [] });
+	expect(await threadSummary(url, "a")).toMatchObject({ busy: true, generation: 1 });
+	expect(await threadSummary(url, "b")).toMatchObject({ busy: true, generation: 1 });
+	// A's question cannot be answered through B: the id is not one of B's open questions.
+	const crossed = await fetch(`${url}/api/threads/b/dialog`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ id: "d1", value: "a" }),
+	});
+	expect(crossed.status).toBe(404);
+	expect(fake.built.map((record) => record.answers)).toEqual([[], []]);
+	for (const follow of [followA, followB, lateB]) follow.close();
+});
+
 // ── 6. refusals are plain HTTP, not stream events ─────────────────────────────────────
 
 test("an unknown slash command is a 400 at admission and releases the thread", async () => {

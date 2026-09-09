@@ -31,6 +31,12 @@ export const ZEN_CUSTOM_EVENT_DIALOG_SETTLED = "zen.dialog-settled";
  * Value: `{ open: ZenOpenDialog[] }`.
  */
 export const ZEN_CUSTOM_EVENT_OPEN_DIALOGS = "zen.open-dialogs";
+/**
+ * The follow ended without this page leaving it (#103 receipt): the server closed, restarted,
+ * or dropped the connection. Value: `{ threadId }`. The page says so; the debug pane
+ * refetches, so a session the server no longer holds is not shown as its last fetch.
+ */
+export const ZEN_CUSTOM_EVENT_FOLLOW_ENDED = "zen.follow-ended";
 /** An extension persisted a custom session entry (#29). Value: the `custom-entry` observation. */
 export const ZEN_CUSTOM_EVENT_ENTRY = "zen.entry";
 /**
