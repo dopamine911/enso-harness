@@ -9,6 +9,7 @@
   ],
   "pi": {
     "extensions": [
+      "./extensions/logging/index.ts",
       "./extensions/guards/index.ts",
       "./extensions/web-fetch/index.ts",
       "./extensions/web-search/index.ts",
@@ -38,6 +39,7 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@logtape/testing": "2.3.4",
     "typebox": "^1.3.25"
   }
 }

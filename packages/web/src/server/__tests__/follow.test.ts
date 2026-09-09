@@ -232,6 +232,34 @@ test("prompt answers at admission with a message id; the run is released by pi's
 		{ type: "status", live: true, busy: false, generation: 1 },
 	]);
 	expect(await threadSummary(url, "t1")).toMatchObject({ busy: false });
+
+	// The trace (#132): the spine at `info` — built, acquired, the settle, released — and the
+	// delta at `debug` as a COUNT, its text nowhere below `trace`.
+	logs.assertLogged({ level: "info", rawMessage: /^thread built/, properties: { threadId: "t1", generation: 0 } });
+	logs.assertLogged({
+		level: "info",
+		rawMessage: "run {generation} acquired",
+		properties: { threadId: "t1", generation: 1 },
+	});
+	logs.assertLogged({
+		level: "debug",
+		category: ["zen", "server", "events"],
+		properties: { threadId: "t1", generation: 1, seq: 1, kind: "text-delta", chars: 2 },
+	});
+	logs.assertLogged({ level: "info", category: ["zen", "server", "events"], properties: { seq: 2, kind: "settled" } });
+	logs.assertLogged({
+		level: "info",
+		rawMessage: /^run \{generation\} released/,
+		properties: { threadId: "t1", generation: 1 },
+	});
+	const payload = logs.find({ level: "trace", properties: { seq: 1 } });
+	expect(payload?.properties.observation).toMatchObject({ kind: "text-delta", delta: "hi" });
+	// Below trace, the text appears in no record's properties.
+	expect(
+		logs.records
+			.filter((record) => record.level !== "trace")
+			.some((record) => JSON.stringify(record.properties).includes('"hi"')),
+	).toBe(false);
 	follow.close();
 });
 

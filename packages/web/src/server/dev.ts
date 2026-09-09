@@ -6,13 +6,15 @@
  * it is set by whoever starts the server rather than by whoever opens the page.
  *
  * The launcher is where logging is configured (#132): the library under it configures
- * nothing. The terminal sees `info` and up; the day's file under `.zen/logs` gets everything.
+ * nothing. `ZEN_LOG_LEVEL` picks the file's tier (default `info`; `debug` for every
+ * observation; `trace` with payloads; `info,zen.host.events=trace` for one subtree);
+ * `ZEN_LOG_CONSOLE` the terminal's (default `info`).
  */
 
 import { mkdirSync } from "node:fs";
 import { findRepoRoot, harnessPackageDir, zenAgentDir, zenLogger, zenLogsDir } from "@zen/core";
+import { configureProcessLogging, parseZenLogLevels } from "@zen/core/log-process";
 import { startZenServer } from "./index.ts";
-import { configureProcessLogging } from "./logging.ts";
 
 const cwdArgument = process.argv[2];
 const cwd = cwdArgument === undefined || cwdArgument.length === 0 ? process.cwd() : cwdArgument;
@@ -25,7 +27,7 @@ mkdirSync(agentDir, { recursive: true });
 const disposeLogging = await configureProcessLogging({
 	logsDir: zenLogsDir(repoRoot),
 	process: "server",
-	console: "info",
+	levels: parseZenLogLevels(process.env, { console: "info" }),
 });
 const log = zenLogger("server", "dev");
 

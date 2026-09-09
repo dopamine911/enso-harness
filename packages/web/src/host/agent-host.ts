@@ -265,6 +265,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 			log.warn("pi {type}: {message}", { threadId, type: diagnostic.type, message: diagnostic.message });
 		}
 		const extensionsResult = services.resourceLoader.getExtensions();
+		log.debug("pi extensions loaded: {count}", {
+			threadId,
+			count: extensionsResult.extensions.length,
+			paths: extensionsResult.extensions.map((extension) => extension.path),
+		});
 		for (const loadError of extensionsResult.errors) {
 			// pi does not throw on a resource that fails to load; the failure would otherwise be
 			// silent and the symptom unrelated (the vendor-links incident, `server/index.ts`).

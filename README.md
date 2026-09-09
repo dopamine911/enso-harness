@@ -283,6 +283,26 @@ Built so far:
 The dev entry (`bun run dev`) starts the API server first, then the web surface with an `/api` proxy —
 deliberately ordered, since the proxy does not retry a refused connection.
 
+## The log (#132)
+
+One file for the harness: `.zen/logs/zen-YYYY-MM-DD.jsonl`, every process appending (`process` and a
+per-process `sequence` on each line), one JSON record per line, redacted by field name before it is
+written. Every record names what it knows — `threadId`, `generation`, `seq`, `toolCallId` — so one
+thread's story reads across layers: the route that admitted the prompt, pi's events on the feed, the
+guard's verdict on each call, the result. Levels are the knob:
+
+```sh
+ZEN_LOG_LEVEL=info    bun run dev   # default: the spine — runs, tool calls, verdicts, questions, failures
+ZEN_LOG_LEVEL=debug   bun run dev   # every observation, one compact line each (a delta is a count)
+ZEN_LOG_LEVEL=trace   bun run dev   # the same, plus each observation's payload
+ZEN_LOG_LEVEL="info,zen.server.events=trace,zen.extension.guards=debug" bun run dev   # one subtree up
+ZEN_LOG_CONSOLE=warning bun run dev  # the terminal's level; the file is unaffected
+```
+
+A value that is not a level is a startup error naming it. The first record of every process says
+which levels it runs at. The TUI's pi process configures itself the same way (`extensions/logging`,
+first in the manifest); in the web host pi runs in-process and shares the server's.
+
 ## The vendored pi packages
 
 Declared explicitly in `packages/harness/package.json` → `pi.extensions`, guards first — pi resolves

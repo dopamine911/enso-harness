@@ -19,7 +19,7 @@ export async function recordZenLogs(): Promise<LogRecorder> {
 		reset: true,
 		sinks: { recorder: recorder.sink },
 		loggers: [
-			{ category: [ZEN_LOG_ROOT], lowestLevel: "debug", sinks: ["recorder"] },
+			{ category: [ZEN_LOG_ROOT], lowestLevel: "trace", sinks: ["recorder"] },
 			{ category: ["logtape", "meta"], sinks: [] },
 		],
 		contextLocalStorage: new AsyncLocalStorage(),

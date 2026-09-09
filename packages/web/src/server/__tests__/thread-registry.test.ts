@@ -298,7 +298,7 @@ test("a dispose that throws is reported, not thrown", async () => {
 	});
 	await threads.acquire("t1");
 	threads.shutdown();
-	expect(logs.records).toHaveLength(1);
+	expect(logs.filter({ level: "error" })).toHaveLength(1);
 	logs.assertLogged({
 		level: "error",
 		rawMessage: "dispose after {why} failed: {error}",

@@ -1,7 +1,9 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
+import type { LogRecord } from "@logtape/logtape";
 import { EXTERNAL_WEB_CONTENT_NOTICE, WEB_SEARCH_TOOL_NAME } from "@zen/core";
 import type { WebSearchOutcome } from "../../../core/index.ts";
 import { WebSearchProviderError } from "../../../core/index.ts";
+import { auditRecords, recordZenLogs, releaseZenLogs } from "../../__tests__/log-recorder.ts";
 import { createWebSearch, type WebSearchDependencies } from "../index.ts";
 
 /**
@@ -105,29 +107,28 @@ async function run(loaded: LoadedWebSearch, extensionContext: unknown): Promise<
 	return text;
 }
 
-/** Silence and capture the audit lines for one call. */
-function withAuditCapture<T>(action: () => Promise<T>): Promise<{ value: T; auditLines: string[] }> {
-	const auditLines: string[] = [];
-	const consoleErrorSpy = spyOn(console, "error").mockImplementation((line: string) => {
-		auditLines.push(line);
-	});
-	return action()
-		.then((value) => ({ value, auditLines }))
-		.finally(() => consoleErrorSpy.mockRestore());
+/** Capture the audit records for one call (#132: records, not stderr lines). */
+async function withAuditCapture<T>(action: () => Promise<T>): Promise<{ value: T; audits: readonly LogRecord[] }> {
+	const logs = await recordZenLogs();
+	try {
+		const value = await action();
+		return { value, audits: auditRecords(logs, "web-search") };
+	} finally {
+		await releaseZenLogs();
+	}
 }
 
 test("a searched primary renders the via-line, the notice, the answer, and the sources", async () => {
 	const loaded = loadWebSearch();
-	const { value: text, auditLines } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
+	const { value: text, audits } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
 	expect(text.startsWith("Searched the web via anthropic.")).toBe(true);
 	expect(text).toContain(EXTERNAL_WEB_CONTENT_NOTICE);
 	expect(text).toContain("zen gained web_search[1].");
 	expect(text).toContain("1. [Zen docs](https://example.com/zen)");
 	expect(loaded.calls.tavily).toBe(0);
-	// One audit line, naming provider and outcome, never any key material.
-	expect(auditLines).toHaveLength(1);
-	expect(auditLines[0]).toContain("provider=anthropic");
-	expect(auditLines[0]).toContain("searched");
+	// One audit record, naming provider and outcome, never any key material.
+	expect(audits).toHaveLength(1);
+	expect(audits[0]?.properties).toMatchObject({ provider: "anthropic", outcome: "searched" });
 });
 
 // ⚠ THE ACCURACY CONTRACT (#63): an ungrounded answer with no fallback armed is returned
@@ -164,16 +165,16 @@ test("ungrounded WITH Tavily armed falls back, and the render says why", async (
 		},
 		{ TAVILY_API_KEY: "tv-key" },
 	);
-	const { value: text, auditLines } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
+	const { value: text, audits } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
 	expect(text.startsWith("Searched the web via tavily (fallback")).toBe(true);
 	expect(text).toContain("answered WITHOUT searching");
 	expect(text).toContain("## Results");
 	expect(text).toContain("web_search landed");
 	expect(text).toContain(EXTERNAL_WEB_CONTENT_NOTICE);
-	expect(auditLines[0]).toContain("provider=tavily");
-	// The key must never appear in the rendered text or the audit line.
+	expect(audits.map((record) => record.properties.provider)).toEqual(["tavily"]);
+	// The key must never appear in the rendered text or any audit record.
 	expect(text).not.toContain("tv-key");
-	expect(auditLines.join("\n")).not.toContain("tv-key");
+	expect(JSON.stringify(audits.map((record) => record.properties))).not.toContain("tv-key");
 });
 
 test("a primary failure AFTER dispatch falls back and admits it may have billed", async () => {

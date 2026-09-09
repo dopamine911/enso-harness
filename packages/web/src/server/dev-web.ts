@@ -16,8 +16,8 @@
  */
 import { join } from "node:path";
 import { findRepoRoot, webPackageDir, zenLogger, zenLogsDir } from "@zen/core";
+import { configureProcessLogging, parseZenLogLevels } from "@zen/core/log-process";
 import homepage from "../../index.html";
-import { configureProcessLogging } from "./logging.ts";
 
 const WEB_PORT = 5178;
 const API_UPSTREAM_ORIGIN = "http://127.0.0.1:5179";
@@ -30,7 +30,7 @@ const publicDir = join(webPackageDir(repoRoot), "public");
 const disposeLogging = await configureProcessLogging({
 	logsDir: zenLogsDir(repoRoot),
 	process: "web",
-	console: "info",
+	levels: parseZenLogLevels(process.env, { console: "info" }),
 });
 const log = zenLogger("server", "web");
 // A stop from the hub or a terminal: flush the file, then exit the way the signal would

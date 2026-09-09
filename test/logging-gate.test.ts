@@ -13,24 +13,31 @@ import { join } from "node:path";
  *      `onProblem` seams were until this gate. Tests, the dev-web launcher's HMR shim, and
  *      vendored components are outside it: they are not the harness's process.
  *   2. `@logtape/*` is imported only where the schema lives (`core/src/log.ts`) and where a
- *      process configures its sink. Everything else goes through `zenLogger`, so the record
+ *      process configures its sink (`core/src/log-process.ts`). Everything else goes through `zenLogger`, so the record
  *      shape is ours to hold and the substrate is ours to swap (one maintainer — the #132
  *      assessment's named risk).
  *
- * `MIGRATED_ROOTS` grows as the slices land: the extension process (`packages/harness`) is
- * slice 2, the browser is slice 3. Adding a root is the PR that migrates it; removing one
- * is a design conversation.
+ * `MIGRATED_ROOTS` grows as the slices land: the browser (`packages/web/src`, the rest of it)
+ * is slice 3. Adding a root is the PR that migrates it; removing one is a design
+ * conversation.
  */
 
 const repositoryRoot = join(import.meta.dir, "..");
-const MIGRATED_ROOTS = ["packages/core/src", "packages/web/src/server", "packages/web/src/host"] as const;
+const MIGRATED_ROOTS = [
+	"packages/core/src",
+	"packages/web/src/server",
+	"packages/web/src/host",
+	"packages/harness",
+] as const;
 const SKIPPED_DIRECTORIES = ["node_modules", "dist", "dist-types", "coverage", "__tests__"] as const;
 const SOURCE_EXTENSION = /\.tsx?$/;
+/** A line that is only a comment: `//`, a block opener, or a block's `*`-led body. */
+const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/;
 /** The console is a sink LogTape owns; nothing here writes to it by hand. */
 const CONSOLE_CALL = /\bconsole\.(?:log|error|warn|info|debug|trace)\s*\(/;
 /** Where the substrate may be named. */
 const LOGTAPE_IMPORT = /from\s+["']@logtape\//;
-const LOGTAPE_ALLOWED = ["packages/core/src/log.ts", "packages/web/src/server/logging.ts"] as const;
+const LOGTAPE_ALLOWED = ["packages/core/src/log.ts", "packages/core/src/log-process.ts"] as const;
 
 function sourceFiles(directory: string): string[] {
 	const found: string[] = [];
@@ -51,6 +58,8 @@ function offendersMatching(pattern: RegExp, allowed: readonly string[]): string[
 			if (allowed.includes(repositoryRelative)) continue;
 			const lines = readFileSync(path, "utf8").split("\n");
 			for (const [lineIndex, line] of lines.entries()) {
+				// Code, not prose: a comment may quote `console.log` as the thing a guard denies.
+				if (COMMENT_LINE.test(line)) continue;
 				if (pattern.test(line)) offenders.push(`${repositoryRelative}:${lineIndex + 1}`);
 			}
 		}

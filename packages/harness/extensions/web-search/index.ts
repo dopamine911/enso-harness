@@ -16,6 +16,7 @@ import {
 	WebSearchToolParameters,
 	ZEN_CONFIG_FILENAME,
 	zenConfigPath,
+	zenLogger,
 } from "@zen/core";
 import {
 	DEEPSEEK_API_KEY_VARIABLE,
@@ -372,11 +373,13 @@ function renderOutcome(outcome: WebSearchOutcome, fallbackReason: string | undef
 	return { content: [{ type: "text", text: bodySections.join("\n\n") }], details: undefined };
 }
 
-/** One stderr line per call, every outcome — the audit property (#54's discipline). */
+const log = zenLogger("extension", "web-search");
+
+/** One record per call, every outcome — the audit property (#54's discipline; #132: in the file). */
 function auditLine(outcome: string, providerId: WebSearchProviderId | undefined, query: string, detail: string): void {
-	console.error(
-		`${WEB_SEARCH_TOOL_NAME} audit: ${outcome} provider=${providerId ?? "(none)"} query=${query} — ${detail}`,
-	);
+	const properties = { outcome, provider: providerId ?? "(none)", query, detail };
+	if (outcome === "refused") log.warn("audit: {outcome} provider {provider} — {detail}", properties);
+	else log.info("audit: {outcome} provider {provider} — {detail}", properties);
 }
 
 /**
