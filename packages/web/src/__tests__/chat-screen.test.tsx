@@ -73,6 +73,23 @@ test("select renders one button per option, in order", () => {
 	expect(rendered.match(/<button/g)).toHaveLength(2);
 });
 
+// #73: picc's permission prompt arrives as a select carrying the detail a decision needs.
+test("a select with detail renders it preformatted above the options — file content is text, never HTML", () => {
+	const rendered = answerControls({
+		method: "select",
+		title: "Create file",
+		options: ["Yes", "No"],
+		message: "Do you want to create this file: a.html?\n\n<script>alert(1)</script>",
+	});
+	expect(rendered).toContain("<pre");
+	expect(rendered).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+	expect(rendered).not.toContain("<script>");
+	expect(rendered.indexOf("<pre")).toBeLessThan(rendered.indexOf(">Yes<"));
+	// and a plain select — or one whose detail is empty — renders no detail block
+	expect(answerControls(SELECT_DIALOG)).not.toContain("<pre");
+	expect(answerControls({ ...SELECT_DIALOG, message: "" })).not.toContain("<pre");
+});
+
 test("input renders a single-line field with the placeholder and an Answer button", () => {
 	const rendered = answerControls({ method: "input", title: "Name?", placeholder: "your name" });
 	expect(rendered).toContain('placeholder="your name"');
