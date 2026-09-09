@@ -502,9 +502,12 @@ const chatComponents = {
 			// ⚠ `takeBack` runs after a network round trip, from a closure made by an older render.
 			// `chat.messages` there is that render's snapshot; filtering it would replace the
 			// transcript with the snapshot minus one — reverting every delta that streamed in
-			// between (PR #129 review). The ref is the transcript as of the LATEST render.
+			// between (PR #129 review). The ref is the transcript as of the latest COMMITTED
+			// render — written in an effect, never during render (react-doctor, and React's rule).
 			const latestMessages = useRef(chat.messages);
-			latestMessages.current = chat.messages;
+			useEffect(() => {
+				latestMessages.current = chat.messages;
+			}, [chat.messages]);
 			const sendDraft = (): void => {
 				if (!canSend) return;
 				const text = draft;
