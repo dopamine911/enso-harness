@@ -239,3 +239,34 @@ test("a factory that resolves no component degrades to undefined instead of thro
 	expect(await uiContext.custom(noComponent)).toBeUndefined();
 	expect(events).toEqual([]);
 });
+
+// ⚠ pi's rpc mode never ran the factory, so every non-picc factory used to get `undefined` at
+// once. Building against the inert terminal must not take that away (Codex, PR #107): a factory
+// that throws, rejects, or never produces a component falls back the same way, with a report.
+test("⚠ a factory that throws or rejects against the inert terminal falls back to undefined, reported, no request", async () => {
+	const { uiContext, events, problems } = contextUnderTest();
+	const throwing = (() => {
+		throw new Error("tui.requestRender is not a function");
+	}) as unknown as CustomComponentFactory<unknown>;
+	expect(await uiContext.custom(throwing)).toBeUndefined();
+	const rejecting = (() => Promise.reject(new Error("no terminal"))) as unknown as CustomComponentFactory<unknown>;
+	expect(await uiContext.custom(rejecting)).toBeUndefined();
+	expect(events).toEqual([]);
+	expect(problems.map(String).every((problem) => problem.includes("resolving undefined"))).toBe(true);
+	expect(problems).toHaveLength(2);
+});
+
+test("⚠ an async factory that never produces a component is cut off at the build budget, not awaited forever", async () => {
+	const events: PiRpcEvent[] = [];
+	const problems: unknown[] = [];
+	const { uiContext } = createZenExtensionUiContext({
+		emit: (event) => events.push(event),
+		onProblem: (problem) => problems.push(problem),
+		// The code's own timer with a tiny budget — the test awaits the promise it exposes, not a sleep.
+		componentBuildTimeoutMs: 1,
+	});
+	const waitingOnATerminal = (() => new Promise(() => undefined)) as unknown as CustomComponentFactory<unknown>;
+	expect(await uiContext.custom(waitingOnATerminal)).toBeUndefined();
+	expect(events).toEqual([]);
+	expect(String(problems[0])).toContain("no component within 1 ms");
+});

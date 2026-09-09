@@ -73,7 +73,18 @@ export interface ZenExtensionUiContextOptions {
 	 * path (the lift rejecting because picc's module did not load) without unloading picc.
 	 */
 	liftDialog?: (component: unknown) => Promise<LiftedPermissionDialog | undefined>;
+	/** How long an ASYNC component factory may take to produce its component. Defaults to `CUSTOM_COMPONENT_BUILD_TIMEOUT_MS`; injectable for tests. */
+	componentBuildTimeoutMs?: number;
 }
+
+/**
+ * The budget an async `custom` factory gets to construct its component (#73, PR #107
+ * review). Construction is meant to be immediate — picc's factory is synchronous — but a
+ * factory may legitimately return a promise (to load something), and one that instead
+ * waits on terminal interaction would hang the extension forever against a TUI that will
+ * never answer. Past the budget the call falls back to pi's rpc contract (`undefined`).
+ */
+export const CUSTOM_COMPONENT_BUILD_TIMEOUT_MS = 2000;
 
 export interface ZenExtensionUiContext {
 	readonly uiContext: ExtensionUIContext;
@@ -160,6 +171,39 @@ function createNeutralTheme(): PiTheme {
 export function createZenExtensionUiContext(options: ZenExtensionUiContextOptions): ZenExtensionUiContext {
 	const { emit, onProblem } = options;
 	const liftDialog = options.liftDialog ?? liftPermissionDialog;
+	const componentBuildTimeoutMs = options.componentBuildTimeoutMs ?? CUSTOM_COMPONENT_BUILD_TIMEOUT_MS;
+
+	/**
+	 * Build the extension's component against the inert terminal, within the budget.
+	 * Resolves `undefined` — never throws — when the factory throws, rejects, or does not
+	 * produce a component in time: pi's rpc mode never ran the factory at all, so any
+	 * factory that cannot survive a terminal-less build keeps the fallback it always had
+	 * (PR #107 review). The failure is reported, not swallowed.
+	 */
+	async function buildComponent<T>(
+		factory: CustomComponentFactory<T>,
+		done: (result: T) => void,
+	): Promise<(Component & { dispose?(): void }) | undefined> {
+		try {
+			const built = factory(INERT_TUI, uiContext.theme, INERT_KEYBINDINGS, done);
+			if (!(built instanceof Promise)) return built;
+			const budget = Promise.withResolvers<never>();
+			const timer = setTimeout(
+				() => budget.reject(new Error(`no component within ${componentBuildTimeoutMs} ms`)),
+				componentBuildTimeoutMs,
+			);
+			try {
+				return await Promise.race([built, budget.promise]);
+			} finally {
+				clearTimeout(timer);
+			}
+		} catch (error) {
+			onProblem?.(
+				`custom component could not be built on the web surface — resolving undefined, pi's rpc contract: ${String(error)}`,
+			);
+			return undefined;
+		}
+	}
 	const pendingDialogs = new Map<string, PendingDialog>();
 	let neutralTheme: PiTheme | undefined;
 
@@ -292,7 +336,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 		 */
 		async custom<T>(factory: CustomComponentFactory<T>): Promise<T> {
 			const { promise, resolve } = Promise.withResolvers<T>();
-			const component = await factory(INERT_TUI, uiContext.theme, INERT_KEYBINDINGS, resolve);
+			const component = await buildComponent(factory, resolve);
 			let lifted: LiftedPermissionDialog | undefined;
 			try {
 				lifted = await liftDialog(component);
