@@ -28,13 +28,18 @@
  * inline onClick handlers (chat-screen FNF 9 → 16, FNH 0 → 4) without any click hitting
  * them. The function metric is soft on this repo for exactly that reason; lines carry the
  * gate.
+ *
+ * Ratchet 2026-09-09 (#118, 75 files): lcov 94.27% lines / 91.91% functions after the pane
+ * mounted under a DOM over the scripted server (chat-screen.tsx 69.6% → 97.7% lines, 54% →
+ * 87.5% functions — the handlers the static renders materialised now actually run). Same
+ * margin: ~2.5 points under, rounded down.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { findRepoRoot } from "../packages/core/src/index.ts";
 
-export const TOTAL_LINE_COVERAGE_FLOOR = 0.83;
-export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.84;
+export const TOTAL_LINE_COVERAGE_FLOOR = 0.91;
+export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89;
 
 const LCOV_PATH = join(findRepoRoot(import.meta.url), "coverage", "lcov.info");
 

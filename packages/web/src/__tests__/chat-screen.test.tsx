@@ -6,13 +6,12 @@ import {
 	DialogAnswerControls,
 	type KeyedPart,
 	keyedParts,
-	PendingDialog,
 	settleDialog,
 	ThreadPane,
 	ZenDialogCard,
 } from "../chat-screen.tsx";
 import type { DialogAnswerOutcome, FollowConnection } from "../follow-connection.ts";
-import { createStore, ThreadStoresContext } from "../store.ts";
+import { createStore } from "../store.ts";
 import { adoptThread, clearThreadsForTest, mintThread } from "../thread-stores.ts";
 
 /**
@@ -96,18 +95,8 @@ test("the dialog card renders pi-is-asking with the title, the controls and a ca
 	expect(rendered).toContain(">Default<");
 });
 
-test("PendingDialog renders nothing without an open question, and the card once the store holds one (#112)", () => {
-	const stores = mintThread();
-	const render = (): string =>
-		renderToStaticMarkup(
-			<ThreadStoresContext.Provider value={stores}>
-				<PendingDialog />
-			</ThreadStoresContext.Provider>,
-		);
-	expect(render()).toBe("");
-	stores.dialog.set({ id: "d1", dialog: SELECT_DIALOG });
-	expect(render()).toContain("Select permission mode");
-});
+// ⓘ `PendingDialog`'s render from the store is asserted through the MOUNTED pane in
+// thread-pane.test.tsx (#118): the card appears from a wire frame and goes on its settle.
 
 // PR #113 review: a REFUSED answer (422) leaves the question open on the server, so the card
 // must stay; answered and gone (404) spend it. PR #120 review: so does a request that never

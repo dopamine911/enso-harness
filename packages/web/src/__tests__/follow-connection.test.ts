@@ -3,6 +3,7 @@ import { EventType } from "@ag-ui/core";
 import type { StreamChunk } from "@tanstack/ai";
 import type { ZenFollowFrame } from "@zen/core";
 import { createFollowConnection, type FollowConnection } from "../follow-connection.ts";
+import { createScriptedFetch, type ScriptedFetch, SNAPSHOT_IDLE } from "./scripted-server.ts";
 
 /**
  * The adapter is the ONLY place AG-UI is made (#112). These drive it with a scripted server
@@ -10,72 +11,32 @@ import { createFollowConnection, type FollowConnection } from "../follow-connect
  * chunks TanStack would see. Event-driven: every assertion waits for the chunk it names.
  */
 
-interface ScriptedServer {
+interface ScriptedServer extends ScriptedFetch {
 	readonly connection: FollowConnection;
-	/** Write one frame onto the open follow. */
-	readonly frame: (frame: ZenFollowFrame) => void;
-	/** End the follow body — the server went away. */
-	readonly closeFollow: () => void;
-	readonly prompts: Array<{ message: string }>;
-	readonly dialogs: unknown[];
 	readonly problems: string[];
-	/** Chunks the subscription yielded so far. */
+	/** What TanStack would see, in order. */
 	readonly chunks: StreamChunk[];
-	/** Resolves once at least `count` chunks have been yielded. */
+	/** Resolves once at least `count` chunks have arrived. */
 	readonly untilChunks: (count: number) => Promise<void>;
+	/** Abort the subscription — the client's own leaving. */
 	readonly abort: () => void;
-	/** How many `POST …/abort` the server saw (#116). */
-	readonly abortCount: () => number;
-	/** Hold the next prompt's answer; returns the release. */
-	readonly holdPrompt: () => () => void;
 }
 
+/** The adapter subscribed to a scripted server (`scripted-server.ts`), with its chunks collected. */
 function scripted(
-	promptStatus: { status: number; body: unknown } = {
-		status: 202,
-		body: { threadId: "t1", messageId: "pm1", generation: 1, queued: false },
-	},
-	dialogStatus = 204,
-	abortStatus = 204,
+	promptStatus?: { status: number; body: unknown },
+	dialogStatus?: number,
+	abortStatus?: number,
 ): ScriptedServer {
-	let aborts = 0;
-	let write: (text: string) => void = () => undefined;
-	let close: () => void = () => undefined;
-	/** The prompt route answers only once this resolves — open by default; a test may hold it. */
-	let promptGate = { promise: Promise.resolve() } as { promise: Promise<void>; resolve?: () => void };
-	const prompts: Array<{ message: string }> = [];
-	const dialogs: unknown[] = [];
+	const server = createScriptedFetch({
+		...(promptStatus === undefined ? {} : { promptStatus }),
+		...(dialogStatus === undefined ? {} : { dialogStatus }),
+		...(abortStatus === undefined ? {} : { abortStatus }),
+	});
 	const problems: string[] = [];
-	const fetchImpl = ((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-		const url = String(input);
-		if (url.endsWith("/follow")) {
-			const body = new ReadableStream<Uint8Array>({
-				start(controller) {
-					const encoder = new TextEncoder();
-					write = (text) => controller.enqueue(encoder.encode(text));
-					close = () => controller.close();
-				},
-			});
-			return Promise.resolve(new Response(body, { status: 200 }));
-		}
-		if (url.endsWith("/prompt")) {
-			prompts.push(JSON.parse(String(init?.body)) as { message: string });
-			const body = typeof promptStatus.body === "string" ? promptStatus.body : JSON.stringify(promptStatus.body);
-			return promptGate.promise.then(() => new Response(body, { status: promptStatus.status }));
-		}
-		if (url.endsWith("/dialog")) {
-			dialogs.push(JSON.parse(String(init?.body)));
-			return Promise.resolve(new Response(dialogStatus === 204 ? null : "no", { status: dialogStatus }));
-		}
-		if (url.endsWith("/abort") && init?.method === "POST") {
-			aborts += 1;
-			return Promise.resolve(new Response(abortStatus === 204 ? null : "no", { status: abortStatus }));
-		}
-		return Promise.resolve(new Response("not found", { status: 404 }));
-	}) as typeof fetch;
 	const connection = createFollowConnection({
 		threadId: "t1",
-		fetch: fetchImpl,
+		fetch: server.fetch,
 		onProblem: (problem) => problems.push(String(problem)),
 	});
 	const chunks: StreamChunk[] = [];
@@ -89,11 +50,8 @@ function scripted(
 		for (const waiter of waiters.splice(0)) waiter();
 	})();
 	return {
+		...server,
 		connection,
-		frame: (frame) => write(`data: ${JSON.stringify(frame)}\n\n`),
-		closeFollow: () => close(),
-		prompts,
-		dialogs,
 		problems,
 		chunks,
 		untilChunks: (count) => {
@@ -107,26 +65,8 @@ function scripted(
 			return promise;
 		},
 		abort: () => controller.abort(),
-		abortCount: () => aborts,
-		holdPrompt: () => {
-			const gate = Promise.withResolvers<void>();
-			promptGate = gate;
-			return gate.resolve;
-		},
 	};
 }
-
-const SNAPSHOT_IDLE: ZenFollowFrame = {
-	type: "snapshot",
-	threadId: "t1",
-	asOfSeq: 0,
-	live: false,
-	busy: false,
-	generation: 0,
-	permissionMode: { mode: "default", available: ["default", "plan"] },
-	messages: [],
-	openDialogs: [],
-};
 
 test("⚠ a released status ends the run — the slash-command case, which never settles", async () => {
 	const server = scripted();
