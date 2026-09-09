@@ -351,6 +351,58 @@ test("⚠ closing the follow mid-run aborts nothing — the run is pi's, not the
 	again.close();
 });
 
+test("⚠ two followers share one feed: both see every frame with the same seq, and one leaving detaches nothing", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	const first = await openFollow(url, "t1");
+	const second = await openFollow(url, "t1");
+	await first.untilFrames(1);
+	await second.untilFrames(1);
+
+	await prompt(url, "t1", "hello");
+	fake.emit(TEXT_DELTA);
+	await first.untilFrames(4);
+	await second.untilFrames(4);
+	expect(second.frames.slice(1)).toEqual(first.frames.slice(1));
+	expect(first.frames[3]).toMatchObject({ type: "observation", seq: 1 });
+
+	// The first follower leaves; the feed stays attached for the second (the last-listener
+	// detach must count listeners, not followers that ever existed).
+	first.close();
+	fake.emit(SETTLED);
+	await second.untilFrames(6);
+	expect(second.frames.slice(4)).toEqual([
+		{ type: "observation", seq: 2, observation: { kind: "settled" } },
+		{ type: "status", live: true, busy: false, generation: 1 },
+	]);
+	second.close();
+});
+
+test("a confirm dialog round-trips through /dialog; a value answer to it is refused", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	const follow = await openFollow(url, "t1");
+	await prompt(url, "t1", "/mode");
+	fake.emit({
+		type: "extension_ui_request",
+		id: "c1",
+		method: "confirm",
+		title: "Apply?",
+		message: "It is reversible",
+	});
+	await follow.untilFrames(4);
+	const answerWith = (body: Record<string, unknown>) =>
+		fetch(`${url}/api/threads/t1/dialog`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(body),
+		});
+	expect((await answerWith({ id: "c1", value: "yes" })).status).toBe(422);
+	expect((await answerWith({ id: "c1", confirmed: true })).status).toBe(204);
+	expect(fake.built[0]?.answers).toEqual([{ id: "c1", confirmed: true }]);
+	follow.close();
+});
+
 // ── 5. a busy thread queues through pi (#75) ──────────────────────────────────────────
 
 test("a prompt on a busy thread is queued through pi as a followUp, not refused and not re-acquired", async () => {
@@ -379,4 +431,17 @@ test("an unknown slash command is a 400 at admission and releases the thread", a
 	expect(await refused.text()).toContain("/settings is not available");
 	expect(fake.built[0]?.prompts).toEqual([]);
 	expect(await threadSummary(url, "t1")).toMatchObject({ busy: false });
+});
+
+test("a whitespace-only message is a 400 before any lease or session exists", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	const refused = await fetch(`${url}/api/threads/t1/prompt`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ message: "   " }),
+	});
+	expect(refused.status).toBe(400);
+	expect(fake.built).toHaveLength(0);
+	expect(await threadSummary(url, "t1")).toBeUndefined();
 });

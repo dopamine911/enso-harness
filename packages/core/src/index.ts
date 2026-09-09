@@ -57,6 +57,8 @@ export {
 	ZenThinkingDelta,
 	ZenToolCall,
 	ZenToolResultObservation,
+	ZenTurnEnd,
+	ZenTurnStart,
 	ZenUiRequestOrigin,
 	ZenUnmapped,
 	ZenUsage,

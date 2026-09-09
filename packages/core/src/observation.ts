@@ -182,11 +182,13 @@ export type ZenMessageEnd = Static<typeof ZenMessageEnd>;
  * of pi's docs and a reader of this stream agree; the dsh mapping is this comment.
  */
 export const ZenTurnStart = Type.Object({ kind: Type.Literal("turn-start") });
+export type ZenTurnStart = Static<typeof ZenTurnStart>;
 export const ZenTurnEnd = Type.Object({
 	kind: Type.Literal("turn-end"),
 	/** How many tool results the request produced — the step row's count, without the results themselves (they crossed as `tool-result`). */
 	toolResults: Type.Integer({ minimum: 0 }),
 });
+export type ZenTurnEnd = Static<typeof ZenTurnEnd>;
 
 /**
  * pi's `queue_update` (#75, #112): what is waiting behind the run in flight — steering

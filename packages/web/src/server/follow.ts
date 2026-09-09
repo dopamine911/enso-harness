@@ -116,7 +116,10 @@ export function readPromptBody(raw: string): PromptBody {
 	} catch (error) {
 		throw new Error(`malformed prompt body: ${String(error)}`);
 	}
-	if (typeof body.message !== "string" || body.message.length === 0) throw new Error("prompt body needs a message");
+	// Whitespace-only is refused here rather than taking a lease to hand pi nothing.
+	if (typeof body.message !== "string" || body.message.trim().length === 0) {
+		throw new Error("prompt body needs a message");
+	}
 	if (body.streamingBehavior === undefined) return { message: body.message };
 	if (body.streamingBehavior !== "steer" && body.streamingBehavior !== "followUp") {
 		throw new Error("streamingBehavior must be steer or followUp");
