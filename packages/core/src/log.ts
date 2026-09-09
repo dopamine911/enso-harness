@@ -105,7 +105,9 @@ export function withZenLogContext<T>(properties: ZenLogProperties, callback: () 
  * file; this file is the export.
  *
  * The shape mirrors `secrets.ts`'s boundary (`*_API_KEY`, `*_TOKEN`, `*_SECRET`,
- * `*_PASSWORD`) case-insensitively for camelCase property names. ⚠ `token` is deliberate:
+ * `*_PASSWORD`) case-insensitively for camelCase property names, plus `credential` — the
+ * word the guard's own refusals use for the files it protects (`secretPathFragments`), so a
+ * property carrying one is dropped by the same rule. ⚠ `token` is deliberate:
  * usage counts are named `input`/`output` here, and a property literally called `tokens`
  * is dropped by design — better a missing count than a leaked key. Not LogTape's
  * `DEFAULT_REDACT_FIELDS`: that list eats `key`, `auth`, and `email` too, which would drop

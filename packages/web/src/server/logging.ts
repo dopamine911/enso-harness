@@ -73,35 +73,36 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Configure the process; resolves to the disposer that flushes and closes the file. */
 export async function configureProcessLogging(options: ProcessLoggingOptions): Promise<() => Promise<void>> {
 	mkdirSync(options.logsDir, { recursive: true });
-	const redacted: Sink = redactByField(
-		getTimeRotatingFileSink({
-			directory: options.logsDir,
-			interval: "daily",
-			filename: zenLogFilename,
-			parseFilename: (filename: string): Date | null => {
-				const day = ZEN_LOG_FILENAME.exec(filename)?.[1];
-				return day === undefined ? null : new Date(`${day}T00:00:00Z`);
-			},
-			maxAgeMs: KEEP_DAYS * DAY_MS,
-			// The template as the message and the values as properties — an event name a bundle
-			// can filter on, not a sentence with the values rendered into it.
-			formatter: getJsonLinesFormatter({ message: "template" }),
-			bufferSize: 0,
-		}),
-		[...ZEN_REDACT_FIELDS],
-	);
+	const fileSink = getTimeRotatingFileSink({
+		directory: options.logsDir,
+		interval: "daily",
+		filename: zenLogFilename,
+		parseFilename: (filename: string): Date | null => {
+			const day = ZEN_LOG_FILENAME.exec(filename)?.[1];
+			return day === undefined ? null : new Date(`${day}T00:00:00Z`);
+		},
+		maxAgeMs: KEEP_DAYS * DAY_MS,
+		// The template as the message and the values as properties — an event name a bundle
+		// can filter on, not a sentence with the values rendered into it.
+		formatter: getJsonLinesFormatter({ message: "template" }),
+		bufferSize: 0,
+	});
 	// The writer, on every record, since the file is shared. First so a record's own
 	// `process` property, should one ever carry it, wins.
-	const file: Sink = (record: LogRecord) =>
-		redacted({ ...record, properties: { process: options.process, ...record.properties } });
-	const sinks: Record<string, Sink> = { file };
+	const stamped: Sink = (record: LogRecord) =>
+		fileSink({ ...record, properties: { process: options.process, ...record.properties } });
+	// ⚠ Redaction wraps EVERY output, not the file alone. The terminal renders properties too
+	// (the pretty formatter, `properties: true`), and a secret-shaped value on stdout is the
+	// same leak with a different reader — the #134 review caught the console sink bare.
+	// Each sink is wrapped on its own so LogTape's per-sink error containment still holds.
+	const sinks: Record<string, Sink> = { file: redactByField(stamped, [...ZEN_REDACT_FIELDS]) };
 	const zenSinks = ["file"];
 	const metaSinks: string[] = [];
 	if (options.console !== undefined) {
-		sinks.console = withFilter(
-			getConsoleSink({ formatter: getPrettyFormatter({ timestamp: "time", properties: true, categoryWidth: 24 }) }),
-			options.console,
-		);
+		const pretty = getConsoleSink({
+			formatter: getPrettyFormatter({ timestamp: "time", properties: true, categoryWidth: 24 }),
+		});
+		sinks.console = redactByField(withFilter(pretty, options.console), [...ZEN_REDACT_FIELDS]);
 		zenSinks.push("console");
 		metaSinks.push("console");
 	}

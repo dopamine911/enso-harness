@@ -29,10 +29,14 @@ const disposeLogging = await configureProcessLogging({
 });
 const log = zenLogger("server", "dev");
 
-// A stop from the hub or a terminal: flush the file before the process goes.
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
+// A stop from the hub or a terminal: flush the file, then exit the way the signal would
+// have (128 + its number: 130 for SIGINT, 143 for SIGTERM), so a supervisor reads it right.
+for (const [signal, code] of [
+	["SIGINT", 130],
+	["SIGTERM", 143],
+] as const) {
 	process.once(signal, () => {
-		void disposeLogging().finally(() => process.exit(0));
+		void disposeLogging().finally(() => process.exit(code));
 	});
 }
 

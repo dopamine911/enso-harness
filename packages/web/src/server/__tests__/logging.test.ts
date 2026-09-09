@@ -1,5 +1,5 @@
-import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { afterEach, expect, spyOn, test } from "bun:test";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withZenLogContext, ZenLogLine, zenLogger } from "@zen/core";
@@ -65,6 +65,57 @@ test("⚠ the JSONL file: every line validates ZenLogLine; a secret-shaped field
 	expect(refusal?.level).toBe("WARN");
 	expect(refusal?.properties).toEqual({ process: "server", threadId: "t-plain", reason: "denied" });
 	expect(refusal?.message).toBe("a refusal named the key");
+});
+
+test("⚠ the terminal is redacted too: a secret-shaped property never reaches console output (#134 review)", async () => {
+	// The pretty formatter renders properties; a bare console sink would print the value.
+	const printed: string[] = [];
+	const spy = spyOn(console, "info").mockImplementation((...parts: unknown[]) => {
+		printed.push(parts.map(String).join(" "));
+	});
+	try {
+		const logsDir = mkdtempSync(join(tmpdir(), "zen-logs-"));
+		const dispose = await configureProcessLogging({ logsDir, process: "server", console: "info" });
+		zenLogger("server", "probe").info("a refusal named the key: {reason}", {
+			tavilyApiKey: "tvly-MUST-NOT-PRINT",
+			reason: "denied",
+		});
+		await dispose();
+	} finally {
+		spy.mockRestore();
+	}
+	expect(printed.length).toBeGreaterThan(0);
+	expect(printed.join("\n")).toContain("denied");
+	expect(printed.join("\n")).not.toContain("MUST-NOT-PRINT");
+});
+
+test("⚠ two processes, one file: every line lands whole — the property the dated, unbuffered, O_APPEND design rests on", async () => {
+	const logsDir = mkdtempSync(join(tmpdir(), "zen-logs-"));
+	const child = join(logsDir, "writer.ts");
+	writeFileSync(
+		child,
+		[
+			// By path: the script lives in a tmpdir, outside the workspace's module resolution.
+			`import { zenLogger } from ${JSON.stringify(join(import.meta.dir, "..", "..", "..", "..", "core", "src", "index.ts"))};`,
+			`import { configureProcessLogging } from ${JSON.stringify(join(import.meta.dir, "..", "logging.ts"))};`,
+			`const dispose = await configureProcessLogging({ logsDir: ${JSON.stringify(logsDir)}, process: process.argv[2] });`,
+			`const log = zenLogger("server", "writer");`,
+			`for (let i = 0; i < 200; i++) log.info("line {i} from {who}: {pad}", { i, who: process.argv[2], pad: "x".repeat(600) });`,
+			`await dispose();`,
+		].join("\n"),
+	);
+	const spawn = (who: string) =>
+		Bun.spawn(["bun", child, who], { cwd: join(import.meta.dir, ".."), stdout: "ignore", stderr: "pipe" });
+	const [alpha, bravo] = [spawn("alpha"), spawn("bravo")];
+	expect(await Promise.all([alpha.exited, bravo.exited])).toEqual([0, 0]);
+	const lines = readFileSync(join(logsDir, zenLogFilename(new Date())), "utf8")
+		.split("\n")
+		.filter((line) => line.length > 0);
+	const parsed = lines.map((line) => JSON.parse(line) as ZenLogLine);
+	expect(parsed.every((record) => Check(ZenLogLine, record))).toBe(true);
+	// 200 records + the configuration record, per process.
+	expect(parsed.filter((record) => record.properties?.process === "alpha")).toHaveLength(200);
+	expect(parsed.filter((record) => record.properties?.process === "bravo")).toHaveLength(200);
 });
 
 test("a second configure in the same process is refused — one configurator per process, or it is a bug", async () => {
