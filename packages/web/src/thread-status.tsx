@@ -72,7 +72,8 @@ export function describeActivity(
 	const tail = automaticPartsForMessage(last).at(-1);
 	if (tail === undefined) return { kind: "working" };
 	if (tail.key === "toolCall") {
-		const pending = toolResultState(tail.result).status === "pending";
+		// `generating` is true here, so the tail's run is open: no result is pending, never aborted.
+		const pending = toolResultState(tail.result, true).status === "pending";
 		return pending ? { kind: "running", tool: tail.part.name } : { kind: "working" };
 	}
 	if (tail.key === "thinking") return { kind: "thinking" };

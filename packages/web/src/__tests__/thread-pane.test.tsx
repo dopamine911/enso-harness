@@ -407,6 +407,83 @@ test("⚠ the follow closing mid-run: the notice, disconnected on the bar, no st
 	await pane.unmount();
 });
 
+// ── #130: a tool call the run ended without answering is aborted, not running ─────────
+
+test("⚠ a tool call reads running… while its run is open and aborted once the run ends without a result", async () => {
+	const pane = await mountPane();
+	await pane.settle(SNAPSHOT_IDLE);
+	await flush(async () => {
+		typeInto(pane.composer(), "run it");
+		pressEnter(pane.composer());
+		await tick();
+	});
+	await pane.settle(
+		{ type: "observation", seq: 1, observation: { kind: "message-start", role: "assistant" } },
+		{
+			type: "observation",
+			seq: 2,
+			observation: { kind: "tool-call", toolCallId: "c1", toolName: "bash", args: { command: "sleep 40" } },
+		},
+	);
+	const step = (): string | null =>
+		pane.container.querySelector("[data-zen-tool-step]")?.getAttribute("data-zen-tool-step") ?? null;
+	expect(step()).toBe("pending");
+	expect(pane.container.textContent).toContain("running…");
+	expect(pane.status()).toContain("running bash");
+	// The stop: pi is told, and the run ends on the feed with no result for the call.
+	const stop = pane.stopButton();
+	if (stop === null) throw new Error("expected the stop button");
+	await flush(async () => {
+		stop.click();
+		await tick();
+	});
+	await pane.settle(
+		{ type: "observation", seq: 3, observation: { kind: "settled" } },
+		{ type: "status", live: true, busy: false, generation: 1 },
+	);
+	expect(pane.status()).toContain("idle");
+	expect(step()).toBe("aborted");
+	expect(pane.container.textContent).toContain("aborted");
+	expect(pane.container.textContent).not.toContain("running…");
+	await pane.unmount();
+});
+
+test("⚠ a refused or aborted tool call's result reads error LIVE — the same as a resumed log shows it (#130)", async () => {
+	const pane = await mountPane();
+	await pane.settle(SNAPSHOT_IDLE);
+	await flush(async () => {
+		typeInto(pane.composer(), "write it");
+		pressEnter(pane.composer());
+		await tick();
+	});
+	await pane.settle(
+		{ type: "observation", seq: 1, observation: { kind: "message-start", role: "assistant" } },
+		{
+			type: "observation",
+			seq: 2,
+			observation: { kind: "tool-call", toolCallId: "c2", toolName: "write", args: { path: "/etc/x" } },
+		},
+		{
+			type: "observation",
+			seq: 3,
+			observation: {
+				kind: "tool-result",
+				toolCallId: "c2",
+				toolName: "write",
+				text: "blocked: outside the write root",
+				complete: true,
+				isError: true,
+			},
+		},
+	);
+	const row = pane.container.querySelector("[data-zen-tool-step]");
+	expect(row?.getAttribute("data-zen-tool-step")).toBe("error");
+	expect(row?.hasAttribute("open")).toBe(true); // an error opens itself
+	expect(pane.container.textContent).toContain("blocked: outside the write root");
+	expect(pane.status()).toContain("working"); // the model has the output and is composing
+	await pane.unmount();
+});
+
 // ── #125 item 3: runtime truth vs browser belief, through the mounted debug pane (#86) ──
 
 test("⚠ the debug pane names a MISMATCH between the page's mode and the server's, and drops it once they agree", async () => {

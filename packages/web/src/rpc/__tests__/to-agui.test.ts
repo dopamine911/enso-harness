@@ -69,8 +69,12 @@ test("a completed tool result becomes TOOL_CALL_RESULT with its text", () => {
 	});
 });
 
-// ⚠ `isError` has no AG-UI field on a tool result and is the only signal a REFUSED call has.
-test("an errored result carries the error flag, so a denial cannot render as success", () => {
+// ⚠ `isError` has no AG-UI field on a tool result and is the only signal a REFUSED or ABORTED
+// call has. The field that matters is the one TanStack's processor READS — `state:
+// "output-error"` (activities/chat/stream/processor.js, `handleToolCallResultEvent`). The
+// earlier `zenIsError` was read by nothing, and this test passed while a denial rendered as
+// success (#130). The mounted pane pins the observable half: the step row reads `error`.
+test("an errored result carries the state TanStack reads, so a denial cannot render as success", () => {
 	const [errored] = toAgui({
 		kind: "tool-result",
 		toolCallId: "c1",
@@ -79,7 +83,7 @@ test("an errored result carries the error flag, so a denial cannot render as suc
 		complete: true,
 		isError: true,
 	});
-	expect(errored).toMatchObject({ zenIsError: true });
+	expect(errored).toMatchObject({ state: "output-error", content: "blocked" });
 	const [fine] = toAgui({
 		kind: "tool-result",
 		toolCallId: "c1",
@@ -88,6 +92,7 @@ test("an errored result carries the error flag, so a denial cannot render as suc
 		complete: true,
 		isError: false,
 	});
+	expect(fine).not.toHaveProperty("state");
 	expect(fine).not.toHaveProperty("zenIsError");
 });
 

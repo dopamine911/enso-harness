@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { ToolResultPart } from "@tanstack/ai";
 import { isZenToolResultDescriptor, readZenToolResultDescriptor, ZEN_TOOL_RESULT_KEY } from "@zen/core";
 import { renderToStaticMarkup } from "react-dom/server";
-import { type ZenRendererMap, ZenToolResult } from "../ZenToolResult.tsx";
+import { toolResultState, type ZenRendererMap, ZenToolResult } from "../ZenToolResult.tsx";
 
 const partWith = (overrides: Partial<ToolResultPart>): ToolResultPart => ({
 	type: "tool-result",
@@ -16,7 +16,8 @@ const renderers: ZenRendererMap = {
 	diff: (props) => <span data-known>{String(props.summary)}</span>,
 };
 
-const html = (result?: ToolResultPart) => renderToStaticMarkup(<ZenToolResult result={result} renderers={renderers} />);
+const html = (result?: ToolResultPart, runOpen = true) =>
+	renderToStaticMarkup(<ZenToolResult result={result} runOpen={runOpen} renderers={renderers} />);
 
 // --- the descriptor reader, pure and surface-independent
 test("reads a well-formed descriptor out of metadata", () => {
@@ -52,6 +53,19 @@ test("no descriptor at all falls back to the envelope text", () =>
 	expect(html(partWith({}))).toContain("PLAIN TEXT FORM"));
 
 test("an in-flight call says so rather than rendering nothing", () => expect(html(undefined)).toContain("running"));
+
+// #130: pi emits no result for a call its abort interrupted, so without the run's state a
+// stopped call read `running…` forever. Same absence, run over: aborted — still, not pulsing.
+test("⚠ no result once the run is over is ABORTED, not running", () => {
+	const rendered = html(undefined, false);
+	expect(rendered).toContain('data-zen-tool-result="aborted"');
+	expect(rendered).toContain("aborted — the run ended before this call returned");
+	expect(rendered).not.toContain("running");
+	expect(rendered).not.toContain("animate-pulse");
+	// The definition itself, for the two readers that branch on it.
+	expect(toolResultState(undefined, true)).toEqual({ status: "pending" });
+	expect(toolResultState(undefined, false)).toEqual({ status: "aborted" });
+});
 
 test("an errored result shows the error, not the descriptor", () => {
 	const rendered = html(

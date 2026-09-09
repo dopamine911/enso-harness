@@ -127,9 +127,13 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 					// Legal because AG-UI's BaseEvent declares `[k: string]: unknown`.
 					...(observation.descriptor === undefined ? {} : { [ZEN_TOOL_RESULT_KEY]: observation.descriptor }),
 					// ⚠ `isError` has no AG-UI field on a tool result, and it is the only signal a
-					// REFUSED call has (a guard block). Carried as an extra field for the same
-					// reason as the descriptor — dropping it would render a denial as a success.
-					...(observation.isError ? { zenIsError: true } : {}),
+					// REFUSED or ABORTED call has (a guard block; pi's abort mid-tool). TanStack's
+					// processor reads `state: "output-error"` off the chunk (a non-spec extra, legal
+					// as above) and marks the result and its call `error`, with the content as the
+					// error text — the same shape `branch-to-messages` builds from the log, so a
+					// live transcript and a resumed one agree (#130). Before this the flag rode as
+					// `zenIsError`, which nothing read: live said done, resume said error.
+					...(observation.isError ? { state: "output-error" } : {}),
 				},
 			];
 		}

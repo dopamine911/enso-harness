@@ -20,18 +20,24 @@ export type ZenRendererMap = Record<string, (props: Record<string, unknown>) => 
 /**
  * What one tool call is in, read off its result — the ONE definition (PR #93 review).
  * Pending is "no result has paired yet" — TanStack's own selection pairs results to calls
- * across the whole message list — and error is the envelope's `error`, not the descriptor's.
+ * across the whole message list — WHILE the message's run is still open. The same absence
+ * once the run has ended is `aborted` (#130): pi emits no result for a call its abort
+ * interrupted (and a torn tail on resume has none either), so without the run's state a
+ * stopped call read `running…` forever — a state presented as live when it is not
+ * (`architecture.md`, invariant 5). Error is the envelope's `error`, not the descriptor's.
  * The step row, the status bar's `running <tool>`, and this renderer all read this; a
- * fourth state (an interrupt, say) is added here and nowhere else. The narrowed result
- * rides along so a consumer that branches on `status` has it typed for that branch.
+ * fifth state is added here and nowhere else. The narrowed result rides along so a
+ * consumer that branches on `status` has it typed for that branch.
  */
 export type ToolResultState =
 	| { readonly status: "pending" }
+	| { readonly status: "aborted" }
 	| { readonly status: "error"; readonly result: ToolResultPart; readonly error: string }
 	| { readonly status: "done"; readonly result: ToolResultPart };
 
-export function toolResultState(result: ToolResultPart | undefined): ToolResultState {
-	if (result === undefined) return { status: "pending" };
+/** `runOpen`: the run this call belongs to is still in flight — the caller knows (`sessionGenerating && isLastMessage`), the result cannot. */
+export function toolResultState(result: ToolResultPart | undefined, runOpen: boolean): ToolResultState {
+	if (result === undefined) return runOpen ? { status: "pending" } : { status: "aborted" };
 	if (result.error !== undefined) return { status: "error", result, error: result.error };
 	return { status: "done", result };
 }
@@ -62,6 +68,7 @@ function TruncationNote({
 
 export function ZenToolResult({
 	result,
+	runOpen,
 	renderers,
 }: {
 	/**
@@ -70,14 +77,25 @@ export function ZenToolResult({
 	 * absent result is a real state here (the call is in flight), not an omitted prop.
 	 */
 	result: ToolResultPart | undefined;
+	/** The call's run is still in flight — see {@link toolResultState}. */
+	runOpen: boolean;
 	renderers: ZenRendererMap;
 }): React.ReactNode {
-	const state = toolResultState(result);
+	const state = toolResultState(result, runOpen);
 	// No result yet — the call is in flight. Say so rather than rendering nothing.
 	if (state.status === "pending") {
 		return (
 			<p data-zen-tool-result="pending" className="animate-pulse text-muted-foreground text-xs">
 				running…
+			</p>
+		);
+	}
+	// No result and the run is over (#130): the call was interrupted — by a stop, the
+	// server going away, or a torn tail on resume. Still, not pulsing; the words say why.
+	if (state.status === "aborted") {
+		return (
+			<p data-zen-tool-result="aborted" className="text-muted-foreground text-xs">
+				aborted — the run ended before this call returned
 			</p>
 		);
 	}
