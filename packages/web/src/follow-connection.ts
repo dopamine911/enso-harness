@@ -292,6 +292,9 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		}
 		const { observation } = frame;
 		if (observation.kind === "settled") {
+			// Nothing queued behind a settled run can be refused any more: pi claimed it (it ran
+			// inside this run) or a stop cleared it (the receipt said so). Forget the ids.
+			queuedPrompts.clear();
 			finishRunsThrough(serverGeneration);
 			return;
 		}

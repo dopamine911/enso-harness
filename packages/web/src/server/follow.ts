@@ -38,7 +38,7 @@ import type { ThreadFeedFrame, ThreadRegistry } from "./thread-registry.ts";
  *                                  is emitted from pi's own `finally` — so every follower
  *                                  sees the same `settled` + `status`, and the thread is
  *                                  released by the prompt route's observer, not by this
- *                                  route. 204 told; 409 nothing in flight; 404 not live.
+ *                                  route. 200 with the restored queue; 409 nothing in flight; 404 not live.
  *
  * The wire shapes — `ZenFollowFrame`, `ZenPromptReceipt` — are TypeBox in `@zen/core`
  * (`follow.ts` there), like every other crossing; the payload is `ZenObservation`, and AG-UI

@@ -499,6 +499,12 @@ const chatComponents = {
 			// HOLDING (#75): a stop hands those texts back, and the bubble that was never asked
 			// leaves with them — pi's TUI does the same. A claimed prompt's bubble stays.
 			const heldLocally = useRef<Array<{ id: string; text: string }>>([]);
+			// ⚠ `takeBack` runs after a network round trip, from a closure made by an older render.
+			// `chat.messages` there is that render's snapshot; filtering it would replace the
+			// transcript with the snapshot minus one — reverting every delta that streamed in
+			// between (PR #129 review). The ref is the transcript as of the LATEST render.
+			const latestMessages = useRef(chat.messages);
+			latestMessages.current = chat.messages;
 			const sendDraft = (): void => {
 				if (!canSend) return;
 				const text = draft;
@@ -532,7 +538,7 @@ const chatComponents = {
 					leaving.add(heldLocally.current[position]?.id ?? "");
 					heldLocally.current.splice(position, 1);
 				}
-				if (leaving.size > 0) chat.setMessages(chat.messages.filter((message) => !leaving.has(message.id)));
+				if (leaving.size > 0) chat.setMessages(latestMessages.current.filter((message) => !leaving.has(message.id)));
 				setDraft((current) => joinDrafts(current, ...texts));
 			};
 			// Stop (#116) hands back what was queued behind the run (#75, clear-and-restore): the

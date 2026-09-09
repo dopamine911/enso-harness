@@ -242,6 +242,82 @@ test("an input dialog: what is typed is the answer, one POST …/dialog, uncontr
 	await pane.unmount();
 });
 
+// PR #129 review: the take-back runs after a network round trip, from a closure an older
+// render made. It must act on the transcript as it is THEN — not revert what streamed in between.
+test("⚠ a queued prompt refused after a delay takes back only its own bubble; deltas that streamed meanwhile stay", async () => {
+	const server = createScriptedFetch();
+	let releaseSecondPrompt: () => void = () => undefined;
+	let prompts = 0;
+	// The second `/prompt` (the queued one) is held, then refused with a 400.
+	const gated = ((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+		const path = new URL(String(input), "http://localhost").pathname;
+		if (path.endsWith("/prompt")) {
+			prompts += 1;
+			if (prompts === 2) {
+				return new Promise<Response>((resolve) => {
+					releaseSecondPrompt = () => resolve(new Response("pi would not take it", { status: 400 }));
+				});
+			}
+		}
+		return server.fetch(input, init);
+	}) as typeof fetch;
+	globalThis.fetch = gated;
+	const stores = mintThread(gated);
+	const container = document.createElement("div");
+	document.body.appendChild(container);
+	const root: Root = createRoot(container);
+	await flush(async () => {
+		root.render(<ThreadPane threadId={stores.threadId} active={true} debugOpen={false} />);
+	});
+	await flush(tick);
+	const composer = (): HTMLTextAreaElement => {
+		const found = container.querySelector<HTMLTextAreaElement>('textarea[name="message"]');
+		if (found === null) throw new Error("expected the composer");
+		return found;
+	};
+	await flush(async () => {
+		server.frame(SNAPSHOT_IDLE);
+		await tick();
+	});
+	await flush(async () => {
+		typeInto(composer(), "first");
+		pressEnter(composer());
+		await tick();
+	});
+	// Mid-run: the queued prompt goes out and is held by the server.
+	await flush(async () => {
+		typeInto(composer(), "second, queued");
+		await tick();
+	});
+	await flush(async () => {
+		pressEnter(composer());
+		await tick();
+	});
+	expect(container.textContent).toContain("second, queued");
+	// Meanwhile the first answer streams.
+	await flush(async () => {
+		server.frame({ type: "observation", seq: 1, observation: { kind: "message-start", role: "assistant" } });
+		server.frame({
+			type: "observation",
+			seq: 2,
+			observation: { kind: "text-delta", contentIndex: 0, delta: "streamed while held" },
+		});
+		await tick();
+	});
+	expect(container.textContent).toContain("streamed while held");
+	// Now the refusal lands: its bubble leaves, its text returns to the draft — and the delta STAYS.
+	await flush(async () => {
+		releaseSecondPrompt();
+		await tick();
+	});
+	expect(composer().value).toBe("second, queued");
+	expect((container.textContent?.match(/second, queued/g) ?? []).length).toBe(1); // the composer only
+	expect(container.textContent).toContain("streamed while held");
+	expect(container.textContent).toContain("first");
+	await flush(async () => root.unmount());
+	container.remove();
+});
+
 // ── the follow ending under the page (#103 receipt, #119) ───────────────────────────────
 
 test("Enter or the button: one POST …/prompt each and the draft clears; DURING a run the prompt goes to pi now, listed above the composer, and a stop hands it back (#75)", async () => {
