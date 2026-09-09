@@ -8,9 +8,11 @@ import { withZenLogContext, ZenLogLine, zenLogger } from "../log.ts";
 import {
 	configureProcessLogging,
 	effectiveFileLevel,
+	logRecordOf,
 	parseZenLogLevels,
 	ZenLogLevelError,
 	zenLogFilename,
+	zenLogLineRenderer,
 } from "../log-process.ts";
 
 /**
@@ -130,6 +132,33 @@ test("a second configure in the same process is refused — one configurator per
 	const logsDir = mkdtempSync(join(tmpdir(), "zen-logs-"));
 	await configureProcessLogging({ logsDir, process: "server" });
 	await expect(configureProcessLogging({ logsDir, process: "web" })).rejects.toThrow();
+});
+
+// ── reading the file back ─────────────────────────────────────────────────────────────
+
+test("a line reads back as the record it was: the template's placeholders take their values; one with no value stays literal; WARN is warning", () => {
+	const record = logRecordOf({
+		"@timestamp": "2026-09-09T23:41:22.799Z",
+		level: "WARN",
+		message: "{toolName} denied: {reason} — {absent}",
+		logger: "zen.extension.guards",
+		properties: { toolName: "write", reason: "outside the root", threadId: "t1" },
+	});
+	expect(record.category).toEqual(["zen", "extension", "guards"]);
+	expect(record.level).toBe("warning");
+	expect(record.timestamp).toBe(Date.parse("2026-09-09T23:41:22.799Z"));
+	expect(record.message).toEqual(["", "write", " denied: ", "outside the root", " — ", "{absent}", ""]);
+	expect(record.rawMessage).toBe("{toolName} denied: {reason} — {absent}");
+	// Rendered by the terminal's formatter: the values in the sentence, no braces left.
+	const rendered = zenLogLineRenderer({ wordWrap: false })({
+		"@timestamp": "2026-09-09T23:41:22.799Z",
+		level: "INFO",
+		message: "run {generation} acquired",
+		logger: "zen.server.threads",
+		properties: { generation: 1 },
+	}).replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "");
+	expect(rendered).toContain("run 1 acquired");
+	expect(rendered).not.toContain("{generation}");
 });
 
 // ── the knob ──────────────────────────────────────────────────────────────────────────

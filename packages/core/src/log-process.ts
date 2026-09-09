@@ -17,7 +17,7 @@ import {
 } from "@logtape/logtape";
 import { getPrettyFormatter } from "@logtape/pretty";
 import { redactByField } from "@logtape/redaction";
-import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS } from "./log.ts";
+import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS, type ZenLogLine } from "./log.ts";
 import { zenLogsDir } from "./paths.ts";
 
 /**
@@ -260,4 +260,61 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
 		logsDir: options.logsDir,
 	});
 	return dispose;
+}
+
+// ── Reading the file back (#132: `bun run logs`, and the bundle's reader) ─────────────────
+
+const PLACEHOLDER = /\{([^{}]+)\}/g;
+const LEVEL_OF_LINE: Readonly<Record<ZenLogLine["level"], LogLevel>> = {
+	TRACE: "trace",
+	DEBUG: "debug",
+	INFO: "info",
+	WARN: "warning",
+	ERROR: "error",
+	FATAL: "fatal",
+};
+
+/**
+ * A line of the file, back into the record it was — the message re-joined from its
+ * template and properties (`"run {generation} acquired"` + `{ generation: 1 }` →
+ * `["run ", 1, " acquired"]`, LogTape's alternating text/value shape), so any LogTape
+ * formatter renders it exactly as the console did when it was written. A placeholder with
+ * no property renders as itself, so a template that outgrew its record still reads.
+ */
+export function logRecordOf(line: ZenLogLine): LogRecord {
+	const properties = line.properties ?? {};
+	const template = line.message ?? "";
+	const message: unknown[] = [];
+	let cursor = 0;
+	for (const match of template.matchAll(PLACEHOLDER)) {
+		const name = match[1] ?? "";
+		message.push(template.slice(cursor, match.index), name in properties ? properties[name] : match[0]);
+		cursor = match.index + match[0].length;
+	}
+	message.push(template.slice(cursor));
+	return {
+		category: line.logger.split("."),
+		level: LEVEL_OF_LINE[line.level],
+		timestamp: Date.parse(line["@timestamp"]),
+		message,
+		rawMessage: template,
+		properties,
+	};
+}
+
+/**
+ * The terminal's formatter, for the file's records: what `bun run logs` prints. `wordWrap`
+ * as the pretty formatter takes it — `true` wraps to the terminal's width, `false` keeps
+ * each record's lines whole (for a pipe), a number is a width.
+ */
+export function zenLogLineRenderer(
+	options: { readonly wordWrap?: boolean | number } = {},
+): (line: ZenLogLine) => string {
+	const pretty = getPrettyFormatter({
+		timestamp: "time",
+		properties: true,
+		categoryWidth: 24,
+		wordWrap: options.wordWrap ?? true,
+	});
+	return (line: ZenLogLine): string => pretty(logRecordOf(line));
 }
