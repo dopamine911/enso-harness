@@ -4,6 +4,7 @@ import type { ModelMessage, UIMessage } from "@tanstack/ai/client";
 import type { RunAgentInputContext, SubscribeConnectionAdapter } from "@tanstack/ai-client";
 import {
 	type PiDialogResponse,
+	ZenAbortReceipt,
 	type ZenFollowFrame,
 	ZenFollowFrame as ZenFollowFrameSchema,
 	ZenPromptReceipt,
@@ -59,10 +60,18 @@ export interface FollowConnectionOptions {
 /** One run this adapter has open: its AG-UI ids and, once the receipt is in, the acquisition it took or queued behind. */
 interface OpenRun {
 	readonly runId: string;
-	readonly messageId: string;
+	/** The assistant message the view is streaming into. Rotates when pi claims a queued prompt (#75). */
+	messageId: string;
 	/** The receipt's `messageId` — how a `prompt-rejected` names this run. Undefined for a run another client started. */
 	promptMessageId: string | undefined;
 	generation: number | undefined;
+	/**
+	 * Assistant messages pi has begun in this run. A USER `message-start` after the first of
+	 * them is a queued prompt being CLAIMED (#75), not the prompt that opened the run — the
+	 * view then ends the current assistant bubble and starts a new one, so the reply lands
+	 * after its question rather than inside the previous answer.
+	 */
+	assistantMessages: number;
 }
 /** The last user message's text — what `send` prompts with. Images are #68. */
 function latestUserText(messages: Array<UIMessage> | Array<ModelMessage>): string {
@@ -119,14 +128,39 @@ export type DialogAnswerOutcome = "answered" | "gone" | "refused" | "unreachable
  */
 export type AbortOutcome = "aborted" | "idle" | "gone" | "unreachable";
 
+/** What `abort()` returns: the outcome, and the prompts pi had waiting — handed back to the composer (#75). Empty unless `aborted`. */
+export interface AbortResult {
+	readonly outcome: AbortOutcome;
+	readonly restored: readonly string[];
+}
+
+/**
+ * What the server did with a prompt sent DURING a run (#75):
+ * `queued` pi holds it behind the run in flight (202, `queued: true`) — the follow's
+ * `zen.queue` lists it for every follower; pi claims it when the run's turn ends.
+ * `taken` the run had ended by the time it arrived, so it started a run of its own (202,
+ * `queued: false`); the follow opens that run as it would another tab's.
+ * `refused` pi would not take it (a `prompt-rejected` on the follow, or a non-202).
+ * `unreachable` the request never got an answer (network). Nothing changed.
+ */
+export type PromptOutcome = "queued" | "taken" | "refused" | "unreachable";
+
 export interface FollowConnection extends SubscribeConnectionAdapter {
 	/** Answer the thread's open question. A non-`answered` outcome is also reported with the server's reason. */
 	readonly answerDialog: (answer: PiDialogResponse) => Promise<DialogAnswerOutcome>;
 	/**
 	 * Stop the run in flight (#116). ⚠ Not TanStack's `stop()`: that aborts this client's
 	 * in-flight POST, which returned at admission long ago, and touches nothing on the server.
+	 * The answer carries what was queued behind the run, for the composer (#75).
 	 */
-	readonly abort: () => Promise<AbortOutcome>;
+	readonly abort: () => Promise<AbortResult>;
+	/**
+	 * Send a prompt while a run is in flight (#75). ⚠ Not `chat.sendMessage`: TanStack holds a
+	 * send in its own queue while the run it started is open, and delivers it at settle — the
+	 * browser's queue, invisible to other tabs and lost on reload. This POSTs now with
+	 * `streamingBehavior: followUp`, so pi queues it and every follower sees it.
+	 */
+	readonly prompt: (text: string) => Promise<PromptOutcome>;
 }
 
 export function createFollowConnection(options: FollowConnectionOptions): FollowConnection {
@@ -146,6 +180,8 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 	let current: OpenRun | undefined;
 	/** `prompt-rejected` reasons that arrived before the receipt naming their run, by the receipt's `messageId`. */
 	const rejectedBeforeReceipt = new Map<string, string>();
+	/** Receipt ids of prompts this tab queued behind a run (#75) — a later `prompt-rejected` for one is said, not matched to a run. */
+	const queuedPrompts = new Set<string>();
 
 	function push(...chunks: StreamChunk[]): void {
 		queue.push(...chunks);
@@ -154,7 +190,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 	}
 
 	function openRun(runId: string, promptMessageId: string | undefined, generation: number | undefined): OpenRun {
-		const run: OpenRun = { runId, messageId: crypto.randomUUID(), promptMessageId, generation };
+		const run: OpenRun = { runId, messageId: crypto.randomUUID(), promptMessageId, generation, assistantMessages: 0 };
 		runs.set(runId, run);
 		current = run;
 		push(
@@ -168,6 +204,28 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		runs.delete(run.runId);
 		if (current === run) current = undefined;
 		push(chunk);
+	}
+
+	/**
+	 * A message boundary inside the run (#75). Assistant: count it. User, after an assistant
+	 * message has begun: pi claimed a queued prompt — end the current assistant bubble and
+	 * open a new one after it. The run's own prompt arrives before any assistant message and
+	 * rotates nothing.
+	 */
+	function observeMessageStart(role: string): void {
+		if (current === undefined) return;
+		if (role === "assistant") {
+			current.assistantMessages += 1;
+			return;
+		}
+		if (role !== "user" || current.assistantMessages === 0) return;
+		const ended = current.messageId;
+		current.messageId = crypto.randomUUID();
+		current.assistantMessages = 0;
+		push(
+			{ type: EventType.TEXT_MESSAGE_END, messageId: ended },
+			{ type: EventType.TEXT_MESSAGE_START, messageId: current.messageId, role: "assistant" },
+		);
 	}
 
 	function idsOf(run: OpenRun | undefined): AguiIdentifiers {
@@ -237,7 +295,15 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 			finishRunsThrough(serverGeneration);
 			return;
 		}
+		if (observation.kind === "message-start") observeMessageStart(observation.role);
 		if (observation.kind === "prompt-rejected") {
+			// A prompt this tab queued behind the run (#75): pi would not take it. Said where the
+			// human looks; the composer got its text back when `prompt` reported `refused`.
+			if (queuedPrompts.has(observation.messageId)) {
+				queuedPrompts.delete(observation.messageId);
+				onProblem?.(`thread ${threadId}: queued prompt refused: ${observation.reason}`);
+				return;
+			}
 			const run = [...runs.values()].find((open) => open.promptMessageId === observation.messageId);
 			if (run === undefined) {
 				// ⚠ The rejection can beat the receipt that names the run (the queued-prompt
@@ -393,14 +459,46 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		return outcome;
 	}
 
-	async function abort(): Promise<AbortOutcome> {
+	async function abort(): Promise<AbortResult> {
 		const response = await post("abort", "abort");
-		if (response === undefined) return "unreachable";
-		if (response.status === 204) return "aborted";
+		if (response === undefined) return { outcome: "unreachable", restored: [] };
+		if (response.status === 200) {
+			const receipt: unknown = await response.json();
+			if (Check(ZenAbortReceipt, receipt)) return { outcome: "aborted", restored: receipt.restored };
+			onProblem?.(`thread ${threadId}: the abort receipt did not match its schema — anything queued is lost`);
+			return { outcome: "aborted", restored: [] };
+		}
 		const outcome: AbortOutcome = response.status === 409 ? "idle" : "gone";
 		onProblem?.(`thread ${threadId}: abort ${outcome}: ${response.status} ${await response.text()}`);
-		return outcome;
+		return { outcome, restored: [] };
 	}
 
-	return { subscribe, send, answerDialog, abort };
+	async function prompt(text: string): Promise<PromptOutcome> {
+		const response = await post("prompt", "queued prompt", {
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ message: text, streamingBehavior: "followUp" }),
+		});
+		if (response === undefined) return "unreachable";
+		if (response.status !== 202) {
+			onProblem?.(`thread ${threadId}: queued prompt refused: ${response.status} ${await response.text()}`);
+			return "refused";
+		}
+		const receipt: unknown = await response.json();
+		if (!Check(ZenPromptReceipt, receipt)) {
+			onProblem?.(`thread ${threadId}: the prompt receipt did not match its schema`);
+			return "refused";
+		}
+		// The rejection may already have crossed on the follow, before this receipt named it.
+		const rejection = rejectedBeforeReceipt.get(receipt.messageId);
+		if (rejection !== undefined) {
+			rejectedBeforeReceipt.delete(receipt.messageId);
+			onProblem?.(`thread ${threadId}: queued prompt refused: ${rejection}`);
+			return "refused";
+		}
+		if (!receipt.queued) return "taken";
+		queuedPrompts.add(receipt.messageId);
+		return "queued";
+	}
+
+	return { subscribe, send, answerDialog, abort, prompt };
 }

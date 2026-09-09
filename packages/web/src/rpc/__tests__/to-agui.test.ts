@@ -209,7 +209,7 @@ test("nothing is silently dropped: every kind except an in-flight result and a b
 		},
 		{ kind: "turn-start" },
 		{ kind: "turn-end", toolResults: 1 },
-		{ kind: "queue", steering: 0, followUp: 1 },
+		{ kind: "queue", steering: [], followUp: ["later"] },
 		{ kind: "prompt-rejected", messageId: "m", reason: "Agent is already processing" },
 		{ kind: "dialog-settled", id: "d1", outcome: "answered" },
 		{ kind: "run-ended", willRetry: false },

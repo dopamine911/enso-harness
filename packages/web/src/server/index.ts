@@ -394,16 +394,16 @@ export function startZenServer(options: ZenServerOptions) {
 		response.end(JSON.stringify(outcome.receipt));
 	}
 
-	/** No body to read: the thread id is the whole request (#116). */
+	/** No body to read: the thread id is the whole request (#116). The answer is the restored queue (#75). */
 	function respondToAbort(threadId: string, response: ServerResponse): void {
 		const outcome = abortThread(followDeps, threadId);
-		if (outcome.status !== 204) {
+		if (outcome.status !== 200) {
 			response.writeHead(outcome.status, { "Content-Type": "text/plain" });
 			response.end(outcome.reason);
 			return;
 		}
-		response.writeHead(204);
-		response.end();
+		response.writeHead(200, { "Content-Type": "application/json" });
+		response.end(JSON.stringify(outcome.receipt));
 	}
 
 	async function respondToDialog(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {

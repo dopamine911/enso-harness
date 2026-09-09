@@ -1,4 +1,4 @@
-import { ZenNotifyType, ZenOpenDialog, ZenUiRequestOrigin } from "@zen/core";
+import { ZenNotifyType, ZenOpenDialog, ZenQueue, ZenUiRequestOrigin } from "@zen/core";
 import { Check } from "typebox/value";
 import {
 	ZEN_CUSTOM_EVENT_DIALOG,
@@ -8,6 +8,7 @@ import {
 	ZEN_CUSTOM_EVENT_MODE,
 	ZEN_CUSTOM_EVENT_NOTIFY,
 	ZEN_CUSTOM_EVENT_OPEN_DIALOGS,
+	ZEN_CUSTOM_EVENT_QUEUE,
 	ZEN_CUSTOM_EVENT_RUN,
 	ZEN_CUSTOM_EVENT_USAGE,
 } from "./rpc/custom-event-names.ts";
@@ -66,6 +67,12 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
 	}
 	if (eventType === ZEN_CUSTOM_EVENT_USAGE) {
 		stores.stats.applyUsage(data);
+		return;
+	}
+	if (eventType === ZEN_CUSTOM_EVENT_QUEUE) {
+		// pi's queue, whole (#75): steering first, then follow-ups. A malformed frame leaves the
+		// last list standing rather than clearing a real queue.
+		if (Check(ZenQueue, data)) stores.queue.set([...data.steering, ...data.followUp]);
 		return;
 	}
 	if (eventType === ZEN_CUSTOM_EVENT_FOLLOW_ENDED) {

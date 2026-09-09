@@ -22,7 +22,7 @@ export interface ScriptedFetch {
 	readonly frame: (frame: ZenFollowFrame) => void;
 	/** End the follow body — the server went away. */
 	readonly closeFollow: () => void;
-	readonly prompts: Array<{ message: string }>;
+	readonly prompts: Array<{ message: string; streamingBehavior?: string }>;
 	readonly dialogs: unknown[];
 	/** How many `POST …/abort` the server saw (#116). */
 	readonly abortCount: () => number;
@@ -34,6 +34,8 @@ export interface ScriptedFetchOptions {
 	readonly promptStatus?: { status: number; body: unknown };
 	readonly dialogStatus?: number;
 	readonly abortStatus?: number;
+	/** What the stop hands back (#75): the prompts pi had queued. Answered with the 200 receipt. */
+	readonly queued?: string[];
 	readonly mode?: { mode: string; available: string[] };
 	/** What `GET /api/stored-threads` lists — the rail's Previous Sessions (#95). */
 	readonly storedThreads?: ZenStoredThread[];
@@ -54,14 +56,14 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
 		body: { threadId: "t1", messageId: "pm1", generation: 1, queued: false },
 	};
 	const dialogStatus = options.dialogStatus ?? 204;
-	const abortStatus = options.abortStatus ?? 204;
+	const abortStatus = options.abortStatus ?? 200;
 	const mode = options.mode ?? { mode: "default", available: ["default", "plan"] };
 	let aborts = 0;
 	let write: (text: string) => void = () => undefined;
 	let close: () => void = () => undefined;
 	/** The prompt route answers only once this resolves — open by default; a test may hold it. */
 	let promptGate = { promise: Promise.resolve() } as { promise: Promise<void>; resolve?: () => void };
-	const prompts: Array<{ message: string }> = [];
+	const prompts: Array<{ message: string; streamingBehavior?: string }> = [];
 	const dialogs: unknown[] = [];
 	/** The follow: one SSE body per subscription; the latest one is where `frame` writes. */
 	const openFollow = (): Response => {
@@ -104,7 +106,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
 		const action = threadAction(path);
 		if (action === "follow") return Promise.resolve(openFollow());
 		if (action === "prompt") {
-			prompts.push(JSON.parse(String(init?.body)) as { message: string });
+			prompts.push(JSON.parse(String(init?.body)) as { message: string; streamingBehavior?: string });
 			const body = typeof promptStatus.body === "string" ? promptStatus.body : JSON.stringify(promptStatus.body);
 			return promptGate.promise.then(() => new Response(body, { status: promptStatus.status }));
 		}
@@ -114,7 +116,8 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
 		}
 		if (action === "abort" && init?.method === "POST") {
 			aborts += 1;
-			return Promise.resolve(new Response(abortStatus === 204 ? null : "no", { status: abortStatus }));
+			if (abortStatus !== 200) return Promise.resolve(new Response("no", { status: abortStatus }));
+			return Promise.resolve(Response.json({ threadId: "t1", restored: options.queued ?? [] }));
 		}
 		return Promise.resolve(pageRead(path) ?? new Response("not found", { status: 404 }));
 	}) as typeof fetch;

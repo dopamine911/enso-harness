@@ -5,6 +5,7 @@ import {
 	type PiStreamingBehavior,
 	persistedPermissionMode,
 	validateDialogAnswer,
+	type ZenAbortReceipt,
 	type ZenFollowFrame,
 	type ZenPromptReceipt,
 } from "@zen/core";
@@ -30,6 +31,9 @@ import type { ThreadFeedFrame, ThreadRegistry } from "./thread-registry.ts";
  *                                  Nothing parks: the extension's promise is still pending
  *                                  inside pi, the run keeps going on the follow.
  *   POST /api/threads/:id/abort    unary (#116). Stop the run in flight: pi is told, and the
+ *                                  prompts waiting behind the run come back in the answer
+ *                                  (#75, clear-and-restore — pi's queue is cleared, every
+ *                                  follower sees `zen.queue` empty). The
  *                                  run ENDS ON THE FOLLOW like any other — `agent_settled`
  *                                  is emitted from pi's own `finally` — so every follower
  *                                  sees the same `settled` + `status`, and the thread is
@@ -265,15 +269,20 @@ export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answ
 }
 
 export type AbortRouteOutcome =
-	| { readonly status: 204 }
+	| { readonly status: 200; readonly receipt: ZenAbortReceipt }
 	| { readonly status: 404; readonly reason: string }
 	| { readonly status: 409; readonly reason: string };
 
-/** Stop the run in flight on a live thread (#116). The run's end arrives on the follow. */
+/**
+ * Stop the run in flight on a live thread (#116). The run's end arrives on the follow; the
+ * answer carries the prompts that were waiting behind it (#75, clear-and-restore), so the
+ * stopping tab can hand them back to its composer.
+ */
 export function abortThread(deps: FollowRouteDeps, threadId: string): AbortRouteOutcome {
-	switch (deps.threads.abort(threadId)) {
+	const { outcome, restored } = deps.threads.abort(threadId);
+	switch (outcome) {
 		case "aborted":
-			return { status: 204 };
+			return { status: 200, receipt: { threadId, restored: [...restored] } };
 		case "idle":
 			return { status: 409, reason: `nothing is running on thread ${threadId}` };
 		default:

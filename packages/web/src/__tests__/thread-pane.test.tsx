@@ -244,8 +244,8 @@ test("an input dialog: what is typed is the answer, one POST …/dialog, uncontr
 
 // ── the follow ending under the page (#103 receipt, #119) ───────────────────────────────
 
-test("Enter or the button: one POST …/prompt each, the draft clears; during a run the prompt waits in the BROWSER until settle (#75 gap)", async () => {
-	const pane = await mountPane();
+test("Enter or the button: one POST …/prompt each and the draft clears; DURING a run the prompt goes to pi now, listed above the composer, and a stop hands it back (#75)", async () => {
+	const pane = await mountPane({ server: { queued: ["by the button, mid-run"] } });
 	await pane.settle(SNAPSHOT_IDLE);
 	await flush(async () => {
 		typeInto(pane.composer(), "hello pi");
@@ -257,12 +257,8 @@ test("Enter or the button: one POST …/prompt each, the draft clears; during a 
 	// The receipt opened OUR run (generation 1); the bar says so and the server is busy.
 	expect(pane.status()).toContain("working");
 
-	// ⚠ FOUND BY THIS TEST (2026-09-09): a prompt sent while our run is open is queued by
-	// TanStack's ChatClient (`whenBusy: "queue"`, `isSendBusy()` is true while the run it
-	// started is open) and POSTed only when the run settles. It is NOT pi's follow-up queue
-	// (#75 decision 3): another tab sees nothing, a reload loses it, and pi's `queue_update`
-	// never fires. The user-observable contract pinned here is the weaker one that holds
-	// today — the prompt is not lost — with the timing named. #75 changes this test on purpose.
+	// A prompt during the run: to pi NOW as a follow-up — not TanStack's browser queue (which
+	// held it until settle before #75) — with the user message in the transcript at once.
 	await flush(async () => {
 		typeInto(pane.composer(), "by the button, mid-run");
 		await tick();
@@ -273,13 +269,37 @@ test("Enter or the button: one POST …/prompt each, the draft clears; during a 
 		await tick();
 	});
 	expect(pane.composer().value).toBe("");
-	expect(pane.server.prompts).toEqual([{ message: "hello pi" }]); // held in the browser
-	await pane.settle(
-		{ type: "observation", seq: 1, observation: { kind: "settled" } },
-		{ type: "status", live: true, busy: false, generation: 1 },
-	);
-	await flush(tick);
-	expect(pane.server.prompts).toEqual([{ message: "hello pi" }, { message: "by the button, mid-run" }]);
+	expect(pane.server.prompts).toEqual([
+		{ message: "hello pi" },
+		{ message: "by the button, mid-run", streamingBehavior: "followUp" },
+	]);
+	expect(pane.container.textContent).toContain("by the button, mid-run");
+	// pi lists it for every follower; this pane shows the list above the composer.
+	await pane.settle({
+		type: "observation",
+		seq: 1,
+		observation: { kind: "queue", steering: [], followUp: ["by the button, mid-run"] },
+	});
+	const queueList = pane.container.querySelector('[aria-label="queued prompts"]');
+	expect(queueList?.textContent).toContain("1 prompt queued");
+	expect(queueList?.textContent).toContain("by the button, mid-run");
+
+	// Stop: pi is told, its queue is cleared (the frame every follower reads), and the words
+	// come back to THIS composer — clear-and-restore, pi's TUI's behaviour.
+	const stop = pane.stopButton();
+	if (stop === null) throw new Error("expected the stop button during the run");
+	await flush(async () => {
+		stop.click();
+		await tick();
+	});
+	expect(pane.server.abortCount()).toBe(1);
+	expect(pane.composer().value).toBe("by the button, mid-run");
+	await pane.settle({ type: "observation", seq: 2, observation: { kind: "queue", steering: [], followUp: [] } });
+	expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull();
+	// The bubble that was never asked leaves with its text (pi's TUI does the same): with the
+	// queue list gone, the ONLY place the words remain is the composer. The first prompt's bubble stays.
+	expect((pane.container.textContent?.match(/by the button, mid-run/g) ?? []).length).toBe(1);
+	expect(pane.container.textContent).toContain("hello pi");
 	await pane.unmount();
 });
 

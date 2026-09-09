@@ -69,6 +69,7 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
 			record.aborts += 1;
 			return Promise.resolve();
 		},
+		clearQueue: () => ({ steering: [], followUp: [] }),
 		dispose: () => {
 			record.disposed += 1;
 		},
