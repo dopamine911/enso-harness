@@ -15,6 +15,7 @@
     "@ladbabynpm/picc-permission-modes": "0.1.1",
     "@logtape/file": "2.3.4",
     "@logtape/logtape": "2.3.4",
+    "@logtape/pretty": "2.3.4",
     "@logtape/redaction": "2.3.4",
     "@radix-ui/react-use-controllable-state": "^1.2.6",
     "@tanstack/ai": "0.53.0",

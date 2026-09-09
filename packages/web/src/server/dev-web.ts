@@ -25,11 +25,11 @@ const API_UPSTREAM_ORIGIN = "http://127.0.0.1:5179";
 const repoRoot = findRepoRoot(import.meta.url);
 const publicDir = join(webPackageDir(repoRoot), "public");
 
-// Its own process, its own file (#132) — nothing of substance happens here, but a proxy
-// that cannot reach the zen server is exactly the line a bundle needs.
+// Its own process, the same day's file (#132) — nothing of substance happens here, but a
+// proxy that cannot reach the zen server is exactly the line a bundle needs.
 const disposeLogging = await configureProcessLogging({
 	logsDir: zenLogsDir(repoRoot),
-	file: "web.jsonl",
+	process: "web",
 	console: "info",
 });
 const log = zenLogger("server", "web");

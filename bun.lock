@@ -48,6 +48,7 @@
         "@ladbabynpm/picc-permission-modes": "0.1.1",
         "@logtape/file": "2.3.4",
         "@logtape/logtape": "2.3.4",
+        "@logtape/pretty": "2.3.4",
         "@logtape/redaction": "2.3.4",
         "@radix-ui/react-use-controllable-state": "^1.2.6",
         "@tanstack/ai": "0.53.0",
@@ -268,6 +269,8 @@
     "@logtape/file": ["@logtape/file@2.3.4", "", { "peerDependencies": { "@logtape/logtape": "^2.3.4" } }, "sha512-4jXkntOowasyo5qrAjV1RdL9iEbP80xYLcSgnorRgBaxkBVtN0kiYdtMC/975Sj6ATmCuuTrnWlvcO0tyrY/9w=="],
 
     "@logtape/logtape": ["@logtape/logtape@2.3.4", "", {}, "sha512-oW5Q6EOdjemL94c324j2fUn+2nRGuODwmOKmrwY6YAVkjqNWYVgkzpfbckFc4CKmDDCMk+GiwNfPybMZB3QqNQ=="],
+
+    "@logtape/pretty": ["@logtape/pretty@2.3.4", "", { "peerDependencies": { "@logtape/logtape": "^2.3.4" } }, "sha512-l4g4/9+6FoqVWsdmC8qqHt7a1VchL6YYkxWeNuQEGu11ewSE2Ng04/56xjRrkCictGgSjG/T66kRVi/SP+tYyA=="],
 
     "@logtape/redaction": ["@logtape/redaction@2.3.4", "", { "peerDependencies": { "@logtape/logtape": "^2.3.4" } }, "sha512-Mdn4yPczbwxlLRkMiFrNuvalCa+Z0mdACkswete67K6jV9xP+faBR/Ht1Y8YRXZbg3piV08N23bFkQoblYyu8Q=="],
 

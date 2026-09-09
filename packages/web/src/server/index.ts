@@ -403,7 +403,7 @@ export function startZenServer(options: ZenServerOptions) {
 			messageId,
 			generation,
 			admission: queued ? "queued" : "opened",
-			streamingBehavior: body.streamingBehavior,
+			...(body.streamingBehavior === undefined ? {} : { streamingBehavior: body.streamingBehavior }),
 		});
 		response.writeHead(202, { "Content-Type": "application/json" });
 		response.end(JSON.stringify(outcome.receipt));

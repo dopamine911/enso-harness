@@ -5,11 +5,12 @@ import { type Static, Type } from "typebox";
  * The harness's log record (#132): one shape for every process, so a bundle a user hands
  * us reads the same whichever layer wrote the line.
  *
- * LogTape is the substrate (the #132 assessment): a category tree, one sink per process,
- * a record that keeps its values structured. What is OURS is here — the layers, the
- * properties every record carries when it can, and the one way to get a logger. Nothing
- * outside this file and the per-process configurators (`server/logging.ts` and kin)
- * imports `@logtape/*` directly; `test/no-console.test.ts` holds that line.
+ * LogTape is the substrate (the #132 assessment): a category tree, one sink per process
+ * into one shared file, a record that keeps its values structured. What is OURS is here —
+ * the layers, the properties every record carries when it can, and the one way to get a
+ * logger. Nothing outside this file and the per-process configurators
+ * (`web/server/logging.ts` and kin) imports `@logtape/*` directly;
+ * `test/logging-gate.test.ts` holds that line.
  *
  * ⚠ Messages are EVENTS, not sentences with values baked in: `"prompt {messageId}
  * rejected: {reason}"` with `{ threadId, messageId, reason }`, never

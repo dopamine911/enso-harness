@@ -6,7 +6,7 @@
  * it is set by whoever starts the server rather than by whoever opens the page.
  *
  * The launcher is where logging is configured (#132): the library under it configures
- * nothing. The terminal sees `info` and up; the file under `.zen/logs` gets everything.
+ * nothing. The terminal sees `info` and up; the day's file under `.zen/logs` gets everything.
  */
 
 import { mkdirSync } from "node:fs";
@@ -24,7 +24,7 @@ mkdirSync(agentDir, { recursive: true });
 
 const disposeLogging = await configureProcessLogging({
 	logsDir: zenLogsDir(repoRoot),
-	file: "server.jsonl",
+	process: "server",
 	console: "info",
 });
 const log = zenLogger("server", "dev");
