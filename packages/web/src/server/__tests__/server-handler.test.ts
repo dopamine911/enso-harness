@@ -237,6 +237,51 @@ test("⚠ a run that goes silent carries SSE keepalive comments, which parse to 
 	expect(events).toContain(EventType.TEXT_MESSAGE_CONTENT);
 });
 
+// ⚠ The keepalive fires in the window between a client's disconnect and the handler's
+// `finally`; a write on a destroyed response emits 'error', which with no listener is an
+// uncaught exception in the server (PR #108 review). The decisive assertion is the request
+// AFTER the disconnect: the server is still there to answer it, and nothing was reported as
+// an unhandled write.
+test("⚠ a client that drops while the keepalive is ticking does not take the server down", async () => {
+	const problems: unknown[] = [];
+	const { host, built } = fakeHost({
+		onPrompt: (emit, outcome) => {
+			outcome.onAccepted();
+			emit(TEXT_DELTA);
+			// never settles — the client walks away, the keepalive keeps ticking until the close
+		},
+	});
+	const started = startZenServer({
+		cwd: tmpdir(),
+		harnessPackageDir: emptyHarnessDir(),
+		agentDir: mkdtempSync(join(tmpdir(), "zen-handler-agent-")),
+		port: 0,
+		host,
+		sseKeepaliveMs: 5,
+		onProblem: (problem) => problems.push(problem),
+	});
+	openServers.push(started);
+	const url = await started.listening;
+	const controller = new AbortController();
+	const response = await fetch(`${url}/api/chat`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ threadId: "t1", runId: "r1", messages: [userMessage("hello")] }),
+		signal: controller.signal,
+	});
+	const reader = response.body?.getReader();
+	await reader?.read();
+	controller.abort();
+	// Let several keepalive intervals pass after the disconnect, while pi is being stopped.
+	for (let attempt = 0; attempt < 50 && (built[0]?.aborts ?? 0) === 0; attempt += 1) {
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	await new Promise((resolve) => setTimeout(resolve, 30));
+	expect(built[0]?.aborts).toBe(1);
+	expect((await fetch(`${url}/api/threads`)).status).toBe(200);
+	expect(problems.filter((problem) => String(problem).includes("SSE response error"))).toEqual([]);
+});
+
 // #96: a notify the session emits while the run is listening crosses the wire tagged
 // `origin: "run"` — the browser renders it open. The session-start half of the tag rides the
 // real host's replay, pinned in agent-host.test.ts and seen live in the fold.

@@ -68,11 +68,34 @@ const SSE_HEADERS = {
  */
 export const SSE_KEEPALIVE_MS = 5000;
 
-/** Start the keepalive for one open response; returns the stop. Not an event, so not in the sent tail. */
-function startSseKeepalive(response: ServerResponse, intervalMs: number): () => void {
-	const timer = setInterval(() => response.write(": keepalive\n\n"), intervalMs);
+/**
+ * Start the keepalive for one open response; returns the stop. Not an event, so not in the
+ * sent tail.
+ *
+ * ⚠ The timer is GUARANTEED to fire in the window between a client's disconnect and the
+ * handler's `finally` (pi is being torn down asynchronously in between), and a write on a
+ * destroyed response emits `'error'` — with no listener, that is an uncaught exception in
+ * the server (PR #108 review). So: the response's own `'close'` stops the timer, a tick
+ * that finds the response gone stops itself instead of writing, and an `'error'` on the
+ * response is reported rather than thrown.
+ */
+function startSseKeepalive(
+	response: ServerResponse,
+	intervalMs: number,
+	onProblem: ((problem: unknown) => void) | undefined,
+): () => void {
+	const timer = setInterval(() => {
+		if (response.destroyed || response.writableEnded) {
+			clearInterval(timer);
+			return;
+		}
+		response.write(": keepalive\n\n");
+	}, intervalMs);
 	timer.unref?.();
-	return () => clearInterval(timer);
+	const stop = (): void => clearInterval(timer);
+	response.once("close", stop);
+	response.on("error", (error) => onProblem?.(`SSE response error after the client left: ${String(error)}`));
+	return stop;
 }
 
 /**
@@ -513,7 +536,7 @@ export function startZenServer(options: ZenServerOptions) {
 				// aborts the run and releases the thread; the session itself stays alive.
 				const stopParked = registry.peek(ids.threadId)?.stopPi;
 				response.writeHead(200, SSE_HEADERS);
-				const stopKeepalive = startSseKeepalive(response, sseKeepaliveMs);
+				const stopKeepalive = startSseKeepalive(response, sseKeepaliveMs, options.onProblem);
 				// ⚠ `response`, NOT `request` (#34). Under bun's node:http compat the REQUEST
 				// 'close' event fires when the request BODY has been consumed — the start of
 				// every run, before this listener is registered — so a request-close hook is
@@ -573,7 +596,7 @@ export function startZenServer(options: ZenServerOptions) {
 				return;
 			}
 			response.writeHead(200, SSE_HEADERS);
-			const stopKeepalive = startSseKeepalive(response, sseKeepaliveMs);
+			const stopKeepalive = startSseKeepalive(response, sseKeepaliveMs, options.onProblem);
 
 			// A client that navigates away must not leave pi running — but a PARKED session
 			// belongs to the registry, and this close event also fires on normal completion,

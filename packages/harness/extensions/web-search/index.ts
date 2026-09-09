@@ -137,7 +137,8 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
 				const isTavilyArmed = tavilyApiKey !== undefined && tavilyApiKey.length > 0;
 				// ⚠ ONE deadline for the call (#99): the fallback runs under what the primary left,
 				// so primary + fallback can never outlast the server's no-progress cutoff.
-				const deadlineAt = Date.now() + (dependencies.timeoutMs ?? WEB_SEARCH_TIMEOUT_MS);
+				const budgetMs = dependencies.timeoutMs ?? WEB_SEARCH_TIMEOUT_MS;
+				const deadline: CallDeadline = { at: Date.now() + budgetMs, budgetMs };
 				const onProgress = progressForwarder(onUpdate);
 
 				// --- the primary attempt.
@@ -147,7 +148,7 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
 					extensionContext,
 					query,
 					signal,
-					deadlineAt,
+					deadline,
 					onProgress,
 				});
 
@@ -177,7 +178,7 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
 				// progress (#99), and this is the one moment in the chain that is otherwise silent.
 				onProgress(`${fallbackReason} — trying the Tavily fallback…`);
 				try {
-					const tavilyOutcome = await underDeadline(signal, deadlineAt, (deadlineSignal) =>
+					const tavilyOutcome = await underDeadline(signal, deadline, (deadlineSignal) =>
 						dependencies.runProviders.tavily({
 							query,
 							apiKey: tavilyApiKey,
@@ -214,16 +215,16 @@ interface RunPrimaryOptions {
 	extensionContext: ExtensionContext;
 	query: string;
 	signal: AbortSignal | undefined;
-	deadlineAt: number;
+	deadline: CallDeadline;
 	onProgress: (text: string) => void;
 }
 
 /** Run the selected primary backend; a non-outcome return is the failure record. */
 async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome | PrimaryFailure> {
-	const { dependencies, webSearchConfig, extensionContext, query, signal, deadlineAt, onProgress } = options;
+	const { dependencies, webSearchConfig, extensionContext, query, signal, deadline, onProgress } = options;
 	try {
 		if (webSearchConfig.backend === "deepseek") {
-			return await underDeadline(signal, deadlineAt, (deadlineSignal) =>
+			return await underDeadline(signal, deadline, (deadlineSignal) =>
 				dependencies.runProviders.deepseek({
 					query,
 					apiKey: dependencies.readEnvironmentVariable(DEEPSEEK_API_KEY_VARIABLE),
@@ -256,7 +257,7 @@ async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome 
 			signal: deadlineSignal,
 			onProgress,
 		});
-		return await underDeadline(signal, deadlineAt, (deadlineSignal) =>
+		return await underDeadline(signal, deadline, (deadlineSignal) =>
 			dependencies.runProviders[routedProviderId](modelRequest(deadlineSignal)),
 		);
 	} catch (error) {
@@ -278,20 +279,26 @@ function fallbackReasonFor(primary: WebSearchOutcome | PrimaryFailure): string |
 	return `the ${providerName} search failed${billingNote}: ${primary.reason}`;
 }
 
+/** One call's deadline: the instant it passes, and the budget it was set from (named in the refusal). */
+interface CallDeadline {
+	readonly at: number;
+	readonly budgetMs: number;
+}
+
 /** Run one provider attempt under what remains of the call's deadline AND the caller's signal. */
 async function underDeadline<T>(
 	callerSignal: AbortSignal | undefined,
-	deadlineAt: number,
+	deadline: CallDeadline,
 	run: (deadlineSignal: AbortSignal) => Promise<T>,
 ): Promise<T> {
 	const controller = new AbortController();
 	const deadlinePassed = (): void =>
 		controller.abort(
 			new Error(
-				`${WEB_SEARCH_TOOL_NAME} passed its deadline (${WEB_SEARCH_TIMEOUT_MS}ms for primary and fallback together)`,
+				`${WEB_SEARCH_TOOL_NAME} passed its deadline (${deadline.budgetMs}ms for primary and fallback together)`,
 			),
 		);
-	const remainingMs = deadlineAt - Date.now();
+	const remainingMs = deadline.at - Date.now();
 	// A spent budget aborts BEFORE the attempt runs — a 0ms timer would let a fast provider
 	// answer first, and the fallback must not start what the deadline already forbade.
 	if (remainingMs <= 0) deadlinePassed();
