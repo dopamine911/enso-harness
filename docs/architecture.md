@@ -147,7 +147,8 @@ stateDiagram-v2
   idle --> busy: acquire() · generation++ · awaits any abort in flight
   busy --> idle: agent_settled → release() · idle timer armed (30 min)
   busy --> busy: POST …/abort → pi.abort() · settle still ends it
-  busy --> busy: POST …/prompt → queued behind the run (#75)
+  busy --> busy: POST …/prompt → queued behind the run, listed for every follower (#75)
+  busy --> busy: POST …/abort → pi's queue cleared, texts back to the stopping tab (#75)
   idle --> [*]: idle timer → dispose · generation counter kept
 ```
 
@@ -425,6 +426,8 @@ Settled. Each carries its reason so a later session can tell when the reason has
 | **Prompt/follow split** (#112): every route is unary, the follow is the one stream | The run is not an HTTP response, so nothing parks (#27) and no cutoff kills a slow tool (#99). Snapshot then observations; the snapshot is the resync. |
 | **The feed is the only writer of run state in the browser** | Abort (#116), dialogs (#114) and resume (#95) each added a route and changed nothing about how a run ends. |
 | **Abort is by thread, not by lease** (#116) | The lease that took the run lives in the prompt route's closure; an operator's stop is "whatever runs now". The stale-lease fence stays on `release`. |
+| **A stop hands the queue back — clear-and-restore** (#75) | Daniel's call: stop by accident and what was queued returns to the composer, never delivered unasked on the next turn, never dropped — pi's TUI's behaviour. So the queue must be ours to drain: prompts during a run go to pi (not TanStack's browser queue, invisible to other tabs), `POST …/abort` clears pi's queue before telling it to abort and answers with the texts. |
+| **Tool results carry `isError` in the field TanStack reads** (#130) | `state: "output-error"` on `TOOL_CALL_RESULT`; a refused or aborted call reads `error` live exactly as a resumed log does. A call with no result once its run has ended reads `aborted`, never `running…`. |
 | **One thread id, pi's session id** (#95) | The browser mints it, pi stores under it, the rail finds it again after a restart. Validated as a filename component at every entry point. |
 | **`AgentHost` is the storage seam** | The only file that touches `SessionManager` or the session-file layout. Keeps a later store a one-file change. |
 | **Run provenance lives in pi's log as custom entries**, never a side file | picc's `modes` entry is the pattern; a fork inherits provenance by construction. Fields beyond what pi records are deferred to the lineage phase. |
@@ -448,7 +451,7 @@ so a reader knows where to look before touching the file.
 | #53 | The custom-event router is a function, not a closure, so a renamed chunk fails a test; the guard decodes `file://` before judging a path | `web/custom-event-router.ts`, `core/paths.ts` |
 | #59 | One committed config, fails closed; one root finder, realpath-first | `core/config.ts`, `core/paths.ts` |
 | #69 | Events before the first subscriber are held and replayed once; a held `agent_settled` would end the next run, so nothing is held after that | `core/pi-rpc.ts`, `web/host/agent-host.ts` |
-| #75 | A prompt on a busy thread queues through pi (`followUp`); the receipt says `queued`; abort does not drop the queue | `server/follow.ts`, `core/follow.ts` |
+| #75 | A prompt during a run goes to pi's queue now (not TanStack's browser queue); `zen.queue` carries the texts for every follower; a stop clears pi's queue and hands the texts back — clear-and-restore; a claimed follow-up's reply opens a new assistant bubble after its question | `server/thread-registry.ts`, `web/follow-connection.ts`, `web/chat-screen.tsx` |
 | #82 | Cognitive-complexity ceilings are pinned per file as ratchets — may go down, never up | `biome.jsonc` |
 | #84 | The permission mode is picc's CURRENT mode, computed the way picc restores it; never an assumed default; deliberately uncached | `core/permission-mode.ts` |
 | #90 | Stores are per thread, not per page, because TanStack's `onCustomEvent` carries no thread id | `web/thread-stores.ts`, `web/custom-event-router.ts` |
