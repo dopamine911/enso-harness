@@ -20,5 +20,12 @@ export const ZEN_CUSTOM_EVENT_ENTRY = "zen.entry";
  * its own. Value: `{ mode: string, available: string[] }`.
  */
 export const ZEN_CUSTOM_EVENT_MODE = "zen.mode";
+/**
+ * Which server-side acquisition of the thread this run holds (#109). A state receipt the
+ * SERVER synthesises at run start, beside `zen.mode`: the browser keeps the value, and the
+ * debug pane compares it with the server's current `generation` — the two differ exactly
+ * when a run this page did not make has moved the thread on. Value: `{ generation: number }`.
+ */
+export const ZEN_CUSTOM_EVENT_RUN = "zen.run";
 /** A pi event this surface does not model yet — carried, never dropped. Value: the raw event. */
 export const ZEN_CUSTOM_EVENT_UNMAPPED = "zen.unmapped";

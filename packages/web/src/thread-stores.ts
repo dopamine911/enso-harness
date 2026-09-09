@@ -1,11 +1,11 @@
 import type { UIMessage } from "@tanstack/ai-client";
-import type { ZenThreadHistory } from "@zen/core";
+import type { ZenInterruptedTail, ZenThreadHistory } from "@zen/core";
 import { createRecentChunksStore, type RecentChunksStore } from "./custom-event-router.ts";
 import { createModeLines, type ModeLines } from "./mode-lines.ts";
 import { createNotificationsStore, type NotificationsStore } from "./notifications.tsx";
 import { createPermissionModeStore, type PermissionModeStore } from "./permission-mode.tsx";
 import { createSessionStatsStore, type SessionStatsStore } from "./session-stats.tsx";
-import { createStore, type Store } from "./store.ts";
+import { createStore, type Store, type WritableStore } from "./store.ts";
 
 /**
  * Everything the browser knows about one thread beyond its messages (#90 PR 3).
@@ -35,6 +35,13 @@ export interface ThreadStores {
 	readonly notifications: NotificationsStore;
 	readonly modeLines: ModeLines;
 	readonly recentChunks: RecentChunksStore;
+	/**
+	 * The server-side acquisition this page's LAST run on the thread held, from its
+	 * `zen.run` receipt (#109); undefined until a run starts. The debug pane compares it
+	 * with the server's current `generation`: a difference names a run this page did not
+	 * make — another tab, or a rebuild after the idle window.
+	 */
+	readonly generation: WritableStore<number | undefined>;
 }
 
 function createThreadStores(threadId: string, history: readonly UIMessage[]): ThreadStores {
@@ -47,8 +54,21 @@ function createThreadStores(threadId: string, history: readonly UIMessage[]): Th
 		notifications,
 		modeLines: createModeLines(notifications),
 		recentChunks: createRecentChunksStore(),
+		generation: createStore<number | undefined>(undefined),
 	};
 }
+
+/**
+ * What a resumed thread says about a turn that never settled (#109) — a durable line at
+ * the head of the transcript's notices, never a toast, because the next prompt continues
+ * from the torn tail and the user should know that before typing it.
+ */
+export const INTERRUPTED_TAIL_NOTICE: Record<ZenInterruptedTail, string> = {
+	"unanswered-prompt":
+		"This session's last prompt was never answered — its run was cut off before a reply. The next prompt continues from there.",
+	"tool-call-without-result":
+		"This session's last turn ended mid-tool-call — the result never arrived. The next prompt continues from there.",
+};
 
 // ── the page's threads ────────────────────────────────────────────────────────
 
@@ -127,6 +147,9 @@ export function adoptThread(history: ZenThreadHistory): ThreadStores {
 	const messages = reviveHistoryMessages(history.messages);
 	const stores = createThreadStores(history.threadId, messages);
 	stores.permissionMode.applyReceipt(history.permissionMode);
+	if (history.interrupted !== undefined) {
+		stores.notifications.push(INTERRUPTED_TAIL_NOTICE[history.interrupted], "warning", "run");
+	}
 	threads.set(stores.threadId, stores);
 	summaries.set(stores.threadId, {
 		threadId: stores.threadId,

@@ -11,6 +11,7 @@ import type {
 } from "@zen/core";
 import { createDialogRegistry } from "../dialog-registry.ts";
 import { type ChatRunOutcome, resumeChat, runChat } from "../session.ts";
+import { createThreadSessions, type ThreadLease } from "../thread-sessions.ts";
 
 /**
  * Everything a fake session records — the assertions read these instead of wire strings.
@@ -24,6 +25,10 @@ interface FakeSessionRecord {
 	disposed: number;
 	/** Live `subscribe` handles — a run must leave none behind once it ends unparked (#69 PR 2). */
 	subscriberCount: () => number;
+	/** `stop` calls on the run's lease — the registry's teardown, observable (#109). */
+	stops: number;
+	/** `release` calls on the run's lease. */
+	releases: number;
 }
 
 interface FakeSessionScript {
@@ -54,6 +59,8 @@ function fakeSession(script: FakeSessionScript): { session: PiSession; record: F
 		commandLookups: 0,
 		disposed: 0,
 		subscriberCount: () => listeners.size,
+		stops: 0,
+		releases: 0,
 	};
 	const context: FakeSessionContext = {
 		emit: (eventJson) => {
@@ -110,26 +117,36 @@ function scriptedPi(events: string[], commands: string[] = []) {
 
 const ids = { messageId: "m1", runId: "r1", threadId: "t1" };
 
+/** The run's hold on thread `t1` over a fake session — its stop and release land in the fake's record. */
+function leaseOf(pi: { session: PiSession; record: FakeSessionRecord }): ThreadLease {
+	return {
+		threadId: "t1",
+		session: pi.session,
+		generation: 1,
+		stop: () => {
+			pi.record.stops += 1;
+		},
+		release: () => {
+			pi.record.releases += 1;
+		},
+	};
+}
+
 /**
- * Fresh #27 wiring per run: a registry with test-scale timeouts, the outcome the HTTP
- * handler would read, and a counting stopPi so process teardown is observable.
+ * Fresh #27 wiring per run: a registry with test-scale timeouts and the outcome the HTTP
+ * handler would read.
  */
 function runWiring() {
 	const problems: unknown[] = [];
-	const wiring = {
+	return {
 		registry: createDialogRegistry({
 			onProblem: (problem: unknown) => problems.push(problem),
 			answerTimeoutMs: 5000,
 			evictionGraceMs: 5,
 		}),
-		outcome: { parkedAwaitingAnswer: false } as ChatRunOutcome,
+		outcome: { parkedAwaitingAnswer: false, resumedRun: false } as ChatRunOutcome,
 		problems,
-		stopCount: 0,
-		stopPi: () => {
-			wiring.stopCount += 1;
-		},
 	};
-	return wiring;
 }
 
 async function collect(events: string[], images?: ChatImages) {
@@ -137,7 +154,7 @@ async function collect(events: string[], images?: ChatImages) {
 	const wiring = runWiring();
 	const chunks = [];
 	for await (const chunk of runChat({
-		session: pi.session,
+		lease: leaseOf(pi),
 		ids,
 		prompt: "hello",
 		onProblem: undefined,
@@ -150,14 +167,17 @@ async function collect(events: string[], images?: ChatImages) {
 }
 type ChatImages = ReadonlyArray<{ type: "image"; data: string; mimeType: string }>;
 
-test("a run opens with RUN_STARTED, then the mode receipt, then TEXT_MESSAGE_START (#84)", async () => {
+test("a run opens with RUN_STARTED, then the mode and run receipts, then TEXT_MESSAGE_START (#84, #109)", async () => {
 	const { chunks } = await collect(['{"type":"agent_settled"}']);
-	expect(chunks.slice(0, 3).map((c) => c.type)).toEqual([
+	expect(chunks.slice(0, 4).map((c) => c.type)).toEqual([
 		EventType.RUN_STARTED,
+		EventType.CUSTOM,
 		EventType.CUSTOM,
 		EventType.TEXT_MESSAGE_START,
 	]);
 	expect(chunks[1]).toMatchObject({ name: "zen.mode", value: { mode: "default" } });
+	// The run receipt carries the lease's own number — the browser's copy of the server's fence.
+	expect(chunks[2]).toMatchObject({ name: "zen.run", value: { generation: 1 } });
 });
 
 test("⚠ the mode receipt carries the session's own state, and rides even on a REFUSED command (#84)", async () => {
@@ -228,7 +248,7 @@ test("a rejected prompt yields RUN_ERROR rather than throwing", async () => {
 		onPrompt: (_context, _request, outcome) => queueMicrotask(() => outcome.onRejected("already streaming")),
 	});
 	const chunks = [];
-	for await (const chunk of runChat({ session: pi.session, ids, prompt: "x", onProblem: undefined, ...runWiring() }))
+	for await (const chunk of runChat({ lease: leaseOf(pi), ids, prompt: "x", onProblem: undefined, ...runWiring() }))
 		chunks.push(chunk);
 	const error = chunks.find((c) => c.type === EventType.RUN_ERROR);
 	expect(error).toMatchObject({ runId: "r1", message: "already streaming" });
@@ -255,9 +275,9 @@ function piWithCommands(commandNames: string[], events: string[] = ['{"type":"ag
 	return scriptedPi(events, commandNames);
 }
 
-async function runWith(pi: { session: PiSession }, prompt: string) {
+async function runWith(pi: { session: PiSession; record: FakeSessionRecord }, prompt: string) {
 	const chunks = [];
-	for await (const chunk of runChat({ session: pi.session, ids, prompt, onProblem: undefined, ...runWiring() })) {
+	for await (const chunk of runChat({ lease: leaseOf(pi), ids, prompt, onProblem: undefined, ...runWiring() })) {
 		chunks.push(chunk);
 	}
 	return chunks;
@@ -313,7 +333,7 @@ test("a run that never settles ends itself rather than hanging", async () => {
 	const pi = scriptedPi(['{"type":"turn_start"}']);
 	const chunks = [];
 	for await (const chunk of runChat({
-		session: pi.session,
+		lease: leaseOf(pi),
 		ids,
 		prompt: "hello",
 		onProblem: undefined,
@@ -332,7 +352,7 @@ test("a settled run is unaffected by the timeout", async () => {
 	const pi = piWithCommands([], ['{"type":"agent_settled"}']);
 	const chunks = [];
 	for await (const chunk of runChat({
-		session: pi.session,
+		lease: leaseOf(pi),
 		ids,
 		prompt: "hi",
 		onProblem: undefined,
@@ -371,7 +391,7 @@ test("⚠ a tool call running for 2× the no-progress cutoff, streaming updates,
 	});
 	const chunks = [];
 	for await (const chunk of runChat({
-		session: pi.session,
+		lease: leaseOf(pi),
 		ids,
 		prompt: "search",
 		onProblem: undefined,
@@ -433,7 +453,7 @@ async function runIntoDialog(pi: ReturnType<typeof dialogPi>, wiring = runWiring
 	// ⚠ Ordinary prose, not "/x" — a slash prompt would trigger the command lookup, which
 	// this fake does not answer. Dialog behaviour is independent of slash handling.
 	for await (const chunk of runChat({
-		session: pi.session,
+		lease: leaseOf(pi),
 		ids,
 		prompt: "do a thing",
 		onProblem: undefined,
@@ -476,7 +496,7 @@ test("⚠⚠ a blocking dialog interrupts the run: parked, stamped, nothing decl
 	expect(pi.record.answers).toHaveLength(0);
 	expect(wiring.outcome.parkedAwaitingAnswer).toBe(true);
 	expect(wiring.registry.peek("t1")?.dialogId).toBe("d1");
-	expect(wiring.stopCount).toBe(0);
+	expect(pi.record.stops).toBe(0);
 });
 
 /** Resume against whatever the wiring's registry holds. */
@@ -486,7 +506,7 @@ async function resumeWith(
 	parentRunId: string | undefined = "r1",
 ) {
 	const resumeIds = { messageId: "m2", runId: "r2", threadId: "t1" };
-	const outcome = { parkedAwaitingAnswer: false };
+	const outcome: ChatRunOutcome = { parkedAwaitingAnswer: false, resumedRun: false };
 	const chunks = [];
 	for await (const chunk of resumeChat({
 		registry: wiring.registry,
@@ -517,9 +537,10 @@ test("an answered select is delivered verbatim and the run continues to completi
 	// the continuation streamed on the RESUME response and settled
 	expect(chunks.some((c) => c.type === EventType.TEXT_MESSAGE_CONTENT)).toBe(true);
 	expect(chunks.at(-1)?.type).toBe(EventType.RUN_FINISHED);
-	// and the question is spent: nothing parked, no second park
+	// and the question is spent: nothing parked, no second park — THIS request took the
+	// run, so the handler releases its lease through this outcome (#110 review).
 	expect(wiring.registry.peek("t1")).toBeUndefined();
-	expect(outcome.parkedAwaitingAnswer).toBe(false);
+	expect(outcome).toEqual({ parkedAwaitingAnswer: false, resumedRun: true });
 });
 
 test("⚠ an answer outside the offered options is refused and the question re-presented", async () => {
@@ -544,7 +565,8 @@ test("⚠ an answer outside the offered options is refused and the question re-p
 	};
 	expect(binding.interruptedRunId).toBe("r2");
 	expect(wiring.registry.peek("t1")?.interruptedRunId).toBe("r2");
-	expect(outcome.parkedAwaitingAnswer).toBe(true);
+	// Took the run AND re-parked it: the handler must release nothing.
+	expect(outcome).toEqual({ parkedAwaitingAnswer: true, resumedRun: true });
 });
 
 test("cancel from the UI is delivered as pi's cancellation and the run completes", async () => {
@@ -569,7 +591,7 @@ test("a stale parentRunId is refused and the question stays open", async () => {
 	const pi = dialogPi(SELECT_DIALOG);
 	const { wiring } = await runIntoDialog(pi);
 
-	const { chunks } = await resumeWith(
+	const { chunks, outcome } = await resumeWith(
 		wiring,
 		[{ interruptId: "d1", status: "resolved", payload: { value: "auto" } }],
 		"r0",
@@ -579,6 +601,8 @@ test("a stale parentRunId is refused and the question stays open", async () => {
 	expect(pi.record.answers).toHaveLength(0);
 	// ⚠ the decisive half: a bad request must not destroy the parked question
 	expect(wiring.registry.peek("t1")?.dialogId).toBe("d1");
+	// … and it never took the run: the lease is not this request's to stop or release.
+	expect(outcome).toEqual({ parkedAwaitingAnswer: false, resumedRun: false });
 });
 
 test("⚠ an unanswered dialog is evicted: declined, run stopped, pump released", async () => {
@@ -595,7 +619,9 @@ test("⚠ an unanswered dialog is evicted: declined, run stopped, pump released"
 	await new Promise((resolve) => setTimeout(resolve, 80));
 
 	expect(pi.record.answers).toEqual([{ id: "d1", cancelled: true }]);
-	expect(wiring.stopCount).toBe(1);
+	// Stopped AND released through the run's lease: the thread goes idle after eviction.
+	expect(pi.record.stops).toBe(1);
+	expect(pi.record.releases).toBe(1);
 	expect(wiring.registry.peek("t1")).toBeUndefined();
 	// The session outlives the evicted run (#69 PR 2): the parked pump must not stay
 	// subscribed for the thread's remaining lifetime, filling `pending` nobody drains.
@@ -648,13 +674,7 @@ test("a fire-and-forget UI request is NOT cancelled — nothing is waiting on it
 				context.emit('{"type":"agent_settled"}');
 			}),
 	});
-	for await (const _chunk of runChat({
-		session: pi.session,
-		ids,
-		prompt: "hi",
-		onProblem: undefined,
-		...runWiring(),
-	})) {
+	for await (const _chunk of runChat({ lease: leaseOf(pi), ids, prompt: "hi", onProblem: undefined, ...runWiring() })) {
 		// drain
 	}
 	expect(pi.record.answers).toHaveLength(0);
@@ -683,7 +703,7 @@ test("dropped status heartbeats do NOT keep a stalled run alive", async () => {
 	});
 	const chunks = [];
 	for await (const chunk of runChat({
-		session: pi.session,
+		lease: leaseOf(pi),
 		ids,
 		prompt: "hello",
 		onProblem: undefined,
@@ -714,7 +734,7 @@ test("real output DOES renew the deadline, so a slow answer is not cut off", asy
 	});
 	const chunks = [];
 	for await (const chunk of runChat({
-		session: pi.session,
+		lease: leaseOf(pi),
 		ids,
 		prompt: "hello",
 		onProblem: undefined,
@@ -740,7 +760,7 @@ test("a slash-command run closes shortly after its ack, not at the no-progress g
 	const startedAt = Date.now();
 	const chunks = [];
 	for await (const chunk of runChat({
-		session: pi.session,
+		lease: leaseOf(pi),
 		ids,
 		prompt: "/mode auto",
 		onProblem: undefined,
@@ -761,7 +781,7 @@ test("⚠ an ordinary prompt is NOT closed by its ack — ack means accepted, no
 	const startedAt = Date.now();
 	const chunks = [];
 	for await (const chunk of runChat({
-		session: pi.session,
+		lease: leaseOf(pi),
 		ids,
 		prompt: "hello",
 		onProblem: undefined,
@@ -782,7 +802,7 @@ test("an answered slash-command dialog closes its continuation at the grace too"
 	const wiring = runWiring();
 	const chunks1 = [];
 	for await (const chunk of runChat({
-		session: pi.session,
+		lease: leaseOf(pi),
 		ids,
 		prompt: "/mode",
 		onProblem: undefined,
@@ -804,7 +824,7 @@ test("an answered slash-command dialog closes its continuation at the grace too"
 		ids: resumeIds,
 		parentRunId: "r1",
 		resume: [{ interruptId: "d1", status: "resolved", payload: { value: "auto" } }],
-		outcome: { parkedAwaitingAnswer: false },
+		outcome: { parkedAwaitingAnswer: false, resumedRun: false },
 		onProblem: undefined,
 		noProgressTimeoutMs: 5000,
 		slashCommandGraceMs: 25,
@@ -830,7 +850,7 @@ test("a settled run leaves no subscription on the session, and a second run on t
 	async function run(runId: string) {
 		const chunks = [];
 		for await (const chunk of runChat({
-			session: pi.session,
+			lease: leaseOf(pi),
 			ids: { ...ids, runId },
 			prompt: "hello",
 			onProblem: undefined,
@@ -855,7 +875,7 @@ test("a settled run leaves no subscription on the session, and a second run on t
 test("a parked run keeps its subscription until the resume ends, then releases it", async () => {
 	const pi = dialogPi(SELECT_DIALOG);
 	const wiring = runWiring();
-	for await (const _chunk of runChat({ session: pi.session, ids, prompt: "/mode", onProblem: undefined, ...wiring })) {
+	for await (const _chunk of runChat({ lease: leaseOf(pi), ids, prompt: "/mode", onProblem: undefined, ...wiring })) {
 		// drain
 	}
 	expect(wiring.outcome.parkedAwaitingAnswer).toBe(true);
@@ -879,7 +899,7 @@ test("a client that abandons the stream mid-run also releases the subscription",
 		},
 	});
 	const wiring = runWiring();
-	const stream = runChat({ session: pi.session, ids, prompt: "hello", onProblem: undefined, ...wiring });
+	const stream = runChat({ lease: leaseOf(pi), ids, prompt: "hello", onProblem: undefined, ...wiring });
 	for await (const chunk of stream) {
 		if (chunk.type === EventType.TEXT_MESSAGE_CONTENT) break;
 	}
@@ -902,7 +922,7 @@ test("⚠ registry.shutdown declines every parked dialog, stops its run, and rel
 	expect(wiring.problems.some((problem) => String(problem).includes("server shutdown"))).toBe(true);
 	// The stop follows the eviction grace (5 ms in this wiring).
 	await new Promise((resolve) => setTimeout(resolve, 30));
-	expect(wiring.stopCount).toBe(1);
+	expect(pi.record.stops).toBe(1);
 });
 
 test("a resume carrying two entries is refused and the question stays parked", async () => {
@@ -929,13 +949,12 @@ test("⚠ a second question on a parked thread displaces the first: declined, re
 
 	// A second run on the SAME thread (another tab, a retry) reaches its own dialog.
 	const second = dialogPi(SELECT_DIALOG.replace('"id":"d1"', '"id":"d2"'));
-	const secondOutcome = { parkedAwaitingAnswer: false };
+	const secondOutcome = { parkedAwaitingAnswer: false, resumedRun: false };
 	for await (const _chunk of runChat({
-		session: second.session,
+		lease: leaseOf(second),
 		ids,
 		prompt: "/mode",
 		registry: wiring.registry,
-		stopPi: wiring.stopPi,
 		outcome: secondOutcome,
 		onProblem: undefined,
 	})) {
@@ -949,4 +968,73 @@ test("⚠ a second question on a parked thread displaces the first: declined, re
 	expect(wiring.registry.peek("t1")?.dialogId).toBe("d2");
 	expect(second.record.subscriberCount()).toBe(1);
 	expect(secondOutcome.parkedAwaitingAnswer).toBe(true);
+});
+
+// ── the displaced park, end to end over real thread sessions (#109) ─────────────
+// Run A parks a dialog on t1. Run B takes t1 and parks its own; A's dialog is displaced
+// and, after the grace, A's stop and release land — on a thread B holds. Addressed by
+// thread id (pre-#109) that aborted B's session and marked t1 idle under B's parked
+// question. Through A's lease, both are stale and inert.
+
+test("⚠ a displaced park's late stop and release do not touch the run that now holds the thread", async () => {
+	const pi = dialogPi(SELECT_DIALOG);
+	const aborts = { count: 0 };
+	// The eviction's late release is the LAST thing A's lease does; its "ignored" report is
+	// the signal to assert on, not a guessed delay.
+	const staleRelease = Promise.withResolvers<void>();
+	const problems: string[] = [];
+	const threads = createThreadSessions({
+		createSession: () =>
+			Promise.resolve({
+				session: {
+					...pi.session,
+					abort: () => {
+						aborts.count += 1;
+						return Promise.resolve();
+					},
+				},
+				loadedExtensionPaths: [],
+				inspect: () => ({ sessionId: "s", cwd: "/", sessionDir: "/s", sessionFile: null, entries: [], commands: [] }),
+				emittedEvents: () => [],
+			}),
+		onProblem: (problem) => {
+			problems.push(String(problem));
+			if (String(problem).includes("release from run")) staleRelease.resolve();
+		},
+		idleTimeoutMs: 60_000,
+	});
+	const wiring = runWiring();
+
+	const runA = await threads.acquire("t1");
+	for await (const _chunk of runChat({ lease: runA, ids, prompt: "do a thing", onProblem: undefined, ...wiring })) {
+		// parks d1
+	}
+	expect(wiring.registry.peek("t1")?.dialogId).toBe("d1");
+
+	const runB = await threads.acquire("t1");
+	const second = dialogPi(SELECT_DIALOG.replace('"id":"d1"', '"id":"d2"'));
+	const leaseB: ThreadLease = { ...runB, session: second.session };
+	const outcomeB = { parkedAwaitingAnswer: false, resumedRun: false };
+	for await (const _chunk of runChat({
+		lease: leaseB,
+		ids: { ...ids, runId: "r2" },
+		prompt: "do a thing",
+		registry: wiring.registry,
+		outcome: outcomeB,
+		onProblem: undefined,
+	})) {
+		// parks d2, displacing d1
+	}
+	expect(wiring.registry.peek("t1")?.dialogId).toBe("d2");
+
+	// The grace elapses: A's eviction fires stop + release through A's lease — both stale.
+	await staleRelease.promise;
+	expect(problems).toEqual([
+		expect.stringContaining(`stop from run ${runA.generation} ignored — run ${runB.generation} holds it now`),
+		expect.stringContaining(`release from run ${runA.generation} ignored`),
+	]);
+	expect(aborts.count).toBe(0);
+	expect(threads.peek("t1")?.busy).toBe(true);
+	expect(threads.peek("t1")?.generation).toBe(runB.generation);
+	threads.shutdown();
 });

@@ -108,6 +108,24 @@ test("adopting stored history restores dates, title and mode under the stored se
 	expect(threadListStore.get()).toHaveLength(1);
 });
 
+test("⚠ adopting a branch that ends inside a turn opens with a warning that says so; a settled one opens clean (#109)", () => {
+	const torn = adoptThread({
+		threadId: "torn-1",
+		messages: [{ id: "u1", role: "user", parts: [{ type: "text", content: "never answered" }] }],
+		permissionMode: { mode: "default", available: [] },
+		interrupted: "unanswered-prompt",
+	});
+	expect(torn.notifications.get()).toMatchObject([
+		{ message: expect.stringContaining("last prompt was never answered"), notifyType: "warning", origin: "run" },
+	]);
+	const settled = adoptThread({
+		threadId: "settled-1",
+		messages: [],
+		permissionMode: { mode: "default", available: [] },
+	});
+	expect(settled.notifications.get()).toEqual([]);
+});
+
 test("history revival drops malformed rows and invalid dates instead of handing them to TanStack", () => {
 	const revived = reviveHistoryMessages([
 		null,

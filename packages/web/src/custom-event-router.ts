@@ -4,6 +4,7 @@ import {
 	ZEN_CUSTOM_EVENT_ENTRY,
 	ZEN_CUSTOM_EVENT_MODE,
 	ZEN_CUSTOM_EVENT_NOTIFY,
+	ZEN_CUSTOM_EVENT_RUN,
 	ZEN_CUSTOM_EVENT_USAGE,
 } from "./rpc/custom-event-names.ts";
 import { createStore, type Store } from "./store.ts";
@@ -44,6 +45,11 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
 		stores.permissionMode.applyReceipt(data);
 		return;
 	}
+	if (eventType === ZEN_CUSTOM_EVENT_RUN) {
+		const generation = readGeneration(data);
+		if (generation !== undefined) stores.generation.set(generation);
+		return;
+	}
 	if (eventType === ZEN_CUSTOM_EVENT_USAGE) {
 		stores.stats.applyUsage(data);
 		return;
@@ -59,6 +65,13 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
 	// be trusted, a notice is shown, never grouped away.
 	const origin = Check(ZenUiRequestOrigin, observation.origin) ? observation.origin : "run";
 	stores.notifications.push(observation.message, notifyType, origin);
+}
+
+/** The `zen.run` value's number, or undefined for anything that is not a non-negative integer. */
+function readGeneration(data: unknown): number | undefined {
+	if (typeof data !== "object" || data === null || !("generation" in data)) return undefined;
+	const { generation } = data;
+	return typeof generation === "number" && Number.isInteger(generation) && generation >= 0 ? generation : undefined;
 }
 
 // ── the last N chunks, for the debug drawer (#86) ─────────────────────────────

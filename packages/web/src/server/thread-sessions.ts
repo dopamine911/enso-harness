@@ -43,17 +43,14 @@ export interface ThreadSessionsOptions {
 
 export interface ThreadSessions {
 	/**
-	 * The thread's session, created on first use. Cancels a pending idle disposal and waits
-	 * for an in-flight abort so the caller always receives an idle session.
+	 * Take the thread for a run: the session, created on first use, held through a lease.
+	 * Cancels a pending idle disposal and waits for an in-flight abort so the run always
+	 * starts against an idle session.
 	 *
 	 * ⚠ A `createSession` failure is thrown to the caller and leaves NO entry behind, so the
 	 * next request on that thread retries the build instead of finding a poisoned slot.
 	 */
-	acquire(threadId: string): Promise<PiSession>;
-	/** The run is over and nothing is parked: start the idle clock. No-op for an unknown thread. */
-	release(threadId: string): void;
-	/** Abort the thread's run in flight (client gone, dialog evicted). Never disposes. */
-	stop(threadId: string): void;
+	acquire(threadId: string): Promise<ThreadLease>;
 	/**
 	 * The thread's hosted session IF it is live — never creates one (#86). Looking must
 	 * not be the thing that spins pi up; `acquire` is for runs.
@@ -67,12 +64,40 @@ export interface ThreadSessions {
 	liveThreadCount(): number;
 }
 
+/**
+ * One run's hold on a thread (#109, deepseek-harness's `openGeneration` on the server).
+ *
+ * ⚠ WHY A LEASE AND NOT `release(threadId)`. A thread is held by exactly one run at a
+ * time, but handles to it outlive runs: a parked dialog carries its run's stop for the
+ * eviction that may come ten minutes later, and by then a NEWER run may hold the same
+ * thread. Addressed by id, that late stop aborted and released whatever was running — the
+ * displaced-park case `release` used to document as "harmless only because of timing".
+ * A lease is bound to the acquisition it came from; once a later `acquire` or a disposal
+ * has moved the thread on, its `release` and `stop` are inert and say so.
+ */
+export interface ThreadLease {
+	readonly threadId: string;
+	readonly session: PiSession;
+	/**
+	 * Which acquisition this is, counted per thread id for the server's lifetime — the fence
+	 * a stale lease is checked against, and the number the browser's `zen.run` receipt
+	 * carries so the two can be compared (`ZenThreadInspection.generation`).
+	 */
+	readonly generation: number;
+	/** The run is over and nothing is parked: start the idle clock. Stale: a reported no-op. */
+	release(): void;
+	/** Abort the run in flight (client gone, dialog evicted). Never disposes. Stale: a reported no-op. */
+	stop(): void;
+}
+
 /** A live thread as inspection sees it: the session, and whether a run holds it. */
 export interface ThreadView {
 	readonly threadId: string;
 	readonly hosted: HostedSession;
 	/** Acquired and not yet released — a run in flight, or a dialog parked on it. */
 	readonly busy: boolean;
+	/** The latest acquisition's number — see {@link ThreadLease.generation}. */
+	readonly generation: number;
 	/** The last `acquire` or `release`, epoch milliseconds. */
 	readonly lastActivityAt: number;
 	/**
@@ -90,6 +115,8 @@ interface ThreadEntry {
 	abortInFlight: Promise<void> | undefined;
 	/** Set by `acquire`, cleared by `release` — so a parked thread reads busy until its resume releases. */
 	busy: boolean;
+	/** The latest acquisition's number; a lease from an earlier one is stale. */
+	generation: number;
 	lastActivityAt: number;
 	sent: EventTail;
 }
@@ -99,6 +126,7 @@ function viewOf(threadId: string, thread: ThreadEntry): ThreadView {
 		threadId,
 		hosted: thread.hosted,
 		busy: thread.busy,
+		generation: thread.generation,
 		lastActivityAt: thread.lastActivityAt,
 		sent: thread.sent,
 	};
@@ -111,12 +139,20 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 	const threads = new Map<string, ThreadEntry>();
 	/** Builds in progress, so two concurrent first requests on one thread share one session. */
 	const building = new Map<string, Promise<ThreadEntry>>();
+	/**
+	 * Per thread id, surviving disposal: a thread rebuilt after its idle window continues
+	 * the count, so a lease from before the rebuild can never match the new entry by number.
+	 * ⓘ Never pruned — one integer per thread id this server has ever run, the same named
+	 * non-coverage as the thread map itself (header): loopback, dev-only, ids minted by the
+	 * page. Pruning would reopen the rebuild case for a thread that comes back after it.
+	 */
+	const generations = new Map<string, number>();
 
 	function disposeThread(threadId: string, why: string): void {
 		const thread = threads.get(threadId);
 		if (thread === undefined) return;
 		threads.delete(threadId);
-		if (thread.idleTimer !== undefined) clearTimeout(thread.idleTimer);
+		clearTimeout(thread.idleTimer);
 		try {
 			thread.hosted.session.dispose();
 		} catch (error) {
@@ -124,13 +160,24 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 		}
 	}
 
+	/** Set by `shutdown`: no build may publish a session into a registry that is being torn down. */
+	let shutDown = false;
+
 	async function buildThread(threadId: string): Promise<ThreadEntry> {
 		const hosted = await createSession(threadId);
+		if (shutDown) {
+			// ⚠ Teardown must reach quiescence, not just request it: a build that was in
+			// flight when `shutdown` ran would otherwise publish a live pi AFTER every other
+			// session was disposed — a leak nothing would ever dispose.
+			hosted.session.dispose();
+			throw new Error(`thread ${threadId}: the server shut down while its session was being built`);
+		}
 		const thread: ThreadEntry = {
 			hosted,
 			idleTimer: undefined,
 			abortInFlight: undefined,
 			busy: false,
+			generation: generations.get(threadId) ?? 0,
 			lastActivityAt: Date.now(),
 			sent: createEventTail(),
 		};
@@ -138,8 +185,54 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 		return thread;
 	}
 
+	function release(threadId: string, thread: ThreadEntry): void {
+		clearTimeout(thread.idleTimer);
+		const idleTimer = setTimeout(() => disposeThread(threadId, `${idleTimeoutMs}ms idle`), idleTimeoutMs);
+		// A pending disposal must never hold the process open on shutdown.
+		idleTimer.unref?.();
+		thread.idleTimer = idleTimer;
+		thread.busy = false;
+		thread.lastActivityAt = Date.now();
+	}
+
+	function stop(threadId: string, thread: ThreadEntry): void {
+		const abort = thread.hosted.session
+			.abort()
+			.catch((error: unknown) => onProblem?.(`thread ${threadId}: abort failed: ${String(error)}`))
+			.finally(() => {
+				// Only clear our own promise — a later stop may have replaced it.
+				if (thread.abortInFlight === abort) thread.abortInFlight = undefined;
+			});
+		thread.abortInFlight = abort;
+	}
+
+	function leaseOf(threadId: string, thread: ThreadEntry): ThreadLease {
+		const generation = thread.generation;
+		/** Current: the same entry, and no acquisition since. Stale is information, never a throw. */
+		function current(operation: string): boolean {
+			if (threads.get(threadId) === thread && thread.generation === generation) return true;
+			onProblem?.(
+				`thread ${threadId}: ${operation} from run ${generation} ignored — ` +
+					(threads.get(threadId) === undefined ? "the thread was disposed" : `run ${thread.generation} holds it now`),
+			);
+			return false;
+		}
+		return {
+			threadId,
+			session: thread.hosted.session,
+			generation,
+			release: () => {
+				if (current("release")) release(threadId, thread);
+			},
+			stop: () => {
+				if (current("stop")) stop(threadId, thread);
+			},
+		};
+	}
+
 	return {
-		async acquire(threadId: string): Promise<PiSession> {
+		async acquire(threadId: string): Promise<ThreadLease> {
+			if (shutDown) throw new Error(`thread ${threadId}: the server has shut down`);
 			let thread = threads.get(threadId);
 			if (thread === undefined) {
 				let build = building.get(threadId);
@@ -157,37 +250,10 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 				await thread.abortInFlight;
 			}
 			thread.busy = true;
+			thread.generation += 1;
+			generations.set(threadId, thread.generation);
 			thread.lastActivityAt = Date.now();
-			return thread.hosted.session;
-		},
-		release(threadId: string): void {
-			// ⚠ This can be reached while a dialog is still PARKED on the thread: a resume that
-			// fails validation releases in the handler's `finally` with the question still open,
-			// and a displaced park's delayed `stopPi` releases while the newer park is live. It
-			// is harmless only because the dialog TTL plus its grace is shorter than the idle
-			// window, so eviction always releases again before the timer can dispose a parked
-			// session. `thread-sessions.test.ts` pins that ordering of the two constants.
-			const thread = threads.get(threadId);
-			if (thread === undefined) return;
-			if (thread.idleTimer !== undefined) clearTimeout(thread.idleTimer);
-			const idleTimer = setTimeout(() => disposeThread(threadId, `${idleTimeoutMs}ms idle`), idleTimeoutMs);
-			// A pending disposal must never hold the process open on shutdown.
-			idleTimer.unref?.();
-			thread.idleTimer = idleTimer;
-			thread.busy = false;
-			thread.lastActivityAt = Date.now();
-		},
-		stop(threadId: string): void {
-			const thread = threads.get(threadId);
-			if (thread === undefined) return;
-			const abort = thread.hosted.session
-				.abort()
-				.catch((error: unknown) => onProblem?.(`thread ${threadId}: abort failed: ${String(error)}`))
-				.finally(() => {
-					// Only clear our own promise — a later stop may have replaced it.
-					if (thread.abortInFlight === abort) thread.abortInFlight = undefined;
-				});
-			thread.abortInFlight = abort;
+			return leaseOf(threadId, thread);
 		},
 		peek(threadId: string): ThreadView | undefined {
 			const thread = threads.get(threadId);
@@ -197,6 +263,7 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 			return [...threads.entries()].map(([threadId, thread]) => viewOf(threadId, thread));
 		},
 		shutdown(): void {
+			shutDown = true;
 			for (const threadId of [...threads.keys()]) disposeThread(threadId, "server shutdown");
 		},
 		liveThreadCount(): number {

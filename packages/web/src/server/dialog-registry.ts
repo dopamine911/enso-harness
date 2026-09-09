@@ -1,4 +1,5 @@
 import type { PiEventDelivery, PiRpcEvent, PiSession, ZenDialogSpec } from "@zen/core";
+import type { ThreadLease } from "./thread-sessions.ts";
 
 /**
  * Parked pi sessions, waiting for a human to answer a dialog (#27).
@@ -78,11 +79,12 @@ export interface PiSessionPump {
 export interface ParkedDialog {
 	pump: PiSessionPump;
 	/**
-	 * Aborts the thread's run in flight and lets the thread go idle. Handed over by the run
-	 * that created it. ⓘ Since #69 PR 2 this never disposes the session — the thread keeps
-	 * it for the next prompt.
+	 * The interrupted run's hold on its thread (#109). Eviction stops the run and lets the
+	 * thread go idle through it — and if a NEWER run has taken the thread by then, the
+	 * lease is stale and both calls are inert, instead of aborting that run. Never
+	 * disposes the session: the thread keeps it for the next prompt (#69 PR 2).
 	 */
-	stopPi: () => void;
+	lease: ThreadLease;
 	/** pi's dialog request id — the interrupt id, and the id the response must carry. */
 	dialogId: string;
 	dialog: ZenDialogSpec;
@@ -161,11 +163,13 @@ export function createDialogRegistry(options: DialogRegistryOptions): DialogRegi
 		} catch (error) {
 			onProblem?.(error);
 		}
-		// Grace, then stop unconditionally. `unref` (where available) so a pending stop
-		// never holds the process open on shutdown.
+		// Grace, then stop and let the thread go idle — through the run's own lease, so an
+		// eviction that lands after a newer run took the thread touches nothing. `unref`
+		// (where available) so a pending stop never holds the process open on shutdown.
 		const graceTimer = setTimeout(() => {
 			try {
-				entry.stopPi();
+				entry.lease.stop();
+				entry.lease.release();
 			} catch (error) {
 				onProblem?.(error);
 			}

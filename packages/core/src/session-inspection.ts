@@ -36,6 +36,13 @@ export const ZenThreadSummary = Type.Object(
 		busy: Type.Boolean(),
 		/** A dialog is parked on this thread awaiting a human's answer. */
 		parked: Type.Boolean(),
+		/**
+		 * How many runs have taken this thread since the server started (#109) — the fence a
+		 * late run handle is checked against on the server, and the number a run's `zen.run`
+		 * receipt hands the browser: a difference between the two says another client, or a
+		 * rebuild after idle, has moved the thread on since this page's last run.
+		 */
+		generation: Type.Integer({ minimum: 0 }),
 		/** When the thread was last acquired or released — ISO 8601. */
 		lastActivityAt: Type.String(),
 	},
@@ -56,6 +63,8 @@ export const ZenThreadInspection = Type.Object(
 		commands: Type.Array(Type.String()),
 		busy: Type.Boolean(),
 		parked: Type.Boolean(),
+		/** See {@link ZenThreadSummary}. */
+		generation: Type.Integer({ minimum: 0 }),
 		lastActivityAt: Type.String(),
 		/**
 		 * The session BRANCH — root to leaf — as pi holds it, verbatim. pi's own entry shapes
@@ -223,6 +232,20 @@ export const ZenResumableSession = Type.Object(
 export type ZenResumableSession = Static<typeof ZenResumableSession>;
 
 /**
+ * How a stored branch ends when its last turn did not settle (#109): a prompt the
+ * assistant never answered, or an assistant turn that called a tool and never got its
+ * result — the server died mid-run, or the run was cut before the reply. Derived on read
+ * from the branch, never written to pi's file: deepseek-harness appends a synthetic
+ * `turn/end { interrupted }` on resume repair; here the report is the repair, and the
+ * next prompt continues from the torn tail as pi would.
+ */
+export const ZenInterruptedTail = Type.Union([
+	Type.Literal("unanswered-prompt"),
+	Type.Literal("tool-call-without-result"),
+]);
+export type ZenInterruptedTail = Static<typeof ZenInterruptedTail>;
+
+/**
  * A thread's history as the browser mounts it (#95): the branch as TanStack `UIMessage`s —
  * built by the server's `branch-to-messages` mapper, the same way the live stream is
  * mapped to AG-UI — plus the opening permission mode the branch persists. Carried as
@@ -233,6 +256,8 @@ export const ZenThreadHistory = Type.Object(
 		threadId: Type.String(),
 		messages: Type.Array(Type.Unknown()),
 		permissionMode: PiPermissionModeState,
+		/** Present only when the branch ends inside a turn — see {@link ZenInterruptedTail}. */
+		interrupted: Type.Optional(ZenInterruptedTail),
 	},
 	{ additionalProperties: false },
 );

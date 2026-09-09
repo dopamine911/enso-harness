@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { ZEN_TOOL_RESULT_KEY } from "@zen/core";
-import { branchToMessages } from "../branch-to-messages.ts";
+import { branchToMessages, interruptedTail } from "../branch-to-messages.ts";
 
 /**
  * #95: a stored branch mounts as the messages a live run would have left behind. Shapes are
@@ -126,4 +126,37 @@ test("entries that are not messages, and malformed messages, never throw: skippe
 		["user", [{ type: "text", content: "[image content]" }]],
 	]);
 	expect(messages[1]).not.toHaveProperty("createdAt");
+});
+
+// ── the interrupted tail (#109) ───────────────────────────────────────────────
+// A branch that ends inside a turn is REPORTED, never repaired: the two shapes a next
+// prompt would paper over. A settled reply — even one cut short — is not one of them.
+
+const call = (id: string) =>
+	entry(id, { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "bash", arguments: {} }] });
+const result = (id: string) =>
+	entry(id, { role: "toolResult", toolCallId: "c1", toolName: "bash", content: [{ type: "text", text: "ok" }] });
+
+test("a branch ending on a user prompt is an unanswered prompt", () => {
+	const branch = [
+		entry("a0", { role: "assistant", content: [{ type: "text", text: "earlier" }] }),
+		entry("u1", { role: "user", content: "next?", timestamp: 1 }),
+	];
+	expect(interruptedTail(branchToMessages(branch))).toBe("unanswered-prompt");
+});
+
+test("a branch ending on a tool call with no result is a call without its result; with the result it is settled", () => {
+	expect(interruptedTail(branchToMessages([call("a1")]))).toBe("tool-call-without-result");
+	expect(interruptedTail(branchToMessages([call("a1"), result("r1")]))).toBeUndefined();
+	// A refused call is a result too.
+	const refused = entry("r1", { role: "toolResult", toolCallId: "c1", toolName: "bash", content: [], isError: true });
+	expect(interruptedTail(branchToMessages([call("a1"), refused]))).toBeUndefined();
+});
+
+test("an empty branch, and one ending on an assistant reply, are settled", () => {
+	expect(interruptedTail([])).toBeUndefined();
+	const reply = entry("a1", { role: "assistant", content: [{ type: "text", text: "done" }] });
+	expect(
+		interruptedTail(branchToMessages([entry("u1", { role: "user", content: "hi", timestamp: 1 }), reply])),
+	).toBeUndefined();
 });

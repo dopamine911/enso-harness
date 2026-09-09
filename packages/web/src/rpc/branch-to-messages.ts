@@ -1,4 +1,5 @@
 import type { MessagePart, UIMessage } from "@tanstack/ai-client";
+import type { ZenInterruptedTail } from "@zen/core";
 import { contentToText, descriptorFrom, toolResultMetadata } from "./map-events.ts";
 
 /**
@@ -130,4 +131,24 @@ export function branchToMessages(branch: readonly unknown[]): UIMessage[] {
 		}
 	}
 	return messages;
+}
+
+/**
+ * Whether the branch ends inside a turn (#109, `ZenInterruptedTail`). Read off the mapped
+ * messages, not the raw entries, so "a call without its result" is the same fact the step
+ * rows render: a `tool-call` part `attachToolResult` never completed.
+ *
+ * ⚠ Only the two shapes a next prompt would silently paper over are named. An assistant
+ * reply with text and no open call reads as settled even if it was cut short — the branch
+ * carries no fact that says so, and inventing one would be a guess.
+ */
+export function interruptedTail(messages: readonly UIMessage[]): ZenInterruptedTail | undefined {
+	const last = messages.at(-1);
+	if (last === undefined) return undefined;
+	if (last.role === "user") return "unanswered-prompt";
+	if (last.role !== "assistant") return undefined;
+	const unresolved = last.parts.some(
+		(part) => part.type === "tool-call" && part.state !== "complete" && part.state !== "error",
+	);
+	return unresolved ? "tool-call-without-result" : undefined;
 }
