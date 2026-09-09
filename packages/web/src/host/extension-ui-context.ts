@@ -174,11 +174,25 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 	const componentBuildTimeoutMs = options.componentBuildTimeoutMs ?? CUSTOM_COMPONENT_BUILD_TIMEOUT_MS;
 
 	/**
+	 * Release a component without letting its `dispose` take the extension call down: the
+	 * build path was hardened so a factory failure is non-fatal, and a throwing `dispose`
+	 * is the same boundary (PR #107 review). Reported, never propagated.
+	 */
+	function disposeQuietly(component: (Component & { dispose?(): void }) | undefined): void {
+		try {
+			component?.dispose?.();
+		} catch (error) {
+			onProblem?.(`custom component's dispose() threw on the web surface: ${String(error)}`);
+		}
+	}
+
+	/**
 	 * Build the extension's component against the inert terminal, within the budget.
 	 * Resolves `undefined` — never throws — when the factory throws, rejects, or does not
 	 * produce a component in time: pi's rpc mode never ran the factory at all, so any
 	 * factory that cannot survive a terminal-less build keeps the fallback it always had
-	 * (PR #107 review). The failure is reported, not swallowed.
+	 * (PR #107 review). The failure is reported, not swallowed. A component that arrives
+	 * AFTER the budget is disposed on arrival — nobody else will ever see it.
 	 */
 	async function buildComponent<T>(
 		factory: CustomComponentFactory<T>,
@@ -188,10 +202,10 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 			const built = factory(INERT_TUI, uiContext.theme, INERT_KEYBINDINGS, done);
 			if (!(built instanceof Promise)) return built;
 			const budget = Promise.withResolvers<never>();
-			const timer = setTimeout(
-				() => budget.reject(new Error(`no component within ${componentBuildTimeoutMs} ms`)),
-				componentBuildTimeoutMs,
-			);
+			const timer = setTimeout(() => {
+				budget.reject(new Error(`no component within ${componentBuildTimeoutMs} ms`));
+				built.then(disposeQuietly, () => undefined);
+			}, componentBuildTimeoutMs);
 			try {
 				return await Promise.race([built, budget.promise]);
 			} finally {
@@ -347,9 +361,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 				onProblem?.(`custom dialog could not be lifted (#73): ${String(error)}`);
 			}
 			if (lifted === undefined) {
-				// `?.` on the component too: this is the compatibility path for ANY extension's
-				// `custom`, and a factory that resolved nothing must degrade, not throw (PR #107 review).
-				component?.dispose?.();
+				disposeQuietly(component);
 				// pi's rpc contract, stated in TypeScript: an unknown component is "no component".
 				resolve(undefined as T);
 				return promise;
@@ -360,7 +372,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 				undefined,
 				(response) => ("value" in response ? response.value : undefined),
 			);
-			component?.dispose?.();
+			disposeQuietly(component);
 			// The lifted select's value is one of the strings picc offered — `T` for picc is
 			// `FilePermissionChoice = string | null`, and cancel is `undefined`, its "no" path.
 			resolve(choice as T);

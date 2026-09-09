@@ -270,3 +270,37 @@ test("⚠ an async factory that never produces a component is cut off at the bui
 	expect(events).toEqual([]);
 	expect(String(problems[0])).toContain("no component within 1 ms");
 });
+
+test("a component whose dispose() throws is reported, not propagated — the call still resolves undefined", async () => {
+	const { uiContext, problems } = contextUnderTest();
+	const component = {
+		render: () => [],
+		invalidate: () => undefined,
+		dispose: () => {
+			throw new Error("dispose exploded");
+		},
+	};
+	expect(await uiContext.custom(() => component)).toBeUndefined();
+	expect(String(problems[0])).toContain("dispose() threw");
+});
+
+test("a component that arrives after the build budget is disposed on arrival, since nobody will ever see it", async () => {
+	const late = Promise.withResolvers<{ render: () => string[]; invalidate: () => void; dispose: () => void }>();
+	let disposed = 0;
+	const { uiContext } = createZenExtensionUiContext({
+		emit: () => undefined,
+		onProblem: () => undefined,
+		componentBuildTimeoutMs: 1,
+	});
+	expect(await uiContext.custom(() => late.promise)).toBeUndefined();
+	late.resolve({
+		render: () => [],
+		invalidate: () => undefined,
+		dispose: () => {
+			disposed += 1;
+		},
+	});
+	await late.promise; // the disposal is chained on this same promise, so it has run once this settles
+	await Promise.resolve();
+	expect(disposed).toBe(1);
+});
