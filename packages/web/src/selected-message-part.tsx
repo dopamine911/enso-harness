@@ -55,6 +55,7 @@ function readToolInput(selected: ChatUISelectedToolPart): unknown {
 
 const STEP_DOT: Record<ToolResultState["status"], string> = {
 	pending: "size-2 shrink-0 animate-pulse rounded-full bg-foreground",
+	aborted: "size-2 shrink-0 rounded-full border border-muted-foreground/60",
 	done: "size-2 shrink-0 rounded-full bg-muted-foreground/60",
 	error: "size-2 shrink-0 rounded-full bg-destructive",
 };
@@ -68,15 +69,20 @@ const STEP_DOT: Record<ToolResultState["status"], string> = {
  */
 function ToolStep({
 	selected,
+	runOpen,
 	renderers,
 }: {
 	selected: ChatUISelectedToolPart;
+	runOpen: boolean;
 	renderers: ZenRendererMap;
 }): React.ReactNode {
 	const input = readToolInput(selected);
 	const summary = summarizeToolInput(input);
-	const { status } = toolResultState(selected.result);
+	const { status } = toolResultState(selected.result, runOpen);
 	return (
+		// Only an error opens itself: its body is a reason the reader needs (the guard's refusal,
+		// the command's stderr). `aborted` has nothing more inside — its whole story is the one
+		// word on the row (the run ended first), so opening it would show a static line.
 		<details data-zen-tool-step={status} open={status === "error"} className="group my-1">
 			<summary className="flex cursor-pointer list-none items-center gap-2 font-mono text-muted-foreground text-xs marker:hidden">
 				<span aria-hidden="true" className={STEP_DOT[status]} />
@@ -85,6 +91,7 @@ function ToolStep({
 				    content, so without it `truncate` cannot engage (PR #93 review). */}
 				{summary === undefined ? null : <span className="min-w-0 truncate">{summary}</span>}
 				{status === "pending" ? <span>running…</span> : null}
+				{status === "aborted" ? <span>aborted</span> : null}
 				{status === "error" ? <span className="text-destructive">error</span> : null}
 			</summary>
 			<div className="mt-1 ml-1 flex flex-col gap-1 border-l pl-3">
@@ -96,7 +103,7 @@ function ToolStep({
 				{/* ⚠ THE INTEGRATION POINT #18 EXISTS FOR. Every tool result renders through
 				    `ZenToolResult`: the descriptor is read from the result's metadata, and an
 				    absent result (the call is still in flight) renders the visible pending state. */}
-				<ZenToolResult result={selected.result} renderers={renderers} />
+				<ZenToolResult result={selected.result} runOpen={runOpen} renderers={renderers} />
 			</div>
 		</details>
 	);
@@ -136,21 +143,27 @@ function ThinkingBlock({ content, isStreaming }: { content: string; isStreaming:
  *
  * `isStreaming` is true only for the trailing part of the trailing message while a run
  * is in flight — the caller computes it, because only the caller can see the whole list.
+ * `runOpen` is coarser: the message's run is in flight at all (#130). A tool call reads
+ * that one — two calls in one message are both live while the run is, and only the
+ * second is trailing — so a call with no result is `running…` while the run is open and
+ * `aborted` once it is not.
  */
 export function SelectedMessagePart({
 	selected,
 	isStreaming,
+	runOpen,
 	renderers,
 }: {
 	selected: ChatUISelectedPart;
 	isStreaming: boolean;
+	runOpen: boolean;
 	renderers: ZenRendererMap;
 }): React.ReactNode {
-	if (selected.key === "toolCall") return <ToolStep selected={selected} renderers={renderers} />;
+	if (selected.key === "toolCall") return <ToolStep selected={selected} runOpen={runOpen} renderers={renderers} />;
 	// An UNMATCHED result (its call never streamed — a protocol wrinkle, not a normal
 	// state) still renders through the same contract rather than vanishing.
 	if (selected.key === "toolResult") {
-		return <ZenToolResult result={selected.part} renderers={renderers} />;
+		return <ZenToolResult result={selected.part} runOpen={runOpen} renderers={renderers} />;
 	}
 	// TextPart is the markdown pipeline of record (react-markdown, sanitize LAST). `prose`
 	// is @tailwindcss/typography — TextPart emits bare markdown HTML with no classes of

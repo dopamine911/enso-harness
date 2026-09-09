@@ -30,9 +30,14 @@ const { createRoot } = await import("react-dom/client");
  * since #113 (`isLoading`, which the follow adapter never raises) and no test noticed; the
  * first test here FAILS if any of them reads `chat.isLoading` again.
  *
- * ⚠ `act` + `tick`: the adapter consumes SSE frames on its own loop, so a frame's effect on the
- * DOM lands a macrotask later. `settle()` yields once inside `act` so React flushes after the
- * chunk has been routed. Real timers, no fakes — the wait is one tick, not a duration.
+ * ⚠ `act` + `eventually`: the adapter consumes SSE frames on its own loop and a fetch resolves
+ * on the event loop, so a frame's or a click's effect on the DOM lands SOME macrotasks later —
+ * how many depends on the machine (#131's CI run: a 20 ms wait lost the race under load; the
+ * same suite reproduces it locally pinned to one loaded core). So no reading after an action
+ * is a sleep-then-assert: `eventually` retries the assertion inside `act` until it holds or a
+ * deadline lapses, and a real failure reports as the assertion's own message. Real timers, no
+ * fakes; the condition is the wait. A "nothing happens" reading (the disconnected composer's
+ * Enter) cannot be waited for and stays a bounded tick — it can only fail toward passing.
  */
 
 afterEach(() => clearThreadsForTest());
@@ -42,6 +47,30 @@ const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 2
 
 /** React's `act` with async work — typed so its Promise overload is the one seen (biome's nursery `useAwaitThenable` reads the sync one). */
 const flush = (work: () => Promise<void>): Promise<void> => act(work);
+
+/**
+ * How long `eventually` keeps trying before a failing probe is a failure. It bounds a REAL
+ * failure's report time, never a pass — a passing probe returns on its first true reading
+ * (usually the first). The one knob if a slower runner ever loses the race again (#131 CI).
+ */
+const EVENTUALLY_DEADLINE_MS = 2000;
+
+/**
+ * Retry `probe` — assertions, or a lookup that throws when its element is not there yet —
+ * until it holds, yielding a tick inside `act` between tries so React flushes what the
+ * adapter routed. The last failure is the report.
+ */
+async function eventually<T>(probe: () => T): Promise<T> {
+	const deadline = Date.now() + EVENTUALLY_DEADLINE_MS;
+	for (;;) {
+		try {
+			return probe();
+		} catch (error) {
+			if (Date.now() >= deadline) throw error;
+			await flush(tick);
+		}
+	}
+}
 
 interface MountedPane {
 	readonly stores: ThreadStores;
@@ -131,33 +160,39 @@ test("⚠ busy on the wire → working, stop offered, mode select disabled, rail
 	// Another tab's run: busy with no receipt of ours. `isLoading` would never rise for this
 	// — it is TanStack's request-local flag — so a reading on it shows idle here and fails.
 	await pane.settle({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 3 });
-	expect(pane.status()).toContain("working");
-	expect(pane.stopButton()).not.toBeNull();
-	expect(pane.modeSelect().disabled).toBe(true);
-	expect(railBusy(pane.stores.threadId)).toBe(true);
+	await eventually(() => {
+		expect(pane.status()).toContain("working");
+		expect(pane.stopButton()).not.toBeNull();
+		expect(pane.modeSelect().disabled).toBe(true);
+		expect(railBusy(pane.stores.threadId)).toBe(true);
+	});
 
 	await pane.settle(
 		{ type: "observation", seq: 1, observation: { kind: "settled" } },
 		{ type: "status", live: true, busy: false, generation: 3 },
 	);
-	expect(pane.status()).toContain("idle");
-	expect(pane.stopButton()).toBeNull();
-	expect(pane.modeSelect().disabled).toBe(false);
-	expect(railBusy(pane.stores.threadId)).toBe(false);
+	await eventually(() => {
+		expect(pane.status()).toContain("idle");
+		expect(pane.stopButton()).toBeNull();
+		expect(pane.modeSelect().disabled).toBe(false);
+		expect(railBusy(pane.stores.threadId)).toBe(false);
+	});
 	await pane.unmount();
 });
 
 test("the snapshot's mode is the select's value; a persisted modes entry moves it (#84, #95)", async () => {
 	const pane = await mountPane();
 	await pane.settle({ ...SNAPSHOT_IDLE, permissionMode: { mode: "plan", available: ["default", "plan", "auto"] } });
-	expect(pane.modeSelect().value).toBe("plan");
-	expect([...pane.modeSelect().options].map((option) => option.value)).toEqual(["default", "plan", "auto"]);
+	await eventually(() => {
+		expect(pane.modeSelect().value).toBe("plan");
+		expect([...pane.modeSelect().options].map((option) => option.value)).toEqual(["default", "plan", "auto"]);
+	});
 	await pane.settle({
 		type: "observation",
 		seq: 1,
 		observation: { kind: "custom-entry", customType: "modes", data: { mode: "auto" } },
 	});
-	expect(pane.modeSelect().value).toBe("auto");
+	await eventually(() => expect(pane.modeSelect().value).toBe("auto"));
 	await pane.unmount();
 });
 
@@ -177,15 +212,17 @@ test("a blocking question on the wire is the card; its settle from elsewhere rem
 			dialog: { method: "confirm", title: "Apply the edit?", message: "It is reversible" },
 		},
 	});
-	expect(pane.container.textContent).toContain("Apply the edit?");
-	expect(pane.container.querySelector("button")?.textContent).toBeDefined();
+	await eventually(() => {
+		expect(pane.container.textContent).toContain("Apply the edit?");
+		expect(pane.container.querySelector("button")?.textContent).toBeDefined();
+	});
 	// Answered in another tab: the host says so, every follower drops the card (#114).
 	await pane.settle({
 		type: "observation",
 		seq: 2,
 		observation: { kind: "dialog-settled", id: "d1", outcome: "answered" },
 	});
-	expect(pane.container.textContent).not.toContain("Apply the edit?");
+	await eventually(() => expect(pane.container.textContent).not.toContain("Apply the edit?"));
 	await pane.unmount();
 });
 
@@ -203,14 +240,19 @@ test("answering the card is one POST …/dialog, and the card goes when the serv
 			dialog: { method: "select", title: "Pick one", options: ["alpha", "bravo"] },
 		},
 	});
-	const bravo = [...pane.container.querySelectorAll("button")].find((button) => button.textContent === "bravo");
-	if (bravo === undefined) throw new Error("expected the select's options as buttons");
+	const bravo = await eventually(() => {
+		const found = [...pane.container.querySelectorAll("button")].find((button) => button.textContent === "bravo");
+		if (found === undefined) throw new Error("expected the select's options as buttons");
+		return found;
+	});
 	await flush(async () => {
 		bravo.click();
 		await tick();
 	});
-	expect(pane.server.dialogs).toEqual([{ id: "d2", value: "bravo" }]);
-	expect(pane.container.textContent).not.toContain("Pick one");
+	await eventually(() => {
+		expect(pane.server.dialogs).toEqual([{ id: "d2", value: "bravo" }]);
+		expect(pane.container.textContent).not.toContain("Pick one");
+	});
 	await pane.unmount();
 });
 
@@ -228,17 +270,22 @@ test("an input dialog: what is typed is the answer, one POST …/dialog, uncontr
 			dialog: { method: "input", title: "Name?", placeholder: "a name" },
 		},
 	});
-	const field = pane.container.querySelector<HTMLInputElement>('input[name="answer"]');
-	if (field === null) throw new Error("expected the input dialog's field");
-	const answerButton = [...pane.container.querySelectorAll("button")].find((button) => button.textContent === "Answer");
-	if (answerButton === undefined) throw new Error("expected an Answer button");
+	const { field, answerButton } = await eventually(() => {
+		const found = pane.container.querySelector<HTMLInputElement>('input[name="answer"]');
+		if (found === null) throw new Error("expected the input dialog's field");
+		const answer = [...pane.container.querySelectorAll("button")].find((button) => button.textContent === "Answer");
+		if (answer === undefined) throw new Error("expected an Answer button");
+		return { field: found, answerButton: answer };
+	});
 	await flush(async () => {
 		field.value = "zen"; // uncontrolled: the form reads the field at submit, no React state in between
 		answerButton.click();
 		await tick();
 	});
-	expect(pane.server.dialogs).toEqual([{ id: "d3", value: "zen" }]);
-	expect(pane.container.textContent).not.toContain("Name?");
+	await eventually(() => {
+		expect(pane.server.dialogs).toEqual([{ id: "d3", value: "zen" }]);
+		expect(pane.container.textContent).not.toContain("Name?");
+	});
 	await pane.unmount();
 });
 
@@ -293,7 +340,7 @@ test("⚠ a queued prompt refused after a delay takes back only its own bubble; 
 		pressEnter(composer());
 		await tick();
 	});
-	expect(container.textContent).toContain("second, queued");
+	await eventually(() => expect(container.textContent).toContain("second, queued"));
 	// Meanwhile the first answer streams.
 	await flush(async () => {
 		server.frame({ type: "observation", seq: 1, observation: { kind: "message-start", role: "assistant" } });
@@ -304,16 +351,18 @@ test("⚠ a queued prompt refused after a delay takes back only its own bubble; 
 		});
 		await tick();
 	});
-	expect(container.textContent).toContain("streamed while held");
+	await eventually(() => expect(container.textContent).toContain("streamed while held"));
 	// Now the refusal lands: its bubble leaves, its text returns to the draft — and the delta STAYS.
 	await flush(async () => {
 		releaseSecondPrompt();
 		await tick();
 	});
-	expect(composer().value).toBe("second, queued");
-	expect((container.textContent?.match(/second, queued/g) ?? []).length).toBe(1); // the composer only
-	expect(container.textContent).toContain("streamed while held");
-	expect(container.textContent).toContain("first");
+	await eventually(() => {
+		expect(composer().value).toBe("second, queued");
+		expect((container.textContent?.match(/second, queued/g) ?? []).length).toBe(1); // the composer only
+		expect(container.textContent).toContain("streamed while held");
+		expect(container.textContent).toContain("first");
+	});
 	await flush(async () => root.unmount());
 	container.remove();
 });
@@ -328,10 +377,12 @@ test("Enter or the button: one POST …/prompt each and the draft clears; DURING
 		pressEnter(pane.composer());
 		await tick();
 	});
-	expect(pane.server.prompts).toEqual([{ message: "hello pi" }]);
-	expect(pane.composer().value).toBe("");
-	// The receipt opened OUR run (generation 1); the bar says so and the server is busy.
-	expect(pane.status()).toContain("working");
+	await eventually(() => {
+		expect(pane.server.prompts).toEqual([{ message: "hello pi" }]);
+		expect(pane.composer().value).toBe("");
+		// The receipt opened OUR run (generation 1); the bar says so and the server is busy.
+		expect(pane.status()).toContain("working");
+	});
 
 	// A prompt during the run: to pi NOW as a follow-up — not TanStack's browser queue (which
 	// held it until settle before #75) — with the user message in the transcript at once.
@@ -339,26 +390,30 @@ test("Enter or the button: one POST …/prompt each and the draft clears; DURING
 		typeInto(pane.composer(), "by the button, mid-run");
 		await tick();
 	});
-	expect(pane.sendButton().disabled).toBe(false);
+	await eventually(() => expect(pane.sendButton().disabled).toBe(false));
 	await flush(async () => {
 		pane.sendButton().click();
 		await tick();
 	});
-	expect(pane.composer().value).toBe("");
-	expect(pane.server.prompts).toEqual([
-		{ message: "hello pi" },
-		{ message: "by the button, mid-run", streamingBehavior: "followUp" },
-	]);
-	expect(pane.container.textContent).toContain("by the button, mid-run");
+	await eventually(() => {
+		expect(pane.composer().value).toBe("");
+		expect(pane.server.prompts).toEqual([
+			{ message: "hello pi" },
+			{ message: "by the button, mid-run", streamingBehavior: "followUp" },
+		]);
+		expect(pane.container.textContent).toContain("by the button, mid-run");
+	});
 	// pi lists it for every follower; this pane shows the list above the composer.
 	await pane.settle({
 		type: "observation",
 		seq: 1,
 		observation: { kind: "queue", steering: [], followUp: ["by the button, mid-run"] },
 	});
-	const queueList = pane.container.querySelector('[aria-label="queued prompts"]');
-	expect(queueList?.textContent).toContain("1 prompt queued");
-	expect(queueList?.textContent).toContain("by the button, mid-run");
+	await eventually(() => {
+		const queueList = pane.container.querySelector('[aria-label="queued prompts"]');
+		expect(queueList?.textContent).toContain("1 prompt queued");
+		expect(queueList?.textContent).toContain("by the button, mid-run");
+	});
 
 	// Stop: pi is told, its queue is cleared (the frame every follower reads), and the words
 	// come back to THIS composer — clear-and-restore, pi's TUI's behaviour.
@@ -368,42 +423,131 @@ test("Enter or the button: one POST …/prompt each and the draft clears; DURING
 		stop.click();
 		await tick();
 	});
-	expect(pane.server.abortCount()).toBe(1);
-	expect(pane.composer().value).toBe("by the button, mid-run");
+	await eventually(() => {
+		expect(pane.server.abortCount()).toBe(1);
+		expect(pane.composer().value).toBe("by the button, mid-run");
+	});
 	await pane.settle({ type: "observation", seq: 2, observation: { kind: "queue", steering: [], followUp: [] } });
-	expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull();
-	// The bubble that was never asked leaves with its text (pi's TUI does the same): with the
-	// queue list gone, the ONLY place the words remain is the composer. The first prompt's bubble stays.
-	expect((pane.container.textContent?.match(/by the button, mid-run/g) ?? []).length).toBe(1);
-	expect(pane.container.textContent).toContain("hello pi");
+	await eventually(() => {
+		expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull();
+		// The bubble that was never asked leaves with its text (pi's TUI does the same): with the
+		// queue list gone, the ONLY place the words remain is the composer. The first prompt's bubble stays.
+		expect((pane.container.textContent?.match(/by the button, mid-run/g) ?? []).length).toBe(1);
+		expect(pane.container.textContent).toContain("hello pi");
+	});
 	await pane.unmount();
 });
 
 test("⚠ the follow closing mid-run: the notice, disconnected on the bar, no stop, and Enter sends nothing", async () => {
 	const pane = await mountPane();
 	await pane.settle({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 2 });
-	expect(pane.stopButton()).not.toBeNull();
+	await eventually(() => expect(pane.stopButton()).not.toBeNull());
 	// A draft typed BEFORE the drop, so the send path has something to send.
 	await flush(async () => {
 		typeInto(pane.composer(), "this must not send");
 		await tick();
 	});
-	expect(pane.sendButton().disabled).toBe(false);
+	await eventually(() => expect(pane.sendButton().disabled).toBe(false));
 	await flush(async () => {
 		pane.server.closeFollow();
 		await tick();
 	});
-	expect(pane.container.textContent).toContain("the connection to the server ended");
-	expect(pane.status()).toContain("disconnected");
-	expect(pane.stopButton()).toBeNull();
-	expect(pane.sendButton().disabled).toBe(true);
-	expect(pane.composer().placeholder).toContain("disconnected");
+	await eventually(() => {
+		expect(pane.container.textContent).toContain("the connection to the server ended");
+		expect(pane.status()).toContain("disconnected");
+		expect(pane.stopButton()).toBeNull();
+		expect(pane.sendButton().disabled).toBe(true);
+		expect(pane.composer().placeholder).toContain("disconnected");
+	});
 	await flush(async () => {
 		pressEnter(pane.composer());
 		await tick();
 	});
 	expect(pane.server.prompts).toEqual([]);
 	expect(pane.composer().value).toBe("this must not send");
+	await pane.unmount();
+});
+
+// ── #130: a tool call the run ended without answering is aborted, not running ─────────
+
+test("⚠ a tool call reads running… while its run is open and aborted once the run ends without a result", async () => {
+	const pane = await mountPane();
+	await pane.settle(SNAPSHOT_IDLE);
+	await flush(async () => {
+		typeInto(pane.composer(), "run it");
+		pressEnter(pane.composer());
+		await tick();
+	});
+	await pane.settle(
+		{ type: "observation", seq: 1, observation: { kind: "message-start", role: "assistant" } },
+		{
+			type: "observation",
+			seq: 2,
+			observation: { kind: "tool-call", toolCallId: "c1", toolName: "bash", args: { command: "sleep 40" } },
+		},
+	);
+	const step = (): string | null =>
+		pane.container.querySelector("[data-zen-tool-step]")?.getAttribute("data-zen-tool-step") ?? null;
+	await eventually(() => {
+		expect(step()).toBe("pending");
+		expect(pane.container.textContent).toContain("running…");
+		expect(pane.status()).toContain("running bash");
+	});
+	// The stop: pi is told, and the run ends on the feed with no result for the call.
+	const stop = pane.stopButton();
+	if (stop === null) throw new Error("expected the stop button");
+	await flush(async () => {
+		stop.click();
+		await tick();
+	});
+	await pane.settle(
+		{ type: "observation", seq: 3, observation: { kind: "settled" } },
+		{ type: "status", live: true, busy: false, generation: 1 },
+	);
+	await eventually(() => {
+		expect(pane.status()).toContain("idle");
+		expect(step()).toBe("aborted");
+		expect(pane.container.textContent).toContain("aborted");
+		expect(pane.container.textContent).not.toContain("running…");
+	});
+	await pane.unmount();
+});
+
+test("⚠ a refused or aborted tool call's result reads error LIVE — the same as a resumed log shows it (#130)", async () => {
+	const pane = await mountPane();
+	await pane.settle(SNAPSHOT_IDLE);
+	await flush(async () => {
+		typeInto(pane.composer(), "write it");
+		pressEnter(pane.composer());
+		await tick();
+	});
+	await pane.settle(
+		{ type: "observation", seq: 1, observation: { kind: "message-start", role: "assistant" } },
+		{
+			type: "observation",
+			seq: 2,
+			observation: { kind: "tool-call", toolCallId: "c2", toolName: "write", args: { path: "/etc/x" } },
+		},
+		{
+			type: "observation",
+			seq: 3,
+			observation: {
+				kind: "tool-result",
+				toolCallId: "c2",
+				toolName: "write",
+				text: "blocked: outside the write root",
+				complete: true,
+				isError: true,
+			},
+		},
+	);
+	await eventually(() => {
+		const row = pane.container.querySelector("[data-zen-tool-step]");
+		expect(row?.getAttribute("data-zen-tool-step")).toBe("error");
+		expect(row?.hasAttribute("open")).toBe(true); // an error opens itself
+		expect(pane.container.textContent).toContain("blocked: outside the write root");
+		expect(pane.status()).toContain("working"); // the model has the output and is composing
+	});
 	await pane.unmount();
 });
 
@@ -431,23 +575,25 @@ test("⚠ the debug pane names a MISMATCH between the page's mode and the server
 	});
 	// The snapshot says default; the server's inspection says plan. The pane must say so — once.
 	await pane.settle({ ...SNAPSHOT_IDLE, generation: 3 });
-	await flush(tick);
 	const debug = pane.container.querySelector('[aria-label="session debug"]') ?? pane.container;
 	const mismatches = (): number => (debug.textContent?.match(/MISMATCH/g) ?? []).length;
-	expect(debug.textContent).toContain("host mode: plan");
-	expect(debug.textContent).toContain("MISMATCH: host says plan");
-	// Exactly one: generations agree (both 3) and the branch agrees with the host.
-	expect(mismatches()).toBe(1);
+	await eventually(() => {
+		expect(debug.textContent).toContain("host mode: plan");
+		expect(debug.textContent).toContain("MISMATCH: host says plan");
+		// Exactly one: generations agree (both 3) and the branch agrees with the host.
+		expect(mismatches()).toBe(1);
+	});
 	// A persisted modes entry brings the page to plan; the pane refetches on it and the MISMATCH goes.
 	await pane.settle({
 		type: "observation",
 		seq: 1,
 		observation: { kind: "custom-entry", customType: "modes", data: { mode: "plan" } },
 	});
-	await flush(tick);
-	expect(pane.modeSelect().value).toBe("plan");
-	expect(debug.textContent).toContain("host mode: plan");
-	expect(mismatches()).toBe(0);
+	await eventually(() => {
+		expect(pane.modeSelect().value).toBe("plan");
+		expect(debug.textContent).toContain("host mode: plan");
+		expect(mismatches()).toBe(0);
+	});
 	await pane.unmount();
 });
 
@@ -478,13 +624,15 @@ test("⚠ a frame on one thread's follow changes that pane and no other — cost
 			dialog: { method: "confirm", title: "Only alpha asks", message: "m" },
 		},
 	});
-	expect(alpha.status()).toContain("working");
-	expect(alpha.status()).toContain("$0.0123");
-	expect(alpha.container.textContent).toContain("Only alpha asks");
-	expect(bravo.status()).toContain("idle");
-	expect(bravo.status()).toContain("$0.0000");
-	expect(bravo.container.textContent).not.toContain("Only alpha asks");
-	expect(railBusy(bravo.stores.threadId)).toBe(false);
+	await eventually(() => {
+		expect(alpha.status()).toContain("working");
+		expect(alpha.status()).toContain("$0.0123");
+		expect(alpha.container.textContent).toContain("Only alpha asks");
+		expect(bravo.status()).toContain("idle");
+		expect(bravo.status()).toContain("$0.0000");
+		expect(bravo.container.textContent).not.toContain("Only alpha asks");
+		expect(railBusy(bravo.stores.threadId)).toBe(false);
+	});
 	await alpha.unmount();
 	await bravo.unmount();
 });
@@ -545,21 +693,27 @@ test("New Session mints a thread, lists it in the rail as current, and shows exa
 	);
 	if (newSession === undefined) throw new Error("expected a New Session button");
 	await page.click(newSession);
-	expect(page.activeRows()).toHaveLength(1);
-	expect(page.activeRows()[0]?.getAttribute("aria-current")).toBe("true");
-	expect(page.visiblePanes()).toHaveLength(1);
+	await eventually(() => {
+		expect(page.activeRows()).toHaveLength(1);
+		expect(page.activeRows()[0]?.getAttribute("aria-current")).toBe("true");
+		expect(page.visiblePanes()).toHaveLength(1);
+	});
 	await page.click(newSession);
-	expect(page.activeRows()).toHaveLength(2);
-	// Newest first, and the newest is current; one pane visible, the other mounted but hidden.
-	expect(page.activeRows().map((row) => row.getAttribute("aria-current"))).toEqual(["true", null]);
-	expect(page.visiblePanes()).toHaveLength(1);
-	expect(page.container.querySelectorAll("#thread-status")).toHaveLength(2);
+	await eventually(() => {
+		expect(page.activeRows()).toHaveLength(2);
+		// Newest first, and the newest is current; one pane visible, the other mounted but hidden.
+		expect(page.activeRows().map((row) => row.getAttribute("aria-current"))).toEqual(["true", null]);
+		expect(page.visiblePanes()).toHaveLength(1);
+		expect(page.container.querySelectorAll("#thread-status")).toHaveLength(2);
+	});
 	// Click the older row: it becomes current and its pane is the visible one.
 	const older = page.activeRows()[1];
 	if (older === undefined) throw new Error("expected two rows");
 	await page.click(older);
-	expect(page.activeRows().map((row) => row.getAttribute("aria-current"))).toEqual([null, "true"]);
-	expect(page.visiblePanes()).toHaveLength(1);
+	await eventually(() => {
+		expect(page.activeRows().map((row) => row.getAttribute("aria-current"))).toEqual([null, "true"]);
+		expect(page.visiblePanes()).toHaveLength(1);
+	});
 	await page.unmount();
 });
 
@@ -585,18 +739,24 @@ test("Previous Sessions lists the server's stored threads; a click resumes one w
 			},
 		},
 	});
-	expect(page.previousRows().map((row) => row.textContent)).toEqual([expect.stringContaining("fix the login bug")]);
-	const row = page.previousRows()[0];
-	if (row === undefined) throw new Error("expected a stored row");
+	// The listing is a fetch of its own; the row is there once it has answered.
+	const row = await eventually(() => {
+		expect(page.previousRows().map((r) => r.textContent)).toEqual([expect.stringContaining("fix the login bug")]);
+		const found = page.previousRows()[0];
+		if (found === undefined) throw new Error("expected a stored row");
+		return found;
+	});
 	await page.click(row);
 	// Adopted: now an Active Session and current, gone from Previous, its pane shows the branch and opens in plan.
-	expect(
-		page.activeRows().map((r) => [r.textContent?.includes("fix the login bug"), r.getAttribute("aria-current")]),
-	).toEqual([[true, "true"]]);
-	expect(page.previousRows()).toHaveLength(0);
-	expect(page.container.textContent).toContain("Looking at auth.ts");
-	const visible = page.visiblePanes()[0]?.closest("div.flex-1") ?? page.container;
-	expect(visible.querySelector("select")?.value).toBe("plan");
+	await eventually(() => {
+		expect(
+			page.activeRows().map((r) => [r.textContent?.includes("fix the login bug"), r.getAttribute("aria-current")]),
+		).toEqual([[true, "true"]]);
+		expect(page.previousRows()).toHaveLength(0);
+		expect(page.container.textContent).toContain("Looking at auth.ts");
+		const visible = page.visiblePanes()[0]?.closest("div.flex-1") ?? page.container;
+		expect(visible.querySelector("select")?.value).toBe("plan");
+	});
 	await page.unmount();
 });
 
@@ -615,8 +775,10 @@ test("a stored listing the server cannot serve is said in the rail, and the page
 	});
 	await flush(tick);
 	// One bounded line, status first, never the page (#103 receipt, step 8).
-	expect(container.textContent).toContain("could not list previous sessions: 500 <!doctype html>");
-	expect(container.textContent).not.toContain("<html>boom</html>");
+	await eventually(() => {
+		expect(container.textContent).toContain("could not list previous sessions: 500 <!doctype html>");
+		expect(container.textContent).not.toContain("<html>boom</html>");
+	});
 	await flush(async () => root.unmount());
 	container.remove();
 });

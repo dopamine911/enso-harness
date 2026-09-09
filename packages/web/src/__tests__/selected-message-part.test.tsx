@@ -30,8 +30,10 @@ const toolResultWith = (overrides: Partial<ToolResultPart>): ToolResultPart => (
 	...overrides,
 });
 
-const html = (selected: ChatUISelectedPart, isStreaming = false) =>
-	renderToStaticMarkup(<SelectedMessagePart selected={selected} isStreaming={isStreaming} renderers={{}} />);
+const html = (selected: ChatUISelectedPart, isStreaming = false, runOpen = true) =>
+	renderToStaticMarkup(
+		<SelectedMessagePart selected={selected} isStreaming={isStreaming} runOpen={runOpen} renderers={{}} />,
+	);
 
 test("a tool call from an UNREGISTERED name renders its name and result text", () => {
 	const rendered = html({
@@ -50,6 +52,21 @@ test("a tool call with no result yet renders the visible pending state", () => {
 	});
 	expect(rendered).toContain("bash");
 	expect(rendered).toContain("running…");
+});
+
+// #130: the same call once its run has ended — a stop, the server gone, a torn tail on
+// resume — is aborted. The row says so, still dot, closed (nothing to open: no result).
+test("⚠ a tool call with no result in a run that has ENDED reads aborted, not running", () => {
+	const rendered = html(
+		{ key: "toolCall", part: toolCallWith({ id: "call-3", state: "pending" as ToolCallPart["state"] }) },
+		false,
+		false,
+	);
+	expect(rendered).toContain('data-zen-tool-step="aborted"');
+	expect(rendered).toContain(">aborted<");
+	expect(rendered).not.toContain("running…");
+	expect(rendered).not.toContain("animate-pulse");
+	expect(rendered).not.toContain(" open");
 });
 
 // ── the step row (#90 PR 2) ──────────────────────────────────────────────────

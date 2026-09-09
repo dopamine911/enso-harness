@@ -690,6 +690,9 @@ const chatComponents = {
 			);
 			const selectedParts = selectedMessage === undefined ? [] : automaticPartsForMessage(selectedMessage);
 			const isLastMessage = chat.messages.at(-1)?.id === message.id;
+			// This message's run is in flight: the last message, while the thread generates. A
+			// tool call with no result reads `running…` under it and `aborted` without it (#130).
+			const runOpen = chat.sessionGenerating && isLastMessage;
 			return (
 				<Message from={message.role} data-role={message.role}>
 					<MessageContent>
@@ -703,7 +706,8 @@ const chatComponents = {
 								// every later send (the Reasoning shell's auto-close latches after
 								// its first close, so they also never closed again) and overwrote
 								// each block's "Thought for N seconds" with the later run's timing.
-								isStreaming={chat.sessionGenerating && isLastMessage && isTrailingPart}
+								isStreaming={runOpen && isTrailingPart}
+								runOpen={runOpen}
 								renderers={descriptorRenderers}
 							/>
 						))}
