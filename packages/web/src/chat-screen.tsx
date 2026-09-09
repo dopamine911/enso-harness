@@ -260,9 +260,9 @@ function PermissionModeControl(): React.ReactNode {
 }
 
 /*
- * ⓘ `DialogAnswerControls`, `ZenDialogCard` and `PendingDialog` are exported for
- * `__tests__/chat-screen.test.tsx` (#49): static renders of each dialog method. Nothing
- * outside this file and that test imports them.
+ * ⓘ `DialogAnswerControls` and `ZenDialogCard` are exported for `__tests__/chat-screen.test.tsx`
+ * (#49): static renders of each dialog method. Nothing outside this file and that test imports
+ * them. `PendingDialog` is asserted through the mounted pane (`thread-pane.test.tsx`, #118).
  */
 
 /**
@@ -391,7 +391,7 @@ export async function settleDialog(
 }
 
 /** The thread's open question, if any — see {@link settleDialog}. */
-export function PendingDialog(): React.ReactNode {
+function PendingDialog(): React.ReactNode {
 	const stores = useThreadStores();
 	const pending = useStore(stores.dialog);
 	if (pending === undefined) return null;
@@ -495,7 +495,10 @@ const chatComponents = {
 								<SquareIcon />
 							</Button>
 						) : null}
-						{/* Send stays in flight too: a prompt during a run QUEUES through pi (#75). */}
+						{/* Send stays offered in flight. ⚠ Today a prompt sent during a run is held by
+						    TanStack's ChatClient (`whenBusy: "queue"`) and POSTed when the run settles —
+						    the browser's queue, not pi's (#75 decision 3 is the gap; pinned in
+						    `thread-pane.test.tsx`). Not lost, but invisible to other tabs and to a reload. */}
 						<Button type="submit" size="icon" aria-label="send message" disabled={!canSend}>
 							<ArrowUpIcon />
 						</Button>

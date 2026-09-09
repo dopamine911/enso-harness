@@ -70,7 +70,11 @@ export interface ZenPendingDialog {
 	readonly dialog: ZenDialogSpec;
 }
 
-function createThreadStores(threadId: string, history: readonly UIMessage[]): ThreadStores {
+/**
+ * `fetch` is injectable so a test can mount a real pane over a scripted server (#118) — the
+ * one seam between the page and the network. Production never passes it.
+ */
+function createThreadStores(threadId: string, history: readonly UIMessage[], fetchImpl?: typeof fetch): ThreadStores {
 	const notifications = createNotificationsStore();
 	return {
 		threadId,
@@ -85,6 +89,7 @@ function createThreadStores(threadId: string, history: readonly UIMessage[]): Th
 		disconnected: createStore(false),
 		connection: createFollowConnection({
 			threadId,
+			...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
 			onProblem: (problem) => notifications.push(String(problem), "warning", "run"),
 		}),
 	};
@@ -124,9 +129,9 @@ function publishThreadList(): void {
 	threadList.set([...summaries.values()].reverse());
 }
 
-/** Mint a new thread on this page and return its stores. The rail lists it at once, untitled. */
-export function mintThread(): ThreadStores {
-	const stores = createThreadStores(crypto.randomUUID(), []);
+/** Mint a new thread on this page and return its stores. The rail lists it at once, untitled. `fetch` is the #118 test seam. */
+export function mintThread(fetchImpl?: typeof fetch): ThreadStores {
+	const stores = createThreadStores(crypto.randomUUID(), [], fetchImpl);
 	threads.set(stores.threadId, stores);
 	summaries.set(stores.threadId, {
 		threadId: stores.threadId,

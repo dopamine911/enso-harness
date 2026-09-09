@@ -31,12 +31,14 @@
     "use-stick-to-bottom": "^1.1.6"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "20.14.0",
     "@playwright/test": "1.63.0",
     "@shadcn/helpers": "^0.2.0",
     "@tailwindcss/typography": "^0.5.20",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "bun-plugin-tailwind": "0.1.2",
+    "happy-dom": "20.14.0",
     "react-refresh": "^0.18.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.7.0"

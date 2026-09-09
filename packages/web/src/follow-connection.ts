@@ -131,7 +131,10 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
 
 export function createFollowConnection(options: FollowConnectionOptions): FollowConnection {
 	const { threadId } = options;
-	const fetchImpl = options.fetch ?? fetch;
+	// The global is looked up per call, not captured: a thread minted at module load (the
+	// page's first) must still see a `fetch` a test installs afterwards (#118).
+	const fetchImpl: (input: string, init?: RequestInit) => Promise<Response> =
+		options.fetch ?? ((input, init) => fetch(input, init));
 	const onProblem = options.onProblem;
 	const base = `/api/threads/${encodeURIComponent(threadId)}`;
 
