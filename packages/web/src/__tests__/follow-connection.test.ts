@@ -314,6 +314,23 @@ test("abort is one POST to …/abort and names what the server did; it closes no
 	expect(gone.problems).toEqual([expect.stringContaining("abort gone: 404")]);
 });
 
+// PR #120 review: the callers fire-and-forget (`void connection.abort()`), so a network
+// failure must be an OUTCOME the adapter reports, never a rejection that escapes them.
+test("a unary POST that never gets an answer is `unreachable` — reported once, not thrown (#116)", async () => {
+	const problems: string[] = [];
+	const connection = createFollowConnection({
+		threadId: "t1",
+		fetch: (() => Promise.reject(new TypeError("fetch failed"))) as unknown as typeof fetch,
+		onProblem: (problem) => problems.push(String(problem)),
+	});
+	expect(await connection.abort()).toBe("unreachable");
+	expect(await connection.answerDialog({ id: "d1", value: "a" })).toBe("unreachable");
+	expect(problems).toEqual([
+		expect.stringContaining("abort unreachable: TypeError: fetch failed"),
+		expect.stringContaining("dialog d1 unreachable: TypeError: fetch failed"),
+	]);
+});
+
 test("⚠ a blocking question crosses as zen.dialog — no interrupt, no run boundary — and the answer is one POST", async () => {
 	const server = scripted();
 	server.frame(SNAPSHOT_IDLE);

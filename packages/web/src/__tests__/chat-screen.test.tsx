@@ -110,8 +110,9 @@ test("PendingDialog renders nothing without an open question, and the card once 
 });
 
 // PR #113 review: a REFUSED answer (422) leaves the question open on the server, so the card
-// must stay; answered and gone (404) spend it.
-test("⚠ settleDialog clears the question when it is spent and keeps it when the answer was refused", async () => {
+// must stay; answered and gone (404) spend it. PR #120 review: so does a request that never
+// arrived — nothing changed on the server.
+test("⚠ settleDialog clears the question when it is spent and keeps it when the answer was refused or never arrived", async () => {
 	const settle = async (outcome: DialogAnswerOutcome): Promise<boolean> => {
 		const dialog = createStore<{ id: string; dialog: ZenDialogSpec } | undefined>({ id: "d1", dialog: SELECT_DIALOG });
 		const connection = { answerDialog: () => Promise.resolve(outcome) } as unknown as FollowConnection;
@@ -121,6 +122,7 @@ test("⚠ settleDialog clears the question when it is spent and keeps it when th
 	expect(await settle("answered")).toBe(false);
 	expect(await settle("gone")).toBe(false);
 	expect(await settle("refused")).toBe(true);
+	expect(await settle("unreachable")).toBe(true);
 });
 
 // ── part keys are identities, not positions (#82) ─────────────────────────────

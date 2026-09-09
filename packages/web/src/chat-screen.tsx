@@ -379,14 +379,15 @@ export function ZenDialogCard({
  * tab or expired (`gone`). A `refused` answer (an unoffered value, 422) leaves the question
  * open on the server, so it stays on screen with the reason as a notice: nothing would
  * re-show it otherwise, and the thread would sit busy behind a card that vanished (PR #113
- * review). ⓘ Exported for `__tests__/chat-screen.test.tsx`.
+ * review). `unreachable` (the request never arrived) leaves it open the same way.
+ * ⓘ Exported for `__tests__/chat-screen.test.tsx`.
  */
 export async function settleDialog(
 	stores: Pick<ThreadStores, "connection" | "dialog">,
 	response: PiDialogResponse,
 ): Promise<void> {
 	const outcome = await stores.connection.answerDialog(response);
-	if (outcome !== "refused") stores.dialog.set(undefined);
+	if (outcome === "answered" || outcome === "gone") stores.dialog.set(undefined);
 }
 
 /** The thread's open question, if any — see {@link settleDialog}. */

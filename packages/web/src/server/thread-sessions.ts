@@ -326,16 +326,20 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 	 * idle again; the run still ends through `agent_settled` (pi emits it from a `finally`),
 	 * so the prompt route's settle observer releases the lease and every follower sees the
 	 * same `settled` + `status` it would for a natural end. Never disposes.
+	 *
+	 * One abort per run: `busy` stays true until that settle lands, so a second click (PR
+	 * #120 review) would reach pi again. pi's `abort()` is re-entrant (`agent.abort()` +
+	 * `waitForIdle()`), but the second call is the same answer, so it is not made.
 	 */
 	function abort(threadId: string): AbortOutcome {
 		const thread = threads.get(threadId);
 		if (thread === undefined) return "unknown";
 		if (!thread.busy) return "idle";
+		if (thread.abortInFlight !== undefined) return "aborted";
 		const inFlight = thread.hosted.session
 			.abort()
 			.catch((error: unknown) => onProblem?.(`thread ${threadId}: abort failed: ${String(error)}`))
 			.finally(() => {
-				// Only clear our own promise — a later abort may have replaced it.
 				if (thread.abortInFlight === inFlight) thread.abortInFlight = undefined;
 			});
 		thread.abortInFlight = inFlight;

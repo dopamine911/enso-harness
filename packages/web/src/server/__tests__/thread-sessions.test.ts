@@ -101,7 +101,7 @@ test("acquire within the idle window cancels the disposal — #43's fix in one a
 	expect(built).toHaveLength(1);
 });
 
-test("abort stops the run and never disposes; the next acquire waits for the abort to finish (#116)", async () => {
+test("abort stops the run and never disposes; a repeat while it is pending is the same answer, not a second call; the next acquire waits for it (#116)", async () => {
 	const { threads, built } = fakeHost();
 	await threads.acquire("t1");
 	expect(threads.abort("t1")).toBe("aborted");
@@ -109,6 +109,9 @@ test("abort stops the run and never disposes; the next acquire waits for the abo
 	if (hosted === undefined) throw new Error("no session built");
 	expect(hosted.record.aborts).toBe(1);
 	expect(hosted.record.disposed).toBe(0);
+	// The double click (PR #120 review): busy until pi's settle, so only the in-flight abort tells.
+	expect(threads.abort("t1")).toBe("aborted");
+	expect(hosted.record.aborts).toBe(1);
 
 	let acquired = false;
 	const pending = threads.acquire("t1").then(() => {
