@@ -268,11 +268,14 @@ Built so far:
 - **Streaming chat** with tool-call rendering over one structured payload (`@zen/core`'s observation
   and tool-result descriptor schemas — the data/renderer split that lets the TUI and web render the
   same result their own way).
-- **pi's blocking dialogs, answered from the browser (#27, #112).** pi's `select`/`confirm`/`input`
+- **pi's blocking dialogs, answered from the browser (#27, #112, #114).** pi's `select`/`confirm`/`input`
   dialogs block its process; the question crosses on the follow as a `zen.dialog` chunk, the page renders
   it, and the answer is one `POST …/dialog` validated against the question (out-of-options answers are
   refused, cancel propagates). Nothing parks and no run ends for it: the run keeps going on the follow.
-  This is what makes `/mode` and similar flows work from a web page at all.
+  The question's end is on the wire too — a `dialog-settled` observation with its outcome, so a second
+  tab drops the card whoever answered — and a follow's snapshot lists the open questions, so a page that
+  reloads under one resumes the thread from the rail and gets the card back. This is what makes `/mode`
+  and similar flows work from a web page at all.
 - **A session-stats bar (#45 phase 1):** running cost plus the last request's token split.
 - **Mode-change notifications** rendered as chat-adjacent lines rather than lost to stderr.
 

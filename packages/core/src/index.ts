@@ -23,6 +23,7 @@ export {
 	validateDialogAnswer,
 	ZenDialogAnswer,
 	ZenDialogSpec,
+	ZenOpenDialog,
 } from "./dialog.ts";
 export {
 	ZenFollowFrame,
@@ -41,6 +42,8 @@ export {
 } from "./guard.ts";
 export {
 	ZenCustomSessionEntry,
+	ZenDialogOutcome,
+	ZenDialogSettled,
 	ZenExtensionError,
 	ZenExtensionUiRequest,
 	ZenMessageEnd,

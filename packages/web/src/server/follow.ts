@@ -116,6 +116,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
 				? { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] }
 				: nowLive.hosted.session.permissionModeState(),
 		messages,
+		openDialogs: nowLive === undefined ? [] : nowLive.hosted.session.openDialogs(),
 		...(interrupted === undefined ? {} : { interrupted }),
 	});
 }
@@ -242,7 +243,7 @@ export type DialogOutcome =
 export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answer: PiDialogResponse): DialogOutcome {
 	const live = deps.threads.peek(threadId);
 	if (live === undefined) return { status: 404, reason: `no live session for thread ${threadId}` };
-	const question = live.hosted.session.openDialog(answer.id);
+	const question = live.hosted.session.openDialogs().find((open) => open.id === answer.id)?.dialog;
 	if (question === undefined) {
 		return {
 			status: 404,

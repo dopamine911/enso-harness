@@ -117,6 +117,34 @@ export const ZenExtensionUiRequest = Type.Object({
 });
 
 /**
+ * How a blocking question stopped waiting (#114). A closed union: `answered` is a human's
+ * value, the other three are pi's cancel value delivered for a reason — the browser's
+ * cancel or the session's teardown (`cancelled`), the extension's own `timeout`, or the
+ * caller's abort signal (`aborted`).
+ */
+export const ZenDialogOutcome = Type.Union([
+	Type.Literal("answered"),
+	Type.Literal("cancelled"),
+	Type.Literal("timeout"),
+	Type.Literal("aborted"),
+]);
+export type ZenDialogOutcome = Static<typeof ZenDialogOutcome>;
+
+/**
+ * A blocking question is no longer waiting (#114). The HOST synthesises this at the one
+ * point every settle path crosses — pi has no event for it, because in rpc mode the client
+ * that answered already knows. Here a second follower does not: without this, a question
+ * answered in one tab lingered in every other until that tab tried and got `gone`.
+ */
+export const ZenDialogSettled = Type.Object({
+	kind: Type.Literal("dialog-settled"),
+	/** `minLength: 1`, as `ZenOpenDialog.id` — a settle must name a question (PR #115 review). */
+	id: Type.String({ minLength: 1 }),
+	outcome: ZenDialogOutcome,
+});
+export type ZenDialogSettled = Static<typeof ZenDialogSettled>;
+
+/**
  * A CUSTOM session entry was appended (#29) — an extension persisted state via
  * `pi.appendEntry(customType, data)`.
  *
@@ -259,6 +287,7 @@ export const ZenObservation = Type.Union([
 	ZenPromptRejected,
 	ZenExtensionError,
 	ZenExtensionUiRequest,
+	ZenDialogSettled,
 	ZenRunEnded,
 	ZenSettled,
 	ZenUnmapped,

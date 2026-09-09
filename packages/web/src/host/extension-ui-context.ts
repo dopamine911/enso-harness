@@ -1,7 +1,13 @@
 import type { ExtensionUIContext, KeybindingsManager, Theme as PiTheme } from "@earendil-works/pi-coding-agent";
 import { Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
-import { isZenDialogSpec, type PiDialogResponse, type PiRpcEvent, type ZenDialogSpec } from "@zen/core";
+import {
+	isZenDialogSpec,
+	type PiDialogResponse,
+	type PiRpcEvent,
+	type ZenDialogOutcome,
+	type ZenOpenDialog,
+} from "@zen/core";
 import { type LiftedPermissionDialog, liftPermissionDialog } from "./permission-dialog.ts";
 
 /** The factory `ExtensionUIContext.custom` receives, named so the method can be written without `Parameters<>`. */
@@ -92,8 +98,8 @@ export interface ZenExtensionUiContext {
 	readonly uiContext: ExtensionUIContext;
 	/** Deliver an answer. Unknown ids are reported, not thrown — the extension is not waiting on them. */
 	answerDialog(response: PiDialogResponse): void;
-	/** The pending dialog's question, or undefined once it is settled or if it was never asked. */
-	openDialog(id: string): ZenDialogSpec | undefined;
+	/** Every pending question, oldest first, as the follow's snapshot lists them (#114). Empty once settled. */
+	openDialogs(): ZenOpenDialog[];
 	/** Cancel every pending dialog — session teardown. Each blocked extension call resolves to its cancel value. */
 	cancelAllDialogs(): void;
 	/** How many dialogs are blocked right now — observable state for tests and for the idle-timeout logic. */
@@ -230,6 +236,10 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 	 * the caller's timeout. `mapResponse` turns the wire answer into the method's return type;
 	 * `cancelValue` is what the extension sees for every non-answer outcome — pi's own
 	 * contract (`select`/`input`/`editor` → `undefined`, `confirm` → `false`).
+	 *
+	 * Every path that stops the wait goes through `finish`, which is why the settle record
+	 * (#114) is emitted there and nowhere else: pi has no event for a question ending, and a
+	 * follower that did not answer it has no other way to learn the card is stale.
 	 */
 	function awaitDialog<T>(
 		request: BlockingDialogRequest,
@@ -240,24 +250,27 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 		return new Promise<T>((resolve) => {
 			const id = crypto.randomUUID();
 			let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-			const finish = (value: T): void => {
+			const finish = (value: T, outcome: ZenDialogOutcome): void => {
 				if (!pendingDialogs.delete(id)) return; // already settled by another path
 				if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
 				dialogOptions?.signal?.removeEventListener("abort", onAbort);
+				emit({ type: "extension_ui_settled", id, outcome });
 				resolve(value);
 			};
-			const onAbort = (): void => finish(cancelValue);
+			const onAbort = (): void => finish(cancelValue, "aborted");
 			if (dialogOptions?.signal?.aborted) {
 				resolve(cancelValue);
 				return;
 			}
 			dialogOptions?.signal?.addEventListener("abort", onAbort);
 			if (dialogOptions?.timeout !== undefined) {
-				timeoutHandle = setTimeout(() => finish(cancelValue), dialogOptions.timeout);
+				timeoutHandle = setTimeout(() => finish(cancelValue, "timeout"), dialogOptions.timeout);
 			}
 			pendingDialogs.set(id, {
 				resolve: (response) =>
-					finish("cancelled" in response && response.cancelled ? cancelValue : mapResponse(response)),
+					"cancelled" in response && response.cancelled
+						? finish(cancelValue, "cancelled")
+						: finish(mapResponse(response), "answered"),
 				request,
 			});
 			emit({ type: "extension_ui_request", id, ...request });
@@ -411,12 +424,15 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 			}
 			pending.resolve(response);
 		},
-		openDialog(id) {
-			const request = pendingDialogs.get(id)?.request;
-			// The request IS a dialog spec structurally (the mapper builds the browser's spec
-			// from the same fields); checked rather than cast, so a request shape the spec
-			// does not admit (a select with no options) reads as "no question" here too.
-			return request !== undefined && isZenDialogSpec(request) ? request : undefined;
+		openDialogs() {
+			const open: ZenOpenDialog[] = [];
+			for (const [id, { request }] of pendingDialogs) {
+				// The request IS a dialog spec structurally (the mapper builds the browser's spec
+				// from the same fields); checked rather than cast, so a request shape the spec
+				// does not admit (a select with no options) is not listed as a question here either.
+				if (isZenDialogSpec(request)) open.push({ id, dialog: request });
+			}
+			return open;
 		},
 		cancelAllDialogs() {
 			for (const [id, pending] of [...pendingDialogs]) {

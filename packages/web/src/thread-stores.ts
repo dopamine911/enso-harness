@@ -44,9 +44,13 @@ export interface ThreadStores {
 	 */
 	readonly generation: WritableStore<number | undefined>;
 	/**
-	 * The question pi is blocked on, from the `zen.dialog` chunk (#112); undefined when
-	 * none is open. pi asks one at a time, so one slot. Cleared by the answer this page
-	 * sends, or by the server refusing it because another tab already answered.
+	 * The question this page shows pi blocked on; undefined when none. Fed by three chunks
+	 * (#112, #114): `zen.dialog` opens it, `zen.dialog-settled` clears it by id, and a
+	 * snapshot's `zen.open-dialogs` replaces it wholesale. ONE slot is the browser's choice,
+	 * not pi's — extensions can hold several questions at once (`openDialogs()` lists them);
+	 * this page shows the oldest, and a second only once a snapshot lists it (see
+	 * `routeDialogEvent`). Also cleared by an answer this page sends that the server takes
+	 * or reports gone.
 	 */
 	readonly dialog: WritableStore<ZenPendingDialog | undefined>;
 	/** The thread's transport: TanStack's connection over prompt/follow, and the dialog answer beside it. */

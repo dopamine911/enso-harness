@@ -3,6 +3,7 @@ import type { StreamChunk } from "@tanstack/ai";
 import { ZEN_TOOL_RESULT_KEY, type ZenObservation } from "@zen/core";
 import {
 	ZEN_CUSTOM_EVENT_DIALOG,
+	ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
 	ZEN_CUSTOM_EVENT_ENTRY,
 	ZEN_CUSTOM_EVENT_NOTIFY,
 	ZEN_CUSTOM_EVENT_QUEUE,
@@ -253,6 +254,17 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 			// pi refused the prompt at preflight (#112) — the run the client thinks it started never
 			// did. A run error, so the client shows why instead of a spinner that never ends.
 			return [{ type: EventType.RUN_ERROR, runId: ids.runId, message: observation.reason }];
+
+		case "dialog-settled":
+			// The question stopped waiting (#114). CUSTOM: nothing on the run ended for it,
+			// exactly as nothing started for the question. The browser drops the card by id.
+			return [
+				{
+					type: EventType.CUSTOM,
+					name: ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
+					value: { id: observation.id, outcome: observation.outcome },
+				},
+			];
 
 		case "custom-entry":
 			// An extension persisted state (#29) — a receipt the browser may render (the mode

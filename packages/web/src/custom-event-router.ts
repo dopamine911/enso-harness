@@ -1,10 +1,12 @@
-import { isZenDialogSpec, ZenNotifyType, ZenUiRequestOrigin } from "@zen/core";
+import { ZenNotifyType, ZenOpenDialog, ZenUiRequestOrigin } from "@zen/core";
 import { Check } from "typebox/value";
 import {
 	ZEN_CUSTOM_EVENT_DIALOG,
+	ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
 	ZEN_CUSTOM_EVENT_ENTRY,
 	ZEN_CUSTOM_EVENT_MODE,
 	ZEN_CUSTOM_EVENT_NOTIFY,
+	ZEN_CUSTOM_EVENT_OPEN_DIALOGS,
 	ZEN_CUSTOM_EVENT_RUN,
 	ZEN_CUSTOM_EVENT_USAGE,
 } from "./rpc/custom-event-names.ts";
@@ -51,17 +53,12 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
 		if (generation !== undefined) stores.generation.set(generation);
 		return;
 	}
-	if (eventType === ZEN_CUSTOM_EVENT_DIALOG) {
-		// One open question per thread (#112). A malformed value opens nothing — and says
-		// so, because a question that vanished silently is the #4 failure shape.
-		if (typeof data === "object" && data !== null && "id" in data && "dialog" in data) {
-			const { id, dialog } = data;
-			if (typeof id === "string" && id.length > 0 && isZenDialogSpec(dialog)) {
-				stores.dialog.set({ id, dialog });
-				return;
-			}
-		}
-		stores.notifications.push("pi asked a question this page could not read; it was left unanswered", "error", "run");
+	if (
+		eventType === ZEN_CUSTOM_EVENT_DIALOG ||
+		eventType === ZEN_CUSTOM_EVENT_DIALOG_SETTLED ||
+		eventType === ZEN_CUSTOM_EVENT_OPEN_DIALOGS
+	) {
+		routeDialogEvent(stores, eventType, data);
 		return;
 	}
 	if (eventType === ZEN_CUSTOM_EVENT_USAGE) {
@@ -79,6 +76,38 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
 	// be trusted, a notice is shown, never grouped away.
 	const origin = Check(ZenUiRequestOrigin, observation.origin) ? observation.origin : "run";
 	stores.notifications.push(observation.message, notifyType, origin);
+}
+
+/**
+ * The thread's ONE open-question slot (#112, #114), and the three chunks that move it:
+ *
+ *   zen.dialog          a question pi just asked — opens the slot. A malformed value opens
+ *                       nothing and SAYS so: a question that vanished silently is the #4 shape.
+ *   zen.dialog-settled  the question stopped waiting — drops the card if it is the one shown.
+ *                       Any other id is one this page never showed or already dropped.
+ *   zen.open-dialogs    a snapshot's COMPLETE list — replaces the slot, so an empty list
+ *                       clears a card for a question that settled while the page was away.
+ *                       One card at a time: a second concurrent question shows once the
+ *                       first settles and the next snapshot lists it. A malformed list is
+ *                       left alone rather than clearing a real question.
+ */
+function routeDialogEvent(stores: ThreadStores, eventType: string, data: unknown): void {
+	if (eventType === ZEN_CUSTOM_EVENT_DIALOG) {
+		if (Check(ZenOpenDialog, data)) stores.dialog.set(data);
+		else
+			stores.notifications.push("pi asked a question this page could not read; it was left unanswered", "error", "run");
+		return;
+	}
+	if (eventType === ZEN_CUSTOM_EVENT_DIALOG_SETTLED) {
+		const shown = stores.dialog.get();
+		if (shown !== undefined && typeof data === "object" && data !== null && "id" in data && data.id === shown.id) {
+			stores.dialog.set(undefined);
+		}
+		return;
+	}
+	if (typeof data !== "object" || data === null || !("open" in data) || !Array.isArray(data.open)) return;
+	const first: unknown = data.open[0];
+	stores.dialog.set(Check(ZenOpenDialog, first) ? first : undefined);
 }
 
 /** The `zen.run` value's number, or undefined for anything that is not a non-negative integer. */

@@ -17,7 +17,7 @@ function fakeHosted() {
 	const session: PiSession = {
 		prompt: ignore,
 		answerDialog: ignore,
-		openDialog: () => undefined,
+		openDialogs: () => [],
 		listCommands: () => [],
 		permissionModeState: () => ({ mode: "default", available: [] }),
 		subscribe: () => ignore,
