@@ -429,12 +429,17 @@ const chatComponents = {
 			// binding is initialised by then.
 			const chat = useChatContext();
 			const stores = useThreadStores();
+			const disconnected = useStore(stores.disconnected);
 			// Controlled, so the send button can disable on empty — the ai-elements chatbot
 			// example's PromptInput does the same.
 			const [draft, setDraft] = useState("");
 
+			// Nothing sends while disconnected (#119, PR #123 review): the prompt would reach a
+			// server that rebuilds the thread, but this page's follow is gone, so the reply would
+			// land nowhere this page can see. Same shape as the missing stop; the placeholder says why.
+			const canSend = draft.trim().length > 0 && !disconnected;
 			const sendDraft = (): void => {
-				if (draft.trim().length === 0) return;
+				if (!canSend) return;
 				void chat.sendMessage(draft);
 				setDraft("");
 			};
@@ -464,7 +469,7 @@ const chatComponents = {
 									sendDraft();
 								}
 							}}
-							placeholder="ask pi something"
+							placeholder={disconnected ? "disconnected — reload and resume from the rail" : "ask pi something"}
 							autoComplete="off"
 							rows={1}
 							className="max-h-40 min-h-9 flex-1 resize-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
@@ -475,8 +480,10 @@ const chatComponents = {
 						    server. The run ends on the follow (`settled`, `status`) like any other,
 						    so this button changes nothing itself; the feed does. Read off
 						    `sessionGenerating`, the shared run flag — `isLoading` never rises here
-						    (#103 receipt). */}
-						{chat.sessionGenerating ? (
+						    (#103 receipt). Not offered once the follow has ended (#119): the flag
+						    is then as of that moment, and a stop that may stop nothing is issue #4's shape -
+						    `docs/architecture.md`, The control plane, invariant 5. */}
+						{chat.sessionGenerating && !disconnected ? (
 							<Button
 								type="button"
 								size="icon"
@@ -489,7 +496,7 @@ const chatComponents = {
 							</Button>
 						) : null}
 						{/* Send stays in flight too: a prompt during a run QUEUES through pi (#75). */}
-						<Button type="submit" size="icon" aria-label="send message" disabled={draft.trim().length === 0}>
+						<Button type="submit" size="icon" aria-label="send message" disabled={!canSend}>
 							<ArrowUpIcon />
 						</Button>
 					</div>

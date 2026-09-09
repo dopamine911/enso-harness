@@ -37,7 +37,13 @@ export type Activity =
 	| { readonly kind: "working" }
 	| { readonly kind: "thinking" }
 	| { readonly kind: "running"; readonly tool: string }
-	| { readonly kind: "responding" };
+	| { readonly kind: "responding" }
+	/**
+	 * The follow ended under this page (#119): whatever the run flag holds is as of that
+	 * moment, so it is not reported — a run that was in flight may have finished, been
+	 * aborted, or died with the server, and the page cannot tell which.
+	 */
+	| { readonly kind: "disconnected" };
 
 /**
  * Read the activity off the transcript's tail. The last AUTOMATIC part of the last message
@@ -54,7 +60,12 @@ export type Activity =
  * or an unmatched result at the tail — the run is in flight. The part itself is still on
  * screen in the transcript; nothing is hidden by summarising it.
  */
-export function describeActivity(messages: ReadonlyArray<UIMessage>, generating: boolean): Activity {
+export function describeActivity(
+	messages: ReadonlyArray<UIMessage>,
+	generating: boolean,
+	disconnected = false,
+): Activity {
+	if (disconnected) return { kind: "disconnected" };
 	if (!generating) return { kind: "idle" };
 	const last = selectChatUI({ messages }).messages.at(-1);
 	if (last === undefined || last.message.role !== "assistant") return { kind: "working" };
@@ -98,9 +109,20 @@ export interface SessionStatusViewProps {
 	readonly stats: SessionStats;
 }
 
+const DOT_DISCONNECTED = "size-2 rounded-full bg-destructive";
+const DOT_IDLE = "size-2 rounded-full bg-muted-foreground/40";
+const DOT_IN_FLIGHT = "size-2 animate-pulse rounded-full bg-foreground";
+
+/** The dot beside the word: pulsing while in flight, still when idle, red once the follow ended (#119). */
+function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof DOT_IDLE | typeof DOT_IN_FLIGHT {
+	if (activity.kind === "disconnected") return DOT_DISCONNECTED;
+	if (activity.kind === "idle") return DOT_IDLE;
+	return DOT_IN_FLIGHT;
+}
+
 /** Pure view — everything it shows arrives as props, so a static render pins the wording. */
 export function SessionStatusView({ activity, counts, stats }: SessionStatusViewProps): React.ReactNode {
-	const inFlight = activity.kind !== "idle";
+	const dotClass = activityDotClass(activity);
 	return (
 		<footer
 			id="session-status"
@@ -108,14 +130,13 @@ export function SessionStatusView({ activity, counts, stats }: SessionStatusView
 		>
 			<span
 				className="flex items-center gap-1.5"
-				title="what the run is doing right now, read off the transcript's tail"
+				title={
+					activity.kind === "disconnected"
+						? "the connection to the server ended — reload and resume from the rail"
+						: "what the run is doing right now, read off the transcript's tail"
+				}
 			>
-				<span
-					aria-hidden="true"
-					className={
-						inFlight ? "size-2 animate-pulse rounded-full bg-foreground" : "size-2 rounded-full bg-muted-foreground/40"
-					}
-				/>
+				<span aria-hidden="true" className={dotClass} />
 				{activityLabel(activity)}
 			</span>
 			<span title="user messages in this transcript">
@@ -144,13 +165,15 @@ export interface SessionStatusBarProps {
 /**
  * The bar wired to its thread: the chat's messages and in-flight flag come in as props
  * (the chat hook is bound inside chat-screen.tsx, and this module stays free of it), the
- * thread's usage store is read from context.
+ * thread's usage store and its disconnected flag (#119) are read from context.
  */
 export function SessionStatusBar({ messages, generating }: SessionStatusBarProps): React.ReactNode {
-	const stats = useStore(useThreadStores().stats);
+	const stores = useThreadStores();
+	const stats = useStore(stores.stats);
+	const disconnected = useStore(stores.disconnected);
 	return (
 		<SessionStatusView
-			activity={describeActivity(messages, generating)}
+			activity={describeActivity(messages, generating, disconnected)}
 			counts={countSession(messages)}
 			stats={stats}
 		/>

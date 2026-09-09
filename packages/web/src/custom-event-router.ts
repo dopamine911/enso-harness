@@ -52,6 +52,8 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
 	if (eventType === ZEN_CUSTOM_EVENT_RUN) {
 		const generation = readGeneration(data);
 		if (generation !== undefined) stores.generation.set(generation);
+		// A status frame reaches this page only over a live follow (#119).
+		if (stores.disconnected.get()) stores.disconnected.set(false);
 		return;
 	}
 	if (
@@ -67,8 +69,10 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
 		return;
 	}
 	if (eventType === ZEN_CUSTOM_EVENT_FOLLOW_ENDED) {
-		// The server went away under this page (#103 receipt): said where the human looks,
-		// because with no run open nothing else on the page would change.
+		// The server went away under this page (#103 receipt): said where the human looks —
+		// a notice, and the status bar's own state (#119), since with no run open nothing else
+		// on the page would change and with one open the run flag would still say so.
+		stores.disconnected.set(true);
 		stores.notifications.push(
 			"the connection to the server ended — the thread's state here is as of that moment; reload and resume it from the rail to reconnect",
 			"error",

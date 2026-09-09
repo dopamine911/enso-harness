@@ -35,6 +35,15 @@ test("not loading is idle, whatever the transcript holds", () => {
 	expect(describeActivity(messages, false)).toEqual({ kind: "idle" });
 });
 
+// #119: after the follow ends the run flag is as of that moment — a run in flight may have
+// finished, been aborted, or died with the server. The bar says the one thing it knows.
+test("disconnected outranks the run flag: neither idle nor the tail is reported once the follow ended", () => {
+	const midRun = [user("u1", "hi"), assistant("a1", [call("c1", "bash")])];
+	expect(describeActivity(midRun, true, true)).toEqual({ kind: "disconnected" });
+	expect(describeActivity(midRun, false, true)).toEqual({ kind: "disconnected" });
+	expect(describeActivity(midRun, true, false)).toEqual({ kind: "running", tool: "bash" });
+});
+
 test("a run with no assistant output yet is working, not idle", () => {
 	expect(describeActivity([user("u1", "hi")], true)).toEqual({ kind: "working" });
 	expect(describeActivity([], true)).toEqual({ kind: "working" });
@@ -104,6 +113,13 @@ test("a fresh session renders idle with zeros — never an empty string", () => 
 	expect(rendered).toContain("$0.0000");
 	// No last-request figure before the first request: absent, not a fabricated zero.
 	expect(rendered).not.toContain("tok in");
+});
+
+test("disconnected renders as its own word, not pulsing, with the recovery in the title", () => {
+	const rendered = render({ activity: { kind: "disconnected" } });
+	expect(rendered).toContain("disconnected");
+	expect(rendered).not.toContain("animate-pulse");
+	expect(rendered).toContain("reload and resume from the rail");
 });
 
 test("the running tool is named, and counts read as English", () => {
