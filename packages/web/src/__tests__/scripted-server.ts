@@ -60,32 +60,36 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
 		});
 		return new Response(body, { status: 200 });
 	};
-	/** The page's own reads — mode seed, the rail's stored list, a resume click's history. */
-	const pageRead = (url: string): Response | undefined => {
-		if (url.endsWith("/api/mode")) return Response.json(mode);
-		if (url.endsWith("/api/stored-threads")) return Response.json(options.storedThreads ?? []);
-		const history = /\/api\/threads\/([^/]+)\/history$/.exec(url);
+	/** The page's own reads — mode seed, the rail's stored list, a resume click's history. Exact paths. */
+	const pageRead = (path: string): Response | undefined => {
+		if (path === "/api/mode") return Response.json(mode);
+		if (path === "/api/stored-threads") return Response.json(options.storedThreads ?? []);
+		const history = /^\/api\/threads\/([^/]+)\/history$/.exec(path);
 		if (history?.[1] === undefined) return undefined;
 		const found = options.histories?.[decodeURIComponent(history[1])];
 		return found === undefined ? new Response("no such thread", { status: 404 }) : Response.json(found);
 	};
+	/** A thread route's last segment — `/api/threads/<id>/<action>` — or undefined for anything else. */
+	const threadAction = (path: string): string | undefined => /^\/api\/threads\/[^/]+\/([^/]+)$/.exec(path)?.[1];
 	const fetchImpl = ((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-		const url = String(input);
-		if (url.endsWith("/follow")) return Promise.resolve(openFollow());
-		if (url.endsWith("/prompt")) {
+		// Relative URLs, as the browser issues them; the base only makes `pathname` parse.
+		const path = new URL(String(input), "http://localhost").pathname;
+		const action = threadAction(path);
+		if (action === "follow") return Promise.resolve(openFollow());
+		if (action === "prompt") {
 			prompts.push(JSON.parse(String(init?.body)) as { message: string });
 			const body = typeof promptStatus.body === "string" ? promptStatus.body : JSON.stringify(promptStatus.body);
 			return promptGate.promise.then(() => new Response(body, { status: promptStatus.status }));
 		}
-		if (url.endsWith("/dialog")) {
+		if (action === "dialog") {
 			dialogs.push(JSON.parse(String(init?.body)));
 			return Promise.resolve(new Response(dialogStatus === 204 ? null : "no", { status: dialogStatus }));
 		}
-		if (url.endsWith("/abort") && init?.method === "POST") {
+		if (action === "abort" && init?.method === "POST") {
 			aborts += 1;
 			return Promise.resolve(new Response(abortStatus === 204 ? null : "no", { status: abortStatus }));
 		}
-		return Promise.resolve(pageRead(url) ?? new Response("not found", { status: 404 }));
+		return Promise.resolve(pageRead(path) ?? new Response("not found", { status: 404 }));
 	}) as typeof fetch;
 	return {
 		fetch: fetchImpl,
