@@ -81,3 +81,11 @@ test('⚠ the ".zen" literal is assembled only in paths.ts (plus guard.ts, where
 	const GUARD_CORPUS_MODULE = join("packages", "core", "src", "guard.ts");
 	expect(offendersContaining('".zen"', [PATHS_MODULE, GUARD_CORPUS_MODULE])).toEqual([]);
 });
+
+// The storage seam (#102, `docs/architecture.md` → Persistence): pi's `SessionManager` and the
+// session-file layout are touched in ONE file, so a later store is a one-file change. Core and
+// the browser see a path only as debug text (`sessionDir`/`sessionFile` in the inspection).
+test("⚠ SessionManager is imported ONLY by the web host's agent-host.ts — the storage seam", () => {
+	const STORAGE_SEAM = join("packages", "web", "src", "host", "agent-host.ts");
+	expect(offendersContaining("SessionManager", [STORAGE_SEAM])).toEqual([]);
+});
