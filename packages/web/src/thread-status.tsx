@@ -10,7 +10,7 @@ import { toolResultState } from "./ZenToolResult.tsx";
  * deepseek-harness's footer is the reference: `97 turns · 111 steps · LLM 23m5s · …` — the
  * bar is WHERE YOU LOOK, so it is always there.
  *
- * ⚠ ALWAYS VISIBLE, ZEROS INCLUDED. `SessionStatsBar` (#45) hid until the first counted
+ * ⚠ ALWAYS VISIBLE, ZEROS INCLUDED. The original bar (#45, `SessionStatsBar`, since removed) hid until the first counted
  * request so an all-zero line would not read as a broken meter. That was the wrong call for
  * a bar whose job is to be the place you look: a fresh session reading `idle · 0 turns ·
  * $0.0000` is the honest state, the same reasoning that put `default` in the mode dropdown

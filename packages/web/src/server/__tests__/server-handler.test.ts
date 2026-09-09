@@ -381,7 +381,7 @@ test("GET /api/stored-threads lists stored threads with title, count and age, ma
 	const response = await fetch(`${url}/api/stored-threads`);
 	expect(response.status).toBe(200);
 	const listed: unknown = await response.json();
-	expect(Array.isArray(listed) && listed.every((session) => Check(ZenStoredThread, session))).toBe(true);
+	expect(Array.isArray(listed) && listed.every((thread) => Check(ZenStoredThread, thread))).toBe(true);
 	expect(listed).toEqual([
 		{
 			threadId: "stored-1",
@@ -423,7 +423,7 @@ test("⚠ a thread this server holds IDLE is resumable — /history reads pi's m
 	const { url, built } = await startWith(settlesAtOnce, stored);
 	await prompt(url, "t1", "hello");
 	const listed = (await (await fetch(`${url}/api/stored-threads`)).json()) as ZenStoredThread[];
-	expect(listed.find((session) => session.threadId === "t1")?.busy).toBe(false);
+	expect(listed.find((thread) => thread.threadId === "t1")?.busy).toBe(false);
 	const response = await fetch(`${url}/api/threads/t1/history`);
 	expect(response.status).toBe(200);
 	const history = (await response.json()) as ZenThreadHistory;

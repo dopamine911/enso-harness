@@ -8,8 +8,8 @@ import type { ThreadSummary } from "./thread-stores.ts";
  * page, how do I start over. deepseek-harness's left rail is the reference — a title, a
  * relative age, a New Session button.
  *
- * Two lists, each labelled for what it is. "ACTIVE SESSIONS": the threads this page has open
- * — they die with the page. "PREVIOUS SESSIONS" (#95): pi's session files for this
+ * Two lists, each labelled for what it is. "Active Sessions": the threads this page has open
+ * — they die with the page. "Previous Sessions" (#95): pi's session files for this
  * workspace that this page has not got open; a click resumes one, with its history and
  * its mode, under the same id — the thread id IS pi's session id. A session another page
  * is RUNNING right now (a run in flight, a dialog parked) is shown but not clickable:

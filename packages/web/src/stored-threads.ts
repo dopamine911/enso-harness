@@ -35,7 +35,7 @@ export function createStoredThreadsStore(
 		refresh: async () => {
 			try {
 				const listed = await fetchStoredThreads();
-				const wellFormed = Array.isArray(listed) && listed.every((session) => Check(ZenStoredThread, session));
+				const wellFormed = Array.isArray(listed) && listed.every((thread) => Check(ZenStoredThread, thread));
 				if (!wellFormed) throw new Error("the server's session listing did not match its schema");
 				store.set({ threads: listed as ZenStoredThread[], error: undefined });
 			} catch (error) {
@@ -117,5 +117,5 @@ export function storedThreadsNotOnThisPage(
 	stored: readonly ZenStoredThread[],
 	pageThreadIds: ReadonlySet<string>,
 ): ZenStoredThread[] {
-	return stored.filter((session) => !pageThreadIds.has(session.threadId));
+	return stored.filter((thread) => !pageThreadIds.has(thread.threadId));
 }
