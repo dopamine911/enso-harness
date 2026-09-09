@@ -15,6 +15,8 @@ function fakeHosted() {
 	const record = { disposed: 0, aborts: 0, queueClears: 0 };
 	/** What pi holds behind the run — a test fills it to see the stop hand it back (#75). */
 	const queue = { steering: [] as string[], followUp: [] as string[] };
+	/** Set by a test to make the next `clearQueue` throw — pi emits to listeners inside it. */
+	const failClear = { with: undefined as Error | undefined };
 	let finishAbort: () => void = ignore;
 	const session: PiSession = {
 		prompt: ignore,
@@ -31,6 +33,7 @@ function fakeHosted() {
 		},
 		clearQueue: () => {
 			record.queueClears += 1;
+			if (failClear.with !== undefined) throw failClear.with;
 			const cleared = { steering: [...queue.steering], followUp: [...queue.followUp] };
 			queue.steering = [];
 			queue.followUp = [];
@@ -46,7 +49,7 @@ function fakeHosted() {
 		inspect: () => ({ sessionId: "s", cwd: "/", sessionDir: "/s", sessionFile: null, entries: [], commands: [] }),
 		emittedEvents: () => [],
 	};
-	return { hosted, record, queue, finishAbort: () => finishAbort() };
+	return { hosted, record, queue, failClear, finishAbort: () => finishAbort() };
 }
 
 function fakeHost() {
@@ -161,6 +164,20 @@ test("⚠ abort hands back the queued prompts in order and clears pi's queue; a 
 	// The second click: same answer, the queue was already taken.
 	expect(threads.abort("t1")).toEqual({ outcome: "aborted", restored: [] });
 	expect(hosted.record.queueClears).toBe(1);
+});
+
+test("⚠ a stop must stop: if clearing the queue throws, pi is still told to abort and the loss is said (PR #129 review)", async () => {
+	const { threads, built, problems } = fakeHost();
+	await threads.acquire("t1");
+	const hosted = built[0];
+	if (hosted === undefined) throw new Error("no session built");
+	hosted.queue.followUp.push("would have been restored");
+	hosted.failClear.with = new Error("a queue listener threw");
+	expect(threads.abort("t1")).toEqual({ outcome: "aborted", restored: [] });
+	expect(hosted.record.aborts).toBe(1);
+	expect(problems.map(String)).toEqual([
+		expect.stringContaining("clearing the queue failed, queued prompts lost: Error: a queue listener threw"),
+	]);
 });
 
 // ── the lease fence (#109) ─────────────────────────────────────────────────────

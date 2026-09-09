@@ -348,7 +348,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 		if (thread === undefined) return { outcome: "unknown", restored: [] };
 		if (!thread.busy) return { outcome: "idle", restored: [] };
 		if (thread.abortInFlight !== undefined) return { outcome: "aborted", restored: [] };
-		const cleared = thread.hosted.session.clearQueue();
+		// A stop must stop (PR #129 review): if clearing the queue throws — pi emits the
+		// emptied queue to its listeners inside it — the texts are lost and said, and pi is
+		// still told to abort. Never the other way round.
+		let cleared: { steering: string[]; followUp: string[] } = { steering: [], followUp: [] };
+		try {
+			cleared = thread.hosted.session.clearQueue();
+		} catch (error: unknown) {
+			onProblem?.(`thread ${threadId}: clearing the queue failed, queued prompts lost: ${String(error)}`);
+		}
 		const inFlight = thread.hosted.session
 			.abort()
 			.catch((error: unknown) => onProblem?.(`thread ${threadId}: abort failed: ${String(error)}`))
