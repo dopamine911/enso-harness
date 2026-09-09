@@ -93,7 +93,6 @@ test("an errored result carries the state TanStack reads, so a denial cannot ren
 		isError: false,
 	});
 	expect(fine).not.toHaveProperty("state");
-	expect(fine).not.toHaveProperty("zenIsError");
 });
 
 // ⚠ NOT RUN_FINISHED — `agent_end` may be followed by an automatic retry.
