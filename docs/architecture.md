@@ -1,6 +1,7 @@
 # zen-harness — vision and architecture
 
-**Status:** foundational. Written 2026-09-03. This is the document a fresh session reads first.
+**Status:** foundational. Written 2026-09-03; runtime and control-plane sections rewritten 2026-09-09
+after the #103 freeze, from the code (#102). This is the document a fresh session reads first.
 
 Research that informs these decisions lives in [`concepts/`](./concepts/) — documents on boundaries,
 tooling, failure modes, prompt caching, support systems, provider auth, and what to harvest from prior
@@ -40,34 +41,33 @@ graph LR
     PITUI["pi CLI + TUI"]
   end
 
-  subgraph webhost["Host B — web server (Bun/Node)"]
-    SDK["pi SDK<br/>(embedded, owns the loop)"]
-    API["zen backend<br/>HTTP + WS"]
-    ACPA["pi-acp adapter<br/>(chat transport only)"]
+  subgraph webhost["Host B — web server (Bun)"]
+    SDK["pi SDK, embedded<br/>AgentHost · one AgentSession per thread"]
+    REG["thread registry<br/>busy · generation · idle disposal"]
+    HTTP["HTTP<br/>prompt · follow (SSE) · dialog · abort"]
   end
 
   PKG["<b>zen-harness</b> pi package<br/>extensions · skills · prompts · themes"]
-  STATE[("<b>.zen/</b><br/>overlays · field notes<br/>memory · health · triggers")]
-  BROWSER["browser<br/>TanStack AI · Monaco · panes"]
+  STATE[("pi session logs<br/>+ <b>.zen/</b> config · secrets")]
+  BROWSER["browser<br/>TanStack AI (state) · ai-elements (presentation)"]
 
   PKG --> PITUI
   PKG --> SDK
   PITUI <--> STATE
-  API <--> STATE
-  SDK --> API
-  API --> BROWSER
-  ACPA --> BROWSER
-  SDK --> ACPA
+  SDK <--> STATE
+  SDK --> REG --> HTTP
+  HTTP <--> BROWSER
 ```
 
-**Why the web host embeds the SDK rather than driving pi over ACP.** The context pane has to read and
-modify the message array. ACP carries chat, tool calls, and permission prompts — not "show me the
-entries and drop these three." So the backend embeds pi directly, and ACP is used *only* as the chat
-transport, where it is sufficient and saves building one.
+**Why the web host embeds the SDK rather than driving pi over a chat protocol (#69, #112).** The context
+pane has to read the entry array; a run has to outlive the request that started it; a second tab has to
+see the first tab's run. Chat protocols (ACP, AG-UI) carry chat, tool calls and interrupts — not
+entries, partial tool output, mode, usage or queue state. So the backend embeds pi and speaks its own
+wire; the browser derives whatever its renderer wants in memory. Details under *The control plane*.
 
-**Why state is files, not a service.** Both hosts read the same `.zen/` directory, so the TUI and the
-web app see the same overlays, notes, and memory from day one with no server between them. A service
-later becomes an optimisation for push (live alerts) rather than a migration.
+**Why state is files, not a service.** pi's session log is the durable record and both hosts read it;
+`.zen/` holds harness config and secrets. A service later becomes an optimisation for push (live
+alerts) rather than a migration — see *Persistence* below for the one rule this imposes today.
 
 ---
 
@@ -104,6 +104,120 @@ replaced. Load order is therefore a security property — see *Decided constrain
 
 ---
 
+## The control plane
+
+The human-facing layer that creates, inspects, switches between and manipulates pi-backed threads
+while pi stays authoritative for execution (#103). Proven viable 2026-09-09 (two receipt runs, second
+clean) and frozen; this section is written from the code that passed.
+
+### Nouns
+
+One id, and a strict rule about what to call it. **`thread`** is the noun for the id everywhere it
+crosses — routes, browser, wire types. **`session`** is reserved for pi's durable log and pi's own
+types (`PiSession`, `SessionManager`, `AgentSession`). Before this was written the word carried four
+meanings; anything zen-owned that says "session" and means "thread" is a rename owed (#102).
+
+| Noun | Meaning | Id | Minted by | Owner, lifetime |
+|---|---|---|---|---|
+| **project** | the cwd pi reads and writes | path | server startup (`ZenServerOptions.cwd`), never a request | the server process; one project, many threads |
+| **thread** | one conversation | `threadId`, UUID-shaped (`isZenThreadId`) | the browser (`crypto.randomUUID()`), or reused from a stored log on resume | the registry's `ThreadEntry` while live; the id outlives it |
+| **pi session** | pi's append-only log, and the live `AgentSession` over it | **the same string as `threadId`** (#95) | pi, under the browser's id | 1:1 with the thread; the log outlives everything |
+| **run** | one acquisition of a thread: prompt admission → `agent_settled`. Not one prompt — prompts during a run queue into it (#75) | `generation`, per thread, monotonic for the server's lifetime | `acquire()` | the lease; released by the settle observer, never by a route |
+| **generation** | the run's number: the stale-lease fence, and the receipt the browser compares against | integer, memory only — **resets when the server restarts**, which is what "lost session" means | server | — |
+| **follow** | one browser subscription to a thread: snapshot, then observations with `seq`, then status | none; per page, per thread | `createFollowConnection` | the page |
+| **messageId** | one prompt admission; how a `prompt-rejected` names its prompt | UUID | the prompt route | one receipt |
+| **dialog** | a question pi is blocked on | `id` from the asking extension | pi | pi's `openDialogs()`; the browser holds one slot (#114) |
+| **branch** | pi's root→leaf entry chain, carried verbatim | entry `id`/`parentId` | pi | pi |
+| **fork** | pi's `/fork`: a new log whose header names `parentSession` | pi session id | pi | pi |
+
+Against deepseek-harness's vocabulary (#102): our `thread` is dsh's `SessionId`; our `run` is dsh's
+`Run` (an owned interval, not a prompt); our `HostedSession` fuses dsh's `Session` (log) and `Agent`
+(handle) — deliberately, since one id serves both; `follow` + `asOfSeq` match dsh's; `dialog` has no
+dsh counterpart because nothing parks when prompt is unary and follow is a separate stream. pi's
+"turn" is dsh's *step* (one model request plus its tool results); dsh's *turn* is our run.
+
+### Lifecycles
+
+**A thread on the server** (`thread-sessions.ts`). Two states while live, and a parked question is
+*busy* — there is no third state, matching dsh's `idle | running` with questions beside it.
+
+```mermaid
+stateDiagram-v2
+  [*] --> idle: acquire() builds the pi session
+  idle --> busy: acquire() · generation++ · awaits any abort in flight
+  busy --> idle: agent_settled → release() · idle timer armed (30 min)
+  busy --> busy: POST …/abort → pi.abort() · settle still ends it
+  busy --> busy: POST …/prompt → queued behind the run (#75)
+  idle --> [*]: idle timer → dispose · generation counter kept
+```
+
+**A run in the browser** (`follow-connection.ts`). Opened by a receipt (own prompt) or by a status
+frame that says busy with no run to match (another tab's — `external-<generation>`). Closed by the
+feed's `settled` + `status`, never by a click or a returning POST. A dropped follow is said as a chunk
+(`zen.follow-ended`) so the page can say so; the next follow's snapshot is the resync (#103, #114).
+
+**A dialog.** pi blocks; the follow carries `zen.dialog`; an answer is `POST …/dialog`, validated
+against the question (#112); every settle path — answered, cancelled, timeout, abort — emits
+`dialog-settled` from the host so every follower drops the card (#114). The snapshot lists every open
+question so a reconnect renders the card at once.
+
+### Invariants — the sentences every receipt was checked against
+
+1. **The feed is the only writer of run state in the browser.** No click, no returning POST, no timer
+   closes a run. This is why abort (#116), dialogs (#113, #114) and resume (#95) landed without
+   regressions: each added a unary route and changed nothing about how a run ends.
+2. **A route tells pi; the feed ends the run.** `prompt` answers at admission (202 + receipt), `abort`
+   answers 204 when pi was told, `dialog` answers 204 when the question was spent. Their effects
+   arrive on the follow for every follower alike.
+3. **The snapshot is the resync.** Nothing is replayed by cursor; a follow opens with the thread as of
+   `asOfSeq` and continues from there.
+4. **One live writer per pi session id.** pi appends with no lock. Within the web server the registry
+   serialises writers (one `ThreadEntry` per id). Across processes — TUI and web resuming the same id
+   in the same cwd — nothing does, and each process's in-memory branch would fork the log silently.
+   Rule, not code, until it is needed.
+5. **Never present a control as working when it is not.** A stop button that stops nothing is removed
+   rather than left (#103 receipt); a mode select that is unsure says `unknown`; a debug pane names a
+   MISMATCH between what the page believes and what the server holds instead of hiding one.
+
+### Persistence
+
+**The storage seam is `AgentHost`** (`packages/web/src/host/agent-host.ts`): the only file that
+touches `SessionManager` or the session-file layout (`listSessions`, `readBranch`, `createSession`).
+`@zen/core` and the browser never see a path except as debug text. Keep it so — this is the state
+abstraction #102 §1 asks for, and it costs one test.
+
+What is durable, and where:
+
+| Artefact | Key | Writer | Read |
+|---|---|---|---|
+| pi session log, `<timestamp>_<threadId>.jsonl` under pi's session dir | thread id | pi — **lazily**: `sessionFile` is null until pi's first flush | live from the hosted session when the thread is live; cold from the file otherwise; messages are rebuilt from entries on every cold read, so a mapper change applies retroactively |
+| picc's `modes` custom entry in that log | — | picc, on `/mode` | `persistedPermissionMode(branch)`: last entry wins, deliberately uncached because `/tree` and `/fork` move the leaf (#84, #95) |
+| `zen.config.json` at the repo root | — | committed | once, at extension load; fails closed (#59) |
+| `.zen/secrets.env` | — | operator | per call by the extension that needs it; quarantined from `process.env` |
+| `.zen/pi-agent/provider-failover.json` | — | seeded at host creation | pi's multi-account extension |
+
+Not durable, by design: `ZenObservation` (derived from pi events in memory, never written); AG-UI
+(derived in the adapter, never on the wire); `generation` and the rest of `ThreadEntry`.
+
+**Run provenance (#102 §3).** pi's log already carries `SessionHeader {id, cwd, timestamp,
+parentSession}`, `model_change {provider, modelId}`, `thinking_level_change`, and picc's mode — so a
+fork point's session, entry, model, mode, cwd and parent are recorded today. Not recorded: project
+revision (git HEAD), a context-manifest hash, active rules, active skills, configuration. Decided: when
+those are recorded they go **into pi's log as zen custom entries**, the way picc records mode — one
+canonical log, and a fork inherits them by construction. Deferred to the lineage phase.
+
+### Presentation
+
+The browser is two layers with a fixed seam (#31, #121). **TanStack AI is the state layer** — client,
+`createChatHook` slots, the `SubscribeConnectionAdapter` our follow adapter implements. **ai-elements
+is the presentation layer**, ported file by file from `vercel/ai-elements` (pinned commit, provenance
+header, `Modified:` list, every `import from "ai"` retyped) under `components/ai-elements/`. Rule:
+before building a presentation component, check upstream; hand-rolling needs its reason in the file
+header. State, the dialog renderer (#27) and the tool-result descriptor renderer (#18) stay ours and
+never migrate into that directory.
+
+---
+
 ## The end state we are building toward
 
 Two surfaces. The TUI reaches parity with what pi, Claude Code and omp already give. The web app is the
@@ -133,52 +247,57 @@ the weights. **Project** is three interfaces, not one.
 
 ## Phasing
 
-The sequence is deliberate: assemble from what exists, then replace what we outgrow.
+The sequence is deliberate: assemble from what exists, prove the control plane, **then** consolidate —
+and only then expand. The original plan put consolidation last, as a backfill once feature-rich; #102
+moved it forward so MVP debt does not compound into architectural debt.
 
 ```mermaid
 graph LR
-  P0["<b>Phase 0</b><br/>Guards + package skeleton<br/><i>Tier 0 of pi-immediate-needs</i>"]
-  P1["<b>Phase 1</b><br/>TUI features<br/>ask · notes · memory · git · health"]
-  P2["<b>Phase 2</b><br/>Web app<br/>chat · context · editor · project"]
-  P3["<b>Phase 3</b><br/>Backfill<br/>replace vendored parts with our own"]
-  P0 --> P1 --> P2 --> P3
+  P0["<b>Phase 0</b> ✓<br/>Guards + package skeleton<br/><i>Tier 0 of pi-immediate-needs</i>"]
+  P2["<b>Phase 2</b> ✓<br/>Web control plane<br/>chat · modes · dialogs · resume · stop"]
+  F["<b>Freeze</b> 2026-09-09<br/>receipt on #103, twice"]
+  C["<b>Consolidate</b> ◀ here<br/>vocabulary · lifecycle · docs<br/>storage seam · renames"]
+  L["<b>Lineage</b><br/>durable identity · fork manifests"]
+  X["<b>Expansion</b><br/>context · skills · rules experiments<br/>then analysis + rubric"]
+  P0 --> P2 --> F --> C --> L --> X
 ```
 
-**Phase 0–2 lean on off-the-shelf parts wherever they fit** — vendor extensions, `pi-acp` for chat
-transport, omp code where it lifts cleanly (`conflict-detect.ts` at 815 lines and two local imports is
-the cheap one; `ast-edit.ts` at 27 imports including the Rust core is not). The goal is a whole system
-early, accepting that pieces will change underneath.
+Phase 1 (TUI features: ask · notes · memory · git · health) was not run as a phase; the TUI has what pi
+and the guards give it, and TUI features accrue as extensions when the web surface needs the same
+thing. Backfill — replacing vendored parts with our own — is no longer a phase; it happens per part
+when a part is outgrown, under the rule that a port is preferred to a rewrite (#121).
 
-**Phase 3 is the backfill.** Once feature-rich, replace vendored extensions with our own, ending at an
-omp-like capability set that composes onto pi rather than forking it. That distinction is the whole
-reason for starting as a package: omp forked, which is exactly why its features are hard to lift.
+**Lean on off-the-shelf parts wherever they fit** — vendor extensions, omp code where it lifts cleanly
+(`conflict-detect.ts` at 815 lines and two local imports is the cheap one; `ast-edit.ts` at 27 imports
+including the Rust core is not). The goal is a whole system early, accepting that pieces change
+underneath; starting as a package rather than a fork is what keeps that cheap — omp forked, which is
+exactly why its features are hard to lift.
 
 ---
 
 ## Package structure
 
-One package, many extensions. Some ours, some vendored.
+Three workspaces. The harness is the pi package; core is the shared shapes; web is outside the manifest.
 
 ```
 zen-harness/
-  package.json              # pi manifest: extensions declared EXPLICITLY, guards first
+  zen.config.json           # the ONE committed harness config (#59)
   packages/
-    core/                   # @zen/core — all TypeBox schemas + shared types
-    extensions/
-      guards/               # Tier 0: confinement, timeouts, secret denial, egress
-      ask/                  # the escalation channel pi lacks
-      git/                  # code host · issues · CI (three interfaces)
-      logs/                 # log wiring (later phase)
-      memory/               # memory manager
-      notes/                # field notes
-      health/               # struggle signals + collection
-    skills/
-    prompts/
+    core/                   # @zen/core — every TypeBox schema and shared type, one place
+    harness/                # the pi package
+      package.json          #   pi manifest: extensions declared EXPLICITLY, guards first
+      core/                 #   guard logic, shell segmentation, egress, web-search
+      extensions/           #   guards · web-fetch · web-search
+      skills/ prompts/ themes/
     web/                    # the web app — outside the pi manifest
+      src/server/           #   routes (prompt · follow · dialog · abort), thread registry
+      src/host/             #   AgentHost: the storage seam, pi events → observations, dialogs
+      src/rpc/              #   observation → AG-UI mapping, branch → messages
+      src/components/       #   ai-elements (ported) · shadcn ui
   docs/
     architecture.md         # this file
     concepts/               # the research
-  .zen/                     # runtime state (gitignored per-project)
+  .zen/                     # secrets, pi agent dir (gitignored)
 ```
 
 `web/` sits outside the manifest deliberately: pi packages carry only `extensions`, `skills`, `prompts`
@@ -292,8 +411,8 @@ Settled. Each carries its reason so a later session can tell when the reason has
 | Assert guard integrity at startup | `write`/`bash`/`read` must resolve to our implementations, failing loudly otherwise. |
 | **All schemas TypeBox in `@zen/core`** | One library, no bridge. TypeBox is mandatory at pi's tool API and *is* JSON Schema at the HTTP boundary — two of three destinations, zero conversion. |
 | Adapter boundaries map explicitly, never via schema transforms | Keeps validation separate from translation, which is what makes a provider swappable. |
-| **State in `.zen/` files, never process memory only** | Keeps shared state between surfaces free, and a service later optional. |
-| Web app **embeds the pi SDK**; ACP is chat transport only | The context pane needs the message array; ACP does not carry it. |
+| **Durable state is pi's session log plus `.zen/` files, never process memory only** | Both surfaces read the same files; a service later is optional. The one cost: one live writer per session id (control plane, invariant 4). |
+| Web app **embeds the pi SDK** (#69); no chat protocol between server and pi | The context pane needs the entry array; a run must outlive its request; a second tab must see the first's run. ACP and AG-UI carry none of that. |
 | The server↔browser wire is **`ZenObservation`** (`@zen/core` `follow.ts`); AG-UI is a browser-side view, never on the wire, never stored | The ACP reason at the other seam (#112): AG-UI carries chat, tool calls and interrupts — not entries, partial tool output, mode, usage or queue state. A wire that lacks our nouns forces a side channel for every one of them (the `zen.*` CUSTOM chunks) and made the run the HTTP response, which is where parking (#27) and the no-progress cutoff (#99) came from. TanStack connects through its `SubscribeConnectionAdapter`, whose `send`/`subscribe` split is exactly prompt/follow; the adapter derives AG-UI in memory if a renderer wants it. |
 | Context overlays keyed by **entry id**, persisted via `appendEntry()` | Survives restarts and compaction; `session_before_compact` hands `branchEntries`. |
 | ⚠ Context edits are **batched, tail-biased** | Prefix-match caching: editing an early entry invalidates everything after it. Measured elsewhere at ~37 reads per cached token. See `concepts/prompt-cache-architecture.md`. |
@@ -302,6 +421,40 @@ Settled. Each carries its reason so a later session can tell when the reason has
 | Log wiring ships with **explicit per-source consent**, no filtering | Redaction damages troubleshooting and costs on hot paths. Consent is honest; a partial filter is not. |
 | Ingested logs **do not persist in the transcript** by default | The exposure is not the agent seeing a line, it is the line landing in the transcript, the cache, and any session store. |
 | Re-anchoring uses a **turn-scoped system message**, never a system-prompt rewrite | Rewriting the prompt per turn invalidates the entire cache. |
+| **Prompt/follow split** (#112): every route is unary, the follow is the one stream | The run is not an HTTP response, so nothing parks (#27) and no cutoff kills a slow tool (#99). Snapshot then observations; the snapshot is the resync. |
+| **The feed is the only writer of run state in the browser** | Abort (#116), dialogs (#114) and resume (#95) each added a route and changed nothing about how a run ends. |
+| **Abort is by thread, not by lease** (#116) | The lease that took the run lives in the prompt route's closure; an operator's stop is "whatever runs now". The stale-lease fence stays on `release`. |
+| **One thread id, pi's session id** (#95) | The browser mints it, pi stores under it, the rail finds it again after a restart. Validated as a filename component at every entry point. |
+| **`AgentHost` is the storage seam** | The only file that touches `SessionManager` or the session-file layout. Keeps a later store a one-file change. |
+| **Run provenance lives in pi's log as custom entries**, never a side file | picc's `modes` entry is the pattern; a fork inherits provenance by construction. Fields beyond what pi records are deferred to the lineage phase. |
+| **Presentation is ported from ai-elements**, not built (#31, #121) | Three files ported so far; the composer is the one hand-rolled divergence, to be reconciled. Hand-rolling needs its reason in the file header. |
+| Load-bearing decisions are **written where the code is**, with the issue number | The issue is the discussion; the comment is the decision. The table below is the index. |
+
+---
+
+## Decisions recorded at the code
+
+Each of these is explained in full in a header comment; the issue holds the discussion. One line each,
+so a reader knows where to look before touching the file.
+
+| Issue | Decision | Where |
+|---|---|---|
+| #9 | Network egress is a **bar, not a boundary**: ad-hoc clients denied at command position; `git` and interpreters deliberately absent. cc-safety-net's own policy dir is guarded by us because its checker does not cover redirects or pi's write tools | `core/guard.ts`, `harness/core/network-egress.ts` |
+| #18 | Tool results: `details` is the contract, `content` is derived; `truncated` is data, never pre-rendered | `core/tool-result.ts` |
+| #27, #112 | Blocking dialogs are data on the wire; nothing parks; an answer is validated against the question because pi hands a select's value to the extension verbatim | `core/dialog.ts`, `server/follow.ts` |
+| #29 | A `notify`'s message is the request; custom entries are state receipts, not narration | `core/observation.ts` |
+| #45 | Usage is read at `message_end`, never summed from deltas (every delta carries the same cumulative usage) | `core/observation.ts` |
+| #53 | The custom-event router is a function, not a closure, so a renamed chunk fails a test; the guard decodes `file://` before judging a path | `web/custom-event-router.ts`, `core/paths.ts` |
+| #59 | One committed config, fails closed; one root finder, realpath-first | `core/config.ts`, `core/paths.ts` |
+| #69 | Events before the first subscriber are held and replayed once; a held `agent_settled` would end the next run, so nothing is held after that | `core/pi-rpc.ts`, `web/host/agent-host.ts` |
+| #75 | A prompt on a busy thread queues through pi (`followUp`); the receipt says `queued`; abort does not drop the queue | `server/follow.ts`, `core/follow.ts` |
+| #82 | Cognitive-complexity ceilings are pinned per file as ratchets — may go down, never up | `biome.jsonc` |
+| #84 | The permission mode is picc's CURRENT mode, computed the way picc restores it; never an assumed default; deliberately uncached | `core/permission-mode.ts` |
+| #90 | Stores are per thread, not per page, because TanStack's `onCustomEvent` carries no thread id | `web/thread-stores.ts`, `web/custom-event-router.ts` |
+| #95 | Resume reads the stored branch and applies its persisted mode under the same id | `web/thread-stores.ts`, `core/session-inspection.ts` |
+| #112 | The wire is `ZenObservation`; AG-UI is made in exactly one place, the adapter | `core/follow.ts`, `web/follow-connection.ts` |
+| #114 | The host synthesises `dialog-settled` at the one point every settle path crosses; the snapshot lists every open question | `web/host/extension-ui-context.ts`, `core/follow.ts` |
+| #116 | `POST …/abort` tells pi; the run ends on the feed; one abort per run; a failed unary POST is an outcome, not a rejection | `server/thread-sessions.ts`, `web/follow-connection.ts` |
 
 ---
 
@@ -311,7 +464,9 @@ Settled. Each carries its reason so a later session can tell when the reason has
 |---|---|
 | Cross-surface **push** (live alerts, shared presence) | Files give shared *state*; push needs a service. Un-deferred when alerts have to arrive rather than be polled. |
 | The **obligation queue** | Design preserved in `concepts/agent-support-systems.md` Part 6. Un-deferred once the tool surface is stable enough to accrue against. |
-| A fork of `pi-acp` for custom commands | TanStack's `acpCompatible` does not implement `available_commands_update`, so the fork buys nothing today. |
+| **Cross-process coordination** on one session id (TUI and web in the same cwd) | pi appends with no lock; two live writers would fork the log silently. Nothing does it today, so it is a rule (control plane, invariant 4). Un-deferred when both surfaces can mutate the same thread. |
+| **Run-provenance entries** (git revision, config hash, active rules and skills) | Where they go is decided — pi's log, as custom entries. What they hold waits for the lineage phase, so the schema is designed once against a real fork. |
+| The `session`→`thread` **renames** in zen-owned names | Owed (#102). Done against this document's vocabulary, by LSP, after it is agreed — not before. |
 | **Command classification** (argument-level policy) | With confinement and recoverability in place it is friction optimisation, not safety. Accretes from real incidents. |
 | Log wiring itself | A later phase. The consent model is decided; the ingestion shape is not. |
 
@@ -332,11 +487,13 @@ Settled. Each carries its reason so a later session can tell when the reason has
 
 ## Reading order for a fresh session
 
-1. This document.
-2. [`concepts/pi-immediate-needs.md`](./concepts/pi-immediate-needs.md) — what pi lacks, ranked, with
+1. This document — *The control plane* first if you are touching `packages/web`.
+2. [`../README.md`](../README.md) — what is built, guard by guard and route by route; the more
+   implementation-accurate of the two documents.
+3. [`concepts/pi-immediate-needs.md`](./concepts/pi-immediate-needs.md) — what pi lacks, ranked, with
    seams and effort. Phase 0 comes straight from its Tier 0.
-3. [`concepts/agent-boundaries.md`](./concepts/agent-boundaries.md) — the boundary model and why
+4. [`concepts/agent-boundaries.md`](./concepts/agent-boundaries.md) — the boundary model and why
    enforcement location matters more than rule content.
-4. [`concepts/harness-design-principles.md`](./concepts/harness-design-principles.md) — progressive
+5. [`concepts/harness-design-principles.md`](./concepts/harness-design-principles.md) — progressive
    disclosure, applied seven times.
-5. The rest of `concepts/` as needed.
+6. The rest of `concepts/` as needed.
