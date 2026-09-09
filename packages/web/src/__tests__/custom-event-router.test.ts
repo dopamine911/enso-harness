@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { routeZenCustomEvent } from "../custom-event-router.ts";
 import {
+	ZEN_CUSTOM_EVENT_DIALOG,
 	ZEN_CUSTOM_EVENT_ENTRY,
 	ZEN_CUSTOM_EVENT_MODE,
 	ZEN_CUSTOM_EVENT_NOTIFY,
@@ -56,6 +57,14 @@ test("zen.run sets the thread's run generation; a malformed value leaves the las
 	route(ZEN_CUSTOM_EVENT_RUN, null);
 	expect(stores.generation.get()).toBe(3);
 	expect(notificationMessages()).toEqual([]);
+});
+
+test("zen.dialog opens the thread's question; a malformed one opens nothing and says so (#112)", () => {
+	route(ZEN_CUSTOM_EVENT_DIALOG, { id: "d1", dialog: { method: "confirm", title: "Apply?", message: "m" } });
+	expect(stores.dialog.get()).toEqual({ id: "d1", dialog: { method: "confirm", title: "Apply?", message: "m" } });
+	route(ZEN_CUSTOM_EVENT_DIALOG, { id: "", dialog: { method: "select" } });
+	expect(stores.dialog.get()?.id).toBe("d1");
+	expect(notificationMessages()).toEqual([expect.stringContaining("could not read")]);
 });
 
 test("zen.usage reaches the session-stats store and nothing else", () => {

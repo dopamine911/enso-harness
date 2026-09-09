@@ -2,14 +2,14 @@ import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
 
 /**
- * pi's blocking extension dialogs, as data (#27).
+ * pi's blocking extension dialogs, as data (#27, #112).
  *
  * pi's rpc mode has four dialog methods — `select`, `confirm`, `input`, `editor` — that
  * emit an `extension_ui_request` and BLOCK the extension until an `extension_ui_response`
- * with the matching id arrives on stdin (pi `rpc-types.d.ts`, read at v0.84.4). These
- * schemas are the harness's model of that exchange: the QUESTION (`ZenDialogSpec`), which
- * rides to the browser inside an AG-UI interrupt, and the ANSWER (`ZenDialogAnswer`),
- * which rides back in the resume request's payload.
+ * with the matching id arrives (pi `rpc-types.d.ts`, read at v0.84.4). These schemas are
+ * the harness's model of that exchange: the QUESTION (`ZenDialogSpec`), which rides to the
+ * browser on the follow as a `zen.dialog` chunk, and the ANSWER (`ZenDialogAnswer`), which
+ * rides back in `POST /api/threads/:id/dialog`.
  *
  * ⚠ The answer shapes mirror pi's response contract EXACTLY, minus the envelope
  * (`type`/`id`), so the server can forward a validated answer by adding the envelope and
@@ -21,17 +21,8 @@ import { Compile } from "typebox/compile";
  *                                                          be one of the offered options)
  *     confirm                  →  { confirmed: boolean }  (rpc-mode.js:85)
  *     any                      →  cancellation, which has NO payload here — it travels as
- *                                  the resume entry's `status: "cancelled"` and the server
- *                                  writes pi's `{ cancelled: true }` form
+ *                                  pi's own `{ cancelled: true }` form and needs no check
  */
-
-/**
- * The metadata key an AG-UI interrupt carries the dialog spec under.
- *
- * ⚠ NO DOT, DELIBERATELY — same reasoning as `ZEN_TOOL_RESULT_KEY`: a dot inside a key is
- * legal JSON but collides with every path-based accessor.
- */
-export const ZEN_DIALOG_KEY = "zen:dialog" as const;
 
 /**
  * One dialog question, per method.
@@ -81,31 +72,11 @@ export const ZenDialogAnswer = Type.Union([
 ]);
 export type ZenDialogAnswer = Static<typeof ZenDialogAnswer>;
 
-/**
- * One entry of a TanStack resume request (`body.resume`), as this server accepts it.
- *
- * The shape is TanStack's (`ResumeEntry` in `@ag-ui/core`); the schema exists because the
- * bytes arrive over HTTP and are validated like any other untrusted input. `payload` stays
- * `Unknown` here — whether it is a valid ANSWER depends on which dialog it answers, which
- * is `validateDialogAnswer`'s job, not the transport schema's.
- */
-export const ZenDialogResumeEntry = Type.Object({
-	interruptId: Type.String({ minLength: 1 }),
-	status: Type.Union([Type.Literal("resolved"), Type.Literal("cancelled")]),
-	payload: Type.Optional(Type.Unknown()),
-});
-export type ZenDialogResumeEntry = Static<typeof ZenDialogResumeEntry>;
-
 const dialogSpecValidator = Compile(ZenDialogSpec);
 const dialogAnswerValidator = Compile(ZenDialogAnswer);
-const resumeEntryValidator = Compile(ZenDialogResumeEntry);
 
 export function isZenDialogSpec(value: unknown): value is ZenDialogSpec {
 	return dialogSpecValidator.Check(value);
-}
-
-export function isZenDialogResumeEntry(value: unknown): value is ZenDialogResumeEntry {
-	return resumeEntryValidator.Check(value);
 }
 
 /**

@@ -10,13 +10,11 @@ import {
 } from "@zen/core";
 import type { AgentHost } from "../host/agent-host.ts";
 import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
-import { slashCommandName } from "./session.ts";
 import { SSE_HEADERS, startSseKeepalive } from "./sse.ts";
 import type { ThreadFeedFrame, ThreadSessions } from "./thread-sessions.ts";
 
 /**
- * The prompt/follow split (#112) — the server↔browser wire, beside the `/api/chat` run
- * path until the cutover retires it.
+ * The prompt/follow split (#112) — the server↔browser wire.
  *
  * Three routes, none of which is a run:
  *
@@ -54,7 +52,19 @@ export type PromptOutcome =
 	| { readonly status: 202; readonly receipt: ZenPromptReceipt }
 	| { readonly status: 400; readonly reason: string };
 
-function writeFrame(response: ServerResponse, frame: ZenFollowFrame): void {
+/** Leading token of a slash input, without the slash. `/mode auto` -> `mode`. */
+function slashCommandName(prompt: string): string | undefined {
+	if (!prompt.startsWith("/")) return undefined;
+	const name = prompt.slice(1).trimEnd().split(/\s/)[0];
+	return name === undefined || name.length === 0 ? undefined : name;
+}
+/**
+ * Write one frame, recording it into the thread's sent tail (#97) when the thread is live
+ * — the one place every frame crosses to a browser, so the record and the wire agree.
+ */
+function writeFrame(threads: ThreadSessions, threadId: string, response: ServerResponse, frame: ZenFollowFrame): void {
+	const name = frame.type === "observation" ? frame.observation.kind : undefined;
+	threads.peek(threadId)?.sent.record(frame.type, name, "sent");
 	response.write(`data: ${JSON.stringify(frame)}\n\n`);
 }
 
@@ -79,6 +89,8 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
 	const follow = threads.observe(threadId, (frame: ThreadFeedFrame) => {
 		if (response.destroyed || response.writableEnded) return;
 		writeFrame(
+			threads,
+			threadId,
 			response,
 			frame.kind === "observation"
 				? { type: "observation", seq: frame.seq, observation: frame.observation }
@@ -92,7 +104,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
 
 	const messages = branchToMessages(branch);
 	const interrupted = interruptedTail(messages);
-	writeFrame(response, {
+	writeFrame(threads, threadId, response, {
 		type: "snapshot",
 		threadId,
 		asOfSeq: follow.asOfSeq,
@@ -142,16 +154,17 @@ export function readPromptBody(raw: string): PromptBody {
 export async function promptThread(deps: FollowRouteDeps, threadId: string, body: PromptBody): Promise<PromptOutcome> {
 	const { threads, onProblem } = deps;
 	const messageId = crypto.randomUUID();
+	/** pi refused the prompt after the receipt went out: the feed is the client's only way to hear it. */
+	const rejected = (reason: string): void => {
+		onProblem?.(`thread ${threadId}: prompt ${messageId} rejected: ${reason}`);
+		threads.announce(threadId, { kind: "prompt-rejected", messageId, reason });
+	};
 
 	const live = threads.peek(threadId);
 	if (live?.busy === true) {
 		live.hosted.session.prompt(
 			{ message: body.message, streamingBehavior: body.streamingBehavior ?? "followUp" },
-			{
-				onAccepted: () => undefined,
-				onRejected: (reason: string) =>
-					onProblem?.(`thread ${threadId}: queued prompt ${messageId} rejected: ${reason}`),
-			},
+			{ onAccepted: () => undefined, onRejected: rejected },
 		);
 		return { status: 202, receipt: { threadId, messageId, generation: live.generation, queued: true } };
 	}
@@ -191,7 +204,7 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
 				lease.release();
 			},
 			onRejected: (reason: string) => {
-				onProblem?.(`thread ${threadId}: prompt ${messageId} rejected: ${reason}`);
+				rejected(reason);
 				settle.unsubscribe();
 				lease.release();
 			},

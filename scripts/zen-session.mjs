@@ -50,7 +50,7 @@ if (threadId === undefined) {
 		console.log("no live threads — nothing has run since the server started, or every session idled out");
 	}
 	for (const thread of threads) {
-		const state = [thread.busy ? "busy" : "idle", thread.parked ? "parked" : null].filter(Boolean).join(",");
+		const state = thread.busy ? "busy" : "idle";
 		const file = thread.sessionFile ?? "(in memory, not flushed yet)";
 		console.log(
 			`${thread.threadId}  mode=${thread.mode}  ${state}  run=#${thread.generation}  last=${thread.lastActivityAt}  ${file}`,
@@ -96,7 +96,7 @@ console.log(
 	`mode        ${inspection.permissionMode.mode}  (may switch to: ${inspection.permissionMode.available.join(", ")})`,
 );
 console.log(
-	`state       ${inspection.busy ? "busy" : "idle"}${inspection.parked ? ", dialog parked" : ""}, run #${inspection.generation}, last activity ${inspection.lastActivityAt}`,
+	`state       ${inspection.busy ? "busy" : "idle"}, run #${inspection.generation}, last activity ${inspection.lastActivityAt}`,
 );
 console.log(`commands    ${inspection.commands.map((commandName) => `/${commandName}`).join(" ")}`);
 console.log(`branch      ${inspection.entries.length} entries, root to leaf:`);

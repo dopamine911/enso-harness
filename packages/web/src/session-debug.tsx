@@ -202,8 +202,7 @@ export function SessionDebugView({
 							</div>
 							<div>branch mode: {branchMode}</div>
 							<div>
-								{session.busy ? "busy" : "idle"}
-								{session.parked ? ", dialog parked" : ""}, run #{session.generation}, last activity{" "}
+								{session.busy ? "busy" : "idle"}, run #{session.generation}, last activity{" "}
 								{session.lastActivityAt.slice(11, 19)}
 							</div>
 							<div>commands: {session.commands.map((command) => `/${command}`).join(" ")}</div>

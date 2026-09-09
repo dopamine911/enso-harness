@@ -2,6 +2,7 @@ import { EventType } from "@ag-ui/core";
 import type { StreamChunk } from "@tanstack/ai";
 import { ZEN_TOOL_RESULT_KEY, type ZenObservation } from "@zen/core";
 import {
+	ZEN_CUSTOM_EVENT_DIALOG,
 	ZEN_CUSTOM_EVENT_ENTRY,
 	ZEN_CUSTOM_EVENT_NOTIFY,
 	ZEN_CUSTOM_EVENT_QUEUE,
@@ -10,21 +11,20 @@ import {
 } from "./custom-event-names.ts";
 
 /**
- * `ZenObservation` → AG-UI `StreamChunk` (#24).
+ * `ZenObservation` → AG-UI `StreamChunk` (#24, #112).
  *
- * WHY THIS LAYER EXISTS AT ALL
- * TanStack AI's chat client does not accept a protocol of our choosing.
- * `ConnectConnectionAdapter.connect` returns `AsyncIterable<StreamChunk>`, and
- * `StreamChunk = AGUIEvent` — the Agent Client protocol from `@ag-ui/core`. So the pipeline
- * is three hops, not two:
+ * WHERE THIS RUNS, AND WHY
+ * TanStack AI's chat client consumes `StreamChunk = AGUIEvent` — the Agent Client protocol
+ * from `@ag-ui/core`. That is the client's in-memory chunk vocabulary, not the wire: the wire
+ * carries observations (`GET /api/threads/:id/follow`), and the browser's connection adapter
+ * (`follow-connection.ts`) runs THIS function on each one before handing the chunks to
+ * TanStack. So the pipeline is three hops, the last one inside the page:
  *
  *     pi rpc event  →  ZenObservation  →  AG-UI StreamChunk  →  TanStack client
- *                   ^ map-events.ts    ^ this module
+ *                   ^ map-events.ts    ^ this module, in the browser
  *
- * ⚠ I estimated this route at "80 lines and a WebSocket" before reading the contract. That
- * was wrong: the transport is a specified protocol with its own event vocabulary, and
- * matching it is what buys TanStack's reconnect, hydration and `joinRun` machinery instead
- * of reimplementing them.
+ * Nothing serialises the output of this module and nothing stores it (`docs/architecture.md`,
+ * decided constraints). A renderer that stops speaking AG-UI deletes it and the adapter.
  *
  * ⚠⚠ WHERE #18's DESCRIPTOR RIDES, AND WHY IT IS NOT `metadata`
  * `ToolCallResultEvent` declares `content: string` and NOTHING ELSE — no metadata field. So
@@ -134,17 +134,26 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 		}
 
 		case "extension-ui-request":
-			// ⚠⚠ THE DEGENERATE CASE ONLY. A blocking dialog with a readable question never
-			// reaches this mapper: the session layer intercepts it and hands it to the
-			// browser as a resolvable AG-UI interrupt (#27). What arrives here is the
-			// remainder — a blocking request whose fields did not form a `ZenDialogSpec`
-			// (or that carried no id) — which the session layer has already DECLINED on the
-			// wire so pi is not left hanging. The user still has to be told, or a command
-			// that silently did nothing reads as a command that worked.
+			// A blocking question the browser can render crosses whole as `zen.dialog` (#112):
+			// the adapter's dialog store shows it, and the answer is a unary POST — no
+			// interrupt, no run boundary. The run keeps going on the follow meanwhile.
+			if (observation.blocking && observation.dialog !== undefined && observation.id.length > 0) {
+				return [
+					{
+						type: EventType.CUSTOM,
+						name: ZEN_CUSTOM_EVENT_DIALOG,
+						value: { id: observation.id, dialog: observation.dialog },
+					},
+				];
+			}
+			// ⚠ THE DEGENERATE CASE: a blocking request whose fields did not form a
+			// `ZenDialogSpec` (or that carried no id). The connection declines it on pi's
+			// behalf so the extension is not left hanging; the user still has to be told, or
+			// a command that silently did nothing reads as a command that worked.
 			//
 			// ⚠ THE TENSE IS LOAD-BEARING AND IT WAS WRONG ONCE. An earlier version told the
 			// user pi was STILL waiting — true of the state that motivated the fix, false of
-			// the state after it, because the declining happens upstream of this line. So it
+			// the state after it, because the declining happens beside this line. So it
 			// reported a hung agent at the exact moment the run was completing normally.
 			// Describe the state a reader is in, not the one that made the code necessary.
 			if (observation.blocking) {
@@ -155,7 +164,7 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 						message:
 							`pi asked an interactive '${observation.method}' question (id ${observation.id}) ` +
 							`whose content this surface could not read, so it was declined and the ` +
-							`command did nothing. (A readable question would have been shown to you — #27.)`,
+							`command did nothing.`,
 					},
 				];
 			}
@@ -239,6 +248,11 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 					value: observation,
 				},
 			];
+
+		case "prompt-rejected":
+			// pi refused the prompt at preflight (#112) — the run the client thinks it started never
+			// did. A run error, so the client shows why instead of a spinner that never ends.
+			return [{ type: EventType.RUN_ERROR, runId: ids.runId, message: observation.reason }];
 
 		case "custom-entry":
 			// An extension persisted state (#29) — a receipt the browser may render (the mode

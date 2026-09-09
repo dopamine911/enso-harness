@@ -13,6 +13,12 @@ export const ZEN_CUSTOM_EVENT_NOTIFY = "zen.notify";
 export const ZEN_CUSTOM_EVENT_USAGE = "zen.usage";
 /** What waits behind the run in flight (#75). Value: the `queue` observation. */
 export const ZEN_CUSTOM_EVENT_QUEUE = "zen.queue";
+/**
+ * A blocking question pi is waiting on (#112). Value: `{ id, dialog: ZenDialogSpec }`. The
+ * browser renders it and answers with `POST /api/threads/:id/dialog`; nothing on the run
+ * ends or resumes for it.
+ */
+export const ZEN_CUSTOM_EVENT_DIALOG = "zen.dialog";
 /** An extension persisted a custom session entry (#29). Value: the `custom-entry` observation. */
 export const ZEN_CUSTOM_EVENT_ENTRY = "zen.entry";
 /**

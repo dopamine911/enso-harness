@@ -116,7 +116,15 @@ test("EVERY observation the mapper can emit validates against ZenObservation", (
 	// and the set above actually covers every member of the union — derived from the union
 	// itself, never a hard-coded count: the count drifted once (566e8b1 bumped the sibling
 	// sweep in to-agui.test.ts to 9 and left this one at 8), and a count cannot say WHICH
-	// kind is missing.
-	const coveredKinds: string[] = [...new Set(events.map((event) => mapPiEvent(event).kind))];
+	// kind is missing. Kinds the SERVER synthesises (never off a pi event) are named here,
+	// and must validate too.
+	const synthesised = [{ kind: "prompt-rejected", messageId: "m", reason: "r" }] as const;
+	for (const observation of synthesised) expect(Check(ZenObservation, observation)).toBe(true);
+	const coveredKinds: string[] = [
+		...new Set([
+			...events.map((event) => mapPiEvent(event).kind),
+			...synthesised.map((observation) => observation.kind),
+		]),
+	];
 	expect(coveredKinds.sort()).toEqual(observationKindsDeclaredByTheUnion());
 });

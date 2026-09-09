@@ -1,4 +1,3 @@
-import type { StreamChunk } from "@tanstack/ai";
 import type { PiRpcEvent, ZenEventProvenance, ZenThreadEvent } from "@zen/core";
 
 /**
@@ -11,8 +10,9 @@ import type { PiRpcEvent, ZenEventProvenance, ZenThreadEvent } from "@zen/core";
  * source. Each is one glance at a timestamped list. This is that list.
  *
  * Two tails per thread, one per funnel: the host's `emit` (pi's rpc events, with HOW they
- * were delivered) and the server's SSE writer (AG-UI chunks, in the wire's own order).
- * Three columns, one screen: what pi holds · what the host emitted · what the browser got.
+ * were delivered) and the server's follow writer (wire frames, in the wire's own order —
+ * an observation's row is named by its kind). Three columns, one screen: what pi holds ·
+ * what the host emitted · what the browser got.
  *
  * ⚠ COALESCED, not sampled. Consecutive events of the same type+name+provenance fold into
  * one record with a count — a model turn is hundreds of text deltas — so the tail stays
@@ -71,13 +71,5 @@ export function describePiRpcEvent(event: PiRpcEvent): { type: string; name: str
 	}
 	if (typeof record.method === "string") return { type: record.type, name: record.method };
 	if (typeof record.toolName === "string") return { type: record.type, name: record.toolName };
-	return { type: record.type, name: undefined };
-}
-
-/** The inner name of an AG-UI chunk: a CUSTOM chunk's name, a tool call's tool. */
-export function describeStreamChunk(chunk: StreamChunk): { type: string; name: string | undefined } {
-	const record = chunk as { type: string; name?: unknown; toolCallName?: unknown };
-	if (typeof record.name === "string") return { type: record.type, name: record.name };
-	if (typeof record.toolCallName === "string") return { type: record.type, name: record.toolCallName };
 	return { type: record.type, name: undefined };
 }

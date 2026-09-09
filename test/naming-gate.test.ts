@@ -77,8 +77,8 @@ test("⚠ the externally-fixed names are exempt as KEYS but still refused as BIN
 const EXEMPTED_KEY_SITES = [
 	// Bun.serve's static directory-route option bag.
 	"packages/web/src/server/dev-web.ts",
-	// TanStack's `tanstack:interruptBinding` stamp — {v, kind, interruptId, …}.
-	"packages/web/src/server/session.ts",
+	// (TanStack's `tanstack:interruptBinding` stamp was the second site until #112 retired
+	// the run path; the wire carries no interrupts.)
 ] as const;
 const SCANNED_ROOTS = ["packages", "scripts"] as const;
 const SKIPPED_DIRECTORIES = new Set(["node_modules", "dist", "dist-types", "coverage"]);
@@ -97,7 +97,7 @@ function sourceFiles(directory: string): string[] {
 	return found;
 }
 
-test("⚠ only the two documented sites rely on the key exemption", () => {
+test("⚠ only the documented site relies on the key exemption", () => {
 	const relyingFiles = new Set<string>();
 	for (const root of SCANNED_ROOTS) {
 		for (const path of sourceFiles(join(repositoryRoot, root))) {

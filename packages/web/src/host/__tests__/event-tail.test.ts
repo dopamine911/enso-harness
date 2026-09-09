@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
-import { EventType } from "@ag-ui/core";
-import { createEventTail, describePiRpcEvent, describeStreamChunk } from "../event-tail.ts";
+import { createEventTail, describePiRpcEvent } from "../event-tail.ts";
 
 /**
  * #97's tail is a debugging surface: what it must not do is lie by omission. Coalescing
@@ -66,18 +65,4 @@ test("a pi event's inner name: the custom entry's type, a ui method, a tool; not
 		name: "bash",
 	});
 	expect(describePiRpcEvent({ type: "agent_settled" })).toEqual({ type: "agent_settled", name: undefined });
-});
-
-test("an AG-UI chunk's inner name: a CUSTOM chunk's name, a tool call's tool", () => {
-	expect(describeStreamChunk({ type: EventType.CUSTOM, name: "zen.notify", value: {} } as never)).toEqual({
-		type: "CUSTOM",
-		name: "zen.notify",
-	});
-	expect(
-		describeStreamChunk({ type: EventType.TOOL_CALL_START, toolCallId: "c1", toolCallName: "bash" } as never),
-	).toEqual({ type: "TOOL_CALL_START", name: "bash" });
-	expect(describeStreamChunk({ type: EventType.RUN_STARTED, threadId: "t", runId: "r" } as never)).toEqual({
-		type: "RUN_STARTED",
-		name: undefined,
-	});
 });

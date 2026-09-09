@@ -1,16 +1,16 @@
 import { afterEach, expect, test } from "bun:test";
-import type { GenericAGUIInterrupt } from "@tanstack/ai-client";
 import type { ChatUISelectedPart } from "@tanstack/ai-client/ui";
-import { ZEN_DIALOG_KEY, type ZenDialogSpec } from "@zen/core";
+import type { ZenDialogSpec } from "@zen/core";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
 	DialogAnswerControls,
 	type KeyedPart,
 	keyedParts,
+	PendingDialog,
 	ThreadPane,
-	UnhandledInterrupt,
-	ZenDialogInterrupt,
+	ZenDialogCard,
 } from "../chat-screen.tsx";
+import { ThreadStoresContext } from "../store.ts";
 import { adoptThread, clearThreadsForTest, mintThread } from "../thread-stores.ts";
 
 /**
@@ -31,28 +31,6 @@ const SELECT_DIALOG: ZenDialogSpec = {
 
 function neverCalled(): void {
 	// Static markup runs no handlers; the callbacks exist only to satisfy the props.
-}
-
-/** A fully-typed generic interrupt — no casts, so a TanStack shape change fails here. */
-function genericInterrupt(overrides: Partial<GenericAGUIInterrupt> = {}): GenericAGUIInterrupt {
-	return {
-		kind: "generic",
-		id: "i1",
-		interruptId: "d1",
-		reason: "zen:dialog",
-		threadId: "t1",
-		interruptedRunId: "r1",
-		generation: 0,
-		status: "pending",
-		errors: [],
-		canResolve: true,
-		binding: { v: 1, kind: "generic", interruptId: "d1", interruptedRunId: "r1", generation: 0 },
-		metadata: { [ZEN_DIALOG_KEY]: SELECT_DIALOG },
-		resolveInterrupt: neverCalled,
-		cancel: neverCalled,
-		clearResolution: neverCalled,
-		...overrides,
-	};
 }
 
 const answerControls = (dialog: ZenDialogSpec) =>
@@ -105,34 +83,28 @@ test("editor renders a multi-line field prefilled with the draft", () => {
 	expect(rendered).toContain(">Answer<");
 });
 
-// --- the interrupt shell
-test("a readable, resolvable dialog renders the pi-is-asking card with its title and a cancel", () => {
-	const rendered = renderToStaticMarkup(<ZenDialogInterrupt interrupt={genericInterrupt()} />);
+// --- the card, and the slot that shows the thread's open question
+test("the dialog card renders pi-is-asking with the title, the controls and a cancel", () => {
+	const rendered = renderToStaticMarkup(
+		<ZenDialogCard dialog={SELECT_DIALOG} answer={neverCalled} cancel={neverCalled} />,
+	);
 	expect(rendered).toContain("pi is asking");
 	expect(rendered).toContain("Select permission mode");
 	expect(rendered).toContain("Cancel — decline the question");
 	expect(rendered).toContain(">Default<");
 });
 
-// ⚠ Visible, never dropped: a silently skipped interrupt is indistinguishable from one
-// that was never sent.
-test("an interrupt whose metadata is not a dialog spec renders the visible unhandled block", () => {
-	const rendered = renderToStaticMarkup(
-		<ZenDialogInterrupt interrupt={genericInterrupt({ metadata: { [ZEN_DIALOG_KEY]: { method: "select" } } })} />,
-	);
-	expect(rendered).toContain("interrupt (unhandled)");
-	expect(rendered).not.toContain("pi is asking");
-});
-
-test("an unresolvable interrupt renders the unhandled block even when its dialog is readable", () => {
-	const rendered = renderToStaticMarkup(<ZenDialogInterrupt interrupt={genericInterrupt({ canResolve: false })} />);
-	expect(rendered).toContain("interrupt (unhandled)");
-});
-
-test("the unhandled block shows the interrupt as JSON so a reader can see what arrived", () => {
-	const rendered = renderToStaticMarkup(<UnhandledInterrupt interrupt={{ reason: "mystery", detail: 42 }} />);
-	expect(rendered).toContain("&quot;reason&quot;:&quot;mystery&quot;");
-	expect(rendered).toContain("42");
+test("PendingDialog renders nothing without an open question, and the card once the store holds one (#112)", () => {
+	const stores = mintThread();
+	const render = (): string =>
+		renderToStaticMarkup(
+			<ThreadStoresContext.Provider value={stores}>
+				<PendingDialog />
+			</ThreadStoresContext.Provider>,
+		);
+	expect(render()).toBe("");
+	stores.dialog.set({ id: "d1", dialog: SELECT_DIALOG });
+	expect(render()).toContain("Select permission mode");
 });
 
 // ── part keys are identities, not positions (#82) ─────────────────────────────
