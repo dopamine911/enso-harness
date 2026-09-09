@@ -101,14 +101,17 @@ test("acquire within the idle window cancels the disposal — #43's fix in one a
 	expect(built).toHaveLength(1);
 });
 
-test("stop aborts the run and never disposes; the next acquire waits for the abort to finish", async () => {
+test("abort stops the run and never disposes; a repeat while it is pending is the same answer, not a second call; the next acquire waits for it (#116)", async () => {
 	const { threads, built } = fakeHost();
-	const lease = await threads.acquire("t1");
-	lease.stop();
+	await threads.acquire("t1");
+	expect(threads.abort("t1")).toBe("aborted");
 	const hosted = built[0];
 	if (hosted === undefined) throw new Error("no session built");
 	expect(hosted.record.aborts).toBe(1);
 	expect(hosted.record.disposed).toBe(0);
+	// The double click (PR #120 review): busy until pi's settle, so only the in-flight abort tells.
+	expect(threads.abort("t1")).toBe("aborted");
+	expect(hosted.record.aborts).toBe(1);
 
 	let acquired = false;
 	const pending = threads.acquire("t1").then(() => {
@@ -121,27 +124,34 @@ test("stop aborts the run and never disposes; the next acquire waits for the abo
 	expect(acquired).toBe(true);
 });
 
-// ── the lease fence (#109) ─────────────────────────────────────────────────────
-// The displaced-park case: run A parks a dialog, run B takes the same thread, A's dialog
-// is evicted, and A's stop lands ten minutes later. Addressed by thread id, it aborted B.
+test("abort on an idle thread or an unknown one touches nothing, and says which (#116)", async () => {
+	const { threads, built } = fakeHost();
+	expect(threads.abort("never")).toBe("unknown");
+	const lease = await threads.acquire("t1");
+	lease.release();
+	expect(threads.abort("t1")).toBe("idle");
+	expect(built[0]?.record.aborts).toBe(0);
+});
 
-test("⚠ a lease superseded by a later acquire is stale: its stop and release touch nothing, and say so", async () => {
+// ── the lease fence (#109) ─────────────────────────────────────────────────────
+// The displaced-park case: run A parks a dialog, run B takes the same thread, and A's late
+// release lands ten minutes later. Addressed by thread id, it released B. (A's late STOP was the
+// other half; since #116 abort is the operator's, by thread, on purpose — see below.)
+
+test("⚠ a lease superseded by a later acquire is stale: its release touches nothing, and says so", async () => {
 	const { threads, built, problems } = fakeHost();
 	const first = await threads.acquire("t1");
 	const second = await threads.acquire("t1");
 	expect(second.generation).toBe(first.generation + 1);
 
-	first.stop();
 	first.release();
-	expect(built[0]?.record.aborts).toBe(0);
 	expect(threads.peek("t1")?.busy).toBe(true);
 	expect(problems.map(String)).toEqual([
-		expect.stringContaining(`stop from run ${first.generation} ignored — run ${second.generation} holds it now`),
-		expect.stringContaining(`release from run ${first.generation} ignored`),
+		expect.stringContaining(`release from run ${first.generation} ignored — run ${second.generation} holds it now`),
 	]);
 
-	// The current lease still works.
-	second.stop();
+	// An operator's abort is by thread, not by lease: it stops whatever runs NOW (#116).
+	expect(threads.abort("t1")).toBe("aborted");
 	expect(built[0]?.record.aborts).toBe(1);
 });
 
@@ -151,7 +161,7 @@ test("⚠ a lease from before a rebuild is stale, and the rebuilt thread continu
 	before.release();
 	await sleep(30); // idle window: disposed
 	expect(threads.liveThreadCount()).toBe(0);
-	before.stop();
+	before.release();
 	expect(problems.map(String)).toEqual([expect.stringContaining("the thread was disposed")]);
 
 	const after = await threads.acquire("t1");

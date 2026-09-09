@@ -16,7 +16,7 @@ import type { ThreadFeedFrame, ThreadSessions } from "./thread-sessions.ts";
 /**
  * The prompt/follow split (#112) — the server↔browser wire.
  *
- * Three routes, none of which is a run:
+ * Four routes, none of which is a run:
  *
  *   POST /api/threads/:id/prompt   unary. Takes the thread, fires the prompt, answers at
  *                                  once with a message id. The thread's own `settled`
@@ -29,6 +29,12 @@ import type { ThreadFeedFrame, ThreadSessions } from "./thread-sessions.ts";
  *                                  against the question and delivered to the live session.
  *                                  Nothing parks: the extension's promise is still pending
  *                                  inside pi, the run keeps going on the follow.
+ *   POST /api/threads/:id/abort    unary (#116). Stop the run in flight: pi is told, and the
+ *                                  run ENDS ON THE FOLLOW like any other — `agent_settled`
+ *                                  is emitted from pi's own `finally` — so every follower
+ *                                  sees the same `settled` + `status`, and the thread is
+ *                                  released by the prompt route's observer, not by this
+ *                                  route. 204 told; 409 nothing in flight; 404 not live.
  *
  * The wire shapes — `ZenFollowFrame`, `ZenPromptReceipt` — are TypeBox in `@zen/core`
  * (`follow.ts` there), like every other crossing; the payload is `ZenObservation`, and AG-UI
@@ -256,4 +262,21 @@ export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answ
 	}
 	live.hosted.session.answerDialog(answer);
 	return { status: 204 };
+}
+
+export type AbortRouteOutcome =
+	| { readonly status: 204 }
+	| { readonly status: 404; readonly reason: string }
+	| { readonly status: 409; readonly reason: string };
+
+/** Stop the run in flight on a live thread (#116). The run's end arrives on the follow. */
+export function abortThread(deps: FollowRouteDeps, threadId: string): AbortRouteOutcome {
+	switch (deps.threads.abort(threadId)) {
+		case "aborted":
+			return { status: 204 };
+		case "idle":
+			return { status: 409, reason: `nothing is running on thread ${threadId}` };
+		default:
+			return { status: 404, reason: `no live session for thread ${threadId}` };
+	}
 }

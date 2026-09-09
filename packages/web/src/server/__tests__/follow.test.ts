@@ -205,6 +205,35 @@ test("prompt answers at admission with a message id; the run is released by pi's
 	follow.close();
 });
 
+test("⚠ POST …/abort tells pi once and answers 204; the run still ends on the follow by its settle, not by the route (#116)", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	const follow = await openFollow(url, "t1");
+	await follow.untilFrames(1);
+	const abortWith = (threadId: string) => fetch(`${url}/api/threads/${threadId}/abort`, { method: "POST" });
+
+	// Nothing live: 404. Idle after a run: 409. Neither reaches the session.
+	expect((await abortWith("never")).status).toBe(404);
+	await prompt(url, "t1", "hello");
+	await follow.untilFrames(3);
+	const told = await abortWith("t1");
+	expect(told.status).toBe(204);
+	expect(fake.built[0]?.aborts).toBe(1);
+	// The route released nothing: the thread is still busy until pi's own settle arrives.
+	expect(await threadSummary(url, "t1")).toMatchObject({ busy: true, generation: 1 });
+	fake.emit(SETTLED);
+	await follow.untilFrames(5);
+	expect(follow.frames.slice(3)).toEqual([
+		{ type: "observation", seq: 1, observation: { kind: "settled" } },
+		{ type: "status", live: true, busy: false, generation: 1 },
+	]);
+	const idle = await abortWith("t1");
+	expect(idle.status).toBe(409);
+	expect(await idle.text()).toContain("nothing is running");
+	expect(fake.built[0]?.aborts).toBe(1);
+	follow.close();
+});
+
 // ── 2. a dialog parks nothing ─────────────────────────────────────────────────────────
 
 test("⚠ a blocking dialog is an observation on the follow and a unary answer back — nothing parks, nothing expires", async () => {

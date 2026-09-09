@@ -101,16 +101,32 @@ async function* readSseFrames(body: ReadableStream<Uint8Array>, signal: AbortSig
 
 /**
  * What the server did with a dialog answer (#112, PR #113 review):
- *   `answered`  taken (204) — the question is spent.
- *   `gone`      no such open question (404) — answered from another tab, or expired. Spent too.
- *   `refused`   the answer did not fit the question (422: an unoffered value). The question is
- *               STILL OPEN on the server and must stay on screen.
+ * `answered` taken (204) — the question is spent.
+ * `gone` no such open question (404) — answered from another tab, or expired. Spent too.
+ * `refused` the answer did not fit the question (422: an unoffered value). The question is
+ * STILL OPEN on the server and must stay on screen.
+ * `unreachable` the request never got an answer (network). Nothing changed; still open.
  */
-export type DialogAnswerOutcome = "answered" | "gone" | "refused";
+export type DialogAnswerOutcome = "answered" | "gone" | "refused" | "unreachable";
+
+/**
+ * What the server did with an abort (#116):
+ * `aborted` pi was told (204). The run ends ON THE FOLLOW — `settled`, then `status` — so
+ * nothing here closes it; the same frames close it for every follower.
+ * `idle` nothing was in flight (409) — the run ended between the click and the request.
+ * `gone` the thread is not live on the server (404).
+ * `unreachable` the request never got an answer (network). The run is still in flight.
+ */
+export type AbortOutcome = "aborted" | "idle" | "gone" | "unreachable";
 
 export interface FollowConnection extends SubscribeConnectionAdapter {
 	/** Answer the thread's open question. A non-`answered` outcome is also reported with the server's reason. */
 	readonly answerDialog: (answer: PiDialogResponse) => Promise<DialogAnswerOutcome>;
+	/**
+	 * Stop the run in flight (#116). ⚠ Not TanStack's `stop()`: that aborts this client's
+	 * in-flight POST, which returned at admission long ago, and touches nothing on the server.
+	 */
+	readonly abort: () => Promise<AbortOutcome>;
 }
 
 export function createFollowConnection(options: FollowConnectionOptions): FollowConnection {
@@ -349,17 +365,39 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		}
 	}
 
+	/**
+	 * One unary POST, or `undefined` when it never got an answer. Reported here, once, so the
+	 * callers' fire-and-forget (`void connection.abort()`) can never leak an unhandled rejection.
+	 */
+	async function post(route: string, what: string, init?: RequestInit): Promise<Response | undefined> {
+		try {
+			return await fetchImpl(`${base}/${route}`, { ...init, method: "POST" });
+		} catch (error) {
+			onProblem?.(`thread ${threadId}: ${what} unreachable: ${String(error)}`);
+			return undefined;
+		}
+	}
+
 	async function answerDialog(answer: PiDialogResponse): Promise<DialogAnswerOutcome> {
-		const response = await fetchImpl(`${base}/dialog`, {
-			method: "POST",
+		const response = await post("dialog", `dialog ${answer.id}`, {
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify(answer),
 		});
+		if (response === undefined) return "unreachable";
 		if (response.status === 204) return "answered";
 		const outcome: DialogAnswerOutcome = response.status === 404 ? "gone" : "refused";
 		onProblem?.(`thread ${threadId}: dialog ${answer.id} ${outcome}: ${response.status} ${await response.text()}`);
 		return outcome;
 	}
 
-	return { subscribe, send, answerDialog };
+	async function abort(): Promise<AbortOutcome> {
+		const response = await post("abort", "abort");
+		if (response === undefined) return "unreachable";
+		if (response.status === 204) return "aborted";
+		const outcome: AbortOutcome = response.status === 409 ? "idle" : "gone";
+		onProblem?.(`thread ${threadId}: abort ${outcome}: ${response.status} ${await response.text()}`);
+		return outcome;
+	}
+
+	return { subscribe, send, answerDialog, abort };
 }

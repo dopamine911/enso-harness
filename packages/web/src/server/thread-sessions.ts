@@ -8,16 +8,16 @@
  * session survives the run and is disposed only after `idleTimeoutMs` with no run, or at
  * server shutdown.
  *
- * ⚠ RUN vs SESSION LIFETIME. `stop` ABORTS the run in flight; it never disposes. `release`
+ * ⚠ RUN vs SESSION LIFETIME. `abort` ABORTS the run in flight; it never disposes. `release`
  * arms the idle timer; `acquire` cancels it. Disposal is therefore only ever reached with
  * no run in flight, which is what makes the host's dispose ordering (unsubscribe, then
  * `session.dispose()`) safe: there is no `agent_settled` left to swallow.
  *
- * ⚠ THE DISCONNECT-THEN-PROMPT RACE. A tab closes mid-run → the response 'close' calls
- * `stop` → pi's `abort()` resolves only when the agent is idle again (agent-session.js
- * `abort` → `waitForIdle`). If the user reopens and prompts before that, pi's `prompt()`
- * would refuse ("Agent is already processing"). So `stop` stores the in-flight abort and
- * `acquire` awaits it first — the new run starts against an idle session.
+ * ⚠ THE ABORT-THEN-PROMPT RACE. An operator aborts (#116) → pi's `abort()` resolves only
+ * when the agent is idle again (agent-session.js `abort` → `waitForIdle`). If they prompt
+ * before that, pi's `prompt()` would refuse ("Agent is already processing"). So `abort`
+ * stores the in-flight abort and `acquire` awaits it first — the new run starts against an
+ * idle session. (Before #113 the same race came from a tab closing mid-run.)
  *
  * ⓘ Named non-coverage: the map is unbounded, and a client that omits `threadId` gets a
  * fresh session per request that lives for the idle window. Loopback-only, dev-only server.
@@ -95,6 +95,13 @@ export interface ThreadSessions {
 	 */
 	announce(threadId: string, observation: ZenObservation): void;
 	/**
+	 * Abort the run in flight on a thread (#116) — the operator's stop, addressed by thread
+	 * because the lease that took the run lives in the prompt route's closure and a later
+	 * request cannot reach it. `aborted`: pi was told; the run ends on the feed as any run
+	 * does. `idle`: nothing in flight. `unknown`: no live thread.
+	 */
+	abort(threadId: string): AbortOutcome;
+	/**
 	 * The thread's hosted session IF it is live — never creates one (#86). Looking must
 	 * not be the thing that spins pi up; `acquire` is for runs.
 	 */
@@ -112,6 +119,9 @@ export interface ThreadFollow {
 	readonly asOfSeq: number;
 	readonly unsubscribe: () => void;
 }
+
+/** What {@link ThreadSessions.abort} did. */
+export type AbortOutcome = "aborted" | "idle" | "unknown";
 
 /**
  * One run's hold on a thread (#109, deepseek-harness's `openGeneration` on the server).
@@ -135,8 +145,6 @@ export interface ThreadLease {
 	readonly generation: number;
 	/** The run is over and nothing is parked: start the idle clock. Stale: a reported no-op. */
 	release(): void;
-	/** Abort the run in flight (client gone, dialog evicted). Never disposes. Stale: a reported no-op. */
-	stop(): void;
 }
 
 /** A live thread as inspection sees it: the session, and whether a run holds it. */
@@ -313,15 +321,29 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 		publishStatus(threadId, thread);
 	}
 
-	function stop(threadId: string, thread: ThreadEntry): void {
-		const abort = thread.hosted.session
+	/**
+	 * Abort the run in flight on a thread (#116). pi's `abort()` resolves when the agent is
+	 * idle again; the run still ends through `agent_settled` (pi emits it from a `finally`),
+	 * so the prompt route's settle observer releases the lease and every follower sees the
+	 * same `settled` + `status` it would for a natural end. Never disposes.
+	 *
+	 * One abort per run: `busy` stays true until that settle lands, so a second click (PR
+	 * #120 review) would reach pi again. pi's `abort()` is re-entrant (`agent.abort()` +
+	 * `waitForIdle()`), but the second call is the same answer, so it is not made.
+	 */
+	function abort(threadId: string): AbortOutcome {
+		const thread = threads.get(threadId);
+		if (thread === undefined) return "unknown";
+		if (!thread.busy) return "idle";
+		if (thread.abortInFlight !== undefined) return "aborted";
+		const inFlight = thread.hosted.session
 			.abort()
 			.catch((error: unknown) => onProblem?.(`thread ${threadId}: abort failed: ${String(error)}`))
 			.finally(() => {
-				// Only clear our own promise — a later stop may have replaced it.
-				if (thread.abortInFlight === abort) thread.abortInFlight = undefined;
+				if (thread.abortInFlight === inFlight) thread.abortInFlight = undefined;
 			});
-		thread.abortInFlight = abort;
+		thread.abortInFlight = inFlight;
+		return "aborted";
 	}
 
 	function leaseOf(threadId: string, thread: ThreadEntry): ThreadLease {
@@ -341,9 +363,6 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 			generation,
 			release: () => {
 				if (current("release")) release(threadId, thread);
-			},
-			stop: () => {
-				if (current("stop")) stop(threadId, thread);
 			},
 		};
 	}
@@ -401,6 +420,7 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 				},
 			};
 		},
+		abort,
 		peek(threadId: string): ThreadView | undefined {
 			const thread = threads.get(threadId);
 			return thread === undefined ? undefined : viewOf(threadId, thread);

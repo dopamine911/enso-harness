@@ -1,7 +1,7 @@
 import { automaticPartsForMessage, type ChatUISelectedPart, selectChatUI } from "@tanstack/ai-client/ui";
 import { createChatHook, createChatHookContexts, type LayoutProps, type MessageProps } from "@tanstack/ai-react/ui";
 import type { PiDialogResponse, ZenDialogSpec } from "@zen/core";
-import { ArrowUpIcon } from "lucide-react";
+import { ArrowUpIcon, SquareIcon } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import {
 	Conversation,
@@ -379,14 +379,15 @@ export function ZenDialogCard({
  * tab or expired (`gone`). A `refused` answer (an unoffered value, 422) leaves the question
  * open on the server, so it stays on screen with the reason as a notice: nothing would
  * re-show it otherwise, and the thread would sit busy behind a card that vanished (PR #113
- * review). ⓘ Exported for `__tests__/chat-screen.test.tsx`.
+ * review). `unreachable` (the request never arrived) leaves it open the same way.
+ * ⓘ Exported for `__tests__/chat-screen.test.tsx`.
  */
 export async function settleDialog(
 	stores: Pick<ThreadStores, "connection" | "dialog">,
 	response: PiDialogResponse,
 ): Promise<void> {
 	const outcome = await stores.connection.answerDialog(response);
-	if (outcome !== "refused") stores.dialog.set(undefined);
+	if (outcome === "answered" || outcome === "gone") stores.dialog.set(undefined);
 }
 
 /** The thread's open question, if any — see {@link settleDialog}. */
@@ -427,6 +428,7 @@ const chatComponents = {
 			// one returned by `createChatHook` above — referenced at render time, so the
 			// binding is initialised by then.
 			const chat = useChatContext();
+			const stores = useThreadStores();
 			// Controlled, so the send button can disable on empty — the ai-elements chatbot
 			// example's PromptInput does the same.
 			const [draft, setDraft] = useState("");
@@ -467,13 +469,26 @@ const chatComponents = {
 							rows={1}
 							className="max-h-40 min-h-9 flex-1 resize-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
 						/>
-						{/* Send, in flight or not (#103 receipt). Under the follow transport a prompt
-						    during a run QUEUES through pi (#75) — a follow-up is the right thing to
-						    offer. The stop button that stood here read `chat.isLoading`, which the
-						    adapter never raises (`send()` returns at admission), so it had not
-						    rendered since #113 — and `chat.stop()` aborts only the in-flight POST,
-						    not pi; there is no abort route on this wire yet (#116). A control that
-						    looks like stop and stops nothing is the #4 shape, so none is offered. */}
+						{/* Stop while a run is in flight (#116), through the thread's connection —
+						    `POST …/abort` → pi's own abort. ⚠ NOT `chat.stop()`: that aborts this
+						    client's POST, which returned at admission, and touches nothing on the
+						    server. The run ends on the follow (`settled`, `status`) like any other,
+						    so this button changes nothing itself; the feed does. Read off
+						    `sessionGenerating`, the shared run flag — `isLoading` never rises here
+						    (#103 receipt). */}
+						{chat.sessionGenerating ? (
+							<Button
+								type="button"
+								size="icon"
+								variant="outline"
+								aria-label="stop the run"
+								title="stop the run in flight — pi is told; the run ends on the feed"
+								onClick={() => void stores.connection.abort()}
+							>
+								<SquareIcon />
+							</Button>
+						) : null}
+						{/* Send stays in flight too: a prompt during a run QUEUES through pi (#75). */}
 						<Button type="submit" size="icon" aria-label="send message" disabled={draft.trim().length === 0}>
 							<ArrowUpIcon />
 						</Button>
