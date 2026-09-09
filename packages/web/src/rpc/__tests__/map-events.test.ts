@@ -338,6 +338,8 @@ test("the host's extension_ui_settled maps to dialog-settled; an outcome the uni
 	expect(mapPiEvent({ type: "extension_ui_settled", id: "d1", outcome: "vanished" })).toMatchObject({
 		kind: "unmapped",
 	});
+	// A settle must name a question: an empty id is the same drift (`ZenDialogSettled.id` is minLength 1).
+	expect(mapPiEvent({ type: "extension_ui_settled", id: "", outcome: "answered" })).toMatchObject({ kind: "unmapped" });
 });
 
 // ⚠ The design rule: there is no skip case.

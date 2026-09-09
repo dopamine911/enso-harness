@@ -138,7 +138,8 @@ export type ZenDialogOutcome = Static<typeof ZenDialogOutcome>;
  */
 export const ZenDialogSettled = Type.Object({
 	kind: Type.Literal("dialog-settled"),
-	id: Type.String(),
+	/** `minLength: 1`, as `ZenOpenDialog.id` — a settle must name a question (PR #115 review). */
+	id: Type.String({ minLength: 1 }),
 	outcome: ZenDialogOutcome,
 });
 export type ZenDialogSettled = Static<typeof ZenDialogSettled>;

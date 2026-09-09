@@ -293,7 +293,9 @@ export function mapPiEvent(event: PiRpcEvent, delivery: PiEventDelivery = "live"
 			// An outcome the union does not name is a host/mapper drift, not a pi event to
 			// carry through: it stays unmapped so the debug pane shows it.
 			const { id, outcome } = event;
-			if (typeof id === "string" && Check(ZenDialogOutcome, outcome)) return { kind: "dialog-settled", id, outcome };
+			if (typeof id === "string" && id.length > 0 && Check(ZenDialogOutcome, outcome)) {
+				return { kind: "dialog-settled", id, outcome };
+			}
 			return { kind: "unmapped", event };
 		}
 

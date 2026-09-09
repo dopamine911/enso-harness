@@ -84,6 +84,26 @@ test("zen.dialog-settled drops the card for ITS id and no other (#114)", () => {
 	expect(notificationMessages()).toEqual([]);
 });
 
+test("two questions open: a settle for the one NOT shown leaves the card; the snapshot then lists the survivor first (#114, PR #115 review)", () => {
+	const SELECT: ZenDialogSpec = { method: "select", title: "Pick", options: ["a", "b"] };
+	route(ZEN_CUSTOM_EVENT_OPEN_DIALOGS, {
+		open: [
+			{ id: "first", dialog: CONFIRM },
+			{ id: "second", dialog: SELECT },
+		],
+	});
+	expect(stores.dialog.get()?.id).toBe("first");
+	// The second question settles elsewhere while the first is what this page shows.
+	route(ZEN_CUSTOM_EVENT_DIALOG_SETTLED, { id: "second", outcome: "answered" });
+	expect(stores.dialog.get()?.id).toBe("first");
+	// The shown one settles: the slot clears; the next question is whatever the next snapshot lists.
+	route(ZEN_CUSTOM_EVENT_DIALOG_SETTLED, { id: "first", outcome: "cancelled" });
+	expect(stores.dialog.get()).toBeUndefined();
+	route(ZEN_CUSTOM_EVENT_OPEN_DIALOGS, { open: [{ id: "third", dialog: SELECT }] });
+	expect(stores.dialog.get()).toEqual({ id: "third", dialog: SELECT });
+	expect(notificationMessages()).toEqual([]);
+});
+
 test("zen.open-dialogs is the snapshot's complete list: it replaces the card, an empty list clears it, a malformed one is ignored (#114)", () => {
 	route(ZEN_CUSTOM_EVENT_DIALOG, { id: "stale", dialog: CONFIRM });
 	route(ZEN_CUSTOM_EVENT_OPEN_DIALOGS, { open: [{ id: "d2", dialog: CONFIRM }] });
