@@ -23,10 +23,16 @@ const repoRoot = findRepoRoot(import.meta.url);
 const webPackageRunDir = webPackageDir(repoRoot);
 const piCwd = process.argv[2] ?? repoRoot;
 
+/** @type {import("bun").Subprocess[]} */
 const children = [];
 let shuttingDown = false;
 
-/** Prefix every line a stdio stream produces; resolves when the stream ends. */
+/**
+ * Prefix every line a stdio stream produces; resolves when the stream ends.
+ * @param {ReadableStream<Uint8Array>} stream
+ * @param {string} label
+ * @param {(lines: string) => void} emit
+ */
 async function prefixStream(stream, label, emit) {
 	const decoder = new TextDecoder();
 	for await (const chunk of stream) {
@@ -40,6 +46,11 @@ async function prefixStream(stream, label, emit) {
 	}
 }
 
+/**
+ * @param {string} label
+ * @param {string} command
+ * @param {string[]} args
+ */
 function run(label, command, args) {
 	const child = Bun.spawn([command, ...args], {
 		cwd: webPackageRunDir,

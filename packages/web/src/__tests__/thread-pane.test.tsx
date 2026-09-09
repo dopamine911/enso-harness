@@ -58,8 +58,10 @@ interface MountedPane {
 	readonly composer: () => HTMLTextAreaElement;
 }
 
-async function mountPane(options: { active?: boolean } = {}): Promise<MountedPane> {
-	const server = createScriptedFetch();
+async function mountPane(
+	options: { active?: boolean; debugOpen?: boolean; server?: ScriptedFetchOptions } = {},
+): Promise<MountedPane> {
+	const server = createScriptedFetch(options.server ?? {});
 	// The composer's mode control seeds from the page's own `fetch("/api/mode")`.
 	globalThis.fetch = server.fetch;
 	const stores = mintThread(server.fetch);
@@ -67,7 +69,9 @@ async function mountPane(options: { active?: boolean } = {}): Promise<MountedPan
 	document.body.appendChild(container);
 	const root: Root = createRoot(container);
 	await flush(async () => {
-		root.render(<ThreadPane threadId={stores.threadId} active={options.active ?? true} debugOpen={false} />);
+		root.render(
+			<ThreadPane threadId={stores.threadId} active={options.active ?? true} debugOpen={options.debugOpen ?? false} />,
+		);
 	});
 	await flush(tick);
 	const one = <T extends Element>(selector: string): T => {
@@ -304,6 +308,50 @@ test("⚠ the follow closing mid-run: the notice, disconnected on the bar, no st
 	});
 	expect(pane.server.prompts).toEqual([]);
 	expect(pane.composer().value).toBe("this must not send");
+	await pane.unmount();
+});
+
+// ── #125 item 3: runtime truth vs browser belief, through the mounted debug pane (#86) ──
+
+test("⚠ the debug pane names a MISMATCH between the page's mode and the server's, and drops it once they agree", async () => {
+	const pane = await mountPane({
+		debugOpen: true,
+		server: {
+			inspection: {
+				cwd: "/repo",
+				sessionDir: "/agent/sessions/--repo--",
+				sessionFile: null,
+				permissionMode: { mode: "plan", available: ["default", "plan"] },
+				commands: ["default", "plan"],
+				busy: false,
+				generation: 3,
+				lastActivityAt: new Date().toISOString(),
+				// The branch agrees with the host (picc's modes entry says plan): the one disagreement is the page's.
+				entries: [
+					{ type: "custom", id: "m1", parentId: null, timestamp: "", customType: "modes", data: { mode: "plan" } },
+				],
+			},
+		},
+	});
+	// The snapshot says default; the server's inspection says plan. The pane must say so — once.
+	await pane.settle({ ...SNAPSHOT_IDLE, generation: 3 });
+	await flush(tick);
+	const debug = pane.container.querySelector('[aria-label="session debug"]') ?? pane.container;
+	const mismatches = (): number => (debug.textContent?.match(/MISMATCH/g) ?? []).length;
+	expect(debug.textContent).toContain("host mode: plan");
+	expect(debug.textContent).toContain("MISMATCH: host says plan");
+	// Exactly one: generations agree (both 3) and the branch agrees with the host.
+	expect(mismatches()).toBe(1);
+	// A persisted modes entry brings the page to plan; the pane refetches on it and the MISMATCH goes.
+	await pane.settle({
+		type: "observation",
+		seq: 1,
+		observation: { kind: "custom-entry", customType: "modes", data: { mode: "plan" } },
+	});
+	await flush(tick);
+	expect(pane.modeSelect().value).toBe("plan");
+	expect(debug.textContent).toContain("host mode: plan");
+	expect(mismatches()).toBe(0);
 	await pane.unmount();
 });
 

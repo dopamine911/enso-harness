@@ -57,9 +57,10 @@ function requiredPackageNames() {
 		for (const entry of Array.isArray(paths) ? paths : [paths]) {
 			if (typeof entry !== "string" || !entry.startsWith(VENDOR_PATH_PREFIX)) continue;
 			const withoutPrefix = entry.slice(VENDOR_PATH_PREFIX.length);
-			const segments = withoutPrefix.split("/");
+			const [scopeOrName, scopedName] = withoutPrefix.split("/");
+			if (scopeOrName === undefined || scopeOrName.length === 0) continue;
 			// Scoped packages carry their scope in the first segment.
-			names.add(segments[0].startsWith("@") ? `${segments[0]}/${segments[1]}` : segments[0]);
+			names.add(scopeOrName.startsWith("@") && scopedName !== undefined ? `${scopeOrName}/${scopedName}` : scopeOrName);
 		}
 	}
 	return [...names];
