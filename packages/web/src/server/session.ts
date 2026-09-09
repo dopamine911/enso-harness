@@ -197,6 +197,7 @@ function createSessionPump(session: PiSession): PiSessionPump {
 		settled: false,
 		promptError: undefined,
 		promptAcknowledged: false,
+		lastToolActivityAt: 0,
 		notify: undefined,
 		wake(): void {
 			pump.notify?.();
@@ -213,6 +214,11 @@ function createSessionPump(session: PiSession): PiSessionPump {
 	unsubscribeFromSession = session.subscribe((event, delivery) => {
 		pump.pending.push({ event, delivery });
 		if (event.type === "agent_settled") pump.settled = true;
+		// Tool activity is progress even when nothing crosses to the browser for it (#99) —
+		// see `PiSessionPump.lastToolActivityAt`. Recorded here, on arrival, off the raw type.
+		if (event.type === "tool_execution_start" || event.type === "tool_execution_update") {
+			pump.lastToolActivityAt = Date.now();
+		}
 		pump.wake();
 	});
 	return pump;
@@ -305,6 +311,9 @@ async function* drainUntilRunEnds(options: StreamRunOptions): AsyncGenerator<Str
 			}
 		}
 		if (emitted) lastProgressAt = Date.now();
+		// ⚠ Progress is what the pump SAW, not only what the wire carried (#99): a running
+		// tool's updates never become chunks, but they are proof the run is alive.
+		lastProgressAt = Math.max(lastProgressAt, pump.lastToolActivityAt);
 
 		if (pump.promptError !== undefined) {
 			// A rejected prompt is a protocol outcome, not an exception — surface it as a run
@@ -316,7 +325,7 @@ async function* drainUntilRunEnds(options: StreamRunOptions): AsyncGenerator<Str
 		if (pump.settled) return;
 
 		if (Date.now() - lastProgressAt >= noProgressTimeoutMs) {
-			// Nothing has been EMITTED for the whole window, whatever traffic arrived.
+			// Nothing emitted and no tool activity for the whole window, whatever else arrived.
 			yield { type: EventType.RUN_FINISHED, threadId: ids.threadId, runId: ids.runId };
 			return;
 		}

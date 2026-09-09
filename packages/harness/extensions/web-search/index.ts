@@ -78,6 +78,8 @@ export interface WebSearchDependencies {
 		tavily: (request: TavilySearchRequest) => Promise<WebSearchOutcome>;
 	};
 	fetchUrl: ModelSearchRequest["fetchUrl"];
+	/** The whole-call deadline. Defaults to `WEB_SEARCH_TIMEOUT_MS`; injectable so the chain's budget is testable in milliseconds. */
+	timeoutMs?: number;
 }
 
 /** A primary attempt that could not run or threw — the fallback's trigger record. */
@@ -131,9 +133,13 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
 							`Nothing is searchable until a human fixes ${configDisplayPath} and restarts the session.`,
 					);
 				}
-
 				const tavilyApiKey = dependencies.readEnvironmentVariable(TAVILY_API_KEY_VARIABLE);
 				const isTavilyArmed = tavilyApiKey !== undefined && tavilyApiKey.length > 0;
+				// ⚠ ONE deadline for the call (#99): the fallback runs under what the primary left,
+				// so primary + fallback can never outlast the server's no-progress cutoff.
+				const budgetMs = dependencies.timeoutMs ?? WEB_SEARCH_TIMEOUT_MS;
+				const deadline: CallDeadline = { at: Date.now() + budgetMs, budgetMs };
+				const onProgress = progressForwarder(onUpdate);
 
 				// --- the primary attempt.
 				const primary = await runPrimary({
@@ -142,7 +148,8 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
 					extensionContext,
 					query,
 					signal,
-					onProgress: progressForwarder(onUpdate),
+					deadline,
+					onProgress,
 				});
 
 				// --- the fallback decision. `searched` never falls back; everything else does
@@ -167,8 +174,11 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
 					);
 				}
 
+				// A progress update before the fallback: the server counts tool activity as
+				// progress (#99), and this is the one moment in the chain that is otherwise silent.
+				onProgress(`${fallbackReason} — trying the Tavily fallback…`);
 				try {
-					const tavilyOutcome = await underDeadline(signal, (deadlineSignal) =>
+					const tavilyOutcome = await underDeadline(signal, deadline, (deadlineSignal) =>
 						dependencies.runProviders.tavily({
 							query,
 							apiKey: tavilyApiKey,
@@ -205,15 +215,16 @@ interface RunPrimaryOptions {
 	extensionContext: ExtensionContext;
 	query: string;
 	signal: AbortSignal | undefined;
+	deadline: CallDeadline;
 	onProgress: (text: string) => void;
 }
 
 /** Run the selected primary backend; a non-outcome return is the failure record. */
 async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome | PrimaryFailure> {
-	const { dependencies, webSearchConfig, extensionContext, query, signal, onProgress } = options;
+	const { dependencies, webSearchConfig, extensionContext, query, signal, deadline, onProgress } = options;
 	try {
 		if (webSearchConfig.backend === "deepseek") {
-			return await underDeadline(signal, (deadlineSignal) =>
+			return await underDeadline(signal, deadline, (deadlineSignal) =>
 				dependencies.runProviders.deepseek({
 					query,
 					apiKey: dependencies.readEnvironmentVariable(DEEPSEEK_API_KEY_VARIABLE),
@@ -246,7 +257,7 @@ async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome 
 			signal: deadlineSignal,
 			onProgress,
 		});
-		return await underDeadline(signal, (deadlineSignal) =>
+		return await underDeadline(signal, deadline, (deadlineSignal) =>
 			dependencies.runProviders[routedProviderId](modelRequest(deadlineSignal)),
 		);
 	} catch (error) {
@@ -268,16 +279,30 @@ function fallbackReasonFor(primary: WebSearchOutcome | PrimaryFailure): string |
 	return `the ${providerName} search failed${billingNote}: ${primary.reason}`;
 }
 
-/** Run one provider attempt under the per-attempt deadline AND the caller's signal. */
+/** One call's deadline: the instant it passes, and the budget it was set from (named in the refusal). */
+interface CallDeadline {
+	readonly at: number;
+	readonly budgetMs: number;
+}
+
+/** Run one provider attempt under what remains of the call's deadline AND the caller's signal. */
 async function underDeadline<T>(
 	callerSignal: AbortSignal | undefined,
+	deadline: CallDeadline,
 	run: (deadlineSignal: AbortSignal) => Promise<T>,
 ): Promise<T> {
 	const controller = new AbortController();
-	const timeoutId = setTimeout(
-		() => controller.abort(new Error(`${WEB_SEARCH_TOOL_NAME} timed out after ${WEB_SEARCH_TIMEOUT_MS}ms`)),
-		WEB_SEARCH_TIMEOUT_MS,
-	);
+	const deadlinePassed = (): void =>
+		controller.abort(
+			new Error(
+				`${WEB_SEARCH_TOOL_NAME} passed its deadline (${deadline.budgetMs}ms for primary and fallback together)`,
+			),
+		);
+	const remainingMs = deadline.at - Date.now();
+	// A spent budget aborts BEFORE the attempt runs — a 0ms timer would let a fast provider
+	// answer first, and the fallback must not start what the deadline already forbade.
+	if (remainingMs <= 0) deadlinePassed();
+	const timeoutId = remainingMs > 0 ? setTimeout(deadlinePassed, remainingMs) : undefined;
 	const abortWithCaller = (): void => controller.abort(callerSignal?.reason);
 	// An ALREADY-aborted signal never fires the event — same pre-abort guard as web_fetch.
 	if (callerSignal?.aborted === true) {
@@ -288,7 +313,7 @@ async function underDeadline<T>(
 	try {
 		return await run(controller.signal);
 	} finally {
-		clearTimeout(timeoutId);
+		if (timeoutId !== undefined) clearTimeout(timeoutId);
 		callerSignal?.removeEventListener("abort", abortWithCaller);
 	}
 }

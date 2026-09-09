@@ -344,6 +344,47 @@ test("a settled run is unaffected by the timeout", async () => {
 	expect(chunks.filter((chunk) => chunk.type === EventType.RUN_FINISHED)).toHaveLength(1);
 });
 
+// ⚠ #99: a tool that is WORKING must not read as a hung run. `tool_execution_update` crosses
+// to the browser as nothing (AG-UI has no progress event), so before this the guard saw
+// silence for the whole tool call and ended the run mid-search at the cutoff (web_search, #98).
+test("⚠ a tool call running for 2× the no-progress cutoff, streaming updates, is not cut off — its result and the settle arrive", async () => {
+	const cutoffMs = 40;
+	const pi = fakeSession({
+		onPrompt: (context, _request, outcome) => {
+			outcome.onAccepted();
+			context.emit('{"type":"tool_execution_start","toolCallId":"c1","toolName":"web_search","args":{"query":"x"}}');
+			// Updates every quarter-cutoff for two cutoffs, then the result and the settle.
+			let ticks = 0;
+			const interval = setInterval(() => {
+				ticks += 1;
+				context.emit(
+					`{"type":"tool_execution_update","toolCallId":"c1","toolName":"web_search","partialResult":{"content":[{"type":"text","text":"searching… ${ticks}"}]}}`,
+				);
+				if (ticks < 8) return;
+				clearInterval(interval);
+				context.emit(
+					'{"type":"tool_execution_end","toolCallId":"c1","toolName":"web_search","result":{"content":[{"type":"text","text":"found it"}]},"isError":false}',
+				);
+				context.emit('{"type":"agent_settled"}');
+			}, cutoffMs / 4);
+		},
+	});
+	const chunks = [];
+	for await (const chunk of runChat({
+		session: pi.session,
+		ids,
+		prompt: "search",
+		onProblem: undefined,
+		noProgressTimeoutMs: cutoffMs,
+		...runWiring(),
+	})) {
+		chunks.push(chunk);
+	}
+	// The result crossed — the run was alive to carry it — and the run ended on the settle, once.
+	expect(chunks.some((chunk) => chunk.type === EventType.TOOL_CALL_RESULT)).toBe(true);
+	expect(chunks.filter((chunk) => chunk.type === EventType.RUN_FINISHED)).toHaveLength(1);
+});
+
 /**
  * ⚠⚠ #27: a blocking dialog INTERRUPTS the run — the browser answers it, pi stays alive.
  *

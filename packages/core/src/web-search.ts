@@ -16,8 +16,12 @@ import { type Static, Type } from "typebox";
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 
 /**
- * Per-attempt deadline. A native search is a full model turn, so this is generous where
- * web_fetch's 30s is tight; dsh ships the same 60s for the same reason.
+ * The deadline for ONE web_search call — primary AND fallback together, not per attempt
+ * (#99). A native search is a full model turn, so this is generous where web_fetch's 30s
+ * is tight; dsh ships the same 60s for the same reason. ⚠ It must stay under the server's
+ * no-progress cutoff (`NO_PROGRESS_TIMEOUT_MS`, 90s): a per-attempt 60s let primary +
+ * fallback run 120s with no chunk crossing, and the server read that as a hung run and cut
+ * it mid-search (#98). The fallback gets whatever the primary left of this budget.
  */
 export const WEB_SEARCH_TIMEOUT_MS = 60_000;
 
