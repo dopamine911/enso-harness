@@ -114,7 +114,7 @@ export {
 	threadEventColumns,
 	ZenEventProvenance,
 	ZenInterruptedTail,
-	ZenResumableSession,
+	ZenStoredThread,
 	ZenThreadEvent,
 	ZenThreadEvents,
 	ZenThreadHistory,

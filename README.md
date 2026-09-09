@@ -277,7 +277,7 @@ Built so far:
   tab drops the card whoever answered — and a follow's snapshot lists the open questions, so a page that
   reloads under one resumes the thread from the rail and gets the card back. This is what makes `/mode`
   and similar flows work from a web page at all.
-- **A session-stats bar (#45 phase 1):** running cost plus the last request's token split.
+- **A thread-stats bar (#45 phase 1):** running cost plus the last request's token split.
 - **Mode-change notifications** rendered as chat-adjacent lines rather than lost to stderr.
 
 The dev entry (`bun run dev`) starts the API server first, then the web surface with an `/api` proxy —

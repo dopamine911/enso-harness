@@ -62,7 +62,7 @@ interface ThreadFeed {
  */
 export const THREAD_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
-export interface ThreadSessionsOptions {
+export interface ThreadRegistryOptions {
 	/** Builds a hosted session for a thread — `AgentHost.createSession`. Injected so tests need no pi. */
 	createSession: (threadId: string) => Promise<HostedSession>;
 	onProblem: ((problem: unknown) => void) | undefined;
@@ -70,7 +70,7 @@ export interface ThreadSessionsOptions {
 	idleTimeoutMs?: number;
 }
 
-export interface ThreadSessions {
+export interface ThreadRegistry {
 	/**
 	 * Take the thread for a run: the session, created on first use, held through a lease.
 	 * Cancels a pending idle disposal and waits for an in-flight abort so the run always
@@ -120,7 +120,7 @@ export interface ThreadFollow {
 	readonly unsubscribe: () => void;
 }
 
-/** What {@link ThreadSessions.abort} did. */
+/** What {@link ThreadRegistry.abort} did. */
 export type AbortOutcome = "aborted" | "idle" | "unknown";
 
 /**
@@ -189,7 +189,7 @@ function viewOf(threadId: string, thread: ThreadEntry): ThreadView {
 	};
 }
 
-export function createThreadSessions(options: ThreadSessionsOptions): ThreadSessions {
+export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegistry {
 	const { createSession, onProblem } = options;
 	const idleTimeoutMs = options.idleTimeoutMs ?? THREAD_IDLE_TIMEOUT_MS;
 

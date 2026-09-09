@@ -10,7 +10,7 @@ import { createStore, type Store, useStore, useThreadStores } from "./store.ts";
  * path for those is the `onCustomEvent` chat option — an imperative callback on the
  * OPTIONS object. So the bridge to React state is this store, one per thread
  * (`thread-stores.ts`): `custom-event-router.ts` pushes into it, and
- * `SessionNotifications` subscribes to the rendering thread's.
+ * `ThreadNotifications` subscribes to the rendering thread's.
  *
  * ⚠ Notifications are DURABLE lines, not toasts, on purpose: this harness's standing rule
  * is that a silent success is indistinguishable from a dropped one, and a toast that
@@ -127,7 +127,7 @@ export function StartupNotices({ notifications }: { notifications: readonly ZenN
  * order — the startup notices folded at its head (they precede every run's by
  * construction: the host replays them before the first prompt), the rest as lines.
  */
-export function SessionNotifications(): React.ReactNode {
+export function ThreadNotifications(): React.ReactNode {
 	const currentNotifications = useStore(useThreadStores().notifications);
 	if (currentNotifications.length === 0) return null;
 	const startup = currentNotifications.filter(isStartupNotice);

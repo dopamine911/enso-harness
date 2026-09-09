@@ -133,7 +133,7 @@ test("zen.open-dialogs is the snapshot's complete list: it replaces the card, an
 	expect(notificationMessages()).toEqual([]);
 });
 
-test("zen.usage reaches the session-stats store and nothing else", () => {
+test("zen.usage reaches the thread-stats store and nothing else", () => {
 	route(ZEN_CUSTOM_EVENT_USAGE, {
 		kind: "message-end",
 		role: "assistant",

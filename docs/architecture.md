@@ -138,7 +138,7 @@ dsh counterpart because nothing parks when prompt is unary and follow is a separ
 
 ### Lifecycles
 
-**A thread on the server** (`thread-sessions.ts`). Two states while live, and a parked question is
+**A thread on the server** (`thread-registry.ts`). Two states while live, and a parked question is
 *busy* — there is no third state, matching dsh's `idle | running` with questions beside it.
 
 ```mermaid
@@ -198,7 +198,7 @@ What is durable, and where:
 
 Not durable, by design: `ZenObservation` (derived from pi events in memory, never written); AG-UI
 (derived in the adapter, never on the wire); `generation` and the rest of the registry's `ThreadEntry`
-(`packages/web/src/server/thread-sessions.ts` — busy, idle timer, abort in flight, the sent tail).
+(`packages/web/src/server/thread-registry.ts` — busy, idle timer, abort in flight, the sent tail).
 
 **Run provenance (#102 §3).** pi's log already carries `SessionHeader {id, cwd, timestamp,
 parentSession}`, `model_change {provider, modelId}`, `thinking_level_change`, and picc's mode — so a
@@ -455,7 +455,7 @@ so a reader knows where to look before touching the file.
 | #95 | Resume reads the stored branch and applies its persisted mode under the same id | `web/thread-stores.ts`, `core/session-inspection.ts` |
 | #112 | The wire is `ZenObservation`; AG-UI is made in exactly one place, the adapter | `core/follow.ts`, `web/follow-connection.ts` |
 | #114 | The host synthesises `dialog-settled` at the one point every settle path crosses; the snapshot lists every open question | `web/host/extension-ui-context.ts`, `core/follow.ts` |
-| #116 | `POST …/abort` tells pi; the run ends on the feed; one abort per run; a failed unary POST is an outcome, not a rejection | `server/thread-sessions.ts`, `web/follow-connection.ts` |
+| #116 | `POST …/abort` tells pi; the run ends on the feed; one abort per run; a failed unary POST is an outcome, not a rejection | `server/thread-registry.ts`, `web/follow-connection.ts` |
 
 ---
 

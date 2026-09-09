@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { PiSession } from "@zen/core";
 import type { HostedSession } from "../../host/agent-host.ts";
-import { createThreadSessions } from "../thread-sessions.ts";
+import { createThreadRegistry } from "../thread-registry.ts";
 
 function ignore(): void {
 	// The lifecycle tests never prompt, answer, or subscribe — only acquire/release/stop/dispose matter.
@@ -43,7 +43,7 @@ function fakeHosted() {
 function fakeHost() {
 	const built: ReturnType<typeof fakeHosted>[] = [];
 	const problems: unknown[] = [];
-	const threads = createThreadSessions({
+	const threads = createThreadRegistry({
 		createSession: () => {
 			const next = fakeHosted();
 			built.push(next);
@@ -172,7 +172,7 @@ test("⚠ a lease from before a rebuild is stale, and the rebuilt thread continu
 
 test("a failed build leaves no entry, so the next request retries", async () => {
 	let attempts = 0;
-	const threads = createThreadSessions({
+	const threads = createThreadRegistry({
 		createSession: () => {
 			attempts += 1;
 			if (attempts === 1) return Promise.reject(new Error("loader exploded"));
@@ -204,7 +204,7 @@ test("shutdown disposes every live session and clears pending idle timers", asyn
 test("⚠ a build in flight at shutdown is disposed on arrival, never published; a later acquire is refused", async () => {
 	let finishBuild: () => void = ignore;
 	const hosted = fakeHosted();
-	const threads = createThreadSessions({
+	const threads = createThreadRegistry({
 		createSession: () =>
 			new Promise<HostedSession>((resolve) => {
 				finishBuild = () => resolve(hosted.hosted);
@@ -228,7 +228,7 @@ test("a dispose that throws is reported, not thrown", async () => {
 	broken.hosted.session.dispose = () => {
 		throw new Error("already gone");
 	};
-	const threads = createThreadSessions({
+	const threads = createThreadRegistry({
 		createSession: () => Promise.resolve(broken.hosted),
 		onProblem: (problem) => problems.push(problem),
 		idleTimeoutMs: 20,

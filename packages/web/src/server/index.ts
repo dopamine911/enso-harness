@@ -7,7 +7,7 @@ import {
 	PICC_PERMISSION_MODES,
 	type PiDialogResponse,
 	persistedPermissionMode,
-	type ZenResumableSession,
+	type ZenStoredThread,
 	type ZenThreadEvents,
 	type ZenThreadHistory,
 	type ZenThreadInspection,
@@ -26,7 +26,7 @@ import {
 	readPromptBody,
 } from "./follow.ts";
 import { SSE_KEEPALIVE_MS } from "./sse.ts";
-import { createThreadSessions, type ThreadView } from "./thread-sessions.ts";
+import { createThreadRegistry, type ThreadView } from "./thread-registry.ts";
 
 /** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
 const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/;
@@ -192,7 +192,7 @@ export function startZenServer(options: ZenServerOptions) {
 			harnessPackageDir: options.harnessPackageDir,
 			onProblem: options.onProblem,
 		});
-	const threads = createThreadSessions({
+	const threads = createThreadRegistry({
 		createSession: (threadId) => host.createSession(threadId),
 		onProblem: options.onProblem,
 	});
@@ -253,9 +253,9 @@ export function startZenServer(options: ZenServerOptions) {
 	 * marks the ones a thread on THIS server is running right now; the rail shows those but
 	 * does not offer them, and `/history` refuses them below.
 	 */
-	async function respondWithSessions(response: ServerResponse): Promise<void> {
+	async function respondWithStoredThreads(response: ServerResponse): Promise<void> {
 		const stored = await host.listSessions();
-		const payload: ZenResumableSession[] = stored.map((session) => ({
+		const payload: ZenStoredThread[] = stored.map((session) => ({
 			threadId: session.id,
 			...(session.firstMessage.trim().length === 0 ? {} : { title: session.firstMessage.trim() }),
 			lastActivityAt: session.modified.toISOString(),
@@ -438,8 +438,8 @@ export function startZenServer(options: ZenServerOptions) {
 			respondWithThreads(response);
 			return;
 		}
-		if (request.method === "GET" && url === "/api/sessions") {
-			answerOrFail(respondWithSessions(response), response);
+		if (request.method === "GET" && url === "/api/stored-threads") {
+			answerOrFail(respondWithStoredThreads(response), response);
 			return;
 		}
 		if (request.method === "GET") {

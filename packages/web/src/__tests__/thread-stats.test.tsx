@@ -1,14 +1,14 @@
 import { beforeEach, expect, test } from "bun:test";
-import { createSessionStatsStore, type SessionStatsStore } from "../session-stats.tsx";
+import { createThreadStatsStore, type ThreadStatsStore } from "../thread-stats.tsx";
 
 /**
  * #45's browser half: `zen.usage` chunks become the stats the status bar renders (#90,
- * session-status.test.tsx). One store per thread (#90 PR 3); each case builds a fresh one.
+ * thread-status.test.tsx). One store per thread (#90 PR 3); each case builds a fresh one.
  */
 
-let store: SessionStatsStore;
+let store: ThreadStatsStore;
 beforeEach(() => {
-	store = createSessionStatsStore();
+	store = createThreadStatsStore();
 });
 
 const assistantUsage = (input: number, cacheRead: number, totalCost: number) => ({

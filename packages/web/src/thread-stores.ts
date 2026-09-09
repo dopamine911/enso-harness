@@ -5,8 +5,8 @@ import { createFollowConnection, type FollowConnection } from "./follow-connecti
 import { createModeLines, type ModeLines } from "./mode-lines.ts";
 import { createNotificationsStore, type NotificationsStore } from "./notifications.tsx";
 import { createPermissionModeStore, type PermissionModeStore } from "./permission-mode.tsx";
-import { createSessionStatsStore, type SessionStatsStore } from "./session-stats.tsx";
 import { createStore, type Store, type WritableStore } from "./store.ts";
+import { createThreadStatsStore, type ThreadStatsStore } from "./thread-stats.tsx";
 
 /**
  * Everything the browser knows about one thread beyond its messages (#90 PR 3).
@@ -32,7 +32,7 @@ export interface ThreadStores {
 	 */
 	readonly history: readonly UIMessage[];
 	readonly permissionMode: PermissionModeStore;
-	readonly stats: SessionStatsStore;
+	readonly stats: ThreadStatsStore;
 	readonly notifications: NotificationsStore;
 	readonly modeLines: ModeLines;
 	readonly recentChunks: RecentChunksStore;
@@ -76,7 +76,7 @@ function createThreadStores(threadId: string, history: readonly UIMessage[]): Th
 		threadId,
 		history,
 		permissionMode: createPermissionModeStore(),
-		stats: createSessionStatsStore(),
+		stats: createThreadStatsStore(),
 		notifications,
 		modeLines: createModeLines(notifications),
 		recentChunks: createRecentChunksStore(),

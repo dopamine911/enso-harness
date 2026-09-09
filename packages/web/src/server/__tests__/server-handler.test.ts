@@ -7,7 +7,7 @@ import {
 	type PiPromptOutcome,
 	type PiRpcEvent,
 	type PiSession,
-	ZenResumableSession,
+	ZenStoredThread,
 	ZenThreadEvents,
 	ZenThreadHistory,
 	ZenThreadInspection,
@@ -366,7 +366,7 @@ test("⚠ a prompt on a thread passes THAT id to the host — the thread id is p
 	expect(requested).toEqual(["stored-1"]);
 });
 
-test("GET /api/sessions lists stored sessions with title, count and age, marking the ones a thread here is RUNNING", async () => {
+test("GET /api/stored-threads lists stored threads with title, count and age, marking the ones a thread here is RUNNING", async () => {
 	const stored = {
 		"stored-1": {
 			branch: STORED_BRANCH,
@@ -378,10 +378,10 @@ test("GET /api/sessions lists stored sessions with title, count and age, marking
 	const { url } = await startWith(asksAndWaits, stored);
 	// An open question holds stored-1 busy on this server: taken, never released.
 	await prompt(url, "stored-1", "/mode");
-	const response = await fetch(`${url}/api/sessions`);
+	const response = await fetch(`${url}/api/stored-threads`);
 	expect(response.status).toBe(200);
 	const listed: unknown = await response.json();
-	expect(Array.isArray(listed) && listed.every((session) => Check(ZenResumableSession, session))).toBe(true);
+	expect(Array.isArray(listed) && listed.every((thread) => Check(ZenStoredThread, thread))).toBe(true);
 	expect(listed).toEqual([
 		{
 			threadId: "stored-1",
@@ -422,8 +422,8 @@ test("⚠ a thread this server holds IDLE is resumable — /history reads pi's m
 	const stored = { t1: { branch: STORED_BRANCH, modified: new Date(0), firstMessage: "earlier question" } };
 	const { url, built } = await startWith(settlesAtOnce, stored);
 	await prompt(url, "t1", "hello");
-	const listed = (await (await fetch(`${url}/api/sessions`)).json()) as ZenResumableSession[];
-	expect(listed.find((session) => session.threadId === "t1")?.busy).toBe(false);
+	const listed = (await (await fetch(`${url}/api/stored-threads`)).json()) as ZenStoredThread[];
+	expect(listed.find((thread) => thread.threadId === "t1")?.busy).toBe(false);
 	const response = await fetch(`${url}/api/threads/t1/history`);
 	expect(response.status).toBe(200);
 	const history = (await response.json()) as ZenThreadHistory;

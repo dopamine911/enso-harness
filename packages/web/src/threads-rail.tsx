@@ -1,4 +1,4 @@
-import type { ZenResumableSession } from "@zen/core";
+import type { ZenStoredThread } from "@zen/core";
 import { Button } from "./components/ui/button.tsx";
 import { cn } from "./lib/utils.ts";
 import type { ThreadSummary } from "./thread-stores.ts";
@@ -6,10 +6,10 @@ import type { ThreadSummary } from "./thread-stores.ts";
 /**
  * The sessions rail (#90 PR 3): which conversation am I in, what else is live on this
  * page, how do I start over. deepseek-harness's left rail is the reference — a title, a
- * relative age, a New session button.
+ * relative age, a New Session button.
  *
- * Two lists, each labelled for what it is. "LIVE SESSIONS": the threads this page has open
- * — they die with the page. "EARLIER SESSIONS" (#95): pi's session files for this
+ * Two lists, each labelled for what it is. "Active Sessions": the threads this page has open
+ * — they die with the page. "Previous Sessions" (#95): pi's session files for this
  * workspace that this page has not got open; a click resumes one, with its history and
  * its mode, under the same id — the thread id IS pi's session id. A session another page
  * is RUNNING right now (a run in flight, a dialog parked) is shown but not clickable:
@@ -33,13 +33,13 @@ export function relativeAge(from: Date, now: Date): string {
 }
 
 /** What an untitled thread reads as — a thread that has not been asked anything yet. */
-export const UNTITLED_SESSION = "new session";
+export const UNTITLED_THREAD = "new session";
 
-export interface SessionsRailProps {
+export interface ThreadsRailProps {
 	readonly threads: readonly ThreadSummary[];
 	readonly activeThreadId: string;
 	/** Stored sessions not open on this page, newest first — already filtered by the caller. */
-	readonly earlier: readonly ZenResumableSession[];
+	readonly earlier: readonly ZenStoredThread[];
 	/** Why the earlier list could not be fetched, or undefined. Shown where the rows would be. */
 	readonly earlierError: string | undefined;
 	/** For the relative ages; injected so a static render is deterministic. */
@@ -56,12 +56,12 @@ export interface SessionsRailProps {
  * from here. Before #113 a run belonged to the tab's HTTP response and a second page could
  * not join it, which is what the old `disabled` protected.
  */
-function EarlierSessionRow({
+function EarlierThreadRow({
 	session,
 	now,
 	onResume,
 }: {
-	session: ZenResumableSession;
+	session: ZenStoredThread;
 	now: Date;
 	onResume: (threadId: string) => void;
 }): React.ReactNode {
@@ -80,7 +80,7 @@ function EarlierSessionRow({
 					</span>
 				) : null}
 				<span className={cn("min-w-0 flex-1 truncate", session.title === undefined ? "italic" : "")}>
-					{session.title ?? UNTITLED_SESSION}
+					{session.title ?? UNTITLED_THREAD}
 				</span>
 				<span className="shrink-0 tabular-nums">{relativeAge(at, now)}</span>
 			</button>
@@ -88,7 +88,7 @@ function EarlierSessionRow({
 	);
 }
 
-export function SessionsRail({
+export function ThreadsRail({
 	threads,
 	activeThreadId,
 	earlier,
@@ -97,14 +97,14 @@ export function SessionsRail({
 	onSelect,
 	onResume,
 	onNew,
-}: SessionsRailProps): React.ReactNode {
+}: ThreadsRailProps): React.ReactNode {
 	return (
 		<nav aria-label="sessions" className="flex w-56 shrink-0 flex-col gap-2 border-r p-2">
 			<Button type="button" size="sm" variant="outline" onClick={onNew}>
-				New session
+				New Session
 			</Button>
-			<h2 className="px-1 pt-1 font-medium text-muted-foreground text-xs">live sessions</h2>
-			<ol aria-label="live sessions" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+			<h2 className="px-1 pt-1 font-medium text-muted-foreground text-xs">Active Sessions</h2>
+			<ol aria-label="Active Sessions" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
 				{threads.map((thread) => {
 					const active = thread.threadId === activeThreadId;
 					return (
@@ -125,7 +125,7 @@ export function SessionsRail({
 									</span>
 								) : null}
 								<span className={cn("min-w-0 flex-1 truncate", thread.title === undefined ? "italic" : "")}>
-									{thread.title ?? UNTITLED_SESSION}
+									{thread.title ?? UNTITLED_THREAD}
 								</span>
 								<span className="shrink-0 tabular-nums" title={thread.lastActivityAt.toLocaleString()}>
 									{relativeAge(thread.lastActivityAt, now)}
@@ -135,18 +135,18 @@ export function SessionsRail({
 					);
 				})}
 			</ol>
-			<h2 className="px-1 pt-1 font-medium text-muted-foreground text-xs">earlier sessions</h2>
+			<h2 className="px-1 pt-1 font-medium text-muted-foreground text-xs">Previous Sessions</h2>
 			{earlierError !== undefined ? (
 				<div role="alert" className="px-2 text-destructive text-xs">
-					could not list sessions: {earlierError}
+					could not list previous sessions: {earlierError}
 				</div>
 			) : null}
-			<ol aria-label="earlier sessions" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+			<ol aria-label="Previous Sessions" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
 				{earlier.length === 0 && earlierError === undefined ? (
 					<li className="px-2 py-1.5 text-muted-foreground text-xs italic">none yet</li>
 				) : null}
 				{earlier.map((session) => (
-					<EarlierSessionRow key={session.threadId} session={session} now={now} onResume={onResume} />
+					<EarlierThreadRow key={session.threadId} session={session} now={now} onResume={onResume} />
 				))}
 			</ol>
 		</nav>

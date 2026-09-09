@@ -11,7 +11,7 @@ import {
 import type { AgentHost } from "../host/agent-host.ts";
 import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
 import { SSE_HEADERS, startSseKeepalive } from "./sse.ts";
-import type { ThreadFeedFrame, ThreadSessions } from "./thread-sessions.ts";
+import type { ThreadFeedFrame, ThreadRegistry } from "./thread-registry.ts";
 
 /**
  * The prompt/follow split (#112) — the server↔browser wire.
@@ -43,7 +43,7 @@ import type { ThreadFeedFrame, ThreadSessions } from "./thread-sessions.ts";
  */
 
 export interface FollowRouteDeps {
-	readonly threads: ThreadSessions;
+	readonly threads: ThreadRegistry;
 	readonly host: AgentHost;
 	readonly sseKeepaliveMs: number;
 	readonly onProblem: ((problem: unknown) => void) | undefined;
@@ -68,7 +68,7 @@ function slashCommandName(prompt: string): string | undefined {
  * Write one frame, recording it into the thread's sent tail (#97) when the thread is live
  * — the one place every frame crosses to a browser, so the record and the wire agree.
  */
-function writeFrame(threads: ThreadSessions, threadId: string, response: ServerResponse, frame: ZenFollowFrame): void {
+function writeFrame(threads: ThreadRegistry, threadId: string, response: ServerResponse, frame: ZenFollowFrame): void {
 	const name = frame.type === "observation" ? frame.observation.kind : undefined;
 	threads.peek(threadId)?.sent.record(frame.type, name, "sent");
 	response.write(`data: ${JSON.stringify(frame)}\n\n`);
