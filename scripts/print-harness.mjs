@@ -33,7 +33,14 @@ const PICC_EXTENSION_FRAGMENT = "picc-permission-modes";
 /** The one real file in the variant; everything else is a symlink into the package. */
 const MANIFEST_FILENAME = "package.json";
 
+/**
+ * The harness `package.json` as this filter reads it: the pi manifest block, and everything
+ * else carried verbatim. Only `pi.extensions` is examined.
+ * @typedef {{ name?: string, pi?: { extensions?: unknown, skills?: unknown, prompts?: unknown, themes?: unknown }, [key: string]: unknown }} HarnessManifest
+ */
+
 export class PrintHarnessShapeError extends Error {
+	/** @param {string} detail */
 	constructor(detail) {
 		super(
 			`print-harness: the harness manifest no longer matches the shape this filter ` +
@@ -47,6 +54,8 @@ export class PrintHarnessShapeError extends Error {
 /**
  * The harness manifest with picc-permission-modes removed from `pi.extensions`.
  * Everything else — skills, prompts, themes, dependencies — is carried verbatim.
+ * @param {HarnessManifest} manifest
+ * @returns {HarnessManifest & { pi: NonNullable<HarnessManifest["pi"]> & { extensions: string[] } }}
  */
 export function buildPrintManifest(manifest) {
 	const extensions = manifest?.pi?.extensions;
@@ -75,6 +84,9 @@ export function buildPrintManifest(manifest) {
  * — links are recreated every launch (a moved repo heals), and entries the harness no
  * longer has are REMOVED (a renamed or deleted sibling does not leave a dead link that pi
  * would skip in silence). Returns the directory to pass to `-e`.
+ * @param {string} printHarnessDir
+ * @param {string} harnessPackageRoot
+ * @param {HarnessManifest} printManifest
  */
 export function materializePrintHarness(printHarnessDir, harnessPackageRoot, printManifest) {
 	mkdirSync(printHarnessDir, { recursive: true });

@@ -24,11 +24,18 @@
 // The row formats are core's, shared with the drawer: one definition, so the two views cannot drift.
 import { describeSessionEntry, threadEventColumns } from "../packages/core/src/index.ts";
 
+/** @import { ZenThreadEvent, ZenThreadEvents, ZenThreadInspection, ZenThreadSummary } from "../packages/core/src/index.ts" */
+
 const serverUrl = process.env.ZEN_SERVER_URL ?? "http://127.0.0.1:5179";
 const [threadId, ...flags] = process.argv.slice(2);
 const wantsJson = flags.includes("--json");
 const wantsEvents = flags.includes("--events");
 
+/**
+ * @template T
+ * @param {string} path
+ * @returns {Promise<T>}
+ */
 async function fetchJson(path) {
 	let response;
 	try {
@@ -41,10 +48,11 @@ async function fetchJson(path) {
 		console.error(`zen-session: ${response.status} ${await response.text()}`);
 		process.exit(1);
 	}
-	return response.json();
+	return /** @type {Promise<T>} */ (response.json());
 }
 
 if (threadId === undefined) {
+	/** @type {ZenThreadSummary[]} */
 	const threads = await fetchJson("/api/threads");
 	if (threads.length === 0) {
 		console.log("no live threads — nothing has run since the server started, or every session idled out");
@@ -59,13 +67,17 @@ if (threadId === undefined) {
 	process.exit(0);
 }
 
-/** The drawer's row, as a table: the provenance column padded so `held`/`dropped` line up down the page. */
+/**
+ * The drawer's row, as a table: the provenance column padded so `held`/`dropped` line up down the page.
+ * @param {ZenThreadEvent} event
+ */
 function describeThreadEvent(event) {
 	const columns = threadEventColumns(event);
 	return `${columns.when}  ${columns.provenance.padEnd(12)} ${columns.subject}`;
 }
 
 if (wantsEvents) {
+	/** @type {ZenThreadEvents} */
 	const events = await fetchJson(`/api/threads/${encodeURIComponent(threadId)}/events`);
 	if (wantsJson) {
 		console.log(JSON.stringify(events, null, 2));
@@ -79,6 +91,7 @@ if (wantsEvents) {
 	process.exit(0);
 }
 
+/** @type {ZenThreadInspection} */
 const inspection = await fetchJson(`/api/threads/${encodeURIComponent(threadId)}`);
 if (wantsJson) {
 	console.log(JSON.stringify(inspection, null, 2));

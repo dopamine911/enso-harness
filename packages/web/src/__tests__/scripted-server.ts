@@ -1,4 +1,11 @@
-import type { ZenFollowFrame, ZenFollowSnapshot, ZenStoredThread, ZenThreadHistory } from "@zen/core";
+import type {
+	ZenFollowFrame,
+	ZenFollowSnapshot,
+	ZenStoredThread,
+	ZenThreadEvents,
+	ZenThreadHistory,
+	ZenThreadInspection,
+} from "@zen/core";
 
 /**
  * A scripted server behind `fetch` (#112, #118): one follow body the test writes SSE frames
@@ -32,6 +39,13 @@ export interface ScriptedFetchOptions {
 	readonly storedThreads?: ZenStoredThread[];
 	/** What `GET /api/threads/:id/history` answers for a resume click; keyed by thread id. */
 	readonly histories?: Record<string, ZenThreadHistory>;
+	/**
+	 * What the debug pane's two reads answer — `GET /api/threads/:id` and `…/events` (#86). One
+	 * inspection for every thread id (the pane compares it with the page's belief, so a test
+	 * scripts the disagreement it wants); 404 when absent, the pane's "no live session yet".
+	 */
+	readonly inspection?: Omit<ZenThreadInspection, "threadId" | "sessionId">;
+	readonly events?: Omit<ZenThreadEvents, "threadId">;
 }
 
 export function createScriptedFetch(options: ScriptedFetchOptions = {}): ScriptedFetch {
@@ -65,9 +79,22 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
 		if (path === "/api/mode") return Response.json(mode);
 		if (path === "/api/stored-threads") return Response.json(options.storedThreads ?? []);
 		const history = /^\/api\/threads\/([^/]+)\/history$/.exec(path);
-		if (history?.[1] === undefined) return undefined;
-		const found = options.histories?.[decodeURIComponent(history[1])];
-		return found === undefined ? new Response("no such thread", { status: 404 }) : Response.json(found);
+		if (history?.[1] !== undefined) {
+			const found = options.histories?.[decodeURIComponent(history[1])];
+			return found === undefined ? new Response("no such thread", { status: 404 }) : Response.json(found);
+		}
+		const events = /^\/api\/threads\/([^/]+)\/events$/.exec(path);
+		if (events?.[1] !== undefined) {
+			const threadId = decodeURIComponent(events[1]);
+			return Response.json({ threadId, emitted: [], sent: [], ...options.events });
+		}
+		const inspection = /^\/api\/threads\/([^/]+)$/.exec(path);
+		if (inspection?.[1] !== undefined) {
+			if (options.inspection === undefined) return new Response("no live session for thread", { status: 404 });
+			const threadId = decodeURIComponent(inspection[1]);
+			return Response.json({ threadId, sessionId: threadId, ...options.inspection });
+		}
+		return undefined;
 	};
 	/** A thread route's last segment — `/api/threads/<id>/<action>` — or undefined for anything else. */
 	const threadAction = (path: string): string | undefined => /^\/api\/threads\/[^/]+\/([^/]+)$/.exec(path)?.[1];
