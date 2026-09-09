@@ -132,6 +132,15 @@ export function printHarnessDir(repoRoot: string): string {
 	return join(repoRoot, ZEN_RUNTIME_DIRECTORY, "print-harness");
 }
 
+/**
+ * Where every process's log file lives (#132): `.zen/logs/<layer>.jsonl`, one file per
+ * process — the server and pi's process (our extensions) never share a rotating file. Under
+ * `.zen/` so bun never autoloads from it and the write gate already knows it (guard.ts).
+ */
+export function zenLogsDir(repoRoot: string): string {
+	return join(repoRoot, ZEN_RUNTIME_DIRECTORY, "logs");
+}
+
 /** The harness package — the directory `zen.mjs` hands to pi's `-e`. */
 export function harnessPackageDir(repoRoot: string): string {
 	return join(repoRoot, "packages", "harness");

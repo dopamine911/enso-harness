@@ -7,11 +7,13 @@ import {
 	PICC_PERMISSION_MODES,
 	type PiDialogResponse,
 	persistedPermissionMode,
+	withZenLogContext,
 	type ZenStoredThread,
 	type ZenThreadEvents,
 	type ZenThreadHistory,
 	type ZenThreadInspection,
 	type ZenThreadSummary,
+	zenLogger,
 } from "@zen/core";
 import { type AgentHost, createAgentHost } from "../host/agent-host.ts";
 import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
@@ -54,6 +56,8 @@ const THREAD_ABORT_ROUTE = /^\/api\/threads\/([^/?#]+)\/abort$/;
  */
 const DEFAULT_PORT = 5179;
 const LOOPBACK_ONLY = "127.0.0.1";
+
+const log = zenLogger("server", "http");
 
 function readBody(request: IncomingMessage): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -106,8 +110,6 @@ export interface ZenServerOptions {
 	/** Scratch config dir for pi, so the operator's own packages stay invisible. */
 	agentDir: string;
 	port?: number;
-	/** Notified for anything worth an operator's attention. Never swallowed. */
-	onProblem?: (problem: unknown) => void;
 	/**
 	 * The pi host to use instead of building one from `cwd` / `agentDir` /
 	 * `harnessPackageDir`. ⓘ Exists for `__tests__/server-handler.test.ts` (#76): a fake host
@@ -190,11 +192,9 @@ export function startZenServer(options: ZenServerOptions) {
 			cwd: options.cwd,
 			agentDir: options.agentDir,
 			harnessPackageDir: options.harnessPackageDir,
-			onProblem: options.onProblem,
 		});
 	const threads = createThreadRegistry({
 		createSession: (threadId) => host.createSession(threadId),
-		onProblem: options.onProblem,
 	});
 
 	// The permission mode a FRESH thread starts in (#84). The browser asks once on mount,
@@ -311,7 +311,7 @@ export function startZenServer(options: ZenServerOptions) {
 	 */
 	function answerOrFail(work: Promise<void>, response: ServerResponse): void {
 		work.catch((error: unknown) => {
-			options.onProblem?.(error);
+			log.error("a handler failed: {error}", { error });
 			if (!response.headersSent) response.writeHead(500, { "Content-Type": "text/plain" });
 			response.end("the session listing failed — see the server log");
 		});
@@ -343,7 +343,7 @@ export function startZenServer(options: ZenServerOptions) {
 	}
 
 	// ── The wire (#112): prompt / follow / dialog ────────────────────────────────────
-	const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs, onProblem: options.onProblem };
+	const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs };
 
 	/** The thread routes; true when the request was one of them. A bad body is a 400 here, never a throw. */
 	function dispatchFollowRoutes(request: IncomingMessage, response: ServerResponse): boolean {
@@ -351,25 +351,31 @@ export function startZenServer(options: ZenServerOptions) {
 		const followMatch = request.method === "GET" ? THREAD_FOLLOW_ROUTE.exec(url) : null;
 		if (followMatch?.[1] !== undefined) {
 			const threadId = decodeThreadId(followMatch[1], response);
-			if (threadId !== undefined) answerOrFail(followThread(followDeps, threadId, response), response);
+			if (threadId !== undefined) {
+				withZenLogContext({ threadId }, () => answerOrFail(followThread(followDeps, threadId, response), response));
+			}
 			return true;
 		}
 		const promptMatch = request.method === "POST" ? THREAD_PROMPT_ROUTE.exec(url) : null;
 		if (promptMatch?.[1] !== undefined) {
 			const threadId = decodeThreadId(promptMatch[1], response);
-			if (threadId !== undefined) answerOrFail(respondToPrompt(threadId, request, response), response);
+			if (threadId !== undefined) {
+				withZenLogContext({ threadId }, () => answerOrFail(respondToPrompt(threadId, request, response), response));
+			}
 			return true;
 		}
 		const dialogMatch = request.method === "POST" ? THREAD_DIALOG_ROUTE.exec(url) : null;
 		if (dialogMatch?.[1] !== undefined) {
 			const threadId = decodeThreadId(dialogMatch[1], response);
-			if (threadId !== undefined) answerOrFail(respondToDialog(threadId, request, response), response);
+			if (threadId !== undefined) {
+				withZenLogContext({ threadId }, () => answerOrFail(respondToDialog(threadId, request, response), response));
+			}
 			return true;
 		}
 		const abortMatch = request.method === "POST" ? THREAD_ABORT_ROUTE.exec(url) : null;
 		if (abortMatch?.[1] !== undefined) {
 			const threadId = decodeThreadId(abortMatch[1], response);
-			if (threadId !== undefined) respondToAbort(threadId, response);
+			if (threadId !== undefined) withZenLogContext({ threadId }, () => respondToAbort(threadId, response));
 			return true;
 		}
 		return false;
@@ -386,10 +392,19 @@ export function startZenServer(options: ZenServerOptions) {
 		}
 		const outcome = await promptThread(followDeps, threadId, body);
 		if (outcome.status === 400) {
+			log.warn("prompt refused: {reason}", { threadId, reason: outcome.reason });
 			response.writeHead(400, { "Content-Type": "text/plain" });
 			response.end(outcome.reason);
 			return;
 		}
+		const { messageId, generation, queued } = outcome.receipt;
+		log.info("prompt {messageId} {admission} on run {generation}", {
+			threadId,
+			messageId,
+			generation,
+			admission: queued ? "queued" : "opened",
+			streamingBehavior: body.streamingBehavior,
+		});
 		response.writeHead(202, { "Content-Type": "application/json" });
 		response.end(JSON.stringify(outcome.receipt));
 	}
@@ -398,10 +413,15 @@ export function startZenServer(options: ZenServerOptions) {
 	function respondToAbort(threadId: string, response: ServerResponse): void {
 		const outcome = abortThread(followDeps, threadId);
 		if (outcome.status !== 200) {
+			log.warn("abort refused ({status}): {reason}", { threadId, status: outcome.status, reason: outcome.reason });
 			response.writeHead(outcome.status, { "Content-Type": "text/plain" });
 			response.end(outcome.reason);
 			return;
 		}
+		log.info("abort: queue of {restored} restored to the caller", {
+			threadId,
+			restored: outcome.receipt.restored.length,
+		});
 		response.writeHead(200, { "Content-Type": "application/json" });
 		response.end(JSON.stringify(outcome.receipt));
 	}
@@ -417,10 +437,17 @@ export function startZenServer(options: ZenServerOptions) {
 		}
 		const outcome = answerThreadDialog(followDeps, threadId, answer);
 		if (outcome.status !== 204) {
+			log.warn("dialog {dialogId} answer refused ({status}): {reason}", {
+				threadId,
+				dialogId: answer.id,
+				status: outcome.status,
+				reason: outcome.reason,
+			});
 			response.writeHead(outcome.status, { "Content-Type": "text/plain" });
 			response.end(outcome.reason);
 			return;
 		}
+		log.info("dialog {dialogId} answered", { threadId, dialogId: answer.id });
 		response.writeHead(204);
 		response.end();
 	}
@@ -480,13 +507,15 @@ export function startZenServer(options: ZenServerOptions) {
 	// and it cost a minute of reading a trace to learn a one-line fact.
 	server.on("error", (error: NodeJS.ErrnoException) => {
 		if (error.code === "EADDRINUSE") {
-			options.onProblem?.(
-				`port ${port} is already in use — another zen server is probably running. ` +
-					`Stop it, or pass a different port.`,
+			log.error(
+				"port {port} is already in use — another zen server is probably running; stop it, or pass a different port",
+				{
+					port,
+				},
 			);
 			return;
 		}
-		options.onProblem?.(error);
+		log.error("server error: {error}", { error });
 	});
 
 	// Resolves with the URL of the port the OS actually bound — the same as `url` unless the
@@ -500,7 +529,7 @@ export function startZenServer(options: ZenServerOptions) {
 		// A bind failure emits 'error' (handled above), never 'listening'. Under Bun the
 		// 'listening' event does not re-fire afterwards, so without this the promise would
 		// hang forever and any `await listening` caller (dev.ts) would dangle silently. The
-		// onProblem handler already reported the cause; this only settles the wait.
+		// 'error' handler already logged the cause; this only settles the wait.
 		server.once("error", reject);
 	});
 	server.listen(port, LOOPBACK_ONLY);

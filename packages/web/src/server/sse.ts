@@ -1,10 +1,13 @@
 import type { ServerResponse } from "node:http";
+import { zenLogger } from "@zen/core";
 
 /**
  * The SSE plumbing every streaming route shares: the response headers and the keepalive.
  * Lifted out of `index.ts` so the follow route (SPIKE #109) can use them without importing
  * the dispatcher.
  */
+
+const log = zenLogger("server", "sse");
 
 export const SSE_HEADERS = {
 	"Content-Type": "text/event-stream",
@@ -43,11 +46,7 @@ export const SSE_KEEPALIVE_MS = 5000;
  * that finds the response gone stops itself instead of writing, and an `'error'` on the
  * response is reported rather than thrown.
  */
-export function startSseKeepalive(
-	response: ServerResponse,
-	intervalMs: number,
-	onProblem: ((problem: unknown) => void) | undefined,
-): () => void {
+export function startSseKeepalive(response: ServerResponse, intervalMs: number): () => void {
 	const timer = setInterval(() => {
 		if (response.destroyed || response.writableEnded) {
 			clearInterval(timer);
@@ -58,6 +57,6 @@ export function startSseKeepalive(
 	timer.unref?.();
 	const stop = (): void => clearInterval(timer);
 	response.once("close", stop);
-	response.on("error", (error) => onProblem?.(`SSE response error after the client left: ${String(error)}`));
+	response.on("error", (error: unknown) => log.warn("SSE response error after the client left: {error}", { error }));
 	return stop;
 }

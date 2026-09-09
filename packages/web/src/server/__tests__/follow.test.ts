@@ -1,7 +1,8 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { LogRecorder } from "@logtape/testing/recorder";
 import {
 	isZenDialogSpec,
 	type PiDialogResponse,
@@ -13,6 +14,7 @@ import {
 	type ZenDialogSpec,
 	type ZenFollowFrame,
 } from "@zen/core";
+import { recordZenLogs, releaseZenLogs } from "../../__tests__/log-recorder.ts";
 import type { AgentHost, HostedSession } from "../../host/agent-host.ts";
 import { startZenServer } from "../index.ts";
 import { type OpenFollow, openFollow as openSharedFollow } from "./follow-reader.ts";
@@ -137,6 +139,13 @@ afterEach(async () => {
 	for (const started of openServers.splice(0)) await started.close();
 });
 
+let logs: LogRecorder;
+beforeAll(async () => {
+	logs = await recordZenLogs();
+});
+beforeEach(() => logs.clear());
+afterAll(releaseZenLogs);
+
 async function startWith(fake: FakeHost, sseKeepaliveMs = 1000) {
 	const started = startZenServer({
 		cwd: tmpdir(),
@@ -197,6 +206,12 @@ test("prompt answers at admission with a message id; the run is released by pi's
 	expect(admitted.status).toBe(202);
 	expect(admitted.body).toMatchObject({ threadId: "t1", generation: 1, queued: false });
 	expect(typeof admitted.body.messageId).toBe("string");
+	// The admission is a record (#132): the same ids as the receipt, so a bundle joins them.
+	logs.assertLogged({
+		level: "info",
+		rawMessage: "prompt {messageId} {admission} on run {generation}",
+		properties: { threadId: "t1", messageId: admitted.body.messageId, generation: 1, admission: "opened" },
+	});
 	// Nothing has been emitted yet, and the prompt has already been answered.
 	expect(fake.built[0]?.prompts.map((request) => request.message)).toEqual(["hello"]);
 	expect(await threadSummary(url, "t1")).toMatchObject({ busy: true, generation: 1 });
@@ -240,6 +255,9 @@ test("⚠ POST …/abort tells pi once and answers with the restored queue; the 
 	expect(told.status).toBe(200);
 	expect(await told.json()).toEqual({ threadId: "t1", restored: ["wait — stop at the tests", "then this"] });
 	expect(built.aborts).toBe(1);
+	// Both outcomes are records: the 404 above named its thread; the stop names what it handed back.
+	logs.assertLogged({ level: "warning", rawMessage: /^abort refused/, properties: { threadId: "never", status: 404 } });
+	logs.assertLogged({ level: "info", rawMessage: /^abort: queue of/, properties: { threadId: "t1", restored: 2 } });
 	expect(built.queue).toEqual({ steering: [], followUp: [] });
 	// The route released nothing: the thread is still busy until pi's own settle arrives.
 	expect(await threadSummary(url, "t1")).toMatchObject({ busy: true, generation: 1 });

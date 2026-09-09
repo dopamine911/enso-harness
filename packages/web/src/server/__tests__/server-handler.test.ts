@@ -1,7 +1,8 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { LogRecorder } from "@logtape/testing/recorder";
 import {
 	type PiEventDelivery,
 	type PiPromptOutcome,
@@ -14,10 +15,18 @@ import {
 	ZenThreadSummary,
 } from "@zen/core";
 import { Check } from "typebox/value";
+import { recordZenLogs, releaseZenLogs } from "../../__tests__/log-recorder.ts";
 import type { AgentHost, HostedSession, HostedSessionInspection } from "../../host/agent-host.ts";
 import { createEventTail, describePiRpcEvent } from "../../host/event-tail.ts";
 import { startZenServer } from "../index.ts";
 import { openFollow } from "./follow-reader.ts";
+
+let logs: LogRecorder;
+beforeAll(async () => {
+	logs = await recordZenLogs();
+});
+beforeEach(() => logs.clear());
+afterAll(releaseZenLogs);
 
 /**
  * The server's routes beside the wire, over real HTTP (#76, #86, #95, #97): what the
@@ -470,17 +479,15 @@ test("⚠ a bind conflict rejects `listening` instead of hanging, and reports th
 
 	// Asking for the same port must not dangle: before the fix `listening` never settled
 	// (Bun does not re-fire 'listening' after an 'error'), so `await listening` hung forever.
-	// Now it rejects, and the human-readable clash still reaches `onProblem`.
-	const problems: unknown[] = [];
+	// Now it rejects, and the human-readable clash is still logged, naming the port.
 	const second = startZenServer({
 		cwd: tmpdir(),
 		harnessPackageDir: emptyHarnessDir(),
 		agentDir: mkdtempSync(join(tmpdir(), "zen-handler-agent-")),
 		port: occupied,
 		host,
-		onProblem: (problem) => problems.push(problem),
 	});
 	openServers.push(second);
 	await expect(second.listening).rejects.toThrow();
-	expect(problems.some((problem) => typeof problem === "string" && problem.includes("already in use"))).toBe(true);
+	logs.assertLogged({ level: "error", message: /already in use/, properties: { port: occupied } });
 });

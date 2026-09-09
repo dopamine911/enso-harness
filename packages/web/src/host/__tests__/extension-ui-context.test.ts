@@ -1,5 +1,7 @@
-import { beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import type { LogRecorder } from "@logtape/testing/recorder";
 import type { PiRpcEvent } from "@zen/core";
+import { recordZenLogs, releaseZenLogs } from "../../__tests__/log-recorder.ts";
 import { type CustomComponentFactory, createZenExtensionUiContext } from "../extension-ui-context.ts";
 import { PICC_PERMISSION_DIALOG_MODULE } from "../permission-dialog.ts";
 
@@ -10,20 +12,28 @@ import { PICC_PERMISSION_DIALOG_MODULE } from "../permission-dialog.ts";
  * surface is inert — pi's rpc mode's behaviour, which extensions already tolerate.
  */
 
+let logs: LogRecorder;
+beforeAll(async () => {
+	logs = await recordZenLogs();
+});
+beforeEach(() => logs.clear());
+afterAll(releaseZenLogs);
+
+const THREAD = "t-ui";
+
 function contextUnderTest() {
 	/** Every record the host emits — requests, settles (#114), fire-and-forget. */
 	const events: PiRpcEvent[] = [];
 	/** The blocking/notify requests alone, so a test can name "the second question" without counting settles. */
 	const requests: PiRpcEvent[] = [];
-	const problems: unknown[] = [];
 	const context = createZenExtensionUiContext({
 		emit: (event) => {
 			events.push(event);
 			if (event.type === "extension_ui_request") requests.push(event);
 		},
-		onProblem: (problem) => problems.push(problem),
+		threadId: THREAD,
 	});
-	return { ...context, events, requests, problems };
+	return { ...context, events, requests };
 }
 
 const requestId = (event: PiRpcEvent | undefined) => String(event?.id);
@@ -122,7 +132,7 @@ test("the caller's abort signal and timeout both resolve to the cancel value, ea
 });
 
 test("cancelAllDialogs settles every pending dialog as cancelled; a second answer is reported, not applied", async () => {
-	const { uiContext, answerDialog, cancelAllDialogs, requests, events, problems } = contextUnderTest();
+	const { uiContext, answerDialog, cancelAllDialogs, requests, events } = contextUnderTest();
 	const a = uiContext.select("A", ["x"]);
 	const b = uiContext.input("B");
 	cancelAllDialogs();
@@ -130,8 +140,12 @@ test("cancelAllDialogs settles every pending dialog as cancelled; a second answe
 	expect(await b).toBeUndefined();
 	expect(settles(events).map((settle) => settle.outcome)).toEqual(["cancelled", "cancelled"]);
 	answerDialog({ id: requestId(requests[0]), value: "x" });
-	expect(problems).toHaveLength(1);
-	expect(String(problems[0])).toContain(requestId(requests[0]));
+	expect(logs.records).toHaveLength(1);
+	logs.assertLogged({
+		level: "warning",
+		rawMessage: /^dialog answer for unknown request id/,
+		properties: { threadId: THREAD, dialogId: requestId(requests[0]) },
+	});
 });
 
 test("fire-and-forget methods emit the rpc-shaped record and return immediately", () => {
@@ -255,20 +269,23 @@ test("cancelling the lifted prompt resolves picc's 'dismissed' value; a non-picc
 
 // ⚠ The catch that exists so a picc module that fails to load can never silently reopen #73:
 // the extension is released with "dismissed", the operator is told why, no request is emitted.
-test("⚠ a lift that rejects (picc's module did not load) fails closed: undefined to the extension, a report to onProblem, no request", async () => {
+test("⚠ a lift that rejects (picc's module did not load) fails closed: undefined to the extension, an error logged, no request", async () => {
 	const events: PiRpcEvent[] = [];
-	const problems: unknown[] = [];
 	const { uiContext } = createZenExtensionUiContext({
 		emit: (event) => events.push(event),
-		onProblem: (problem) => problems.push(problem),
+		threadId: THREAD,
 		liftDialog: () => Promise.reject(new Error("Cannot find module filePermissionDialog.ts")),
 	});
 	const answer = await uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT));
 	expect(answer).toBeUndefined();
 	expect(events).toEqual([]);
-	expect(problems).toHaveLength(1);
-	expect(String(problems[0])).toContain("#73");
-	expect(String(problems[0])).toContain("Cannot find module");
+	expect(logs.records).toHaveLength(1);
+	logs.assertLogged({
+		level: "error",
+		rawMessage: /#73/,
+		properties: (properties) =>
+			properties.threadId === THREAD && String(properties.error).includes("Cannot find module"),
+	});
 });
 
 test("a factory that resolves no component degrades to undefined instead of throwing on dispose", async () => {
@@ -283,7 +300,7 @@ test("a factory that resolves no component degrades to undefined instead of thro
 // once. Building against the inert terminal must not take that away (Codex, PR #107): a factory
 // that throws, rejects, or never produces a component falls back the same way, with a report.
 test("⚠ a factory that throws or rejects against the inert terminal falls back to undefined, reported, no request", async () => {
-	const { uiContext, events, problems } = contextUnderTest();
+	const { uiContext, events } = contextUnderTest();
 	const throwing = (() => {
 		throw new Error("tui.requestRender is not a function");
 	}) as unknown as CustomComponentFactory<unknown>;
@@ -291,27 +308,31 @@ test("⚠ a factory that throws or rejects against the inert terminal falls back
 	const rejecting = (() => Promise.reject(new Error("no terminal"))) as unknown as CustomComponentFactory<unknown>;
 	expect(await uiContext.custom(rejecting)).toBeUndefined();
 	expect(events).toEqual([]);
-	expect(problems.map(String).every((problem) => problem.includes("resolving undefined"))).toBe(true);
-	expect(problems).toHaveLength(2);
+	expect(
+		logs.filter({ level: "warning", rawMessage: /resolving undefined/, properties: { threadId: THREAD } }),
+	).toHaveLength(2);
+	expect(logs.records).toHaveLength(2);
 });
 
 test("⚠ an async factory that never produces a component is cut off at the build budget, not awaited forever", async () => {
 	const events: PiRpcEvent[] = [];
-	const problems: unknown[] = [];
 	const { uiContext } = createZenExtensionUiContext({
 		emit: (event) => events.push(event),
-		onProblem: (problem) => problems.push(problem),
+		threadId: THREAD,
 		// The code's own timer with a tiny budget — the test awaits the promise it exposes, not a sleep.
 		componentBuildTimeoutMs: 1,
 	});
 	const waitingOnATerminal = (() => new Promise(() => undefined)) as unknown as CustomComponentFactory<unknown>;
 	expect(await uiContext.custom(waitingOnATerminal)).toBeUndefined();
 	expect(events).toEqual([]);
-	expect(String(problems[0])).toContain("no component within 1 ms");
+	logs.assertLogged({
+		level: "warning",
+		properties: (properties) => String(properties.error).includes("no component within 1 ms"),
+	});
 });
 
 test("a component whose dispose() throws is reported, not propagated — the call still resolves undefined", async () => {
-	const { uiContext, problems } = contextUnderTest();
+	const { uiContext } = contextUnderTest();
 	const component = {
 		render: () => [],
 		invalidate: () => undefined,
@@ -320,7 +341,11 @@ test("a component whose dispose() throws is reported, not propagated — the cal
 		},
 	};
 	expect(await uiContext.custom(() => component)).toBeUndefined();
-	expect(String(problems[0])).toContain("dispose() threw");
+	logs.assertLogged({
+		level: "warning",
+		rawMessage: /dispose\(\) threw/,
+		properties: (properties) => properties.threadId === THREAD && String(properties.error).includes("dispose exploded"),
+	});
 });
 
 test("a component that arrives after the build budget is disposed on arrival, since nobody will ever see it", async () => {
@@ -328,7 +353,7 @@ test("a component that arrives after the build budget is disposed on arrival, si
 	let disposed = 0;
 	const { uiContext } = createZenExtensionUiContext({
 		emit: () => undefined,
-		onProblem: () => undefined,
+		threadId: THREAD,
 		componentBuildTimeoutMs: 1,
 	});
 	expect(await uiContext.custom(() => late.promise)).toBeUndefined();
