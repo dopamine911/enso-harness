@@ -162,7 +162,7 @@ function writeDialogResponse(session: PiSession, response: PiDialogResponse): vo
 }
 
 /** Leading token of a slash input, without the slash. `/mode auto` -> `mode`. */
-function slashCommandName(prompt: string): string | undefined {
+export function slashCommandName(prompt: string): string | undefined {
 	if (!prompt.startsWith("/")) return undefined;
 	const name = prompt.slice(1).trimEnd().split(/\s/)[0];
 	return name === undefined || name.length === 0 ? undefined : name;

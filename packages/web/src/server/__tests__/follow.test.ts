@@ -1,0 +1,354 @@
+import { afterEach, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type {
+	PiDialogResponse,
+	PiEventDelivery,
+	PiPromptOutcome,
+	PiPromptRequest,
+	PiRpcEvent,
+	PiSession,
+} from "@zen/core";
+import type { AgentHost, HostedSession } from "../../host/agent-host.ts";
+import type { ZenFollowFrame } from "../follow.ts";
+import { startZenServer } from "../index.ts";
+
+/**
+ * SPIKE #109 — THE RECEIPT. Each test is one measurement of what deepseek-harness's
+ * prompt/follow split changes for this server, over the same fake host
+ * `server-handler.test.ts` drives the run path with. Read the test names as the findings.
+ *
+ * The fake's `emit` is exposed to the test, so every scenario advances by emitting the pi
+ * event that would arrive and awaiting the frame it produces — never a guessed delay.
+ */
+
+interface FakeRecord {
+	prompts: PiPromptRequest[];
+	answers: PiDialogResponse[];
+	aborts: number;
+	disposed: number;
+}
+
+interface FakeHost {
+	readonly host: AgentHost;
+	readonly built: FakeRecord[];
+	/** Emit into the LAST built session — every scenario here uses one thread. */
+	readonly emit: (event: PiRpcEvent) => void;
+	/** Fire the last prompt's acceptance (a slash command's completion signal). */
+	readonly accept: () => void;
+}
+
+function fakeHost(commands: string[] = ["mode"]): FakeHost {
+	const built: FakeRecord[] = [];
+	let emit: (event: PiRpcEvent) => void = () => undefined;
+	let accept: () => void = () => undefined;
+	const host: AgentHost = {
+		createSession: () => {
+			const listeners = new Set<(event: PiRpcEvent, delivery: PiEventDelivery) => void>();
+			const record: FakeRecord = { prompts: [], answers: [], aborts: 0, disposed: 0 };
+			built.push(record);
+			emit = (event) => {
+				for (const listener of listeners) listener(event, "live");
+			};
+			const session: PiSession = {
+				prompt: (request: PiPromptRequest, outcome: PiPromptOutcome) => {
+					record.prompts.push(request);
+					accept = () => outcome.onAccepted();
+				},
+				answerDialog: (response) => {
+					record.answers.push(response);
+				},
+				listCommands: () => commands.map((name) => ({ name, source: "extension" as const })),
+				permissionModeState: () => ({ mode: "default", available: ["default", "plan"] }),
+				subscribe: (onEvent) => {
+					listeners.add(onEvent);
+					return () => {
+						listeners.delete(onEvent);
+					};
+				},
+				abort: () => {
+					record.aborts += 1;
+					return Promise.resolve();
+				},
+				dispose: () => {
+					record.disposed += 1;
+				},
+			};
+			const hosted: HostedSession = {
+				session,
+				loadedExtensionPaths: [],
+				inspect: () => ({ sessionId: "s1", cwd: "/", sessionDir: "/s", sessionFile: null, entries: [], commands }),
+				emittedEvents: () => [],
+			};
+			return Promise.resolve(hosted);
+		},
+		listSessions: () => Promise.resolve([]),
+		readBranch: () => Promise.resolve(undefined),
+	};
+	return { host, built, emit: (event) => emit(event), accept: () => accept() };
+}
+
+function emptyHarnessDir(): string {
+	const directory = mkdtempSync(join(tmpdir(), "zen-follow-harness-"));
+	mkdirSync(directory, { recursive: true });
+	writeFileSync(join(directory, "package.json"), JSON.stringify({ name: "fake-harness", pi: {} }));
+	return directory;
+}
+
+const openServers: Array<{ close: () => Promise<void> }> = [];
+/** Every follow a test opened — aborted first, or a failed assertion leaves `server.close()` waiting on it. */
+const openFollows: AbortController[] = [];
+afterEach(async () => {
+	for (const follow of openFollows.splice(0)) follow.abort();
+	for (const started of openServers.splice(0)) await started.close();
+});
+
+async function startWith(fake: FakeHost, sseKeepaliveMs = 1000) {
+	const started = startZenServer({
+		cwd: tmpdir(),
+		harnessPackageDir: emptyHarnessDir(),
+		agentDir: mkdtempSync(join(tmpdir(), "zen-follow-agent-")),
+		port: 0,
+		host: fake.host,
+		sseKeepaliveMs,
+	});
+	openServers.push(started);
+	return await started.listening;
+}
+
+/** A follow as the test reads it: frames and keepalive comments as they arrive, awaited by count. */
+interface OpenFollow {
+	readonly frames: ZenFollowFrame[];
+	readonly comments: () => number;
+	/** Resolves once at least `count` frames have arrived. */
+	readonly untilFrames: (count: number) => Promise<void>;
+	/** Resolves once at least `count` keepalive comments have arrived. */
+	readonly untilComments: (count: number) => Promise<void>;
+	readonly close: () => void;
+}
+
+async function openFollow(url: string, threadId: string): Promise<OpenFollow> {
+	const controller = new AbortController();
+	openFollows.push(controller);
+	const response = await fetch(`${url}/api/threads/${threadId}/follow`, { signal: controller.signal });
+	expect(response.status).toBe(200);
+	const frames: ZenFollowFrame[] = [];
+	let comments = 0;
+	const waiters: Array<() => void> = [];
+	const wake = (): void => {
+		for (const waiter of waiters.splice(0)) waiter();
+	};
+	const reader = response.body?.getReader();
+	if (reader === undefined) throw new Error("no body");
+	void (async () => {
+		const decoder = new TextDecoder();
+		let buffered = "";
+		try {
+			while (true) {
+				const { value, done } = await reader.read();
+				if (done) break;
+				buffered += decoder.decode(value, { stream: true });
+				const lines = buffered.split("\n");
+				buffered = lines.pop() ?? "";
+				for (const line of lines) {
+					if (line.startsWith("data: ")) frames.push(JSON.parse(line.slice("data: ".length)) as ZenFollowFrame);
+					else if (line.startsWith(":")) comments += 1;
+				}
+				wake();
+			}
+		} catch {
+			// the test closed the follow
+		}
+	})();
+	const until = (ready: () => boolean): Promise<void> => {
+		if (ready()) return Promise.resolve();
+		const { promise, resolve } = Promise.withResolvers<void>();
+		const check = (): void => {
+			if (ready()) resolve();
+			else waiters.push(check);
+		};
+		waiters.push(check);
+		return promise;
+	};
+	return {
+		frames,
+		comments: () => comments,
+		untilFrames: (count) => until(() => frames.length >= count),
+		untilComments: (count) => until(() => comments >= count),
+		close: () => controller.abort(),
+	};
+}
+
+async function prompt(url: string, threadId: string, message: string) {
+	const response = await fetch(`${url}/api/threads/${threadId}/prompt`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ message }),
+	});
+	return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+}
+
+async function threadSummary(url: string, threadId: string) {
+	const summaries = (await (await fetch(`${url}/api/threads`)).json()) as Array<Record<string, unknown>>;
+	return summaries.find((summary) => summary.threadId === threadId);
+}
+
+const SETTLED: PiRpcEvent = { type: "agent_settled" };
+const TEXT_DELTA: PiRpcEvent = {
+	type: "message_update",
+	assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "hi" },
+};
+const SELECT_DIALOG: PiRpcEvent = {
+	type: "extension_ui_request",
+	id: "d1",
+	method: "select",
+	title: "Pick",
+	options: ["a", "b"],
+};
+
+// ── 1. prompt is admission; the thread's own settle releases it ──────────────────────
+
+test("prompt answers at admission with a message id; the run is released by pi's settle, no HTTP response in between", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	const follow = await openFollow(url, "t1");
+	await follow.untilFrames(1);
+	// Observation preceded the first prompt: an empty snapshot, not a 404.
+	expect(follow.frames[0]).toMatchObject({ type: "snapshot", live: false, busy: false, generation: 0, messages: [] });
+
+	const admitted = await prompt(url, "t1", "hello");
+	expect(admitted.status).toBe(202);
+	expect(admitted.body).toMatchObject({ threadId: "t1", generation: 1, queued: false });
+	expect(typeof admitted.body.messageId).toBe("string");
+	// Nothing has been emitted yet, and the prompt has already been answered.
+	expect(fake.built[0]?.prompts.map((request) => request.message)).toEqual(["hello"]);
+	expect(await threadSummary(url, "t1")).toMatchObject({ busy: true, generation: 1 });
+
+	// The follow saw the thread come alive and get taken — status frames, in order.
+	await follow.untilFrames(3);
+	expect(follow.frames.slice(1)).toEqual([
+		{ type: "status", live: true, busy: false, generation: 0 },
+		{ type: "status", live: true, busy: true, generation: 1 },
+	]);
+
+	fake.emit(TEXT_DELTA);
+	fake.emit(SETTLED);
+	await follow.untilFrames(6);
+	expect(follow.frames.slice(3)).toEqual([
+		{ type: "observation", seq: 1, observation: expect.objectContaining({ kind: "text-delta" }) },
+		{ type: "observation", seq: 2, observation: { kind: "settled" } },
+		{ type: "status", live: true, busy: false, generation: 1 },
+	]);
+	expect(await threadSummary(url, "t1")).toMatchObject({ busy: false });
+	follow.close();
+});
+
+// ── 2. a dialog parks nothing ─────────────────────────────────────────────────────────
+
+test("⚠ a blocking dialog is an observation on the follow and a unary answer back — nothing parks, nothing expires", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	const follow = await openFollow(url, "t1");
+	await follow.untilFrames(1);
+
+	const admitted = await prompt(url, "t1", "/mode");
+	expect(admitted.status).toBe(202);
+	fake.emit(SELECT_DIALOG);
+	await follow.untilFrames(4);
+	expect(follow.frames[3]).toMatchObject({
+		type: "observation",
+		observation: { kind: "extension-ui-request", id: "d1", blocking: true, dialog: expect.anything() },
+	});
+	// The thread is busy and NOT parked: the registry never heard of this question.
+	expect(await threadSummary(url, "t1")).toMatchObject({ busy: true, parked: false });
+
+	const answered = await fetch(`${url}/api/threads/t1/dialog`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ id: "d1", value: "a" }),
+	});
+	expect(answered.status).toBe(204);
+	expect(fake.built[0]?.answers).toEqual([{ id: "d1", value: "a" }]);
+
+	// A slash command's completion is its acceptance (it never settles) — the lease follows it.
+	fake.accept();
+	await follow.untilFrames(5);
+	expect(follow.frames[4]).toEqual({ type: "status", live: true, busy: false, generation: 1 });
+	expect(fake.built[0]?.aborts).toBe(0);
+	follow.close();
+});
+
+// ── 3. silence ends nothing ───────────────────────────────────────────────────────────
+
+test("⚠ a long silent tool call ends nothing: the follow stays open on keepalives and the thread stays busy", async () => {
+	const fake = fakeHost();
+	// A keepalive interval far shorter than the run path's 90 s cutoff, so three of them
+	// are a silence the cutoff would have called a hung run.
+	const url = await startWith(fake, 5);
+	const follow = await openFollow(url, "t1");
+	await prompt(url, "t1", "hello");
+	await follow.untilFrames(3);
+
+	await follow.untilComments(3);
+	expect(await threadSummary(url, "t1")).toMatchObject({ busy: true });
+	expect(follow.frames).toHaveLength(3);
+
+	fake.emit(SETTLED);
+	await follow.untilFrames(5);
+	expect(follow.frames.at(-1)).toEqual({ type: "status", live: true, busy: false, generation: 1 });
+	follow.close();
+});
+
+// ── 4. a follower leaving is not a client leaving a run ───────────────────────────────
+
+test("⚠ closing the follow mid-run aborts nothing — the run is pi's, not the connection's", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	const follow = await openFollow(url, "t1");
+	await prompt(url, "t1", "hello");
+	await follow.untilFrames(3);
+	follow.close();
+
+	// A second follower opens a NEW generation: a fresh snapshot, taken live, mid-run.
+	const again = await openFollow(url, "t1");
+	await again.untilFrames(1);
+	expect(again.frames[0]).toMatchObject({ type: "snapshot", live: true, busy: true, generation: 1 });
+	expect(fake.built[0]?.aborts).toBe(0);
+	expect(await threadSummary(url, "t1")).toMatchObject({ busy: true });
+
+	fake.emit(SETTLED);
+	await again.untilFrames(3);
+	expect(again.frames.at(-1)).toEqual({ type: "status", live: true, busy: false, generation: 1 });
+	again.close();
+});
+
+// ── 5. a busy thread queues through pi (#75) ──────────────────────────────────────────
+
+test("a prompt on a busy thread is queued through pi as a followUp, not refused and not re-acquired", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	const first = await prompt(url, "t1", "one");
+	expect(first.body).toMatchObject({ generation: 1, queued: false });
+	const second = await prompt(url, "t1", "two");
+	expect(second.status).toBe(202);
+	expect(second.body).toMatchObject({ generation: 1, queued: true });
+	expect(fake.built[0]?.prompts).toEqual([{ message: "one" }, { message: "two", streamingBehavior: "followUp" }]);
+	expect(await threadSummary(url, "t1")).toMatchObject({ busy: true, generation: 1 });
+});
+
+// ── 6. refusals are plain HTTP, not stream events ─────────────────────────────────────
+
+test("an unknown slash command is a 400 at admission and releases the thread", async () => {
+	const fake = fakeHost(["mode"]);
+	const url = await startWith(fake);
+	const refused = await fetch(`${url}/api/threads/t1/prompt`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ message: "/settings" }),
+	});
+	expect(refused.status).toBe(400);
+	expect(await refused.text()).toContain("/settings is not available");
+	expect(fake.built[0]?.prompts).toEqual([]);
+	expect(await threadSummary(url, "t1")).toMatchObject({ busy: false });
+});

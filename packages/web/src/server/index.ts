@@ -7,6 +7,7 @@ import {
 	isZenThreadId,
 	PICC_DEFAULT_PERMISSION_MODE,
 	PICC_PERMISSION_MODES,
+	type PiDialogResponse,
 	persistedPermissionMode,
 	type ZenResumableSession,
 	type ZenThreadEvents,
@@ -18,7 +19,17 @@ import { type AgentHost, createAgentHost } from "../host/agent-host.ts";
 import { describeStreamChunk, type EventTail } from "../host/event-tail.ts";
 import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
 import { createDialogRegistry } from "./dialog-registry.ts";
+import {
+	answerThreadDialog,
+	type FollowRouteDeps,
+	followThread,
+	type PromptBody,
+	promptThread,
+	readDialogBody,
+	readPromptBody,
+} from "./follow.ts";
 import { type ChatRunOutcome, resumeChat, runChat } from "./session.ts";
+import { SSE_HEADERS, SSE_KEEPALIVE_MS, startSseKeepalive } from "./sse.ts";
 import { createThreadSessions, type ThreadLease, type ThreadView } from "./thread-sessions.ts";
 
 /** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
@@ -27,6 +38,10 @@ const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/;
 const THREAD_EVENTS_ROUTE = /^\/api\/threads\/([^/?#]+)\/events$/;
 /** `GET /api/threads/<threadId>/history` — the branch as messages, live or stored (#95). */
 const THREAD_HISTORY_ROUTE = /^\/api\/threads\/([^/?#]+)\/history$/;
+/** SPIKE #109 — the prompt/follow split's three routes. See `follow.ts`. */
+const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/;
+const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/;
+const THREAD_DIALOG_ROUTE = /^\/api\/threads\/([^/?#]+)\/dialog$/;
 
 /**
  * The dev backend: one SSE endpoint TanStack AI's `fetchServerSentEvents` can talk to (#24).
@@ -42,61 +57,6 @@ const THREAD_HISTORY_ROUTE = /^\/api\/threads\/([^/?#]+)\/history$/;
 
 const DEFAULT_PORT = 5179;
 const LOOPBACK_ONLY = "127.0.0.1";
-const SSE_HEADERS = {
-	"Content-Type": "text/event-stream",
-	"Cache-Control": "no-cache, no-transform",
-	Connection: "keep-alive",
-	// The dev web surface proxies `/api` in dev, so this is the same origin — but a stray
-	// buffering proxy would hold the stream open and silent, which looks exactly like a hung agent.
-	"X-Accel-Buffering": "no",
-} as const;
-
-/**
- * How often an open run's response carries an SSE comment while no event is flowing.
- *
- * ⚠⚠ THE ACTUAL CAUSE OF #98/#99. `Bun.serve` closes an HTTP connection after 10 s of
- * inactivity by default (`idleTimeout`), and the dev web surface proxies `/api` through one.
- * A tool call has NO AG-UI event for its progress (`to-agui.ts`), so a search that took
- * 12 s put no byte on the wire for 12 s, the proxy dropped the connection, the browser saw
- * "Stream response body read failed", and the server's close hook aborted pi mid-call —
- * which is the `AbortError` the tool's audit line showed. The 90 s no-progress cutoff was
- * never reached; it would have ended the run cleanly with RUN_FINISHED, not a read failure.
- *
- * An SSE comment line (`: keepalive`) is the protocol's own answer: every intermediary sees
- * bytes, every client ignores it (TanStack's parser skips `:` lines). Well under the 10 s
- * default so a missed tick does not matter; cleared when the response ends.
- */
-export const SSE_KEEPALIVE_MS = 5000;
-
-/**
- * Start the keepalive for one open response; returns the stop. Not an event, so not in the
- * sent tail.
- *
- * ⚠ The timer is GUARANTEED to fire in the window between a client's disconnect and the
- * handler's `finally` (pi is being torn down asynchronously in between), and a write on a
- * destroyed response emits `'error'` — with no listener, that is an uncaught exception in
- * the server (PR #108 review). So: the response's own `'close'` stops the timer, a tick
- * that finds the response gone stops itself instead of writing, and an `'error'` on the
- * response is reported rather than thrown.
- */
-function startSseKeepalive(
-	response: ServerResponse,
-	intervalMs: number,
-	onProblem: ((problem: unknown) => void) | undefined,
-): () => void {
-	const timer = setInterval(() => {
-		if (response.destroyed || response.writableEnded) {
-			clearInterval(timer);
-			return;
-		}
-		response.write(": keepalive\n\n");
-	}, intervalMs);
-	timer.unref?.();
-	const stop = (): void => clearInterval(timer);
-	response.once("close", stop);
-	response.on("error", (error) => onProblem?.(`SSE response error after the client left: ${String(error)}`));
-	return stop;
-}
 
 /**
  * AG-UI's `RunAgentInput`, reduced to the fields this endpoint uses.
@@ -462,6 +422,71 @@ export function startZenServer(options: ZenServerOptions) {
 		response.end(JSON.stringify(payload));
 	}
 
+	// ── SPIKE #109: prompt / follow / dialog, beside the run path ─────────────────────
+	const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs, onProblem: options.onProblem };
+
+	/** The spike's routes; true when the request was one of them. A bad body is a 400 here, never a throw. */
+	function dispatchFollowRoutes(request: IncomingMessage, response: ServerResponse): boolean {
+		const url = request.url ?? "";
+		const followMatch = request.method === "GET" ? THREAD_FOLLOW_ROUTE.exec(url) : null;
+		if (followMatch?.[1] !== undefined) {
+			const threadId = decodeThreadId(followMatch[1], response);
+			if (threadId !== undefined) answerOrFail(followThread(followDeps, threadId, response), response);
+			return true;
+		}
+		const promptMatch = request.method === "POST" ? THREAD_PROMPT_ROUTE.exec(url) : null;
+		if (promptMatch?.[1] !== undefined) {
+			const threadId = decodeThreadId(promptMatch[1], response);
+			if (threadId !== undefined) answerOrFail(respondToPrompt(threadId, request, response), response);
+			return true;
+		}
+		const dialogMatch = request.method === "POST" ? THREAD_DIALOG_ROUTE.exec(url) : null;
+		if (dialogMatch?.[1] !== undefined) {
+			const threadId = decodeThreadId(dialogMatch[1], response);
+			if (threadId !== undefined) answerOrFail(respondToDialog(threadId, request, response), response);
+			return true;
+		}
+		return false;
+	}
+
+	async function respondToPrompt(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+		let body: PromptBody;
+		try {
+			body = readPromptBody(await readBody(request));
+		} catch (error) {
+			response.writeHead(400, { "Content-Type": "text/plain" });
+			response.end((error as Error).message);
+			return;
+		}
+		const outcome = await promptThread(followDeps, threadId, body);
+		if (outcome.status === 400) {
+			response.writeHead(400, { "Content-Type": "text/plain" });
+			response.end(outcome.reason);
+			return;
+		}
+		response.writeHead(202, { "Content-Type": "application/json" });
+		response.end(JSON.stringify(outcome.receipt));
+	}
+
+	async function respondToDialog(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+		let answer: PiDialogResponse;
+		try {
+			answer = readDialogBody(await readBody(request));
+		} catch (error) {
+			response.writeHead(400, { "Content-Type": "text/plain" });
+			response.end((error as Error).message);
+			return;
+		}
+		const status = answerThreadDialog(followDeps, threadId, answer);
+		if (status === 404) {
+			response.writeHead(404, { "Content-Type": "text/plain" });
+			response.end(`no live session for thread ${threadId}`);
+			return;
+		}
+		response.writeHead(204);
+		response.end();
+	}
+
 	// ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler sits at the
 	// complexity ceiling biome.jsonc pins for this file (#82), and its top-to-bottom shape is
 	// the #27/#34 teardown ordering. New routes are added to this dispatcher, not to it.
@@ -499,6 +524,7 @@ export function startZenServer(options: ZenServerOptions) {
 				return;
 			}
 		}
+		if (dispatchFollowRoutes(request, response)) return;
 		void handleChat(request, response);
 	});
 

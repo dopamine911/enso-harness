@@ -22,9 +22,38 @@
  * ⓘ Named non-coverage: the map is unbounded, and a client that omits `threadId` gets a
  * fresh session per request that lives for the idle window. Loopback-only, dev-only server.
  */
-import type { PiSession } from "@zen/core";
+import type { PiSession, ZenObservation } from "@zen/core";
 import type { HostedSession } from "../host/agent-host.ts";
 import { createEventTail, type EventTail } from "../host/event-tail.ts";
+import { mapPiEvent } from "../rpc/map-events.ts";
+
+/**
+ * One frame of a thread's feed (SPIKE #109 — the `follow` half of deepseek-harness's
+ * prompt/follow split). An `observation` is a pi event through the mapper with the feed's
+ * own monotonic `seq`; a `status` is the thread's lifecycle as this registry sees it —
+ * built, taken by a run, released, disposed. The feed exists whether or not a run does:
+ * that independence is the whole experiment.
+ */
+export type ThreadFeedFrame =
+	| { readonly kind: "observation"; readonly seq: number; readonly observation: ZenObservation }
+	| { readonly kind: "status"; readonly live: boolean; readonly busy: boolean; readonly generation: number };
+
+export type ThreadFeedListener = (frame: ThreadFeedFrame) => void;
+
+/** A thread's observers and their attachment to whichever session the thread currently has. */
+interface ThreadFeed {
+	readonly listeners: Set<ThreadFeedListener>;
+	seq: number;
+	/** The session subscription while the thread is live; undefined while it is not. */
+	detach: (() => void) | undefined;
+	/**
+	 * Frames raised by a listener DURING a publish (a `settled` observation releasing the
+	 * thread, which publishes a status). Delivered after the current frame reaches every
+	 * listener, so no follower sees the consequence before its cause.
+	 */
+	readonly queued: ThreadFeedFrame[];
+	publishing: boolean;
+}
 
 /**
  * How long a thread's session outlives its last run. Long enough for a human to read a
@@ -52,6 +81,14 @@ export interface ThreadSessions {
 	 */
 	acquire(threadId: string): Promise<ThreadLease>;
 	/**
+	 * Follow the thread's feed (SPIKE #109): every observation and status change from now
+	 * on, whether or not a run is in flight, whether or not the thread is even built yet.
+	 * Observation only — never creates a session. `asOfSeq` is the feed's position at
+	 * subscription: a snapshot taken in the same tick is exact as of it, and every
+	 * observation delivered afterwards carries a greater `seq`.
+	 */
+	observe(threadId: string, listener: ThreadFeedListener): ThreadFollow;
+	/**
 	 * The thread's hosted session IF it is live — never creates one (#86). Looking must
 	 * not be the thing that spins pi up; `acquire` is for runs.
 	 */
@@ -62,6 +99,12 @@ export interface ThreadSessions {
 	shutdown(): void;
 	/** Observable state for tests. */
 	liveThreadCount(): number;
+}
+
+/** A live follow: where the feed stood when it began, and how to leave. */
+export interface ThreadFollow {
+	readonly asOfSeq: number;
+	readonly unsubscribe: () => void;
 }
 
 /**
@@ -148,16 +191,78 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 	 */
 	const generations = new Map<string, number>();
 
+	/**
+	 * Feeds by thread id, independent of the entry: a follower may arrive before the thread
+	 * is built and stays through a rebuild. Deleted when its last listener leaves.
+	 */
+	const feeds = new Map<string, ThreadFeed>();
+
+	function publish(feed: ThreadFeed, frame: ThreadFeedFrame): void {
+		feed.queued.push(frame);
+		if (feed.publishing) return;
+		feed.publishing = true;
+		try {
+			for (let next = feed.queued.shift(); next !== undefined; next = feed.queued.shift()) {
+				for (const listener of feed.listeners) {
+					try {
+						listener(next);
+					} catch (error) {
+						// One bad follower never breaks the feed for the others, nor the session.
+						onProblem?.(`thread feed: a listener threw: ${String(error)}`);
+					}
+				}
+			}
+		} finally {
+			feed.publishing = false;
+		}
+	}
+
+	function publishStatus(threadId: string, thread: ThreadEntry | undefined): void {
+		const feed = feeds.get(threadId);
+		if (feed === undefined) return;
+		publish(feed, {
+			kind: "status",
+			live: thread !== undefined,
+			busy: thread?.busy ?? false,
+			generation: thread?.generation ?? generations.get(threadId) ?? 0,
+		});
+	}
+
+	/**
+	 * Subscribe the feed to the thread's session. ⚠ This makes the feed the session's FIRST
+	 * subscriber when a follower is present at build, so the host's start-up replay
+	 * (#96) lands here, not in a later `/api/chat` pump — the spike's receipt records it.
+	 */
+	function attachFeed(threadId: string, thread: ThreadEntry): void {
+		const feed = feeds.get(threadId);
+		if (feed === undefined || feed.detach !== undefined) return;
+		feed.detach = thread.hosted.session.subscribe((event, delivery) => {
+			feed.seq += 1;
+			publish(feed, { kind: "observation", seq: feed.seq, observation: mapPiEvent(event, delivery) });
+		});
+	}
+
+	function detachFeed(threadId: string): void {
+		const feed = feeds.get(threadId);
+		if (feed?.detach === undefined) return;
+		feed.detach();
+		feed.detach = undefined;
+	}
+
 	function disposeThread(threadId: string, why: string): void {
 		const thread = threads.get(threadId);
 		if (thread === undefined) return;
 		threads.delete(threadId);
 		clearTimeout(thread.idleTimer);
+		// Listeners first, then the kill — a late event from the disposing session must not
+		// reach a follower as if the thread were alive.
+		detachFeed(threadId);
 		try {
 			thread.hosted.session.dispose();
 		} catch (error) {
 			onProblem?.(`thread ${threadId}: dispose after ${why} failed: ${String(error)}`);
 		}
+		publishStatus(threadId, undefined);
 	}
 
 	/** Set by `shutdown`: no build may publish a session into a registry that is being torn down. */
@@ -182,6 +287,8 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 			sent: createEventTail(),
 		};
 		threads.set(threadId, thread);
+		attachFeed(threadId, thread);
+		publishStatus(threadId, thread);
 		return thread;
 	}
 
@@ -193,6 +300,7 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 		thread.idleTimer = idleTimer;
 		thread.busy = false;
 		thread.lastActivityAt = Date.now();
+		publishStatus(threadId, thread);
 	}
 
 	function stop(threadId: string, thread: ThreadEntry): void {
@@ -253,7 +361,31 @@ export function createThreadSessions(options: ThreadSessionsOptions): ThreadSess
 			thread.generation += 1;
 			generations.set(threadId, thread.generation);
 			thread.lastActivityAt = Date.now();
+			publishStatus(threadId, thread);
 			return leaseOf(threadId, thread);
+		},
+		observe(threadId: string, listener: ThreadFeedListener): ThreadFollow {
+			let feed = feeds.get(threadId);
+			if (feed === undefined) {
+				feed = { listeners: new Set(), seq: 0, detach: undefined, queued: [], publishing: false };
+				feeds.set(threadId, feed);
+			}
+			feed.listeners.add(listener);
+			const thread = threads.get(threadId);
+			if (thread !== undefined) attachFeed(threadId, thread);
+			const attached = feed;
+			return {
+				asOfSeq: attached.seq,
+				unsubscribe: () => {
+					attached.listeners.delete(listener);
+					if (attached.listeners.size > 0) return;
+					// The last follower leaves: detach from the session so the next run's pump
+					// is the first subscriber again, and forget the feed (its `seq` restarts
+					// with the next follower — a new generation, snapshot-first).
+					detachFeed(threadId);
+					feeds.delete(threadId);
+				},
+			};
 		},
 		peek(threadId: string): ThreadView | undefined {
 			const thread = threads.get(threadId);
