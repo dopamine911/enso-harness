@@ -11,6 +11,7 @@
  *   bun run logs --since 10m           the last 10 minutes (s, m, h, d)
  *   bun run logs --date 2026-09-08     another day's file
  *   bun run logs --json                the matching lines raw, for jq
+ *   bun run logs --color | less -R     colors kept through a pipe
  *
  * ⚠ The file stores each message as its TEMPLATE with the values in `properties`, so a
  * bundle can filter on the event name; raw, a human reads `run {generation} acquired`. This
@@ -43,6 +44,7 @@ interface Query {
 	readonly date: Date;
 	readonly follow: boolean;
 	readonly json: boolean;
+	readonly color: boolean;
 	readonly level: number;
 	readonly thread: string | undefined;
 	readonly process: string | undefined;
@@ -52,7 +54,7 @@ interface Query {
 function usage(problem: string): never {
 	process.stderr.write(`zen-logs: ${problem}\n\n`);
 	process.stderr.write(
-		"usage: bun run logs [--follow] [--level trace|debug|info|warning|error] [--thread ID] [--process NAME] [--since 10m] [--date YYYY-MM-DD] [--json]\n",
+		"usage: bun run logs [--follow] [--level trace|debug|info|warning|error] [--thread ID] [--process NAME] [--since 10m] [--date YYYY-MM-DD] [--json] [--color]\n",
 	);
 	process.exit(2);
 }
@@ -61,6 +63,7 @@ function parseArguments(argv: readonly string[]): Query {
 	let date = new Date();
 	let follow = false;
 	let json = false;
+	let color = false;
 	let level = LEVEL_RANK.info ?? 2;
 	let thread: string | undefined;
 	let processName: string | undefined;
@@ -75,6 +78,9 @@ function parseArguments(argv: readonly string[]): Query {
 				break;
 			case "--json":
 				json = true;
+				break;
+			case "--color":
+				color = true;
 				break;
 			case "--level": {
 				const wanted = value().toLowerCase();
@@ -98,7 +104,7 @@ function parseArguments(argv: readonly string[]): Query {
 				break;
 			}
 			case "--date": {
-				const parsed = new Date(`${value()}T12:00:00Z`);
+				const parsed = new Date(`${value()}T12:00:00`); // local noon: the file is named by the local day
 				if (Number.isNaN(parsed.getTime())) usage(`--date wants YYYY-MM-DD`);
 				date = parsed;
 				flagIndex += 1;
@@ -108,7 +114,7 @@ function parseArguments(argv: readonly string[]): Query {
 				usage(`unknown flag ${flag}`);
 		}
 	}
-	return { date, follow, json, level, thread, process: processName, sinceMs };
+	return { date, follow, json, color, level, thread, process: processName, sinceMs };
 }
 
 function matches(query: Query, line: ZenLogLine, notBefore: number): boolean {
@@ -142,8 +148,13 @@ function print(query: Query, text: string, notBefore: number): void {
 }
 
 const query: Query = parseArguments(process.argv.slice(2));
-// A terminal wraps to its width; a pipe (`| less`, `> file`) gets whole lines.
-const render: (line: ZenLogLine) => string = zenLogLineRenderer({ wordWrap: process.stdout.isTTY === true });
+// A terminal gets colors and wraps to its width; a pipe (`| less`, `> file`) gets plain,
+// whole lines. `--color` keeps colors through a pipe (`| less -R`).
+const onTerminal = process.stdout.isTTY === true;
+const render: (line: ZenLogLine) => string = zenLogLineRenderer({
+	wordWrap: onTerminal,
+	colors: onTerminal || query.color,
+});
 const logsDir = zenLogsDir(findRepoRoot(import.meta.url));
 const file = join(logsDir, zenLogFilename(query.date));
 const notBefore = query.sinceMs === undefined ? 0 : Date.now() - query.sinceMs;

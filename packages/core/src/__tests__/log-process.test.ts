@@ -1,5 +1,5 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reset } from "@logtape/logtape";
@@ -121,7 +121,11 @@ test("⚠ two processes, one file: every line lands whole — the property the d
 		Bun.spawn(["bun", child, who], { cwd: join(import.meta.dir, ".."), stdout: "ignore", stderr: "pipe" });
 	const [alpha, bravo] = [spawn("alpha"), spawn("bravo")];
 	expect(await Promise.all([alpha.exited, bravo.exited])).toEqual([0, 0]);
-	const parsed = linesOf(join(logsDir, zenLogFilename(new Date()))).map((line) => JSON.parse(line) as ZenLogLine);
+	// ⚠ `bun test` runs in UTC; the children run in the machine's zone and name the file by
+	// their local day (as the launchers do), so read whatever day file they made.
+	const written = readdirSync(logsDir).filter((name) => /^zen-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name));
+	expect(written).toHaveLength(1);
+	const parsed = linesOf(join(logsDir, written[0] ?? "")).map((line) => JSON.parse(line) as ZenLogLine);
 	expect(parsed.every((record) => Check(ZenLogLine, record))).toBe(true);
 	// 200 records + the configuration record, per process.
 	expect(parsed.filter((record) => record.properties?.process === "alpha")).toHaveLength(201);

@@ -182,9 +182,16 @@ export function logsDirFrom(environment: Readonly<Record<string, string | undefi
 	return configured === undefined || configured.length === 0 ? zenLogsDir(repoRoot) : configured;
 }
 
-/** `zen-2026-09-09.jsonl`: the harness's one log for that day. */
+/**
+ * `zen-2026-09-09.jsonl`: the harness's one log for that day — the machine's LOCAL day, not
+ * UTC. The file is for the person at the machine: at 19:05 local `bun run logs` must not say
+ * "no log for today" because it is 00:05 tomorrow in Greenwich (found live). The timestamps
+ * inside stay ISO UTC.
+ */
 export function zenLogFilename(date: Date): string {
-	return `zen-${date.toISOString().slice(0, 10)}.jsonl`;
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	const day = String(date.getDate()).padStart(2, "0");
+	return `zen-${date.getFullYear()}-${month}-${day}.jsonl`;
 }
 
 const ZEN_LOG_FILENAME = /^zen-(\d{4}-\d{2}-\d{2})\.jsonl$/;
@@ -206,7 +213,7 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
 		filename: zenLogFilename,
 		parseFilename: (filename: string): Date | null => {
 			const day = ZEN_LOG_FILENAME.exec(filename)?.[1];
-			return day === undefined ? null : new Date(`${day}T00:00:00Z`);
+			return day === undefined ? null : new Date(`${day}T00:00:00`); // local midnight, as the name was made
 		},
 		maxAgeMs: KEEP_DAYS * DAY_MS,
 		// The template as the message and the values as properties — an event name a bundle
@@ -305,16 +312,17 @@ export function logRecordOf(line: ZenLogLine): LogRecord {
 /**
  * The terminal's formatter, for the file's records: what `bun run logs` prints. `wordWrap`
  * as the pretty formatter takes it — `true` wraps to the terminal's width, `false` keeps
- * each record's lines whole (for a pipe), a number is a width.
+ * each record's lines whole (for a pipe), a number is a width. `colors` off for a pipe.
  */
 export function zenLogLineRenderer(
-	options: { readonly wordWrap?: boolean | number } = {},
+	options: { readonly wordWrap?: boolean | number; readonly colors?: boolean } = {},
 ): (line: ZenLogLine) => string {
 	const pretty = getPrettyFormatter({
 		timestamp: "time",
 		properties: true,
 		categoryWidth: 24,
 		wordWrap: options.wordWrap ?? true,
+		colors: options.colors ?? true,
 	});
 	return (line: ZenLogLine): string => pretty(logRecordOf(line));
 }
