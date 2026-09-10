@@ -1,5 +1,5 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reset } from "@logtape/logtape";
@@ -8,9 +8,11 @@ import { withZenLogContext, ZenLogLine, zenLogger } from "../log.ts";
 import {
 	configureProcessLogging,
 	effectiveFileLevel,
+	logRecordOf,
 	parseZenLogLevels,
 	ZenLogLevelError,
 	zenLogFilename,
+	zenLogLineRenderer,
 } from "../log-process.ts";
 
 /**
@@ -119,7 +121,11 @@ test("⚠ two processes, one file: every line lands whole — the property the d
 		Bun.spawn(["bun", child, who], { cwd: join(import.meta.dir, ".."), stdout: "ignore", stderr: "pipe" });
 	const [alpha, bravo] = [spawn("alpha"), spawn("bravo")];
 	expect(await Promise.all([alpha.exited, bravo.exited])).toEqual([0, 0]);
-	const parsed = linesOf(join(logsDir, zenLogFilename(new Date()))).map((line) => JSON.parse(line) as ZenLogLine);
+	// ⚠ `bun test` runs in UTC; the children run in the machine's zone and name the file by
+	// their local day (as the launchers do), so read whatever day file they made.
+	const written = readdirSync(logsDir).filter((name) => /^zen-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name));
+	expect(written).toHaveLength(1);
+	const parsed = linesOf(join(logsDir, written[0] ?? "")).map((line) => JSON.parse(line) as ZenLogLine);
 	expect(parsed.every((record) => Check(ZenLogLine, record))).toBe(true);
 	// 200 records + the configuration record, per process.
 	expect(parsed.filter((record) => record.properties?.process === "alpha")).toHaveLength(201);
@@ -130,6 +136,33 @@ test("a second configure in the same process is refused — one configurator per
 	const logsDir = mkdtempSync(join(tmpdir(), "zen-logs-"));
 	await configureProcessLogging({ logsDir, process: "server" });
 	await expect(configureProcessLogging({ logsDir, process: "web" })).rejects.toThrow();
+});
+
+// ── reading the file back ─────────────────────────────────────────────────────────────
+
+test("a line reads back as the record it was: the template's placeholders take their values; one with no value stays literal; WARN is warning", () => {
+	const record = logRecordOf({
+		"@timestamp": "2026-09-09T23:41:22.799Z",
+		level: "WARN",
+		message: "{toolName} denied: {reason} — {absent}",
+		logger: "zen.extension.guards",
+		properties: { toolName: "write", reason: "outside the root", threadId: "t1" },
+	});
+	expect(record.category).toEqual(["zen", "extension", "guards"]);
+	expect(record.level).toBe("warning");
+	expect(record.timestamp).toBe(Date.parse("2026-09-09T23:41:22.799Z"));
+	expect(record.message).toEqual(["", "write", " denied: ", "outside the root", " — ", "{absent}", ""]);
+	expect(record.rawMessage).toBe("{toolName} denied: {reason} — {absent}");
+	// Rendered by the terminal's formatter: the values in the sentence, no braces left.
+	const rendered = zenLogLineRenderer({ wordWrap: false })({
+		"@timestamp": "2026-09-09T23:41:22.799Z",
+		level: "INFO",
+		message: "run {generation} acquired",
+		logger: "zen.server.threads",
+		properties: { generation: 1 },
+	}).replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "");
+	expect(rendered).toContain("run 1 acquired");
+	expect(rendered).not.toContain("{generation}");
 });
 
 // ── the knob ──────────────────────────────────────────────────────────────────────────

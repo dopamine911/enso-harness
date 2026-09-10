@@ -23,6 +23,7 @@
 		"postinstall": "bun scripts/link-vendor-packages.mjs",
 		"zen": "bun scripts/zen.mjs",
 		"dev": "bun scripts/dev.mjs",
+		"logs": "bun scripts/zen-logs.ts",
 		"dev:server": "bun run --silent --cwd packages/web dev:server",
 		"dev:web": "bun run --silent --cwd packages/web dev:web",
 		"e2e": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep-invert @model",

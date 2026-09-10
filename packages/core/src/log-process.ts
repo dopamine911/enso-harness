@@ -17,7 +17,7 @@ import {
 } from "@logtape/logtape";
 import { getPrettyFormatter } from "@logtape/pretty";
 import { redactByField } from "@logtape/redaction";
-import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS } from "./log.ts";
+import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS, type ZenLogLine } from "./log.ts";
 import { zenLogsDir } from "./paths.ts";
 
 /**
@@ -182,9 +182,16 @@ export function logsDirFrom(environment: Readonly<Record<string, string | undefi
 	return configured === undefined || configured.length === 0 ? zenLogsDir(repoRoot) : configured;
 }
 
-/** `zen-2026-09-09.jsonl`: the harness's one log for that day. */
+/**
+ * `zen-2026-09-09.jsonl`: the harness's one log for that day — the machine's LOCAL day, not
+ * UTC. The file is for the person at the machine: at 19:05 local `bun run logs` must not say
+ * "no log for today" because it is 00:05 tomorrow in Greenwich (found live). The timestamps
+ * inside stay ISO UTC.
+ */
 export function zenLogFilename(date: Date): string {
-	return `zen-${date.toISOString().slice(0, 10)}.jsonl`;
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	const day = String(date.getDate()).padStart(2, "0");
+	return `zen-${date.getFullYear()}-${month}-${day}.jsonl`;
 }
 
 const ZEN_LOG_FILENAME = /^zen-(\d{4}-\d{2}-\d{2})\.jsonl$/;
@@ -206,7 +213,7 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
 		filename: zenLogFilename,
 		parseFilename: (filename: string): Date | null => {
 			const day = ZEN_LOG_FILENAME.exec(filename)?.[1];
-			return day === undefined ? null : new Date(`${day}T00:00:00Z`);
+			return day === undefined ? null : new Date(`${day}T00:00:00`); // local midnight, as the name was made
 		},
 		maxAgeMs: KEEP_DAYS * DAY_MS,
 		// The template as the message and the values as properties — an event name a bundle
@@ -260,4 +267,62 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
 		logsDir: options.logsDir,
 	});
 	return dispose;
+}
+
+// ── Reading the file back (#132: `bun run logs`, and the bundle's reader) ─────────────────
+
+const PLACEHOLDER = /\{([^{}]+)\}/g;
+const LEVEL_OF_LINE: Readonly<Record<ZenLogLine["level"], LogLevel>> = {
+	TRACE: "trace",
+	DEBUG: "debug",
+	INFO: "info",
+	WARN: "warning",
+	ERROR: "error",
+	FATAL: "fatal",
+};
+
+/**
+ * A line of the file, back into the record it was — the message re-joined from its
+ * template and properties (`"run {generation} acquired"` + `{ generation: 1 }` →
+ * `["run ", 1, " acquired"]`, LogTape's alternating text/value shape), so any LogTape
+ * formatter renders it exactly as the console did when it was written. A placeholder with
+ * no property renders as itself, so a template that outgrew its record still reads.
+ */
+export function logRecordOf(line: ZenLogLine): LogRecord {
+	const properties = line.properties ?? {};
+	const template = line.message ?? "";
+	const message: unknown[] = [];
+	let cursor = 0;
+	for (const match of template.matchAll(PLACEHOLDER)) {
+		const name = match[1] ?? "";
+		message.push(template.slice(cursor, match.index), name in properties ? properties[name] : match[0]);
+		cursor = match.index + match[0].length;
+	}
+	message.push(template.slice(cursor));
+	return {
+		category: line.logger.split("."),
+		level: LEVEL_OF_LINE[line.level],
+		timestamp: Date.parse(line["@timestamp"]),
+		message,
+		rawMessage: template,
+		properties,
+	};
+}
+
+/**
+ * The terminal's formatter, for the file's records: what `bun run logs` prints. `wordWrap`
+ * as the pretty formatter takes it — `true` wraps to the terminal's width, `false` keeps
+ * each record's lines whole (for a pipe), a number is a width. `colors` off for a pipe.
+ */
+export function zenLogLineRenderer(
+	options: { readonly wordWrap?: boolean | number; readonly colors?: boolean } = {},
+): (line: ZenLogLine) => string {
+	const pretty = getPrettyFormatter({
+		timestamp: "time",
+		properties: true,
+		categoryWidth: 24,
+		wordWrap: options.wordWrap ?? true,
+		colors: options.colors ?? true,
+	});
+	return (line: ZenLogLine): string => pretty(logRecordOf(line));
 }

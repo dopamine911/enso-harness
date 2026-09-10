@@ -300,6 +300,17 @@ ZEN_LOG_CONSOLE=warning bun run dev  # the terminal's level; the file is unaffec
 ZEN_LOGS_DIR=/somewhere/else bun run dev   # the directory, for every process; default .zen/logs
 ```
 
+Read it back rendered the way the terminal shows it live — the values put back into each message:
+
+```sh
+bun run logs                     # today, info and up
+bun run logs --follow            # keep printing as records land
+bun run logs --thread 6923e6     # one thread, by id or prefix
+bun run logs --level debug --since 10m
+bun run logs --process pi --date 2026-09-08
+bun run logs --json | jq …       # the matching lines raw
+```
+
 A value that is not a level is a startup error naming it. The first record of every process says
 which levels it runs at. The TUI's pi process configures itself the same way (`extensions/logging`,
 first in the manifest); in the web host pi runs in-process and shares the server's.
