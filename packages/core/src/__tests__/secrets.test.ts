@@ -132,8 +132,10 @@ test("⚠ the logger's value set is the secrets file plus secret-shaped env name
 		["TAVILY_API_KEY=tvly-long-enough-to-scan", "HARMLESS_LOOKING=but-in-the-file-so-secret", "SHORT=abc"].join("\n"),
 	);
 	const values = knownSecretValues(root, {
-		// Secret-shaped, long enough: in — a process configured before quarantine ran.
-		GH_TOKEN: "ghp_1234567890abcdef",
+		// Secret-shaped, long enough: in — a process configured before quarantine ran. The value
+		// says `notarealsecret` because a PAT-shaped fixture (`ghp_…`) trips the repo's secret
+		// scanner, and a fixture that reads as a real credential to a scanner is a bad fixture.
+		GH_TOKEN: "ghp-notarealsecret-fixture",
 		// Secret-shaped but too short to scan for: a 4-char value would redact prose.
 		DB_PASSWORD: "hunt",
 		// The same value the file holds: one entry, not two.
@@ -143,7 +145,7 @@ test("⚠ the logger's value set is the secrets file plus secret-shaped env name
 	});
 	expect([...values].sort()).toEqual([
 		"but-in-the-file-so-secret", // in the file, so a secret by definition whatever its name
-		"ghp_1234567890abcdef",
+		"ghp-notarealsecret-fixture",
 		"tvly-long-enough-to-scan",
 	]);
 });
