@@ -1,15 +1,20 @@
 import type { ServerResponse } from "node:http";
 import {
+	base64DecodedBytes,
 	PICC_PERMISSION_MODES,
 	type PiDialogResponse,
+	type PiImageContent,
 	type PiStreamingBehavior,
 	persistedPermissionMode,
 	validateDialogAnswer,
+	ZEN_IMAGE_MAX_BYTES,
 	type ZenAbortReceipt,
 	type ZenFollowFrame,
+	ZenPromptBody,
 	type ZenPromptReceipt,
 	zenLogger,
 } from "@zen/core";
+import { Check, Errors } from "typebox/value";
 import type { AgentHost } from "../host/agent-host.ts";
 import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
 import { SSE_HEADERS, startSseKeepalive } from "./sse.ts";
@@ -58,6 +63,8 @@ export interface FollowRouteDeps {
 export interface PromptBody {
 	readonly message: string;
 	readonly streamingBehavior?: PiStreamingBehavior;
+	/** Attached images (#68), already in pi's shape; absent — not empty — when the prompt has none. */
+	readonly images?: readonly PiImageContent[];
 }
 
 export type PromptOutcome =
@@ -133,23 +140,46 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
 	});
 }
 
-/** The prompt body, shape-checked. Throws `Error`s whose message is the 400 text. */
+const MEGABYTE = 1024 * 1024;
+const megabytes = (bytes: number): string => `${(bytes / MEGABYTE).toFixed(1)} MB`;
+
+/**
+ * The prompt body, shape-checked against `ZenPromptBody` (#112: closed schemas on the wire).
+ * Throws `Error`s whose message is the 400 text — the first thing wrong, by path, so a
+ * refused image says which one and why rather than "did not match" (#68: never silently
+ * dropped). The byte cap is on the DECODED size: what the provider counts.
+ */
 export function readPromptBody(raw: string): PromptBody {
-	let body: { message?: unknown; streamingBehavior?: unknown };
+	let parsed: unknown;
 	try {
-		body = JSON.parse(raw) as { message?: unknown; streamingBehavior?: unknown };
+		parsed = JSON.parse(raw);
 	} catch (error) {
 		throw new Error(`malformed prompt body: ${String(error)}`);
 	}
+	if (!Check(ZenPromptBody, parsed)) {
+		const first = Errors(ZenPromptBody, parsed)[0];
+		const where =
+			first === undefined ? "" : ` at ${first.instancePath === "" ? "/" : first.instancePath}: ${first.message}`;
+		throw new Error(`prompt body must match ZenPromptBody${where}`);
+	}
 	// Whitespace-only is refused here rather than taking a lease to hand pi nothing.
-	if (typeof body.message !== "string" || body.message.trim().length === 0) {
+	if (parsed.message.trim().length === 0 && parsed.images === undefined) {
 		throw new Error("prompt body needs a message");
 	}
-	if (body.streamingBehavior === undefined) return { message: body.message };
-	if (body.streamingBehavior !== "steer" && body.streamingBehavior !== "followUp") {
-		throw new Error("streamingBehavior must be steer or followUp");
-	}
-	return { message: body.message, streamingBehavior: body.streamingBehavior };
+	const images = parsed.images?.map((image, position): PiImageContent => {
+		const bytes = base64DecodedBytes(image.data);
+		if (bytes > ZEN_IMAGE_MAX_BYTES) {
+			throw new Error(
+				`image ${position + 1} of ${parsed.images?.length ?? 0} is ${megabytes(bytes)}; an image is at most ${megabytes(ZEN_IMAGE_MAX_BYTES)}`,
+			);
+		}
+		return { type: "image", data: image.data, mimeType: image.mimeType };
+	});
+	return {
+		message: parsed.message,
+		...(parsed.streamingBehavior === undefined ? {} : { streamingBehavior: parsed.streamingBehavior }),
+		...(images === undefined ? {} : { images }),
+	};
 }
 
 /**
@@ -176,7 +206,11 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
 	const live = threads.peek(threadId);
 	if (live?.busy === true) {
 		live.hosted.session.prompt(
-			{ message: body.message, streamingBehavior: body.streamingBehavior ?? "followUp" },
+			{
+				message: body.message,
+				streamingBehavior: body.streamingBehavior ?? "followUp",
+				...(body.images === undefined ? {} : { images: body.images }),
+			},
 			{ onAccepted: () => undefined, onRejected: rejected },
 		);
 		return { status: 202, receipt: { threadId, messageId, generation: live.generation, queued: true } };
@@ -207,6 +241,7 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
 		{
 			message: body.message,
 			...(body.streamingBehavior === undefined ? {} : { streamingBehavior: body.streamingBehavior }),
+			...(body.images === undefined ? {} : { images: body.images }),
 		},
 		{
 			onAccepted: () => {

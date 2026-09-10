@@ -11,6 +11,9 @@ import {
 	type PiPromptRequest,
 	type PiRpcEvent,
 	type PiSession,
+	ZEN_IMAGE_MAX_BYTES,
+	ZEN_PROMPT_BODY_MAX_BYTES,
+	ZEN_PROMPT_MAX_IMAGES,
 	type ZenDialogSpec,
 	type ZenFollowFrame,
 } from "@zen/core";
@@ -584,4 +587,133 @@ test("a whitespace-only message is a 400 before any lease or session exists", as
 	expect(refused.status).toBe(400);
 	expect(fake.built).toHaveLength(0);
 	expect(await threadSummary(url, "t1")).toBeUndefined();
+});
+
+// ── 9. images on a prompt (#68) ─────────────────────────────────────────────────────
+
+/** A real 1×1 PNG — signature `89 50 4E 47`, IHDR, IDAT, IEND — the smallest file a decoder accepts. */
+const ONE_PIXEL_PNG = Buffer.from(
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+	"base64",
+);
+
+async function promptWith(url: string, threadId: string, body: unknown) {
+	const response = await fetch(`${url}/api/threads/${threadId}/prompt`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(body),
+	});
+	return { status: response.status, text: await response.text() };
+}
+
+test("a real PNG's bytes reach pi's prompt.images unchanged, byte for byte; the audit record carries the count and kinds, never the data", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	const data = ONE_PIXEL_PNG.toString("base64");
+	const admitted = await promptWith(url, "t1", {
+		message: "what does this say?",
+		images: [{ mimeType: "image/png", data }],
+	});
+	expect(admitted.status).toBe(202);
+
+	const received = fake.built[0]?.prompts[0];
+	expect(received?.message).toBe("what does this say?");
+	expect(received?.images).toEqual([{ type: "image", mimeType: "image/png", data }]);
+	expect(Buffer.from(received?.images?.[0]?.data ?? "", "base64").equals(ONE_PIXEL_PNG)).toBe(true);
+
+	logs.assertLogged({
+		level: "info",
+		rawMessage: "prompt carries {count} image(s): {mimeTypes}, {bytes} bytes",
+		// A predicate: the recorder compares values with `Object.is`, which no two arrays pass.
+		properties: (properties) =>
+			properties.threadId === "t1" &&
+			properties.count === 1 &&
+			JSON.stringify(properties.mimeTypes) === JSON.stringify(["image/png"]) &&
+			properties.bytes === ONE_PIXEL_PNG.length,
+	});
+	expect(logs.records.map((record) => JSON.stringify(record.properties)).join("\n")).not.toContain(data.slice(0, 24));
+});
+
+test("[WARN] a text-only prompt has NO images key (the committed shape), and images ride a queued prompt on a busy thread too", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	await promptWith(url, "t1", { message: "one" });
+	expect(fake.built[0]?.prompts[0]).toEqual({ message: "one" });
+	expect(fake.built[0]?.prompts[0]).not.toHaveProperty("images");
+
+	const data = ONE_PIXEL_PNG.toString("base64");
+	const queued = await promptWith(url, "t1", { message: "and this", images: [{ mimeType: "image/webp", data }] });
+	expect(queued.status).toBe(202);
+	expect(fake.built[0]?.prompts[1]).toEqual({
+		message: "and this",
+		streamingBehavior: "followUp",
+		images: [{ type: "image", mimeType: "image/webp", data }],
+	});
+});
+
+test("[WARN] an image outside the allowlist, over the byte cap, or too many is a 400 that names the image and the reason — never silently dropped", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	const data = ONE_PIXEL_PNG.toString("base64");
+
+	const svg = await promptWith(url, "t1", { message: "x", images: [{ mimeType: "image/svg+xml", data }] });
+	expect(svg.status).toBe(400);
+	expect(svg.text).toContain("/images/0/mimeType");
+
+	const notBase64 = await promptWith(url, "t1", {
+		message: "x",
+		images: [{ mimeType: "image/png", data: "data:image/png;base64,AAAA" }],
+	});
+	expect(notBase64.status).toBe(400);
+	expect(notBase64.text).toContain("/images/0/data");
+
+	// Over the cap by one byte, decoded — the base64 string is 4/3 longer and would pass a length check.
+	const oversized = Buffer.alloc(ZEN_IMAGE_MAX_BYTES + 1).toString("base64");
+	const big = await promptWith(url, "t1", {
+		message: "x",
+		images: [
+			{ mimeType: "image/png", data },
+			{ mimeType: "image/jpeg", data: oversized },
+		],
+	});
+	expect(big.status).toBe(400);
+	expect(big.text).toBe("image 2 of 2 is 5.0 MB; an image is at most 5.0 MB");
+
+	const tooMany = await promptWith(url, "t1", {
+		message: "x",
+		images: Array.from({ length: ZEN_PROMPT_MAX_IMAGES + 1 }, () => ({ mimeType: "image/png", data })),
+	});
+	expect(tooMany.status).toBe(400);
+	expect(tooMany.text).toContain("/images");
+
+	const empty = await promptWith(url, "t1", { message: "x", images: [] });
+	expect(empty.status).toBe(400);
+
+	// None of them reached pi, and no session was built for a prompt that was refused at the door.
+	expect(fake.built).toHaveLength(0);
+});
+
+test("[WARN] a body past the wire cap is a 413 and the read stops — the server does not buffer it first", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	// Streamed in chunks so the cap has to trip mid-body, not on a Content-Length it never reads.
+	const chunk = "x".repeat(1024 * 1024);
+	const body = new ReadableStream<Uint8Array>({
+		start(controller) {
+			for (let sent = 0; sent <= ZEN_PROMPT_BODY_MAX_BYTES + chunk.length; sent += chunk.length) {
+				controller.enqueue(new TextEncoder().encode(chunk));
+			}
+			controller.close();
+		},
+	});
+	const response = await fetch(`${url}/api/threads/t1/prompt`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body,
+		// @ts-expect-error — Bun accepts a streaming body with duplex; the lib types lag.
+		duplex: "half",
+	});
+	expect(response.status).toBe(413);
+	expect(await response.text()).toContain("a prompt body is at most");
+	expect(fake.built).toHaveLength(0);
 });
