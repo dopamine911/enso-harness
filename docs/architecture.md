@@ -256,12 +256,31 @@ moved it forward so MVP debt does not compound into architectural debt.
 graph LR
   P0["<b>Phase 0</b> ✓<br/>Guards + package skeleton<br/><i>Tier 0 of pi-immediate-needs</i>"]
   P2["<b>Phase 2</b> ✓<br/>Web control plane<br/>chat · modes · dialogs · resume · stop"]
-  F["<b>Freeze</b> 2026-09-09<br/>receipt on #103, twice"]
-  C["<b>Consolidate</b> ◀ here<br/>vocabulary · lifecycle · docs<br/>storage seam · renames"]
+  H["<b>Hardening</b> ◀ here<br/>correctness + security blockers<br/>gates that fence the seams"]
+  F["<b>Freeze</b><br/>#103's receipt, then feature stop"]
+  C["<b>Consolidate</b><br/>vocabulary · lifecycle · docs<br/>storage seam · renames"]
   L["<b>Lineage</b><br/>durable identity · fork manifests"]
   X["<b>Expansion</b><br/>context · skills · rules experiments<br/>then analysis + rubric"]
-  P0 --> P2 --> F --> C --> L --> X
+  P0 --> P2 --> H --> F --> C --> L --> X
 ```
+
+**Hardening is a real stage, not a pause before the freeze.** #103's freeze rule allows exactly one
+class of work through — correctness and security blockers — and running that class to the end is what
+the receipt is taken against. What it has landed: the nested-shell guard bypass (#57 — a `-c` payload
+is re-parsed to a depth of 3, with a floor under the raw scan that refuses unparseable constructs by
+name); the URL as the thread's source of truth (#142); the debug records a triage cannot work without
+(#144 slice 1 — `pid`/`startedAt` per process, time to first token, the provider's `request-id`); and
+value-level secret redaction at write (#139).
+
+Half of it is **gates**, because a seam that is not enforced is a seam that has already moved:
+`test/vendor-gate.test.ts` (#145 — only the host and the pi extensions may name pi, and the allowlist
+is the leak inventory), `test/presentation-gate.test.ts` (#121 — every ported file carries its pin and
+none imports the state layer), beside the logging, naming, no-lint-suppressions and coverage-manifest
+gates already there. ⚠ Every one of them is a matcher over lines, and every review of one has found the
+same failure mode: a spelling the pattern did not cover (`\b` against `PICC_`, a relative path against
+the `@/` alias, a bare specifier against a subpath) or an ordering it got wrong (first-match against
+longest-match, which truncated a redaction). Each gate now carries a test for its matcher, not only for
+its verdict — the pattern is the thing that rots.
 
 Phase 1 (TUI features: ask · notes · memory · git · health) was not run as a phase; the TUI has what pi
 and the guards give it, and TUI features accrue as extensions when the web surface needs the same
