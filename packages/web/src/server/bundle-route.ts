@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { arch, platform, release } from "node:os";
 import { join } from "node:path";
-import { VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { buildLogBundle, findRepoRoot, isZenThreadId, type ZenBundleAbout, type ZenLogLine } from "@zen/core";
 import { parseZenLogLine, zenLogFilename } from "@zen/core/log-process";
 import { inspectThread, type ThreadView } from "./thread-registry.ts";
@@ -29,6 +28,8 @@ export interface BundleRouteDeps {
 	readonly threads: { list(): ThreadView[] };
 	/** Where this process's file is — the launcher's `logsDir`, passed down so the route reads what was written. */
 	readonly logsDir: string;
+	/** The agent runtime's version, from the host — the vendor gate (#145) keeps pi's import there. */
+	readonly runtimeVersion: string;
 	/** Test seam: the day, and the clock. */
 	readonly now?: () => Date;
 }
@@ -110,7 +111,7 @@ export function createBundleRoute(deps: BundleRouteDeps): (query: URLSearchParam
 		const about: ZenBundleAbout = {
 			at: at.toISOString(),
 			zen,
-			pi: PI_VERSION,
+			pi: deps.runtimeVersion,
 			bun: typeof Bun === "undefined" ? "not bun" : Bun.version,
 			os: `${platform()} ${release()} ${arch()}`,
 			selection,

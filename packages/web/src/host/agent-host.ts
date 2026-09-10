@@ -6,6 +6,7 @@ import {
 	type ExtensionError,
 	type InlineExtension,
 	initTheme,
+	VERSION as PI_VERSION,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import {
@@ -165,6 +166,13 @@ export interface AgentHost {
 	 */
 	readBranch(threadId: string): Promise<unknown[] | undefined>;
 }
+
+/**
+ * The agent runtime this build is bound to, by version. The ONE place outside this host that
+ * needs pi's version is the log bundle's `about` (#132), and it takes this string rather than
+ * the import — the vendor gate (#145) keeps the import inside `host/`.
+ */
+export const AGENT_RUNTIME_VERSION: string = PI_VERSION;
 
 /**
  * Pin `childProxy: false` in the agent dir's multi-account config — see the module header.

@@ -18,7 +18,7 @@ import {
 	type ZenThreadSummary,
 	zenLogger,
 } from "@zen/core";
-import { type AgentHost, createAgentHost } from "../host/agent-host.ts";
+import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost } from "../host/agent-host.ts";
 import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
 import { createBundleRoute } from "./bundle-route.ts";
 import {
@@ -370,7 +370,7 @@ export function startZenServer(options: ZenServerOptions) {
 	}
 
 	// The bundle (#132): today's records + the live threads + the versions, one file.
-	const bundle = createBundleRoute({ threads, logsDir: options.logsDir });
+	const bundle = createBundleRoute({ threads, logsDir: options.logsDir, runtimeVersion: AGENT_RUNTIME_VERSION });
 
 	// ── The wire (#112): prompt / follow / dialog ────────────────────────────────────
 	const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs };
