@@ -20,10 +20,18 @@ import { join } from "node:path";
  * dependency site adds one and must say why. Adding a ROOT, or removing one, is a design
  * conversation — the two roots are the boundary this repo is built on.
  *
- * What it cannot catch, said up front: this is regexes over lines. `ZenThreadInspection.entries:
- * unknown[]` carries pi's persistence format with no import and no vendor name in it (goals L2).
- * That needs a transcript type of ours; a third test — vendor-prefixed identifiers outside the
- * host, the naming gate's trick — keeps it fixed once it is.
+ * It reads WORDS, not substrings (PR #150 review): the line is split on non-alphanumerics and
+ * on `camelCase`, so `readPiccPersistedMode`, `PICC_PERMISSION_MODES` and `.cc-safety-net` all
+ * count as the same mention. The two narrower matchers tried before each let a live site
+ * through — `\b` missed the `_` form, a both-sides lookaround missed the camelCase one — and
+ * a boundary that cannot see a dependency is not a boundary. `pickle` and `piccolo` are not
+ * picc: a word is the unit.
+ *
+ * What it still cannot catch, said up front: it is a line scan, not a type checker.
+ * `ZenThreadInspection.entries: unknown[]` carries pi's persistence format with no import and
+ * no vendor name in it (goals L2). That needs a transcript type of ours; a third test —
+ * vendor-prefixed identifiers outside the host, the naming gate's trick — keeps it fixed once
+ * it is. A vendor name assembled at runtime (`"pi" + "cc"`) is out of reach by construction.
  *
  * `COMMENT_LINE` reads one line at a time, so a block comment whose continuation lines do not
  * lead with `*` is scanned as code (PR #150 review). That direction is the safe one: the gate
@@ -40,13 +48,42 @@ const SKIPPED_DIRECTORIES = ["node_modules", "dist", "dist-types", "coverage", "
 const SOURCE_EXTENSION = /\.tsx?$/;
 /** A line that is only a comment: `//`, a block opener, or a block's `*`-led body. */
 const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/;
-/** pi and its libraries, by package scope. */
-const VENDOR_IMPORT = /from\s+["']@earendil-works\//;
 /**
- * A vendor extension by name. `_`/`-` are boundaries here, not word characters, so
- * `PICC_PERMISSION_MODES` and `.cc-safety-net` both count — a prefix IS the dependency.
+ * pi and its libraries, by package scope — in ANY string that names it, not only a
+ * `from "…"` clause (PR #150 review): `import("@earendil-works/…")` and
+ * `import.meta.resolve("@earendil-works/…")` are the same dependency by another spelling.
  */
-const VENDOR_NAMED = /(?<![A-Za-z0-9])(?:picc|pi[-_]multi[-_]account|cc[-_]safety[-_]net)(?![A-Za-z0-9])/i;
+const VENDOR_IMPORT = /["']@earendil-works\//;
+/**
+ * The words a line is made of, with `camelCase` split: `readPiccPersistedMode` is
+ * `read | picc | persisted | mode`, `PICC_PERMISSION_MODES` is `picc | permission | modes`,
+ * `.cc-safety-net` is `cc | safety | net`. Matching WORDS rather than substrings is what
+ * catches a vendor name embedded mid-identifier — a lookaround requiring a non-alphanumeric
+ * on both sides never fires inside `readPiccPersistedMode` (PR #150 review found it live).
+ */
+function wordsOf(line: string): string[] {
+	const words: string[] = [];
+	for (const token of line.match(/[A-Za-z0-9]+/g) ?? []) {
+		words.push(...(token.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z0-9]+|[0-9]+/g) ?? []).map((word) => word.toLowerCase()));
+	}
+	return words;
+}
+
+/** One word is the whole name. */
+const VENDOR_WORD = "picc";
+/** …and the ones spelled in several words, however they are joined (`cc-safety-net`, `ccSafetyNet`). */
+const VENDOR_WORD_SEQUENCES = [
+	["cc", "safety", "net"],
+	["pi", "multi", "account"],
+] as const;
+
+function namesVendor(line: string): boolean {
+	const words = wordsOf(line);
+	if (words.includes(VENDOR_WORD)) return true;
+	return VENDOR_WORD_SEQUENCES.some((sequence) =>
+		words.some((_word, start) => sequence.every((part, offset) => words[start + offset] === part)),
+	);
+}
 
 /**
  * Measured on `main` @ #149. The bundle's `about` no longer imports pi's `VERSION` — the host
@@ -78,6 +115,9 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
 	// default a fresh thread starts in. The call leaves with L3; the sentence stops being true
 	// the same day.
 	"packages/web/src/permission-mode.tsx",
+	// The status line's second reader of the same persisted entry (`readPiccPersistedMode`) —
+	// found by the widened matcher, not by the first one (PR #150 review). Leaves with L3.
+	"packages/web/src/mode-lines.ts",
 ];
 
 function sourceFiles(directory: string): string[] {
@@ -91,7 +131,7 @@ function sourceFiles(directory: string): string[] {
 	return found;
 }
 
-function offendersMatching(pattern: RegExp, allowed: readonly string[]): string[] {
+function offendersMatching(names: (line: string) => boolean, allowed: readonly string[]): string[] {
 	const offenders: string[] = [];
 	for (const root of SEARCHED_ROOTS) {
 		for (const path of sourceFiles(join(repositoryRoot, root))) {
@@ -101,17 +141,36 @@ function offendersMatching(pattern: RegExp, allowed: readonly string[]): string[
 			for (const [lineIndex, line] of readFileSync(path, "utf8").split("\n").entries()) {
 				// Code, not prose: a comment may name picc to say why a guard exists.
 				if (COMMENT_LINE.test(line)) continue;
-				if (pattern.test(line)) offenders.push(`${repositoryRelative}:${lineIndex + 1}`);
+				if (names(line)) offenders.push(`${repositoryRelative}:${lineIndex + 1}`);
 			}
 		}
 	}
 	return offenders;
 }
 
-test("⚠ @earendil-works/* is imported only by the host and the pi extensions (#145)", () => {
-	expect(offendersMatching(VENDOR_IMPORT, VENDOR_IMPORT_ALLOWED)).toEqual([]);
+test("⚠ @earendil-works/* is named only by the host and the pi extensions (#145)", () => {
+	expect(offendersMatching((line) => VENDOR_IMPORT.test(line), VENDOR_IMPORT_ALLOWED)).toEqual([]);
 });
 
 test("⚠ a vendor extension is named in code only there — the allowlist is the leak inventory (#145)", () => {
-	expect(offendersMatching(VENDOR_NAMED, VENDOR_NAMED_ALLOWED)).toEqual([]);
+	expect(offendersMatching(namesVendor, VENDOR_NAMED_ALLOWED)).toEqual([]);
+});
+
+// The gate can only be a ratchet if its matcher sees what a reader would call a mention. The
+// first two rows are the ones a `\b` boundary and a both-sides lookaround each missed.
+test("the matcher reads words, not substrings: a vendor name counts wherever it is spelled", () => {
+	for (const line of [
+		"import { readPiccPersistedMode } from '@zen/core';", // camelCase — missed by lookarounds
+		"export const PICC_PERMISSION_MODES = [] as const;", // `_` bounded — missed by \b
+		'const dirs = [".cc-safety-net"];',
+		"const config = ccSafetyNetConfig;",
+		"await loadPiMultiAccount();",
+		"a fresh thread starts in picc's default",
+	]) {
+		expect(namesVendor(line)).toBe(true);
+	}
+	// Words that merely share a prefix are not the vendor.
+	for (const line of ["const piccolo = 1;", "import { pick } from './x.ts';", "const netSafetyCc = 2;"]) {
+		expect(namesVendor(line)).toBe(false);
+	}
 });
