@@ -3,11 +3,12 @@ import type { MessagePart, StreamChunk } from "@tanstack/ai";
 import type { ModelMessage, UIMessage } from "@tanstack/ai/client";
 import type { RunAgentInputContext, SubscribeConnectionAdapter } from "@tanstack/ai-client";
 import {
+	isZenImageMimeType,
 	type PiDialogResponse,
+	ZEN_IMAGE_MIME_TYPES,
 	ZenAbortReceipt,
 	type ZenFollowFrame,
 	ZenFollowFrame as ZenFollowFrameSchema,
-	type ZenImageMimeType,
 	type ZenPromptBody,
 	type ZenPromptImage,
 	ZenPromptReceipt,
@@ -120,18 +121,28 @@ export function imagesOf(parts: readonly MessagePart[]): { images: ZenPromptImag
 	const refused: string[] = [];
 	for (const part of parts) {
 		if (part.type !== "image") continue;
-		if (part.source.type === "data") {
-			images.push({ mimeType: part.source.mimeType as ZenImageMimeType, data: part.source.value });
+		// Bytes and a kind, from either source shape; a kind the wire does not take is refused
+		// by name here rather than sent for the server to refuse (the server still would).
+		const inline: [string, string] | undefined =
+			part.source.type === "data" ? [part.source.mimeType, part.source.value] : dataUrlOf(part.source.value);
+		if (inline === undefined) {
+			refused.push(`${part.source.value.slice(0, 80)}: an image by URL is not sent — attach the file itself`);
 			continue;
 		}
-		const inline = DATA_URL.exec(part.source.value);
-		if (inline?.[1] !== undefined && inline[2] !== undefined) {
-			images.push({ mimeType: inline[1] as ZenImageMimeType, data: inline[2] });
+		const [mimeType, data] = inline;
+		if (!isZenImageMimeType(mimeType)) {
+			refused.push(`${mimeType}: not a kind this wire takes (${ZEN_IMAGE_MIME_TYPES.join(", ")})`);
 			continue;
 		}
-		refused.push(part.source.value.slice(0, 80));
+		images.push({ mimeType, data });
 	}
 	return { images, refused };
+}
+
+/** `data:<mime>;base64,<data>` → `[mime, data]`; anything else — an http(s) URL, a blob URL — is not inline bytes. */
+function dataUrlOf(value: string): [string, string] | undefined {
+	const match = DATA_URL.exec(value);
+	return match?.[1] !== undefined && match[2] !== undefined ? [match[1], match[2]] : undefined;
 }
 
 /** `data:` lines of an SSE body, one parsed frame at a time; comments (keepalives) are skipped. */
@@ -451,7 +462,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		const { images, refused } = imagesOf(parts);
 		if (refused.length > 0) {
 			// Refused on this side, by name: the server would only ever have seen bytes.
-			const reason = `an image by URL is not sent — attach the file itself (${refused.join(", ")})`;
+			const reason = `image not sent: ${refused.join("; ")}`;
 			log.warn("prompt refused: {reason}", { runId: run.runId, reason });
 			closeRun(run, { type: EventType.RUN_ERROR, runId: run.runId, message: reason });
 			return;

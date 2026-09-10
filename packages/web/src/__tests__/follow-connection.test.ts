@@ -181,7 +181,33 @@ test("[WARN] an image by URL is refused on THIS side, by name, before anything i
 	expect(server.chunks[5]).toEqual({
 		type: EventType.RUN_ERROR,
 		runId: "r1",
-		message: "an image by URL is not sent — attach the file itself (https://example.com/secret-internal.png)",
+		message:
+			"image not sent: https://example.com/secret-internal.png: an image by URL is not sent — attach the file itself",
+	});
+	server.abort();
+});
+
+test("[WARN] a kind the wire does not take is refused on this side by name, not sent for the server to refuse", async () => {
+	const server = scripted();
+	server.frame(SNAPSHOT_IDLE);
+	await server.untilChunks(3);
+	await server.connection.send(
+		[
+			{
+				id: "u1",
+				role: "user",
+				parts: [{ type: "image", source: { type: "data", value: PNG_BYTES, mimeType: "image/svg+xml" } }],
+			},
+		],
+		undefined,
+		undefined,
+		{ threadId: "t1", runId: "r1", clientTools: [], forwardedProps: {} },
+	);
+	await server.untilChunks(6);
+	expect(server.prompts).toEqual([]);
+	expect(server.chunks[5]).toMatchObject({
+		type: EventType.RUN_ERROR,
+		message: "image not sent: image/svg+xml: not a kind this wire takes (image/png, image/jpeg, image/gif, image/webp)",
 	});
 	server.abort();
 });

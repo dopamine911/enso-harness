@@ -79,6 +79,10 @@ export const ZenImageMimeType = Type.Union([
 export type ZenImageMimeType = Static<typeof ZenImageMimeType>;
 /** The same set as a list — the form's `accept`, the notice's wording. ⚠ Derived from the schema, not written twice. */
 export const ZEN_IMAGE_MIME_TYPES: readonly ZenImageMimeType[] = ZenImageMimeType.anyOf.map((literal) => literal.const);
+/** Narrows a mime string the browser reported (`File.type`, a `data:` URL's head) to the kinds the wire takes — no cast. */
+export function isZenImageMimeType(value: string): value is ZenImageMimeType {
+	return (ZEN_IMAGE_MIME_TYPES as readonly string[]).includes(value);
+}
 /** Anthropic's per-image cap, decoded bytes. Checked on the decoded size, not the base64 length. */
 export const ZEN_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 /** Images on one prompt. Claude.ai's own composer stops at 20; a pasted batch rarely nears this. */

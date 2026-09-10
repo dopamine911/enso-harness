@@ -186,13 +186,15 @@ test("a resumed pane mounts with the stored user and assistant messages already 
 	expect(rendered).toContain('<option value="plan" selected="">plan</option>');
 });
 
-// A file the composer would not take is SAID, with the cap by name (#68) — never dropped silently.
-test("an attachment the form refuses is a notice naming the cap: the kinds, the size, the count", () => {
-	expect(describeAttachmentError({ code: "accept", message: "" })).toBe(
-		"only images are attached here: png, jpeg, gif, webp",
+// A file the composer would not take is SAID, with how many and the cap by name (#68) — never dropped silently.
+test("an attachment the form refuses is a notice saying how many and naming the cap: the kinds, the size, the count", () => {
+	expect(describeAttachmentError({ code: "accept", message: "", count: 1 })).toBe(
+		"1 file was not attached: only images are attached here (png, jpeg, gif, webp)",
 	);
-	expect(describeAttachmentError({ code: "max_file_size", message: "" })).toBe("an image is at most 5 MB");
-	expect(describeAttachmentError({ code: "max_files", message: "" })).toBe(
-		"at most 20 images on one prompt — the rest were not added",
+	expect(describeAttachmentError({ code: "max_file_size", message: "", count: 2 })).toBe(
+		"2 files were not attached: an image is at most 5 MB",
+	);
+	expect(describeAttachmentError({ code: "max_files", message: "", count: 3 })).toBe(
+		"3 files were not attached: at most 20 images on one prompt",
 	);
 });

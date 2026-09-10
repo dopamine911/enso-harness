@@ -14,6 +14,10 @@
  * - removed `PromptInputSubmit`: upstream folds send and stop into one button by status;
  *   here send stays offered in flight (a prompt during a run queues through pi, #75) and stop
  *   is its own button (#116) — two buttons by decision, owned by `chat-screen.tsx`
+ * - `add` reports EVERY refusal, with a count, even when the rest of the batch went through —
+ *   upstream reported only when the whole batch failed, so a mixed drop lost files silently
+ *   (PR #141 review); the selection is a pure `selectAttachments`, tested without a DOM, and
+ *   runs against the held count before `setFiles` rather than inside the updater
  * - the text at submit comes from the form's `message` field and the form is NOT reset:
  *   the owner clears its controlled draft (upstream `form.reset()` fought a controlled value)
  * - `FileUIPart` from the Vercel AI SDK → local `PromptAttachment` (README rule 4);
@@ -86,7 +90,69 @@ export interface PromptInputMessage {
 export type PromptInputError = {
 	code: "max_files" | "max_file_size" | "accept";
 	message: string;
+	/** How many of the batch this refusal covers — a mixed drop says "2 of 3", never nothing. */
+	count: number;
 };
+
+/** True when `file.type` matches one of `accept`'s comma-separated patterns (`image/png`, `image/*`); no `accept` takes anything. */
+function matchesAccept(accept: string | undefined, file: File): boolean {
+	if (!accept || accept.trim() === "") {
+		return true;
+	}
+	const patterns = accept
+		.split(",")
+		.map((pattern) => pattern.trim())
+		.filter(Boolean);
+	return patterns.some((pattern) => {
+		if (pattern.endsWith("/*")) {
+			// e.g: image/* -> image/
+			const prefix = pattern.slice(0, -1);
+			return file.type.startsWith(prefix);
+		}
+		return file.type === pattern;
+	});
+}
+
+export interface AttachmentLimits {
+	readonly accept?: string | undefined;
+	readonly maxFileSize?: number | undefined;
+	readonly maxFiles?: number | undefined;
+	/** Attachments already held, so `maxFiles` counts across adds. */
+	readonly held: number;
+}
+
+/**
+ * Which of a batch attach, and every refusal with its count. Pure, so it is tested without
+ * a DOM. ⚠ Upstream reported a refusal only when the WHOLE batch failed a check (a mixed
+ * drop — two PNGs and a PDF — dropped the PDF silently); here each check reports what it
+ * refused even when the rest went through (PR #141 review). Order of checks is upstream's:
+ * kind, then size, then room.
+ */
+export function selectAttachments(
+	fileList: readonly File[] | FileList,
+	limits: AttachmentLimits,
+): { readonly accepted: File[]; readonly errors: PromptInputError[] } {
+	const incoming = [...fileList];
+	const errors: PromptInputError[] = [];
+	const accepted = incoming.filter((file) => matchesAccept(limits.accept, file));
+	if (accepted.length < incoming.length) {
+		errors.push({
+			code: "accept",
+			message: "Some files do not match the accepted types.",
+			count: incoming.length - accepted.length,
+		});
+	}
+	const sized = accepted.filter((file) => (limits.maxFileSize ? file.size <= limits.maxFileSize : true));
+	if (sized.length < accepted.length) {
+		errors.push({ code: "max_file_size", message: "Some files exceed the maximum size.", count: accepted.length - sized.length });
+	}
+	const capacity = typeof limits.maxFiles === "number" ? Math.max(0, limits.maxFiles - limits.held) : undefined;
+	const capped = typeof capacity === "number" ? sized.slice(0, capacity) : sized;
+	if (capped.length < sized.length) {
+		errors.push({ code: "max_files", message: "Too many files. Some were not added.", count: sized.length - capped.length });
+	}
+	return { accepted: capped, errors };
+}
 
 export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit" | "onError"> & {
 	// e.g., "image/*" or leave undefined for any
@@ -125,56 +191,27 @@ export const PromptInput = ({
 		inputRef.current?.click();
 	}, []);
 
-	const matchesAccept = useCallback(
-		(file: File) => {
-			if (!accept || accept.trim() === "") {
-				return true;
-			}
-			const patterns = accept
-				.split(",")
-				.map((pattern) => pattern.trim())
-				.filter(Boolean);
-			return patterns.some((pattern) => {
-				if (pattern.endsWith("/*")) {
-					// e.g: image/* -> image/
-					const prefix = pattern.slice(0, -1);
-					return file.type.startsWith(prefix);
-				}
-				return file.type === pattern;
-			});
-		},
-		[accept],
-	);
-
 	const add = useCallback(
 		(fileList: File[] | FileList) => {
-			const incoming = [...fileList];
-			const accepted = incoming.filter((file) => matchesAccept(file));
-			if (incoming.length && accepted.length === 0) {
-				onError?.({ code: "accept", message: "No files match the accepted types." });
-				return;
-			}
-			const sized = accepted.filter((file) => (maxFileSize ? file.size <= maxFileSize : true));
-			if (accepted.length > 0 && sized.length === 0) {
-				onError?.({ code: "max_file_size", message: "All files exceed the maximum size." });
-				return;
-			}
-			setFiles((previous) => {
-				const capacity = typeof maxFiles === "number" ? Math.max(0, maxFiles - previous.length) : undefined;
-				const capped = typeof capacity === "number" ? sized.slice(0, capacity) : sized;
-				if (typeof capacity === "number" && sized.length > capacity) {
-					onError?.({ code: "max_files", message: "Too many files. Some were not added." });
-				}
-				const next: PromptAttachment[] = capped.map((file) => ({
-					filename: file.name,
-					id: crypto.randomUUID(),
-					mediaType: file.type,
-					url: URL.createObjectURL(file),
-				}));
-				return [...previous, ...next];
+			// Selected against what is held NOW (the ref), not inside the updater: `onError` is a
+			// side effect, and React may run an updater twice.
+			const { accepted, errors } = selectAttachments(fileList, {
+				accept,
+				maxFileSize,
+				maxFiles,
+				held: filesRef.current.length,
 			});
+			for (const error of errors) onError?.(error);
+			if (accepted.length === 0) return;
+			const next: PromptAttachment[] = accepted.map((file) => ({
+				filename: file.name,
+				id: crypto.randomUUID(),
+				mediaType: file.type,
+				url: URL.createObjectURL(file),
+			}));
+			setFiles((previous) => [...previous, ...next]);
 		},
-		[matchesAccept, maxFiles, maxFileSize, onError],
+		[accept, maxFiles, maxFileSize, onError],
 	);
 
 	const remove = useCallback(

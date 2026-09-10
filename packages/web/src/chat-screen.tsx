@@ -2,12 +2,12 @@ import type { ContentPart } from "@tanstack/ai";
 import { automaticPartsForMessage, type ChatUISelectedPart, selectChatUI } from "@tanstack/ai-client/ui";
 import { createChatHook, createChatHookContexts, type LayoutProps, type MessageProps } from "@tanstack/ai-react/ui";
 import {
+	isZenImageMimeType,
 	type PiDialogResponse,
 	ZEN_IMAGE_MAX_BYTES,
 	ZEN_IMAGE_MIME_TYPES,
 	ZEN_PROMPT_MAX_IMAGES,
 	type ZenDialogSpec,
-	type ZenImageMimeType,
 	type ZenPromptImage,
 } from "@zen/core";
 import { ArrowUpIcon, PaperclipIcon, SquareIcon } from "lucide-react";
@@ -440,15 +440,16 @@ export function joinDrafts(current: string, ...more: readonly string[]): string 
 	return [current, ...more].filter((part) => part.trim().length > 0).join("\n\n");
 }
 
-/** What the form would not take, as the notice says it (#68): the cap by name, never a silent drop. */
+/** What the form would not take, as the notice says it (#68): how many, and the cap by name — never a silent drop. */
 export function describeAttachmentError(error: PromptInputError): string {
+	const files = error.count === 1 ? "1 file was" : `${error.count} files were`;
 	switch (error.code) {
 		case "accept":
-			return `only images are attached here: ${ZEN_IMAGE_MIME_TYPES.map((mimeType) => mimeType.slice("image/".length)).join(", ")}`;
+			return `${files} not attached: only images are attached here (${ZEN_IMAGE_MIME_TYPES.map((mimeType) => mimeType.slice("image/".length)).join(", ")})`;
 		case "max_file_size":
-			return `an image is at most ${(ZEN_IMAGE_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB`;
+			return `${files} not attached: an image is at most ${(ZEN_IMAGE_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB`;
 		case "max_files":
-			return `at most ${ZEN_PROMPT_MAX_IMAGES} images on one prompt — the rest were not added`;
+			return `${files} not attached: at most ${ZEN_PROMPT_MAX_IMAGES} images on one prompt`;
 	}
 }
 
@@ -682,11 +683,27 @@ const chatComponents = {
 					onError={(error) => stores.notifications.push(describeAttachmentError(error), "warning", "run")}
 					onSubmit={({ text, files }) => {
 						// The form hands back `data:` URLs (blob → FileReader); the wire takes bytes + kind.
-						const images = files.flatMap((file): ZenPromptImage[] => {
+						// The form's `accept` already filtered by `File.type`; this is the same set, as a
+						// guard rather than a cast, and a miss is said the same way the form says one.
+						const images: ZenPromptImage[] = [];
+						let notImages = 0;
+						for (const file of files) {
 							const inline = /^data:([^;,]+);base64,(.*)$/.exec(file.url);
-							if (inline?.[1] === undefined || inline[2] === undefined) return [];
-							return [{ mimeType: inline[1] as ZenImageMimeType, data: inline[2] }];
-						});
+							const mimeType = inline?.[1];
+							const data = inline?.[2];
+							if (mimeType === undefined || data === undefined || !isZenImageMimeType(mimeType)) {
+								notImages += 1;
+								continue;
+							}
+							images.push({ mimeType, data });
+						}
+						if (notImages > 0) {
+							stores.notifications.push(
+								describeAttachmentError({ code: "accept", message: "", count: notImages }),
+								"warning",
+								"run",
+							);
+						}
 						send(text, images);
 					}}
 				>
