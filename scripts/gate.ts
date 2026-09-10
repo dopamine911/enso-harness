@@ -29,7 +29,7 @@
  * TypeScript types at load. Each gate shells out through `npm run <script>`, so a
  * command's definition lives in exactly one place: package.json.
  */
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 
 const GREEN = '\x1b[32m'
 const RED = '\x1b[31m'
@@ -134,30 +134,63 @@ export function reportsWorkerAbort(stderr: string): boolean {
 }
 
 /**
- * Runs one gate to completion. stdout stays inherited, so the tool's colored, streaming
- * output reaches the terminal unchanged; stderr is captured, echoed verbatim, then scanned
- * for a runtime abort. Returns the child's exit code (non-zero = failure); a child killed by
- * a signal (status null), or one that aborted while claiming success, counts as failure.
+ * The overlap kept between stderr chunks so a banner split across a chunk boundary still
+ * matches — comfortably longer than the longest phrase in `WORKER_ABORT`.
  */
-function runGate(gate: Gate): number {
+const ABORT_SCAN_OVERLAP = 64
+
+/**
+ * Runs one gate to completion. stdout stays inherited, so the tool's colored, streaming
+ * output reaches the terminal unchanged. stderr is piped only so it can be scanned: every
+ * chunk is written straight through as it arrives — live, verbatim, unbuffered — and
+ * scanned for a runtime abort as it passes. Nothing accumulates, so there is no output size
+ * a gate can exceed. Resolves the child's exit code (non-zero = failure); a child killed by
+ * a signal, one that failed to spawn, or one that aborted while claiming success, fails.
+ */
+function runGate(gate: Gate): Promise<number> {
   process.stdout.write(`\n${BOLD}▶ ${gate.name}${RESET} ${DIM}— ${gate.describe}${RESET}\n`)
-  const result = spawnSync(PACKAGE_MANAGER, ['run', gate.script], {
-    stdio: ['inherit', 'inherit', 'pipe'],
-    encoding: 'utf8',
+  return new Promise<number>((resolve) => {
+    const child = spawn(PACKAGE_MANAGER, ['run', gate.script], {
+      stdio: ['inherit', 'inherit', 'pipe'],
+      // Piping costs the tool its stderr TTY, and most tools drop color when they lose it.
+      // Ask for it back when ours is a terminal, so the two streams still look alike.
+      env: process.stderr.isTTY ? { ...process.env, FORCE_COLOR: '1' } : process.env,
+    })
+
+    let aborted = false
+    let carry = ''
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk: string) => {
+      process.stderr.write(chunk)
+      const window = carry + chunk
+      if (reportsWorkerAbort(window)) aborted = true
+      carry = window.slice(-ABORT_SCAN_OVERLAP)
+    })
+
+    let settled = false
+    const settle = (code: number): void => {
+      if (settled) return
+      settled = true
+      resolve(code)
+    }
+
+    child.on('error', (error: Error) => {
+      process.stderr.write(`${RED}gate "${gate.name}" failed to spawn: ${error.message}${RESET}\n`)
+      settle(1)
+    })
+
+    child.on('close', (status: number | null, signal: NodeJS.Signals | null) => {
+      if (aborted) {
+        const exited = signal ? `signal ${signal}` : `${status}`
+        process.stderr.write(
+          `${RED}gate "${gate.name}": the tool ABORTED — whatever it held was not checked, whatever it exited with (${exited}).${RESET}\n`,
+        )
+        settle(1)
+        return
+      }
+      settle(status ?? 1)
+    })
   })
-  if (result.error) {
-    process.stderr.write(`${RED}gate "${gate.name}" failed to spawn: ${result.error.message}${RESET}\n`)
-    return 1
-  }
-  const stderr = result.stderr ?? ''
-  if (stderr.length > 0) process.stderr.write(stderr)
-  if (reportsWorkerAbort(stderr)) {
-    process.stderr.write(
-      `${RED}gate "${gate.name}": the tool ABORTED — whatever it held was not checked, whatever it exited with (${result.status}).${RESET}\n`,
-    )
-    return 1
-  }
-  return result.status ?? 1
 }
 
 /**
@@ -165,12 +198,12 @@ function runGate(gate: Gate): number {
  * matcher can be tested, and a test that imported this file would otherwise run every gate
  * — including itself — from inside the test run.
  */
-function main(): void {
+async function main(): Promise<void> {
   process.stdout.write(`${DIM}gate: running via ${PACKAGE_MANAGER}${RESET}\n`)
 
   let failedGate: string | null = null
   for (const gate of GATES) {
-    if (runGate(gate) !== 0) {
+    if ((await runGate(gate)) !== 0) {
       failedGate = gate.name
       break
     }
@@ -184,4 +217,4 @@ function main(): void {
   process.stdout.write(`\n${GREEN}✓ All gates passed.${RESET}\n`)
 }
 
-if (import.meta.main) main()
+if (import.meta.main) await main()

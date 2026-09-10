@@ -32,18 +32,12 @@ test('ordinary stderr is not an abort — diagnostics, warnings and an empty str
 })
 
 /**
- * End to end, because the unit above cannot prove the wiring: a gate script that prints the
- * banner and exits 0 must take the whole gate down. Runs the real `scripts/gate.ts` against a
- * throwaway package.json whose one gate does exactly that.
+ * Builds a throwaway package whose `lint` gate runs `body`, then runs the real
+ * `scripts/gate.ts` against it.
  */
-test('⚠ end to end: a gate script that prints the banner and exits 0 still fails the run', () => {
+function runGateOver(body: string): { status: number | null; output: string } {
   const scratch = mkdtempSync(join(tmpdir(), 'zen-gate-abort-'))
-  // Exits 0 on purpose — that is the whole point.
-  writeFileSync(
-    join(scratch, 'crash.sh'),
-    '#!/bin/sh\necho "thread \'biome::workspace_worker_0\' has overflowed its stack" >&2\necho "fatal runtime error: stack overflow, aborting" >&2\nexit 0\n',
-    { mode: 0o755 },
-  )
+  writeFileSync(join(scratch, 'crash.sh'), `#!/bin/sh\n${body}`, { mode: 0o755 })
   writeFileSync(
     join(scratch, 'package.json'),
     JSON.stringify({
@@ -57,9 +51,37 @@ test('⚠ end to end: a gate script that prints the banner and exits 0 still fai
   const run = spawnSync('bun', [join(import.meta.dir, '..', 'scripts', 'gate.ts')], {
     cwd: scratch,
     encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
   })
+  return { status: run.status, output: `${run.stdout}${run.stderr}` }
+}
+
+/**
+ * End to end, because the unit above cannot prove the wiring: a gate script that prints the
+ * banner and exits 0 must take the whole gate down.
+ */
+test('⚠ end to end: a gate script that prints the banner and exits 0 still fails the run', () => {
+  // Exits 0 on purpose — that is the whole point.
+  const run = runGateOver(
+    'echo "thread \'biome::workspace_worker_0\' has overflowed its stack" >&2\necho "fatal runtime error: stack overflow, aborting" >&2\nexit 0\n',
+  )
   expect(run.status).toBe(1)
-  expect(`${run.stdout}${run.stderr}`).toContain('ABORTED')
+  expect(run.output).toContain('ABORTED')
   // …and it stops there rather than running the gates behind it on a broken tree.
-  expect(run.stdout).not.toContain('All gates passed')
+  expect(run.output).not.toContain('All gates passed')
+})
+
+/**
+ * A tool that says a lot before it dies is still a tool that died. stderr is streamed and
+ * scanned as it passes, never accumulated, so there is no size at which the gate stops
+ * reading — a buffered read would have hit its 1 MB ceiling here and reported the crash as
+ * something else entirely.
+ */
+test('⚠ megabytes of stderr before the banner does not hide the abort', () => {
+  const run = runGateOver(
+    "head -c 2000000 /dev/zero | tr '\\0' 'x' >&2\necho >&2\necho 'fatal runtime error: stack overflow, aborting' >&2\nexit 0\n",
+  )
+  expect(run.status).toBe(1)
+  expect(run.output).toContain('ABORTED')
+  expect(run.output).not.toContain('failed to spawn')
 })
