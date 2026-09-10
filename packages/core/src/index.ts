@@ -134,6 +134,16 @@ export {
 	PiStreamingBehavior,
 } from "./pi-rpc.ts";
 export {
+	describeRunContext,
+	latestRunContext,
+	readZenRunContext,
+	runContextChanged,
+	ZEN_RUN_CONTEXT_CUSTOM_TYPE,
+	ZenRunContext,
+	ZenRunContextFiles,
+	ZenRunRevision,
+} from "./run-context.ts";
+export {
 	isSecretShapedName,
 	knownSecretValues,
 	parseDotenv,

@@ -1,7 +1,9 @@
 import {
 	browserSection,
+	describeRunContext,
 	describeSessionEntry,
 	describeThreadEvent,
+	latestRunContext,
 	persistedPermissionMode,
 	type ZenLogLine,
 	type ZenThreadEvent,
@@ -172,6 +174,7 @@ export function ThreadDebugView({
 }: ThreadDebugViewProps): React.ReactNode {
 	const browserMode = browser.mode.mode ?? "unknown";
 	const hostMode = session?.permissionMode.mode;
+	const runContext = session === undefined ? undefined : latestRunContext(session.entries);
 	const branchMode = session === undefined ? undefined : persistedPermissionMode(session.entries);
 	const sessionMissing = error === NO_SESSION_YET;
 	const generationDrift =
@@ -273,6 +276,12 @@ export function ThreadDebugView({
 								{session.lastActivityAt.slice(11, 19)}
 							</div>
 							<div>commands: {session.commands.map((command) => `/${command}`).join(" ")}</div>
+							<div className="break-all">
+								{/* The conditions this branch last recorded (#126) — derived from the branch, not a
+								    second field on the payload, so the log stays the one home. */}
+								run context:{" "}
+								{runContext === undefined ? "none recorded on this branch" : describeRunContext(runContext)}
+							</div>
 							<h4 className="mt-1 text-foreground">branch ({session.entries.length} entries)</h4>
 							<ol>
 								{session.entries.map((entry, position) => (
