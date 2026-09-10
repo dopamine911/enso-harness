@@ -140,23 +140,35 @@ export function reportsWorkerAbort(stderr: string): boolean {
 const ABORT_SCAN_OVERLAP = 64
 
 /**
- * Runs one gate to completion. stdout stays inherited, so the tool's colored, streaming
- * output reaches the terminal unchanged. stderr is piped only so it can be scanned: every
- * chunk is written straight through as it arrives — live, verbatim, unbuffered — and
- * scanned for a runtime abort as it passes. Nothing accumulates, so there is no output size
- * a gate can exceed. Resolves the child's exit code (non-zero = failure); a child killed by
- * a signal, one that failed to spawn, or one that aborted while claiming success, fails.
+ * Runs one gate to completion. Both of the tool's streams are piped and written straight
+ * through as they arrive — live, verbatim, unbuffered, each to the stream it came from.
+ * Only stderr is scanned for a runtime abort, and nothing accumulates, so there is no
+ * output size a gate can exceed. Resolves the child's exit code (non-zero = failure); a
+ * child killed by a signal, one that failed to spawn, or one that aborted while claiming
+ * success, fails.
+ *
+ * Both streams are piped rather than one, because inheriting stdout while piping stderr
+ * races a direct fd against one that round-trips our event loop: Biome writes diagnostics
+ * to stdout and its summary to stderr, and the two spliced into each other mid-line.
+ * Delaying both by the same path keeps the tool's own order.
  */
 function runGate(gate: Gate): Promise<number> {
   process.stdout.write(`\n${BOLD}▶ ${gate.name}${RESET} ${DIM}— ${gate.describe}${RESET}\n`)
   return new Promise<number>((resolve) => {
     const child = spawn(PACKAGE_MANAGER, ['run', gate.script], {
-      stdio: ['inherit', 'inherit', 'pipe'],
-      // Piping costs the tool its stderr TTY, and most tools drop color when they lose it.
-      // Ask for it back when ours is a terminal, so the two streams still look alike.
-      env: process.stderr.isTTY ? { ...process.env, FORCE_COLOR: '1' } : process.env,
+      stdio: ['inherit', 'pipe', 'pipe'],
+      // Piping costs the tool its TTY, and most tools drop color when they lose it. Ask for
+      // it back only when both of ours are terminals — forcing it with either redirected
+      // would write escapes into someone's log file.
+      env: process.stdout.isTTY && process.stderr.isTTY ? { ...process.env, FORCE_COLOR: '1' } : process.env,
     })
 
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => process.stdout.write(chunk))
+
+    // Only stderr is scanned: an abort banner is a runtime's dying words, always on stderr,
+    // and a tool that quotes source on stdout (Biome prints this repo's own test file, which
+    // names the banners) would otherwise take the gate down for reporting correctly.
     let aborted = false
     let carry = ''
     child.stderr.setEncoding('utf8')

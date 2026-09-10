@@ -35,7 +35,7 @@ test('ordinary stderr is not an abort — diagnostics, warnings and an empty str
  * Builds a throwaway package whose `lint` gate runs `body`, then runs the real
  * `scripts/gate.ts` against it.
  */
-function runGateOver(body: string): { status: number | null; output: string } {
+function runGateOver(body: string): { status: number | null; stdout: string; stderr: string; output: string } {
   const scratch = mkdtempSync(join(tmpdir(), 'zen-gate-abort-'))
   writeFileSync(join(scratch, 'crash.sh'), `#!/bin/sh\n${body}`, { mode: 0o755 })
   writeFileSync(
@@ -53,7 +53,7 @@ function runGateOver(body: string): { status: number | null; output: string } {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   })
-  return { status: run.status, output: `${run.stdout}${run.stderr}` }
+  return { status: run.status, stdout: run.stdout, stderr: run.stderr, output: `${run.stdout}${run.stderr}` }
 }
 
 /**
@@ -84,4 +84,30 @@ test('⚠ megabytes of stderr before the banner does not hide the abort', () => 
   expect(run.status).toBe(1)
   expect(run.output).toContain('ABORTED')
   expect(run.output).not.toContain('failed to spawn')
+})
+
+/**
+ * Both streams are piped, so the gate is now the only writer to the terminal. Every line the
+ * tool wrote must arrive whole and on the stream it was written to — an earlier revision
+ * inherited stdout while piping stderr, and Biome's diagnostics and its summary spliced into
+ * each other mid-line. (Ordering ACROSS the two streams is grouped in chunks, not exact;
+ * that is the price of reading either of them.)
+ */
+test('⚠ a tool writing both streams has every line arrive whole, on the stream it came from', () => {
+  const run = runGateOver('i=0\nwhile [ $i -lt 300 ]; do\n  echo "out $i"\n  echo "err $i" >&2\n  i=$((i+1))\ndone\n')
+  expect(run.status).toBe(0)
+  const lines = (stream: string, tag: string): string[] => stream.split('\n').filter((line) => line.startsWith(tag))
+  expect(lines(run.stdout, 'out ')).toEqual(Array.from({ length: 300 }, (_, index) => `out ${index}`))
+  expect(lines(run.stderr, 'err ')).toEqual(Array.from({ length: 300 }, (_, index) => `err ${index}`))
+})
+
+/**
+ * stdout is forwarded but never scanned. A linter quoting source — this very file names every
+ * banner, and Biome prints the offending lines — must not read as its own death.
+ */
+test('⚠ a banner quoted on stdout is a tool reporting, not a tool dying', () => {
+  const run = runGateOver('echo "fatal runtime error: stack overflow, aborting"\necho "  > 42 | Segmentation fault"\n')
+  expect(run.status).toBe(0)
+  expect(run.output).toContain('All gates passed')
+  expect(run.output).not.toContain('ABORTED')
 })
