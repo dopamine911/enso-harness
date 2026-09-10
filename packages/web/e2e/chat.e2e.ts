@@ -55,6 +55,11 @@ async function waitForRunToSettle(page: Page): Promise<void> {
 	await expect(page.getByRole("button", { name: SEND_BUTTON_NAME })).toBeVisible();
 }
 
+/** The permission-mode select in the composer — what a resumed thread's persisted mode shows on (#142). */
+function modeControl(page: Page): ReturnType<Page["getByRole"]> {
+	return page.getByRole("combobox", { name: "permission mode" });
+}
+
 async function typeAndSend(page: Page, message: string): Promise<void> {
 	const composer = page.getByPlaceholder(COMPOSER_PLACEHOLDER);
 	await composer.fill(message);
@@ -137,6 +142,56 @@ test.describe("chat surface", () => {
 		// The user's own image is in the transcript, as inline bytes.
 		await expect(page.locator('img[alt="attached by the user"]')).toHaveCount(1);
 		await captureScreenshot(page, "07-image-sent");
+	});
+
+	test("the URL names the thread (#142): reload keeps it, back/forward walk threads, a pasted link opens cold, a bad id says so", async ({
+		page,
+	}) => {
+		// A fresh page writes its thread's id to the URL at once.
+		await page.goto("/");
+		await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toBeVisible();
+		await expect(page).toHaveURL(/\?thread=[0-9a-f-]{36}$/);
+		const first = new URL(page.url()).searchParams.get("thread") ?? "";
+
+		// /mode builds the session on the server (no model), so the thread exists to come back to.
+		await typeAndSend(page, MODE_COMMAND);
+		const modeOption = page.getByRole("button", { name: MODE_OPTION_LABEL });
+		await expect(modeOption).toBeVisible();
+		await modeOption.click();
+		await waitForRunToSettle(page);
+		await expect(page.getByText(MODE_ANSWERED_STATUS)).toBeVisible();
+
+		// Reload: the same thread with its persisted mode — not a fresh one (the #68 check that
+		// failed). The mode CONTROL is the receipt: the "Mode: acceptEdits" line was a live notice.
+		await page.reload();
+		await expect(page).toHaveURL(new RegExp(`\\?thread=${first}$`));
+		await expect(modeControl(page)).toHaveValue("acceptEdits");
+		await expect(page.locator("[aria-current='true']")).toHaveCount(1);
+		await captureScreenshot(page, "08-thread-reloaded");
+
+		// New Session pushes; back returns to the first thread; forward to the second.
+		await page.getByRole("button", { name: "New Session", exact: true }).click();
+		await expect(page).not.toHaveURL(new RegExp(`thread=${first}$`));
+		const second = new URL(page.url()).searchParams.get("thread") ?? "";
+		expect(second).not.toBe(first);
+		await expect(modeControl(page)).toHaveValue("default");
+		await page.goBack();
+		await expect(page).toHaveURL(new RegExp(`thread=${first}$`));
+		await expect(modeControl(page)).toHaveValue("acceptEdits");
+		await page.goForward();
+		await expect(page).toHaveURL(new RegExp(`thread=${second}$`));
+		await expect(modeControl(page)).toHaveValue("default");
+
+		// A pasted link on a fresh page opens that thread cold — no page state.
+		await page.goto(`/?thread=${first}`);
+		await expect(modeControl(page)).toHaveValue("acceptEdits");
+
+		// A URL that cannot name a thread: a new session, and the rail says why.
+		await page.goto("/?thread=not%20a%20thread");
+		await expect(page.getByRole("alert")).toContainText("is not a thread id");
+		await expect(page).toHaveURL(/\?thread=[0-9a-f-]{36}$/);
+		await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toBeVisible();
+		await captureScreenshot(page, "09-thread-bad-id");
 	});
 
 	test("one real model turn @model", async ({ page }) => {

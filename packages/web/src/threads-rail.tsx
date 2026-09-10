@@ -37,7 +37,8 @@ export const UNTITLED_THREAD = "new session";
 
 export interface ThreadsRailProps {
 	readonly threads: readonly ThreadSummary[];
-	readonly activeThreadId: string;
+	/** Undefined while a URL-named thread is still being adopted (#142): nothing is highlighted. */
+	readonly activeThreadId: string | undefined;
 	/** Stored sessions not open on this page, newest first — already filtered by the caller. */
 	readonly earlier: readonly ZenStoredThread[];
 	/** Why the earlier list could not be fetched, or undefined. Shown where the rows would be. */

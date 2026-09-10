@@ -408,7 +408,7 @@ export async function fetchThreadBundle(
 	if (!response.ok) throw new InspectionFetchError(response.status, boundedFailureDetail(await response.text()));
 	const disposition = response.headers.get("Content-Disposition") ?? "";
 	const named = /filename="([^"]+)"/.exec(disposition)?.[1];
-	const text = `${await response.text()}\n${browserSection(ring)}`;
+	const text = `${await response.text()}\n${browserSection(ring, typeof window === "undefined" ? undefined : window.location.href)}`;
 	return { filename: named ?? `zen-bundle-${threadId.slice(0, 8)}.md`, text };
 }
 
