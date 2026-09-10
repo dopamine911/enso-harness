@@ -44,7 +44,7 @@ const SOURCE_EXTENSION = /\.tsx?$/;
  */
 const STATE_LAYER_MODULES = "store|thread-stores|stored-threads|follow-connection|session-stats|custom-event-router";
 const STATE_LAYER_IMPORT = new RegExp(
-	`from\\s+["'](?:@zen/core|@tanstack/[^"']+|(?:(?:\\.\\./)+|@/)(?:${STATE_LAYER_MODULES})\\.ts)["']`,
+	`from\\s+["'](?:@zen/core(?:/[^"']+)?|@tanstack/[^"']+|(?:(?:\\.\\./)+|@/)(?:${STATE_LAYER_MODULES})\\.ts)["']`,
 );
 
 function portedFiles(): string[] {
@@ -80,6 +80,9 @@ test("the state-layer matcher catches both spellings — the alias and the relat
 		'import type { ZenObservation } from "@zen/core";',
 		'import { useChat } from "@tanstack/react-ai";',
 		'import { createFollowConnection } from "@/follow-connection.ts";',
+		// A subpath is the same package: `@zen/core/log-process` is imported elsewhere in the
+		// repo, and the bare-specifier branch would have missed it (PR #153 review).
+		'import { parseZenLogLine } from "@zen/core/log-process";',
 	]) {
 		expect(STATE_LAYER_IMPORT.test(line)).toBe(true);
 	}

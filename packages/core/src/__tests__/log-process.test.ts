@@ -283,3 +283,48 @@ test("with no known values the pass does not run — an ordinary record is untou
 	await dispose();
 	expect(readFileSync(join(logsDir, zenLogFilename(new Date())), "utf8")).toContain("nothing to scrub here");
 });
+
+// PR #153 review, issue 1: a JS alternation takes the FIRST matching branch, not the longest.
+// Two live keys from one provider — or a key and its rotation — routinely share a prefix.
+test("⚠ a known value that is a prefix of another known value does not truncate the redaction", async () => {
+	const logsDir = mkdtempSync(join(tmpdir(), "zen-logs-prefix-"));
+	const dispose = await configureProcessLogging({
+		logsDir,
+		process: "server",
+		// The shorter one first: the order `knownSecretValues` would have produced from a file.
+		secretValues: ["sk-notarealsecret-abc", "sk-notarealsecret-abcdef99"],
+	});
+	zenLogger("server", "probe").info("leaked: sk-notarealsecret-abcdef99");
+	await dispose();
+	const text = readFileSync(join(logsDir, zenLogFilename(new Date())), "utf8");
+	// Before the fix this file held `[REDACTED:value]def99` — the tail of a live key.
+	expect(text).not.toContain("def99");
+	expect(text).toContain(`leaked: ${ZEN_REDACTED_VALUE}`);
+});
+
+// PR #153 review, issue 2: the console sink is wrapped the same way as the file (#134's
+// lesson), and now says so under test rather than by inspection.
+test("⚠ the terminal gets the value pass too: a known secret never reaches console output", async () => {
+	const printed: string[] = [];
+	const spy = spyOn(console, "info").mockImplementation((...parts: unknown[]) => {
+		printed.push(parts.map(String).join(" "));
+	});
+	try {
+		const dispose = await configureProcessLogging({
+			logsDir: mkdtempSync(join(tmpdir(), "zen-logs-console-")),
+			process: "server",
+			levels: { file: "info", console: "info", overrides: [] },
+			secretValues: ["tvly-notarealsecret-console"],
+		});
+		// Quoted in the message and in a plainly-named property: neither is a secret-shaped
+		// FIELD, so the name pass has nothing to catch and only the value pass can.
+		zenLogger("server", "probe").info("a command carried tvly-notarealsecret-console", {
+			reason: "the command carried tvly-notarealsecret-console",
+		});
+		await dispose();
+		expect(printed.join("\n")).not.toContain("tvly-notarealsecret-console");
+		expect(printed.join("\n")).toContain(ZEN_REDACTED_VALUE);
+	} finally {
+		spy.mockRestore();
+	}
+});

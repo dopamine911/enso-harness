@@ -172,9 +172,15 @@ function lowestOf(levels: ZenLogLevels): LogLevel {
  * One pre-built alternation over the known values, so the cost is a single regex pass per
  * string rather than one pass per secret. With no known values it is the identity: no
  * allocation, no scan, nothing on the write path at all.
+ *
+ * ⚠ LONGEST FIRST (PR #153 review). A JS alternation takes the first branch that matches at
+ * a position, not the longest, so with `sk-live-abc` listed before `sk-live-abcdef99` the
+ * longer secret is redacted down to its prefix and its tail stays in the file — silent
+ * under-redaction, in exactly the case that matters most: two live keys from one provider,
+ * or a key and its rotation. Reproduced before this line existed: `[REDACTED:value]def99`.
  */
 function redactingKnownValues(values: readonly string[]): (sink: Sink) => Sink {
-	const scannable = values.filter((value) => value.length > 0);
+	const scannable = values.filter((value) => value.length > 0).sort((left, right) => right.length - left.length);
 	if (scannable.length === 0) return (sink: Sink): Sink => sink;
 	const pattern = new RegExp(scannable.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g");
 	const scrubbed = (value: unknown): unknown => {
