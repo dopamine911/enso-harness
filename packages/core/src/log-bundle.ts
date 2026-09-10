@@ -100,9 +100,11 @@ function threadSection(inspection: ZenThreadInspection): string {
 }
 
 /** The browser's own records — appended by the drawer, which is the only place that has them. */
-export function browserSection(lines: readonly ZenLogLine[]): string {
-	if (lines.length === 0) return "## browser logged\n\nnothing — the page's ring was empty for this selection\n";
-	return `## browser logged — ${lines.length} records from the page's ring (every level the page ran at)\n\n${FENCE}jsonl\n${lines
+export function browserSection(lines: readonly ZenLogLine[], pageUrl?: string): string {
+	// The page's URL names the thread (#142): the line a reader opens to see it live.
+	const page = pageUrl === undefined ? "" : `\nPage: ${pageUrl}\n`;
+	if (lines.length === 0) return `## browser logged\n${page}\nnothing — the page's ring was empty for this selection\n`;
+	return `## browser logged — ${lines.length} records from the page's ring (every level the page ran at)\n${page}\n${FENCE}jsonl\n${lines
 		.map((line) => JSON.stringify(line))
 		.join("\n")}\n${FENCE}\n`;
 }

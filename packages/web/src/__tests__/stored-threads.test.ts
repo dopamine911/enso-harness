@@ -120,8 +120,8 @@ test("⚠ two clicks before the first history lands: the FIRST response is dropp
 		(next) => applied.push(next.threadId),
 		(m) => failures.push(m),
 	);
-	resume("first");
-	resume("second");
+	resume("first", undefined);
+	resume("second", undefined);
 	// The slow first response arrives AFTER the second click: superseded, not applied.
 	await history.resolve("first");
 	expect(applied).toEqual([]);
@@ -139,14 +139,34 @@ test("a superseded request's failure is not shown; the latest request's failure 
 		(next) => applied.push(next.threadId),
 		(m) => failures.push(m),
 	);
-	resume("first");
-	resume("second");
+	resume("first", undefined);
+	resume("second", undefined);
 	await history.reject("first", "first went away");
 	await history.reject("second", "409 second is running on this server");
 	expect(applied).toEqual([]);
 	expect(failures).toEqual(["409 second is running on this server"]);
 	// After the latest settles, a new click is a fresh request, not a stale one.
-	resume("third");
+	resume("third", undefined);
 	await history.resolve("third");
 	expect(applied).toEqual(["third"]);
+});
+
+// The boot's resume and a rail click can overlap (PR #143 review): each outcome must carry
+// what ITS request meant, never what the latest request meant.
+test("each outcome carries its own request's intent, not the latest request's", async () => {
+	const history = controlledHistory();
+	const seen: Array<[string, string]> = [];
+	const resume = createResumeRequests<string>(
+		history.fetch,
+		(next, intent) => seen.push([next.threadId, intent]),
+		(message, intent) => seen.push([message, intent]),
+	);
+	resume("first", "pop");
+	await history.resolve("first");
+	resume("second", "push");
+	await history.reject("second", "second went away");
+	expect(seen).toEqual([
+		["first", "pop"],
+		["second went away", "push"],
+	]);
 });

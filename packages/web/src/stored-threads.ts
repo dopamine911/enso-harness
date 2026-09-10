@@ -85,25 +85,29 @@ export async function fetchThreadHistory(threadId: string): Promise<ZenThreadHis
  * both apply, so response timing chose the active thread and, with it, where the next
  * prompt went. A superseded response is dropped whole: not applied, its failure not shown.
  * The fetcher is injected so the race is testable with controlled resolution order.
+ *
+ * Each request carries its own `intent` — what the caller meant by it — and gets it back
+ * with the outcome (PR #143 review): a shared "how did the latest one happen" slot is wrong
+ * the moment two requests overlap, and the boot's resume and a rail click can.
  */
-export function createResumeRequests(
+export function createResumeRequests<TIntent>(
 	fetchHistory: (threadId: string) => Promise<ZenThreadHistory>,
-	onHistory: (history: ZenThreadHistory) => void,
-	onFailure: (message: string) => void,
-): (threadId: string) => void {
+	onHistory: (history: ZenThreadHistory, intent: TIntent) => void,
+	onFailure: (message: string, intent: TIntent) => void,
+): (threadId: string, intent: TIntent) => void {
 	let latest: string | undefined;
-	return (threadId) => {
+	return (threadId, intent) => {
 		latest = threadId;
 		fetchHistory(threadId).then(
 			(history) => {
 				if (latest !== threadId) return;
 				latest = undefined;
-				onHistory(history);
+				onHistory(history, intent);
 			},
 			(failure: unknown) => {
 				if (latest !== threadId) return;
 				latest = undefined;
-				onFailure(failure instanceof Error ? failure.message : String(failure));
+				onFailure(failure instanceof Error ? failure.message : String(failure), intent);
 			},
 		);
 	};

@@ -11,7 +11,7 @@ import {
 	type ZenPromptImage,
 } from "@zen/core";
 import { ArrowUpIcon, PaperclipIcon, SquareIcon } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from "./components/ai-elements/attachments.tsx";
 import {
 	Conversation,
@@ -66,6 +66,7 @@ import {
 	titleFromMessages,
 	updateThreadSummary,
 } from "./thread-stores.ts";
+import { readThreadUrl, type ThreadUrl, urlForThread } from "./thread-url.ts";
 import { ThreadsRail, UNTITLED_THREAD } from "./threads-rail.tsx";
 import type { ZenRendererMap } from "./ZenToolResult.tsx";
 
@@ -870,10 +871,25 @@ export function ThreadPane({
 }
 
 /**
- * The first thread is minted when this module loads, as the page's single thread was
- * (#86): every page load starts a fresh session, mode and all.
+ * The URL names the thread (#142). A page that names one adopts it from `/history` before
+ * showing a pane; a page that names none, or names something that is not a thread id,
+ * mints a fresh one as every page load did before (#86) — and writes its id to the URL at
+ * once, so a reload from the first prompt on shows this thread, not another fresh one.
  */
-const FIRST_THREAD_ID = mintThread().threadId;
+const BOOT: ThreadUrl = typeof window === "undefined" ? { kind: "fresh" } : readThreadUrl(window.location.search);
+const FIRST_THREAD_ID: string | undefined = BOOT.kind === "fresh" ? mintThread().threadId : undefined;
+if (FIRST_THREAD_ID !== undefined && typeof window !== "undefined") {
+	window.history.replaceState(null, "", urlForThread(window.location.search, FIRST_THREAD_ID));
+}
+
+/** How the active thread came to change — what, if anything, is written to history. */
+type ThreadNavigation =
+	/** A click: a new history entry, so back returns to the thread before it. */
+	| "push"
+	/** The page's own doing (a fresh thread after a failed boot): the current entry is rewritten. */
+	| "replace"
+	/** Back or forward: history already moved; the page follows it. */
+	| "pop";
 
 /**
  * The stored sessions the rail can come back to (#95). Page-level, refreshed on load and
@@ -885,28 +901,79 @@ const storedThreads = createStoredThreadsStore();
 export function ChatScreen(): React.ReactNode {
 	const threads = useStore(threadListStore);
 	const stored = useStore(storedThreads);
-	const [activeThreadId, setActiveThreadId] = useState(FIRST_THREAD_ID);
-	const [resumeError, setResumeError] = useState<string | undefined>(undefined);
+	// Undefined only while a URL-named thread is being adopted: no pane, nothing active.
+	const [activeThreadId, setActiveThreadId] = useState<string | undefined>(FIRST_THREAD_ID);
+	const [resumeError, setResumeError] = useState<string | undefined>(BOOT.kind === "fresh" ? BOOT.notice : undefined);
 	const anyBusy = threads.some((thread) => thread.busy);
 	useEffect(() => {
 		// Load, and every time the page goes from a run in flight to none: something settled.
 		if (!(anyBusy || isFixtureMode)) void storedThreads.refresh();
 	}, [anyBusy]);
 	const pageThreadIds = new Set(threads.map((thread) => thread.threadId));
-	// Last click wins (PR #104 review) — the race lives in `createResumeRequests`, tested there.
-	// The two setters are stable, so the coordinator is created once per page.
+	// ⚠ Two things a resume's outcome must know, and cannot read from shared state (PR #143
+	// review — a shared "how" slot plus a "no threads yet" check desynced the URL from the
+	// pane the moment the boot's resume overlapped a rail click):
+	// - HOW its own request meant to reach history: it rides with the request (`intent`).
+	// - WHETHER a navigation happened since it was issued: `epoch` counts every navigation,
+	//   and an outcome from before the current one is dropped whole. New Session during the
+	//   boot's "resuming…" therefore wins outright: the URL says the new thread, the pane
+	//   shows it, and the boot's answer arrives to nobody.
+	// `activePane` mirrors `activeThreadId` for the same closures.
+	const epoch = useRef(0);
+	const activePane = useRef<string | undefined>(FIRST_THREAD_ID);
+	/** Make `threadId` the active pane, and tell history how it happened. History state is `null`: the URL is read back, never the state object. */
+	const navigate = useCallback((threadId: string, how: ThreadNavigation): void => {
+		epoch.current += 1;
+		activePane.current = threadId;
+		setActiveThreadId(threadId);
+		if (how === "pop" || typeof window === "undefined") return;
+		const url = urlForThread(window.location.search, threadId);
+		if (how === "push") window.history.pushState(null, "", url);
+		else window.history.replaceState(null, "", url);
+	}, []);
 	const resume = useMemo(
 		() =>
-			createResumeRequests(
+			createResumeRequests<{ how: ThreadNavigation; epoch: number }>(
 				fetchThreadHistory,
-				(history) => {
+				(history, intent) => {
+					if (intent.epoch !== epoch.current) return; // a navigation happened since — superseded
 					setResumeError(undefined);
-					setActiveThreadId(adoptThread(history).threadId);
+					navigate(adoptThread(history).threadId, intent.how);
 				},
-				setResumeError,
+				(message, intent) => {
+					if (intent.epoch !== epoch.current) return;
+					setResumeError(message);
+					// The page must show SOMETHING: a resume that failed with no pane behind it (the
+					// boot's, or a rail click while the boot was still out) leaves a fresh thread, said
+					// (the error is on the rail), and the URL rewritten so a reload does not ask again.
+					if (activePane.current === undefined) navigate(mintThread().threadId, "replace");
+				},
 			),
-		[],
+		[navigate],
 	);
+	const resumeFrom = useCallback(
+		(threadId: string, how: ThreadNavigation): void => resume(threadId, { how, epoch: epoch.current }),
+		[resume],
+	);
+	// Boot: the URL named a thread — adopt it. Once per page; the coordinator drops a stale answer.
+	useEffect(() => {
+		if (BOOT.kind === "resume") resumeFrom(BOOT.threadId, "pop");
+	}, [resumeFrom]);
+	// Back/forward: the URL moved; the page follows it — a thread on this page is a switch, one
+	// that is not is a resume. Neither writes history again.
+	useEffect(() => {
+		const onPopState = (): void => {
+			const named = readThreadUrl(window.location.search);
+			if (named.kind !== "resume") return;
+			if (threadListStore.get().some((thread) => thread.threadId === named.threadId)) {
+				navigate(named.threadId, "pop");
+				return;
+			}
+			resumeFrom(named.threadId, "pop");
+		};
+		window.addEventListener("popstate", onPopState);
+		return () => window.removeEventListener("popstate", onPopState);
+	}, [navigate, resumeFrom]);
 	// The debug column (#86) is a right-hand pane, not a bottom drawer: stacked under the
 	// transcript it took forty percent of the height and squeezed the conversation it
 	// exists to explain. Opt-in by `?debug`; open by default when it is, and collapsible
@@ -924,8 +991,8 @@ export function ChatScreen(): React.ReactNode {
 					<span className="rounded-full border px-2 py-0.5 text-muted-foreground text-xs">fixture</span>
 				) : null}
 				{/* Where you are: the active thread's title, the same one the rail shows. */}
-				<span className="min-w-0 flex-1 truncate text-sm" title={activeThreadId}>
-					{active?.title ?? UNTITLED_THREAD}
+				<span className="min-w-0 flex-1 truncate text-sm" title={activeThreadId ?? ""}>
+					{active?.title ?? (activeThreadId === undefined ? "resuming…" : UNTITLED_THREAD)}
 				</span>
 				{isDebugMode ? (
 					<Button
@@ -947,9 +1014,9 @@ export function ChatScreen(): React.ReactNode {
 					earlier={storedThreadsNotOnThisPage(stored.threads, pageThreadIds)}
 					earlierError={stored.error ?? resumeError}
 					now={new Date()}
-					onSelect={setActiveThreadId}
-					onResume={resume}
-					onNew={() => setActiveThreadId(mintThread().threadId)}
+					onSelect={(threadId) => navigate(threadId, "push")}
+					onResume={(threadId) => resumeFrom(threadId, "push")}
+					onNew={() => navigate(mintThread().threadId, "push")}
 				/>
 				{threads.map((thread) => (
 					<ThreadPane

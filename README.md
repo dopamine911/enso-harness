@@ -279,6 +279,12 @@ Built so far:
   and similar flows work from a web page at all.
 - **A thread-stats bar (#45 phase 1):** running cost plus the last request's token split.
 - **Mode-change notifications** rendered as chat-adjacent lines rather than lost to stderr.
+- **The URL names the thread (#142).** `?thread=<id>` is the source of truth for the active pane: a
+  fresh page writes its thread's id at once, so a reload shows the thread you were in (transcript,
+  mode, the user's images — from the server, not page state); the rail and New Session push history,
+  so back/forward walk the threads you switched between; a thread has a link. A `?thread=` that is
+  not a thread id opens a new session and says so on the rail. `history`, no router — a router earns
+  its place only if `?debug`/`?log`/`?fixture` become a real surface.
 - **Images on a prompt (#68).** Paste, drop, or attach png/jpeg/gif/webp (5 MB each, 20 per prompt);
   the composer — `prompt-input.tsx` + `attachments.tsx` ported under #121 — shows the thumbnails, and
   an image with no words is a prompt. The bytes cross as `ZenPromptBody.images` (inline base64 + kind:
