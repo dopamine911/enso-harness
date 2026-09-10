@@ -879,7 +879,7 @@ export function ThreadPane({
 const BOOT: ThreadUrl = typeof window === "undefined" ? { kind: "fresh" } : readThreadUrl(window.location.search);
 const FIRST_THREAD_ID: string | undefined = BOOT.kind === "fresh" ? mintThread().threadId : undefined;
 if (FIRST_THREAD_ID !== undefined && typeof window !== "undefined") {
-	window.history.replaceState({ threadId: FIRST_THREAD_ID }, "", urlForThread(window.location.search, FIRST_THREAD_ID));
+	window.history.replaceState(null, "", urlForThread(window.location.search, FIRST_THREAD_ID));
 }
 
 /** How the active thread came to change — what, if anything, is written to history. */
@@ -910,40 +910,49 @@ export function ChatScreen(): React.ReactNode {
 		if (!(anyBusy || isFixtureMode)) void storedThreads.refresh();
 	}, [anyBusy]);
 	const pageThreadIds = new Set(threads.map((thread) => thread.threadId));
-	/** Make `threadId` the active pane, and tell history how it happened. */
+	// ⚠ Two things a resume's outcome must know, and cannot read from shared state (PR #143
+	// review — a shared "how" slot plus a "no threads yet" check desynced the URL from the
+	// pane the moment the boot's resume overlapped a rail click):
+	// - HOW its own request meant to reach history: it rides with the request (`intent`).
+	// - WHETHER a navigation happened since it was issued: `epoch` counts every navigation,
+	//   and an outcome from before the current one is dropped whole. New Session during the
+	//   boot's "resuming…" therefore wins outright: the URL says the new thread, the pane
+	//   shows it, and the boot's answer arrives to nobody.
+	// `activePane` mirrors `activeThreadId` for the same closures.
+	const epoch = useRef(0);
+	const activePane = useRef<string | undefined>(FIRST_THREAD_ID);
+	/** Make `threadId` the active pane, and tell history how it happened. History state is `null`: the URL is read back, never the state object. */
 	const navigate = useCallback((threadId: string, how: ThreadNavigation): void => {
+		epoch.current += 1;
+		activePane.current = threadId;
 		setActiveThreadId(threadId);
 		if (how === "pop" || typeof window === "undefined") return;
 		const url = urlForThread(window.location.search, threadId);
-		if (how === "push") window.history.pushState({ threadId }, "", url);
-		else window.history.replaceState({ threadId }, "", url);
+		if (how === "push") window.history.pushState(null, "", url);
+		else window.history.replaceState(null, "", url);
 	}, []);
-	// A resume's outcome lands after a round trip, so how it reached history rides along:
-	// last click wins (PR #104 review, the race is tested in `createResumeRequests`), and
-	// the latest request's navigation is the one that applies.
-	const resumeHow = useRef<ThreadNavigation>("push");
 	const resume = useMemo(
 		() =>
-			createResumeRequests(
+			createResumeRequests<{ how: ThreadNavigation; epoch: number }>(
 				fetchThreadHistory,
-				(history) => {
+				(history, intent) => {
+					if (intent.epoch !== epoch.current) return; // a navigation happened since — superseded
 					setResumeError(undefined);
-					navigate(adoptThread(history).threadId, resumeHow.current);
+					navigate(adoptThread(history).threadId, intent.how);
 				},
-				(message) => {
+				(message, intent) => {
+					if (intent.epoch !== epoch.current) return;
 					setResumeError(message);
-					// A boot that named a thread the server does not have: a fresh one, said
+					// The page must show SOMETHING: a resume that failed with no pane behind it (the
+					// boot's, or a rail click while the boot was still out) leaves a fresh thread, said
 					// (the error is on the rail), and the URL rewritten so a reload does not ask again.
-					if (threadListStore.get().length === 0) navigate(mintThread().threadId, "replace");
+					if (activePane.current === undefined) navigate(mintThread().threadId, "replace");
 				},
 			),
 		[navigate],
 	);
 	const resumeFrom = useCallback(
-		(threadId: string, how: ThreadNavigation): void => {
-			resumeHow.current = how;
-			resume(threadId);
-		},
+		(threadId: string, how: ThreadNavigation): void => resume(threadId, { how, epoch: epoch.current }),
 		[resume],
 	);
 	// Boot: the URL named a thread — adopt it. Once per page; the coordinator drops a stale answer.

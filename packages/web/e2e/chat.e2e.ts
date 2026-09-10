@@ -194,6 +194,40 @@ test.describe("chat surface", () => {
 		await captureScreenshot(page, "09-thread-bad-id");
 	});
 
+	test("⚠ New Session during a slow boot resume wins outright: URL and pane agree, the late history is dropped (PR #143 review)", async ({
+		page,
+	}) => {
+		// A thread to come back to, with a mode that tells it apart from a fresh one.
+		await page.goto("/");
+		await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toBeVisible();
+		const first = new URL(page.url()).searchParams.get("thread") ?? "";
+		await typeAndSend(page, MODE_COMMAND);
+		await page.getByRole("button", { name: MODE_OPTION_LABEL }).click();
+		await waitForRunToSettle(page);
+		await expect(modeControl(page)).toHaveValue("acceptEdits");
+
+		// The boot's /history is slow; the user does not wait.
+		await page.route("**/api/threads/*/history", async (route) => {
+			await new Promise((resolve) => setTimeout(resolve, 1500));
+			await route.continue();
+		});
+		await page.goto(`/?thread=${first}`);
+		await expect(page.getByText("resuming…")).toBeVisible();
+		await page.getByRole("button", { name: "New Session", exact: true }).click();
+		const fresh = new URL(page.url()).searchParams.get("thread") ?? "";
+		expect(fresh).not.toBe(first);
+		await expect(modeControl(page)).toHaveValue("default");
+
+		// The late answer for `first` arrives — and changes nothing: URL, current row, and mode
+		// all still say the fresh thread. (Pre-fix: the pane flipped to `first` under a URL naming `fresh`.)
+		await page.waitForTimeout(2000);
+		await expect(page).toHaveURL(new RegExp(`thread=${fresh}$`));
+		await expect(modeControl(page)).toHaveValue("default");
+		await expect(page.locator("[aria-current='true']")).toHaveCount(1);
+		await expect(page.getByText(/resuming/)).toHaveCount(0);
+		await page.unroute("**/api/threads/*/history");
+	});
+
 	test("one real model turn @model", async ({ page }) => {
 		await page.goto("/");
 		await typeAndSend(page, MODEL_PROMPT);

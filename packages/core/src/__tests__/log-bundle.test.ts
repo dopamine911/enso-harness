@@ -81,3 +81,17 @@ test("an empty ring says so rather than fencing nothing — and an empty block i
 	expect(text).toContain("the page's ring was empty");
 	expect(bundleRecordsText(`${buildLogBundle({ about, threads: [], lines: [], matched: 0 })}\n${text}`)).toBe("");
 });
+
+// The page's URL names the thread (#142): the line a reader opens to see it live - present in both shapes of the section.
+test("the browser section carries the page URL when given one, with records and without", () => {
+	const ring = [line("follow opened", { pageSequence: 1 })];
+	expect(browserSection(ring, "http://127.0.0.1:5178/?thread=t1")).toContain(
+		"\nPage: http://127.0.0.1:5178/?thread=t1\n",
+	);
+	expect(browserSection([], "http://127.0.0.1:5178/?thread=t1")).toContain(
+		"\nPage: http://127.0.0.1:5178/?thread=t1\n",
+	);
+	expect(browserSection([])).not.toContain("Page:");
+	// The records still round-trip through the reader with the line in place.
+	expect(bundleRecordsText(browserSection(ring, "http://x/?thread=t1"))).toBe(JSON.stringify(ring[0]));
+});
