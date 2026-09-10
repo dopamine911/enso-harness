@@ -60,6 +60,13 @@ test("⚠ the JSONL file: every line validates ZenLogLine; a secret-shaped field
 	for (const record of parsed) expect(Check(ZenLogLine, record)).toBe(true);
 	const [configured, underRoute, refusal] = parsed as ZenLogLine[];
 	expect(configured?.properties).toMatchObject({ process: "server", sequence: 1, file: "info", console: "off" });
+	// Who wrote this file, and since when (#144): a shared file makes "the processes" mean
+	// "who has written today", and liveness is then inferable from the last write.
+	expect(configured?.properties?.pid).toBe(process.pid);
+	const startedAt = new Date(String(configured?.properties?.startedAt));
+	expect(Number.isNaN(startedAt.getTime())).toBe(false);
+	expect(startedAt.getTime()).toBeLessThanOrEqual(Date.now());
+	expect(startedAt.getTime()).toBeGreaterThan(Date.now() - 60 * 60 * 1000);
 
 	// Implicit context: the route's threadId is on the record; its own properties stay. The
 	// message is the TEMPLATE — the event, not its values — so a bundle can filter on it.
