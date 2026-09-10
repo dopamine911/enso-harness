@@ -98,11 +98,18 @@ const SHELL_COMMAND_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/
 const UNSCANNABLE_CHARACTERS = /['"\\{[*?]/
 
 /**
- * `${…}` standing where the command word goes: the start of the text or just after a
- * separator (`;`, `&&`, `||`, `|`, newline), past any leading `NAME=value` assignments —
+ * `${…}` standing where the command word goes: the start of a line or just after a
+ * separator (`;`, `&&`, `||`, `|`), past any leading `NAME=value` assignments —
  * `P=cur; ${P}l https://x`. An expansion anywhere else is an argument.
+ *
+ * ⚠ Applied per LINE, with comment lines dropped first (review): a newline is a command
+ * separator, so `# note: ${CMD} is a placeholder` otherwise reads as an expansion at
+ * command position and denies a command bash never runs. Refusing what is safe is the
+ * cheap direction to be wrong in, but a gate that fires on a comment teaches people to
+ * route around the gate.
  */
-const EXPANSION_COMMAND_WORD = /(?:^|[;&|\n])[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+)*\$\{/
+const EXPANSION_COMMAND_WORD = /(?:^|[;&|])[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+)*\$\{/
+const SHELL_COMMENT_LINE = /^[ \t]*#/
 
 /** bash's built-in TCP/UDP redirection devices — no legitimate use in this harness. */
 const BASH_SOCKET_DEVICE_PATTERN = /\/dev\/(?:tcp|udp)\//i
@@ -401,11 +408,11 @@ function unscannableFloor(command: string): NetworkEgressMatch | undefined {
   // ⚠ A `${…}` ANYWHERE makes the whole command unsegmentable (the segmenter refuses it),
   // so every such command lands here and, until this rule, fell through to a raw scan that
   // cannot see `P=cur; ${P}l …` — the name is assembled at expansion time, exactly the
-  // synthesis blindness `{c,}url` is denied for. Refused only AT COMMAND POSITION (start of
-  // the command, or after a separator, past any leading assignments): `echo "${HOME}/x"`
-  // and `git commit -m "${message}"` expand into ARGUMENTS, where the command word is still
-  // literal and the scan still exact, so they stay allowed.
-  if (EXPANSION_COMMAND_WORD.test(commandLines)) {
+  // synthesis blindness `{c,}url` is denied for. Refused only AT COMMAND POSITION:
+  // `echo "${HOME}/x"` and `git commit -m "${message}"` expand into ARGUMENTS, where the
+  // command word is still literal and the scan still exact, so they stay allowed.
+  const runnableLines = commandLines.split('\n').filter((line) => !SHELL_COMMENT_LINE.test(line))
+  if (runnableLines.some((line) => EXPANSION_COMMAND_WORD.test(line))) {
     return { matched: 'a parameter expansion at command position', via: 'unresolvable' }
   }
   if (/<</.test(commandLines) && shellFedByStream(commandLines)) {

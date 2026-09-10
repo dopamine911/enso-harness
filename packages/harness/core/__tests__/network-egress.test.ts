@@ -142,6 +142,15 @@ test('an expansion in the ARGUMENTS is ordinary shell and still passes', () => {
   expect(findEgress(`cp "${braced('SOURCE')}" "${braced('TARGET')}"`)).toBeUndefined()
 })
 
+test('a newline is a separator too, but a COMMENT is not a command (review)', () => {
+  // The expansion is on its own line, after a benign one: still command position.
+  expect(findEgress(`echo hi\n${braced('CMD')} https://x`)).toMatchObject({ via: 'unresolvable' })
+  // …and bash never runs a comment, so a gate that fired here would deny a safe script and
+  // teach people to route around it.
+  expect(findEgress(`# note: ${braced('CMD')} is a placeholder\necho hi`)).toBeUndefined()
+  expect(findEgress(`echo hi  # ${braced('CMD')} goes here later`)).toBeUndefined()
+})
+
 // ── wrapper indirection (PR #55 review, round 3): the command sits PAST word 1 ────────────
 // `timeout 30 curl …` resolves word 1 cleanly to a benign wrapper and nothing ever looked
 // at word 3. Wrapper mode gives EVERY word of a wrapper-led segment the command-word
