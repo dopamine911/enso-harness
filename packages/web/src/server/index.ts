@@ -27,6 +27,7 @@ import {
 	readDialogBody,
 	readPromptBody,
 } from "./follow.ts";
+import { receiveBrowserLogs } from "./logs-route.ts";
 import { SSE_KEEPALIVE_MS } from "./sse.ts";
 import { createThreadRegistry, type ThreadView } from "./thread-registry.ts";
 
@@ -409,6 +410,18 @@ export function startZenServer(options: ZenServerOptions) {
 		response.end(JSON.stringify(outcome.receipt));
 	}
 
+	/** The browser's records (#132 slice 3): into this process's logger, or a 4xx that says why — never logged itself. */
+	async function respondToBrowserLogs(request: IncomingMessage, response: ServerResponse): Promise<void> {
+		const outcome = receiveBrowserLogs(await readBody(request));
+		if (outcome.status !== 204) {
+			response.writeHead(outcome.status, { "Content-Type": "text/plain" });
+			response.end(outcome.reason);
+			return;
+		}
+		response.writeHead(204);
+		response.end();
+	}
+
 	/** No body to read: the thread id is the whole request (#116). The answer is the restored queue (#75). */
 	function respondToAbort(threadId: string, response: ServerResponse): void {
 		const outcome = abortThread(followDeps, threadId);
@@ -467,6 +480,10 @@ export function startZenServer(options: ZenServerOptions) {
 		}
 		if (request.method === "GET" && url === "/api/stored-threads") {
 			answerOrFail(respondWithStoredThreads(response), response);
+			return;
+		}
+		if (request.method === "POST" && url === "/api/logs") {
+			answerOrFail(respondToBrowserLogs(request, response), response);
 			return;
 		}
 		if (request.method === "GET") {

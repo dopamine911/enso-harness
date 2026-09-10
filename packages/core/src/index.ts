@@ -45,11 +45,13 @@ export {
 	withZenLogContext,
 	ZEN_LOG_ROOT,
 	ZEN_REDACT_FIELDS,
+	ZenBrowserLogBatch,
 	type ZenLogger,
 	type ZenLogLayer,
 	ZenLogLine,
 	type ZenLogProperties,
 	zenLogger,
+	zenLogLineOf,
 } from "./log.ts";
 export {
 	ZenCustomSessionEntry,
