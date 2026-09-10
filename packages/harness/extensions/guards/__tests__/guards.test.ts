@@ -7,7 +7,10 @@ import type { LogRecorder } from '@logtape/testing/recorder'
 import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
 import { createGuards, GUARD_POLICY_TOOL_NAMES, type GuardDependencies } from '../index.ts'
 
-type Handler = (event: unknown, extensionContext: unknown) => { block?: boolean; reason?: string } | undefined
+/** What a guard handler answers: a block verdict, or nothing when the call passes. */
+type GuardVerdict = { block?: boolean; reason?: string } | undefined
+
+type Handler = (event: unknown, extensionContext: unknown) => GuardVerdict
 
 /** ONE guard instance's captured handlers — the #10 sequences need state across calls. */
 interface GuardRuntime {
@@ -60,7 +63,7 @@ function loadGuard(): Handler {
 }
 
 const cwd = mkdtempSync(join(tmpdir(), 'zen-guard-live-'))
-const call = (toolName: string, input: Record<string, unknown>) =>
+const call = (toolName: string, input: Record<string, unknown>): GuardVerdict =>
   loadGuard()({ type: 'tool_call', toolCallId: 't', toolName, input }, { cwd })
 
 /** Every verdict is a record (#132): the recorder is the file. */
@@ -77,7 +80,7 @@ test('⚠ every verdict is a record: a denial at warn with the tool, the path an
     level: 'warning',
     category: ['zen', 'extension', 'guards'],
     rawMessage: '{toolName} denied: {reason}',
-    properties: (properties) =>
+    properties: (properties: Readonly<Record<string, unknown>>) =>
       properties.toolCallId === 't' &&
       properties.toolName === 'write' &&
       properties.path === '/etc/passwd' &&
@@ -317,7 +320,7 @@ test('re-reading the changed file clears the staleness and the write passes', ()
 const isGitAvailable = Bun.which('git') !== null
 test.skipIf(!isGitAvailable)('the incident shape: staged, mutated, restored from index — the write is refused', () => {
   const repo = mkdtempSync(join(tmpdir(), 'zen-guard-incident-'))
-  const runGit = (...args: string[]) => {
+  const runGit = (...args: string[]): void => {
     const result = Bun.spawnSync(['git', ...args], { cwd: repo })
     if (result.exitCode !== 0) {
       throw new Error(`git ${args[0]} failed: ${result.stderr.toString()}`)

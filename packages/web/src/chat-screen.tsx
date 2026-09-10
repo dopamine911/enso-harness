@@ -1,6 +1,14 @@
 import type { ContentPart } from '@tanstack/ai'
+import type { ConnectConnectionAdapter, UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, type ChatUISelectedPart, selectChatUI } from '@tanstack/ai-client/ui'
-import { createChatHook, createChatHookContexts, type LayoutProps, type MessageProps } from '@tanstack/ai-react/ui'
+import {
+  type ChatUIContexts,
+  type ChatUIHost,
+  createChatHook,
+  createChatHookContexts,
+  type LayoutProps,
+  type MessageProps,
+} from '@tanstack/ai-react/ui'
 import {
   isZenImageMimeType,
   type PiDialogResponse,
@@ -11,7 +19,7 @@ import {
   type ZenPromptImage,
 } from '@zen/core'
 import { ArrowUpIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { type ComponentType, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from './components/ai-elements/attachments.tsx'
 import {
   Conversation,
@@ -24,6 +32,7 @@ import {
   PromptInput,
   PromptInputButton,
   type PromptInputError,
+  type PromptInputMessage,
   PromptInputTextarea,
   usePromptInputAttachments,
 } from './components/ai-elements/prompt-input.tsx'
@@ -45,6 +54,7 @@ import { Input } from './components/ui/input.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
 import { routeZenCustomEvent } from './custom-event-router.ts'
 import { createFixtureChat } from './fixture-conversation.ts'
+import type { FollowConnection } from './follow-connection.ts'
 import { ThreadNotifications } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
@@ -137,7 +147,7 @@ const isDebugMode = typeof window !== 'undefined' && new URLSearchParams(window.
  * `AppChat` provides the same context, with its own chat instance.
  */
 const chatContexts = createChatHookContexts()
-const useChatContext = chatContexts.useChatContext
+const useChatContext: ChatUIContexts['useChatContext'] = chatContexts.useChatContext
 
 /**
  * ⚠ ONE CHAT FACTORY PER THREAD (#90 PR 3), built by the thread's pane. Two facts force it:
@@ -158,7 +168,7 @@ const useChatContext = chatContexts.useChatContext
  * `fixture-conversation.ts` — the styling dev loop (#31). Everything downstream of the
  * connection is identical on both paths, which is the point.
  */
-function threadChatOptions(stores: ThreadStores) {
+function threadChatOptions(stores: ThreadStores): ThreadChatOptions {
   return {
     threadId: stores.threadId,
     // A resumed thread mounts with its stored branch (#95); a minted one with nothing.
@@ -174,9 +184,27 @@ function threadChatOptions(stores: ThreadStores) {
   }
 }
 /** The options type the widget map below is written against — one shape for every thread. */
-type ThreadChatOptions = ReturnType<typeof threadChatOptions>
+interface ThreadChatOptions {
+  threadId: string
+  initialMessages: UIMessage[]
+  /** The live follow, or — under `?fixture` — the scripted conversation's local adapter. */
+  connection: ConnectConnectionAdapter | FollowConnection
+  live: boolean
+  onCustomEvent: (eventType: string, data: unknown) => void
+}
 
-function createThreadChatHook(stores: ThreadStores) {
+/**
+ * One thread's chat factory: the pair `createChatHook` returns, bound to this thread's
+ * options. ⚠ `useAppChat` takes NO overrides on purpose — TanStack's `threadId`/`live`
+ * overrides would re-point a factory that belongs to exactly one thread, which is the
+ * dispose-the-follow hazard `createThreadChatHook` exists to avoid.
+ */
+interface ThreadChatHook {
+  readonly useAppChat: () => ChatUIHost<ThreadChatOptions> & { AppChat: ComponentType }
+  readonly useChatContext: () => ChatUIHost<ThreadChatOptions>
+}
+
+function createThreadChatHook(stores: ThreadStores): ThreadChatHook {
   return createChatHook({ options: threadChatOptions(stores), context: chatContexts, ...chatComponents })
 }
 
@@ -283,7 +311,7 @@ function PermissionModeControl(): React.ReactNode {
       available={available}
       disabled={chat.sessionGenerating}
       // picc registers one command per mode, named exactly the mode (index.ts:526-536).
-      onSelect={(next) => void chat.sendMessage(`/${next}`)}
+      onSelect={(next: string) => void chat.sendMessage(`/${next}`)}
     />
   )
 }
@@ -356,7 +384,7 @@ export function DialogAnswerControls({
   }
   return (
     <form
-      onSubmit={(event) => {
+      onSubmit={(event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault()
         const field = event.currentTarget.elements.namedItem('answer')
         if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
@@ -430,7 +458,7 @@ function PendingDialog(): React.ReactNode {
   return (
     <ZenDialogCard
       dialog={pending.dialog}
-      answer={(payload) => settle({ id: pending.id, ...payload })}
+      answer={(payload: { value: string } | { confirmed: boolean }) => settle({ id: pending.id, ...payload })}
       cancel={() => settle({ id: pending.id, cancelled: true })}
     />
   )
@@ -490,7 +518,7 @@ function ComposerBody({
       <div className="flex items-end gap-2">
         <PromptInputTextarea
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(event.target.value)}
           placeholder={disconnected ? 'disconnected — reload and resume from the rail' : 'ask pi something'}
           autoComplete="off"
           rows={1}
@@ -549,10 +577,10 @@ export function PendingQueue(): React.ReactNode {
   // pi's queue is texts without ids; the same text may wait twice. Key by text and its
   // occurrence so a duplicate keeps its own row and a removal from the head does not remount.
   const seen = new Map<string, number>()
-  const keyed = queued.map((text) => {
-    const occurrence = seen.get(text) ?? 0
-    seen.set(text, occurrence + 1)
-    return { text, key: `${text}\u0000${occurrence}` }
+  const keyed = queued.map((queuedPrompt) => {
+    const occurrence = seen.get(queuedPrompt) ?? 0
+    seen.set(queuedPrompt, occurrence + 1)
+    return { text: queuedPrompt, key: `${queuedPrompt}\u0000${occurrence}` }
   })
   return (
     <QueueShell aria-label="queued prompts" className="mx-auto mb-2 w-full max-w-3xl">
@@ -593,7 +621,7 @@ const chatComponents = {
      * with a confusing error. Property order is load-bearing here, which is not a thing
      * one expects of an object literal.
      */
-    input: function ChatPromptInput() {
+    input: function ChatPromptInput(): React.ReactNode {
       // Application-owned, per `ChatInput`'s deprecation notice. `useChatContext` is the
       // one returned by `createChatHook` above — referenced at render time, so the
       // binding is initialised by then.
@@ -656,8 +684,8 @@ const chatComponents = {
       /** Texts pi never took come back to the draft, and their never-asked bubbles leave the transcript. */
       const takeBack = (texts: readonly string[]): void => {
         const leaving = new Set<string>()
-        for (const text of texts) {
-          const position = heldLocally.current.findIndex((held) => held.text === text)
+        for (const takenBackText of texts) {
+          const position = heldLocally.current.findIndex((held) => held.text === takenBackText)
           if (position === -1) continue
           leaving.add(heldLocally.current[position]?.id ?? '')
           heldLocally.current.splice(position, 1)
@@ -681,8 +709,10 @@ const chatComponents = {
           maxFiles={ZEN_PROMPT_MAX_IMAGES}
           maxFileSize={ZEN_IMAGE_MAX_BYTES}
           // A file the form would not take is said, not dropped (#68): the reason names the cap.
-          onError={(error) => stores.notifications.push(describeAttachmentError(error), 'warning', 'run')}
-          onSubmit={({ text, files }) => {
+          onError={(error: PromptInputError): void =>
+            stores.notifications.push(describeAttachmentError(error), 'warning', 'run')
+          }
+          onSubmit={({ text, files }: PromptInputMessage): void => {
             // The form hands back `data:` URLs (blob → FileReader); the wire takes bytes + kind.
             // The form's `accept` already filtered by `File.type`; this is the same set, as a
             // guard rather than a cast, and a miss is said the same way the form says one.
@@ -734,7 +764,7 @@ const chatComponents = {
      * Errors are not a message part, so no `partsComponents` entry catches them. They
      * live on the chat instance and have to be rendered deliberately.
      */
-    layout: function ChatLayout({ Messages, Input }: LayoutProps<ThreadChatOptions>) {
+    layout: function ChatLayout({ Messages, Input }: LayoutProps<ThreadChatOptions>): React.ReactNode {
       const chat = useChatContext()
       const debugOpen = useContext(DebugOpenContext)
       return (
@@ -793,10 +823,10 @@ const chatComponents = {
      * `selectMessageUI` was the first draft and would have shown such a call as
      * "running…" forever. O(messages²) per render is irrelevant at chat scale.
      */
-    message: function ChatMessageRow({ message }: MessageProps<ThreadChatOptions>) {
+    message: function ChatMessageRow({ message }: MessageProps<ThreadChatOptions>): React.ReactNode {
       const chat = useChatContext()
       const selectedMessage = selectChatUI({ messages: chat.messages }).messages.find(
-        (entry) => entry.message.id === message.id,
+        (selected) => selected.message.id === message.id,
       )
       const selectedParts = selectedMessage === undefined ? [] : automaticPartsForMessage(selectedMessage)
       const isLastMessage = chat.messages.at(-1)?.id === message.id
@@ -1014,8 +1044,8 @@ export function ChatScreen(): React.ReactNode {
           earlier={storedThreadsNotOnThisPage(stored.threads, pageThreadIds)}
           earlierError={stored.error ?? resumeError}
           now={new Date()}
-          onSelect={(threadId) => navigate(threadId, 'push')}
-          onResume={(threadId) => resumeFrom(threadId, 'push')}
+          onSelect={(threadId: string) => navigate(threadId, 'push')}
+          onResume={(threadId: string) => resumeFrom(threadId, 'push')}
           onNew={() => navigate(mintThread().threadId, 'push')}
         />
         {threads.map((thread) => (

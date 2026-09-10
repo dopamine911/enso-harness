@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { LogRecord } from '@logtape/logtape'
 import { EXTERNAL_WEB_CONTENT_NOTICE, WEB_SEARCH_TOOL_NAME } from '@zen/core'
-import type { WebSearchOutcome } from '../../../core/index.ts'
+import type { DeepseekSearchRequest, TavilySearchRequest, WebSearchOutcome } from '../../../core/index.ts'
 import { WebSearchProviderError } from '../../../core/index.ts'
 import { auditRecords, recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
 import { createWebSearch, type WebSearchDependencies } from '../index.ts'
@@ -66,7 +66,7 @@ function loadWebSearch(
   const dependencies: WebSearchDependencies = {
     locateConfigFile: () => '/repo/zen.config.json',
     readConfigText: () => JSON.stringify({ webFetch: { allowedHosts: [] } }),
-    readEnvironmentVariable: (variableName) => environment[variableName],
+    readEnvironmentVariable: (variableName: string) => environment[variableName],
     runProviders: {
       anthropic: async () => {
         calls.anthropic += 1
@@ -78,12 +78,12 @@ function loadWebSearch(
       openai: async () => {
         throw new Error('openai fake not expected in this test')
       },
-      deepseek: async (request) => {
+      deepseek: async (request: DeepseekSearchRequest) => {
         calls.deepseek += 1
         deepseekKeys.push(request.apiKey)
         return { ...SEARCHED, providerId: 'deepseek' }
       },
-      tavily: async (request) => {
+      tavily: async (request: TavilySearchRequest) => {
         calls.tavily += 1
         tavilyRequests.push({ apiKey: request.apiKey, includeDomains: request.includeDomains })
         return TAVILY_RESULTS
@@ -322,7 +322,7 @@ test('⚠ a primary that stalls for the whole budget leaves the fallback NO time
         deepseek: async () => {
           throw new Error('unexpected')
         },
-        tavily: async (request) => {
+        tavily: async (request: TavilySearchRequest) => {
           tavilySignals.push(request.signal?.aborted === true)
           if (request.signal?.aborted === true) throw request.signal.reason
           return TAVILY_RESULTS
@@ -360,7 +360,7 @@ test('a primary that fails FAST leaves the fallback the rest of the budget, and 
         deepseek: async () => {
           throw new Error('unexpected')
         },
-        tavily: async (request) => {
+        tavily: async (request: TavilySearchRequest) => {
           expect(request.signal?.aborted).toBe(false)
           return TAVILY_RESULTS
         },

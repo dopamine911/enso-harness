@@ -3,7 +3,7 @@ import type { LogRecorder } from '@logtape/testing/recorder'
 import type { PiSession } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
 import type { HostedSession } from '../../host/agent-host.ts'
-import { createThreadRegistry } from '../thread-registry.ts'
+import { createThreadRegistry, type ThreadRegistry } from '../thread-registry.ts'
 
 let logs: LogRecorder
 beforeAll(async () => {
@@ -16,11 +16,23 @@ function ignore(): void {
   // The lifecycle tests never prompt, answer, or subscribe — only acquire/release/stop/dispose matter.
 }
 
+/** What a fake hosted session lets a test read and steer — the lifecycle calls it recorded. */
+interface FakeHosted {
+  readonly hosted: HostedSession
+  readonly record: { disposed: number; aborts: number; queueClears: number }
+  /** What pi holds behind the run — a test fills it to see the stop hand it back (#75). */
+  readonly queue: { steering: string[]; followUp: string[] }
+  /** Set by a test to make the next `clearQueue` throw — pi emits to listeners inside it. */
+  readonly failClear: { with: Error | undefined }
+  /** Resolve the abort this fake left pending. */
+  readonly finishAbort: () => void
+}
+
 /**
  * A fake hosted session that records lifecycle calls. `abort` resolves only when the test
  * says so — the disconnect-then-prompt race is about the gap between abort and idle.
  */
-function fakeHosted() {
+function fakeHosted(): FakeHosted {
   const record = { disposed: 0, aborts: 0, queueClears: 0 }
   /** What pi holds behind the run — a test fills it to see the stop hand it back (#75). */
   const queue = { steering: [] as string[], followUp: [] as string[] }
@@ -58,11 +70,11 @@ function fakeHosted() {
     inspect: () => ({ sessionId: 's', cwd: '/', sessionDir: '/s', sessionFile: null, entries: [], commands: [] }),
     emittedEvents: () => [],
   }
-  return { hosted, record, queue, failClear, finishAbort: () => finishAbort() }
+  return { hosted, record, queue, failClear, finishAbort: (): void => finishAbort() }
 }
 
-function fakeHost() {
-  const built: ReturnType<typeof fakeHosted>[] = []
+function fakeHost(): { threads: ThreadRegistry; built: FakeHosted[] } {
+  const built: FakeHosted[] = []
   const threads = createThreadRegistry({
     createSession: () => {
       const next = fakeHosted()
@@ -74,7 +86,7 @@ function fakeHost() {
   return { threads, built }
 }
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+const sleep = (ms: number): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 test('the same thread acquired twice gets ONE session; two threads get two', async () => {
   const { threads, built } = fakeHost()
@@ -198,7 +210,7 @@ test('⚠ a stop must stop: if clearing the queue throws, pi is still told to ab
   logs.assertLogged({
     level: 'error',
     rawMessage: 'clearing the queue failed, queued prompts lost: {error}',
-    properties: (properties) =>
+    properties: (properties: Readonly<Record<string, unknown>>) =>
       properties.threadId === 't1' && String(properties.error).includes('a queue listener threw'),
   })
 })
@@ -302,7 +314,7 @@ test('⚠ a build in flight at shutdown is disposed on arrival, never published;
 
 test('a dispose that throws is reported, not thrown', async () => {
   const broken = fakeHosted()
-  broken.hosted.session.dispose = () => {
+  broken.hosted.session.dispose = (): void => {
     throw new Error('already gone')
   }
   const threads = createThreadRegistry({
@@ -315,7 +327,7 @@ test('a dispose that throws is reported, not thrown', async () => {
   logs.assertLogged({
     level: 'error',
     rawMessage: 'dispose after {why} failed: {error}',
-    properties: (properties) =>
+    properties: (properties: Readonly<Record<string, unknown>>) =>
       properties.threadId === 't1' &&
       properties.why === 'server shutdown' &&
       String(properties.error).includes('already gone'),

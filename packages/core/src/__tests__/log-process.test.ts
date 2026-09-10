@@ -131,7 +131,7 @@ test('⚠ two processes, one file: every line lands whole — the property the d
       `await dispose();`,
     ].join('\n'),
   )
-  const spawn = (who: string) =>
+  const spawn = (who: string): Bun.Subprocess<'ignore', 'ignore', 'pipe'> =>
     Bun.spawn(['bun', child, who], { cwd: join(import.meta.dir, '..'), stdout: 'ignore', stderr: 'pipe' })
   const [alpha, bravo] = [spawn('alpha'), spawn('bravo')]
   expect(await Promise.all([alpha.exited, bravo.exited])).toEqual([0, 0])

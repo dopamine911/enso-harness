@@ -54,9 +54,9 @@ const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf
 function requiredPackageNames() {
   const names = new Set(Object.keys(manifest.dependencies ?? {}))
   for (const paths of Object.values(manifest.pi ?? {})) {
-    for (const entry of Array.isArray(paths) ? paths : [paths]) {
-      if (typeof entry !== 'string' || !entry.startsWith(VENDOR_PATH_PREFIX)) continue
-      const withoutPrefix = entry.slice(VENDOR_PATH_PREFIX.length)
+    for (const resourcePath of Array.isArray(paths) ? paths : [paths]) {
+      if (typeof resourcePath !== 'string' || !resourcePath.startsWith(VENDOR_PATH_PREFIX)) continue
+      const withoutPrefix = resourcePath.slice(VENDOR_PATH_PREFIX.length)
       const [scopeOrName, scopedName] = withoutPrefix.split('/')
       if (scopeOrName === undefined || scopeOrName.length === 0) continue
       // Scoped packages carry their scope in the first segment.
@@ -78,7 +78,9 @@ for (const packageName of requiredPackageNames()) {
   }
   const hoisted = join(repoRoot, 'node_modules', packageName)
   if (!existsSync(hoisted)) {
-    console.error(`link-vendor-packages: ${packageName} is at neither ${target} nor the repo root — run bun install`)
+    process.stderr.write(
+      `link-vendor-packages: ${packageName} is at neither ${target} nor the repo root — run bun install\n`,
+    )
     process.exit(1)
   }
   mkdirSync(dirname(target), { recursive: true })
@@ -93,7 +95,7 @@ for (const packageName of requiredPackageNames()) {
   linked.push(packageName)
 }
 
-console.error(
+process.stderr.write(
   `link-vendor-packages: ${verified.length} already in place (${verified.join(', ') || 'none'}); ` +
-    `linked ${linked.length} (${linked.join(', ') || 'none'})`,
+    `linked ${linked.length} (${linked.join(', ') || 'none'})\n`,
 )

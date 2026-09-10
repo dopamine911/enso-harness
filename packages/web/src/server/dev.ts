@@ -16,8 +16,8 @@ import { findRepoRoot, harnessPackageDir, knownSecretValues, zenAgentDir, zenLog
 import { configureProcessLogging, logsDirFrom, parseZenLogLevels } from '@zen/core/log-process'
 import { startZenServer } from './index.ts'
 
-const cwdArgument = process.argv[2]
-const cwd = cwdArgument === undefined || cwdArgument.length === 0 ? process.cwd() : cwdArgument
+const cwdArgument: string | undefined = process.argv[2]
+const cwd: string = cwdArgument === undefined || cwdArgument.length === 0 ? process.cwd() : cwdArgument
 
 const repoRoot = findRepoRoot(import.meta.url)
 // Same scratch dir the TUI launcher uses, so both surfaces share one isolated config.
@@ -25,7 +25,7 @@ const agentDir = zenAgentDir(repoRoot)
 mkdirSync(agentDir, { recursive: true })
 
 const logsDir = logsDirFrom(process.env, repoRoot)
-const disposeLogging = await configureProcessLogging({
+const disposeLogging: () => Promise<void> = await configureProcessLogging({
   logsDir,
   process: 'server',
   levels: parseZenLogLevels(process.env, { console: 'info' }),

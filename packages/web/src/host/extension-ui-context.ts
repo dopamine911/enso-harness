@@ -1,4 +1,10 @@
-import type { ExtensionUIContext, KeybindingsManager, Theme as PiTheme } from '@earendil-works/pi-coding-agent'
+import type {
+  ExtensionUIContext,
+  ExtensionUIDialogOptions,
+  ExtensionWidgetOptions,
+  KeybindingsManager,
+  Theme as PiTheme,
+} from '@earendil-works/pi-coding-agent'
 import { Theme } from '@earendil-works/pi-coding-agent'
 import type { Component, TUI } from '@earendil-works/pi-tui'
 import {
@@ -94,6 +100,13 @@ export interface ZenExtensionUiContextOptions {
  * never answer. Past the budget the call falls back to pi's rpc contract (`undefined`).
  */
 export const CUSTOM_COMPONENT_BUILD_TIMEOUT_MS = 2000
+
+/**
+ * What `confirm` answers for every non-answer outcome — cancel, abort, timeout. pi's own
+ * contract, and the one dialog method whose "no answer" value is not `undefined`; declared
+ * as `boolean` because the extension's `await` may equally see `true`.
+ */
+const CONFIRM_DISMISSED: boolean = false
 
 const hostLog = zenLogger('host', 'ui')
 
@@ -274,7 +287,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         timeoutHandle = setTimeout(() => finish(cancelValue, 'timeout'), dialogOptions.timeout)
       }
       pendingDialogs.set(id, {
-        resolve: (response) =>
+        resolve: (response: PiDialogResponse) =>
           'cancelled' in response && response.cancelled
             ? finish(cancelValue, 'cancelled')
             : finish(mapResponse(response), 'answered'),
@@ -285,8 +298,8 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
   }
 
   const uiContext: ExtensionUIContext = {
-    select: (title, options, dialogOptions) =>
-      awaitDialog(
+    select(title: string, options: string[], dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined> {
+      return awaitDialog(
         {
           method: 'select',
           title,
@@ -295,10 +308,11 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         },
         dialogOptions,
         undefined,
-        (response) => ('value' in response ? response.value : undefined),
-      ),
-    confirm: (title, message, dialogOptions) =>
-      awaitDialog(
+        (response: PiDialogResponse) => ('value' in response ? response.value : undefined),
+      )
+    },
+    confirm(title: string, message: string, dialogOptions?: ExtensionUIDialogOptions): Promise<boolean> {
+      return awaitDialog(
         {
           method: 'confirm',
           title,
@@ -306,11 +320,12 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
           ...(dialogOptions?.timeout === undefined ? {} : { timeout: dialogOptions.timeout }),
         },
         dialogOptions,
-        false,
-        (response) => ('confirmed' in response ? response.confirmed : false),
-      ),
-    input: (title, placeholder, dialogOptions) =>
-      awaitDialog(
+        CONFIRM_DISMISSED,
+        (response: PiDialogResponse) => ('confirmed' in response ? response.confirmed : false),
+      )
+    },
+    input(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined> {
+      return awaitDialog(
         {
           method: 'input',
           title,
@@ -319,19 +334,21 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         },
         dialogOptions,
         undefined,
-        (response) => ('value' in response ? response.value : undefined),
-      ),
-    editor: (title, prefill) =>
-      awaitDialog(
+        (response: PiDialogResponse) => ('value' in response ? response.value : undefined),
+      )
+    },
+    editor(title: string, prefill?: string): Promise<string | undefined> {
+      return awaitDialog(
         { method: 'editor', title, ...(prefill === undefined ? {} : { prefill }) },
         undefined,
         undefined,
-        (response) => ('value' in response ? response.value : undefined),
-      ),
-    notify(message, type) {
+        (response: PiDialogResponse) => ('value' in response ? response.value : undefined),
+      )
+    },
+    notify(message: string, type?: 'info' | 'warning' | 'error'): void {
       emit({ type: 'extension_ui_request', id: crypto.randomUUID(), method: 'notify', message, notifyType: type })
     },
-    setStatus(key, text) {
+    setStatus(key: string, text: string | undefined): void {
       emit({
         type: 'extension_ui_request',
         id: crypto.randomUUID(),
@@ -340,7 +357,11 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         statusText: text,
       })
     },
-    setWidget(key, content, widgetOptions) {
+    setWidget(
+      key: string,
+      content: string[] | ((tui: TUI, theme: PiTheme) => Component & { dispose?(): void }) | undefined,
+      widgetOptions?: ExtensionWidgetOptions,
+    ): void {
       // A component factory has no serialisable form; only string lines cross (pi's rule too).
       if (typeof content === 'function') return
       emit({
@@ -352,10 +373,10 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         widgetPlacement: widgetOptions?.placement,
       })
     },
-    setTitle(title) {
+    setTitle(title: string): void {
       emit({ type: 'extension_ui_request', id: crypto.randomUUID(), method: 'setTitle', title })
     },
-    setEditorText(text) {
+    setEditorText(text: string): void {
       emit({ type: 'extension_ui_request', id: crypto.randomUUID(), method: 'set_editor_text', text })
     },
     // ── Terminal-only surface: inert on the web, exactly as in pi's rpc mode ──────────
@@ -408,7 +429,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
     addAutocompleteProvider: () => undefined,
     setEditorComponent: () => undefined,
     getEditorComponent: () => undefined,
-    get theme() {
+    get theme(): PiTheme {
       neutralTheme ??= createNeutralTheme()
       return neutralTheme
     },
@@ -421,7 +442,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 
   return {
     uiContext,
-    answerDialog(response) {
+    answerDialog(response: PiDialogResponse): void {
       const pending = pendingDialogs.get(response.id)
       if (pending === undefined) {
         log.warn('dialog answer for unknown request id {dialogId} — already answered, cancelled, or never asked', {
@@ -431,22 +452,22 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
       }
       pending.resolve(response)
     },
-    openDialogs() {
+    openDialogs(): ZenOpenDialog[] {
       const open: ZenOpenDialog[] = []
-      for (const [id, { request }] of pendingDialogs) {
+      for (const [dialogId, { request }] of pendingDialogs) {
         // The request IS a dialog spec structurally (the mapper builds the browser's spec
         // from the same fields); checked rather than cast, so a request shape the spec
         // does not admit (a select with no options) is not listed as a question here either.
-        if (isZenDialogSpec(request)) open.push({ id, dialog: request })
+        if (isZenDialogSpec(request)) open.push({ id: dialogId, dialog: request })
       }
       return open
     },
-    cancelAllDialogs() {
-      for (const [id, pending] of [...pendingDialogs]) {
-        pending.resolve({ id, cancelled: true })
+    cancelAllDialogs(): void {
+      for (const [dialogId, pending] of [...pendingDialogs]) {
+        pending.resolve({ id: dialogId, cancelled: true })
       }
     },
-    pendingDialogCount() {
+    pendingDialogCount(): number {
       return pendingDialogs.size
     },
   }

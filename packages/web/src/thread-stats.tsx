@@ -84,7 +84,7 @@ export function createThreadStatsStore(): ThreadStatsStore {
   return {
     get: store.get,
     subscribe: store.subscribe,
-    applyUsage: (data) => {
+    applyUsage: (data: unknown) => {
       if (typeof data !== 'object' || data === null) return
       const observation = data as { role?: unknown; usage?: unknown }
       const usage = readUsageShape(observation.usage)

@@ -64,6 +64,27 @@ test('credential material is recognised by basename and by directory', () => {
   expect(looksLikeSecret('/home/u/project/README.md', f)).toBe(false)
 })
 
+test('⚠ a symlink with an innocent name pointing at credential material is recognised', () => {
+  // The reader gate's own hole, the mirror of the workspace-boundary case above: pi follows
+  // the link, so judging only the literal name reads `~/.aws/credentials` as `notes.txt`.
+  const credentials = join(outside, '.aws')
+  mkdirSync(credentials, { recursive: true })
+  writeFileSync(join(credentials, 'credentials'), 'aws_secret_access_key = x')
+  const link = join(root, 'notes.txt')
+  symlinkSync(join(credentials, 'credentials'), link, 'file')
+  const f = DEFAULT_GUARD_POLICY.secretPathFragments
+  expect(looksLikeSecret(link, f)).toBe(true)
+})
+
+test("⚠ a process's environment is credential material — the bash deny's twin, for read", () => {
+  const f = DEFAULT_GUARD_POLICY.secretPathFragments
+  expect(looksLikeSecret('/proc/self/environ', f)).toBe(true)
+  expect(looksLikeSecret('/proc/1234/environ', f)).toBe(true)
+  // Neighbouring /proc entries are ordinary reads.
+  expect(looksLikeSecret('/proc/self/status', f)).toBe(false)
+  expect(looksLikeSecret('/home/u/project/environ.ts', f)).toBe(false)
+})
+
 // ── #21: write-persistence vectors ────────────────────────────────────────────────────────
 
 test('every shell-init basename is a persistence write target', () => {
@@ -217,7 +238,7 @@ test("⚠ corpus: the guard resolver agrees with pi's resolveToCwd on every inpu
   const piEntryPoint = fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))
   const piPaths = (await import(join(dirname(piEntryPoint), 'utils', 'paths.js'))) as PiPathsModule
   // The exact options pi's tools pass (core/tools/path-utils.js `resolveToCwd`).
-  const piResolveToCwd = (input: string, cwd: string) =>
+  const piResolveToCwd = (input: string, cwd: string): string =>
     piPaths.resolvePath(input, cwd, { normalizeUnicodeSpaces: true, stripAtPrefix: true })
 
   const corpus: readonly (readonly [input: string, cwd: string])[] = [

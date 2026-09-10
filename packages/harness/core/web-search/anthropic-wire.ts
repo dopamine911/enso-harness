@@ -65,7 +65,7 @@ export async function runAnthropicWireSearch(options: AnthropicWireSearchOptions
     stream: true,
   }
   if (options.systemTextBlocks !== undefined && options.systemTextBlocks.length > 0) {
-    requestBody.system = options.systemTextBlocks.map((text) => ({ type: 'text', text }))
+    requestBody.system = options.systemTextBlocks.map((blockText) => ({ type: 'text', text: blockText }))
   }
 
   let response: Response

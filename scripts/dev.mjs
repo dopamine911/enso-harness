@@ -61,12 +61,12 @@ function run(label, command, args) {
     // worse than none: the web surface serving a page whose API is gone looks like an app bug.
     onExit(_child, code, signalCode) {
       if (shuttingDown) return
-      console.error(`[dev] ${label} exited (${code ?? signalCode ?? 'signal'}) — stopping the other surface`)
+      process.stderr.write(`[dev] ${label} exited (${code ?? signalCode ?? 'signal'}) — stopping the other surface\n`)
       shutdown()
     },
   })
-  void prefixStream(child.stdout, label, (lines) => console.log(lines))
-  void prefixStream(child.stderr, label, (lines) => console.error(lines))
+  void prefixStream(child.stdout, label, (lines) => process.stdout.write(`${lines}\n`))
+  void prefixStream(child.stderr, label, (lines) => process.stderr.write(`${lines}\n`))
   children.push(child)
   return child
 }
@@ -82,7 +82,7 @@ function shutdown() {
 process.on('SIGINT', shutdown)
 process.on('SIGTERM', shutdown)
 
-console.error(`[dev] pi will run in ${piCwd}`)
+process.stderr.write(`[dev] pi will run in ${piCwd}\n`)
 // ⚠ bun runs the server (#30): the runtime the tests exercise (`bun test`) is now the
 // runtime that ships. Node's strip-types flag — and its strip-ONLY constraint — is gone.
 run('server', 'bun', ['src/server/dev.ts', piCwd])

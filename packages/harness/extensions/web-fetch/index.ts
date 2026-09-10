@@ -46,6 +46,17 @@ import { isFetchableContentType, isHostAllowed, isPublicIpAddress, parseWebFetch
  */
 
 /**
+ * The init the tool hands `fetchUrl`, every field load-bearing: `manual` so a redirect is
+ * reported instead of followed (#54), the call's abort signal, and our own user agent.
+ * Named so the composition root and the tests' fakes annotate the parameter by type.
+ */
+export interface WebFetchRequestInit {
+  redirect: 'manual'
+  signal: AbortSignal
+  headers: Record<string, string>
+}
+
+/**
  * The IO seams, injected so tests never touch the network, DNS or the real config file —
  * same pattern as the guards' `analyzeBashCommand`.
  */
@@ -56,10 +67,7 @@ export interface WebFetchDependencies {
    */
   locateConfigFile: () => string
   readConfigText: (path: string) => string
-  fetchUrl: (
-    url: string,
-    init: { redirect: 'manual'; signal: AbortSignal; headers: Record<string, string> },
-  ) => Promise<Response>
+  fetchUrl: (url: string, init: WebFetchRequestInit) => Promise<Response>
   /** Resolve a hostname to its addresses. Rejects on NXDOMAIN/timeouts. */
   resolveHostAddresses: (hostname: string) => Promise<string[]>
 }
@@ -102,7 +110,11 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
         `; a refusal names the file a human can extend.`,
       promptSnippet: `${WEB_FETCH_TOOL_NAME}: fetch an allowlisted http(s) URL as text`,
       parameters: WebFetchToolParameters,
-      execute: async (_toolCallId, params, signal): Promise<AgentToolResult<undefined>> => {
+      execute: async (
+        _toolCallId: string,
+        params: WebFetchToolParameters,
+        signal: AbortSignal | undefined,
+      ): Promise<AgentToolResult<undefined>> => {
         const rawUrl = params.url
 
         // --- the policy gates, in cheapest-first order; each refusal is final.
@@ -345,7 +357,8 @@ async function readBodyUpTo(response: Response, maxBytes: number): Promise<{ tex
  */
 export default createWebFetch({
   locateConfigFile: () => zenConfigPath(findRepoRoot(import.meta.url)),
-  readConfigText: (path) => readFileSync(path, 'utf8'),
-  fetchUrl: (url, init) => fetch(url, init),
-  resolveHostAddresses: async (hostname) => (await lookup(hostname, { all: true })).map((entry) => entry.address),
+  readConfigText: (path: string) => readFileSync(path, 'utf8'),
+  fetchUrl: (url: string, init: WebFetchRequestInit) => fetch(url, init),
+  resolveHostAddresses: async (hostname: string) =>
+    (await lookup(hostname, { all: true })).map((resolved) => resolved.address),
 })

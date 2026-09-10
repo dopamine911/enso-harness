@@ -1,4 +1,5 @@
 import { beforeEach, expect, test } from 'bun:test'
+import type { ZenMessageEnd } from '@zen/core'
 import { createThreadStatsStore, type ThreadStatsStore } from '../thread-stats.tsx'
 
 /**
@@ -11,7 +12,7 @@ beforeEach(() => {
   store = createThreadStatsStore()
 })
 
-const assistantUsage = (input: number, cacheRead: number, totalCost: number) => ({
+const assistantUsage = (input: number, cacheRead: number, totalCost: number): ZenMessageEnd => ({
   kind: 'message-end',
   role: 'assistant',
   usage: { input, output: 10, cacheRead, cacheWrite: 0, totalCost },

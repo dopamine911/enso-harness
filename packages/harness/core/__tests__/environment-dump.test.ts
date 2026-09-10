@@ -9,6 +9,13 @@ import { findEnvironmentDump } from '../environment-dump.ts'
 
 const denied = (command: string): string | undefined => findEnvironmentDump(command)?.via
 
+/**
+ * `${NAME}` built rather than written: a literal `${` inside a quoted JS string reads to
+ * Biome as a botched template literal (`noTemplateCurlyInString`), and these are SHELL
+ * strings handed to the scanner as data. The escapes are `{` and `}`.
+ */
+const braced = (variableName: string): string => `$\u007b${variableName}\u007d`
+
 // ── listings at command position ─────────────────────────────────────────────
 
 test('a bare env, printenv, set, export -p, declare -p is a listing', () => {
@@ -68,10 +75,10 @@ test("/proc/<pid>/environ is the kernel's copy of the same list", () => {
 
 test('expanding a secret-shaped variable is denied; a non-secret one is not', () => {
   expect(findEnvironmentDump('echo $TAVILY_API_KEY')).toEqual({ matched: '$TAVILY_API_KEY', via: 'secret-expansion' })
-  expect(denied('echo "${GH_TOKEN}"')).toBe('secret-expansion')
-  expect(denied('curl -H "Authorization: Bearer ${CLIENT_SECRET}" x')).toBe('secret-expansion')
+  expect(denied(`echo "${braced('GH_TOKEN')}"`)).toBe('secret-expansion')
+  expect(denied(`curl -H "Authorization: Bearer ${braced('CLIENT_SECRET')}" x`)).toBe('secret-expansion')
   expect(denied('echo $HOME $PATH')).toBeUndefined()
-  expect(denied('echo ${TOKENIZER_PATH}')).toBeUndefined()
+  expect(denied(`echo ${braced('TOKENIZER_PATH')}`)).toBeUndefined()
 })
 
 test('an unparseable command takes the coarse scan; a parseable one does not', () => {

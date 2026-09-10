@@ -68,10 +68,10 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   /** The follow: one SSE body per subscription; the latest one is where `frame` writes. */
   const openFollow = (): Response => {
     const body = new ReadableStream<Uint8Array>({
-      start(controller) {
+      start(controller: ReadableStreamDefaultController<Uint8Array>): void {
         const encoder = new TextEncoder()
-        write = (text) => controller.enqueue(encoder.encode(text))
-        close = () => controller.close()
+        write = (text: string): void => controller.enqueue(encoder.encode(text))
+        close = (): void => controller.close()
       },
     })
     return new Response(body, { status: 200 })
@@ -125,7 +125,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   }) as typeof fetch
   return {
     fetch: fetchImpl,
-    frame: (frame) => write(`data: ${JSON.stringify(frame)}\n\n`),
+    frame: (frame: ZenFollowFrame) => write(`data: ${JSON.stringify(frame)}\n\n`),
     closeFollow: () => close(),
     prompts,
     dialogs,

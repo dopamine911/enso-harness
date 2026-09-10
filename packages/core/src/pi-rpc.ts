@@ -1,4 +1,4 @@
-import { type Static, Type } from 'typebox'
+import { type Static, type TObject, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
 import type { ZenOpenDialog } from './dialog.ts'
 import type { PiPermissionModeState } from './permission-mode.ts'
@@ -48,7 +48,7 @@ export type PiStreamingBehavior = Static<typeof PiStreamingBehavior>
  */
 type OpenRecord = Record<string, unknown>
 
-const openObject = <T extends Parameters<typeof Type.Object>[0]>(properties: T) =>
+const openObject = <T extends Parameters<typeof Type.Object>[0]>(properties: T): TObject<T> =>
   Type.Object(properties, { additionalProperties: Type.Unknown() })
 
 /** One event from pi, in the rpc wire shape. Only `type` is constrained — see the header. */

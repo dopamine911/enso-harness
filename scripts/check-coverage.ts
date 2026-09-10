@@ -86,19 +86,21 @@ function formatPercent(rate: number): string {
 // Gate body — runs only when executed directly, so tests can import summarizeLcov alone.
 if (import.meta.main) {
   if (!existsSync(LCOV_PATH)) {
-    console.error(`check-coverage: ${LCOV_PATH} is missing — run \`bun test\` first (the gate does).`)
+    process.stderr.write(`check-coverage: ${LCOV_PATH} is missing — run \`bun test\` first (the gate does).\n`)
     process.exit(1)
   }
   const totals = summarizeLcov(await Bun.file(LCOV_PATH).text())
   const lineOk = totals.lineRate >= TOTAL_LINE_COVERAGE_FLOOR
   const functionOk = totals.functionRate >= TOTAL_FUNCTION_COVERAGE_FLOOR
-  console.error(
+  process.stderr.write(
     `check-coverage: ${totals.fileCount} files — lines ${formatPercent(totals.lineRate)} ` +
       `(floor ${formatPercent(TOTAL_LINE_COVERAGE_FLOOR)}), functions ${formatPercent(totals.functionRate)} ` +
-      `(floor ${formatPercent(TOTAL_FUNCTION_COVERAGE_FLOOR)})`,
+      `(floor ${formatPercent(TOTAL_FUNCTION_COVERAGE_FLOOR)})\n`,
   )
   if (!(lineOk && functionOk)) {
-    console.error('check-coverage: BELOW the floor. Add tests, or lower the floor in its own PR with the reason.')
+    process.stderr.write(
+      'check-coverage: BELOW the floor. Add tests, or lower the floor in its own PR with the reason.\n',
+    )
     process.exit(1)
   }
 }

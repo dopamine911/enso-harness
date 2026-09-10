@@ -96,7 +96,7 @@ export function createResumeRequests<TIntent>(
   onFailure: (message: string, intent: TIntent) => void,
 ): (threadId: string, intent: TIntent) => void {
   let latest: string | undefined
-  return (threadId, intent) => {
+  return (threadId: string, intent: TIntent) => {
     latest = threadId
     fetchHistory(threadId).then(
       (history) => {

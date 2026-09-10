@@ -3,7 +3,7 @@ import { resolveModelAuth } from '../web-search/auth.ts'
 import { applyByteIndexCitations, applyIndexCitations, applyTextCitations } from '../web-search/citations.ts'
 import { runTavilyProviderSearch, TAVILY_SEARCH_URL } from '../web-search/providers/tavily.ts'
 import { cleanSources, isLikelyJunkSearchUrl, normalizeSearchUrl, titleFromUrl } from '../web-search/sources.ts'
-import type { FetchUrl } from '../web-search/vocabulary.ts'
+import type { FetchUrl, FetchUrlInit } from '../web-search/vocabulary.ts'
 import { WebSearchProviderError } from '../web-search/vocabulary.ts'
 
 /** The web_search support layer (#63): source hygiene, citation appliers, auth, Tavily. */
@@ -127,7 +127,7 @@ test('tavily sends the query, bounded results, bearer key, and only non-empty do
   let capturedUrl: string | undefined
   let capturedHeaders: Record<string, string> | undefined
   let capturedBody: Record<string, unknown> | undefined
-  const fetchUrl: FetchUrl = async (url, init) => {
+  const fetchUrl: FetchUrl = async (url: string, init: FetchUrlInit) => {
     capturedUrl = url
     capturedHeaders = init.headers
     capturedBody = JSON.parse(init.body ?? '{}') as Record<string, unknown>

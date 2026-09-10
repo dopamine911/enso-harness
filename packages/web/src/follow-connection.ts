@@ -226,7 +226,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   // The global is looked up per call, not captured: a thread minted at module load (the
   // page's first) must still see a `fetch` a test installs afterwards (#118).
   const fetchImpl: (input: string, init?: RequestInit) => Promise<Response> =
-    options.fetch ?? ((input, init) => fetch(input, init))
+    options.fetch ?? ((input: string, init?: RequestInit): Promise<Response> => fetch(input, init))
   const base = `/api/threads/${encodeURIComponent(threadId)}`
   const log = followLog.with({ threadId })
   /**

@@ -1,13 +1,14 @@
 import { expect, test } from 'bun:test'
 import { EventType } from '@ag-ui/core'
+import type { StreamChunk } from '@tanstack/ai'
 import { isZenToolResultDescriptor, ZEN_TOOL_RESULT_KEY, type ZenObservation } from '@zen/core'
 import { mapPiEvent } from '../map-events.ts'
 import { type AguiIdentifiers, observationToAguiEvents } from '../to-agui.ts'
 import { observationKindsDeclaredByTheUnion } from './observation-kinds.ts'
 
 const ids: AguiIdentifiers = { messageId: 'm1', runId: 'r1', threadId: 't1' }
-const toAgui = (observation: ZenObservation) => observationToAguiEvents(observation, ids)
-const types = (observation: ZenObservation) => toAgui(observation).map((event) => event.type)
+const toAgui = (observation: ZenObservation): StreamChunk[] => observationToAguiEvents(observation, ids)
+const types = (observation: ZenObservation): StreamChunk['type'][] => toAgui(observation).map((event) => event.type)
 
 test('a text delta becomes TEXT_MESSAGE_CONTENT carrying the message id', () => {
   const [event] = toAgui({ kind: 'text-delta', contentIndex: 0, delta: 'Hello ' })

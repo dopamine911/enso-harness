@@ -103,7 +103,8 @@ const PINNED_MTIME = new Date('2026-01-01T00:00:00.000Z')
  * record and rewrite is what makes the ctime move observable. Flaked once without it.
  */
 const KERNEL_TIMESTAMP_TICK_MS = 25
-const pastOneKernelTick = () => new Promise<void>((resolve) => setTimeout(resolve, KERNEL_TIMESTAMP_TICK_MS))
+const pastOneKernelTick = (): Promise<void> =>
+  new Promise<void>((resolve) => setTimeout(resolve, KERNEL_TIMESTAMP_TICK_MS))
 
 test('a same-size rewrite with mtime pinned classifies as stale (ctime moved)', async () => {
   const tracker = createSessionReadTracker()

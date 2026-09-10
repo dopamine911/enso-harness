@@ -167,7 +167,7 @@ export function createRecentChunksStore(): RecentChunksStore {
   return {
     get: store.get,
     subscribe: store.subscribe,
-    record: (name, value) => {
+    record: (name: string, value: unknown) => {
       nextSequence += 1
       const appended = [...store.get(), { sequence: nextSequence, name, value, receivedAt: new Date().toISOString() }]
       store.set(appended.slice(-RECENT_CUSTOM_CHUNK_CAPACITY))

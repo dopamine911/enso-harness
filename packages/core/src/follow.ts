@@ -92,7 +92,8 @@ export const ZEN_PROMPT_MAX_IMAGES = 20
  * bytes, rounded up to a 4-byte group), plus room for the text. The route stops READING at
  * this size rather than buffering first and refusing after.
  */
-export const ZEN_PROMPT_BODY_MAX_BYTES = ZEN_PROMPT_MAX_IMAGES * Math.ceil(ZEN_IMAGE_MAX_BYTES / 3) * 4 + 1024 * 1024
+export const ZEN_PROMPT_BODY_MAX_BYTES: number =
+  ZEN_PROMPT_MAX_IMAGES * Math.ceil(ZEN_IMAGE_MAX_BYTES / 3) * 4 + 1024 * 1024
 
 /**
  * The base64 alphabet with trailing `=` padding — what `btoa` and `FileReader.readAsDataURL`

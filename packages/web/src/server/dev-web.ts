@@ -27,7 +27,7 @@ const publicDir = join(webPackageDir(repoRoot), 'public')
 
 // Its own process, the same day's file (#132) — nothing of substance happens here, but a
 // proxy that cannot reach the zen server is exactly the line a bundle needs.
-const disposeLogging = await configureProcessLogging({
+const disposeLogging: () => Promise<void> = await configureProcessLogging({
   logsDir: logsDirFrom(process.env, repoRoot),
   process: 'web',
   levels: parseZenLogLevels(process.env, { console: 'info' }),

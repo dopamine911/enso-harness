@@ -95,16 +95,16 @@ function controlledHistory(): {
       () => undefined,
     )
   return {
-    fetch: (threadId) => {
+    fetch: (threadId: string) => {
       const deferred = Promise.withResolvers<ZenThreadHistory>()
       pending.set(threadId, deferred)
       return deferred.promise
     },
-    resolve: (threadId) => {
+    resolve: (threadId: string) => {
       pending.get(threadId)?.resolve({ threadId, messages: [], permissionMode: { mode: 'default', available: [] } })
       return settled(threadId)
     },
-    reject: (threadId, message) => {
+    reject: (threadId: string, message: string) => {
       pending.get(threadId)?.reject(new Error(message))
       return settled(threadId)
     },

@@ -13,10 +13,10 @@ const partWith = (overrides: Partial<ToolResultPart>): ToolResultPart => ({
 })
 
 const renderers: ZenRendererMap = {
-  diff: (props) => <span data-known>{String(props.summary)}</span>,
+  diff: (props: Record<string, unknown>) => <span data-known>{String(props.summary)}</span>,
 }
 
-const html = (result?: ToolResultPart, runOpen = true) =>
+const html = (result?: ToolResultPart, runOpen = true): string =>
   renderToStaticMarkup(<ZenToolResult result={result} runOpen={runOpen} renderers={renderers} />)
 
 // --- the descriptor reader, pure and surface-independent

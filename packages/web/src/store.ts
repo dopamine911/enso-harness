@@ -25,11 +25,11 @@ export function createStore<T>(initial: T): WritableStore<T> {
   const listeners = new Set<() => void>()
   return {
     get: () => value,
-    set: (next) => {
+    set: (next: T) => {
       value = next
       for (const listener of listeners) listener()
     },
-    subscribe: (listener) => {
+    subscribe: (listener: () => void) => {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },

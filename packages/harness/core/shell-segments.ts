@@ -265,6 +265,13 @@ export function literalShellWord(text: string): LiteralShellWordResult {
       characterIndex++
       continue
     }
+    // ⚠ `$'…'` is ANSI-C quoting, not an expansion: bash decodes the escapes and the word
+    // becomes a name that never appears in the text — `$'\143url'` IS `curl`, verified
+    // live. That is the SYNTHESIS class, not the expansion class: escalating to a scan of
+    // the unexpanded text is no net at all, because the scan cannot see a name spelled in
+    // octal. Same verdict as `{c,}url` and for the same reason (the two were missed when
+    // that round landed). `$"…"` keeps escalating: its content stays contiguous.
+    if (character === '$' && text[characterIndex + 1] === "'") return { kind: 'word-synthesis' }
     if (character === '$' || character === '`') return { kind: 'runtime-expansion' }
     if (WORD_SYNTHESIS_CHARACTERS.has(character ?? '')) return { kind: 'word-synthesis' }
     if (character === ' ' || character === '\t') break

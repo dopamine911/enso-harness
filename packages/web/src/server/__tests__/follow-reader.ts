@@ -70,8 +70,8 @@ export async function openFollow(
   return {
     frames,
     comments: () => comments,
-    untilFrames: (count) => until(() => frames.length >= count),
-    untilComments: (count) => until(() => comments >= count),
+    untilFrames: (count: number) => until(() => frames.length >= count),
+    untilComments: (count: number) => until(() => comments >= count),
     close: () => controller.abort(),
   }
 }

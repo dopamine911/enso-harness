@@ -30,7 +30,7 @@ const toolResultWith = (overrides: Partial<ToolResultPart>): ToolResultPart => (
   ...overrides,
 })
 
-const html = (selected: ChatUISelectedPart, isStreaming = false, runOpen = true) =>
+const html = (selected: ChatUISelectedPart, isStreaming = false, runOpen = true): string =>
   renderToStaticMarkup(
     <SelectedMessagePart selected={selected} isStreaming={isStreaming} runOpen={runOpen} renderers={{}} />,
   )
