@@ -1,4 +1,4 @@
-import { ZEN_REDACTED, type ZenLogLine } from "./log.ts";
+import { ZEN_REDACTED, ZEN_REDACTED_VALUE, type ZenLogLine } from "./log.ts";
 import { describeSessionEntry, type ZenThreadInspection } from "./session-inspection.ts";
 
 /**
@@ -43,13 +43,21 @@ export interface ZenBundleInputs {
 	readonly matched: number;
 }
 
-/** Field name → how many records carry it redacted. What the reader is NOT seeing. */
+/**
+ * Field name → how many records carry it redacted. What the reader is NOT seeing.
+ *
+ * Two passes, counted separately (#139). A field-name redaction is a record shaped right:
+ * `tavilyApiKey` was never going to be written. A `values` row is a leak that was CAUGHT —
+ * a known secret quoted inside a message, a `reason`, or a `trace` payload — and its count
+ * is how many records that happened in, which is a different thing for a reader to know.
+ */
 export function redactionManifest(lines: readonly ZenLogLine[]): Readonly<Record<string, number>> {
 	const counts: Record<string, number> = {};
 	for (const line of lines) {
 		for (const [fieldName, fieldValue] of Object.entries(line.properties ?? {})) {
 			if (fieldValue === ZEN_REDACTED) counts[fieldName] = (counts[fieldName] ?? 0) + 1;
 		}
+		if (JSON.stringify(line).includes(ZEN_REDACTED_VALUE)) counts.values = (counts.values ?? 0) + 1;
 	}
 	return counts;
 }
@@ -130,8 +138,8 @@ export function buildLogBundle(inputs: ZenBundleInputs): string {
 		"## redacted",
 		"",
 		redacted.length === 0
-			? "nothing — no record carried a secret-shaped field"
-			: `Field values replaced with \`${ZEN_REDACTED}\` at write; the field names stayed so you can see what is missing:\n\n${redacted
+			? "nothing — no record carried a secret-shaped field, and no known secret value appeared in one"
+			: `Two passes at write, both before the line reached this file. A **field** row is a property whose NAME is secret-shaped: its value became \`${ZEN_REDACTED}\` and the name stayed, so you can see what is missing. The \`values\` row counts records where a known secret VALUE appeared somewhere it was not named — quoted in a message, in a tool result, in a payload — and became \`${ZEN_REDACTED_VALUE}\` (#139).\n\n${redacted
 					.map(([name, count]) => `- \`${name}\` × ${count}`)
 					.join("\n")}`,
 		"",
