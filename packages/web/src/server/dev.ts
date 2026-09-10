@@ -47,6 +47,7 @@ const { listening } = startZenServer({
 	cwd,
 	harnessPackageDir: harnessPackageDir(repoRoot),
 	agentDir,
+	logsDir,
 });
 
 try {

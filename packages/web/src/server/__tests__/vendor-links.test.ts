@@ -36,7 +36,7 @@ test("refuses to start when a vendor manifest path is missing", () => {
 		{ extensions: ["./extensions/guards/index.ts", "node_modules/pi-multi-account/index.ts"] },
 		false,
 	);
-	expect(() => startZenServer({ cwd, harnessPackageDir: harness, agentDir: tmpdir() })).toThrow(
+	expect(() => startZenServer({ cwd, harnessPackageDir: harness, agentDir: tmpdir(), logsDir: tmpdir() })).toThrow(
 		/vendor package paths are missing/,
 	);
 });
@@ -47,7 +47,7 @@ test("the refusal NAMES the missing path and the fix", () => {
 	// undefined, and the message assertions fail on `undefined` rather than being skipped.
 	let thrown: unknown;
 	try {
-		startZenServer({ cwd, harnessPackageDir: harness, agentDir: tmpdir() });
+		startZenServer({ cwd, harnessPackageDir: harness, agentDir: tmpdir(), logsDir: tmpdir() });
 	} catch (error) {
 		thrown = error;
 	}
@@ -63,6 +63,7 @@ test("starts when every vendor path resolves", async () => {
 		cwd,
 		harnessPackageDir: harness,
 		agentDir: tmpdir(),
+		logsDir: mkdtempSync(join(tmpdir(), "zen-logs-")),
 		port: 0,
 	});
 	expect(started.url).toContain("127.0.0.1");
@@ -76,6 +77,7 @@ test("a non-vendor manifest path is not required to exist", async () => {
 		cwd,
 		harnessPackageDir: harness,
 		agentDir: tmpdir(),
+		logsDir: mkdtempSync(join(tmpdir(), "zen-logs-")),
 		port: 0,
 	});
 	// It started: the URL is bound. (Was `expect(true).toBe(true)` — #53 S3.)
@@ -85,7 +87,12 @@ test("a non-vendor manifest path is not required to exist", async () => {
 
 test("refuses when the harness package.json itself is absent", () => {
 	expect(() =>
-		startZenServer({ cwd, harnessPackageDir: join(tmpdir(), "definitely-not-here"), agentDir: tmpdir() }),
+		startZenServer({
+			cwd,
+			harnessPackageDir: join(tmpdir(), "definitely-not-here"),
+			agentDir: tmpdir(),
+			logsDir: tmpdir(),
+		}),
 	).toThrow(/no package.json/);
 });
 
@@ -95,6 +102,7 @@ test("refuses an empty cwd before touching the filesystem", () => {
 			cwd: "",
 			harnessPackageDir: fakeHarness({ extensions: [] }, true),
 			agentDir: tmpdir(),
+			logsDir: tmpdir(),
 		}),
 	).toThrow(/cwd must not be empty/);
 });

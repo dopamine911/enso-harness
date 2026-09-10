@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reset } from "@logtape/logtape";
 import { Check } from "typebox/value";
-import { withZenLogContext, ZenLogLine, zenLogger } from "../log.ts";
+import { withZenLogContext, ZEN_REDACTED, ZenLogLine, zenLogger } from "../log.ts";
 import {
 	configureProcessLogging,
 	effectiveFileLevel,
@@ -67,12 +67,18 @@ test("⚠ the JSONL file: every line validates ZenLogLine; a secret-shaped field
 	expect(underRoute?.level).toBe("INFO");
 	expect(underRoute?.message).toBe("something under the route happened: {detail}");
 	expect(underRoute?.properties).toMatchObject({ process: "server", sequence: 2, threadId: "t-ctx", toolCallId: "c1" });
-	// `tokens` is on ZEN_REDACT_FIELDS by design (token) — dropped, and the test says so.
-	expect(underRoute?.properties).not.toHaveProperty("tokens");
+	// `tokens` is on ZEN_REDACT_FIELDS by design (token) — a marker, and the test says so.
+	expect(underRoute?.properties?.tokens).toBe(ZEN_REDACTED);
 
-	// Redaction at write: the field is absent; the rest of the record is intact.
+	// Redaction at write: the field is a MARKER — the reader knows it was there — and its value is gone.
 	expect(refusal?.level).toBe("WARN");
-	expect(refusal?.properties).toEqual({ process: "server", sequence: 3, threadId: "t-plain", reason: "denied" });
+	expect(refusal?.properties).toEqual({
+		process: "server",
+		sequence: 3,
+		threadId: "t-plain",
+		tavilyApiKey: ZEN_REDACTED,
+		reason: "denied",
+	});
 	expect(refusal?.message).toBe("a refusal named the key");
 });
 

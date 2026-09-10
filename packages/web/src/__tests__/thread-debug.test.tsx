@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import type { ZenThreadEvent, ZenThreadEvents, ZenThreadInspection } from "@zen/core";
+import type { ZenLogLine, ZenThreadEvent, ZenThreadEvents, ZenThreadInspection } from "@zen/core";
 import { renderToStaticMarkup } from "react-dom/server";
 import { RECENT_CUSTOM_CHUNK_CAPACITY, routeZenCustomEvent } from "../custom-event-router.ts";
 import {
 	type BrowserBelief,
+	type BundleState,
 	type CopyState,
 	describeChunk,
+	fetchThreadBundle,
 	InspectionFetchError,
 	latestServerStateSequence,
 	latestWins,
@@ -82,10 +84,18 @@ interface RenderOverrides {
 	readonly session: ZenThreadInspection | undefined;
 	readonly error?: string | undefined;
 	readonly copyState?: CopyState;
+	readonly bundleState?: BundleState;
 	readonly events?: ZenThreadEvents;
 }
 
-const renderWith = ({ browser, session, error, copyState = "idle", events }: RenderOverrides): string =>
+const renderWith = ({
+	browser,
+	session,
+	error,
+	copyState = "idle",
+	bundleState = "idle",
+	events,
+}: RenderOverrides): string =>
 	renderToStaticMarkup(
 		<ThreadDebugView
 			threadId="t1"
@@ -94,8 +104,10 @@ const renderWith = ({ browser, session, error, copyState = "idle", events }: Ren
 			events={events}
 			error={error}
 			copyState={copyState}
+			bundleState={bundleState}
 			onRefresh={noop}
 			onCopy={noop}
+			onBundle={noop}
 		/>,
 	);
 
@@ -270,6 +282,52 @@ test("the copy outcome is named beside the button", () => {
 	expect(render(believing("plan"), inspection(), undefined, "copied")).toContain("copied");
 	expect(render(believing("plan"), inspection(), undefined, "failed")).toContain("copy failed");
 	expect(render(believing("plan"), inspection(), undefined, "idle")).not.toContain("copy failed");
+});
+
+// A bundle in flight, saved, or failed must each read differently — and "failed" says why.
+test("the bundle outcome is named beside the button, and building disables it", () => {
+	const building = renderWith({ browser: believing("plan"), session: inspection(), bundleState: "building" });
+	expect(building).toContain("building the bundle…");
+	expect(building).toMatch(/<button[^>]*disabled[^>]*>download log bundle/);
+	expect(renderWith({ browser: believing("plan"), session: inspection(), bundleState: "saved" })).toContain(
+		"bundle saved — open it before you attach it",
+	);
+	expect(
+		renderWith({ browser: believing("plan"), session: inspection(), bundleState: { failed: "503 no file" } }),
+	).toContain("bundle failed — 503 no file");
+	expect(renderWith({ browser: believing("plan"), session: inspection() })).not.toContain("bundle failed");
+});
+
+test("the bundle is the server's file with the page's ring appended; the name is the header's, or the thread's when the header is missing", async () => {
+	const ring: ZenLogLine[] = [
+		{
+			"@timestamp": "2026-09-10T01:00:00.000Z",
+			level: "WARN",
+			logger: "zen.browser.follow",
+			message: "follow failed",
+			properties: {},
+		},
+	];
+	const served = (headers: Record<string, string>) => (): Promise<Response> =>
+		Promise.resolve(new Response("# zen-harness log bundle\n\n## log — 0 records\n", { status: 200, headers }));
+
+	const named = await fetchThreadBundle(
+		"t1",
+		ring,
+		served({ "Content-Disposition": 'attachment; filename="zen-bundle-2026-09-10-t1.md"' }),
+	);
+	expect(named.filename).toBe("zen-bundle-2026-09-10-t1.md");
+	expect(named.text.startsWith("# zen-harness log bundle")).toBe(true);
+	expect(named.text).toContain("## browser logged — 1 records");
+	expect(named.text).toContain(JSON.stringify(ring[0]));
+
+	const unnamed = await fetchThreadBundle("6923e620-856a-4132-a9c8-1a2ff7d271f9", ring, served({}));
+	expect(unnamed.filename).toBe("zen-bundle-6923e620.md");
+
+	// A refused bundle is the server's reason, with its status as data — like the inspection.
+	const refused = (): Promise<Response> =>
+		Promise.resolve(new Response("thread must be a thread id or a prefix of one", { status: 400 }));
+	await expect(fetchThreadBundle("t1", ring, refused)).rejects.toMatchObject({ status: 400 });
 });
 
 // ── the event tails (#97): the ordering view ────────────────────────────────────
