@@ -22,8 +22,8 @@
 import { existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Check } from "typebox/value";
-import { findRepoRoot, ZenLogLine, zenLogsDir } from "../packages/core/src/index.ts";
-import { logRecordOf, zenLogFilename, zenLogLineRenderer } from "../packages/core/src/log-process.ts";
+import { findRepoRoot, ZenLogLine } from "../packages/core/src/index.ts";
+import { logRecordOf, logsDirFrom, zenLogFilename, zenLogLineRenderer } from "../packages/core/src/log-process.ts";
 
 const LEVEL_RANK: Readonly<Record<string, number>> = {
 	trace: 0,
@@ -40,7 +40,7 @@ const UNIT_SUFFIXES = ["s", "m", "h", "d"] as const;
 const UNIT_MS = [1000, 60_000, 3_600_000, 86_400_000] as const;
 const FOLLOW_POLL_MS = 250;
 
-interface Query {
+export interface Query {
 	readonly date: Date;
 	readonly follow: boolean;
 	readonly json: boolean;
@@ -51,15 +51,22 @@ interface Query {
 	readonly sinceMs: number | undefined;
 }
 
-function usage(problem: string): never {
-	process.stderr.write(`zen-logs: ${problem}\n\n`);
-	process.stderr.write(
-		"usage: bun run logs [--follow] [--level trace|debug|info|warning|error] [--thread ID] [--process NAME] [--since 10m] [--date YYYY-MM-DD] [--json] [--color]\n",
-	);
-	process.exit(2);
+export const USAGE =
+	"usage: bun run logs [--follow] [--level trace|debug|info|warning|error] [--thread ID] [--process NAME] [--since 10m] [--date YYYY-MM-DD] [--json] [--color]";
+
+/** A flag the parser could not accept — the main prints it with the usage and exits 2. */
+export class UsageError extends Error {
+	constructor(problem: string) {
+		super(problem);
+		this.name = "UsageError";
+	}
 }
 
-function parseArguments(argv: readonly string[]): Query {
+function usage(problem: string): never {
+	throw new UsageError(problem);
+}
+
+export function parseArguments(argv: readonly string[]): Query {
 	let date = new Date();
 	let follow = false;
 	let json = false;
@@ -117,7 +124,7 @@ function parseArguments(argv: readonly string[]): Query {
 	return { date, follow, json, color, level, thread, process: processName, sinceMs };
 }
 
-function matches(query: Query, line: ZenLogLine, notBefore: number): boolean {
+export function matches(query: Query, line: ZenLogLine, notBefore: number): boolean {
 	const record = logRecordOf(line);
 	if ((LEVEL_RANK[record.level] ?? 0) < query.level) return false;
 	if (record.timestamp < notBefore) return false;
@@ -128,7 +135,7 @@ function matches(query: Query, line: ZenLogLine, notBefore: number): boolean {
 }
 
 /** Print every matching line in `text`; a line that is not a record is said, not skipped silently. */
-function print(query: Query, text: string, notBefore: number): void {
+function print(query: Query, render: (line: ZenLogLine) => string, text: string, notBefore: number): void {
 	for (const raw of text.split("\n")) {
 		if (raw.length === 0) continue;
 		let parsed: unknown;
@@ -147,28 +154,14 @@ function print(query: Query, text: string, notBefore: number): void {
 	}
 }
 
-const query: Query = parseArguments(process.argv.slice(2));
-// A terminal gets colors and wraps to its width; a pipe (`| less`, `> file`) gets plain,
-// whole lines. `--color` keeps colors through a pipe (`| less -R`).
-const onTerminal = process.stdout.isTTY === true;
-const render: (line: ZenLogLine) => string = zenLogLineRenderer({
-	wordWrap: onTerminal,
-	colors: onTerminal || query.color,
-});
-const logsDir = zenLogsDir(findRepoRoot(import.meta.url));
-const file = join(logsDir, zenLogFilename(query.date));
-const notBefore = query.sinceMs === undefined ? 0 : Date.now() - query.sinceMs;
-
-if (!existsSync(file)) {
-	process.stderr.write(
-		`zen-logs: no log for ${zenLogFilename(query.date)} in ${logsDir} — has a launcher run today?\n`,
-	);
-	process.exit(1);
+/** Poll until the day's file exists — `--follow` started before the first launcher of the day. */
+async function untilExists(file: string): Promise<void> {
+	if (existsSync(file)) return;
+	process.stderr.write(`zen-logs: waiting for ${file} …\n`);
+	while (!existsSync(file)) await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS));
 }
 
-print(query, readFileSync(file, "utf8"), notBefore);
-
-if (query.follow) {
+function follow(query: Query, render: (line: ZenLogLine) => string, file: string): void {
 	// Poll from where the first read ended; a partial last line is carried to the next poll.
 	let offset = statSync(file).size;
 	let carry = "";
@@ -182,6 +175,36 @@ if (query.follow) {
 		const text = carry + chunk.toString("utf8");
 		const lastNewline = text.lastIndexOf("\n");
 		carry = lastNewline === -1 ? text : text.slice(lastNewline + 1);
-		if (lastNewline !== -1) print(query, text.slice(0, lastNewline), 0);
+		if (lastNewline !== -1) print(query, render, text.slice(0, lastNewline), 0);
 	}, FOLLOW_POLL_MS);
 }
+
+async function main(argv: readonly string[]): Promise<void> {
+	let query: Query;
+	try {
+		query = parseArguments(argv);
+	} catch (error) {
+		if (!(error instanceof UsageError)) throw error;
+		process.stderr.write(`zen-logs: ${error.message}\n\n${USAGE}\n`);
+		process.exit(2);
+	}
+	// A terminal gets colors and wraps to its width; a pipe (`| less`, `> file`) gets plain,
+	// whole lines. `--color` keeps colors through a pipe (`| less -R`).
+	const onTerminal = process.stdout.isTTY === true;
+	const render = zenLogLineRenderer({ wordWrap: onTerminal, colors: onTerminal || query.color });
+	const logsDir = logsDirFrom(process.env, findRepoRoot(import.meta.url));
+	const file = join(logsDir, zenLogFilename(query.date));
+	const notBefore = query.sinceMs === undefined ? 0 : Date.now() - query.sinceMs;
+
+	if (query.follow) await untilExists(file);
+	else if (!existsSync(file)) {
+		process.stderr.write(
+			`zen-logs: no log for ${zenLogFilename(query.date)} in ${logsDir} — has a launcher run today?\n`,
+		);
+		process.exit(1);
+	}
+	print(query, render, readFileSync(file, "utf8"), notBefore);
+	if (query.follow) follow(query, render, file);
+}
+
+if (import.meta.main) await main(process.argv.slice(2));
