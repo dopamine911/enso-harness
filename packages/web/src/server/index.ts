@@ -2,12 +2,16 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join, resolve } from "node:path";
 import {
+	base64DecodedBytes,
 	isZenThreadId,
 	PICC_DEFAULT_PERMISSION_MODE,
 	PICC_PERMISSION_MODES,
 	type PiDialogResponse,
 	persistedPermissionMode,
 	withZenLogContext,
+	ZEN_IMAGE_MAX_BYTES,
+	ZEN_PROMPT_BODY_MAX_BYTES,
+	ZEN_PROMPT_MAX_IMAGES,
 	type ZenStoredThread,
 	type ZenThreadEvents,
 	type ZenThreadHistory,
@@ -60,16 +64,50 @@ const LOOPBACK_ONLY = "127.0.0.1";
 
 const log = zenLogger("server", "http");
 
-function readBody(request: IncomingMessage): Promise<string> {
-	return new Promise((resolve, reject) => {
-		let body = "";
-		request.setEncoding("utf8");
-		request.on("data", (chunk: string) => {
-			body += chunk;
-		});
-		request.on("end", () => resolve(body));
-		request.on("error", reject);
-	});
+/** A body that outgrew its route's cap: the read stopped, nothing was buffered past it. */
+export class BodyTooLargeError extends Error {
+	constructor(readonly maxBytes: number) {
+		super(`the request body is larger than ${maxBytes} bytes`);
+		this.name = "BodyTooLargeError";
+	}
+}
+
+/**
+ * A request's body as text. With `maxBytes`, the read STOPS at the cap — the listener comes
+ * off, the stream is paused, what was buffered is dropped, the promise rejects — rather than
+ * buffering an arbitrary body first and refusing it after (#68: a prompt may carry images,
+ * and the cap is many megabytes). ⚠ The socket is NOT destroyed here: the response shares
+ * it, and destroying first is how a 413 never reaches the client. The caller answers, then
+ * tears the connection down (`endAndClose`). Counted in bytes as they arrive.
+ */
+function readBody(request: IncomingMessage, maxBytes = Number.POSITIVE_INFINITY): Promise<string> {
+	const { promise, resolve, reject } = Promise.withResolvers<string>();
+	const chunks: Buffer[] = [];
+	let received = 0;
+	const onEnd = (): void => resolve(Buffer.concat(chunks).toString("utf8"));
+	const onData = (chunk: Buffer): void => {
+		received += chunk.length;
+		if (received > maxBytes) {
+			request.off("data", onData).off("end", onEnd).off("error", reject);
+			request.pause();
+			chunks.length = 0;
+			reject(new BodyTooLargeError(maxBytes));
+			return;
+		}
+		chunks.push(chunk);
+	};
+	request.on("data", onData).on("end", onEnd).on("error", reject);
+	return promise;
+}
+
+/**
+ * Answer, then drop the connection: the request body was never read to its end, so this
+ * socket cannot carry another request. The header says so; the destroy makes it so, once
+ * the answer has been flushed.
+ */
+function endAndClose(request: IncomingMessage, response: ServerResponse, status: number, text: string): void {
+	response.writeHead(status, { "Content-Type": "text/plain", Connection: "close" });
+	response.end(text, () => request.destroy());
 }
 
 /**
@@ -376,11 +414,29 @@ export function startZenServer(options: ZenServerOptions) {
 	async function respondToPrompt(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
 		let body: PromptBody;
 		try {
-			body = readPromptBody(await readBody(request));
+			body = readPromptBody(await readBody(request, ZEN_PROMPT_BODY_MAX_BYTES));
 		} catch (error) {
+			if (error instanceof BodyTooLargeError) {
+				endAndClose(
+					request,
+					response,
+					413,
+					`a prompt body is at most ${ZEN_PROMPT_BODY_MAX_BYTES} bytes (${ZEN_PROMPT_MAX_IMAGES} images of ${ZEN_IMAGE_MAX_BYTES} bytes, base64, plus text)`,
+				);
+				return;
+			}
 			response.writeHead(400, { "Content-Type": "text/plain" });
 			response.end((error as Error).message);
 			return;
+		}
+		if (body.images !== undefined) {
+			// The audit line (#68): what crossed, never the bytes. One record per prompt with images.
+			log.info("prompt carries {count} image(s): {mimeTypes}, {bytes} bytes", {
+				threadId,
+				count: body.images.length,
+				mimeTypes: body.images.map((image) => image.mimeType),
+				bytes: body.images.reduce((total, image) => total + base64DecodedBytes(image.data), 0),
+			});
 		}
 		const outcome = await promptThread(followDeps, threadId, body);
 		if (outcome.status === 400) {

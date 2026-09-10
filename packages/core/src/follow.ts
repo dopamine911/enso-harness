@@ -2,6 +2,7 @@ import { type Static, Type } from "typebox";
 import { ZenOpenDialog } from "./dialog.ts";
 import { ZenObservation } from "./observation.ts";
 import { PiPermissionModeState } from "./permission-mode.ts";
+import { PiStreamingBehavior } from "./pi-rpc.ts";
 import { ZenInterruptedTail } from "./session-inspection.ts";
 
 /**
@@ -63,6 +64,76 @@ export type ZenFollowStatus = Static<typeof ZenFollowStatus>;
 
 export const ZenFollowFrame = Type.Union([ZenFollowSnapshot, ZenFollowObservation, ZenFollowStatus]);
 export type ZenFollowFrame = Static<typeof ZenFollowFrame>;
+
+/**
+ * The image types the Anthropic wire accepts (#68). pi documents no limit of its own and
+ * passes the bytes through; anything outside this set would be refused by the provider
+ * after the upload, with a worse message than ours.
+ */
+export const ZEN_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+export type ZenImageMimeType = (typeof ZEN_IMAGE_MIME_TYPES)[number];
+/** Anthropic's per-image cap, decoded bytes. Checked on the decoded size, not the base64 length. */
+export const ZEN_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+/** Images on one prompt. Claude.ai's own composer stops at 20; a pasted batch rarely nears this. */
+export const ZEN_PROMPT_MAX_IMAGES = 20;
+/**
+ * The most a prompt body may be on the wire: every image at its cap in base64 (4/3 of the
+ * bytes, rounded up to a 4-byte group), plus room for the text. The route stops READING at
+ * this size rather than buffering first and refusing after.
+ */
+export const ZEN_PROMPT_BODY_MAX_BYTES = ZEN_PROMPT_MAX_IMAGES * Math.ceil(ZEN_IMAGE_MAX_BYTES / 3) * 4 + 1024 * 1024;
+
+/**
+ * The base64 alphabet with trailing `=` padding — what `btoa` and `FileReader.readAsDataURL`
+ * produce. Never a `data:` URI. ⚠ Deliberately NOT the grouped grammar
+ * `(?:[…]{4})*(?:[…]{2}==|[…]{3}=)?`: on a 5 MB image the grouped form costs ~300 ms of
+ * event-loop time in V8, this one ~4 ms, and for a length that is a multiple of four the two
+ * accept exactly the same strings. The length check is `isWholeBase64`, applied by the
+ * reader beside the byte cap (PR #140 review, measured).
+ */
+const BASE64 = "^[A-Za-z0-9+/]*={0,2}$";
+
+/**
+ * With `BASE64`, strict standard base64: whole 4-character groups, the last padded to four.
+ * Refused as "not base64" rather than decoded leniently into a truncated image.
+ */
+export function isWholeBase64(data: string): boolean {
+	return data.length % 4 === 0;
+}
+
+/**
+ * One image on a prompt (#68): the bytes, base64, and what they are. Not TanStack's
+ * `ImagePart` — that union admits a `url` source, and a server-side fetch is egress the
+ * guards do not cover (`web_fetch`'s allowlist is the only sanctioned fetch path, #54), so
+ * the browser resolves every attachment to bytes before it crosses and a URL cannot arrive.
+ */
+export const ZenPromptImage = Type.Object(
+	{
+		mimeType: Type.Union(ZEN_IMAGE_MIME_TYPES.map((mimeType) => Type.Literal(mimeType))),
+		data: Type.String({ minLength: 1, pattern: BASE64 }),
+	},
+	{ additionalProperties: false },
+);
+export type ZenPromptImage = Static<typeof ZenPromptImage>;
+
+/** What `POST /api/threads/:id/prompt` takes. The shape is checked here; the byte cap is checked on the decoded size by the route. */
+export const ZenPromptBody = Type.Object(
+	{
+		message: Type.String(),
+		streamingBehavior: Type.Optional(PiStreamingBehavior),
+		images: Type.Optional(Type.Array(ZenPromptImage, { minItems: 1, maxItems: ZEN_PROMPT_MAX_IMAGES })),
+	},
+	{ additionalProperties: false },
+);
+export type ZenPromptBody = Static<typeof ZenPromptBody>;
+
+/** Decoded size of a base64 string, without decoding it: three bytes per four characters, less the padding. */
+export function base64DecodedBytes(data: string): number {
+	let padding = 0;
+	if (data.endsWith("==")) padding = 2;
+	else if (data.endsWith("=")) padding = 1;
+	return Math.floor((data.length * 3) / 4) - padding;
+}
 
 /**
  * What `POST /api/threads/:id/prompt` answers with: ADMISSION, not a result. A run is not
