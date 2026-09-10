@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
 	findRepoRoot,
@@ -8,6 +8,7 @@ import {
 	ZEN_CONFIG_FILENAME,
 	zenConfigPath,
 } from "@zen/core";
+import { auditRecords, recordZenLogs, releaseZenLogs } from "../../__tests__/log-recorder.ts";
 import { createWebFetch, type WebFetchDependencies } from "../index.ts";
 
 /**
@@ -335,18 +336,19 @@ test("a network failure comes back as a refusal, not a throw", async () => {
 
 // --- the audit property (#54: "auditable by construction") -------------------------------
 
-test("every call prints exactly one audit line — fetched and refused alike", async () => {
-	const errorSpy = spyOn(console, "error").mockImplementation(() => undefined);
+test("every call writes exactly one audit record — fetched at info, refused at warn (#54, #132)", async () => {
+	const logs = await recordZenLogs();
 	try {
 		const loaded = loadWebFetch();
 		await run(loaded, "https://docs.example.com/guide");
 		await run(loaded, "https://evil.example/");
-		const auditLines = errorSpy.mock.calls.filter(
-			(call) => typeof call[0] === "string" && call[0].startsWith(`${WEB_FETCH_TOOL_NAME} audit:`),
-		);
-		expect(auditLines.length).toBe(2);
+		const audits = auditRecords(logs, "web-fetch");
+		expect(audits.map((record) => [record.level, record.properties.outcome, record.properties.url])).toEqual([
+			["info", "fetched", "https://docs.example.com/guide"],
+			["warning", "refused", "https://evil.example/"],
+		]);
 	} finally {
-		errorSpy.mockRestore();
+		await releaseZenLogs();
 	}
 });
 

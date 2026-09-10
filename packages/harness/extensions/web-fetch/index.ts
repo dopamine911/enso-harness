@@ -13,6 +13,7 @@ import {
 	ZEN_CONFIG_EXAMPLE,
 	ZEN_CONFIG_FILENAME,
 	zenConfigPath,
+	zenLogger,
 } from "@zen/core";
 import { isFetchableContentType, isHostAllowed, isPublicIpAddress, parseWebFetchUrl } from "../../core/index.ts";
 
@@ -302,9 +303,13 @@ async function renderResponse(url: URL, rawUrl: string, response: Response): Pro
 	};
 }
 
-/** One stderr line per call, every outcome — the audit property #54 names. */
+const log = zenLogger("extension", "web-fetch");
+
+/** One record per call, every outcome — the audit property #54 names (#132: in the file, at `info`; a refusal at `warn`). */
 function auditLine(outcome: string, url: string, detail: string): void {
-	console.error(`${WEB_FETCH_TOOL_NAME} audit: ${outcome} url=${url} — ${detail}`);
+	const properties = { outcome, url, detail };
+	if (outcome === "refused") log.warn("audit: {outcome} {url} — {detail}", properties);
+	else log.info("audit: {outcome} {url} — {detail}", properties);
 }
 
 /** Read up to `maxBytes` of the body as UTF-8, cancelling the stream past the cap. */

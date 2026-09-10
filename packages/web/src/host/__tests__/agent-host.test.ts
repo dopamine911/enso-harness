@@ -39,6 +39,7 @@ afterAll(async () => {
 
 /** The five extension path suffixes the harness manifest declares, in load order. */
 const MANIFEST_EXTENSION_MARKERS = [
+	"extensions/logging/index.ts",
 	"extensions/guards/index.ts",
 	"extensions/web-fetch/index.ts",
 	"extensions/web-search/index.ts",

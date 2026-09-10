@@ -9,7 +9,7 @@ import { type Static, Type } from "typebox";
  * into one shared file, a record that keeps its values structured. What is OURS is here —
  * the layers, the properties every record carries when it can, and the one way to get a
  * logger. Nothing outside this file and the per-process configurators
- * (`web/server/logging.ts` and kin) imports `@logtape/*` directly;
+ * (`log-process.ts`) imports `@logtape/*` directly;
  * `test/logging-gate.test.ts` holds that line.
  *
  * ⚠ Messages are EVENTS, not sentences with values baked in: `"prompt {messageId}
@@ -44,8 +44,13 @@ export interface ZenLogProperties {
 	readonly [key: string]: unknown;
 }
 
-/** The typed surface. Four levels — `trace` and `fatal` are not vocabulary here. */
+/**
+ * The typed surface. Five levels; `fatal` is not vocabulary here. The tiers (#132):
+ * `info` is the spine — what happened; `debug` is every observation, one compact line;
+ * `trace` is the same with the payload. `ZEN_LOG_LEVEL` picks the tier (`log-process.ts`).
+ */
 export interface ZenLogger {
+	trace(message: string, properties?: ZenLogProperties): void;
 	debug(message: string, properties?: ZenLogProperties): void;
 	info(message: string, properties?: ZenLogProperties): void;
 	warn(message: string, properties?: ZenLogProperties): void;
@@ -59,6 +64,9 @@ export const ZEN_LOG_ROOT = "zen";
 
 function wrap(logger: Logger): ZenLogger {
 	return {
+		trace(message: string, properties?: ZenLogProperties): void {
+			logger.trace(message, properties);
+		},
 		debug(message: string, properties?: ZenLogProperties): void {
 			logger.debug(message, properties);
 		},
@@ -93,6 +101,11 @@ export function zenLogger(layer: ZenLogLayer, ...subcategory: readonly string[])
  * `{ threadId }`, the prompt route adds `{ generation }` after the acquire. ⚠ Only when the
  * process's configurator installed a `contextLocalStorage`; without one the properties are
  * silently absent — the browser has no `AsyncLocalStorage` and binds them explicitly.
+ *
+ * ⚠ The context follows the async chain, not the module graph: pi's in-process extension
+ * handlers (the guard's `tool_call`) run inside the prompt route's chain and inherit the
+ * thread without being told it. That holds only while pi is in-process — see the note on
+ * `guards/index.ts`'s logger.
  */
 export function withZenLogContext<T>(properties: ZenLogProperties, callback: () => T): T {
 	return withContext(properties, callback);

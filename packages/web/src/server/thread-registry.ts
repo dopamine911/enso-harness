@@ -26,6 +26,7 @@ import { type PiSession, type ZenObservation, zenLogger } from "@zen/core";
 import type { HostedSession } from "../host/agent-host.ts";
 import { createEventTail, type EventTail } from "../host/event-tail.ts";
 import { mapPiEvent } from "../rpc/map-events.ts";
+import { recordObservation } from "./observation-log.ts";
 
 /**
  * One frame of a thread's feed (SPIKE #109 — the `follow` half of deepseek-harness's
@@ -266,6 +267,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 
 	function publishObservation(feed: ThreadFeed, observation: ZenObservation): void {
 		feed.seq += 1;
+		recordObservation(feed.threadId, generations.get(feed.threadId) ?? 0, feed.seq, observation);
 		publish(feed, { kind: "observation", seq: feed.seq, observation });
 	}
 
@@ -286,6 +288,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 		detachFeed(threadId);
 		try {
 			thread.hosted.session.dispose();
+			log.info("thread disposed: {why}", { threadId, generation: thread.generation, why });
 		} catch (error) {
 			log.error("dispose after {why} failed: {error}", { threadId, why, error });
 		}
@@ -316,6 +319,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 		threads.set(threadId, thread);
 		attachFeed(threadId, thread);
 		publishStatus(threadId, thread);
+		log.info("thread built: session {sessionId} in {sessionDir}", {
+			threadId,
+			generation: thread.generation,
+			sessionId: hosted.inspect().sessionId,
+			sessionDir: hosted.inspect().sessionDir,
+			extensions: hosted.loadedExtensionPaths.length,
+		});
 		return thread;
 	}
 
@@ -328,6 +338,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 		thread.busy = false;
 		thread.lastActivityAt = Date.now();
 		publishStatus(threadId, thread);
+		log.info("run {generation} released; idle timer {idleTimeoutMs} ms", {
+			threadId,
+			generation: thread.generation,
+			idleTimeoutMs,
+		});
 	}
 
 	/**
@@ -366,6 +381,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 				if (thread.abortInFlight === inFlight) thread.abortInFlight = undefined;
 			});
 		thread.abortInFlight = inFlight;
+		log.info("run {generation} told to abort; {restored} queued prompt(s) handed back", {
+			threadId,
+			generation: thread.generation,
+			restored: cleared.steering.length + cleared.followUp.length,
+		});
 		return { outcome: "aborted", restored: [...cleared.steering, ...cleared.followUp] };
 	}
 
@@ -417,6 +437,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 			generations.set(threadId, thread.generation);
 			thread.lastActivityAt = Date.now();
 			publishStatus(threadId, thread);
+			log.info("run {generation} acquired", { threadId, generation: thread.generation });
 			return leaseOf(threadId, thread);
 		},
 		announce(threadId: string, observation: ZenObservation): void {

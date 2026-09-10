@@ -38,14 +38,27 @@ test("⚠ no TypeBox schema is declared outside @zen/core", () => {
 	expect(offenders).toEqual([]);
 });
 
-test("the barrel re-exports every module, so one import reaches every shape", () => {
+test("every module is reachable: from the barrel, or from a subpath package.json declares", () => {
 	// If a module is added to src/ and not to index.ts, a consumer would have to reach past
-	// the barrel — and "is this shape already declared?" stops being one search.
+	// the barrel — and "is this shape already declared?" stops being one search. The one
+	// exception is a module the BROWSER must never see: `@logtape/file` builds its sinks on
+	// `node:fs` at import and is not tree-shaken, so `log-process.ts` is a subpath export
+	// (`@zen/core/log-process`) — declared in package.json, which is checked here so the
+	// exception cannot be an undeclared file either.
 	const modules = readdirSync(join(import.meta.dir, ".."), { withFileTypes: true })
 		.filter((entry) => entry.isFile() && entry.name.endsWith(".ts") && entry.name !== "index.ts")
 		.map((entry) => entry.name);
 	const barrel = readFileSync(join(import.meta.dir, "..", "index.ts"), "utf8");
-	for (const module of modules) expect(barrel).toContain(module);
+	const manifest = JSON.parse(readFileSync(join(import.meta.dir, "..", "..", "package.json"), "utf8")) as {
+		exports: Record<string, string>;
+	};
+	const subpathModules = Object.entries(manifest.exports)
+		.filter(([subpath]) => subpath !== ".")
+		.map(([, target]) => target.replace(/^\.\/src\//, ""));
+	expect(subpathModules).toEqual(["log-process.ts"]);
+	const inBarrel = modules.filter((module) => barrel.includes(module));
+	const expectedInBarrel = modules.filter((module) => !subpathModules.includes(module));
+	expect(inBarrel.sort()).toEqual(expectedInBarrel.sort());
 });
 
 test("the schemas the rest of the repo depends on are actually exported", () => {

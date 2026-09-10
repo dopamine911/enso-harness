@@ -5,7 +5,7 @@ import type {
 	ToolCallEventResult,
 	ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_GUARD_POLICY, type GuardPolicy, WEB_FETCH_TOOL_NAME } from "@zen/core";
+import { DEFAULT_GUARD_POLICY, type GuardPolicy, WEB_FETCH_TOOL_NAME, zenLogger } from "@zen/core";
 import { type CheckCommandResult, checkCommand } from "cc-safety-net/api";
 import {
 	canonicalToolName,
@@ -147,6 +147,16 @@ const MUTATING_PATH_TOOLS = new Set([TOOL_WRITE, TOOL_EDIT]);
  * whole-file knowledge is exactly what a follow-up `write` claims. The cost is one `read`
  * before a wholesale rewrite of an edited file, which is the rule working.
  */
+/**
+ * ⚠ `threadId` on these records is INHERITED, never passed: in the web host pi runs
+ * in-process, the prompt route binds `{ threadId }` in `AsyncLocalStorage`
+ * (`withZenLogContext`), and the agent loop that reaches this handler is still inside that
+ * async chain — proven by the slice-2 receipt, not designed. Move extensions to a worker or
+ * a child (the TUI already runs pi as one) and every verdict loses its thread with no test
+ * going red; a record here would then need the id handed to it explicitly.
+ */
+const log = zenLogger("extension", "guards");
+
 const KNOWLEDGE_CONFERRING_TOOLS = new Set([TOOL_READ, TOOL_WRITE]);
 
 /**
@@ -215,7 +225,7 @@ function shellCommandDenial(
 		try {
 			safetyNetVerdict = dependencies.analyzeBashCommand({ command, cwd });
 		} catch (error) {
-			console.error("guards: cc-safety-net checkCommand threw — denying per its contract", error);
+			log.error("cc-safety-net checkCommand threw — denying per its contract: {error}", { error });
 			safetyNetVerdict = {
 				kind: "deny",
 				reason: `the safety analyzer failed (${String(error)}), and its contract is that an unanalyzed command must not run`,
@@ -292,7 +302,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
 		} catch (error) {
 			// The denial reason below is for the operator; the raw error (with stack) goes to
 			// stderr for whoever has to debug WHY enumeration failed after the fact.
-			console.error("guards: getAllTools() failed during the policy check", error);
+			log.error("getAllTools() failed during the policy check: {error}", { error });
 			policyToolMismatch = `the guard could not enumerate pi's tools: ${String(error)}`;
 		}
 	}
@@ -324,8 +334,23 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
 		}
 	});
 
+	// Every verdict is a record (#132): a denial at `warn` with the tool, the path it named
+	// and the reason; an allow at `debug`. The transcript shows the model what was refused;
+	// this says WHEN, on which call, in the file beside every other layer's line about it.
 	pi.on("tool_call", (event, extensionContext): ToolCallEventResult | undefined => {
-		const cwd = extensionContext.cwd;
+		const verdict = decide(event, extensionContext.cwd);
+		const path = pathArgumentOf(event);
+		const properties = {
+			toolCallId: event.toolCallId,
+			toolName: event.toolName,
+			...(path === undefined ? {} : { path }),
+		};
+		if (verdict?.block === true) log.warn("{toolName} denied: {reason}", { ...properties, reason: verdict.reason });
+		else log.debug("{toolName} allowed", properties);
+		return verdict;
+	});
+
+	function decide(event: ToolCallEvent, cwd: string): ToolCallEventResult | undefined {
 		const toolName = canonicalToolName(event.toolName);
 
 		// --- #4's fail-closed floor: a policy/tool-list mismatch denies EVERYTHING, first.
@@ -451,5 +476,5 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
 		}
 
 		return undefined;
-	});
+	}
 }

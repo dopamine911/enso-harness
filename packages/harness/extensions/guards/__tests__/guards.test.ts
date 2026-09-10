@@ -1,8 +1,10 @@
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCodingTools, createPowerShellTool, createReadOnlyTools } from "@earendil-works/pi-coding-agent";
+import type { LogRecorder } from "@logtape/testing/recorder";
+import { recordZenLogs, releaseZenLogs } from "../../__tests__/log-recorder.ts";
 import { createGuards, GUARD_POLICY_TOOL_NAMES, type GuardDependencies } from "../index.ts";
 
 type Handler = (event: unknown, extensionContext: unknown) => { block?: boolean; reason?: string } | undefined;
@@ -60,6 +62,36 @@ function loadGuard(): Handler {
 const cwd = mkdtempSync(join(tmpdir(), "zen-guard-live-"));
 const call = (toolName: string, input: Record<string, unknown>) =>
 	loadGuard()({ type: "tool_call", toolCallId: "t", toolName, input }, { cwd });
+
+/** Every verdict is a record (#132): the recorder is the file. */
+let logs: LogRecorder;
+beforeAll(async () => {
+	logs = await recordZenLogs();
+});
+beforeEach(() => logs.clear());
+afterAll(releaseZenLogs);
+
+test("⚠ every verdict is a record: a denial at warn with the tool, the path and the reason; an allow at debug — never silent (#132)", () => {
+	expect(call("write", { path: "/etc/passwd" })?.block).toBe(true);
+	logs.assertLogged({
+		level: "warning",
+		category: ["zen", "extension", "guards"],
+		rawMessage: "{toolName} denied: {reason}",
+		properties: (properties) =>
+			properties.toolCallId === "t" &&
+			properties.toolName === "write" &&
+			properties.path === "/etc/passwd" &&
+			String(properties.reason).includes("blocked"),
+	});
+	logs.clear();
+	expect(call("write", { path: "src/a.ts" })).toBeUndefined();
+	logs.assertLogged({
+		level: "debug",
+		rawMessage: "{toolName} allowed",
+		properties: { toolCallId: "t", toolName: "write", path: "src/a.ts" },
+	});
+	logs.assertNotLogged({ level: "warning" });
+});
 
 test("registers a tool_call handler", () => expect(typeof loadGuard()).toBe("function"));
 test("write inside the workspace passes", () => expect(call("write", { path: "src/a.ts" })).toBeUndefined());

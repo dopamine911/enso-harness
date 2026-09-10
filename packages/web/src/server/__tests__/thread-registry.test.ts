@@ -103,6 +103,12 @@ test("release starts the idle clock; the session is disposed after the window, a
 	await sleep(30);
 	expect(built[0]?.record.disposed).toBe(1);
 	expect(threads.liveThreadCount()).toBe(0);
+	// The disposal is a record that says why (#132) — the idle window, by its length.
+	logs.assertLogged({
+		level: "info",
+		rawMessage: "thread disposed: {why}",
+		properties: { threadId: "t1", generation: 1, why: "20ms idle" },
+	});
 	// The next acquire on that thread builds a fresh session.
 	await threads.acquire("t1");
 	expect(built).toHaveLength(2);
@@ -168,6 +174,13 @@ test("⚠ abort hands back the queued prompts in order and clears pi's queue; a 
 	});
 	expect(hosted.record.queueClears).toBe(1);
 	expect(hosted.queue).toEqual({ steering: [], followUp: [] });
+	// The stop is a record with the COUNT it handed back (#132) — never the texts.
+	logs.assertLogged({
+		level: "info",
+		rawMessage: /^run \{generation\} told to abort/,
+		properties: { threadId: "t1", generation: 1, restored: 3 },
+	});
+	expect(JSON.stringify(logs.records.map((record) => record.properties))).not.toContain("stop at the tests");
 	// The second click: same answer, the queue was already taken.
 	expect(threads.abort("t1")).toEqual({ outcome: "aborted", restored: [] });
 	expect(hosted.record.queueClears).toBe(1);
@@ -298,7 +311,7 @@ test("a dispose that throws is reported, not thrown", async () => {
 	});
 	await threads.acquire("t1");
 	threads.shutdown();
-	expect(logs.records).toHaveLength(1);
+	expect(logs.filter({ level: "error" })).toHaveLength(1);
 	logs.assertLogged({
 		level: "error",
 		rawMessage: "dispose after {why} failed: {error}",
