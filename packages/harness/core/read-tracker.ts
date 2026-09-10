@@ -1,5 +1,5 @@
-import { existsSync, statSync } from "node:fs";
-import { realpathOfNearestExisting } from "./paths.ts";
+import { existsSync, statSync } from 'node:fs'
+import { realpathOfNearestExisting } from './paths.ts'
 
 /**
  * Session-scoped record of files whose content this session has seen (#10), and of the
@@ -51,92 +51,92 @@ import { realpathOfNearestExisting } from "./paths.ts";
  * userland, and a replace-by-rename changes the inode.
  */
 interface ObservedFileStamp {
-	/** Nanoseconds, as pi reads them (`statSync(path, { bigint: true })`) — no float rounding. */
-	mtimeNs: bigint;
-	ctimeNs: bigint;
-	ino: bigint;
-	size: bigint;
+  /** Nanoseconds, as pi reads them (`statSync(path, { bigint: true })`) — no float rounding. */
+  mtimeNs: bigint
+  ctimeNs: bigint
+  ino: bigint
+  size: bigint
 }
 
 function stampsMatch(current: ObservedFileStamp, recorded: ObservedFileStamp): boolean {
-	return (
-		current.mtimeNs === recorded.mtimeNs &&
-		current.ctimeNs === recorded.ctimeNs &&
-		current.ino === recorded.ino &&
-		current.size === recorded.size
-	);
+  return (
+    current.mtimeNs === recorded.mtimeNs &&
+    current.ctimeNs === recorded.ctimeNs &&
+    current.ino === recorded.ino &&
+    current.size === recorded.size
+  )
 }
 
-export type KnownPathState = "unknown" | "fresh" | "stale";
+export type KnownPathState = 'unknown' | 'fresh' | 'stale'
 
 export interface SessionReadTracker {
-	/**
-	 * Record that the session has seen this file's content (a successful read or write),
-	 * stamping the file's current stat. A file that cannot be statted records nothing.
-	 */
-	recordKnownPath(absolutePath: string): void;
-	/**
-	 * Re-stamp a file that is ALREADY known — for the session's own successful `edit`,
-	 * which moves mtime and size without conferring whole-file knowledge (#10's decision).
-	 * Knowledge and stamp currency are separate concerns: an edit proves the session knew
-	 * one fragment, so an unknown file stays unknown, but a KNOWN file's stamp must follow
-	 * the session's own mutation or the next mutation classifies the session's own work as
-	 * "changed underneath us" (found live: read → edit → edit refused the second edit).
-	 */
-	refreshStampIfKnown(absolutePath: string): void;
-	/** How the file this path resolves to relates to what the session last saw of it. */
-	classifyPath(absolutePath: string): KnownPathState;
-	/** Forget everything — called on session_start. */
-	reset(): void;
+  /**
+   * Record that the session has seen this file's content (a successful read or write),
+   * stamping the file's current stat. A file that cannot be statted records nothing.
+   */
+  recordKnownPath(absolutePath: string): void
+  /**
+   * Re-stamp a file that is ALREADY known — for the session's own successful `edit`,
+   * which moves mtime and size without conferring whole-file knowledge (#10's decision).
+   * Knowledge and stamp currency are separate concerns: an edit proves the session knew
+   * one fragment, so an unknown file stays unknown, but a KNOWN file's stamp must follow
+   * the session's own mutation or the next mutation classifies the session's own work as
+   * "changed underneath us" (found live: read → edit → edit refused the second edit).
+   */
+  refreshStampIfKnown(absolutePath: string): void
+  /** How the file this path resolves to relates to what the session last saw of it. */
+  classifyPath(absolutePath: string): KnownPathState
+  /** Forget everything — called on session_start. */
+  reset(): void
 }
 
 export function createSessionReadTracker(): SessionReadTracker {
-	const stampsByRealpath = new Map<string, ObservedFileStamp>();
+  const stampsByRealpath = new Map<string, ObservedFileStamp>()
 
-	function statStampOf(realpath: string): ObservedFileStamp | undefined {
-		try {
-			const stats = statSync(realpath, { bigint: true });
-			return { mtimeNs: stats.mtimeNs, ctimeNs: stats.ctimeNs, ino: stats.ino, size: stats.size };
-		} catch {
-			return undefined;
-		}
-	}
+  function statStampOf(realpath: string): ObservedFileStamp | undefined {
+    try {
+      const stats = statSync(realpath, { bigint: true })
+      return { mtimeNs: stats.mtimeNs, ctimeNs: stats.ctimeNs, ino: stats.ino, size: stats.size }
+    } catch {
+      return undefined
+    }
+  }
 
-	return {
-		recordKnownPath(absolutePath: string): void {
-			// ⚠ Only a path that EXISTS may be recorded: for a missing file,
-			// realpathOfNearestExisting degrades to the nearest existing ANCESTOR, and
-			// stamping that directory poisons the map — a directory's mtime moves on any
-			// entry creation, so the stamp would later classify unrelated paths under it
-			// as "stale" and block ordinary file creation. Found by the record-nothing test.
-			if (!existsSync(absolutePath)) return;
-			const realpath = realpathOfNearestExisting(absolutePath);
-			const stamp = statStampOf(realpath);
-			if (stamp === undefined) return;
-			stampsByRealpath.set(realpath, stamp);
-		},
-		refreshStampIfKnown(absolutePath: string): void {
-			const realpath = realpathOfNearestExisting(absolutePath);
-			if (!stampsByRealpath.has(realpath)) return;
-			const stamp = statStampOf(realpath);
-			if (stamp === undefined) return;
-			stampsByRealpath.set(realpath, stamp);
-		},
-		classifyPath(absolutePath: string): KnownPathState {
-			const realpath = realpathOfNearestExisting(absolutePath);
-			const recorded = stampsByRealpath.get(realpath);
-			if (recorded === undefined) return "unknown";
-			const current = statStampOf(realpath);
-			// ⓘ A recorded file DELETED underneath us never reaches this line: its realpath
-			// degrades to the nearest existing ancestor above, misses the map, and returns
-			// "unknown" — so a write to the now-absent path takes the ordinary creation
-			// route. This branch is the narrow remainder (a stat race, a permission flip):
-			// the disk no longer matches what the session saw, so fail toward stale.
-			if (current === undefined) return "stale";
-			return stampsMatch(current, recorded) ? "fresh" : "stale";
-		},
-		reset(): void {
-			stampsByRealpath.clear();
-		},
-	};
+  return {
+    recordKnownPath(absolutePath: string): void {
+      // ⚠ Only a path that EXISTS may be recorded: for a missing file,
+      // realpathOfNearestExisting degrades to the nearest existing ANCESTOR, and
+      // stamping that directory poisons the map — a directory's mtime moves on any
+      // entry creation, so the stamp would later classify unrelated paths under it
+      // as "stale" and block ordinary file creation. Found by the record-nothing test.
+      if (!existsSync(absolutePath)) return
+      const realpath = realpathOfNearestExisting(absolutePath)
+      const stamp = statStampOf(realpath)
+      if (stamp === undefined) return
+      stampsByRealpath.set(realpath, stamp)
+    },
+    refreshStampIfKnown(absolutePath: string): void {
+      const realpath = realpathOfNearestExisting(absolutePath)
+      if (!stampsByRealpath.has(realpath)) return
+      const stamp = statStampOf(realpath)
+      if (stamp === undefined) return
+      stampsByRealpath.set(realpath, stamp)
+    },
+    classifyPath(absolutePath: string): KnownPathState {
+      const realpath = realpathOfNearestExisting(absolutePath)
+      const recorded = stampsByRealpath.get(realpath)
+      if (recorded === undefined) return 'unknown'
+      const current = statStampOf(realpath)
+      // ⓘ A recorded file DELETED underneath us never reaches this line: its realpath
+      // degrades to the nearest existing ancestor above, misses the map, and returns
+      // "unknown" — so a write to the now-absent path takes the ordinary creation
+      // route. This branch is the narrow remainder (a stat race, a permission flip):
+      // the disk no longer matches what the session saw, so fail toward stale.
+      if (current === undefined) return 'stale'
+      return stampsMatch(current, recorded) ? 'fresh' : 'stale'
+    },
+    reset(): void {
+      stampsByRealpath.clear()
+    },
+  }
 }

@@ -1,10 +1,10 @@
-import { expect, test } from "bun:test";
-import type { LogRecord } from "@logtape/logtape";
-import { EXTERNAL_WEB_CONTENT_NOTICE, WEB_SEARCH_TOOL_NAME } from "@zen/core";
-import type { WebSearchOutcome } from "../../../core/index.ts";
-import { WebSearchProviderError } from "../../../core/index.ts";
-import { auditRecords, recordZenLogs, releaseZenLogs } from "../../__tests__/log-recorder.ts";
-import { createWebSearch, type WebSearchDependencies } from "../index.ts";
+import { expect, test } from 'bun:test'
+import type { LogRecord } from '@logtape/logtape'
+import { EXTERNAL_WEB_CONTENT_NOTICE, WEB_SEARCH_TOOL_NAME } from '@zen/core'
+import type { WebSearchOutcome } from '../../../core/index.ts'
+import { WebSearchProviderError } from '../../../core/index.ts'
+import { auditRecords, recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
+import { createWebSearch, type WebSearchDependencies } from '../index.ts'
 
 /**
  * The web_search extension (#63) against injected seams — the SELECTION and FALLBACK
@@ -14,369 +14,369 @@ import { createWebSearch, type WebSearchDependencies } from "../index.ts";
  */
 
 interface CapturedTool {
-	name: string;
-	description: string;
-	execute: (
-		toolCallId: string,
-		params: { query: string },
-		signal: AbortSignal | undefined,
-		onUpdate: undefined,
-		extensionContext: unknown,
-	) => Promise<{ content: { type: string; text: string }[] }>;
+  name: string
+  description: string
+  execute: (
+    toolCallId: string,
+    params: { query: string },
+    signal: AbortSignal | undefined,
+    onUpdate: undefined,
+    extensionContext: unknown,
+  ) => Promise<{ content: { type: string; text: string }[] }>
 }
 
-const QUERY = "what changed in zen";
+const QUERY = 'what changed in zen'
 const SEARCHED: WebSearchOutcome = {
-	kind: "searched",
-	providerId: "anthropic",
-	answerText: "zen gained web_search[1].",
-	sources: [{ title: "Zen docs", url: "https://example.com/zen" }],
-};
+  kind: 'searched',
+  providerId: 'anthropic',
+  answerText: 'zen gained web_search[1].',
+  sources: [{ title: 'Zen docs', url: 'https://example.com/zen' }],
+}
 const UNGROUNDED: WebSearchOutcome = {
-	kind: "ungrounded",
-	providerId: "anthropic",
-	answerText: "I believe zen gained web_search.",
-};
+  kind: 'ungrounded',
+  providerId: 'anthropic',
+  answerText: 'I believe zen gained web_search.',
+}
 const TAVILY_RESULTS: WebSearchOutcome = {
-	kind: "searched",
-	providerId: "tavily",
-	sources: [{ title: "Zen docs", url: "https://example.com/zen" }],
-	snippets: [{ title: "Zen docs", url: "https://example.com/zen", snippet: "web_search landed" }],
-};
+  kind: 'searched',
+  providerId: 'tavily',
+  sources: [{ title: 'Zen docs', url: 'https://example.com/zen' }],
+  snippets: [{ title: 'Zen docs', url: 'https://example.com/zen', snippet: 'web_search landed' }],
+}
 
 /** A model whose api routes to the anthropic provider. */
-const ANTHROPIC_MODEL = { id: "claude-test", provider: "anthropic", api: "anthropic-messages", maxTokens: 8192 };
+const ANTHROPIC_MODEL = { id: 'claude-test', provider: 'anthropic', api: 'anthropic-messages', maxTokens: 8192 }
 /** pi registers DeepSeek chat models like this — routable to NOTHING (#63). */
-const UNROUTED_MODEL = { id: "deepseek-v4-flash", provider: "deepseek", api: "openai-completions", maxTokens: 8192 };
+const UNROUTED_MODEL = { id: 'deepseek-v4-flash', provider: 'deepseek', api: 'openai-completions', maxTokens: 8192 }
 
 interface LoadedWebSearch {
-	tool: CapturedTool;
-	calls: { anthropic: number; deepseek: number; tavily: number };
-	tavilyRequests: { apiKey: string; includeDomains?: readonly string[] | undefined }[];
-	deepseekKeys: (string | undefined)[];
+  tool: CapturedTool
+  calls: { anthropic: number; deepseek: number; tavily: number }
+  tavilyRequests: { apiKey: string; includeDomains?: readonly string[] | undefined }[]
+  deepseekKeys: (string | undefined)[]
 }
 
 function loadWebSearch(
-	overrides: Partial<WebSearchDependencies> = {},
-	environment: Record<string, string> = {},
+  overrides: Partial<WebSearchDependencies> = {},
+  environment: Record<string, string> = {},
 ): LoadedWebSearch {
-	const calls = { anthropic: 0, deepseek: 0, tavily: 0 };
-	const tavilyRequests: LoadedWebSearch["tavilyRequests"] = [];
-	const deepseekKeys: (string | undefined)[] = [];
-	const dependencies: WebSearchDependencies = {
-		locateConfigFile: () => "/repo/zen.config.json",
-		readConfigText: () => JSON.stringify({ webFetch: { allowedHosts: [] } }),
-		readEnvironmentVariable: (variableName) => environment[variableName],
-		runProviders: {
-			anthropic: async () => {
-				calls.anthropic += 1;
-				return SEARCHED;
-			},
-			google: async () => {
-				throw new Error("google fake not expected in this test");
-			},
-			openai: async () => {
-				throw new Error("openai fake not expected in this test");
-			},
-			deepseek: async (request) => {
-				calls.deepseek += 1;
-				deepseekKeys.push(request.apiKey);
-				return { ...SEARCHED, providerId: "deepseek" };
-			},
-			tavily: async (request) => {
-				calls.tavily += 1;
-				tavilyRequests.push({ apiKey: request.apiKey, includeDomains: request.includeDomains });
-				return TAVILY_RESULTS;
-			},
-		},
-		fetchUrl: async () => {
-			throw new Error("no test reaches the network");
-		},
-		...overrides,
-	};
-	let captured: CapturedTool | undefined;
-	createWebSearch(dependencies)({ registerTool: (tool: CapturedTool) => (captured = tool) } as never);
-	if (captured === undefined) throw new Error("web-search did not register a tool");
-	return { tool: captured, calls, tavilyRequests, deepseekKeys };
+  const calls = { anthropic: 0, deepseek: 0, tavily: 0 }
+  const tavilyRequests: LoadedWebSearch['tavilyRequests'] = []
+  const deepseekKeys: (string | undefined)[] = []
+  const dependencies: WebSearchDependencies = {
+    locateConfigFile: () => '/repo/zen.config.json',
+    readConfigText: () => JSON.stringify({ webFetch: { allowedHosts: [] } }),
+    readEnvironmentVariable: (variableName) => environment[variableName],
+    runProviders: {
+      anthropic: async () => {
+        calls.anthropic += 1
+        return SEARCHED
+      },
+      google: async () => {
+        throw new Error('google fake not expected in this test')
+      },
+      openai: async () => {
+        throw new Error('openai fake not expected in this test')
+      },
+      deepseek: async (request) => {
+        calls.deepseek += 1
+        deepseekKeys.push(request.apiKey)
+        return { ...SEARCHED, providerId: 'deepseek' }
+      },
+      tavily: async (request) => {
+        calls.tavily += 1
+        tavilyRequests.push({ apiKey: request.apiKey, includeDomains: request.includeDomains })
+        return TAVILY_RESULTS
+      },
+    },
+    fetchUrl: async () => {
+      throw new Error('no test reaches the network')
+    },
+    ...overrides,
+  }
+  let captured: CapturedTool | undefined
+  createWebSearch(dependencies)({ registerTool: (tool: CapturedTool) => (captured = tool) } as never)
+  if (captured === undefined) throw new Error('web-search did not register a tool')
+  return { tool: captured, calls, tavilyRequests, deepseekKeys }
 }
 
 async function run(loaded: LoadedWebSearch, extensionContext: unknown): Promise<string> {
-	const result = await loaded.tool.execute("t", { query: QUERY }, undefined, undefined, extensionContext);
-	const text = result.content[0]?.text;
-	if (text === undefined) throw new Error("the tool returned no text");
-	return text;
+  const result = await loaded.tool.execute('t', { query: QUERY }, undefined, undefined, extensionContext)
+  const text = result.content[0]?.text
+  if (text === undefined) throw new Error('the tool returned no text')
+  return text
 }
 
 /** Capture the audit records for one call (#132: records, not stderr lines). */
 async function withAuditCapture<T>(action: () => Promise<T>): Promise<{ value: T; audits: readonly LogRecord[] }> {
-	const logs = await recordZenLogs();
-	try {
-		const value = await action();
-		return { value, audits: auditRecords(logs, "web-search") };
-	} finally {
-		await releaseZenLogs();
-	}
+  const logs = await recordZenLogs()
+  try {
+    const value = await action()
+    return { value, audits: auditRecords(logs, 'web-search') }
+  } finally {
+    await releaseZenLogs()
+  }
 }
 
-test("a searched primary renders the via-line, the notice, the answer, and the sources", async () => {
-	const loaded = loadWebSearch();
-	const { value: text, audits } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
-	expect(text.startsWith("Searched the web via anthropic.")).toBe(true);
-	expect(text).toContain(EXTERNAL_WEB_CONTENT_NOTICE);
-	expect(text).toContain("zen gained web_search[1].");
-	expect(text).toContain("1. [Zen docs](https://example.com/zen)");
-	expect(loaded.calls.tavily).toBe(0);
-	// One audit record, naming provider and outcome, never any key material.
-	expect(audits).toHaveLength(1);
-	expect(audits[0]?.properties).toMatchObject({ provider: "anthropic", outcome: "searched" });
-});
+test('a searched primary renders the via-line, the notice, the answer, and the sources', async () => {
+  const loaded = loadWebSearch()
+  const { value: text, audits } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
+  expect(text.startsWith('Searched the web via anthropic.')).toBe(true)
+  expect(text).toContain(EXTERNAL_WEB_CONTENT_NOTICE)
+  expect(text).toContain('zen gained web_search[1].')
+  expect(text).toContain('1. [Zen docs](https://example.com/zen)')
+  expect(loaded.calls.tavily).toBe(0)
+  // One audit record, naming provider and outcome, never any key material.
+  expect(audits).toHaveLength(1)
+  expect(audits[0]?.properties).toMatchObject({ provider: 'anthropic', outcome: 'searched' })
+})
 
 // ⚠ THE ACCURACY CONTRACT (#63): an ungrounded answer with no fallback armed is returned
 // LABELED, never rendered as a search result, and never carries the web-content notice
 // (it is the model's own output, not external content).
-test("ungrounded with no Tavily key: labeled as NOT a search result, no notice, no via-line", async () => {
-	const loaded = loadWebSearch({
-		runProviders: {
-			anthropic: async () => UNGROUNDED,
-			google: async () => UNGROUNDED,
-			openai: async () => UNGROUNDED,
-			deepseek: async () => UNGROUNDED,
-			tavily: async () => TAVILY_RESULTS,
-		},
-	});
-	const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
-	expect(text.startsWith("No web search was performed")).toBe(true);
-	expect(text).toContain("NOT a search result");
-	expect(text).toContain("I believe zen gained web_search.");
-	expect(text).not.toContain(EXTERNAL_WEB_CONTENT_NOTICE);
-	expect(text).not.toContain("Searched the web");
-});
+test('ungrounded with no Tavily key: labeled as NOT a search result, no notice, no via-line', async () => {
+  const loaded = loadWebSearch({
+    runProviders: {
+      anthropic: async () => UNGROUNDED,
+      google: async () => UNGROUNDED,
+      openai: async () => UNGROUNDED,
+      deepseek: async () => UNGROUNDED,
+      tavily: async () => TAVILY_RESULTS,
+    },
+  })
+  const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
+  expect(text.startsWith('No web search was performed')).toBe(true)
+  expect(text).toContain('NOT a search result')
+  expect(text).toContain('I believe zen gained web_search.')
+  expect(text).not.toContain(EXTERNAL_WEB_CONTENT_NOTICE)
+  expect(text).not.toContain('Searched the web')
+})
 
-test("ungrounded WITH Tavily armed falls back, and the render says why", async () => {
-	const loaded = loadWebSearch(
-		{
-			runProviders: {
-				anthropic: async () => UNGROUNDED,
-				google: async () => UNGROUNDED,
-				openai: async () => UNGROUNDED,
-				deepseek: async () => UNGROUNDED,
-				tavily: async () => TAVILY_RESULTS,
-			},
-		},
-		{ TAVILY_API_KEY: "tv-key" },
-	);
-	const { value: text, audits } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
-	expect(text.startsWith("Searched the web via tavily (fallback")).toBe(true);
-	expect(text).toContain("answered WITHOUT searching");
-	expect(text).toContain("## Results");
-	expect(text).toContain("web_search landed");
-	expect(text).toContain(EXTERNAL_WEB_CONTENT_NOTICE);
-	expect(audits.map((record) => record.properties.provider)).toEqual(["tavily"]);
-	// The key must never appear in the rendered text or any audit record.
-	expect(text).not.toContain("tv-key");
-	expect(JSON.stringify(audits.map((record) => record.properties))).not.toContain("tv-key");
-});
+test('ungrounded WITH Tavily armed falls back, and the render says why', async () => {
+  const loaded = loadWebSearch(
+    {
+      runProviders: {
+        anthropic: async () => UNGROUNDED,
+        google: async () => UNGROUNDED,
+        openai: async () => UNGROUNDED,
+        deepseek: async () => UNGROUNDED,
+        tavily: async () => TAVILY_RESULTS,
+      },
+    },
+    { TAVILY_API_KEY: 'tv-key' },
+  )
+  const { value: text, audits } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
+  expect(text.startsWith('Searched the web via tavily (fallback')).toBe(true)
+  expect(text).toContain('answered WITHOUT searching')
+  expect(text).toContain('## Results')
+  expect(text).toContain('web_search landed')
+  expect(text).toContain(EXTERNAL_WEB_CONTENT_NOTICE)
+  expect(audits.map((record) => record.properties.provider)).toEqual(['tavily'])
+  // The key must never appear in the rendered text or any audit record.
+  expect(text).not.toContain('tv-key')
+  expect(JSON.stringify(audits.map((record) => record.properties))).not.toContain('tv-key')
+})
 
-test("a primary failure AFTER dispatch falls back and admits it may have billed", async () => {
-	const loaded = loadWebSearch(
-		{
-			runProviders: {
-				anthropic: async () => {
-					throw new WebSearchProviderError("anthropic", "HTTP 500", { requestDispatched: true });
-				},
-				google: async () => SEARCHED,
-				openai: async () => SEARCHED,
-				deepseek: async () => SEARCHED,
-				tavily: async () => TAVILY_RESULTS,
-			},
-		},
-		{ TAVILY_API_KEY: "tv-key" },
-	);
-	const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
-	expect(text.startsWith("Searched the web via tavily (fallback")).toBe(true);
-	expect(text).toContain("it may have billed");
-	expect(text).toContain("HTTP 500");
-});
+test('a primary failure AFTER dispatch falls back and admits it may have billed', async () => {
+  const loaded = loadWebSearch(
+    {
+      runProviders: {
+        anthropic: async () => {
+          throw new WebSearchProviderError('anthropic', 'HTTP 500', { requestDispatched: true })
+        },
+        google: async () => SEARCHED,
+        openai: async () => SEARCHED,
+        deepseek: async () => SEARCHED,
+        tavily: async () => TAVILY_RESULTS,
+      },
+    },
+    { TAVILY_API_KEY: 'tv-key' },
+  )
+  const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
+  expect(text.startsWith('Searched the web via tavily (fallback')).toBe(true)
+  expect(text).toContain('it may have billed')
+  expect(text).toContain('HTTP 500')
+})
 
-test("an unrouted model with no Tavily key refuses, naming the arming env var", async () => {
-	const loaded = loadWebSearch();
-	const { value: text } = await withAuditCapture(() => run(loaded, { model: UNROUTED_MODEL }));
-	expect(text.startsWith("Not searched:")).toBe(true);
-	expect(text).toContain("has no native web search");
-	expect(text).toContain("TAVILY_API_KEY");
-	expect(loaded.calls.anthropic).toBe(0);
-});
+test('an unrouted model with no Tavily key refuses, naming the arming env var', async () => {
+  const loaded = loadWebSearch()
+  const { value: text } = await withAuditCapture(() => run(loaded, { model: UNROUTED_MODEL }))
+  expect(text.startsWith('Not searched:')).toBe(true)
+  expect(text).toContain('has no native web search')
+  expect(text).toContain('TAVILY_API_KEY')
+  expect(loaded.calls.anthropic).toBe(0)
+})
 
-test("an unrouted model WITH Tavily armed searches through the fallback", async () => {
-	const loaded = loadWebSearch({}, { TAVILY_API_KEY: "tv-key" });
-	const { value: text } = await withAuditCapture(() => run(loaded, { model: UNROUTED_MODEL }));
-	expect(text.startsWith("Searched the web via tavily (fallback")).toBe(true);
-	expect(loaded.tavilyRequests[0]?.apiKey).toBe("tv-key");
-});
+test('an unrouted model WITH Tavily armed searches through the fallback', async () => {
+  const loaded = loadWebSearch({}, { TAVILY_API_KEY: 'tv-key' })
+  const { value: text } = await withAuditCapture(() => run(loaded, { model: UNROUTED_MODEL }))
+  expect(text.startsWith('Searched the web via tavily (fallback')).toBe(true)
+  expect(loaded.tavilyRequests[0]?.apiKey).toBe('tv-key')
+})
 
-test("config backend=deepseek pins the dedicated backend and hands it ITS env key", async () => {
-	const loaded = loadWebSearch(
-		{
-			readConfigText: () => JSON.stringify({ webFetch: { allowedHosts: [] }, webSearch: { backend: "deepseek" } }),
-		},
-		{ DEEPSEEK_API_KEY: "ds-key" },
-	);
-	const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
-	expect(text.startsWith("Searched the web via deepseek.")).toBe(true);
-	expect(loaded.calls.deepseek).toBe(1);
-	expect(loaded.calls.anthropic).toBe(0);
-	expect(loaded.deepseekKeys).toEqual(["ds-key"]);
-});
+test('config backend=deepseek pins the dedicated backend and hands it ITS env key', async () => {
+  const loaded = loadWebSearch(
+    {
+      readConfigText: () => JSON.stringify({ webFetch: { allowedHosts: [] }, webSearch: { backend: 'deepseek' } }),
+    },
+    { DEEPSEEK_API_KEY: 'ds-key' },
+  )
+  const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
+  expect(text.startsWith('Searched the web via deepseek.')).toBe(true)
+  expect(loaded.calls.deepseek).toBe(1)
+  expect(loaded.calls.anthropic).toBe(0)
+  expect(loaded.deepseekKeys).toEqual(['ds-key'])
+})
 
-test("config tavily domain filters reach the fallback request", async () => {
-	const loaded = loadWebSearch(
-		{
-			readConfigText: () =>
-				JSON.stringify({
-					webFetch: { allowedHosts: [] },
-					webSearch: { tavily: { includeDomains: ["example.com"] } },
-				}),
-		},
-		{ TAVILY_API_KEY: "tv-key" },
-	);
-	await withAuditCapture(() => run(loaded, { model: UNROUTED_MODEL }));
-	expect(loaded.tavilyRequests[0]?.includeDomains).toEqual(["example.com"]);
-});
+test('config tavily domain filters reach the fallback request', async () => {
+  const loaded = loadWebSearch(
+    {
+      readConfigText: () =>
+        JSON.stringify({
+          webFetch: { allowedHosts: [] },
+          webSearch: { tavily: { includeDomains: ['example.com'] } },
+        }),
+    },
+    { TAVILY_API_KEY: 'tv-key' },
+  )
+  await withAuditCapture(() => run(loaded, { model: UNROUTED_MODEL }))
+  expect(loaded.tavilyRequests[0]?.includeDomains).toEqual(['example.com'])
+})
 
-test("both backends failing renders BOTH reasons", async () => {
-	const loaded = loadWebSearch(
-		{
-			runProviders: {
-				anthropic: async () => {
-					throw new WebSearchProviderError("anthropic", "primary broke", { requestDispatched: false });
-				},
-				google: async () => SEARCHED,
-				openai: async () => SEARCHED,
-				deepseek: async () => SEARCHED,
-				tavily: async () => {
-					throw new WebSearchProviderError("tavily", "fallback broke too", { requestDispatched: true });
-				},
-			},
-		},
-		{ TAVILY_API_KEY: "tv-key" },
-	);
-	const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
-	expect(text.startsWith("Not searched:")).toBe(true);
-	expect(text).toContain("primary broke");
-	expect(text).toContain("fallback broke too");
-});
+test('both backends failing renders BOTH reasons', async () => {
+  const loaded = loadWebSearch(
+    {
+      runProviders: {
+        anthropic: async () => {
+          throw new WebSearchProviderError('anthropic', 'primary broke', { requestDispatched: false })
+        },
+        google: async () => SEARCHED,
+        openai: async () => SEARCHED,
+        deepseek: async () => SEARCHED,
+        tavily: async () => {
+          throw new WebSearchProviderError('tavily', 'fallback broke too', { requestDispatched: true })
+        },
+      },
+    },
+    { TAVILY_API_KEY: 'tv-key' },
+  )
+  const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
+  expect(text.startsWith('Not searched:')).toBe(true)
+  expect(text).toContain('primary broke')
+  expect(text).toContain('fallback broke too')
+})
 
-test("an unreadable config fails CLOSED: every call refuses, no provider runs", async () => {
-	const loaded = loadWebSearch({
-		readConfigText: () => "{ not json",
-	});
-	const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
-	expect(text.startsWith("Not searched:")).toBe(true);
-	expect(text).toContain("zen.config.json");
-	expect(loaded.calls.anthropic).toBe(0);
-	expect(loaded.calls.tavily).toBe(0);
-});
+test('an unreadable config fails CLOSED: every call refuses, no provider runs', async () => {
+  const loaded = loadWebSearch({
+    readConfigText: () => '{ not json',
+  })
+  const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
+  expect(text.startsWith('Not searched:')).toBe(true)
+  expect(text).toContain('zen.config.json')
+  expect(loaded.calls.anthropic).toBe(0)
+  expect(loaded.calls.tavily).toBe(0)
+})
 
-test("the ABSENT webSearch section is the working default — current-model routing runs", async () => {
-	// The committed config has no webSearch section; the tool must work anyway (#63:
-	// a required section would have made every committed config unreadable).
-	const loaded = loadWebSearch();
-	const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
-	expect(text.startsWith("Searched the web via anthropic.")).toBe(true);
-});
+test('the ABSENT webSearch section is the working default — current-model routing runs', async () => {
+  // The committed config has no webSearch section; the tool must work anyway (#63:
+  // a required section would have made every committed config unreadable).
+  const loaded = loadWebSearch()
+  const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
+  expect(text.startsWith('Searched the web via anthropic.')).toBe(true)
+})
 
 test("the tool's self-description names the accuracy contract", () => {
-	const loaded = loadWebSearch();
-	expect(loaded.tool.name).toBe(WEB_SEARCH_TOOL_NAME);
-	expect(loaded.tool.description).toContain("names");
-	expect(loaded.tool.description).toContain("WITHOUT searching");
-});
+  const loaded = loadWebSearch()
+  expect(loaded.tool.name).toBe(WEB_SEARCH_TOOL_NAME)
+  expect(loaded.tool.description).toContain('names')
+  expect(loaded.tool.description).toContain('WITHOUT searching')
+})
 
 // ── one deadline for the whole call (#99) ────────────────────────────────────
 // Per-attempt deadlines let primary + fallback run 2× the budget with nothing crossing to
 // the browser; the server's no-progress guard read that as a hung run and cut it (#98).
 
 /** A provider that never answers: it rejects only when its deadline signal aborts it. */
-function stalledUntilAborted(providerId: "anthropic") {
-	return (request: { signal?: AbortSignal | undefined }): Promise<WebSearchOutcome> =>
-		new Promise((_resolve, reject) => {
-			request.signal?.addEventListener("abort", () =>
-				reject(new WebSearchProviderError(providerId, String(request.signal?.reason), { requestDispatched: true })),
-			);
-		});
+function stalledUntilAborted(providerId: 'anthropic') {
+  return (request: { signal?: AbortSignal | undefined }): Promise<WebSearchOutcome> =>
+    new Promise((_resolve, reject) => {
+      request.signal?.addEventListener('abort', () =>
+        reject(new WebSearchProviderError(providerId, String(request.signal?.reason), { requestDispatched: true })),
+      )
+    })
 }
 
-test("⚠ a primary that stalls for the whole budget leaves the fallback NO time — it is refused with the deadline, not run for another budget", async () => {
-	const tavilySignals: boolean[] = [];
-	const loaded = loadWebSearch(
-		{
-			timeoutMs: 30,
-			runProviders: {
-				anthropic: stalledUntilAborted("anthropic"),
-				google: async () => {
-					throw new Error("unexpected");
-				},
-				openai: async () => {
-					throw new Error("unexpected");
-				},
-				deepseek: async () => {
-					throw new Error("unexpected");
-				},
-				tavily: async (request) => {
-					tavilySignals.push(request.signal?.aborted === true);
-					if (request.signal?.aborted === true) throw request.signal.reason;
-					return TAVILY_RESULTS;
-				},
-			},
-		},
-		{ TAVILY_API_KEY: "tvly-test" },
-	);
-	const startedAt = Date.now();
-	const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }));
-	// Bounded by ONE budget, not two: well under 2 × 30ms even with scheduling slack.
-	expect(Date.now() - startedAt).toBeLessThan(55);
-	// The fallback was handed an already-dead signal, so it never really searched.
-	expect(tavilySignals).toEqual([true]);
-	expect(text.startsWith("Not searched:")).toBe(true);
-	expect(text).toContain("passed its deadline");
-	expect(text).toContain("the Tavily fallback then failed too");
-});
+test('⚠ a primary that stalls for the whole budget leaves the fallback NO time — it is refused with the deadline, not run for another budget', async () => {
+  const tavilySignals: boolean[] = []
+  const loaded = loadWebSearch(
+    {
+      timeoutMs: 30,
+      runProviders: {
+        anthropic: stalledUntilAborted('anthropic'),
+        google: async () => {
+          throw new Error('unexpected')
+        },
+        openai: async () => {
+          throw new Error('unexpected')
+        },
+        deepseek: async () => {
+          throw new Error('unexpected')
+        },
+        tavily: async (request) => {
+          tavilySignals.push(request.signal?.aborted === true)
+          if (request.signal?.aborted === true) throw request.signal.reason
+          return TAVILY_RESULTS
+        },
+      },
+    },
+    { TAVILY_API_KEY: 'tvly-test' },
+  )
+  const startedAt = Date.now()
+  const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
+  // Bounded by ONE budget, not two: well under 2 × 30ms even with scheduling slack.
+  expect(Date.now() - startedAt).toBeLessThan(55)
+  // The fallback was handed an already-dead signal, so it never really searched.
+  expect(tavilySignals).toEqual([true])
+  expect(text.startsWith('Not searched:')).toBe(true)
+  expect(text).toContain('passed its deadline')
+  expect(text).toContain('the Tavily fallback then failed too')
+})
 
-test("a primary that fails FAST leaves the fallback the rest of the budget, and the fallback is announced as progress", async () => {
-	const progress: string[] = [];
-	const loaded = loadWebSearch(
-		{
-			timeoutMs: 500,
-			runProviders: {
-				anthropic: async () => {
-					throw new WebSearchProviderError("anthropic", "HTTP 529 overloaded", { requestDispatched: true });
-				},
-				google: async () => {
-					throw new Error("unexpected");
-				},
-				openai: async () => {
-					throw new Error("unexpected");
-				},
-				deepseek: async () => {
-					throw new Error("unexpected");
-				},
-				tavily: async (request) => {
-					expect(request.signal?.aborted).toBe(false);
-					return TAVILY_RESULTS;
-				},
-			},
-		},
-		{ TAVILY_API_KEY: "tvly-test" },
-	);
-	const onUpdate = (update: { content: { type: string; text: string }[] }): void => {
-		const first = update.content[0];
-		if (first !== undefined) progress.push(first.text);
-	};
-	const { value: result } = await withAuditCapture(() =>
-		loaded.tool.execute("t", { query: QUERY }, undefined, onUpdate as never, { model: ANTHROPIC_MODEL }),
-	);
-	expect(result.content[0]?.text.startsWith("Searched the web via tavily")).toBe(true);
-	// The one otherwise-silent moment in the chain now reports itself — the server's no-progress
-	// guard counts a tool update as progress (#99).
-	expect(progress.some((text) => text.includes("trying the Tavily fallback"))).toBe(true);
-});
+test('a primary that fails FAST leaves the fallback the rest of the budget, and the fallback is announced as progress', async () => {
+  const progress: string[] = []
+  const loaded = loadWebSearch(
+    {
+      timeoutMs: 500,
+      runProviders: {
+        anthropic: async () => {
+          throw new WebSearchProviderError('anthropic', 'HTTP 529 overloaded', { requestDispatched: true })
+        },
+        google: async () => {
+          throw new Error('unexpected')
+        },
+        openai: async () => {
+          throw new Error('unexpected')
+        },
+        deepseek: async () => {
+          throw new Error('unexpected')
+        },
+        tavily: async (request) => {
+          expect(request.signal?.aborted).toBe(false)
+          return TAVILY_RESULTS
+        },
+      },
+    },
+    { TAVILY_API_KEY: 'tvly-test' },
+  )
+  const onUpdate = (update: { content: { type: string; text: string }[] }): void => {
+    const first = update.content[0]
+    if (first !== undefined) progress.push(first.text)
+  }
+  const { value: result } = await withAuditCapture(() =>
+    loaded.tool.execute('t', { query: QUERY }, undefined, onUpdate as never, { model: ANTHROPIC_MODEL }),
+  )
+  expect(result.content[0]?.text.startsWith('Searched the web via tavily')).toBe(true)
+  // The one otherwise-silent moment in the chain now reports itself — the server's no-progress
+  // guard counts a tool update as progress (#99).
+  expect(progress.some((text) => text.includes('trying the Tavily fallback'))).toBe(true)
+})

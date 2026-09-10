@@ -1,25 +1,25 @@
-import type { ServerResponse } from "node:http";
+import type { ServerResponse } from 'node:http'
 import {
-	base64DecodedBytes,
-	isWholeBase64,
-	PICC_PERMISSION_MODES,
-	type PiDialogResponse,
-	type PiImageContent,
-	type PiStreamingBehavior,
-	persistedPermissionMode,
-	validateDialogAnswer,
-	ZEN_IMAGE_MAX_BYTES,
-	type ZenAbortReceipt,
-	type ZenFollowFrame,
-	ZenPromptBody,
-	type ZenPromptReceipt,
-	zenLogger,
-} from "@zen/core";
-import { Check, Errors } from "typebox/value";
-import type { AgentHost } from "../host/agent-host.ts";
-import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
-import { SSE_HEADERS, startSseKeepalive } from "./sse.ts";
-import type { ThreadFeedFrame, ThreadRegistry } from "./thread-registry.ts";
+  base64DecodedBytes,
+  isWholeBase64,
+  PICC_PERMISSION_MODES,
+  type PiDialogResponse,
+  type PiImageContent,
+  type PiStreamingBehavior,
+  persistedPermissionMode,
+  validateDialogAnswer,
+  ZEN_IMAGE_MAX_BYTES,
+  type ZenAbortReceipt,
+  type ZenFollowFrame,
+  ZenPromptBody,
+  type ZenPromptReceipt,
+  zenLogger,
+} from '@zen/core'
+import { Check, Errors } from 'typebox/value'
+import type { AgentHost } from '../host/agent-host.ts'
+import { branchToMessages, interruptedTail } from '../rpc/branch-to-messages.ts'
+import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
+import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
 
 /**
  * The prompt/follow split (#112) — the server↔browser wire.
@@ -53,39 +53,39 @@ import type { ThreadFeedFrame, ThreadRegistry } from "./thread-registry.ts";
  * split retires is on #109; the decision and its sequence are #112.
  */
 
-const log = zenLogger("server", "follow");
+const log = zenLogger('server', 'follow')
 
 export interface FollowRouteDeps {
-	readonly threads: ThreadRegistry;
-	readonly host: AgentHost;
-	readonly sseKeepaliveMs: number;
+  readonly threads: ThreadRegistry
+  readonly host: AgentHost
+  readonly sseKeepaliveMs: number
 }
 
 export interface PromptBody {
-	readonly message: string;
-	readonly streamingBehavior?: PiStreamingBehavior;
-	/** Attached images (#68), already in pi's shape; absent — not empty — when the prompt has none. */
-	readonly images?: readonly PiImageContent[];
+  readonly message: string
+  readonly streamingBehavior?: PiStreamingBehavior
+  /** Attached images (#68), already in pi's shape; absent — not empty — when the prompt has none. */
+  readonly images?: readonly PiImageContent[]
 }
 
 export type PromptOutcome =
-	| { readonly status: 202; readonly receipt: ZenPromptReceipt }
-	| { readonly status: 400; readonly reason: string };
+  | { readonly status: 202; readonly receipt: ZenPromptReceipt }
+  | { readonly status: 400; readonly reason: string }
 
 /** Leading token of a slash input, without the slash. `/mode auto` -> `mode`. */
 function slashCommandName(prompt: string): string | undefined {
-	if (!prompt.startsWith("/")) return undefined;
-	const name = prompt.slice(1).trimEnd().split(/\s/)[0];
-	return name === undefined || name.length === 0 ? undefined : name;
+  if (!prompt.startsWith('/')) return undefined
+  const name = prompt.slice(1).trimEnd().split(/\s/)[0]
+  return name === undefined || name.length === 0 ? undefined : name
 }
 /**
  * Write one frame, recording it into the thread's sent tail (#97) when the thread is live
  * — the one place every frame crosses to a browser, so the record and the wire agree.
  */
 function writeFrame(threads: ThreadRegistry, threadId: string, response: ServerResponse, frame: ZenFollowFrame): void {
-	const name = frame.type === "observation" ? frame.observation.kind : undefined;
-	threads.peek(threadId)?.sent.record(frame.type, name, "sent");
-	response.write(`data: ${JSON.stringify(frame)}\n\n`);
+  const name = frame.type === 'observation' ? frame.observation.kind : undefined
+  threads.peek(threadId)?.sent.record(frame.type, name, 'sent')
+  response.write(`data: ${JSON.stringify(frame)}\n\n`)
 }
 
 /**
@@ -94,55 +94,55 @@ function writeFrame(threads: ThreadRegistry, threadId: string, response: ServerR
  * snapshot per generation, then only deltas; reconnect = a new follow = a new snapshot).
  */
 export async function followThread(deps: FollowRouteDeps, threadId: string, response: ServerResponse): Promise<void> {
-	const { threads, host } = deps;
-	const live = threads.peek(threadId);
-	// Cold read for a thread that is not live — the file, as `/history` reads it. Awaited
-	// BEFORE subscribing: a thread built during the read is then seen live below. A thread
-	// with neither a session nor a file is an EMPTY snapshot, not a 404: observation may
-	// precede the first prompt, and must, or the prompt's opening events have no follower.
-	const storedBranch = live === undefined ? await host.readBranch(threadId) : undefined;
-	const nowLive = threads.peek(threadId);
-	const branch = nowLive === undefined ? (storedBranch ?? []) : nowLive.hosted.inspect().entries;
+  const { threads, host } = deps
+  const live = threads.peek(threadId)
+  // Cold read for a thread that is not live — the file, as `/history` reads it. Awaited
+  // BEFORE subscribing: a thread built during the read is then seen live below. A thread
+  // with neither a session nor a file is an EMPTY snapshot, not a 404: observation may
+  // precede the first prompt, and must, or the prompt's opening events have no follower.
+  const storedBranch = live === undefined ? await host.readBranch(threadId) : undefined
+  const nowLive = threads.peek(threadId)
+  const branch = nowLive === undefined ? (storedBranch ?? []) : nowLive.hosted.inspect().entries
 
-	response.writeHead(200, SSE_HEADERS);
-	const stopKeepalive = startSseKeepalive(response, deps.sseKeepaliveMs);
-	const follow = threads.observe(threadId, (frame: ThreadFeedFrame) => {
-		if (response.destroyed || response.writableEnded) return;
-		writeFrame(
-			threads,
-			threadId,
-			response,
-			frame.kind === "observation"
-				? { type: "observation", seq: frame.seq, observation: frame.observation }
-				: { type: "status", live: frame.live, busy: frame.busy, generation: frame.generation },
-		);
-	});
-	response.once("close", () => {
-		stopKeepalive();
-		follow.unsubscribe();
-	});
+  response.writeHead(200, SSE_HEADERS)
+  const stopKeepalive = startSseKeepalive(response, deps.sseKeepaliveMs)
+  const follow = threads.observe(threadId, (frame: ThreadFeedFrame) => {
+    if (response.destroyed || response.writableEnded) return
+    writeFrame(
+      threads,
+      threadId,
+      response,
+      frame.kind === 'observation'
+        ? { type: 'observation', seq: frame.seq, observation: frame.observation }
+        : { type: 'status', live: frame.live, busy: frame.busy, generation: frame.generation },
+    )
+  })
+  response.once('close', () => {
+    stopKeepalive()
+    follow.unsubscribe()
+  })
 
-	const messages = branchToMessages(branch);
-	const interrupted = interruptedTail(messages);
-	writeFrame(threads, threadId, response, {
-		type: "snapshot",
-		threadId,
-		asOfSeq: follow.asOfSeq,
-		live: nowLive !== undefined,
-		busy: nowLive?.busy ?? false,
-		generation: nowLive?.generation ?? 0,
-		permissionMode:
-			nowLive === undefined
-				? { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] }
-				: nowLive.hosted.session.permissionModeState(),
-		messages,
-		openDialogs: nowLive === undefined ? [] : nowLive.hosted.session.openDialogs(),
-		...(interrupted === undefined ? {} : { interrupted }),
-	});
+  const messages = branchToMessages(branch)
+  const interrupted = interruptedTail(messages)
+  writeFrame(threads, threadId, response, {
+    type: 'snapshot',
+    threadId,
+    asOfSeq: follow.asOfSeq,
+    live: nowLive !== undefined,
+    busy: nowLive?.busy ?? false,
+    generation: nowLive?.generation ?? 0,
+    permissionMode:
+      nowLive === undefined
+        ? { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] }
+        : nowLive.hosted.session.permissionModeState(),
+    messages,
+    openDialogs: nowLive === undefined ? [] : nowLive.hosted.session.openDialogs(),
+    ...(interrupted === undefined ? {} : { interrupted }),
+  })
 }
 
-const MEGABYTE = 1024 * 1024;
-const megabytes = (bytes: number): string => `${(bytes / MEGABYTE).toFixed(1)} MB`;
+const MEGABYTE = 1024 * 1024
+const megabytes = (bytes: number): string => `${(bytes / MEGABYTE).toFixed(1)} MB`
 
 /**
  * The prompt body, shape-checked against `ZenPromptBody` (#112: closed schemas on the wire).
@@ -151,39 +151,39 @@ const megabytes = (bytes: number): string => `${(bytes / MEGABYTE).toFixed(1)} M
  * dropped). The byte cap is on the DECODED size: what the provider counts.
  */
 export function readPromptBody(raw: string): PromptBody {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(raw);
-	} catch (error) {
-		throw new Error(`malformed prompt body: ${String(error)}`);
-	}
-	if (!Check(ZenPromptBody, parsed)) {
-		const first = Errors(ZenPromptBody, parsed)[0];
-		const where =
-			first === undefined ? "" : ` at ${first.instancePath === "" ? "/" : first.instancePath}: ${first.message}`;
-		throw new Error(`prompt body must match ZenPromptBody${where}`);
-	}
-	// Whitespace-only is refused here rather than taking a lease to hand pi nothing.
-	if (parsed.message.trim().length === 0 && parsed.images === undefined) {
-		throw new Error("prompt body needs a message");
-	}
-	const images = parsed.images?.map((image, position): PiImageContent => {
-		if (!isWholeBase64(image.data)) {
-			throw new Error(`prompt body must match ZenPromptBody at /images/${position}/data: must be whole base64 groups`);
-		}
-		const bytes = base64DecodedBytes(image.data);
-		if (bytes > ZEN_IMAGE_MAX_BYTES) {
-			throw new Error(
-				`image ${position + 1} of ${parsed.images?.length ?? 0} is ${megabytes(bytes)}; an image is at most ${megabytes(ZEN_IMAGE_MAX_BYTES)}`,
-			);
-		}
-		return { type: "image", data: image.data, mimeType: image.mimeType };
-	});
-	return {
-		message: parsed.message,
-		...(parsed.streamingBehavior === undefined ? {} : { streamingBehavior: parsed.streamingBehavior }),
-		...(images === undefined ? {} : { images }),
-	};
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (error) {
+    throw new Error(`malformed prompt body: ${String(error)}`)
+  }
+  if (!Check(ZenPromptBody, parsed)) {
+    const first = Errors(ZenPromptBody, parsed)[0]
+    const where =
+      first === undefined ? '' : ` at ${first.instancePath === '' ? '/' : first.instancePath}: ${first.message}`
+    throw new Error(`prompt body must match ZenPromptBody${where}`)
+  }
+  // Whitespace-only is refused here rather than taking a lease to hand pi nothing.
+  if (parsed.message.trim().length === 0 && parsed.images === undefined) {
+    throw new Error('prompt body needs a message')
+  }
+  const images = parsed.images?.map((image, position): PiImageContent => {
+    if (!isWholeBase64(image.data)) {
+      throw new Error(`prompt body must match ZenPromptBody at /images/${position}/data: must be whole base64 groups`)
+    }
+    const bytes = base64DecodedBytes(image.data)
+    if (bytes > ZEN_IMAGE_MAX_BYTES) {
+      throw new Error(
+        `image ${position + 1} of ${parsed.images?.length ?? 0} is ${megabytes(bytes)}; an image is at most ${megabytes(ZEN_IMAGE_MAX_BYTES)}`,
+      )
+    }
+    return { type: 'image', data: image.data, mimeType: image.mimeType }
+  })
+  return {
+    message: parsed.message,
+    ...(parsed.streamingBehavior === undefined ? {} : { streamingBehavior: parsed.streamingBehavior }),
+    ...(images === undefined ? {} : { images }),
+  }
 }
 
 /**
@@ -199,91 +199,91 @@ export function readPromptBody(raw: string): PromptBody {
  * response is open for any of this.
  */
 export async function promptThread(deps: FollowRouteDeps, threadId: string, body: PromptBody): Promise<PromptOutcome> {
-	const { threads } = deps;
-	const messageId = crypto.randomUUID();
-	/** pi refused the prompt after the receipt went out: the feed is the client's only way to hear it. */
-	const rejected = (reason: string): void => {
-		log.warn("prompt {messageId} rejected: {reason}", { threadId, messageId, reason });
-		threads.announce(threadId, { kind: "prompt-rejected", messageId, reason });
-	};
+  const { threads } = deps
+  const messageId = crypto.randomUUID()
+  /** pi refused the prompt after the receipt went out: the feed is the client's only way to hear it. */
+  const rejected = (reason: string): void => {
+    log.warn('prompt {messageId} rejected: {reason}', { threadId, messageId, reason })
+    threads.announce(threadId, { kind: 'prompt-rejected', messageId, reason })
+  }
 
-	const live = threads.peek(threadId);
-	if (live?.busy === true) {
-		live.hosted.session.prompt(
-			{
-				message: body.message,
-				streamingBehavior: body.streamingBehavior ?? "followUp",
-				...(body.images === undefined ? {} : { images: body.images }),
-			},
-			{ onAccepted: () => undefined, onRejected: rejected },
-		);
-		return { status: 202, receipt: { threadId, messageId, generation: live.generation, queued: true } };
-	}
+  const live = threads.peek(threadId)
+  if (live?.busy === true) {
+    live.hosted.session.prompt(
+      {
+        message: body.message,
+        streamingBehavior: body.streamingBehavior ?? 'followUp',
+        ...(body.images === undefined ? {} : { images: body.images }),
+      },
+      { onAccepted: () => undefined, onRejected: rejected },
+    )
+    return { status: 202, receipt: { threadId, messageId, generation: live.generation, queued: true } }
+  }
 
-	const lease = await threads.acquire(threadId);
-	const command = slashCommandName(body.message);
-	if (command !== undefined) {
-		const available = lease.session.listCommands();
-		if (!available.some((known) => known.name === command)) {
-			lease.release();
-			return {
-				status: 400,
-				reason: `/${command} is not available on this surface. Available here: ${
-					available.length === 0 ? "none" : available.map((known) => `/${known.name}`).join(", ")
-				}`,
-			};
-		}
-	}
+  const lease = await threads.acquire(threadId)
+  const command = slashCommandName(body.message)
+  if (command !== undefined) {
+    const available = lease.session.listCommands()
+    if (!available.some((known) => known.name === command)) {
+      lease.release()
+      return {
+        status: 400,
+        reason: `/${command} is not available on this surface. Available here: ${
+          available.length === 0 ? 'none' : available.map((known) => `/${known.name}`).join(', ')
+        }`,
+      }
+    }
+  }
 
-	// The run's end, observed the way a follower would: the thread's own `settled`.
-	const settle = threads.observe(threadId, (frame: ThreadFeedFrame) => {
-		if (frame.kind !== "observation" || frame.observation.kind !== "settled") return;
-		settle.unsubscribe();
-		lease.release();
-	});
-	lease.session.prompt(
-		{
-			message: body.message,
-			...(body.streamingBehavior === undefined ? {} : { streamingBehavior: body.streamingBehavior }),
-			...(body.images === undefined ? {} : { images: body.images }),
-		},
-		{
-			onAccepted: () => {
-				// An extension command's acceptance IS its completion (pi reports it after the
-				// command ran); an ordinary prompt's acceptance is only admission.
-				if (command === undefined) return;
-				settle.unsubscribe();
-				lease.release();
-			},
-			onRejected: (reason: string) => {
-				rejected(reason);
-				settle.unsubscribe();
-				lease.release();
-			},
-		},
-	);
-	return { status: 202, receipt: { threadId, messageId, generation: lease.generation, queued: false } };
+  // The run's end, observed the way a follower would: the thread's own `settled`.
+  const settle = threads.observe(threadId, (frame: ThreadFeedFrame) => {
+    if (frame.kind !== 'observation' || frame.observation.kind !== 'settled') return
+    settle.unsubscribe()
+    lease.release()
+  })
+  lease.session.prompt(
+    {
+      message: body.message,
+      ...(body.streamingBehavior === undefined ? {} : { streamingBehavior: body.streamingBehavior }),
+      ...(body.images === undefined ? {} : { images: body.images }),
+    },
+    {
+      onAccepted: () => {
+        // An extension command's acceptance IS its completion (pi reports it after the
+        // command ran); an ordinary prompt's acceptance is only admission.
+        if (command === undefined) return
+        settle.unsubscribe()
+        lease.release()
+      },
+      onRejected: (reason: string) => {
+        rejected(reason)
+        settle.unsubscribe()
+        lease.release()
+      },
+    },
+  )
+  return { status: 202, receipt: { threadId, messageId, generation: lease.generation, queued: false } }
 }
 
 /** The dialog body: pi's response shape, keyed by the request id the follow showed. */
 export function readDialogBody(raw: string): PiDialogResponse {
-	let body: { id?: unknown; cancelled?: unknown; value?: unknown; confirmed?: unknown };
-	try {
-		body = JSON.parse(raw) as typeof body;
-	} catch (error) {
-		throw new Error(`malformed dialog body: ${String(error)}`);
-	}
-	if (typeof body.id !== "string" || body.id.length === 0) throw new Error("dialog body needs the request id");
-	if (body.cancelled === true) return { id: body.id, cancelled: true };
-	if (typeof body.value === "string") return { id: body.id, value: body.value };
-	if (typeof body.confirmed === "boolean") return { id: body.id, confirmed: body.confirmed };
-	throw new Error("dialog body needs cancelled, value, or confirmed");
+  let body: { id?: unknown; cancelled?: unknown; value?: unknown; confirmed?: unknown }
+  try {
+    body = JSON.parse(raw) as typeof body
+  } catch (error) {
+    throw new Error(`malformed dialog body: ${String(error)}`)
+  }
+  if (typeof body.id !== 'string' || body.id.length === 0) throw new Error('dialog body needs the request id')
+  if (body.cancelled === true) return { id: body.id, cancelled: true }
+  if (typeof body.value === 'string') return { id: body.id, value: body.value }
+  if (typeof body.confirmed === 'boolean') return { id: body.id, confirmed: body.confirmed }
+  throw new Error('dialog body needs cancelled, value, or confirmed')
 }
 
 export type DialogOutcome =
-	| { readonly status: 204 }
-	| { readonly status: 404; readonly reason: string }
-	| { readonly status: 422; readonly reason: string };
+  | { readonly status: 204 }
+  | { readonly status: 404; readonly reason: string }
+  | { readonly status: 422; readonly reason: string }
 
 /**
  * Deliver the answer to the LIVE session's OPEN question. Validated against what was
@@ -292,27 +292,27 @@ export type DialogOutcome =
  * refused answer leaves the question open; a cancellation needs no validation.
  */
 export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answer: PiDialogResponse): DialogOutcome {
-	const live = deps.threads.peek(threadId);
-	if (live === undefined) return { status: 404, reason: `no live session for thread ${threadId}` };
-	const question = live.hosted.session.openDialogs().find((open) => open.id === answer.id)?.dialog;
-	if (question === undefined) {
-		return {
-			status: 404,
-			reason: `no open question ${answer.id} on thread ${threadId} — answered, expired, or never asked`,
-		};
-	}
-	if (!("cancelled" in answer)) {
-		const refusal = validateDialogAnswer(question, answer);
-		if (refusal !== undefined) return { status: 422, reason: `answer refused: ${refusal}` };
-	}
-	live.hosted.session.answerDialog(answer);
-	return { status: 204 };
+  const live = deps.threads.peek(threadId)
+  if (live === undefined) return { status: 404, reason: `no live session for thread ${threadId}` }
+  const question = live.hosted.session.openDialogs().find((open) => open.id === answer.id)?.dialog
+  if (question === undefined) {
+    return {
+      status: 404,
+      reason: `no open question ${answer.id} on thread ${threadId} — answered, expired, or never asked`,
+    }
+  }
+  if (!('cancelled' in answer)) {
+    const refusal = validateDialogAnswer(question, answer)
+    if (refusal !== undefined) return { status: 422, reason: `answer refused: ${refusal}` }
+  }
+  live.hosted.session.answerDialog(answer)
+  return { status: 204 }
 }
 
 export type AbortRouteOutcome =
-	| { readonly status: 200; readonly receipt: ZenAbortReceipt }
-	| { readonly status: 404; readonly reason: string }
-	| { readonly status: 409; readonly reason: string };
+  | { readonly status: 200; readonly receipt: ZenAbortReceipt }
+  | { readonly status: 404; readonly reason: string }
+  | { readonly status: 409; readonly reason: string }
 
 /**
  * Stop the run in flight on a live thread (#116). The run's end arrives on the follow; the
@@ -320,13 +320,13 @@ export type AbortRouteOutcome =
  * stopping tab can hand them back to its composer.
  */
 export function abortThread(deps: FollowRouteDeps, threadId: string): AbortRouteOutcome {
-	const { outcome, restored } = deps.threads.abort(threadId);
-	switch (outcome) {
-		case "aborted":
-			return { status: 200, receipt: { threadId, restored: [...restored] } };
-		case "idle":
-			return { status: 409, reason: `nothing is running on thread ${threadId}` };
-		default:
-			return { status: 404, reason: `no live session for thread ${threadId}` };
-	}
+  const { outcome, restored } = deps.threads.abort(threadId)
+  switch (outcome) {
+    case 'aborted':
+      return { status: 200, receipt: { threadId, restored: [...restored] } }
+    case 'idle':
+      return { status: 409, reason: `nothing is running on thread ${threadId}` }
+    default:
+      return { status: 404, reason: `no live session for thread ${threadId}` }
+  }
 }

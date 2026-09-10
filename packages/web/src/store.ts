@@ -1,5 +1,5 @@
-import { createContext, useContext, useSyncExternalStore } from "react";
-import type { ThreadStores } from "./thread-stores.ts";
+import { createContext, useContext, useSyncExternalStore } from 'react'
+import type { ThreadStores } from './thread-stores.ts'
 
 /**
  * The smallest external store React can subscribe to: one value, replaced whole, and a
@@ -12,43 +12,43 @@ import type { ThreadStores } from "./thread-stores.ts";
  * edge back — a type, erased, no cycle at runtime.
  */
 export interface Store<T> {
-	readonly get: () => T;
-	readonly subscribe: (listener: () => void) => () => void;
+  readonly get: () => T
+  readonly subscribe: (listener: () => void) => () => void
 }
 
 export interface WritableStore<T> extends Store<T> {
-	readonly set: (next: T) => void;
+  readonly set: (next: T) => void
 }
 
 export function createStore<T>(initial: T): WritableStore<T> {
-	let value = initial;
-	const listeners = new Set<() => void>();
-	return {
-		get: () => value,
-		set: (next) => {
-			value = next;
-			for (const listener of listeners) listener();
-		},
-		subscribe: (listener) => {
-			listeners.add(listener);
-			return () => listeners.delete(listener);
-		},
-	};
+  let value = initial
+  const listeners = new Set<() => void>()
+  return {
+    get: () => value,
+    set: (next) => {
+      value = next
+      for (const listener of listeners) listener()
+    },
+    subscribe: (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+  }
 }
 
 /** `useSyncExternalStore` over a `Store` — the store's own methods are stable, so no memo. */
 export function useStore<T>(store: Store<T>): T {
-	return useSyncExternalStore(store.subscribe, store.get, store.get);
+  return useSyncExternalStore(store.subscribe, store.get, store.get)
 }
 
 /** The stores of the thread a component is rendering inside — provided by the thread's pane. */
-export const ThreadStoresContext = createContext<ThreadStores | null>(null);
+export const ThreadStoresContext = createContext<ThreadStores | null>(null)
 
 export function useThreadStores(): ThreadStores {
-	const stores = useContext(ThreadStoresContext);
-	if (stores === null)
-		throw new Error(
-			"useThreadStores: no ThreadStoresContext above this component — it must render inside a thread pane",
-		);
-	return stores;
+  const stores = useContext(ThreadStoresContext)
+  if (stores === null)
+    throw new Error(
+      'useThreadStores: no ThreadStoresContext above this component — it must render inside a thread pane',
+    )
+  return stores
 }

@@ -13,10 +13,7 @@
       "total_records": 2688,
       "injection_text": "remember collaborative session delegate partnership, remember no broken windows",
       "has_remember_prefix": true,
-      "phrases": [
-        "no broken windows",
-        "collaborative session delegate partnership"
-      ]
+      "phrases": ["no broken windows", "collaborative session delegate partnership"]
     },
     {
       "timestamp": "2026-04-09T19:54:30.213Z",
@@ -26,9 +23,7 @@
       "total_records": 2751,
       "injection_text": "Remeber collaborative session delegate partnership and no broken windows. Lets do phase 2!",
       "has_remember_prefix": true,
-      "phrases": [
-        "no broken windows"
-      ]
+      "phrases": ["no broken windows"]
     },
     {
       "timestamp": "2026-04-10T16:59:41.754Z",
@@ -38,9 +33,7 @@
       "total_records": 2100,
       "injection_text": "remeber no broken windows",
       "has_remember_prefix": true,
-      "phrases": [
-        "no broken windows"
-      ]
+      "phrases": ["no broken windows"]
     },
     {
       "timestamp": "2026-04-15T20:31:04.877Z",
@@ -50,9 +43,7 @@
       "total_records": 2351,
       "injection_text": "remember no broken windows",
       "has_remember_prefix": true,
-      "phrases": [
-        "no broken windows"
-      ]
+      "phrases": ["no broken windows"]
     },
     {
       "timestamp": "2026-04-17T00:01:12.447Z",
@@ -62,9 +53,7 @@
       "total_records": 1123,
       "injection_text": "remeber no broken windows",
       "has_remember_prefix": true,
-      "phrases": [
-        "no broken windows"
-      ]
+      "phrases": ["no broken windows"]
     },
     {
       "timestamp": "2026-04-30T04:04:53.481Z",
@@ -74,9 +63,7 @@
       "total_records": 12157,
       "injection_text": "no broken windows",
       "has_remember_prefix": false,
-      "phrases": [
-        "no broken windows"
-      ]
+      "phrases": ["no broken windows"]
     },
     {
       "timestamp": "2026-05-05T00:55:59.955Z",
@@ -86,9 +73,7 @@
       "total_records": 8376,
       "injection_text": "remember no broken windows",
       "has_remember_prefix": true,
-      "phrases": [
-        "no broken windows"
-      ]
+      "phrases": ["no broken windows"]
     }
   ],
   "correction": "An earlier note said '3,883 transcripts'. That was the recursive file count; 3,508 of those are subagent logs under <session>/subagents/. The scan scope (main sessions only) was correct, the stated denominator was not.",

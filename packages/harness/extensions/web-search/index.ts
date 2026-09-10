@@ -1,40 +1,40 @@
-import { readFileSync } from "node:fs";
+import { readFileSync } from 'node:fs'
 import type {
-	AgentToolResult,
-	AgentToolUpdateCallback,
-	ExtensionAPI,
-	ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+  AgentToolResult,
+  AgentToolUpdateCallback,
+  ExtensionAPI,
+  ExtensionContext,
+} from '@earendil-works/pi-coding-agent'
 import {
-	EXTERNAL_WEB_CONTENT_NOTICE,
-	findRepoRoot,
-	parseZenConfig,
-	readSecret,
-	WEB_SEARCH_TIMEOUT_MS,
-	WEB_SEARCH_TOOL_NAME,
-	type WebSearchConfig,
-	WebSearchToolParameters,
-	ZEN_CONFIG_FILENAME,
-	zenConfigPath,
-	zenLogger,
-} from "@zen/core";
+  EXTERNAL_WEB_CONTENT_NOTICE,
+  findRepoRoot,
+  parseZenConfig,
+  readSecret,
+  WEB_SEARCH_TIMEOUT_MS,
+  WEB_SEARCH_TOOL_NAME,
+  type WebSearchConfig,
+  WebSearchToolParameters,
+  ZEN_CONFIG_FILENAME,
+  zenConfigPath,
+  zenLogger,
+} from '@zen/core'
 import {
-	DEEPSEEK_API_KEY_VARIABLE,
-	type DeepseekSearchRequest,
-	type ModelSearchRequest,
-	resolveModelAuth,
-	routedProviderIdForModel,
-	runAnthropicProviderSearch,
-	runDeepseekProviderSearch,
-	runGoogleProviderSearch,
-	runOpenAiProviderSearch,
-	runTavilyProviderSearch,
-	TAVILY_API_KEY_VARIABLE,
-	type TavilySearchRequest,
-	type WebSearchOutcome,
-	WebSearchProviderError,
-	type WebSearchProviderId,
-} from "../../core/index.ts";
+  DEEPSEEK_API_KEY_VARIABLE,
+  type DeepseekSearchRequest,
+  type ModelSearchRequest,
+  resolveModelAuth,
+  routedProviderIdForModel,
+  runAnthropicProviderSearch,
+  runDeepseekProviderSearch,
+  runGoogleProviderSearch,
+  runOpenAiProviderSearch,
+  runTavilyProviderSearch,
+  TAVILY_API_KEY_VARIABLE,
+  type TavilySearchRequest,
+  type WebSearchOutcome,
+  WebSearchProviderError,
+  type WebSearchProviderId,
+} from '../../core/index.ts'
 
 /**
  * The web_search tool (#63) — provider-native search with a Tavily fallback, consumed
@@ -66,320 +66,320 @@ import {
 
 /** The IO seams. Provider runs are injectable so the fallback policy is testable alone. */
 export interface WebSearchDependencies {
-	/** Where `zen.config.json` lives. May throw; the extension fails CLOSED on that. */
-	locateConfigFile: () => string;
-	readConfigText: (path: string) => string;
-	/** Env reads happen HERE (composition root) — providers receive values, never names. */
-	readEnvironmentVariable: (variableName: string) => string | undefined;
-	runProviders: {
-		anthropic: (request: ModelSearchRequest) => Promise<WebSearchOutcome>;
-		google: (request: ModelSearchRequest) => Promise<WebSearchOutcome>;
-		openai: (request: ModelSearchRequest) => Promise<WebSearchOutcome>;
-		deepseek: (request: DeepseekSearchRequest) => Promise<WebSearchOutcome>;
-		tavily: (request: TavilySearchRequest) => Promise<WebSearchOutcome>;
-	};
-	fetchUrl: ModelSearchRequest["fetchUrl"];
-	/** The whole-call deadline. Defaults to `WEB_SEARCH_TIMEOUT_MS`; injectable so the chain's budget is testable in milliseconds. */
-	timeoutMs?: number;
+  /** Where `zen.config.json` lives. May throw; the extension fails CLOSED on that. */
+  locateConfigFile: () => string
+  readConfigText: (path: string) => string
+  /** Env reads happen HERE (composition root) — providers receive values, never names. */
+  readEnvironmentVariable: (variableName: string) => string | undefined
+  runProviders: {
+    anthropic: (request: ModelSearchRequest) => Promise<WebSearchOutcome>
+    google: (request: ModelSearchRequest) => Promise<WebSearchOutcome>
+    openai: (request: ModelSearchRequest) => Promise<WebSearchOutcome>
+    deepseek: (request: DeepseekSearchRequest) => Promise<WebSearchOutcome>
+    tavily: (request: TavilySearchRequest) => Promise<WebSearchOutcome>
+  }
+  fetchUrl: ModelSearchRequest['fetchUrl']
+  /** The whole-call deadline. Defaults to `WEB_SEARCH_TIMEOUT_MS`; injectable so the chain's budget is testable in milliseconds. */
+  timeoutMs?: number
 }
 
 /** A primary attempt that could not run or threw — the fallback's trigger record. */
 interface PrimaryFailure {
-	providerId: WebSearchProviderId | undefined;
-	reason: string;
-	/** True when an HTTP request left the process — the honest "may have billed" bit. */
-	requestDispatched: boolean;
+  providerId: WebSearchProviderId | undefined
+  reason: string
+  /** True when an HTTP request left the process — the honest "may have billed" bit. */
+  requestDispatched: boolean
 }
 
 export function createWebSearch(dependencies: WebSearchDependencies): (pi: ExtensionAPI) => void {
-	return function webSearch(pi: ExtensionAPI): void {
-		// Load ONCE at extension load; see the header. The tool registers even on a broken
-		// config so the refusal can say what to fix (a load-time throw could wedge pi).
-		let webSearchConfig: WebSearchConfig = {};
-		let configProblem: string | undefined;
-		let configPath: string | undefined;
-		try {
-			configPath = dependencies.locateConfigFile();
-			const parsed = parseZenConfig(dependencies.readConfigText(configPath));
-			if (parsed.kind === "ok") {
-				webSearchConfig = parsed.config.webSearch ?? {};
-			} else {
-				configProblem = parsed.reason;
-			}
-		} catch (error) {
-			configProblem = `the config file could not be read: ${String(error)}`;
-		}
-		const configDisplayPath = configPath ?? `${ZEN_CONFIG_FILENAME} (at the zen-harness repository root)`;
+  return function webSearch(pi: ExtensionAPI): void {
+    // Load ONCE at extension load; see the header. The tool registers even on a broken
+    // config so the refusal can say what to fix (a load-time throw could wedge pi).
+    let webSearchConfig: WebSearchConfig = {}
+    let configProblem: string | undefined
+    let configPath: string | undefined
+    try {
+      configPath = dependencies.locateConfigFile()
+      const parsed = parseZenConfig(dependencies.readConfigText(configPath))
+      if (parsed.kind === 'ok') {
+        webSearchConfig = parsed.config.webSearch ?? {}
+      } else {
+        configProblem = parsed.reason
+      }
+    } catch (error) {
+      configProblem = `the config file could not be read: ${String(error)}`
+    }
+    const configDisplayPath = configPath ?? `${ZEN_CONFIG_FILENAME} (at the zen-harness repository root)`
 
-		pi.registerTool({
-			name: WEB_SEARCH_TOOL_NAME,
-			label: "Web search",
-			description:
-				`Search the live web. Primary: the current model's own native search ` +
-				`(Anthropic / Google Gemini / OpenAI Responses families)` +
-				(webSearchConfig.backend === "deepseek" ? `, pinned by config to the dedicated DeepSeek backend` : "") +
-				`; fallback: the Tavily retrieval API when its key is configured. The result names ` +
-				`which backend answered — an answer produced WITHOUT searching is labeled as such, ` +
-				`never presented as a search result.`,
-			promptSnippet: `${WEB_SEARCH_TOOL_NAME}: search the live web (provider-native, Tavily fallback)`,
-			parameters: WebSearchToolParameters,
-			// ⚠ pi's execute contract is FIVE positional arguments and the gate caps declared
-			// parameters at four (useMaxParams), so they arrive as a named tuple instead.
-			execute: async (...executeArguments: WebSearchExecuteArguments): Promise<AgentToolResult<undefined>> => {
-				const [, params, signal, onUpdate, extensionContext] = executeArguments;
-				const query = params.query;
-				if (configProblem !== undefined) {
-					return refusal(
-						`the ${WEB_SEARCH_TOOL_NAME} configuration could not be used — ${configProblem}. ` +
-							`Nothing is searchable until a human fixes ${configDisplayPath} and restarts the session.`,
-					);
-				}
-				const tavilyApiKey = dependencies.readEnvironmentVariable(TAVILY_API_KEY_VARIABLE);
-				const isTavilyArmed = tavilyApiKey !== undefined && tavilyApiKey.length > 0;
-				// ⚠ ONE deadline for the call (#99): the fallback runs under what the primary left,
-				// so primary + fallback can never outlast the server's no-progress cutoff.
-				const budgetMs = dependencies.timeoutMs ?? WEB_SEARCH_TIMEOUT_MS;
-				const deadline: CallDeadline = { at: Date.now() + budgetMs, budgetMs };
-				const onProgress = progressForwarder(onUpdate);
+    pi.registerTool({
+      name: WEB_SEARCH_TOOL_NAME,
+      label: 'Web search',
+      description:
+        `Search the live web. Primary: the current model's own native search ` +
+        `(Anthropic / Google Gemini / OpenAI Responses families)` +
+        (webSearchConfig.backend === 'deepseek' ? `, pinned by config to the dedicated DeepSeek backend` : '') +
+        `; fallback: the Tavily retrieval API when its key is configured. The result names ` +
+        `which backend answered — an answer produced WITHOUT searching is labeled as such, ` +
+        `never presented as a search result.`,
+      promptSnippet: `${WEB_SEARCH_TOOL_NAME}: search the live web (provider-native, Tavily fallback)`,
+      parameters: WebSearchToolParameters,
+      // ⚠ pi's execute contract is FIVE positional arguments and the gate caps declared
+      // parameters at four (useMaxParams), so they arrive as a named tuple instead.
+      execute: async (...executeArguments: WebSearchExecuteArguments): Promise<AgentToolResult<undefined>> => {
+        const [, params, signal, onUpdate, extensionContext] = executeArguments
+        const query = params.query
+        if (configProblem !== undefined) {
+          return refusal(
+            `the ${WEB_SEARCH_TOOL_NAME} configuration could not be used — ${configProblem}. ` +
+              `Nothing is searchable until a human fixes ${configDisplayPath} and restarts the session.`,
+          )
+        }
+        const tavilyApiKey = dependencies.readEnvironmentVariable(TAVILY_API_KEY_VARIABLE)
+        const isTavilyArmed = tavilyApiKey !== undefined && tavilyApiKey.length > 0
+        // ⚠ ONE deadline for the call (#99): the fallback runs under what the primary left,
+        // so primary + fallback can never outlast the server's no-progress cutoff.
+        const budgetMs = dependencies.timeoutMs ?? WEB_SEARCH_TIMEOUT_MS
+        const deadline: CallDeadline = { at: Date.now() + budgetMs, budgetMs }
+        const onProgress = progressForwarder(onUpdate)
 
-				// --- the primary attempt.
-				const primary = await runPrimary({
-					dependencies,
-					webSearchConfig,
-					extensionContext,
-					query,
-					signal,
-					deadline,
-					onProgress,
-				});
+        // --- the primary attempt.
+        const primary = await runPrimary({
+          dependencies,
+          webSearchConfig,
+          extensionContext,
+          query,
+          signal,
+          deadline,
+          onProgress,
+        })
 
-				// --- the fallback decision. `searched` never falls back; everything else does
-				// when Tavily is armed.
-				const fallbackReason = fallbackReasonFor(primary);
-				if (fallbackReason === undefined) {
-					const outcome = primary as WebSearchOutcome;
-					auditLine(outcome.kind, outcome.providerId, query, "primary");
-					return renderOutcome(outcome, undefined);
-				}
-				if (!isTavilyArmed) {
-					if ("kind" in primary && primary.kind === "ungrounded") {
-						auditLine("ungrounded", primary.providerId, query, "no fallback armed");
-						return renderUngrounded(primary);
-					}
-					const failure = primary as PrimaryFailure;
-					auditLine("refused", failure.providerId, query, failure.reason);
-					return refusal(
-						`${failure.reason}. The Tavily fallback is not armed — a human can set ` +
-							`${TAVILY_API_KEY_VARIABLE} in .zen/secrets.env (never in ${ZEN_CONFIG_FILENAME}, never in ` +
-							`the root .env, never in the environment — #89). No restart needed; the file is read per call.`,
-					);
-				}
+        // --- the fallback decision. `searched` never falls back; everything else does
+        // when Tavily is armed.
+        const fallbackReason = fallbackReasonFor(primary)
+        if (fallbackReason === undefined) {
+          const outcome = primary as WebSearchOutcome
+          auditLine(outcome.kind, outcome.providerId, query, 'primary')
+          return renderOutcome(outcome, undefined)
+        }
+        if (!isTavilyArmed) {
+          if ('kind' in primary && primary.kind === 'ungrounded') {
+            auditLine('ungrounded', primary.providerId, query, 'no fallback armed')
+            return renderUngrounded(primary)
+          }
+          const failure = primary as PrimaryFailure
+          auditLine('refused', failure.providerId, query, failure.reason)
+          return refusal(
+            `${failure.reason}. The Tavily fallback is not armed — a human can set ` +
+              `${TAVILY_API_KEY_VARIABLE} in .zen/secrets.env (never in ${ZEN_CONFIG_FILENAME}, never in ` +
+              `the root .env, never in the environment — #89). No restart needed; the file is read per call.`,
+          )
+        }
 
-				// A progress update before the fallback: the server counts tool activity as
-				// progress (#99), and this is the one moment in the chain that is otherwise silent.
-				onProgress(`${fallbackReason} — trying the Tavily fallback…`);
-				try {
-					const tavilyOutcome = await underDeadline(signal, deadline, (deadlineSignal) =>
-						dependencies.runProviders.tavily({
-							query,
-							apiKey: tavilyApiKey,
-							includeDomains: webSearchConfig.tavily?.includeDomains,
-							excludeDomains: webSearchConfig.tavily?.excludeDomains,
-							fetchUrl: dependencies.fetchUrl,
-							signal: deadlineSignal,
-						}),
-					);
-					auditLine(tavilyOutcome.kind, "tavily", query, `fallback: ${fallbackReason}`);
-					return renderOutcome(tavilyOutcome, fallbackReason);
-				} catch (error) {
-					const tavilyReason = error instanceof Error ? error.message : String(error);
-					auditLine("refused", "tavily", query, tavilyReason);
-					return refusal(`${fallbackReason}; the Tavily fallback then failed too: ${tavilyReason}`);
-				}
-			},
-		});
-	};
+        // A progress update before the fallback: the server counts tool activity as
+        // progress (#99), and this is the one moment in the chain that is otherwise silent.
+        onProgress(`${fallbackReason} — trying the Tavily fallback…`)
+        try {
+          const tavilyOutcome = await underDeadline(signal, deadline, (deadlineSignal) =>
+            dependencies.runProviders.tavily({
+              query,
+              apiKey: tavilyApiKey,
+              includeDomains: webSearchConfig.tavily?.includeDomains,
+              excludeDomains: webSearchConfig.tavily?.excludeDomains,
+              fetchUrl: dependencies.fetchUrl,
+              signal: deadlineSignal,
+            }),
+          )
+          auditLine(tavilyOutcome.kind, 'tavily', query, `fallback: ${fallbackReason}`)
+          return renderOutcome(tavilyOutcome, fallbackReason)
+        } catch (error) {
+          const tavilyReason = error instanceof Error ? error.message : String(error)
+          auditLine('refused', 'tavily', query, tavilyReason)
+          return refusal(`${fallbackReason}; the Tavily fallback then failed too: ${tavilyReason}`)
+        }
+      },
+    })
+  }
 }
 
 /** pi's five positional execute arguments, named as a tuple (see the execute comment). */
 type WebSearchExecuteArguments = [
-	toolCallId: string,
-	params: { query: string },
-	signal: AbortSignal | undefined,
-	onUpdate: AgentToolUpdateCallback<undefined> | undefined,
-	extensionContext: ExtensionContext,
-];
+  toolCallId: string,
+  params: { query: string },
+  signal: AbortSignal | undefined,
+  onUpdate: AgentToolUpdateCallback<undefined> | undefined,
+  extensionContext: ExtensionContext,
+]
 
 interface RunPrimaryOptions {
-	dependencies: WebSearchDependencies;
-	webSearchConfig: WebSearchConfig;
-	extensionContext: ExtensionContext;
-	query: string;
-	signal: AbortSignal | undefined;
-	deadline: CallDeadline;
-	onProgress: (text: string) => void;
+  dependencies: WebSearchDependencies
+  webSearchConfig: WebSearchConfig
+  extensionContext: ExtensionContext
+  query: string
+  signal: AbortSignal | undefined
+  deadline: CallDeadline
+  onProgress: (text: string) => void
 }
 
 /** Run the selected primary backend; a non-outcome return is the failure record. */
 async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome | PrimaryFailure> {
-	const { dependencies, webSearchConfig, extensionContext, query, signal, deadline, onProgress } = options;
-	try {
-		if (webSearchConfig.backend === "deepseek") {
-			return await underDeadline(signal, deadline, (deadlineSignal) =>
-				dependencies.runProviders.deepseek({
-					query,
-					apiKey: dependencies.readEnvironmentVariable(DEEPSEEK_API_KEY_VARIABLE),
-					fetchUrl: dependencies.fetchUrl,
-					signal: deadlineSignal,
-					onProgress,
-				}),
-			);
-		}
+  const { dependencies, webSearchConfig, extensionContext, query, signal, deadline, onProgress } = options
+  try {
+    if (webSearchConfig.backend === 'deepseek') {
+      return await underDeadline(signal, deadline, (deadlineSignal) =>
+        dependencies.runProviders.deepseek({
+          query,
+          apiKey: dependencies.readEnvironmentVariable(DEEPSEEK_API_KEY_VARIABLE),
+          fetchUrl: dependencies.fetchUrl,
+          signal: deadlineSignal,
+          onProgress,
+        }),
+      )
+    }
 
-		const currentModel = extensionContext.model;
-		if (currentModel === undefined) {
-			return { providerId: undefined, reason: "no model is selected", requestDispatched: false };
-		}
-		const routedProviderId = routedProviderIdForModel(currentModel);
-		if (routedProviderId === undefined) {
-			return {
-				providerId: undefined,
-				reason:
-					`the current model (${currentModel.id}, ${currentModel.provider}/${currentModel.api}) ` +
-					`has no native web search`,
-				requestDispatched: false,
-			};
-		}
-		const modelRequest = (deadlineSignal: AbortSignal): ModelSearchRequest => ({
-			query,
-			model: currentModel,
-			resolveAuth: (model) => resolveModelAuth(extensionContext.modelRegistry, model),
-			fetchUrl: dependencies.fetchUrl,
-			signal: deadlineSignal,
-			onProgress,
-		});
-		return await underDeadline(signal, deadline, (deadlineSignal) =>
-			dependencies.runProviders[routedProviderId](modelRequest(deadlineSignal)),
-		);
-	} catch (error) {
-		if (error instanceof WebSearchProviderError) {
-			return { providerId: error.providerId, reason: error.message, requestDispatched: error.requestDispatched };
-		}
-		return { providerId: undefined, reason: String(error), requestDispatched: false };
-	}
+    const currentModel = extensionContext.model
+    if (currentModel === undefined) {
+      return { providerId: undefined, reason: 'no model is selected', requestDispatched: false }
+    }
+    const routedProviderId = routedProviderIdForModel(currentModel)
+    if (routedProviderId === undefined) {
+      return {
+        providerId: undefined,
+        reason:
+          `the current model (${currentModel.id}, ${currentModel.provider}/${currentModel.api}) ` +
+          `has no native web search`,
+        requestDispatched: false,
+      }
+    }
+    const modelRequest = (deadlineSignal: AbortSignal): ModelSearchRequest => ({
+      query,
+      model: currentModel,
+      resolveAuth: (model) => resolveModelAuth(extensionContext.modelRegistry, model),
+      fetchUrl: dependencies.fetchUrl,
+      signal: deadlineSignal,
+      onProgress,
+    })
+    return await underDeadline(signal, deadline, (deadlineSignal) =>
+      dependencies.runProviders[routedProviderId](modelRequest(deadlineSignal)),
+    )
+  } catch (error) {
+    if (error instanceof WebSearchProviderError) {
+      return { providerId: error.providerId, reason: error.message, requestDispatched: error.requestDispatched }
+    }
+    return { providerId: undefined, reason: String(error), requestDispatched: false }
+  }
 }
 
 /** Why the fallback should run, or undefined when the primary outcome stands. */
 function fallbackReasonFor(primary: WebSearchOutcome | PrimaryFailure): string | undefined {
-	if ("kind" in primary) {
-		if (primary.kind === "searched") return undefined;
-		return `the ${primary.providerId} backend answered WITHOUT searching (the model used its own knowledge)`;
-	}
-	const providerName = primary.providerId ?? "primary";
-	const billingNote = primary.requestDispatched ? " after the request was sent (it may have billed)" : "";
-	return `the ${providerName} search failed${billingNote}: ${primary.reason}`;
+  if ('kind' in primary) {
+    if (primary.kind === 'searched') return undefined
+    return `the ${primary.providerId} backend answered WITHOUT searching (the model used its own knowledge)`
+  }
+  const providerName = primary.providerId ?? 'primary'
+  const billingNote = primary.requestDispatched ? ' after the request was sent (it may have billed)' : ''
+  return `the ${providerName} search failed${billingNote}: ${primary.reason}`
 }
 
 /** One call's deadline: the instant it passes, and the budget it was set from (named in the refusal). */
 interface CallDeadline {
-	readonly at: number;
-	readonly budgetMs: number;
+  readonly at: number
+  readonly budgetMs: number
 }
 
 /** Run one provider attempt under what remains of the call's deadline AND the caller's signal. */
 async function underDeadline<T>(
-	callerSignal: AbortSignal | undefined,
-	deadline: CallDeadline,
-	run: (deadlineSignal: AbortSignal) => Promise<T>,
+  callerSignal: AbortSignal | undefined,
+  deadline: CallDeadline,
+  run: (deadlineSignal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-	const controller = new AbortController();
-	const deadlinePassed = (): void =>
-		controller.abort(
-			new Error(
-				`${WEB_SEARCH_TOOL_NAME} passed its deadline (${deadline.budgetMs}ms for primary and fallback together)`,
-			),
-		);
-	const remainingMs = deadline.at - Date.now();
-	// A spent budget aborts BEFORE the attempt runs — a 0ms timer would let a fast provider
-	// answer first, and the fallback must not start what the deadline already forbade.
-	if (remainingMs <= 0) deadlinePassed();
-	const timeoutId = remainingMs > 0 ? setTimeout(deadlinePassed, remainingMs) : undefined;
-	const abortWithCaller = (): void => controller.abort(callerSignal?.reason);
-	// An ALREADY-aborted signal never fires the event — same pre-abort guard as web_fetch.
-	if (callerSignal?.aborted === true) {
-		abortWithCaller();
-	} else {
-		callerSignal?.addEventListener("abort", abortWithCaller, { once: true });
-	}
-	try {
-		return await run(controller.signal);
-	} finally {
-		if (timeoutId !== undefined) clearTimeout(timeoutId);
-		callerSignal?.removeEventListener("abort", abortWithCaller);
-	}
+  const controller = new AbortController()
+  const deadlinePassed = (): void =>
+    controller.abort(
+      new Error(
+        `${WEB_SEARCH_TOOL_NAME} passed its deadline (${deadline.budgetMs}ms for primary and fallback together)`,
+      ),
+    )
+  const remainingMs = deadline.at - Date.now()
+  // A spent budget aborts BEFORE the attempt runs — a 0ms timer would let a fast provider
+  // answer first, and the fallback must not start what the deadline already forbade.
+  if (remainingMs <= 0) deadlinePassed()
+  const timeoutId = remainingMs > 0 ? setTimeout(deadlinePassed, remainingMs) : undefined
+  const abortWithCaller = (): void => controller.abort(callerSignal?.reason)
+  // An ALREADY-aborted signal never fires the event — same pre-abort guard as web_fetch.
+  if (callerSignal?.aborted === true) {
+    abortWithCaller()
+  } else {
+    callerSignal?.addEventListener('abort', abortWithCaller, { once: true })
+  }
+  try {
+    return await run(controller.signal)
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId)
+    callerSignal?.removeEventListener('abort', abortWithCaller)
+  }
 }
 
 function progressForwarder(onUpdate: AgentToolUpdateCallback<undefined> | undefined): (text: string) => void {
-	return (text: string): void => {
-		onUpdate?.({ content: [{ type: "text", text }], details: undefined });
-	};
+  return (text: string): void => {
+    onUpdate?.({ content: [{ type: 'text', text }], details: undefined })
+  }
 }
 
 function refusal(reason: string): AgentToolResult<undefined> {
-	return { content: [{ type: "text", text: `Not searched: ${reason}` }], details: undefined };
+  return { content: [{ type: 'text', text: `Not searched: ${reason}` }], details: undefined }
 }
 
 /** An ungrounded answer with no fallback armed: returned, loudly labeled, never as a search. */
-function renderUngrounded(outcome: Extract<WebSearchOutcome, { kind: "ungrounded" }>): AgentToolResult<undefined> {
-	return {
-		content: [
-			{
-				type: "text",
-				text:
-					`No web search was performed — the ${outcome.providerId} model answered from its own ` +
-					`knowledge, and this is NOT a search result.\n\n${outcome.answerText}`,
-			},
-		],
-		details: undefined,
-	};
+function renderUngrounded(outcome: Extract<WebSearchOutcome, { kind: 'ungrounded' }>): AgentToolResult<undefined> {
+  return {
+    content: [
+      {
+        type: 'text',
+        text:
+          `No web search was performed — the ${outcome.providerId} model answered from its own ` +
+          `knowledge, and this is NOT a search result.\n\n${outcome.answerText}`,
+      },
+    ],
+    details: undefined,
+  }
 }
 
 /** Render a `searched` outcome: backend-named first line, the notice, answer, sources. */
 function renderOutcome(outcome: WebSearchOutcome, fallbackReason: string | undefined): AgentToolResult<undefined> {
-	if (outcome.kind === "ungrounded") return renderUngrounded(outcome);
+  if (outcome.kind === 'ungrounded') return renderUngrounded(outcome)
 
-	const viaLine =
-		fallbackReason === undefined
-			? `Searched the web via ${outcome.providerId}.`
-			: `Searched the web via ${outcome.providerId} (fallback — ${fallbackReason}).`;
+  const viaLine =
+    fallbackReason === undefined
+      ? `Searched the web via ${outcome.providerId}.`
+      : `Searched the web via ${outcome.providerId} (fallback — ${fallbackReason}).`
 
-	const bodySections: string[] = [viaLine, EXTERNAL_WEB_CONTENT_NOTICE];
-	if (outcome.answerText !== undefined && outcome.answerText.length > 0) {
-		bodySections.push(outcome.answerText);
-	}
-	if (outcome.snippets !== undefined && outcome.snippets.length > 0) {
-		const snippetLines = outcome.snippets.map((snippet, snippetIndex) => {
-			const snippetTail = snippet.snippet !== undefined && snippet.snippet.length > 0 ? `\n   ${snippet.snippet}` : "";
-			return `${snippetIndex + 1}. ${snippet.title} — ${snippet.url}${snippetTail}`;
-		});
-		bodySections.push(`## Results\n${snippetLines.join("\n")}`);
-	} else if (outcome.sources.length > 0) {
-		const sourceLines = outcome.sources.map(
-			(source, sourceIndex) => `${sourceIndex + 1}. [${source.title}](${source.url})`,
-		);
-		bodySections.push(`## Sources\n${sourceLines.join("\n")}`);
-	}
+  const bodySections: string[] = [viaLine, EXTERNAL_WEB_CONTENT_NOTICE]
+  if (outcome.answerText !== undefined && outcome.answerText.length > 0) {
+    bodySections.push(outcome.answerText)
+  }
+  if (outcome.snippets !== undefined && outcome.snippets.length > 0) {
+    const snippetLines = outcome.snippets.map((snippet, snippetIndex) => {
+      const snippetTail = snippet.snippet !== undefined && snippet.snippet.length > 0 ? `\n   ${snippet.snippet}` : ''
+      return `${snippetIndex + 1}. ${snippet.title} — ${snippet.url}${snippetTail}`
+    })
+    bodySections.push(`## Results\n${snippetLines.join('\n')}`)
+  } else if (outcome.sources.length > 0) {
+    const sourceLines = outcome.sources.map(
+      (source, sourceIndex) => `${sourceIndex + 1}. [${source.title}](${source.url})`,
+    )
+    bodySections.push(`## Sources\n${sourceLines.join('\n')}`)
+  }
 
-	return { content: [{ type: "text", text: bodySections.join("\n\n") }], details: undefined };
+  return { content: [{ type: 'text', text: bodySections.join('\n\n') }], details: undefined }
 }
 
-const log = zenLogger("extension", "web-search");
+const log = zenLogger('extension', 'web-search')
 
 /** One record per call, every outcome — the audit property (#54's discipline; #132: in the file). */
 function auditLine(outcome: string, providerId: WebSearchProviderId | undefined, query: string, detail: string): void {
-	const properties = { outcome, provider: providerId ?? "(none)", query, detail };
-	if (outcome === "refused") log.warn("audit: {outcome} provider {provider} — {detail}", properties);
-	else log.info("audit: {outcome} provider {provider} — {detail}", properties);
+  const properties = { outcome, provider: providerId ?? '(none)', query, detail }
+  if (outcome === 'refused') log.warn('audit: {outcome} provider {provider} — {detail}', properties)
+  else log.info('audit: {outcome} provider {provider} — {detail}', properties)
 }
 
 /**
@@ -388,20 +388,20 @@ function auditLine(outcome: string, providerId: WebSearchProviderId | undefined,
  * the print harness's symlink mirror (#20, same rationale as web_fetch's root).
  */
 export default createWebSearch({
-	locateConfigFile: () => zenConfigPath(findRepoRoot(import.meta.url)),
-	readConfigText: (path) => readFileSync(path, "utf8"),
-	// ⚠ From the gated `.zen/secrets.env` FILE, never `process.env` (#89): the host
-	// quarantines every secret out of the environment before a session exists, precisely so
-	// a `bash` child cannot print it. Extension code is trusted to read the file the model's
-	// `read` cannot. The composition root keeps the dependency's name — the providers still
-	// receive values, never names, and never learn where they came from.
-	readEnvironmentVariable: (variableName) => readSecret(findRepoRoot(import.meta.url), variableName),
-	runProviders: {
-		anthropic: runAnthropicProviderSearch,
-		google: runGoogleProviderSearch,
-		openai: runOpenAiProviderSearch,
-		deepseek: runDeepseekProviderSearch,
-		tavily: runTavilyProviderSearch,
-	},
-	fetchUrl: (url, init) => fetch(url, { ...init, signal: init.signal ?? null }),
-});
+  locateConfigFile: () => zenConfigPath(findRepoRoot(import.meta.url)),
+  readConfigText: (path) => readFileSync(path, 'utf8'),
+  // ⚠ From the gated `.zen/secrets.env` FILE, never `process.env` (#89): the host
+  // quarantines every secret out of the environment before a session exists, precisely so
+  // a `bash` child cannot print it. Extension code is trusted to read the file the model's
+  // `read` cannot. The composition root keeps the dependency's name — the providers still
+  // receive values, never names, and never learn where they came from.
+  readEnvironmentVariable: (variableName) => readSecret(findRepoRoot(import.meta.url), variableName),
+  runProviders: {
+    anthropic: runAnthropicProviderSearch,
+    google: runGoogleProviderSearch,
+    openai: runOpenAiProviderSearch,
+    deepseek: runDeepseekProviderSearch,
+    tavily: runTavilyProviderSearch,
+  },
+  fetchUrl: (url, init) => fetch(url, { ...init, signal: init.signal ?? null }),
+})

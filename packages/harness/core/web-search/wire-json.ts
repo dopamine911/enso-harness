@@ -7,15 +7,15 @@
 
 /** Narrow an unknown wire value to a plain object, or undefined. */
 export function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined;
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined
 }
 
 /** Narrow an unknown wire value to a string, or undefined. */
 export function asString(value: unknown): string | undefined {
-	return typeof value === "string" ? value : undefined;
+  return typeof value === 'string' ? value : undefined
 }
 
 /** Strip trailing slashes so endpoint concatenation never emits a double slash. */
 export function trimTrailingSlash(value: string): string {
-	return value.replace(/\/+$/, "");
+  return value.replace(/\/+$/, '')
 }

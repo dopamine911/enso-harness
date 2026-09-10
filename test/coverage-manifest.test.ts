@@ -1,6 +1,6 @@
-import { expect, test } from "bun:test";
-import { existsSync, readdirSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { expect, test } from 'bun:test'
+import { existsSync, readdirSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
 
 /**
  * THE COVERAGE DENOMINATOR (#slop-factory port). Bun measures coverage only over files a
@@ -20,15 +20,15 @@ import { join, relative, resolve } from "node:path";
  * of silently widening the exclusion into a dead pattern.
  */
 
-const REPOSITORY_ROOT = resolve(import.meta.dir, "..");
+const REPOSITORY_ROOT = resolve(import.meta.dir, '..')
 
 /** Library roots whose every source file must enter the coverage denominator. */
 const LIBRARY_SOURCE_ROOTS = [
-	"packages/core/src",
-	"packages/harness/core",
-	"packages/harness/extensions",
-	"packages/web/src",
-] as const;
+  'packages/core/src',
+  'packages/harness/core',
+  'packages/harness/extensions',
+  'packages/web/src',
+] as const
 
 /**
  * Modules whose top-level code IS the program — mounting the DOM app, starting the dev
@@ -36,67 +36,70 @@ const LIBRARY_SOURCE_ROOTS = [
  * THIN so the exclusion stays small (main.tsx's header carries that contract).
  */
 const ENTRY_POINT_EXCEPTIONS = [
-	"packages/web/src/main.tsx",
-	"packages/web/src/server/dev.ts",
-	"packages/web/src/server/dev-web.ts",
-] as const;
+  'packages/web/src/main.tsx',
+  'packages/web/src/server/dev.ts',
+  'packages/web/src/server/dev-web.ts',
+] as const
 
 /** Vendored code — biome.jsonc's exclusion boundary, applied to coverage for the same reason. */
-const VENDORED_DIRECTORIES = ["packages/web/src/components"] as const;
+const VENDORED_DIRECTORIES = ['packages/web/src/components'] as const
 
 function isSourceFile(fileName: string): boolean {
-	if (fileName.endsWith(".test.ts") || fileName.endsWith(".test.tsx")) return false;
-	return fileName.endsWith(".ts") || fileName.endsWith(".tsx");
+  if (fileName.endsWith('.test.ts') || fileName.endsWith('.test.tsx')) return false
+  return fileName.endsWith('.ts') || fileName.endsWith('.tsx')
 }
 
 function collectLibrarySources(rootDirectory: string): string[] {
-	const collected: string[] = [];
-	for (const dirEntry of readdirSync(rootDirectory, { withFileTypes: true, recursive: true })) {
-		if (!(dirEntry.isFile() && isSourceFile(dirEntry.name))) continue;
-		const absolutePath = join(dirEntry.parentPath, dirEntry.name);
-		const repositoryRelative = relative(REPOSITORY_ROOT, absolutePath);
-		if (repositoryRelative.includes("__tests__")) continue;
-		if (VENDORED_DIRECTORIES.some((vendored) => repositoryRelative.startsWith(vendored))) continue;
-		if (ENTRY_POINT_EXCEPTIONS.some((entry) => repositoryRelative === entry)) continue;
-		collected.push(absolutePath);
-	}
-	return collected;
+  const collected: string[] = []
+  for (const dirEntry of readdirSync(rootDirectory, { withFileTypes: true, recursive: true })) {
+    if (!(dirEntry.isFile() && isSourceFile(dirEntry.name))) continue
+    const absolutePath = join(dirEntry.parentPath, dirEntry.name)
+    const repositoryRelative = relative(REPOSITORY_ROOT, absolutePath)
+    if (repositoryRelative.includes('__tests__')) continue
+    if (VENDORED_DIRECTORIES.some((vendored) => repositoryRelative.startsWith(vendored))) continue
+    if (ENTRY_POINT_EXCEPTIONS.some((entry) => repositoryRelative === entry)) continue
+    collected.push(absolutePath)
+  }
+  return collected
 }
 
-test("every named entry-point exception still exists — a rename must not widen the exclusion", () => {
-	for (const entryPoint of ENTRY_POINT_EXCEPTIONS) {
-		expect(existsSync(join(REPOSITORY_ROOT, entryPoint))).toBe(true);
-	}
-});
+test('every named entry-point exception still exists — a rename must not widen the exclusion', () => {
+  for (const entryPoint of ENTRY_POINT_EXCEPTIONS) {
+    expect(existsSync(join(REPOSITORY_ROOT, entryPoint))).toBe(true)
+  }
+})
 
-test("every library source file is importable and enters the coverage denominator", async () => {
-	const sources = LIBRARY_SOURCE_ROOTS.flatMap((root) => collectLibrarySources(join(REPOSITORY_ROOT, root)));
-	// A denominator of zero would mean the roots are wrong, not that coverage is perfect.
-	expect(sources.length).toBeGreaterThan(20);
-	for (const sourcePath of sources) {
-		// Import failures name the file — an import-unclean module must either become
-		// clean or be promoted to a named entry-point exception with its reason.
-		await import(sourcePath);
-	}
-});
+test('every library source file is importable and enters the coverage denominator', async () => {
+  const sources = LIBRARY_SOURCE_ROOTS.flatMap((root) => collectLibrarySources(join(REPOSITORY_ROOT, root)))
+  // A denominator of zero would mean the roots are wrong, not that coverage is perfect.
+  expect(sources.length).toBeGreaterThan(20)
+  for (const sourcePath of sources) {
+    // Import failures name the file — an import-unclean module must either become
+    // clean or be promoted to a named entry-point exception with its reason.
+    await import(sourcePath)
+  }
+})
 
 // ⚠ The floor itself is code that nothing else references at build time: assert it is
 // present, wired into the gate, and at least the intended level — so weakening or
 // unplugging it is a red test rather than a quiet edit. (It lives in a SCRIPT rather than
 // bunfig's coverageThreshold because bun 1.4 enforces that key PER FILE — measured
 // 2026-09-04, docs disagree — see scripts/check-coverage.ts.)
-const INTENDED_LINE_FLOOR = 0.91;
-const INTENDED_FUNCTION_FLOOR = 0.89;
+const INTENDED_LINE_FLOOR = 0.91
+const INTENDED_FUNCTION_FLOOR = 0.89
 
-test("the total coverage floor is wired into the gate at the intended level", async () => {
-	const { TOTAL_LINE_COVERAGE_FLOOR, TOTAL_FUNCTION_COVERAGE_FLOOR } = await import(
-		join(REPOSITORY_ROOT, "scripts", "check-coverage.ts")
-	);
-	expect(TOTAL_LINE_COVERAGE_FLOOR).toBeGreaterThanOrEqual(INTENDED_LINE_FLOOR);
-	expect(TOTAL_FUNCTION_COVERAGE_FLOOR).toBeGreaterThanOrEqual(INTENDED_FUNCTION_FLOOR);
-	// The script only bites while the gate runs it — assert the wiring, not just the value.
-	const gate = await Bun.file(join(REPOSITORY_ROOT, "scripts", "gate.ts")).text();
-	expect(gate).toContain('script: "coverage:check"');
-	const bunfig = await Bun.file(join(REPOSITORY_ROOT, "bunfig.toml")).text();
-	expect(bunfig).toMatch(/^coverage = true$/m);
-});
+test('the total coverage floor is wired into the gate at the intended level', async () => {
+  const { TOTAL_LINE_COVERAGE_FLOOR, TOTAL_FUNCTION_COVERAGE_FLOOR } = await import(
+    join(REPOSITORY_ROOT, 'scripts', 'check-coverage.ts')
+  )
+  expect(TOTAL_LINE_COVERAGE_FLOOR).toBeGreaterThanOrEqual(INTENDED_LINE_FLOOR)
+  expect(TOTAL_FUNCTION_COVERAGE_FLOOR).toBeGreaterThanOrEqual(INTENDED_FUNCTION_FLOOR)
+  // The script only bites while the gate runs it — assert the wiring, not just the value.
+  // ⚠ Quote-agnostic: the wiring is the gate naming that script, not which quote character the
+  // formatter happens to use. A `toContain('script: "coverage:check"')` here failed the whole
+  // suite the day the formatter switched to single quotes — a test pinning style, not behaviour.
+  const gate = await Bun.file(join(REPOSITORY_ROOT, 'scripts', 'gate.ts')).text()
+  expect(gate).toMatch(/script:\s*['"]coverage:check['"]/)
+  const bunfig = await Bun.file(join(REPOSITORY_ROOT, 'bunfig.toml')).text()
+  expect(bunfig).toMatch(/^coverage = true$/m)
+})

@@ -1,12 +1,12 @@
-import { basename } from "node:path";
+import { basename } from 'node:path'
 import {
-	extractFlatShellCommandSegments,
-	type FlatShellCommandSegment,
-	literalShellWord,
-	shellWordsOf,
-	withoutLeadingEnvironmentAssignments,
-} from "./shell-segments.ts";
-import { canonicalToolName } from "./tool-identity.ts";
+  extractFlatShellCommandSegments,
+  type FlatShellCommandSegment,
+  literalShellWord,
+  shellWordsOf,
+  withoutLeadingEnvironmentAssignments,
+} from './shell-segments.ts'
+import { canonicalToolName } from './tool-identity.ts'
 
 /**
  * The bash network deny (#9) — a BAR, deliberately not a boundary.
@@ -73,14 +73,14 @@ import { canonicalToolName } from "./tool-identity.ts";
 
 /** How the deny matched — carried into the block reason so a denial is explainable. */
 export interface NetworkEgressMatch {
-	/** The denied name (or device path) that matched. */
-	matched: string;
-	/**
-	 * Which mode found it — segment-precise, the coarse raw scan, the bash socket device,
-	 * or a brace/glob-synthesized command word (denied without knowing the final name,
-	 * because expansion assembles it from pieces no scan can see contiguously).
-	 */
-	via: "command-position" | "raw-scan" | "dev-socket" | "command-word-synthesis" | "wrapped-command" | "unresolvable";
+  /** The denied name (or device path) that matched. */
+  matched: string
+  /**
+   * Which mode found it — segment-precise, the coarse raw scan, the bash socket device,
+   * or a brace/glob-synthesized command word (denied without knowing the final name,
+   * because expansion assembles it from pieces no scan can see contiguously).
+   */
+  via: 'command-position' | 'raw-scan' | 'dev-socket' | 'command-word-synthesis' | 'wrapped-command' | 'unresolvable'
 }
 
 /**
@@ -88,17 +88,17 @@ export interface NetworkEgressMatch {
  * refuses instead (#57). Two levels is `bash -c "sh -c '…'"`; a legitimate command does
  * not go past that, and past the cap "cannot vouch" is the honest verdict.
  */
-export const MAX_SHELL_NESTING = 3;
+export const MAX_SHELL_NESTING = 3
 
 /** Shells whose program is whatever they are fed when no `-c` names it — a pipe or a heredoc IS their code. */
-const STDIN_SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
+const STDIN_SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh'])
 /** `-c` in any of its spellings; a shell carrying one reads its program from the argument, not from stdin. */
-const SHELL_COMMAND_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/;
+const SHELL_COMMAND_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/
 /** Characters that make an unparseable region unscannable: quoting and escapes splice a name, expansion assembles one. */
-const UNSCANNABLE_CHARACTERS = /['"\\{[*?]/;
+const UNSCANNABLE_CHARACTERS = /['"\\{[*?]/
 
 /** bash's built-in TCP/UDP redirection devices — no legitimate use in this harness. */
-const BASH_SOCKET_DEVICE_PATTERN = /\/dev\/(?:tcp|udp)\//i;
+const BASH_SOCKET_DEVICE_PATTERN = /\/dev\/(?:tcp|udp)\//i
 
 /**
  * The segment's command word, resolved to the LITERAL value the shell would execute —
@@ -111,9 +111,9 @@ const BASH_SOCKET_DEVICE_PATTERN = /\/dev\/(?:tcp|udp)\//i;
  * raw scan is no net at all — see LiteralShellWordResult's doc for the split.
  */
 type CommandWordResult =
-	| { kind: "word"; canonical: string }
-	| { kind: "escalate-to-raw-scan" }
-	| { kind: "deny-synthesis"; rawWord: string };
+  | { kind: 'word'; canonical: string }
+  | { kind: 'escalate-to-raw-scan' }
+  | { kind: 'deny-synthesis'; rawWord: string }
 
 /**
  * Commands that transparently exec their argument vector as the next command — no code
@@ -127,62 +127,62 @@ type CommandWordResult =
  */
 /** Shared with `environment-dump.ts`: the same wrappers move a dumping command past word 1. */
 export const TRANSPARENT_COMMAND_WRAPPERS = new Set([
-	"env",
-	"timeout",
-	"nohup",
-	"nice",
-	"ionice",
-	"setsid",
-	"stdbuf",
-	"taskset",
-	"chrt",
-	"numactl",
-	"flock",
-	"watch",
-	"xargs",
-	"command",
-	"exec",
-	"eval",
-	"time",
-	"sudo",
-	"doas",
-	"strace",
-	"ltrace",
-	"sh",
-	"bash",
-	"zsh",
-	"dash",
-	"ksh",
-]);
+  'env',
+  'timeout',
+  'nohup',
+  'nice',
+  'ionice',
+  'setsid',
+  'stdbuf',
+  'taskset',
+  'chrt',
+  'numactl',
+  'flock',
+  'watch',
+  'xargs',
+  'command',
+  'exec',
+  'eval',
+  'time',
+  'sudo',
+  'doas',
+  'strace',
+  'ltrace',
+  'sh',
+  'bash',
+  'zsh',
+  'dash',
+  'ksh',
+])
 
 /**
  * Wrapper-word exemptions: `[` is the test builtin; `{}` is xargs's -I placeholder and
  * expands to NOTHING in bash (brace expansion needs a comma or range), so neither can
  * synthesize a name.
  */
-const WRAPPER_WORD_EXEMPTIONS = new Set(["[", "{}"]);
+const WRAPPER_WORD_EXEMPTIONS = new Set(['[', '{}'])
 
 function commandWordOf(segmentText: string): CommandWordResult {
-	const withoutAssignments = (withoutLeadingEnvironmentAssignments(segmentText) ?? segmentText).trim();
-	const resolved = literalShellWord(withoutAssignments);
-	if (resolved.kind === "word-synthesis") {
-		// ⚠ The one legitimate synthesis character at command position: a word that IS
-		// exactly `[` is the test builtin (`[ -f x ] && …`), everywhere in shell scripts.
-		// Only the BARE bracket is exempt — `cur[l]` and `[foo` stay synthesis.
-		const rawWord = withoutAssignments.split(/[ \t]/, 1)[0] ?? "";
-		if (rawWord === "[") return { kind: "word", canonical: "[" };
-		return { kind: "deny-synthesis", rawWord };
-	}
-	if (resolved.kind !== "literal") return { kind: "escalate-to-raw-scan" };
-	if (resolved.value.length === 0) return { kind: "word", canonical: "" };
-	// `/usr/bin/curl` and `curl` are the same binary.
-	return { kind: "word", canonical: canonicalToolName(basename(resolved.value)) };
+  const withoutAssignments = (withoutLeadingEnvironmentAssignments(segmentText) ?? segmentText).trim()
+  const resolved = literalShellWord(withoutAssignments)
+  if (resolved.kind === 'word-synthesis') {
+    // ⚠ The one legitimate synthesis character at command position: a word that IS
+    // exactly `[` is the test builtin (`[ -f x ] && …`), everywhere in shell scripts.
+    // Only the BARE bracket is exempt — `cur[l]` and `[foo` stay synthesis.
+    const rawWord = withoutAssignments.split(/[ \t]/, 1)[0] ?? ''
+    if (rawWord === '[') return { kind: 'word', canonical: '[' }
+    return { kind: 'deny-synthesis', rawWord }
+  }
+  if (resolved.kind !== 'literal') return { kind: 'escalate-to-raw-scan' }
+  if (resolved.value.length === 0) return { kind: 'word', canonical: '' }
+  // `/usr/bin/curl` and `curl` are the same binary.
+  return { kind: 'word', canonical: canonicalToolName(basename(resolved.value)) }
 }
 
 type WrappedWordFinding =
-	| { kind: "denied"; word: string; via: NetworkEgressMatch["via"] }
-	| { kind: "synthesis"; word: string }
-	| { kind: "unresolvable" };
+  | { kind: 'denied'; word: string; via: NetworkEgressMatch['via'] }
+  | { kind: 'synthesis'; word: string }
+  | { kind: 'unresolvable' }
 
 /**
  * Scan every word of a wrapper-led segment with the command-word treatment. A word's
@@ -197,48 +197,48 @@ type WrappedWordFinding =
  * denies or escalates exactly as it would at command position.
  */
 function deniedWordInWrappedSegment(
-	segmentText: string,
-	denied: Set<string>,
-	deniedBinaries: readonly string[],
-	depth: number,
+  segmentText: string,
+  denied: Set<string>,
+  deniedBinaries: readonly string[],
+  depth: number,
 ): WrappedWordFinding | undefined {
-	const rawWords = shellWordsOf(segmentText);
-	if (rawWords === null) return { kind: "unresolvable" };
-	let sawUnresolvable = false;
-	for (const rawWord of rawWords.slice(1)) {
-		if (WRAPPER_WORD_EXEMPTIONS.has(rawWord)) continue;
-		if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(rawWord)) continue;
-		const resolved = literalShellWord(rawWord);
-		if (resolved.kind === "word-synthesis") return { kind: "synthesis", word: rawWord };
-		if (resolved.kind !== "literal") {
-			sawUnresolvable = true;
-			continue;
-		}
-		// ⚠ The resolved literal IS the command line the child shell will parse (#57): a
-		// `-c` payload's outer quoting is gone, and whatever quoting it still carries is
-		// the child's to resolve — `cu'r'l` inside `"…"` is `curl` to that child. So the
-		// whole guard runs on it, one level down, rather than a whitespace split that sees
-		// the inner quotes as part of the name (the hole every classifier in the #57 spike
-		// shared). A plain wrapper operand (`timeout 30 curl …` → `30`, `curl`) is a
-		// one-word command line to the same call, so this is the round-3 word treatment too.
-		const verdict = gateCommandLine(resolved.value, denied, deniedBinaries, depth + 1);
-		if (verdict === "escalate" || verdict === "escalate-unparseable") {
-			sawUnresolvable = true;
-			continue;
-		}
-		if (verdict !== undefined) return { kind: "denied", word: verdict.matched, via: verdict.via };
-	}
-	return sawUnresolvable ? { kind: "unresolvable" } : undefined;
+  const rawWords = shellWordsOf(segmentText)
+  if (rawWords === null) return { kind: 'unresolvable' }
+  let sawUnresolvable = false
+  for (const rawWord of rawWords.slice(1)) {
+    if (WRAPPER_WORD_EXEMPTIONS.has(rawWord)) continue
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(rawWord)) continue
+    const resolved = literalShellWord(rawWord)
+    if (resolved.kind === 'word-synthesis') return { kind: 'synthesis', word: rawWord }
+    if (resolved.kind !== 'literal') {
+      sawUnresolvable = true
+      continue
+    }
+    // ⚠ The resolved literal IS the command line the child shell will parse (#57): a
+    // `-c` payload's outer quoting is gone, and whatever quoting it still carries is
+    // the child's to resolve — `cu'r'l` inside `"…"` is `curl` to that child. So the
+    // whole guard runs on it, one level down, rather than a whitespace split that sees
+    // the inner quotes as part of the name (the hole every classifier in the #57 spike
+    // shared). A plain wrapper operand (`timeout 30 curl …` → `30`, `curl`) is a
+    // one-word command line to the same call, so this is the round-3 word treatment too.
+    const verdict = gateCommandLine(resolved.value, denied, deniedBinaries, depth + 1)
+    if (verdict === 'escalate' || verdict === 'escalate-unparseable') {
+      sawUnresolvable = true
+      continue
+    }
+    if (verdict !== undefined) return { kind: 'denied', word: verdict.matched, via: verdict.via }
+  }
+  return sawUnresolvable ? { kind: 'unresolvable' } : undefined
 }
 
 function rawScanFor(command: string, deniedBinaries: readonly string[]): string | undefined {
-	for (const deniedBinary of deniedBinaries) {
-		// All list entries are [word-ish] names, so \b is well-defined at both ends;
-		// escape anything regex-special defensively rather than trusting the policy data.
-		const escaped = deniedBinary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-		if (new RegExp(`\\b${escaped}\\b`, "i").test(command)) return deniedBinary;
-	}
-	return undefined;
+  for (const deniedBinary of deniedBinaries) {
+    // All list entries are [word-ish] names, so \b is well-defined at both ends;
+    // escape anything regex-special defensively rather than trusting the policy data.
+    const escaped = deniedBinary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    if (new RegExp(`\\b${escaped}\\b`, 'i').test(command)) return deniedBinary
+  }
+  return undefined
 }
 
 /**
@@ -253,44 +253,44 @@ function rawScanFor(command: string, deniedBinaries: readonly string[]): string 
  * and errs toward safety.
  */
 function gateSegment(
-	segment: FlatShellCommandSegment,
-	denied: Set<string>,
-	deniedBinaries: readonly string[],
-	depth: number,
-): NetworkEgressMatch | "escalate" | undefined {
-	const commandWord = commandWordOf(segment.text);
-	if (commandWord.kind === "deny-synthesis") {
-		return { matched: commandWord.rawWord, via: "command-word-synthesis" };
-	}
-	if (commandWord.kind === "escalate-to-raw-scan") return "escalate";
-	if (denied.has(commandWord.canonical)) {
-		return { matched: commandWord.canonical, via: "command-position" };
-	}
-	// A shell fed by a pipe runs the pipe (#57's heredoc twin, `curl … | bash` with the
-	// fetch a step earlier): its program is data no scan of this command can see. The
-	// same shell with `-c` names its program in the argument and takes wrapper mode; with a
-	// script operand (`cat in | bash script.sh`) the pipe is the SCRIPT's stdin, not the program.
-	if (
-		STDIN_SHELLS.has(commandWord.canonical) &&
-		segment.pipedStdin &&
-		shellProgramIsStdin((shellWordsOf(segment.text) ?? []).slice(1))
-	) {
-		return { matched: `${commandWord.canonical} reading its program from a pipe`, via: "unresolvable" };
-	}
-	if (!TRANSPARENT_COMMAND_WRAPPERS.has(commandWord.canonical)) return undefined;
-	const wrapped = deniedWordInWrappedSegment(segment.text, denied, deniedBinaries, depth);
-	if (wrapped === undefined) return undefined;
-	if (wrapped.kind === "unresolvable") return "escalate";
-	if (wrapped.kind === "synthesis") return { matched: wrapped.word, via: "command-word-synthesis" };
-	// A match inside a payload reports how the CHILD saw it (its own command position is
-	// this level's wrapped command); the floor's own vocabulary passes through unchanged.
-	return { matched: wrapped.word, via: wrapped.via === "command-position" ? "wrapped-command" : wrapped.via };
+  segment: FlatShellCommandSegment,
+  denied: Set<string>,
+  deniedBinaries: readonly string[],
+  depth: number,
+): NetworkEgressMatch | 'escalate' | undefined {
+  const commandWord = commandWordOf(segment.text)
+  if (commandWord.kind === 'deny-synthesis') {
+    return { matched: commandWord.rawWord, via: 'command-word-synthesis' }
+  }
+  if (commandWord.kind === 'escalate-to-raw-scan') return 'escalate'
+  if (denied.has(commandWord.canonical)) {
+    return { matched: commandWord.canonical, via: 'command-position' }
+  }
+  // A shell fed by a pipe runs the pipe (#57's heredoc twin, `curl … | bash` with the
+  // fetch a step earlier): its program is data no scan of this command can see. The
+  // same shell with `-c` names its program in the argument and takes wrapper mode; with a
+  // script operand (`cat in | bash script.sh`) the pipe is the SCRIPT's stdin, not the program.
+  if (
+    STDIN_SHELLS.has(commandWord.canonical) &&
+    segment.pipedStdin &&
+    shellProgramIsStdin((shellWordsOf(segment.text) ?? []).slice(1))
+  ) {
+    return { matched: `${commandWord.canonical} reading its program from a pipe`, via: 'unresolvable' }
+  }
+  if (!TRANSPARENT_COMMAND_WRAPPERS.has(commandWord.canonical)) return undefined
+  const wrapped = deniedWordInWrappedSegment(segment.text, denied, deniedBinaries, depth)
+  if (wrapped === undefined) return undefined
+  if (wrapped.kind === 'unresolvable') return 'escalate'
+  if (wrapped.kind === 'synthesis') return { matched: wrapped.word, via: 'command-word-synthesis' }
+  // A match inside a payload reports how the CHILD saw it (its own command position is
+  // this level's wrapped command); the floor's own vocabulary passes through unchanged.
+  return { matched: wrapped.word, via: wrapped.via === 'command-position' ? 'wrapped-command' : wrapped.via }
 }
 
 /** Redirect operators, with or without a descriptor, whose next word is a target and not an operand. */
-const REDIRECT_OPERATOR = /^(?:\d*(?:<<<|<<-?|<>|>>|>|<)|&>>?|\d*>&\d*)$/;
+const REDIRECT_OPERATOR = /^(?:\d*(?:<<<|<<-?|<>|>>|>|<)|&>>?|\d*>&\d*)$/
 /** A redirect with its target attached (`>file`, `2>&1`, `<<EOF`, `<<<word`): one word, no operand. */
-const ATTACHED_REDIRECT = /^(?:\d*(?:<<<|<<-?|<>|>>|>|<)|&>>?)\S+$/;
+const ATTACHED_REDIRECT = /^(?:\d*(?:<<<|<<-?|<>|>>|>|<)|&>>?)\S+$/
 
 /**
  * A shell whose words after its own name leave NO program: no `-c` (any spelling) naming
@@ -298,23 +298,23 @@ const ATTACHED_REDIRECT = /^(?:\d*(?:<<<|<<-?|<>|>>|>|<)|&>>?)\S+$/;
  * shell reads its program from stdin, and stdin is whatever the pipe or the heredoc feeds it.
  */
 function shellProgramIsStdin(wordsAfterShell: readonly string[]): boolean {
-	let skipNext = false;
-	for (const word of wordsAfterShell) {
-		if (skipNext) {
-			skipNext = false;
-			continue;
-		}
-		if (SHELL_COMMAND_FLAG.test(word)) return false;
-		// The bare operator BEFORE the attached form: `<<<` alone would otherwise read as `<<`
-		// with `<` attached, and the herestring's word as an operand.
-		if (REDIRECT_OPERATOR.test(word)) {
-			skipNext = true;
-			continue;
-		}
-		if (word.startsWith("-") || ATTACHED_REDIRECT.test(word)) continue;
-		return false; // an operand: the shell's program is this file
-	}
-	return true;
+  let skipNext = false
+  for (const word of wordsAfterShell) {
+    if (skipNext) {
+      skipNext = false
+      continue
+    }
+    if (SHELL_COMMAND_FLAG.test(word)) return false
+    // The bare operator BEFORE the attached form: `<<<` alone would otherwise read as `<<`
+    // with `<` attached, and the herestring's word as an operand.
+    if (REDIRECT_OPERATOR.test(word)) {
+      skipNext = true
+      continue
+    }
+    if (word.startsWith('-') || ATTACHED_REDIRECT.test(word)) continue
+    return false // an operand: the shell's program is this file
+  }
+  return true
 }
 
 /**
@@ -325,37 +325,37 @@ function shellProgramIsStdin(wordsAfterShell: readonly string[]): boolean {
  * review); or undefined to pass.
  */
 function gateCommandLine(
-	command: string,
-	denied: Set<string>,
-	deniedBinaries: readonly string[],
-	depth: number,
-): NetworkEgressMatch | "escalate" | "escalate-unparseable" | undefined {
-	if (depth > MAX_SHELL_NESTING) {
-		return { matched: `a shell nested more than ${MAX_SHELL_NESTING} deep`, via: "unresolvable" };
-	}
-	const segments = extractFlatShellCommandSegments(command);
-	if (segments.length === 0) return unscannableFloor(command) ?? "escalate-unparseable";
-	// Two distinct unknowable-word escalations (PR #55 review, one round each), and they
-	// must NOT share a path:
-	// - runtime-expansion (`$C https://…`): the coarse scan of the WHOLE command may catch
-	//   a sibling assignment (`C=curl; $C …`), so escalate to it. What it cannot see is a
-	//   value set in an EARLIER tool call — stated non-coverage, with the interpreters.
-	// - word-synthesis (`{c,}url`, `/usr/bin/cur[l]` — both execute curl, verified live):
-	//   brace/pathname expansion assembles the name from pieces, so it never appears
-	//   contiguously and the raw scan is STRUCTURALLY BLIND. Escalation is not a net here —
-	//   deny outright. The false-positive cost is glob/brace AT COMMAND POSITION, which
-	//   legitimate commands essentially never need (the bare `[` test builtin is exempted
-	//   in commandWordOf).
-	let hasUnresolvableCommandWord = false;
-	for (const segment of segments) {
-		const verdict = gateSegment(segment, denied, deniedBinaries, depth);
-		if (verdict === "escalate") {
-			hasUnresolvableCommandWord = true;
-			continue;
-		}
-		if (verdict !== undefined) return verdict;
-	}
-	return hasUnresolvableCommandWord ? "escalate" : undefined;
+  command: string,
+  denied: Set<string>,
+  deniedBinaries: readonly string[],
+  depth: number,
+): NetworkEgressMatch | 'escalate' | 'escalate-unparseable' | undefined {
+  if (depth > MAX_SHELL_NESTING) {
+    return { matched: `a shell nested more than ${MAX_SHELL_NESTING} deep`, via: 'unresolvable' }
+  }
+  const segments = extractFlatShellCommandSegments(command)
+  if (segments.length === 0) return unscannableFloor(command) ?? 'escalate-unparseable'
+  // Two distinct unknowable-word escalations (PR #55 review, one round each), and they
+  // must NOT share a path:
+  // - runtime-expansion (`$C https://…`): the coarse scan of the WHOLE command may catch
+  //   a sibling assignment (`C=curl; $C …`), so escalate to it. What it cannot see is a
+  //   value set in an EARLIER tool call — stated non-coverage, with the interpreters.
+  // - word-synthesis (`{c,}url`, `/usr/bin/cur[l]` — both execute curl, verified live):
+  //   brace/pathname expansion assembles the name from pieces, so it never appears
+  //   contiguously and the raw scan is STRUCTURALLY BLIND. Escalation is not a net here —
+  //   deny outright. The false-positive cost is glob/brace AT COMMAND POSITION, which
+  //   legitimate commands essentially never need (the bare `[` test builtin is exempted
+  //   in commandWordOf).
+  let hasUnresolvableCommandWord = false
+  for (const segment of segments) {
+    const verdict = gateSegment(segment, denied, deniedBinaries, depth)
+    if (verdict === 'escalate') {
+      hasUnresolvableCommandWord = true
+      continue
+    }
+    if (verdict !== undefined) return verdict
+  }
+  return hasUnresolvableCommandWord ? 'escalate' : undefined
 }
 
 /**
@@ -377,38 +377,38 @@ function gateCommandLine(
  * stdin): none of these trip it.
  */
 function unscannableFloor(command: string): NetworkEgressMatch | undefined {
-	const heredocs = heredocBodies(command);
-	const expanded = withoutRanges(
-		command,
-		heredocs.filter((body) => body.quoted).map((body) => [body.start, body.end]),
-	);
-	for (const body of substitutionBodies(expanded)) {
-		if (UNSCANNABLE_CHARACTERS.test(body)) {
-			return { matched: "a command substitution with quoting or expansion inside it", via: "unresolvable" };
-		}
-	}
-	const commandLines = withoutRanges(
-		command,
-		heredocs.map((body) => [body.start, body.end]),
-	);
-	if (/<</.test(commandLines) && shellFedByStream(commandLines)) {
-		return { matched: "a shell reading its program from a heredoc", via: "unresolvable" };
-	}
-	return undefined;
+  const heredocs = heredocBodies(command)
+  const expanded = withoutRanges(
+    command,
+    heredocs.filter((body) => body.quoted).map((body) => [body.start, body.end]),
+  )
+  for (const body of substitutionBodies(expanded)) {
+    if (UNSCANNABLE_CHARACTERS.test(body)) {
+      return { matched: 'a command substitution with quoting or expansion inside it', via: 'unresolvable' }
+    }
+  }
+  const commandLines = withoutRanges(
+    command,
+    heredocs.map((body) => [body.start, body.end]),
+  )
+  if (/<</.test(commandLines) && shellFedByStream(commandLines)) {
+    return { matched: 'a shell reading its program from a heredoc', via: 'unresolvable' }
+  }
+  return undefined
 }
 
 interface HeredocBody {
-	/** Offset of the body's first character — the line after the operator's line. */
-	readonly start: number;
-	/** Offset just past the terminator line, or the end of the text when it never closes. */
-	readonly end: number;
-	/** The delimiter was quoted or escaped: the body is literal, bash expands nothing in it. */
-	readonly quoted: boolean;
+  /** Offset of the body's first character — the line after the operator's line. */
+  readonly start: number
+  /** Offset just past the terminator line, or the end of the text when it never closes. */
+  readonly end: number
+  /** The delimiter was quoted or escaped: the body is literal, bash expands nothing in it. */
+  readonly quoted: boolean
 }
 
 /** `<<` and `<<-` (not `<<<`), the optional quoting or escape, and the delimiter word. */
 const HEREDOC_OPERATOR =
-	/(?<!<)<<(?!<)(-?)[ \t]*(?:'([^']+)'|"([^"]+)"|\\([A-Za-z0-9_.-]+)|([A-Za-z_][A-Za-z0-9_.-]*))/g;
+  /(?<!<)<<(?!<)(-?)[ \t]*(?:'([^']+)'|"([^"]+)"|\\([A-Za-z0-9_.-]+)|([A-Za-z_][A-Za-z0-9_.-]*))/g
 
 /**
  * Every heredoc's body, in order. bash reads the bodies of a line's operators one after
@@ -417,77 +417,77 @@ const HEREDOC_OPERATOR =
  * closes runs to the end of the text.
  */
 function heredocBodies(command: string): HeredocBody[] {
-	const bodies: HeredocBody[] = [];
-	let cursor = 0;
-	for (const match of command.matchAll(HEREDOC_OPERATOR)) {
-		const stripTabs = match[1] === "-";
-		const delimiter = match[2] ?? match[3] ?? match[4] ?? match[5] ?? "";
-		const quoted = match[2] !== undefined || match[3] !== undefined || match[4] !== undefined;
-		const operatorLineEnd = command.indexOf("\n", match.index ?? 0);
-		if (operatorLineEnd === -1) break; // no line after the operator: no body to read
-		const start = Math.max(operatorLineEnd + 1, cursor);
-		const end = heredocTerminatorEnd(command, start, delimiter, stripTabs);
-		bodies.push({ start, end, quoted });
-		cursor = end;
-	}
-	return bodies;
+  const bodies: HeredocBody[] = []
+  let cursor = 0
+  for (const match of command.matchAll(HEREDOC_OPERATOR)) {
+    const stripTabs = match[1] === '-'
+    const delimiter = match[2] ?? match[3] ?? match[4] ?? match[5] ?? ''
+    const quoted = match[2] !== undefined || match[3] !== undefined || match[4] !== undefined
+    const operatorLineEnd = command.indexOf('\n', match.index ?? 0)
+    if (operatorLineEnd === -1) break // no line after the operator: no body to read
+    const start = Math.max(operatorLineEnd + 1, cursor)
+    const end = heredocTerminatorEnd(command, start, delimiter, stripTabs)
+    bodies.push({ start, end, quoted })
+    cursor = end
+  }
+  return bodies
 }
 
 /** Just past the first line from `start` that is exactly `delimiter` — or the end of the text. */
 function heredocTerminatorEnd(command: string, start: number, delimiter: string, stripTabs: boolean): number {
-	let lineStart = start;
-	while (lineStart < command.length) {
-		const lineEnd = command.indexOf("\n", lineStart);
-		const line = command.slice(lineStart, lineEnd === -1 ? command.length : lineEnd);
-		if ((stripTabs ? line.replace(/^\t+/, "") : line) === delimiter) {
-			return lineEnd === -1 ? command.length : lineEnd + 1;
-		}
-		if (lineEnd === -1) break;
-		lineStart = lineEnd + 1;
-	}
-	return command.length;
+  let lineStart = start
+  while (lineStart < command.length) {
+    const lineEnd = command.indexOf('\n', lineStart)
+    const line = command.slice(lineStart, lineEnd === -1 ? command.length : lineEnd)
+    if ((stripTabs ? line.replace(/^\t+/, '') : line) === delimiter) {
+      return lineEnd === -1 ? command.length : lineEnd + 1
+    }
+    if (lineEnd === -1) break
+    lineStart = lineEnd + 1
+  }
+  return command.length
 }
 
 /** The text with the `[start, end)` ranges cut out. */
 function withoutRanges(text: string, ranges: readonly (readonly [number, number])[]): string {
-	if (ranges.length === 0) return text;
-	const sorted = [...ranges].sort((left, right) => left[0] - right[0]);
-	let kept = "";
-	let cursor = 0;
-	for (const [start, end] of sorted) {
-		if (start > cursor) kept += text.slice(cursor, start);
-		cursor = Math.max(cursor, end);
-	}
-	return kept + text.slice(cursor);
+  if (ranges.length === 0) return text
+  const sorted = [...ranges].sort((left, right) => left[0] - right[0])
+  let kept = ''
+  let cursor = 0
+  for (const [start, end] of sorted) {
+    if (start > cursor) kept += text.slice(cursor, start)
+    cursor = Math.max(cursor, end)
+  }
+  return kept + text.slice(cursor)
 }
 
 /** Where a `$(` opened at `start` closes, paren-balanced — or the end of the text when it never does. */
 function closingParenAfter(command: string, start: number): number {
-	let depth = 1;
-	let end = start;
-	while (end < command.length && depth > 0) {
-		if (command[end] === "(") depth += 1;
-		else if (command[end] === ")") depth -= 1;
-		end += 1;
-	}
-	return depth === 0 ? end - 1 : end;
+  let depth = 1
+  let end = start
+  while (end < command.length && depth > 0) {
+    if (command[end] === '(') depth += 1
+    else if (command[end] === ')') depth -= 1
+    end += 1
+  }
+  return depth === 0 ? end - 1 : end
 }
 
 /** The inside of every `$( … )` and every backtick pair — over-approximate on purpose: an unclosed one runs to the end. */
 function substitutionBodies(command: string): string[] {
-	const bodies: string[] = [];
-	for (let index = 0; index < command.length; index += 1) {
-		if (command[index] === "$" && command[index + 1] === "(") {
-			const close = closingParenAfter(command, index + 2);
-			bodies.push(command.slice(index + 2, close));
-			index = close;
-		} else if (command[index] === "`") {
-			const close = command.indexOf("`", index + 1);
-			bodies.push(command.slice(index + 1, close === -1 ? command.length : close));
-			index = close === -1 ? command.length : close;
-		}
-	}
-	return bodies;
+  const bodies: string[] = []
+  for (let index = 0; index < command.length; index += 1) {
+    if (command[index] === '$' && command[index + 1] === '(') {
+      const close = closingParenAfter(command, index + 2)
+      bodies.push(command.slice(index + 2, close))
+      index = close
+    } else if (command[index] === '`') {
+      const close = command.indexOf('`', index + 1)
+      bodies.push(command.slice(index + 1, close === -1 ? command.length : close))
+      index = close === -1 ? command.length : close
+    }
+  }
+  return bodies
 }
 
 /**
@@ -496,26 +496,26 @@ function substitutionBodies(command: string): string[] {
  * purpose: this runs only where the segmenter has already declined.
  */
 function shellFedByStream(commandLines: string): boolean {
-	for (const list of commandLines.split(/\|\||&&|;|\n/)) {
-		const pipeline = list.split("|");
-		for (const [position, piece] of pipeline.entries()) {
-			// Quote-aware words where the text allows it (`bash <<< "two words"` is one operand),
-			// whitespace otherwise — coarse is the mode here, and coarse errs toward the floor.
-			const words =
-				shellWordsOf(piece.trim()) ??
-				piece
-					.trim()
-					.split(/\s+/)
-					.filter((word) => word.length > 0);
-			let head = 0;
-			while (head < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[head] ?? "")) head += 1;
-			if (!STDIN_SHELLS.has(canonicalToolName(basename(words[head] ?? "")))) continue;
-			const rest = words.slice(head + 1);
-			const fedByRedirect = rest.some((word) => /^\d*<<</.test(word) || /^\d*<<-?/.test(word));
-			if ((position > 0 || fedByRedirect) && shellProgramIsStdin(rest)) return true;
-		}
-	}
-	return false;
+  for (const list of commandLines.split(/\|\||&&|;|\n/)) {
+    const pipeline = list.split('|')
+    for (const [position, piece] of pipeline.entries()) {
+      // Quote-aware words where the text allows it (`bash <<< "two words"` is one operand),
+      // whitespace otherwise — coarse is the mode here, and coarse errs toward the floor.
+      const words =
+        shellWordsOf(piece.trim()) ??
+        piece
+          .trim()
+          .split(/\s+/)
+          .filter((word) => word.length > 0)
+      let head = 0
+      while (head < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[head] ?? '')) head += 1
+      if (!STDIN_SHELLS.has(canonicalToolName(basename(words[head] ?? '')))) continue
+      const rest = words.slice(head + 1)
+      const fedByRedirect = rest.some((word) => /^\d*<<</.test(word) || /^\d*<<-?/.test(word))
+      if ((position > 0 || fedByRedirect) && shellProgramIsStdin(rest)) return true
+    }
+  }
+  return false
 }
 
 /**
@@ -523,25 +523,25 @@ function shellFedByStream(commandLines: string): boolean {
  * `coarse` forces the raw word-boundary scan (the PowerShell path).
  */
 export function findDeniedNetworkEgress(
-	command: string,
-	deniedBinaries: readonly string[],
-	options: { coarse?: boolean } = {},
+  command: string,
+  deniedBinaries: readonly string[],
+  options: { coarse?: boolean } = {},
 ): NetworkEgressMatch | undefined {
-	if (BASH_SOCKET_DEVICE_PATTERN.test(command)) {
-		return { matched: "/dev/tcp|/dev/udp", via: "dev-socket" };
-	}
-	if (options.coarse !== true) {
-		const denied = new Set(deniedBinaries.map((binary) => canonicalToolName(binary)));
-		const verdict = gateCommandLine(command, denied, deniedBinaries, 0);
-		if (verdict === "escalate") {
-			// A parseable command with an unresolvable word: the floor has not seen this text
-			// yet (the unparseable path runs it itself); then coarse over the whole command.
-			const floor = unscannableFloor(command);
-			if (floor !== undefined) return floor;
-		} else if (verdict !== "escalate-unparseable") {
-			return verdict;
-		}
-	}
-	const rawMatch = rawScanFor(command, deniedBinaries);
-	return rawMatch === undefined ? undefined : { matched: rawMatch, via: "raw-scan" };
+  if (BASH_SOCKET_DEVICE_PATTERN.test(command)) {
+    return { matched: '/dev/tcp|/dev/udp', via: 'dev-socket' }
+  }
+  if (options.coarse !== true) {
+    const denied = new Set(deniedBinaries.map((binary) => canonicalToolName(binary)))
+    const verdict = gateCommandLine(command, denied, deniedBinaries, 0)
+    if (verdict === 'escalate') {
+      // A parseable command with an unresolvable word: the floor has not seen this text
+      // yet (the unparseable path runs it itself); then coarse over the whole command.
+      const floor = unscannableFloor(command)
+      if (floor !== undefined) return floor
+    } else if (verdict !== 'escalate-unparseable') {
+      return verdict
+    }
+  }
+  const rawMatch = rawScanFor(command, deniedBinaries)
+  return rawMatch === undefined ? undefined : { matched: rawMatch, via: 'raw-scan' }
 }

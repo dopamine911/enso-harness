@@ -1,6 +1,6 @@
-import { expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { expect, test } from 'bun:test'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 /**
  * Every record goes through the one logger (#132), and the substrate stays behind it.
@@ -22,54 +22,54 @@ import { join } from "node:path";
  * is a design conversation.
  */
 
-const repositoryRoot = join(import.meta.dir, "..");
-const MIGRATED_ROOTS = ["packages/core/src", "packages/web/src", "packages/harness"] as const;
-const SKIPPED_DIRECTORIES = ["node_modules", "dist", "dist-types", "coverage", "__tests__"] as const;
-const SOURCE_EXTENSION = /\.tsx?$/;
+const repositoryRoot = join(import.meta.dir, '..')
+const MIGRATED_ROOTS = ['packages/core/src', 'packages/web/src', 'packages/harness'] as const
+const SKIPPED_DIRECTORIES = ['node_modules', 'dist', 'dist-types', 'coverage', '__tests__'] as const
+const SOURCE_EXTENSION = /\.tsx?$/
 /** A line that is only a comment: `//`, a block opener, or a block's `*`-led body. */
-const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/;
+const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/
 /** The console is a sink LogTape owns; nothing here writes to it by hand. */
-const CONSOLE_CALL = /\bconsole\.(?:log|error|warn|info|debug|trace)\s*\(/;
+const CONSOLE_CALL = /\bconsole\.(?:log|error|warn|info|debug|trace)\s*\(/
 /** Where the substrate may be named. */
-const LOGTAPE_IMPORT = /from\s+["']@logtape\//;
+const LOGTAPE_IMPORT = /from\s+["']@logtape\//
 const LOGTAPE_ALLOWED = [
-	"packages/core/src/log.ts",
-	"packages/core/src/log-process.ts",
-	"packages/web/src/browser-logging.ts",
-] as const;
+  'packages/core/src/log.ts',
+  'packages/core/src/log-process.ts',
+  'packages/web/src/browser-logging.ts',
+] as const
 
 function sourceFiles(directory: string): string[] {
-	const found: string[] = [];
-	for (const dirent of readdirSync(directory, { withFileTypes: true })) {
-		if ((SKIPPED_DIRECTORIES as readonly string[]).includes(dirent.name)) continue;
-		const path = join(directory, dirent.name);
-		if (dirent.isDirectory()) found.push(...sourceFiles(path));
-		else if (SOURCE_EXTENSION.test(dirent.name)) found.push(path);
-	}
-	return found;
+  const found: string[] = []
+  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
+    if ((SKIPPED_DIRECTORIES as readonly string[]).includes(dirent.name)) continue
+    const path = join(directory, dirent.name)
+    if (dirent.isDirectory()) found.push(...sourceFiles(path))
+    else if (SOURCE_EXTENSION.test(dirent.name)) found.push(path)
+  }
+  return found
 }
 
 function offendersMatching(pattern: RegExp, allowed: readonly string[]): string[] {
-	const offenders: string[] = [];
-	for (const root of MIGRATED_ROOTS) {
-		for (const path of sourceFiles(join(repositoryRoot, root))) {
-			const repositoryRelative = path.slice(repositoryRoot.length + 1);
-			if (allowed.includes(repositoryRelative)) continue;
-			const lines = readFileSync(path, "utf8").split("\n");
-			for (const [lineIndex, line] of lines.entries()) {
-				// Code, not prose: a comment may quote `console.log` as the thing a guard denies.
-				if (COMMENT_LINE.test(line)) continue;
-				if (pattern.test(line)) offenders.push(`${repositoryRelative}:${lineIndex + 1}`);
-			}
-		}
-	}
-	return offenders;
+  const offenders: string[] = []
+  for (const root of MIGRATED_ROOTS) {
+    for (const path of sourceFiles(join(repositoryRoot, root))) {
+      const repositoryRelative = path.slice(repositoryRoot.length + 1)
+      if (allowed.includes(repositoryRelative)) continue
+      const lines = readFileSync(path, 'utf8').split('\n')
+      for (const [lineIndex, line] of lines.entries()) {
+        // Code, not prose: a comment may quote `console.log` as the thing a guard denies.
+        if (COMMENT_LINE.test(line)) continue
+        if (pattern.test(line)) offenders.push(`${repositoryRelative}:${lineIndex + 1}`)
+      }
+    }
+  }
+  return offenders
 }
 
-test("⚠ no production console.* in a migrated root — every record goes through zenLogger (#132)", () => {
-	expect(offendersMatching(CONSOLE_CALL, [])).toEqual([]);
-});
+test('⚠ no production console.* in a migrated root — every record goes through zenLogger (#132)', () => {
+  expect(offendersMatching(CONSOLE_CALL, [])).toEqual([])
+})
 
-test("⚠ @logtape/* is imported only by the schema and the configurators (#132)", () => {
-	expect(offendersMatching(LOGTAPE_IMPORT, LOGTAPE_ALLOWED)).toEqual([]);
-});
+test('⚠ @logtape/* is imported only by the schema and the configurators (#132)', () => {
+  expect(offendersMatching(LOGTAPE_IMPORT, LOGTAPE_ALLOWED)).toEqual([])
+})

@@ -1,5 +1,5 @@
-import { type Static, Type } from "typebox";
-import { Compile } from "typebox/compile";
+import { type Static, Type } from 'typebox'
+import { Compile } from 'typebox/compile'
 
 /**
  * The tool-result payload contract (#18), as a TypeBox schema.
@@ -49,11 +49,11 @@ import { Compile } from "typebox/compile";
  *
  * A colon namespaces just as well and is not path syntax anywhere.
  */
-export const ZEN_TOOL_RESULT_KEY = "zen:toolResult" as const;
+export const ZEN_TOOL_RESULT_KEY = 'zen:toolResult' as const
 
 /** Units a truncation can be counted in. Closed, because a surface must render each one. */
-export const ZenTruncationUnit = Type.Union([Type.Literal("lines"), Type.Literal("bytes"), Type.Literal("items")]);
-export type ZenTruncationUnit = Static<typeof ZenTruncationUnit>;
+export const ZenTruncationUnit = Type.Union([Type.Literal('lines'), Type.Literal('bytes'), Type.Literal('items')])
+export type ZenTruncationUnit = Static<typeof ZenTruncationUnit>
 
 /**
  * Truncation carried as data, never pre-rendered (#18).
@@ -62,11 +62,11 @@ export type ZenTruncationUnit = Static<typeof ZenTruncationUnit>;
  * lines", and a pre-truncated string forces the terminal's choice onto the browser.
  */
 export const ZenTruncation = Type.Object({
-	shown: Type.Integer({ minimum: 0 }),
-	total: Type.Integer({ minimum: 0 }),
-	unit: ZenTruncationUnit,
-});
-export type ZenTruncation = Static<typeof ZenTruncation>;
+  shown: Type.Integer({ minimum: 0 }),
+  total: Type.Integer({ minimum: 0 }),
+  unit: ZenTruncationUnit,
+})
+export type ZenTruncation = Static<typeof ZenTruncation>
 
 /**
  * A tool result, described rather than rendered.
@@ -77,13 +77,13 @@ export type ZenTruncation = Static<typeof ZenTruncation>;
  * unrecognised renderer into a dropped result.
  */
 export const ZenToolResultDescriptor = Type.Object({
-	/** Renderer selector. Unknown values MUST fall back to the envelope's `content`. */
-	kind: Type.String({ minLength: 1 }),
-	/** Serializable props for the selected renderer. Never a rendered element. */
-	props: Type.Record(Type.String(), Type.Unknown()),
-	truncated: Type.Optional(ZenTruncation),
-});
-export type ZenToolResultDescriptor = Static<typeof ZenToolResultDescriptor>;
+  /** Renderer selector. Unknown values MUST fall back to the envelope's `content`. */
+  kind: Type.String({ minLength: 1 }),
+  /** Serializable props for the selected renderer. Never a rendered element. */
+  props: Type.Record(Type.String(), Type.Unknown()),
+  truncated: Type.Optional(ZenTruncation),
+})
+export type ZenToolResultDescriptor = Static<typeof ZenToolResultDescriptor>
 
 /**
  * JIT validator, compiled once at module load.
@@ -91,11 +91,11 @@ export type ZenToolResultDescriptor = Static<typeof ZenToolResultDescriptor>;
  * `Compile` rather than `Check` because this runs on every tool result that crosses the
  * wire; `Check` re-walks the schema per call.
  */
-const descriptorValidator = Compile(ZenToolResultDescriptor);
+const descriptorValidator = Compile(ZenToolResultDescriptor)
 
 /** Runtime shape check, from the schema rather than beside it. */
 export function isZenToolResultDescriptor(value: unknown): value is ZenToolResultDescriptor {
-	return descriptorValidator.Check(value);
+  return descriptorValidator.Check(value)
 }
 
 /**
@@ -105,9 +105,9 @@ export function isZenToolResultDescriptor(value: unknown): value is ZenToolResul
  * renderer too — which has no TanStack types and must not gain them.
  */
 export function readZenToolResultDescriptor(
-	metadata: Record<string, unknown> | undefined,
+  metadata: Record<string, unknown> | undefined,
 ): ZenToolResultDescriptor | undefined {
-	if (metadata === undefined) return undefined;
-	const candidate = metadata[ZEN_TOOL_RESULT_KEY];
-	return isZenToolResultDescriptor(candidate) ? candidate : undefined;
+  if (metadata === undefined) return undefined
+  const candidate = metadata[ZEN_TOOL_RESULT_KEY]
+  return isZenToolResultDescriptor(candidate) ? candidate : undefined
 }

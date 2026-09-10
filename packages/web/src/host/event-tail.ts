@@ -1,4 +1,4 @@
-import type { PiRpcEvent, ZenEventProvenance, ZenThreadEvent } from "@zen/core";
+import type { PiRpcEvent, ZenEventProvenance, ZenThreadEvent } from '@zen/core'
 
 /**
  * A thread's event tail (#97): the last N events through one funnel, with provenance.
@@ -24,37 +24,37 @@ import type { PiRpcEvent, ZenEventProvenance, ZenThreadEvent } from "@zen/core";
  */
 
 /** Enough for a whole run with its startup replays and a few tool calls; deltas coalesce. */
-export const EVENT_TAIL_CAPACITY = 200;
+export const EVENT_TAIL_CAPACITY = 200
 
 export interface EventTail {
-	readonly record: (type: string, name: string | undefined, provenance: ZenEventProvenance) => void;
-	/** Oldest first. A fresh copy per call — the caller's to keep or mutate; the ring is untouched. */
-	readonly recent: () => ZenThreadEvent[];
+  readonly record: (type: string, name: string | undefined, provenance: ZenEventProvenance) => void
+  /** Oldest first. A fresh copy per call — the caller's to keep or mutate; the ring is untouched. */
+  readonly recent: () => ZenThreadEvent[]
 }
 
 export function createEventTail(capacity = EVENT_TAIL_CAPACITY): EventTail {
-	const ring: ZenThreadEvent[] = [];
-	let nextSequence = 0;
-	return {
-		record: (type, name, provenance) => {
-			const last = ring.at(-1);
-			if (last !== undefined && last.type === type && last.name === name && last.provenance === provenance) {
-				ring[ring.length - 1] = { ...last, count: last.count + 1 };
-				return;
-			}
-			nextSequence += 1;
-			const entry: ZenThreadEvent = {
-				sequence: nextSequence,
-				type,
-				provenance,
-				at: new Date().toISOString(),
-				count: 1,
-			};
-			ring.push(name === undefined ? entry : { ...entry, name });
-			if (ring.length > capacity) ring.shift();
-		},
-		recent: () => [...ring],
-	};
+  const ring: ZenThreadEvent[] = []
+  let nextSequence = 0
+  return {
+    record: (type, name, provenance) => {
+      const last = ring.at(-1)
+      if (last !== undefined && last.type === type && last.name === name && last.provenance === provenance) {
+        ring[ring.length - 1] = { ...last, count: last.count + 1 }
+        return
+      }
+      nextSequence += 1
+      const entry: ZenThreadEvent = {
+        sequence: nextSequence,
+        type,
+        provenance,
+        at: new Date().toISOString(),
+        count: 1,
+      }
+      ring.push(name === undefined ? entry : { ...entry, name })
+      if (ring.length > capacity) ring.shift()
+    },
+    recent: () => [...ring],
+  }
 }
 
 /**
@@ -63,13 +63,13 @@ export function createEventTail(capacity = EVENT_TAIL_CAPACITY): EventTail {
  * modelled (`pi-rpc.ts`).
  */
 export function describePiRpcEvent(event: PiRpcEvent): { type: string; name: string | undefined } {
-	const record = event as { type: string; entry?: unknown; method?: unknown; toolName?: unknown };
-	if (record.type === "entry_appended" && typeof record.entry === "object" && record.entry !== null) {
-		const entry = record.entry as { type?: unknown; customType?: unknown };
-		if (typeof entry.customType === "string") return { type: record.type, name: entry.customType };
-		if (typeof entry.type === "string") return { type: record.type, name: entry.type };
-	}
-	if (typeof record.method === "string") return { type: record.type, name: record.method };
-	if (typeof record.toolName === "string") return { type: record.type, name: record.toolName };
-	return { type: record.type, name: undefined };
+  const record = event as { type: string; entry?: unknown; method?: unknown; toolName?: unknown }
+  if (record.type === 'entry_appended' && typeof record.entry === 'object' && record.entry !== null) {
+    const entry = record.entry as { type?: unknown; customType?: unknown }
+    if (typeof entry.customType === 'string') return { type: record.type, name: entry.customType }
+    if (typeof entry.type === 'string') return { type: record.type, name: entry.type }
+  }
+  if (typeof record.method === 'string') return { type: record.type, name: record.method }
+  if (typeof record.toolName === 'string') return { type: record.type, name: record.toolName }
+  return { type: record.type, name: undefined }
 }

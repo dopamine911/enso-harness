@@ -1,6 +1,6 @@
-import type { MessagePart, UIMessage } from "@tanstack/ai-client";
-import type { ZenInterruptedTail } from "@zen/core";
-import { contentToText, descriptorFrom, toolResultMetadata } from "./map-events.ts";
+import type { MessagePart, UIMessage } from '@tanstack/ai-client'
+import type { ZenInterruptedTail } from '@zen/core'
+import { contentToText, descriptorFrom, toolResultMetadata } from './map-events.ts'
 
 /**
  * pi's session branch → TanStack `UIMessage`s (#95): the history a resumed thread mounts
@@ -20,36 +20,36 @@ import { contentToText, descriptorFrom, toolResultMetadata } from "./map-events.
  */
 
 interface PiSessionEntry {
-	type?: unknown;
-	id?: unknown;
-	timestamp?: unknown;
-	message?: unknown;
+  type?: unknown
+  id?: unknown
+  timestamp?: unknown
+  message?: unknown
 }
 
 interface PiStoredMessage {
-	role?: unknown;
-	content?: unknown;
-	toolCallId?: unknown;
-	toolName?: unknown;
-	isError?: unknown;
-	details?: unknown;
+  role?: unknown
+  content?: unknown
+  toolCallId?: unknown
+  toolName?: unknown
+  isError?: unknown
+  details?: unknown
 }
 
 interface PiAssistantContentPart {
-	type?: unknown;
-	text?: unknown;
-	thinking?: unknown;
-	id?: unknown;
-	name?: unknown;
-	arguments?: unknown;
+  type?: unknown
+  text?: unknown
+  thinking?: unknown
+  id?: unknown
+  name?: unknown
+  arguments?: unknown
 }
 
 /** pi's user content: `string`, or `[{type:"text", text}, {type:"image", data, mimeType}, …]` (`UserMessage` in pi-ai). */
 interface PiUserContentPart {
-	type?: unknown;
-	text?: unknown;
-	data?: unknown;
-	mimeType?: unknown;
+  type?: unknown
+  text?: unknown
+  data?: unknown
+  mimeType?: unknown
 }
 
 /**
@@ -60,106 +60,106 @@ interface PiUserContentPart {
  * does, rather than vanishing.
  */
 function userParts(content: unknown): MessagePart[] {
-	if (typeof content === "string") return [{ type: "text", content }];
-	if (!Array.isArray(content)) return [{ type: "text", content: "" }];
-	const parts: MessagePart[] = [];
-	for (const raw of content as PiUserContentPart[]) {
-		if (typeof raw !== "object" || raw === null) continue;
-		if (raw.type === "text" && typeof raw.text === "string") parts.push({ type: "text", content: raw.text });
-		else if (raw.type === "image" && typeof raw.data === "string" && typeof raw.mimeType === "string") {
-			parts.push({ type: "image", source: { type: "data", value: raw.data, mimeType: raw.mimeType } });
-		} else parts.push({ type: "text", content: `[${typeof raw.type === "string" ? raw.type : "unknown"} content]` });
-	}
-	return parts;
+  if (typeof content === 'string') return [{ type: 'text', content }]
+  if (!Array.isArray(content)) return [{ type: 'text', content: '' }]
+  const parts: MessagePart[] = []
+  for (const raw of content as PiUserContentPart[]) {
+    if (typeof raw !== 'object' || raw === null) continue
+    if (raw.type === 'text' && typeof raw.text === 'string') parts.push({ type: 'text', content: raw.text })
+    else if (raw.type === 'image' && typeof raw.data === 'string' && typeof raw.mimeType === 'string') {
+      parts.push({ type: 'image', source: { type: 'data', value: raw.data, mimeType: raw.mimeType } })
+    } else parts.push({ type: 'text', content: `[${typeof raw.type === 'string' ? raw.type : 'unknown'} content]` })
+  }
+  return parts
 }
 
 function assistantParts(content: unknown): MessagePart[] {
-	if (!Array.isArray(content)) return [];
-	const parts: MessagePart[] = [];
-	for (const raw of content as PiAssistantContentPart[]) {
-		if (typeof raw !== "object" || raw === null) continue;
-		if (raw.type === "text" && typeof raw.text === "string") parts.push({ type: "text", content: raw.text });
-		else if (raw.type === "thinking" && typeof raw.thinking === "string") {
-			parts.push({ type: "thinking", content: raw.thinking });
-		} else if (raw.type === "toolCall" && typeof raw.id === "string" && typeof raw.name === "string") {
-			parts.push({
-				type: "tool-call",
-				id: raw.id,
-				name: raw.name,
-				arguments: JSON.stringify(raw.arguments ?? {}),
-				input: raw.arguments,
-				state: "input-complete",
-			});
-		}
-	}
-	return parts;
+  if (!Array.isArray(content)) return []
+  const parts: MessagePart[] = []
+  for (const raw of content as PiAssistantContentPart[]) {
+    if (typeof raw !== 'object' || raw === null) continue
+    if (raw.type === 'text' && typeof raw.text === 'string') parts.push({ type: 'text', content: raw.text })
+    else if (raw.type === 'thinking' && typeof raw.thinking === 'string') {
+      parts.push({ type: 'thinking', content: raw.thinking })
+    } else if (raw.type === 'toolCall' && typeof raw.id === 'string' && typeof raw.name === 'string') {
+      parts.push({
+        type: 'tool-call',
+        id: raw.id,
+        name: raw.name,
+        arguments: JSON.stringify(raw.arguments ?? {}),
+        input: raw.arguments,
+        state: 'input-complete',
+      })
+    }
+  }
+  return parts
 }
 
 function createdAt(entry: PiSessionEntry): Date | undefined {
-	if (typeof entry.timestamp !== "string") return undefined;
-	const parsed = new Date(entry.timestamp);
-	return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+  if (typeof entry.timestamp !== 'string') return undefined
+  const parsed = new Date(entry.timestamp)
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed
 }
 
 /** Attach a stored tool result to the assistant message holding its call; false if no call is found. */
 function attachToolResult(messages: UIMessage[], stored: PiStoredMessage): boolean {
-	if (typeof stored.toolCallId !== "string") return false;
-	const toolName = typeof stored.toolName === "string" ? stored.toolName : "unknown";
-	const text = contentToText(stored.content);
-	const isError = stored.isError === true;
-	for (let position = messages.length - 1; position >= 0; position -= 1) {
-		const candidate = messages[position];
-		if (candidate === undefined || candidate.role !== "assistant") continue;
-		const call = candidate.parts.find((part) => part.type === "tool-call" && part.id === stored.toolCallId);
-		if (call === undefined || call.type !== "tool-call") continue;
-		call.state = isError ? "error" : "complete";
-		call.output = text;
-		const metadata = toolResultMetadata(descriptorFrom(toolName, stored.details));
-		candidate.parts.push({
-			type: "tool-result",
-			toolCallId: stored.toolCallId,
-			name: toolName,
-			content: text,
-			state: isError ? "error" : "complete",
-			...(isError ? { error: text } : {}),
-			...(metadata === undefined ? {} : { metadata }),
-		});
-		return true;
-	}
-	return false;
+  if (typeof stored.toolCallId !== 'string') return false
+  const toolName = typeof stored.toolName === 'string' ? stored.toolName : 'unknown'
+  const text = contentToText(stored.content)
+  const isError = stored.isError === true
+  for (let position = messages.length - 1; position >= 0; position -= 1) {
+    const candidate = messages[position]
+    if (candidate === undefined || candidate.role !== 'assistant') continue
+    const call = candidate.parts.find((part) => part.type === 'tool-call' && part.id === stored.toolCallId)
+    if (call === undefined || call.type !== 'tool-call') continue
+    call.state = isError ? 'error' : 'complete'
+    call.output = text
+    const metadata = toolResultMetadata(descriptorFrom(toolName, stored.details))
+    candidate.parts.push({
+      type: 'tool-result',
+      toolCallId: stored.toolCallId,
+      name: toolName,
+      content: text,
+      state: isError ? 'error' : 'complete',
+      ...(isError ? { error: text } : {}),
+      ...(metadata === undefined ? {} : { metadata }),
+    })
+    return true
+  }
+  return false
 }
 
 /** The branch, root to leaf, as the messages a chat mounts with. Entries that are not messages are skipped. */
 export function branchToMessages(branch: readonly unknown[]): UIMessage[] {
-	const messages: UIMessage[] = [];
-	for (const raw of branch) {
-		if (typeof raw !== "object" || raw === null) continue;
-		const entry = raw as PiSessionEntry;
-		if (entry.type !== "message" || typeof entry.message !== "object" || entry.message === null) continue;
-		const stored = entry.message as PiStoredMessage;
-		const id = typeof entry.id === "string" ? entry.id : `entry-${messages.length}`;
-		const at = createdAt(entry);
-		if (stored.role === "user") {
-			messages.push({
-				id,
-				role: "user",
-				parts: userParts(stored.content),
-				...(at === undefined ? {} : { createdAt: at }),
-			});
-		} else if (stored.role === "assistant") {
-			messages.push({
-				id,
-				role: "assistant",
-				parts: assistantParts(stored.content),
-				...(at === undefined ? {} : { createdAt: at }),
-			});
-		} else if (stored.role === "toolResult") {
-			// A result whose call is not on the branch (a compacted or edited history) is
-			// dropped: TanStack keeps detached results verbatim, which renders as a stray row.
-			attachToolResult(messages, stored);
-		}
-	}
-	return messages;
+  const messages: UIMessage[] = []
+  for (const raw of branch) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const entry = raw as PiSessionEntry
+    if (entry.type !== 'message' || typeof entry.message !== 'object' || entry.message === null) continue
+    const stored = entry.message as PiStoredMessage
+    const id = typeof entry.id === 'string' ? entry.id : `entry-${messages.length}`
+    const at = createdAt(entry)
+    if (stored.role === 'user') {
+      messages.push({
+        id,
+        role: 'user',
+        parts: userParts(stored.content),
+        ...(at === undefined ? {} : { createdAt: at }),
+      })
+    } else if (stored.role === 'assistant') {
+      messages.push({
+        id,
+        role: 'assistant',
+        parts: assistantParts(stored.content),
+        ...(at === undefined ? {} : { createdAt: at }),
+      })
+    } else if (stored.role === 'toolResult') {
+      // A result whose call is not on the branch (a compacted or edited history) is
+      // dropped: TanStack keeps detached results verbatim, which renders as a stray row.
+      attachToolResult(messages, stored)
+    }
+  }
+  return messages
 }
 
 /**
@@ -172,12 +172,12 @@ export function branchToMessages(branch: readonly unknown[]): UIMessage[] {
  * carries no fact that says so, and inventing one would be a guess.
  */
 export function interruptedTail(messages: readonly UIMessage[]): ZenInterruptedTail | undefined {
-	const last = messages.at(-1);
-	if (last === undefined) return undefined;
-	if (last.role === "user") return "unanswered-prompt";
-	if (last.role !== "assistant") return undefined;
-	const unresolved = last.parts.some(
-		(part) => part.type === "tool-call" && part.state !== "complete" && part.state !== "error",
-	);
-	return unresolved ? "tool-call-without-result" : undefined;
+  const last = messages.at(-1)
+  if (last === undefined) return undefined
+  if (last.role === 'user') return 'unanswered-prompt'
+  if (last.role !== 'assistant') return undefined
+  const unresolved = last.parts.some(
+    (part) => part.type === 'tool-call' && part.state !== 'complete' && part.state !== 'error',
+  )
+  return unresolved ? 'tool-call-without-result' : undefined
 }

@@ -44,27 +44,27 @@
  * Usage:  bun run zen -p "hello"
  *         ZEN_AGENT_DIR=/somewhere/else bun run zen
  */
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import {
-	findRepoRoot,
-	harnessPackageDir,
-	printHarnessDir,
-	quarantineSecrets,
-	zenAgentDir,
-} from "../packages/core/src/index.ts";
-import { buildPrintManifest, materializePrintHarness } from "./print-harness.mjs";
+  findRepoRoot,
+  harnessPackageDir,
+  printHarnessDir,
+  quarantineSecrets,
+  zenAgentDir,
+} from '../packages/core/src/index.ts'
+import { buildPrintManifest, materializePrintHarness } from './print-harness.mjs'
 
-const repoRoot = findRepoRoot(import.meta.url);
-const packageRoot = harnessPackageDir(repoRoot);
-const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+const repoRoot = findRepoRoot(import.meta.url)
+const packageRoot = harnessPackageDir(repoRoot)
+const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
 
-const VENDOR_PATH_PREFIX = "node_modules/";
+const VENDOR_PATH_PREFIX = 'node_modules/'
 
-const declaredResources = Object.values(manifest.pi ?? {}).flatMap((paths) => (Array.isArray(paths) ? paths : [paths]));
+const declaredResources = Object.values(manifest.pi ?? {}).flatMap((paths) => (Array.isArray(paths) ? paths : [paths]))
 if (declaredResources.length === 0) {
-	console.error("zen: packages/harness/package.json declares no pi resources");
-	process.exit(1);
+  console.error('zen: packages/harness/package.json declares no pi resources')
+  process.exit(1)
 }
 
 /**
@@ -76,20 +76,20 @@ if (declaredResources.length === 0) {
  * whatever the vendor package was supposed to provide.
  */
 const missingVendorPaths = declaredResources
-	.filter((entry) => typeof entry === "string" && entry.startsWith(VENDOR_PATH_PREFIX))
-	.filter((entry) => !existsSync(resolve(packageRoot, entry)));
+  .filter((entry) => typeof entry === 'string' && entry.startsWith(VENDOR_PATH_PREFIX))
+  .filter((entry) => !existsSync(resolve(packageRoot, entry)))
 
 if (missingVendorPaths.length > 0) {
-	console.error("zen: vendor package paths are missing from the harness package:");
-	for (const missing of missingVendorPaths) console.error(`  - ${missing}`);
-	console.error("zen: run `bun install` (its postinstall relinks the vendor packages)");
-	process.exit(1);
+  console.error('zen: vendor package paths are missing from the harness package:')
+  for (const missing of missingVendorPaths) console.error(`  - ${missing}`)
+  console.error('zen: run `bun install` (its postinstall relinks the vendor packages)')
+  process.exit(1)
 }
 
-const agentDir = process.env.ZEN_AGENT_DIR ?? zenAgentDir(repoRoot);
-mkdirSync(agentDir, { recursive: true });
+const agentDir = process.env.ZEN_AGENT_DIR ?? zenAgentDir(repoRoot)
+mkdirSync(agentDir, { recursive: true })
 
-const passthroughArgs = process.argv.slice(2);
+const passthroughArgs = process.argv.slice(2)
 
 /**
  * ⚠ PRINT RUNS LOAD A VARIANT PACKAGE WITHOUT picc-permission-modes (#20).
@@ -104,19 +104,19 @@ const passthroughArgs = process.argv.slice(2);
  * not a TTY (piped input cannot answer a permission dialog even without -p). Interactive
  * runs keep the full package and the full permission model.
  */
-const isPrintRun = passthroughArgs.includes("-p") || passthroughArgs.includes("--print") || !process.stdin.isTTY;
+const isPrintRun = passthroughArgs.includes('-p') || passthroughArgs.includes('--print') || !process.stdin.isTTY
 
 const packageToLoad = isPrintRun
-	? materializePrintHarness(printHarnessDir(repoRoot), packageRoot, buildPrintManifest(manifest))
-	: packageRoot;
+  ? materializePrintHarness(printHarnessDir(repoRoot), packageRoot, buildPrintManifest(manifest))
+  : packageRoot
 
-const args = ["--no-extensions", "--no-skills", "-e", packageToLoad, ...passthroughArgs];
+const args = ['--no-extensions', '--no-skills', '-e', packageToLoad, ...passthroughArgs]
 
 console.error(
-	`zen: vanilla pi | agent-dir=${agentDir} | package=${packageToLoad}` +
-		`${isPrintRun ? " (print variant, no permission modes — #20)" : ""} | ` +
-		`${declaredResources.length} declared resource path(s)`,
-);
+  `zen: vanilla pi | agent-dir=${agentDir} | package=${packageToLoad}` +
+    `${isPrintRun ? ' (print variant, no permission modes — #20)' : ''} | ` +
+    `${declaredResources.length} declared resource path(s)`,
+)
 
 /**
  * ⚠ SECRETS OUT BEFORE THE SPAWN (#89). bun auto-loaded a root `.env` into THIS process's
@@ -125,19 +125,19 @@ console.error(
  * that need a key read `.zen/secrets.env` directly (`readSecret`); the environment carries
  * none, and a root `.env` that still holds a secret is reported as misplaced.
  */
-const quarantine = quarantineSecrets(process.env, repoRoot);
+const quarantine = quarantineSecrets(process.env, repoRoot)
 if (quarantine.removed.length > 0)
-	console.error(`zen: secrets kept out of pi's environment (#89): ${quarantine.removed.join(", ")}`);
+  console.error(`zen: secrets kept out of pi's environment (#89): ${quarantine.removed.join(', ')}`)
 if (quarantine.misplaced.length > 0) {
-	console.error(
-		`zen: ⚠ the root .env defines ${quarantine.misplaced.join(", ")} — bun autoloads .env into every bun child, ` +
-			"so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env.",
-	);
+  console.error(
+    `zen: ⚠ the root .env defines ${quarantine.misplaced.join(', ')} — bun autoloads .env into every bun child, ` +
+      'so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env.',
+  )
 }
 
-const pi = Bun.spawn(["pi", ...args], {
-	stdio: ["inherit", "inherit", "inherit"],
-	env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
-});
+const pi = Bun.spawn(['pi', ...args], {
+  stdio: ['inherit', 'inherit', 'inherit'],
+  env: { ...process.env, PI_CODING_AGENT_DIR: agentDir },
+})
 // `exited` resolves with the exit code (never null, unlike Node's `exit` event).
-process.exit(await pi.exited);
+process.exit(await pi.exited)

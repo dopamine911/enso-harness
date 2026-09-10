@@ -1,45 +1,45 @@
 {
-	"name": "zen-harness-foundation",
-	"private": true,
-	"type": "module",
-	"workspaces": [
-		"packages/*"
-	],
-	"engines": {
-		"bun": ">=1.4.0",
-		"node": ">=22"
-	},
-	"packageManager": "bun@1.4.0",
-	"scripts": {
-		"typecheck": "tsc -b --pretty false",
-		"test": "bun test",
-		"lint": "biome check",
-		"lint:fix": "biome check --write",
-		"format": "biome format --write",
-		"check:all": "bun scripts/gate.ts",
-		"check": "bun scripts/gate.ts",
-		"prepare": "git config core.hooksPath .githooks || true",
-		"link:vendor": "bun scripts/link-vendor-packages.mjs",
-		"postinstall": "bun scripts/link-vendor-packages.mjs",
-		"zen": "bun scripts/zen.mjs",
-		"dev": "bun scripts/dev.mjs",
-		"logs": "bun scripts/zen-logs.ts",
-		"dev:server": "bun run --silent --cwd packages/web dev:server",
-		"dev:web": "bun run --silent --cwd packages/web dev:web",
-		"e2e": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep-invert @model",
-		"e2e:model": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep @model",
-		"coverage:check": "bun scripts/check-coverage.ts",
-		"doctor": "bunx react-doctor@latest --verbose"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "2.5.12",
-		"@types/bun": "^1.4.0",
-		"typescript": "~7.0.2"
-	},
-	"overrides": {
-		"@tanstack/ai": "0.53.0",
-		"@tanstack/ai-client": "0.31.0",
-		"@tanstack/ai-utils": "0.4.0",
-		"@ag-ui/core": "0.1.1-canary.beta.0"
-	}
+  "name": "zen-harness-foundation",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "bun": ">=1.4.0",
+    "node": ">=22"
+  },
+  "packageManager": "bun@1.4.0",
+  "scripts": {
+    "typecheck": "tsc -b --pretty false",
+    "test": "bun test",
+    "lint": "biome check",
+    "lint:fix": "biome check --write",
+    "format": "biome format --write",
+    "check:all": "bun scripts/gate.ts",
+    "check": "bun scripts/gate.ts",
+    "prepare": "git config core.hooksPath .githooks || true",
+    "link:vendor": "bun scripts/link-vendor-packages.mjs",
+    "postinstall": "bun scripts/link-vendor-packages.mjs",
+    "zen": "bun scripts/zen.mjs",
+    "dev": "bun scripts/dev.mjs",
+    "logs": "bun scripts/zen-logs.ts",
+    "dev:server": "bun run --silent --cwd packages/web dev:server",
+    "dev:web": "bun run --silent --cwd packages/web dev:web",
+    "e2e": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep-invert @model",
+    "e2e:model": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep @model",
+    "coverage:check": "bun scripts/check-coverage.ts",
+    "doctor": "bunx react-doctor@latest --verbose"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.12",
+    "@types/bun": "^1.4.0",
+    "typescript": "~7.0.2"
+  },
+  "overrides": {
+    "@tanstack/ai": "0.53.0",
+    "@tanstack/ai-client": "0.31.0",
+    "@tanstack/ai-utils": "0.4.0",
+    "@ag-ui/core": "0.1.1-canary.beta.0"
+  }
 }

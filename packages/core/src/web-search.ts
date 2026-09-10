@@ -1,4 +1,4 @@
-import { type Static, Type } from "typebox";
+import { type Static, Type } from 'typebox'
 
 /**
  * The web_search tool's shapes and config section (#63).
@@ -13,7 +13,7 @@ import { type Static, Type } from "typebox";
  */
 
 /** The tool's registered name. */
-export const WEB_SEARCH_TOOL_NAME = "web_search";
+export const WEB_SEARCH_TOOL_NAME = 'web_search'
 
 /**
  * The deadline for ONE web_search call — primary AND fallback together, not per attempt
@@ -23,7 +23,7 @@ export const WEB_SEARCH_TOOL_NAME = "web_search";
  * fallback run 120s with no chunk crossing, and the server read that as a hung run and cut
  * it mid-search (#98). The fallback gets whatever the primary left of this budget.
  */
-export const WEB_SEARCH_TIMEOUT_MS = 60_000;
+export const WEB_SEARCH_TIMEOUT_MS = 60_000
 
 /**
  * The tool's parameters: the query and nothing else. Upstream pi-web-search also took
@@ -32,9 +32,9 @@ export const WEB_SEARCH_TIMEOUT_MS = 60_000;
  * backend silently ignores is a capability drop, not a feature.
  */
 export const WebSearchToolParameters = Type.Object({
-	query: Type.String({ description: "The search query or question to answer from the live web." }),
-});
-export type WebSearchToolParameters = Static<typeof WebSearchToolParameters>;
+  query: Type.String({ description: 'The search query or question to answer from the live web.' }),
+})
+export type WebSearchToolParameters = Static<typeof WebSearchToolParameters>
 
 /**
  * web_search's OPTIONAL section of `zen.config.json`.
@@ -53,18 +53,18 @@ export type WebSearchToolParameters = Static<typeof WebSearchToolParameters>;
  *   and secrets never enter this committed file.
  */
 export const WebSearchConfig = Type.Object(
-	{
-		backend: Type.Optional(Type.Literal("deepseek")),
-		tavily: Type.Optional(
-			Type.Object(
-				{
-					includeDomains: Type.Optional(Type.Array(Type.String())),
-					excludeDomains: Type.Optional(Type.Array(Type.String())),
-				},
-				{ additionalProperties: false },
-			),
-		),
-	},
-	{ additionalProperties: false },
-);
-export type WebSearchConfig = Static<typeof WebSearchConfig>;
+  {
+    backend: Type.Optional(Type.Literal('deepseek')),
+    tavily: Type.Optional(
+      Type.Object(
+        {
+          includeDomains: Type.Optional(Type.Array(Type.String())),
+          excludeDomains: Type.Optional(Type.Array(Type.String())),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+)
+export type WebSearchConfig = Static<typeof WebSearchConfig>

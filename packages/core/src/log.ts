@@ -1,5 +1,5 @@
-import { getLogger, type Logger, type LogLevel, type LogRecord, withContext } from "@logtape/logtape";
-import { type Static, Type } from "typebox";
+import { getLogger, type Logger, type LogLevel, type LogRecord, withContext } from '@logtape/logtape'
+import { type Static, Type } from 'typebox'
 
 /**
  * The harness's log record (#132): one shape for every process, so a bundle a user hands
@@ -27,7 +27,7 @@ import { type Static, Type } from "typebox";
  */
 
 /** The process a record came from. `extension` is our code inside pi's process. */
-export type ZenLogLayer = "server" | "host" | "extension" | "browser";
+export type ZenLogLayer = 'server' | 'host' | 'extension' | 'browser'
 
 /**
  * What every record carries when it knows it. These are the identities the wire already
@@ -35,13 +35,13 @@ export type ZenLogLayer = "server" | "host" | "extension" | "browser";
  * the event tail (#97), and the other layers' lines about the same moment.
  */
 export interface ZenLogProperties {
-	readonly threadId?: string;
-	/** The acquisition the record belongs to (`zen.run`, #109). */
-	readonly generation?: number;
-	/** The observation's sequence on the follow, where the record is about one (#112). */
-	readonly seq?: number;
-	readonly toolCallId?: string;
-	readonly [key: string]: unknown;
+  readonly threadId?: string
+  /** The acquisition the record belongs to (`zen.run`, #109). */
+  readonly generation?: number
+  /** The observation's sequence on the follow, where the record is about one (#112). */
+  readonly seq?: number
+  readonly toolCallId?: string
+  readonly [key: string]: unknown
 }
 
 /**
@@ -50,39 +50,39 @@ export interface ZenLogProperties {
  * `trace` is the same with the payload. `ZEN_LOG_LEVEL` picks the tier (`log-process.ts`).
  */
 export interface ZenLogger {
-	trace(message: string, properties?: ZenLogProperties): void;
-	debug(message: string, properties?: ZenLogProperties): void;
-	info(message: string, properties?: ZenLogProperties): void;
-	warn(message: string, properties?: ZenLogProperties): void;
-	error(message: string, properties?: ZenLogProperties): void;
-	/** A logger whose every record carries `properties` — bind `threadId` once per handler. */
-	with(properties: ZenLogProperties): ZenLogger;
+  trace(message: string, properties?: ZenLogProperties): void
+  debug(message: string, properties?: ZenLogProperties): void
+  info(message: string, properties?: ZenLogProperties): void
+  warn(message: string, properties?: ZenLogProperties): void
+  error(message: string, properties?: ZenLogProperties): void
+  /** A logger whose every record carries `properties` — bind `threadId` once per handler. */
+  with(properties: ZenLogProperties): ZenLogger
 }
 
 /** The root category. A configurator routes `["zen"]` and every layer inherits. */
-export const ZEN_LOG_ROOT = "zen";
+export const ZEN_LOG_ROOT = 'zen'
 
 function wrap(logger: Logger): ZenLogger {
-	return {
-		trace(message: string, properties?: ZenLogProperties): void {
-			logger.trace(message, properties);
-		},
-		debug(message: string, properties?: ZenLogProperties): void {
-			logger.debug(message, properties);
-		},
-		info(message: string, properties?: ZenLogProperties): void {
-			logger.info(message, properties);
-		},
-		warn(message: string, properties?: ZenLogProperties): void {
-			logger.warn(message, properties);
-		},
-		error(message: string, properties?: ZenLogProperties): void {
-			logger.error(message, properties);
-		},
-		with(properties: ZenLogProperties): ZenLogger {
-			return wrap(logger.with(properties));
-		},
-	};
+  return {
+    trace(message: string, properties?: ZenLogProperties): void {
+      logger.trace(message, properties)
+    },
+    debug(message: string, properties?: ZenLogProperties): void {
+      logger.debug(message, properties)
+    },
+    info(message: string, properties?: ZenLogProperties): void {
+      logger.info(message, properties)
+    },
+    warn(message: string, properties?: ZenLogProperties): void {
+      logger.warn(message, properties)
+    },
+    error(message: string, properties?: ZenLogProperties): void {
+      logger.error(message, properties)
+    },
+    with(properties: ZenLogProperties): ZenLogger {
+      return wrap(logger.with(properties))
+    },
+  }
 }
 
 /**
@@ -91,7 +91,7 @@ function wrap(logger: Logger): ZenLogger {
  * level, once per file.
  */
 export function zenLogger(layer: ZenLogLayer, ...subcategory: readonly string[]): ZenLogger {
-	return wrap(getLogger([ZEN_LOG_ROOT, layer, ...subcategory]));
+  return wrap(getLogger([ZEN_LOG_ROOT, layer, ...subcategory]))
 }
 
 /**
@@ -108,7 +108,7 @@ export function zenLogger(layer: ZenLogLayer, ...subcategory: readonly string[])
  * `guards/index.ts`'s logger.
  */
 export function withZenLogContext<T>(properties: ZenLogProperties, callback: () => T): T {
-	return withContext(properties, callback);
+  return withContext(properties, callback)
 }
 
 /**
@@ -126,7 +126,7 @@ export function withZenLogContext<T>(properties: ZenLogProperties, callback: () 
  * `DEFAULT_REDACT_FIELDS`: that list eats `key`, `auth`, and `email` too, which would drop
  * `threadKey`-shaped names and `author` from records that carry nothing secret.
  */
-export const ZEN_REDACT_FIELDS: readonly RegExp[] = [/api[-_]?key/i, /secret/i, /password/i, /token/i, /credential/i];
+export const ZEN_REDACT_FIELDS: readonly RegExp[] = [/api[-_]?key/i, /secret/i, /password/i, /token/i, /credential/i]
 
 /**
  * What a redacted field's value becomes on disk. A MARKER, not a deletion: the record still
@@ -134,7 +134,7 @@ export const ZEN_REDACT_FIELDS: readonly RegExp[] = [/api[-_]?key/i, /secret/i, 
  * bundle (#132 item 5) counts markers per field name for its redaction manifest with no
  * bookkeeping in the writer. The value itself never lands — `log-process.test.ts`.
  */
-export const ZEN_REDACTED = "[REDACTED]";
+export const ZEN_REDACTED = '[REDACTED]'
 
 /**
  * What a known secret VALUE becomes wherever it appears — inside a message, a guard's
@@ -142,7 +142,7 @@ export const ZEN_REDACTED = "[REDACTED]";
  * manifest can count the two passes separately: a field name redacted is a record shaped
  * right, a value redacted is a leak that was caught.
  */
-export const ZEN_REDACTED_VALUE = "[REDACTED:value]";
+export const ZEN_REDACTED_VALUE = '[REDACTED:value]'
 
 /**
  * One line of the JSONL file, as LogTape's `jsonLinesFormatter` writes it — pinned here
@@ -151,32 +151,32 @@ export const ZEN_REDACTED_VALUE = "[REDACTED:value]";
  * `level` is upper-cased on disk and `warning` is written `WARN` (measured, LogTape 2.3.4).
  */
 export const ZenLogLine = Type.Object(
-	{
-		"@timestamp": Type.String(),
-		level: Type.Union([
-			Type.Literal("TRACE"),
-			Type.Literal("DEBUG"),
-			Type.Literal("INFO"),
-			Type.Literal("WARN"),
-			Type.Literal("ERROR"),
-			Type.Literal("FATAL"),
-		]),
-		message: Type.Optional(Type.String()),
-		logger: Type.String(),
-		properties: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-	},
-	{ additionalProperties: false },
-);
-export type ZenLogLine = Static<typeof ZenLogLine>;
+  {
+    '@timestamp': Type.String(),
+    level: Type.Union([
+      Type.Literal('TRACE'),
+      Type.Literal('DEBUG'),
+      Type.Literal('INFO'),
+      Type.Literal('WARN'),
+      Type.Literal('ERROR'),
+      Type.Literal('FATAL'),
+    ]),
+    message: Type.Optional(Type.String()),
+    logger: Type.String(),
+    properties: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  },
+  { additionalProperties: false },
+)
+export type ZenLogLine = Static<typeof ZenLogLine>
 
-const LINE_LEVEL: Readonly<Record<LogLevel, ZenLogLine["level"]>> = {
-	trace: "TRACE",
-	debug: "DEBUG",
-	info: "INFO",
-	warning: "WARN",
-	error: "ERROR",
-	fatal: "FATAL",
-};
+const LINE_LEVEL: Readonly<Record<LogLevel, ZenLogLine['level']>> = {
+  trace: 'TRACE',
+  debug: 'DEBUG',
+  info: 'INFO',
+  warning: 'WARN',
+  error: 'ERROR',
+  fatal: 'FATAL',
+}
 
 /**
  * A LogTape record as the line the file would hold — the browser's ring keeps these, so the
@@ -184,14 +184,14 @@ const LINE_LEVEL: Readonly<Record<LogLevel, ZenLogLine["level"]>> = {
  * TEMPLATE (`rawMessage`), as on disk; `log-process.ts`'s `logRecordOf` is the inverse.
  */
 export function zenLogLineOf(record: LogRecord): ZenLogLine {
-	return {
-		"@timestamp": new Date(record.timestamp).toISOString(),
-		level: LINE_LEVEL[record.level],
-		// A tagged-template message has an array here; ours are always strings (the wrapper).
-		message: typeof record.rawMessage === "string" ? record.rawMessage : record.rawMessage.join("{}"),
-		logger: record.category.join("."),
-		properties: record.properties,
-	};
+  return {
+    '@timestamp': new Date(record.timestamp).toISOString(),
+    level: LINE_LEVEL[record.level],
+    // A tagged-template message has an array here; ours are always strings (the wrapper).
+    message: typeof record.rawMessage === 'string' ? record.rawMessage : record.rawMessage.join('{}'),
+    logger: record.category.join('.'),
+    properties: record.properties,
+  }
 }
 
 /**
@@ -203,22 +203,22 @@ export function zenLogLineOf(record: LogRecord): ZenLogLine {
  * told what the host or the guard said.
  */
 export const ZenBrowserLogBatch = Type.Object(
-	{
-		page: Type.String({ minLength: 1, maxLength: 64 }),
-		records: Type.Array(
-			Type.Object(
-				{
-					at: Type.String(),
-					level: Type.Union([Type.Literal("info"), Type.Literal("warning"), Type.Literal("error")]),
-					logger: Type.String({ pattern: "^zen\\.browser(\\.[A-Za-z0-9-]+)*$" }),
-					message: Type.String({ maxLength: 4096 }),
-					properties: Type.Record(Type.String(), Type.Unknown()),
-				},
-				{ additionalProperties: false },
-			),
-			{ maxItems: 200 },
-		),
-	},
-	{ additionalProperties: false },
-);
-export type ZenBrowserLogBatch = Static<typeof ZenBrowserLogBatch>;
+  {
+    page: Type.String({ minLength: 1, maxLength: 64 }),
+    records: Type.Array(
+      Type.Object(
+        {
+          at: Type.String(),
+          level: Type.Union([Type.Literal('info'), Type.Literal('warning'), Type.Literal('error')]),
+          logger: Type.String({ pattern: '^zen\\.browser(\\.[A-Za-z0-9-]+)*$' }),
+          message: Type.String({ maxLength: 4096 }),
+          properties: Type.Record(Type.String(), Type.Unknown()),
+        },
+        { additionalProperties: false },
+      ),
+      { maxItems: 200 },
+    ),
+  },
+  { additionalProperties: false },
+)
+export type ZenBrowserLogBatch = Static<typeof ZenBrowserLogBatch>

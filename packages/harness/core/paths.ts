@@ -1,35 +1,35 @@
-import { existsSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, sep as pathSeparator, resolve } from "node:path";
+import { existsSync, realpathSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { basename, dirname, isAbsolute, join, sep as pathSeparator, resolve } from 'node:path'
 import {
-	fileUrlToPath,
-	isFileUrl,
-	PERSISTENCE_WRITE_BASENAMES,
-	PERSISTENCE_WRITE_DIRECTORIES,
-	SECRET_BASENAME_PATTERNS,
-	ZEN_PERSISTENCE_WRITE_DIRECTORIES,
-} from "@zen/core";
+  fileUrlToPath,
+  isFileUrl,
+  PERSISTENCE_WRITE_BASENAMES,
+  PERSISTENCE_WRITE_DIRECTORIES,
+  SECRET_BASENAME_PATTERNS,
+  ZEN_PERSISTENCE_WRITE_DIRECTORIES,
+} from '@zen/core'
 
 /**
  * The full directory-segment deny set: picc's vendored corpus plus the zen additions
  * (pi's own persistence surfaces — see the constants' comments in @zen/core guard.ts).
  */
 const ALL_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [
-	...PERSISTENCE_WRITE_DIRECTORIES,
-	...ZEN_PERSISTENCE_WRITE_DIRECTORIES,
-];
+  ...PERSISTENCE_WRITE_DIRECTORIES,
+  ...ZEN_PERSISTENCE_WRITE_DIRECTORIES,
+]
 
 /**
  * The unicode space characters pi collapses to a plain space before resolving a path
  * (NBSP, the U+2000 block, narrow NBSP, medium mathematical space, ideographic space).
  * Same set as pi's `UNICODE_SPACES` — see the attribution on {@link normalizeLikePi}.
  */
-const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g
 
-const AT_PREFIX = "@";
-const TILDE = "~";
-const TILDE_DIRECTORY_PREFIX = "~/";
-const WINDOWS_PLATFORM = "win32";
+const AT_PREFIX = '@'
+const TILDE = '~'
+const TILDE_DIRECTORY_PREFIX = '~/'
+const WINDOWS_PLATFORM = 'win32'
 
 /**
  * Convert a Git Bash / MSYS / Cygwin / WSL drive path (`/c/x`, `/mnt/c/x`, `/cygdrive/c/x`)
@@ -42,14 +42,14 @@ const WINDOWS_PLATFORM = "win32";
  * it is the only part that stays unexercised until the suite runs on Windows.
  */
 export function normalizeWindowsShellPath(filePath: string): string {
-	if (!filePath.startsWith("/") || filePath.startsWith("//") || filePath.includes("\\")) return filePath;
-	const match = filePath.match(/^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i);
-	if (match === null) return filePath;
-	const driveLetter = match[1];
-	if (driveLetter === undefined) return filePath;
-	const remainder = match[2];
-	const suffix = remainder === undefined ? "" : remainder.replaceAll("/", "\\");
-	return `${driveLetter.toUpperCase()}:\\${suffix}`;
+  if (!filePath.startsWith('/') || filePath.startsWith('//') || filePath.includes('\\')) return filePath
+  const match = filePath.match(/^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i)
+  if (match === null) return filePath
+  const driveLetter = match[1]
+  if (driveLetter === undefined) return filePath
+  const remainder = match[2]
+  const suffix = remainder === undefined ? '' : remainder.replaceAll('/', '\\')
+  return `${driveLetter.toUpperCase()}:\\${suffix}`
 }
 
 /**
@@ -75,23 +75,23 @@ export function normalizeWindowsShellPath(filePath: string): string {
  * after the strip and then `$HOME/x`; `@file:///x` decodes only because the `@` went first.
  */
 function normalizeLikePi(input: string, options: { stripAtPrefix: boolean; normalizeUnicodeSpaces: boolean }): string {
-	let normalized = options.normalizeUnicodeSpaces ? input.replace(UNICODE_SPACES, " ") : input;
-	if (options.stripAtPrefix && normalized.startsWith(AT_PREFIX)) {
-		normalized = normalized.slice(AT_PREFIX.length);
-	}
-	if (process.platform === WINDOWS_PLATFORM) {
-		normalized = normalizeWindowsShellPath(normalized);
-	}
-	// Only the bare `~` and `~/…` expand — `~user/x` stays literal, exactly as in pi.
-	const home = homedir();
-	if (normalized === TILDE) return home;
-	if (normalized.startsWith(TILDE_DIRECTORY_PREFIX)) {
-		return join(home, normalized.slice(TILDE_DIRECTORY_PREFIX.length));
-	}
-	if (isFileUrl(normalized)) {
-		return fileUrlToPath(normalized);
-	}
-	return normalized;
+  let normalized = options.normalizeUnicodeSpaces ? input.replace(UNICODE_SPACES, ' ') : input
+  if (options.stripAtPrefix && normalized.startsWith(AT_PREFIX)) {
+    normalized = normalized.slice(AT_PREFIX.length)
+  }
+  if (process.platform === WINDOWS_PLATFORM) {
+    normalized = normalizeWindowsShellPath(normalized)
+  }
+  // Only the bare `~` and `~/…` expand — `~user/x` stays literal, exactly as in pi.
+  const home = homedir()
+  if (normalized === TILDE) return home
+  if (normalized.startsWith(TILDE_DIRECTORY_PREFIX)) {
+    return join(home, normalized.slice(TILDE_DIRECTORY_PREFIX.length))
+  }
+  if (isFileUrl(normalized)) {
+    return fileUrlToPath(normalized)
+  }
+  return normalized
 }
 
 /**
@@ -104,9 +104,9 @@ function normalizeLikePi(input: string, options: { stripAtPrefix: boolean; norma
  * its unicode spaces).
  */
 export function resolveAgainstCwd(candidate: string, cwd: string): string {
-	const normalizedCandidate = normalizeLikePi(candidate, { stripAtPrefix: true, normalizeUnicodeSpaces: true });
-	const normalizedCwd = normalizeLikePi(cwd, { stripAtPrefix: false, normalizeUnicodeSpaces: false });
-	return isAbsolute(normalizedCandidate) ? resolve(normalizedCandidate) : resolve(normalizedCwd, normalizedCandidate);
+  const normalizedCandidate = normalizeLikePi(candidate, { stripAtPrefix: true, normalizeUnicodeSpaces: true })
+  const normalizedCwd = normalizeLikePi(cwd, { stripAtPrefix: false, normalizeUnicodeSpaces: false })
+  return isAbsolute(normalizedCandidate) ? resolve(normalizedCandidate) : resolve(normalizedCwd, normalizedCandidate)
 }
 
 /**
@@ -117,35 +117,35 @@ export function resolveAgainstCwd(candidate: string, cwd: string): string {
  * the nearest existing ancestor is the thing to resolve.
  */
 export function realpathOfNearestExisting(absolutePath: string): string {
-	let current = absolutePath;
-	for (;;) {
-		if (existsSync(current)) {
-			try {
-				return realpathSync(current);
-			} catch {
-				return current;
-			}
-		}
-		const parent = dirname(current);
-		if (parent === current) return current;
-		current = parent;
-	}
+  let current = absolutePath
+  for (;;) {
+    if (existsSync(current)) {
+      try {
+        return realpathSync(current)
+      } catch {
+        return current
+      }
+    }
+    const parent = dirname(current)
+    if (parent === current) return current
+    current = parent
+  }
 }
 
 /** True when `absolutePath` is `root` or lives beneath it. Compares with a trailing separator so `/a/bc` is not inside `/a/b`. */
 export function isInsideRoot(absolutePath: string, root: string): boolean {
-	const normalizedRoot = resolve(root);
-	if (absolutePath === normalizedRoot) return true;
-	return absolutePath.startsWith(
-		normalizedRoot.endsWith(pathSeparator) ? normalizedRoot : normalizedRoot + pathSeparator,
-	);
+  const normalizedRoot = resolve(root)
+  if (absolutePath === normalizedRoot) return true
+  return absolutePath.startsWith(
+    normalizedRoot.endsWith(pathSeparator) ? normalizedRoot : normalizedRoot + pathSeparator,
+  )
 }
 
 /** True when the path is inside at least one root, checking both the literal path and its realpath. */
 export function isInsideAnyRoot(absolutePath: string, roots: readonly string[]): boolean {
-	if (roots.length === 0) return false;
-	const viaSymlink = realpathOfNearestExisting(absolutePath);
-	return roots.some((root) => isInsideRoot(absolutePath, root) && isInsideRoot(viaSymlink, resolve(root)));
+  if (roots.length === 0) return false
+  const viaSymlink = realpathOfNearestExisting(absolutePath)
+  return roots.some((root) => isInsideRoot(absolutePath, root) && isInsideRoot(viaSymlink, resolve(root)))
 }
 
 /**
@@ -160,20 +160,20 @@ export function isInsideAnyRoot(absolutePath: string, roots: readonly string[]):
  * (`/.npmrc`, `/.kube/config`) are unaffected because they still occur as a substring.
  */
 function containsPathFragment(absolutePath: string, fragments: readonly string[]): boolean {
-	const loweredWithTrailingSeparator = absolutePath.toLowerCase() + pathSeparator;
-	return fragments.some((fragment) => loweredWithTrailingSeparator.includes(fragment.toLowerCase()));
+  const loweredWithTrailingSeparator = absolutePath.toLowerCase() + pathSeparator
+  return fragments.some((fragment) => loweredWithTrailingSeparator.includes(fragment.toLowerCase()))
 }
 
 /** True when the path looks like credential material, by directory fragment or by basename. */
 export function looksLikeSecret(absolutePath: string, fragments: readonly string[]): boolean {
-	if (containsPathFragment(absolutePath, fragments)) return true;
-	const name = basename(absolutePath);
-	return SECRET_BASENAME_PATTERNS.some((pattern) => pattern.test(name));
+  if (containsPathFragment(absolutePath, fragments)) return true
+  const name = basename(absolutePath)
+  return SECRET_BASENAME_PATTERNS.some((pattern) => pattern.test(name))
 }
 
 /** True when the path contains a fragment that is never writable. */
 export function isProtectedForWrite(absolutePath: string, fragments: readonly string[]): boolean {
-	return containsPathFragment(absolutePath, fragments);
+  return containsPathFragment(absolutePath, fragments)
 }
 
 /**
@@ -191,13 +191,13 @@ export function isProtectedForWrite(absolutePath: string, fragments: readonly st
  * fragments — `.profile-notes/x.ts` and `my.bashrc` must not be caught.
  */
 export function isPersistenceWriteTarget(absolutePath: string): boolean {
-	for (const candidate of [absolutePath, realpathOfNearestExisting(absolutePath)]) {
-		const name = basename(candidate).toLowerCase();
-		if (PERSISTENCE_WRITE_BASENAMES.some((dangerous) => dangerous === name)) return true;
-		const segments = candidate.toLowerCase().split(pathSeparator);
-		if (segments.some((segment) => ALL_PERSISTENCE_WRITE_DIRECTORIES.some((dangerous) => dangerous === segment))) {
-			return true;
-		}
-	}
-	return false;
+  for (const candidate of [absolutePath, realpathOfNearestExisting(absolutePath)]) {
+    const name = basename(candidate).toLowerCase()
+    if (PERSISTENCE_WRITE_BASENAMES.some((dangerous) => dangerous === name)) return true
+    const segments = candidate.toLowerCase().split(pathSeparator)
+    if (segments.some((segment) => ALL_PERSISTENCE_WRITE_DIRECTORIES.some((dangerous) => dangerous === segment))) {
+      return true
+    }
+  }
+  return false
 }

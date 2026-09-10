@@ -1,6 +1,6 @@
-import { ZenStoredThread, ZenThreadHistory } from "@zen/core";
-import { Check } from "typebox/value";
-import { createStore, type Store } from "./store.ts";
+import { ZenStoredThread, ZenThreadHistory } from '@zen/core'
+import { Check } from 'typebox/value'
+import { createStore, type Store } from './store.ts'
 
 /**
  * The sessions a user can come back to (#95): pi's session files for this workspace, as
@@ -16,33 +16,33 @@ import { createStore, type Store } from "./store.ts";
  */
 
 export interface StoredThreadsState {
-	readonly threads: readonly ZenStoredThread[];
-	/** Why the last refresh produced nothing — a down server, a payload off its schema. */
-	readonly error: string | undefined;
+  readonly threads: readonly ZenStoredThread[]
+  /** Why the last refresh produced nothing — a down server, a payload off its schema. */
+  readonly error: string | undefined
 }
 
 export interface StoredThreadsStore extends Store<StoredThreadsState> {
-	readonly refresh: () => Promise<void>;
+  readonly refresh: () => Promise<void>
 }
 
 export function createStoredThreadsStore(
-	fetchStoredThreads: () => Promise<unknown> = fetchStoredThreadList,
+  fetchStoredThreads: () => Promise<unknown> = fetchStoredThreadList,
 ): StoredThreadsStore {
-	const store = createStore<StoredThreadsState>({ threads: [], error: undefined });
-	return {
-		get: store.get,
-		subscribe: store.subscribe,
-		refresh: async () => {
-			try {
-				const listed = await fetchStoredThreads();
-				const wellFormed = Array.isArray(listed) && listed.every((thread) => Check(ZenStoredThread, thread));
-				if (!wellFormed) throw new Error("the server's session listing did not match its schema");
-				store.set({ threads: listed as ZenStoredThread[], error: undefined });
-			} catch (error) {
-				store.set({ threads: store.get().threads, error: error instanceof Error ? error.message : String(error) });
-			}
-		},
-	};
+  const store = createStore<StoredThreadsState>({ threads: [], error: undefined })
+  return {
+    get: store.get,
+    subscribe: store.subscribe,
+    refresh: async () => {
+      try {
+        const listed = await fetchStoredThreads()
+        const wellFormed = Array.isArray(listed) && listed.every((thread) => Check(ZenStoredThread, thread))
+        if (!wellFormed) throw new Error("the server's session listing did not match its schema")
+        store.set({ threads: listed as ZenStoredThread[], error: undefined })
+      } catch (error) {
+        store.set({ threads: store.get().threads, error: error instanceof Error ? error.message : String(error) })
+      }
+    },
+  }
 }
 
 /**
@@ -52,31 +52,31 @@ export function createStoredThreadsStore(
  * operator most needed to see which thread they were on. Shared with the debug pane's
  * fetchers, which had the same page in their session column.
  */
-export const FAILURE_DETAIL_MAX_LENGTH = 120;
+export const FAILURE_DETAIL_MAX_LENGTH = 120
 export function boundedFailureDetail(body: string): string {
-	const line = body.split("\n", 1)[0]?.trim() ?? "";
-	return line.length > FAILURE_DETAIL_MAX_LENGTH ? `${line.slice(0, FAILURE_DETAIL_MAX_LENGTH)}…` : line;
+  const line = body.split('\n', 1)[0]?.trim() ?? ''
+  return line.length > FAILURE_DETAIL_MAX_LENGTH ? `${line.slice(0, FAILURE_DETAIL_MAX_LENGTH)}…` : line
 }
 
 /** The status and the bounded body, as one line. */
 export async function describeFailedResponse(response: Response): Promise<string> {
-	const detail = boundedFailureDetail(await response.text());
-	return detail.length === 0 ? String(response.status) : `${response.status} ${detail}`;
+  const detail = boundedFailureDetail(await response.text())
+  return detail.length === 0 ? String(response.status) : `${response.status} ${detail}`
 }
 
 async function fetchStoredThreadList(): Promise<unknown> {
-	const response = await fetch("/api/stored-threads");
-	if (!response.ok) throw new Error(await describeFailedResponse(response));
-	return response.json();
+  const response = await fetch('/api/stored-threads')
+  if (!response.ok) throw new Error(await describeFailedResponse(response))
+  return response.json()
 }
 
 /** A stored thread's history, for `adoptThread`; a non-2xx throws with the status in the message. */
 export async function fetchThreadHistory(threadId: string): Promise<ZenThreadHistory> {
-	const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/history`);
-	if (!response.ok) throw new Error(await describeFailedResponse(response));
-	const payload: unknown = await response.json();
-	if (!Check(ZenThreadHistory, payload)) throw new Error("the server's history payload did not match its schema");
-	return payload;
+  const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/history`)
+  if (!response.ok) throw new Error(await describeFailedResponse(response))
+  const payload: unknown = await response.json()
+  if (!Check(ZenThreadHistory, payload)) throw new Error("the server's history payload did not match its schema")
+  return payload
 }
 
 /**
@@ -91,26 +91,26 @@ export async function fetchThreadHistory(threadId: string): Promise<ZenThreadHis
  * the moment two requests overlap, and the boot's resume and a rail click can.
  */
 export function createResumeRequests<TIntent>(
-	fetchHistory: (threadId: string) => Promise<ZenThreadHistory>,
-	onHistory: (history: ZenThreadHistory, intent: TIntent) => void,
-	onFailure: (message: string, intent: TIntent) => void,
+  fetchHistory: (threadId: string) => Promise<ZenThreadHistory>,
+  onHistory: (history: ZenThreadHistory, intent: TIntent) => void,
+  onFailure: (message: string, intent: TIntent) => void,
 ): (threadId: string, intent: TIntent) => void {
-	let latest: string | undefined;
-	return (threadId, intent) => {
-		latest = threadId;
-		fetchHistory(threadId).then(
-			(history) => {
-				if (latest !== threadId) return;
-				latest = undefined;
-				onHistory(history, intent);
-			},
-			(failure: unknown) => {
-				if (latest !== threadId) return;
-				latest = undefined;
-				onFailure(failure instanceof Error ? failure.message : String(failure), intent);
-			},
-		);
-	};
+  let latest: string | undefined
+  return (threadId, intent) => {
+    latest = threadId
+    fetchHistory(threadId).then(
+      (history) => {
+        if (latest !== threadId) return
+        latest = undefined
+        onHistory(history, intent)
+      },
+      (failure: unknown) => {
+        if (latest !== threadId) return
+        latest = undefined
+        onFailure(failure instanceof Error ? failure.message : String(failure), intent)
+      },
+    )
+  }
 }
 
 /**
@@ -118,8 +118,8 @@ export function createResumeRequests<TIntent>(
  * is pi's session id, so "already open here" is a set lookup — the payoff of one identity.
  */
 export function storedThreadsNotOnThisPage(
-	stored: readonly ZenStoredThread[],
-	pageThreadIds: ReadonlySet<string>,
+  stored: readonly ZenStoredThread[],
+  pageThreadIds: ReadonlySet<string>,
 ): ZenStoredThread[] {
-	return stored.filter((thread) => !pageThreadIds.has(thread.threadId));
+  return stored.filter((thread) => !pageThreadIds.has(thread.threadId))
 }

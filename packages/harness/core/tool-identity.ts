@@ -14,5 +14,5 @@
  * table belongs to the allow-store work deferred with the #4 arbiter.
  */
 export function canonicalToolName(name: string): string {
-	return name.toLowerCase();
+  return name.toLowerCase()
 }

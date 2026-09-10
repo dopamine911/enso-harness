@@ -1,5 +1,5 @@
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import type { PiRpcEvent } from "@zen/core";
+import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
+import type { PiRpcEvent } from '@zen/core'
 
 /**
  * `AgentSessionEvent` → the rpc WIRE shape (#69).
@@ -23,40 +23,40 @@ import type { PiRpcEvent } from "@zen/core";
  * event still reaches the browser as `zen.unmapped` (the design rule from `map-events.ts`).
  */
 export function toRpcWireEvent(event: AgentSessionEvent): PiRpcEvent {
-	if (event.type !== "message_update") {
-		// A copy, not a cast: the union's members are object literals, so the spread is an
-		// open record and needs no type assertion to become the wire shape.
-		return { ...event };
-	}
-	if (event.message.role !== "assistant") {
-		throw new Error("message_update message is not an assistant message");
-	}
-	return {
-		type: "message_update",
-		usage: event.message.usage,
-		assistantMessageEvent: stripCumulativeSnapshot(event.assistantMessageEvent),
-	};
+  if (event.type !== 'message_update') {
+    // A copy, not a cast: the union's members are object literals, so the spread is an
+    // open record and needs no type assertion to become the wire shape.
+    return { ...event }
+  }
+  if (event.message.role !== 'assistant') {
+    throw new Error('message_update message is not an assistant message')
+  }
+  return {
+    type: 'message_update',
+    usage: event.message.usage,
+    assistantMessageEvent: stripCumulativeSnapshot(event.assistantMessageEvent),
+  }
 }
 
 /** The `partial` snapshot goes; on `toolcall_start` the tool's id and name are hoisted first. */
 function stripCumulativeSnapshot(
-	assistantMessageEvent: AgentSessionEvent & { type: "message_update" } extends {
-		assistantMessageEvent: infer E;
-	}
-		? E
-		: never,
+  assistantMessageEvent: AgentSessionEvent & { type: 'message_update' } extends {
+    assistantMessageEvent: infer E
+  }
+    ? E
+    : never,
 ): Record<string, unknown> {
-	if (assistantMessageEvent.type === "toolcall_start") {
-		const toolCall = assistantMessageEvent.partial.content[assistantMessageEvent.contentIndex];
-		if (toolCall?.type !== "toolCall") {
-			throw new Error(`toolcall_start content at index ${assistantMessageEvent.contentIndex} is not a tool call`);
-		}
-		const { partial: _partial, ...deltaEvent } = assistantMessageEvent;
-		return { ...deltaEvent, id: toolCall.id, toolName: toolCall.name };
-	}
-	if (!("partial" in assistantMessageEvent)) {
-		return assistantMessageEvent;
-	}
-	const { partial: _partial, ...deltaEvent } = assistantMessageEvent;
-	return deltaEvent;
+  if (assistantMessageEvent.type === 'toolcall_start') {
+    const toolCall = assistantMessageEvent.partial.content[assistantMessageEvent.contentIndex]
+    if (toolCall?.type !== 'toolCall') {
+      throw new Error(`toolcall_start content at index ${assistantMessageEvent.contentIndex} is not a tool call`)
+    }
+    const { partial: _partial, ...deltaEvent } = assistantMessageEvent
+    return { ...deltaEvent, id: toolCall.id, toolName: toolCall.name }
+  }
+  if (!('partial' in assistantMessageEvent)) {
+    return assistantMessageEvent
+  }
+  const { partial: _partial, ...deltaEvent } = assistantMessageEvent
+  return deltaEvent
 }

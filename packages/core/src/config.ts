@@ -1,8 +1,8 @@
-import { join } from "node:path";
-import { type Static, Type } from "typebox";
-import { Compile } from "typebox/compile";
-import { WebFetchConfig } from "./web-fetch.ts";
-import { WebSearchConfig } from "./web-search.ts";
+import { join } from 'node:path'
+import { type Static, Type } from 'typebox'
+import { Compile } from 'typebox/compile'
+import { WebFetchConfig } from './web-fetch.ts'
+import { WebSearchConfig } from './web-search.ts'
 
 /**
  * zen-harness's ONE committed config file (#59): `zen.config.json` at the repository
@@ -25,10 +25,10 @@ import { WebSearchConfig } from "./web-search.ts";
  */
 
 /** The committed config file's basename. Lives at the repository root. */
-export const ZEN_CONFIG_FILENAME = "zen.config.json";
+export const ZEN_CONFIG_FILENAME = 'zen.config.json'
 
 /** The example a refusal message shows a human who needs to change the config. */
-export const ZEN_CONFIG_EXAMPLE = `{ "webFetch": { "allowedHosts": ["docs.example.com"] } }`;
+export const ZEN_CONFIG_EXAMPLE = `{ "webFetch": { "allowedHosts": ["docs.example.com"] } }`
 
 /**
  * The whole config file. One section per consumer; every section's schema lives with its
@@ -37,41 +37,41 @@ export const ZEN_CONFIG_EXAMPLE = `{ "webFetch": { "allowedHosts": ["docs.exampl
  * every consumer at once.
  */
 export const ZenConfig = Type.Object(
-	{
-		webFetch: WebFetchConfig,
-		webSearch: Type.Optional(WebSearchConfig),
-	},
-	{ additionalProperties: false },
-);
-export type ZenConfig = Static<typeof ZenConfig>;
+  {
+    webFetch: WebFetchConfig,
+    webSearch: Type.Optional(WebSearchConfig),
+  },
+  { additionalProperties: false },
+)
+export type ZenConfig = Static<typeof ZenConfig>
 
-const zenConfigValidator = Compile(ZenConfig);
+const zenConfigValidator = Compile(ZenConfig)
 
-export type ZenConfigParseResult = { kind: "ok"; config: ZenConfig } | { kind: "unreadable"; reason: string };
+export type ZenConfigParseResult = { kind: 'ok'; config: ZenConfig } | { kind: 'unreadable'; reason: string }
 
 /**
  * Parse the config file's text. Any failure comes back as `unreadable`, and the caller
  * must fail CLOSED on it — "could not read the policy" must never render as "no policy".
  */
 export function parseZenConfig(fileText: string): ZenConfigParseResult {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(fileText);
-	} catch (error) {
-		return { kind: "unreadable", reason: `${ZEN_CONFIG_FILENAME} is not valid JSON (${String(error)})` };
-	}
-	if (!zenConfigValidator.Check(parsed)) {
-		return {
-			kind: "unreadable",
-			reason:
-				`${ZEN_CONFIG_FILENAME} does not match the expected shape ${ZEN_CONFIG_EXAMPLE} ` +
-				`(unknown keys are refused — a typo must fail loudly, not configure nothing)`,
-		};
-	}
-	return { kind: "ok", config: parsed };
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(fileText)
+  } catch (error) {
+    return { kind: 'unreadable', reason: `${ZEN_CONFIG_FILENAME} is not valid JSON (${String(error)})` }
+  }
+  if (!zenConfigValidator.Check(parsed)) {
+    return {
+      kind: 'unreadable',
+      reason:
+        `${ZEN_CONFIG_FILENAME} does not match the expected shape ${ZEN_CONFIG_EXAMPLE} ` +
+        `(unknown keys are refused — a typo must fail loudly, not configure nothing)`,
+    }
+  }
+  return { kind: 'ok', config: parsed }
 }
 
 /** The config file's path under a repository root (see `findRepoRoot` in paths.ts). */
 export function zenConfigPath(repoRoot: string): string {
-	return join(repoRoot, ZEN_CONFIG_FILENAME);
+  return join(repoRoot, ZEN_CONFIG_FILENAME)
 }

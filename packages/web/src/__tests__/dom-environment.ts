@@ -1,4 +1,4 @@
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { GlobalRegistrator } from '@happy-dom/global-registrator'
 
 /**
  * A browser DOM for the tests that MOUNT React (#118) — the mounted-pane tests, which need
@@ -21,14 +21,14 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
  * real `fetch` back.
  */
 
-const realFetch: typeof fetch = globalThis.fetch;
+const realFetch: typeof fetch = globalThis.fetch
 
-GlobalRegistrator.register({ url: "http://localhost/" });
+GlobalRegistrator.register({ url: 'http://localhost/' })
 // React's `act` warns without this — it is how a test tells React it will flush updates itself.
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 /** Tear the DOM down and give `fetch` back — `afterAll` in every file that imports this module. */
 export async function releaseDom(): Promise<void> {
-	globalThis.fetch = realFetch;
-	await GlobalRegistrator.unregister();
+  globalThis.fetch = realFetch
+  await GlobalRegistrator.unregister()
 }

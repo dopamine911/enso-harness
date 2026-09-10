@@ -12,10 +12,10 @@
  */
 
 /** `${threadId}:${generation}` → the ms clock at admission. */
-const admittedAt = new Map<string, number>();
+const admittedAt = new Map<string, number>()
 
 function keyOf(threadId: string, generation: number): string {
-	return `${threadId}:${generation}`;
+  return `${threadId}:${generation}`
 }
 
 /**
@@ -23,8 +23,8 @@ function keyOf(threadId: string, generation: number): string {
  * behind a run in flight joins that run and does not restart its clock.
  */
 export function noteRunAdmitted(threadId: string, generation: number, now: number = Date.now()): void {
-	const key = keyOf(threadId, generation);
-	if (!admittedAt.has(key)) admittedAt.set(key, now);
+  const key = keyOf(threadId, generation)
+  if (!admittedAt.has(key)) admittedAt.set(key, now)
 }
 
 /**
@@ -32,14 +32,14 @@ export function noteRunAdmitted(threadId: string, generation: number, now: numbe
  * `undefined` when the run's admission was never seen (a follow attached mid-run, a test).
  */
 export function takeFirstDeltaMs(threadId: string, generation: number, now: number = Date.now()): number | undefined {
-	const key = keyOf(threadId, generation);
-	const admitted = admittedAt.get(key);
-	if (admitted === undefined) return undefined;
-	admittedAt.delete(key);
-	return now - admitted;
+  const key = keyOf(threadId, generation)
+  const admitted = admittedAt.get(key)
+  if (admitted === undefined) return undefined
+  admittedAt.delete(key)
+  return now - admitted
 }
 
 /** The run ended without a delta, or has had its one record: nothing left to time. */
 export function forgetRun(threadId: string, generation: number): void {
-	admittedAt.delete(keyOf(threadId, generation));
+  admittedAt.delete(keyOf(threadId, generation))
 }

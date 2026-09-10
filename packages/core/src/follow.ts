@@ -1,9 +1,9 @@
-import { type Static, Type } from "typebox";
-import { ZenOpenDialog } from "./dialog.ts";
-import { ZenObservation } from "./observation.ts";
-import { PiPermissionModeState } from "./permission-mode.ts";
-import { PiStreamingBehavior } from "./pi-rpc.ts";
-import { ZenInterruptedTail } from "./session-inspection.ts";
+import { type Static, Type } from 'typebox'
+import { ZenOpenDialog } from './dialog.ts'
+import { ZenObservation } from './observation.ts'
+import { PiPermissionModeState } from './permission-mode.ts'
+import { PiStreamingBehavior } from './pi-rpc.ts'
+import { ZenInterruptedTail } from './session-inspection.ts'
 
 /**
  * The server↔browser wire (#112): a thread's feed, as the follow route serves it.
@@ -20,50 +20,50 @@ import { ZenInterruptedTail } from "./session-inspection.ts";
  */
 
 export const ZenFollowSnapshot = Type.Object(
-	{
-		type: Type.Literal("snapshot"),
-		threadId: Type.String(),
-		/** The feed's position this snapshot is exact as of; every later observation's `seq` is greater. */
-		asOfSeq: Type.Integer({ minimum: 0 }),
-		/** A pi session exists for the thread on this server. False: served cold from the file, or empty. */
-		live: Type.Boolean(),
-		busy: Type.Boolean(),
-		/** See `ZenThreadSummary.generation`. */
-		generation: Type.Integer({ minimum: 0 }),
-		permissionMode: PiPermissionModeState,
-		/** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not zen's. */
-		messages: Type.Array(Type.Unknown()),
-		/** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */
-		openDialogs: Type.Array(ZenOpenDialog),
-		interrupted: Type.Optional(ZenInterruptedTail),
-	},
-	{ additionalProperties: false },
-);
-export type ZenFollowSnapshot = Static<typeof ZenFollowSnapshot>;
+  {
+    type: Type.Literal('snapshot'),
+    threadId: Type.String(),
+    /** The feed's position this snapshot is exact as of; every later observation's `seq` is greater. */
+    asOfSeq: Type.Integer({ minimum: 0 }),
+    /** A pi session exists for the thread on this server. False: served cold from the file, or empty. */
+    live: Type.Boolean(),
+    busy: Type.Boolean(),
+    /** See `ZenThreadSummary.generation`. */
+    generation: Type.Integer({ minimum: 0 }),
+    permissionMode: PiPermissionModeState,
+    /** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not zen's. */
+    messages: Type.Array(Type.Unknown()),
+    /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */
+    openDialogs: Type.Array(ZenOpenDialog),
+    interrupted: Type.Optional(ZenInterruptedTail),
+  },
+  { additionalProperties: false },
+)
+export type ZenFollowSnapshot = Static<typeof ZenFollowSnapshot>
 
 export const ZenFollowObservation = Type.Object(
-	{
-		type: Type.Literal("observation"),
-		seq: Type.Integer({ minimum: 1 }),
-		observation: ZenObservation,
-	},
-	{ additionalProperties: false },
-);
-export type ZenFollowObservation = Static<typeof ZenFollowObservation>;
+  {
+    type: Type.Literal('observation'),
+    seq: Type.Integer({ minimum: 1 }),
+    observation: ZenObservation,
+  },
+  { additionalProperties: false },
+)
+export type ZenFollowObservation = Static<typeof ZenFollowObservation>
 
 export const ZenFollowStatus = Type.Object(
-	{
-		type: Type.Literal("status"),
-		live: Type.Boolean(),
-		busy: Type.Boolean(),
-		generation: Type.Integer({ minimum: 0 }),
-	},
-	{ additionalProperties: false },
-);
-export type ZenFollowStatus = Static<typeof ZenFollowStatus>;
+  {
+    type: Type.Literal('status'),
+    live: Type.Boolean(),
+    busy: Type.Boolean(),
+    generation: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+)
+export type ZenFollowStatus = Static<typeof ZenFollowStatus>
 
-export const ZenFollowFrame = Type.Union([ZenFollowSnapshot, ZenFollowObservation, ZenFollowStatus]);
-export type ZenFollowFrame = Static<typeof ZenFollowFrame>;
+export const ZenFollowFrame = Type.Union([ZenFollowSnapshot, ZenFollowObservation, ZenFollowStatus])
+export type ZenFollowFrame = Static<typeof ZenFollowFrame>
 
 /**
  * The image types the Anthropic wire accepts (#68). pi documents no limit of its own and
@@ -71,28 +71,28 @@ export type ZenFollowFrame = Static<typeof ZenFollowFrame>;
  * after the upload, with a worse message than ours.
  */
 export const ZenImageMimeType = Type.Union([
-	Type.Literal("image/png"),
-	Type.Literal("image/jpeg"),
-	Type.Literal("image/gif"),
-	Type.Literal("image/webp"),
-]);
-export type ZenImageMimeType = Static<typeof ZenImageMimeType>;
+  Type.Literal('image/png'),
+  Type.Literal('image/jpeg'),
+  Type.Literal('image/gif'),
+  Type.Literal('image/webp'),
+])
+export type ZenImageMimeType = Static<typeof ZenImageMimeType>
 /** The same set as a list — the form's `accept`, the notice's wording. ⚠ Derived from the schema, not written twice. */
-export const ZEN_IMAGE_MIME_TYPES: readonly ZenImageMimeType[] = ZenImageMimeType.anyOf.map((literal) => literal.const);
+export const ZEN_IMAGE_MIME_TYPES: readonly ZenImageMimeType[] = ZenImageMimeType.anyOf.map((literal) => literal.const)
 /** Narrows a mime string the browser reported (`File.type`, a `data:` URL's head) to the kinds the wire takes — no cast. */
 export function isZenImageMimeType(value: string): value is ZenImageMimeType {
-	return (ZEN_IMAGE_MIME_TYPES as readonly string[]).includes(value);
+  return (ZEN_IMAGE_MIME_TYPES as readonly string[]).includes(value)
 }
 /** Anthropic's per-image cap, decoded bytes. Checked on the decoded size, not the base64 length. */
-export const ZEN_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+export const ZEN_IMAGE_MAX_BYTES = 5 * 1024 * 1024
 /** Images on one prompt. Claude.ai's own composer stops at 20; a pasted batch rarely nears this. */
-export const ZEN_PROMPT_MAX_IMAGES = 20;
+export const ZEN_PROMPT_MAX_IMAGES = 20
 /**
  * The most a prompt body may be on the wire: every image at its cap in base64 (4/3 of the
  * bytes, rounded up to a 4-byte group), plus room for the text. The route stops READING at
  * this size rather than buffering first and refusing after.
  */
-export const ZEN_PROMPT_BODY_MAX_BYTES = ZEN_PROMPT_MAX_IMAGES * Math.ceil(ZEN_IMAGE_MAX_BYTES / 3) * 4 + 1024 * 1024;
+export const ZEN_PROMPT_BODY_MAX_BYTES = ZEN_PROMPT_MAX_IMAGES * Math.ceil(ZEN_IMAGE_MAX_BYTES / 3) * 4 + 1024 * 1024
 
 /**
  * The base64 alphabet with trailing `=` padding — what `btoa` and `FileReader.readAsDataURL`
@@ -102,14 +102,14 @@ export const ZEN_PROMPT_BODY_MAX_BYTES = ZEN_PROMPT_MAX_IMAGES * Math.ceil(ZEN_I
  * accept exactly the same strings. The length check is `isWholeBase64`, applied by the
  * reader beside the byte cap (PR #140 review, measured).
  */
-const BASE64 = "^[A-Za-z0-9+/]*={0,2}$";
+const BASE64 = '^[A-Za-z0-9+/]*={0,2}$'
 
 /**
  * With `BASE64`, strict standard base64: whole 4-character groups, the last padded to four.
  * Refused as "not base64" rather than decoded leniently into a truncated image.
  */
 export function isWholeBase64(data: string): boolean {
-	return data.length % 4 === 0;
+  return data.length % 4 === 0
 }
 
 /**
@@ -119,33 +119,33 @@ export function isWholeBase64(data: string): boolean {
  * the browser resolves every attachment to bytes before it crosses and a URL cannot arrive.
  */
 export const ZenPromptImage = Type.Object(
-	{
-		// ⚠ A spelled-out tuple, not `Type.Union(list.map(...))`: TypeBox's static type of a union
-		// over a non-tuple array is `never`, which every cast in the browser then satisfied silently.
-		mimeType: ZenImageMimeType,
-		data: Type.String({ minLength: 1, pattern: BASE64 }),
-	},
-	{ additionalProperties: false },
-);
-export type ZenPromptImage = Static<typeof ZenPromptImage>;
+  {
+    // ⚠ A spelled-out tuple, not `Type.Union(list.map(...))`: TypeBox's static type of a union
+    // over a non-tuple array is `never`, which every cast in the browser then satisfied silently.
+    mimeType: ZenImageMimeType,
+    data: Type.String({ minLength: 1, pattern: BASE64 }),
+  },
+  { additionalProperties: false },
+)
+export type ZenPromptImage = Static<typeof ZenPromptImage>
 
 /** What `POST /api/threads/:id/prompt` takes. The shape is checked here; the byte cap is checked on the decoded size by the route. */
 export const ZenPromptBody = Type.Object(
-	{
-		message: Type.String(),
-		streamingBehavior: Type.Optional(PiStreamingBehavior),
-		images: Type.Optional(Type.Array(ZenPromptImage, { minItems: 1, maxItems: ZEN_PROMPT_MAX_IMAGES })),
-	},
-	{ additionalProperties: false },
-);
-export type ZenPromptBody = Static<typeof ZenPromptBody>;
+  {
+    message: Type.String(),
+    streamingBehavior: Type.Optional(PiStreamingBehavior),
+    images: Type.Optional(Type.Array(ZenPromptImage, { minItems: 1, maxItems: ZEN_PROMPT_MAX_IMAGES })),
+  },
+  { additionalProperties: false },
+)
+export type ZenPromptBody = Static<typeof ZenPromptBody>
 
 /** Decoded size of a base64 string, without decoding it: three bytes per four characters, less the padding. */
 export function base64DecodedBytes(data: string): number {
-	let padding = 0;
-	if (data.endsWith("==")) padding = 2;
-	else if (data.endsWith("=")) padding = 1;
-	return Math.floor((data.length * 3) / 4) - padding;
+  let padding = 0
+  if (data.endsWith('==')) padding = 2
+  else if (data.endsWith('=')) padding = 1
+  return Math.floor((data.length * 3) / 4) - padding
 }
 
 /**
@@ -155,18 +155,18 @@ export function base64DecodedBytes(data: string): number {
  * carries everything after (deepseek-harness: `followup()` returns void).
  */
 export const ZenPromptReceipt = Type.Object(
-	{
-		threadId: Type.String(),
-		/** Minted at admission — the identity a client correlates this message by. */
-		messageId: Type.String(),
-		/** The acquisition this prompt took, or the one it queued behind. */
-		generation: Type.Integer({ minimum: 0 }),
-		/** The thread was busy: pi queued the message behind the run in flight (#75). */
-		queued: Type.Boolean(),
-	},
-	{ additionalProperties: false },
-);
-export type ZenPromptReceipt = Static<typeof ZenPromptReceipt>;
+  {
+    threadId: Type.String(),
+    /** Minted at admission — the identity a client correlates this message by. */
+    messageId: Type.String(),
+    /** The acquisition this prompt took, or the one it queued behind. */
+    generation: Type.Integer({ minimum: 0 }),
+    /** The thread was busy: pi queued the message behind the run in flight (#75). */
+    queued: Type.Boolean(),
+  },
+  { additionalProperties: false },
+)
+export type ZenPromptReceipt = Static<typeof ZenPromptReceipt>
 
 /**
  * What `POST /api/threads/:id/abort` answers with when pi was told (#116, #75): the prompts
@@ -176,10 +176,10 @@ export type ZenPromptReceipt = Static<typeof ZenPromptReceipt>;
  * The run's own end still arrives on the follow.
  */
 export const ZenAbortReceipt = Type.Object(
-	{
-		threadId: Type.String(),
-		restored: Type.Array(Type.String()),
-	},
-	{ additionalProperties: false },
-);
-export type ZenAbortReceipt = Static<typeof ZenAbortReceipt>;
+  {
+    threadId: Type.String(),
+    restored: Type.Array(Type.String()),
+  },
+  { additionalProperties: false },
+)
+export type ZenAbortReceipt = Static<typeof ZenAbortReceipt>

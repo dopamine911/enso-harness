@@ -34,19 +34,19 @@
  * 87.5% functions — the handlers the static renders materialised now actually run). Same
  * margin: ~2.5 points under, rounded down.
  */
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { findRepoRoot } from "../packages/core/src/index.ts";
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { findRepoRoot } from '../packages/core/src/index.ts'
 
-export const TOTAL_LINE_COVERAGE_FLOOR = 0.91;
-export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89;
+export const TOTAL_LINE_COVERAGE_FLOOR = 0.91
+export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89
 
-const LCOV_PATH = join(findRepoRoot(import.meta.url), "coverage", "lcov.info");
+const LCOV_PATH = join(findRepoRoot(import.meta.url), 'coverage', 'lcov.info')
 
 export interface CoverageTotals {
-	lineRate: number;
-	functionRate: number;
-	fileCount: number;
+  lineRate: number
+  functionRate: number
+  fileCount: number
 }
 
 /**
@@ -55,50 +55,50 @@ export interface CoverageTotals {
  * and "no data" must never read as "no problem".
  */
 export function summarizeLcov(lcovText: string): CoverageTotals {
-	let linesFound = 0;
-	let linesHit = 0;
-	let functionsFound = 0;
-	let functionsHit = 0;
-	let fileCount = 0;
-	for (const line of lcovText.split("\n")) {
-		if (line.startsWith("SF:")) fileCount += 1;
-		else if (line.startsWith("LF:")) linesFound += Number(line.slice(3));
-		else if (line.startsWith("LH:")) linesHit += Number(line.slice(3));
-		else if (line.startsWith("FNF:")) functionsFound += Number(line.slice(4));
-		else if (line.startsWith("FNH:")) functionsHit += Number(line.slice(4));
-	}
-	if (fileCount === 0 || linesFound === 0) {
-		throw new Error("check-coverage: the lcov report is empty — did `bun test` run with coverage on?");
-	}
-	return {
-		lineRate: linesHit / linesFound,
-		// A report with no functions at all would divide by zero; treat it as fully covered
-		// rather than crashing — lines are the load-bearing metric in that degenerate case.
-		functionRate: functionsFound === 0 ? 1 : functionsHit / functionsFound,
-		fileCount,
-	};
+  let linesFound = 0
+  let linesHit = 0
+  let functionsFound = 0
+  let functionsHit = 0
+  let fileCount = 0
+  for (const line of lcovText.split('\n')) {
+    if (line.startsWith('SF:')) fileCount += 1
+    else if (line.startsWith('LF:')) linesFound += Number(line.slice(3))
+    else if (line.startsWith('LH:')) linesHit += Number(line.slice(3))
+    else if (line.startsWith('FNF:')) functionsFound += Number(line.slice(4))
+    else if (line.startsWith('FNH:')) functionsHit += Number(line.slice(4))
+  }
+  if (fileCount === 0 || linesFound === 0) {
+    throw new Error('check-coverage: the lcov report is empty — did `bun test` run with coverage on?')
+  }
+  return {
+    lineRate: linesHit / linesFound,
+    // A report with no functions at all would divide by zero; treat it as fully covered
+    // rather than crashing — lines are the load-bearing metric in that degenerate case.
+    functionRate: functionsFound === 0 ? 1 : functionsHit / functionsFound,
+    fileCount,
+  }
 }
 
 function formatPercent(rate: number): string {
-	return `${(rate * 100).toFixed(2)}%`;
+  return `${(rate * 100).toFixed(2)}%`
 }
 
 // Gate body — runs only when executed directly, so tests can import summarizeLcov alone.
 if (import.meta.main) {
-	if (!existsSync(LCOV_PATH)) {
-		console.error(`check-coverage: ${LCOV_PATH} is missing — run \`bun test\` first (the gate does).`);
-		process.exit(1);
-	}
-	const totals = summarizeLcov(await Bun.file(LCOV_PATH).text());
-	const lineOk = totals.lineRate >= TOTAL_LINE_COVERAGE_FLOOR;
-	const functionOk = totals.functionRate >= TOTAL_FUNCTION_COVERAGE_FLOOR;
-	console.error(
-		`check-coverage: ${totals.fileCount} files — lines ${formatPercent(totals.lineRate)} ` +
-			`(floor ${formatPercent(TOTAL_LINE_COVERAGE_FLOOR)}), functions ${formatPercent(totals.functionRate)} ` +
-			`(floor ${formatPercent(TOTAL_FUNCTION_COVERAGE_FLOOR)})`,
-	);
-	if (!(lineOk && functionOk)) {
-		console.error("check-coverage: BELOW the floor. Add tests, or lower the floor in its own PR with the reason.");
-		process.exit(1);
-	}
+  if (!existsSync(LCOV_PATH)) {
+    console.error(`check-coverage: ${LCOV_PATH} is missing — run \`bun test\` first (the gate does).`)
+    process.exit(1)
+  }
+  const totals = summarizeLcov(await Bun.file(LCOV_PATH).text())
+  const lineOk = totals.lineRate >= TOTAL_LINE_COVERAGE_FLOOR
+  const functionOk = totals.functionRate >= TOTAL_FUNCTION_COVERAGE_FLOOR
+  console.error(
+    `check-coverage: ${totals.fileCount} files — lines ${formatPercent(totals.lineRate)} ` +
+      `(floor ${formatPercent(TOTAL_LINE_COVERAGE_FLOOR)}), functions ${formatPercent(totals.functionRate)} ` +
+      `(floor ${formatPercent(TOTAL_FUNCTION_COVERAGE_FLOOR)})`,
+  )
+  if (!(lineOk && functionOk)) {
+    console.error('check-coverage: BELOW the floor. Add tests, or lower the floor in its own PR with the reason.')
+    process.exit(1)
+  }
 }
