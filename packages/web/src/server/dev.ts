@@ -12,7 +12,7 @@
  */
 
 import { mkdirSync } from "node:fs";
-import { findRepoRoot, harnessPackageDir, zenAgentDir, zenLogger } from "@zen/core";
+import { findRepoRoot, harnessPackageDir, knownSecretValues, zenAgentDir, zenLogger } from "@zen/core";
 import { configureProcessLogging, logsDirFrom, parseZenLogLevels } from "@zen/core/log-process";
 import { startZenServer } from "./index.ts";
 
@@ -29,6 +29,8 @@ const disposeLogging = await configureProcessLogging({
 	logsDir,
 	process: "server",
 	levels: parseZenLogLevels(process.env, { console: "info" }),
+	// The value pass (#139): what a token quoted in a message or a trace payload is scrubbed against.
+	secretValues: knownSecretValues(repoRoot),
 });
 const log = zenLogger("server", "dev");
 

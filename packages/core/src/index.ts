@@ -56,6 +56,7 @@ export {
 	ZEN_LOG_ROOT,
 	ZEN_REDACT_FIELDS,
 	ZEN_REDACTED,
+	ZEN_REDACTED_VALUE,
 	ZenBrowserLogBatch,
 	type ZenLogger,
 	type ZenLogLayer,
@@ -134,6 +135,7 @@ export {
 } from "./pi-rpc.ts";
 export {
 	isSecretShapedName,
+	knownSecretValues,
 	parseDotenv,
 	type QuarantineReport,
 	quarantineSecrets,

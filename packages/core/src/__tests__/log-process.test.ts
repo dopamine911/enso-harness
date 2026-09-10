@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reset } from "@logtape/logtape";
 import { Check } from "typebox/value";
-import { withZenLogContext, ZEN_REDACTED, ZenLogLine, zenLogger } from "../log.ts";
+import { withZenLogContext, ZEN_REDACTED, ZEN_REDACTED_VALUE, ZenLogLine, zenLogger } from "../log.ts";
+import { redactionManifest } from "../log-bundle.ts";
 import {
 	configureProcessLogging,
 	effectiveFileLevel,
@@ -240,4 +241,45 @@ test("⚠ the file holds the tier the knob picked: at info a debug line is not w
 		(line) => (JSON.parse(line) as ZenLogLine).message,
 	);
 	expect(messages.slice(1)).toEqual(["written", "written too, the subtree is up"]);
+});
+
+// #139: the gap #132 accepted. Redaction by field NAME cannot see a secret quoted inside a
+// message, inside an innocently-named property, or inside a `trace` payload — and those are
+// exactly the shapes a guard's `reason` and a tool's output take.
+test("⚠ a known secret VALUE is scrubbed wherever it appears: in the message, in a plainly-named property, inside a trace payload (#139)", async () => {
+	const logsDir = mkdtempSync(join(tmpdir(), "zen-logs-values-"));
+	const secret = "tvly-LIVE-VALUE-MUST-NOT-LAND";
+	const dispose = await configureProcessLogging({
+		logsDir,
+		process: "server",
+		levels: { file: "trace", console: undefined, overrides: [] },
+		secretValues: [secret],
+	});
+	const log = zenLogger("server", "probe");
+	// 1. quoted in the message itself — no property to name.
+	log.info(`a command was refused: curl -H "x-key: ${secret}" https://example.com`);
+	// 2. inside a property whose name is not secret-shaped: a guard's reason, a path.
+	log.warn("bash command refused: {reason}", { reason: `the command carried --token ${secret}`, threadId: "t1" });
+	// 3. inside a nested payload, which is what `trace` writes.
+	log.trace("tool-result payload", { observation: { kind: "tool-result", text: `KEY=${secret}\n`, isError: false } });
+	await dispose();
+
+	const text = readFileSync(join(logsDir, zenLogFilename(new Date())), "utf8");
+	expect(text).not.toContain("LIVE-VALUE-MUST-NOT-LAND");
+	// Present, and counted as a value redaction rather than a field one — the manifest tells a
+	// reader that something leaked and was caught, not that a field was shaped right.
+	const lines = linesOf(join(logsDir, zenLogFilename(new Date()))).map((line) => JSON.parse(line) as ZenLogLine);
+	for (const line of lines) expect(Check(ZenLogLine, line)).toBe(true);
+	expect(redactionManifest(lines).values).toBe(3);
+	// The rest of each record survives: this is a replacement, not a dropped record.
+	expect(text).toContain("https://example.com");
+	expect(text).toContain(ZEN_REDACTED_VALUE);
+});
+
+test("with no known values the pass does not run — an ordinary record is untouched", async () => {
+	const logsDir = mkdtempSync(join(tmpdir(), "zen-logs-novalues-"));
+	const dispose = await configureProcessLogging({ logsDir, process: "server" });
+	zenLogger("server", "probe").info("nothing to scrub here");
+	await dispose();
+	expect(readFileSync(join(logsDir, zenLogFilename(new Date())), "utf8")).toContain("nothing to scrub here");
 });

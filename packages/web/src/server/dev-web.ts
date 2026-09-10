@@ -15,7 +15,7 @@
  * unconfined (#9), neither surface may be reachable from another host.
  */
 import { join } from "node:path";
-import { findRepoRoot, webPackageDir, zenLogger } from "@zen/core";
+import { findRepoRoot, knownSecretValues, webPackageDir, zenLogger } from "@zen/core";
 import { configureProcessLogging, logsDirFrom, parseZenLogLevels } from "@zen/core/log-process";
 import homepage from "../../index.html";
 
@@ -31,6 +31,8 @@ const disposeLogging = await configureProcessLogging({
 	logsDir: logsDirFrom(process.env, repoRoot),
 	process: "web",
 	levels: parseZenLogLevels(process.env, { console: "info" }),
+	// The value pass (#139): what a token quoted in a message or a trace payload is scrubbed against.
+	secretValues: knownSecretValues(repoRoot),
 });
 const log = zenLogger("server", "web");
 // A stop from the hub or a terminal: flush the file, then exit the way the signal would
