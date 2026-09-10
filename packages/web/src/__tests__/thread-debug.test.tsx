@@ -66,6 +66,7 @@ function believing(mode: string | undefined, generation: number | undefined = 1)
 		stats: { totalCost: 0, lastRequestInputTokens: undefined, countedMessages: 0 },
 		recentChunks: [],
 		generation,
+		logged: [],
 	};
 }
 

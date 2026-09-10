@@ -8,6 +8,7 @@ import {
 	type ZenFollowFrame,
 	ZenFollowFrame as ZenFollowFrameSchema,
 	ZenPromptReceipt,
+	zenLogger,
 } from "@zen/core";
 import { Check } from "typebox/value";
 import {
@@ -48,6 +49,17 @@ import { type AguiIdentifiers, observationToAguiEvents } from "./rpc/to-agui.ts"
  * going on the follow and nothing on the server parks. An unreadable blocking request is
  * declined here on pi's behalf, and the run error `to-agui.ts` emits tells the user.
  */
+
+const followLog = zenLogger("browser", "follow");
+
+/** The template with its values in, as a notice reads it: `dialog {id} {outcome}` → `dialog d1 refused`. */
+function sentence(template: string, properties: Record<string, unknown>): string {
+	return template.replace(/\{([^{}]+)\}/g, (placeholder, name: string) => {
+		const value = properties[name];
+		if (value === undefined) return placeholder;
+		return typeof value === "string" ? value : JSON.stringify(value);
+	});
+}
 
 export interface FollowConnectionOptions {
 	readonly threadId: string;
@@ -169,8 +181,17 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 	// page's first) must still see a `fetch` a test installs afterwards (#118).
 	const fetchImpl: (input: string, init?: RequestInit) => Promise<Response> =
 		options.fetch ?? ((input, init) => fetch(input, init));
-	const onProblem = options.onProblem;
 	const base = `/api/threads/${encodeURIComponent(threadId)}`;
+	const log = followLog.with({ threadId });
+	/**
+	 * A problem is a RECORD (#132) — the event with its properties, to the ring and the
+	 * server — and, through `onProblem`, a NOTICE the page shows: the same template rendered
+	 * as one sentence. One site per problem, so the two can never disagree.
+	 */
+	const problem = (template: string, properties: Record<string, unknown> = {}): void => {
+		log.warn(template, properties);
+		options.onProblem?.(`thread ${threadId}: ${sentence(template, properties)}`);
+	};
 
 	/** Chunks waiting for the subscription loop to take them — pushed by frames and by `send`. */
 	const queue: StreamChunk[] = [];
@@ -273,7 +294,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 	async function declineUnreadable(id: string): Promise<void> {
 		// `gone` is fine — someone else settled it; only a refusal of a cancel is a problem.
 		if ((await answerDialog({ id, cancelled: true })) === "refused") {
-			onProblem?.(`thread ${threadId}: could not decline unreadable dialog ${id}`);
+			problem("could not decline unreadable dialog {dialogId}", { dialogId: id });
 		}
 	}
 
@@ -304,7 +325,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 			// human looks; the composer got its text back when `prompt` reported `refused`.
 			if (queuedPrompts.has(observation.messageId)) {
 				queuedPrompts.delete(observation.messageId);
-				onProblem?.(`thread ${threadId}: queued prompt refused: ${observation.reason}`);
+				problem("queued prompt refused: {reason}", { messageId: observation.messageId, reason: observation.reason });
 				return;
 			}
 			const run = [...runs.values()].find((open) => open.promptMessageId === observation.messageId);
@@ -338,13 +359,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 			try {
 				for await (const raw of frames) {
 					if (!Check(ZenFollowFrameSchema, raw)) {
-						onProblem?.(`thread ${threadId}: a frame off the wire fails ZenFollowFrame: ${JSON.stringify(raw)}`);
+						problem("a frame off the wire fails ZenFollowFrame: {frame}", { frame: raw });
 						continue;
 					}
 					observe(raw);
 				}
 			} catch (error) {
-				if (!abort.aborted) onProblem?.(`thread ${threadId}: the follow failed: ${String(error)}`);
+				if (!abort.aborted) problem("the follow failed: {error}", { error: String(error) });
 			} finally {
 				ended = true;
 				// The follow closed under open runs: the client would otherwise wait forever.
@@ -400,6 +421,8 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 				...(signal === undefined ? {} : { signal }),
 			});
 		} catch (error) {
+			// The transcript shows the run's error; the record says what the page could not do.
+			log.warn("prompt could not be sent: {error}", { runId: run.runId, error: String(error) });
 			closeRun(run, {
 				type: EventType.RUN_ERROR,
 				runId: run.runId,
@@ -408,11 +431,14 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 			return;
 		}
 		if (response.status !== 202) {
-			closeRun(run, { type: EventType.RUN_ERROR, runId: run.runId, message: await response.text() });
+			const body = await response.text();
+			log.warn("prompt refused: {status} {body}", { runId: run.runId, status: response.status, body });
+			closeRun(run, { type: EventType.RUN_ERROR, runId: run.runId, message: body });
 			return;
 		}
 		const receipt: unknown = await response.json();
 		if (!Check(ZenPromptReceipt, receipt)) {
+			log.warn("the prompt receipt did not match its schema", { runId: run.runId });
 			closeRun(run, {
 				type: EventType.RUN_ERROR,
 				runId: run.runId,
@@ -422,6 +448,13 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		}
 		run.promptMessageId = receipt.messageId;
 		run.generation = receipt.generation;
+		// The spine from this side: the admission, with the ids that join it to the server's line.
+		log.info("prompt {messageId} {admission} on run {generation}", {
+			runId: run.runId,
+			messageId: receipt.messageId,
+			generation: receipt.generation,
+			admission: receipt.queued ? "queued" : "opened",
+		});
 		// The rejection may already have crossed on the follow, before this receipt named the run.
 		const rejection = rejectedBeforeReceipt.get(receipt.messageId);
 		if (rejection !== undefined) {
@@ -445,7 +478,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		try {
 			return await fetchImpl(`${base}/${route}`, { ...init, method: "POST" });
 		} catch (error) {
-			onProblem?.(`thread ${threadId}: ${what} unreachable: ${String(error)}`);
+			problem("{what} unreachable: {error}", { what, error: String(error) });
 			return undefined;
 		}
 	}
@@ -458,7 +491,12 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		if (response === undefined) return "unreachable";
 		if (response.status === 204) return "answered";
 		const outcome: DialogAnswerOutcome = response.status === 404 ? "gone" : "refused";
-		onProblem?.(`thread ${threadId}: dialog ${answer.id} ${outcome}: ${response.status} ${await response.text()}`);
+		problem("dialog {dialogId} {outcome}: {status} {body}", {
+			dialogId: answer.id,
+			outcome,
+			status: response.status,
+			body: await response.text(),
+		});
 		return outcome;
 	}
 
@@ -468,11 +506,11 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		if (response.status === 200) {
 			const receipt: unknown = await response.json();
 			if (Check(ZenAbortReceipt, receipt)) return { outcome: "aborted", restored: receipt.restored };
-			onProblem?.(`thread ${threadId}: the abort receipt did not match its schema — anything queued is lost`);
+			problem("the abort receipt did not match its schema — anything queued is lost");
 			return { outcome: "aborted", restored: [] };
 		}
 		const outcome: AbortOutcome = response.status === 409 ? "idle" : "gone";
-		onProblem?.(`thread ${threadId}: abort ${outcome}: ${response.status} ${await response.text()}`);
+		problem("abort {outcome}: {status} {body}", { outcome, status: response.status, body: await response.text() });
 		return { outcome, restored: [] };
 	}
 
@@ -483,19 +521,19 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		});
 		if (response === undefined) return "unreachable";
 		if (response.status !== 202) {
-			onProblem?.(`thread ${threadId}: queued prompt refused: ${response.status} ${await response.text()}`);
+			problem("queued prompt refused: {status} {body}", { status: response.status, body: await response.text() });
 			return "refused";
 		}
 		const receipt: unknown = await response.json();
 		if (!Check(ZenPromptReceipt, receipt)) {
-			onProblem?.(`thread ${threadId}: the prompt receipt did not match its schema`);
+			problem("the prompt receipt did not match its schema");
 			return "refused";
 		}
 		// The rejection may already have crossed on the follow, before this receipt named it.
 		const rejection = rejectedBeforeReceipt.get(receipt.messageId);
 		if (rejection !== undefined) {
 			rejectedBeforeReceipt.delete(receipt.messageId);
-			onProblem?.(`thread ${threadId}: queued prompt refused: ${rejection}`);
+			problem("queued prompt refused: {reason}", { reason: rejection });
 			return "refused";
 		}
 		if (!receipt.queued) return "taken";

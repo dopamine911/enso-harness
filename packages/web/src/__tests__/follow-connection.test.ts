@@ -3,6 +3,7 @@ import { EventType } from "@ag-ui/core";
 import type { StreamChunk } from "@tanstack/ai";
 import type { ZenFollowFrame } from "@zen/core";
 import { createFollowConnection, type FollowConnection } from "../follow-connection.ts";
+import { recordZenLogs, releaseZenLogs } from "./log-recorder.ts";
 import { createScriptedFetch, type ScriptedFetch, SNAPSHOT_IDLE } from "./scripted-server.ts";
 
 /**
@@ -352,19 +353,38 @@ test("⚠ when pi CLAIMS a queued prompt (a user message-start after an assistan
 
 // PR #120 review: the callers fire-and-forget (`void connection.abort()`), so a network
 // failure must be an OUTCOME the adapter reports, never a rejection that escapes them.
-test("a unary POST that never gets an answer is `unreachable` — reported once, not thrown (#116)", async () => {
-	const problems: string[] = [];
-	const connection = createFollowConnection({
-		threadId: "t1",
-		fetch: (() => Promise.reject(new TypeError("fetch failed"))) as unknown as typeof fetch,
-		onProblem: (problem) => problems.push(String(problem)),
-	});
-	expect(await connection.abort()).toEqual({ outcome: "unreachable", restored: [] });
-	expect(await connection.answerDialog({ id: "d1", value: "a" })).toBe("unreachable");
-	expect(problems).toEqual([
-		expect.stringContaining("abort unreachable: TypeError: fetch failed"),
-		expect.stringContaining("dialog d1 unreachable: TypeError: fetch failed"),
-	]);
+test("a unary POST that never gets an answer is `unreachable` — reported once, not thrown (#116); a RECORD and a NOTICE from one site (#132)", async () => {
+	const logs = await recordZenLogs();
+	try {
+		const problems: string[] = [];
+		const connection = createFollowConnection({
+			threadId: "t1",
+			fetch: (() => Promise.reject(new TypeError("fetch failed"))) as unknown as typeof fetch,
+			onProblem: (problem) => problems.push(String(problem)),
+		});
+		expect(await connection.abort()).toEqual({ outcome: "unreachable", restored: [] });
+		expect(await connection.answerDialog({ id: "d1", value: "a" })).toBe("unreachable");
+		// The notice: the template rendered as a sentence, prefixed with the thread.
+		expect(problems).toEqual([
+			"thread t1: abort unreachable: TypeError: fetch failed",
+			"thread t1: dialog d1 unreachable: TypeError: fetch failed",
+		]);
+		// The record: the event and its properties, under the browser's category, with the thread.
+		logs.assertLogged({
+			level: "warning",
+			category: ["zen", "browser", "follow"],
+			rawMessage: "{what} unreachable: {error}",
+			properties: { threadId: "t1", what: "abort", error: "TypeError: fetch failed" },
+		});
+		logs.assertLogged({
+			level: "warning",
+			rawMessage: "{what} unreachable: {error}",
+			properties: { what: "dialog d1" },
+		});
+		expect(logs.records).toHaveLength(2);
+	} finally {
+		await releaseZenLogs();
+	}
 });
 
 test("⚠ a blocking question crosses as zen.dialog — no interrupt, no run boundary — and the answer is one POST", async () => {

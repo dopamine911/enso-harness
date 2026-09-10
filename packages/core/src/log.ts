@@ -1,4 +1,4 @@
-import { getLogger, type Logger, withContext } from "@logtape/logtape";
+import { getLogger, type Logger, type LogLevel, type LogRecord, withContext } from "@logtape/logtape";
 import { type Static, Type } from "typebox";
 
 /**
@@ -152,3 +152,57 @@ export const ZenLogLine = Type.Object(
 	{ additionalProperties: false },
 );
 export type ZenLogLine = Static<typeof ZenLogLine>;
+
+const LINE_LEVEL: Readonly<Record<LogLevel, ZenLogLine["level"]>> = {
+	trace: "TRACE",
+	debug: "DEBUG",
+	info: "INFO",
+	warning: "WARN",
+	error: "ERROR",
+	fatal: "FATAL",
+};
+
+/**
+ * A LogTape record as the line the file would hold — the browser's ring keeps these, so the
+ * drawer and the bundle read one shape whichever process wrote it. The message is the
+ * TEMPLATE (`rawMessage`), as on disk; `log-process.ts`'s `logRecordOf` is the inverse.
+ */
+export function zenLogLineOf(record: LogRecord): ZenLogLine {
+	return {
+		"@timestamp": new Date(record.timestamp).toISOString(),
+		level: LINE_LEVEL[record.level],
+		// A tagged-template message has an array here; ours are always strings (the wrapper).
+		message: typeof record.rawMessage === "string" ? record.rawMessage : record.rawMessage.join("{}"),
+		logger: record.category.join("."),
+		properties: record.properties,
+	};
+}
+
+/**
+ * What the browser ships to `POST /api/logs` (#132 slice 3): its records at `info` and up,
+ * batched. The server re-emits each through its own logger as `process: "browser"`, so they
+ * land in the same file, redacted by the same sink, and `bun run logs --process browser`
+ * finds them. `at` is the browser's clock; the file's `@timestamp` is the server's receipt.
+ * `page` tells two tabs apart. `logger` must be under `zen.browser`: the server will not be
+ * told what the host or the guard said.
+ */
+export const ZenBrowserLogBatch = Type.Object(
+	{
+		page: Type.String({ minLength: 1, maxLength: 64 }),
+		records: Type.Array(
+			Type.Object(
+				{
+					at: Type.String(),
+					level: Type.Union([Type.Literal("info"), Type.Literal("warning"), Type.Literal("error")]),
+					logger: Type.String({ pattern: "^zen\\.browser(\\.[A-Za-z0-9-]+)*$" }),
+					message: Type.String({ maxLength: 4096 }),
+					properties: Type.Record(Type.String(), Type.Unknown()),
+				},
+				{ additionalProperties: false },
+			),
+			{ maxItems: 200 },
+		),
+	},
+	{ additionalProperties: false },
+);
+export type ZenBrowserLogBatch = Static<typeof ZenBrowserLogBatch>;

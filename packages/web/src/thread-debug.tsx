@@ -2,11 +2,12 @@ import {
 	describeSessionEntry,
 	describeThreadEvent,
 	persistedPermissionMode,
+	type ZenLogLine,
 	type ZenThreadEvent,
 	ZenThreadEvents,
 	ZenThreadInspection,
 } from "@zen/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Check } from "typebox/value";
 import { Button } from "./components/ui/button.tsx";
 import type { RecordedCustomChunk } from "./custom-event-router.ts";
@@ -17,9 +18,20 @@ import {
 	ZEN_CUSTOM_EVENT_FOLLOW_ENDED,
 	ZEN_CUSTOM_EVENT_RUN,
 } from "./rpc/custom-event-names.ts";
-import { useStore, useThreadStores } from "./store.ts";
+import { type Store, useStore, useThreadStores } from "./store.ts";
 import { boundedFailureDetail } from "./stored-threads.ts";
 import type { ThreadStats } from "./thread-stats.tsx";
+import { browserLogging } from "./thread-stores.ts";
+
+const NO_LINES: readonly ZenLogLine[] = [];
+/** A page mounted without `configureBrowserLogging` (tests) has no ring: nothing to subscribe to, nothing logged. */
+function useRing(ring: Store<readonly ZenLogLine[]> | undefined): readonly ZenLogLine[] {
+	return useSyncExternalStore(
+		ring?.subscribe ?? (() => () => undefined),
+		ring?.get ?? (() => NO_LINES),
+		ring?.get ?? (() => NO_LINES),
+	);
+}
 
 /**
  * The session debug drawer (#86): what the BROWSER believes next to what pi's SESSION
@@ -49,6 +61,8 @@ export interface BrowserBelief {
 	readonly recentChunks: readonly RecordedCustomChunk[];
 	/** The acquisition this page's last run held (`zen.run`, #109); undefined before a run. */
 	readonly generation: number | undefined;
+	/** This thread's records from the page's ring (#132): what the browser LOGGED, newest last. */
+	readonly logged: readonly ZenLogLine[];
 }
 
 /**
@@ -196,6 +210,20 @@ export function ThreadDebugView({
 						{browser.recentChunks.map((chunk) => (
 							<li key={chunk.sequence}>
 								{chunk.receivedAt.slice(11, 19)} {describeChunk(chunk)}
+							</li>
+						))}
+					</ol>
+					{/* The page's own records for this thread (#132): the ring, not the server — what
+					    the adapter said as it happened, including what the server never heard. */}
+					<h4 className="mt-1 text-foreground">browser logged ({browser.logged.length})</h4>
+					<ol aria-label="browser log">
+						{browser.logged.map((line) => (
+							<li
+								key={String(line.properties?.pageSequence ?? line["@timestamp"])}
+								className={line.level === "WARN" || line.level === "ERROR" ? "text-destructive" : ""}
+							>
+								{line["@timestamp"].slice(11, 23)} {line.level.toLowerCase()}{" "}
+								{line.logger.replace(/^zen\.browser\.?/, "")} {line.message}
 							</li>
 						))}
 					</ol>
@@ -367,11 +395,14 @@ export function ThreadDebugDrawer(): React.ReactNode {
 	const stats = useStore(stores.stats);
 	const recentChunks = useStore(stores.recentChunks);
 	const generation = useStore(stores.generation);
+	const logging = useStore(browserLogging);
+	const ring = useRing(logging?.ring);
+	const logged = useMemo(() => ring.filter((line) => line.properties?.threadId === threadId), [ring, threadId]);
 	const [session, setSession] = useState<ZenThreadInspection | undefined>(undefined);
 	const [events, setEvents] = useState<ZenThreadEvents | undefined>(undefined);
 	const [error, setError] = useState<string | undefined>(undefined);
 	const [copyState, setCopyState] = useState<CopyState>("idle");
-	const browser: BrowserBelief = { mode, stats, recentChunks, generation };
+	const browser: BrowserBelief = { mode, stats, recentChunks, generation, logged };
 	// One sequencer per thread id: a new thread starts a new "latest".
 	const fetchLatest = useMemo(() => latestWins(() => fetchThreadDebug(threadId)), [threadId]);
 	const refresh = useCallback((): void => {

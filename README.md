@@ -315,6 +315,11 @@ A value that is not a level is a startup error naming it. The first record of ev
 which levels it runs at. The TUI's pi process configures itself the same way (`extensions/logging`,
 first in the manifest); in the web host pi runs in-process and shares the server's.
 
+The browser logs too: its records at `info` and up are batched to `POST /api/logs` and land in the
+same file as `process: browser` (`bun run logs --process browser`), with `at` — the page's clock — and
+`page` to tell tabs apart. Every level the page runs at (`?log=debug` beside `?debug`) stays in an
+in-memory ring the `?debug` drawer shows under *browser logged*.
+
 ## The vendored pi packages
 
 Declared explicitly in `packages/harness/package.json` → `pi.extensions`, guards first — pi resolves

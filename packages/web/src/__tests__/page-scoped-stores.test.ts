@@ -21,6 +21,8 @@ const PAGE_SCOPED_BY_DESIGN: readonly string[] = [
 	"thread-stores.ts:threadList",
 	// The server's stored-threads listing (Previous Sessions): one per page, refreshed on settle.
 	"chat-screen.tsx:storedThreads",
+	// The page's log ring and shipper (#132): configured once by main.tsx, read by the drawer.
+	"thread-stores.ts:browserLogging",
 ];
 
 const MODULE_LEVEL_STORE = /^(?:export )?const (\w+)(?::[^=]+)? = create\w*(?:Store|Lines)\w*(?:<[^\n]*?>)?\(/gm;

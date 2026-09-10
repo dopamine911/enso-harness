@@ -1,5 +1,6 @@
 import type { UIMessage } from "@tanstack/ai-client";
 import type { ZenDialogSpec, ZenInterruptedTail, ZenThreadHistory } from "@zen/core";
+import type { BrowserLogging } from "./browser-logging.ts";
 import { createRecentChunksStore, type RecentChunksStore } from "./custom-event-router.ts";
 import { createFollowConnection, type FollowConnection } from "./follow-connection.ts";
 import { createModeLines, type ModeLines } from "./mode-lines.ts";
@@ -128,6 +129,15 @@ export interface ThreadSummary {
 	/** A run is in flight. */
 	readonly busy: boolean;
 }
+
+/**
+ * The page's logging (#132): the ring the drawer reads and the shipper the page flushes on
+ * hide — set once by `main.tsx` after `configureBrowserLogging`; undefined in tests that
+ * mount without it. One per page, like the rail.
+ */
+export const browserLogging: WritableStore<BrowserLogging | undefined> = createStore<BrowserLogging | undefined>(
+	undefined,
+);
 
 const threads = new Map<string, ThreadStores>();
 const summaries = new Map<string, ThreadSummary>();
