@@ -36,9 +36,16 @@ const SOURCE_EXTENSION = /\.tsx?$/;
  * The state layer, by import. `@zen/core` is the wire: a presentation component taking a
  * `ZenObservation` is reading the protocol, which is the renderer's job (README rule 4 —
  * types are retyped as they cross, not imported).
+ *
+ * ⚠ Both spellings of the same module (PR #152 review). `packages/web/tsconfig.json` maps
+ * `@/*` to `./src/*`, and these files already reach for that alias for their ui primitives —
+ * so `@/store.ts` is the MORE natural way to write the import this gate exists to refuse,
+ * and a relative-only pattern would have waved it through.
  */
-const STATE_LAYER_IMPORT =
-	/from\s+["'](?:@zen\/core|@tanstack\/[^"']+|(?:\.\.\/)+(?:store|thread-stores|stored-threads|follow-connection|session-stats|custom-event-router)\.ts)["']/;
+const STATE_LAYER_MODULES = "store|thread-stores|stored-threads|follow-connection|session-stats|custom-event-router";
+const STATE_LAYER_IMPORT = new RegExp(
+	`from\\s+["'](?:@zen/core|@tanstack/[^"']+|(?:(?:\\.\\./)+|@/)(?:${STATE_LAYER_MODULES})\\.ts)["']`,
+);
 
 function portedFiles(): string[] {
 	const directory = join(repositoryRoot, PORTED_DIRECTORY);
@@ -62,4 +69,27 @@ test("⚠ nothing under ai-elements reaches the state layer — component-local 
 		}
 	}
 	expect(offenders).toEqual([]);
+});
+
+// The gate can only gate what its pattern sees. Every spelling of the same forbidden module
+// belongs here, and the `@/` alias row is the one PR #152's review found missing.
+test("the state-layer matcher catches both spellings — the alias and the relative path (PR #152 review)", () => {
+	for (const line of [
+		'import { useStore } from "@/store.ts";',
+		'import { useThreadStores } from "../../thread-stores.ts";',
+		'import type { ZenObservation } from "@zen/core";',
+		'import { useChat } from "@tanstack/react-ai";',
+		'import { createFollowConnection } from "@/follow-connection.ts";',
+	]) {
+		expect(STATE_LAYER_IMPORT.test(line)).toBe(true);
+	}
+	// What presentation legitimately imports, and must keep importing.
+	for (const line of [
+		'import { cn } from "@/lib/utils.ts";',
+		'import { Button } from "@/components/ui/button.tsx";',
+		'import { useState } from "react";',
+		'import { PromptAttachment } from "./prompt-input.tsx";',
+	]) {
+		expect(STATE_LAYER_IMPORT.test(line)).toBe(false);
+	}
 });
