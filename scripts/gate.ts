@@ -113,33 +113,75 @@ const GATES: readonly Gate[] = [
 ]
 
 /**
- * Runs one gate to completion, inheriting stdio so the underlying tool's colored
- * output and progress reach the terminal unchanged. Returns the child's exit code
- * (non-zero = failure); a child killed by a signal (status null) counts as failure.
+ * A tool that died mid-run and still exited 0 — the one failure a gate cannot see by
+ * asking the exit code.
+ *
+ * Measured 2026-09-10: Biome 2.5.13 with any GritQL plugin loaded (ours is
+ * `.biome/naming.grit`) overflows a worker thread's stack, prints
+ * `fatal runtime error: stack overflow, aborting`, and **exits 0**. Whatever that worker
+ * held was never checked, and the gate reported green over it. Same silent-pass class this
+ * repo keeps finding in its own matchers — a gate that cannot fail still reads as
+ * protection — arriving from a dependency instead of from us.
+ *
+ * Rust panics and segfaults print their own banner and are covered by the same scan. A tool
+ * that dies loudly AND exits non-zero was already caught by the status check below.
+ */
+const WORKER_ABORT = /has overflowed its stack|fatal runtime error|panicked at|Segmentation fault/
+
+/** Whether a tool's stderr says it aborted. Exported for `test/gate-abort.test.ts`. */
+export function reportsWorkerAbort(stderr: string): boolean {
+  return WORKER_ABORT.test(stderr)
+}
+
+/**
+ * Runs one gate to completion. stdout stays inherited, so the tool's colored, streaming
+ * output reaches the terminal unchanged; stderr is captured, echoed verbatim, then scanned
+ * for a runtime abort. Returns the child's exit code (non-zero = failure); a child killed by
+ * a signal (status null), or one that aborted while claiming success, counts as failure.
  */
 function runGate(gate: Gate): number {
   process.stdout.write(`\n${BOLD}▶ ${gate.name}${RESET} ${DIM}— ${gate.describe}${RESET}\n`)
-  const result = spawnSync(PACKAGE_MANAGER, ['run', gate.script], { stdio: 'inherit' })
+  const result = spawnSync(PACKAGE_MANAGER, ['run', gate.script], {
+    stdio: ['inherit', 'inherit', 'pipe'],
+    encoding: 'utf8',
+  })
   if (result.error) {
     process.stderr.write(`${RED}gate "${gate.name}" failed to spawn: ${result.error.message}${RESET}\n`)
+    return 1
+  }
+  const stderr = result.stderr ?? ''
+  if (stderr.length > 0) process.stderr.write(stderr)
+  if (reportsWorkerAbort(stderr)) {
+    process.stderr.write(
+      `${RED}gate "${gate.name}": the tool ABORTED — whatever it held was not checked, whatever it exited with (${result.status}).${RESET}\n`,
+    )
     return 1
   }
   return result.status ?? 1
 }
 
-process.stdout.write(`${DIM}gate: running via ${PACKAGE_MANAGER}${RESET}\n`)
+/**
+ * Run only when EXECUTED, never when imported. `reportsWorkerAbort` is exported so its
+ * matcher can be tested, and a test that imported this file would otherwise run every gate
+ * — including itself — from inside the test run.
+ */
+function main(): void {
+  process.stdout.write(`${DIM}gate: running via ${PACKAGE_MANAGER}${RESET}\n`)
 
-let failedGate: string | null = null
-for (const gate of GATES) {
-  if (runGate(gate) !== 0) {
-    failedGate = gate.name
-    break
+  let failedGate: string | null = null
+  for (const gate of GATES) {
+    if (runGate(gate) !== 0) {
+      failedGate = gate.name
+      break
+    }
   }
+
+  if (failedGate) {
+    process.stdout.write(`\n${RED}✗ gate "${failedGate}" failed.${RESET}\n`)
+    process.exit(1)
+  }
+
+  process.stdout.write(`\n${GREEN}✓ All gates passed.${RESET}\n`)
 }
 
-if (failedGate) {
-  process.stdout.write(`\n${RED}✗ gate "${failedGate}" failed.${RESET}\n`)
-  process.exit(1)
-}
-
-process.stdout.write(`\n${GREEN}✓ All gates passed.${RESET}\n`)
+if (import.meta.main) main()
