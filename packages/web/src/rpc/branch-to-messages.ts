@@ -44,6 +44,35 @@ interface PiAssistantContentPart {
 	arguments?: unknown;
 }
 
+/** pi's user content: `string`, or `[{type:"text", text}, {type:"image", data, mimeType}, …]` (`UserMessage` in pi-ai). */
+interface PiUserContentPart {
+	type?: unknown;
+	text?: unknown;
+	data?: unknown;
+	mimeType?: unknown;
+}
+
+/**
+ * A stored user message as parts: its text, and each image pi kept beside it (#68) as a
+ * TanStack `ImagePart` with a `data` source — the bytes ARE in the session file (pi stores
+ * the prompt's images in the user entry), so a reload shows the user's image without the
+ * browser holding anything. Unknown part kinds render as text markers, as `contentToText`
+ * does, rather than vanishing.
+ */
+function userParts(content: unknown): MessagePart[] {
+	if (typeof content === "string") return [{ type: "text", content }];
+	if (!Array.isArray(content)) return [{ type: "text", content: "" }];
+	const parts: MessagePart[] = [];
+	for (const raw of content as PiUserContentPart[]) {
+		if (typeof raw !== "object" || raw === null) continue;
+		if (raw.type === "text" && typeof raw.text === "string") parts.push({ type: "text", content: raw.text });
+		else if (raw.type === "image" && typeof raw.data === "string" && typeof raw.mimeType === "string") {
+			parts.push({ type: "image", source: { type: "data", value: raw.data, mimeType: raw.mimeType } });
+		} else parts.push({ type: "text", content: `[${typeof raw.type === "string" ? raw.type : "unknown"} content]` });
+	}
+	return parts;
+}
+
 function assistantParts(content: unknown): MessagePart[] {
 	if (!Array.isArray(content)) return [];
 	const parts: MessagePart[] = [];
@@ -114,7 +143,7 @@ export function branchToMessages(branch: readonly unknown[]): UIMessage[] {
 			messages.push({
 				id,
 				role: "user",
-				parts: [{ type: "text", content: contentToText(stored.content) }],
+				parts: userParts(stored.content),
 				...(at === undefined ? {} : { createdAt: at }),
 			});
 		} else if (stored.role === "assistant") {

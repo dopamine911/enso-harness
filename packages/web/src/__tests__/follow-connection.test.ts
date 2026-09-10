@@ -116,6 +116,89 @@ const send = (server: ScriptedServer, message: string, runId = "r1") =>
 		},
 	);
 
+// ── images on a prompt (#68) ───────────────────────────────────────────────────────
+
+const PNG_BYTES = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+test("send posts the user's image parts as inline bytes + kind, with the text; a text-only message has NO images key", async () => {
+	const server = scripted();
+	server.frame(SNAPSHOT_IDLE);
+	await server.untilChunks(3);
+	await server.connection.send(
+		[
+			{
+				id: "u1",
+				role: "user",
+				parts: [
+					{ type: "text", content: "what does this say?" },
+					{ type: "image", source: { type: "data", value: PNG_BYTES, mimeType: "image/png" } },
+					// A `data:` URL is bytes already — the form's own shape — so it crosses as bytes too.
+					{ type: "image", source: { type: "url", value: `data:image/webp;base64,${PNG_BYTES}` } },
+				],
+			},
+		],
+		undefined,
+		undefined,
+		{ threadId: "t1", runId: "r1", clientTools: [], forwardedProps: {} },
+	);
+	expect(server.prompts).toEqual([
+		{
+			message: "what does this say?",
+			images: [
+				{ mimeType: "image/png", data: PNG_BYTES },
+				{ mimeType: "image/webp", data: PNG_BYTES },
+			],
+		},
+	]);
+	await send(server, "plain", "r2");
+	expect(server.prompts[1]).toEqual({ message: "plain" });
+	expect(server.prompts[1]).not.toHaveProperty("images");
+	server.abort();
+});
+
+test("[WARN] an image by URL is refused on THIS side, by name, before anything is posted — the server never sees a URL (#68)", async () => {
+	const server = scripted();
+	server.frame(SNAPSHOT_IDLE);
+	await server.untilChunks(3);
+	await server.connection.send(
+		[
+			{
+				id: "u1",
+				role: "user",
+				parts: [
+					{ type: "text", content: "look" },
+					{ type: "image", source: { type: "url", value: "https://example.com/secret-internal.png" } },
+				],
+			},
+		],
+		undefined,
+		undefined,
+		{ threadId: "t1", runId: "r1", clientTools: [], forwardedProps: {} },
+	);
+	// The run opened (RUN_STARTED, TEXT_MESSAGE_START) and ended with the reason — like a 400, minus the POST.
+	await server.untilChunks(6);
+	expect(server.prompts).toEqual([]);
+	expect(server.chunks[5]).toEqual({
+		type: EventType.RUN_ERROR,
+		runId: "r1",
+		message: "an image by URL is not sent — attach the file itself (https://example.com/secret-internal.png)",
+	});
+	server.abort();
+});
+
+test("prompt() during a run carries the images beside the text, as a followUp (#68, #75)", async () => {
+	const server = scripted(QUEUED_RECEIPT);
+	server.frame({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 2 });
+	await server.untilChunks(5);
+	expect(await server.connection.prompt("and this", [{ mimeType: "image/png" as const, data: PNG_BYTES }])).toBe(
+		"queued",
+	);
+	expect(server.prompts).toEqual([
+		{ message: "and this", streamingBehavior: "followUp", images: [{ mimeType: "image/png", data: PNG_BYTES }] },
+	]);
+	server.abort();
+});
+
 test("the snapshot becomes the mode, open-question and run receipts the stores already read", async () => {
 	const server = scripted();
 	server.frame(SNAPSHOT_IDLE);

@@ -22,7 +22,7 @@ export interface ScriptedFetch {
 	readonly frame: (frame: ZenFollowFrame) => void;
 	/** End the follow body — the server went away. */
 	readonly closeFollow: () => void;
-	readonly prompts: Array<{ message: string; streamingBehavior?: string }>;
+	readonly prompts: Array<{ message: string; streamingBehavior?: string; images?: unknown[] }>;
 	readonly dialogs: unknown[];
 	/** How many `POST …/abort` the server saw (#116). */
 	readonly abortCount: () => number;
@@ -63,7 +63,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
 	let close: () => void = () => undefined;
 	/** The prompt route answers only once this resolves — open by default; a test may hold it. */
 	let promptGate = { promise: Promise.resolve() } as { promise: Promise<void>; resolve?: () => void };
-	const prompts: Array<{ message: string; streamingBehavior?: string }> = [];
+	const prompts: Array<{ message: string; streamingBehavior?: string; images?: unknown[] }> = [];
 	const dialogs: unknown[] = [];
 	/** The follow: one SSE body per subscription; the latest one is where `frame` writes. */
 	const openFollow = (): Response => {
@@ -106,7 +106,9 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
 		const action = threadAction(path);
 		if (action === "follow") return Promise.resolve(openFollow());
 		if (action === "prompt") {
-			prompts.push(JSON.parse(String(init?.body)) as { message: string; streamingBehavior?: string });
+			prompts.push(
+				JSON.parse(String(init?.body)) as { message: string; streamingBehavior?: string; images?: unknown[] },
+			);
 			const body = typeof promptStatus.body === "string" ? promptStatus.body : JSON.stringify(promptStatus.body);
 			return promptGate.promise.then(() => new Response(body, { status: promptStatus.status }));
 		}

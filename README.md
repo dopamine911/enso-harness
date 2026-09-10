@@ -279,6 +279,14 @@ Built so far:
   and similar flows work from a web page at all.
 - **A thread-stats bar (#45 phase 1):** running cost plus the last request's token split.
 - **Mode-change notifications** rendered as chat-adjacent lines rather than lost to stderr.
+- **Images on a prompt (#68).** Paste, drop, or attach png/jpeg/gif/webp (5 MB each, 20 per prompt);
+  the composer — `prompt-input.tsx` + `attachments.tsx` ported under #121 — shows the thumbnails, and
+  an image with no words is a prompt. The bytes cross as `ZenPromptBody.images` (inline base64 + kind:
+  the wire has no `url`, so a server-side fetch cannot be asked for), pi stores them in the session's
+  user entry, and the transcript renders the user's image from the snapshot — so resuming the thread
+  from the rail shows it, with no page state involved. A file the form refuses is a notice naming the
+  cap; a server refusal names the image and the reason. Measured: a 1254×1254, 1.2 MB PNG went through
+  as-is and the provider read it — no client-side downscale; that thread's snapshot then weighs 1.7 MB.
 
 The dev entry (`bun run dev`) starts the API server first, then the web surface with an `/api` proxy —
 deliberately ordered, since the proxy does not retry a refused connection.

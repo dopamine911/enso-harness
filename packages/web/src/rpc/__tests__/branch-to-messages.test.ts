@@ -53,6 +53,26 @@ test("user and assistant messages map in branch order, with text, thinking and t
 // TanStack's own normalised shape: the result sits in the assistant message that holds the
 // call, and the call reads complete with the result as its output — so a resumed step row
 // (#93) renders exactly like a live one.
+test("a user message pi stored with an image beside its text comes back as text + image parts (#68) — the bytes are in the file", () => {
+	const messages = branchToMessages([
+		entry("u1", {
+			role: "user",
+			content: [
+				{ type: "text", text: "what does this say?" },
+				{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+				{ type: "audio", data: "x" },
+			],
+			timestamp: 1,
+		}),
+	]);
+	expect(messages[0]?.parts).toEqual([
+		{ type: "text", content: "what does this say?" },
+		{ type: "image", source: { type: "data", value: "iVBORw0KGgo=", mimeType: "image/png" } },
+		// An unknown kind is a visible marker, as `contentToText` renders one — never a silent skip.
+		{ type: "text", content: "[audio content]" },
+	]);
+});
+
 test("⚠ a tool result is paired into the assistant message holding its call; the call completes with that output", () => {
 	const messages = branchToMessages([
 		entry("u1", { role: "user", content: "ls", timestamp: 1 }),

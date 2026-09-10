@@ -37,7 +37,7 @@ export {
 	ZenFollowObservation,
 	ZenFollowSnapshot,
 	ZenFollowStatus,
-	type ZenImageMimeType,
+	ZenImageMimeType,
 	ZenPromptBody,
 	ZenPromptImage,
 	ZenPromptReceipt,

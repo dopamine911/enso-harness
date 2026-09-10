@@ -1,5 +1,5 @@
 import { EventType } from "@ag-ui/core";
-import type { StreamChunk } from "@tanstack/ai";
+import type { MessagePart, StreamChunk } from "@tanstack/ai";
 import type { ModelMessage, UIMessage } from "@tanstack/ai/client";
 import type { RunAgentInputContext, SubscribeConnectionAdapter } from "@tanstack/ai-client";
 import {
@@ -7,6 +7,9 @@ import {
 	ZenAbortReceipt,
 	type ZenFollowFrame,
 	ZenFollowFrame as ZenFollowFrameSchema,
+	type ZenImageMimeType,
+	type ZenPromptBody,
+	type ZenPromptImage,
 	ZenPromptReceipt,
 	zenLogger,
 } from "@zen/core";
@@ -85,18 +88,50 @@ interface OpenRun {
 	 */
 	assistantMessages: number;
 }
-/** The last user message's text — what `send` prompts with. Images are #68. */
-function latestUserText(messages: Array<UIMessage> | Array<ModelMessage>): string {
+/** The parts of the last user message, whichever shape TanStack hands over — `UIMessage.parts` or `ModelMessage.content`. */
+function latestUserParts(messages: Array<UIMessage> | Array<ModelMessage>): readonly MessagePart[] {
 	for (let position = messages.length - 1; position >= 0; position -= 1) {
 		const message: UIMessage | ModelMessage | undefined = messages[position];
 		if (message === undefined || message.role !== "user") continue;
-		if ("parts" in message) {
-			return message.parts.map((part) => (part.type === "text" ? part.content : "")).join("");
-		}
-		if (typeof message.content === "string") return message.content;
-		return (message.content ?? []).map((part) => (part.type === "text" ? part.content : "")).join("");
+		if ("parts" in message) return message.parts;
+		if (typeof message.content === "string") return [{ type: "text", content: message.content }];
+		return message.content ?? [];
 	}
-	return "";
+	return [];
+}
+
+/** The text of a user message's parts — what `send` prompts with. */
+function textOf(parts: readonly MessagePart[]): string {
+	return parts.map((part) => (part.type === "text" ? part.content : "")).join("");
+}
+
+/** The `data:<mime>;base64,<data>` URL the composer submits, split. Anything else is not an inline image. */
+const DATA_URL = /^data:([^;,]+);base64,([A-Za-z0-9+/]*={0,2})$/;
+
+/**
+ * The user's image parts as the wire takes them (#68): inline bytes only. `ZenPromptImage`
+ * has no `url` — a server-side fetch would be egress the guards do not cover — so a part
+ * whose source is a URL that is not a `data:` URL is REFUSED here, by name, before anything
+ * is posted; the server never learns of it. A `data:` URL is bytes already, so it crosses.
+ * The mime type is the part's own; the server holds the allowlist and says which is refused.
+ */
+export function imagesOf(parts: readonly MessagePart[]): { images: ZenPromptImage[]; refused: string[] } {
+	const images: ZenPromptImage[] = [];
+	const refused: string[] = [];
+	for (const part of parts) {
+		if (part.type !== "image") continue;
+		if (part.source.type === "data") {
+			images.push({ mimeType: part.source.mimeType as ZenImageMimeType, data: part.source.value });
+			continue;
+		}
+		const inline = DATA_URL.exec(part.source.value);
+		if (inline?.[1] !== undefined && inline[2] !== undefined) {
+			images.push({ mimeType: inline[1] as ZenImageMimeType, data: inline[2] });
+			continue;
+		}
+		refused.push(part.source.value.slice(0, 80));
+	}
+	return { images, refused };
 }
 
 /** `data:` lines of an SSE body, one parsed frame at a time; comments (keepalives) are skipped. */
@@ -172,7 +207,7 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
 	 * browser's queue, invisible to other tabs and lost on reload. This POSTs now with
 	 * `streamingBehavior: followUp`, so pi queues it and every follower sees it.
 	 */
-	readonly prompt: (text: string) => Promise<PromptOutcome>;
+	readonly prompt: (text: string, images?: readonly ZenPromptImage[]) => Promise<PromptOutcome>;
 }
 
 export function createFollowConnection(options: FollowConnectionOptions): FollowConnection {
@@ -411,13 +446,23 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		runContext?: RunAgentInputContext,
 	): Promise<void> {
 		const run = openRun(runContext?.runId ?? crypto.randomUUID(), undefined, undefined);
-		const message = latestUserText(messages);
+		const parts = latestUserParts(messages);
+		const message = textOf(parts);
+		const { images, refused } = imagesOf(parts);
+		if (refused.length > 0) {
+			// Refused on this side, by name: the server would only ever have seen bytes.
+			const reason = `an image by URL is not sent — attach the file itself (${refused.join(", ")})`;
+			log.warn("prompt refused: {reason}", { runId: run.runId, reason });
+			closeRun(run, { type: EventType.RUN_ERROR, runId: run.runId, message: reason });
+			return;
+		}
+		const body: ZenPromptBody = { message, ...(images.length === 0 ? {} : { images }) };
 		let response: Response;
 		try {
 			response = await fetchImpl(`${base}/prompt`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ message }),
+				body: JSON.stringify(body),
 				...(signal === undefined ? {} : { signal }),
 			});
 		} catch (error) {
@@ -514,10 +559,15 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
 		return { outcome, restored: [] };
 	}
 
-	async function prompt(text: string): Promise<PromptOutcome> {
+	async function prompt(text: string, images: readonly ZenPromptImage[] = []): Promise<PromptOutcome> {
+		const body: ZenPromptBody = {
+			message: text,
+			streamingBehavior: "followUp",
+			...(images.length === 0 ? {} : { images: [...images] }),
+		};
 		const response = await post("prompt", "queued prompt", {
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ message: text, streamingBehavior: "followUp" }),
+			body: JSON.stringify(body),
 		});
 		if (response === undefined) return "unreachable";
 		if (response.status !== 202) {

@@ -7,7 +7,7 @@ Drives the real dev surface end to end and leaves screenshots behind for a PR. N
 ## Run
 
 ```bash
-bun run e2e          # model-free tier: /mode dialog round trip, three screenshots
+bun run e2e          # model-free tier: /mode dialog round trip, an image paste, five screenshots
 bun run e2e:model    # one real model turn (costs tokens, needs .zen/pi-agent identity)
 ```
 
@@ -21,8 +21,10 @@ the dev servers yourself or let the harness do it. It waits for `http://127.0.0.
 
 `packages/web/e2e/output/` (gitignored):
 
-- `screenshots/01-empty-state.png`, `02-mode-dialog.png`, `03-mode-answered.png` from the
-  default tier; `04-model-streaming.png`, `05-model-settled.png` from `@model`.
+- `screenshots/01-empty-state.png`, `02-mode-dialog.png`, `03-mode-answered.png`,
+  `06-image-attached.png`, `07-image-sent.png` from the default tier (the image test answers the
+  prompt route itself, so no model is involved); `04-model-streaming.png`, `05-model-settled.png`
+  from `@model`.
 - `test-results/` holds a trace on failure — open with `bunx playwright show-trace <zip>`.
 
 The names are fixed, so the paths above are the paths every run writes.

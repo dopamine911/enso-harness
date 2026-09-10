@@ -4,6 +4,7 @@ import type { ZenDialogSpec } from "@zen/core";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
 	DialogAnswerControls,
+	describeAttachmentError,
 	type KeyedPart,
 	keyedParts,
 	settleDialog,
@@ -162,7 +163,8 @@ test("⚠ two mounted panes with ?debug open render exactly ONE debug column, in
 	);
 	expect(rendered.match(/id="thread-debug-pane"/g)).toHaveLength(1);
 	// The active pane is laid out; the other is hidden, not gone — its chat stays mounted.
-	expect(rendered.match(/class="hidden"/g)).toHaveLength(1);
+	// (The pane's div, specifically: each composer also carries a hidden file input, #68.)
+	expect(rendered.match(/<div class="hidden">/g)).toHaveLength(1);
 	expect(rendered.match(/id="thread-status"/g)).toHaveLength(2);
 	// And with the switch off, no pane shows one.
 	const closed = renderToStaticMarkup(<ThreadPane threadId={first.threadId} active={true} debugOpen={false} />);
@@ -182,4 +184,15 @@ test("a resumed pane mounts with the stored user and assistant messages already 
 	expect(rendered).toContain("Earlier question");
 	expect(rendered).toContain("Earlier answer");
 	expect(rendered).toContain('<option value="plan" selected="">plan</option>');
+});
+
+// A file the composer would not take is SAID, with the cap by name (#68) — never dropped silently.
+test("an attachment the form refuses is a notice naming the cap: the kinds, the size, the count", () => {
+	expect(describeAttachmentError({ code: "accept", message: "" })).toBe(
+		"only images are attached here: png, jpeg, gif, webp",
+	);
+	expect(describeAttachmentError({ code: "max_file_size", message: "" })).toBe("an image is at most 5 MB");
+	expect(describeAttachmentError({ code: "max_files", message: "" })).toBe(
+		"at most 20 images on one prompt — the rest were not added",
+	);
 });

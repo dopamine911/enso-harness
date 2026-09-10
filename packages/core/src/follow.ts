@@ -70,8 +70,15 @@ export type ZenFollowFrame = Static<typeof ZenFollowFrame>;
  * passes the bytes through; anything outside this set would be refused by the provider
  * after the upload, with a worse message than ours.
  */
-export const ZEN_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
-export type ZenImageMimeType = (typeof ZEN_IMAGE_MIME_TYPES)[number];
+export const ZenImageMimeType = Type.Union([
+	Type.Literal("image/png"),
+	Type.Literal("image/jpeg"),
+	Type.Literal("image/gif"),
+	Type.Literal("image/webp"),
+]);
+export type ZenImageMimeType = Static<typeof ZenImageMimeType>;
+/** The same set as a list — the form's `accept`, the notice's wording. ⚠ Derived from the schema, not written twice. */
+export const ZEN_IMAGE_MIME_TYPES: readonly ZenImageMimeType[] = ZenImageMimeType.anyOf.map((literal) => literal.const);
 /** Anthropic's per-image cap, decoded bytes. Checked on the decoded size, not the base64 length. */
 export const ZEN_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 /** Images on one prompt. Claude.ai's own composer stops at 20; a pasted batch rarely nears this. */
@@ -109,7 +116,9 @@ export function isWholeBase64(data: string): boolean {
  */
 export const ZenPromptImage = Type.Object(
 	{
-		mimeType: Type.Union(ZEN_IMAGE_MIME_TYPES.map((mimeType) => Type.Literal(mimeType))),
+		// ⚠ A spelled-out tuple, not `Type.Union(list.map(...))`: TypeBox's static type of a union
+		// over a non-tuple array is `never`, which every cast in the browser then satisfied silently.
+		mimeType: ZenImageMimeType,
 		data: Type.String({ minLength: 1, pattern: BASE64 }),
 	},
 	{ additionalProperties: false },

@@ -39,6 +39,10 @@ const MODE_OPTION_LABEL = /accept edits/i;
 /** The status line picc emits once the mode is switched — the observable that the answer landed. */
 const MODE_ANSWERED_STATUS = /Mode: acceptEdits/;
 
+/** A real 1×1 PNG (signature, IHDR, IDAT, IEND) — the smallest file a decoder accepts; what the paste test puts on the clipboard. */
+const ONE_PIXEL_PNG =
+	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
 /** Same prompt the TUI receipt uses — cheap, and the answer shape is checkable by eye. */
 const MODEL_PROMPT = "Reply with exactly three words.";
 
@@ -89,6 +93,50 @@ test.describe("chat surface", () => {
 		// (and Playwright reads an empty block as hidden; receipt: first run of this spec).
 		await expect(page.getByText(MODE_ANSWERED_STATUS)).toBeVisible();
 		await captureScreenshot(page, "03-mode-answered");
+	});
+
+	test("paste an image: thumbnail, send enabled, the bytes on the wire as ZenPromptImage (model-free)", async ({
+		page,
+	}) => {
+		// The prompt route is answered here, not by pi: this pins the browser's half of #68 — paste
+		// → attachment → `data:` URL → `images: [{mimeType, data}]` on the POST — without a model turn.
+		const posted: Array<{ message: string; images?: Array<{ mimeType: string; data: string }> }> = [];
+		await page.route("**/api/threads/*/prompt", async (route) => {
+			posted.push(route.request().postDataJSON());
+			await route.fulfill({
+				status: 202,
+				contentType: "application/json",
+				body: JSON.stringify({ threadId: "t", messageId: "m1", generation: 1, queued: false }),
+			});
+		});
+		await page.goto("/");
+		await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toBeVisible();
+		await expect(page.getByRole("button", { name: SEND_BUTTON_NAME })).toBeDisabled();
+
+		// Ctrl+V with a PNG on the clipboard, as the browser delivers it: a `paste` whose data is a file.
+		await page.getByPlaceholder(COMPOSER_PLACEHOLDER).focus();
+		await page.evaluate((base64) => {
+			const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+			const transfer = new DataTransfer();
+			transfer.items.add(new File([bytes], "pixel.png", { type: "image/png" }));
+			document
+				.querySelector("textarea")
+				?.dispatchEvent(new ClipboardEvent("paste", { clipboardData: transfer, bubbles: true, cancelable: true }));
+		}, ONE_PIXEL_PNG);
+		const strip = page.getByLabel("attached images");
+		await expect(strip.getByRole("img")).toHaveCount(1);
+		// An image with no words is a prompt: send is offered on the attachment alone.
+		await expect(page.getByRole("button", { name: SEND_BUTTON_NAME })).toBeEnabled();
+		await captureScreenshot(page, "06-image-attached");
+
+		await typeAndSend(page, "what does this say?");
+		await expect(strip).toHaveCount(0);
+		await expect.poll(() => posted.length).toBe(1);
+		expect(posted[0]?.message).toBe("what does this say?");
+		expect(posted[0]?.images).toEqual([{ mimeType: "image/png", data: ONE_PIXEL_PNG }]);
+		// The user's own image is in the transcript, as inline bytes.
+		await expect(page.locator('img[alt="attached by the user"]')).toHaveCount(1);
+		await captureScreenshot(page, "07-image-sent");
 	});
 
 	test("one real model turn @model", async ({ page }) => {
