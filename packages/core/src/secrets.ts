@@ -85,6 +85,40 @@ export function readSecret(repoRoot: string, name: string): string | undefined {
 	return readDotenvFile(zenSecretsPath(repoRoot)).get(name);
 }
 
+/**
+ * A value shorter than this is not treated as a secret to scan for. A two-character value in
+ * the secrets file (a flag, a placeholder someone left) would otherwise redact half the log.
+ */
+const SHORTEST_SCANNABLE_SECRET = 8;
+
+/**
+ * The secret VALUES this harness knows, for the logger's value pass (#139). Redaction by
+ * field name cannot see a token quoted inside a message, a guard's `reason`, or a `trace`
+ * payload; this is the set those passes scan for.
+ *
+ * Two sources, both ours: `.zen/secrets.env` — everything in it is a secret by definition —
+ * and the environment's own secret-shaped names, for a process configured before
+ * `quarantineSecrets` has run. After quarantine the environment half is empty by design,
+ * and the file half is what still matters: it is where the provider key a tool might echo
+ * actually lives.
+ *
+ * ⚠ Known values only, never a shape heuristic. "Looks like a secret" over model output
+ * redacts a user's own text on a guess; an exact value redacts exactly what leaked.
+ */
+export function knownSecretValues(
+	repoRoot: string,
+	environment: Readonly<Record<string, string | undefined>> = process.env,
+): readonly string[] {
+	const values = new Set<string>();
+	for (const value of readDotenvFile(zenSecretsPath(repoRoot)).values()) {
+		if (value.length >= SHORTEST_SCANNABLE_SECRET) values.add(value);
+	}
+	for (const [name, value] of Object.entries(environment)) {
+		if (value !== undefined && value.length >= SHORTEST_SCANNABLE_SECRET && isSecretShapedName(name)) values.add(value);
+	}
+	return [...values];
+}
+
 export interface QuarantineReport {
 	/** Names deleted from the environment, sorted. Never values — this is what a startup log line prints. */
 	readonly removed: readonly string[];

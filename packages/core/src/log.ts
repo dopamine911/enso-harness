@@ -137,6 +137,14 @@ export const ZEN_REDACT_FIELDS: readonly RegExp[] = [/api[-_]?key/i, /secret/i, 
 export const ZEN_REDACTED = "[REDACTED]";
 
 /**
+ * What a known secret VALUE becomes wherever it appears — inside a message, a guard's
+ * `reason`, a `trace` payload (#139). A distinct marker from `ZEN_REDACTED` so the bundle's
+ * manifest can count the two passes separately: a field name redacted is a record shaped
+ * right, a value redacted is a leak that was caught.
+ */
+export const ZEN_REDACTED_VALUE = "[REDACTED:value]";
+
+/**
  * One line of the JSONL file, as LogTape's `jsonLinesFormatter` writes it — pinned here
  * so the bundle reader (#132 item 5) validates what it reads and a formatter change goes
  * red instead of silently reshaping the file. `logger` is the category joined by `.`;

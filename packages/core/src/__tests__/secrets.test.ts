@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rootDotenvPath, zenSecretsPath } from "../paths.ts";
-import { isSecretShapedName, parseDotenv, quarantineSecrets, readSecret } from "../secrets.ts";
+import { isSecretShapedName, knownSecretValues, parseDotenv, quarantineSecrets, readSecret } from "../secrets.ts";
 
 /**
  * #89: secrets stay out of the environment the model's tools inherit. The reader takes
@@ -121,4 +121,35 @@ test("with no secrets file the quarantine still removes secret-shaped names from
 	const report = quarantineSecrets(environment, scratchRepoRoot());
 	expect(report).toEqual({ removed: ["GH_TOKEN"], misplaced: [] });
 	expect(environment).toEqual({ LANG: "C" });
+});
+
+// #139: the values the logger scans for. A fixture root, never the operator's own file —
+// the whole reason `knownSecretValues` takes a root and an environment as arguments.
+test("⚠ the logger's value set is the secrets file plus secret-shaped env names, deduped, short values left out", () => {
+	const root = scratchRepoRoot();
+	writeFileSync(
+		zenSecretsPath(root),
+		["TAVILY_API_KEY=tvly-long-enough-to-scan", "HARMLESS_LOOKING=but-in-the-file-so-secret", "SHORT=abc"].join("\n"),
+	);
+	const values = knownSecretValues(root, {
+		// Secret-shaped, long enough: in — a process configured before quarantine ran. The value
+		// says `notarealsecret` because a PAT-shaped fixture (`ghp_…`) trips the repo's secret
+		// scanner, and a fixture that reads as a real credential to a scanner is a bad fixture.
+		GH_TOKEN: "ghp-notarealsecret-fixture",
+		// Secret-shaped but too short to scan for: a 4-char value would redact prose.
+		DB_PASSWORD: "hunt",
+		// The same value the file holds: one entry, not two.
+		ANTHROPIC_API_KEY: "tvly-long-enough-to-scan",
+		// Not secret-shaped: never scanned for, however long.
+		PUBLIC_URL: "https://example.com/a-very-long-public-url",
+	});
+	expect([...values].sort()).toEqual([
+		"but-in-the-file-so-secret", // in the file, so a secret by definition whatever its name
+		"ghp-notarealsecret-fixture",
+		"tvly-long-enough-to-scan",
+	]);
+});
+
+test("no secrets file and no secret-shaped names: an empty set, so the value pass never runs", () => {
+	expect(knownSecretValues(scratchRepoRoot(), { PUBLIC_URL: "https://example.com" })).toEqual([]);
 });

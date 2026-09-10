@@ -18,7 +18,7 @@ import {
 import { getPrettyFormatter } from "@logtape/pretty";
 import { redactByField } from "@logtape/redaction";
 import { Check } from "typebox/value";
-import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS, ZEN_REDACTED, ZenLogLine } from "./log.ts";
+import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS, ZEN_REDACTED, ZEN_REDACTED_VALUE, ZenLogLine } from "./log.ts";
 import { zenLogsDir } from "./paths.ts";
 
 /**
@@ -164,6 +164,44 @@ function lowestOf(levels: ZenLogLevels): LogLevel {
 	return lowest;
 }
 
+/**
+ * A sink wrapper that replaces every known secret VALUE, wherever it appears, with
+ * `ZEN_REDACTED_VALUE` (#139) — in the rendered message, in the raw template, and in every
+ * string property, however deeply the property nests.
+ *
+ * One pre-built alternation over the known values, so the cost is a single regex pass per
+ * string rather than one pass per secret. With no known values it is the identity: no
+ * allocation, no scan, nothing on the write path at all.
+ *
+ * ⚠ LONGEST FIRST (PR #153 review). A JS alternation takes the first branch that matches at
+ * a position, not the longest, so with `sk-live-abc` listed before `sk-live-abcdef99` the
+ * longer secret is redacted down to its prefix and its tail stays in the file — silent
+ * under-redaction, in exactly the case that matters most: two live keys from one provider,
+ * or a key and its rotation. Reproduced before this line existed: `[REDACTED:value]def99`.
+ */
+function redactingKnownValues(values: readonly string[]): (sink: Sink) => Sink {
+	const scannable = values.filter((value) => value.length > 0).sort((left, right) => right.length - left.length);
+	if (scannable.length === 0) return (sink: Sink): Sink => sink;
+	const pattern = new RegExp(scannable.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g");
+	const scrubbed = (value: unknown): unknown => {
+		if (typeof value === "string") return value.replace(pattern, ZEN_REDACTED_VALUE);
+		if (Array.isArray(value)) return value.map(scrubbed);
+		if (typeof value === "object" && value !== null) {
+			return Object.fromEntries(Object.entries(value).map(([name, nested]) => [name, scrubbed(nested)]));
+		}
+		return value;
+	};
+	return (sink: Sink): Sink =>
+		(record: LogRecord): void => {
+			sink({
+				...record,
+				message: record.message.map(scrubbed),
+				rawMessage: typeof record.rawMessage === "string" ? (scrubbed(record.rawMessage) as string) : record.rawMessage,
+				properties: scrubbed(record.properties) as LogRecord["properties"],
+			});
+		};
+}
+
 export interface ProcessLoggingOptions {
 	/** `zenLogsDir(repoRoot)` — created if absent. */
 	readonly logsDir: string;
@@ -171,6 +209,11 @@ export interface ProcessLoggingOptions {
 	readonly process: string;
 	/** From `parseZenLogLevels`; the defaults when omitted: file `info`, no console. */
 	readonly levels?: ZenLogLevels;
+	/**
+	 * The secret values to scrub wherever they appear, from `knownSecretValues` (#139).
+	 * Omitted — a test, a process with no secret store — means the value pass does not run.
+	 */
+	readonly secretValues?: readonly string[];
 }
 
 /**
@@ -238,14 +281,19 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
 	// same leak with a different reader — the #134 review caught the console sink bare.
 	// Each sink is wrapped on its own so LogTape's per-sink error containment still holds.
 	const redaction = { fieldPatterns: [...ZEN_REDACT_FIELDS], action: (): string => ZEN_REDACTED };
-	const sinks: Record<string, Sink> = { file: redactByField(file, redaction) };
+	// …and the VALUE pass outside it (#139): field names cannot see a token quoted in a
+	// message, a guard's `reason`, or a `trace` payload. Measured before it was written —
+	// 193 ns for an ordinary record, 725 ns for a 20 KB payload, so a 50k-record `trace` day
+	// costs ~10 ms: the write path is the right place, and the file stays safe at rest (#132).
+	const redactValues = redactingKnownValues(options.secretValues ?? []);
+	const sinks: Record<string, Sink> = { file: redactValues(redactByField(file, redaction)) };
 	const zenSinks = ["file"];
 	const metaSinks: string[] = [];
 	if (levels.console !== undefined) {
 		const pretty = getConsoleSink({
 			formatter: getPrettyFormatter({ timestamp: "time", properties: true, categoryWidth: 24 }),
 		});
-		sinks.console = redactByField(withFilter(pretty, levels.console), redaction);
+		sinks.console = redactValues(redactByField(withFilter(pretty, levels.console), redaction));
 		zenSinks.push("console");
 		metaSinks.push("console");
 	}
