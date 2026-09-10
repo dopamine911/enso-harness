@@ -84,12 +84,22 @@ export const ZEN_PROMPT_MAX_IMAGES = 20;
 export const ZEN_PROMPT_BODY_MAX_BYTES = ZEN_PROMPT_MAX_IMAGES * Math.ceil(ZEN_IMAGE_MAX_BYTES / 3) * 4 + 1024 * 1024;
 
 /**
- * Strict standard base64 — whole 4-character groups, a final group padded to four with `=`
- * — what `btoa` and `FileReader.readAsDataURL` produce. Never a `data:` URI. A length that
- * is not a multiple of four is refused here as "not base64" rather than decoded leniently
- * into a truncated image (PR #140 review).
+ * The base64 alphabet with trailing `=` padding — what `btoa` and `FileReader.readAsDataURL`
+ * produce. Never a `data:` URI. ⚠ Deliberately NOT the grouped grammar
+ * `(?:[…]{4})*(?:[…]{2}==|[…]{3}=)?`: on a 5 MB image the grouped form costs ~300 ms of
+ * event-loop time in V8, this one ~4 ms, and for a length that is a multiple of four the two
+ * accept exactly the same strings. The length check is `isWholeBase64`, applied by the
+ * reader beside the byte cap (PR #140 review, measured).
  */
-const BASE64 = "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$";
+const BASE64 = "^[A-Za-z0-9+/]*={0,2}$";
+
+/**
+ * With `BASE64`, strict standard base64: whole 4-character groups, the last padded to four.
+ * Refused as "not base64" rather than decoded leniently into a truncated image.
+ */
+export function isWholeBase64(data: string): boolean {
+	return data.length % 4 === 0;
+}
 
 /**
  * One image on a prompt (#68): the bytes, base64, and what they are. Not TanStack's

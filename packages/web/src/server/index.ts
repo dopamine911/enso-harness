@@ -84,10 +84,11 @@ function readBody(request: IncomingMessage, maxBytes = Number.POSITIVE_INFINITY)
 	const { promise, resolve, reject } = Promise.withResolvers<string>();
 	const chunks: Buffer[] = [];
 	let received = 0;
+	const onEnd = (): void => resolve(Buffer.concat(chunks).toString("utf8"));
 	const onData = (chunk: Buffer): void => {
 		received += chunk.length;
 		if (received > maxBytes) {
-			request.off("data", onData);
+			request.off("data", onData).off("end", onEnd).off("error", reject);
 			request.pause();
 			chunks.length = 0;
 			reject(new BodyTooLargeError(maxBytes));
@@ -95,9 +96,7 @@ function readBody(request: IncomingMessage, maxBytes = Number.POSITIVE_INFINITY)
 		}
 		chunks.push(chunk);
 	};
-	request.on("data", onData);
-	request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-	request.on("error", reject);
+	request.on("data", onData).on("end", onEnd).on("error", reject);
 	return promise;
 }
 

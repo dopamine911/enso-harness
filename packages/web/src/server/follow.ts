@@ -1,6 +1,7 @@
 import type { ServerResponse } from "node:http";
 import {
 	base64DecodedBytes,
+	isWholeBase64,
 	PICC_PERMISSION_MODES,
 	type PiDialogResponse,
 	type PiImageContent,
@@ -167,6 +168,9 @@ export function readPromptBody(raw: string): PromptBody {
 		throw new Error("prompt body needs a message");
 	}
 	const images = parsed.images?.map((image, position): PiImageContent => {
+		if (!isWholeBase64(image.data)) {
+			throw new Error(`prompt body must match ZenPromptBody at /images/${position}/data: must be whole base64 groups`);
+		}
 		const bytes = base64DecodedBytes(image.data);
 		if (bytes > ZEN_IMAGE_MAX_BYTES) {
 			throw new Error(
