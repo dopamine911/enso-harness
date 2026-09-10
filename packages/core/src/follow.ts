@@ -83,8 +83,13 @@ export const ZEN_PROMPT_MAX_IMAGES = 20;
  */
 export const ZEN_PROMPT_BODY_MAX_BYTES = ZEN_PROMPT_MAX_IMAGES * Math.ceil(ZEN_IMAGE_MAX_BYTES / 3) * 4 + 1024 * 1024;
 
-/** Standard base64 with optional `=` padding — what `btoa` and `FileReader.readAsDataURL` produce. Never a `data:` URI. */
-const BASE64 = "^[A-Za-z0-9+/]+={0,2}$";
+/**
+ * Strict standard base64 — whole 4-character groups, a final group padded to four with `=`
+ * — what `btoa` and `FileReader.readAsDataURL` produce. Never a `data:` URI. A length that
+ * is not a multiple of four is refused here as "not base64" rather than decoded leniently
+ * into a truncated image (PR #140 review).
+ */
+const BASE64 = "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$";
 
 /**
  * One image on a prompt (#68): the bytes, base64, and what they are. Not TanStack's

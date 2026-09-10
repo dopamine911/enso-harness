@@ -689,8 +689,40 @@ test("[WARN] an image outside the allowlist, over the byte cap, or too many is a
 	const empty = await promptWith(url, "t1", { message: "x", images: [] });
 	expect(empty.status).toBe(400);
 
+	// Base64 that is not whole groups is "not base64", refused by path — not decoded leniently into a truncated image.
+	const ragged = await promptWith(url, "t1", { message: "x", images: [{ mimeType: "image/png", data: "AAAAA" }] });
+	expect(ragged.status).toBe(400);
+	expect(ragged.text).toContain("/images/0/data");
+
 	// None of them reached pi, and no session was built for a prompt that was refused at the door.
 	expect(fake.built).toHaveLength(0);
+});
+
+test("the edges are inside: an image of exactly the cap, exactly the maximum count (a gif among them), and an image with no words at all", async () => {
+	const fake = fakeHost();
+	const url = await startWith(fake);
+	const data = ONE_PIXEL_PNG.toString("base64");
+
+	const atCap = Buffer.alloc(ZEN_IMAGE_MAX_BYTES).toString("base64");
+	expect(
+		(await promptWith(url, "t1", { message: "x", images: [{ mimeType: "image/jpeg", data: atCap }] })).status,
+	).toBe(202);
+	expect(fake.built[0]?.prompts[0]?.images?.[0]?.data.length).toBe(atCap.length);
+
+	const twenty = Array.from({ length: ZEN_PROMPT_MAX_IMAGES }, (_, index) => ({
+		mimeType: index === 0 ? ("image/gif" as const) : ("image/png" as const),
+		data,
+	}));
+	expect((await promptWith(url, "t1", { message: "x", images: twenty })).status).toBe(202);
+	expect(fake.built[0]?.prompts[1]?.images?.map((image) => image.mimeType)).toEqual(
+		twenty.map((image) => image.mimeType),
+	);
+
+	// An image with an empty message is a prompt: pi-ai drops the empty text block and keeps
+	// the image (`anthropic-messages.js`, `filteredBlocks`). Only nothing-at-all is refused.
+	expect((await promptWith(url, "t1", { message: "", images: [{ mimeType: "image/png", data }] })).status).toBe(202);
+	expect(fake.built[0]?.prompts[2]).toMatchObject({ message: "", images: [{ type: "image", mimeType: "image/png" }] });
+	expect((await promptWith(url, "t1", { message: "  " })).status).toBe(400);
 });
 
 test("[WARN] a body past the wire cap is a 413 and the read stops — the server does not buffer it first", async () => {

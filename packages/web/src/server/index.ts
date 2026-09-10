@@ -73,29 +73,42 @@ export class BodyTooLargeError extends Error {
 }
 
 /**
- * A request's body as text. With `maxBytes`, the read STOPS at the cap — the stream is
- * paused, what was buffered is dropped, the promise rejects — rather than buffering an
- * arbitrary body first and refusing it after (#68: a prompt may carry images, and the cap is
- * many megabytes). The caller answers on the still-open response; Node closes the connection
- * behind an unconsumed body. Counted in bytes as they arrive, not in the decoded string.
+ * A request's body as text. With `maxBytes`, the read STOPS at the cap — the listener comes
+ * off, the stream is paused, what was buffered is dropped, the promise rejects — rather than
+ * buffering an arbitrary body first and refusing it after (#68: a prompt may carry images,
+ * and the cap is many megabytes). ⚠ The socket is NOT destroyed here: the response shares
+ * it, and destroying first is how a 413 never reaches the client. The caller answers, then
+ * tears the connection down (`endAndClose`). Counted in bytes as they arrive.
  */
 function readBody(request: IncomingMessage, maxBytes = Number.POSITIVE_INFINITY): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const chunks: Buffer[] = [];
-		let received = 0;
-		request.on("data", (chunk: Buffer) => {
-			received += chunk.length;
-			if (received > maxBytes) {
-				chunks.length = 0;
-				request.pause();
-				reject(new BodyTooLargeError(maxBytes));
-				return;
-			}
-			chunks.push(chunk);
-		});
-		request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-		request.on("error", reject);
-	});
+	const { promise, resolve, reject } = Promise.withResolvers<string>();
+	const chunks: Buffer[] = [];
+	let received = 0;
+	const onData = (chunk: Buffer): void => {
+		received += chunk.length;
+		if (received > maxBytes) {
+			request.off("data", onData);
+			request.pause();
+			chunks.length = 0;
+			reject(new BodyTooLargeError(maxBytes));
+			return;
+		}
+		chunks.push(chunk);
+	};
+	request.on("data", onData);
+	request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+	request.on("error", reject);
+	return promise;
+}
+
+/**
+ * Answer, then drop the connection: the request body was never read to its end, so this
+ * socket cannot carry another request. The header says so; the destroy makes it so, once
+ * the answer has been flushed.
+ */
+function endAndClose(request: IncomingMessage, response: ServerResponse, status: number, text: string): void {
+	response.writeHead(status, { "Content-Type": "text/plain", Connection: "close" });
+	response.end(text, () => request.destroy());
 }
 
 /**
@@ -405,9 +418,10 @@ export function startZenServer(options: ZenServerOptions) {
 			body = readPromptBody(await readBody(request, ZEN_PROMPT_BODY_MAX_BYTES));
 		} catch (error) {
 			if (error instanceof BodyTooLargeError) {
-				// `Connection: close`: the rest of the body is never read, so this socket cannot carry another request.
-				response.writeHead(413, { "Content-Type": "text/plain", Connection: "close" });
-				response.end(
+				endAndClose(
+					request,
+					response,
+					413,
 					`a prompt body is at most ${ZEN_PROMPT_BODY_MAX_BYTES} bytes (${ZEN_PROMPT_MAX_IMAGES} images of ${ZEN_IMAGE_MAX_BYTES} bytes, base64, plus text)`,
 				);
 				return;
