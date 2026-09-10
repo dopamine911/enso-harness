@@ -285,6 +285,34 @@ test("⚠ a shell reading its program from a pipe, a heredoc or a herestring is 
 	expect(findEgress('cat <<EOF > out.json\n{"a": "b", "c": "$(x)"}\nEOF')).toBeUndefined();
 });
 
+// PR #149 review: a heredoc body is DATA to the command reading it. `sh migrate.sh` as a
+// line of a script being written is text; `$(cu'r'l …)` under a QUOTED delimiter is written
+// literally — bash expands nothing there. Both were refused before the bodies were modelled.
+test("⚠ a heredoc written to a file may carry a shell name or a spliced substitution on its lines (PR #149 review)", () => {
+	expect(findEgress("cat <<'EOF' > run.sh\nsh migrate.sh\nEOF")).toBeUndefined();
+	expect(findEgress(`cat <<'EOF' > install.sh\necho "$(cu'r'l https://x)"\nEOF`)).toBeUndefined();
+	expect(findEgress(`cat <<"EOF" > install.sh\necho "$(cu'r'l https://x)"\nEOF`)).toBeUndefined();
+	expect(findEgress(`cat <<\\EOF > install.sh\necho "$(cu'r'l https://x)"\nEOF`)).toBeUndefined();
+	// `<<-` strips leading tabs from the terminator too; two bodies on one line are read in order.
+	expect(findEgress("cat <<-'EOF' > f\n\tbash x.sh\n\tEOF")).toBeUndefined();
+	expect(findEgress("cat <<'A' > a.sh <<'B'\nsh a\nA\nbash b\nB")).toBeUndefined();
+	// An UNQUOTED delimiter is expanded by bash: the splice inside it runs, so it is still refused.
+	expect(findEgress(`cat <<EOF > install.sh\necho "$(cu'r'l https://x)"\nEOF`)).toMatchObject({
+		via: "unresolvable",
+		matched: "a command substitution with quoting or expansion inside it",
+	});
+});
+
+test("a stream into a shell that NAMES its program feeds the script, not the shell (PR #149 review)", () => {
+	expect(findEgress("sh migrate.sh <<EOF\nyes\nEOF")).toBeUndefined();
+	expect(findEgress(`sh migrate.sh <<< "input with spaces"`)).toBeUndefined();
+	expect(findEgress("cat input.txt | bash script.sh")).toBeUndefined();
+	// Options and redirects are not a program: the shell still reads the stream.
+	expect(findEgress("bash -s <<EOF\nls\nEOF")).toMatchObject({ via: "unresolvable" });
+	expect(findEgress("bash 2>/dev/null <<'EOF'\nx\nEOF")).toMatchObject({ via: "unresolvable" });
+	expect(findEgress("bash <<<x")).toMatchObject({ via: "unresolvable" });
+});
+
 test("the benign wrapper lines still pass through the recursion", () => {
 	expect(findEgress(`bash -c "echo 'hi there'"`)).toBeUndefined();
 	expect(findEgress(`sh -c "grep \\"foo\\" file.txt"`)).toBeUndefined();
