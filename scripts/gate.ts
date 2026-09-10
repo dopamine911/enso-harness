@@ -29,7 +29,7 @@
  * TypeScript types at load. Each gate shells out through `npm run <script>`, so a
  * command's definition lives in exactly one place: package.json.
  */
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 
 const GREEN = '\x1b[32m'
 const RED = '\x1b[31m'
@@ -113,33 +113,120 @@ const GATES: readonly Gate[] = [
 ]
 
 /**
- * Runs one gate to completion, inheriting stdio so the underlying tool's colored
- * output and progress reach the terminal unchanged. Returns the child's exit code
- * (non-zero = failure); a child killed by a signal (status null) counts as failure.
+ * A tool that died mid-run and still exited 0 — the one failure a gate cannot see by
+ * asking the exit code.
+ *
+ * Measured 2026-09-10: Biome 2.5.13 with any GritQL plugin loaded (ours is
+ * `.biome/naming.grit`) overflows a worker thread's stack, prints
+ * `fatal runtime error: stack overflow, aborting`, and **exits 0**. Whatever that worker
+ * held was never checked, and the gate reported green over it. Same silent-pass class this
+ * repo keeps finding in its own matchers — a gate that cannot fail still reads as
+ * protection — arriving from a dependency instead of from us.
+ *
+ * Rust panics and segfaults print their own banner and are covered by the same scan. A tool
+ * that dies loudly AND exits non-zero was already caught by the status check below.
  */
-function runGate(gate: Gate): number {
+const WORKER_ABORT = /has overflowed its stack|fatal runtime error|panicked at|Segmentation fault/
+
+/** Whether a tool's stderr says it aborted. Exported for `test/gate-abort.test.ts`. */
+export function reportsWorkerAbort(stderr: string): boolean {
+  return WORKER_ABORT.test(stderr)
+}
+
+/**
+ * The overlap kept between stderr chunks so a banner split across a chunk boundary still
+ * matches — comfortably longer than the longest phrase in `WORKER_ABORT`.
+ */
+const ABORT_SCAN_OVERLAP = 64
+
+/**
+ * Runs one gate to completion. Both of the tool's streams are piped and written straight
+ * through as they arrive — live, verbatim, unbuffered, each to the stream it came from.
+ * Only stderr is scanned for a runtime abort, and nothing accumulates, so there is no
+ * output size a gate can exceed. Resolves the child's exit code (non-zero = failure); a
+ * child killed by a signal, one that failed to spawn, or one that aborted while claiming
+ * success, fails.
+ *
+ * Both streams are piped rather than one, because inheriting stdout while piping stderr
+ * races a direct fd against one that round-trips our event loop: Biome writes diagnostics
+ * to stdout and its summary to stderr, and the two spliced into each other mid-line.
+ * Delaying both by the same path keeps the tool's own order.
+ */
+function runGate(gate: Gate): Promise<number> {
   process.stdout.write(`\n${BOLD}▶ ${gate.name}${RESET} ${DIM}— ${gate.describe}${RESET}\n`)
-  const result = spawnSync(PACKAGE_MANAGER, ['run', gate.script], { stdio: 'inherit' })
-  if (result.error) {
-    process.stderr.write(`${RED}gate "${gate.name}" failed to spawn: ${result.error.message}${RESET}\n`)
-    return 1
+  return new Promise<number>((resolve) => {
+    const child = spawn(PACKAGE_MANAGER, ['run', gate.script], {
+      stdio: ['inherit', 'pipe', 'pipe'],
+      // Piping costs the tool its TTY, and most tools drop color when they lose it. Ask for
+      // it back only when both of ours are terminals — forcing it with either redirected
+      // would write escapes into someone's log file.
+      env: process.stdout.isTTY && process.stderr.isTTY ? { ...process.env, FORCE_COLOR: '1' } : process.env,
+    })
+
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => process.stdout.write(chunk))
+
+    // Only stderr is scanned: an abort banner is a runtime's dying words, always on stderr,
+    // and a tool that quotes source on stdout (Biome prints this repo's own test file, which
+    // names the banners) would otherwise take the gate down for reporting correctly.
+    let aborted = false
+    let carry = ''
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk: string) => {
+      process.stderr.write(chunk)
+      const window = carry + chunk
+      if (reportsWorkerAbort(window)) aborted = true
+      carry = window.slice(-ABORT_SCAN_OVERLAP)
+    })
+
+    let settled = false
+    const settle = (code: number): void => {
+      if (settled) return
+      settled = true
+      resolve(code)
+    }
+
+    child.on('error', (error: Error) => {
+      process.stderr.write(`${RED}gate "${gate.name}" failed to spawn: ${error.message}${RESET}\n`)
+      settle(1)
+    })
+
+    child.on('close', (status: number | null, signal: NodeJS.Signals | null) => {
+      if (aborted) {
+        const exited = signal ? `signal ${signal}` : `${status}`
+        process.stderr.write(
+          `${RED}gate "${gate.name}": the tool ABORTED — whatever it held was not checked, whatever it exited with (${exited}).${RESET}\n`,
+        )
+        settle(1)
+        return
+      }
+      settle(status ?? 1)
+    })
+  })
+}
+
+/**
+ * Run only when EXECUTED, never when imported. `reportsWorkerAbort` is exported so its
+ * matcher can be tested, and a test that imported this file would otherwise run every gate
+ * — including itself — from inside the test run.
+ */
+async function main(): Promise<void> {
+  process.stdout.write(`${DIM}gate: running via ${PACKAGE_MANAGER}${RESET}\n`)
+
+  let failedGate: string | null = null
+  for (const gate of GATES) {
+    if ((await runGate(gate)) !== 0) {
+      failedGate = gate.name
+      break
+    }
   }
-  return result.status ?? 1
-}
 
-process.stdout.write(`${DIM}gate: running via ${PACKAGE_MANAGER}${RESET}\n`)
-
-let failedGate: string | null = null
-for (const gate of GATES) {
-  if (runGate(gate) !== 0) {
-    failedGate = gate.name
-    break
+  if (failedGate) {
+    process.stdout.write(`\n${RED}✗ gate "${failedGate}" failed.${RESET}\n`)
+    process.exit(1)
   }
+
+  process.stdout.write(`\n${GREEN}✓ All gates passed.${RESET}\n`)
 }
 
-if (failedGate) {
-  process.stdout.write(`\n${RED}✗ gate "${failedGate}" failed.${RESET}\n`)
-  process.exit(1)
-}
-
-process.stdout.write(`\n${GREEN}✓ All gates passed.${RESET}\n`)
+if (import.meta.main) await main()
