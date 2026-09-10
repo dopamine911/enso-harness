@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { RECENT_CUSTOM_CHUNK_CAPACITY, routeZenCustomEvent } from "../custom-event-router.ts";
 import {
 	type BrowserBelief,
+	type BundleState,
 	type CopyState,
 	describeChunk,
 	InspectionFetchError,
@@ -82,10 +83,18 @@ interface RenderOverrides {
 	readonly session: ZenThreadInspection | undefined;
 	readonly error?: string | undefined;
 	readonly copyState?: CopyState;
+	readonly bundleState?: BundleState;
 	readonly events?: ZenThreadEvents;
 }
 
-const renderWith = ({ browser, session, error, copyState = "idle", events }: RenderOverrides): string =>
+const renderWith = ({
+	browser,
+	session,
+	error,
+	copyState = "idle",
+	bundleState = "idle",
+	events,
+}: RenderOverrides): string =>
 	renderToStaticMarkup(
 		<ThreadDebugView
 			threadId="t1"
@@ -94,8 +103,10 @@ const renderWith = ({ browser, session, error, copyState = "idle", events }: Ren
 			events={events}
 			error={error}
 			copyState={copyState}
+			bundleState={bundleState}
 			onRefresh={noop}
 			onCopy={noop}
+			onBundle={noop}
 		/>,
 	);
 

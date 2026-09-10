@@ -22,7 +22,7 @@
  * ⓘ Named non-coverage: the map is unbounded, and a client that omits `threadId` gets a
  * fresh session per request that lives for the idle window. Loopback-only, dev-only server.
  */
-import { type PiSession, type ZenObservation, zenLogger } from "@zen/core";
+import { type PiSession, type ZenObservation, type ZenThreadInspection, zenLogger } from "@zen/core";
 import type { HostedSession } from "../host/agent-host.ts";
 import { createEventTail, type EventTail } from "../host/event-tail.ts";
 import { mapPiEvent } from "../rpc/map-events.ts";
@@ -158,6 +158,27 @@ export interface ThreadLease {
 }
 
 /** A live thread as inspection sees it: the session, and whether a run holds it. */
+/**
+ * A live thread as the wire describes it — `GET /api/threads/:id` and the bundle both
+ * say this, from here, so they cannot drift.
+ */
+export function inspectThread(view: ThreadView): ZenThreadInspection {
+	const inspection = view.hosted.inspect();
+	return {
+		threadId: view.threadId,
+		sessionId: inspection.sessionId,
+		cwd: inspection.cwd,
+		sessionDir: inspection.sessionDir,
+		sessionFile: inspection.sessionFile,
+		permissionMode: view.hosted.session.permissionModeState(),
+		commands: [...inspection.commands],
+		busy: view.busy,
+		generation: view.generation,
+		lastActivityAt: new Date(view.lastActivityAt).toISOString(),
+		entries: [...inspection.entries],
+	};
+}
+
 export interface ThreadView {
 	readonly threadId: string;
 	readonly hosted: HostedSession;

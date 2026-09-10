@@ -192,6 +192,7 @@ async function startWith(script: FakeSessionScript, stored: Record<string, FakeS
 		cwd: tmpdir(),
 		harnessPackageDir: emptyHarnessDir(),
 		agentDir: mkdtempSync(join(tmpdir(), "zen-handler-agent-")),
+		logsDir: mkdtempSync(join(tmpdir(), "zen-logs-")),
 		port: 0,
 		host,
 	});
@@ -471,6 +472,7 @@ test("⚠ a bind conflict rejects `listening` instead of hanging, and reports th
 		cwd: tmpdir(),
 		harnessPackageDir: emptyHarnessDir(),
 		agentDir: mkdtempSync(join(tmpdir(), "zen-handler-agent-")),
+		logsDir: mkdtempSync(join(tmpdir(), "zen-logs-")),
 		port: 0,
 		host,
 	});
@@ -484,6 +486,7 @@ test("⚠ a bind conflict rejects `listening` instead of hanging, and reports th
 		cwd: tmpdir(),
 		harnessPackageDir: emptyHarnessDir(),
 		agentDir: mkdtempSync(join(tmpdir(), "zen-handler-agent-")),
+		logsDir: mkdtempSync(join(tmpdir(), "zen-logs-")),
 		port: occupied,
 		host,
 	});

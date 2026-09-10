@@ -129,6 +129,14 @@ export function withZenLogContext<T>(properties: ZenLogProperties, callback: () 
 export const ZEN_REDACT_FIELDS: readonly RegExp[] = [/api[-_]?key/i, /secret/i, /password/i, /token/i, /credential/i];
 
 /**
+ * What a redacted field's value becomes on disk. A MARKER, not a deletion: the record still
+ * says the field was there, so a reader knows what is missing rather than wondering, and the
+ * bundle (#132 item 5) counts markers per field name for its redaction manifest with no
+ * bookkeeping in the writer. The value itself never lands — `log-process.test.ts`.
+ */
+export const ZEN_REDACTED = "[REDACTED]";
+
+/**
  * One line of the JSONL file, as LogTape's `jsonLinesFormatter` writes it — pinned here
  * so the bundle reader (#132 item 5) validates what it reads and a formatter change goes
  * red instead of silently reshaping the file. `logger` is the category joined by `.`;

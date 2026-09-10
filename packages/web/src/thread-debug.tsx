@@ -1,4 +1,5 @@
 import {
+	browserSection,
 	describeSessionEntry,
 	describeThreadEvent,
 	persistedPermissionMode,
@@ -104,8 +105,11 @@ export interface ThreadDebugViewProps {
 	readonly error: string | undefined;
 	/** The last copy's outcome; the label beside the button says which. */
 	readonly copyState: CopyState;
+	/** The last bundle's outcome (#132 item 5); "failed" names why. */
+	readonly bundleState: BundleState;
 	readonly onRefresh: () => void;
 	readonly onCopy: () => void;
+	readonly onBundle: () => void;
 }
 
 /**
@@ -160,8 +164,10 @@ export function ThreadDebugView({
 	events,
 	error,
 	copyState,
+	bundleState,
 	onRefresh,
 	onCopy,
+	onBundle,
 }: ThreadDebugViewProps): React.ReactNode {
 	const browserMode = browser.mode.mode ?? "unknown";
 	const hostMode = session?.permissionMode.mode;
@@ -181,10 +187,20 @@ export function ThreadDebugView({
 					<Button type="button" size="sm" variant="outline" onClick={onCopy}>
 						copy as JSON
 					</Button>
+					<Button type="button" size="sm" variant="outline" onClick={onBundle} disabled={bundleState === "building"}>
+						download log bundle
+					</Button>
 					{copyState === "copied" ? <span role="status">copied</span> : null}
 					{copyState === "failed" ? (
 						<span role="status" className="text-destructive">
 							copy failed — clipboard needs a secure context or permission
+						</span>
+					) : null}
+					{bundleState === "building" ? <span role="status">building the bundle…</span> : null}
+					{bundleState === "saved" ? <span role="status">bundle saved — open it before you attach it</span> : null}
+					{typeof bundleState === "object" ? (
+						<span role="status" className="text-destructive">
+							bundle failed — {bundleState.failed}
 						</span>
 					) : null}
 				</span>
@@ -375,6 +391,34 @@ export function latestServerStateSequence(chunks: readonly RecordedCustomChunk[]
 
 /** The clipboard call's outcome, so a failed copy does not look identical to a successful one. */
 export type CopyState = "idle" | "copied" | "failed";
+export type BundleState = "idle" | "building" | "saved" | { readonly failed: string };
+
+/**
+ * The bundle (#132 item 5): the server's file for this thread — its records, the live
+ * inspection, the versions — with the page's own ring appended, since only the page has it.
+ * Downloaded, never uploaded: the user opens it and attaches it themselves.
+ */
+export async function fetchThreadBundle(
+	threadId: string,
+	ring: readonly ZenLogLine[],
+): Promise<{ filename: string; text: string }> {
+	const response = await fetch(`/api/logs/bundle?thread=${encodeURIComponent(threadId)}`);
+	if (!response.ok) throw new InspectionFetchError(response.status, boundedFailureDetail(await response.text()));
+	const disposition = response.headers.get("Content-Disposition") ?? "";
+	const named = /filename="([^"]+)"/.exec(disposition)?.[1];
+	const text = `${await response.text()}\n${browserSection(ring)}`;
+	return { filename: named ?? `zen-bundle-${threadId.slice(0, 8)}.md`, text };
+}
+
+/** Hands the browser a file to save — an object URL for a moment, then released. */
+function saveTextFile(filename: string, text: string): void {
+	const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
+	const anchor = document.createElement("a");
+	anchor.href = url;
+	anchor.download = filename;
+	anchor.click();
+	URL.revokeObjectURL(url);
+}
 
 /**
  * The drawer wired to the stores, the router's record, and the server. Mounted by `?debug`.
@@ -402,6 +446,7 @@ export function ThreadDebugDrawer(): React.ReactNode {
 	const [events, setEvents] = useState<ZenThreadEvents | undefined>(undefined);
 	const [error, setError] = useState<string | undefined>(undefined);
 	const [copyState, setCopyState] = useState<CopyState>("idle");
+	const [bundleState, setBundleState] = useState<BundleState>("idle");
 	const browser: BrowserBelief = { mode, stats, recentChunks, generation, logged };
 	// One sequencer per thread id: a new thread starts a new "latest".
 	const fetchLatest = useMemo(() => latestWins(() => fetchThreadDebug(threadId)), [threadId]);
@@ -442,6 +487,18 @@ export function ThreadDebugDrawer(): React.ReactNode {
 			() => setCopyState("failed"),
 		);
 	};
+	const bundle = (): void => {
+		setBundleState("building");
+		// The page's whole ring, not just this thread's lines: a problem on another tab of the
+		// same page, or before the thread had an id, is exactly what a triage wants to see.
+		fetchThreadBundle(threadId, ring).then(
+			({ filename, text }) => {
+				saveTextFile(filename, text);
+				setBundleState("saved");
+			},
+			(failure: unknown) => setBundleState({ failed: failure instanceof Error ? failure.message : String(failure) }),
+		);
+	};
 	return (
 		<ThreadDebugView
 			threadId={threadId}
@@ -450,8 +507,10 @@ export function ThreadDebugDrawer(): React.ReactNode {
 			events={events}
 			error={error}
 			copyState={copyState}
+			bundleState={bundleState}
 			onRefresh={refresh}
 			onCopy={copy}
+			onBundle={bundle}
 		/>
 	);
 }

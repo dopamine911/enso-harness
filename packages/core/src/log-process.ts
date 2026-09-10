@@ -17,7 +17,8 @@ import {
 } from "@logtape/logtape";
 import { getPrettyFormatter } from "@logtape/pretty";
 import { redactByField } from "@logtape/redaction";
-import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS, type ZenLogLine } from "./log.ts";
+import { Check } from "typebox/value";
+import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS, ZEN_REDACTED, ZenLogLine } from "./log.ts";
 import { zenLogsDir } from "./paths.ts";
 
 /**
@@ -236,14 +237,15 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
 	// (the pretty formatter, `properties: true`), and a secret-shaped value on stdout is the
 	// same leak with a different reader — the #134 review caught the console sink bare.
 	// Each sink is wrapped on its own so LogTape's per-sink error containment still holds.
-	const sinks: Record<string, Sink> = { file: redactByField(file, [...ZEN_REDACT_FIELDS]) };
+	const redaction = { fieldPatterns: [...ZEN_REDACT_FIELDS], action: (): string => ZEN_REDACTED };
+	const sinks: Record<string, Sink> = { file: redactByField(file, redaction) };
 	const zenSinks = ["file"];
 	const metaSinks: string[] = [];
 	if (levels.console !== undefined) {
 		const pretty = getConsoleSink({
 			formatter: getPrettyFormatter({ timestamp: "time", properties: true, categoryWidth: 24 }),
 		});
-		sinks.console = redactByField(withFilter(pretty, levels.console), [...ZEN_REDACT_FIELDS]);
+		sinks.console = redactByField(withFilter(pretty, levels.console), redaction);
 		zenSinks.push("console");
 		metaSinks.push("console");
 	}
@@ -280,6 +282,21 @@ const LEVEL_OF_LINE: Readonly<Record<ZenLogLine["level"], LogLevel>> = {
 	ERROR: "error",
 	FATAL: "fatal",
 };
+
+/**
+ * One raw line of the file → the record, or the reason it is not one. THE parser (the
+ * reader, the bundle route, and the bundle reader all go through it): a line that is not
+ * a record is said, never skipped silently — the file is the honest place.
+ */
+export function parseZenLogLine(raw: string): ZenLogLine | string {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return "not JSON";
+	}
+	return Check(ZenLogLine, parsed) ? parsed : "not a ZenLogLine";
+}
 
 /**
  * A line of the file, back into the record it was — the message re-joined from its

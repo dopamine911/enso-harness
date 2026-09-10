@@ -309,6 +309,7 @@ bun run logs --thread 6923e6     # one thread, by id or prefix
 bun run logs --level debug --since 10m
 bun run logs --process pi --date 2026-09-08
 bun run logs --json | jq …       # the matching lines raw
+bun run logs --file zen-bundle.md   # a bundle someone attached (or any log file), read the same way
 ```
 
 A value that is not a level is a startup error naming it. The first record of every process says
@@ -319,6 +320,14 @@ The browser logs too: its records at `info` and up are batched to `POST /api/log
 same file as `process: browser` (`bun run logs --process browser`), with `at` — the page's clock — and
 `page` to tell tabs apart. Every level the page runs at (`?log=debug` beside `?debug`) stays in an
 in-memory ring the `?debug` drawer shows under *browser logged*.
+
+**The bundle** is what a user hands over: one markdown file — the versions (zen commit, pi, bun, os),
+each live thread's inspection (mode, branch), the day's records for the thread fenced as JSONL, and a
+manifest of what was redacted (redaction replaces a field's value with `[REDACTED]` and keeps the
+name, so the reader knows what is missing). The `?debug` drawer's *download log bundle* button makes
+it, with the page's own ring appended; `bun run logs bundle [--thread ID] > zen-bundle.md` makes it
+from the running server. Never uploaded anywhere: the user opens it and attaches it. It reads back
+with `bun run logs --file` — a bundle is a log file with prose around it.
 
 ## The vendored pi packages
 

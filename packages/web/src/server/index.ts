@@ -11,12 +11,12 @@ import {
 	type ZenStoredThread,
 	type ZenThreadEvents,
 	type ZenThreadHistory,
-	type ZenThreadInspection,
 	type ZenThreadSummary,
 	zenLogger,
 } from "@zen/core";
 import { type AgentHost, createAgentHost } from "../host/agent-host.ts";
 import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
+import { createBundleRoute } from "./bundle-route.ts";
 import {
 	abortThread,
 	answerThreadDialog,
@@ -29,7 +29,7 @@ import {
 } from "./follow.ts";
 import { receiveBrowserLogs } from "./logs-route.ts";
 import { SSE_KEEPALIVE_MS } from "./sse.ts";
-import { createThreadRegistry, type ThreadView } from "./thread-registry.ts";
+import { createThreadRegistry, inspectThread, type ThreadView } from "./thread-registry.ts";
 
 /** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
 const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/;
@@ -110,6 +110,8 @@ export interface ZenServerOptions {
 	harnessPackageDir: string;
 	/** Scratch config dir for pi, so the operator's own packages stay invisible. */
 	agentDir: string;
+	/** Where this process's log file is — the launcher configured logging there; the bundle route reads it (#132). */
+	logsDir: string;
 	port?: number;
 	/**
 	 * The pi host to use instead of building one from `cwd` / `agentDir` /
@@ -325,23 +327,12 @@ export function startZenServer(options: ZenServerOptions) {
 			response.end(`no live session for thread ${threadId}`);
 			return;
 		}
-		const inspection = thread.hosted.inspect();
-		const payload: ZenThreadInspection = {
-			threadId,
-			sessionId: inspection.sessionId,
-			cwd: inspection.cwd,
-			sessionDir: inspection.sessionDir,
-			sessionFile: inspection.sessionFile,
-			permissionMode: thread.hosted.session.permissionModeState(),
-			commands: [...inspection.commands],
-			busy: thread.busy,
-			generation: thread.generation,
-			lastActivityAt: new Date(thread.lastActivityAt).toISOString(),
-			entries: [...inspection.entries],
-		};
 		response.writeHead(200, { "Content-Type": "application/json" });
-		response.end(JSON.stringify(payload));
+		response.end(JSON.stringify(inspectThread(thread)));
 	}
+
+	// The bundle (#132): today's records + the live threads + the versions, one file.
+	const bundle = createBundleRoute({ threads, logsDir: options.logsDir });
 
 	// ── The wire (#112): prompt / follow / dialog ────────────────────────────────────
 	const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs };
@@ -480,6 +471,15 @@ export function startZenServer(options: ZenServerOptions) {
 		}
 		if (request.method === "GET" && url === "/api/stored-threads") {
 			answerOrFail(respondWithStoredThreads(response), response);
+			return;
+		}
+		if (request.method === "GET" && url.startsWith("/api/logs/bundle")) {
+			const outcome = bundle(new URL(url, "http://zen").searchParams);
+			response.writeHead(outcome.status, {
+				"Content-Type": "text/markdown; charset=utf-8",
+				"Content-Disposition": `attachment; filename="${outcome.filename}"`,
+			});
+			response.end(outcome.body);
 			return;
 		}
 		if (request.method === "POST" && url === "/api/logs") {

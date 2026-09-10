@@ -151,6 +151,7 @@ async function startWith(fake: FakeHost, sseKeepaliveMs = 1000) {
 		cwd: tmpdir(),
 		harnessPackageDir: emptyHarnessDir(),
 		agentDir: mkdtempSync(join(tmpdir(), "zen-follow-agent-")),
+		logsDir: mkdtempSync(join(tmpdir(), "zen-logs-")),
 		port: 0,
 		host: fake.host,
 		sseKeepaliveMs,

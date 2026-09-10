@@ -45,6 +45,7 @@ export {
 	withZenLogContext,
 	ZEN_LOG_ROOT,
 	ZEN_REDACT_FIELDS,
+	ZEN_REDACTED,
 	ZenBrowserLogBatch,
 	type ZenLogger,
 	type ZenLogLayer,
@@ -53,6 +54,15 @@ export {
 	zenLogger,
 	zenLogLineOf,
 } from "./log.ts";
+export {
+	browserSection,
+	buildLogBundle,
+	bundleRecordsText,
+	isLogBundle,
+	redactionManifest,
+	type ZenBundleAbout,
+	type ZenBundleInputs,
+} from "./log-bundle.ts";
 export {
 	ZenCustomSessionEntry,
 	ZenDialogOutcome,

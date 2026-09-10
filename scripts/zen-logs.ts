@@ -12,6 +12,8 @@
  *   bun run logs --date 2026-09-08     another day's file
  *   bun run logs --json                the matching lines raw, for jq
  *   bun run logs --color | less -R     colors kept through a pipe
+ *   bun run logs --file zen-bundle.md  a bundle someone attached (or any log file), read like today's
+ *   bun run logs bundle > b.md         make a bundle from the running server (--thread ID for one thread)
  *
  * ⚠ The file stores each message as its TEMPLATE with the values in `properties`, so a
  * bundle can filter on the event name; raw, a human reads `run {generation} acquired`. This
@@ -21,9 +23,14 @@
 
 import { existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { Check } from "typebox/value";
-import { findRepoRoot, ZenLogLine } from "../packages/core/src/index.ts";
-import { logRecordOf, logsDirFrom, zenLogFilename, zenLogLineRenderer } from "../packages/core/src/log-process.ts";
+import { bundleRecordsText, findRepoRoot, isLogBundle, type ZenLogLine } from "../packages/core/src/index.ts";
+import {
+	logRecordOf,
+	logsDirFrom,
+	parseZenLogLine,
+	zenLogFilename,
+	zenLogLineRenderer,
+} from "../packages/core/src/log-process.ts";
 
 const LEVEL_RANK: Readonly<Record<string, number>> = {
 	trace: 0,
@@ -49,10 +56,13 @@ export interface Query {
 	readonly thread: string | undefined;
 	readonly process: string | undefined;
 	readonly sinceMs: number | undefined;
+	/** A file to read instead of the day's: a bundle (`GET /api/logs/bundle`) or a raw log. */
+	readonly file: string | undefined;
 }
 
 export const USAGE =
-	"usage: bun run logs [--follow] [--level trace|debug|info|warning|error] [--thread ID] [--process NAME] [--since 10m] [--date YYYY-MM-DD] [--json] [--color]";
+	"usage: bun run logs [--follow] [--level trace|debug|info|warning|error] [--thread ID] [--process NAME] [--since 10m] [--date YYYY-MM-DD] [--file PATH] [--json] [--color]\n" +
+	"       bun run logs bundle [--thread ID] > zen-bundle.md";
 
 /** A flag the parser could not accept — the main prints it with the usage and exits 2. */
 export class UsageError extends Error {
@@ -75,6 +85,7 @@ export function parseArguments(argv: readonly string[]): Query {
 	let thread: string | undefined;
 	let processName: string | undefined;
 	let sinceMs: number | undefined;
+	let file: string | undefined;
 	for (let flagIndex = 0; flagIndex < argv.length; flagIndex += 1) {
 		const flag = argv[flagIndex];
 		const value = (): string => argv[flagIndex + 1] ?? usage(`${flag} needs a value`);
@@ -110,6 +121,10 @@ export function parseArguments(argv: readonly string[]): Query {
 				flagIndex += 1;
 				break;
 			}
+			case "--file":
+				file = value();
+				flagIndex += 1;
+				break;
 			case "--date": {
 				const parsed = new Date(`${value()}T12:00:00`); // local noon: the file is named by the local day
 				if (Number.isNaN(parsed.getTime())) usage(`--date wants YYYY-MM-DD`);
@@ -121,7 +136,8 @@ export function parseArguments(argv: readonly string[]): Query {
 				usage(`unknown flag ${flag}`);
 		}
 	}
-	return { date, follow, json, color, level, thread, process: processName, sinceMs };
+	if (file !== undefined && follow) usage("--file is a finished file; it cannot be followed");
+	return { date, follow, json, color, level, thread, process: processName, sinceMs, file };
 }
 
 export function matches(query: Query, line: ZenLogLine, notBefore: number): boolean {
@@ -138,15 +154,9 @@ export function matches(query: Query, line: ZenLogLine, notBefore: number): bool
 function print(query: Query, render: (line: ZenLogLine) => string, text: string, notBefore: number): void {
 	for (const raw of text.split("\n")) {
 		if (raw.length === 0) continue;
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(raw);
-		} catch {
-			process.stdout.write(`(not JSON) ${raw}\n`);
-			continue;
-		}
-		if (!Check(ZenLogLine, parsed)) {
-			process.stdout.write(`(not a ZenLogLine) ${raw}\n`);
+		const parsed = parseZenLogLine(raw);
+		if (typeof parsed === "string") {
+			process.stdout.write(`(${parsed}) ${raw}\n`);
 			continue;
 		}
 		if (!matches(query, parsed, notBefore)) continue;
@@ -179,7 +189,37 @@ function follow(query: Query, render: (line: ZenLogLine) => string, file: string
 	}, FOLLOW_POLL_MS);
 }
 
+/**
+ * `bundle`: the running server's bundle (`GET /api/logs/bundle`) to stdout — its records,
+ * its live threads, the versions. The server is needed for the threads; without one, the
+ * file alone is `bun run logs --json`. The browser's ring is NOT here (only a page has it);
+ * the drawer's button is the bundle with that appended.
+ */
+async function bundle(argv: readonly string[]): Promise<void> {
+	const query = parseArguments(argv);
+	const serverUrl = process.env.ZEN_SERVER_URL ?? "http://127.0.0.1:5179";
+	const url = `${serverUrl}/api/logs/bundle${query.thread === undefined ? "" : `?thread=${encodeURIComponent(query.thread)}`}`;
+	let response: Response;
+	try {
+		response = await fetch(url);
+	} catch (error) {
+		process.stderr.write(
+			`zen-logs: no server at ${serverUrl} (${error instanceof Error ? error.message : String(error)}) — a bundle needs the running server for its threads; is \`bun run dev\` up? The file alone is \`bun run logs --json\`.\n`,
+		);
+		process.exit(1);
+	}
+	if (!response.ok) {
+		process.stderr.write(`zen-logs: ${url} answered ${response.status}: ${await response.text()}\n`);
+		process.exit(1);
+	}
+	process.stdout.write(await response.text());
+}
+
 async function main(argv: readonly string[]): Promise<void> {
+	if (argv[0] === "bundle") {
+		await bundle(argv.slice(1));
+		return;
+	}
 	let query: Query;
 	try {
 		query = parseArguments(argv);
@@ -192,10 +232,22 @@ async function main(argv: readonly string[]): Promise<void> {
 	// whole lines. `--color` keeps colors through a pipe (`| less -R`).
 	const onTerminal = process.stdout.isTTY === true;
 	const render = zenLogLineRenderer({ wordWrap: onTerminal, colors: onTerminal || query.color });
-	const logsDir = logsDirFrom(process.env, findRepoRoot(import.meta.url));
-	const file = join(logsDir, zenLogFilename(query.date));
 	const notBefore = query.sinceMs === undefined ? 0 : Date.now() - query.sinceMs;
 
+	if (query.file !== undefined) {
+		// A bundle is a log file with prose around it: its fenced records, in order. Anything
+		// else is read as a raw log — the same parser says what is not a record.
+		if (!existsSync(query.file)) {
+			process.stderr.write(`zen-logs: no such file ${query.file}\n`);
+			process.exit(1);
+		}
+		const text = readFileSync(query.file, "utf8");
+		print(query, render, isLogBundle(text) ? bundleRecordsText(text) : text, notBefore);
+		return;
+	}
+
+	const logsDir = logsDirFrom(process.env, findRepoRoot(import.meta.url));
+	const file = join(logsDir, zenLogFilename(query.date));
 	if (query.follow) await untilExists(file);
 	else if (!existsSync(file)) {
 		process.stderr.write(
