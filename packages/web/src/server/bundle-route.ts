@@ -79,8 +79,18 @@ function selectRecords(
 	return { lines, malformed };
 }
 
+/**
+ * The checkout, read once per process (PR #151 review): both routes are built at startup and
+ * `.git/HEAD` — plus `packed-refs` on a packed branch — does not change under a running server.
+ */
+let checkoutOnce: string | undefined;
+function thisCheckout(): string {
+	checkoutOnce ??= describeCheckout(findRepoRoot(import.meta.url));
+	return checkoutOnce;
+}
+
 export function createBundleRoute(deps: BundleRouteDeps): (query: URLSearchParams) => BundleRouteOutcome {
-	const zen = describeCheckout(findRepoRoot(import.meta.url));
+	const zen = thisCheckout();
 	const now = deps.now ?? ((): Date => new Date());
 	return (query: URLSearchParams): BundleRouteOutcome => {
 		const at = now();
@@ -153,7 +163,7 @@ export function createAboutRoute(deps: {
 	readonly runtimeVersion: string;
 	readonly now?: () => Date;
 }): () => ZenBundleAbout {
-	const zen = describeCheckout(findRepoRoot(import.meta.url));
+	const zen = thisCheckout();
 	const now = deps.now ?? ((): Date => new Date());
 	return (): ZenBundleAbout =>
 		describeAbout({

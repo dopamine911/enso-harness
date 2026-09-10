@@ -494,3 +494,18 @@ test("⚠ a bind conflict rejects `listening` instead of hanging, and reports th
 	await expect(second.listening).rejects.toThrow();
 	logs.assertLogged({ level: "error", message: /already in use/, properties: { port: occupied } });
 });
+
+// #144: the observation rule's first route. Two properties, and the second is the rule —
+// a surface that exists to read the trace must not appear in it.
+test("⚠ GET /api/about answers the bundle's own header, and writes no record", async () => {
+	const { url } = await startWith(settlesAtOnce);
+	const before = logs.records.length;
+	const response = await fetch(`${url}/api/about`);
+	expect(response.status).toBe(200);
+	const about = (await response.json()) as Record<string, unknown>;
+	// Every field the bundle's header carries, and nothing undefined among them.
+	expect(Object.keys(about).sort()).toEqual(["at", "bun", "os", "pi", "selection", "zen"]);
+	expect(Number.isNaN(new Date(String(about.at)).getTime())).toBe(false);
+	for (const twice of [0, 1]) await fetch(`${url}/api/about?call=${twice}`);
+	expect(logs.records.length).toBe(before);
+});

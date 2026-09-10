@@ -6,7 +6,13 @@ import { bundleRecordsText, type PiSession, ZEN_REDACTED, type ZenLogLine } from
 import { parseZenLogLine, zenLogFilename } from "@zen/core/log-process";
 import type { HostedSession } from "../../host/agent-host.ts";
 import { createEventTail } from "../../host/event-tail.ts";
-import { BUNDLE_MAX_RECORDS, type BundleRouteOutcome, createBundleRoute, describeCheckout } from "../bundle-route.ts";
+import {
+	BUNDLE_MAX_RECORDS,
+	type BundleRouteOutcome,
+	createAboutRoute,
+	createBundleRoute,
+	describeCheckout,
+} from "../bundle-route.ts";
 import type { ThreadView } from "../thread-registry.ts";
 
 const ignore = (): void => undefined;
@@ -187,4 +193,28 @@ test("the checkout is described from .git by hand: a branch ref, a detached head
 
 	writeFileSync(join(repo, ".git", "HEAD"), "fedcba9876543210fedcba9876543210fedcba98\n");
 	expect(describeCheckout(repo)).toBe("fedcba987654");
+});
+
+// #144: one `about` builder for both surfaces. The claim worth pinning is not that the route
+// answers — it is that a bundle a user hands over and a dashboard reading `/api/about` cannot
+// disagree about which checkout, runtime and machine produced them.
+test("⚠ /api/about carries the same about the bundle's header does — one builder, no drift (#144)", () => {
+	const deps = { runtimeVersion: "1.2.3", now: (): Date => DAY };
+	const about = createAboutRoute(deps)();
+	const body = bodyOf(
+		createBundleRoute({ threads: { list: () => [] }, logsDir: logsDirWith([line("t1", "ok")]), ...deps })(
+			new URLSearchParams(),
+		),
+	);
+	expect(about.at).toBe(DAY.toISOString());
+	for (const row of [
+		`- zen: \`${about.zen}\``,
+		`- pi: \`${about.pi}\``,
+		`- bun: \`${about.bun}\``,
+		`- os: ${about.os}`,
+	]) {
+		expect(body).toContain(row);
+	}
+	// Its own `selection` says what it is: a header with no records behind it.
+	expect(about.selection).toContain("no records");
 });
