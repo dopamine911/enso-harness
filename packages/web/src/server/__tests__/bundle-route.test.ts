@@ -80,6 +80,7 @@ test("the bundle is today's records for the thread, its live inspection, and the
 	const route = createBundleRoute({
 		threads: { list: () => [liveThread("t1"), liveThread("t2")] },
 		logsDir,
+		runtimeVersion: "1.2.3",
 		now: () => DAY,
 	});
 	const outcome = route(new URLSearchParams("thread=t1"));
@@ -97,7 +98,8 @@ test("the bundle is today's records for the thread, its live inspection, and the
 	expect(body).toContain("### thread t1");
 	expect(body).not.toContain("### thread t2");
 	expect(body).toContain("- `tavilyApiKey` × 1");
-	expect(body).toContain("- pi: `");
+	// The version is the HOST's (#145): the route is handed a string and prints that one.
+	expect(body).toContain("- pi: `1.2.3`");
 	expect(body).toContain("selection: thread t1 from today's file (zen-2026-09-10.jsonl");
 });
 
@@ -109,6 +111,7 @@ test("[WARN] no thread: every record and every live thread; the cap keeps the NE
 	const route = createBundleRoute({
 		threads: { list: () => [liveThread("t1")] },
 		logsDir: logsDirWith(many),
+		runtimeVersion: "1.2.3",
 		now: () => DAY,
 	});
 	const outcome = route(new URLSearchParams());
@@ -125,12 +128,18 @@ test("[WARN] no thread: every record and every live thread; the cap keeps the NE
 
 test("a missing file and a malformed line are said in the selection, never silently absent", () => {
 	const empty = mkdtempSync(join(tmpdir(), "zen-bundle-empty-"));
-	const route = createBundleRoute({ threads: { list: () => [] }, logsDir: empty, now: () => DAY });
+	const route = createBundleRoute({
+		threads: { list: () => [] },
+		logsDir: empty,
+		runtimeVersion: "1.2.3",
+		now: () => DAY,
+	});
 	expect(bodyOf(route(new URLSearchParams()))).toContain("does not exist yet: no process has logged today");
 
 	const torn = createBundleRoute({
 		threads: { list: () => [] },
 		logsDir: logsDirWith([line("t1", "ok"), "{not json", JSON.stringify({ level: "INFO" })]),
+		runtimeVersion: "1.2.3",
 		now: () => DAY,
 	});
 	const body = bodyOf(torn(new URLSearchParams()));
@@ -143,6 +152,7 @@ test("[WARN] a thread that is not id-shaped is a 400, never a filename: a quote 
 	const route = createBundleRoute({
 		threads: { list: () => [] },
 		logsDir: logsDirWith([line("t1", "ok")]),
+		runtimeVersion: "1.2.3",
 		now: () => DAY,
 	});
 	for (const hostile of ['t1"; x="y', "t1\r\nX-Injected: 1", "../etc", " t1", "t1 x"]) {
