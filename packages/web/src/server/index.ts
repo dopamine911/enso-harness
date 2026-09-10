@@ -20,7 +20,7 @@ import {
 } from "@zen/core";
 import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost } from "../host/agent-host.ts";
 import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
-import { createBundleRoute } from "./bundle-route.ts";
+import { createAboutRoute, createBundleRoute } from "./bundle-route.ts";
 import {
 	abortThread,
 	answerThreadDialog,
@@ -32,6 +32,7 @@ import {
 	readPromptBody,
 } from "./follow.ts";
 import { receiveBrowserLogs } from "./logs-route.ts";
+import { noteRunAdmitted } from "./run-timing.ts";
 import { SSE_KEEPALIVE_MS } from "./sse.ts";
 import { createThreadRegistry, inspectThread, type ThreadView } from "./thread-registry.ts";
 
@@ -371,6 +372,7 @@ export function startZenServer(options: ZenServerOptions) {
 
 	// The bundle (#132): today's records + the live threads + the versions, one file.
 	const bundle = createBundleRoute({ threads, logsDir: options.logsDir, runtimeVersion: AGENT_RUNTIME_VERSION });
+	const about = createAboutRoute({ runtimeVersion: AGENT_RUNTIME_VERSION });
 
 	// ── The wire (#112): prompt / follow / dialog ────────────────────────────────────
 	const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs };
@@ -446,6 +448,9 @@ export function startZenServer(options: ZenServerOptions) {
 			return;
 		}
 		const { messageId, generation, queued } = outcome.receipt;
+		// The clock the first-delta record measures from (#144); a queued prompt joins the run
+		// already in flight and does not restart it.
+		noteRunAdmitted(threadId, generation);
 		log.info("prompt {messageId} {admission} on run {generation}", {
 			threadId,
 			messageId,
@@ -527,6 +532,13 @@ export function startZenServer(options: ZenServerOptions) {
 		}
 		if (request.method === "GET" && url === "/api/stored-threads") {
 			answerOrFail(respondWithStoredThreads(response), response);
+			return;
+		}
+		if (request.method === "GET" && url === "/api/about") {
+			// No log line here, by rule (#144): a surface that exists to read the trace must not
+			// write to it.
+			response.writeHead(200, { "Content-Type": "application/json" });
+			response.end(JSON.stringify(about()));
 			return;
 		}
 		if (request.method === "GET" && url.startsWith("/api/logs/bundle")) {

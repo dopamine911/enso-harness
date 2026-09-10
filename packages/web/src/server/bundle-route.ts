@@ -108,14 +108,7 @@ export function createBundleRoute(deps: BundleRouteDeps): (query: URLSearchParam
 		]
 			.filter((part) => part.length > 0)
 			.join(" ");
-		const about: ZenBundleAbout = {
-			at: at.toISOString(),
-			zen,
-			pi: deps.runtimeVersion,
-			bun: typeof Bun === "undefined" ? "not bun" : Bun.version,
-			os: `${platform()} ${release()} ${arch()}`,
-			selection,
-		};
+		const about = describeAbout({ zen, runtimeVersion: deps.runtimeVersion, at, selection });
 		const body = buildLogBundle({
 			about,
 			threads,
@@ -127,4 +120,46 @@ export function createBundleRoute(deps: BundleRouteDeps): (query: URLSearchParam
 			threadPrefix === undefined ? `zen-bundle-${day}.md` : `zen-bundle-${day}-${threadPrefix.slice(0, 8)}.md`;
 		return { status: 200, filename, body };
 	};
+}
+
+/**
+ * The one `about` builder (#144): the bundle carries it in its header and `GET /api/about`
+ * answers with it, so a dashboard and a handed-over bundle cannot disagree about which
+ * checkout, which runtime, which machine.
+ */
+export function describeAbout(input: {
+	readonly zen: string;
+	readonly runtimeVersion: string;
+	readonly at: Date;
+	readonly selection: string;
+}): ZenBundleAbout {
+	return {
+		at: input.at.toISOString(),
+		zen: input.zen,
+		pi: input.runtimeVersion,
+		bun: typeof Bun === "undefined" ? "not bun" : Bun.version,
+		os: `${platform()} ${release()} ${arch()}`,
+		selection: input.selection,
+	};
+}
+
+/**
+ * `GET /api/about` — versions and checkout, as JSON, for a debugging surface that wants the
+ * header without downloading the day (#144). Reads nothing but this process's own facts,
+ * builds nothing, and — like `POST /api/logs` — writes no record: an observation surface
+ * must not appear in the trace it is reading (#97).
+ */
+export function createAboutRoute(deps: {
+	readonly runtimeVersion: string;
+	readonly now?: () => Date;
+}): () => ZenBundleAbout {
+	const zen = describeCheckout(findRepoRoot(import.meta.url));
+	const now = deps.now ?? ((): Date => new Date());
+	return (): ZenBundleAbout =>
+		describeAbout({
+			zen,
+			runtimeVersion: deps.runtimeVersion,
+			at: now(),
+			selection: "no records: this is the bundle's header alone, for this process, now",
+		});
 }

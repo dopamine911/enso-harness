@@ -1,4 +1,5 @@
 import { type ZenLogProperties, type ZenObservation, zenLogger } from "@zen/core";
+import { forgetRun, takeFirstDeltaMs } from "./run-timing.ts";
 
 /**
  * Every observation the server publishes becomes a record (#132, "trace everything") —
@@ -113,4 +114,19 @@ export function recordObservation(
 	if (isSpine(observation)) events.info("{kind}", properties);
 	else events.debug("{kind}", properties);
 	events.trace("{kind} payload", { threadId, generation, seq, kind: observation.kind, observation });
+	// Time to first token, at `info` (#144): the deltas themselves are `debug`, so without this
+	// one line the latency a person actually asks about is only visible to whoever was already
+	// turned up. One record per run — the second delta finds nothing to take.
+	if (observation.kind === "text-delta" || observation.kind === "thinking-delta") {
+		const firstDeltaMs = takeFirstDeltaMs(threadId, generation);
+		if (firstDeltaMs !== undefined) {
+			events.info("run {generation} first delta after {firstDeltaMs}ms", {
+				threadId,
+				generation,
+				seq,
+				kind: observation.kind,
+				firstDeltaMs,
+			});
+		}
+	} else if (observation.kind === "settled") forgetRun(threadId, generation);
 }

@@ -261,12 +261,18 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
 		contextLocalStorage: new AsyncLocalStorage(),
 	});
 	// The first record: what this process will and will not write, so a bundle that lacks
-	// the debug lines says why.
+	// the debug lines says why — and WHO is writing (#144). A shared file makes "the
+	// processes" mean "who has written to today's file"; with a pid and a start time,
+	// liveness is inferable from the last write without any process asking to be counted.
 	getLogger([ZEN_LOG_ROOT, "log"]).info("logging configured: file {file}, console {console}, overrides {overrides}", {
 		file: levels.file,
 		console: levels.console ?? "off",
 		overrides: levels.overrides.map((override) => `${override.category.join(".")}=${override.level}`),
 		logsDir: options.logsDir,
+		pid: typeof process === "undefined" ? undefined : process.pid,
+		startedAt: new Date(
+			Date.now() - (typeof process === "undefined" ? 0 : Math.round(process.uptime() * 1000)),
+		).toISOString(),
 	});
 	return dispose;
 }
