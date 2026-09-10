@@ -98,7 +98,8 @@ test("the bundle is today's records for the thread, its live inspection, and the
 	expect(body).toContain("### thread t1");
 	expect(body).not.toContain("### thread t2");
 	expect(body).toContain("- `tavilyApiKey` × 1");
-	expect(body).toContain("- pi: `");
+	// The version is the HOST's (#145): the route is handed a string and prints that one.
+	expect(body).toContain("- pi: `1.2.3`");
 	expect(body).toContain("selection: thread t1 from today's file (zen-2026-09-10.jsonl");
 });
 

@@ -24,6 +24,12 @@ import { join } from "node:path";
  * unknown[]` carries pi's persistence format with no import and no vendor name in it (goals L2).
  * That needs a transcript type of ours; a third test — vendor-prefixed identifiers outside the
  * host, the naming gate's trick — keeps it fixed once it is.
+ *
+ * `COMMENT_LINE` reads one line at a time, so a block comment whose continuation lines do not
+ * lead with `*` is scanned as code (PR #150 review). That direction is the safe one: the gate
+ * FAILS on prose rather than passing a dependency, and the fix is to write the comment in the
+ * house style the whole repo already uses. A skip that tracked block state could hide a real
+ * import inside an unterminated comment; this cannot.
  */
 
 const repositoryRoot = join(import.meta.dir, "..");
@@ -68,8 +74,9 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
 	// Leaves with L3 — the host would hand the server a mode state of ours.
 	"packages/web/src/server/index.ts",
 	"packages/web/src/server/follow.ts",
-	// The dropdown's empty-state sentence says whose default a fresh thread starts in. A UI
-	// string, and it stops being true the moment the mode is ours (L3, again).
+	// The dropdown reads the persisted mode through `readPiccPersistedMode` and says whose
+	// default a fresh thread starts in. The call leaves with L3; the sentence stops being true
+	// the same day.
 	"packages/web/src/permission-mode.tsx",
 ];
 
