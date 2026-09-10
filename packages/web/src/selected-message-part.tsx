@@ -178,10 +178,22 @@ export function SelectedMessagePart({
 	if (selected.part.type === "thinking") {
 		return <ThinkingBlock content={selected.part.content} isStreaming={isStreaming} />;
 	}
-	// ⚠ An unhandled part kind renders VISIBLY rather than vanishing. `image`, `audio`,
-	// `video`, `document`, `structuredOutput` and `uiResource` are all in the vocabulary
-	// and it will grow — and a silently skipped part is indistinguishable from one that
-	// was never sent.
+	// The user's image (#68): inline bytes, as the composer sent it and as pi stored it — the
+	// snapshot carries the same part back on reload. A `url` source falls through to the
+	// visible block below: nothing on this wire produces one, and rendering a remote URL
+	// would be a fetch this page never asked for.
+	if (selected.part.type === "image" && selected.part.source.type === "data") {
+		return (
+			<img
+				alt="attached by the user"
+				className="my-2 max-h-96 max-w-full rounded-md border"
+				src={`data:${selected.part.source.mimeType};base64,${selected.part.source.value}`}
+			/>
+		);
+	}
+	// ⚠ An unhandled part kind renders VISIBLY rather than vanishing. `audio`, `video`,
+	// `document`, `structuredOutput` and `uiResource` are all in the vocabulary and it will
+	// grow — and a silently skipped part is indistinguishable from one that was never sent.
 	return (
 		<pre className="overflow-x-auto rounded-md border bg-muted/50 p-2 text-muted-foreground text-xs">
 			{selected.part.type}: {JSON.stringify(selected.part)}

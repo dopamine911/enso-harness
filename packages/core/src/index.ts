@@ -28,6 +28,7 @@ export {
 export {
 	base64DecodedBytes,
 	isWholeBase64,
+	isZenImageMimeType,
 	ZEN_IMAGE_MAX_BYTES,
 	ZEN_IMAGE_MIME_TYPES,
 	ZEN_PROMPT_BODY_MAX_BYTES,
@@ -37,7 +38,7 @@ export {
 	ZenFollowObservation,
 	ZenFollowSnapshot,
 	ZenFollowStatus,
-	type ZenImageMimeType,
+	ZenImageMimeType,
 	ZenPromptBody,
 	ZenPromptImage,
 	ZenPromptReceipt,

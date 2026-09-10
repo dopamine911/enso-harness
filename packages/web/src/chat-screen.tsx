@@ -1,8 +1,18 @@
+import type { ContentPart } from "@tanstack/ai";
 import { automaticPartsForMessage, type ChatUISelectedPart, selectChatUI } from "@tanstack/ai-client/ui";
 import { createChatHook, createChatHookContexts, type LayoutProps, type MessageProps } from "@tanstack/ai-react/ui";
-import type { PiDialogResponse, ZenDialogSpec } from "@zen/core";
-import { ArrowUpIcon, SquareIcon } from "lucide-react";
+import {
+	isZenImageMimeType,
+	type PiDialogResponse,
+	ZEN_IMAGE_MAX_BYTES,
+	ZEN_IMAGE_MIME_TYPES,
+	ZEN_PROMPT_MAX_IMAGES,
+	type ZenDialogSpec,
+	type ZenPromptImage,
+} from "@zen/core";
+import { ArrowUpIcon, PaperclipIcon, SquareIcon } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from "./components/ai-elements/attachments.tsx";
 import {
 	Conversation,
 	ConversationContent,
@@ -10,6 +20,13 @@ import {
 	ConversationScrollButton,
 } from "./components/ai-elements/conversation.tsx";
 import { Message, MessageContent } from "./components/ai-elements/message.tsx";
+import {
+	PromptInput,
+	PromptInputButton,
+	type PromptInputError,
+	PromptInputTextarea,
+	usePromptInputAttachments,
+} from "./components/ai-elements/prompt-input.tsx";
 import {
 	QueueItem,
 	QueueItemContent,
@@ -423,6 +440,101 @@ export function joinDrafts(current: string, ...more: readonly string[]): string 
 	return [current, ...more].filter((part) => part.trim().length > 0).join("\n\n");
 }
 
+/** What the form would not take, as the notice says it (#68): how many, and the cap by name — never a silent drop. */
+export function describeAttachmentError(error: PromptInputError): string {
+	const files = error.count === 1 ? "1 file was" : `${error.count} files were`;
+	switch (error.code) {
+		case "accept":
+			return `${files} not attached: only images are attached here (${ZEN_IMAGE_MIME_TYPES.map((mimeType) => mimeType.slice("image/".length)).join(", ")})`;
+		case "max_file_size":
+			return `${files} not attached: an image is at most ${(ZEN_IMAGE_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB`;
+		case "max_files":
+			return `${files} not attached: at most ${ZEN_PROMPT_MAX_IMAGES} images on one prompt`;
+	}
+}
+
+/**
+ * Inside the ported form: the attachment strip, the textarea, the attach / stop / send
+ * buttons. A separate component because the attachments live in the form's context
+ * (`usePromptInputAttachments`), and "can send" depends on them — an image with no words
+ * sends (#68).
+ */
+function ComposerBody({
+	draft,
+	setDraft,
+	disconnected,
+	running,
+	onStop,
+}: {
+	draft: string;
+	setDraft: (next: string) => void;
+	disconnected: boolean;
+	running: boolean;
+	onStop: () => void;
+}): React.ReactNode {
+	const attachments = usePromptInputAttachments();
+	const canSend = (draft.trim().length > 0 || attachments.files.length > 0) && !disconnected;
+	return (
+		<div className="flex flex-col gap-2 rounded-xl border bg-background p-2 shadow-sm focus-within:ring-1 focus-within:ring-ring">
+			{attachments.files.length === 0 ? null : (
+				<Attachments aria-label="attached images" className="px-1 pt-1">
+					{attachments.files.map((file) => (
+						<Attachment key={file.id} data={file} onRemove={() => attachments.remove(file.id)}>
+							<AttachmentPreview />
+							<AttachmentRemove label={`remove ${file.filename || "image"}`} />
+						</Attachment>
+					))}
+				</Attachments>
+			)}
+			<div className="flex items-end gap-2">
+				<PromptInputTextarea
+					value={draft}
+					onChange={(event) => setDraft(event.target.value)}
+					placeholder={disconnected ? "disconnected — reload and resume from the rail" : "ask pi something"}
+					autoComplete="off"
+					rows={1}
+					className="max-h-40 min-h-9 flex-1 resize-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
+				/>
+				{/* Attach (#68): the same file dialog a paste or a drop bypasses. */}
+				<PromptInputButton
+					aria-label="attach an image"
+					title="attach an image — or paste one, or drop it here"
+					disabled={disconnected}
+					onClick={attachments.openFileDialog}
+				>
+					<PaperclipIcon />
+				</PromptInputButton>
+				{/* Stop while a run is in flight (#116), through the thread's connection —
+				    `POST …/abort` → pi's own abort. ⚠ NOT `chat.stop()`: that aborts this
+				    client's POST, which returned at admission, and touches nothing on the
+				    server. The run ends on the follow (`settled`, `status`) like any other,
+				    so this button changes nothing itself; the feed does. Read off
+				    `sessionGenerating`, the shared run flag — `isLoading` never rises here
+				    (#103 receipt). Not offered once the follow has ended (#119): the flag
+				    is then as of that moment, and a stop that may stop nothing is issue #4's shape -
+				    `docs/architecture.md`, The control plane, invariant 5. */}
+				{running && !disconnected ? (
+					<Button
+						type="button"
+						size="icon"
+						variant="outline"
+						aria-label="stop the run"
+						title="stop the run in flight — pi is told; the run ends on the feed"
+						onClick={onStop}
+					>
+						<SquareIcon />
+					</Button>
+				) : null}
+				{/* Send stays offered in flight: a prompt during a run queues through pi (#75) —
+				    the form's submit takes the direct route past TanStack's own queue. */}
+				<Button type="submit" size="icon" aria-label="send message" disabled={!canSend}>
+					<ArrowUpIcon />
+				</Button>
+			</div>
+		</div>
+	);
+}
+
 /**
  * What waits behind the run, as pi holds it (#75) — the `zen.queue` list, rendered above the
  * composer with ai-elements' Queue shell (#121). Every follower sees the same list; a stop
@@ -487,14 +599,9 @@ const chatComponents = {
 			const chat = useChatContext();
 			const stores = useThreadStores();
 			const disconnected = useStore(stores.disconnected);
-			// Controlled, so the send button can disable on empty — the ai-elements chatbot
-			// example's PromptInput does the same.
+			// Controlled, so the send button can disable on empty and a take-back can write it —
+			// the ai-elements chatbot example's PromptInput does the same.
 			const [draft, setDraft] = useState("");
-
-			// Nothing sends while disconnected (#119, PR #123 review): the prompt would reach a
-			// server that rebuilds the thread, but this page's follow is gone, so the reply would
-			// land nowhere this page can see. Same shape as the missing stop; the placeholder says why.
-			const canSend = draft.trim().length > 0 && !disconnected;
 			// The user messages this composer put in the transcript for prompts pi is still
 			// HOLDING (#75): a stop hands those texts back, and the bubble that was never asked
 			// leaves with them — pi's TUI does the same. A claimed prompt's bubble stays.
@@ -508,12 +615,26 @@ const chatComponents = {
 			useEffect(() => {
 				latestMessages.current = chat.messages;
 			}, [chat.messages]);
-			const sendDraft = (): void => {
-				if (!canSend) return;
-				const text = draft;
+			/**
+			 * Send what the form holds: the text, and the pasted or dropped images as inline bytes.
+			 * Nothing sends while disconnected (#119, PR #123 review): the prompt would reach a
+			 * server that rebuilds the thread, but this page's follow is gone, so the reply would
+			 * land nowhere this page can see. An image with no words is a prompt (pi-ai keeps the
+			 * image and drops the empty text block); nothing at all is not.
+			 */
+			const send = (text: string, images: readonly ZenPromptImage[]): void => {
+				if (disconnected) return;
+				if (text.trim().length === 0 && images.length === 0) return;
 				setDraft("");
+				const parts: ContentPart[] = [
+					...(text.length === 0 ? [] : [{ type: "text" as const, content: text }]),
+					...images.map((image) => ({
+						type: "image" as const,
+						source: { type: "data" as const, value: image.data, mimeType: image.mimeType },
+					})),
+				];
 				if (!chat.sessionGenerating) {
-					void chat.sendMessage(text);
+					void chat.sendMessage({ content: parts });
 					return;
 				}
 				// A prompt DURING a run queues through pi (#75). ⚠ Not `chat.sendMessage`: TanStack
@@ -521,14 +642,13 @@ const chatComponents = {
 				// settle — the browser's queue, invisible to other tabs, lost on reload. So the user
 				// message goes into the transcript here, and the text goes to pi now: pi lists it on
 				// the follow for every follower (`zen.queue`, the list above this composer) and claims
-				// it when the run's turn ends. Refused or unreachable, the words come back to the draft.
+				// it when the run's turn ends. Refused or unreachable, the words come back to the
+				// draft. ⚠ The images do not: pi's queue hands back texts (`ZenAbortReceipt.restored`),
+				// and the composer's attachments are the form's, not this component's — re-attach.
 				const id = crypto.randomUUID();
 				heldLocally.current.push({ id, text });
-				chat.setMessages([
-					...chat.messages,
-					{ id, role: "user", parts: [{ type: "text", content: text }], createdAt: new Date() },
-				]);
-				void stores.connection.prompt(text).then((outcome) => {
+				chat.setMessages([...chat.messages, { id, role: "user", parts, createdAt: new Date() }]);
+				void stores.connection.prompt(text, images).then((outcome) => {
 					if (outcome === "refused" || outcome === "unreachable") takeBack([text]);
 				});
 			};
@@ -553,63 +673,52 @@ const chatComponents = {
 			};
 
 			return (
-				<form
-					onSubmit={(event) => {
-						event.preventDefault();
-						sendDraft();
-					}}
+				<PromptInput
 					className="mx-auto w-full max-w-3xl px-4 pb-4"
+					accept={ZEN_IMAGE_MIME_TYPES.join(",")}
+					multiple
+					maxFiles={ZEN_PROMPT_MAX_IMAGES}
+					maxFileSize={ZEN_IMAGE_MAX_BYTES}
+					// A file the form would not take is said, not dropped (#68): the reason names the cap.
+					onError={(error) => stores.notifications.push(describeAttachmentError(error), "warning", "run")}
+					onSubmit={({ text, files }) => {
+						// The form hands back `data:` URLs (blob → FileReader); the wire takes bytes + kind.
+						// The form's `accept` already filtered by `File.type`; this is the same set, as a
+						// guard rather than a cast, and a miss is said the same way the form says one.
+						const images: ZenPromptImage[] = [];
+						let notImages = 0;
+						for (const file of files) {
+							const inline = /^data:([^;,]+);base64,(.*)$/.exec(file.url);
+							const mimeType = inline?.[1];
+							const data = inline?.[2];
+							if (mimeType === undefined || data === undefined || !isZenImageMimeType(mimeType)) {
+								notImages += 1;
+								continue;
+							}
+							images.push({ mimeType, data });
+						}
+						if (notImages > 0) {
+							stores.notifications.push(
+								describeAttachmentError({ code: "accept", message: "", count: notImages }),
+								"warning",
+								"run",
+							);
+						}
+						send(text, images);
+					}}
 				>
 					{/* The composer chrome (#90): the knobs at the point of use, deepseek's shape. */}
 					<div className="flex items-center justify-end px-1 pb-1">
 						<PermissionModeControl />
 					</div>
-					<div className="flex items-end gap-2 rounded-xl border bg-background p-2 shadow-sm focus-within:ring-1 focus-within:ring-ring">
-						<Textarea
-							name="message"
-							value={draft}
-							onChange={(event) => setDraft(event.target.value)}
-							onKeyDown={(event) => {
-								// Enter sends; Shift+Enter keeps its newline (the chatbot-example
-								// convention, and what anyone typing to an agent expects).
-								if (event.key === "Enter" && !event.shiftKey) {
-									event.preventDefault();
-									sendDraft();
-								}
-							}}
-							placeholder={disconnected ? "disconnected — reload and resume from the rail" : "ask pi something"}
-							autoComplete="off"
-							rows={1}
-							className="max-h-40 min-h-9 flex-1 resize-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
-						/>
-						{/* Stop while a run is in flight (#116), through the thread's connection —
-						    `POST …/abort` → pi's own abort. ⚠ NOT `chat.stop()`: that aborts this
-						    client's POST, which returned at admission, and touches nothing on the
-						    server. The run ends on the follow (`settled`, `status`) like any other,
-						    so this button changes nothing itself; the feed does. Read off
-						    `sessionGenerating`, the shared run flag — `isLoading` never rises here
-						    (#103 receipt). Not offered once the follow has ended (#119): the flag
-						    is then as of that moment, and a stop that may stop nothing is issue #4's shape -
-						    `docs/architecture.md`, The control plane, invariant 5. */}
-						{chat.sessionGenerating && !disconnected ? (
-							<Button
-								type="button"
-								size="icon"
-								variant="outline"
-								aria-label="stop the run"
-								title="stop the run in flight — pi is told; the run ends on the feed"
-								onClick={stopRun}
-							>
-								<SquareIcon />
-							</Button>
-						) : null}
-						{/* Send stays offered in flight: a prompt during a run queues through pi (#75) —
-						    `sendDraft` above takes the direct route past TanStack's own queue. */}
-						<Button type="submit" size="icon" aria-label="send message" disabled={!canSend}>
-							<ArrowUpIcon />
-						</Button>
-					</div>
-				</form>
+					<ComposerBody
+						draft={draft}
+						setDraft={setDraft}
+						disconnected={disconnected}
+						running={chat.sessionGenerating}
+						onStop={stopRun}
+					/>
+				</PromptInput>
 			);
 		},
 		/**

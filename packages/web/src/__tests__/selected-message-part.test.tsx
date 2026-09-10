@@ -175,3 +175,16 @@ test("a text part renders through the markdown pipeline inside the prose shell",
 	expect(rendered).toContain("<strong>bold</strong>");
 	expect(rendered).toContain("prose");
 });
+
+// The user's image (#68): inline bytes render as the image; a URL source stays visible as data, not fetched.
+test("an image part with inline bytes renders as an <img>; a URL-sourced one falls through to the visible block, never an <img>", () => {
+	const inline: MessagePart = { type: "image", source: { type: "data", value: "iVBORw0KGgo=", mimeType: "image/png" } };
+	const rendered = html({ key: "image", part: inline });
+	expect(rendered).toContain('<img alt="attached by the user"');
+	expect(rendered).toContain('src="data:image/png;base64,iVBORw0KGgo="');
+
+	const remote: MessagePart = { type: "image", source: { type: "url", value: "https://example.com/x.png" } };
+	const fallen = html({ key: "image", part: remote });
+	expect(fallen).not.toContain("<img");
+	expect(fallen).toContain("https://example.com/x.png");
+});
