@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { join, resolve } from 'node:path'
 import {
   base64DecodedBytes,
@@ -31,7 +31,7 @@ import {
   readDialogBody,
   readPromptBody,
 } from './follow.ts'
-import { receiveBrowserLogs } from './logs-route.ts'
+import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
 import { noteRunAdmitted } from './run-timing.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
@@ -62,6 +62,18 @@ const THREAD_ABORT_ROUTE = /^\/api\/threads\/([^/?#]+)\/abort$/
  */
 const DEFAULT_PORT = 5179
 const LOOPBACK_ONLY = '127.0.0.1'
+/** A dialog answer is an id and a short value — kilobytes, not megabytes. */
+const MAX_DIALOG_BODY_BYTES = 64 * 1024
+
+/**
+ * Is this `Host`/`Origin` authority the machine itself? Port is irrelevant (either dev
+ * surface may ask); the NAME is the whole point, because a hostname that merely resolves
+ * to 127.0.0.1 today is a rebinding attack, not localhost.
+ */
+function isLoopbackAuthority(authority: string): boolean {
+  const host = authority.startsWith('[') ? authority.slice(0, authority.indexOf(']') + 1) : authority.split(':')[0]
+  return host === LOOPBACK_ONLY || host === 'localhost' || host === '[::1]'
+}
 
 const log = zenLogger('server', 'http')
 
@@ -163,6 +175,15 @@ export interface ZenServerOptions {
   sseKeepaliveMs?: number
 }
 
+/** What a started server hands back — the node server plus the lifecycle the launchers drive. */
+export interface ZenServerHandle {
+  readonly server: Server
+  readonly url: string
+  /** Resolves with the bound origin once listening; rejects if the bind failed. */
+  readonly listening: Promise<string>
+  readonly close: () => Promise<void>
+}
+
 /*
  * ⚠⚠ THE FIRST LIVE RUN EXPOSED THIS, AND IT WAS A SECURITY DEFECT — kept as history because
  * the in-process host inherits the same obligation.
@@ -205,18 +226,18 @@ function assertVendorLinks(harnessPackageDir: string): void {
   }
   const declared = Object.values(manifest.pi ?? {}).flatMap((paths) => (Array.isArray(paths) ? paths : [paths]))
   const missing = declared
-    .filter((entry) => entry.startsWith('node_modules/'))
-    .filter((entry) => !existsSync(resolve(harnessPackageDir, entry)))
+    .filter((vendorPath) => vendorPath.startsWith('node_modules/'))
+    .filter((vendorPath) => !existsSync(resolve(harnessPackageDir, vendorPath)))
   if (missing.length > 0) {
     throw new Error(
       `zen-server: vendor package paths are missing from the harness package:\n` +
-        `${missing.map((entry) => `  - ${entry}`).join('\n')}\n` +
+        `${missing.map((vendorPath) => `  - ${vendorPath}`).join('\n')}\n` +
         `Run \`bun install\` (its postinstall relinks the vendor packages).`,
     )
   }
 }
 
-export function startZenServer(options: ZenServerOptions) {
+export function startZenServer(options: ZenServerOptions): ZenServerHandle {
   if (options.cwd.length === 0) {
     // ⚠ Fail at startup rather than on the first request. A bad `cwd` discovered mid-run
     // is a confusing failure; discovered at boot it is a one-line message.
@@ -236,7 +257,7 @@ export function startZenServer(options: ZenServerOptions) {
       harnessPackageDir: options.harnessPackageDir,
     })
   const threads = createThreadRegistry({
-    createSession: (threadId) => host.createSession(threadId),
+    createSession: (threadId: string) => host.createSession(threadId),
   })
 
   // The permission mode a FRESH thread starts in (#84). The browser asks once on mount,
@@ -464,7 +485,20 @@ export function startZenServer(options: ZenServerOptions) {
 
   /** The browser's records (#132 slice 3): into this process's logger, or a 4xx that says why — never logged itself. */
   async function respondToBrowserLogs(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const outcome = receiveBrowserLogs(await readBody(request))
+    // The cap is passed, not left to the schema check downstream: `receiveBrowserLogs` can
+    // only refuse a batch it has already buffered whole, which is the thing `readBody`'s
+    // `maxBytes` exists to avoid.
+    let body: string
+    try {
+      body = await readBody(request, MAX_LOG_BODY_BYTES)
+    } catch (error) {
+      if (error instanceof BodyTooLargeError) {
+        endAndClose(request, response, 413, `a log batch is at most ${MAX_LOG_BODY_BYTES} bytes`)
+        return
+      }
+      throw error
+    }
+    const outcome = receiveBrowserLogs(body)
     if (outcome.status !== 204) {
       response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
       response.end(outcome.reason)
@@ -494,8 +528,13 @@ export function startZenServer(options: ZenServerOptions) {
   async function respondToDialog(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
     let answer: PiDialogResponse
     try {
-      answer = readDialogBody(await readBody(request))
+      // A dialog answer is an id and a short value; nothing legitimate approaches this.
+      answer = readDialogBody(await readBody(request, MAX_DIALOG_BODY_BYTES))
     } catch (error) {
+      if (error instanceof BodyTooLargeError) {
+        endAndClose(request, response, 413, `a dialog answer is at most ${MAX_DIALOG_BODY_BYTES} bytes`)
+        return
+      }
       response.writeHead(400, { 'Content-Type': 'text/plain' })
       response.end((error as Error).message)
       return
@@ -517,11 +556,56 @@ export function startZenServer(options: ZenServerOptions) {
     response.end()
   }
 
+  /**
+   * The one check that stands between a page the operator happens to visit and an agent
+   * with unconfined `bash` in their tree.
+   *
+   * ⚠ Binding loopback is NOT an authorization boundary against a browser (review of the
+   * lint/hardening pass). A page on any origin can POST to `127.0.0.1:5179`, and
+   * `/api/threads/<id>/prompt` is a CORS-*simple* request — `JSON.parse` never consults
+   * `Content-Type`, so `text/plain` reaches the handler with no preflight — and
+   * `threads.acquire` mints a session for any id matching the pattern, so no existing
+   * thread need be known. The reply is opaque to the attacker, but the side effect is a
+   * full agent run. Two independent checks, both here so every route inherits them:
+   *
+   * 1. `Host` must name loopback. Node does not validate it, and a DNS name that resolves
+   *    to 127.0.0.1 (rebinding) makes the READ side — `/api/threads/:id`, the verbatim
+   *    branch, and the log bundle — same-origin readable. A rebound name is not loopback.
+   * 2. `Origin`, when the caller sends one, must be loopback too. Browsers always send it
+   *    on cross-origin POSTs; `curl` and the repo's own CLIs send none, so they are
+   *    unaffected. Either dev port satisfies it, and the 5178 proxy forwards both headers
+   *    unchanged.
+   */
+  function fromTrustedOrigin(request: IncomingMessage): boolean {
+    const hostHeader = request.headers.host
+    if (hostHeader === undefined || !isLoopbackAuthority(hostHeader)) return false
+    const origin = request.headers.origin
+    if (origin === undefined || origin === 'null') return true
+    let originHost: string
+    try {
+      originHost = new URL(origin).host
+    } catch {
+      return false
+    }
+    return isLoopbackAuthority(originHost)
+  }
+
   // ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler sits at the
   // complexity ceiling biome.jsonc pins for this file (#82), and its top-to-bottom shape is
   // the #27/#34 teardown ordering. New routes are added to this dispatcher, not to it.
   const server = createServer((request, response) => {
     const url = request.url ?? ''
+    if (!fromTrustedOrigin(request)) {
+      log.warn('request refused: {method} {url} from host {host} origin {origin}', {
+        method: request.method,
+        url,
+        host: request.headers.host,
+        origin: request.headers.origin,
+      })
+      response.writeHead(403, { 'Content-Type': 'text/plain' })
+      response.end('this server answers the machine it runs on, and only to a loopback origin')
+      return
+    }
     if (request.method === 'GET' && url === '/api/mode') {
       respondWithFreshThreadMode(response)
       return
@@ -627,6 +711,6 @@ export function startZenServer(options: ZenServerOptions) {
     server,
     url: `http://${LOOPBACK_ONLY}:${port}`,
     listening,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    close: (): Promise<void> => new Promise<void>((resolve) => server.close(() => resolve())),
   }
 }

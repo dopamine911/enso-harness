@@ -9,7 +9,7 @@ import {
   zenConfigPath,
 } from '@zen/core'
 import { auditRecords, recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
-import { createWebFetch, type WebFetchDependencies } from '../index.ts'
+import { createWebFetch, type WebFetchDependencies, type WebFetchRequestInit } from '../index.ts'
 
 /**
  * The web_fetch extension (#54), against injected IO seams — no test here touches the
@@ -60,12 +60,12 @@ function loadWebFetch(overrides: Partial<WebFetchDependencies> = {}): LoadedWebF
   const dependencies: WebFetchDependencies = {
     locateConfigFile: () => CONFIG_PATH,
     readConfigText: () => configWith([ALLOWED_HOST]),
-    fetchUrl: async (url, init) => {
+    fetchUrl: async (url: string, init: WebFetchRequestInit) => {
       fetchedUrls.push(url)
       fetchInits.push({ redirect: init.redirect, signal: init.signal })
       return textResponse('hello from the docs')
     },
-    resolveHostAddresses: async (hostname) => {
+    resolveHostAddresses: async (hostname: string) => {
       resolvedHosts.push(hostname)
       return [PUBLIC_ADDRESS]
     },
@@ -297,7 +297,7 @@ test('a truncation cut inside a multi-byte character ends on a CLEAN boundary �
   // {stream: true} and never flushes, so the partial sequence is BUFFERED and dropped —
   // probed live 2026-09-04: a final flush emits U+FFFD, the stream path does not.
   // Pins PR #58 review nit 2 as already-correct behavior.
-  const body = 'a'.repeat(WEB_FETCH_MAX_RESPONSE_BYTES - 1) + 'é'
+  const body = `${'a'.repeat(WEB_FETCH_MAX_RESPONSE_BYTES - 1)}é`
   const loaded = loadWebFetch({ fetchUrl: async () => textResponse(body) })
   const text = await run(loaded, 'https://docs.example.com/multibyte')
   expect(text).toContain('TRUNCATED')
@@ -309,7 +309,7 @@ test('a signal that is ALREADY aborted propagates immediately — addEventListen
   abortedController.abort(new Error('caller gave up before execute ran'))
   let observedSignalAborted = false
   const loaded = loadWebFetch({
-    fetchUrl: async (_url, init) => {
+    fetchUrl: async (_url: string, init: WebFetchRequestInit) => {
       observedSignalAborted = init.signal.aborted
       return textResponse('late')
     },

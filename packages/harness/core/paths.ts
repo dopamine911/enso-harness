@@ -164,11 +164,31 @@ function containsPathFragment(absolutePath: string, fragments: readonly string[]
   return fragments.some((fragment) => loweredWithTrailingSeparator.includes(fragment.toLowerCase()))
 }
 
-/** True when the path looks like credential material, by directory fragment or by basename. */
+/**
+ * The kernel's copy of a process's environment. The bash deny already refuses
+ * `/proc/<pid>/environ` by regex (`environment-dump.ts`) precisely so a quarantine
+ * regression is LOUD; without this the same bytes came back through `read`/`grep`, whose
+ * gate saw a path with no credential fragment and a basename matching nothing.
+ */
+const PROC_ENVIRON_PATH = /^\/proc\/[^/]+\/environ$/
+
+/**
+ * True when the path looks like credential material, by directory fragment, by basename,
+ * or because it is a process's environment.
+ *
+ * ⚠ Both the literal path AND the realpath of its nearest existing ancestor are judged,
+ * for the reason `isPersistenceWriteTarget` and `isInsideAnyRoot` already do it: a symlink
+ * inside the workspace named `notes.txt` pointing at `~/.aws/credentials` has an innocent
+ * literal path, and pi follows the link. Reading a secret is the precondition for
+ * exfiltrating one, so this gate cannot be the one that judges only the name it was given.
+ */
 export function looksLikeSecret(absolutePath: string, fragments: readonly string[]): boolean {
-  if (containsPathFragment(absolutePath, fragments)) return true
-  const name = basename(absolutePath)
-  return SECRET_BASENAME_PATTERNS.some((pattern) => pattern.test(name))
+  for (const candidate of [absolutePath, realpathOfNearestExisting(absolutePath)]) {
+    if (containsPathFragment(candidate, fragments)) return true
+    if (PROC_ENVIRON_PATH.test(candidate)) return true
+    if (SECRET_BASENAME_PATTERNS.some((pattern) => pattern.test(basename(candidate)))) return true
+  }
+  return false
 }
 
 /** True when the path contains a fragment that is never writable. */

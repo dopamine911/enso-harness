@@ -15,7 +15,7 @@ import { startZenServer } from '../index.ts'
  * now does, at both launch points.
  */
 
-function fakeHarness(manifestPi: Record<string, string[]>, createLinks: boolean) {
+function fakeHarness(manifestPi: Record<string, string[]>, createLinks: boolean): string {
   const directory = mkdtempSync(join(tmpdir(), 'zen-harness-fake-'))
   writeFileSync(join(directory, 'package.json'), JSON.stringify({ name: 'zen-harness', pi: manifestPi }))
   if (createLinks) {

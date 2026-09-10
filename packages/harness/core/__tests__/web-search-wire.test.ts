@@ -1,12 +1,16 @@
 import { expect, test } from 'bun:test'
-import { ANTHROPIC_WEB_SEARCH_TOOL_TYPE, runAnthropicWireSearch } from '../web-search/anthropic-wire.ts'
+import {
+  ANTHROPIC_WEB_SEARCH_TOOL_TYPE,
+  type AnthropicWireSearchOptions,
+  runAnthropicWireSearch,
+} from '../web-search/anthropic-wire.ts'
 import {
   DEEPSEEK_SEARCH_BASE_URL,
   DEEPSEEK_SEARCH_MODEL_ID,
   runDeepseekProviderSearch,
 } from '../web-search/providers/deepseek.ts'
 import { readSseEvents } from '../web-search/sse.ts'
-import type { FetchUrl } from '../web-search/vocabulary.ts'
+import type { FetchUrl, FetchUrlInit } from '../web-search/vocabulary.ts'
 import { WebSearchProviderError } from '../web-search/vocabulary.ts'
 
 /**
@@ -42,12 +46,12 @@ function sseResponse(events: unknown[]): Response {
 
 const fetchReturning =
   (response: Response): FetchUrl =>
-  async () =>
+  async (): Promise<Response> =>
     response
 
 const QUERY_TEXT = 'what is zen-harness'
 
-function wireOptions(fetchUrl: FetchUrl) {
+function wireOptions(fetchUrl: FetchUrl): AnthropicWireSearchOptions {
   return {
     providerId: 'anthropic' as const,
     endpointUrl: 'https://api.anthropic.example/v1/messages',
@@ -171,7 +175,7 @@ test("an in-stream error event throws with the API's message", async () => {
 
 test('the request body carries the pinned tool type, budgets, and prompt', async () => {
   let capturedBody: string | undefined
-  const capturingFetch: FetchUrl = async (_url, init) => {
+  const capturingFetch: FetchUrl = async (_url: string, init: FetchUrlInit) => {
     capturedBody = init.body
     return sseResponse(SEARCHED_EVENTS)
   }
@@ -213,7 +217,7 @@ test("deepseek hits ITS Anthropic-compatible base with dsh's instruction and bud
   let capturedUrl: string | undefined
   let capturedHeaders: Record<string, string> | undefined
   let capturedBody: string | undefined
-  const capturingFetch: FetchUrl = async (url, init) => {
+  const capturingFetch: FetchUrl = async (url: string, init: FetchUrlInit) => {
     capturedUrl = url
     capturedHeaders = init.headers
     capturedBody = init.body
@@ -294,7 +298,7 @@ test('⚠ an OAuth credential sends the Claude Code identity system block — it
   // credential searched (audit line: `searched provider=anthropic — primary`).
   const { runAnthropicProviderSearch } = await import('../web-search/providers/anthropic.ts')
   let capturedBody: string | undefined
-  const capturingFetch: FetchUrl = async (_url, init) => {
+  const capturingFetch: FetchUrl = async (_url: string, init: FetchUrlInit) => {
     capturedBody = init.body
     return sseResponse(SEARCHED_EVENTS)
   }

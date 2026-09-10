@@ -94,12 +94,12 @@ export function createPermissionModeStore(): PermissionModeStore {
     get: store.get,
     subscribe: store.subscribe,
     applyReceipt,
-    applyPersistedEntry: (data) => {
+    applyPersistedEntry: (data: unknown) => {
       const mode = readPiccPersistedMode(data)
       if (mode === undefined) return
       store.set({ mode, available: store.get().available })
     },
-    seed: (fetchFreshThreadState) => {
+    seed: (fetchFreshThreadState: () => Promise<unknown>) => {
       if (store.get().mode !== undefined) return Promise.resolve()
       seeding ??= seedOnce(fetchFreshThreadState).finally(() => {
         seeding = undefined

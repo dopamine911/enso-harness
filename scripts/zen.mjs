@@ -63,7 +63,7 @@ const VENDOR_PATH_PREFIX = 'node_modules/'
 
 const declaredResources = Object.values(manifest.pi ?? {}).flatMap((paths) => (Array.isArray(paths) ? paths : [paths]))
 if (declaredResources.length === 0) {
-  console.error('zen: packages/harness/package.json declares no pi resources')
+  process.stderr.write('zen: packages/harness/package.json declares no pi resources\n')
   process.exit(1)
 }
 
@@ -76,13 +76,13 @@ if (declaredResources.length === 0) {
  * whatever the vendor package was supposed to provide.
  */
 const missingVendorPaths = declaredResources
-  .filter((entry) => typeof entry === 'string' && entry.startsWith(VENDOR_PATH_PREFIX))
-  .filter((entry) => !existsSync(resolve(packageRoot, entry)))
+  .filter((resourcePath) => typeof resourcePath === 'string' && resourcePath.startsWith(VENDOR_PATH_PREFIX))
+  .filter((resourcePath) => !existsSync(resolve(packageRoot, resourcePath)))
 
 if (missingVendorPaths.length > 0) {
-  console.error('zen: vendor package paths are missing from the harness package:')
-  for (const missing of missingVendorPaths) console.error(`  - ${missing}`)
-  console.error('zen: run `bun install` (its postinstall relinks the vendor packages)')
+  process.stderr.write('zen: vendor package paths are missing from the harness package:\n')
+  for (const missing of missingVendorPaths) process.stderr.write(`  - ${missing}\n`)
+  process.stderr.write('zen: run `bun install` (its postinstall relinks the vendor packages)\n')
   process.exit(1)
 }
 
@@ -112,10 +112,10 @@ const packageToLoad = isPrintRun
 
 const args = ['--no-extensions', '--no-skills', '-e', packageToLoad, ...passthroughArgs]
 
-console.error(
+process.stderr.write(
   `zen: vanilla pi | agent-dir=${agentDir} | package=${packageToLoad}` +
     `${isPrintRun ? ' (print variant, no permission modes — #20)' : ''} | ` +
-    `${declaredResources.length} declared resource path(s)`,
+    `${declaredResources.length} declared resource path(s)\n`,
 )
 
 /**
@@ -127,11 +127,11 @@ console.error(
  */
 const quarantine = quarantineSecrets(process.env, repoRoot)
 if (quarantine.removed.length > 0)
-  console.error(`zen: secrets kept out of pi's environment (#89): ${quarantine.removed.join(', ')}`)
+  process.stderr.write(`zen: secrets kept out of pi's environment (#89): ${quarantine.removed.join(', ')}\n`)
 if (quarantine.misplaced.length > 0) {
-  console.error(
+  process.stderr.write(
     `zen: ⚠ the root .env defines ${quarantine.misplaced.join(', ')} — bun autoloads .env into every bun child, ` +
-      'so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env.',
+      'so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env.\n',
   )
 }
 

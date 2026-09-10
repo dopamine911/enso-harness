@@ -13,12 +13,16 @@ import {
   findRepoRoot,
   PICC_PERMISSION_MODES,
   type PiCommand,
+  type PiDialogResponse,
   type PiEventDelivery,
   type PiPermissionModeState,
+  type PiPromptOutcome,
+  type PiPromptRequest,
   type PiRpcEvent,
   type PiSession,
   persistedPermissionMode,
   quarantineSecrets,
+  type ZenOpenDialog,
   type ZenThreadEvent,
   zenLogger,
 } from '@zen/core'
@@ -365,7 +369,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
     let disposed = false
     const piSession: PiSession = {
-      prompt(request, outcome) {
+      prompt(request: PiPromptRequest, outcome: PiPromptOutcome): void {
         let accepted = false
         // ⚠ Fire-and-forget, exactly as pi's rpc mode does: `prompt()` resolves only when
         // the whole run finishes, and awaiting it in front of the drain loop is the
@@ -381,7 +385,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
             ...(request.images === undefined ? {} : { images: [...request.images] }),
             ...(request.streamingBehavior === undefined ? {} : { streamingBehavior: request.streamingBehavior }),
             source: PROMPT_SOURCE_RPC,
-            preflightResult: (didSucceed) => {
+            preflightResult: (didSucceed: boolean) => {
               if (didSucceed) {
                 accepted = true
                 outcome.onAccepted()
@@ -392,10 +396,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
             if (!accepted) outcome.onRejected(error instanceof Error ? error.message : String(error))
           })
       },
-      answerDialog(response) {
+      answerDialog(response: PiDialogResponse): void {
         ui.answerDialog(response)
       },
-      openDialogs() {
+      openDialogs(): ZenOpenDialog[] {
         return ui.openDialogs()
       },
       listCommands(): PiCommand[] {
@@ -426,7 +430,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         )
         return { mode, available: PICC_PERMISSION_MODES.filter((candidate) => registered.has(candidate)) }
       },
-      subscribe(onEvent) {
+      subscribe(onEvent: (event: PiRpcEvent, delivery: PiEventDelivery) => void): () => void {
         listeners.add(onEvent)
         hasHadSubscriber = true
         if (heldUntilFirstSubscriber.length > 0) {
@@ -443,13 +447,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           listeners.delete(onEvent)
         }
       },
-      abort() {
+      abort(): Promise<void> {
         return session.abort()
       },
-      clearQueue() {
+      clearQueue(): { steering: string[]; followUp: string[] } {
         return session.clearQueue()
       },
-      dispose() {
+      dispose(): void {
         if (disposed) return
         disposed = true
         ui.cancelAllDialogs()

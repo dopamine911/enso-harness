@@ -180,12 +180,25 @@ function lowestOf(levels: ZenLogLevels): LogLevel {
  * or a key and its rotation. Reproduced before this line existed: `[REDACTED:value]def99`.
  */
 function redactingKnownValues(values: readonly string[]): (sink: Sink) => Sink {
-  const scannable = values.filter((value) => value.length > 0).sort((left, right) => right.length - left.length)
+  const scannable = values.filter((secret) => secret.length > 0).sort((left, right) => right.length - left.length)
   if (scannable.length === 0) return (sink: Sink): Sink => sink
-  const pattern = new RegExp(scannable.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g')
+  const pattern = new RegExp(scannable.map((secret) => secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g')
   const scrubbed = (value: unknown): unknown => {
     if (typeof value === 'string') return value.replace(pattern, ZEN_REDACTED_VALUE)
     if (Array.isArray(value)) return value.map(scrubbed)
+    // ⚠ An Error's `message` and `stack` are own but NON-ENUMERABLE, so the structural
+    // rebuild below turns `log.error('…: {error}', { error })` into `{}` — and the records
+    // that carry an Error are exactly the ones someone is reading to find out why (the
+    // guard's analyzer-failure deny, the server's handler failure). Named explicitly, and
+    // the text still goes through the value pass.
+    if (value instanceof Error) {
+      return {
+        name: value.name,
+        message: scrubbed(value.message),
+        ...(value.stack === undefined ? {} : { stack: scrubbed(value.stack) }),
+        ...(value.cause === undefined ? {} : { cause: scrubbed(value.cause) }),
+      }
+    }
     if (typeof value === 'object' && value !== null) {
       return Object.fromEntries(Object.entries(value).map(([name, nested]) => [name, scrubbed(nested)]))
     }

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { reset } from '@logtape/logtape'
+import { type LogRecord, reset } from '@logtape/logtape'
 import { ZenBrowserLogBatch, zenLogger } from '@zen/core'
 import { Check } from 'typebox/value'
 import {
@@ -38,7 +38,7 @@ function recordingFetch(answer: () => Promise<Response> = () => Promise.resolve(
       waiting ??= Promise.withResolvers<Post>()
       return waiting.promise
     },
-    fetch: (url, init) => {
+    fetch: (url: string, init?: RequestInit) => {
       const post: Post = { url, body: JSON.parse(String(init?.body)), keepalive: init?.keepalive }
       posts.push(post)
       waiting?.resolve(post)
@@ -68,7 +68,7 @@ test('⚠ the shipper batches by count or by time, ships only info and up, sends
   const { fetch, posts, nextPost } = recordingFetch(() => Promise.reject(new Error('server down')))
   const shipper = createLogShipper({ fetch, page: 'p2', flushMs: 1 })
   const at = Date.now()
-  const record = (level: 'debug' | 'info' | 'warning', message: string) => ({
+  const record = (level: 'debug' | 'info' | 'warning', message: string): LogRecord => ({
     category: ['zen', 'browser', 'follow'],
     level,
     timestamp: at,

@@ -66,7 +66,7 @@ function fakeHost(commands: string[] = ['mode']): FakeHost {
       built.push(record)
       /** Every blocking question this fake has emitted and not yet had answered — what the real host's `openDialog` reads. */
       const open = new Map<string, ZenDialogSpec>()
-      emit = (event) => {
+      emit = (event: PiRpcEvent) => {
         if (event.type === 'extension_ui_request' && typeof event.id === 'string') {
           const { type: _type, id: _id, ...request } = event
           if (isZenDialogSpec(request)) open.set(event.id, request)
@@ -78,7 +78,7 @@ function fakeHost(commands: string[] = ['mode']): FakeHost {
           record.prompts.push(request)
           accept = () => outcome.onAccepted()
         },
-        answerDialog: (response) => {
+        answerDialog: (response: PiDialogResponse) => {
           record.answers.push(response)
           // What the real host does at `finish` (#114): the settle is a record on the stream.
           if (open.delete(response.id)) {
@@ -92,7 +92,7 @@ function fakeHost(commands: string[] = ['mode']): FakeHost {
         openDialogs: () => [...open].map(([id, dialog]) => ({ id, dialog })),
         listCommands: () => commands.map((name) => ({ name, source: 'extension' as const })),
         permissionModeState: () => ({ mode: 'default', available: ['default', 'plan'] }),
-        subscribe: (onEvent) => {
+        subscribe: (onEvent: (event: PiRpcEvent, delivery: PiEventDelivery) => void) => {
           listeners.add(onEvent)
           return () => {
             listeners.delete(onEvent)
@@ -124,7 +124,7 @@ function fakeHost(commands: string[] = ['mode']): FakeHost {
     listSessions: () => Promise.resolve([]),
     readBranch: () => Promise.resolve(undefined),
   }
-  return { host, built, emit: (event) => emit(event), accept: () => accept() }
+  return { host, built, emit: (event: PiRpcEvent) => emit(event), accept: () => accept() }
 }
 
 function emptyHarnessDir(): string {
@@ -149,7 +149,7 @@ beforeAll(async () => {
 beforeEach(() => logs.clear())
 afterAll(releaseZenLogs)
 
-async function startWith(fake: FakeHost, sseKeepaliveMs = 1000) {
+async function startWith(fake: FakeHost, sseKeepaliveMs = 1000): Promise<string> {
   const started = startZenServer({
     cwd: tmpdir(),
     harnessPackageDir: emptyHarnessDir(),
@@ -169,7 +169,11 @@ async function openFollow(url: string, threadId: string): Promise<OpenFollow> {
   return await openSharedFollow(url, threadId, controller)
 }
 
-async function prompt(url: string, threadId: string, message: string) {
+async function prompt(
+  url: string,
+  threadId: string,
+  message: string,
+): Promise<{ status: number; body: Record<string, unknown> }> {
   const response = await fetch(`${url}/api/threads/${threadId}/prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -178,7 +182,7 @@ async function prompt(url: string, threadId: string, message: string) {
   return { status: response.status, body: (await response.json()) as Record<string, unknown> }
 }
 
-async function threadSummary(url: string, threadId: string) {
+async function threadSummary(url: string, threadId: string): Promise<Record<string, unknown> | undefined> {
   const summaries = (await (await fetch(`${url}/api/threads`)).json()) as Array<Record<string, unknown>>
   return summaries.find((summary) => summary.threadId === threadId)
 }
@@ -272,7 +276,8 @@ test('⚠ POST …/abort tells pi once and answers with the restored queue; the 
   const url = await startWith(fake)
   const follow = await openFollow(url, 't1')
   await follow.untilFrames(1)
-  const abortWith = (threadId: string) => fetch(`${url}/api/threads/${threadId}/abort`, { method: 'POST' })
+  const abortWith = (threadId: string): Promise<Response> =>
+    fetch(`${url}/api/threads/${threadId}/abort`, { method: 'POST' })
 
   // Nothing live: 404. Idle after a run: 409. Neither reaches the session.
   expect((await abortWith('never')).status).toBe(404)
@@ -334,7 +339,7 @@ test('⚠ a blocking dialog is an observation on the follow and a unary answer b
 
   // An unoffered value is refused at the door (#112) — the seam the old resume path
   // closed with the same check; the question stays open, nothing reaches pi.
-  const answerWith = (body: Record<string, unknown>) =>
+  const answerWith = (body: Record<string, unknown>): Promise<Response> =>
     fetch(`${url}/api/threads/t1/dialog`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -495,7 +500,7 @@ test('a confirm dialog round-trips through /dialog; a value answer to it is refu
     message: 'It is reversible',
   })
   await follow.untilFrames(4)
-  const answerWith = (body: Record<string, unknown>) =>
+  const answerWith = (body: Record<string, unknown>): Promise<Response> =>
     fetch(`${url}/api/threads/t1/dialog`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -597,7 +602,7 @@ const ONE_PIXEL_PNG = Buffer.from(
   'base64',
 )
 
-async function promptWith(url: string, threadId: string, body: unknown) {
+async function promptWith(url: string, threadId: string, body: unknown): Promise<{ status: number; text: string }> {
   const response = await fetch(`${url}/api/threads/${threadId}/prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -625,7 +630,7 @@ test("a real PNG's bytes reach pi's prompt.images unchanged, byte for byte; the 
     level: 'info',
     rawMessage: 'prompt carries {count} image(s): {mimeTypes}, {bytes} bytes',
     // A predicate: the recorder compares values with `Object.is`, which no two arrays pass.
-    properties: (properties) =>
+    properties: (properties: Readonly<Record<string, unknown>>) =>
       properties.threadId === 't1' &&
       properties.count === 1 &&
       JSON.stringify(properties.mimeTypes) === JSON.stringify(['image/png']) &&
@@ -731,7 +736,7 @@ test('[WARN] a body past the wire cap is a 413 and the read stops — the server
   // Streamed in chunks so the cap has to trip mid-body, not on a Content-Length it never reads.
   const chunk = 'x'.repeat(1024 * 1024)
   const body = new ReadableStream<Uint8Array>({
-    start(controller) {
+    start(controller: ReadableStreamDefaultController<Uint8Array>): void {
       for (let sent = 0; sent <= ZEN_PROMPT_BODY_MAX_BYTES + chunk.length; sent += chunk.length) {
         controller.enqueue(new TextEncoder().encode(chunk))
       }

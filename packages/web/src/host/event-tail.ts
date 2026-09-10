@@ -36,7 +36,7 @@ export function createEventTail(capacity = EVENT_TAIL_CAPACITY): EventTail {
   const ring: ZenThreadEvent[] = []
   let nextSequence = 0
   return {
-    record: (type, name, provenance) => {
+    record: (type: string, name: string | undefined, provenance: ZenEventProvenance) => {
       const last = ring.at(-1)
       if (last !== undefined && last.type === type && last.name === name && last.provenance === provenance) {
         ring[ring.length - 1] = { ...last, count: last.count + 1 }

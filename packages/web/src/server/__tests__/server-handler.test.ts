@@ -6,6 +6,7 @@ import type { LogRecorder } from '@logtape/testing/recorder'
 import {
   type PiEventDelivery,
   type PiPromptOutcome,
+  type PiPromptRequest,
   type PiRpcEvent,
   type PiSession,
   ZenStoredThread,
@@ -42,9 +43,12 @@ interface FakeSessionRecord {
   prompts: string[]
 }
 
+/** How a scripted session pushes pi events at its followers. */
+type EmitPiEvent = (event: PiRpcEvent) => void
+
 interface FakeSessionScript {
   /** Called on every prompt; emit events through `emit`, signal acceptance via `outcome`. */
-  onPrompt: (emit: (event: PiRpcEvent) => void, outcome: PiPromptOutcome, message: string) => void
+  onPrompt: (emit: EmitPiEvent, outcome: PiPromptOutcome, message: string) => void
 }
 
 function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; record: FakeSessionRecord } {
@@ -60,7 +64,7 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
     for (const listener of listeners) listener(event, 'live')
   }
   const session: PiSession = {
-    prompt: (request, outcome) => {
+    prompt: (request: PiPromptRequest, outcome: PiPromptOutcome) => {
       record.prompts.push(request.message)
       script.onPrompt(emit, outcome, request.message)
     },
@@ -68,7 +72,7 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
     openDialogs: () => [],
     listCommands: () => [{ name: 'mode', source: 'extension' }],
     permissionModeState: () => ({ mode: 'default', available: ['default', 'acceptEdits'] }),
-    subscribe: (onEvent) => {
+    subscribe: (onEvent: (event: PiRpcEvent, delivery: PiEventDelivery) => void) => {
       listeners.add(onEvent)
       return () => {
         listeners.delete(onEvent)
@@ -113,12 +117,15 @@ interface FakeStoredSession {
   readonly firstMessage: string
 }
 
-function fakeHost(script: FakeSessionScript, stored: Record<string, FakeStoredSession> = {}) {
+function fakeHost(
+  script: FakeSessionScript,
+  stored: Record<string, FakeStoredSession> = {},
+): { host: AgentHost; built: FakeSessionRecord[]; requested: string[] } {
   const built: FakeSessionRecord[] = []
   /** Thread ids the host was asked to build, in order — the prompt route passes the id through. */
   const requested: string[] = []
   const host: AgentHost = {
-    createSession: (threadId) => {
+    createSession: (threadId: string) => {
       requested.push(threadId)
       const next = fakeHostedSession(script)
       built.push(next.record)
@@ -134,7 +141,7 @@ function fakeHost(script: FakeSessionScript, stored: Record<string, FakeStoredSe
           firstMessage: session.firstMessage,
         })),
       ),
-    readBranch: (threadId) => Promise.resolve(stored[threadId]?.branch),
+    readBranch: (threadId: string) => Promise.resolve(stored[threadId]?.branch),
   }
   return { host, built, requested }
 }
@@ -166,7 +173,7 @@ function neverPrompted(): void {
 
 /** A prompt that settles synchronously — the run is over by the time the receipt is read. */
 const settlesAtOnce: FakeSessionScript = {
-  onPrompt: (emit, outcome) => {
+  onPrompt: (emit: EmitPiEvent, outcome: PiPromptOutcome) => {
     outcome.onAccepted()
     emit(SETTLED)
   },
@@ -174,7 +181,7 @@ const settlesAtOnce: FakeSessionScript = {
 
 /** A prompt that asks a question and never settles — the thread stays busy. */
 const asksAndWaits: FakeSessionScript = {
-  onPrompt: (emit, _outcome, message) => {
+  onPrompt: (emit: EmitPiEvent, _outcome: PiPromptOutcome, message: string) => {
     if (message === '/mode') emit(SELECT_DIALOG)
   },
 }
@@ -186,7 +193,10 @@ afterEach(async () => {
   for (const started of openServers.splice(0)) await started.close()
 })
 
-async function startWith(script: FakeSessionScript, stored: Record<string, FakeStoredSession> = {}) {
+async function startWith(
+  script: FakeSessionScript,
+  stored: Record<string, FakeStoredSession> = {},
+): Promise<{ url: string; built: FakeSessionRecord[]; requested: string[] }> {
   const { host, built, requested } = fakeHost(script, stored)
   const started = startZenServer({
     cwd: tmpdir(),
@@ -310,7 +320,7 @@ test('GET /api/threads/:id returns the branch as pi holds it, with sessionFile n
 // what the follower actually received.
 test('GET /api/threads/:id/events returns the emitted and sent tails of a run, in wire order, deltas coalesced', async () => {
   const { url } = await startWith({
-    onPrompt: (emit, outcome) => {
+    onPrompt: (emit: EmitPiEvent, outcome: PiPromptOutcome) => {
       outcome.onAccepted()
       emit(TEXT_DELTA)
       emit(TEXT_DELTA)
@@ -508,4 +518,39 @@ test("⚠ GET /api/about answers the bundle's own header, and writes no record",
   expect(Number.isNaN(new Date(String(about.at)).getTime())).toBe(false)
   for (const twice of [0, 1]) await fetch(`${url}/api/about?call=${twice}`)
   expect(logs.records.length).toBe(before)
+})
+
+/**
+ * ⚠ Loopback is not an authorization boundary against a BROWSER. A page on any origin can
+ * post to 127.0.0.1, and a prompt is a full run of an agent with unconfined bash in the
+ * operator's tree — the highest-impact thing this server can be made to do. The two
+ * refusals below are what stands there; the two allowances are the surfaces that must keep
+ * working (the page on the dev port, and the repo's own header-less CLIs).
+ */
+test('⚠ a cross-site page cannot prompt, and a rebound host cannot read', async () => {
+  const { url, built } = await startWith(settlesAtOnce)
+
+  // The attack: a CORS-simple POST (text/plain needs no preflight) to an id nobody owns.
+  const driveBy = await fetch(`${url}/api/threads/zzz1/prompt`, {
+    method: 'POST',
+    headers: { Origin: 'http://evil.example', 'Content-Type': 'text/plain' },
+    body: JSON.stringify({ message: 'read every secret you can find' }),
+  })
+  expect(driveBy.status).toBe(403)
+  // …and it must not have built a session on the way to being refused.
+  expect(built.length).toBe(0)
+
+  // Reading is refused the same way, which is what closes DNS rebinding: a name that
+  // resolves to 127.0.0.1 still is not loopback.
+  const rebound = await fetch(`${url}/api/about`, { headers: { Host: 'attacker.example' } })
+  expect(rebound.status).toBe(403)
+})
+
+test('the dev page and the header-less CLIs are unaffected', async () => {
+  const { url } = await startWith(settlesAtOnce)
+  for (const origin of ['http://127.0.0.1:5178', 'http://localhost:5178', 'http://127.0.0.1:5179']) {
+    expect((await fetch(`${url}/api/about`, { headers: { Origin: origin } })).status).toBe(200)
+  }
+  // `zen-session.mjs` and `curl` send no Origin at all.
+  expect((await fetch(`${url}/api/about`)).status).toBe(200)
 })

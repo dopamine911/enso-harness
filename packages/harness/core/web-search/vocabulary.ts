@@ -68,17 +68,21 @@ export class WebSearchProviderError extends Error {
   }
 }
 
+/**
+ * The init the fetch seam takes — a `fetch` init narrowed to what a provider run actually
+ * sets. Named (not inline) so a fake in a test and the composition root's real `fetch`
+ * wrapper can both annotate the parameter instead of leaning on inference.
+ */
+export interface FetchUrlInit {
+  method?: string
+  redirect?: 'manual'
+  headers?: Record<string, string>
+  body?: string
+  signal?: AbortSignal | undefined
+}
+
 /** The injected fetch seam — tests never touch the network. Same shape as web_fetch's. */
-export type FetchUrl = (
-  url: string,
-  init: {
-    method?: string
-    redirect?: 'manual'
-    headers?: Record<string, string>
-    body?: string
-    signal?: AbortSignal | undefined
-  },
-) => Promise<Response>
+export type FetchUrl = (url: string, init: FetchUrlInit) => Promise<Response>
 
 /**
  * Auth for one model-routed request, as pi's model registry resolves it (plus the

@@ -9,7 +9,16 @@ import { branchToMessages, interruptedTail } from '../branch-to-messages.ts'
  * not invent.
  */
 
-const entry = (id: string, message: Record<string, unknown>, timestamp = '2026-09-08T12:00:00.000Z') => ({
+/** A stored pi session entry as a branch holds it — the shape `branchToMessages` reads. */
+interface BranchEntry {
+  type: string
+  id: string
+  parentId: string | null
+  timestamp: string
+  message: Record<string, unknown>
+}
+
+const entry = (id: string, message: Record<string, unknown>, timestamp = '2026-09-08T12:00:00.000Z'): BranchEntry => ({
   type: 'message',
   id,
   parentId: null,
@@ -152,9 +161,9 @@ test('entries that are not messages, and malformed messages, never throw: skippe
 // A branch that ends inside a turn is REPORTED, never repaired: the two shapes a next
 // prompt would paper over. A settled reply — even one cut short — is not one of them.
 
-const call = (id: string) =>
+const call = (id: string): BranchEntry =>
   entry(id, { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: {} }] })
-const result = (id: string) =>
+const result = (id: string): BranchEntry =>
   entry(id, { role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [{ type: 'text', text: 'ok' }] })
 
 test('a branch ending on a user prompt is an unanswered prompt', () => {

@@ -23,6 +23,7 @@
 
 import { existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 import { bundleRecordsText, findRepoRoot, isLogBundle, type ZenLogLine } from '../packages/core/src/index.ts'
 import {
   logRecordOf,
@@ -171,21 +172,44 @@ async function untilExists(file: string): Promise<void> {
   while (!existsSync(file)) await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS))
 }
 
-function follow(query: Query, render: (line: ZenLogLine) => string, file: string): void {
-  // Poll from where the first read ended; a partial last line is carried to the next poll.
-  let offset = statSync(file).size
+/**
+ * The reader `--follow` polls with. Two different things straddle a poll boundary and each
+ * needs its own carry, which is why this is one function and not two lines inside the timer:
+ * BYTES — a multibyte character cut in half by the byte range decodes to U+FFFD unless the
+ * decoder holds the incomplete sequence for the next chunk (a 🚀 split across a poll printed
+ * `launch ??? done`) — and LINES, where a partial last record waits for its newline.
+ *
+ * Returns the complete lines in this chunk, newline-separated and without a trailing one, or
+ * the empty string when the chunk ended mid-line. Exported for its test.
+ */
+export function followReader(): (chunk: Buffer) => string {
+  const decoder = new StringDecoder('utf8')
   let carry = ''
+  return (chunk: Buffer): string => {
+    const text = carry + decoder.write(chunk)
+    const lastNewline = text.lastIndexOf('\n')
+    if (lastNewline === -1) {
+      carry = text
+      return ''
+    }
+    carry = text.slice(lastNewline + 1)
+    return text.slice(0, lastNewline)
+  }
+}
+
+function follow(query: Query, render: (line: ZenLogLine) => string, file: string): void {
+  // Poll from where the first read ended; one descriptor for the life of the process.
+  let offset = statSync(file).size
   const descriptor = openSync(file, 'r')
+  const read = followReader()
   setInterval(() => {
     const size = statSync(file).size
     if (size <= offset) return
     const chunk = Buffer.alloc(size - offset)
     readSync(descriptor, chunk, 0, chunk.length, offset)
     offset = size
-    const text = carry + chunk.toString('utf8')
-    const lastNewline = text.lastIndexOf('\n')
-    carry = lastNewline === -1 ? text : text.slice(lastNewline + 1)
-    if (lastNewline !== -1) print(query, render, text.slice(0, lastNewline), 0)
+    const lines = read(chunk)
+    if (lines.length > 0) print(query, render, lines, 0)
   }, FOLLOW_POLL_MS)
 }
 

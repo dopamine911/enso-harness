@@ -2,7 +2,11 @@ import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import type { PiRpcEvent } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
-import { type CustomComponentFactory, createZenExtensionUiContext } from '../extension-ui-context.ts'
+import {
+  type CustomComponentFactory,
+  createZenExtensionUiContext,
+  type ZenExtensionUiContext,
+} from '../extension-ui-context.ts'
 import { PICC_PERMISSION_DIALOG_MODULE } from '../permission-dialog.ts'
 
 /**
@@ -21,13 +25,13 @@ afterAll(releaseZenLogs)
 
 const THREAD = 't-ui'
 
-function contextUnderTest() {
+function contextUnderTest(): ZenExtensionUiContext & { events: PiRpcEvent[]; requests: PiRpcEvent[] } {
   /** Every record the host emits — requests, settles (#114), fire-and-forget. */
   const events: PiRpcEvent[] = []
   /** The blocking/notify requests alone, so a test can name "the second question" without counting settles. */
   const requests: PiRpcEvent[] = []
   const context = createZenExtensionUiContext({
-    emit: (event) => {
+    emit: (event: PiRpcEvent) => {
       events.push(event)
       if (event.type === 'extension_ui_request') requests.push(event)
     },
@@ -36,9 +40,9 @@ function contextUnderTest() {
   return { ...context, events, requests }
 }
 
-const requestId = (event: PiRpcEvent | undefined) => String(event?.id)
+const requestId = (event: PiRpcEvent | undefined): string => String(event?.id)
 /** The settle records (#114), as `{ id, outcome }` — what the follow's `dialog-settled` observation carries. */
-const settles = (events: PiRpcEvent[]) =>
+const settles = (events: PiRpcEvent[]): Array<{ id: unknown; outcome: unknown }> =>
   events.filter((event) => event.type === 'extension_ui_settled').map(({ id, outcome }) => ({ id, outcome }))
 
 test('select emits a request and resolves to the answered value', async () => {
@@ -272,7 +276,7 @@ test("cancelling the lifted prompt resolves picc's 'dismissed' value; a non-picc
 test("⚠ a lift that rejects (picc's module did not load) fails closed: undefined to the extension, an error logged, no request", async () => {
   const events: PiRpcEvent[] = []
   const { uiContext } = createZenExtensionUiContext({
-    emit: (event) => events.push(event),
+    emit: (event: PiRpcEvent) => events.push(event),
     threadId: THREAD,
     liftDialog: () => Promise.reject(new Error('Cannot find module filePermissionDialog.ts')),
   })
@@ -283,7 +287,7 @@ test("⚠ a lift that rejects (picc's module did not load) fails closed: undefin
   logs.assertLogged({
     level: 'error',
     rawMessage: /#73/,
-    properties: (properties) =>
+    properties: (properties: Readonly<Record<string, unknown>>) =>
       properties.threadId === THREAD && String(properties.error).includes('Cannot find module'),
   })
 })
@@ -317,7 +321,7 @@ test('⚠ a factory that throws or rejects against the inert terminal falls back
 test('⚠ an async factory that never produces a component is cut off at the build budget, not awaited forever', async () => {
   const events: PiRpcEvent[] = []
   const { uiContext } = createZenExtensionUiContext({
-    emit: (event) => events.push(event),
+    emit: (event: PiRpcEvent) => events.push(event),
     threadId: THREAD,
     // The code's own timer with a tiny budget — the test awaits the promise it exposes, not a sleep.
     componentBuildTimeoutMs: 1,
@@ -327,7 +331,8 @@ test('⚠ an async factory that never produces a component is cut off at the bui
   expect(events).toEqual([])
   logs.assertLogged({
     level: 'warning',
-    properties: (properties) => String(properties.error).includes('no component within 1 ms'),
+    properties: (properties: Readonly<Record<string, unknown>>) =>
+      String(properties.error).includes('no component within 1 ms'),
   })
 })
 
@@ -344,7 +349,8 @@ test('a component whose dispose() throws is reported, not propagated — the cal
   logs.assertLogged({
     level: 'warning',
     rawMessage: /dispose\(\) threw/,
-    properties: (properties) => properties.threadId === THREAD && String(properties.error).includes('dispose exploded'),
+    properties: (properties: Readonly<Record<string, unknown>>) =>
+      properties.threadId === THREAD && String(properties.error).includes('dispose exploded'),
   })
 })
 

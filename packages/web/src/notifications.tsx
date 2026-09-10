@@ -57,7 +57,7 @@ export function createNotificationsStore(): NotificationsStore {
   return {
     get: store.get,
     subscribe: store.subscribe,
-    push: (message, notifyType, origin) => {
+    push: (message: string, notifyType: ZenNotifyType | undefined, origin: ZenUiRequestOrigin) => {
       const appended = [...store.get(), { id: nextNotificationId++, message, notifyType, origin, at: new Date() }]
       store.set(appended.slice(-MAX_KEPT_NOTIFICATIONS))
     },

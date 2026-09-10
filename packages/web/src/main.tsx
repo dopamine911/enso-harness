@@ -3,7 +3,7 @@
 // CLI (`components.json` points here). Do not add a second css entry point.
 import './styles/global.css'
 import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createRoot, type Root } from 'react-dom/client'
 import { configureBrowserLogging, pageLogLevel } from './browser-logging.ts'
 import { ChatScreen } from './chat-screen.tsx'
 import { browserLogging } from './thread-stores.ts'
@@ -20,7 +20,7 @@ import { browserLogging } from './thread-stores.ts'
 // records go with it.
 browserLogging.set(
   await configureBrowserLogging({
-    fetch: (input, init) => fetch(input, init),
+    fetch: (input: string, init?: RequestInit) => fetch(input, init),
     level: pageLogLevel(window.location.search),
     page: crypto.randomUUID().slice(0, 8),
     console: true,
@@ -42,7 +42,7 @@ const globalWithRoot = globalThis as { __zenReactRoot?: ReturnType<typeof create
 if (globalWithRoot.__zenReactRoot === undefined) {
   globalWithRoot.__zenReactRoot = createRoot(rootElement)
 }
-const reactRoot = globalWithRoot.__zenReactRoot
+const reactRoot: Root = globalWithRoot.__zenReactRoot
 reactRoot.render(
   <StrictMode>
     <ChatScreen />

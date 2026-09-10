@@ -35,7 +35,7 @@ function neverCalled(): void {
   // Static markup runs no handlers; the callbacks exist only to satisfy the props.
 }
 
-const answerControls = (dialog: ZenDialogSpec) =>
+const answerControls = (dialog: ZenDialogSpec): string =>
   renderToStaticMarkup(<DialogAnswerControls dialog={dialog} answer={neverCalled} />)
 
 // --- one render per dialog method

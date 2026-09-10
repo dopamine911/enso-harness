@@ -54,7 +54,7 @@
         "noUnusedImports": "error"
       },
       "suspicious": {
-        "noConsole": "warn",
+        "noConsole": "error",
         "noUnknownAtRules": "error",
         "noTsIgnore": "error",
         "noExplicitAny": "error",
@@ -75,7 +75,7 @@
         "useSortedClasses": "error",
         "noFloatingPromises": "error",
         "useExhaustiveSwitchCases": "error",
-        "useExplicitType": "warn",
+        "useExplicitType": "error",
         "noConditionalExpect": "error",
         "noUselessTypeConversion": "error",
         "noMisusedPromises": "error",
@@ -110,18 +110,28 @@
     }
   },
   "overrides": [
+    // ── The environment boundary (#89) ────────────────────────────────────────
+    // `noProcessEnv` cannot be satisfied by a program that has to read its own
+    // environment: it flags `import { env } from 'node:process'` too, so there
+    // is no spelling that a launcher, a log-level parser or a spawn can use.
+    // The rule is therefore not switched off — it is scoped to a LIST, and this
+    // list is the inventory of every place that touches the real environment.
+    // A new file reading `process.env` fails the gate and has to argue its way
+    // onto this list; everything else takes an injected environment, which is
+    // also what makes the quarantine testable (#89) without a test ever reading
+    // the machine it runs on.
     {
-      "includes": ["**/*.ts", "**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
-      "linter": {
-        "rules": {
-          "style": {
-            "noProcessEnv": "off"
-          }
-        }
-      }
-    },
-    {
-      "includes": ["scripts/**"],
+      "includes": [
+        "scripts/zen.mjs", // the launcher: quarantine, then the spawn's env
+        "scripts/zen-session.mjs", // ZEN_SERVER_URL
+        "scripts/zen-logs.ts", // ZEN_SERVER_URL, ZEN_LOGS_DIR
+        "scripts/gate.ts", // npm_config_user_agent, and the child's FORCE_COLOR
+        "packages/core/src/secrets.ts", // the quarantine's default argument — the seam itself
+        "packages/harness/extensions/logging/index.ts", // the pi entry point's own environment
+        "packages/web/src/host/agent-host.ts", // pins PI_CODING_AGENT_DIR, then quarantines
+        "packages/web/src/server/dev.ts", // launcher: logs dir + levels
+        "packages/web/src/server/dev-web.ts" // launcher: logs dir + levels
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -147,9 +157,15 @@
     // scatter a state machine rather than simplify it. Replaces 7 per-line
     // `// biome-ignore` comments, which hid both the score and the count.
     // To retire one: reduce the function, then lower the number here.
+    //
+    // ⚠ A ratchet nobody re-measures is not a ratchet. Measured 2026-09-10 by
+    // pinning every entry to 5 and reading the reported scores: guards had
+    // drifted to 18 points of unclaimed slack (62 pinned, 44 measured) and
+    // map-events to 3, so a function could have grown that far unreviewed.
+    // Every number below is today's measurement. Re-measure the same way.
     {
       // A shell character-scanner: `extractFlatShellCommandSegments` (68),
-      // `literalShellWord` (47), `skipShellWord` (32). One linear read of the
+      // `literalShellWord` (50), `skipShellWord` (32). One linear read of the
       // quote/escape state machine, kept close to upstream oh-my-pi so a diff
       // stays reviewable.
       "includes": ["packages/harness/core/shell-segments.ts"],
@@ -162,20 +178,20 @@
       }
     },
     {
-      // The `tool_call` guard dispatch (62): bash patch, then the write denials
+      // The `tool_call` guard dispatch (44): bash patch, then the write denials
       // in precedence order, then the reader gate. The precedence order IS the
       // security contract this file's header documents; splitting it hides it.
       "includes": ["packages/harness/extensions/guards/index.ts"],
       "linter": {
         "rules": {
           "complexity": {
-            "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 62 } }
+            "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 44 } }
           }
         }
       }
     },
     {
-      // `mapPiEvent` (31): one switch arm per pi event type, read side-by-side
+      // `mapPiEvent` (28): one switch arm per pi event type, read side-by-side
       // against pi's protocol doc. The complexity is the protocol's. Was 48 until
       // the `extension_ui_request` arm moved to `mapExtensionUiRequest` (#96), which
       // clears the default on its own; ratcheted down to the measured value.
@@ -183,20 +199,21 @@
       "linter": {
         "rules": {
           "complexity": {
-            "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 31 } }
+            "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 28 } }
           }
         }
       }
     },
     {
-      // The single HTTP handler (51): parse → resume-vs-run → stream → teardown.
-      // The #27/#34 teardown ordering lives in its control flow — fragmenting it
-      // is how the response-close bug hid (see #74, #81).
+      // The route dispatcher (49): the origin/host refusal, then one arm per
+      // route. Beside it the chat handler (29) holds the #27/#34 teardown
+      // ordering in its control flow — fragmenting that is how the
+      // response-close bug hid (see #74, #81).
       "includes": ["packages/web/src/server/index.ts"],
       "linter": {
         "rules": {
           "complexity": {
-            "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 51 } }
+            "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 49 } }
           }
         }
       }

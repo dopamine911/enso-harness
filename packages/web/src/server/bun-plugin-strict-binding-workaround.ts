@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import type { BunPlugin, PluginBuilder } from 'bun'
 
 /**
  * Workaround for a live bun bug (dev-server HMR, present in 1.4.0 and the 2026-09-03
@@ -48,9 +49,9 @@ class StrictBindingWorkaroundStaleError extends Error {
   }
 }
 
-const strictBindingWorkaround: import('bun').BunPlugin = {
+const strictBindingWorkaround: BunPlugin = {
   name: 'zen-strict-binding-workaround',
-  setup(build) {
+  setup(build: PluginBuilder): void {
     build.onLoad({ filter: /typebox[/\\]build[/\\]system[/\\]system\.mjs$/ }, (args) => {
       const source = readFileSync(args.path, 'utf8')
       if (!source.includes(BARE_STAR_LINE)) {

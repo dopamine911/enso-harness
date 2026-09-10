@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import type { Api, Model } from '@earendil-works/pi-ai'
 import type {
   AgentToolResult,
   AgentToolUpdateCallback,
@@ -21,7 +22,9 @@ import {
 import {
   DEEPSEEK_API_KEY_VARIABLE,
   type DeepseekSearchRequest,
+  type FetchUrlInit,
   type ModelSearchRequest,
+  type ResolvedProviderAuth,
   resolveModelAuth,
   routedProviderIdForModel,
   runAnthropicProviderSearch,
@@ -253,7 +256,8 @@ async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome 
     const modelRequest = (deadlineSignal: AbortSignal): ModelSearchRequest => ({
       query,
       model: currentModel,
-      resolveAuth: (model) => resolveModelAuth(extensionContext.modelRegistry, model),
+      resolveAuth: (model: Model<Api>): Promise<ResolvedProviderAuth> =>
+        resolveModelAuth(extensionContext.modelRegistry, model),
       fetchUrl: dependencies.fetchUrl,
       signal: deadlineSignal,
       onProgress,
@@ -389,13 +393,13 @@ function auditLine(outcome: string, providerId: WebSearchProviderId | undefined,
  */
 export default createWebSearch({
   locateConfigFile: () => zenConfigPath(findRepoRoot(import.meta.url)),
-  readConfigText: (path) => readFileSync(path, 'utf8'),
+  readConfigText: (path: string) => readFileSync(path, 'utf8'),
   // ⚠ From the gated `.zen/secrets.env` FILE, never `process.env` (#89): the host
   // quarantines every secret out of the environment before a session exists, precisely so
   // a `bash` child cannot print it. Extension code is trusted to read the file the model's
   // `read` cannot. The composition root keeps the dependency's name — the providers still
   // receive values, never names, and never learn where they came from.
-  readEnvironmentVariable: (variableName) => readSecret(findRepoRoot(import.meta.url), variableName),
+  readEnvironmentVariable: (variableName: string) => readSecret(findRepoRoot(import.meta.url), variableName),
   runProviders: {
     anthropic: runAnthropicProviderSearch,
     google: runGoogleProviderSearch,
@@ -403,5 +407,5 @@ export default createWebSearch({
     deepseek: runDeepseekProviderSearch,
     tavily: runTavilyProviderSearch,
   },
-  fetchUrl: (url, init) => fetch(url, { ...init, signal: init.signal ?? null }),
+  fetchUrl: (url: string, init: FetchUrlInit) => fetch(url, { ...init, signal: init.signal ?? null }),
 })

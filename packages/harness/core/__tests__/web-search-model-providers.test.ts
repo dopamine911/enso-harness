@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { runGoogleProviderSearch } from '../web-search/providers/google.ts'
 import { runOpenAiProviderSearch } from '../web-search/providers/openai.ts'
-import type { FetchUrl, ModelSearchRequest, ResolvedProviderAuth } from '../web-search/vocabulary.ts'
+import type { FetchUrl, FetchUrlInit, ModelSearchRequest, ResolvedProviderAuth } from '../web-search/vocabulary.ts'
 import { WebSearchProviderError } from '../web-search/vocabulary.ts'
 
 /**
@@ -124,7 +124,7 @@ test('google: grounding-redirect URLs resolve through a HEAD and keep originals 
     },
   ]
   const headRequests: string[] = []
-  const fetchUrl: FetchUrl = async (url, init) => {
+  const fetchUrl: FetchUrl = async (url: string, init: FetchUrlInit) => {
     if (init.method === 'HEAD') {
       headRequests.push(url)
       if (url === redirectUrl) {

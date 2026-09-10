@@ -1,7 +1,7 @@
 import './dom-environment.ts'
 import { afterAll, afterEach, expect, test } from 'bun:test'
 import { act } from 'react'
-import type { Root } from 'react-dom/client'
+import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import { ChatScreen, ThreadPane } from '../chat-screen.tsx'
 import { clearThreadsForTest, mintThread, type ThreadStores, threadListStore } from '../thread-stores.ts'
 import { releaseDom } from './dom-environment.ts'
@@ -12,7 +12,7 @@ import { createScriptedFetch, type ScriptedFetch, type ScriptedFetchOptions, SNA
 // focus-tracking polyfill), and bun evaluates node_modules imports before the side-effect
 // import above has registered the DOM. Statically imported, React sat in polyfill mode:
 // `onChange` and `onKeyDown` never fired and its change plugin threw on every keystroke.
-const { createRoot } = await import('react-dom/client')
+const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-dom/client')
 
 /**
  * The pane, MOUNTED, over a scripted server (#118, #125 items 1–3).
@@ -667,7 +667,7 @@ async function mountPage(options: ScriptedFetchOptions = {}): Promise<MountedPag
     },
     activeRows: () => buttons('Active Sessions'),
     previousRows: () => buttons('Previous Sessions'),
-    click: async (button) => {
+    click: async (button: HTMLElement) => {
       await flush(async () => {
         button.click()
         await tick()

@@ -40,7 +40,7 @@ function scripted(
   const connection = createFollowConnection({
     threadId: 't1',
     fetch: server.fetch,
-    onProblem: (problem) => problems.push(String(problem)),
+    onProblem: (problem: unknown) => problems.push(String(problem)),
   })
   const chunks: StreamChunk[] = []
   const waiters: Array<() => void> = []
@@ -57,7 +57,7 @@ function scripted(
     connection,
     problems,
     chunks,
-    untilChunks: (count) => {
+    untilChunks: (count: number) => {
       if (chunks.length >= count) return Promise.resolve()
       const { promise, resolve } = Promise.withResolvers<void>()
       const check = (): void => {
@@ -103,7 +103,7 @@ test("⚠ an earlier run's ending frames cannot close a run whose receipt is sti
   server.abort()
 })
 
-const send = (server: ScriptedServer, message: string, runId = 'r1') =>
+const send = (server: ScriptedServer, message: string, runId = 'r1'): Promise<void> =>
   server.connection.send(
     [{ id: 'u1', role: 'user', parts: [{ type: 'text', content: message }] }],
     undefined,
@@ -404,7 +404,7 @@ test('prompt() names what the server did: taken when the run had ended, refused 
   const dead = createFollowConnection({
     threadId: 't1',
     fetch: (() => Promise.reject(new TypeError('fetch failed'))) as unknown as typeof fetch,
-    onProblem: (problem) => problems.push(String(problem)),
+    onProblem: (problem: unknown) => problems.push(String(problem)),
   })
   expect(await dead.prompt('x')).toBe('unreachable')
 })
@@ -469,7 +469,7 @@ test('a unary POST that never gets an answer is `unreachable` — reported once,
     const connection = createFollowConnection({
       threadId: 't1',
       fetch: (() => Promise.reject(new TypeError('fetch failed'))) as unknown as typeof fetch,
-      onProblem: (problem) => problems.push(String(problem)),
+      onProblem: (problem: unknown) => problems.push(String(problem)),
     })
     expect(await connection.abort()).toEqual({ outcome: 'unreachable', restored: [] })
     expect(await connection.answerDialog({ id: 'd1', value: 'a' })).toBe('unreachable')

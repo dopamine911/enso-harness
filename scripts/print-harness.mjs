@@ -63,7 +63,7 @@ export function buildPrintManifest(manifest) {
     throw new PrintHarnessShapeError('pi.extensions is not an array')
   }
   const keptExtensions = extensions.filter(
-    (entry) => typeof entry !== 'string' || !entry.includes(PICC_EXTENSION_FRAGMENT),
+    (extensionPath) => typeof extensionPath !== 'string' || !extensionPath.includes(PICC_EXTENSION_FRAGMENT),
   )
   if (keptExtensions.length === extensions.length) {
     throw new PrintHarnessShapeError(`no extension entry contains "${PICC_EXTENSION_FRAGMENT}" — the filter is stale`)
@@ -97,14 +97,14 @@ export function materializePrintHarness(printHarnessDir, harnessPackageRoot, pri
   // NOT mirrored and does not need to be: it lives at the REPO root, and web-fetch finds
   // it via `findRepoRoot`, which realpaths out of this mirror before walking (paths.ts) —
   // do not "fix" the mirror to carry it.
-  const packageEntries = readdirSync(harnessPackageRoot).filter((entry) => entry !== MANIFEST_FILENAME)
+  const packageEntries = readdirSync(harnessPackageRoot).filter((packageEntry) => packageEntry !== MANIFEST_FILENAME)
   const wantedEntries = new Set([...packageEntries, MANIFEST_FILENAME])
   for (const stale of readdirSync(printHarnessDir)) {
     if (!wantedEntries.has(stale)) rmSync(join(printHarnessDir, stale), { recursive: true, force: true })
   }
-  for (const entry of packageEntries) {
-    const linkPath = join(printHarnessDir, entry)
-    const targetPath = join(harnessPackageRoot, entry)
+  for (const packageEntry of packageEntries) {
+    const linkPath = join(printHarnessDir, packageEntry)
+    const targetPath = join(harnessPackageRoot, packageEntry)
     // lstat, not exists: a broken symlink must be replaced, and exists() follows links.
     try {
       lstatSync(linkPath)

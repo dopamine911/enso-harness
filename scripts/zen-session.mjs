@@ -41,11 +41,11 @@ async function fetchJson(path) {
   try {
     response = await fetch(`${serverUrl}${path}`)
   } catch (error) {
-    console.error(`zen-session: cannot reach ${serverUrl} — is \`bun run dev\` up? (${String(error)})`)
+    process.stderr.write(`zen-session: cannot reach ${serverUrl} — is \`bun run dev\` up? (${String(error)})\n`)
     process.exit(1)
   }
   if (!response.ok) {
-    console.error(`zen-session: ${response.status} ${await response.text()}`)
+    process.stderr.write(`zen-session: ${response.status} ${await response.text()}\n`)
     process.exit(1)
   }
   return /** @type {Promise<T>} */ (response.json())
@@ -55,13 +55,13 @@ if (threadId === undefined) {
   /** @type {ZenThreadSummary[]} */
   const threads = await fetchJson('/api/threads')
   if (threads.length === 0) {
-    console.log('no live threads — nothing has run since the server started, or every session idled out')
+    process.stdout.write('no live threads — nothing has run since the server started, or every session idled out\n')
   }
   for (const thread of threads) {
     const state = thread.busy ? 'busy' : 'idle'
     const file = thread.sessionFile ?? '(in memory, not flushed yet)'
-    console.log(
-      `${thread.threadId}  mode=${thread.mode}  ${state}  run=#${thread.generation}  last=${thread.lastActivityAt}  ${file}`,
+    process.stdout.write(
+      `${thread.threadId}  mode=${thread.mode}  ${state}  run=#${thread.generation}  last=${thread.lastActivityAt}  ${file}\n`,
     )
   }
   process.exit(0)
@@ -80,37 +80,37 @@ if (wantsEvents) {
   /** @type {ZenThreadEvents} */
   const events = await fetchJson(`/api/threads/${encodeURIComponent(threadId)}/events`)
   if (wantsJson) {
-    console.log(JSON.stringify(events, null, 2))
+    process.stdout.write(`${JSON.stringify(events, null, 2)}\n`)
     process.exit(0)
   }
-  console.log(`thread ${events.threadId}`)
-  console.log(`the host emitted (${events.emitted.length} events, oldest first):`)
-  for (const event of events.emitted) console.log(`  ${describeThreadEvent(event)}`)
-  console.log(`the server sent (${events.sent.length} chunks, oldest first):`)
-  for (const event of events.sent) console.log(`  ${describeThreadEvent(event)}`)
+  process.stdout.write(`thread ${events.threadId}\n`)
+  process.stdout.write(`the host emitted (${events.emitted.length} events, oldest first):\n`)
+  for (const event of events.emitted) process.stdout.write(`  ${describeThreadEvent(event)}\n`)
+  process.stdout.write(`the server sent (${events.sent.length} chunks, oldest first):\n`)
+  for (const event of events.sent) process.stdout.write(`  ${describeThreadEvent(event)}\n`)
   process.exit(0)
 }
 
 /** @type {ZenThreadInspection} */
 const inspection = await fetchJson(`/api/threads/${encodeURIComponent(threadId)}`)
 if (wantsJson) {
-  console.log(JSON.stringify(inspection, null, 2))
+  process.stdout.write(`${JSON.stringify(inspection, null, 2)}\n`)
   process.exit(0)
 }
 
-console.log(`thread      ${inspection.threadId}`)
-console.log(`session     ${inspection.sessionId}`)
-console.log(`cwd         ${inspection.cwd}`)
-console.log(`session dir ${inspection.sessionDir}`)
-console.log(
-  `file        ${inspection.sessionFile ?? '(in memory, not flushed yet — pi writes after the first assistant message)'}`,
+process.stdout.write(`thread      ${inspection.threadId}\n`)
+process.stdout.write(`session     ${inspection.sessionId}\n`)
+process.stdout.write(`cwd         ${inspection.cwd}\n`)
+process.stdout.write(`session dir ${inspection.sessionDir}\n`)
+process.stdout.write(
+  `file        ${inspection.sessionFile ?? '(in memory, not flushed yet — pi writes after the first assistant message)'}\n`,
 )
-console.log(
-  `mode        ${inspection.permissionMode.mode}  (may switch to: ${inspection.permissionMode.available.join(', ')})`,
+process.stdout.write(
+  `mode        ${inspection.permissionMode.mode}  (may switch to: ${inspection.permissionMode.available.join(', ')})\n`,
 )
-console.log(
-  `state       ${inspection.busy ? 'busy' : 'idle'}, run #${inspection.generation}, last activity ${inspection.lastActivityAt}`,
+process.stdout.write(
+  `state       ${inspection.busy ? 'busy' : 'idle'}, run #${inspection.generation}, last activity ${inspection.lastActivityAt}\n`,
 )
-console.log(`commands    ${inspection.commands.map((commandName) => `/${commandName}`).join(' ')}`)
-console.log(`branch      ${inspection.entries.length} entries, root to leaf:`)
-for (const branchEntry of inspection.entries) console.log(`  ${describeSessionEntry(branchEntry)}`)
+process.stdout.write(`commands    ${inspection.commands.map((commandName) => `/${commandName}`).join(' ')}\n`)
+process.stdout.write(`branch      ${inspection.entries.length} entries, root to leaf:\n`)
+for (const branchEntry of inspection.entries) process.stdout.write(`  ${describeSessionEntry(branchEntry)}\n`)

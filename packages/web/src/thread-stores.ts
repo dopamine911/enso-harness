@@ -100,7 +100,7 @@ function createThreadStores(threadId: string, history: readonly UIMessage[], fet
     connection: createFollowConnection({
       threadId,
       ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
-      onProblem: (problem) => notifications.push(String(problem), 'warning', 'run'),
+      onProblem: (problem: unknown) => notifications.push(String(problem), 'warning', 'run'),
     }),
   }
 }

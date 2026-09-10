@@ -110,11 +110,12 @@ export function knownSecretValues(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): readonly string[] {
   const values = new Set<string>()
-  for (const value of readDotenvFile(zenSecretsPath(repoRoot)).values()) {
-    if (value.length >= SHORTEST_SCANNABLE_SECRET) values.add(value)
+  for (const secretValue of readDotenvFile(zenSecretsPath(repoRoot)).values()) {
+    if (secretValue.length >= SHORTEST_SCANNABLE_SECRET) values.add(secretValue)
   }
-  for (const [name, value] of Object.entries(environment)) {
-    if (value !== undefined && value.length >= SHORTEST_SCANNABLE_SECRET && isSecretShapedName(name)) values.add(value)
+  for (const [variableName, variableValue] of Object.entries(environment)) {
+    if (variableValue === undefined || variableValue.length < SHORTEST_SCANNABLE_SECRET) continue
+    if (isSecretShapedName(variableName)) values.add(variableValue)
   }
   return [...values]
 }

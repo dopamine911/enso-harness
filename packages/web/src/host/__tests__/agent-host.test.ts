@@ -2,7 +2,12 @@ import { afterAll, beforeAll, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type InlineExtension, SessionManager } from '@earendil-works/pi-coding-agent'
+import {
+  type ExtensionAPI,
+  type ExtensionCommandContext,
+  type InlineExtension,
+  SessionManager,
+} from '@earendil-works/pi-coding-agent'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { findRepoRoot, harnessPackageDir, type PiRpcEvent } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
@@ -69,7 +74,11 @@ async function hostedSession(extensionFactories: InlineExtension[] = []): Promis
   return hosted
 }
 
-const nextTick = () => new Promise((resolve) => setTimeout(resolve, 0))
+const nextTick = (): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<void>()
+  setTimeout(resolve, 0)
+  return promise
+}
 
 test("⚠ childProxy is pinned off in the agent dir's multi-account config, other keys preserved", () => {
   const scratch = mkdtempSync(join(tmpdir(), 'zen-host-seed-'))
@@ -138,7 +147,7 @@ test('⚠ session_start fires exactly once per session, and two sessions do not 
   const startsPerInstance: number[] = []
   const probe: InlineExtension = {
     name: 'zen-host-probe',
-    factory: (pi) => {
+    factory: (pi: ExtensionAPI) => {
       factoryRuns += 1
       const mine = factoryRuns - 1
       startsPerInstance[mine] = 0
@@ -158,7 +167,7 @@ test('⚠⚠ a dialog an extension opens reaches the subscriber and its answer r
   let settled = false
   const probe: InlineExtension = {
     name: 'zen-host-dialog-probe',
-    factory: (pi) => {
+    factory: (pi: ExtensionAPI) => {
       pi.on('session_start', (_event, extensionContext) => {
         // Fire-and-forget on purpose: awaiting here would block bindExtensions until the
         // test answers, and the test cannot answer what it has not yet observed.
@@ -186,7 +195,7 @@ test("a cancelled dialog resolves to pi's cancel value, and dispose cancels what
   const answers: unknown[] = []
   const probe: InlineExtension = {
     name: 'zen-host-cancel-probe',
-    factory: (pi) => {
+    factory: (pi: ExtensionAPI) => {
       pi.on('session_start', (_event, extensionContext) => {
         void extensionContext.ui.select('Pick', ['a', 'b']).then((answer) => answers.push(answer))
         void extensionContext.ui.input('Name?').then((answer) => answers.push(answer))
@@ -215,7 +224,7 @@ test('an answer naming no pending dialog is reported, never thrown', async () =>
 test('⚠ a throwing session_start becomes an extension_error record; the session is still created', async () => {
   const probe: InlineExtension = {
     name: 'zen-host-throwing-probe',
-    factory: (pi) => {
+    factory: (pi: ExtensionAPI) => {
       pi.on('session_start', () => {
         throw new Error('probe: session_start threw')
       })
@@ -237,7 +246,7 @@ test('⚠ a throwing session_start becomes an extension_error record; the sessio
 test('⚠ an entry an extension persists during session_start reaches the first subscriber (#88)', async () => {
   const probe: InlineExtension = {
     name: 'zen-host-startup-entry-probe',
-    factory: (pi) => {
+    factory: (pi: ExtensionAPI) => {
       pi.on('session_start', () => {
         pi.appendEntry('probe-startup', { seen: true }) // the same call picc makes for `modes`
       })
@@ -269,10 +278,10 @@ function noopListener(): void {
 /** Emits a notify on command — used to produce an event while nobody is subscribed. */
 const lateNotifyProbe: InlineExtension = {
   name: 'zen-host-late-notify-probe',
-  factory: (pi) => {
+  factory: (pi: ExtensionAPI) => {
     pi.registerCommand('zen-late-notify', {
       description: 'emit a notify while nobody is listening',
-      handler: async (_args, extensionContext) => {
+      handler: async (_args: string, extensionContext: ExtensionCommandContext) => {
         extensionContext.ui.notify('late notify', 'info')
       },
     })
@@ -294,7 +303,7 @@ test('⚠ events are held only until the FIRST subscriber; with nobody listening
   await new Promise<void>((resolve, reject) => {
     hosted.session.prompt(
       { message: '/zen-late-notify' },
-      { onAccepted: resolve, onRejected: (reason) => reject(new Error(reason)) },
+      { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )
   })
 
@@ -333,14 +342,14 @@ test("⚠ the emitted tail records each event's provenance: held at startup, rep
   await new Promise<void>((resolve, reject) => {
     hosted.session.prompt(
       { message: '/zen-late-notify' },
-      { onAccepted: resolve, onRejected: (reason) => reject(new Error(reason)) },
+      { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )
   })
   unsubscribe()
   await new Promise<void>((resolve, reject) => {
     hosted.session.prompt(
       { message: '/zen-late-notify' },
-      { onAccepted: resolve, onRejected: (reason) => reject(new Error(reason)) },
+      { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )
   })
   const notifies = hosted
@@ -376,7 +385,7 @@ test("⚠ subscribe delivers startup records as `replayed` and a run's events as
   await new Promise<void>((resolve, reject) => {
     hosted.session.prompt(
       { message: '/zen-late-notify' },
-      { onAccepted: resolve, onRejected: (reason) => reject(new Error(reason)) },
+      { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )
   })
   expect(deliveries.at(-1)).toEqual(['late notify', 'live'])

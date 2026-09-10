@@ -58,6 +58,7 @@ export {
 } from './web-search/providers/tavily.ts'
 export {
   type FetchUrl,
+  type FetchUrlInit,
   type ModelSearchRequest,
   type ResolvedProviderAuth,
   routedProviderIdForModel,

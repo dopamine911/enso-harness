@@ -66,11 +66,13 @@ const RECORDED_RESPONSE_HEADERS = [
 function recordProviderResponses(pi: ExtensionAPI): void {
   const log = zenLogger('extension', 'provider')
   pi.on('after_provider_response', (event): void => {
-    const headers = new Map(Object.entries(event.headers).map(([name, value]) => [name.toLowerCase(), value]))
+    const headers = new Map(
+      Object.entries(event.headers).map(([headerName, headerValue]) => [headerName.toLowerCase(), headerValue]),
+    )
     const recorded: Record<string, string> = {}
-    for (const name of RECORDED_RESPONSE_HEADERS) {
-      const value = headers.get(name)
-      if (value !== undefined) recorded[name] = value
+    for (const headerName of RECORDED_RESPONSE_HEADERS) {
+      const headerValue = headers.get(headerName)
+      if (headerValue !== undefined) recorded[headerName] = headerValue
     }
     log.info('provider responded {status}, request id {requestId}', {
       status: event.status,

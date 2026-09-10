@@ -131,7 +131,7 @@ test('⚠ two processes, one file: every line lands whole — the property the d
       `await dispose();`,
     ].join('\n'),
   )
-  const spawn = (who: string) =>
+  const spawn = (who: string): Bun.Subprocess<'ignore', 'ignore', 'pipe'> =>
     Bun.spawn(['bun', child, who], { cwd: join(import.meta.dir, '..'), stdout: 'ignore', stderr: 'pipe' })
   const [alpha, bravo] = [spawn('alpha'), spawn('bravo')]
   expect(await Promise.all([alpha.exited, bravo.exited])).toEqual([0, 0])
@@ -280,6 +280,41 @@ test('with no known values the pass does not run — an ordinary record is untou
   zenLogger('server', 'probe').info('nothing to scrub here')
   await dispose()
   expect(readFileSync(join(logsDir, zenLogFilename(new Date())), 'utf8')).toContain('nothing to scrub here')
+})
+
+// Review of the lint/hardening pass. The value pass rebuilds every object structurally, and
+// an Error's `message`/`stack` are own but NON-ENUMERABLE — so `Object.entries` saw `{}` and
+// wrote `{}`. The records that carry an Error are exactly the ones someone reads to find out
+// why: the guard's analyzer-failure deny, the server's handler failure.
+test('⚠ an Error property survives the value pass with its message and stack — and is still scrubbed', async () => {
+  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-error-'))
+  const secret = 'tvly-LIVE-VALUE-IN-AN-ERROR'
+  const dispose = await configureProcessLogging({
+    logsDir,
+    process: 'server',
+    secretValues: [secret],
+  })
+  zenLogger('server', 'probe').error('handler failed: {error}', {
+    error: new Error(`refused while sending ${secret}`),
+  })
+  await dispose()
+
+  const file = join(logsDir, zenLogFilename(new Date()))
+  const text = readFileSync(file, 'utf8')
+  // Every process's first record is `logging configured`; the one under test is the ERROR.
+  const records = linesOf(file).map((line) => JSON.parse(line) as ZenLogLine)
+  const record = records.find((candidate) => candidate.level === 'ERROR')
+  const properties = record?.properties ?? {}
+  if (!('error' in properties)) throw new Error('the record carried no error property at all')
+  const error = properties.error
+  if (error === null || typeof error !== 'object') throw new Error(`the error was flattened to ${String(error)}`)
+  expect('name' in error && error.name).toBe('Error')
+  // The reason survives — this is the whole point; it used to be `{}`.
+  expect('message' in error && String(error.message)).toContain('refused while sending')
+  expect('stack' in error && typeof error.stack).toBe('string')
+  // …and the secret quoted inside it does not.
+  expect(text).not.toContain('LIVE-VALUE-IN-AN-ERROR')
+  expect('message' in error && String(error.message)).toContain(ZEN_REDACTED_VALUE)
 })
 
 // PR #153 review, issue 1: a JS alternation takes the FIRST matching branch, not the longest.

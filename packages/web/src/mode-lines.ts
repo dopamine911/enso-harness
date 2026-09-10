@@ -41,7 +41,7 @@ export interface ModeLines {
 export function createModeLines(notifications: NotificationsStore): ModeLines {
   let lastRenderedMode: string | undefined
   return {
-    apply: (value) => {
+    apply: (value: unknown) => {
       const mode = readPiccPersistedMode(value)
       if (mode === undefined) return
       if (mode === lastRenderedMode) return
