@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { arch, platform, release } from "node:os";
 import { join } from "node:path";
 import { VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
-import { buildLogBundle, findRepoRoot, type ZenBundleAbout, type ZenLogLine } from "@zen/core";
+import { buildLogBundle, findRepoRoot, isZenThreadId, type ZenBundleAbout, type ZenLogLine } from "@zen/core";
 import { parseZenLogLine, zenLogFilename } from "@zen/core/log-process";
 import { inspectThread, type ThreadView } from "./thread-registry.ts";
 
@@ -33,11 +33,10 @@ export interface BundleRouteDeps {
 	readonly now?: () => Date;
 }
 
-export interface BundleRouteOutcome {
-	readonly status: 200;
-	readonly filename: string;
-	readonly body: string;
-}
+export type BundleRouteOutcome =
+	| { readonly status: 200; readonly filename: string; readonly body: string }
+	/** A `thread` that is not thread-id shaped: refused before it reaches a filter, a filename, or a header. */
+	| { readonly status: 400; readonly reason: string };
 
 /** The checkout's commit, from `.git` by hand — no shell from a server. `unknown` when there is no checkout. */
 export function describeCheckout(repoRoot: string): string {
@@ -86,6 +85,13 @@ export function createBundleRoute(deps: BundleRouteDeps): (query: URLSearchParam
 		const at = now();
 		const threadParameter = query.get("thread");
 		const threadPrefix = threadParameter === null || threadParameter.length === 0 ? undefined : threadParameter;
+		// The third entry point a thread id crosses (#95 named the other two). A PREFIX of a valid
+		// id is itself a valid id, so the one check covers both — and it is what keeps the value
+		// out of the `Content-Disposition` header: a `"` would end the filename, a CR/LF would
+		// throw inside the request callback (PR #138 review).
+		if (threadPrefix !== undefined && !isZenThreadId(threadPrefix)) {
+			return { status: 400, reason: "thread must be a thread id or a prefix of one" };
+		}
 		const file = join(deps.logsDir, zenLogFilename(at));
 		const text = existsSync(file) ? readFileSync(file, "utf8") : "";
 		const { lines, malformed } = selectRecords(text, threadPrefix);

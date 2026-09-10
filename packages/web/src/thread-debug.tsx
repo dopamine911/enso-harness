@@ -10,6 +10,7 @@ import {
 } from "@zen/core";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Check } from "typebox/value";
+import type { FetchLike } from "./browser-logging.ts";
 import { Button } from "./components/ui/button.tsx";
 import type { RecordedCustomChunk } from "./custom-event-router.ts";
 import { type PermissionModeState, usePermissionMode } from "./permission-mode.tsx";
@@ -401,8 +402,9 @@ export type BundleState = "idle" | "building" | "saved" | { readonly failed: str
 export async function fetchThreadBundle(
 	threadId: string,
 	ring: readonly ZenLogLine[],
+	fetchImpl: FetchLike = fetch,
 ): Promise<{ filename: string; text: string }> {
-	const response = await fetch(`/api/logs/bundle?thread=${encodeURIComponent(threadId)}`);
+	const response = await fetchImpl(`/api/logs/bundle?thread=${encodeURIComponent(threadId)}`);
 	if (!response.ok) throw new InspectionFetchError(response.status, boundedFailureDetail(await response.text()));
 	const disposition = response.headers.get("Content-Disposition") ?? "";
 	const named = /filename="([^"]+)"/.exec(disposition)?.[1];

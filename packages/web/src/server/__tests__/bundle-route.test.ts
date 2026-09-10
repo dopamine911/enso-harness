@@ -6,7 +6,7 @@ import { bundleRecordsText, type PiSession, ZEN_REDACTED, type ZenLogLine } from
 import { parseZenLogLine, zenLogFilename } from "@zen/core/log-process";
 import type { HostedSession } from "../../host/agent-host.ts";
 import { createEventTail } from "../../host/event-tail.ts";
-import { BUNDLE_MAX_RECORDS, createBundleRoute, describeCheckout } from "../bundle-route.ts";
+import { BUNDLE_MAX_RECORDS, type BundleRouteOutcome, createBundleRoute, describeCheckout } from "../bundle-route.ts";
 import type { ThreadView } from "../thread-registry.ts";
 
 const ignore = (): void => undefined;
@@ -57,6 +57,11 @@ const line = (threadId: string, message: string, extra: Record<string, unknown> 
 
 const DAY = new Date("2026-09-10T12:00:00");
 
+const bodyOf = (outcome: BundleRouteOutcome): string => {
+	if (outcome.status !== 200) throw new Error(outcome.reason);
+	return outcome.body;
+};
+
 function logsDirWith(lines: readonly (ZenLogLine | string)[]): string {
 	const logsDir = mkdtempSync(join(tmpdir(), "zen-bundle-"));
 	writeFileSync(
@@ -77,7 +82,9 @@ test("the bundle is today's records for the thread, its live inspection, and the
 		logsDir,
 		now: () => DAY,
 	});
-	const { filename, body } = route(new URLSearchParams("thread=t1"));
+	const outcome = route(new URLSearchParams("thread=t1"));
+	if (outcome.status !== 200) throw new Error(outcome.reason);
+	const { filename, body } = outcome;
 
 	expect(filename).toBe("zen-bundle-2026-09-10-t1.md");
 	const records = bundleRecordsText(body)
@@ -104,7 +111,9 @@ test("[WARN] no thread: every record and every live thread; the cap keeps the NE
 		logsDir: logsDirWith(many),
 		now: () => DAY,
 	});
-	const { filename, body } = route(new URLSearchParams());
+	const outcome = route(new URLSearchParams());
+	if (outcome.status !== 200) throw new Error(outcome.reason);
+	const { filename, body } = outcome;
 
 	expect(filename).toBe("zen-bundle-2026-09-10.md");
 	expect(body).toContain(`## log — the last ${BUNDLE_MAX_RECORDS} of ${BUNDLE_MAX_RECORDS + 3} records`);
@@ -117,17 +126,36 @@ test("[WARN] no thread: every record and every live thread; the cap keeps the NE
 test("a missing file and a malformed line are said in the selection, never silently absent", () => {
 	const empty = mkdtempSync(join(tmpdir(), "zen-bundle-empty-"));
 	const route = createBundleRoute({ threads: { list: () => [] }, logsDir: empty, now: () => DAY });
-	expect(route(new URLSearchParams()).body).toContain("does not exist yet: no process has logged today");
+	expect(bodyOf(route(new URLSearchParams()))).toContain("does not exist yet: no process has logged today");
 
 	const torn = createBundleRoute({
 		threads: { list: () => [] },
 		logsDir: logsDirWith([line("t1", "ok"), "{not json", JSON.stringify({ level: "INFO" })]),
 		now: () => DAY,
 	});
-	const body = torn(new URLSearchParams()).body;
+	const body = bodyOf(torn(new URLSearchParams()));
 	expect(body).toContain("2 line(s) of it were not records and are left out");
 	expect(body).toContain("## log — 1 records");
 	expect(body).toContain("none live at the time of the bundle");
+});
+
+test("[WARN] a thread that is not id-shaped is a 400, never a filename: a quote would end the header's attribute, a CR/LF would throw in the request callback (PR #138 review)", () => {
+	const route = createBundleRoute({
+		threads: { list: () => [] },
+		logsDir: logsDirWith([line("t1", "ok")]),
+		now: () => DAY,
+	});
+	for (const hostile of ['t1"; x="y', "t1\r\nX-Injected: 1", "../etc", " t1", "t1 x"]) {
+		expect(route(new URLSearchParams({ thread: hostile }))).toEqual({
+			status: 400,
+			reason: "thread must be a thread id or a prefix of one",
+		});
+	}
+	// A prefix of a valid id is a valid id: the one check serves both the filter and the filename.
+	expect(route(new URLSearchParams({ thread: "6923e6" }))).toMatchObject({
+		status: 200,
+		filename: "zen-bundle-2026-09-10-6923e6.md",
+	});
 });
 
 test("the checkout is described from .git by hand: a branch ref, a detached head, and no checkout at all", () => {

@@ -475,6 +475,11 @@ export function startZenServer(options: ZenServerOptions) {
 		}
 		if (request.method === "GET" && url.startsWith("/api/logs/bundle")) {
 			const outcome = bundle(new URL(url, "http://zen").searchParams);
+			if (outcome.status !== 200) {
+				response.writeHead(outcome.status, { "Content-Type": "text/plain" });
+				response.end(outcome.reason);
+				return;
+			}
 			response.writeHead(outcome.status, {
 				"Content-Type": "text/markdown; charset=utf-8",
 				"Content-Disposition": `attachment; filename="${outcome.filename}"`,
