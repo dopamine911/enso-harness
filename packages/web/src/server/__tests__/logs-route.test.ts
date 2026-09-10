@@ -65,5 +65,11 @@ test("⚠ a bad batch is a 4xx that says why — and is NOT logged, so a page in
 	expect(receiveBrowserLogs(`{"page":"p","records":[],"pad":"${"x".repeat(MAX_LOG_BODY_BYTES)}"}`)).toMatchObject({
 		status: 413,
 	});
+	// Bytes, not code units: a body under the cap in characters but over it in UTF-8.
+	expect(
+		receiveBrowserLogs(`{"page":"p","records":[],"pad":"${"é".repeat(MAX_LOG_BODY_BYTES / 2 + 8)}"}`),
+	).toMatchObject({
+		status: 413,
+	});
 	expect(logs.records).toHaveLength(0);
 });

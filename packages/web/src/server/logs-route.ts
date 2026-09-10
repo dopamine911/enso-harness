@@ -1,5 +1,5 @@
 import { type ZenBrowserLogBatch, ZenBrowserLogBatch as ZenBrowserLogBatchSchema, zenLogger } from "@zen/core";
-import { Check } from "typebox/value";
+import { Check, Errors } from "typebox/value";
 
 /**
  * `POST /api/logs` (#132 slice 3): the browser's records, into the one file. Each record is
@@ -27,16 +27,24 @@ export type LogsRouteOutcome =
 const BROWSER_CATEGORY_PREFIX = "zen.browser";
 
 export function receiveBrowserLogs(body: string): LogsRouteOutcome {
-	if (body.length > MAX_LOG_BODY_BYTES)
+	// Bytes, not UTF-16 code units: a message full of emoji is twice its `.length` on the wire.
+	if (Buffer.byteLength(body, "utf8") > MAX_LOG_BODY_BYTES) {
 		return { status: 413, reason: `a log batch is at most ${MAX_LOG_BODY_BYTES} bytes` };
+	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(body);
 	} catch {
 		return { status: 400, reason: "a log batch is JSON" };
 	}
-	if (!Check(ZenBrowserLogBatchSchema, parsed))
-		return { status: 400, reason: "a log batch must match ZenBrowserLogBatch" };
+	if (!Check(ZenBrowserLogBatchSchema, parsed)) {
+		// The first thing wrong, by path — the whole batch is refused on it (one bad record
+		// loses its siblings; the browser sends the next batch regardless).
+		const first = Errors(ZenBrowserLogBatchSchema, parsed)[0];
+		const where =
+			first === undefined ? "" : ` at ${first.instancePath === "" ? "/" : first.instancePath}: ${first.message}`;
+		return { status: 400, reason: `a log batch must match ZenBrowserLogBatch${where}` };
+	}
 	const batch: ZenBrowserLogBatch = parsed;
 	for (const record of batch.records) {
 		const subcategory = record.logger.slice(BROWSER_CATEGORY_PREFIX.length + 1);

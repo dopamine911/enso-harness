@@ -89,10 +89,12 @@ export function createLogShipper(options: LogShipperOptions): LogShipper {
 	const batchSize = options.batchSize ?? SHIP_BATCH_SIZE;
 	const flushMs = options.flushMs ?? SHIP_FLUSH_MS;
 	let pending: ZenBrowserLogBatch["records"] = [];
-	let scheduled = false;
+	// The timer in flight, by number: a flush by count or by hand bumps it, so a timer that
+	// was scheduled before finds itself stale and does nothing — by count and by time are
+	// mutually exclusive, with no handle to type across bun (an object) and the browser (a number).
+	let schedule = 0;
 	const flush = (keepalive = false): void => {
-		// A timer that fires after a count-flush finds nothing pending and returns; no handle kept.
-		scheduled = false;
+		schedule += 1;
 		if (pending.length === 0) return;
 		const batch: ZenBrowserLogBatch = { page: options.page, records: pending };
 		pending = [];
@@ -120,9 +122,11 @@ export function createLogShipper(options: LogShipperOptions): LogShipper {
 				properties: line.properties ?? {},
 			});
 			if (pending.length >= batchSize) flush();
-			else if (!scheduled) {
-				scheduled = true;
-				setTimeout(() => flush(), flushMs);
+			else if (pending.length === 1) {
+				const mine = schedule;
+				setTimeout(() => {
+					if (schedule === mine) flush();
+				}, flushMs);
 			}
 		},
 	};
