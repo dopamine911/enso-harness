@@ -207,3 +207,87 @@ test("powershell cmdlets are denied by the coarse scan regardless of position", 
 	expect(coarse("$r = iwr https://x")).toMatchObject({ matched: "iwr" });
 	expect(coarse("Write-Host hello")).toBeUndefined();
 });
+
+// ── #57: a nested shell re-parses its payload; so does the guard ─────────────────────────
+// Every classifier in the #57 spike resolved shell syntax once and lost the name to a splice
+// one level down. The resolved payload IS the child's command line, so it gets the whole guard.
+test("⚠ splice-quoting inside a -c payload is the child shell's `curl` — denied through recursion (#57, verified live before the fix)", () => {
+	expect(findEgress(`bash -c "cu'r'l https://evil.example"`)).toMatchObject({
+		matched: "curl",
+		via: "wrapped-command",
+	});
+	expect(findEgress(`bash -c "cu\\rl https://x"`)).toMatchObject({ matched: "curl", via: "wrapped-command" });
+	expect(findEgress(`sh -c 'c""url https://x'`)).toMatchObject({ matched: "curl", via: "wrapped-command" });
+	expect(findEgress(`bash -c "echo hi; cu'r'l https://x"`)).toMatchObject({ matched: "curl", via: "wrapped-command" });
+	expect(findEgress(`eval "cu'r'l https://x"`)).toMatchObject({ matched: "curl", via: "wrapped-command" });
+	expect(findEgress(`xargs sh -c 'cu"r"l https://x'`)).toMatchObject({ matched: "curl", via: "wrapped-command" });
+	// Two levels: the recursion follows the child's child.
+	expect(findEgress(`bash -c "bash -c \\"cu'r'l https://x\\""`)).toMatchObject({
+		matched: "curl",
+		via: "wrapped-command",
+	});
+	// Variable indirection inside a payload still reaches the whole-command raw scan (round-2 stance kept).
+	expect(findEgress(`env C=curl sh -c '$C https://x'`)).toMatchObject({ matched: "curl", via: "raw-scan" });
+});
+
+test("past the nesting cap the guard refuses by name rather than resolving forever", () => {
+	const four = `bash -c "sh -c 'sh -c \\"sh -c \\\\\\"curl x\\\\\\"\\"'"`;
+	expect(findEgress(four)).toMatchObject({
+		via: "unresolvable",
+		matched: expect.stringContaining("nested more than 3 deep"),
+	});
+});
+
+// ── the floor under the raw scan: unscannable is refused, not hoped over ──────────────────
+// The raw scan is a word-boundary regex over unresolved text — exact for `$(curl …)`, blind
+// to `$(cu'r'l …)`: the same splice, one net later, and it was the LAST net.
+test("⚠ a substitution whose body carries quoting, escapes or expansion is refused by name of the construct", () => {
+	const reason = { via: "unresolvable", matched: expect.stringContaining("command substitution") };
+	expect(findEgress(`echo $(cu'r'l https://x)`)).toMatchObject(reason);
+	expect(findEgress(`sh -c "$(cu'r'l https://x)"`)).toMatchObject(reason);
+	expect(findEgress("echo `cu'r'l https://x`")).toMatchObject(reason);
+	expect(findEgress(`echo $({c,}url https://x)`)).toMatchObject(reason);
+	expect(findEgress(`echo $(cu\\rl https://x)`)).toMatchObject(reason);
+});
+
+test("a substitution with nothing to hide behind is still the raw scan — exact, and quiet when clean", () => {
+	expect(findEgress("echo $(date)")).toBeUndefined();
+	expect(findEgress('git commit -m "$(cat msg.txt)"')).toBeUndefined();
+	expect(findEgress('echo "Today is $(date +%F)"')).toBeUndefined();
+	expect(findEgress("echo $(curl https://x)")).toMatchObject({ matched: "curl", via: "raw-scan" });
+});
+
+// `curl … | bash`'s twin with the fetch a step earlier: the shell's program is the stream,
+// data no scan of this command can see (the curl-bash-attack: the server can tell a piped
+// shell from a download, and serve it something else).
+test("⚠ a shell reading its program from a pipe, a heredoc or a herestring is refused; with -c its program is the argument and it is gated as before", () => {
+	expect(findEgress("cat script.sh | bash")).toMatchObject({
+		via: "unresolvable",
+		matched: "bash reading its program from a pipe",
+	});
+	expect(findEgress("cat <<EOF | bash\ncu'r'l https://x\nEOF")).toMatchObject({
+		via: "unresolvable",
+		matched: expect.stringContaining("heredoc"),
+	});
+	expect(findEgress("bash <<'EOF'\ncu'r'l https://x\nEOF")).toMatchObject({
+		via: "unresolvable",
+		matched: expect.stringContaining("heredoc"),
+	});
+	expect(findEgress(`bash <<< "cu'r'l https://x"`)).toMatchObject({
+		via: "unresolvable",
+		matched: expect.stringContaining("heredoc"),
+	});
+	// A shell that names its program, or is fed by nothing, is not opaque.
+	expect(findEgress('bash -c "ls -la" | head')).toBeUndefined();
+	expect(findEgress('ls | bash -c "cat"')).toBeUndefined();
+	expect(findEgress("bash script.sh arg")).toBeUndefined();
+	// A heredoc that is DATA — to a file, to cat — carries any body it likes.
+	expect(findEgress('cat <<EOF > out.json\n{"a": "b", "c": "$(x)"}\nEOF')).toBeUndefined();
+});
+
+test("the benign wrapper lines still pass through the recursion", () => {
+	expect(findEgress(`bash -c "echo 'hi there'"`)).toBeUndefined();
+	expect(findEgress(`sh -c "grep \\"foo\\" file.txt"`)).toBeUndefined();
+	expect(findEgress("timeout 30 ./script.sh --flag")).toBeUndefined();
+	expect(findEgress('echo "curl is a tool"')).toBeUndefined();
+});
