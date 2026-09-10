@@ -240,6 +240,18 @@ function shellCommandDenial(
 
 	const coarse = toolName === TOOL_POWERSHELL;
 	const egress = findDeniedNetworkEgress(command, policy.deniedNetworkBinaries, { coarse });
+	if (egress?.via === "unresolvable") {
+		// The floor (#57): not a name the guard saw, but a construct it cannot see through.
+		// The refusal names the construct so the rewrite is obvious — and says why "cannot
+		// vouch" is a denial here rather than a question.
+		return {
+			block: true,
+			reason:
+				`${toolName} command refused: ${egress.matched} — the network deny (#9) cannot vouch for what it ` +
+				`cannot resolve, so it refuses rather than guesses. Rewrite without the nesting, the substitution, ` +
+				`or the stream: name the command directly. Fetching is ${WEB_FETCH_TOOL_NAME} (#54), never a shell client.`,
+		};
+	}
 	if (egress !== undefined) {
 		return {
 			block: true,
