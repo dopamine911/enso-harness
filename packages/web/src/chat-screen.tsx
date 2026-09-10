@@ -1,74 +1,74 @@
-import type { ContentPart } from "@tanstack/ai";
-import { automaticPartsForMessage, type ChatUISelectedPart, selectChatUI } from "@tanstack/ai-client/ui";
-import { createChatHook, createChatHookContexts, type LayoutProps, type MessageProps } from "@tanstack/ai-react/ui";
+import type { ContentPart } from '@tanstack/ai'
+import { automaticPartsForMessage, type ChatUISelectedPart, selectChatUI } from '@tanstack/ai-client/ui'
+import { createChatHook, createChatHookContexts, type LayoutProps, type MessageProps } from '@tanstack/ai-react/ui'
 import {
-	isZenImageMimeType,
-	type PiDialogResponse,
-	ZEN_IMAGE_MAX_BYTES,
-	ZEN_IMAGE_MIME_TYPES,
-	ZEN_PROMPT_MAX_IMAGES,
-	type ZenDialogSpec,
-	type ZenPromptImage,
-} from "@zen/core";
-import { ArrowUpIcon, PaperclipIcon, SquareIcon } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from "./components/ai-elements/attachments.tsx";
+  isZenImageMimeType,
+  type PiDialogResponse,
+  ZEN_IMAGE_MAX_BYTES,
+  ZEN_IMAGE_MIME_TYPES,
+  ZEN_PROMPT_MAX_IMAGES,
+  type ZenDialogSpec,
+  type ZenPromptImage,
+} from '@zen/core'
+import { ArrowUpIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from './components/ai-elements/attachments.tsx'
 import {
-	Conversation,
-	ConversationContent,
-	ConversationEmptyState,
-	ConversationScrollButton,
-} from "./components/ai-elements/conversation.tsx";
-import { Message, MessageContent } from "./components/ai-elements/message.tsx";
+  Conversation,
+  ConversationContent,
+  ConversationEmptyState,
+  ConversationScrollButton,
+} from './components/ai-elements/conversation.tsx'
+import { Message, MessageContent } from './components/ai-elements/message.tsx'
 import {
-	PromptInput,
-	PromptInputButton,
-	type PromptInputError,
-	PromptInputTextarea,
-	usePromptInputAttachments,
-} from "./components/ai-elements/prompt-input.tsx";
+  PromptInput,
+  PromptInputButton,
+  type PromptInputError,
+  PromptInputTextarea,
+  usePromptInputAttachments,
+} from './components/ai-elements/prompt-input.tsx'
 import {
-	QueueItem,
-	QueueItemContent,
-	QueueItemIndicator,
-	QueueList,
-	QueueSection,
-	QueueSectionContent,
-	QueueSectionLabel,
-	QueueSectionTrigger,
-	Queue as QueueShell,
-} from "./components/ai-elements/queue.tsx";
-import { Alert, AlertDescription, AlertTitle } from "./components/ui/alert.tsx";
-import { Button } from "./components/ui/button.tsx";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./components/ui/card.tsx";
-import { Input } from "./components/ui/input.tsx";
-import { Textarea } from "./components/ui/textarea.tsx";
-import { routeZenCustomEvent } from "./custom-event-router.ts";
-import { createFixtureChat } from "./fixture-conversation.ts";
-import { ThreadNotifications } from "./notifications.tsx";
-import { PermissionModeSelect, usePermissionMode } from "./permission-mode.tsx";
-import { SelectedMessagePart } from "./selected-message-part.tsx";
-import { ThreadStoresContext, useStore, useThreadStores } from "./store.ts";
+  QueueItem,
+  QueueItemContent,
+  QueueItemIndicator,
+  QueueList,
+  QueueSection,
+  QueueSectionContent,
+  QueueSectionLabel,
+  QueueSectionTrigger,
+  Queue as QueueShell,
+} from './components/ai-elements/queue.tsx'
+import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.tsx'
+import { Button } from './components/ui/button.tsx'
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './components/ui/card.tsx'
+import { Input } from './components/ui/input.tsx'
+import { Textarea } from './components/ui/textarea.tsx'
+import { routeZenCustomEvent } from './custom-event-router.ts'
+import { createFixtureChat } from './fixture-conversation.ts'
+import { ThreadNotifications } from './notifications.tsx'
+import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
+import { SelectedMessagePart } from './selected-message-part.tsx'
+import { ThreadStoresContext, useStore, useThreadStores } from './store.ts'
 import {
-	createResumeRequests,
-	createStoredThreadsStore,
-	fetchThreadHistory,
-	storedThreadsNotOnThisPage,
-} from "./stored-threads.ts";
-import { ThreadDebugDrawer } from "./thread-debug.tsx";
-import { ThreadStatusBar } from "./thread-status.tsx";
+  createResumeRequests,
+  createStoredThreadsStore,
+  fetchThreadHistory,
+  storedThreadsNotOnThisPage,
+} from './stored-threads.ts'
+import { ThreadDebugDrawer } from './thread-debug.tsx'
+import { ThreadStatusBar } from './thread-status.tsx'
 import {
-	adoptThread,
-	getThreadStores,
-	mintThread,
-	type ThreadStores,
-	threadListStore,
-	titleFromMessages,
-	updateThreadSummary,
-} from "./thread-stores.ts";
-import { readThreadUrl, type ThreadUrl, urlForThread } from "./thread-url.ts";
-import { ThreadsRail, UNTITLED_THREAD } from "./threads-rail.tsx";
-import type { ZenRendererMap } from "./ZenToolResult.tsx";
+  adoptThread,
+  getThreadStores,
+  mintThread,
+  type ThreadStores,
+  threadListStore,
+  titleFromMessages,
+  updateThreadSummary,
+} from './thread-stores.ts'
+import { readThreadUrl, type ThreadUrl, urlForThread } from './thread-url.ts'
+import { ThreadsRail, UNTITLED_THREAD } from './threads-rail.tsx'
+import type { ZenRendererMap } from './ZenToolResult.tsx'
 
 /**
  * The zen web surface (#24, #17) — every component and the chat wiring, importable with
@@ -116,7 +116,7 @@ import type { ZenRendererMap } from "./ZenToolResult.tsx";
  * is exactly what the contract promises for an unknown kind — so empty is the honest
  * default, not a gap. A renderer is added when a tool earns one.
  */
-const descriptorRenderers: ZenRendererMap = {};
+const descriptorRenderers: ZenRendererMap = {}
 
 /**
  * `?fixture` swaps the live server connection for the scripted conversation in
@@ -127,17 +127,17 @@ const descriptorRenderers: ZenRendererMap = {};
 // ⚠ `typeof window` guard: this module is imported by the coverage manifest under `bun
 // test`, where no DOM exists — fixture mode is a browser concern, so headless is never
 // fixture mode. The ENTRY (main.tsx) stays the only module that touches the DOM freely.
-const isFixtureMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("fixture");
+const isFixtureMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('fixture')
 /** `?debug` opens the session debug drawer (#86) — same switch shape as `?fixture`. */
-const isDebugMode = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
+const isDebugMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('debug')
 /**
  * The chat contexts every widget below reads through — created ONCE and handed to every
  * per-thread factory (`createThreadChatHook`), TanStack's escape hatch for "widgets in
  * other files". One `useChatContext` serves every thread's tree because each pane's
  * `AppChat` provides the same context, with its own chat instance.
  */
-const chatContexts = createChatHookContexts();
-const useChatContext = chatContexts.useChatContext;
+const chatContexts = createChatHookContexts()
+const useChatContext = chatContexts.useChatContext
 
 /**
  * ⚠ ONE CHAT FACTORY PER THREAD (#90 PR 3), built by the thread's pane. Two facts force it:
@@ -159,25 +159,25 @@ const useChatContext = chatContexts.useChatContext;
  * connection is identical on both paths, which is the point.
  */
 function threadChatOptions(stores: ThreadStores) {
-	return {
-		threadId: stores.threadId,
-		// A resumed thread mounts with its stored branch (#95); a minted one with nothing.
-		initialMessages: [...stores.history],
-		connection: isFixtureMode ? createFixtureChat().transport() : stores.connection,
-		live: !isFixtureMode,
-		/**
-		 * TanStack's designated path for AG-UI CUSTOM chunks (#29) — verified against the
-		 * stream processor: every CUSTOM chunk fires this with `(chunk.name, chunk.value)`.
-		 * The dispatch itself lives in `custom-event-router.ts` so it is testable (#53 S1.3).
-		 */
-		onCustomEvent: (eventType: string, data: unknown): void => routeZenCustomEvent(stores, eventType, data),
-	};
+  return {
+    threadId: stores.threadId,
+    // A resumed thread mounts with its stored branch (#95); a minted one with nothing.
+    initialMessages: [...stores.history],
+    connection: isFixtureMode ? createFixtureChat().transport() : stores.connection,
+    live: !isFixtureMode,
+    /**
+     * TanStack's designated path for AG-UI CUSTOM chunks (#29) — verified against the
+     * stream processor: every CUSTOM chunk fires this with `(chunk.name, chunk.value)`.
+     * The dispatch itself lives in `custom-event-router.ts` so it is testable (#53 S1.3).
+     */
+    onCustomEvent: (eventType: string, data: unknown): void => routeZenCustomEvent(stores, eventType, data),
+  }
 }
 /** The options type the widget map below is written against — one shape for every thread. */
-type ThreadChatOptions = ReturnType<typeof threadChatOptions>;
+type ThreadChatOptions = ReturnType<typeof threadChatOptions>
 
 function createThreadChatHook(stores: ThreadStores) {
-	return createChatHook({ options: threadChatOptions(stores), context: chatContexts, ...chatComponents });
+  return createChatHook({ options: threadChatOptions(stores), context: chatContexts, ...chatComponents })
 }
 
 /**
@@ -186,14 +186,14 @@ function createThreadChatHook(stores: ThreadStores) {
  * column — with its fixed `id` and its own inspection fetches — once per thread, hidden or
  * not (PR #94 review). Exactly one pane is active, so exactly one column exists.
  */
-const DebugOpenContext = createContext(false);
+const DebugOpenContext = createContext(false)
 
 /** One selected part paired with the React key that identifies it. */
 export interface KeyedPart {
-	/** Stable across re-renders AND position changes — see `keyedParts` for why that matters. */
-	partKey: string;
-	selected: ChatUISelectedPart;
-	isTrailingPart: boolean;
+  /** Stable across re-renders AND position changes — see `keyedParts` for why that matters. */
+  partKey: string
+  selected: ChatUISelectedPart
+  isTrailingPart: boolean
 }
 
 /**
@@ -214,23 +214,23 @@ export interface KeyedPart {
  * ⓘ Exported for `__tests__/chat-screen.test.tsx` only; nothing else imports it.
  */
 export function keyedParts(parts: ChatUISelectedPart[]): KeyedPart[] {
-	const seenPerKind = new Map<string, number>();
-	return parts.map((selected, position) => {
-		const identity = partIdentity(selected);
-		if (identity !== undefined) {
-			return { partKey: `${selected.key}-${identity}`, selected, isTrailingPart: position === parts.length - 1 };
-		}
-		const seen = seenPerKind.get(selected.key) ?? 0;
-		seenPerKind.set(selected.key, seen + 1);
-		return { partKey: `${selected.key}#${seen}`, selected, isTrailingPart: position === parts.length - 1 };
-	});
+  const seenPerKind = new Map<string, number>()
+  return parts.map((selected, position) => {
+    const identity = partIdentity(selected)
+    if (identity !== undefined) {
+      return { partKey: `${selected.key}-${identity}`, selected, isTrailingPart: position === parts.length - 1 }
+    }
+    const seen = seenPerKind.get(selected.key) ?? 0
+    seenPerKind.set(selected.key, seen + 1)
+    return { partKey: `${selected.key}#${seen}`, selected, isTrailingPart: position === parts.length - 1 }
+  })
 }
 
 /** The part's own stable id, or undefined for the kinds that carry none. */
 function partIdentity(selected: ChatUISelectedPart): string | undefined {
-	if (selected.key === "toolCall") return selected.part.id;
-	if (selected.key === "toolResult") return selected.part.toolCallId;
-	return undefined;
+  if (selected.key === 'toolCall') return selected.part.id
+  if (selected.key === 'toolResult') return selected.part.toolCallId
+  return undefined
 }
 
 /**
@@ -238,16 +238,16 @@ function partIdentity(selected: ChatUISelectedPart): string | undefined {
  * shared contexts declared above — the same `useChatContext` every widget here uses.
  */
 function RunProblem(): React.ReactNode {
-	const chat = useChatContext();
-	if (chat.error === undefined || chat.error === null) return null;
-	return (
-		<Alert variant="destructive" className="my-4">
-			<AlertTitle>the run failed</AlertTitle>
-			<AlertDescription className="whitespace-pre-wrap">
-				{chat.error instanceof Error ? chat.error.message : String(chat.error)}
-			</AlertDescription>
-		</Alert>
-	);
+  const chat = useChatContext()
+  if (chat.error === undefined || chat.error === null) return null
+  return (
+    <Alert variant="destructive" className="my-4">
+      <AlertTitle>the run failed</AlertTitle>
+      <AlertDescription className="whitespace-pre-wrap">
+        {chat.error instanceof Error ? chat.error.message : String(chat.error)}
+      </AlertDescription>
+    </Alert>
+  )
 }
 
 /**
@@ -271,21 +271,21 @@ function RunProblem(): React.ReactNode {
  * mode there is no server; the fetch fails and the store honestly stays `unknown`.
  */
 function PermissionModeControl(): React.ReactNode {
-	const chat = useChatContext();
-	const stores = useThreadStores();
-	const { mode, available } = usePermissionMode();
-	useEffect(() => {
-		void stores.permissionMode.seed(async () => (await fetch("/api/mode")).json());
-	}, [stores]);
-	return (
-		<PermissionModeSelect
-			mode={mode}
-			available={available}
-			disabled={chat.sessionGenerating}
-			// picc registers one command per mode, named exactly the mode (index.ts:526-536).
-			onSelect={(next) => void chat.sendMessage(`/${next}`)}
-		/>
-	);
+  const chat = useChatContext()
+  const stores = useThreadStores()
+  const { mode, available } = usePermissionMode()
+  useEffect(() => {
+    void stores.permissionMode.seed(async () => (await fetch('/api/mode')).json())
+  }, [stores])
+  return (
+    <PermissionModeSelect
+      mode={mode}
+      available={available}
+      disabled={chat.sessionGenerating}
+      // picc registers one command per mode, named exactly the mode (index.ts:526-536).
+      onSelect={(next) => void chat.sendMessage(`/${next}`)}
+    />
+  )
 }
 
 /*
@@ -313,93 +313,93 @@ function PermissionModeControl(): React.ReactNode {
  * only difference is the field element.
  */
 export function DialogAnswerControls({
-	dialog,
-	answer,
+  dialog,
+  answer,
 }: {
-	dialog: ZenDialogSpec;
-	answer: (payload: { value: string } | { confirmed: boolean }) => void;
+  dialog: ZenDialogSpec
+  answer: (payload: { value: string } | { confirmed: boolean }) => void
 }): React.ReactNode {
-	if (dialog.method === "confirm") {
-		return (
-			<div className="flex flex-col gap-3">
-				<p className="text-sm">{dialog.message}</p>
-				<div className="flex gap-2">
-					<Button type="button" onClick={() => answer({ confirmed: true })}>
-						Yes
-					</Button>
-					<Button type="button" variant="outline" onClick={() => answer({ confirmed: false })}>
-						No
-					</Button>
-				</div>
-			</div>
-		);
-	}
-	if (dialog.method === "select") {
-		return (
-			<div className="flex flex-col gap-3">
-				{/* The detail behind the question (#73): a file preview, a diff, a command. Preformatted,
+  if (dialog.method === 'confirm') {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-sm">{dialog.message}</p>
+        <div className="flex gap-2">
+          <Button type="button" onClick={() => answer({ confirmed: true })}>
+            Yes
+          </Button>
+          <Button type="button" variant="outline" onClick={() => answer({ confirmed: false })}>
+            No
+          </Button>
+        </div>
+      </div>
+    )
+  }
+  if (dialog.method === 'select') {
+    return (
+      <div className="flex flex-col gap-3">
+        {/* The detail behind the question (#73): a file preview, a diff, a command. Preformatted,
 				    never markdown — model-chosen file content must not render as HTML. */}
-				{dialog.message === undefined || dialog.message.length === 0 ? null : (
-					<pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/50 p-3 text-xs">
-						{dialog.message}
-					</pre>
-				)}
-				<div className="flex flex-wrap gap-2">
-					{dialog.options.map((option) => (
-						<Button key={option} type="button" variant="outline" onClick={() => answer({ value: option })}>
-							{option}
-						</Button>
-					))}
-				</div>
-			</div>
-		);
-	}
-	return (
-		<form
-			onSubmit={(event) => {
-				event.preventDefault();
-				const field = event.currentTarget.elements.namedItem("answer");
-				if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
-					answer({ value: field.value });
-				}
-			}}
-			className="flex items-start gap-2"
-		>
-			{dialog.method === "editor" ? (
-				<Textarea name="answer" defaultValue={dialog.prefill ?? ""} rows={6} className="flex-1" />
-			) : (
-				<Input name="answer" placeholder={dialog.placeholder ?? ""} autoComplete="off" className="flex-1" />
-			)}
-			<Button type="submit">Answer</Button>
-		</form>
-	);
+        {dialog.message === undefined || dialog.message.length === 0 ? null : (
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/50 p-3 text-xs">
+            {dialog.message}
+          </pre>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {dialog.options.map((option) => (
+            <Button key={option} type="button" variant="outline" onClick={() => answer({ value: option })}>
+              {option}
+            </Button>
+          ))}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault()
+        const field = event.currentTarget.elements.namedItem('answer')
+        if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+          answer({ value: field.value })
+        }
+      }}
+      className="flex items-start gap-2"
+    >
+      {dialog.method === 'editor' ? (
+        <Textarea name="answer" defaultValue={dialog.prefill ?? ''} rows={6} className="flex-1" />
+      ) : (
+        <Input name="answer" placeholder={dialog.placeholder ?? ''} autoComplete="off" className="flex-1" />
+      )}
+      <Button type="submit">Answer</Button>
+    </form>
+  )
 }
 
 export function ZenDialogCard({
-	dialog,
-	answer,
-	cancel,
+  dialog,
+  answer,
+  cancel,
 }: {
-	dialog: ZenDialogSpec;
-	answer: (payload: { value: string } | { confirmed: boolean }) => void;
-	cancel: () => void;
+  dialog: ZenDialogSpec
+  answer: (payload: { value: string } | { confirmed: boolean }) => void
+  cancel: () => void
 }): React.ReactNode {
-	return (
-		<Card className="my-4">
-			<CardHeader>
-				<CardDescription className="uppercase tracking-wide">pi is asking</CardDescription>
-				<CardTitle className="text-base">{dialog.title}</CardTitle>
-			</CardHeader>
-			<CardContent>
-				<DialogAnswerControls dialog={dialog} answer={answer} />
-			</CardContent>
-			<CardFooter>
-				<Button type="button" variant="ghost" size="sm" onClick={cancel}>
-					Cancel — decline the question
-				</Button>
-			</CardFooter>
-		</Card>
-	);
+  return (
+    <Card className="my-4">
+      <CardHeader>
+        <CardDescription className="uppercase tracking-wide">pi is asking</CardDescription>
+        <CardTitle className="text-base">{dialog.title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <DialogAnswerControls dialog={dialog} answer={answer} />
+      </CardContent>
+      <CardFooter>
+        <Button type="button" variant="ghost" size="sm" onClick={cancel}>
+          Cancel — decline the question
+        </Button>
+      </CardFooter>
+    </Card>
+  )
 }
 
 /**
@@ -412,46 +412,46 @@ export function ZenDialogCard({
  * ⓘ Exported for `__tests__/chat-screen.test.tsx`.
  */
 export async function settleDialog(
-	stores: Pick<ThreadStores, "connection" | "dialog">,
-	response: PiDialogResponse,
+  stores: Pick<ThreadStores, 'connection' | 'dialog'>,
+  response: PiDialogResponse,
 ): Promise<void> {
-	const outcome = await stores.connection.answerDialog(response);
-	if (outcome === "answered" || outcome === "gone") stores.dialog.set(undefined);
+  const outcome = await stores.connection.answerDialog(response)
+  if (outcome === 'answered' || outcome === 'gone') stores.dialog.set(undefined)
 }
 
 /** The thread's open question, if any — see {@link settleDialog}. */
 function PendingDialog(): React.ReactNode {
-	const stores = useThreadStores();
-	const pending = useStore(stores.dialog);
-	if (pending === undefined) return null;
-	const settle = (response: PiDialogResponse): void => {
-		void settleDialog(stores, response);
-	};
-	return (
-		<ZenDialogCard
-			dialog={pending.dialog}
-			answer={(payload) => settle({ id: pending.id, ...payload })}
-			cancel={() => settle({ id: pending.id, cancelled: true })}
-		/>
-	);
+  const stores = useThreadStores()
+  const pending = useStore(stores.dialog)
+  if (pending === undefined) return null
+  const settle = (response: PiDialogResponse): void => {
+    void settleDialog(stores, response)
+  }
+  return (
+    <ZenDialogCard
+      dialog={pending.dialog}
+      answer={(payload) => settle({ id: pending.id, ...payload })}
+      cancel={() => settle({ id: pending.id, cancelled: true })}
+    />
+  )
 }
 
 /** The composer's draft with more text appended — restored prompts after what was already typed, one blank line between. */
 export function joinDrafts(current: string, ...more: readonly string[]): string {
-	return [current, ...more].filter((part) => part.trim().length > 0).join("\n\n");
+  return [current, ...more].filter((part) => part.trim().length > 0).join('\n\n')
 }
 
 /** What the form would not take, as the notice says it (#68): how many, and the cap by name — never a silent drop. */
 export function describeAttachmentError(error: PromptInputError): string {
-	const files = error.count === 1 ? "1 file was" : `${error.count} files were`;
-	switch (error.code) {
-		case "accept":
-			return `${files} not attached: only images are attached here (${ZEN_IMAGE_MIME_TYPES.map((mimeType) => mimeType.slice("image/".length)).join(", ")})`;
-		case "max_file_size":
-			return `${files} not attached: an image is at most ${(ZEN_IMAGE_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB`;
-		case "max_files":
-			return `${files} not attached: at most ${ZEN_PROMPT_MAX_IMAGES} images on one prompt`;
-	}
+  const files = error.count === 1 ? '1 file was' : `${error.count} files were`
+  switch (error.code) {
+    case 'accept':
+      return `${files} not attached: only images are attached here (${ZEN_IMAGE_MIME_TYPES.map((mimeType) => mimeType.slice('image/'.length)).join(', ')})`
+    case 'max_file_size':
+      return `${files} not attached: an image is at most ${(ZEN_IMAGE_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB`
+    case 'max_files':
+      return `${files} not attached: at most ${ZEN_PROMPT_MAX_IMAGES} images on one prompt`
+  }
 }
 
 /**
@@ -461,51 +461,51 @@ export function describeAttachmentError(error: PromptInputError): string {
  * sends (#68).
  */
 function ComposerBody({
-	draft,
-	setDraft,
-	disconnected,
-	running,
-	onStop,
+  draft,
+  setDraft,
+  disconnected,
+  running,
+  onStop,
 }: {
-	draft: string;
-	setDraft: (next: string) => void;
-	disconnected: boolean;
-	running: boolean;
-	onStop: () => void;
+  draft: string
+  setDraft: (next: string) => void
+  disconnected: boolean
+  running: boolean
+  onStop: () => void
 }): React.ReactNode {
-	const attachments = usePromptInputAttachments();
-	const canSend = (draft.trim().length > 0 || attachments.files.length > 0) && !disconnected;
-	return (
-		<div className="flex flex-col gap-2 rounded-xl border bg-background p-2 shadow-sm focus-within:ring-1 focus-within:ring-ring">
-			{attachments.files.length === 0 ? null : (
-				<Attachments aria-label="attached images" className="px-1 pt-1">
-					{attachments.files.map((file) => (
-						<Attachment key={file.id} data={file} onRemove={() => attachments.remove(file.id)}>
-							<AttachmentPreview />
-							<AttachmentRemove label={`remove ${file.filename || "image"}`} />
-						</Attachment>
-					))}
-				</Attachments>
-			)}
-			<div className="flex items-end gap-2">
-				<PromptInputTextarea
-					value={draft}
-					onChange={(event) => setDraft(event.target.value)}
-					placeholder={disconnected ? "disconnected — reload and resume from the rail" : "ask pi something"}
-					autoComplete="off"
-					rows={1}
-					className="max-h-40 min-h-9 flex-1 resize-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
-				/>
-				{/* Attach (#68): the same file dialog a paste or a drop bypasses. */}
-				<PromptInputButton
-					aria-label="attach an image"
-					title="attach an image — or paste one, or drop it here"
-					disabled={disconnected}
-					onClick={attachments.openFileDialog}
-				>
-					<PaperclipIcon />
-				</PromptInputButton>
-				{/* Stop while a run is in flight (#116), through the thread's connection —
+  const attachments = usePromptInputAttachments()
+  const canSend = (draft.trim().length > 0 || attachments.files.length > 0) && !disconnected
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border bg-background p-2 shadow-sm focus-within:ring-1 focus-within:ring-ring">
+      {attachments.files.length === 0 ? null : (
+        <Attachments aria-label="attached images" className="px-1 pt-1">
+          {attachments.files.map((file) => (
+            <Attachment key={file.id} data={file} onRemove={() => attachments.remove(file.id)}>
+              <AttachmentPreview />
+              <AttachmentRemove label={`remove ${file.filename || 'image'}`} />
+            </Attachment>
+          ))}
+        </Attachments>
+      )}
+      <div className="flex items-end gap-2">
+        <PromptInputTextarea
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder={disconnected ? 'disconnected — reload and resume from the rail' : 'ask pi something'}
+          autoComplete="off"
+          rows={1}
+          className="max-h-40 min-h-9 flex-1 resize-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
+        />
+        {/* Attach (#68): the same file dialog a paste or a drop bypasses. */}
+        <PromptInputButton
+          aria-label="attach an image"
+          title="attach an image — or paste one, or drop it here"
+          disabled={disconnected}
+          onClick={attachments.openFileDialog}
+        >
+          <PaperclipIcon />
+        </PromptInputButton>
+        {/* Stop while a run is in flight (#116), through the thread's connection —
 				    `POST …/abort` → pi's own abort. ⚠ NOT `chat.stop()`: that aborts this
 				    client's POST, which returned at admission, and touches nothing on the
 				    server. The run ends on the follow (`settled`, `status`) like any other,
@@ -514,26 +514,26 @@ function ComposerBody({
 				    (#103 receipt). Not offered once the follow has ended (#119): the flag
 				    is then as of that moment, and a stop that may stop nothing is issue #4's shape -
 				    `docs/architecture.md`, The control plane, invariant 5. */}
-				{running && !disconnected ? (
-					<Button
-						type="button"
-						size="icon"
-						variant="outline"
-						aria-label="stop the run"
-						title="stop the run in flight — pi is told; the run ends on the feed"
-						onClick={onStop}
-					>
-						<SquareIcon />
-					</Button>
-				) : null}
-				{/* Send stays offered in flight: a prompt during a run queues through pi (#75) —
+        {running && !disconnected ? (
+          <Button
+            type="button"
+            size="icon"
+            variant="outline"
+            aria-label="stop the run"
+            title="stop the run in flight — pi is told; the run ends on the feed"
+            onClick={onStop}
+          >
+            <SquareIcon />
+          </Button>
+        ) : null}
+        {/* Send stays offered in flight: a prompt during a run queues through pi (#75) —
 				    the form's submit takes the direct route past TanStack's own queue. */}
-				<Button type="submit" size="icon" aria-label="send message" disabled={!canSend}>
-					<ArrowUpIcon />
-				</Button>
-			</div>
-		</div>
-	);
+        <Button type="submit" size="icon" aria-label="send message" disabled={!canSend}>
+          <ArrowUpIcon />
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 /**
@@ -543,38 +543,38 @@ function ComposerBody({
  * ⓘ Exported for `__tests__/chat-screen.test.tsx`.
  */
 export function PendingQueue(): React.ReactNode {
-	const stores = useThreadStores();
-	const queued = useStore(stores.queue);
-	if (queued.length === 0) return null;
-	// pi's queue is texts without ids; the same text may wait twice. Key by text and its
-	// occurrence so a duplicate keeps its own row and a removal from the head does not remount.
-	const seen = new Map<string, number>();
-	const keyed = queued.map((text) => {
-		const occurrence = seen.get(text) ?? 0;
-		seen.set(text, occurrence + 1);
-		return { text, key: `${text}\u0000${occurrence}` };
-	});
-	return (
-		<QueueShell aria-label="queued prompts" className="mx-auto mb-2 w-full max-w-3xl">
-			<QueueSection>
-				<QueueSectionTrigger>
-					<QueueSectionLabel count={queued.length} label={queued.length === 1 ? "prompt queued" : "prompts queued"} />
-				</QueueSectionTrigger>
-				<QueueSectionContent>
-					<QueueList>
-						{keyed.map(({ text, key }) => (
-							<QueueItem key={key}>
-								<span className="flex items-start gap-2">
-									<QueueItemIndicator />
-									<QueueItemContent title={text}>{text}</QueueItemContent>
-								</span>
-							</QueueItem>
-						))}
-					</QueueList>
-				</QueueSectionContent>
-			</QueueSection>
-		</QueueShell>
-	);
+  const stores = useThreadStores()
+  const queued = useStore(stores.queue)
+  if (queued.length === 0) return null
+  // pi's queue is texts without ids; the same text may wait twice. Key by text and its
+  // occurrence so a duplicate keeps its own row and a removal from the head does not remount.
+  const seen = new Map<string, number>()
+  const keyed = queued.map((text) => {
+    const occurrence = seen.get(text) ?? 0
+    seen.set(text, occurrence + 1)
+    return { text, key: `${text}\u0000${occurrence}` }
+  })
+  return (
+    <QueueShell aria-label="queued prompts" className="mx-auto mb-2 w-full max-w-3xl">
+      <QueueSection>
+        <QueueSectionTrigger>
+          <QueueSectionLabel count={queued.length} label={queued.length === 1 ? 'prompt queued' : 'prompts queued'} />
+        </QueueSectionTrigger>
+        <QueueSectionContent>
+          <QueueList>
+            {keyed.map(({ text, key }) => (
+              <QueueItem key={key}>
+                <span className="flex items-start gap-2">
+                  <QueueItemIndicator />
+                  <QueueItemContent title={text}>{text}</QueueItemContent>
+                </span>
+              </QueueItem>
+            ))}
+          </QueueList>
+        </QueueSectionContent>
+      </QueueSection>
+    </QueueShell>
+  )
 }
 
 /**
@@ -582,258 +582,258 @@ export function PendingQueue(): React.ReactNode {
  * render identically. Type-annotated by inference through `createThreadChatHook`.
  */
 const chatComponents = {
-	components: {
-		/**
-		 * ⚠ `input` MUST be declared before `layout`.
-		 *
-		 * `docs/ui/react`: "Define `input` before `layout` in your component map to ensure
-		 * TypeScript recognizes it as registered." `LayoutProps` only carries `Input` when a
-		 * `components.input` is present, and that conditional type resolves in literal
-		 * property order — so declaring `layout` first makes `Input` vanish from its props
-		 * with a confusing error. Property order is load-bearing here, which is not a thing
-		 * one expects of an object literal.
-		 */
-		input: function ChatPromptInput() {
-			// Application-owned, per `ChatInput`'s deprecation notice. `useChatContext` is the
-			// one returned by `createChatHook` above — referenced at render time, so the
-			// binding is initialised by then.
-			const chat = useChatContext();
-			const stores = useThreadStores();
-			const disconnected = useStore(stores.disconnected);
-			// Controlled, so the send button can disable on empty and a take-back can write it —
-			// the ai-elements chatbot example's PromptInput does the same.
-			const [draft, setDraft] = useState("");
-			// The user messages this composer put in the transcript for prompts pi is still
-			// HOLDING (#75): a stop hands those texts back, and the bubble that was never asked
-			// leaves with them — pi's TUI does the same. A claimed prompt's bubble stays.
-			const heldLocally = useRef<Array<{ id: string; text: string }>>([]);
-			// ⚠ `takeBack` runs after a network round trip, from a closure made by an older render.
-			// `chat.messages` there is that render's snapshot; filtering it would replace the
-			// transcript with the snapshot minus one — reverting every delta that streamed in
-			// between (PR #129 review). The ref is the transcript as of the latest COMMITTED
-			// render — written in an effect, never during render (react-doctor, and React's rule).
-			const latestMessages = useRef(chat.messages);
-			useEffect(() => {
-				latestMessages.current = chat.messages;
-			}, [chat.messages]);
-			/**
-			 * Send what the form holds: the text, and the pasted or dropped images as inline bytes.
-			 * Nothing sends while disconnected (#119, PR #123 review): the prompt would reach a
-			 * server that rebuilds the thread, but this page's follow is gone, so the reply would
-			 * land nowhere this page can see. An image with no words is a prompt (pi-ai keeps the
-			 * image and drops the empty text block); nothing at all is not.
-			 */
-			const send = (text: string, images: readonly ZenPromptImage[]): void => {
-				if (disconnected) return;
-				if (text.trim().length === 0 && images.length === 0) return;
-				setDraft("");
-				const parts: ContentPart[] = [
-					...(text.length === 0 ? [] : [{ type: "text" as const, content: text }]),
-					...images.map((image) => ({
-						type: "image" as const,
-						source: { type: "data" as const, value: image.data, mimeType: image.mimeType },
-					})),
-				];
-				if (!chat.sessionGenerating) {
-					void chat.sendMessage({ content: parts });
-					return;
-				}
-				// A prompt DURING a run queues through pi (#75). ⚠ Not `chat.sendMessage`: TanStack
-				// holds a send in its own queue while the run it started is open and delivers it at
-				// settle — the browser's queue, invisible to other tabs, lost on reload. So the user
-				// message goes into the transcript here, and the text goes to pi now: pi lists it on
-				// the follow for every follower (`zen.queue`, the list above this composer) and claims
-				// it when the run's turn ends. Refused or unreachable, the words come back to the
-				// draft. ⚠ The images do not: pi's queue hands back texts (`ZenAbortReceipt.restored`),
-				// and the composer's attachments are the form's, not this component's — re-attach.
-				const id = crypto.randomUUID();
-				heldLocally.current.push({ id, text });
-				chat.setMessages([...chat.messages, { id, role: "user", parts, createdAt: new Date() }]);
-				void stores.connection.prompt(text, images).then((outcome) => {
-					if (outcome === "refused" || outcome === "unreachable") takeBack([text]);
-				});
-			};
-			/** Texts pi never took come back to the draft, and their never-asked bubbles leave the transcript. */
-			const takeBack = (texts: readonly string[]): void => {
-				const leaving = new Set<string>();
-				for (const text of texts) {
-					const position = heldLocally.current.findIndex((held) => held.text === text);
-					if (position === -1) continue;
-					leaving.add(heldLocally.current[position]?.id ?? "");
-					heldLocally.current.splice(position, 1);
-				}
-				if (leaving.size > 0) chat.setMessages(latestMessages.current.filter((message) => !leaving.has(message.id)));
-				setDraft((current) => joinDrafts(current, ...texts));
-			};
-			// Stop (#116) hands back what was queued behind the run (#75, clear-and-restore): the
-			// abort receipt's texts become the draft, in order, after anything already typed.
-			const stopRun = (): void => {
-				void stores.connection.abort().then(({ restored }) => {
-					if (restored.length > 0) takeBack(restored);
-				});
-			};
+  components: {
+    /**
+     * ⚠ `input` MUST be declared before `layout`.
+     *
+     * `docs/ui/react`: "Define `input` before `layout` in your component map to ensure
+     * TypeScript recognizes it as registered." `LayoutProps` only carries `Input` when a
+     * `components.input` is present, and that conditional type resolves in literal
+     * property order — so declaring `layout` first makes `Input` vanish from its props
+     * with a confusing error. Property order is load-bearing here, which is not a thing
+     * one expects of an object literal.
+     */
+    input: function ChatPromptInput() {
+      // Application-owned, per `ChatInput`'s deprecation notice. `useChatContext` is the
+      // one returned by `createChatHook` above — referenced at render time, so the
+      // binding is initialised by then.
+      const chat = useChatContext()
+      const stores = useThreadStores()
+      const disconnected = useStore(stores.disconnected)
+      // Controlled, so the send button can disable on empty and a take-back can write it —
+      // the ai-elements chatbot example's PromptInput does the same.
+      const [draft, setDraft] = useState('')
+      // The user messages this composer put in the transcript for prompts pi is still
+      // HOLDING (#75): a stop hands those texts back, and the bubble that was never asked
+      // leaves with them — pi's TUI does the same. A claimed prompt's bubble stays.
+      const heldLocally = useRef<Array<{ id: string; text: string }>>([])
+      // ⚠ `takeBack` runs after a network round trip, from a closure made by an older render.
+      // `chat.messages` there is that render's snapshot; filtering it would replace the
+      // transcript with the snapshot minus one — reverting every delta that streamed in
+      // between (PR #129 review). The ref is the transcript as of the latest COMMITTED
+      // render — written in an effect, never during render (react-doctor, and React's rule).
+      const latestMessages = useRef(chat.messages)
+      useEffect(() => {
+        latestMessages.current = chat.messages
+      }, [chat.messages])
+      /**
+       * Send what the form holds: the text, and the pasted or dropped images as inline bytes.
+       * Nothing sends while disconnected (#119, PR #123 review): the prompt would reach a
+       * server that rebuilds the thread, but this page's follow is gone, so the reply would
+       * land nowhere this page can see. An image with no words is a prompt (pi-ai keeps the
+       * image and drops the empty text block); nothing at all is not.
+       */
+      const send = (text: string, images: readonly ZenPromptImage[]): void => {
+        if (disconnected) return
+        if (text.trim().length === 0 && images.length === 0) return
+        setDraft('')
+        const parts: ContentPart[] = [
+          ...(text.length === 0 ? [] : [{ type: 'text' as const, content: text }]),
+          ...images.map((image) => ({
+            type: 'image' as const,
+            source: { type: 'data' as const, value: image.data, mimeType: image.mimeType },
+          })),
+        ]
+        if (!chat.sessionGenerating) {
+          void chat.sendMessage({ content: parts })
+          return
+        }
+        // A prompt DURING a run queues through pi (#75). ⚠ Not `chat.sendMessage`: TanStack
+        // holds a send in its own queue while the run it started is open and delivers it at
+        // settle — the browser's queue, invisible to other tabs, lost on reload. So the user
+        // message goes into the transcript here, and the text goes to pi now: pi lists it on
+        // the follow for every follower (`zen.queue`, the list above this composer) and claims
+        // it when the run's turn ends. Refused or unreachable, the words come back to the
+        // draft. ⚠ The images do not: pi's queue hands back texts (`ZenAbortReceipt.restored`),
+        // and the composer's attachments are the form's, not this component's — re-attach.
+        const id = crypto.randomUUID()
+        heldLocally.current.push({ id, text })
+        chat.setMessages([...chat.messages, { id, role: 'user', parts, createdAt: new Date() }])
+        void stores.connection.prompt(text, images).then((outcome) => {
+          if (outcome === 'refused' || outcome === 'unreachable') takeBack([text])
+        })
+      }
+      /** Texts pi never took come back to the draft, and their never-asked bubbles leave the transcript. */
+      const takeBack = (texts: readonly string[]): void => {
+        const leaving = new Set<string>()
+        for (const text of texts) {
+          const position = heldLocally.current.findIndex((held) => held.text === text)
+          if (position === -1) continue
+          leaving.add(heldLocally.current[position]?.id ?? '')
+          heldLocally.current.splice(position, 1)
+        }
+        if (leaving.size > 0) chat.setMessages(latestMessages.current.filter((message) => !leaving.has(message.id)))
+        setDraft((current) => joinDrafts(current, ...texts))
+      }
+      // Stop (#116) hands back what was queued behind the run (#75, clear-and-restore): the
+      // abort receipt's texts become the draft, in order, after anything already typed.
+      const stopRun = (): void => {
+        void stores.connection.abort().then(({ restored }) => {
+          if (restored.length > 0) takeBack(restored)
+        })
+      }
 
-			return (
-				<PromptInput
-					className="mx-auto w-full max-w-3xl px-4 pb-4"
-					accept={ZEN_IMAGE_MIME_TYPES.join(",")}
-					multiple
-					maxFiles={ZEN_PROMPT_MAX_IMAGES}
-					maxFileSize={ZEN_IMAGE_MAX_BYTES}
-					// A file the form would not take is said, not dropped (#68): the reason names the cap.
-					onError={(error) => stores.notifications.push(describeAttachmentError(error), "warning", "run")}
-					onSubmit={({ text, files }) => {
-						// The form hands back `data:` URLs (blob → FileReader); the wire takes bytes + kind.
-						// The form's `accept` already filtered by `File.type`; this is the same set, as a
-						// guard rather than a cast, and a miss is said the same way the form says one.
-						const images: ZenPromptImage[] = [];
-						let notImages = 0;
-						for (const file of files) {
-							const inline = /^data:([^;,]+);base64,(.*)$/.exec(file.url);
-							const mimeType = inline?.[1];
-							const data = inline?.[2];
-							if (mimeType === undefined || data === undefined || !isZenImageMimeType(mimeType)) {
-								notImages += 1;
-								continue;
-							}
-							images.push({ mimeType, data });
-						}
-						if (notImages > 0) {
-							stores.notifications.push(
-								describeAttachmentError({ code: "accept", message: "", count: notImages }),
-								"warning",
-								"run",
-							);
-						}
-						send(text, images);
-					}}
-				>
-					{/* The composer chrome (#90): the knobs at the point of use, deepseek's shape. */}
-					<div className="flex items-center justify-end px-1 pb-1">
-						<PermissionModeControl />
-					</div>
-					<ComposerBody
-						draft={draft}
-						setDraft={setDraft}
-						disconnected={disconnected}
-						running={chat.sessionGenerating}
-						onStop={stopRun}
-					/>
-				</PromptInput>
-			);
-		},
-		/**
-		 * ⚠⚠ A RUN_ERROR HAD NOWHERE TO RENDER, WHICH IS HOW `/mode` LOOKED LIKE NOTHING.
-		 *
-		 * Daniel typed `/mode`, the server correctly emitted RUN_ERROR explaining that pi was
-		 * blocked on an interactive dialog — and the page showed an empty assistant turn,
-		 * because the layout mounted Messages, Interrupts, Queue and Input and nothing read
-		 * `chat.error`. The transcript he pasted back was the INPUT PLACEHOLDER, which was
-		 * simply the next visible text on the page.
-		 *
-		 * Errors are not a message part, so no `partsComponents` entry catches them. They
-		 * live on the chat instance and have to be rendered deliberately.
-		 */
-		layout: function ChatLayout({ Messages, Input }: LayoutProps<ThreadChatOptions>) {
-			const chat = useChatContext();
-			const debugOpen = useContext(DebugOpenContext);
-			return (
-				<div className="flex min-h-0 flex-1 flex-col">
-					<div className="flex min-h-0 flex-1">
-						<div className="flex min-h-0 min-w-0 flex-1 flex-col">
-							<Conversation>
-								<ConversationContent className="mx-auto w-full max-w-3xl">
-									{chat.messages.length === 0 ? (
-										<ConversationEmptyState
-											icon={<img src="/logo-full.png" alt="zen-harness" className="w-44" />}
-											title=""
-											description="ask pi something to get started"
-										/>
-									) : (
-										<Messages />
-									)}
-									{/* pi's notify lines (#29) — the transcript tail, above the question,
+      return (
+        <PromptInput
+          className="mx-auto w-full max-w-3xl px-4 pb-4"
+          accept={ZEN_IMAGE_MIME_TYPES.join(',')}
+          multiple
+          maxFiles={ZEN_PROMPT_MAX_IMAGES}
+          maxFileSize={ZEN_IMAGE_MAX_BYTES}
+          // A file the form would not take is said, not dropped (#68): the reason names the cap.
+          onError={(error) => stores.notifications.push(describeAttachmentError(error), 'warning', 'run')}
+          onSubmit={({ text, files }) => {
+            // The form hands back `data:` URLs (blob → FileReader); the wire takes bytes + kind.
+            // The form's `accept` already filtered by `File.type`; this is the same set, as a
+            // guard rather than a cast, and a miss is said the same way the form says one.
+            const images: ZenPromptImage[] = []
+            let notImages = 0
+            for (const file of files) {
+              const inline = /^data:([^;,]+);base64,(.*)$/.exec(file.url)
+              const mimeType = inline?.[1]
+              const data = inline?.[2]
+              if (mimeType === undefined || data === undefined || !isZenImageMimeType(mimeType)) {
+                notImages += 1
+                continue
+              }
+              images.push({ mimeType, data })
+            }
+            if (notImages > 0) {
+              stores.notifications.push(
+                describeAttachmentError({ code: 'accept', message: '', count: notImages }),
+                'warning',
+                'run',
+              )
+            }
+            send(text, images)
+          }}
+        >
+          {/* The composer chrome (#90): the knobs at the point of use, deepseek's shape. */}
+          <div className="flex items-center justify-end px-1 pb-1">
+            <PermissionModeControl />
+          </div>
+          <ComposerBody
+            draft={draft}
+            setDraft={setDraft}
+            disconnected={disconnected}
+            running={chat.sessionGenerating}
+            onStop={stopRun}
+          />
+        </PromptInput>
+      )
+    },
+    /**
+     * ⚠⚠ A RUN_ERROR HAD NOWHERE TO RENDER, WHICH IS HOW `/mode` LOOKED LIKE NOTHING.
+     *
+     * Daniel typed `/mode`, the server correctly emitted RUN_ERROR explaining that pi was
+     * blocked on an interactive dialog — and the page showed an empty assistant turn,
+     * because the layout mounted Messages, Interrupts, Queue and Input and nothing read
+     * `chat.error`. The transcript he pasted back was the INPUT PLACEHOLDER, which was
+     * simply the next visible text on the page.
+     *
+     * Errors are not a message part, so no `partsComponents` entry catches them. They
+     * live on the chat instance and have to be rendered deliberately.
+     */
+    layout: function ChatLayout({ Messages, Input }: LayoutProps<ThreadChatOptions>) {
+      const chat = useChatContext()
+      const debugOpen = useContext(DebugOpenContext)
+      return (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <Conversation>
+                <ConversationContent className="mx-auto w-full max-w-3xl">
+                  {chat.messages.length === 0 ? (
+                    <ConversationEmptyState
+                      icon={<img src="/logo-full.png" alt="zen-harness" className="w-44" />}
+                      title=""
+                      description="ask pi something to get started"
+                    />
+                  ) : (
+                    <Messages />
+                  )}
+                  {/* pi's notify lines (#29) — the transcript tail, above the question,
 									    so "Mode set to X" reads next to the run it belongs to. */}
-									<ThreadNotifications />
-									{/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
+                  <ThreadNotifications />
+                  {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
 									    `ask` verdict reaches the browser, and an unmounted slot is precisely
 									    why an approval would silently never appear. */}
-									<PendingDialog />
-									<RunProblem />
-								</ConversationContent>
-								<ConversationScrollButton />
-							</Conversation>
-							{/* pi's queue, not TanStack's `Queue` slot (#75): a prompt sent during a run goes to
+                  <PendingDialog />
+                  <RunProblem />
+                </ConversationContent>
+                <ConversationScrollButton />
+              </Conversation>
+              {/* pi's queue, not TanStack's `Queue` slot (#75): a prompt sent during a run goes to
 							    pi and is listed here for every follower; TanStack's own queue is bypassed. */}
-							<PendingQueue />
-							<Input />
-						</div>
-						{/* The session debug pane (#86): what the browser believes beside what pi's
+              <PendingQueue />
+              <Input />
+            </div>
+            {/* The session debug pane (#86): what the browser believes beside what pi's
 						    session holds, for THIS thread. Scrolls on its own so a long branch never
 						    moves the composer. */}
-						{debugOpen ? (
-							<div id="thread-debug-pane" className="w-[30rem] shrink-0 overflow-y-auto border-l">
-								<ThreadDebugDrawer />
-							</div>
-						) : null}
-					</div>
-					{/* The status bar (#90): activity, turns, tool calls, cost — always visible, full
+            {debugOpen ? (
+              <div id="thread-debug-pane" className="w-[30rem] shrink-0 overflow-y-auto border-l">
+                <ThreadDebugDrawer />
+              </div>
+            ) : null}
+          </div>
+          {/* The status bar (#90): activity, turns, tool calls, cost — always visible, full
 					    width under transcript AND debug pane, so it is the one place to look. */}
-					<ThreadStatusBar messages={chat.messages} generating={chat.sessionGenerating} />
-				</div>
-			);
-		},
-		/**
-		 * ⚠ Ignores the bound `Parts` component ON PURPOSE — see `SelectedMessagePart`'s
-		 * header for why (TanStack's own dispatcher drops tools it has no name for).
-		 *
-		 * The selection is the library's, run over the WHOLE message list — the same input
-		 * its own Messages component gives `selectChatUI` — so a tool result the server
-		 * stamps onto a DIFFERENT message than its call still pairs. A per-message
-		 * `selectMessageUI` was the first draft and would have shown such a call as
-		 * "running…" forever. O(messages²) per render is irrelevant at chat scale.
-		 */
-		message: function ChatMessageRow({ message }: MessageProps<ThreadChatOptions>) {
-			const chat = useChatContext();
-			const selectedMessage = selectChatUI({ messages: chat.messages }).messages.find(
-				(entry) => entry.message.id === message.id,
-			);
-			const selectedParts = selectedMessage === undefined ? [] : automaticPartsForMessage(selectedMessage);
-			const isLastMessage = chat.messages.at(-1)?.id === message.id;
-			// This message's run is in flight: the last message, while the thread generates. A
-			// tool call with no result reads `running…` under it and `aborted` without it (#130).
-			const runOpen = chat.sessionGenerating && isLastMessage;
-			return (
-				<Message from={message.role} data-role={message.role}>
-					<MessageContent>
-						{keyedParts(selectedParts).map(({ partKey, selected, isTrailingPart }) => (
-							<SelectedMessagePart
-								key={`${message.id}-${partKey}`}
-								selected={selected}
-								// ⚠ Part-level, not chat-level: true only for the TRAILING part of
-								// the TRAILING message while a run is in flight. Passing bare
-								// `chat.isLoading` here re-opened EVERY prior thinking block on
-								// every later send (the Reasoning shell's auto-close latches after
-								// its first close, so they also never closed again) and overwrote
-								// each block's "Thought for N seconds" with the later run's timing.
-								isStreaming={runOpen && isTrailingPart}
-								runOpen={runOpen}
-								renderers={descriptorRenderers}
-							/>
-						))}
-					</MessageContent>
-				</Message>
-			);
-		},
-	},
-	// ⚠ Deliberately empty, and load-bearing as documentation: nothing renders the bound
-	// `Parts` component (the `message` slot above dispatches parts itself), so any entry
-	// written here is dead code that LOOKS live — which is precisely the state this
-	// arrangement replaced (`partsComponents.toolCall` sat here for weeks, unreachable).
-	partsComponents: {},
-	// No `interruptsComponents`: pi's questions are not AG-UI interrupts on this surface
-	// (#112) — they arrive as `zen.dialog` chunks and render through `PendingDialog` above.
-};
+          <ThreadStatusBar messages={chat.messages} generating={chat.sessionGenerating} />
+        </div>
+      )
+    },
+    /**
+     * ⚠ Ignores the bound `Parts` component ON PURPOSE — see `SelectedMessagePart`'s
+     * header for why (TanStack's own dispatcher drops tools it has no name for).
+     *
+     * The selection is the library's, run over the WHOLE message list — the same input
+     * its own Messages component gives `selectChatUI` — so a tool result the server
+     * stamps onto a DIFFERENT message than its call still pairs. A per-message
+     * `selectMessageUI` was the first draft and would have shown such a call as
+     * "running…" forever. O(messages²) per render is irrelevant at chat scale.
+     */
+    message: function ChatMessageRow({ message }: MessageProps<ThreadChatOptions>) {
+      const chat = useChatContext()
+      const selectedMessage = selectChatUI({ messages: chat.messages }).messages.find(
+        (entry) => entry.message.id === message.id,
+      )
+      const selectedParts = selectedMessage === undefined ? [] : automaticPartsForMessage(selectedMessage)
+      const isLastMessage = chat.messages.at(-1)?.id === message.id
+      // This message's run is in flight: the last message, while the thread generates. A
+      // tool call with no result reads `running…` under it and `aborted` without it (#130).
+      const runOpen = chat.sessionGenerating && isLastMessage
+      return (
+        <Message from={message.role} data-role={message.role}>
+          <MessageContent>
+            {keyedParts(selectedParts).map(({ partKey, selected, isTrailingPart }) => (
+              <SelectedMessagePart
+                key={`${message.id}-${partKey}`}
+                selected={selected}
+                // ⚠ Part-level, not chat-level: true only for the TRAILING part of
+                // the TRAILING message while a run is in flight. Passing bare
+                // `chat.isLoading` here re-opened EVERY prior thinking block on
+                // every later send (the Reasoning shell's auto-close latches after
+                // its first close, so they also never closed again) and overwrote
+                // each block's "Thought for N seconds" with the later run's timing.
+                isStreaming={runOpen && isTrailingPart}
+                runOpen={runOpen}
+                renderers={descriptorRenderers}
+              />
+            ))}
+          </MessageContent>
+        </Message>
+      )
+    },
+  },
+  // ⚠ Deliberately empty, and load-bearing as documentation: nothing renders the bound
+  // `Parts` component (the `message` slot above dispatches parts itself), so any entry
+  // written here is dead code that LOOKS live — which is precisely the state this
+  // arrangement replaced (`partsComponents.toolCall` sat here for weeks, unreachable).
+  partsComponents: {},
+  // No `interruptsComponents`: pi's questions are not AG-UI interrupts on this surface
+  // (#112) — they arrive as `zen.dialog` chunks and render through `PendingDialog` above.
+}
 
 /**
  * One thread's pane: its chat factory, its stores in context, its summary kept current for
@@ -844,30 +844,30 @@ const chatComponents = {
  * that a hidden pane renders no debug column. Nothing else imports it.
  */
 export function ThreadPane({
-	threadId,
-	active,
-	debugOpen,
+  threadId,
+  active,
+  debugOpen,
 }: {
-	threadId: string;
-	active: boolean;
-	/** The page's `?debug` switch; the column itself opens only in the active pane. */
-	debugOpen: boolean;
+  threadId: string
+  active: boolean
+  /** The page's `?debug` switch; the column itself opens only in the active pane. */
+  debugOpen: boolean
 }): React.ReactNode {
-	const stores = getThreadStores(threadId);
-	const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores]);
-	const chat = useAppChat();
-	useEffect(() => {
-		updateThreadSummary(threadId, { title: titleFromMessages(chat.messages), busy: chat.sessionGenerating });
-	}, [threadId, chat.messages, chat.sessionGenerating]);
-	return (
-		<div className={active ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"}>
-			<ThreadStoresContext.Provider value={stores}>
-				<DebugOpenContext.Provider value={debugOpen && active}>
-					<chat.AppChat />
-				</DebugOpenContext.Provider>
-			</ThreadStoresContext.Provider>
-		</div>
-	);
+  const stores = getThreadStores(threadId)
+  const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores])
+  const chat = useAppChat()
+  useEffect(() => {
+    updateThreadSummary(threadId, { title: titleFromMessages(chat.messages), busy: chat.sessionGenerating })
+  }, [threadId, chat.messages, chat.sessionGenerating])
+  return (
+    <div className={active ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
+      <ThreadStoresContext.Provider value={stores}>
+        <DebugOpenContext.Provider value={debugOpen && active}>
+          <chat.AppChat />
+        </DebugOpenContext.Provider>
+      </ThreadStoresContext.Provider>
+    </div>
+  )
 }
 
 /**
@@ -876,157 +876,157 @@ export function ThreadPane({
  * mints a fresh one as every page load did before (#86) — and writes its id to the URL at
  * once, so a reload from the first prompt on shows this thread, not another fresh one.
  */
-const BOOT: ThreadUrl = typeof window === "undefined" ? { kind: "fresh" } : readThreadUrl(window.location.search);
-const FIRST_THREAD_ID: string | undefined = BOOT.kind === "fresh" ? mintThread().threadId : undefined;
-if (FIRST_THREAD_ID !== undefined && typeof window !== "undefined") {
-	window.history.replaceState(null, "", urlForThread(window.location.search, FIRST_THREAD_ID));
+const BOOT: ThreadUrl = typeof window === 'undefined' ? { kind: 'fresh' } : readThreadUrl(window.location.search)
+const FIRST_THREAD_ID: string | undefined = BOOT.kind === 'fresh' ? mintThread().threadId : undefined
+if (FIRST_THREAD_ID !== undefined && typeof window !== 'undefined') {
+  window.history.replaceState(null, '', urlForThread(window.location.search, FIRST_THREAD_ID))
 }
 
 /** How the active thread came to change — what, if anything, is written to history. */
 type ThreadNavigation =
-	/** A click: a new history entry, so back returns to the thread before it. */
-	| "push"
-	/** The page's own doing (a fresh thread after a failed boot): the current entry is rewritten. */
-	| "replace"
-	/** Back or forward: history already moved; the page follows it. */
-	| "pop";
+  /** A click: a new history entry, so back returns to the thread before it. */
+  | 'push'
+  /** The page's own doing (a fresh thread after a failed boot): the current entry is rewritten. */
+  | 'replace'
+  /** Back or forward: history already moved; the page follows it. */
+  | 'pop'
 
 /**
  * The stored sessions the rail can come back to (#95). Page-level, refreshed on load and
  * whenever a run settles — the moments a session file appears or grows.
  */
-const storedThreads = createStoredThreadsStore();
+const storedThreads = createStoredThreadsStore()
 
 /** The page (#90): header, the sessions rail, and one mounted pane per live thread. */
 export function ChatScreen(): React.ReactNode {
-	const threads = useStore(threadListStore);
-	const stored = useStore(storedThreads);
-	// Undefined only while a URL-named thread is being adopted: no pane, nothing active.
-	const [activeThreadId, setActiveThreadId] = useState<string | undefined>(FIRST_THREAD_ID);
-	const [resumeError, setResumeError] = useState<string | undefined>(BOOT.kind === "fresh" ? BOOT.notice : undefined);
-	const anyBusy = threads.some((thread) => thread.busy);
-	useEffect(() => {
-		// Load, and every time the page goes from a run in flight to none: something settled.
-		if (!(anyBusy || isFixtureMode)) void storedThreads.refresh();
-	}, [anyBusy]);
-	const pageThreadIds = new Set(threads.map((thread) => thread.threadId));
-	// ⚠ Two things a resume's outcome must know, and cannot read from shared state (PR #143
-	// review — a shared "how" slot plus a "no threads yet" check desynced the URL from the
-	// pane the moment the boot's resume overlapped a rail click):
-	// - HOW its own request meant to reach history: it rides with the request (`intent`).
-	// - WHETHER a navigation happened since it was issued: `epoch` counts every navigation,
-	//   and an outcome from before the current one is dropped whole. New Session during the
-	//   boot's "resuming…" therefore wins outright: the URL says the new thread, the pane
-	//   shows it, and the boot's answer arrives to nobody.
-	// `activePane` mirrors `activeThreadId` for the same closures.
-	const epoch = useRef(0);
-	const activePane = useRef<string | undefined>(FIRST_THREAD_ID);
-	/** Make `threadId` the active pane, and tell history how it happened. History state is `null`: the URL is read back, never the state object. */
-	const navigate = useCallback((threadId: string, how: ThreadNavigation): void => {
-		epoch.current += 1;
-		activePane.current = threadId;
-		setActiveThreadId(threadId);
-		if (how === "pop" || typeof window === "undefined") return;
-		const url = urlForThread(window.location.search, threadId);
-		if (how === "push") window.history.pushState(null, "", url);
-		else window.history.replaceState(null, "", url);
-	}, []);
-	const resume = useMemo(
-		() =>
-			createResumeRequests<{ how: ThreadNavigation; epoch: number }>(
-				fetchThreadHistory,
-				(history, intent) => {
-					if (intent.epoch !== epoch.current) return; // a navigation happened since — superseded
-					setResumeError(undefined);
-					navigate(adoptThread(history).threadId, intent.how);
-				},
-				(message, intent) => {
-					if (intent.epoch !== epoch.current) return;
-					setResumeError(message);
-					// The page must show SOMETHING: a resume that failed with no pane behind it (the
-					// boot's, or a rail click while the boot was still out) leaves a fresh thread, said
-					// (the error is on the rail), and the URL rewritten so a reload does not ask again.
-					if (activePane.current === undefined) navigate(mintThread().threadId, "replace");
-				},
-			),
-		[navigate],
-	);
-	const resumeFrom = useCallback(
-		(threadId: string, how: ThreadNavigation): void => resume(threadId, { how, epoch: epoch.current }),
-		[resume],
-	);
-	// Boot: the URL named a thread — adopt it. Once per page; the coordinator drops a stale answer.
-	useEffect(() => {
-		if (BOOT.kind === "resume") resumeFrom(BOOT.threadId, "pop");
-	}, [resumeFrom]);
-	// Back/forward: the URL moved; the page follows it — a thread on this page is a switch, one
-	// that is not is a resume. Neither writes history again.
-	useEffect(() => {
-		const onPopState = (): void => {
-			const named = readThreadUrl(window.location.search);
-			if (named.kind !== "resume") return;
-			if (threadListStore.get().some((thread) => thread.threadId === named.threadId)) {
-				navigate(named.threadId, "pop");
-				return;
-			}
-			resumeFrom(named.threadId, "pop");
-		};
-		window.addEventListener("popstate", onPopState);
-		return () => window.removeEventListener("popstate", onPopState);
-	}, [navigate, resumeFrom]);
-	// The debug column (#86) is a right-hand pane, not a bottom drawer: stacked under the
-	// transcript it took forty percent of the height and squeezed the conversation it
-	// exists to explain. Opt-in by `?debug`; open by default when it is, and collapsible
-	// from the header so it can get out of the way without a reload.
-	const [debugOpen, setDebugOpen] = useState(isDebugMode);
-	const active = threads.find((thread) => thread.threadId === activeThreadId);
-	return (
-		<div className="flex h-dvh flex-col bg-background text-foreground">
-			<header className="flex items-center gap-2 border-b px-4 py-2">
-				{/* The ensō mark, cropped from .local/logo.png into public/enso.png —
+  const threads = useStore(threadListStore)
+  const stored = useStore(storedThreads)
+  // Undefined only while a URL-named thread is being adopted: no pane, nothing active.
+  const [activeThreadId, setActiveThreadId] = useState<string | undefined>(FIRST_THREAD_ID)
+  const [resumeError, setResumeError] = useState<string | undefined>(BOOT.kind === 'fresh' ? BOOT.notice : undefined)
+  const anyBusy = threads.some((thread) => thread.busy)
+  useEffect(() => {
+    // Load, and every time the page goes from a run in flight to none: something settled.
+    if (!(anyBusy || isFixtureMode)) void storedThreads.refresh()
+  }, [anyBusy])
+  const pageThreadIds = new Set(threads.map((thread) => thread.threadId))
+  // ⚠ Two things a resume's outcome must know, and cannot read from shared state (PR #143
+  // review — a shared "how" slot plus a "no threads yet" check desynced the URL from the
+  // pane the moment the boot's resume overlapped a rail click):
+  // - HOW its own request meant to reach history: it rides with the request (`intent`).
+  // - WHETHER a navigation happened since it was issued: `epoch` counts every navigation,
+  //   and an outcome from before the current one is dropped whole. New Session during the
+  //   boot's "resuming…" therefore wins outright: the URL says the new thread, the pane
+  //   shows it, and the boot's answer arrives to nobody.
+  // `activePane` mirrors `activeThreadId` for the same closures.
+  const epoch = useRef(0)
+  const activePane = useRef<string | undefined>(FIRST_THREAD_ID)
+  /** Make `threadId` the active pane, and tell history how it happened. History state is `null`: the URL is read back, never the state object. */
+  const navigate = useCallback((threadId: string, how: ThreadNavigation): void => {
+    epoch.current += 1
+    activePane.current = threadId
+    setActiveThreadId(threadId)
+    if (how === 'pop' || typeof window === 'undefined') return
+    const url = urlForThread(window.location.search, threadId)
+    if (how === 'push') window.history.pushState(null, '', url)
+    else window.history.replaceState(null, '', url)
+  }, [])
+  const resume = useMemo(
+    () =>
+      createResumeRequests<{ how: ThreadNavigation; epoch: number }>(
+        fetchThreadHistory,
+        (history, intent) => {
+          if (intent.epoch !== epoch.current) return // a navigation happened since — superseded
+          setResumeError(undefined)
+          navigate(adoptThread(history).threadId, intent.how)
+        },
+        (message, intent) => {
+          if (intent.epoch !== epoch.current) return
+          setResumeError(message)
+          // The page must show SOMETHING: a resume that failed with no pane behind it (the
+          // boot's, or a rail click while the boot was still out) leaves a fresh thread, said
+          // (the error is on the rail), and the URL rewritten so a reload does not ask again.
+          if (activePane.current === undefined) navigate(mintThread().threadId, 'replace')
+        },
+      ),
+    [navigate],
+  )
+  const resumeFrom = useCallback(
+    (threadId: string, how: ThreadNavigation): void => resume(threadId, { how, epoch: epoch.current }),
+    [resume],
+  )
+  // Boot: the URL named a thread — adopt it. Once per page; the coordinator drops a stale answer.
+  useEffect(() => {
+    if (BOOT.kind === 'resume') resumeFrom(BOOT.threadId, 'pop')
+  }, [resumeFrom])
+  // Back/forward: the URL moved; the page follows it — a thread on this page is a switch, one
+  // that is not is a resume. Neither writes history again.
+  useEffect(() => {
+    const onPopState = (): void => {
+      const named = readThreadUrl(window.location.search)
+      if (named.kind !== 'resume') return
+      if (threadListStore.get().some((thread) => thread.threadId === named.threadId)) {
+        navigate(named.threadId, 'pop')
+        return
+      }
+      resumeFrom(named.threadId, 'pop')
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [navigate, resumeFrom])
+  // The debug column (#86) is a right-hand pane, not a bottom drawer: stacked under the
+  // transcript it took forty percent of the height and squeezed the conversation it
+  // exists to explain. Opt-in by `?debug`; open by default when it is, and collapsible
+  // from the header so it can get out of the way without a reload.
+  const [debugOpen, setDebugOpen] = useState(isDebugMode)
+  const active = threads.find((thread) => thread.threadId === activeThreadId)
+  return (
+    <div className="flex h-dvh flex-col bg-background text-foreground">
+      <header className="flex items-center gap-2 border-b px-4 py-2">
+        {/* The ensō mark, cropped from .local/logo.png into public/enso.png —
 				    kanagawa fujiWhite cream, so it reads on the Wave background. */}
-				<img src="/enso.png" alt="" className="size-6" />
-				<h1 className="font-medium text-muted-foreground text-sm">zen-harness</h1>
-				{isFixtureMode ? (
-					<span className="rounded-full border px-2 py-0.5 text-muted-foreground text-xs">fixture</span>
-				) : null}
-				{/* Where you are: the active thread's title, the same one the rail shows. */}
-				<span className="min-w-0 flex-1 truncate text-sm" title={activeThreadId ?? ""}>
-					{active?.title ?? (activeThreadId === undefined ? "resuming…" : UNTITLED_THREAD)}
-				</span>
-				{isDebugMode ? (
-					<Button
-						type="button"
-						size="sm"
-						variant={debugOpen ? "secondary" : "outline"}
-						aria-expanded={debugOpen}
-						aria-controls="thread-debug-pane"
-						onClick={() => setDebugOpen((open) => !open)}
-					>
-						{debugOpen ? "hide debug" : "show debug"}
-					</Button>
-				) : null}
-			</header>
-			<div className="flex min-h-0 flex-1">
-				<ThreadsRail
-					threads={threads}
-					activeThreadId={activeThreadId}
-					earlier={storedThreadsNotOnThisPage(stored.threads, pageThreadIds)}
-					earlierError={stored.error ?? resumeError}
-					now={new Date()}
-					onSelect={(threadId) => navigate(threadId, "push")}
-					onResume={(threadId) => resumeFrom(threadId, "push")}
-					onNew={() => navigate(mintThread().threadId, "push")}
-				/>
-				{threads.map((thread) => (
-					<ThreadPane
-						key={thread.threadId}
-						threadId={thread.threadId}
-						active={thread.threadId === activeThreadId}
-						debugOpen={isDebugMode && debugOpen}
-					/>
-				))}
-			</div>
-		</div>
-	);
+        <img src="/enso.png" alt="" className="size-6" />
+        <h1 className="font-medium text-muted-foreground text-sm">zen-harness</h1>
+        {isFixtureMode ? (
+          <span className="rounded-full border px-2 py-0.5 text-muted-foreground text-xs">fixture</span>
+        ) : null}
+        {/* Where you are: the active thread's title, the same one the rail shows. */}
+        <span className="min-w-0 flex-1 truncate text-sm" title={activeThreadId ?? ''}>
+          {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
+        </span>
+        {isDebugMode ? (
+          <Button
+            type="button"
+            size="sm"
+            variant={debugOpen ? 'secondary' : 'outline'}
+            aria-expanded={debugOpen}
+            aria-controls="thread-debug-pane"
+            onClick={() => setDebugOpen((open) => !open)}
+          >
+            {debugOpen ? 'hide debug' : 'show debug'}
+          </Button>
+        ) : null}
+      </header>
+      <div className="flex min-h-0 flex-1">
+        <ThreadsRail
+          threads={threads}
+          activeThreadId={activeThreadId}
+          earlier={storedThreadsNotOnThisPage(stored.threads, pageThreadIds)}
+          earlierError={stored.error ?? resumeError}
+          now={new Date()}
+          onSelect={(threadId) => navigate(threadId, 'push')}
+          onResume={(threadId) => resumeFrom(threadId, 'push')}
+          onNew={() => navigate(mintThread().threadId, 'push')}
+        />
+        {threads.map((thread) => (
+          <ThreadPane
+            key={thread.threadId}
+            threadId={thread.threadId}
+            active={thread.threadId === activeThreadId}
+            debugOpen={isDebugMode && debugOpen}
+          />
+        ))}
+      </div>
+    </div>
+  )
 }

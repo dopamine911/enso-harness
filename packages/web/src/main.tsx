@@ -1,12 +1,12 @@
 // ⚠ First import, deliberately: Tailwind's layers must land before any component renders,
 // and this is the ONE stylesheet — shadcn's theme variables are injected into it by the
 // CLI (`components.json` points here). Do not add a second css entry point.
-import "./styles/global.css";
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { configureBrowserLogging, pageLogLevel } from "./browser-logging.ts";
-import { ChatScreen } from "./chat-screen.tsx";
-import { browserLogging } from "./thread-stores.ts";
+import './styles/global.css'
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { configureBrowserLogging, pageLogLevel } from './browser-logging.ts'
+import { ChatScreen } from './chat-screen.tsx'
+import { browserLogging } from './thread-stores.ts'
 
 /**
  * THE ENTRY, deliberately thin: mount the app, nothing else. Everything importable lives
@@ -19,32 +19,32 @@ import { browserLogging } from "./thread-stores.ts";
 // `?log=debug` turns the page up. The shipper flushes on hide, so a closing tab's last
 // records go with it.
 browserLogging.set(
-	await configureBrowserLogging({
-		fetch: (input, init) => fetch(input, init),
-		level: pageLogLevel(window.location.search),
-		page: crypto.randomUUID().slice(0, 8),
-		console: true,
-	}),
-);
-document.addEventListener("visibilitychange", () => {
-	if (document.visibilityState === "hidden") browserLogging.get()?.shipper.flush(true);
-});
+  await configureBrowserLogging({
+    fetch: (input, init) => fetch(input, init),
+    level: pageLogLevel(window.location.search),
+    page: crypto.randomUUID().slice(0, 8),
+    console: true,
+  }),
+)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') browserLogging.get()?.shipper.flush(true)
+})
 
-const rootElement = document.getElementById("root");
-if (rootElement === null) throw new Error("zen-harness: #root is missing from index.html");
+const rootElement = document.getElementById('root')
+if (rootElement === null) throw new Error('zen-harness: #root is missing from index.html')
 // ⚠ The root is cached across module re-evaluations. This file cannot Fast Refresh (bun's
 // dev server warns "not accepted" and full-reloads on every edit here, as vite did before
 // #36 — an entry with side effects is never a refresh boundary), and a bare
 // `createRoot()` here then re-roots the same container, which React reports as an error
 // (seen live while verifying #29). Dev-only, but the cache is three lines and makes an
 // HMR edit render through the ONE root instead of racing two.
-const globalWithRoot = globalThis as { __zenReactRoot?: ReturnType<typeof createRoot> };
+const globalWithRoot = globalThis as { __zenReactRoot?: ReturnType<typeof createRoot> }
 if (globalWithRoot.__zenReactRoot === undefined) {
-	globalWithRoot.__zenReactRoot = createRoot(rootElement);
+  globalWithRoot.__zenReactRoot = createRoot(rootElement)
 }
-const reactRoot = globalWithRoot.__zenReactRoot;
+const reactRoot = globalWithRoot.__zenReactRoot
 reactRoot.render(
-	<StrictMode>
-		<ChatScreen />
-	</StrictMode>,
-);
+  <StrictMode>
+    <ChatScreen />
+  </StrictMode>,
+)

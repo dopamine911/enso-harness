@@ -1,16 +1,16 @@
 import {
-	isZenDialogSpec,
-	type PiEventDelivery,
-	type PiRpcEvent,
-	ZEN_TOOL_RESULT_KEY,
-	ZenDialogOutcome,
-	type ZenDialogSpec,
-	ZenNotifyType,
-	type ZenObservation,
-	type ZenToolResultDescriptor,
-	type ZenUsage,
-} from "@zen/core";
-import { Check } from "typebox/value";
+  isZenDialogSpec,
+  type PiEventDelivery,
+  type PiRpcEvent,
+  ZEN_TOOL_RESULT_KEY,
+  ZenDialogOutcome,
+  type ZenDialogSpec,
+  ZenNotifyType,
+  type ZenObservation,
+  type ZenToolResultDescriptor,
+  type ZenUsage,
+} from '@zen/core'
+import { Check } from 'typebox/value'
 
 /**
  * pi rpc events → the observations a surface renders (#24).
@@ -29,44 +29,44 @@ import { Check } from "typebox/value";
  */
 
 /** Methods that block pi until a response arrives — see the `extension_ui_request` case. */
-const DIALOG_UI_METHODS = new Set(["select", "confirm", "input", "editor"]);
+const DIALOG_UI_METHODS = new Set(['select', 'confirm', 'input', 'editor'])
 
 interface PiContentPart {
-	type?: string;
-	text?: string;
+  type?: string
+  text?: string
 }
 
 /** pi's tool `details` bag, which is where truncation lives. */
 interface PiToolDetails {
-	truncation?: { shown?: number; total?: number; unit?: string } | null;
-	fullOutputPath?: string | null;
-	[field: string]: unknown;
+  truncation?: { shown?: number; total?: number; unit?: string } | null
+  fullOutputPath?: string | null
+  [field: string]: unknown
 }
 
 function readUsage(raw: unknown): ZenUsage | undefined {
-	if (typeof raw !== "object" || raw === null) return undefined;
-	const usage = raw as Record<string, unknown>;
-	const numberAt = (key: string): number => (typeof usage[key] === "number" ? (usage[key] as number) : 0);
-	const cost = usage.cost as Record<string, unknown> | undefined;
-	const totalCost = typeof cost?.total === "number" ? (cost.total as number) : undefined;
-	return {
-		input: numberAt("input"),
-		output: numberAt("output"),
-		cacheRead: numberAt("cacheRead"),
-		cacheWrite: numberAt("cacheWrite"),
-		...(totalCost === undefined ? {} : { totalCost }),
-	};
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const usage = raw as Record<string, unknown>
+  const numberAt = (key: string): number => (typeof usage[key] === 'number' ? (usage[key] as number) : 0)
+  const cost = usage.cost as Record<string, unknown> | undefined
+  const totalCost = typeof cost?.total === 'number' ? (cost.total as number) : undefined
+  return {
+    input: numberAt('input'),
+    output: numberAt('output'),
+    cacheRead: numberAt('cacheRead'),
+    cacheWrite: numberAt('cacheWrite'),
+    ...(totalCost === undefined ? {} : { totalCost }),
+  }
 }
 
 /** Flatten pi's `content` array to text. Non-text parts are named, never dropped. */
 export function contentToText(content: unknown): string {
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return (content as PiContentPart[])
-		.map((part) =>
-			part.type === "text" && typeof part.text === "string" ? part.text : `[${part.type ?? "unknown"} content]`,
-		)
-		.join("");
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return (content as PiContentPart[])
+    .map((part) =>
+      part.type === 'text' && typeof part.text === 'string' ? part.text : `[${part.type ?? 'unknown'} content]`,
+    )
+    .join('')
 }
 
 /**
@@ -77,101 +77,101 @@ export function contentToText(content: unknown): string {
  * that wants a richer descriptor should emit one; this is the floor, not the ceiling.
  */
 export function descriptorFrom(toolName: string, details: unknown): ZenToolResultDescriptor | undefined {
-	if (typeof details !== "object" || details === null) return undefined;
-	const truncation = (details as PiToolDetails).truncation;
-	if (truncation === null || truncation === undefined) return undefined;
-	const { shown, total, unit } = truncation;
-	if (typeof shown !== "number" || typeof total !== "number") return undefined;
-	return {
-		kind: `pi.tool.${toolName}`,
-		props: {},
-		truncated: {
-			shown,
-			total,
-			unit: unit === "bytes" || unit === "items" ? unit : "lines",
-		},
-	};
+  if (typeof details !== 'object' || details === null) return undefined
+  const truncation = (details as PiToolDetails).truncation
+  if (truncation === null || truncation === undefined) return undefined
+  const { shown, total, unit } = truncation
+  if (typeof shown !== 'number' || typeof total !== 'number') return undefined
+  return {
+    kind: `pi.tool.${toolName}`,
+    props: {},
+    truncated: {
+      shown,
+      total,
+      unit: unit === 'bytes' || unit === 'items' ? unit : 'lines',
+    },
+  }
 }
 
 /** The metadata bag to attach to a TanStack `ToolResultPart`, or undefined if there is none. */
 export function toolResultMetadata(
-	descriptor: ZenToolResultDescriptor | undefined,
+  descriptor: ZenToolResultDescriptor | undefined,
 ): Record<string, unknown> | undefined {
-	return descriptor === undefined ? undefined : { [ZEN_TOOL_RESULT_KEY]: descriptor };
+  return descriptor === undefined ? undefined : { [ZEN_TOOL_RESULT_KEY]: descriptor }
 }
 
 /** The `extension_ui_request` case of {@link mapPiEvent}, on its own because of its size. */
 function mapExtensionUiRequest(event: PiRpcEvent, delivery: PiEventDelivery): ZenObservation {
-	// ⚠ pi's Extension UI sub-protocol, and it splits in two (`docs/rpc.md` § Extension
-	// UI Protocol):
-	//
-	//   DIALOG methods    select | confirm | input | editor
-	//                     emit a request and BLOCK until the client answers it (over
-	//                     rpc: an `extension_ui_response` line on stdin; in-process:
-	//                     `PiSession.answerDialog`) with the matching id.
-	//   FIRE-AND-FORGET   notify | setStatus | setWidget | setTitle | set_editor_text
-	//                     emit and continue; a client may ignore them.
-	//
-	// ⚠⚠ A blocking request means pi is WAITING and stays blocked until an answer
-	// carrying this id reaches the extension's promise. The session
-	// layer answers dialogs by handing them to the browser as AG-UI interrupts
-	// (#27), and what it needs from this hop is the QUESTION — so the dialog fields
-	// are read here, defensively, into the one shared `ZenDialogSpec` shape.
-	//
-	// ⚠ Defensively means: a blocking request whose fields do not form a
-	// well-shaped question still maps as `blocking: true` with `dialog` absent.
-	// The session layer declines those on the wire (the pre-#27 behaviour) —
-	// mapping them as unmapped or non-blocking instead would hang pi silently,
-	// which is the bug this observation kind exists to make inexpressible.
-	const method = String(event.method ?? "unknown");
-	const dialogCandidate: Record<string, unknown> = { method };
-	for (const field of ["title", "options", "message", "placeholder", "prefill", "timeout"]) {
-		if (event[field] !== undefined) dialogCandidate[field] = event[field];
-	}
-	const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate) ? dialogCandidate : undefined;
-	// ⚠ A notify's `message` IS the request (#29): pi's wire shape is
-	// `{method: "notify", message, notifyType?}`, and dropping the message here is
-	// how a mode change once completed with nothing visible. Copied for notify ONLY —
-	// a dialog's `message` is part of the QUESTION and travels inside `dialog` above,
-	// and giving it a second home would invite the two to drift. `notifyType` is
-	// copied only when it is one of pi's three declared values (info|warning|error);
-	// an unrecognised value degrades to an untyped notification, never a validation
-	// failure.
-	const notifyFields: { message?: string; notifyType?: ZenNotifyType } = {};
-	if (method === "notify") {
-		notifyFields.message = String(event.message ?? "");
-		// The declared values come from the schema, not a literal list — the browser
-		// router (custom-event-router.ts) makes the same check the same way.
-		const notifyTypeCandidate = event.notifyType;
-		if (Check(ZenNotifyType, notifyTypeCandidate)) {
-			notifyFields.notifyType = notifyTypeCandidate;
-		}
-	}
-	return {
-		kind: "extension-ui-request",
-		id: String(event.id ?? ""),
-		method,
-		blocking: DIALOG_UI_METHODS.has(method),
-		// Tagged from the host's delivery, never inferred from position (#96).
-		origin: delivery === "replayed" ? "session-start" : "run",
-		...(dialog === undefined ? {} : { dialog }),
-		...notifyFields,
-	};
+  // ⚠ pi's Extension UI sub-protocol, and it splits in two (`docs/rpc.md` § Extension
+  // UI Protocol):
+  //
+  //   DIALOG methods    select | confirm | input | editor
+  //                     emit a request and BLOCK until the client answers it (over
+  //                     rpc: an `extension_ui_response` line on stdin; in-process:
+  //                     `PiSession.answerDialog`) with the matching id.
+  //   FIRE-AND-FORGET   notify | setStatus | setWidget | setTitle | set_editor_text
+  //                     emit and continue; a client may ignore them.
+  //
+  // ⚠⚠ A blocking request means pi is WAITING and stays blocked until an answer
+  // carrying this id reaches the extension's promise. The session
+  // layer answers dialogs by handing them to the browser as AG-UI interrupts
+  // (#27), and what it needs from this hop is the QUESTION — so the dialog fields
+  // are read here, defensively, into the one shared `ZenDialogSpec` shape.
+  //
+  // ⚠ Defensively means: a blocking request whose fields do not form a
+  // well-shaped question still maps as `blocking: true` with `dialog` absent.
+  // The session layer declines those on the wire (the pre-#27 behaviour) —
+  // mapping them as unmapped or non-blocking instead would hang pi silently,
+  // which is the bug this observation kind exists to make inexpressible.
+  const method = String(event.method ?? 'unknown')
+  const dialogCandidate: Record<string, unknown> = { method }
+  for (const field of ['title', 'options', 'message', 'placeholder', 'prefill', 'timeout']) {
+    if (event[field] !== undefined) dialogCandidate[field] = event[field]
+  }
+  const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate) ? dialogCandidate : undefined
+  // ⚠ A notify's `message` IS the request (#29): pi's wire shape is
+  // `{method: "notify", message, notifyType?}`, and dropping the message here is
+  // how a mode change once completed with nothing visible. Copied for notify ONLY —
+  // a dialog's `message` is part of the QUESTION and travels inside `dialog` above,
+  // and giving it a second home would invite the two to drift. `notifyType` is
+  // copied only when it is one of pi's three declared values (info|warning|error);
+  // an unrecognised value degrades to an untyped notification, never a validation
+  // failure.
+  const notifyFields: { message?: string; notifyType?: ZenNotifyType } = {}
+  if (method === 'notify') {
+    notifyFields.message = String(event.message ?? '')
+    // The declared values come from the schema, not a literal list — the browser
+    // router (custom-event-router.ts) makes the same check the same way.
+    const notifyTypeCandidate = event.notifyType
+    if (Check(ZenNotifyType, notifyTypeCandidate)) {
+      notifyFields.notifyType = notifyTypeCandidate
+    }
+  }
+  return {
+    kind: 'extension-ui-request',
+    id: String(event.id ?? ''),
+    method,
+    blocking: DIALOG_UI_METHODS.has(method),
+    // Tagged from the host's delivery, never inferred from position (#96).
+    origin: delivery === 'replayed' ? 'session-start' : 'run',
+    ...(dialog === undefined ? {} : { dialog }),
+    ...notifyFields,
+  }
 }
 
 /** pi's message role off a `message_start` / `message_end`, or `unknown` when the record has none. */
 function roleOf(message: { role?: unknown } | undefined): string {
-	return typeof message?.role === "string" ? message.role : "unknown";
+  return typeof message?.role === 'string' ? message.role : 'unknown'
 }
 
 /** The length of an array field pi carries, or 0 — `toolResults`, `steering`, `followUp`. */
 function countOf(value: unknown): number {
-	return Array.isArray(value) ? value.length : 0;
+  return Array.isArray(value) ? value.length : 0
 }
 
 /** The strings of an array field pi carries, in order; anything that is not a string is dropped, an absent field is empty. */
 function textsOf(value: unknown): string[] {
-	return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
 }
 
 /**
@@ -179,11 +179,11 @@ function textsOf(value: unknown): string[] {
  * prompt another tab sent; every other role's content arrives by its own events.
  */
 function mapMessageStart(event: PiRpcEvent): ZenObservation {
-	const message = event.message as { role?: unknown; content?: unknown } | undefined;
-	const role = roleOf(message);
-	return role === "user"
-		? { kind: "message-start", role, text: contentToText(message?.content) }
-		: { kind: "message-start", role };
+  const message = event.message as { role?: unknown; content?: unknown } | undefined
+  const role = roleOf(message)
+  return role === 'user'
+    ? { kind: 'message-start', role, text: contentToText(message?.content) }
+    : { kind: 'message-start', role }
 }
 
 /**
@@ -198,13 +198,13 @@ function mapMessageStart(event: PiRpcEvent): ZenObservation {
  * attributable spend; every other completed message is a boundary without it.
  */
 function mapMessageEnd(event: PiRpcEvent): ZenObservation {
-	const message = event.message as { role?: unknown; usage?: unknown } | undefined;
-	const role = roleOf(message);
-	const usage = readUsage(message?.usage);
-	if (usage !== undefined && (role === "assistant" || role === "toolResult")) {
-		return { kind: "message-end", role, usage };
-	}
-	return { kind: "message-end", role };
+  const message = event.message as { role?: unknown; usage?: unknown } | undefined
+  const role = roleOf(message)
+  const usage = readUsage(message?.usage)
+  if (usage !== undefined && (role === 'assistant' || role === 'toolResult')) {
+    return { kind: 'message-end', role, usage }
+  }
+  return { kind: 'message-end', role }
 }
 
 /**
@@ -214,125 +214,125 @@ function mapMessageEnd(event: PiRpcEvent): ZenObservation {
  * the session's own start — becomes `origin: "session-start"` on a ui request; `live` is
  * `"run"`. Defaults to live: every caller but the pump is mapping a run's stream.
  */
-export function mapPiEvent(event: PiRpcEvent, delivery: PiEventDelivery = "live"): ZenObservation {
-	switch (event.type) {
-		case "message_update": {
-			const delta = event.assistantMessageEvent as { type?: string; contentIndex?: number; delta?: string } | undefined;
-			const usage = readUsage(event.usage);
-			const contentIndex = typeof delta?.contentIndex === "number" ? delta.contentIndex : 0;
-			const text = typeof delta?.delta === "string" ? delta.delta : "";
-			if (delta?.type === "text_delta") {
-				return { kind: "text-delta", contentIndex, delta: text, ...(usage ? { usage } : {}) };
-			}
-			if (delta?.type === "thinking_delta") {
-				return { kind: "thinking-delta", contentIndex, delta: text, ...(usage ? { usage } : {}) };
-			}
-			// start/end markers and any future delta type: carried, not dropped.
-			return { kind: "unmapped", event };
-		}
+export function mapPiEvent(event: PiRpcEvent, delivery: PiEventDelivery = 'live'): ZenObservation {
+  switch (event.type) {
+    case 'message_update': {
+      const delta = event.assistantMessageEvent as { type?: string; contentIndex?: number; delta?: string } | undefined
+      const usage = readUsage(event.usage)
+      const contentIndex = typeof delta?.contentIndex === 'number' ? delta.contentIndex : 0
+      const text = typeof delta?.delta === 'string' ? delta.delta : ''
+      if (delta?.type === 'text_delta') {
+        return { kind: 'text-delta', contentIndex, delta: text, ...(usage ? { usage } : {}) }
+      }
+      if (delta?.type === 'thinking_delta') {
+        return { kind: 'thinking-delta', contentIndex, delta: text, ...(usage ? { usage } : {}) }
+      }
+      // start/end markers and any future delta type: carried, not dropped.
+      return { kind: 'unmapped', event }
+    }
 
-		case "message_start":
-			return mapMessageStart(event);
+    case 'message_start':
+      return mapMessageStart(event)
 
-		case "message_end":
-			return mapMessageEnd(event);
+    case 'message_end':
+      return mapMessageEnd(event)
 
-		case "turn_start":
-			return { kind: "turn-start" };
+    case 'turn_start':
+      return { kind: 'turn-start' }
 
-		case "turn_end":
-			// pi's turn: one model request and its tool results (dsh's step — see @zen/core).
-			return { kind: "turn-end", toolResults: countOf(event.toolResults) };
+    case 'turn_end':
+      // pi's turn: one model request and its tool results (dsh's step — see @zen/core).
+      return { kind: 'turn-end', toolResults: countOf(event.toolResults) }
 
-		case "queue_update":
-			return { kind: "queue", steering: textsOf(event.steering), followUp: textsOf(event.followUp) };
+    case 'queue_update':
+      return { kind: 'queue', steering: textsOf(event.steering), followUp: textsOf(event.followUp) }
 
-		case "tool_execution_start":
-			return {
-				kind: "tool-call",
-				toolCallId: String(event.toolCallId),
-				toolName: String(event.toolName),
-				args: event.args,
-			};
+    case 'tool_execution_start':
+      return {
+        kind: 'tool-call',
+        toolCallId: String(event.toolCallId),
+        toolName: String(event.toolName),
+        args: event.args,
+      }
 
-		case "tool_execution_update": {
-			const partial = event.partialResult as { content?: unknown; details?: unknown } | undefined;
-			const toolName = String(event.toolName);
-			const descriptor = descriptorFrom(toolName, partial?.details);
-			return {
-				kind: "tool-result",
-				toolCallId: String(event.toolCallId),
-				toolName,
-				text: contentToText(partial?.content),
-				complete: false,
-				isError: false,
-				...(descriptor === undefined ? {} : { descriptor }),
-			};
-		}
+    case 'tool_execution_update': {
+      const partial = event.partialResult as { content?: unknown; details?: unknown } | undefined
+      const toolName = String(event.toolName)
+      const descriptor = descriptorFrom(toolName, partial?.details)
+      return {
+        kind: 'tool-result',
+        toolCallId: String(event.toolCallId),
+        toolName,
+        text: contentToText(partial?.content),
+        complete: false,
+        isError: false,
+        ...(descriptor === undefined ? {} : { descriptor }),
+      }
+    }
 
-		case "tool_execution_end": {
-			const result = event.result as { content?: unknown; details?: unknown } | undefined;
-			const toolName = String(event.toolName);
-			const descriptor = descriptorFrom(toolName, result?.details);
-			return {
-				kind: "tool-result",
-				toolCallId: String(event.toolCallId),
-				toolName,
-				text: contentToText(result?.content),
-				complete: true,
-				// ⚠ `isError` is the only signal a refused call has. pi documents no distinct
-				// "blocked" event, so a guard's `{block: true, reason}` is UNVERIFIED as to
-				// which shape it takes on the wire. Treating any error result as displayable
-				// covers it either way — see also `extension_error` below.
-				isError: event.isError === true,
-				...(descriptor === undefined ? {} : { descriptor }),
-			};
-		}
+    case 'tool_execution_end': {
+      const result = event.result as { content?: unknown; details?: unknown } | undefined
+      const toolName = String(event.toolName)
+      const descriptor = descriptorFrom(toolName, result?.details)
+      return {
+        kind: 'tool-result',
+        toolCallId: String(event.toolCallId),
+        toolName,
+        text: contentToText(result?.content),
+        complete: true,
+        // ⚠ `isError` is the only signal a refused call has. pi documents no distinct
+        // "blocked" event, so a guard's `{block: true, reason}` is UNVERIFIED as to
+        // which shape it takes on the wire. Treating any error result as displayable
+        // covers it either way — see also `extension_error` below.
+        isError: event.isError === true,
+        ...(descriptor === undefined ? {} : { descriptor }),
+      }
+    }
 
-		case "extension_ui_request":
-			return mapExtensionUiRequest(event, delivery);
+    case 'extension_ui_request':
+      return mapExtensionUiRequest(event, delivery)
 
-		case "extension_ui_settled": {
-			// The host's own record (#114) — emitted by `extension-ui-context.ts` at the one
-			// point every settle path crosses, in stream order with the request it closes.
-			// An outcome the union does not name is a host/mapper drift, not a pi event to
-			// carry through: it stays unmapped so the debug pane shows it.
-			const { id, outcome } = event;
-			if (typeof id === "string" && id.length > 0 && Check(ZenDialogOutcome, outcome)) {
-				return { kind: "dialog-settled", id, outcome };
-			}
-			return { kind: "unmapped", event };
-		}
+    case 'extension_ui_settled': {
+      // The host's own record (#114) — emitted by `extension-ui-context.ts` at the one
+      // point every settle path crosses, in stream order with the request it closes.
+      // An outcome the union does not name is a host/mapper drift, not a pi event to
+      // carry through: it stays unmapped so the debug pane shows it.
+      const { id, outcome } = event
+      if (typeof id === 'string' && id.length > 0 && Check(ZenDialogOutcome, outcome)) {
+        return { kind: 'dialog-settled', id, outcome }
+      }
+      return { kind: 'unmapped', event }
+    }
 
-		case "entry_appended": {
-			// ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via
-			// `pi.appendEntry(customType, data)` is a receipt a surface may want (picc's
-			// "modes" entry is the only RPC-observable artifact of a successful mode change —
-			// its updateStatus is a stub and its setMode never notifies). Every other entry
-			// kind (messages, compaction, labels) duplicates information that already flows
-			// as first-class observations, so those stay unmapped, exactly as before.
-			const entry = event.entry as { type?: string; customType?: string; data?: unknown } | undefined;
-			if (entry?.type === "custom" && typeof entry.customType === "string") {
-				return { kind: "custom-entry", customType: entry.customType, data: entry.data };
-			}
-			return { kind: "unmapped", event };
-		}
+    case 'entry_appended': {
+      // ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via
+      // `pi.appendEntry(customType, data)` is a receipt a surface may want (picc's
+      // "modes" entry is the only RPC-observable artifact of a successful mode change —
+      // its updateStatus is a stub and its setMode never notifies). Every other entry
+      // kind (messages, compaction, labels) duplicates information that already flows
+      // as first-class observations, so those stay unmapped, exactly as before.
+      const entry = event.entry as { type?: string; customType?: string; data?: unknown } | undefined
+      if (entry?.type === 'custom' && typeof entry.customType === 'string') {
+        return { kind: 'custom-entry', customType: entry.customType, data: entry.data }
+      }
+      return { kind: 'unmapped', event }
+    }
 
-		case "extension_error":
-			return {
-				kind: "extension-error",
-				extensionPath: String(event.extensionPath ?? "unknown"),
-				event: String(event.event ?? "unknown"),
-				error: String(event.error ?? "unknown error"),
-			};
+    case 'extension_error':
+      return {
+        kind: 'extension-error',
+        extensionPath: String(event.extensionPath ?? 'unknown'),
+        event: String(event.event ?? 'unknown'),
+        error: String(event.error ?? 'unknown error'),
+      }
 
-		case "agent_end":
-			return { kind: "run-ended", willRetry: event.willRetry === true };
+    case 'agent_end':
+      return { kind: 'run-ended', willRetry: event.willRetry === true }
 
-		case "agent_settled":
-			return { kind: "settled" };
+    case 'agent_settled':
+      return { kind: 'settled' }
 
-		default:
-			return { kind: "unmapped", event };
-	}
+    default:
+      return { kind: 'unmapped', event }
+  }
 }

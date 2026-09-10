@@ -1,4 +1,4 @@
-import { ZenObservation } from "@zen/core";
+import { ZenObservation } from '@zen/core'
 
 /**
  * The oracle both "every observation" sweeps compare against (#53 S1.4): every `kind`
@@ -10,6 +10,6 @@ import { ZenObservation } from "@zen/core";
  * test-only helper does not enter the denominator as an untested "library" file.
  */
 export function observationKindsDeclaredByTheUnion(): string[] {
-	const kinds: string[] = ZenObservation.anyOf.map((member) => String(member.properties.kind.const));
-	return kinds.sort();
+  const kinds: string[] = ZenObservation.anyOf.map((member) => String(member.properties.kind.const))
+  return kinds.sort()
 }

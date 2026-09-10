@@ -1,5 +1,5 @@
 {
-	"webFetch": {
-		"allowedHosts": []
-	}
+  "webFetch": {
+    "allowedHosts": []
+  }
 }

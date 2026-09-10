@@ -1,6 +1,6 @@
-import { expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { expect, test } from 'bun:test'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 /**
  * Presentation stays presentation (#121 item 4, #31).
@@ -26,11 +26,11 @@ import { join } from "node:path";
  * review.
  */
 
-const repositoryRoot = join(import.meta.dir, "..");
-const PORTED_DIRECTORY = "packages/web/src/components/ai-elements";
+const repositoryRoot = join(import.meta.dir, '..')
+const PORTED_DIRECTORY = 'packages/web/src/components/ai-elements'
 /** The pin every ported file carries; bump it here when the clone moves (the #31 procedure). */
-const UPSTREAM_PIN = "6a9d5b1822ffb10bba4bd97175f01edd7d8651cd";
-const SOURCE_EXTENSION = /\.tsx?$/;
+const UPSTREAM_PIN = '6a9d5b1822ffb10bba4bd97175f01edd7d8651cd'
+const SOURCE_EXTENSION = /\.tsx?$/
 
 /**
  * The state layer, by import. `@zen/core` is the wire: a presentation component taking a
@@ -42,57 +42,57 @@ const SOURCE_EXTENSION = /\.tsx?$/;
  * so `@/store.ts` is the MORE natural way to write the import this gate exists to refuse,
  * and a relative-only pattern would have waved it through.
  */
-const STATE_LAYER_MODULES = "store|thread-stores|stored-threads|follow-connection|session-stats|custom-event-router";
+const STATE_LAYER_MODULES = 'store|thread-stores|stored-threads|follow-connection|session-stats|custom-event-router'
 const STATE_LAYER_IMPORT = new RegExp(
-	`from\\s+["'](?:@zen/core(?:/[^"']+)?|@tanstack/[^"']+|(?:(?:\\.\\./)+|@/)(?:${STATE_LAYER_MODULES})\\.ts)["']`,
-);
+  `from\\s+["'](?:@zen/core(?:/[^"']+)?|@tanstack/[^"']+|(?:(?:\\.\\./)+|@/)(?:${STATE_LAYER_MODULES})\\.ts)["']`,
+)
 
 function portedFiles(): string[] {
-	const directory = join(repositoryRoot, PORTED_DIRECTORY);
-	return readdirSync(directory)
-		.filter((name) => SOURCE_EXTENSION.test(name))
-		.map((name) => join(directory, name));
+  const directory = join(repositoryRoot, PORTED_DIRECTORY)
+  return readdirSync(directory)
+    .filter((name) => SOURCE_EXTENSION.test(name))
+    .map((name) => join(directory, name))
 }
 
-test("⚠ every ported presentation file names its upstream pin (#31, #121)", () => {
-	const withoutProvenance = portedFiles()
-		.filter((path) => !readFileSync(path, "utf8").includes(UPSTREAM_PIN))
-		.map((path) => path.slice(repositoryRoot.length + 1));
-	expect(withoutProvenance).toEqual([]);
-});
+test('⚠ every ported presentation file names its upstream pin (#31, #121)', () => {
+  const withoutProvenance = portedFiles()
+    .filter((path) => !readFileSync(path, 'utf8').includes(UPSTREAM_PIN))
+    .map((path) => path.slice(repositoryRoot.length + 1))
+  expect(withoutProvenance).toEqual([])
+})
 
-test("⚠ nothing under ai-elements reaches the state layer — component-local state only (#121 item 4)", () => {
-	const offenders: string[] = [];
-	for (const path of portedFiles()) {
-		for (const [lineIndex, line] of readFileSync(path, "utf8").split("\n").entries()) {
-			if (STATE_LAYER_IMPORT.test(line)) offenders.push(`${path.slice(repositoryRoot.length + 1)}:${lineIndex + 1}`);
-		}
-	}
-	expect(offenders).toEqual([]);
-});
+test('⚠ nothing under ai-elements reaches the state layer — component-local state only (#121 item 4)', () => {
+  const offenders: string[] = []
+  for (const path of portedFiles()) {
+    for (const [lineIndex, line] of readFileSync(path, 'utf8').split('\n').entries()) {
+      if (STATE_LAYER_IMPORT.test(line)) offenders.push(`${path.slice(repositoryRoot.length + 1)}:${lineIndex + 1}`)
+    }
+  }
+  expect(offenders).toEqual([])
+})
 
 // The gate can only gate what its pattern sees. Every spelling of the same forbidden module
 // belongs here, and the `@/` alias row is the one PR #152's review found missing.
-test("the state-layer matcher catches both spellings — the alias and the relative path (PR #152 review)", () => {
-	for (const line of [
-		'import { useStore } from "@/store.ts";',
-		'import { useThreadStores } from "../../thread-stores.ts";',
-		'import type { ZenObservation } from "@zen/core";',
-		'import { useChat } from "@tanstack/react-ai";',
-		'import { createFollowConnection } from "@/follow-connection.ts";',
-		// A subpath is the same package: `@zen/core/log-process` is imported elsewhere in the
-		// repo, and the bare-specifier branch would have missed it (PR #153 review).
-		'import { parseZenLogLine } from "@zen/core/log-process";',
-	]) {
-		expect(STATE_LAYER_IMPORT.test(line)).toBe(true);
-	}
-	// What presentation legitimately imports, and must keep importing.
-	for (const line of [
-		'import { cn } from "@/lib/utils.ts";',
-		'import { Button } from "@/components/ui/button.tsx";',
-		'import { useState } from "react";',
-		'import { PromptAttachment } from "./prompt-input.tsx";',
-	]) {
-		expect(STATE_LAYER_IMPORT.test(line)).toBe(false);
-	}
-});
+test('the state-layer matcher catches both spellings — the alias and the relative path (PR #152 review)', () => {
+  for (const line of [
+    'import { useStore } from "@/store.ts";',
+    'import { useThreadStores } from "../../thread-stores.ts";',
+    'import type { ZenObservation } from "@zen/core";',
+    'import { useChat } from "@tanstack/react-ai";',
+    'import { createFollowConnection } from "@/follow-connection.ts";',
+    // A subpath is the same package: `@zen/core/log-process` is imported elsewhere in the
+    // repo, and the bare-specifier branch would have missed it (PR #153 review).
+    'import { parseZenLogLine } from "@zen/core/log-process";',
+  ]) {
+    expect(STATE_LAYER_IMPORT.test(line)).toBe(true)
+  }
+  // What presentation legitimately imports, and must keep importing.
+  for (const line of [
+    'import { cn } from "@/lib/utils.ts";',
+    'import { Button } from "@/components/ui/button.tsx";',
+    'import { useState } from "react";',
+    'import { PromptAttachment } from "./prompt-input.tsx";',
+  ]) {
+    expect(STATE_LAYER_IMPORT.test(line)).toBe(false)
+  }
+})

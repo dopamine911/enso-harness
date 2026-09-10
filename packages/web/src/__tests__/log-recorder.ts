@@ -1,7 +1,7 @@
-import { AsyncLocalStorage } from "node:async_hooks";
-import { configure, reset } from "@logtape/logtape";
-import { createLogRecorder, type LogRecorder } from "@logtape/testing/recorder";
-import { ZEN_LOG_ROOT } from "@zen/core";
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { configure, reset } from '@logtape/logtape'
+import { createLogRecorder, type LogRecorder } from '@logtape/testing/recorder'
+import { ZEN_LOG_ROOT } from '@zen/core'
 
 /**
  * The test's sink (#132): every `zen` record, at every level, into memory — assert on the
@@ -14,18 +14,18 @@ import { ZEN_LOG_ROOT } from "@zen/core";
  * is routed nowhere so LogTape's own notes never leak into a test's output.
  */
 export async function recordZenLogs(): Promise<LogRecorder> {
-	const recorder = createLogRecorder();
-	await configure({
-		reset: true,
-		sinks: { recorder: recorder.sink },
-		loggers: [
-			{ category: [ZEN_LOG_ROOT], lowestLevel: "trace", sinks: ["recorder"] },
-			{ category: ["logtape", "meta"], sinks: [] },
-		],
-		contextLocalStorage: new AsyncLocalStorage(),
-	});
-	return recorder;
+  const recorder = createLogRecorder()
+  await configure({
+    reset: true,
+    sinks: { recorder: recorder.sink },
+    loggers: [
+      { category: [ZEN_LOG_ROOT], lowestLevel: 'trace', sinks: ['recorder'] },
+      { category: ['logtape', 'meta'], sinks: [] },
+    ],
+    contextLocalStorage: new AsyncLocalStorage(),
+  })
+  return recorder
 }
 
 /** Back to "no configuration, no logs" for whatever runs next in the process. */
-export const releaseZenLogs: () => Promise<void> = reset;
+export const releaseZenLogs: () => Promise<void> = reset

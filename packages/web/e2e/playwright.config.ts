@@ -19,53 +19,53 @@
  * request with one cwd — parallel browsers would interleave their runs' stderr and, for
  * the `@model` tier, race for the same provider identity.
  */
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { defineConfig } from "@playwright/test";
-import { findRepoRoot } from "@zen/core";
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { defineConfig } from '@playwright/test'
+import { findRepoRoot } from '@zen/core'
 
-const e2eDirectory = dirname(fileURLToPath(import.meta.url));
+const e2eDirectory = dirname(fileURLToPath(import.meta.url))
 // `bun run dev` must run from the repo root: scripts/dev.mjs resolves the web package
 // directory from there. Same helper every other launcher uses, so the answer cannot drift.
-const repoRoot = findRepoRoot(import.meta.url);
+const repoRoot = findRepoRoot(import.meta.url)
 
 /** The web surface's origin — matches WEB_PORT in src/server/dev-web.ts. */
-export const WEB_ORIGIN = "http://127.0.0.1:5178";
+export const WEB_ORIGIN = 'http://127.0.0.1:5178'
 
 /** Where screenshots and traces land. Gitignored; the run prints the paths. */
-export const OUTPUT_DIRECTORY = join(e2eDirectory, "output");
+export const OUTPUT_DIRECTORY = join(e2eDirectory, 'output')
 
 /**
  * Generous because a cold `createAgentSessionServices` is ~700 ms and a real model turn
  * can take tens of seconds; the point is to finish, not to be fast.
  */
-const TEST_TIMEOUT_MS = 120_000;
-const WEB_SERVER_STARTUP_TIMEOUT_MS = 60_000;
+const TEST_TIMEOUT_MS = 120_000
+const WEB_SERVER_STARTUP_TIMEOUT_MS = 60_000
 
 export default defineConfig({
-	testDir: e2eDirectory,
-	testMatch: "**/*.e2e.ts",
-	outputDir: join(OUTPUT_DIRECTORY, "test-results"),
-	timeout: TEST_TIMEOUT_MS,
-	fullyParallel: false,
-	workers: 1,
-	retries: 0,
-	reporter: "list",
-	use: {
-		baseURL: WEB_ORIGIN,
-		// Trace and video are for a failed run's post-mortem; the deliverable screenshots are
-		// taken explicitly in the spec so their names mean something in a PR.
-		trace: "retain-on-failure",
-		screenshot: "only-on-failure",
-		viewport: { width: 1280, height: 900 },
-	},
-	webServer: {
-		command: "bun run dev",
-		cwd: repoRoot,
-		url: WEB_ORIGIN,
-		reuseExistingServer: true,
-		timeout: WEB_SERVER_STARTUP_TIMEOUT_MS,
-		stdout: "pipe",
-		stderr: "pipe",
-	},
-});
+  testDir: e2eDirectory,
+  testMatch: '**/*.e2e.ts',
+  outputDir: join(OUTPUT_DIRECTORY, 'test-results'),
+  timeout: TEST_TIMEOUT_MS,
+  fullyParallel: false,
+  workers: 1,
+  retries: 0,
+  reporter: 'list',
+  use: {
+    baseURL: WEB_ORIGIN,
+    // Trace and video are for a failed run's post-mortem; the deliverable screenshots are
+    // taken explicitly in the spec so their names mean something in a PR.
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    viewport: { width: 1280, height: 900 },
+  },
+  webServer: {
+    command: 'bun run dev',
+    cwd: repoRoot,
+    url: WEB_ORIGIN,
+    reuseExistingServer: true,
+    timeout: WEB_SERVER_STARTUP_TIMEOUT_MS,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  },
+})

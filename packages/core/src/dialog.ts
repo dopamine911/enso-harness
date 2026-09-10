@@ -1,5 +1,5 @@
-import { type Static, Type } from "typebox";
-import { Compile } from "typebox/compile";
+import { type Static, Type } from 'typebox'
+import { Compile } from 'typebox/compile'
 
 /**
  * pi's blocking extension dialogs, as data (#27, #112).
@@ -32,59 +32,59 @@ import { Compile } from "typebox/compile";
  * to an id nobody is waiting on. Carried so a surface can stop offering a dead question.
  */
 export const ZenDialogSpec = Type.Union([
-	Type.Object({
-		method: Type.Literal("select"),
-		title: Type.String(),
-		options: Type.Array(Type.String(), { minItems: 1 }),
-		/**
-		 * The detail behind the question — a file preview, a diff, a command. pi's own
-		 * `select` has none; the host adds it when it lifts a component dialog to a select
-		 * (#73: picc's permission prompt), because a permission decision needs to see what it
-		 * is deciding about. Preformatted text: rendered as-is, never as markdown.
-		 */
-		message: Type.Optional(Type.String()),
-		timeout: Type.Optional(Type.Number({ minimum: 0 })),
-	}),
-	Type.Object({
-		method: Type.Literal("confirm"),
-		title: Type.String(),
-		message: Type.String(),
-		timeout: Type.Optional(Type.Number({ minimum: 0 })),
-	}),
-	Type.Object({
-		method: Type.Literal("input"),
-		title: Type.String(),
-		placeholder: Type.Optional(Type.String()),
-		timeout: Type.Optional(Type.Number({ minimum: 0 })),
-	}),
-	Type.Object({
-		method: Type.Literal("editor"),
-		title: Type.String(),
-		prefill: Type.Optional(Type.String()),
-	}),
-]);
-export type ZenDialogSpec = Static<typeof ZenDialogSpec>;
+  Type.Object({
+    method: Type.Literal('select'),
+    title: Type.String(),
+    options: Type.Array(Type.String(), { minItems: 1 }),
+    /**
+     * The detail behind the question — a file preview, a diff, a command. pi's own
+     * `select` has none; the host adds it when it lifts a component dialog to a select
+     * (#73: picc's permission prompt), because a permission decision needs to see what it
+     * is deciding about. Preformatted text: rendered as-is, never as markdown.
+     */
+    message: Type.Optional(Type.String()),
+    timeout: Type.Optional(Type.Number({ minimum: 0 })),
+  }),
+  Type.Object({
+    method: Type.Literal('confirm'),
+    title: Type.String(),
+    message: Type.String(),
+    timeout: Type.Optional(Type.Number({ minimum: 0 })),
+  }),
+  Type.Object({
+    method: Type.Literal('input'),
+    title: Type.String(),
+    placeholder: Type.Optional(Type.String()),
+    timeout: Type.Optional(Type.Number({ minimum: 0 })),
+  }),
+  Type.Object({
+    method: Type.Literal('editor'),
+    title: Type.String(),
+    prefill: Type.Optional(Type.String()),
+  }),
+])
+export type ZenDialogSpec = Static<typeof ZenDialogSpec>
 
 /** A resolved answer. Cancellation is NOT an answer — see the module header. */
 export const ZenDialogAnswer = Type.Union([
-	Type.Object({ value: Type.String() }),
-	Type.Object({ confirmed: Type.Boolean() }),
-]);
-export type ZenDialogAnswer = Static<typeof ZenDialogAnswer>;
+  Type.Object({ value: Type.String() }),
+  Type.Object({ confirmed: Type.Boolean() }),
+])
+export type ZenDialogAnswer = Static<typeof ZenDialogAnswer>
 
 /**
  * One question pi is blocked on, as the follow's snapshot lists it (#114) — so a follow
  * opened while pi waits renders the card at once, instead of a busy thread with nothing to
  * answer. `id` is the request id the answer is keyed by.
  */
-export const ZenOpenDialog = Type.Object({ id: Type.String({ minLength: 1 }), dialog: ZenDialogSpec });
-export type ZenOpenDialog = Static<typeof ZenOpenDialog>;
+export const ZenOpenDialog = Type.Object({ id: Type.String({ minLength: 1 }), dialog: ZenDialogSpec })
+export type ZenOpenDialog = Static<typeof ZenOpenDialog>
 
-const dialogSpecValidator = Compile(ZenDialogSpec);
-const dialogAnswerValidator = Compile(ZenDialogAnswer);
+const dialogSpecValidator = Compile(ZenDialogSpec)
+const dialogAnswerValidator = Compile(ZenDialogAnswer)
 
 export function isZenDialogSpec(value: unknown): value is ZenDialogSpec {
-	return dialogSpecValidator.Check(value);
+  return dialogSpecValidator.Check(value)
 }
 
 /**
@@ -97,23 +97,23 @@ export function isZenDialogSpec(value: unknown): value is ZenDialogSpec {
  * seam, and it is closed HERE rather than trusted to the renderer.
  */
 export function validateDialogAnswer(spec: ZenDialogSpec, payload: unknown): string | undefined {
-	if (!dialogAnswerValidator.Check(payload)) {
-		return `the payload is not a dialog answer ({ value: string } or { confirmed: boolean })`;
-	}
-	switch (spec.method) {
-		case "confirm":
-			return "confirmed" in payload
-				? undefined
-				: `a 'confirm' dialog takes { confirmed: boolean }, got a 'value' answer`;
-		case "select":
-			if (!("value" in payload)) {
-				return `a 'select' dialog takes { value: string }, got a 'confirmed' answer`;
-			}
-			return spec.options.includes(payload.value) ? undefined : `'${payload.value}' is not one of the offered options`;
-		case "input":
-		case "editor":
-			return "value" in payload
-				? undefined
-				: `an '${spec.method}' dialog takes { value: string }, got a 'confirmed' answer`;
-	}
+  if (!dialogAnswerValidator.Check(payload)) {
+    return `the payload is not a dialog answer ({ value: string } or { confirmed: boolean })`
+  }
+  switch (spec.method) {
+    case 'confirm':
+      return 'confirmed' in payload
+        ? undefined
+        : `a 'confirm' dialog takes { confirmed: boolean }, got a 'value' answer`
+    case 'select':
+      if (!('value' in payload)) {
+        return `a 'select' dialog takes { value: string }, got a 'confirmed' answer`
+      }
+      return spec.options.includes(payload.value) ? undefined : `'${payload.value}' is not one of the offered options`
+    case 'input':
+    case 'editor':
+      return 'value' in payload
+        ? undefined
+        : `an '${spec.method}' dialog takes { value: string }, got a 'confirmed' answer`
+  }
 }

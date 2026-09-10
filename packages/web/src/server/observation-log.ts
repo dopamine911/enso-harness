@@ -1,5 +1,5 @@
-import { type ZenLogProperties, type ZenObservation, zenLogger } from "@zen/core";
-import { forgetRun, takeFirstDeltaMs } from "./run-timing.ts";
+import { type ZenLogProperties, type ZenObservation, zenLogger } from '@zen/core'
+import { forgetRun, takeFirstDeltaMs } from './run-timing.ts'
 
 /**
  * Every observation the server publishes becomes a record (#132, "trace everything") —
@@ -21,20 +21,20 @@ import { forgetRun, takeFirstDeltaMs } from "./run-timing.ts";
  * WHEN and WHAT KIND, and at `trace`, for one investigation, everything.
  */
 
-const events = zenLogger("server", "events");
+const events = zenLogger('server', 'events')
 
 /** The kinds that are the spine at `info`; everything else is `debug`. */
 const SPINE: Readonly<Record<string, true>> = {
-	"tool-call": true,
-	"tool-result": true,
-	"extension-ui-request": true,
-	"dialog-settled": true,
-	queue: true,
-	"prompt-rejected": true,
-	"extension-error": true,
-	"run-ended": true,
-	settled: true,
-};
+  'tool-call': true,
+  'tool-result': true,
+  'extension-ui-request': true,
+  'dialog-settled': true,
+  queue: true,
+  'prompt-rejected': true,
+  'extension-error': true,
+  'run-ended': true,
+  settled: true,
+}
 
 /**
  * The name of a pi event an `unmapped` observation wraps — `message_update/toolcall_delta`,
@@ -42,55 +42,55 @@ const SPINE: Readonly<Record<string, true>> = {
  * is on the `trace` line.
  */
 function piEventName(event: unknown): string {
-	if (typeof event !== "object" || event === null) return "(not an object)";
-	const record = event as { type?: unknown; assistantMessageEvent?: { type?: unknown } };
-	const outer = typeof record.type === "string" ? record.type : "(untyped)";
-	const inner = record.assistantMessageEvent?.type;
-	return typeof inner === "string" ? `${outer}/${inner}` : outer;
+  if (typeof event !== 'object' || event === null) return '(not an object)'
+  const record = event as { type?: unknown; assistantMessageEvent?: { type?: unknown } }
+  const outer = typeof record.type === 'string' ? record.type : '(untyped)'
+  const inner = record.assistantMessageEvent?.type
+  return typeof inner === 'string' ? `${outer}/${inner}` : outer
 }
 
 /** The ids and sizes a compact line carries, per kind — no text below `trace`. */
 function compactOf(observation: ZenObservation): ZenLogProperties {
-	switch (observation.kind) {
-		case "tool-call":
-			return { toolCallId: observation.toolCallId, toolName: observation.toolName };
-		case "tool-result":
-			return {
-				toolCallId: observation.toolCallId,
-				toolName: observation.toolName,
-				chars: observation.text.length,
-				complete: observation.complete,
-				isError: observation.isError,
-			};
-		case "text-delta":
-		case "thinking-delta":
-			return { contentIndex: observation.contentIndex, chars: observation.delta.length };
-		case "message-start":
-		case "message-end":
-			return { role: observation.role };
-		case "extension-ui-request":
-			return { requestId: observation.id, method: observation.method, blocking: observation.blocking };
-		case "dialog-settled":
-			return { dialogId: observation.id, outcome: observation.outcome };
-		case "queue":
-			return { steering: observation.steering.length, followUp: observation.followUp.length };
-		case "prompt-rejected":
-			return { messageId: observation.messageId, reason: observation.reason };
-		case "custom-entry":
-			return { customType: observation.customType };
-		case "extension-error":
-			return { extensionPath: observation.extensionPath, event: observation.event };
-		case "run-ended":
-			return { willRetry: observation.willRetry };
-		case "turn-start":
-			return {};
-		case "turn-end":
-			return { toolResults: observation.toolResults };
-		case "unmapped":
-			return { event: piEventName(observation.event) };
-		case "settled":
-			return {};
-	}
+  switch (observation.kind) {
+    case 'tool-call':
+      return { toolCallId: observation.toolCallId, toolName: observation.toolName }
+    case 'tool-result':
+      return {
+        toolCallId: observation.toolCallId,
+        toolName: observation.toolName,
+        chars: observation.text.length,
+        complete: observation.complete,
+        isError: observation.isError,
+      }
+    case 'text-delta':
+    case 'thinking-delta':
+      return { contentIndex: observation.contentIndex, chars: observation.delta.length }
+    case 'message-start':
+    case 'message-end':
+      return { role: observation.role }
+    case 'extension-ui-request':
+      return { requestId: observation.id, method: observation.method, blocking: observation.blocking }
+    case 'dialog-settled':
+      return { dialogId: observation.id, outcome: observation.outcome }
+    case 'queue':
+      return { steering: observation.steering.length, followUp: observation.followUp.length }
+    case 'prompt-rejected':
+      return { messageId: observation.messageId, reason: observation.reason }
+    case 'custom-entry':
+      return { customType: observation.customType }
+    case 'extension-error':
+      return { extensionPath: observation.extensionPath, event: observation.event }
+    case 'run-ended':
+      return { willRetry: observation.willRetry }
+    case 'turn-start':
+      return {}
+    case 'turn-end':
+      return { toolResults: observation.toolResults }
+    case 'unmapped':
+      return { event: piEventName(observation.event) }
+    case 'settled':
+      return {}
+  }
 }
 
 /**
@@ -99,34 +99,34 @@ function compactOf(observation: ZenObservation): ZenLogProperties {
  * at session start (four before the first prompt, live); a question is the one that matters.
  */
 function isSpine(observation: ZenObservation): boolean {
-	if (observation.kind === "extension-ui-request") return observation.blocking;
-	return SPINE[observation.kind] === true;
+  if (observation.kind === 'extension-ui-request') return observation.blocking
+  return SPINE[observation.kind] === true
 }
 
 /** One observation, on its way to every follower: the compact line at its tier, the payload at `trace`. */
 export function recordObservation(
-	threadId: string,
-	generation: number,
-	seq: number,
-	observation: ZenObservation,
+  threadId: string,
+  generation: number,
+  seq: number,
+  observation: ZenObservation,
 ): void {
-	const properties: ZenLogProperties = { threadId, generation, seq, kind: observation.kind, ...compactOf(observation) };
-	if (isSpine(observation)) events.info("{kind}", properties);
-	else events.debug("{kind}", properties);
-	events.trace("{kind} payload", { threadId, generation, seq, kind: observation.kind, observation });
-	// Time to first token, at `info` (#144): the deltas themselves are `debug`, so without this
-	// one line the latency a person actually asks about is only visible to whoever was already
-	// turned up. One record per run — the second delta finds nothing to take.
-	if (observation.kind === "text-delta" || observation.kind === "thinking-delta") {
-		const firstDeltaMs = takeFirstDeltaMs(threadId, generation);
-		if (firstDeltaMs !== undefined) {
-			events.info("run {generation} first delta after {firstDeltaMs}ms", {
-				threadId,
-				generation,
-				seq,
-				kind: observation.kind,
-				firstDeltaMs,
-			});
-		}
-	} else if (observation.kind === "settled") forgetRun(threadId, generation);
+  const properties: ZenLogProperties = { threadId, generation, seq, kind: observation.kind, ...compactOf(observation) }
+  if (isSpine(observation)) events.info('{kind}', properties)
+  else events.debug('{kind}', properties)
+  events.trace('{kind} payload', { threadId, generation, seq, kind: observation.kind, observation })
+  // Time to first token, at `info` (#144): the deltas themselves are `debug`, so without this
+  // one line the latency a person actually asks about is only visible to whoever was already
+  // turned up. One record per run — the second delta finds nothing to take.
+  if (observation.kind === 'text-delta' || observation.kind === 'thinking-delta') {
+    const firstDeltaMs = takeFirstDeltaMs(threadId, generation)
+    if (firstDeltaMs !== undefined) {
+      events.info('run {generation} first delta after {firstDeltaMs}ms', {
+        threadId,
+        generation,
+        seq,
+        kind: observation.kind,
+        firstDeltaMs,
+      })
+    }
+  } else if (observation.kind === 'settled') forgetRun(threadId, generation)
 }

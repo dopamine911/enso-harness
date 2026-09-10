@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /**
  * The workspace path helpers (#59) — THE one place that walks the filesystem for roots.
@@ -24,22 +24,22 @@ import { fileURLToPath } from "node:url";
 
 /** Thrown when no ancestor of the start path is a workspace root. */
 export class RepoRootNotFoundError extends Error {
-	constructor(startPath: string) {
-		super(
-			`no ancestor of "${startPath}" is a workspace root (a directory whose package.json ` +
-				`carries a "workspaces" field) — is this file inside the zen-harness checkout?`,
-		);
-		this.name = "RepoRootNotFoundError";
-	}
+  constructor(startPath: string) {
+    super(
+      `no ancestor of "${startPath}" is a workspace root (a directory whose package.json ` +
+        `carries a "workspaces" field) — is this file inside the zen-harness checkout?`,
+    )
+    this.name = 'RepoRootNotFoundError'
+  }
 }
 
 /** `realpathSync`, or the input unchanged when the path (or a segment of it) does not exist. */
 export function realpathOrSelf(path: string): string {
-	try {
-		return realpathSync(path);
-	} catch {
-		return path;
-	}
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
 }
 
 /**
@@ -50,23 +50,23 @@ export function realpathOrSelf(path: string): string {
  * the root, keep walking" — never a throw.
  */
 function isWorkspaceRoot(directory: string): boolean {
-	const manifestPath = join(directory, "package.json");
-	if (!existsSync(manifestPath)) return false;
-	try {
-		const manifest: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
-		if (typeof manifest !== "object" || manifest === null || !("workspaces" in manifest)) return false;
-		const workspaces = (manifest as Record<string, unknown>).workspaces;
-		return Array.isArray(workspaces) || (typeof workspaces === "object" && workspaces !== null);
-	} catch {
-		return false;
-	}
+  const manifestPath = join(directory, 'package.json')
+  if (!existsSync(manifestPath)) return false
+  try {
+    const manifest: unknown = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    if (typeof manifest !== 'object' || manifest === null || !('workspaces' in manifest)) return false
+    const workspaces = (manifest as Record<string, unknown>).workspaces
+    return Array.isArray(workspaces) || (typeof workspaces === 'object' && workspaces !== null)
+  } catch {
+    return false
+  }
 }
 
-const FILE_URL_PREFIX = "file://";
+const FILE_URL_PREFIX = 'file://'
 
 /** True when the string is a `file://` URL rather than a filesystem path. */
 export function isFileUrl(candidate: string): boolean {
-	return candidate.startsWith(FILE_URL_PREFIX);
+  return candidate.startsWith(FILE_URL_PREFIX)
 }
 
 /**
@@ -78,7 +78,7 @@ export function isFileUrl(candidate: string): boolean {
  * one before touching the filesystem, so the guard must judge the decoded path (#53).
  */
 export function fileUrlToPath(fileUrl: string): string {
-	return fileURLToPath(fileUrl);
+  return fileURLToPath(fileUrl)
 }
 
 /**
@@ -93,22 +93,22 @@ export function fileUrlToPath(fileUrl: string): string {
  * distinction is what `config.ts` relies on; do not "fix" this to consult `process.cwd()`.
  */
 export function findRepoRoot(startPathOrFileUrl: string): string {
-	const startPath = isFileUrl(startPathOrFileUrl) ? fileUrlToPath(startPathOrFileUrl) : startPathOrFileUrl;
-	let current = realpathOrSelf(startPath);
-	for (;;) {
-		if (isWorkspaceRoot(current)) return current;
-		const parent = dirname(current);
-		if (parent === current) throw new RepoRootNotFoundError(startPath);
-		current = parent;
-	}
+  const startPath = isFileUrl(startPathOrFileUrl) ? fileUrlToPath(startPathOrFileUrl) : startPathOrFileUrl
+  let current = realpathOrSelf(startPath)
+  for (;;) {
+    if (isWorkspaceRoot(current)) return current
+    const parent = dirname(current)
+    if (parent === current) throw new RepoRootNotFoundError(startPath)
+    current = parent
+  }
 }
 
 /** The `.zen` runtime dir names, assembled here and nowhere else (the anchor enforces it). */
-const ZEN_RUNTIME_DIRECTORY = ".zen";
+const ZEN_RUNTIME_DIRECTORY = '.zen'
 
 /** pi's scratch agent dir — settings, extensions, auth. Shared by the TUI launcher and the web server. */
 export function zenAgentDir(repoRoot: string): string {
-	return join(repoRoot, ZEN_RUNTIME_DIRECTORY, "pi-agent");
+  return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'pi-agent')
 }
 
 /**
@@ -119,17 +119,17 @@ export function zenAgentDir(repoRoot: string): string {
  * (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`), and read-gated by basename (`secrets.env`).
  */
 export function zenSecretsPath(repoRoot: string): string {
-	return join(repoRoot, ZEN_RUNTIME_DIRECTORY, "secrets.env");
+  return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'secrets.env')
 }
 
 /** The root `.env` — where secrets must NOT live (#89); reported as misplaced when they do. */
 export function rootDotenvPath(repoRoot: string): string {
-	return join(repoRoot, ".env");
+  return join(repoRoot, '.env')
 }
 
 /** Where the print variant of the harness package is materialized (#20). */
 export function printHarnessDir(repoRoot: string): string {
-	return join(repoRoot, ZEN_RUNTIME_DIRECTORY, "print-harness");
+  return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'print-harness')
 }
 
 /**
@@ -139,15 +139,15 @@ export function printHarnessDir(repoRoot: string): string {
  * already knows it (guard.ts).
  */
 export function zenLogsDir(repoRoot: string): string {
-	return join(repoRoot, ZEN_RUNTIME_DIRECTORY, "logs");
+  return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'logs')
 }
 
 /** The harness package — the directory `zen.mjs` hands to pi's `-e`. */
 export function harnessPackageDir(repoRoot: string): string {
-	return join(repoRoot, "packages", "harness");
+  return join(repoRoot, 'packages', 'harness')
 }
 
 /** The web package — the cwd both dev surfaces run in. */
 export function webPackageDir(repoRoot: string): string {
-	return join(repoRoot, "packages", "web");
+  return join(repoRoot, 'packages', 'web')
 }

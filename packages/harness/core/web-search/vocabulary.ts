@@ -1,4 +1,4 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model } from '@earendil-works/pi-ai'
 
 /**
  * The web_search vocabulary (#63): provider ids, the outcome union, and the request
@@ -11,19 +11,19 @@ import type { Api, Model } from "@earendil-works/pi-ai";
  */
 
 /** Every backend that can answer a web_search call. */
-export type WebSearchProviderId = "anthropic" | "google" | "openai" | "deepseek" | "tavily";
+export type WebSearchProviderId = 'anthropic' | 'google' | 'openai' | 'deepseek' | 'tavily'
 
 /** One cited or returned web source. */
 export interface WebSource {
-	title: string;
-	url: string;
+  title: string
+  url: string
 }
 
 /** One retrieval-style result (the Tavily shape): a source plus its snippet. */
 export interface WebSearchSnippet {
-	title: string;
-	url: string;
-	snippet?: string | undefined;
+  title: string
+  url: string
+  snippet?: string | undefined
 }
 
 /**
@@ -35,21 +35,21 @@ export interface WebSearchSnippet {
  * `grounded = sources.length > 0` had exactly that defect.
  */
 export type WebSearchOutcome =
-	| {
-			kind: "searched";
-			providerId: WebSearchProviderId;
-			/** The provider-synthesized answer, citation-marked. Absent for retrieval backends (Tavily). */
-			answerText?: string;
-			sources: WebSource[];
-			/** Retrieval results with snippets — the Tavily shape; model-native backends leave it absent. */
-			snippets?: WebSearchSnippet[];
-	  }
-	| {
-			/** The model answered WITHOUT searching — its own knowledge, not the live web. */
-			kind: "ungrounded";
-			providerId: WebSearchProviderId;
-			answerText: string;
-	  };
+  | {
+      kind: 'searched'
+      providerId: WebSearchProviderId
+      /** The provider-synthesized answer, citation-marked. Absent for retrieval backends (Tavily). */
+      answerText?: string
+      sources: WebSource[]
+      /** Retrieval results with snippets — the Tavily shape; model-native backends leave it absent. */
+      snippets?: WebSearchSnippet[]
+    }
+  | {
+      /** The model answered WITHOUT searching — its own knowledge, not the live web. */
+      kind: 'ungrounded'
+      providerId: WebSearchProviderId
+      answerText: string
+    }
 
 /**
  * Thrown by provider runs on failure. `requestDispatched` says whether the HTTP request
@@ -57,46 +57,46 @@ export type WebSearchOutcome =
  * the provider's accounting, not knowable here), surfaced when the fallback re-searches.
  */
 export class WebSearchProviderError extends Error {
-	readonly providerId: WebSearchProviderId;
-	readonly requestDispatched: boolean;
+  readonly providerId: WebSearchProviderId
+  readonly requestDispatched: boolean
 
-	constructor(providerId: WebSearchProviderId, message: string, options: { requestDispatched: boolean }) {
-		super(message);
-		this.name = "WebSearchProviderError";
-		this.providerId = providerId;
-		this.requestDispatched = options.requestDispatched;
-	}
+  constructor(providerId: WebSearchProviderId, message: string, options: { requestDispatched: boolean }) {
+    super(message)
+    this.name = 'WebSearchProviderError'
+    this.providerId = providerId
+    this.requestDispatched = options.requestDispatched
+  }
 }
 
 /** The injected fetch seam — tests never touch the network. Same shape as web_fetch's. */
 export type FetchUrl = (
-	url: string,
-	init: {
-		method?: string;
-		redirect?: "manual";
-		headers?: Record<string, string>;
-		body?: string;
-		signal?: AbortSignal | undefined;
-	},
-) => Promise<Response>;
+  url: string,
+  init: {
+    method?: string
+    redirect?: 'manual'
+    headers?: Record<string, string>
+    body?: string
+    signal?: AbortSignal | undefined
+  },
+) => Promise<Response>
 
 /**
  * Auth for one model-routed request, as pi's model registry resolves it (plus the
  * provider-env fallback — see `auth.ts`).
  */
 export type ResolvedProviderAuth =
-	| { ok: true; apiKey?: string; headers?: Record<string, string>; baseUrl?: string }
-	| { ok: false; error: string };
+  | { ok: true; apiKey?: string; headers?: Record<string, string>; baseUrl?: string }
+  | { ok: false; error: string }
 
 /** What a MODEL-ROUTED provider run receives (anthropic / google / openai). */
 export interface ModelSearchRequest {
-	query: string;
-	model: Model<Api>;
-	resolveAuth: (model: Model<Api>) => Promise<ResolvedProviderAuth>;
-	fetchUrl: FetchUrl;
-	signal: AbortSignal | undefined;
-	/** Streaming progress for the UI; carries the accumulated answer text so far. */
-	onProgress?: ((text: string) => void) | undefined;
+  query: string
+  model: Model<Api>
+  resolveAuth: (model: Model<Api>) => Promise<ResolvedProviderAuth>
+  fetchUrl: FetchUrl
+  signal: AbortSignal | undefined
+  /** Streaming progress for the UI; carries the accumulated answer text so far. */
+  onProgress?: ((text: string) => void) | undefined
 }
 
 /**
@@ -105,15 +105,15 @@ export interface ModelSearchRequest {
  * (pi registers DeepSeek models as `openai-completions`, so they land here as
  * `undefined` too: the DeepSeek backend is config-pinned, never model-routed — #63.)
  */
-export function routedProviderIdForModel(model: Model<Api>): "anthropic" | "google" | "openai" | undefined {
-	if (model.provider === "google-generative-ai" || model.api === "google-generative-ai") return "google";
-	if (
-		model.api === "openai-responses" ||
-		model.api === "azure-openai-responses" ||
-		model.api === "openai-codex-responses"
-	) {
-		return "openai";
-	}
-	if (model.api === "anthropic-messages") return "anthropic";
-	return undefined;
+export function routedProviderIdForModel(model: Model<Api>): 'anthropic' | 'google' | 'openai' | undefined {
+  if (model.provider === 'google-generative-ai' || model.api === 'google-generative-ai') return 'google'
+  if (
+    model.api === 'openai-responses' ||
+    model.api === 'azure-openai-responses' ||
+    model.api === 'openai-codex-responses'
+  ) {
+    return 'openai'
+  }
+  if (model.api === 'anthropic-messages') return 'anthropic'
+  return undefined
 }

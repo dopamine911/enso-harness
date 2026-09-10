@@ -1,6 +1,6 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { findRepoRoot, knownSecretValues, zenLogger } from "@zen/core";
-import { configureProcessLogging, isLoggingConfigured, logsDirFrom, parseZenLogLevels } from "@zen/core/log-process";
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import { findRepoRoot, knownSecretValues, zenLogger } from '@zen/core'
+import { configureProcessLogging, isLoggingConfigured, logsDirFrom, parseZenLogLevels } from '@zen/core/log-process'
 
 /**
  * The extension process's logging (#132), and the one record only an extension can write:
@@ -22,25 +22,25 @@ import { configureProcessLogging, isLoggingConfigured, logsDirFrom, parseZenLogL
  * it; `ZEN_LOG_CONSOLE` is ignored here on purpose.
  */
 export function createLoggingExtension(
-	environment: Readonly<Record<string, string | undefined>>,
+  environment: Readonly<Record<string, string | undefined>>,
 ): (pi: ExtensionAPI) => Promise<void> {
-	return async (pi: ExtensionAPI): Promise<void> => {
-		recordProviderResponses(pi);
-		if (isLoggingConfigured()) return;
-		const repoRoot = findRepoRoot(import.meta.url);
-		const disposeLogging = await configureProcessLogging({
-			logsDir: logsDirFrom(environment, repoRoot),
-			process: "pi",
-			levels: parseZenLogLevels(environment, { console: undefined }),
-			// The value pass (#139): pi as a child writes tool output and model text, which is
-			// exactly where a known secret is quoted rather than named.
-			secretValues: knownSecretValues(repoRoot, environment),
-		});
-		zenLogger("extension", "logging").debug("configured by the extension: pi is a child process");
-		pi.on("session_shutdown", async (): Promise<void> => {
-			await disposeLogging();
-		});
-	};
+  return async (pi: ExtensionAPI): Promise<void> => {
+    recordProviderResponses(pi)
+    if (isLoggingConfigured()) return
+    const repoRoot = findRepoRoot(import.meta.url)
+    const disposeLogging = await configureProcessLogging({
+      logsDir: logsDirFrom(environment, repoRoot),
+      process: 'pi',
+      levels: parseZenLogLevels(environment, { console: undefined }),
+      // The value pass (#139): pi as a child writes tool output and model text, which is
+      // exactly where a known secret is quoted rather than named.
+      secretValues: knownSecretValues(repoRoot, environment),
+    })
+    zenLogger('extension', 'logging').debug('configured by the extension: pi is a child process')
+    pi.on('session_shutdown', async (): Promise<void> => {
+      await disposeLogging()
+    })
+  }
 }
 
 /**
@@ -50,11 +50,11 @@ export function createLoggingExtension(
  * says is safe to hand over. These four are correlation and capacity, never credentials.
  */
 const RECORDED_RESPONSE_HEADERS = [
-	"request-id",
-	"x-request-id",
-	"anthropic-ratelimit-requests-remaining",
-	"anthropic-ratelimit-tokens-remaining",
-] as const;
+  'request-id',
+  'x-request-id',
+  'anthropic-ratelimit-requests-remaining',
+  'anthropic-ratelimit-tokens-remaining',
+] as const
 
 /**
  * One record per provider call: the id the PROVIDER knows the call by, and the status.
@@ -64,21 +64,21 @@ const RECORDED_RESPONSE_HEADERS = [
  * case-insensitively anyway, since that is a provider's choice to change.
  */
 function recordProviderResponses(pi: ExtensionAPI): void {
-	const log = zenLogger("extension", "provider");
-	pi.on("after_provider_response", (event): void => {
-		const headers = new Map(Object.entries(event.headers).map(([name, value]) => [name.toLowerCase(), value]));
-		const recorded: Record<string, string> = {};
-		for (const name of RECORDED_RESPONSE_HEADERS) {
-			const value = headers.get(name);
-			if (value !== undefined) recorded[name] = value;
-		}
-		log.info("provider responded {status}, request id {requestId}", {
-			status: event.status,
-			requestId: recorded["request-id"] ?? recorded["x-request-id"] ?? "(none)",
-			headers: recorded,
-		});
-	});
+  const log = zenLogger('extension', 'provider')
+  pi.on('after_provider_response', (event): void => {
+    const headers = new Map(Object.entries(event.headers).map(([name, value]) => [name.toLowerCase(), value]))
+    const recorded: Record<string, string> = {}
+    for (const name of RECORDED_RESPONSE_HEADERS) {
+      const value = headers.get(name)
+      if (value !== undefined) recorded[name] = value
+    }
+    log.info('provider responded {status}, request id {requestId}', {
+      status: event.status,
+      requestId: recorded['request-id'] ?? recorded['x-request-id'] ?? '(none)',
+      headers: recorded,
+    })
+  })
 }
 
 /** The pi entry point: this process's environment. Tests build one with an environment of their own. */
-export default createLoggingExtension(process.env);
+export default createLoggingExtension(process.env)

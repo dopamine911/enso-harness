@@ -24,14 +24,14 @@
  * ⚠ What a print run then has: OUR guards only. `bash` is unconfined (#9) — that is the
  * pre-picc posture restored, usability without unattended safety. Stated in #20.
  */
-import { lstatSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { lstatSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { join, relative } from 'node:path'
 
 /** The manifest entry to remove — matching by package name, not exact path. */
-const PICC_EXTENSION_FRAGMENT = "picc-permission-modes";
+const PICC_EXTENSION_FRAGMENT = 'picc-permission-modes'
 
 /** The one real file in the variant; everything else is a symlink into the package. */
-const MANIFEST_FILENAME = "package.json";
+const MANIFEST_FILENAME = 'package.json'
 
 /**
  * The harness `package.json` as this filter reads it: the pi manifest block, and everything
@@ -40,15 +40,15 @@ const MANIFEST_FILENAME = "package.json";
  */
 
 export class PrintHarnessShapeError extends Error {
-	/** @param {string} detail */
-	constructor(detail) {
-		super(
-			`print-harness: the harness manifest no longer matches the shape this filter ` +
-				`expects (${detail}). Re-derive the print variant (#20) before launching ` +
-				`non-interactive runs.`,
-		);
-		this.name = "PrintHarnessShapeError";
-	}
+  /** @param {string} detail */
+  constructor(detail) {
+    super(
+      `print-harness: the harness manifest no longer matches the shape this filter ` +
+        `expects (${detail}). Re-derive the print variant (#20) before launching ` +
+        `non-interactive runs.`,
+    )
+    this.name = 'PrintHarnessShapeError'
+  }
 }
 
 /**
@@ -58,24 +58,24 @@ export class PrintHarnessShapeError extends Error {
  * @returns {HarnessManifest & { pi: NonNullable<HarnessManifest["pi"]> & { extensions: string[] } }}
  */
 export function buildPrintManifest(manifest) {
-	const extensions = manifest?.pi?.extensions;
-	if (!Array.isArray(extensions)) {
-		throw new PrintHarnessShapeError("pi.extensions is not an array");
-	}
-	const keptExtensions = extensions.filter(
-		(entry) => typeof entry !== "string" || !entry.includes(PICC_EXTENSION_FRAGMENT),
-	);
-	if (keptExtensions.length === extensions.length) {
-		throw new PrintHarnessShapeError(`no extension entry contains "${PICC_EXTENSION_FRAGMENT}" — the filter is stale`);
-	}
-	if (keptExtensions.length === 0) {
-		throw new PrintHarnessShapeError("the filter removed every extension");
-	}
-	return {
-		...manifest,
-		name: `${manifest.name}-print`,
-		pi: { ...manifest.pi, extensions: keptExtensions },
-	};
+  const extensions = manifest?.pi?.extensions
+  if (!Array.isArray(extensions)) {
+    throw new PrintHarnessShapeError('pi.extensions is not an array')
+  }
+  const keptExtensions = extensions.filter(
+    (entry) => typeof entry !== 'string' || !entry.includes(PICC_EXTENSION_FRAGMENT),
+  )
+  if (keptExtensions.length === extensions.length) {
+    throw new PrintHarnessShapeError(`no extension entry contains "${PICC_EXTENSION_FRAGMENT}" — the filter is stale`)
+  }
+  if (keptExtensions.length === 0) {
+    throw new PrintHarnessShapeError('the filter removed every extension')
+  }
+  return {
+    ...manifest,
+    name: `${manifest.name}-print`,
+    pi: { ...manifest.pi, extensions: keptExtensions },
+  }
 }
 
 /**
@@ -89,31 +89,31 @@ export function buildPrintManifest(manifest) {
  * @param {HarnessManifest} printManifest
  */
 export function materializePrintHarness(printHarnessDir, harnessPackageRoot, printManifest) {
-	mkdirSync(printHarnessDir, { recursive: true });
-	// ⚠ EVERY package-root entry is mirrored, not a curated list: extensions import their
-	// siblings by relative path (guards reaches `../../core/index.ts`), and pi resolves
-	// those against the variant's path — a missing sibling is a launch-time module error.
-	// readdir keeps the mirror complete as the package grows. ⓘ `zen.config.json` (#59) is
-	// NOT mirrored and does not need to be: it lives at the REPO root, and web-fetch finds
-	// it via `findRepoRoot`, which realpaths out of this mirror before walking (paths.ts) —
-	// do not "fix" the mirror to carry it.
-	const packageEntries = readdirSync(harnessPackageRoot).filter((entry) => entry !== MANIFEST_FILENAME);
-	const wantedEntries = new Set([...packageEntries, MANIFEST_FILENAME]);
-	for (const stale of readdirSync(printHarnessDir)) {
-		if (!wantedEntries.has(stale)) rmSync(join(printHarnessDir, stale), { recursive: true, force: true });
-	}
-	for (const entry of packageEntries) {
-		const linkPath = join(printHarnessDir, entry);
-		const targetPath = join(harnessPackageRoot, entry);
-		// lstat, not exists: a broken symlink must be replaced, and exists() follows links.
-		try {
-			lstatSync(linkPath);
-			rmSync(linkPath, { recursive: true, force: true });
-		} catch {
-			// nothing there yet
-		}
-		symlinkSync(relative(printHarnessDir, targetPath), linkPath, "dir");
-	}
-	writeFileSync(join(printHarnessDir, MANIFEST_FILENAME), `${JSON.stringify(printManifest, null, "\t")}\n`);
-	return printHarnessDir;
+  mkdirSync(printHarnessDir, { recursive: true })
+  // ⚠ EVERY package-root entry is mirrored, not a curated list: extensions import their
+  // siblings by relative path (guards reaches `../../core/index.ts`), and pi resolves
+  // those against the variant's path — a missing sibling is a launch-time module error.
+  // readdir keeps the mirror complete as the package grows. ⓘ `zen.config.json` (#59) is
+  // NOT mirrored and does not need to be: it lives at the REPO root, and web-fetch finds
+  // it via `findRepoRoot`, which realpaths out of this mirror before walking (paths.ts) —
+  // do not "fix" the mirror to carry it.
+  const packageEntries = readdirSync(harnessPackageRoot).filter((entry) => entry !== MANIFEST_FILENAME)
+  const wantedEntries = new Set([...packageEntries, MANIFEST_FILENAME])
+  for (const stale of readdirSync(printHarnessDir)) {
+    if (!wantedEntries.has(stale)) rmSync(join(printHarnessDir, stale), { recursive: true, force: true })
+  }
+  for (const entry of packageEntries) {
+    const linkPath = join(printHarnessDir, entry)
+    const targetPath = join(harnessPackageRoot, entry)
+    // lstat, not exists: a broken symlink must be replaced, and exists() follows links.
+    try {
+      lstatSync(linkPath)
+      rmSync(linkPath, { recursive: true, force: true })
+    } catch {
+      // nothing there yet
+    }
+    symlinkSync(relative(printHarnessDir, targetPath), linkPath, 'dir')
+  }
+  writeFileSync(join(printHarnessDir, MANIFEST_FILENAME), `${JSON.stringify(printManifest, null, '\t')}\n`)
+  return printHarnessDir
 }

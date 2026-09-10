@@ -1,8 +1,8 @@
-import type { UIMessage } from "@tanstack/ai-client";
-import { automaticPartsForMessage, selectChatUI } from "@tanstack/ai-client/ui";
-import { useStore, useThreadStores } from "./store.ts";
-import type { ThreadStats } from "./thread-stats.tsx";
-import { toolResultState } from "./ZenToolResult.tsx";
+import type { UIMessage } from '@tanstack/ai-client'
+import { automaticPartsForMessage, selectChatUI } from '@tanstack/ai-client/ui'
+import { useStore, useThreadStores } from './store.ts'
+import type { ThreadStats } from './thread-stats.tsx'
+import { toolResultState } from './ZenToolResult.tsx'
 
 /**
  * The status bar (#90 PR 1): the always-on line that says what this session is doing and
@@ -32,18 +32,18 @@ import { toolResultState } from "./ZenToolResult.tsx";
 
 /** What the run is doing right now, as far as the page can tell from the transcript. */
 export type Activity =
-	| { readonly kind: "idle" }
-	/** A run is in flight but nothing has streamed yet, or the model is between steps. */
-	| { readonly kind: "working" }
-	| { readonly kind: "thinking" }
-	| { readonly kind: "running"; readonly tool: string }
-	| { readonly kind: "responding" }
-	/**
-	 * The follow ended under this page (#119): whatever the run flag holds is as of that
-	 * moment, so it is not reported — a run that was in flight may have finished, been
-	 * aborted, or died with the server, and the page cannot tell which.
-	 */
-	| { readonly kind: "disconnected" };
+  | { readonly kind: 'idle' }
+  /** A run is in flight but nothing has streamed yet, or the model is between steps. */
+  | { readonly kind: 'working' }
+  | { readonly kind: 'thinking' }
+  | { readonly kind: 'running'; readonly tool: string }
+  | { readonly kind: 'responding' }
+  /**
+   * The follow ended under this page (#119): whatever the run flag holds is as of that
+   * moment, so it is not reported — a run that was in flight may have finished, been
+   * aborted, or died with the server, and the page cannot tell which.
+   */
+  | { readonly kind: 'disconnected' }
 
 /**
  * Read the activity off the transcript's tail. The last AUTOMATIC part of the last message
@@ -61,106 +61,106 @@ export type Activity =
  * screen in the transcript; nothing is hidden by summarising it.
  */
 export function describeActivity(
-	messages: ReadonlyArray<UIMessage>,
-	generating: boolean,
-	disconnected = false,
+  messages: ReadonlyArray<UIMessage>,
+  generating: boolean,
+  disconnected = false,
 ): Activity {
-	if (disconnected) return { kind: "disconnected" };
-	if (!generating) return { kind: "idle" };
-	const last = selectChatUI({ messages }).messages.at(-1);
-	if (last === undefined || last.message.role !== "assistant") return { kind: "working" };
-	const tail = automaticPartsForMessage(last).at(-1);
-	if (tail === undefined) return { kind: "working" };
-	if (tail.key === "toolCall") {
-		// `generating` is true here, so the tail's run is open: no result is pending, never aborted.
-		const pending = toolResultState(tail.result, true).status === "pending";
-		return pending ? { kind: "running", tool: tail.part.name } : { kind: "working" };
-	}
-	if (tail.key === "thinking") return { kind: "thinking" };
-	if (tail.key === "text") return { kind: "responding" };
-	return { kind: "working" };
+  if (disconnected) return { kind: 'disconnected' }
+  if (!generating) return { kind: 'idle' }
+  const last = selectChatUI({ messages }).messages.at(-1)
+  if (last === undefined || last.message.role !== 'assistant') return { kind: 'working' }
+  const tail = automaticPartsForMessage(last).at(-1)
+  if (tail === undefined) return { kind: 'working' }
+  if (tail.key === 'toolCall') {
+    // `generating` is true here, so the tail's run is open: no result is pending, never aborted.
+    const pending = toolResultState(tail.result, true).status === 'pending'
+    return pending ? { kind: 'running', tool: tail.part.name } : { kind: 'working' }
+  }
+  if (tail.key === 'thinking') return { kind: 'thinking' }
+  if (tail.key === 'text') return { kind: 'responding' }
+  return { kind: 'working' }
 }
 
 export interface ThreadCounts {
-	/** User messages — one per thing the human asked. */
-	readonly turns: number;
-	/** Tool calls across the whole transcript, paired or not. */
-	readonly toolCalls: number;
+  /** User messages — one per thing the human asked. */
+  readonly turns: number
+  /** Tool calls across the whole transcript, paired or not. */
+  readonly toolCalls: number
 }
 
 /** Count the transcript. Cheap enough to run per render; the list is what is on screen. */
 export function countThread(messages: ReadonlyArray<UIMessage>): ThreadCounts {
-	let turns = 0;
-	let toolCalls = 0;
-	for (const message of messages) {
-		if (message.role === "user") turns += 1;
-		for (const part of message.parts) if (part.type === "tool-call") toolCalls += 1;
-	}
-	return { turns, toolCalls };
+  let turns = 0
+  let toolCalls = 0
+  for (const message of messages) {
+    if (message.role === 'user') turns += 1
+    for (const part of message.parts) if (part.type === 'tool-call') toolCalls += 1
+  }
+  return { turns, toolCalls }
 }
 
 /** `running read` — the tool named as pi names it, so it matches the transcript's step row. */
 export function activityLabel(activity: Activity): string {
-	return activity.kind === "running" ? `running ${activity.tool}` : activity.kind;
+  return activity.kind === 'running' ? `running ${activity.tool}` : activity.kind
 }
 
 export interface ThreadStatusViewProps {
-	readonly activity: Activity;
-	readonly counts: ThreadCounts;
-	readonly stats: ThreadStats;
+  readonly activity: Activity
+  readonly counts: ThreadCounts
+  readonly stats: ThreadStats
 }
 
-const DOT_DISCONNECTED = "size-2 rounded-full bg-destructive";
-const DOT_IDLE = "size-2 rounded-full bg-muted-foreground/40";
-const DOT_IN_FLIGHT = "size-2 animate-pulse rounded-full bg-foreground";
+const DOT_DISCONNECTED = 'size-2 rounded-full bg-destructive'
+const DOT_IDLE = 'size-2 rounded-full bg-muted-foreground/40'
+const DOT_IN_FLIGHT = 'size-2 animate-pulse rounded-full bg-foreground'
 
 /** The dot beside the word: pulsing while in flight, still when idle, red once the follow ended (#119). */
 function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof DOT_IDLE | typeof DOT_IN_FLIGHT {
-	if (activity.kind === "disconnected") return DOT_DISCONNECTED;
-	if (activity.kind === "idle") return DOT_IDLE;
-	return DOT_IN_FLIGHT;
+  if (activity.kind === 'disconnected') return DOT_DISCONNECTED
+  if (activity.kind === 'idle') return DOT_IDLE
+  return DOT_IN_FLIGHT
 }
 
 /** Pure view — everything it shows arrives as props, so a static render pins the wording. */
 export function ThreadStatusView({ activity, counts, stats }: ThreadStatusViewProps): React.ReactNode {
-	const dotClass = activityDotClass(activity);
-	return (
-		<footer
-			id="thread-status"
-			className="flex items-center gap-3 border-t px-4 py-1 font-mono text-muted-foreground text-xs"
-		>
-			<span
-				className="flex items-center gap-1.5"
-				title={
-					activity.kind === "disconnected"
-						? "the connection to the server ended — reload and resume from the rail"
-						: "what the run is doing right now, read off the transcript's tail"
-				}
-			>
-				<span aria-hidden="true" className={dotClass} />
-				{activityLabel(activity)}
-			</span>
-			<span title="user messages in this transcript">
-				{counts.turns} {counts.turns === 1 ? "turn" : "turns"}
-			</span>
-			<span title="tool calls across this transcript, finished or not">
-				{counts.toolCalls} {counts.toolCalls === 1 ? "tool call" : "tool calls"}
-			</span>
-			<span className="ml-auto" title="sum of every model request this page has made (pi's own attribution rule)">
-				${stats.totalCost.toFixed(4)}
-			</span>
-			{stats.lastRequestInputTokens === undefined ? null : (
-				<span title="prompt tokens the model saw on the latest request (input + cache read + cache write) — not a context-window percentage; the window size does not cross the wire">
-					last {stats.lastRequestInputTokens.toLocaleString("en-US")} tok in
-				</span>
-			)}
-		</footer>
-	);
+  const dotClass = activityDotClass(activity)
+  return (
+    <footer
+      id="thread-status"
+      className="flex items-center gap-3 border-t px-4 py-1 font-mono text-muted-foreground text-xs"
+    >
+      <span
+        className="flex items-center gap-1.5"
+        title={
+          activity.kind === 'disconnected'
+            ? 'the connection to the server ended — reload and resume from the rail'
+            : "what the run is doing right now, read off the transcript's tail"
+        }
+      >
+        <span aria-hidden="true" className={dotClass} />
+        {activityLabel(activity)}
+      </span>
+      <span title="user messages in this transcript">
+        {counts.turns} {counts.turns === 1 ? 'turn' : 'turns'}
+      </span>
+      <span title="tool calls across this transcript, finished or not">
+        {counts.toolCalls} {counts.toolCalls === 1 ? 'tool call' : 'tool calls'}
+      </span>
+      <span className="ml-auto" title="sum of every model request this page has made (pi's own attribution rule)">
+        ${stats.totalCost.toFixed(4)}
+      </span>
+      {stats.lastRequestInputTokens === undefined ? null : (
+        <span title="prompt tokens the model saw on the latest request (input + cache read + cache write) — not a context-window percentage; the window size does not cross the wire">
+          last {stats.lastRequestInputTokens.toLocaleString('en-US')} tok in
+        </span>
+      )}
+    </footer>
+  )
 }
 
 export interface ThreadStatusBarProps {
-	readonly messages: ReadonlyArray<UIMessage>;
-	readonly generating: boolean;
+  readonly messages: ReadonlyArray<UIMessage>
+  readonly generating: boolean
 }
 
 /**
@@ -169,14 +169,14 @@ export interface ThreadStatusBarProps {
  * thread's usage store and its disconnected flag (#119) are read from context.
  */
 export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps): React.ReactNode {
-	const stores = useThreadStores();
-	const stats = useStore(stores.stats);
-	const disconnected = useStore(stores.disconnected);
-	return (
-		<ThreadStatusView
-			activity={describeActivity(messages, generating, disconnected)}
-			counts={countThread(messages)}
-			stats={stats}
-		/>
-	);
+  const stores = useThreadStores()
+  const stats = useStore(stores.stats)
+  const disconnected = useStore(stores.disconnected)
+  return (
+    <ThreadStatusView
+      activity={describeActivity(messages, generating, disconnected)}
+      counts={countThread(messages)}
+      stats={stats}
+    />
+  )
 }

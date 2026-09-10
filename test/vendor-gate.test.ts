@@ -1,6 +1,6 @@
-import { expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { expect, test } from 'bun:test'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 /**
  * The seam has an owner: only the host and the pi extensions may name the vendor (#145).
@@ -40,20 +40,20 @@ import { join } from "node:path";
  * import inside an unterminated comment; this cannot.
  */
 
-const repositoryRoot = join(import.meta.dir, "..");
-const SEARCHED_ROOTS = ["packages/core/src", "packages/web/src", "packages/harness"] as const;
+const repositoryRoot = join(import.meta.dir, '..')
+const SEARCHED_ROOTS = ['packages/core/src', 'packages/web/src', 'packages/harness'] as const
 /** Where the vendor may be named. Removing one of these is a design conversation. */
-const VENDOR_ROOTS = ["packages/web/src/host", "packages/harness/extensions"] as const;
-const SKIPPED_DIRECTORIES = ["node_modules", "dist", "dist-types", "coverage", "__tests__"] as const;
-const SOURCE_EXTENSION = /\.tsx?$/;
+const VENDOR_ROOTS = ['packages/web/src/host', 'packages/harness/extensions'] as const
+const SKIPPED_DIRECTORIES = ['node_modules', 'dist', 'dist-types', 'coverage', '__tests__'] as const
+const SOURCE_EXTENSION = /\.tsx?$/
 /** A line that is only a comment: `//`, a block opener, or a block's `*`-led body. */
-const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/;
+const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/
 /**
  * pi and its libraries, by package scope — in ANY string that names it, not only a
  * `from "…"` clause (PR #150 review): `import("@earendil-works/…")` and
  * `import.meta.resolve("@earendil-works/…")` are the same dependency by another spelling.
  */
-const VENDOR_IMPORT = /["']@earendil-works\//;
+const VENDOR_IMPORT = /["']@earendil-works\//
 /**
  * The words a line is made of, with `camelCase` split: `readPiccPersistedMode` is
  * `read | picc | persisted | mode`, `PICC_PERMISSION_MODES` is `picc | permission | modes`,
@@ -62,27 +62,27 @@ const VENDOR_IMPORT = /["']@earendil-works\//;
  * on both sides never fires inside `readPiccPersistedMode` (PR #150 review found it live).
  */
 function wordsOf(line: string): string[] {
-	const words: string[] = [];
-	for (const token of line.match(/[A-Za-z0-9]+/g) ?? []) {
-		words.push(...(token.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z0-9]+|[0-9]+/g) ?? []).map((word) => word.toLowerCase()));
-	}
-	return words;
+  const words: string[] = []
+  for (const token of line.match(/[A-Za-z0-9]+/g) ?? []) {
+    words.push(...(token.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z0-9]+|[0-9]+/g) ?? []).map((word) => word.toLowerCase()))
+  }
+  return words
 }
 
 /** One word is the whole name. */
-const VENDOR_WORD = "picc";
+const VENDOR_WORD = 'picc'
 /** …and the ones spelled in several words, however they are joined (`cc-safety-net`, `ccSafetyNet`). */
 const VENDOR_WORD_SEQUENCES = [
-	["cc", "safety", "net"],
-	["pi", "multi", "account"],
-] as const;
+  ['cc', 'safety', 'net'],
+  ['pi', 'multi', 'account'],
+] as const
 
 function namesVendor(line: string): boolean {
-	const words = wordsOf(line);
-	if (words.includes(VENDOR_WORD)) return true;
-	return VENDOR_WORD_SEQUENCES.some((sequence) =>
-		words.some((_word, start) => sequence.every((part, offset) => words[start + offset] === part)),
-	);
+  const words = wordsOf(line)
+  if (words.includes(VENDOR_WORD)) return true
+  return VENDOR_WORD_SEQUENCES.some((sequence) =>
+    words.some((_word, start) => sequence.every((part, offset) => words[start + offset] === part)),
+  )
 }
 
 /**
@@ -92,85 +92,85 @@ function namesVendor(line: string): boolean {
  * agent loop) and is fenced by `web-search`'s five-providers-behind-one-contract shape.
  */
 const VENDOR_IMPORT_ALLOWED: readonly string[] = [
-	// pi-ai's `Api`/`Model` types and its env-key fallback: the PROVIDER seam, not the loop.
-	// Leaves when web-search's provider contract names its own model/credential types.
-	"packages/harness/core/web-search/vocabulary.ts",
-	"packages/harness/core/web-search/auth.ts",
-];
+  // pi-ai's `Api`/`Model` types and its env-key fallback: the PROVIDER seam, not the loop.
+  // Leaves when web-search's provider contract names its own model/credential types.
+  'packages/harness/core/web-search/vocabulary.ts',
+  'packages/harness/core/web-search/auth.ts',
+]
 
 const VENDOR_NAMED_ALLOWED: readonly string[] = [
-	// L3 (picc's persistence read in core): the mode's own vocabulary is picc's registered set
-	// and its persisted `customType: "modes"` entry. Leaves when the mode concept is ours.
-	"packages/core/src/permission-mode.ts",
-	// …and its re-export surface: `PICC_*` is part of `@zen/core`'s public names today.
-	"packages/core/src/index.ts",
-	// The guard's write-allowlist names cc-safety-net's state directory: a path, not an import.
-	// Leaves when the harness owns the list of directories an extension may write.
-	"packages/core/src/guard.ts",
-	// The two server routes that answer `{ mode, available }`: the available set is picc's.
-	// Leaves with L3 — the host would hand the server a mode state of ours.
-	"packages/web/src/server/index.ts",
-	"packages/web/src/server/follow.ts",
-	// The dropdown reads the persisted mode through `readPiccPersistedMode` and says whose
-	// default a fresh thread starts in. The call leaves with L3; the sentence stops being true
-	// the same day.
-	"packages/web/src/permission-mode.tsx",
-	// The status line's second reader of the same persisted entry (`readPiccPersistedMode`) —
-	// found by the widened matcher, not by the first one (PR #150 review). Leaves with L3.
-	"packages/web/src/mode-lines.ts",
-];
+  // L3 (picc's persistence read in core): the mode's own vocabulary is picc's registered set
+  // and its persisted `customType: "modes"` entry. Leaves when the mode concept is ours.
+  'packages/core/src/permission-mode.ts',
+  // …and its re-export surface: `PICC_*` is part of `@zen/core`'s public names today.
+  'packages/core/src/index.ts',
+  // The guard's write-allowlist names cc-safety-net's state directory: a path, not an import.
+  // Leaves when the harness owns the list of directories an extension may write.
+  'packages/core/src/guard.ts',
+  // The two server routes that answer `{ mode, available }`: the available set is picc's.
+  // Leaves with L3 — the host would hand the server a mode state of ours.
+  'packages/web/src/server/index.ts',
+  'packages/web/src/server/follow.ts',
+  // The dropdown reads the persisted mode through `readPiccPersistedMode` and says whose
+  // default a fresh thread starts in. The call leaves with L3; the sentence stops being true
+  // the same day.
+  'packages/web/src/permission-mode.tsx',
+  // The status line's second reader of the same persisted entry (`readPiccPersistedMode`) —
+  // found by the widened matcher, not by the first one (PR #150 review). Leaves with L3.
+  'packages/web/src/mode-lines.ts',
+]
 
 function sourceFiles(directory: string): string[] {
-	const found: string[] = [];
-	for (const dirent of readdirSync(directory, { withFileTypes: true })) {
-		if ((SKIPPED_DIRECTORIES as readonly string[]).includes(dirent.name)) continue;
-		const path = join(directory, dirent.name);
-		if (dirent.isDirectory()) found.push(...sourceFiles(path));
-		else if (SOURCE_EXTENSION.test(dirent.name)) found.push(path);
-	}
-	return found;
+  const found: string[] = []
+  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
+    if ((SKIPPED_DIRECTORIES as readonly string[]).includes(dirent.name)) continue
+    const path = join(directory, dirent.name)
+    if (dirent.isDirectory()) found.push(...sourceFiles(path))
+    else if (SOURCE_EXTENSION.test(dirent.name)) found.push(path)
+  }
+  return found
 }
 
 function offendersMatching(names: (line: string) => boolean, allowed: readonly string[]): string[] {
-	const offenders: string[] = [];
-	for (const root of SEARCHED_ROOTS) {
-		for (const path of sourceFiles(join(repositoryRoot, root))) {
-			const repositoryRelative = path.slice(repositoryRoot.length + 1);
-			if (VENDOR_ROOTS.some((vendorRoot) => repositoryRelative.startsWith(`${vendorRoot}/`))) continue;
-			if (allowed.includes(repositoryRelative)) continue;
-			for (const [lineIndex, line] of readFileSync(path, "utf8").split("\n").entries()) {
-				// Code, not prose: a comment may name picc to say why a guard exists.
-				if (COMMENT_LINE.test(line)) continue;
-				if (names(line)) offenders.push(`${repositoryRelative}:${lineIndex + 1}`);
-			}
-		}
-	}
-	return offenders;
+  const offenders: string[] = []
+  for (const root of SEARCHED_ROOTS) {
+    for (const path of sourceFiles(join(repositoryRoot, root))) {
+      const repositoryRelative = path.slice(repositoryRoot.length + 1)
+      if (VENDOR_ROOTS.some((vendorRoot) => repositoryRelative.startsWith(`${vendorRoot}/`))) continue
+      if (allowed.includes(repositoryRelative)) continue
+      for (const [lineIndex, line] of readFileSync(path, 'utf8').split('\n').entries()) {
+        // Code, not prose: a comment may name picc to say why a guard exists.
+        if (COMMENT_LINE.test(line)) continue
+        if (names(line)) offenders.push(`${repositoryRelative}:${lineIndex + 1}`)
+      }
+    }
+  }
+  return offenders
 }
 
-test("⚠ @earendil-works/* is named only by the host and the pi extensions (#145)", () => {
-	expect(offendersMatching((line) => VENDOR_IMPORT.test(line), VENDOR_IMPORT_ALLOWED)).toEqual([]);
-});
+test('⚠ @earendil-works/* is named only by the host and the pi extensions (#145)', () => {
+  expect(offendersMatching((line) => VENDOR_IMPORT.test(line), VENDOR_IMPORT_ALLOWED)).toEqual([])
+})
 
-test("⚠ a vendor extension is named in code only there — the allowlist is the leak inventory (#145)", () => {
-	expect(offendersMatching(namesVendor, VENDOR_NAMED_ALLOWED)).toEqual([]);
-});
+test('⚠ a vendor extension is named in code only there — the allowlist is the leak inventory (#145)', () => {
+  expect(offendersMatching(namesVendor, VENDOR_NAMED_ALLOWED)).toEqual([])
+})
 
 // The gate can only be a ratchet if its matcher sees what a reader would call a mention. The
 // first two rows are the ones a `\b` boundary and a both-sides lookaround each missed.
-test("the matcher reads words, not substrings: a vendor name counts wherever it is spelled", () => {
-	for (const line of [
-		"import { readPiccPersistedMode } from '@zen/core';", // camelCase — missed by lookarounds
-		"export const PICC_PERMISSION_MODES = [] as const;", // `_` bounded — missed by \b
-		'const dirs = [".cc-safety-net"];',
-		"const config = ccSafetyNetConfig;",
-		"await loadPiMultiAccount();",
-		"a fresh thread starts in picc's default",
-	]) {
-		expect(namesVendor(line)).toBe(true);
-	}
-	// Words that merely share a prefix are not the vendor.
-	for (const line of ["const piccolo = 1;", "import { pick } from './x.ts';", "const netSafetyCc = 2;"]) {
-		expect(namesVendor(line)).toBe(false);
-	}
-});
+test('the matcher reads words, not substrings: a vendor name counts wherever it is spelled', () => {
+  for (const line of [
+    "import { readPiccPersistedMode } from '@zen/core';", // camelCase — missed by lookarounds
+    'export const PICC_PERMISSION_MODES = [] as const;', // `_` bounded — missed by \b
+    'const dirs = [".cc-safety-net"];',
+    'const config = ccSafetyNetConfig;',
+    'await loadPiMultiAccount();',
+    "a fresh thread starts in picc's default",
+  ]) {
+    expect(namesVendor(line)).toBe(true)
+  }
+  // Words that merely share a prefix are not the vendor.
+  for (const line of ['const piccolo = 1;', "import { pick } from './x.ts';", 'const netSafetyCc = 2;']) {
+    expect(namesVendor(line)).toBe(false)
+  }
+})

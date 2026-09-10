@@ -1,32 +1,32 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
-	createAgentSessionFromServices,
-	createAgentSessionServices,
-	type ExtensionError,
-	type InlineExtension,
-	initTheme,
-	VERSION as PI_VERSION,
-	SessionManager,
-} from "@earendil-works/pi-coding-agent";
+  createAgentSessionFromServices,
+  createAgentSessionServices,
+  type ExtensionError,
+  type InlineExtension,
+  initTheme,
+  VERSION as PI_VERSION,
+  SessionManager,
+} from '@earendil-works/pi-coding-agent'
 import {
-	findRepoRoot,
-	PICC_PERMISSION_MODES,
-	type PiCommand,
-	type PiEventDelivery,
-	type PiPermissionModeState,
-	type PiRpcEvent,
-	type PiSession,
-	persistedPermissionMode,
-	quarantineSecrets,
-	type ZenThreadEvent,
-	zenLogger,
-} from "@zen/core";
-import { createEventTail, describePiRpcEvent } from "./event-tail.ts";
-import { createZenExtensionUiContext } from "./extension-ui-context.ts";
-import { toRpcWireEvent } from "./session-events.ts";
+  findRepoRoot,
+  PICC_PERMISSION_MODES,
+  type PiCommand,
+  type PiEventDelivery,
+  type PiPermissionModeState,
+  type PiRpcEvent,
+  type PiSession,
+  persistedPermissionMode,
+  quarantineSecrets,
+  type ZenThreadEvent,
+  zenLogger,
+} from '@zen/core'
+import { createEventTail, describePiRpcEvent } from './event-tail.ts'
+import { createZenExtensionUiContext } from './extension-ui-context.ts'
+import { toRpcWireEvent } from './session-events.ts'
 
-const log = zenLogger("host");
+const log = zenLogger('host')
 
 /**
  * pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning
@@ -73,35 +73,35 @@ const log = zenLogger("host");
  */
 
 /** The agent dir's multi-account config file, and the one key this host must pin in it. */
-const MULTI_ACCOUNT_CONFIG_FILENAME = "provider-failover.json";
-const MULTI_ACCOUNT_CHILD_PROXY_KEY = "childProxy";
+const MULTI_ACCOUNT_CONFIG_FILENAME = 'provider-failover.json'
+const MULTI_ACCOUNT_CHILD_PROXY_KEY = 'childProxy'
 
 /** pi's `InputSource` for prompts that arrive over a wire rather than a keyboard. */
-const PROMPT_SOURCE_RPC = "rpc";
+const PROMPT_SOURCE_RPC = 'rpc'
 
 /** The `ExtensionMode` we bind — `ctx.mode` as extensions see it. rpc is the truthful one: no terminal, a remote surface. */
-const EXTENSION_MODE_RPC = "rpc";
+const EXTENSION_MODE_RPC = 'rpc'
 
 export interface AgentHostOptions {
-	/** The tree pi reads and writes. One per server, never from a request (see `server/index.ts`). */
-	cwd: string;
-	/** Scratch config dir — the operator's own packages and credentials stay invisible. */
-	agentDir: string;
-	/** The zen harness pi package directory; loaded as the ONLY extension source. */
-	harnessPackageDir: string;
-	/**
-	 * The environment the secrets quarantine (#89) scrubs — `process.env` in production, the
-	 * one pi and every `bash` child inherit. A seam so the quarantine is testable without a
-	 * test ever touching `process.env` (the repo's rule for tests). The agent-dir pin is not
-	 * on this seam: it is a process fact pi-multi-account reads at import.
-	 */
-	environment?: Record<string, string | undefined>;
-	/**
-	 * Test seam: inline extensions loaded BESIDE the harness. A test can register a probe that
-	 * asks a dialog on `session_start`, or throws there, and observe what the host does — with
-	 * no model, no key, no network. Never set in production.
-	 */
-	extensionFactories?: readonly InlineExtension[];
+  /** The tree pi reads and writes. One per server, never from a request (see `server/index.ts`). */
+  cwd: string
+  /** Scratch config dir — the operator's own packages and credentials stay invisible. */
+  agentDir: string
+  /** The zen harness pi package directory; loaded as the ONLY extension source. */
+  harnessPackageDir: string
+  /**
+   * The environment the secrets quarantine (#89) scrubs — `process.env` in production, the
+   * one pi and every `bash` child inherit. A seam so the quarantine is testable without a
+   * test ever touching `process.env` (the repo's rule for tests). The agent-dir pin is not
+   * on this seam: it is a process fact pi-multi-account reads at import.
+   */
+  environment?: Record<string, string | undefined>
+  /**
+   * Test seam: inline extensions loaded BESIDE the harness. A test can register a probe that
+   * asks a dialog on `session_start`, or throws there, and observe what the host does — with
+   * no model, no key, no network. Never set in production.
+   */
+  extensionFactories?: readonly InlineExtension[]
 }
 
 /**
@@ -111,60 +111,60 @@ export interface AgentHostOptions {
  * cross-check against.
  */
 export interface HostedSessionInspection {
-	readonly sessionId: string;
-	readonly cwd: string;
-	readonly sessionDir: string;
-	/** The session file once pi has flushed it; null while the session lives only in memory. */
-	readonly sessionFile: string | null;
-	/** The branch, root to leaf, verbatim — pi's own entry shapes. */
-	readonly entries: readonly unknown[];
-	/** Slash commands this session registers. */
-	readonly commands: readonly string[];
+  readonly sessionId: string
+  readonly cwd: string
+  readonly sessionDir: string
+  /** The session file once pi has flushed it; null while the session lives only in memory. */
+  readonly sessionFile: string | null
+  /** The branch, root to leaf, verbatim — pi's own entry shapes. */
+  readonly entries: readonly unknown[]
+  /** Slash commands this session registers. */
+  readonly commands: readonly string[]
 }
 
 export interface HostedSession {
-	readonly session: PiSession;
-	/** How many extensions the loader found — the load receipt a caller may assert. */
-	readonly loadedExtensionPaths: readonly string[];
-	/**
-	 * Read-only view of the session as pi holds it. Deliberately here and NOT on
-	 * `PiSession`: that is the run contract, pinned by three fakes and the refusal-path
-	 * tests, and inspection is a host concern.
-	 */
-	inspect(): HostedSessionInspection;
-	/** The emitted tail (#97): what the host's `emit` funnel saw, with provenance. A fresh copy per call. */
-	emittedEvents(): ZenThreadEvent[];
+  readonly session: PiSession
+  /** How many extensions the loader found — the load receipt a caller may assert. */
+  readonly loadedExtensionPaths: readonly string[]
+  /**
+   * Read-only view of the session as pi holds it. Deliberately here and NOT on
+   * `PiSession`: that is the run contract, pinned by three fakes and the refusal-path
+   * tests, and inspection is a host concern.
+   */
+  inspect(): HostedSessionInspection
+  /** The emitted tail (#97): what the host's `emit` funnel saw, with provenance. A fresh copy per call. */
+  emittedEvents(): ZenThreadEvent[]
 }
 
 /** One of pi's session files for this workspace, as pi lists it (#95). */
 export interface StoredSession {
-	/** pi's session id — the thread id it was created under. */
-	readonly id: string;
-	readonly path: string;
-	readonly modified: Date;
-	readonly messageCount: number;
-	/** The first user message, verbatim; empty for a session with none. */
-	readonly firstMessage: string;
+  /** pi's session id — the thread id it was created under. */
+  readonly id: string
+  readonly path: string
+  readonly modified: Date
+  readonly messageCount: number
+  /** The first user message, verbatim; empty for a session with none. */
+  readonly firstMessage: string
 }
 
 export interface AgentHost {
-	/**
-	 * A session for this thread, with its own services, extensions bound, events flowing.
-	 *
-	 * ⚠ THE THREAD ID IS PI'S SESSION ID (#95). A session file already under that id is
-	 * OPENED — the thread idled out, or the server restarted, and the user came back;
-	 * otherwise a fresh session is CREATED with the id. So resume needs no id mapping and
-	 * no index file: pi's own listing is the one source, and a page-owned thread finds its
-	 * own file again across a server restart.
-	 */
-	createSession(threadId: string): Promise<HostedSession>;
-	/** pi's session files for this workspace, newest first — the resumable listing. */
-	listSessions(): Promise<StoredSession[]>;
-	/**
-	 * The branch of a stored session, read-only — no pi session is built, nothing is
-	 * written (#86's rule: looking must not build). `undefined` when no file has that id.
-	 */
-	readBranch(threadId: string): Promise<unknown[] | undefined>;
+  /**
+   * A session for this thread, with its own services, extensions bound, events flowing.
+   *
+   * ⚠ THE THREAD ID IS PI'S SESSION ID (#95). A session file already under that id is
+   * OPENED — the thread idled out, or the server restarted, and the user came back;
+   * otherwise a fresh session is CREATED with the id. So resume needs no id mapping and
+   * no index file: pi's own listing is the one source, and a page-owned thread finds its
+   * own file again across a server restart.
+   */
+  createSession(threadId: string): Promise<HostedSession>
+  /** pi's session files for this workspace, newest first — the resumable listing. */
+  listSessions(): Promise<StoredSession[]>
+  /**
+   * The branch of a stored session, read-only — no pi session is built, nothing is
+   * written (#86's rule: looking must not build). `undefined` when no file has that id.
+   */
+  readBranch(threadId: string): Promise<unknown[] | undefined>
 }
 
 /**
@@ -172,7 +172,7 @@ export interface AgentHost {
  * needs pi's version is the log bundle's `about` (#132), and it takes this string rather than
  * the import — the vendor gate (#145) keeps the import inside `host/`.
  */
-export const AGENT_RUNTIME_VERSION: string = PI_VERSION;
+export const AGENT_RUNTIME_VERSION: string = PI_VERSION
 
 /**
  * Pin `childProxy: false` in the agent dir's multi-account config — see the module header.
@@ -180,310 +180,310 @@ export const AGENT_RUNTIME_VERSION: string = PI_VERSION;
  * operator set is preserved verbatim.
  */
 export function seedMultiAccountChildProxyOff(agentDir: string): void {
-	mkdirSync(agentDir, { recursive: true });
-	const configPath = join(agentDir, MULTI_ACCOUNT_CONFIG_FILENAME);
-	let existing: Record<string, unknown> = {};
-	if (existsSync(configPath)) {
-		const parsed: unknown = JSON.parse(readFileSync(configPath, "utf8"));
-		if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-			existing = parsed as Record<string, unknown>;
-		}
-	}
-	if (existing[MULTI_ACCOUNT_CHILD_PROXY_KEY] === false) return;
-	writeFileSync(configPath, `${JSON.stringify({ ...existing, [MULTI_ACCOUNT_CHILD_PROXY_KEY]: false }, null, "\t")}\n`);
+  mkdirSync(agentDir, { recursive: true })
+  const configPath = join(agentDir, MULTI_ACCOUNT_CONFIG_FILENAME)
+  let existing: Record<string, unknown> = {}
+  if (existsSync(configPath)) {
+    const parsed: unknown = JSON.parse(readFileSync(configPath, 'utf8'))
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      existing = parsed as Record<string, unknown>
+    }
+  }
+  if (existing[MULTI_ACCOUNT_CHILD_PROXY_KEY] === false) return
+  writeFileSync(configPath, `${JSON.stringify({ ...existing, [MULTI_ACCOUNT_CHILD_PROXY_KEY]: false }, null, '\t')}\n`)
 }
 
 /** `PiCommand` with `description` present only when pi supplied one (`exactOptionalPropertyTypes`). */
-function describeCommand(name: string, source: PiCommand["source"], description: string | undefined): PiCommand {
-	return description === undefined ? { name, source } : { name, source, description };
+function describeCommand(name: string, source: PiCommand['source'], description: string | undefined): PiCommand {
+  return description === undefined ? { name, source } : { name, source, description }
 }
 
 export function createAgentHost(options: AgentHostOptions): AgentHost {
-	const { cwd, agentDir, harnessPackageDir } = options;
+  const { cwd, agentDir, harnessPackageDir } = options
 
-	// Order matters, and it is the module header's ⚠⚠ items: env before any pi module can
-	// be imported by the loader, the proxy pin before the first session_start, and the
-	// secrets out of the environment before anything can inherit it (#89).
-	process.env.PI_CODING_AGENT_DIR = agentDir;
-	seedMultiAccountChildProxyOff(agentDir);
-	// The secrets file is a fact about THIS checkout (the harness), not about the tree pi
-	// operates on — `cwd` may be anywhere, a tmpdir in tests — so it resolves from here.
-	const quarantine = quarantineSecrets(options.environment ?? process.env, findRepoRoot(import.meta.url));
-	if (quarantine.removed.length > 0) {
-		log.info("secrets kept out of the tool environment (#89): {removed}", { removed: quarantine.removed });
-	}
-	if (quarantine.misplaced.length > 0) {
-		log.warn(
-			"the root .env defines {misplaced} — bun autoloads .env into every bun child, so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env",
-			{ misplaced: quarantine.misplaced },
-		);
-	}
-	// The theme registry pi's UI code consults; harmless without a terminal, required once.
-	initTheme();
+  // Order matters, and it is the module header's ⚠⚠ items: env before any pi module can
+  // be imported by the loader, the proxy pin before the first session_start, and the
+  // secrets out of the environment before anything can inherit it (#89).
+  process.env.PI_CODING_AGENT_DIR = agentDir
+  seedMultiAccountChildProxyOff(agentDir)
+  // The secrets file is a fact about THIS checkout (the harness), not about the tree pi
+  // operates on — `cwd` may be anywhere, a tmpdir in tests — so it resolves from here.
+  const quarantine = quarantineSecrets(options.environment ?? process.env, findRepoRoot(import.meta.url))
+  if (quarantine.removed.length > 0) {
+    log.info('secrets kept out of the tool environment (#89): {removed}', { removed: quarantine.removed })
+  }
+  if (quarantine.misplaced.length > 0) {
+    log.warn(
+      'the root .env defines {misplaced} — bun autoloads .env into every bun child, so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env',
+      { misplaced: quarantine.misplaced },
+    )
+  }
+  // The theme registry pi's UI code consults; harmless without a terminal, required once.
+  initTheme()
 
-	/**
-	 * pi's listing, through its API — never a directory scan: the file naming is pi's to
-	 * change, and `list` reads each file's header for the id. Cost is one parse per file,
-	 * paid per call; a workspace with dozens of sessions is milliseconds. Sessions pi has
-	 * not flushed yet (no assistant message) have no file and are not listed — there is
-	 * nothing to come back to.
-	 */
-	async function listSessions(): Promise<StoredSession[]> {
-		const listed = await SessionManager.list(cwd);
-		return listed
-			.map((info) => ({
-				id: info.id,
-				path: info.path,
-				modified: info.modified,
-				messageCount: info.messageCount,
-				firstMessage: info.firstMessage,
-			}))
-			.sort((first, second) => second.modified.getTime() - first.modified.getTime());
-	}
+  /**
+   * pi's listing, through its API — never a directory scan: the file naming is pi's to
+   * change, and `list` reads each file's header for the id. Cost is one parse per file,
+   * paid per call; a workspace with dozens of sessions is milliseconds. Sessions pi has
+   * not flushed yet (no assistant message) have no file and are not listed — there is
+   * nothing to come back to.
+   */
+  async function listSessions(): Promise<StoredSession[]> {
+    const listed = await SessionManager.list(cwd)
+    return listed
+      .map((info) => ({
+        id: info.id,
+        path: info.path,
+        modified: info.modified,
+        messageCount: info.messageCount,
+        firstMessage: info.firstMessage,
+      }))
+      .sort((first, second) => second.modified.getTime() - first.modified.getTime())
+  }
 
-	async function storedSessionPath(threadId: string): Promise<string | undefined> {
-		return (await listSessions()).find((stored) => stored.id === threadId)?.path;
-	}
+  async function storedSessionPath(threadId: string): Promise<string | undefined> {
+    return (await listSessions()).find((stored) => stored.id === threadId)?.path
+  }
 
-	async function readBranch(threadId: string): Promise<unknown[] | undefined> {
-		const path = await storedSessionPath(threadId);
-		if (path === undefined) return undefined;
-		// `open` loads the file into memory and writes nothing until an append.
-		return SessionManager.open(path).getBranch();
-	}
+  async function readBranch(threadId: string): Promise<unknown[] | undefined> {
+    const path = await storedSessionPath(threadId)
+    if (path === undefined) return undefined
+    // `open` loads the file into memory and writes nothing until an append.
+    return SessionManager.open(path).getBranch()
+  }
 
-	async function createSession(threadId: string): Promise<HostedSession> {
-		// Resolved BEFORE the services so a bad id fails before anything is built.
-		const storedPath = await storedSessionPath(threadId);
-		const services = await createAgentSessionServices({
-			cwd,
-			agentDir,
-			resourceLoaderOptions: {
-				// The isolation triple `scripts/zen.mjs` documents, expressed as loader options:
-				// no discovery (`--no-extensions`), no ~/.agents skills (`--no-skills`), and the
-				// harness package as the one extension source (`-e <dir>` — pi resolves a
-				// directory's `pi` manifest for extensions, skills, prompts AND themes).
-				noExtensions: true,
-				noSkills: true,
-				additionalExtensionPaths: [harnessPackageDir],
-				...(options.extensionFactories === undefined ? {} : { extensionFactories: [...options.extensionFactories] }),
-			},
-		});
-		for (const diagnostic of services.diagnostics) {
-			log.warn("pi {type}: {message}", { threadId, type: diagnostic.type, message: diagnostic.message });
-		}
-		const extensionsResult = services.resourceLoader.getExtensions();
-		log.debug("pi extensions loaded: {count}", {
-			threadId,
-			count: extensionsResult.extensions.length,
-			paths: extensionsResult.extensions.map((extension) => extension.path),
-		});
-		for (const loadError of extensionsResult.errors) {
-			// pi does not throw on a resource that fails to load; the failure would otherwise be
-			// silent and the symptom unrelated (the vendor-links incident, `server/index.ts`).
-			log.error("pi extension failed to load: {path}: {error}", {
-				threadId,
-				path: loadError.path,
-				error: loadError.error,
-			});
-		}
+  async function createSession(threadId: string): Promise<HostedSession> {
+    // Resolved BEFORE the services so a bad id fails before anything is built.
+    const storedPath = await storedSessionPath(threadId)
+    const services = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      resourceLoaderOptions: {
+        // The isolation triple `scripts/zen.mjs` documents, expressed as loader options:
+        // no discovery (`--no-extensions`), no ~/.agents skills (`--no-skills`), and the
+        // harness package as the one extension source (`-e <dir>` — pi resolves a
+        // directory's `pi` manifest for extensions, skills, prompts AND themes).
+        noExtensions: true,
+        noSkills: true,
+        additionalExtensionPaths: [harnessPackageDir],
+        ...(options.extensionFactories === undefined ? {} : { extensionFactories: [...options.extensionFactories] }),
+      },
+    })
+    for (const diagnostic of services.diagnostics) {
+      log.warn('pi {type}: {message}', { threadId, type: diagnostic.type, message: diagnostic.message })
+    }
+    const extensionsResult = services.resourceLoader.getExtensions()
+    log.debug('pi extensions loaded: {count}', {
+      threadId,
+      count: extensionsResult.extensions.length,
+      paths: extensionsResult.extensions.map((extension) => extension.path),
+    })
+    for (const loadError of extensionsResult.errors) {
+      // pi does not throw on a resource that fails to load; the failure would otherwise be
+      // silent and the symptom unrelated (the vendor-links incident, `server/index.ts`).
+      log.error('pi extension failed to load: {path}: {error}', {
+        threadId,
+        path: loadError.path,
+        error: loadError.error,
+      })
+    }
 
-		// One session file per thread, under the agent dir pi resolves from the env set above —
-		// the same default `pi --mode rpc` used, so picc's persisted "modes" entry and the
-		// transcript land where the TUI's would. Opened when the thread already has a file
-		// (#95), created under the thread's id when not. Retained: `permissionModeState()`
-		// below walks its branch, the same walk picc's `restoreState` does.
-		const sessionManager =
-			storedPath === undefined
-				? SessionManager.create(cwd, undefined, { id: threadId })
-				: SessionManager.open(storedPath);
-		const { session } = await createAgentSessionFromServices({ services, sessionManager });
+    // One session file per thread, under the agent dir pi resolves from the env set above —
+    // the same default `pi --mode rpc` used, so picc's persisted "modes" entry and the
+    // transcript land where the TUI's would. Opened when the thread already has a file
+    // (#95), created under the thread's id when not. Retained: `permissionModeState()`
+    // below walks its branch, the same walk picc's `restoreState` does.
+    const sessionManager =
+      storedPath === undefined
+        ? SessionManager.create(cwd, undefined, { id: threadId })
+        : SessionManager.open(storedPath)
+    const { session } = await createAgentSessionFromServices({ services, sessionManager })
 
-		// ── The event fan-out. Records emitted before the FIRST subscriber (everything an
-		// extension says during session_start — multi-account's startup notify, a dialog a
-		// probe opens) are held and replayed, so the browser sees them exactly as it saw
-		// pi's unsolicited startup stdout over the pipe.
-		//
-		// ⚠ Held ONLY until the first subscriber, never between runs. The session now lives
-		// across runs (#69 PR 2) and each run subscribes its own pump. Holding between runs
-		// would replay an aborted run's `agent_settled` into the NEXT run's pump — which would
-		// end that run before its first token (the disconnect-then-prompt race). Events with
-		// nobody listening after the first subscriber are dropped, like status heartbeats
-		// were when no rpc client was reading the pipe.
-		const listeners = new Set<(event: PiRpcEvent, delivery: PiEventDelivery) => void>();
-		const heldUntilFirstSubscriber: PiRpcEvent[] = [];
-		let hasHadSubscriber = false;
-		// The emitted tail (#97): every event through this funnel, with HOW it was delivered.
-		// Recorded at the one place all of them pass, so the record and the delivery cannot
-		// disagree — a held record's later replay is recorded again, as `replayed`, when it
-		// actually reaches a subscriber (see `subscribe`).
-		const emitted = createEventTail();
-		function emit(event: PiRpcEvent): void {
-			const described = describePiRpcEvent(event);
-			if (listeners.size === 0) {
-				if (!hasHadSubscriber) {
-					heldUntilFirstSubscriber.push(event);
-					emitted.record(described.type, described.name, "held");
-					return;
-				}
-				emitted.record(described.type, described.name, "dropped");
-				return;
-			}
-			emitted.record(described.type, described.name, "live");
-			for (const listener of listeners) listener(event, "live");
-		}
+    // ── The event fan-out. Records emitted before the FIRST subscriber (everything an
+    // extension says during session_start — multi-account's startup notify, a dialog a
+    // probe opens) are held and replayed, so the browser sees them exactly as it saw
+    // pi's unsolicited startup stdout over the pipe.
+    //
+    // ⚠ Held ONLY until the first subscriber, never between runs. The session now lives
+    // across runs (#69 PR 2) and each run subscribes its own pump. Holding between runs
+    // would replay an aborted run's `agent_settled` into the NEXT run's pump — which would
+    // end that run before its first token (the disconnect-then-prompt race). Events with
+    // nobody listening after the first subscriber are dropped, like status heartbeats
+    // were when no rpc client was reading the pipe.
+    const listeners = new Set<(event: PiRpcEvent, delivery: PiEventDelivery) => void>()
+    const heldUntilFirstSubscriber: PiRpcEvent[] = []
+    let hasHadSubscriber = false
+    // The emitted tail (#97): every event through this funnel, with HOW it was delivered.
+    // Recorded at the one place all of them pass, so the record and the delivery cannot
+    // disagree — a held record's later replay is recorded again, as `replayed`, when it
+    // actually reaches a subscriber (see `subscribe`).
+    const emitted = createEventTail()
+    function emit(event: PiRpcEvent): void {
+      const described = describePiRpcEvent(event)
+      if (listeners.size === 0) {
+        if (!hasHadSubscriber) {
+          heldUntilFirstSubscriber.push(event)
+          emitted.record(described.type, described.name, 'held')
+          return
+        }
+        emitted.record(described.type, described.name, 'dropped')
+        return
+      }
+      emitted.record(described.type, described.name, 'live')
+      for (const listener of listeners) listener(event, 'live')
+    }
 
-		const ui = createZenExtensionUiContext({ emit, threadId });
+    const ui = createZenExtensionUiContext({ emit, threadId })
 
-		// ⚠ SUBSCRIBE BEFORE BINDING (#88). Extensions persist state during `session_start` —
-		// picc writes its opening `modes` entry there — and pi emits `entry_appended` to whoever
-		// is listening at that moment. Subscribing after `bindExtensions` returned meant those
-		// entries went to nobody: the held-until-first-subscriber buffer sits behind THIS
-		// subscription, so nothing put them in it, and the browser saw one `modes` entry where
-		// the branch had two. The `ui` notifies always crossed because `ui` binds `emit` directly.
-		// Nothing session_start emits is run progress (`agent_settled` comes from the run loop
-		// only), so replaying it into the first run's pump is inert.
-		const unsubscribeSession = session.subscribe((event) => {
-			try {
-				emit(toRpcWireEvent(event));
-			} catch (error) {
-				log.error("a session event could not be emitted: {error}", { threadId, error });
-			}
-		});
+    // ⚠ SUBSCRIBE BEFORE BINDING (#88). Extensions persist state during `session_start` —
+    // picc writes its opening `modes` entry there — and pi emits `entry_appended` to whoever
+    // is listening at that moment. Subscribing after `bindExtensions` returned meant those
+    // entries went to nobody: the held-until-first-subscriber buffer sits behind THIS
+    // subscription, so nothing put them in it, and the browser saw one `modes` entry where
+    // the branch had two. The `ui` notifies always crossed because `ui` binds `emit` directly.
+    // Nothing session_start emits is run progress (`agent_settled` comes from the run loop
+    // only), so replaying it into the first run's pump is inert.
+    const unsubscribeSession = session.subscribe((event) => {
+      try {
+        emit(toRpcWireEvent(event))
+      } catch (error) {
+        log.error('a session event could not be emitted: {error}', { threadId, error })
+      }
+    })
 
-		// Bound ONCE — see the module header. Errors thrown by an extension handler arrive here
-		// (spike receipt: a throwing session_start is routed to onError and bindExtensions
-		// resolves; it neither hangs nor rejects), and cross as the same `extension_error`
-		// record the rpc mode emitted.
-		await session.bindExtensions({
-			uiContext: ui.uiContext,
-			mode: EXTENSION_MODE_RPC,
-			onError: (error: ExtensionError) => {
-				emit({ type: "extension_error", extensionPath: error.extensionPath, event: error.event, error: error.error });
-			},
-		});
+    // Bound ONCE — see the module header. Errors thrown by an extension handler arrive here
+    // (spike receipt: a throwing session_start is routed to onError and bindExtensions
+    // resolves; it neither hangs nor rejects), and cross as the same `extension_error`
+    // record the rpc mode emitted.
+    await session.bindExtensions({
+      uiContext: ui.uiContext,
+      mode: EXTENSION_MODE_RPC,
+      onError: (error: ExtensionError) => {
+        emit({ type: 'extension_error', extensionPath: error.extensionPath, event: error.event, error: error.error })
+      },
+    })
 
-		let disposed = false;
-		const piSession: PiSession = {
-			prompt(request, outcome) {
-				let accepted = false;
-				// ⚠ Fire-and-forget, exactly as pi's rpc mode does: `prompt()` resolves only when
-				// the whole run finishes, and awaiting it in front of the drain loop is the
-				// original `/mode` hang. Acceptance is the preflight callback; completion is the
-				// `agent_settled` event. A rejection AFTER acceptance is dropped here on purpose —
-				// this is pi's own rpc-mode handler line for line (dist/modes/rpc/rpc-mode.js,
-				// `case "prompt"`), and pi's `_runAgentPrompt` emits `agent_settled` from a
-				// `finally`, so the run still terminates; only the error text is lost. Model and
-				// tool errors never reach this path — the agent loop turns them into an assistant
-				// message with `stopReason: "error"`, which the stream carries as usual.
-				void session
-					.prompt(request.message, {
-						...(request.images === undefined ? {} : { images: [...request.images] }),
-						...(request.streamingBehavior === undefined ? {} : { streamingBehavior: request.streamingBehavior }),
-						source: PROMPT_SOURCE_RPC,
-						preflightResult: (didSucceed) => {
-							if (didSucceed) {
-								accepted = true;
-								outcome.onAccepted();
-							}
-						},
-					})
-					.catch((error: unknown) => {
-						if (!accepted) outcome.onRejected(error instanceof Error ? error.message : String(error));
-					});
-			},
-			answerDialog(response) {
-				ui.answerDialog(response);
-			},
-			openDialogs() {
-				return ui.openDialogs();
-			},
-			listCommands(): PiCommand[] {
-				// The three sources pi's rpc `get_commands` assembles, in its order.
-				const commands: PiCommand[] = [];
-				for (const command of session.extensionRunner.getRegisteredCommands()) {
-					commands.push(describeCommand(command.invocationName, "extension", command.description));
-				}
-				for (const template of session.promptTemplates) {
-					commands.push(describeCommand(template.name, "prompt", template.description));
-				}
-				for (const skill of session.resourceLoader.getSkills().skills) {
-					commands.push(describeCommand(`skill:${skill.name}`, "skill", skill.description));
-				}
-				return commands;
-			},
-			permissionModeState(): PiPermissionModeState {
-				// picc's own `restoreState` walk (#84), re-run on every call — see the walk for why
-				// it is never cached. `getBranch()` is one parent-pointer walk that builds a fresh
-				// array; the walk is a second linear pass over it.
-				const mode = persistedPermissionMode(sessionManager.getBranch());
-				// The dropdown offers picc's modes AS REGISTERED HERE: picc names one command per
-				// mode, exactly after it, so the intersection is a name lookup. Read off the
-				// registry directly rather than through `listCommands` — that call's count is a
-				// contract the refusal path's tests pin, and this is not a refusal lookup.
-				const registered = new Set(
-					session.extensionRunner.getRegisteredCommands().map((command) => command.invocationName),
-				);
-				return { mode, available: PICC_PERMISSION_MODES.filter((candidate) => registered.has(candidate)) };
-			},
-			subscribe(onEvent) {
-				listeners.add(onEvent);
-				hasHadSubscriber = true;
-				if (heldUntilFirstSubscriber.length > 0) {
-					const held = heldUntilFirstSubscriber.splice(0);
-					for (const event of held) {
-						const described = describePiRpcEvent(event);
-						emitted.record(described.type, described.name, "replayed");
-						// The subscriber learns it is a replay (#96): the tail's `replayed` and the
-						// observation's `origin: "session-start"` are the same fact, told once here.
-						onEvent(event, "replayed");
-					}
-				}
-				return () => {
-					listeners.delete(onEvent);
-				};
-			},
-			abort() {
-				return session.abort();
-			},
-			clearQueue() {
-				return session.clearQueue();
-			},
-			dispose() {
-				if (disposed) return;
-				disposed = true;
-				ui.cancelAllDialogs();
-				unsubscribeSession();
-				// `AgentSession.dispose()` does NOT emit session_shutdown — only pi's runtime layer
-				// does. multi-account clears its timers on that event ("for ANY reason"), so the
-				// host emits it the way `AgentSessionRuntime.dispose` does, then releases.
-				void session.extensionRunner
-					.emit({ type: "session_shutdown", reason: "quit" })
-					.catch((error: unknown) => log.error("session_shutdown threw: {error}", { threadId, error }))
-					.finally(() => session.dispose());
-			},
-		};
+    let disposed = false
+    const piSession: PiSession = {
+      prompt(request, outcome) {
+        let accepted = false
+        // ⚠ Fire-and-forget, exactly as pi's rpc mode does: `prompt()` resolves only when
+        // the whole run finishes, and awaiting it in front of the drain loop is the
+        // original `/mode` hang. Acceptance is the preflight callback; completion is the
+        // `agent_settled` event. A rejection AFTER acceptance is dropped here on purpose —
+        // this is pi's own rpc-mode handler line for line (dist/modes/rpc/rpc-mode.js,
+        // `case "prompt"`), and pi's `_runAgentPrompt` emits `agent_settled` from a
+        // `finally`, so the run still terminates; only the error text is lost. Model and
+        // tool errors never reach this path — the agent loop turns them into an assistant
+        // message with `stopReason: "error"`, which the stream carries as usual.
+        void session
+          .prompt(request.message, {
+            ...(request.images === undefined ? {} : { images: [...request.images] }),
+            ...(request.streamingBehavior === undefined ? {} : { streamingBehavior: request.streamingBehavior }),
+            source: PROMPT_SOURCE_RPC,
+            preflightResult: (didSucceed) => {
+              if (didSucceed) {
+                accepted = true
+                outcome.onAccepted()
+              }
+            },
+          })
+          .catch((error: unknown) => {
+            if (!accepted) outcome.onRejected(error instanceof Error ? error.message : String(error))
+          })
+      },
+      answerDialog(response) {
+        ui.answerDialog(response)
+      },
+      openDialogs() {
+        return ui.openDialogs()
+      },
+      listCommands(): PiCommand[] {
+        // The three sources pi's rpc `get_commands` assembles, in its order.
+        const commands: PiCommand[] = []
+        for (const command of session.extensionRunner.getRegisteredCommands()) {
+          commands.push(describeCommand(command.invocationName, 'extension', command.description))
+        }
+        for (const template of session.promptTemplates) {
+          commands.push(describeCommand(template.name, 'prompt', template.description))
+        }
+        for (const skill of session.resourceLoader.getSkills().skills) {
+          commands.push(describeCommand(`skill:${skill.name}`, 'skill', skill.description))
+        }
+        return commands
+      },
+      permissionModeState(): PiPermissionModeState {
+        // picc's own `restoreState` walk (#84), re-run on every call — see the walk for why
+        // it is never cached. `getBranch()` is one parent-pointer walk that builds a fresh
+        // array; the walk is a second linear pass over it.
+        const mode = persistedPermissionMode(sessionManager.getBranch())
+        // The dropdown offers picc's modes AS REGISTERED HERE: picc names one command per
+        // mode, exactly after it, so the intersection is a name lookup. Read off the
+        // registry directly rather than through `listCommands` — that call's count is a
+        // contract the refusal path's tests pin, and this is not a refusal lookup.
+        const registered = new Set(
+          session.extensionRunner.getRegisteredCommands().map((command) => command.invocationName),
+        )
+        return { mode, available: PICC_PERMISSION_MODES.filter((candidate) => registered.has(candidate)) }
+      },
+      subscribe(onEvent) {
+        listeners.add(onEvent)
+        hasHadSubscriber = true
+        if (heldUntilFirstSubscriber.length > 0) {
+          const held = heldUntilFirstSubscriber.splice(0)
+          for (const event of held) {
+            const described = describePiRpcEvent(event)
+            emitted.record(described.type, described.name, 'replayed')
+            // The subscriber learns it is a replay (#96): the tail's `replayed` and the
+            // observation's `origin: "session-start"` are the same fact, told once here.
+            onEvent(event, 'replayed')
+          }
+        }
+        return () => {
+          listeners.delete(onEvent)
+        }
+      },
+      abort() {
+        return session.abort()
+      },
+      clearQueue() {
+        return session.clearQueue()
+      },
+      dispose() {
+        if (disposed) return
+        disposed = true
+        ui.cancelAllDialogs()
+        unsubscribeSession()
+        // `AgentSession.dispose()` does NOT emit session_shutdown — only pi's runtime layer
+        // does. multi-account clears its timers on that event ("for ANY reason"), so the
+        // host emits it the way `AgentSessionRuntime.dispose` does, then releases.
+        void session.extensionRunner
+          .emit({ type: 'session_shutdown', reason: 'quit' })
+          .catch((error: unknown) => log.error('session_shutdown threw: {error}', { threadId, error }))
+          .finally(() => session.dispose())
+      },
+    }
 
-		return {
-			session: piSession,
-			loadedExtensionPaths: extensionsResult.extensions.map((extension) => extension.path),
-			emittedEvents: () => emitted.recent(),
-			inspect(): HostedSessionInspection {
-				// ⚠ `getSessionFile()` names the path pi WILL write, from creation — but pi flushes
-				// lazily, holding every entry until the first assistant message. So the path is
-				// reported only once the file exists; before that the branch below is the only copy.
-				const plannedFile = sessionManager.getSessionFile();
-				return {
-					sessionId: sessionManager.getSessionId(),
-					cwd: sessionManager.getCwd(),
-					sessionDir: sessionManager.getSessionDir(),
-					sessionFile: plannedFile !== undefined && existsSync(plannedFile) ? plannedFile : null,
-					entries: sessionManager.getBranch(),
-					commands: piSession.listCommands().map((command) => command.name),
-				};
-			},
-		};
-	}
+    return {
+      session: piSession,
+      loadedExtensionPaths: extensionsResult.extensions.map((extension) => extension.path),
+      emittedEvents: () => emitted.recent(),
+      inspect(): HostedSessionInspection {
+        // ⚠ `getSessionFile()` names the path pi WILL write, from creation — but pi flushes
+        // lazily, holding every entry until the first assistant message. So the path is
+        // reported only once the file exists; before that the branch below is the only copy.
+        const plannedFile = sessionManager.getSessionFile()
+        return {
+          sessionId: sessionManager.getSessionId(),
+          cwd: sessionManager.getCwd(),
+          sessionDir: sessionManager.getSessionDir(),
+          sessionFile: plannedFile !== undefined && existsSync(plannedFile) ? plannedFile : null,
+          entries: sessionManager.getBranch(),
+          commands: piSession.listCommands().map((command) => command.name),
+        }
+      },
+    }
+  }
 
-	return { createSession, listSessions, readBranch };
+  return { createSession, listSessions, readBranch }
 }

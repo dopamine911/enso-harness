@@ -27,15 +27,15 @@
  * Symlinks, not copies: `pi update` and `bun install` stay authoritative over the real
  * package, and there is no second copy to go stale.
  */
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
-import { findRepoRoot, harnessPackageDir } from "../packages/core/src/index.ts";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { dirname, join, relative } from 'node:path'
+import { findRepoRoot, harnessPackageDir } from '../packages/core/src/index.ts'
 
-const VENDOR_PATH_PREFIX = "node_modules/";
+const VENDOR_PATH_PREFIX = 'node_modules/'
 
-const repoRoot = findRepoRoot(import.meta.url);
-const packageRoot = harnessPackageDir(repoRoot);
-const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+const repoRoot = findRepoRoot(import.meta.url)
+const packageRoot = harnessPackageDir(repoRoot)
+const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
 
 /**
  * Every package that must exist inside the harness package's own node_modules.
@@ -52,48 +52,48 @@ const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf
  *     failed at load rather than at typecheck.
  */
 function requiredPackageNames() {
-	const names = new Set(Object.keys(manifest.dependencies ?? {}));
-	for (const paths of Object.values(manifest.pi ?? {})) {
-		for (const entry of Array.isArray(paths) ? paths : [paths]) {
-			if (typeof entry !== "string" || !entry.startsWith(VENDOR_PATH_PREFIX)) continue;
-			const withoutPrefix = entry.slice(VENDOR_PATH_PREFIX.length);
-			const [scopeOrName, scopedName] = withoutPrefix.split("/");
-			if (scopeOrName === undefined || scopeOrName.length === 0) continue;
-			// Scoped packages carry their scope in the first segment.
-			names.add(scopeOrName.startsWith("@") && scopedName !== undefined ? `${scopeOrName}/${scopedName}` : scopeOrName);
-		}
-	}
-	return [...names];
+  const names = new Set(Object.keys(manifest.dependencies ?? {}))
+  for (const paths of Object.values(manifest.pi ?? {})) {
+    for (const entry of Array.isArray(paths) ? paths : [paths]) {
+      if (typeof entry !== 'string' || !entry.startsWith(VENDOR_PATH_PREFIX)) continue
+      const withoutPrefix = entry.slice(VENDOR_PATH_PREFIX.length)
+      const [scopeOrName, scopedName] = withoutPrefix.split('/')
+      if (scopeOrName === undefined || scopeOrName.length === 0) continue
+      // Scoped packages carry their scope in the first segment.
+      names.add(scopeOrName.startsWith('@') && scopedName !== undefined ? `${scopeOrName}/${scopedName}` : scopeOrName)
+    }
+  }
+  return [...names]
 }
 
-const verified = [];
-const linked = [];
+const verified = []
+const linked = []
 for (const packageName of requiredPackageNames()) {
-	const target = join(packageRoot, "node_modules", packageName);
-	// existsSync FOLLOWS symlinks, so a bun-made link into the `.bun` store passes here
-	// while a broken link falls through to the fix branch below.
-	if (existsSync(target)) {
-		verified.push(packageName);
-		continue;
-	}
-	const hoisted = join(repoRoot, "node_modules", packageName);
-	if (!existsSync(hoisted)) {
-		console.error(`link-vendor-packages: ${packageName} is at neither ${target} nor the repo root — run bun install`);
-		process.exit(1);
-	}
-	mkdirSync(dirname(target), { recursive: true });
-	// lstat, not exists: a broken symlink must be replaced, and exists() follows links.
-	try {
-		lstatSync(target);
-		rmSync(target, { recursive: true, force: true });
-	} catch {
-		// nothing there yet
-	}
-	symlinkSync(relative(dirname(target), hoisted), target, "dir");
-	linked.push(packageName);
+  const target = join(packageRoot, 'node_modules', packageName)
+  // existsSync FOLLOWS symlinks, so a bun-made link into the `.bun` store passes here
+  // while a broken link falls through to the fix branch below.
+  if (existsSync(target)) {
+    verified.push(packageName)
+    continue
+  }
+  const hoisted = join(repoRoot, 'node_modules', packageName)
+  if (!existsSync(hoisted)) {
+    console.error(`link-vendor-packages: ${packageName} is at neither ${target} nor the repo root — run bun install`)
+    process.exit(1)
+  }
+  mkdirSync(dirname(target), { recursive: true })
+  // lstat, not exists: a broken symlink must be replaced, and exists() follows links.
+  try {
+    lstatSync(target)
+    rmSync(target, { recursive: true, force: true })
+  } catch {
+    // nothing there yet
+  }
+  symlinkSync(relative(dirname(target), hoisted), target, 'dir')
+  linked.push(packageName)
 }
 
 console.error(
-	`link-vendor-packages: ${verified.length} already in place (${verified.join(", ") || "none"}); ` +
-		`linked ${linked.length} (${linked.join(", ") || "none"})`,
-);
+  `link-vendor-packages: ${verified.length} already in place (${verified.join(', ') || 'none'}); ` +
+    `linked ${linked.length} (${linked.join(', ') || 'none'})`,
+)

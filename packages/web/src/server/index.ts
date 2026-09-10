@@ -1,52 +1,52 @@
-import { existsSync, readFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync } from 'node:fs'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { join, resolve } from 'node:path'
 import {
-	base64DecodedBytes,
-	isZenThreadId,
-	PICC_DEFAULT_PERMISSION_MODE,
-	PICC_PERMISSION_MODES,
-	type PiDialogResponse,
-	persistedPermissionMode,
-	withZenLogContext,
-	ZEN_IMAGE_MAX_BYTES,
-	ZEN_PROMPT_BODY_MAX_BYTES,
-	ZEN_PROMPT_MAX_IMAGES,
-	type ZenStoredThread,
-	type ZenThreadEvents,
-	type ZenThreadHistory,
-	type ZenThreadSummary,
-	zenLogger,
-} from "@zen/core";
-import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost } from "../host/agent-host.ts";
-import { branchToMessages, interruptedTail } from "../rpc/branch-to-messages.ts";
-import { createAboutRoute, createBundleRoute } from "./bundle-route.ts";
+  base64DecodedBytes,
+  isZenThreadId,
+  PICC_DEFAULT_PERMISSION_MODE,
+  PICC_PERMISSION_MODES,
+  type PiDialogResponse,
+  persistedPermissionMode,
+  withZenLogContext,
+  ZEN_IMAGE_MAX_BYTES,
+  ZEN_PROMPT_BODY_MAX_BYTES,
+  ZEN_PROMPT_MAX_IMAGES,
+  type ZenStoredThread,
+  type ZenThreadEvents,
+  type ZenThreadHistory,
+  type ZenThreadSummary,
+  zenLogger,
+} from '@zen/core'
+import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost } from '../host/agent-host.ts'
+import { branchToMessages, interruptedTail } from '../rpc/branch-to-messages.ts'
+import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
-	abortThread,
-	answerThreadDialog,
-	type FollowRouteDeps,
-	followThread,
-	type PromptBody,
-	promptThread,
-	readDialogBody,
-	readPromptBody,
-} from "./follow.ts";
-import { receiveBrowserLogs } from "./logs-route.ts";
-import { noteRunAdmitted } from "./run-timing.ts";
-import { SSE_KEEPALIVE_MS } from "./sse.ts";
-import { createThreadRegistry, inspectThread, type ThreadView } from "./thread-registry.ts";
+  abortThread,
+  answerThreadDialog,
+  type FollowRouteDeps,
+  followThread,
+  type PromptBody,
+  promptThread,
+  readDialogBody,
+  readPromptBody,
+} from './follow.ts'
+import { receiveBrowserLogs } from './logs-route.ts'
+import { noteRunAdmitted } from './run-timing.ts'
+import { SSE_KEEPALIVE_MS } from './sse.ts'
+import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
 
 /** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
-const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/;
+const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/
 /** `GET /api/threads/<threadId>/events` — the thread's two event tails (#97). */
-const THREAD_EVENTS_ROUTE = /^\/api\/threads\/([^/?#]+)\/events$/;
+const THREAD_EVENTS_ROUTE = /^\/api\/threads\/([^/?#]+)\/events$/
 /** `GET /api/threads/<threadId>/history` — the branch as messages, live or stored (#95). */
-const THREAD_HISTORY_ROUTE = /^\/api\/threads\/([^/?#]+)\/history$/;
+const THREAD_HISTORY_ROUTE = /^\/api\/threads\/([^/?#]+)\/history$/
 /** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
-const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/;
-const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/;
-const THREAD_DIALOG_ROUTE = /^\/api\/threads\/([^/?#]+)\/dialog$/;
-const THREAD_ABORT_ROUTE = /^\/api\/threads\/([^/?#]+)\/abort$/;
+const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/
+const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/
+const THREAD_DIALOG_ROUTE = /^\/api\/threads\/([^/?#]+)\/dialog$/
+const THREAD_ABORT_ROUTE = /^\/api\/threads\/([^/?#]+)\/abort$/
 
 /**
  * The dev backend: the thread routes the browser's `FollowConnection` talks to (#112), and
@@ -60,17 +60,17 @@ const THREAD_ABORT_ROUTE = /^\/api\/threads\/([^/?#]+)\/abort$/;
  * should not happen by default, and doing it before #9 closes would mean a page could point
  * an unconfined agent at any path on the machine.
  */
-const DEFAULT_PORT = 5179;
-const LOOPBACK_ONLY = "127.0.0.1";
+const DEFAULT_PORT = 5179
+const LOOPBACK_ONLY = '127.0.0.1'
 
-const log = zenLogger("server", "http");
+const log = zenLogger('server', 'http')
 
 /** A body that outgrew its route's cap: the read stopped, nothing was buffered past it. */
 export class BodyTooLargeError extends Error {
-	constructor(readonly maxBytes: number) {
-		super(`the request body is larger than ${maxBytes} bytes`);
-		this.name = "BodyTooLargeError";
-	}
+  constructor(readonly maxBytes: number) {
+    super(`the request body is larger than ${maxBytes} bytes`)
+    this.name = 'BodyTooLargeError'
+  }
 }
 
 /**
@@ -82,23 +82,23 @@ export class BodyTooLargeError extends Error {
  * tears the connection down (`endAndClose`). Counted in bytes as they arrive.
  */
 function readBody(request: IncomingMessage, maxBytes = Number.POSITIVE_INFINITY): Promise<string> {
-	const { promise, resolve, reject } = Promise.withResolvers<string>();
-	const chunks: Buffer[] = [];
-	let received = 0;
-	const onEnd = (): void => resolve(Buffer.concat(chunks).toString("utf8"));
-	const onData = (chunk: Buffer): void => {
-		received += chunk.length;
-		if (received > maxBytes) {
-			request.off("data", onData).off("end", onEnd).off("error", reject);
-			request.pause();
-			chunks.length = 0;
-			reject(new BodyTooLargeError(maxBytes));
-			return;
-		}
-		chunks.push(chunk);
-	};
-	request.on("data", onData).on("end", onEnd).on("error", reject);
-	return promise;
+  const { promise, resolve, reject } = Promise.withResolvers<string>()
+  const chunks: Buffer[] = []
+  let received = 0
+  const onEnd = (): void => resolve(Buffer.concat(chunks).toString('utf8'))
+  const onData = (chunk: Buffer): void => {
+    received += chunk.length
+    if (received > maxBytes) {
+      request.off('data', onData).off('end', onEnd).off('error', reject)
+      request.pause()
+      chunks.length = 0
+      reject(new BodyTooLargeError(maxBytes))
+      return
+    }
+    chunks.push(chunk)
+  }
+  request.on('data', onData).on('end', onEnd).on('error', reject)
+  return promise
 }
 
 /**
@@ -107,8 +107,8 @@ function readBody(request: IncomingMessage, maxBytes = Number.POSITIVE_INFINITY)
  * the answer has been flushed.
  */
 function endAndClose(request: IncomingMessage, response: ServerResponse, status: number, text: string): void {
-	response.writeHead(status, { "Content-Type": "text/plain", Connection: "close" });
-	response.end(text, () => request.destroy());
+  response.writeHead(status, { 'Content-Type': 'text/plain', Connection: 'close' })
+  response.end(text, () => request.destroy())
 }
 
 /**
@@ -122,45 +122,45 @@ function endAndClose(request: IncomingMessage, response: ServerResponse, status:
  * read) is the same 400. Nothing downstream ever sees an id that failed here.
  */
 function decodeThreadId(rawSegment: string, response: ServerResponse): string | undefined {
-	let decoded: string;
-	try {
-		decoded = decodeURIComponent(rawSegment);
-	} catch {
-		decoded = "";
-	}
-	if (isZenThreadId(decoded)) return decoded;
-	response.writeHead(400, { "Content-Type": "text/plain" });
-	response.end("malformed thread id");
-	return undefined;
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(rawSegment)
+  } catch {
+    decoded = ''
+  }
+  if (isZenThreadId(decoded)) return decoded
+  response.writeHead(400, { 'Content-Type': 'text/plain' })
+  response.end('malformed thread id')
+  return undefined
 }
 
 export interface ZenServerOptions {
-	/**
-	 * Where pi runs — the tree it will read and write. With no sandbox (#24) this value IS
-	 * the blast radius; it comes from the launcher's own arguments, never from a request.
-	 */
-	cwd: string;
-	/**
-	 * The zen-harness pi package directory, loaded as the ONLY extension source.
-	 *
-	 * ⚠ Required, not optional. An optional value here would make "no guards" the default
-	 * for anyone who forgot it, which is exactly the state the first live run was in.
-	 */
-	harnessPackageDir: string;
-	/** Scratch config dir for pi, so the operator's own packages stay invisible. */
-	agentDir: string;
-	/** Where this process's log file is — the launcher configured logging there; the bundle route reads it (#132). */
-	logsDir: string;
-	port?: number;
-	/**
-	 * The pi host to use instead of building one from `cwd` / `agentDir` /
-	 * `harnessPackageDir`. ⓘ Exists for `__tests__/server-handler.test.ts` (#76): a fake host
-	 * whose sessions record abort/dispose is the only way to observe the handler's
-	 * stop/release sequencing without a model. Production launchers never pass it.
-	 */
-	host?: AgentHost;
-	/** SSE keepalive interval; defaults to `SSE_KEEPALIVE_MS`. ⓘ Injectable for `server-handler.test.ts`. */
-	sseKeepaliveMs?: number;
+  /**
+   * Where pi runs — the tree it will read and write. With no sandbox (#24) this value IS
+   * the blast radius; it comes from the launcher's own arguments, never from a request.
+   */
+  cwd: string
+  /**
+   * The zen-harness pi package directory, loaded as the ONLY extension source.
+   *
+   * ⚠ Required, not optional. An optional value here would make "no guards" the default
+   * for anyone who forgot it, which is exactly the state the first live run was in.
+   */
+  harnessPackageDir: string
+  /** Scratch config dir for pi, so the operator's own packages stay invisible. */
+  agentDir: string
+  /** Where this process's log file is — the launcher configured logging there; the bundle route reads it (#132). */
+  logsDir: string
+  port?: number
+  /**
+   * The pi host to use instead of building one from `cwd` / `agentDir` /
+   * `harnessPackageDir`. ⓘ Exists for `__tests__/server-handler.test.ts` (#76): a fake host
+   * whose sessions record abort/dispose is the only way to observe the handler's
+   * stop/release sequencing without a model. Production launchers never pass it.
+   */
+  host?: AgentHost
+  /** SSE keepalive interval; defaults to `SSE_KEEPALIVE_MS`. ⓘ Injectable for `server-handler.test.ts`. */
+  sseKeepaliveMs?: number
 }
 
 /*
@@ -196,437 +196,437 @@ export interface ZenServerOptions {
  * it must be enforced at both or the unenforced one becomes the confusing path.
  */
 function assertVendorLinks(harnessPackageDir: string): void {
-	const manifestPath = join(harnessPackageDir, "package.json");
-	if (!existsSync(manifestPath)) {
-		throw new Error(`zen-server: no package.json at ${harnessPackageDir}`);
-	}
-	const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-		pi?: Record<string, string | string[]>;
-	};
-	const declared = Object.values(manifest.pi ?? {}).flatMap((paths) => (Array.isArray(paths) ? paths : [paths]));
-	const missing = declared
-		.filter((entry) => entry.startsWith("node_modules/"))
-		.filter((entry) => !existsSync(resolve(harnessPackageDir, entry)));
-	if (missing.length > 0) {
-		throw new Error(
-			`zen-server: vendor package paths are missing from the harness package:\n` +
-				`${missing.map((entry) => `  - ${entry}`).join("\n")}\n` +
-				`Run \`bun install\` (its postinstall relinks the vendor packages).`,
-		);
-	}
+  const manifestPath = join(harnessPackageDir, 'package.json')
+  if (!existsSync(manifestPath)) {
+    throw new Error(`zen-server: no package.json at ${harnessPackageDir}`)
+  }
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    pi?: Record<string, string | string[]>
+  }
+  const declared = Object.values(manifest.pi ?? {}).flatMap((paths) => (Array.isArray(paths) ? paths : [paths]))
+  const missing = declared
+    .filter((entry) => entry.startsWith('node_modules/'))
+    .filter((entry) => !existsSync(resolve(harnessPackageDir, entry)))
+  if (missing.length > 0) {
+    throw new Error(
+      `zen-server: vendor package paths are missing from the harness package:\n` +
+        `${missing.map((entry) => `  - ${entry}`).join('\n')}\n` +
+        `Run \`bun install\` (its postinstall relinks the vendor packages).`,
+    )
+  }
 }
 
 export function startZenServer(options: ZenServerOptions) {
-	if (options.cwd.length === 0) {
-		// ⚠ Fail at startup rather than on the first request. A bad `cwd` discovered mid-run
-		// is a confusing failure; discovered at boot it is a one-line message.
-		throw new Error("zen-server: cwd must not be empty");
-	}
-	assertVendorLinks(options.harnessPackageDir);
+  if (options.cwd.length === 0) {
+    // ⚠ Fail at startup rather than on the first request. A bad `cwd` discovered mid-run
+    // is a confusing failure; discovered at boot it is a one-line message.
+    throw new Error('zen-server: cwd must not be empty')
+  }
+  assertVendorLinks(options.harnessPackageDir)
 
-	// pi, in this process (#69). Creating the host sets the isolation env and pins the
-	// multi-account config; sessions are created per chat THREAD below and live across runs
-	// (#43 — a mode chosen on prompt 1 is in force on prompt 2).
-	const sseKeepaliveMs = options.sseKeepaliveMs ?? SSE_KEEPALIVE_MS;
-	const host: AgentHost =
-		options.host ??
-		createAgentHost({
-			cwd: options.cwd,
-			agentDir: options.agentDir,
-			harnessPackageDir: options.harnessPackageDir,
-		});
-	const threads = createThreadRegistry({
-		createSession: (threadId) => host.createSession(threadId),
-	});
+  // pi, in this process (#69). Creating the host sets the isolation env and pins the
+  // multi-account config; sessions are created per chat THREAD below and live across runs
+  // (#43 — a mode chosen on prompt 1 is in force on prompt 2).
+  const sseKeepaliveMs = options.sseKeepaliveMs ?? SSE_KEEPALIVE_MS
+  const host: AgentHost =
+    options.host ??
+    createAgentHost({
+      cwd: options.cwd,
+      agentDir: options.agentDir,
+      harnessPackageDir: options.harnessPackageDir,
+    })
+  const threads = createThreadRegistry({
+    createSession: (threadId) => host.createSession(threadId),
+  })
 
-	// The permission mode a FRESH thread starts in (#84). The browser asks once on mount,
-	// before any run exists, so the header can read `default` instead of `unknown` from the
-	// first paint. Honest by construction: every page load is a new thread, the host creates
-	// a fresh session file for it, and picc's initial mode is `default`; the option list is
-	// the set picc registers unconditionally (one command per mode). A thread's LIVE state —
-	// after a change — rides on the run-start receipt, never here.
-	function respondWithFreshThreadMode(response: ServerResponse): void {
-		response.writeHead(200, { "Content-Type": "application/json" });
-		response.end(JSON.stringify({ mode: PICC_DEFAULT_PERMISSION_MODE, available: [...PICC_PERMISSION_MODES] }));
-	}
+  // The permission mode a FRESH thread starts in (#84). The browser asks once on mount,
+  // before any run exists, so the header can read `default` instead of `unknown` from the
+  // first paint. Honest by construction: every page load is a new thread, the host creates
+  // a fresh session file for it, and picc's initial mode is `default`; the option list is
+  // the set picc registers unconditionally (one command per mode). A thread's LIVE state —
+  // after a change — rides on the run-start receipt, never here.
+  function respondWithFreshThreadMode(response: ServerResponse): void {
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ mode: PICC_DEFAULT_PERMISSION_MODE, available: [...PICC_PERMISSION_MODES] }))
+  }
 
-	// ── Session inspection (#86): what a live thread's session ACTUALLY contains, for a
-	// human (the debug drawer) or an agent (`scripts/zen-session.mjs`) to cross-check the
-	// derived views against. Read-only. Never creates a session — `threads.peek`, never
-	// `acquire`: looking must not be the thing that spins pi up. Loopback-only by the
-	// server's bind; the branch is conversation and tool output, which is the point.
-	function summarize(thread: ThreadView): ZenThreadSummary {
-		const inspection = thread.hosted.inspect();
-		return {
-			threadId: thread.threadId,
-			sessionId: inspection.sessionId,
-			sessionDir: inspection.sessionDir,
-			sessionFile: inspection.sessionFile,
-			mode: thread.hosted.session.permissionModeState().mode,
-			busy: thread.busy,
-			generation: thread.generation,
-			lastActivityAt: new Date(thread.lastActivityAt).toISOString(),
-		};
-	}
+  // ── Session inspection (#86): what a live thread's session ACTUALLY contains, for a
+  // human (the debug drawer) or an agent (`scripts/zen-session.mjs`) to cross-check the
+  // derived views against. Read-only. Never creates a session — `threads.peek`, never
+  // `acquire`: looking must not be the thing that spins pi up. Loopback-only by the
+  // server's bind; the branch is conversation and tool output, which is the point.
+  function summarize(thread: ThreadView): ZenThreadSummary {
+    const inspection = thread.hosted.inspect()
+    return {
+      threadId: thread.threadId,
+      sessionId: inspection.sessionId,
+      sessionDir: inspection.sessionDir,
+      sessionFile: inspection.sessionFile,
+      mode: thread.hosted.session.permissionModeState().mode,
+      busy: thread.busy,
+      generation: thread.generation,
+      lastActivityAt: new Date(thread.lastActivityAt).toISOString(),
+    }
+  }
 
-	function respondWithThreads(response: ServerResponse): void {
-		response.writeHead(200, { "Content-Type": "application/json" });
-		response.end(JSON.stringify(threads.list().map(summarize)));
-	}
+  function respondWithThreads(response: ServerResponse): void {
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(threads.list().map(summarize)))
+  }
 
-	function respondWithThreadEvents(threadId: string, response: ServerResponse): void {
-		const thread = threads.peek(threadId);
-		if (thread === undefined) {
-			response.writeHead(404, { "Content-Type": "text/plain" });
-			response.end(`no live session for thread ${threadId}`);
-			return;
-		}
-		const payload: ZenThreadEvents = {
-			threadId,
-			emitted: thread.hosted.emittedEvents(),
-			sent: thread.sent.recent(),
-		};
-		response.writeHead(200, { "Content-Type": "application/json" });
-		response.end(JSON.stringify(payload));
-	}
+  function respondWithThreadEvents(threadId: string, response: ServerResponse): void {
+    const thread = threads.peek(threadId)
+    if (thread === undefined) {
+      response.writeHead(404, { 'Content-Type': 'text/plain' })
+      response.end(`no live session for thread ${threadId}`)
+      return
+    }
+    const payload: ZenThreadEvents = {
+      threadId,
+      emitted: thread.hosted.emittedEvents(),
+      sent: thread.sent.recent(),
+    }
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(payload))
+  }
 
-	/**
-	 * pi's session files for this workspace (#95) — what the rail can come back to. `busy`
-	 * marks the ones a thread on THIS server is running right now; the rail shows those but
-	 * does not offer them, and `/history` refuses them below.
-	 */
-	async function respondWithStoredThreads(response: ServerResponse): Promise<void> {
-		const stored = await host.listSessions();
-		const payload: ZenStoredThread[] = stored.map((session) => ({
-			threadId: session.id,
-			...(session.firstMessage.trim().length === 0 ? {} : { title: session.firstMessage.trim() }),
-			lastActivityAt: session.modified.toISOString(),
-			messageCount: session.messageCount,
-			busy: threads.peek(session.id)?.busy === true,
-		}));
-		response.writeHead(200, { "Content-Type": "application/json" });
-		response.end(JSON.stringify(payload));
-	}
+  /**
+   * pi's session files for this workspace (#95) — what the rail can come back to. `busy`
+   * marks the ones a thread on THIS server is running right now; the rail shows those but
+   * does not offer them, and `/history` refuses them below.
+   */
+  async function respondWithStoredThreads(response: ServerResponse): Promise<void> {
+    const stored = await host.listSessions()
+    const payload: ZenStoredThread[] = stored.map((session) => ({
+      threadId: session.id,
+      ...(session.firstMessage.trim().length === 0 ? {} : { title: session.firstMessage.trim() }),
+      lastActivityAt: session.modified.toISOString(),
+      messageCount: session.messageCount,
+      busy: threads.peek(session.id)?.busy === true,
+    }))
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(payload))
+  }
 
-	/**
-	 * The thread's branch as the messages a chat mounts with (#95), plus its permission mode.
-	 * Read-only — looking must not build (#86).
-	 *
-	 * Decided by what the server holds, not by whether it holds anything:
-	 *   • HERE (a run in flight, a dialog open, or idle within the eviction window): pi's
-	 *     memory and the session's own mode — fresher than the file, and RESUMABLE. A page
-	 *     that reloaded after a run must be able to come back before the 30-minute eviction
-	 *     (PR #104 review); a page that reloaded UNDER pi's open question must be able to
-	 *     come back to the card (#114). Busy is not a refusal any more: under the follow
-	 *     transport (#112) a resumed pane follows the run in flight, and a prompt to a busy
-	 *     thread queues through pi (#75) — the 409 that guarded the old per-response run
-	 *     path guarded nothing here and locked the operator out of their own question.
-	 *   • NOT here: the file, with the mode its branch persists. Neither: 404.
-	 */
-	async function respondWithThreadHistory(threadId: string, response: ServerResponse): Promise<void> {
-		const live = threads.peek(threadId);
-		const branch = live === undefined ? await host.readBranch(threadId) : live.hosted.inspect().entries;
-		if (branch === undefined) {
-			response.writeHead(404, { "Content-Type": "text/plain" });
-			response.end(`no session for thread ${threadId}`);
-			return;
-		}
-		const messages = branchToMessages(branch);
-		const interrupted = interruptedTail(messages);
-		const payload: ZenThreadHistory = {
-			threadId,
-			messages,
-			permissionMode:
-				live === undefined
-					? { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] }
-					: live.hosted.session.permissionModeState(),
-			...(interrupted === undefined ? {} : { interrupted }),
-		};
-		response.writeHead(200, { "Content-Type": "application/json" });
-		response.end(JSON.stringify(payload));
-	}
+  /**
+   * The thread's branch as the messages a chat mounts with (#95), plus its permission mode.
+   * Read-only — looking must not build (#86).
+   *
+   * Decided by what the server holds, not by whether it holds anything:
+   *   • HERE (a run in flight, a dialog open, or idle within the eviction window): pi's
+   *     memory and the session's own mode — fresher than the file, and RESUMABLE. A page
+   *     that reloaded after a run must be able to come back before the 30-minute eviction
+   *     (PR #104 review); a page that reloaded UNDER pi's open question must be able to
+   *     come back to the card (#114). Busy is not a refusal any more: under the follow
+   *     transport (#112) a resumed pane follows the run in flight, and a prompt to a busy
+   *     thread queues through pi (#75) — the 409 that guarded the old per-response run
+   *     path guarded nothing here and locked the operator out of their own question.
+   *   • NOT here: the file, with the mode its branch persists. Neither: 404.
+   */
+  async function respondWithThreadHistory(threadId: string, response: ServerResponse): Promise<void> {
+    const live = threads.peek(threadId)
+    const branch = live === undefined ? await host.readBranch(threadId) : live.hosted.inspect().entries
+    if (branch === undefined) {
+      response.writeHead(404, { 'Content-Type': 'text/plain' })
+      response.end(`no session for thread ${threadId}`)
+      return
+    }
+    const messages = branchToMessages(branch)
+    const interrupted = interruptedTail(messages)
+    const payload: ZenThreadHistory = {
+      threadId,
+      messages,
+      permissionMode:
+        live === undefined
+          ? { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] }
+          : live.hosted.session.permissionModeState(),
+      ...(interrupted === undefined ? {} : { interrupted }),
+    }
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(payload))
+  }
 
-	/**
-	 * ⚠ The dispatcher is synchronous and a throw in the request listener has nothing above
-	 * it (PR #87). The two handlers that await the host run through here: a rejection is
-	 * reported and answered as a 500, and the server stays up.
-	 */
-	function answerOrFail(work: Promise<void>, response: ServerResponse): void {
-		work.catch((error: unknown) => {
-			log.error("a handler failed: {error}", { error });
-			if (!response.headersSent) response.writeHead(500, { "Content-Type": "text/plain" });
-			response.end("the session listing failed — see the server log");
-		});
-	}
+  /**
+   * ⚠ The dispatcher is synchronous and a throw in the request listener has nothing above
+   * it (PR #87). The two handlers that await the host run through here: a rejection is
+   * reported and answered as a 500, and the server stays up.
+   */
+  function answerOrFail(work: Promise<void>, response: ServerResponse): void {
+    work.catch((error: unknown) => {
+      log.error('a handler failed: {error}', { error })
+      if (!response.headersSent) response.writeHead(500, { 'Content-Type': 'text/plain' })
+      response.end('the session listing failed — see the server log')
+    })
+  }
 
-	function respondWithThread(threadId: string, response: ServerResponse): void {
-		const thread = threads.peek(threadId);
-		if (thread === undefined) {
-			response.writeHead(404, { "Content-Type": "text/plain" });
-			response.end(`no live session for thread ${threadId}`);
-			return;
-		}
-		response.writeHead(200, { "Content-Type": "application/json" });
-		response.end(JSON.stringify(inspectThread(thread)));
-	}
+  function respondWithThread(threadId: string, response: ServerResponse): void {
+    const thread = threads.peek(threadId)
+    if (thread === undefined) {
+      response.writeHead(404, { 'Content-Type': 'text/plain' })
+      response.end(`no live session for thread ${threadId}`)
+      return
+    }
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(inspectThread(thread)))
+  }
 
-	// The bundle (#132): today's records + the live threads + the versions, one file.
-	const bundle = createBundleRoute({ threads, logsDir: options.logsDir, runtimeVersion: AGENT_RUNTIME_VERSION });
-	const about = createAboutRoute({ runtimeVersion: AGENT_RUNTIME_VERSION });
+  // The bundle (#132): today's records + the live threads + the versions, one file.
+  const bundle = createBundleRoute({ threads, logsDir: options.logsDir, runtimeVersion: AGENT_RUNTIME_VERSION })
+  const about = createAboutRoute({ runtimeVersion: AGENT_RUNTIME_VERSION })
 
-	// ── The wire (#112): prompt / follow / dialog ────────────────────────────────────
-	const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs };
+  // ── The wire (#112): prompt / follow / dialog ────────────────────────────────────
+  const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs }
 
-	/** The thread routes; true when the request was one of them. A bad body is a 400 here, never a throw. */
-	function dispatchFollowRoutes(request: IncomingMessage, response: ServerResponse): boolean {
-		const url = request.url ?? "";
-		const followMatch = request.method === "GET" ? THREAD_FOLLOW_ROUTE.exec(url) : null;
-		if (followMatch?.[1] !== undefined) {
-			const threadId = decodeThreadId(followMatch[1], response);
-			if (threadId !== undefined) {
-				withZenLogContext({ threadId }, () => answerOrFail(followThread(followDeps, threadId, response), response));
-			}
-			return true;
-		}
-		const promptMatch = request.method === "POST" ? THREAD_PROMPT_ROUTE.exec(url) : null;
-		if (promptMatch?.[1] !== undefined) {
-			const threadId = decodeThreadId(promptMatch[1], response);
-			if (threadId !== undefined) {
-				withZenLogContext({ threadId }, () => answerOrFail(respondToPrompt(threadId, request, response), response));
-			}
-			return true;
-		}
-		const dialogMatch = request.method === "POST" ? THREAD_DIALOG_ROUTE.exec(url) : null;
-		if (dialogMatch?.[1] !== undefined) {
-			const threadId = decodeThreadId(dialogMatch[1], response);
-			if (threadId !== undefined) {
-				withZenLogContext({ threadId }, () => answerOrFail(respondToDialog(threadId, request, response), response));
-			}
-			return true;
-		}
-		const abortMatch = request.method === "POST" ? THREAD_ABORT_ROUTE.exec(url) : null;
-		if (abortMatch?.[1] !== undefined) {
-			const threadId = decodeThreadId(abortMatch[1], response);
-			if (threadId !== undefined) withZenLogContext({ threadId }, () => respondToAbort(threadId, response));
-			return true;
-		}
-		return false;
-	}
+  /** The thread routes; true when the request was one of them. A bad body is a 400 here, never a throw. */
+  function dispatchFollowRoutes(request: IncomingMessage, response: ServerResponse): boolean {
+    const url = request.url ?? ''
+    const followMatch = request.method === 'GET' ? THREAD_FOLLOW_ROUTE.exec(url) : null
+    if (followMatch?.[1] !== undefined) {
+      const threadId = decodeThreadId(followMatch[1], response)
+      if (threadId !== undefined) {
+        withZenLogContext({ threadId }, () => answerOrFail(followThread(followDeps, threadId, response), response))
+      }
+      return true
+    }
+    const promptMatch = request.method === 'POST' ? THREAD_PROMPT_ROUTE.exec(url) : null
+    if (promptMatch?.[1] !== undefined) {
+      const threadId = decodeThreadId(promptMatch[1], response)
+      if (threadId !== undefined) {
+        withZenLogContext({ threadId }, () => answerOrFail(respondToPrompt(threadId, request, response), response))
+      }
+      return true
+    }
+    const dialogMatch = request.method === 'POST' ? THREAD_DIALOG_ROUTE.exec(url) : null
+    if (dialogMatch?.[1] !== undefined) {
+      const threadId = decodeThreadId(dialogMatch[1], response)
+      if (threadId !== undefined) {
+        withZenLogContext({ threadId }, () => answerOrFail(respondToDialog(threadId, request, response), response))
+      }
+      return true
+    }
+    const abortMatch = request.method === 'POST' ? THREAD_ABORT_ROUTE.exec(url) : null
+    if (abortMatch?.[1] !== undefined) {
+      const threadId = decodeThreadId(abortMatch[1], response)
+      if (threadId !== undefined) withZenLogContext({ threadId }, () => respondToAbort(threadId, response))
+      return true
+    }
+    return false
+  }
 
-	async function respondToPrompt(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
-		let body: PromptBody;
-		try {
-			body = readPromptBody(await readBody(request, ZEN_PROMPT_BODY_MAX_BYTES));
-		} catch (error) {
-			if (error instanceof BodyTooLargeError) {
-				endAndClose(
-					request,
-					response,
-					413,
-					`a prompt body is at most ${ZEN_PROMPT_BODY_MAX_BYTES} bytes (${ZEN_PROMPT_MAX_IMAGES} images of ${ZEN_IMAGE_MAX_BYTES} bytes, base64, plus text)`,
-				);
-				return;
-			}
-			response.writeHead(400, { "Content-Type": "text/plain" });
-			response.end((error as Error).message);
-			return;
-		}
-		if (body.images !== undefined) {
-			// The audit line (#68): what crossed, never the bytes. One record per prompt with images.
-			log.info("prompt carries {count} image(s): {mimeTypes}, {bytes} bytes", {
-				threadId,
-				count: body.images.length,
-				mimeTypes: body.images.map((image) => image.mimeType),
-				bytes: body.images.reduce((total, image) => total + base64DecodedBytes(image.data), 0),
-			});
-		}
-		const outcome = await promptThread(followDeps, threadId, body);
-		if (outcome.status === 400) {
-			log.warn("prompt refused: {reason}", { threadId, reason: outcome.reason });
-			response.writeHead(400, { "Content-Type": "text/plain" });
-			response.end(outcome.reason);
-			return;
-		}
-		const { messageId, generation, queued } = outcome.receipt;
-		// The clock the first-delta record measures from (#144); a queued prompt joins the run
-		// already in flight and does not restart it.
-		noteRunAdmitted(threadId, generation);
-		log.info("prompt {messageId} {admission} on run {generation}", {
-			threadId,
-			messageId,
-			generation,
-			admission: queued ? "queued" : "opened",
-			...(body.streamingBehavior === undefined ? {} : { streamingBehavior: body.streamingBehavior }),
-		});
-		response.writeHead(202, { "Content-Type": "application/json" });
-		response.end(JSON.stringify(outcome.receipt));
-	}
+  async function respondToPrompt(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+    let body: PromptBody
+    try {
+      body = readPromptBody(await readBody(request, ZEN_PROMPT_BODY_MAX_BYTES))
+    } catch (error) {
+      if (error instanceof BodyTooLargeError) {
+        endAndClose(
+          request,
+          response,
+          413,
+          `a prompt body is at most ${ZEN_PROMPT_BODY_MAX_BYTES} bytes (${ZEN_PROMPT_MAX_IMAGES} images of ${ZEN_IMAGE_MAX_BYTES} bytes, base64, plus text)`,
+        )
+        return
+      }
+      response.writeHead(400, { 'Content-Type': 'text/plain' })
+      response.end((error as Error).message)
+      return
+    }
+    if (body.images !== undefined) {
+      // The audit line (#68): what crossed, never the bytes. One record per prompt with images.
+      log.info('prompt carries {count} image(s): {mimeTypes}, {bytes} bytes', {
+        threadId,
+        count: body.images.length,
+        mimeTypes: body.images.map((image) => image.mimeType),
+        bytes: body.images.reduce((total, image) => total + base64DecodedBytes(image.data), 0),
+      })
+    }
+    const outcome = await promptThread(followDeps, threadId, body)
+    if (outcome.status === 400) {
+      log.warn('prompt refused: {reason}', { threadId, reason: outcome.reason })
+      response.writeHead(400, { 'Content-Type': 'text/plain' })
+      response.end(outcome.reason)
+      return
+    }
+    const { messageId, generation, queued } = outcome.receipt
+    // The clock the first-delta record measures from (#144); a queued prompt joins the run
+    // already in flight and does not restart it.
+    noteRunAdmitted(threadId, generation)
+    log.info('prompt {messageId} {admission} on run {generation}', {
+      threadId,
+      messageId,
+      generation,
+      admission: queued ? 'queued' : 'opened',
+      ...(body.streamingBehavior === undefined ? {} : { streamingBehavior: body.streamingBehavior }),
+    })
+    response.writeHead(202, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(outcome.receipt))
+  }
 
-	/** The browser's records (#132 slice 3): into this process's logger, or a 4xx that says why — never logged itself. */
-	async function respondToBrowserLogs(request: IncomingMessage, response: ServerResponse): Promise<void> {
-		const outcome = receiveBrowserLogs(await readBody(request));
-		if (outcome.status !== 204) {
-			response.writeHead(outcome.status, { "Content-Type": "text/plain" });
-			response.end(outcome.reason);
-			return;
-		}
-		response.writeHead(204);
-		response.end();
-	}
+  /** The browser's records (#132 slice 3): into this process's logger, or a 4xx that says why — never logged itself. */
+  async function respondToBrowserLogs(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const outcome = receiveBrowserLogs(await readBody(request))
+    if (outcome.status !== 204) {
+      response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
+      response.end(outcome.reason)
+      return
+    }
+    response.writeHead(204)
+    response.end()
+  }
 
-	/** No body to read: the thread id is the whole request (#116). The answer is the restored queue (#75). */
-	function respondToAbort(threadId: string, response: ServerResponse): void {
-		const outcome = abortThread(followDeps, threadId);
-		if (outcome.status !== 200) {
-			log.warn("abort refused ({status}): {reason}", { threadId, status: outcome.status, reason: outcome.reason });
-			response.writeHead(outcome.status, { "Content-Type": "text/plain" });
-			response.end(outcome.reason);
-			return;
-		}
-		log.info("abort: queue of {restored} restored to the caller", {
-			threadId,
-			restored: outcome.receipt.restored.length,
-		});
-		response.writeHead(200, { "Content-Type": "application/json" });
-		response.end(JSON.stringify(outcome.receipt));
-	}
+  /** No body to read: the thread id is the whole request (#116). The answer is the restored queue (#75). */
+  function respondToAbort(threadId: string, response: ServerResponse): void {
+    const outcome = abortThread(followDeps, threadId)
+    if (outcome.status !== 200) {
+      log.warn('abort refused ({status}): {reason}', { threadId, status: outcome.status, reason: outcome.reason })
+      response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
+      response.end(outcome.reason)
+      return
+    }
+    log.info('abort: queue of {restored} restored to the caller', {
+      threadId,
+      restored: outcome.receipt.restored.length,
+    })
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(outcome.receipt))
+  }
 
-	async function respondToDialog(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
-		let answer: PiDialogResponse;
-		try {
-			answer = readDialogBody(await readBody(request));
-		} catch (error) {
-			response.writeHead(400, { "Content-Type": "text/plain" });
-			response.end((error as Error).message);
-			return;
-		}
-		const outcome = answerThreadDialog(followDeps, threadId, answer);
-		if (outcome.status !== 204) {
-			log.warn("dialog {dialogId} answer refused ({status}): {reason}", {
-				threadId,
-				dialogId: answer.id,
-				status: outcome.status,
-				reason: outcome.reason,
-			});
-			response.writeHead(outcome.status, { "Content-Type": "text/plain" });
-			response.end(outcome.reason);
-			return;
-		}
-		log.info("dialog {dialogId} answered", { threadId, dialogId: answer.id });
-		response.writeHead(204);
-		response.end();
-	}
+  async function respondToDialog(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+    let answer: PiDialogResponse
+    try {
+      answer = readDialogBody(await readBody(request))
+    } catch (error) {
+      response.writeHead(400, { 'Content-Type': 'text/plain' })
+      response.end((error as Error).message)
+      return
+    }
+    const outcome = answerThreadDialog(followDeps, threadId, answer)
+    if (outcome.status !== 204) {
+      log.warn('dialog {dialogId} answer refused ({status}): {reason}', {
+        threadId,
+        dialogId: answer.id,
+        status: outcome.status,
+        reason: outcome.reason,
+      })
+      response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
+      response.end(outcome.reason)
+      return
+    }
+    log.info('dialog {dialogId} answered', { threadId, dialogId: answer.id })
+    response.writeHead(204)
+    response.end()
+  }
 
-	// ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler sits at the
-	// complexity ceiling biome.jsonc pins for this file (#82), and its top-to-bottom shape is
-	// the #27/#34 teardown ordering. New routes are added to this dispatcher, not to it.
-	const server = createServer((request, response) => {
-		const url = request.url ?? "";
-		if (request.method === "GET" && url === "/api/mode") {
-			respondWithFreshThreadMode(response);
-			return;
-		}
-		if (request.method === "GET" && url === "/api/threads") {
-			respondWithThreads(response);
-			return;
-		}
-		if (request.method === "GET" && url === "/api/stored-threads") {
-			answerOrFail(respondWithStoredThreads(response), response);
-			return;
-		}
-		if (request.method === "GET" && url === "/api/about") {
-			// No log line here, by rule (#144): a surface that exists to read the trace must not
-			// write to it.
-			response.writeHead(200, { "Content-Type": "application/json" });
-			response.end(JSON.stringify(about()));
-			return;
-		}
-		if (request.method === "GET" && url.startsWith("/api/logs/bundle")) {
-			const outcome = bundle(new URL(url, "http://zen").searchParams);
-			if (outcome.status !== 200) {
-				response.writeHead(outcome.status, { "Content-Type": "text/plain" });
-				response.end(outcome.reason);
-				return;
-			}
-			response.writeHead(outcome.status, {
-				"Content-Type": "text/markdown; charset=utf-8",
-				"Content-Disposition": `attachment; filename="${outcome.filename}"`,
-			});
-			response.end(outcome.body);
-			return;
-		}
-		if (request.method === "POST" && url === "/api/logs") {
-			answerOrFail(respondToBrowserLogs(request, response), response);
-			return;
-		}
-		if (request.method === "GET") {
-			const eventsMatch = THREAD_EVENTS_ROUTE.exec(url);
-			if (eventsMatch?.[1] !== undefined) {
-				const threadId = decodeThreadId(eventsMatch[1], response);
-				if (threadId !== undefined) respondWithThreadEvents(threadId, response);
-				return;
-			}
-			const historyMatch = THREAD_HISTORY_ROUTE.exec(url);
-			if (historyMatch?.[1] !== undefined) {
-				const threadId = decodeThreadId(historyMatch[1], response);
-				if (threadId !== undefined) answerOrFail(respondWithThreadHistory(threadId, response), response);
-				return;
-			}
-			const threadMatch = THREAD_ROUTE.exec(url);
-			if (threadMatch?.[1] !== undefined) {
-				const threadId = decodeThreadId(threadMatch[1], response);
-				if (threadId !== undefined) respondWithThread(threadId, response);
-				return;
-			}
-		}
-		if (dispatchFollowRoutes(request, response)) return;
-		response.writeHead(404, { "Content-Type": "text/plain" });
-		response.end("not found");
-	});
+  // ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler sits at the
+  // complexity ceiling biome.jsonc pins for this file (#82), and its top-to-bottom shape is
+  // the #27/#34 teardown ordering. New routes are added to this dispatcher, not to it.
+  const server = createServer((request, response) => {
+    const url = request.url ?? ''
+    if (request.method === 'GET' && url === '/api/mode') {
+      respondWithFreshThreadMode(response)
+      return
+    }
+    if (request.method === 'GET' && url === '/api/threads') {
+      respondWithThreads(response)
+      return
+    }
+    if (request.method === 'GET' && url === '/api/stored-threads') {
+      answerOrFail(respondWithStoredThreads(response), response)
+      return
+    }
+    if (request.method === 'GET' && url === '/api/about') {
+      // No log line here, by rule (#144): a surface that exists to read the trace must not
+      // write to it.
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify(about()))
+      return
+    }
+    if (request.method === 'GET' && url.startsWith('/api/logs/bundle')) {
+      const outcome = bundle(new URL(url, 'http://zen').searchParams)
+      if (outcome.status !== 200) {
+        response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
+        response.end(outcome.reason)
+        return
+      }
+      response.writeHead(outcome.status, {
+        'Content-Type': 'text/markdown; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${outcome.filename}"`,
+      })
+      response.end(outcome.body)
+      return
+    }
+    if (request.method === 'POST' && url === '/api/logs') {
+      answerOrFail(respondToBrowserLogs(request, response), response)
+      return
+    }
+    if (request.method === 'GET') {
+      const eventsMatch = THREAD_EVENTS_ROUTE.exec(url)
+      if (eventsMatch?.[1] !== undefined) {
+        const threadId = decodeThreadId(eventsMatch[1], response)
+        if (threadId !== undefined) respondWithThreadEvents(threadId, response)
+        return
+      }
+      const historyMatch = THREAD_HISTORY_ROUTE.exec(url)
+      if (historyMatch?.[1] !== undefined) {
+        const threadId = decodeThreadId(historyMatch[1], response)
+        if (threadId !== undefined) answerOrFail(respondWithThreadHistory(threadId, response), response)
+        return
+      }
+      const threadMatch = THREAD_ROUTE.exec(url)
+      if (threadMatch?.[1] !== undefined) {
+        const threadId = decodeThreadId(threadMatch[1], response)
+        if (threadId !== undefined) respondWithThread(threadId, response)
+        return
+      }
+    }
+    if (dispatchFollowRoutes(request, response)) return
+    response.writeHead(404, { 'Content-Type': 'text/plain' })
+    response.end('not found')
+  })
 
-	// Every thread's session is disposed with the server.
-	server.on("close", () => {
-		threads.shutdown();
-	});
+  // Every thread's session is disposed with the server.
+  server.on('close', () => {
+    threads.shutdown()
+  })
 
-	const port = options.port ?? DEFAULT_PORT;
+  const port = options.port ?? DEFAULT_PORT
 
-	// ⚠ Without this, a port clash surfaces as an unhandled 'error' event and a Node stack
-	// trace — which is what happened, and which reads as "the server is broken" rather than
-	// "something else is already listening". Observed while restarting during development,
-	// and it cost a minute of reading a trace to learn a one-line fact.
-	server.on("error", (error: NodeJS.ErrnoException) => {
-		if (error.code === "EADDRINUSE") {
-			log.error(
-				"port {port} is already in use — another zen server is probably running; stop it, or pass a different port",
-				{
-					port,
-				},
-			);
-			return;
-		}
-		log.error("server error: {error}", { error });
-	});
+  // ⚠ Without this, a port clash surfaces as an unhandled 'error' event and a Node stack
+  // trace — which is what happened, and which reads as "the server is broken" rather than
+  // "something else is already listening". Observed while restarting during development,
+  // and it cost a minute of reading a trace to learn a one-line fact.
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      log.error(
+        'port {port} is already in use — another zen server is probably running; stop it, or pass a different port',
+        {
+          port,
+        },
+      )
+      return
+    }
+    log.error('server error: {error}', { error })
+  })
 
-	// Resolves with the URL of the port the OS actually bound — the same as `url` unless the
-	// caller asked for port 0 (tests do), where `url` would name a port that does not exist.
-	const listening = new Promise<string>((resolve, reject) => {
-		server.once("listening", () => {
-			const address = server.address();
-			const boundPort = typeof address === "object" && address !== null ? address.port : port;
-			resolve(`http://${LOOPBACK_ONLY}:${boundPort}`);
-		});
-		// A bind failure emits 'error' (handled above), never 'listening'. Under Bun the
-		// 'listening' event does not re-fire afterwards, so without this the promise would
-		// hang forever and any `await listening` caller (dev.ts) would dangle silently. The
-		// 'error' handler already logged the cause; this only settles the wait.
-		server.once("error", reject);
-	});
-	server.listen(port, LOOPBACK_ONLY);
-	return {
-		server,
-		url: `http://${LOOPBACK_ONLY}:${port}`,
-		listening,
-		close: () => new Promise<void>((resolve) => server.close(() => resolve())),
-	};
+  // Resolves with the URL of the port the OS actually bound — the same as `url` unless the
+  // caller asked for port 0 (tests do), where `url` would name a port that does not exist.
+  const listening = new Promise<string>((resolve, reject) => {
+    server.once('listening', () => {
+      const address = server.address()
+      const boundPort = typeof address === 'object' && address !== null ? address.port : port
+      resolve(`http://${LOOPBACK_ONLY}:${boundPort}`)
+    })
+    // A bind failure emits 'error' (handled above), never 'listening'. Under Bun the
+    // 'listening' event does not re-fire afterwards, so without this the promise would
+    // hang forever and any `await listening` caller (dev.ts) would dangle silently. The
+    // 'error' handler already logged the cause; this only settles the wait.
+    server.once('error', reject)
+  })
+  server.listen(port, LOOPBACK_ONLY)
+  return {
+    server,
+    url: `http://${LOOPBACK_ONLY}:${port}`,
+    listening,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  }
 }

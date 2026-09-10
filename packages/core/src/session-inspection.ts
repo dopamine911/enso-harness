@@ -1,5 +1,5 @@
-import { type Static, Type } from "typebox";
-import { PiPermissionModeState } from "./permission-mode.ts";
+import { type Static, Type } from 'typebox'
+import { PiPermissionModeState } from './permission-mode.ts'
 
 /**
  * What a live thread's session ACTUALLY contains, as the server reports it (#86).
@@ -23,57 +23,57 @@ import { PiPermissionModeState } from "./permission-mode.ts";
 
 /** One live thread, at a glance. */
 export const ZenThreadSummary = Type.Object(
-	{
-		threadId: Type.String(),
-		sessionId: Type.String(),
-		/** Where the session file is or will be. */
-		sessionDir: Type.String(),
-		/** The session file's path once pi has flushed it to disk; null while it lives only in memory. */
-		sessionFile: Type.Union([Type.String(), Type.Null()]),
-		/** picc's current mode, computed the way picc restores it. */
-		mode: Type.String(),
-		/** A run has taken the session and not released it — in flight, or blocked on a question. */
-		busy: Type.Boolean(),
-		/**
-		 * How many runs have taken this thread since the server started (#109) — the fence a
-		 * late run handle is checked against on the server, and the number a run's `zen.run`
-		 * receipt hands the browser: a difference between the two says another client, or a
-		 * rebuild after idle, has moved the thread on since this page's last run.
-		 */
-		generation: Type.Integer({ minimum: 0 }),
-		/** When the thread was last acquired or released — ISO 8601. */
-		lastActivityAt: Type.String(),
-	},
-	{ additionalProperties: false },
-);
-export type ZenThreadSummary = Static<typeof ZenThreadSummary>;
+  {
+    threadId: Type.String(),
+    sessionId: Type.String(),
+    /** Where the session file is or will be. */
+    sessionDir: Type.String(),
+    /** The session file's path once pi has flushed it to disk; null while it lives only in memory. */
+    sessionFile: Type.Union([Type.String(), Type.Null()]),
+    /** picc's current mode, computed the way picc restores it. */
+    mode: Type.String(),
+    /** A run has taken the session and not released it — in flight, or blocked on a question. */
+    busy: Type.Boolean(),
+    /**
+     * How many runs have taken this thread since the server started (#109) — the fence a
+     * late run handle is checked against on the server, and the number a run's `zen.run`
+     * receipt hands the browser: a difference between the two says another client, or a
+     * rebuild after idle, has moved the thread on since this page's last run.
+     */
+    generation: Type.Integer({ minimum: 0 }),
+    /** When the thread was last acquired or released — ISO 8601. */
+    lastActivityAt: Type.String(),
+  },
+  { additionalProperties: false },
+)
+export type ZenThreadSummary = Static<typeof ZenThreadSummary>
 
 /** One live thread, in full: the summary plus the session branch and what it may run. */
 export const ZenThreadInspection = Type.Object(
-	{
-		threadId: Type.String(),
-		sessionId: Type.String(),
-		cwd: Type.String(),
-		sessionDir: Type.String(),
-		sessionFile: Type.Union([Type.String(), Type.Null()]),
-		permissionMode: PiPermissionModeState,
-		/** Slash commands this session registers — extensions, prompt templates, skills. */
-		commands: Type.Array(Type.String()),
-		busy: Type.Boolean(),
-		/** See {@link ZenThreadSummary}. */
-		generation: Type.Integer({ minimum: 0 }),
-		lastActivityAt: Type.String(),
-		/**
-		 * The session BRANCH — root to leaf — as pi holds it, verbatim. pi's own entry shapes
-		 * (`message`, `custom`, `model_change`, …), not zen's: they are carried, not modelled,
-		 * so a reader sees exactly what pi sees. Consumers read the base fields (`type`, `id`,
-		 * `parentId`, `timestamp`, `customType`) defensively, like every wire crossing.
-		 */
-		entries: Type.Array(Type.Unknown()),
-	},
-	{ additionalProperties: false },
-);
-export type ZenThreadInspection = Static<typeof ZenThreadInspection>;
+  {
+    threadId: Type.String(),
+    sessionId: Type.String(),
+    cwd: Type.String(),
+    sessionDir: Type.String(),
+    sessionFile: Type.Union([Type.String(), Type.Null()]),
+    permissionMode: PiPermissionModeState,
+    /** Slash commands this session registers — extensions, prompt templates, skills. */
+    commands: Type.Array(Type.String()),
+    busy: Type.Boolean(),
+    /** See {@link ZenThreadSummary}. */
+    generation: Type.Integer({ minimum: 0 }),
+    lastActivityAt: Type.String(),
+    /**
+     * The session BRANCH — root to leaf — as pi holds it, verbatim. pi's own entry shapes
+     * (`message`, `custom`, `model_change`, …), not zen's: they are carried, not modelled,
+     * so a reader sees exactly what pi sees. Consumers read the base fields (`type`, `id`,
+     * `parentId`, `timestamp`, `customType`) defensively, like every wire crossing.
+     */
+    entries: Type.Array(Type.Unknown()),
+  },
+  { additionalProperties: false },
+)
+export type ZenThreadInspection = Static<typeof ZenThreadInspection>
 
 /**
  * Where one recorded event came from (#97) — the axis an ordering bug lives on.
@@ -85,13 +85,13 @@ export type ZenThreadInspection = Static<typeof ZenThreadInspection>;
  *   sent      an AG-UI chunk the server wrote to the browser — the wire's own order
  */
 export const ZenEventProvenance = Type.Union([
-	Type.Literal("live"),
-	Type.Literal("held"),
-	Type.Literal("replayed"),
-	Type.Literal("dropped"),
-	Type.Literal("sent"),
-]);
-export type ZenEventProvenance = Static<typeof ZenEventProvenance>;
+  Type.Literal('live'),
+  Type.Literal('held'),
+  Type.Literal('replayed'),
+  Type.Literal('dropped'),
+  Type.Literal('sent'),
+])
+export type ZenEventProvenance = Static<typeof ZenEventProvenance>
 
 /**
  * One event in a thread's tail. Consecutive events of the same shape coalesce into one
@@ -99,33 +99,33 @@ export type ZenEventProvenance = Static<typeof ZenEventProvenance>;
  * be read, not scrolled.
  */
 export const ZenThreadEvent = Type.Object(
-	{
-		/** Monotonic per thread — identity, since type + time can collide. */
-		sequence: Type.Number(),
-		/** pi's rpc event type for the host's tail; the AG-UI event type for the wire's. */
-		type: Type.String(),
-		/** The inner name when the type alone says nothing: a custom entry's `customType`, a ui request's method, a tool's name, a CUSTOM chunk's name. */
-		name: Type.Optional(Type.String()),
-		provenance: ZenEventProvenance,
-		/** ISO 8601 — when the FIRST of a coalesced run was recorded. */
-		at: Type.String(),
-		/** How many consecutive same-shaped events this record stands for. */
-		count: Type.Number({ minimum: 1 }),
-	},
-	{ additionalProperties: false },
-);
-export type ZenThreadEvent = Static<typeof ZenThreadEvent>;
+  {
+    /** Monotonic per thread — identity, since type + time can collide. */
+    sequence: Type.Number(),
+    /** pi's rpc event type for the host's tail; the AG-UI event type for the wire's. */
+    type: Type.String(),
+    /** The inner name when the type alone says nothing: a custom entry's `customType`, a ui request's method, a tool's name, a CUSTOM chunk's name. */
+    name: Type.Optional(Type.String()),
+    provenance: ZenEventProvenance,
+    /** ISO 8601 — when the FIRST of a coalesced run was recorded. */
+    at: Type.String(),
+    /** How many consecutive same-shaped events this record stands for. */
+    count: Type.Number({ minimum: 1 }),
+  },
+  { additionalProperties: false },
+)
+export type ZenThreadEvent = Static<typeof ZenThreadEvent>
 
 /** A thread's two tails: what the host emitted (with how), and what the server sent. */
 export const ZenThreadEvents = Type.Object(
-	{
-		threadId: Type.String(),
-		emitted: Type.Array(ZenThreadEvent),
-		sent: Type.Array(ZenThreadEvent),
-	},
-	{ additionalProperties: false },
-);
-export type ZenThreadEvents = Static<typeof ZenThreadEvents>;
+  {
+    threadId: Type.String(),
+    emitted: Type.Array(ZenThreadEvent),
+    sent: Type.Array(ZenThreadEvent),
+  },
+  { additionalProperties: false },
+)
+export type ZenThreadEvents = Static<typeof ZenThreadEvents>
 
 /**
  * One entry of the branch as a row — `12:34:56 custom:modes mode=plan` — read defensively:
@@ -133,35 +133,35 @@ export type ZenThreadEvents = Static<typeof ZenThreadEvents>;
  * `zen-session.mjs` had one each and they had already drifted apart.
  */
 export function describeSessionEntry(entry: unknown): string {
-	if (typeof entry !== "object" || entry === null) return String(entry);
-	const fields = entry as {
-		type?: unknown;
-		customType?: unknown;
-		timestamp?: unknown;
-		message?: unknown;
-		data?: unknown;
-	};
-	const kind = typeof fields.type === "string" ? fields.type : "?";
-	const custom = typeof fields.customType === "string" ? `:${fields.customType}` : "";
-	const role =
-		typeof fields.message === "object" && fields.message !== null && "role" in fields.message
-			? ` ${String(fields.message.role)}`
-			: "";
-	const mode =
-		fields.customType === "modes" && typeof fields.data === "object" && fields.data !== null && "mode" in fields.data
-			? ` mode=${String(fields.data.mode)}`
-			: "";
-	const when = typeof fields.timestamp === "string" ? fields.timestamp.slice(11, 19) : "";
-	return `${when} ${kind}${custom}${role}${mode}`.trim();
+  if (typeof entry !== 'object' || entry === null) return String(entry)
+  const fields = entry as {
+    type?: unknown
+    customType?: unknown
+    timestamp?: unknown
+    message?: unknown
+    data?: unknown
+  }
+  const kind = typeof fields.type === 'string' ? fields.type : '?'
+  const custom = typeof fields.customType === 'string' ? `:${fields.customType}` : ''
+  const role =
+    typeof fields.message === 'object' && fields.message !== null && 'role' in fields.message
+      ? ` ${String(fields.message.role)}`
+      : ''
+  const mode =
+    fields.customType === 'modes' && typeof fields.data === 'object' && fields.data !== null && 'mode' in fields.data
+      ? ` mode=${String(fields.data.mode)}`
+      : ''
+  const when = typeof fields.timestamp === 'string' ? fields.timestamp.slice(11, 19) : ''
+  return `${when} ${kind}${custom}${role}${mode}`.trim()
 }
 
 /** The three columns of an event row: `12:34:56` · `held ×3` · `entry_appended modes`. */
 export interface ThreadEventColumns {
-	readonly when: string;
-	/** Provenance, with the count when coalesced — the column a reader scans for `held`/`dropped`. */
-	readonly provenance: string;
-	/** Type, with the inner name when there is one. */
-	readonly subject: string;
+  readonly when: string
+  /** Provenance, with the count when coalesced — the column a reader scans for `held`/`dropped`. */
+  readonly provenance: string
+  /** Type, with the inner name when there is one. */
+  readonly subject: string
 }
 
 /**
@@ -170,17 +170,17 @@ export interface ThreadEventColumns {
  * with a space (`describeThreadEvent`), `zen-session.mjs` pads them into a table.
  */
 export function threadEventColumns(event: ZenThreadEvent): ThreadEventColumns {
-	return {
-		when: event.at.slice(11, 19),
-		provenance: event.count > 1 ? `${event.provenance} ×${event.count}` : event.provenance,
-		subject: event.name === undefined ? event.type : `${event.type} ${event.name}`,
-	};
+  return {
+    when: event.at.slice(11, 19),
+    provenance: event.count > 1 ? `${event.provenance} ×${event.count}` : event.provenance,
+    subject: event.name === undefined ? event.type : `${event.type} ${event.name}`,
+  }
 }
 
 /** One event of a tail as a row — `12:34:56 held ×3 entry_appended modes`. */
 export function describeThreadEvent(event: ZenThreadEvent): string {
-	const columns = threadEventColumns(event);
-	return `${columns.when} ${columns.provenance} ${columns.subject}`;
+  const columns = threadEventColumns(event)
+  return `${columns.when} ${columns.provenance} ${columns.subject}`
 }
 
 /**
@@ -195,10 +195,10 @@ export function describeThreadEvent(event: ZenThreadEvent): string {
  * attack. Checked by the server at BOTH entry points (the chat body and the thread routes);
  * the host never sees an id that failed here.
  */
-const ZEN_THREAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const ZEN_THREAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 
 export function isZenThreadId(value: unknown): value is string {
-	return typeof value === "string" && ZEN_THREAD_ID_PATTERN.test(value);
+  return typeof value === 'string' && ZEN_THREAD_ID_PATTERN.test(value)
 }
 
 /**
@@ -208,25 +208,25 @@ export function isZenThreadId(value: unknown): value is string {
  * and a page-owned thread finds its own file again after the server restarts.
  */
 export const ZenStoredThread = Type.Object(
-	{
-		threadId: Type.String(),
-		/** The first user message, or undefined for a session with none — the rail's title, as deepseek does. */
-		title: Type.Optional(Type.String()),
-		/** The file's mtime, ISO 8601 — when the session last grew. */
-		lastActivityAt: Type.String(),
-		messageCount: Type.Integer({ minimum: 0 }),
-		/**
-		 * A thread on THIS server is running it right now — a run in flight or a dialog parked
-		 * (`ThreadView.busy`). Not "held": a released thread stays cached for the idle window,
-		 * and a page that reloaded must be able to come back to it before that expires (PR
-		 * #104 review). While busy, resuming is refused — pi refuses a second concurrent
-		 * prompt anyway; this is the readable, early form of that refusal.
-		 */
-		busy: Type.Boolean(),
-	},
-	{ additionalProperties: false },
-);
-export type ZenStoredThread = Static<typeof ZenStoredThread>;
+  {
+    threadId: Type.String(),
+    /** The first user message, or undefined for a session with none — the rail's title, as deepseek does. */
+    title: Type.Optional(Type.String()),
+    /** The file's mtime, ISO 8601 — when the session last grew. */
+    lastActivityAt: Type.String(),
+    messageCount: Type.Integer({ minimum: 0 }),
+    /**
+     * A thread on THIS server is running it right now — a run in flight or a dialog parked
+     * (`ThreadView.busy`). Not "held": a released thread stays cached for the idle window,
+     * and a page that reloaded must be able to come back to it before that expires (PR
+     * #104 review). While busy, resuming is refused — pi refuses a second concurrent
+     * prompt anyway; this is the readable, early form of that refusal.
+     */
+    busy: Type.Boolean(),
+  },
+  { additionalProperties: false },
+)
+export type ZenStoredThread = Static<typeof ZenStoredThread>
 
 /**
  * How a stored branch ends when its last turn did not settle (#109): a prompt the
@@ -237,10 +237,10 @@ export type ZenStoredThread = Static<typeof ZenStoredThread>;
  * next prompt continues from the torn tail as pi would.
  */
 export const ZenInterruptedTail = Type.Union([
-	Type.Literal("unanswered-prompt"),
-	Type.Literal("tool-call-without-result"),
-]);
-export type ZenInterruptedTail = Static<typeof ZenInterruptedTail>;
+  Type.Literal('unanswered-prompt'),
+  Type.Literal('tool-call-without-result'),
+])
+export type ZenInterruptedTail = Static<typeof ZenInterruptedTail>
 
 /**
  * A thread's history as the browser mounts it (#95): the branch as TanStack `UIMessage`s —
@@ -249,13 +249,13 @@ export type ZenInterruptedTail = Static<typeof ZenInterruptedTail>;
  * `Unknown` because the shape is TanStack's, not zen's; the durable form is pi's entries.
  */
 export const ZenThreadHistory = Type.Object(
-	{
-		threadId: Type.String(),
-		messages: Type.Array(Type.Unknown()),
-		permissionMode: PiPermissionModeState,
-		/** Present only when the branch ends inside a turn — see {@link ZenInterruptedTail}. */
-		interrupted: Type.Optional(ZenInterruptedTail),
-	},
-	{ additionalProperties: false },
-);
-export type ZenThreadHistory = Static<typeof ZenThreadHistory>;
+  {
+    threadId: Type.String(),
+    messages: Type.Array(Type.Unknown()),
+    permissionMode: PiPermissionModeState,
+    /** Present only when the branch ends inside a turn — see {@link ZenInterruptedTail}. */
+    interrupted: Type.Optional(ZenInterruptedTail),
+  },
+  { additionalProperties: false },
+)
+export type ZenThreadHistory = Static<typeof ZenThreadHistory>

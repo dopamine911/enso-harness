@@ -1,6 +1,6 @@
-import { type Static, Type } from "typebox";
-import { ZenDialogSpec } from "./dialog.ts";
-import { ZenToolResultDescriptor } from "./tool-result.ts";
+import { type Static, Type } from 'typebox'
+import { ZenDialogSpec } from './dialog.ts'
+import { ZenToolResultDescriptor } from './tool-result.ts'
 
 /**
  * What a pi rpc event becomes for a surface to render.
@@ -14,36 +14,36 @@ import { ZenToolResultDescriptor } from "./tool-result.ts";
 
 /** Token and cost accounting, present on `message_update`, assistant and tool messages. */
 export const ZenUsage = Type.Object({
-	input: Type.Integer({ minimum: 0 }),
-	output: Type.Integer({ minimum: 0 }),
-	cacheRead: Type.Integer({ minimum: 0 }),
-	cacheWrite: Type.Integer({ minimum: 0 }),
-	totalCost: Type.Optional(Type.Number({ minimum: 0 })),
-});
-export type ZenUsage = Static<typeof ZenUsage>;
+  input: Type.Integer({ minimum: 0 }),
+  output: Type.Integer({ minimum: 0 }),
+  cacheRead: Type.Integer({ minimum: 0 }),
+  cacheWrite: Type.Integer({ minimum: 0 }),
+  totalCost: Type.Optional(Type.Number({ minimum: 0 })),
+})
+export type ZenUsage = Static<typeof ZenUsage>
 
 /** A streaming text delta. ⚠ `usage` rides along on EVERY one — see `message_update`. */
 export const ZenTextDelta = Type.Object({
-	kind: Type.Literal("text-delta"),
-	contentIndex: Type.Integer({ minimum: 0 }),
-	delta: Type.String(),
-	usage: Type.Optional(ZenUsage),
-});
+  kind: Type.Literal('text-delta'),
+  contentIndex: Type.Integer({ minimum: 0 }),
+  delta: Type.String(),
+  usage: Type.Optional(ZenUsage),
+})
 
 export const ZenThinkingDelta = Type.Object({
-	kind: Type.Literal("thinking-delta"),
-	contentIndex: Type.Integer({ minimum: 0 }),
-	delta: Type.String(),
-	usage: Type.Optional(ZenUsage),
-});
+  kind: Type.Literal('thinking-delta'),
+  contentIndex: Type.Integer({ minimum: 0 }),
+  delta: Type.String(),
+  usage: Type.Optional(ZenUsage),
+})
 
 /** A tool call has started. Mirrors TanStack's `ToolCallPart` fields. */
 export const ZenToolCall = Type.Object({
-	kind: Type.Literal("tool-call"),
-	toolCallId: Type.String(),
-	toolName: Type.String(),
-	args: Type.Unknown(),
-});
+  kind: Type.Literal('tool-call'),
+  toolCallId: Type.String(),
+  toolName: Type.String(),
+  args: Type.Unknown(),
+})
 
 /**
  * Tool output.
@@ -54,14 +54,14 @@ export const ZenToolCall = Type.Object({
  * grows with output length. The field is named `text` rather than `delta` for that reason.
  */
 export const ZenToolResultObservation = Type.Object({
-	kind: Type.Literal("tool-result"),
-	toolCallId: Type.String(),
-	toolName: Type.String(),
-	text: Type.String(),
-	complete: Type.Boolean(),
-	isError: Type.Boolean(),
-	descriptor: Type.Optional(ZenToolResultDescriptor),
-});
+  kind: Type.Literal('tool-result'),
+  toolCallId: Type.String(),
+  toolName: Type.String(),
+  text: Type.String(),
+  complete: Type.Boolean(),
+  isError: Type.Boolean(),
+  descriptor: Type.Optional(ZenToolResultDescriptor),
+})
 
 /**
  * pi asked the client for UI.
@@ -85,8 +85,8 @@ export const ZenToolResultObservation = Type.Object({
  * copies `notifyType` only when it is one of pi's three declared values, so an unknown
  * value degrades to an untyped notification rather than failing validation.
  */
-export const ZenNotifyType = Type.Union([Type.Literal("info"), Type.Literal("warning"), Type.Literal("error")]);
-export type ZenNotifyType = Static<typeof ZenNotifyType>;
+export const ZenNotifyType = Type.Union([Type.Literal('info'), Type.Literal('warning'), Type.Literal('error')])
+export type ZenNotifyType = Static<typeof ZenNotifyType>
 
 /**
  * Where a ui request came from (#96) — tagged at the SOURCE, never inferred.
@@ -102,19 +102,19 @@ export type ZenNotifyType = Static<typeof ZenNotifyType>;
  *
  * A closed union: a third origin fails at the mapper, loudly, not silently in a consumer.
  */
-export const ZenUiRequestOrigin = Type.Union([Type.Literal("session-start"), Type.Literal("run")]);
-export type ZenUiRequestOrigin = Static<typeof ZenUiRequestOrigin>;
+export const ZenUiRequestOrigin = Type.Union([Type.Literal('session-start'), Type.Literal('run')])
+export type ZenUiRequestOrigin = Static<typeof ZenUiRequestOrigin>
 
 export const ZenExtensionUiRequest = Type.Object({
-	kind: Type.Literal("extension-ui-request"),
-	id: Type.String(),
-	method: Type.String(),
-	blocking: Type.Boolean(),
-	origin: ZenUiRequestOrigin,
-	dialog: Type.Optional(ZenDialogSpec),
-	message: Type.Optional(Type.String()),
-	notifyType: Type.Optional(ZenNotifyType),
-});
+  kind: Type.Literal('extension-ui-request'),
+  id: Type.String(),
+  method: Type.String(),
+  blocking: Type.Boolean(),
+  origin: ZenUiRequestOrigin,
+  dialog: Type.Optional(ZenDialogSpec),
+  message: Type.Optional(Type.String()),
+  notifyType: Type.Optional(ZenNotifyType),
+})
 
 /**
  * How a blocking question stopped waiting (#114). A closed union: `answered` is a human's
@@ -123,12 +123,12 @@ export const ZenExtensionUiRequest = Type.Object({
  * caller's abort signal (`aborted`).
  */
 export const ZenDialogOutcome = Type.Union([
-	Type.Literal("answered"),
-	Type.Literal("cancelled"),
-	Type.Literal("timeout"),
-	Type.Literal("aborted"),
-]);
-export type ZenDialogOutcome = Static<typeof ZenDialogOutcome>;
+  Type.Literal('answered'),
+  Type.Literal('cancelled'),
+  Type.Literal('timeout'),
+  Type.Literal('aborted'),
+])
+export type ZenDialogOutcome = Static<typeof ZenDialogOutcome>
 
 /**
  * A blocking question is no longer waiting (#114). The HOST synthesises this at the one
@@ -137,12 +137,12 @@ export type ZenDialogOutcome = Static<typeof ZenDialogOutcome>;
  * answered in one tab lingered in every other until that tab tried and got `gone`.
  */
 export const ZenDialogSettled = Type.Object({
-	kind: Type.Literal("dialog-settled"),
-	/** `minLength: 1`, as `ZenOpenDialog.id` — a settle must name a question (PR #115 review). */
-	id: Type.String({ minLength: 1 }),
-	outcome: ZenDialogOutcome,
-});
-export type ZenDialogSettled = Static<typeof ZenDialogSettled>;
+  kind: Type.Literal('dialog-settled'),
+  /** `minLength: 1`, as `ZenOpenDialog.id` — a settle must name a question (PR #115 review). */
+  id: Type.String({ minLength: 1 }),
+  outcome: ZenDialogOutcome,
+})
+export type ZenDialogSettled = Static<typeof ZenDialogSettled>
 
 /**
  * A CUSTOM session entry was appended (#29) — an extension persisted state via
@@ -161,11 +161,11 @@ export type ZenDialogSettled = Static<typeof ZenDialogSettled>;
  * stay `unmapped`.
  */
 export const ZenCustomSessionEntry = Type.Object({
-	kind: Type.Literal("custom-entry"),
-	customType: Type.String(),
-	data: Type.Unknown(),
-});
-export type ZenCustomSessionEntry = Static<typeof ZenCustomSessionEntry>;
+  kind: Type.Literal('custom-entry'),
+  customType: Type.String(),
+  data: Type.Unknown(),
+})
+export type ZenCustomSessionEntry = Static<typeof ZenCustomSessionEntry>
 
 /**
  * A message began — pi's `message_start` (#112). The boundary AG-UI's `TEXT_MESSAGE_START`
@@ -174,12 +174,12 @@ export type ZenCustomSessionEntry = Static<typeof ZenCustomSessionEntry>;
  * `user/message`); assistant text arrives as deltas.
  */
 export const ZenMessageStart = Type.Object({
-	kind: Type.Literal("message-start"),
-	/** pi's message role, carried as pi names it. */
-	role: Type.String(),
-	text: Type.Optional(Type.String()),
-});
-export type ZenMessageStart = Static<typeof ZenMessageStart>;
+  kind: Type.Literal('message-start'),
+  /** pi's message role, carried as pi names it. */
+  role: Type.String(),
+  text: Type.Optional(Type.String()),
+})
+export type ZenMessageStart = Static<typeof ZenMessageStart>
 
 /**
  * A message completed — pi's `message_end` — with its accounting when it has any (#45).
@@ -197,11 +197,11 @@ export type ZenMessageStart = Static<typeof ZenMessageStart>;
  * accounting travels with the message it belongs to, never as a side record.
  */
 export const ZenMessageEnd = Type.Object({
-	kind: Type.Literal("message-end"),
-	role: Type.String(),
-	usage: Type.Optional(ZenUsage),
-});
-export type ZenMessageEnd = Static<typeof ZenMessageEnd>;
+  kind: Type.Literal('message-end'),
+  role: Type.String(),
+  usage: Type.Optional(ZenUsage),
+})
+export type ZenMessageEnd = Static<typeof ZenMessageEnd>
 
 /**
  * pi's `turn_start` / `turn_end` (#112). ⚠ pi's "turn" is ONE model request plus the tool
@@ -209,14 +209,14 @@ export type ZenMessageEnd = Static<typeof ZenMessageEnd>;
  * through nothing owed) is pi's whole run, `settled`. Carried under pi's name so a reader
  * of pi's docs and a reader of this stream agree; the dsh mapping is this comment.
  */
-export const ZenTurnStart = Type.Object({ kind: Type.Literal("turn-start") });
-export type ZenTurnStart = Static<typeof ZenTurnStart>;
+export const ZenTurnStart = Type.Object({ kind: Type.Literal('turn-start') })
+export type ZenTurnStart = Static<typeof ZenTurnStart>
 export const ZenTurnEnd = Type.Object({
-	kind: Type.Literal("turn-end"),
-	/** How many tool results the request produced — the step row's count, without the results themselves (they crossed as `tool-result`). */
-	toolResults: Type.Integer({ minimum: 0 }),
-});
-export type ZenTurnEnd = Static<typeof ZenTurnEnd>;
+  kind: Type.Literal('turn-end'),
+  /** How many tool results the request produced — the step row's count, without the results themselves (they crossed as `tool-result`). */
+  toolResults: Type.Integer({ minimum: 0 }),
+})
+export type ZenTurnEnd = Static<typeof ZenTurnEnd>
 
 /**
  * pi's `queue_update` (#75, #112): what is waiting behind the run in flight — steering
@@ -227,11 +227,11 @@ export type ZenTurnEnd = Static<typeof ZenTurnEnd>;
  * waits — the frame pi emits after it claims or clears.
  */
 export const ZenQueue = Type.Object({
-	kind: Type.Literal("queue"),
-	steering: Type.Array(Type.String()),
-	followUp: Type.Array(Type.String()),
-});
-export type ZenQueue = Static<typeof ZenQueue>;
+  kind: Type.Literal('queue'),
+  steering: Type.Array(Type.String()),
+  followUp: Type.Array(Type.String()),
+})
+export type ZenQueue = Static<typeof ZenQueue>
 
 /**
  * pi refused a prompt at preflight (#112) — the one observation the SERVER synthesises,
@@ -240,28 +240,28 @@ export type ZenQueue = Static<typeof ZenQueue>;
  * receipt's, so the client can name which prompt.
  */
 export const ZenPromptRejected = Type.Object({
-	kind: Type.Literal("prompt-rejected"),
-	messageId: Type.String(),
-	reason: Type.String(),
-});
-export type ZenPromptRejected = Static<typeof ZenPromptRejected>;
+  kind: Type.Literal('prompt-rejected'),
+  messageId: Type.String(),
+  reason: Type.String(),
+})
+export type ZenPromptRejected = Static<typeof ZenPromptRejected>
 
 /** An extension threw. Surfaced, never swallowed. */
 export const ZenExtensionError = Type.Object({
-	kind: Type.Literal("extension-error"),
-	extensionPath: Type.String(),
-	event: Type.String(),
-	error: Type.String(),
-});
+  kind: Type.Literal('extension-error'),
+  extensionPath: Type.String(),
+  event: Type.String(),
+  error: Type.String(),
+})
 
 /** One low-level run ended. ⚠ NOT completion — `willRetry` may be true. */
 export const ZenRunEnded = Type.Object({
-	kind: Type.Literal("run-ended"),
-	willRetry: Type.Boolean(),
-});
+  kind: Type.Literal('run-ended'),
+  willRetry: Type.Boolean(),
+})
 
 /** The session-level settle. This is completion. */
-export const ZenSettled = Type.Object({ kind: Type.Literal("settled") });
+export const ZenSettled = Type.Object({ kind: Type.Literal('settled') })
 
 /**
  * Anything not modelled above, carried through so it can be logged or displayed.
@@ -271,27 +271,27 @@ export const ZenSettled = Type.Object({ kind: Type.Literal("settled") });
  * transport is broken", which is the opposite of what this member exists for.
  */
 export const ZenUnmapped = Type.Object({
-	kind: Type.Literal("unmapped"),
-	event: Type.Unknown(),
-});
+  kind: Type.Literal('unmapped'),
+  event: Type.Unknown(),
+})
 
 export const ZenObservation = Type.Union([
-	ZenTextDelta,
-	ZenThinkingDelta,
-	ZenToolCall,
-	ZenToolResultObservation,
-	ZenCustomSessionEntry,
-	ZenMessageStart,
-	ZenMessageEnd,
-	ZenTurnStart,
-	ZenTurnEnd,
-	ZenQueue,
-	ZenPromptRejected,
-	ZenExtensionError,
-	ZenExtensionUiRequest,
-	ZenDialogSettled,
-	ZenRunEnded,
-	ZenSettled,
-	ZenUnmapped,
-]);
-export type ZenObservation = Static<typeof ZenObservation>;
+  ZenTextDelta,
+  ZenThinkingDelta,
+  ZenToolCall,
+  ZenToolResultObservation,
+  ZenCustomSessionEntry,
+  ZenMessageStart,
+  ZenMessageEnd,
+  ZenTurnStart,
+  ZenTurnEnd,
+  ZenQueue,
+  ZenPromptRejected,
+  ZenExtensionError,
+  ZenExtensionUiRequest,
+  ZenDialogSettled,
+  ZenRunEnded,
+  ZenSettled,
+  ZenUnmapped,
+])
+export type ZenObservation = Static<typeof ZenObservation>

@@ -29,22 +29,22 @@
  * TypeScript types at load. Each gate shells out through `npm run <script>`, so a
  * command's definition lives in exactly one place: package.json.
  */
-import { spawnSync } from "node:child_process";
+import { spawnSync } from 'node:child_process'
 
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const RESET = "\x1b[0m";
+const GREEN = '\x1b[32m'
+const RED = '\x1b[31m'
+const DIM = '\x1b[2m'
+const BOLD = '\x1b[1m'
+const RESET = '\x1b[0m'
 
 /**
  * The package managers this gate knows how to shell out to. Each runs a package.json script with
  * `<manager> run <script>`, so the invocation shape is identical and only the binary differs.
  */
-const KNOWN_PACKAGE_MANAGERS = ["npm", "bun", "pnpm", "yarn"] as const;
-type PackageManager = (typeof KNOWN_PACKAGE_MANAGERS)[number];
+const KNOWN_PACKAGE_MANAGERS = ['npm', 'bun', 'pnpm', 'yarn'] as const
+type PackageManager = (typeof KNOWN_PACKAGE_MANAGERS)[number]
 
-const DEFAULT_PACKAGE_MANAGER: PackageManager = "npm";
+const DEFAULT_PACKAGE_MANAGER: PackageManager = 'npm'
 
 /**
  * Which package manager to shell out to for each gate.
@@ -62,55 +62,55 @@ const DEFAULT_PACKAGE_MANAGER: PackageManager = "npm";
  * Falls back to npm, which is correct for `node scripts/gate.ts` on a normal Node install.
  */
 function detectPackageManager(): PackageManager {
-	const userAgent = process.env.npm_config_user_agent;
-	if (userAgent !== undefined) {
-		const managerName = userAgent.split("/")[0];
-		const knownManager = KNOWN_PACKAGE_MANAGERS.find((candidate) => candidate === managerName);
-		if (knownManager !== undefined) {
-			return knownManager;
-		}
-	}
-	// Reading the global this way (rather than declaring `Bun`) keeps the check dependency-free and
-	// avoids `any` — the repo bans it, and pulling in @types/bun for one truthiness test is worse.
-	const isBunRuntime = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
-	return isBunRuntime ? "bun" : DEFAULT_PACKAGE_MANAGER;
+  const userAgent = process.env.npm_config_user_agent
+  if (userAgent !== undefined) {
+    const managerName = userAgent.split('/')[0]
+    const knownManager = KNOWN_PACKAGE_MANAGERS.find((candidate) => candidate === managerName)
+    if (knownManager !== undefined) {
+      return knownManager
+    }
+  }
+  // Reading the global this way (rather than declaring `Bun`) keeps the check dependency-free and
+  // avoids `any` — the repo bans it, and pulling in @types/bun for one truthiness test is worse.
+  const isBunRuntime = typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined'
+  return isBunRuntime ? 'bun' : DEFAULT_PACKAGE_MANAGER
 }
 
-const PACKAGE_MANAGER = detectPackageManager();
+const PACKAGE_MANAGER = detectPackageManager()
 
 /** One child-process gate: a display name, a one-line description, and the script it runs. */
 interface Gate {
-	readonly name: string;
-	readonly describe: string;
-	/** The package.json script name — run as `<package manager> run <script>`. */
-	readonly script: string;
+  readonly name: string
+  readonly describe: string
+  /** The package.json script name — run as `<package manager> run <script>`. */
+  readonly script: string
 }
 
 const GATES: readonly Gate[] = [
-	{
-		name: "biome",
-		describe: "lint + format + import-organize (check-only)",
-		script: "lint",
-	},
-	{
-		name: "typecheck",
-		describe: "tsc --noEmit",
-		script: "typecheck",
-	},
-	{
-		name: "test",
-		describe: "bun test",
-		script: "test",
-	},
-	{
-		// AFTER test, which writes coverage/lcov.info (bunfig keeps coverage always on).
-		// Enforces the TOTAL floor bun cannot: its own coverageThreshold is per-file
-		// (measured 2026-09-04 — see scripts/check-coverage.ts).
-		name: "coverage",
-		describe: "total coverage floor over the full denominator",
-		script: "coverage:check",
-	},
-];
+  {
+    name: 'biome',
+    describe: 'lint + format + import-organize (check-only)',
+    script: 'lint',
+  },
+  {
+    name: 'typecheck',
+    describe: 'tsc --noEmit',
+    script: 'typecheck',
+  },
+  {
+    name: 'test',
+    describe: 'bun test',
+    script: 'test',
+  },
+  {
+    // AFTER test, which writes coverage/lcov.info (bunfig keeps coverage always on).
+    // Enforces the TOTAL floor bun cannot: its own coverageThreshold is per-file
+    // (measured 2026-09-04 — see scripts/check-coverage.ts).
+    name: 'coverage',
+    describe: 'total coverage floor over the full denominator',
+    script: 'coverage:check',
+  },
+]
 
 /**
  * Runs one gate to completion, inheriting stdio so the underlying tool's colored
@@ -118,28 +118,28 @@ const GATES: readonly Gate[] = [
  * (non-zero = failure); a child killed by a signal (status null) counts as failure.
  */
 function runGate(gate: Gate): number {
-	process.stdout.write(`\n${BOLD}▶ ${gate.name}${RESET} ${DIM}— ${gate.describe}${RESET}\n`);
-	const result = spawnSync(PACKAGE_MANAGER, ["run", gate.script], { stdio: "inherit" });
-	if (result.error) {
-		process.stderr.write(`${RED}gate "${gate.name}" failed to spawn: ${result.error.message}${RESET}\n`);
-		return 1;
-	}
-	return result.status ?? 1;
+  process.stdout.write(`\n${BOLD}▶ ${gate.name}${RESET} ${DIM}— ${gate.describe}${RESET}\n`)
+  const result = spawnSync(PACKAGE_MANAGER, ['run', gate.script], { stdio: 'inherit' })
+  if (result.error) {
+    process.stderr.write(`${RED}gate "${gate.name}" failed to spawn: ${result.error.message}${RESET}\n`)
+    return 1
+  }
+  return result.status ?? 1
 }
 
-process.stdout.write(`${DIM}gate: running via ${PACKAGE_MANAGER}${RESET}\n`);
+process.stdout.write(`${DIM}gate: running via ${PACKAGE_MANAGER}${RESET}\n`)
 
-let failedGate: string | null = null;
+let failedGate: string | null = null
 for (const gate of GATES) {
-	if (runGate(gate) !== 0) {
-		failedGate = gate.name;
-		break;
-	}
+  if (runGate(gate) !== 0) {
+    failedGate = gate.name
+    break
+  }
 }
 
 if (failedGate) {
-	process.stdout.write(`\n${RED}✗ gate "${failedGate}" failed.${RESET}\n`);
-	process.exit(1);
+  process.stdout.write(`\n${RED}✗ gate "${failedGate}" failed.${RESET}\n`)
+  process.exit(1)
 }
 
-process.stdout.write(`\n${GREEN}✓ All gates passed.${RESET}\n`);
+process.stdout.write(`\n${GREEN}✓ All gates passed.${RESET}\n`)

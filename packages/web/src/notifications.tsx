@@ -1,7 +1,7 @@
-import type { ZenNotifyType, ZenUiRequestOrigin } from "@zen/core";
-import { InfoIcon, OctagonAlertIcon, TriangleAlertIcon } from "lucide-react";
-import { cn } from "@/lib/utils.ts";
-import { createStore, type Store, useStore, useThreadStores } from "./store.ts";
+import type { ZenNotifyType, ZenUiRequestOrigin } from '@zen/core'
+import { InfoIcon, OctagonAlertIcon, TriangleAlertIcon } from 'lucide-react'
+import { cn } from '@/lib/utils.ts'
+import { createStore, type Store, useStore, useThreadStores } from './store.ts'
 
 /**
  * pi's `notify` messages, rendered (#29).
@@ -28,16 +28,16 @@ import { createStore, type Store, useStore, useThreadStores } from "./store.ts";
  */
 
 export interface ZenNotification {
-	id: number;
-	message: string;
-	notifyType: ZenNotifyType | undefined;
-	/**
-	 * `session-start`: an extension's notice replayed from the session's own start.
-	 * `run`: everything else — a run's notice, and the harness's own `Mode:` line (#84),
-	 * which is not extension chatter and stays open however early it arrives.
-	 */
-	origin: ZenUiRequestOrigin;
-	at: Date;
+  id: number
+  message: string
+  notifyType: ZenNotifyType | undefined
+  /**
+   * `session-start`: an extension's notice replayed from the session's own start.
+   * `run`: everything else — a run's notice, and the harness's own `Mode:` line (#84),
+   * which is not extension chatter and stays open however early it arrives.
+   */
+  origin: ZenUiRequestOrigin
+  at: Date
 }
 
 /**
@@ -45,35 +45,35 @@ export interface ZenNotification {
  * runaway loop must degrade to "the newest 100 lines", not an ever-growing render list.
  * Dropping the OLDEST is the right end: the tail is what the user is looking at.
  */
-const MAX_KEPT_NOTIFICATIONS = 100;
+const MAX_KEPT_NOTIFICATIONS = 100
 
 export interface NotificationsStore extends Store<ReadonlyArray<ZenNotification>> {
-	readonly push: (message: string, notifyType: ZenNotifyType | undefined, origin: ZenUiRequestOrigin) => void;
+  readonly push: (message: string, notifyType: ZenNotifyType | undefined, origin: ZenUiRequestOrigin) => void
 }
 
 export function createNotificationsStore(): NotificationsStore {
-	const store = createStore<ReadonlyArray<ZenNotification>>([]);
-	let nextNotificationId = 1;
-	return {
-		get: store.get,
-		subscribe: store.subscribe,
-		push: (message, notifyType, origin) => {
-			const appended = [...store.get(), { id: nextNotificationId++, message, notifyType, origin, at: new Date() }];
-			store.set(appended.slice(-MAX_KEPT_NOTIFICATIONS));
-		},
-	};
+  const store = createStore<ReadonlyArray<ZenNotification>>([])
+  let nextNotificationId = 1
+  return {
+    get: store.get,
+    subscribe: store.subscribe,
+    push: (message, notifyType, origin) => {
+      const appended = [...store.get(), { id: nextNotificationId++, message, notifyType, origin, at: new Date() }]
+      store.set(appended.slice(-MAX_KEPT_NOTIFICATIONS))
+    },
+  }
 }
 
 /** The grouping rule (#96), in one place: a startup notice that is merely informational. */
 export function isStartupNotice(notification: ZenNotification): boolean {
-	return notification.origin === "session-start" && (notification.notifyType ?? "info") === "info";
+  return notification.origin === 'session-start' && (notification.notifyType ?? 'info') === 'info'
 }
 
 const NOTIFY_TYPE_ICONS = {
-	info: InfoIcon,
-	warning: TriangleAlertIcon,
-	error: OctagonAlertIcon,
-} as const;
+  info: InfoIcon,
+  warning: TriangleAlertIcon,
+  error: OctagonAlertIcon,
+} as const
 
 /**
  * One notification as a small transcript line. Presentational — takes the notification as
@@ -84,20 +84,20 @@ const NOTIFY_TYPE_ICONS = {
  * as info. The full timestamp lives in `title` (hover) — the visible line stays short.
  */
 export function NotificationLine({ notification }: { notification: ZenNotification }): React.ReactNode {
-	const Icon = NOTIFY_TYPE_ICONS[notification.notifyType ?? "info"];
-	return (
-		<div
-			role="status"
-			title={notification.at.toLocaleString()}
-			className={cn(
-				"flex items-center gap-2 text-xs",
-				notification.notifyType === "error" ? "text-destructive" : "text-muted-foreground",
-			)}
-		>
-			<Icon className="size-3.5 shrink-0" />
-			<span className="whitespace-pre-wrap">{notification.message}</span>
-		</div>
-	);
+  const Icon = NOTIFY_TYPE_ICONS[notification.notifyType ?? 'info']
+  return (
+    <div
+      role="status"
+      title={notification.at.toLocaleString()}
+      className={cn(
+        'flex items-center gap-2 text-xs',
+        notification.notifyType === 'error' ? 'text-destructive' : 'text-muted-foreground',
+      )}
+    >
+      <Icon className="size-3.5 shrink-0" />
+      <span className="whitespace-pre-wrap">{notification.message}</span>
+    </div>
+  )
 }
 
 /**
@@ -106,20 +106,20 @@ export function NotificationLine({ notification }: { notification: ZenNotificati
  * open state survives a re-render of the list because React keeps the element.
  */
 export function StartupNotices({ notifications }: { notifications: readonly ZenNotification[] }): React.ReactNode {
-	if (notifications.length === 0) return null;
-	const noun = notifications.length === 1 ? "notice" : "notices";
-	return (
-		<details data-zen-startup-notices="" className="text-muted-foreground text-xs">
-			<summary className="cursor-pointer">
-				{notifications.length} startup {noun} from extensions
-			</summary>
-			<div className="mt-1.5 flex flex-col gap-1.5 pl-4">
-				{notifications.map((notification) => (
-					<NotificationLine key={notification.id} notification={notification} />
-				))}
-			</div>
-		</details>
-	);
+  if (notifications.length === 0) return null
+  const noun = notifications.length === 1 ? 'notice' : 'notices'
+  return (
+    <details data-zen-startup-notices="" className="text-muted-foreground text-xs">
+      <summary className="cursor-pointer">
+        {notifications.length} startup {noun} from extensions
+      </summary>
+      <div className="mt-1.5 flex flex-col gap-1.5 pl-4">
+        {notifications.map((notification) => (
+          <NotificationLine key={notification.id} notification={notification} />
+        ))}
+      </div>
+    </details>
+  )
 }
 
 /**
@@ -128,16 +128,16 @@ export function StartupNotices({ notifications }: { notifications: readonly ZenN
  * construction: the host replays them before the first prompt), the rest as lines.
  */
 export function ThreadNotifications(): React.ReactNode {
-	const currentNotifications = useStore(useThreadStores().notifications);
-	if (currentNotifications.length === 0) return null;
-	const startup = currentNotifications.filter(isStartupNotice);
-	const open = currentNotifications.filter((notification) => !isStartupNotice(notification));
-	return (
-		<div className="flex flex-col gap-1.5">
-			<StartupNotices notifications={startup} />
-			{open.map((notification) => (
-				<NotificationLine key={notification.id} notification={notification} />
-			))}
-		</div>
-	);
+  const currentNotifications = useStore(useThreadStores().notifications)
+  if (currentNotifications.length === 0) return null
+  const startup = currentNotifications.filter(isStartupNotice)
+  const open = currentNotifications.filter((notification) => !isStartupNotice(notification))
+  return (
+    <div className="flex flex-col gap-1.5">
+      <StartupNotices notifications={startup} />
+      {open.map((notification) => (
+        <NotificationLine key={notification.id} notification={notification} />
+      ))}
+    </div>
+  )
 }

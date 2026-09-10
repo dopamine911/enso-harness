@@ -1,6 +1,6 @@
-import { expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { expect, test } from 'bun:test'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join, relative } from 'node:path'
 
 /**
  * The anchor for #125 item 3 / #103 invariant 2 (switching threads leaks no state): every
@@ -13,35 +13,35 @@ import { join, relative } from "node:path";
  * Adding a third means adding it here, with its reason — not making the check looser.
  */
 
-const webSource = join(import.meta.dir, "..");
+const webSource = join(import.meta.dir, '..')
 
 /** `path:name` of every store created at column zero — a module-level singleton. */
 const PAGE_SCOPED_BY_DESIGN: readonly string[] = [
-	// The rail's list of the page's threads: one list per page, owned by the registry.
-	"thread-stores.ts:threadList",
-	// The server's stored-threads listing (Previous Sessions): one per page, refreshed on settle.
-	"chat-screen.tsx:storedThreads",
-	// The page's log ring and shipper (#132): configured once by main.tsx, read by the drawer.
-	"thread-stores.ts:browserLogging",
-];
+  // The rail's list of the page's threads: one list per page, owned by the registry.
+  'thread-stores.ts:threadList',
+  // The server's stored-threads listing (Previous Sessions): one per page, refreshed on settle.
+  'chat-screen.tsx:storedThreads',
+  // The page's log ring and shipper (#132): configured once by main.tsx, read by the drawer.
+  'thread-stores.ts:browserLogging',
+]
 
-const MODULE_LEVEL_STORE = /^(?:export )?const (\w+)(?::[^=]+)? = create\w*(?:Store|Lines)\w*(?:<[^\n]*?>)?\(/gm;
+const MODULE_LEVEL_STORE = /^(?:export )?const (\w+)(?::[^=]+)? = create\w*(?:Store|Lines)\w*(?:<[^\n]*?>)?\(/gm
 
 function moduleLevelStores(): string[] {
-	const found: string[] = [];
-	for (const dirEntry of readdirSync(webSource, { withFileTypes: true, recursive: true })) {
-		if (!dirEntry.isFile()) continue;
-		if (!(dirEntry.name.endsWith(".ts") || dirEntry.name.endsWith(".tsx"))) continue;
-		const absolutePath = join(dirEntry.parentPath, dirEntry.name);
-		const sourceRelative = relative(webSource, absolutePath);
-		if (sourceRelative.startsWith("__tests__") || sourceRelative.includes("/__tests__/")) continue;
-		if (sourceRelative.startsWith("components/")) continue;
-		const source = readFileSync(absolutePath, "utf8");
-		for (const match of source.matchAll(MODULE_LEVEL_STORE)) found.push(`${sourceRelative}:${match[1]}`);
-	}
-	return found.sort();
+  const found: string[] = []
+  for (const dirEntry of readdirSync(webSource, { withFileTypes: true, recursive: true })) {
+    if (!dirEntry.isFile()) continue
+    if (!(dirEntry.name.endsWith('.ts') || dirEntry.name.endsWith('.tsx'))) continue
+    const absolutePath = join(dirEntry.parentPath, dirEntry.name)
+    const sourceRelative = relative(webSource, absolutePath)
+    if (sourceRelative.startsWith('__tests__') || sourceRelative.includes('/__tests__/')) continue
+    if (sourceRelative.startsWith('components/')) continue
+    const source = readFileSync(absolutePath, 'utf8')
+    for (const match of source.matchAll(MODULE_LEVEL_STORE)) found.push(`${sourceRelative}:${match[1]}`)
+  }
+  return found.sort()
 }
 
-test("⚠ every module-level store is page state, named here with its reason — thread state is created per thread", () => {
-	expect(moduleLevelStores()).toEqual([...PAGE_SCOPED_BY_DESIGN].sort());
-});
+test('⚠ every module-level store is page state, named here with its reason — thread state is created per thread', () => {
+  expect(moduleLevelStores()).toEqual([...PAGE_SCOPED_BY_DESIGN].sort())
+})

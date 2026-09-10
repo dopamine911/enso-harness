@@ -1,231 +1,219 @@
 {
-	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-	"vcs": {
-		"enabled": true,
-		"clientKind": "git",
-		"useIgnoreFile": true,
-		"defaultBranch": "main"
-	},
-	"files": {
-		"ignoreUnknown": true,
-		"includes": [
-			"**",
-			"!**/node_modules",
-			"!**/dist",
-			"!**/dist-types",
-			"!**/coverage",
-			"!.claude",
-			"!.biome",
-			"!.inspiration",
-			"!.local",
-			"!.zen",
-			"!.playwright-mcp",
-			"!.codegraph",
-			"!packages/web/src/components"
-		]
-	},
-	"formatter": {
-		"enabled": true,
-		"indentStyle": "tab",
-		"lineWidth": 120,
-		"lineEnding": "lf"
-	},
-	"linter": {
-		"enabled": true,
-		"rules": {
-			"preset": "recommended",
-			"complexity": {
-				"noUselessTernary": "error",
-				"noUselessTypeConstraint": "error",
-				"noExcessiveNestedTestSuites": "error",
-				"useSimplifiedLogicExpression": "error",
-				"noImplicitCoercions": "error",
-				"noUselessStringConcat": "error",
-				"useMaxParams": "error",
-				"noExcessiveCognitiveComplexity": {
-					"level": "error",
-					"options": {
-						"maxAllowedComplexity": 25
-					}
-				}
-			},
-			"correctness": {
-				"noUnusedImports": "error"
-			},
-			"suspicious": {
-				"noConsole": "warn",
-				"noUnknownAtRules": "error",
-				"noTsIgnore": "error",
-				"noExplicitAny": "error",
-				"noEmptyBlockStatements": "error",
-				"useAwait": "off"
-			},
-			"style": {
-				"noNestedTernary": "error",
-				"useNodejsImportProtocol": "off",
-				"useNumericSeparators": "error",
-				"useThrowOnlyError": "error",
-				"noProcessEnv": "error",
-				"useThrowNewError": "error",
-				"noNonNullAssertion": "error",
-				"useExplicitLengthCheck": "error"
-			},
-			"nursery": {
-				"useSortedClasses": "error",
-				"noFloatingPromises": "error",
-				"useExhaustiveSwitchCases": "error",
-				"useExplicitType": "warn",
-				"noConditionalExpect": "error",
-				"noUselessTypeConversion": "error",
-				"noMisusedPromises": "error",
-				"useAwaitThenable": "error",
-				"noImpliedEval": "error",
-				"noUnmodifiedLoopCondition": "error",
-				"noIdenticalTestTitle": "error",
-				"useNullishCoalescing": "error",
-				"noMisleadingReturnType": "error"
-			},
-			"performance": {
-				"noReExportAll": "error"
-			}
-		},
-		"domains": {
-			"test": "all",
-			"react": "recommended"
-		}
-	},
-	"javascript": {
-		"formatter": {
-			"quoteStyle": "double",
-			"semicolons": "always"
-		}
-	},
-	"json": {
-		"formatter": {
-			"enabled": false
-		},
-		"linter": {
-			"enabled": false
-		}
-	},
-	"overrides": [
-		{
-			"includes": [
-				"**/*.ts",
-				"**/*.tsx",
-				"!**/*.test.ts",
-				"!**/*.test.tsx"
-			],
-			"linter": {
-				"rules": {
-					"style": {
-						"noProcessEnv": "off"
-					}
-				}
-			}
-		},
-		{
-			"includes": [
-				"scripts/**"
-			],
-			"linter": {
-				"rules": {
-					"style": {
-						"noProcessEnv": "off"
-					}
-				}
-			}
-		},
-		{
-			"includes": [
-				"**",
-				"!**/*.test.ts",
-				"!**/*.test.tsx"
-			],
-			"plugins": [
-				"./.biome/naming.grit"
-			]
-		},
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "defaultBranch": "main"
+  },
+  "files": {
+    "ignoreUnknown": false,
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/dist-types",
+      "!**/coverage",
+      "!.claude",
+      "!.biome",
+      "!.inspiration",
+      "!.local",
+      "!.zen",
+      "!.playwright-mcp",
+      "!.codegraph",
+      "!packages/web/src/components"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120,
+    "lineEnding": "lf"
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "complexity": {
+        "noUselessTernary": "error",
+        "noUselessTypeConstraint": "error",
+        "noExcessiveNestedTestSuites": "error",
+        "useSimplifiedLogicExpression": "error",
+        "noImplicitCoercions": "error",
+        "noUselessStringConcat": "error",
+        "useMaxParams": "error",
+        "noExcessiveCognitiveComplexity": {
+          "level": "error",
+          "options": {
+            "maxAllowedComplexity": 25
+          }
+        }
+      },
+      "correctness": {
+        "noUnusedImports": "error"
+      },
+      "suspicious": {
+        "noConsole": "warn",
+        "noUnknownAtRules": "error",
+        "noTsIgnore": "error",
+        "noExplicitAny": "error",
+        "noEmptyBlockStatements": "error",
+        "useAwait": "off"
+      },
+      "style": {
+        "noNestedTernary": "error",
+        "useNodejsImportProtocol": "off",
+        "useNumericSeparators": "error",
+        "useThrowOnlyError": "error",
+        "noProcessEnv": "error",
+        "useThrowNewError": "error",
+        "noNonNullAssertion": "error",
+        "useExplicitLengthCheck": "error"
+      },
+      "nursery": {
+        "useSortedClasses": "error",
+        "noFloatingPromises": "error",
+        "useExhaustiveSwitchCases": "error",
+        "useExplicitType": "warn",
+        "noConditionalExpect": "error",
+        "noUselessTypeConversion": "error",
+        "noMisusedPromises": "error",
+        "useAwaitThenable": "error",
+        "noImpliedEval": "error",
+        "noUnmodifiedLoopCondition": "error",
+        "noIdenticalTestTitle": "error",
+        "useNullishCoalescing": "error",
+        "noMisleadingReturnType": "error"
+      },
+      "performance": {
+        "noReExportAll": "error"
+      }
+    },
+    "domains": {
+      "test": "all",
+      "react": "recommended"
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded"
+    }
+  },
+  "json": {
+    "formatter": {
+      "enabled": true
+    },
+    "linter": {
+      "enabled": false
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.ts", "**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noProcessEnv": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["scripts/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noProcessEnv": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**", "!**/*.test.ts", "!**/*.test.tsx"],
+      "plugins": ["./.biome/naming.grit"]
+    },
 
-		// ── Cognitive-complexity exceptions (#82) ─────────────────────────────────
-		// The global ceiling above stays 25 ON PURPOSE: it is what keeps us from
-		// writing functions a human cannot read. These entries do NOT relax it
-		// globally and do NOT switch the rule off — each pins one file to the
-		// EXACT score it measures today, so the rule still fails the moment that
-		// function grows. Treat every number as a ratchet: it may go down, never up.
-		//
-		// Each exists because the complexity belongs to an EXTERNAL grammar or
-		// protocol that must be read top-to-bottom, where extracting helpers would
-		// scatter a state machine rather than simplify it. Replaces 7 per-line
-		// `// biome-ignore` comments, which hid both the score and the count.
-		// To retire one: reduce the function, then lower the number here.
-		{
-			// A shell character-scanner: `extractFlatShellCommandSegments` (68),
-			// `literalShellWord` (47), `skipShellWord` (32). One linear read of the
-			// quote/escape state machine, kept close to upstream oh-my-pi so a diff
-			// stays reviewable.
-			"includes": ["packages/harness/core/shell-segments.ts"],
-			"linter": {
-				"rules": {
-					"complexity": {
-						"noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 68 } }
-					}
-				}
-			}
-		},
-		{
-			// The `tool_call` guard dispatch (62): bash patch, then the write denials
-			// in precedence order, then the reader gate. The precedence order IS the
-			// security contract this file's header documents; splitting it hides it.
-			"includes": ["packages/harness/extensions/guards/index.ts"],
-			"linter": {
-				"rules": {
-					"complexity": {
-						"noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 62 } }
-					}
-				}
-			}
-		},
-		{
-			// `mapPiEvent` (31): one switch arm per pi event type, read side-by-side
-			// against pi's protocol doc. The complexity is the protocol's. Was 48 until
-			// the `extension_ui_request` arm moved to `mapExtensionUiRequest` (#96), which
-			// clears the default on its own; ratcheted down to the measured value.
-			"includes": ["packages/web/src/rpc/map-events.ts"],
-			"linter": {
-				"rules": {
-					"complexity": {
-						"noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 31 } }
-					}
-				}
-			}
-		},
-		{
-			// The single HTTP handler (51): parse → resume-vs-run → stream → teardown.
-			// The #27/#34 teardown ordering lives in its control flow — fragmenting it
-			// is how the response-close bug hid (see #74, #81).
-			"includes": ["packages/web/src/server/index.ts"],
-			"linter": {
-				"rules": {
-					"complexity": {
-						"noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 51 } }
-					}
-				}
-			}
-		}
-	],
-	"assist": {
-		"enabled": true,
-		"actions": {
-			"source": {
-				"noDuplicateClasses": "on",
-				"organizeImports": "on"
-			}
-		}
-	},
-	"css": {
-		"parser": {
-			"tailwindDirectives": true
-		}
-	}
+    // ── Cognitive-complexity exceptions (#82) ─────────────────────────────────
+    // The global ceiling above stays 25 ON PURPOSE: it is what keeps us from
+    // writing functions a human cannot read. These entries do NOT relax it
+    // globally and do NOT switch the rule off — each pins one file to the
+    // EXACT score it measures today, so the rule still fails the moment that
+    // function grows. Treat every number as a ratchet: it may go down, never up.
+    //
+    // Each exists because the complexity belongs to an EXTERNAL grammar or
+    // protocol that must be read top-to-bottom, where extracting helpers would
+    // scatter a state machine rather than simplify it. Replaces 7 per-line
+    // `// biome-ignore` comments, which hid both the score and the count.
+    // To retire one: reduce the function, then lower the number here.
+    {
+      // A shell character-scanner: `extractFlatShellCommandSegments` (68),
+      // `literalShellWord` (47), `skipShellWord` (32). One linear read of the
+      // quote/escape state machine, kept close to upstream oh-my-pi so a diff
+      // stays reviewable.
+      "includes": ["packages/harness/core/shell-segments.ts"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 68 } }
+          }
+        }
+      }
+    },
+    {
+      // The `tool_call` guard dispatch (62): bash patch, then the write denials
+      // in precedence order, then the reader gate. The precedence order IS the
+      // security contract this file's header documents; splitting it hides it.
+      "includes": ["packages/harness/extensions/guards/index.ts"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 62 } }
+          }
+        }
+      }
+    },
+    {
+      // `mapPiEvent` (31): one switch arm per pi event type, read side-by-side
+      // against pi's protocol doc. The complexity is the protocol's. Was 48 until
+      // the `extension_ui_request` arm moved to `mapExtensionUiRequest` (#96), which
+      // clears the default on its own; ratcheted down to the measured value.
+      "includes": ["packages/web/src/rpc/map-events.ts"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 31 } }
+          }
+        }
+      }
+    },
+    {
+      // The single HTTP handler (51): parse → resume-vs-run → stream → teardown.
+      // The #27/#34 teardown ordering lives in its control flow — fragmenting it
+      // is how the response-close bug hid (see #74, #81).
+      "includes": ["packages/web/src/server/index.ts"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 51 } }
+          }
+        }
+      }
+    }
+  ],
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "noDuplicateClasses": "on",
+        "organizeImports": "on"
+      }
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  }
 }

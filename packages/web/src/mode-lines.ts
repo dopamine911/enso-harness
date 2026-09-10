@@ -1,5 +1,5 @@
-import { readPiccPersistedMode } from "@zen/core";
-import type { NotificationsStore } from "./notifications.tsx";
+import { readPiccPersistedMode } from '@zen/core'
+import type { NotificationsStore } from './notifications.tsx'
 
 /**
  * Permission-mode lines in the transcript (#29, the remaining half).
@@ -33,22 +33,22 @@ import type { NotificationsStore } from "./notifications.tsx";
  */
 
 export interface ModeLines {
-	/** The `zen.entry` CUSTOM-chunk consumer — called by the router with the chunk's value. */
-	readonly apply: (value: unknown) => void;
+  /** The `zen.entry` CUSTOM-chunk consumer — called by the router with the chunk's value. */
+  readonly apply: (value: unknown) => void
 }
 
 /** One per thread: the distinct-value gate is the thread's, and the lines go to its notifications. */
 export function createModeLines(notifications: NotificationsStore): ModeLines {
-	let lastRenderedMode: string | undefined;
-	return {
-		apply: (value) => {
-			const mode = readPiccPersistedMode(value);
-			if (mode === undefined) return;
-			if (mode === lastRenderedMode) return;
-			lastRenderedMode = mode;
-			// The harness's own line, not an extension's notice: never grouped with the startup
-			// chatter (#96), however early the entry was replayed — #84/#88 made it visible.
-			notifications.push(`Mode: ${mode}`, "info", "run");
-		},
-	};
+  let lastRenderedMode: string | undefined
+  return {
+    apply: (value) => {
+      const mode = readPiccPersistedMode(value)
+      if (mode === undefined) return
+      if (mode === lastRenderedMode) return
+      lastRenderedMode = mode
+      // The harness's own line, not an extension's notice: never grouped with the startup
+      // chatter (#96), however early the entry was replayed — #84/#88 made it visible.
+      notifications.push(`Mode: ${mode}`, 'info', 'run')
+    },
+  }
 }

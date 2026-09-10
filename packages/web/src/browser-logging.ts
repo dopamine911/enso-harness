@@ -1,14 +1,14 @@
 import {
-	configure,
-	getConsoleSink,
-	isLogLevel,
-	type LogLevel,
-	type LogRecord,
-	type Sink,
-	withFilter,
-} from "@logtape/logtape";
-import { ZEN_LOG_ROOT, type ZenBrowserLogBatch, type ZenLogLine, zenLogLineOf } from "@zen/core";
-import { createStore, type Store } from "./store.ts";
+  configure,
+  getConsoleSink,
+  isLogLevel,
+  type LogLevel,
+  type LogRecord,
+  type Sink,
+  withFilter,
+} from '@logtape/logtape'
+import { ZEN_LOG_ROOT, type ZenBrowserLogBatch, type ZenLogLine, zenLogLineOf } from '@zen/core'
+import { createStore, type Store } from './store.ts'
 
 /**
  * The browser's logging (#132 slice 3). Three sinks, one `configure`, called once from
@@ -35,150 +35,150 @@ import { createStore, type Store } from "./store.ts";
  * (`log-process.ts`), which is why this configurator is its own file and not that one.
  */
 
-export const LOG_RING_CAPACITY = 200;
+export const LOG_RING_CAPACITY = 200
 /** How many records, or how long, before a batch goes. */
-export const SHIP_BATCH_SIZE = 20;
-export const SHIP_FLUSH_MS = 1000;
-export const LOGS_ROUTE = "/api/logs";
+export const SHIP_BATCH_SIZE = 20
+export const SHIP_FLUSH_MS = 1000
+export const LOGS_ROUTE = '/api/logs'
 
 export interface LogRing extends Store<readonly ZenLogLine[]> {
-	readonly sink: Sink;
+  readonly sink: Sink
 }
 
 /** The last N records, newest last, as lines — one shape with the file. */
 export function createLogRing(capacity = LOG_RING_CAPACITY): LogRing {
-	const store = createStore<readonly ZenLogLine[]>([]);
-	return {
-		get: store.get,
-		subscribe: store.subscribe,
-		sink: (record: LogRecord) => {
-			const appended = [...store.get(), zenLogLineOf(record)];
-			store.set(appended.length > capacity ? appended.slice(-capacity) : appended);
-		},
-	};
+  const store = createStore<readonly ZenLogLine[]>([])
+  return {
+    get: store.get,
+    subscribe: store.subscribe,
+    sink: (record: LogRecord) => {
+      const appended = [...store.get(), zenLogLineOf(record)]
+      store.set(appended.length > capacity ? appended.slice(-capacity) : appended)
+    },
+  }
 }
 
 /** `fetch` as a call, not the global's whole interface (`preconnect` and kin) — the connection's shape (#118). */
-export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 
 export interface LogShipperOptions {
-	readonly fetch: FetchLike;
-	/** One id per page load, on every batch, so two tabs' records tell apart. */
-	readonly page: string;
-	readonly batchSize?: number;
-	readonly flushMs?: number;
+  readonly fetch: FetchLike
+  /** One id per page load, on every batch, so two tabs' records tell apart. */
+  readonly page: string
+  readonly batchSize?: number
+  readonly flushMs?: number
 }
 
 export interface LogShipper {
-	readonly sink: Sink;
-	/** Send whatever is pending now. `keepalive` for a page that is going away. */
-	readonly flush: (keepalive?: boolean) => void;
+  readonly sink: Sink
+  /** Send whatever is pending now. `keepalive` for a page that is going away. */
+  readonly flush: (keepalive?: boolean) => void
 }
 
-const SHIPPED_LEVELS: Readonly<Record<LogLevel, "info" | "warning" | "error" | undefined>> = {
-	trace: undefined,
-	debug: undefined,
-	info: "info",
-	warning: "warning",
-	error: "error",
-	fatal: "error",
-};
+const SHIPPED_LEVELS: Readonly<Record<LogLevel, 'info' | 'warning' | 'error' | undefined>> = {
+  trace: undefined,
+  debug: undefined,
+  info: 'info',
+  warning: 'warning',
+  error: 'error',
+  fatal: 'error',
+}
 
 /** Batches `info`+ records to the server; the sink is what `configure` gets. */
 export function createLogShipper(options: LogShipperOptions): LogShipper {
-	const batchSize = options.batchSize ?? SHIP_BATCH_SIZE;
-	const flushMs = options.flushMs ?? SHIP_FLUSH_MS;
-	let pending: ZenBrowserLogBatch["records"] = [];
-	// The timer in flight, by number: a flush by count or by hand bumps it, so a timer that
-	// was scheduled before finds itself stale and does nothing — by count and by time are
-	// mutually exclusive, with no handle to type across bun (an object) and the browser (a number).
-	let schedule = 0;
-	const flush = (keepalive = false): void => {
-		schedule += 1;
-		if (pending.length === 0) return;
-		const batch: ZenBrowserLogBatch = { page: options.page, records: pending };
-		pending = [];
-		// Fire and forget, and NEVER log the outcome: a failing log route must not feed itself.
-		void options
-			.fetch(LOGS_ROUTE, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(batch),
-				keepalive,
-			})
-			.catch(() => undefined);
-	};
-	return {
-		flush,
-		sink: (record: LogRecord) => {
-			const level = SHIPPED_LEVELS[record.level];
-			if (level === undefined) return;
-			const line = zenLogLineOf(record);
-			pending.push({
-				at: line["@timestamp"],
-				level,
-				logger: line.logger,
-				message: line.message ?? "",
-				properties: line.properties ?? {},
-			});
-			if (pending.length >= batchSize) flush();
-			else if (pending.length === 1) {
-				const mine = schedule;
-				setTimeout(() => {
-					if (schedule === mine) flush();
-				}, flushMs);
-			}
-		},
-	};
+  const batchSize = options.batchSize ?? SHIP_BATCH_SIZE
+  const flushMs = options.flushMs ?? SHIP_FLUSH_MS
+  let pending: ZenBrowserLogBatch['records'] = []
+  // The timer in flight, by number: a flush by count or by hand bumps it, so a timer that
+  // was scheduled before finds itself stale and does nothing — by count and by time are
+  // mutually exclusive, with no handle to type across bun (an object) and the browser (a number).
+  let schedule = 0
+  const flush = (keepalive = false): void => {
+    schedule += 1
+    if (pending.length === 0) return
+    const batch: ZenBrowserLogBatch = { page: options.page, records: pending }
+    pending = []
+    // Fire and forget, and NEVER log the outcome: a failing log route must not feed itself.
+    void options
+      .fetch(LOGS_ROUTE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(batch),
+        keepalive,
+      })
+      .catch(() => undefined)
+  }
+  return {
+    flush,
+    sink: (record: LogRecord) => {
+      const level = SHIPPED_LEVELS[record.level]
+      if (level === undefined) return
+      const line = zenLogLineOf(record)
+      pending.push({
+        at: line['@timestamp'],
+        level,
+        logger: line.logger,
+        message: line.message ?? '',
+        properties: line.properties ?? {},
+      })
+      if (pending.length >= batchSize) flush()
+      else if (pending.length === 1) {
+        const mine = schedule
+        setTimeout(() => {
+          if (schedule === mine) flush()
+        }, flushMs)
+      }
+    },
+  }
 }
 
 /** The page's level: `?log=debug`, else `info`. A value that is not a level is `info`, said once in the ring. */
 export function pageLogLevel(search: string): LogLevel {
-	const wanted = new URLSearchParams(search).get("log");
-	if (wanted === null) return "info";
-	const level = wanted === "warn" ? "warning" : wanted.toLowerCase();
-	return isLogLevel(level) ? level : "info";
+  const wanted = new URLSearchParams(search).get('log')
+  if (wanted === null) return 'info'
+  const level = wanted === 'warn' ? 'warning' : wanted.toLowerCase()
+  return isLogLevel(level) ? level : 'info'
 }
 
 export interface BrowserLoggingOptions {
-	readonly fetch: FetchLike;
-	readonly level: LogLevel;
-	readonly page: string;
-	/** Devtools too; off in tests. */
-	readonly console?: boolean;
+  readonly fetch: FetchLike
+  readonly level: LogLevel
+  readonly page: string
+  /** Devtools too; off in tests. */
+  readonly console?: boolean
 }
 
 export interface BrowserLogging {
-	readonly ring: LogRing;
-	readonly shipper: LogShipper;
+  readonly ring: LogRing
+  readonly shipper: LogShipper
 }
 
 /** Configure the page; returns the ring the drawer reads and the shipper the page flushes on hide. */
 export async function configureBrowserLogging(options: BrowserLoggingOptions): Promise<BrowserLogging> {
-	const ring = createLogRing();
-	const shipper = createLogShipper({ fetch: options.fetch, page: options.page });
-	const outputs: Sink[] = [withFilter(ring.sink, options.level), shipper.sink];
-	if (options.console === true) outputs.push(withFilter(getConsoleSink(), options.level));
-	// One sink, stamping once and fanning out: a per-page count on every record — the
-	// drawer's key, and the order inside one millisecond when the file has two of this
-	// page's records with one `@timestamp`. One fan-out rather than three registered sinks
-	// because none of these can throw (the shipper swallows, the ring is a store), so
-	// LogTape's per-sink containment buys nothing here and the count must be assigned once.
-	let written = 0;
-	const stamped: Sink = (record: LogRecord) => {
-		written += 1;
-		const line = { ...record, properties: { pageSequence: written, ...record.properties } };
-		for (const output of outputs) output(line);
-	};
-	await configure({
-		reset: true,
-		sinks: { zen: stamped },
-		loggers: [
-			// The tree lets everything through; the ring's and console's filters pick the level,
-			// and the shipper picks its own (`info`+) regardless of the page's.
-			{ category: [ZEN_LOG_ROOT], lowestLevel: "trace", sinks: ["zen"] },
-			{ category: ["logtape", "meta"], sinks: [] },
-		],
-	});
-	return { ring, shipper };
+  const ring = createLogRing()
+  const shipper = createLogShipper({ fetch: options.fetch, page: options.page })
+  const outputs: Sink[] = [withFilter(ring.sink, options.level), shipper.sink]
+  if (options.console === true) outputs.push(withFilter(getConsoleSink(), options.level))
+  // One sink, stamping once and fanning out: a per-page count on every record — the
+  // drawer's key, and the order inside one millisecond when the file has two of this
+  // page's records with one `@timestamp`. One fan-out rather than three registered sinks
+  // because none of these can throw (the shipper swallows, the ring is a store), so
+  // LogTape's per-sink containment buys nothing here and the count must be assigned once.
+  let written = 0
+  const stamped: Sink = (record: LogRecord) => {
+    written += 1
+    const line = { ...record, properties: { pageSequence: written, ...record.properties } }
+    for (const output of outputs) output(line)
+  }
+  await configure({
+    reset: true,
+    sinks: { zen: stamped },
+    loggers: [
+      // The tree lets everything through; the ring's and console's filters pick the level,
+      // and the shipper picks its own (`info`+) regardless of the page's.
+      { category: [ZEN_LOG_ROOT], lowestLevel: 'trace', sinks: ['zen'] },
+      { category: ['logtape', 'meta'], sinks: [] },
+    ],
+  })
+  return { ring, shipper }
 }

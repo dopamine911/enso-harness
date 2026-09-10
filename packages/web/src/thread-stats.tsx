@@ -1,4 +1,4 @@
-import { createStore, type Store } from "./store.ts";
+import { createStore, type Store } from './store.ts'
 
 /**
  * The thread-stats STORE (#45, phase 1): cost so far + the last request's prompt size.
@@ -22,23 +22,23 @@ import { createStore, type Store } from "./store.ts";
  */
 
 interface ZenUsageShape {
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	totalCost?: number;
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  totalCost?: number
 }
 
 export interface ThreadStats {
-	/** Sum of `totalCost` across every counted request this page has seen. */
-	totalCost: number;
-	/** input + cacheRead + cacheWrite of the LATEST assistant request, or undefined before the first. */
-	lastRequestInputTokens: number | undefined;
-	/** How many usage observations were counted. */
-	countedMessages: number;
+  /** Sum of `totalCost` across every counted request this page has seen. */
+  totalCost: number
+  /** input + cacheRead + cacheWrite of the LATEST assistant request, or undefined before the first. */
+  lastRequestInputTokens: number | undefined
+  /** How many usage observations were counted. */
+  countedMessages: number
 }
 
-const EMPTY_STATS: ThreadStats = { totalCost: 0, lastRequestInputTokens: undefined, countedMessages: 0 };
+const EMPTY_STATS: ThreadStats = { totalCost: 0, lastRequestInputTokens: undefined, countedMessages: 0 }
 
 /**
  * ⓘ Looks like map-events' `readUsage` but parses a DIFFERENT shape, deliberately: that
@@ -47,56 +47,56 @@ const EMPTY_STATS: ThreadStats = { totalCost: 0, lastRequestInputTokens: undefin
  * switch, which costs more than the ~10 lines it saves (PR #51 review, nit 2).
  */
 function readUsageShape(raw: unknown): ZenUsageShape | undefined {
-	if (typeof raw !== "object" || raw === null) return undefined;
-	const usage = raw as Record<string, unknown>;
-	const numberAt = (key: string): number => (typeof usage[key] === "number" ? (usage[key] as number) : 0);
-	return {
-		input: numberAt("input"),
-		output: numberAt("output"),
-		cacheRead: numberAt("cacheRead"),
-		cacheWrite: numberAt("cacheWrite"),
-		...(typeof usage.totalCost === "number" ? { totalCost: usage.totalCost as number } : {}),
-	};
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const usage = raw as Record<string, unknown>
+  const numberAt = (key: string): number => (typeof usage[key] === 'number' ? (usage[key] as number) : 0)
+  return {
+    input: numberAt('input'),
+    output: numberAt('output'),
+    cacheRead: numberAt('cacheRead'),
+    cacheWrite: numberAt('cacheWrite'),
+    ...(typeof usage.totalCost === 'number' ? { totalCost: usage.totalCost as number } : {}),
+  }
 }
 
 export interface ThreadStatsStore extends Store<ThreadStats> {
-	/**
-	 * Fold one `zen.usage` chunk's value into the stats. Defensive like every wire crossing in
-	 * chat-screen.tsx: a malformed value changes nothing rather than throwing in the stream loop.
-	 *
-	 * ⚠ Cost sums over EVERY counted message (assistant and toolResult summaries — pi's own
-	 * attribution rule, see ZenMessageEnd in @zen/core), but "last request" reads ASSISTANT
-	 * messages only: a toolResult summary is a side model call whose prompt is the tool output,
-	 * not the conversation — letting it overwrite the number would show a misleading dip.
-	 *
-	 * ⚠ And only assistant messages whose prompt total is ABOVE ZERO. An errored or aborted
-	 * request still emits an assistant `message_end`, with all-zero usage (observed on the
-	 * wire: an empty-prompt run produced exactly that shape). A real request never sees zero
-	 * prompt tokens, so a zero here means "the request failed", not "the context emptied" —
-	 * the same misleading dip as toolResult, through a different door. Cost still adds its
-	 * zero and the message still counts, so pi's attribution rule is untouched.
-	 */
-	readonly applyUsage: (data: unknown) => void;
+  /**
+   * Fold one `zen.usage` chunk's value into the stats. Defensive like every wire crossing in
+   * chat-screen.tsx: a malformed value changes nothing rather than throwing in the stream loop.
+   *
+   * ⚠ Cost sums over EVERY counted message (assistant and toolResult summaries — pi's own
+   * attribution rule, see ZenMessageEnd in @zen/core), but "last request" reads ASSISTANT
+   * messages only: a toolResult summary is a side model call whose prompt is the tool output,
+   * not the conversation — letting it overwrite the number would show a misleading dip.
+   *
+   * ⚠ And only assistant messages whose prompt total is ABOVE ZERO. An errored or aborted
+   * request still emits an assistant `message_end`, with all-zero usage (observed on the
+   * wire: an empty-prompt run produced exactly that shape). A real request never sees zero
+   * prompt tokens, so a zero here means "the request failed", not "the context emptied" —
+   * the same misleading dip as toolResult, through a different door. Cost still adds its
+   * zero and the message still counts, so pi's attribution rule is untouched.
+   */
+  readonly applyUsage: (data: unknown) => void
 }
 
 export function createThreadStatsStore(): ThreadStatsStore {
-	const store = createStore<ThreadStats>(EMPTY_STATS);
-	return {
-		get: store.get,
-		subscribe: store.subscribe,
-		applyUsage: (data) => {
-			if (typeof data !== "object" || data === null) return;
-			const observation = data as { role?: unknown; usage?: unknown };
-			const usage = readUsageShape(observation.usage);
-			if (usage === undefined) return;
-			const stats = store.get();
-			const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
-			const movesLastRequest = observation.role === "assistant" && promptTokens > 0;
-			store.set({
-				totalCost: stats.totalCost + (usage.totalCost ?? 0),
-				lastRequestInputTokens: movesLastRequest ? promptTokens : stats.lastRequestInputTokens,
-				countedMessages: stats.countedMessages + 1,
-			});
-		},
-	};
+  const store = createStore<ThreadStats>(EMPTY_STATS)
+  return {
+    get: store.get,
+    subscribe: store.subscribe,
+    applyUsage: (data) => {
+      if (typeof data !== 'object' || data === null) return
+      const observation = data as { role?: unknown; usage?: unknown }
+      const usage = readUsageShape(observation.usage)
+      if (usage === undefined) return
+      const stats = store.get()
+      const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite
+      const movesLastRequest = observation.role === 'assistant' && promptTokens > 0
+      store.set({
+        totalCost: stats.totalCost + (usage.totalCost ?? 0),
+        lastRequestInputTokens: movesLastRequest ? promptTokens : stats.lastRequestInputTokens,
+        countedMessages: stats.countedMessages + 1,
+      })
+    },
+  }
 }

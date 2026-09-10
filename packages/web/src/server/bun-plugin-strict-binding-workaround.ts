@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 /**
  * Workaround for a live bun bug (dev-server HMR, present in 1.4.0 and the 2026-09-03
@@ -32,43 +32,43 @@ import { dirname, join } from "node:path";
  * a barrel doing `export * from "./arguments/index.mjs"`, `development: { hmr: true }`.
  */
 
-const BARE_STAR_LINE = "export * from './arguments/index.mjs';";
-const ALIASED_REPLACEMENT = "export * as Arguments from './arguments/arguments.mjs';";
+const BARE_STAR_LINE = "export * from './arguments/index.mjs';"
+const ALIASED_REPLACEMENT = "export * as Arguments from './arguments/arguments.mjs';"
 /** What arguments/index.mjs must contain for the inlined replacement to be faithful. */
-const EXPECTED_INDEX_CONTENT = "export * as Arguments from './arguments.mjs';";
+const EXPECTED_INDEX_CONTENT = "export * as Arguments from './arguments.mjs';"
 
 class StrictBindingWorkaroundStaleError extends Error {
-	constructor(detail: string) {
-		super(
-			`zen-strict-binding-workaround: typebox no longer matches the shape this plugin ` +
-				`rewrites (${detail}). Re-derive the workaround or delete it if bun fixed the ` +
-				`reserved-identifier HMR binding bug.`,
-		);
-		this.name = "StrictBindingWorkaroundStaleError";
-	}
+  constructor(detail: string) {
+    super(
+      `zen-strict-binding-workaround: typebox no longer matches the shape this plugin ` +
+        `rewrites (${detail}). Re-derive the workaround or delete it if bun fixed the ` +
+        `reserved-identifier HMR binding bug.`,
+    )
+    this.name = 'StrictBindingWorkaroundStaleError'
+  }
 }
 
-const strictBindingWorkaround: import("bun").BunPlugin = {
-	name: "zen-strict-binding-workaround",
-	setup(build) {
-		build.onLoad({ filter: /typebox[/\\]build[/\\]system[/\\]system\.mjs$/ }, (args) => {
-			const source = readFileSync(args.path, "utf8");
-			if (!source.includes(BARE_STAR_LINE)) {
-				throw new StrictBindingWorkaroundStaleError("system.mjs lost the bare-star line");
-			}
-			const indexPath = join(dirname(args.path), "arguments", "index.mjs");
-			const indexContent = readFileSync(indexPath, "utf8").trim();
-			if (indexContent !== EXPECTED_INDEX_CONTENT) {
-				throw new StrictBindingWorkaroundStaleError(
-					`arguments/index.mjs is no longer exactly the aliased one-liner (${indexContent})`,
-				);
-			}
-			return {
-				contents: source.replace(BARE_STAR_LINE, ALIASED_REPLACEMENT),
-				loader: "js",
-			};
-		});
-	},
-};
+const strictBindingWorkaround: import('bun').BunPlugin = {
+  name: 'zen-strict-binding-workaround',
+  setup(build) {
+    build.onLoad({ filter: /typebox[/\\]build[/\\]system[/\\]system\.mjs$/ }, (args) => {
+      const source = readFileSync(args.path, 'utf8')
+      if (!source.includes(BARE_STAR_LINE)) {
+        throw new StrictBindingWorkaroundStaleError('system.mjs lost the bare-star line')
+      }
+      const indexPath = join(dirname(args.path), 'arguments', 'index.mjs')
+      const indexContent = readFileSync(indexPath, 'utf8').trim()
+      if (indexContent !== EXPECTED_INDEX_CONTENT) {
+        throw new StrictBindingWorkaroundStaleError(
+          `arguments/index.mjs is no longer exactly the aliased one-liner (${indexContent})`,
+        )
+      }
+      return {
+        contents: source.replace(BARE_STAR_LINE, ALIASED_REPLACEMENT),
+        loader: 'js',
+      }
+    })
+  },
+}
 
-export default strictBindingWorkaround;
+export default strictBindingWorkaround

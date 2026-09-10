@@ -2,14 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
-    "types": [
-      "bun"
-    ]
+    "types": ["bun"]
   },
-  "include": [
-    "core/**/*.ts",
-    "extensions/**/*.ts"
-  ],
+  "include": ["core/**/*.ts", "extensions/**/*.ts"],
   "references": [
     {
       "path": "../core"

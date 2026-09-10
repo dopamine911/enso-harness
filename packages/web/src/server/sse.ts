@@ -1,5 +1,5 @@
-import type { ServerResponse } from "node:http";
-import { zenLogger } from "@zen/core";
+import type { ServerResponse } from 'node:http'
+import { zenLogger } from '@zen/core'
 
 /**
  * The SSE plumbing every streaming route shares: the response headers and the keepalive.
@@ -7,16 +7,16 @@ import { zenLogger } from "@zen/core";
  * the dispatcher.
  */
 
-const log = zenLogger("server", "sse");
+const log = zenLogger('server', 'sse')
 
 export const SSE_HEADERS = {
-	"Content-Type": "text/event-stream",
-	"Cache-Control": "no-cache, no-transform",
-	Connection: "keep-alive",
-	// The dev web surface proxies `/api` in dev, so this is the same origin — but a stray
-	// buffering proxy would hold the stream open and silent, which looks exactly like a hung agent.
-	"X-Accel-Buffering": "no",
-} as const;
+  'Content-Type': 'text/event-stream',
+  'Cache-Control': 'no-cache, no-transform',
+  Connection: 'keep-alive',
+  // The dev web surface proxies `/api` in dev, so this is the same origin — but a stray
+  // buffering proxy would hold the stream open and silent, which looks exactly like a hung agent.
+  'X-Accel-Buffering': 'no',
+} as const
 
 /**
  * How often an open response carries an SSE comment while no event is flowing.
@@ -33,7 +33,7 @@ export const SSE_HEADERS = {
  * bytes, every client ignores it (TanStack's parser skips `:` lines). Well under the 10 s
  * default so a missed tick does not matter; cleared when the response ends.
  */
-export const SSE_KEEPALIVE_MS = 5000;
+export const SSE_KEEPALIVE_MS = 5000
 
 /**
  * Start the keepalive for one open response; returns the stop. Not an event, so not in the
@@ -47,16 +47,16 @@ export const SSE_KEEPALIVE_MS = 5000;
  * response is reported rather than thrown.
  */
 export function startSseKeepalive(response: ServerResponse, intervalMs: number): () => void {
-	const timer = setInterval(() => {
-		if (response.destroyed || response.writableEnded) {
-			clearInterval(timer);
-			return;
-		}
-		response.write(": keepalive\n\n");
-	}, intervalMs);
-	timer.unref?.();
-	const stop = (): void => clearInterval(timer);
-	response.once("close", stop);
-	response.on("error", (error: unknown) => log.warn("SSE response error after the client left: {error}", { error }));
-	return stop;
+  const timer = setInterval(() => {
+    if (response.destroyed || response.writableEnded) {
+      clearInterval(timer)
+      return
+    }
+    response.write(': keepalive\n\n')
+  }, intervalMs)
+  timer.unref?.()
+  const stop = (): void => clearInterval(timer)
+  response.once('close', stop)
+  response.on('error', (error: unknown) => log.warn('SSE response error after the client left: {error}', { error }))
+  return stop
 }
