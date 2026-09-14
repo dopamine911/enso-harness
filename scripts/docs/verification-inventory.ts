@@ -298,14 +298,15 @@ function firstHeaderSentence(source: string, file: string): string {
     .replace(/\s+/g, ' ')
   let sentenceStart = 0
   let inCode = false
-  for (let index = 0; index < prose.length; index += 1) {
-    const character = prose[index]
+  for (let characterIndex = 0; characterIndex < prose.length; characterIndex += 1) {
+    const character = prose[characterIndex]
     if (character === '`') inCode = !inCode
     const closesSentence = !inCode && character !== undefined && '.!?'.includes(character)
-    if (!(closesSentence && (index === prose.length - 1 || /\s/.test(prose[index + 1] ?? '')))) continue
-    const sentence = prose.slice(sentenceStart, index + 1).trim()
+    if (!(closesSentence && (characterIndex === prose.length - 1 || /\s/.test(prose[characterIndex + 1] ?? ''))))
+      continue
+    const sentence = prose.slice(sentenceStart, characterIndex + 1).trim()
     if (!sentence.startsWith('⚠')) return sentence
-    sentenceStart = index + 1
+    sentenceStart = characterIndex + 1
   }
   throw new Error(`${file}: no non-warning sentence in header`)
 }
@@ -342,10 +343,13 @@ function numericConstant(source: string, name: string, file: string): number {
 function detectedExceptionConstants(source: string): string[] {
   const candidates = [...source.matchAll(/^const\s+([A-Z][A-Z0-9_]*)\b/gm)]
     .map((match) => match[1] ?? '')
-    .filter((name) => /(?:ALLOWED|ALLOWLIST|EXCEPTION|EXEMPT|SKIPPED|VENDORED)/.test(name) || name === 'VENDOR_ROOTS')
-  return candidates.filter((name) => {
+    .filter(
+      (constantName) =>
+        /(?:ALLOWED|ALLOWLIST|EXCEPTION|EXEMPT|SKIPPED|VENDORED)/.test(constantName) || constantName === 'VENDOR_ROOTS',
+    )
+  return candidates.filter((constantName) => {
     try {
-      stringArray(source, name, 'gate source')
+      stringArray(source, constantName, 'gate source')
       return true
     } catch {
       return false
@@ -356,8 +360,8 @@ function detectedExceptionConstants(source: string): string[] {
 function rootsOf(source: string, file: string, metadata: GateMetadata): string[] {
   return [
     ...(metadata.roots ?? []),
-    ...(metadata.rootArrays ?? []).flatMap((name) => stringArray(source, name, file)),
-    ...(metadata.rootStrings ?? []).map((name) => stringConstant(source, name, file)),
+    ...(metadata.rootArrays ?? []).flatMap((constantName) => stringArray(source, constantName, file)),
+    ...(metadata.rootStrings ?? []).map((constantName) => stringConstant(source, constantName, file)),
   ]
 }
 
@@ -386,12 +390,12 @@ function complexityRatchets(): Ratchet[] {
   if (matches.length === 0) throw new Error(`${BIOME_CONFIG}: no cognitive-complexity values`)
   const ratchets: Ratchet[] = []
   let previousEnd = 0
-  for (const [index, match] of matches.entries()) {
-    const key = index === 0 ? 'global' : lastIncludes(source.slice(previousEnd, match.index))
+  for (const [matchIndex, match] of matches.entries()) {
+    const key = matchIndex === 0 ? 'global' : lastIncludes(source.slice(previousEnd, match.index))
     const reason = COMPLEXITY_REASONS[key]
     if (reason === undefined) throw new Error(`${BIOME_CONFIG}: no reason metadata for complexity entry ${key}`)
     ratchets.push({
-      kind: index === 0 ? 'Complexity ceiling' : 'Complexity pin',
+      kind: matchIndex === 0 ? 'Complexity ceiling' : 'Complexity pin',
       value: `level \`${match[1]}\`, max \`${match[2]}\``,
       location: key === 'global' ? `${linkedPath(BIOME_CONFIG)} — global` : `${linkedPath(BIOME_CONFIG)} — \`${key}\``,
       reason,
@@ -417,9 +421,9 @@ function lastIncludes(source: string): string {
 
 function filesUnder(directory: string): string[] {
   const found: string[] = []
-  for (const entry of readdirSync(join(ROOT, directory), { withFileTypes: true })) {
-    const path = `${directory}/${entry.name}`
-    if (entry.isDirectory()) found.push(...filesUnder(path))
+  for (const dirent of readdirSync(join(ROOT, directory), { withFileTypes: true })) {
+    const path = `${directory}/${dirent.name}`
+    if (dirent.isDirectory()) found.push(...filesUnder(path))
     else found.push(path)
   }
   return found
@@ -487,17 +491,17 @@ function generate(): string {
     const metadata = GATE_METADATA[file]
     if (metadata === undefined) throw new Error(`${file}: missing gate metadata`)
     const detectedExceptions = detectedExceptionConstants(source).sort()
-    const recordedExceptions = metadata.exceptions.map((entry) => entry.constant).sort()
+    const recordedExceptions = metadata.exceptions.map((exception) => exception.constant).sort()
     assertExactKeys(`${file} exception`, detectedExceptions, recordedExceptions)
-    const exceptionCounts = metadata.exceptions.map((entry) => {
-      const count = stringArray(source, entry.constant, file).length
+    const exceptionCounts = metadata.exceptions.map((exception) => {
+      const count = stringArray(source, exception.constant, file).length
       allowlistRatchets.push({
         kind: 'Allowlist / exception count',
         value: `\`${count}\``,
-        location: `${linkedPath(file)} — \`${entry.constant}\``,
-        reason: entry.reason,
+        location: `${linkedPath(file)} — \`${exception.constant}\``,
+        reason: exception.reason,
       })
-      return `\`${entry.constant}\` = ${count}`
+      return `\`${exception.constant}\` = ${count}`
     })
     if (metadata.emptyAllowlist !== undefined) {
       if (!metadata.emptyAllowlist.pattern.test(source))
@@ -538,8 +542,8 @@ function generate(): string {
   ]
 
   for (const metadata of DOUBLE_METADATA) validateDouble(metadata)
-  const exportedMetadata = DOUBLE_METADATA.filter((entry) => entry.exported)
-    .map((entry) => `${entry.file}#${entry.symbol}`)
+  const exportedMetadata = DOUBLE_METADATA.filter((double) => double.exported)
+    .map((double) => `${double.file}#${double.symbol}`)
     .sort()
   assertExactKeys('exported test double', exportedDoubleKeys(), exportedMetadata)
   const tests = testFiles()

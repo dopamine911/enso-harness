@@ -119,7 +119,7 @@ function customNames(source: string): Record<string, string> {
 
 function adapterResult(source: string, kind: string, names: Record<string, string>): AdapterResult {
   const cases = [...source.matchAll(/^\s+case '([a-z-]+)':/gm)]
-  const matchingCases = cases.filter((entry) => entry[1] === kind)
+  const matchingCases = cases.filter((caseMatch) => caseMatch[1] === kind)
   if (matchingCases.length === 0)
     return { labels: ['UNCLASSIFIED (no adapter case)'], constants: [], dropped: false, classified: false }
   if (matchingCases.length > 1) throw new Error(`observations: adapter repeats case ${kind}`)

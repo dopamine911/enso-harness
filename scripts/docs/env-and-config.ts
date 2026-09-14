@@ -243,11 +243,11 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
 
 function sourceFiles(directory: string): string[] {
   const files: string[] = []
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if ((SKIPPED_DIRECTORIES as readonly string[]).includes(entry.name)) continue
-    const path = join(directory, entry.name)
-    if (entry.isDirectory()) files.push(...sourceFiles(path))
-    else if (entry.isFile() && SOURCE_FILE.test(entry.name)) files.push(path)
+  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
+    if ((SKIPPED_DIRECTORIES as readonly string[]).includes(dirent.name)) continue
+    const path = join(directory, dirent.name)
+    if (dirent.isDirectory()) files.push(...sourceFiles(path))
+    else if (dirent.isFile() && SOURCE_FILE.test(dirent.name)) files.push(path)
   }
   return files
 }
@@ -414,11 +414,11 @@ function objectDeclaration(source: string, name: string): string {
   const mask = source.replaceAll(NON_CODE, (nonCode) => ' '.repeat(nonCode.length))
   const open = source.indexOf('(', start)
   let depth = 0
-  for (let index = open; index < source.length; index += 1) {
-    if (mask[index] === '(') depth += 1
-    else if (mask[index] === ')') {
+  for (let characterIndex = open; characterIndex < source.length; characterIndex += 1) {
+    if (mask[characterIndex] === '(') depth += 1
+    else if (mask[characterIndex] === ')') {
       depth -= 1
-      if (depth === 0) return source.slice(start, index + 1)
+      if (depth === 0) return source.slice(start, characterIndex + 1)
     }
   }
   throw new Error(`could not find the end of Type.Object declaration ${name}`)
@@ -519,7 +519,7 @@ function manifestResources(): ManifestResource[] {
     if (!Array.isArray(paths) || paths.some((path) => typeof path !== 'string')) {
       throw new Error(`packages/harness/package.json pi.${kind} must be a string array`)
     }
-    for (const [index, path] of paths.entries()) resources.push({ kind, order: index + 1, path: String(path) })
+    for (const [pathIndex, path] of paths.entries()) resources.push({ kind, order: pathIndex + 1, path: String(path) })
   }
   return resources
 }

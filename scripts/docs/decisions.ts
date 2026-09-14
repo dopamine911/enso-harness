@@ -32,35 +32,35 @@ interface DecisionRow {
 
 function sourceFiles(directory: string): string[] {
   const files: string[] = []
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if ((SKIPPED_DIRECTORIES as readonly string[]).includes(entry.name)) continue
-    const path = join(directory, entry.name)
+  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
+    if ((SKIPPED_DIRECTORIES as readonly string[]).includes(dirent.name)) continue
+    const path = join(directory, dirent.name)
     const repositoryPath = relative(ROOT, path).replaceAll('\\', '/')
     if (repositoryPath.startsWith(VENDORED_COMPONENTS)) continue
-    if (entry.isDirectory()) files.push(...sourceFiles(path))
-    else if (entry.isFile() && SOURCE_FILE.test(entry.name)) files.push(path)
+    if (dirent.isDirectory()) files.push(...sourceFiles(path))
+    else if (dirent.isFile() && SOURCE_FILE.test(dirent.name)) files.push(path)
   }
   return files
 }
 
 function leadingHeader(source: string): Header | undefined {
   const lines = source.split('\n').slice(0, HEADER_LINE_LIMIT)
-  for (let index = 0; index < lines.length; index += 1) {
-    const trimmed = (lines[index] ?? '').trimStart()
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const trimmed = (lines[lineIndex] ?? '').trimStart()
     if (trimmed.startsWith('/*')) {
-      const headerLines = [lines[index] ?? '']
-      while (!headerLines.at(-1)?.includes('*/') && index + 1 < lines.length) {
-        index += 1
-        headerLines.push(lines[index] ?? '')
+      const headerLines = [lines[lineIndex] ?? '']
+      while (!headerLines.at(-1)?.includes('*/') && lineIndex + 1 < lines.length) {
+        lineIndex += 1
+        headerLines.push(lines[lineIndex] ?? '')
       }
-      return { startLine: index - headerLines.length + 2, lines: headerLines, style: 'block' }
+      return { startLine: lineIndex - headerLines.length + 2, lines: headerLines, style: 'block' }
     }
     if (trimmed.startsWith('//')) {
-      const headerLines = [lines[index] ?? '']
-      const startLine = index + 1
-      while ((lines[index + 1] ?? '').trimStart().startsWith('//')) {
-        index += 1
-        headerLines.push(lines[index] ?? '')
+      const headerLines = [lines[lineIndex] ?? '']
+      const startLine = lineIndex + 1
+      while ((lines[lineIndex + 1] ?? '').trimStart().startsWith('//')) {
+        lineIndex += 1
+        headerLines.push(lines[lineIndex] ?? '')
       }
       return { startLine, lines: headerLines, style: 'line' }
     }
@@ -84,10 +84,10 @@ function normalizedHeader(header: Header): string {
 }
 
 function firstCompleteSentence(text: string): string | undefined {
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index] ?? ''
+  for (let characterIndex = 0; characterIndex < text.length; characterIndex += 1) {
+    const character = text[characterIndex] ?? ''
     if (!'.!?'.includes(character)) continue
-    let afterSentence = index + 1
+    let afterSentence = characterIndex + 1
     while (text[afterSentence] !== undefined && SENTENCE_CLOSERS.includes(text[afterSentence] ?? '')) {
       afterSentence += 1
     }

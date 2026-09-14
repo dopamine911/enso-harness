@@ -154,11 +154,11 @@ function exportsOf(): PublicExport[] {
   const exports = [...barrelExports(readFileSync(BARREL, 'utf8')), ...subpathExports(readFileSync(LOG_PROCESS, 'utf8'))]
   const seen = new Set<string>()
   const detectedModules = new Set<string>()
-  for (const item of exports) {
-    const key = `${item.entrypoint}:${item.symbol}`
+  for (const publicExport of exports) {
+    const key = `${publicExport.entrypoint}:${publicExport.symbol}`
     if (seen.has(key)) throw new Error(`duplicate public export ${key}`)
     seen.add(key)
-    detectedModules.add(item.module)
+    detectedModules.add(publicExport.module)
   }
   if (exports.length === 0) throw new Error('no public core exports detected')
   for (const module of Object.keys(CLASSIFICATION_BY_MODULE)) {
@@ -174,13 +174,13 @@ function exportsOf(): PublicExport[] {
 
 function sourceFiles(directory: string): string[] {
   const files: string[] = []
-  for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
+  for (const dirent of readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
     left.name.localeCompare(right.name),
   )) {
-    if (entry.name === '__tests__' || entry.name === 'node_modules') continue
-    const path = join(directory, entry.name)
-    if (entry.isDirectory()) files.push(...sourceFiles(path))
-    else if (/\.(?:[cm]?[jt]sx?)$/.test(entry.name) && !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(entry.name))
+    if (dirent.name === '__tests__' || dirent.name === 'node_modules') continue
+    const path = join(directory, dirent.name)
+    if (dirent.isDirectory()) files.push(...sourceFiles(path))
+    else if (/\.(?:[cm]?[jt]sx?)$/.test(dirent.name) && !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(dirent.name))
       files.push(path)
   }
   return files
@@ -208,9 +208,9 @@ function importedEntrypoint(importer: string, specifier: string): PublicExport['
 
 function importerCounts(exports: readonly PublicExport[]): Map<string, Readonly<Record<Region, number>>> {
   const counts = new Map<string, Record<Region, number>>()
-  for (const item of exports)
+  for (const publicExport of exports)
     counts.set(
-      `${item.entrypoint}:${item.symbol}`,
+      `${publicExport.entrypoint}:${publicExport.symbol}`,
       Object.fromEntries(REGIONS.map((region) => [region, 0])) as Record<Region, number>,
     )
 
@@ -247,12 +247,12 @@ function linkDomain(domains: string): string {
 
 const publicExports = exportsOf()
 const counts = importerCounts(publicExports)
-const rows = publicExports.map((item) => {
-  const modulePath = `../../packages/core/src/${item.module}`
-  const declaration = `${modulePath}#L${item.declarationLine}`
-  const imported = counts.get(`${item.entrypoint}:${item.symbol}`)
-  if (imported === undefined) throw new Error(`no importer counts for ${item.symbol}`)
-  return `| \`${item.symbol}\` | ${item.kind} | \`${item.entrypoint}\` | [\`${item.module}\`](${modulePath}) | ${linkDomain(item.domain)} | ${item.classification} | ${REGIONS.map((region) => imported[region]).join(' | ')} | [L${item.declarationLine}](${declaration}) |`
+const rows = publicExports.map((publicExport) => {
+  const modulePath = `../../packages/core/src/${publicExport.module}`
+  const declaration = `${modulePath}#L${publicExport.declarationLine}`
+  const imported = counts.get(`${publicExport.entrypoint}:${publicExport.symbol}`)
+  if (imported === undefined) throw new Error(`no importer counts for ${publicExport.symbol}`)
+  return `| \`${publicExport.symbol}\` | ${publicExport.kind} | \`${publicExport.entrypoint}\` | [\`${publicExport.module}\`](${modulePath}) | ${linkDomain(publicExport.domain)} | ${publicExport.classification} | ${REGIONS.map((region) => imported[region]).join(' | ')} | [L${publicExport.declarationLine}](${declaration}) |`
 })
 
 process.stdout.write(
