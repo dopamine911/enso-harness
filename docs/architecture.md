@@ -118,10 +118,10 @@ types (`PiSession`, `SessionManager`, `AgentSession`). Before this was written t
 meanings; anything zen-owned that says "session" and means "thread" is a rename owed (#102).
 
 [`glossary.md`](./glossary.md) is the authority for every word (#161): this table is the identity
-half of its *Thread* domain, kept here because the control plane is read from this page. The six
-domains — Thread, Control, Permission, Observation, Record, Surface — follow this page's own axis (a
-route tells pi; the feed says what happened); the renames owed are its *Retired* table, and the map
-from our words to pi's, deepseek-harness's and TanStack's is its vendor map.
+half of its *Thread* domain, kept here because the control plane is read from this page. Its six
+domains — Thread, Control, Permission, Observation, Record, Surface — follow invariant 2 below (a
+route tells the runtime; the feed ends the run); the renames owed are its *Retired* table; the map
+from our words to the vendors' is its vendor map, the one place it names them.
 
 | Noun | Meaning | Id | Minted by | Owner, lifetime |
 |---|---|---|---|---|

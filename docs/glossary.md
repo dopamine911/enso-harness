@@ -16,9 +16,11 @@ Two rules built the document, and every edit keeps them:
    copied type, schema, event union or field list from anything we vendor. Where a definition wants a
    shape it points at ours in `@zen/core` by name only, never by body — and never at theirs. Vendor
    names appear in exactly one place, the [vendor map](#vendor-map) at the end; a definition that needs
-   the map to be understood is wrong. `test/vendor-gate.test.ts` is this rule in code. The one other
-   place a vendor's name appears is the [Retired](#retired) table, where a vendor-prefixed identifier
-   is quoted in order to be renamed.
+   the map to be understood is wrong. The one other place a vendor's name appears is the
+   [Retired](#retired) table, where a vendor-prefixed identifier is quoted in order to be renamed.
+   `test/glossary-doc.test.ts` holds this document to that: no vendor word before the Retired heading.
+   The same rule over the source tree is `test/vendor-gate.test.ts`; the retired words applied to the
+   source tree are a sibling issue under #162.
 
 One convention makes rule 2 possible. **The runtime** is the vendored agent loop this harness is a
 package for: it owns the loop, the model providers, the durable log and compaction; we own tools, guards,
@@ -279,8 +281,6 @@ harness did). The first is canonical and never rewritten by us; the second is th
 - **run provenance** — what a fork point will additionally record — project revision, context
   manifest, active rules and skills, configuration — as custom entries in the runtime's log, never a
   side file. Schema designed in the lineage phase against a real fork (#126).
-- **row** — one rendered line of anything: a stored thread in the rail, an event in the drawer, an entry
-  in the debug listing. Presentation, never storage.
 
 **Mechanism** — where the bytes go:
 
@@ -322,6 +322,9 @@ and the regions of the page.
 - **indicator** — persistent state on the surface — model, mode, activity — as opposed to a transcript
   line, which is an event. Honest about staleness between runs (#44).
 - **mode line** — a transcript line saying the permission mode changed, and to what.
+- **row** — one rendered line of anything: a stored thread in the rail, an event in the drawer, an entry
+  in the debug listing. Rendering only — an *entry* is the runtime's and a *record* is ours (see Record);
+  a row is neither.
 
 ---
 
