@@ -23,7 +23,8 @@ at the first failure:
 
 The local pre-commit hook (`.githooks/pre-commit`) and the blocking CI job
 (`.github/workflows/ci.yml`) call that same script. CI adds independent jobs or advisory steps — secret
-scan, automated review, React Doctor — but none replaces the five-step gate. A green editor or a
+scan, automated review, React Doctor, `fallow audit` over the changed files — but none replaces the
+five-step gate. A green editor or a
 single test is not repository green.
 
 `test/coverage-manifest.test.ts` closes Bun's denominator hole: Bun reports coverage only for files a

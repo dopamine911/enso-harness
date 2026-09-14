@@ -69,7 +69,9 @@ jobs:
       # The pinned dev dependency, never `bunx fallow@latest`: an audit that changes its
       # own rules between runs is not a signal.
       - name: fallow audit (advisory — never blocks)
-        run: bunx fallow audit --base origin/${{ github.base_ref }} --dead-code-baseline fallow-baseline.json
+        env:
+          BASE_REF: ${{ github.base_ref }} # through env, never interpolated into the shell line
+        run: bunx fallow audit --base "origin/$BASE_REF" --dead-code-baseline fallow-baseline.json
 
   # ADVISORY, deliberately: react-doctor scores the web surface (0-100) and its findings
   # are guidance, not a contract — so the job reports without ever blocking a merge.
