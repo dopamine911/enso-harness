@@ -7,18 +7,23 @@ how to use it. It does not repeat the inventory.
 
 ## One definition of green
 
-`bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Four gates, in order, stopping
+`bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Five gates, in order, stopping
 at the first failure:
 
 1. **Biome** — formatting, lint, import organisation and the repository naming plugin, check-only.
 2. **TypeScript** — project-reference build with no emit.
-3. **Bun test** — the complete test tree, with text and LCOV coverage reporters.
-4. **Aggregate coverage** — `scripts/check-coverage.ts` reads LCOV and enforces the total line and
+3. **Dead code** — `fallow dead-code --baseline fallow-baseline.json` (#163): fails on any unused file,
+   export, type or dependency that is *not* in the committed identity baseline. The baseline is the
+   backlog as inventory; growth is the regression. `.fallowrc.jsonc` names every program fallow cannot
+   see a loader for (the harness extensions, the Bun plugin, the direct-run scripts), and
+   `test/fallow-config.test.ts` holds its extension entries equal to the harness manifest.
+4. **Bun test** — the complete test tree, with text and LCOV coverage reporters.
+5. **Aggregate coverage** — `scripts/check-coverage.ts` reads LCOV and enforces the total line and
    function floors. The current values are generated under *Ratchets* in the inventory.
 
 The local pre-commit hook (`.githooks/pre-commit`) and the blocking CI job
 (`.github/workflows/ci.yml`) call that same script. CI adds independent jobs or advisory steps — secret
-scan, automated review, React Doctor — but none replaces the four-step gate. A green editor or a
+scan, automated review, React Doctor — but none replaces the five-step gate. A green editor or a
 single test is not repository green.
 
 `test/coverage-manifest.test.ts` closes Bun's denominator hole: Bun reports coverage only for files a

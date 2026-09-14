@@ -22,10 +22,10 @@ export const REPOSITORY_ROOT: string = join(import.meta.dir, '..')
 const SKIPPED_DIRECTORIES = ['node_modules', 'dist', 'dist-types', 'coverage'] as const
 const SOURCE_EXTENSION = /\.(?:tsx?|mjs)$/
 /** A line that is only a comment: `//`, a block opener, or a block's `*`-led body. */
-export const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/
+const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/
 
 /** Every source file under `directory`, absolute paths; `__tests__` only when asked for. */
-export function sourceFiles(directory: string, includeTests = false): string[] {
+function sourceFiles(directory: string, includeTests = false): string[] {
   const found: string[] = []
   for (const dirent of readdirSync(directory, { withFileTypes: true })) {
     if ((SKIPPED_DIRECTORIES as readonly string[]).includes(dirent.name)) continue

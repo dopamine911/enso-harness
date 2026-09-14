@@ -1,6 +1,6 @@
 # CI — the enforced quality gate.
 #
-# Runs the SAME gate as the local pre-commit hook (`bun run check:all` = biome → tsc →
+# Runs the SAME gate as the local pre-commit hook (`bun run check:all` = biome → tsc → fallow →
 # bun test → the total-coverage floor), so "green" means one thing whether it ran on a
 # machine or here. A commit made with `--no-verify`, or by someone without the hook
 # installed, is caught at the PR instead of slipping into main.

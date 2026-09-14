@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@ladbabynpm/picc-permission-modes": "0.1.1",
+    "@logtape/logtape": "2.3.4",
     "@mammothb/pi-tokyonight-storm": "0.2.1",
     "@zen/core": "*",
     "cc-safety-net": "2.3.3",

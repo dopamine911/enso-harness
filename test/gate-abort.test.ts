@@ -44,7 +44,13 @@ function runGateOver(body: string): { status: number | null; stdout: string; std
       name: 'gate-abort-fixture',
       private: true,
       packageManager: 'bun@1.4.0',
-      scripts: { lint: './crash.sh', typecheck: 'true', test: 'true', 'coverage:check': 'true' },
+      scripts: {
+        lint: './crash.sh',
+        typecheck: 'true',
+        'deadcode:check': 'true',
+        test: 'true',
+        'coverage:check': 'true',
+      },
     }),
   )
 
