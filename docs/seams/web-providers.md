@@ -1,0 +1,260 @@
+# Seam: web providers
+
+The provider seam under the harness: five search backends behind one contract and one vocabulary,
+selected by the tool that owns the fallback policy, and the fetch tool's injected IO beside it.
+Glossary domains: **Permission** (egress — the two sanctioned network calls the bash guard denies by
+name; a committed allowlist and a committed backend pin decide what may run) and **Control** (a tool
+call inside a run). `.local/refactor/goals.md` §2 names this directory as *where we already did it
+right, as the pattern to copy*: a normalizer in our own code that has held.
+
+Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Refresh with
+`bun scripts/docs/refresh-fences.ts docs/seams/web-providers.md`.
+
+## The contract
+
+The vocabulary (`packages/harness/core/web-search/vocabulary.ts`) exports, top level:
+`WebSearchProviderId`, `WebSource`, `WebSearchSnippet`, `WebSearchOutcome`, `WebSearchProviderError`,
+`FetchUrlInit`, `FetchUrl`, `ResolvedProviderAuth`, `ModelSearchRequest`, `routedProviderIdForModel`.
+Its header (lines 3-7) states the one structural rule: providers live in `./providers/`, one module
+each, and MUST NOT import each other. The four that are the contract:
+
+<!-- source: packages/harness/core/web-search/vocabulary.ts#WebSearchProviderId -->
+```ts
+/** Every backend that can answer a web_search call. */
+export type WebSearchProviderId = 'anthropic' | 'google' | 'openai' | 'deepseek' | 'tavily'
+```
+
+<!-- source: packages/harness/core/web-search/vocabulary.ts#WebSearchOutcome -->
+```ts
+/**
+ * What one provider run produced — the ACCURATE outcome union (#63, Daniel's
+ * requirement). ⚠ `searched` vs `ungrounded` is keyed on evidence that a native search
+ * actually ran (a `server_tool_use` block on the Anthropic wire; each provider names its
+ * own signal), NEVER on source count: a real search can return zero results, and an
+ * ungrounded answer citing a hallucinated URL would read as grounded. Upstream's
+ * `grounded = sources.length > 0` had exactly that defect.
+ */
+export type WebSearchOutcome =
+  | {
+      kind: 'searched'
+      providerId: WebSearchProviderId
+      /** The provider-synthesized answer, citation-marked. Absent for retrieval backends (Tavily). */
+      answerText?: string
+      sources: WebSource[]
+      /** Retrieval results with snippets — the Tavily shape; model-native backends leave it absent. */
+      snippets?: WebSearchSnippet[]
+    }
+  | {
+      /** The model answered WITHOUT searching — its own knowledge, not the live web. */
+      kind: 'ungrounded'
+      providerId: WebSearchProviderId
+      answerText: string
+    }
+```
+
+<!-- source: packages/harness/core/web-search/vocabulary.ts#WebSearchProviderError -->
+```ts
+/**
+ * Thrown by provider runs on failure. `requestDispatched` says whether the HTTP request
+ * left the process — an honest "may have billed" bit (whether a failed request billed is
+ * the provider's accounting, not knowable here), surfaced when the fallback re-searches.
+ */
+export class WebSearchProviderError extends Error {
+  readonly providerId: WebSearchProviderId
+  readonly requestDispatched: boolean
+
+  constructor(providerId: WebSearchProviderId, message: string, options: { requestDispatched: boolean }) {
+    super(message)
+    this.name = 'WebSearchProviderError'
+    this.providerId = providerId
+    this.requestDispatched = options.requestDispatched
+  }
+}
+```
+
+<!-- source: packages/harness/core/web-search/vocabulary.ts#ModelSearchRequest -->
+```ts
+/** What a MODEL-ROUTED provider run receives (anthropic / google / openai). */
+export interface ModelSearchRequest {
+  query: string
+  model: Model<Api>
+  resolveAuth: (model: Model<Api>) => Promise<ResolvedProviderAuth>
+  fetchUrl: FetchUrl
+  signal: AbortSignal | undefined
+  /** Streaming progress for the UI; carries the accumulated answer text so far. */
+  onProgress?: ((text: string) => void) | undefined
+}
+```
+
+The two request shapes that are not model-routed are `DeepseekSearchRequest` (`providers/deepseek.ts:29-36`:
+query, the key read at the composition root, `fetchUrl`, signal, progress) and `TavilySearchRequest`
+(`providers/tavily.ts:21-28`: query, key, the two domain lists, `fetchUrl`, signal). Neither carries a
+model; the config-pinned backend and the fallback are selected without one.
+
+What the two extensions take at their composition roots — the IO seams tests replace:
+
+<!-- source: packages/harness/extensions/web-search/index.ts#WebSearchDependencies -->
+```ts
+/** The IO seams. Provider runs are injectable so the fallback policy is testable alone. */
+export interface WebSearchDependencies {
+  /** Where `zen.config.json` lives. May throw; the extension fails CLOSED on that. */
+  locateConfigFile: () => string
+  readConfigText: (path: string) => string
+  /** Env reads happen HERE (composition root) — providers receive values, never names. */
+  readEnvironmentVariable: (variableName: string) => string | undefined
+  runProviders: {
+    anthropic: (request: ModelSearchRequest) => Promise<WebSearchOutcome>
+    google: (request: ModelSearchRequest) => Promise<WebSearchOutcome>
+    openai: (request: ModelSearchRequest) => Promise<WebSearchOutcome>
+    deepseek: (request: DeepseekSearchRequest) => Promise<WebSearchOutcome>
+    tavily: (request: TavilySearchRequest) => Promise<WebSearchOutcome>
+  }
+  fetchUrl: ModelSearchRequest['fetchUrl']
+  /** The whole-call deadline. Defaults to `WEB_SEARCH_TIMEOUT_MS`; injectable so the chain's budget is testable in milliseconds. */
+  timeoutMs?: number
+}
+```
+
+<!-- source: packages/harness/extensions/web-fetch/index.ts#WebFetchDependencies -->
+```ts
+/**
+ * The IO seams, injected so tests never touch the network, DNS or the real config file —
+ * same pattern as the guards' `analyzeBashCommand`.
+ */
+export interface WebFetchDependencies {
+  /**
+   * Where `zen.config.json` lives — read from AND named in refusal messages. May throw
+   * (a broken install has no findable root); the extension fails CLOSED on that.
+   */
+  locateConfigFile: () => string
+  readConfigText: (path: string) => string
+  fetchUrl: (url: string, init: WebFetchRequestInit) => Promise<Response>
+  /** Resolve a hostname to its addresses. Rejects on NXDOMAIN/timeouts. */
+  resolveHostAddresses: (hostname: string) => Promise<string[]>
+}
+```
+
+The config sections, in `@zen/core`, composed into the one committed file by `config.ts:40-43`
+(`webFetch` required, `webSearch` optional). `WebSearchConfig` (`core/src/web-search.ts:55-70`) is
+two optional knobs and nothing else: `backend: "deepseek"` — the ONLY way that backend is selected,
+so no provider is billed the file never named — and `tavily.includeDomains` / `excludeDomains`, passed
+verbatim; the fallback is armed by the key's presence, never by config, because a key is a secret
+(header lines 47-53). The section must stay optional (42-45): the whole-file schema is closed and
+fail-closed, so a required new section would make every committed config unreadable — and an
+unreadable config refuses all web_fetch calls too.
+
+<!-- source: packages/core/src/web-fetch.ts#WebFetchConfig -->
+```ts
+/**
+ * web_fetch's section of `zen.config.json`. `allowedHosts` are exact hostnames
+ * (case-insensitive, no wildcards, no ports) — each entry is one reviewable grant.
+ * Strict on unknown keys for the same reason the whole config is — see `config.ts`.
+ */
+export const WebFetchConfig = Type.Object(
+  {
+    allowedHosts: Type.Array(Type.String()),
+  },
+  { additionalProperties: false },
+)
+```
+
+## Who implements it, who consumes it
+
+**Five providers, one `run*` function each, all top level and all exported through the harness
+core barrel** (`packages/harness/core/index.ts:44-58`):
+
+| Provider | Function | Takes | Wire |
+|---|---|---|---|
+| `anthropic` | `runAnthropicProviderSearch` (`providers/anthropic.ts:47`) | `ModelSearchRequest` | the shared `anthropic-wire.ts` |
+| `google` | `runGoogleProviderSearch` (`providers/google.ts:97`) | `ModelSearchRequest` | Gemini grounding, own parse |
+| `openai` | `runOpenAiProviderSearch` (`providers/openai.ts:173`) | `ModelSearchRequest` | Responses API, own parse |
+| `deepseek` | `runDeepseekProviderSearch` (`providers/deepseek.ts:38`) | `DeepseekSearchRequest` | the shared `anthropic-wire.ts` |
+| `tavily` | `runTavilyProviderSearch` (`providers/tavily.ts:30`) | `TavilySearchRequest` | one POST, own parse |
+
+Each returns a `WebSearchOutcome` or throws a `WebSearchProviderError` with its `requestDispatched`
+bit. `anthropic-wire.ts` is shared by exactly two: `providers/anthropic.ts:1` imports
+`runAnthropicWireSearch` and the tool type, `providers/deepseek.ts:1` imports `runAnthropicWireSearch`;
+`google.ts`, `openai.ts` and `tavily.ts` do not. Its header (lines 8-14) says why: DeepSeek's search
+endpoint speaks the Anthropic Messages wire at its own base, so callers own endpoint, headers, model id
+and budgets, and the wire module owns the request body, the stream parse and the searched/ungrounded
+verdict — keyed on `server_tool_use` blocks having appeared, never on source count (lines 19-23).
+
+**The web_search extension is the one consumer and owns selection** (`packages/harness/extensions/web-search/index.ts`).
+`createWebSearch` (97-205) loads the config once at extension load and fails closed; `runPrimary`
+(227-274) picks the backend: `webSearch.backend: "deepseek"` pins the dedicated backend (230), else the
+current model routes through `routedProviderIdForModel` (246) and its auth through `resolveModelAuth`
+(259-260), and a model with no native search selects nothing (247-255). The composition root (394-411)
+wires the five `run*` functions into `runProviders`, real `fetch` into `fetchUrl`, and
+`readEnvironmentVariable` to `readSecret` over `.zen/secrets.env` — never `process.env` (397-401): the
+host quarantines secrets out of the environment before a session exists, and providers receive values,
+never names.
+
+**web_fetch consumes its own four seams** (`web-fetch/index.ts:63-73`): `locateConfigFile` and
+`readConfigText` are called once inside `createWebFetch` (87-97), so the allowlist is captured at load
+and an in-session edit is inert (header lines 27-31); `resolveHostAddresses` feeds the advisory
+public-address gate (`addressGateReason`, 173-197); `fetchUrl` is called once per call under
+`fetchUnderDeadline` (200-236) with `redirect: 'manual'` and `WEB_FETCH_TIMEOUT_MS`. The pure policy —
+URL gate, host match, content-type gate, the address classifier — is `harness/core/web-fetch-policy.ts`.
+
+**The second implementation is every test.** `web-search.test.ts` (`extensions/web-search/__tests__/`)
+drives `createWebSearch` with scripted `runProviders` and `readConfigText` — a searched primary, an
+ungrounded one with and without the fallback armed, a post-dispatch failure that *admits it may have
+billed*, both backends failing, the config-pinned backend, an unreadable config failing closed;
+`web-fetch.test.ts` drives `createWebFetch` with fake DNS, fetch and config; `core/__tests__/web-search-model-providers.test.ts`
+drives the three model-routed `run*` functions over scripted SSE, and `web-search-wire.test.ts` the shared wire.
+
+## What fences it
+
+- **The vendor gate's allowlist** (`test/vendor-gate.test.ts:61-66`) is the fence and the inventory:
+  `VENDOR_IMPORT_ALLOWED` holds exactly `packages/harness/core/web-search/vocabulary.ts` and
+  `packages/harness/core/web-search/auth.ts`, with the reason quoted below. Any other file under
+  `harness/core` importing the runtime's packages is a red test that names the file.
+- **The one deadline** (#99). `WEB_SEARCH_TIMEOUT_MS = 60_000` (`core/src/web-search.ts:26`) is the
+  budget for *primary AND fallback together, not per attempt*, and its header (19-24) says why: a
+  per-attempt 60 s let primary + fallback run 120 s with no chunk crossing, and the server's 90 s
+  no-progress cutoff read that as a hung run (#98). `createWebSearch` sets one `CallDeadline` per call
+  (144-145); `underDeadline` (294-324) runs every attempt under what remains of it *and* the caller's
+  signal, and a spent budget aborts before the attempt runs (306-310) — a 0 ms timer would let a fast
+  provider answer first. Both branches of the fallback go through it (231, 265, 185), and two tests pin
+  it: a primary that stalls for the whole budget leaves the fallback no time (`web-search.test.ts:309`),
+  a primary that fails fast leaves it the rest (345).
+- **The independence rule** (`vocabulary.ts:5-7`): providers do not import each other. Not gated;
+  visible in the five files' imports today, and why a later split into provider packages is mechanical.
+
+## What crosses it that should not
+
+**L6 — the model API's types, at the provider seam.** `vocabulary.ts:1` imports `Api` and `Model` as
+types from `@earendil-works/pi-ai`; `auth.ts:1-2` imports the same two types and, as a value,
+`getEnvApiKey` from `@earendil-works/pi-ai/compat`. `ModelSearchRequest.model` is therefore the
+runtime's model shape, and `resolveAuth` takes it. The vendor gate allows both files with this reason
+(`test/vendor-gate.test.ts:62-63`): *pi-ai's `Api`/`Model` types and its env-key fallback: the PROVIDER
+seam, not the loop. Leaves when web-search's provider contract names its own model/credential types.*
+Its header (55-59) draws the line the same way: the provider seam is *a different boundary (a model
+API, not the agent loop)*. goals §2 L6 says of model providers *pi's coupling, not ours. Note it; do
+nothing.* — which is what this page does. `auth.ts:13-17` records the wire fact behind the value
+import: the runtime's registry returns `{ ok: true }` with no key when auth comes only from provider
+env vars, so this code mirrors the runtime's own fallback because it calls `fetch` directly.
+
+**The composition roots import the runtime's extension API** (`ExtensionAPI`, `AgentToolResult`,
+`ExtensionContext`) — under `packages/harness/extensions/`, a root the vendor gate permits, and the
+shape goals §2 numbers L5 for the guards: the registration is the runtime's, the contract behind it is ours.
+
+Nothing else. The outcome union, the error, the two request shapes and both dependency interfaces
+name no vendor; `anthropic-wire.ts` names a provider's HTTP wire, which is the thing being adapted.
+
+## Pivot cost
+
+**Adding a provider** is one file under `providers/` exporting a `run*` over `ModelSearchRequest` (or
+its own request shape, as `deepseek` and `tavily` do), one literal on `WebSearchProviderId`, one entry
+in `WebSearchDependencies.runProviders` and the composition root's map, and — for a model-routed one —
+a branch in `routedProviderIdForModel`. The extension's selection, fallback, deadline and rendering
+do not change; `web-search.test.ts` runs against scripted providers and does not change either.
+
+**Replacing the model API** — a runtime whose model registry has a different shape — changes
+`vocabulary.ts` (`ModelSearchRequest.model`, `ResolvedProviderAuth`, `routedProviderIdForModel`, which
+reads `model.provider` and `model.api`) and `auth.ts` (`ModelAuthSource`, `resolveModelAuth`), plus the
+one call site that builds a `ModelSearchRequest` from the runtime's context (`web-search/index.ts:256-264`).
+The five providers read only `request.model` fields through the request and `resolveAuth`; the wire
+modules, the outcome union, the config sections, web_fetch and every test that scripts a provider do
+not change. That is what the allowlist's two lines say: the leak is those two files, and fixing it
+deletes both lines.

@@ -1,7 +1,8 @@
 /**
- * The AG-UI CUSTOM chunk names zen puts on the wire — the contract between the server-side
- * mapper (`to-agui.ts`, which emits them) and the browser router (`custom-event-router.ts`,
- * which dispatches on them). Declared ONCE here so a rename cannot land on one side only:
+ * The AG-UI CUSTOM chunk names zen derives in the browser — the contract between the adapter
+ * (`to-agui.ts`, which emits them from observations, in memory, never on the wire since #112)
+ * and the router (`custom-event-router.ts`, which dispatches on them). Declared ONCE here so a
+ * rename cannot land on one side only:
  * before this module each side carried its own string literals, and renaming `zen.entry`
  * in the browser left the suite green while every mode line silently stopped rendering
  * (#53 S1.3 — the #29 class, one hop upstream of where #29 was fixed).

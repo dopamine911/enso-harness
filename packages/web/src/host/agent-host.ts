@@ -372,7 +372,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     })
 
     let disposed = false
-    const piSession: ThreadRuntime = {
+    const runtime: ThreadRuntime = {
       prompt(request: PromptRequest, outcome: PromptOutcome): void {
         let accepted = false
         // ⚠ Fire-and-forget, exactly as pi's rpc mode does: `prompt()` resolves only when
@@ -473,7 +473,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     }
 
     return {
-      runtime: piSession,
+      runtime,
       loadedExtensionPaths: extensionsResult.extensions.map((extension) => extension.path),
       emittedEvents: () => emitted.recent(),
       inspect(): HostedThreadInspection {
@@ -487,7 +487,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           sessionDir: sessionManager.getSessionDir(),
           sessionFile: plannedFile !== undefined && existsSync(plannedFile) ? plannedFile : null,
           entries: sessionManager.getBranch(),
-          commands: piSession.listCommands().map((command) => command.name),
+          commands: runtime.listCommands().map((command) => command.name),
         }
       },
     }
