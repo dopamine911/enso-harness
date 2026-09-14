@@ -474,28 +474,19 @@ Settled. Each carries its reason so a later session can tell when the reason has
 
 ## Decisions recorded at the code
 
-Each of these is explained in full in a header comment; the issue holds the discussion. One line each,
-so a reader knows where to look before touching the file.
+The issue is the discussion; the leading source-file header is the decision at the code. The complete
+index is generated from those headers:
 
-| Issue | Decision | Where |
-|---|---|---|
-| #9 | Network egress is a **bar, not a boundary**: ad-hoc clients denied at command position; `git` and interpreters deliberately absent. cc-safety-net's own policy dir is guarded by us because its checker does not cover redirects or pi's write tools | `core/guard.ts`, `harness/core/network-egress.ts` |
-| #18 | Tool results: `details` is the contract, `content` is derived; `truncated` is data, never pre-rendered | `core/tool-result.ts` |
-| #27, #112 | Blocking dialogs are data on the wire; nothing parks; an answer is validated against the question because pi hands a select's value to the extension verbatim | `core/dialog.ts`, `server/follow.ts` |
-| #29 | A `notify`'s message is the request; custom entries are state receipts, not narration | `core/observation.ts` |
-| #45 | Usage is read at `message_end`, never summed from deltas (every delta carries the same cumulative usage) | `core/observation.ts` |
-| #53 | The custom-event router is a function, not a closure, so a renamed chunk fails a test; the guard decodes `file://` before judging a path | `web/custom-event-router.ts`, `core/paths.ts` |
-| #59 | One committed config, fails closed; one root finder, realpath-first | `core/config.ts`, `core/paths.ts` |
-| #69 | Events before the first subscriber are held and replayed once; a held `agent_settled` would end the next run, so nothing is held after that | `core/thread-runtime.ts`, `web/host/agent-host.ts` |
-| #75 | A prompt during a run goes to pi's queue now (not TanStack's browser queue); `zen.queue` carries the texts for every follower; a stop clears pi's queue and hands the texts back — clear-and-restore; a claimed follow-up's reply opens a new assistant bubble after its question | `server/thread-registry.ts`, `web/follow-connection.ts`, `web/chat-screen.tsx` |
-| #82 | Cognitive-complexity ceilings are pinned per file as ratchets — may go down, never up | `biome.jsonc` |
-| #84 | The permission mode is picc's CURRENT mode, computed the way picc restores it; never an assumed default; deliberately uncached | `core/permission-mode.ts` |
-| #90 | Stores are per thread, not per page, because TanStack's `onCustomEvent` carries no thread id | `web/thread-stores.ts`, `web/custom-event-router.ts` |
-| #95 | Resume reads the stored branch and applies its persisted mode under the same id | `web/thread-stores.ts`, `core/thread-inspection.ts` |
-| #112 | The wire is `ZenObservation`; AG-UI is made in exactly one place, the adapter | `core/follow.ts`, `web/follow-connection.ts` |
-| #114 | The host synthesises `dialog-settled` at the one point every settle path crosses; the snapshot lists every open question | `web/host/extension-ui-context.ts`, `core/follow.ts` |
-| #116 | `POST …/abort` tells pi; the run ends on the feed; one abort per run; a failed unary POST is an outcome, not a rejection | `server/thread-registry.ts`, `web/follow-connection.ts` |
-| #132 | One `zenLogger`, one dated file for every process, redaction at write, the route binds `threadId` for everything under it; three tiers on `ZEN_LOG_LEVEL`; every observation and every guard verdict is a record; the browser ships `info`+ to `/api/logs`; the server's `onProblem` callbacks are gone, the browser's is the notice channel; the bundle (`GET /api/logs/bundle`, the drawer's button, `bun run logs bundle`) is one markdown file — versions, live inspections, the day's records fenced as JSONL, a redaction manifest — that `bun run logs --file` reads back; redaction leaves a `[REDACTED]` marker so the manifest can count it | `core/log.ts`, `core/log-process.ts`, `core/log-bundle.ts`, `web/server/observation-log.ts`, `web/browser-logging.ts`, `web/server/logs-route.ts`, `web/server/bundle-route.ts`, `harness/extensions/logging`, `scripts/zen-logs.ts`, `test/logging-gate.test.ts` |
+- [`reference/decisions.md`](./reference/decisions.md) — every owned source file whose leading header
+  cites an issue: file, issues, first decision sentence. A new qualifying header changes the page and
+  the docs gate fails until it is regenerated.
+- [`reference/verification-inventory.md`](./reference/verification-inventory.md) — the gates and
+  ratchets that keep those decisions from moving silently.
+- [`seams/`](./seams/README.md) — the contracts the decisions protect, who implements and consumes
+  them, what still leaks, and what a pivot costs.
+
+This page keeps the system-level decisions above; it does not duplicate the code-local index. Before
+touching a file, read its header and the seam page it belongs to.
 
 ---
 
@@ -533,12 +524,15 @@ so a reader knows where to look before touching the file.
 3. [`seams/`](./seams/README.md) — one page per contract: the source verbatim, who implements and
    consumes it, what fences it, what leaks across it, what a pivot costs. Held equal to the code by
    `test/docs-gate.test.ts`. Read the page for the seam you are about to touch.
-4. [`../README.md`](../README.md) — what is built, guard by guard and route by route; the more
-   implementation-accurate of the two documents.
-5. [`concepts/pi-immediate-needs.md`](./concepts/pi-immediate-needs.md) — what pi lacks, ranked, with
+4. [`reference/`](./reference/README.md) — generated current facts: routes, observations, core exports,
+   environment and configuration, code-local decisions, gates, ratchets and test doubles.
+5. [`verification.md`](./verification.md) — what "green" means, how to use the gates and fakes, and
+   which runtime proof a change needs.
+6. [`../README.md`](../README.md) — quick start and what is built, feature by feature.
+7. [`concepts/pi-immediate-needs.md`](./concepts/pi-immediate-needs.md) — what pi lacks, ranked, with
    seams and effort. Phase 0 comes straight from its Tier 0.
-6. [`concepts/agent-boundaries.md`](./concepts/agent-boundaries.md) — the boundary model and why
+8. [`concepts/agent-boundaries.md`](./concepts/agent-boundaries.md) — the boundary model and why
    enforcement location matters more than rule content.
-7. [`concepts/harness-design-principles.md`](./concepts/harness-design-principles.md) — progressive
+9. [`concepts/harness-design-principles.md`](./concepts/harness-design-principles.md) — progressive
    disclosure, applied seven times.
-8. The rest of `concepts/` as needed.
+10. The rest of `concepts/` as needed.

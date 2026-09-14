@@ -1,0 +1,172 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { join, relative } from 'node:path'
+import { findRepoRoot } from '../../packages/core/src/index.ts'
+
+/**
+ * Generates `docs/reference/decisions.md` (#170): one row for each owned source file whose
+ * first comment/header block cites an issue. It deliberately inventories code-local decision
+ * headers, not arbitrary issue mentions in implementations, fixtures, or prose later in a file.
+ */
+
+const ROOT = findRepoRoot(import.meta.url)
+const SOURCE_ROOTS = ['packages', 'scripts', 'test'] as const
+const SOURCE_FILE = /\.(?:[cm]?[jt]sx?)$/
+const SKIPPED_DIRECTORIES = ['node_modules', 'dist', 'dist-types', 'coverage'] as const
+const VENDORED_COMPONENTS = 'packages/web/src/components/'
+const HEADER_LINE_LIMIT = 80
+const ISSUE = /#(\d+)/g
+const SENTENCE_CLOSERS = '"\'`)]'
+
+interface Header {
+  readonly startLine: number
+  readonly lines: string[]
+  readonly style: 'block' | 'line'
+}
+
+interface DecisionRow {
+  readonly file: string
+  readonly issues: number[]
+  readonly decision: string
+  readonly unclassified: boolean
+}
+
+function sourceFiles(directory: string): string[] {
+  const files: string[] = []
+  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
+    if ((SKIPPED_DIRECTORIES as readonly string[]).includes(dirent.name)) continue
+    const path = join(directory, dirent.name)
+    const repositoryPath = relative(ROOT, path).replaceAll('\\', '/')
+    if (repositoryPath.startsWith(VENDORED_COMPONENTS)) continue
+    if (dirent.isDirectory()) files.push(...sourceFiles(path))
+    else if (dirent.isFile() && SOURCE_FILE.test(dirent.name)) files.push(path)
+  }
+  return files
+}
+
+function leadingHeader(source: string): Header | undefined {
+  const lines = source.split('\n').slice(0, HEADER_LINE_LIMIT)
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const trimmed = (lines[lineIndex] ?? '').trimStart()
+    if (trimmed.startsWith('/*')) {
+      const headerLines = [lines[lineIndex] ?? '']
+      while (!headerLines.at(-1)?.includes('*/') && lineIndex + 1 < lines.length) {
+        lineIndex += 1
+        headerLines.push(lines[lineIndex] ?? '')
+      }
+      return { startLine: lineIndex - headerLines.length + 2, lines: headerLines, style: 'block' }
+    }
+    if (trimmed.startsWith('//')) {
+      const headerLines = [lines[lineIndex] ?? '']
+      const startLine = lineIndex + 1
+      while ((lines[lineIndex + 1] ?? '').trimStart().startsWith('//')) {
+        lineIndex += 1
+        headerLines.push(lines[lineIndex] ?? '')
+      }
+      return { startLine, lines: headerLines, style: 'line' }
+    }
+  }
+  return undefined
+}
+
+function normalizedHeader(header: Header): string {
+  const lines = header.lines.map((line, index) => {
+    if (header.style === 'line') return line.replace(/^\s*\/\/\s?/, '').trim()
+    let cleaned = line
+    if (index === 0) cleaned = cleaned.replace(/^\s*\/\*+\s?/, '')
+    if (index === header.lines.length - 1) cleaned = cleaned.replace(/\s*\*\/\s*$/, '')
+    return cleaned.replace(/^\s*\*\s?/, '').trim()
+  })
+  return lines
+    .filter((line) => line.length > 0)
+    .join(' ')
+    .replaceAll(/\s+/g, ' ')
+    .trim()
+}
+
+function firstCompleteSentence(text: string): string | undefined {
+  for (let characterIndex = 0; characterIndex < text.length; characterIndex += 1) {
+    const character = text[characterIndex] ?? ''
+    if (!'.!?'.includes(character)) continue
+    let afterSentence = characterIndex + 1
+    while (text[afterSentence] !== undefined && SENTENCE_CLOSERS.includes(text[afterSentence] ?? '')) {
+      afterSentence += 1
+    }
+    const next = text[afterSentence]
+    if (next !== undefined && !/\s/.test(next)) continue
+    const sentence = text.slice(0, afterSentence).trim()
+    if (sentence.length > 0) return sentence
+  }
+  return undefined
+}
+
+function decisions(): DecisionRow[] {
+  const rows: DecisionRow[] = []
+  const seen = new Set<string>()
+  const files = SOURCE_ROOTS.flatMap((sourceRoot) => sourceFiles(join(ROOT, sourceRoot))).sort()
+  for (const path of files) {
+    const file = relative(ROOT, path).replaceAll('\\', '/')
+    if (seen.has(file)) throw new Error(`duplicate decision path: ${file}`)
+    seen.add(file)
+    const header = leadingHeader(readFileSync(path, 'utf8'))
+    if (header === undefined) continue
+    const text = normalizedHeader(header)
+    const issues = [...new Set([...text.matchAll(ISSUE)].map((match) => Number(match[1])))]
+      .filter((issue) => Number.isInteger(issue))
+      .sort((left, right) => left - right)
+    if (issues.length === 0) continue
+    const sentence = firstCompleteSentence(text)
+    rows.push({
+      file,
+      issues,
+      decision: sentence ?? `UNCLASSIFIED — leading header at line ${header.startLine} has no complete sentence`,
+      unclassified: sentence === undefined,
+    })
+  }
+  return rows
+}
+
+function tableText(value: string): string {
+  return value.replaceAll('|', '\\|').replaceAll('\n', ' ')
+}
+
+function generate(rows: readonly DecisionRow[]): string {
+  return [
+    '<!-- generated: scripts/docs/decisions.ts -->',
+    '# Code-local decisions',
+    '',
+    `**Decision headers: ${rows.length}.**`,
+    '',
+    'This is an inventory of decisions recorded in leading source-file headers. It is not an index of every',
+    'issue mention: implementation comments, tests and fixture prose after the leading header are deliberately',
+    'outside the inventory. Each qualifying file appears exactly once, with every issue cited by that header.',
+    '',
+    '| File | Issues | First complete decision sentence |',
+    '|---|---|---|',
+    ...rows.map(
+      (row) =>
+        `| \`${row.file}\` | ${row.issues.map((issue) => `\`#${issue}\``).join(', ')} | ${tableText(row.decision)} |`,
+    ),
+    '',
+    '**Parser limit.** The parser considers the first block or contiguous line comment beginning within the',
+    `first ${HEADER_LINE_LIMIT} lines of TypeScript/JavaScript source under \`packages/\`, \`scripts/\`,`,
+    'and `test/`.',
+    'It skips generated type output, dependencies, coverage output, and vendored web components. Sentence',
+    'reduction uses the first `.`, `!`, or `?`, optionally followed by closing quotes/brackets and then',
+    'whitespace or the end of the header; a qualifying header that does not fit that current source shape',
+    'is emitted as `UNCLASSIFIED` and makes generation fail.',
+    '',
+  ].join('\n')
+}
+
+try {
+  const rows = decisions()
+  process.stdout.write(generate(rows))
+  const unclassified = rows.filter((row) => row.unclassified)
+  if (unclassified.length > 0) {
+    process.stderr.write(`decisions: ${unclassified.length} qualifying header(s) are UNCLASSIFIED\n`)
+    process.exitCode = 1
+  }
+} catch (error) {
+  process.stderr.write(`decisions: ${error instanceof Error ? error.message : String(error)}\n`)
+  process.exitCode = 1
+}

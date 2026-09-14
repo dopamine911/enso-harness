@@ -364,7 +364,7 @@ dependency into the harness's own `node_modules` — a missing one is a *silentl
 | `packages/web/` | the web surface: server (in-process pi host, one session per chat thread, dialog registry), client (TanStack AI chat) |
 | `scripts/` | `zen.mjs` (the launcher), `dev.mjs`, `print-harness.mjs`, `gate.ts`, `check-coverage.ts`, `link-vendor-packages.mjs` |
 | `zen.config.json` | the committed config — web_fetch's host allowlist and web_search's optional section live here |
-| `docs/` | `architecture.md` (the vision) and `concepts/` (the research) |
+| `docs/` | `architecture.md` (the vision), `glossary.md` (the words), `seams/` (one page per contract), `reference/` (generated: routes, observations, core exports, environment and config, decisions, gates), `verification.md` (what green means), `concepts/` (the research) |
 | `.zen/` | machine-local runtime state (pi agent dir, print variant) — gitignored |
 | `.inspiration/` | read-only vendored codebases surveyed for design (oh-my-pi, pi, deepseek-harness, …) |
 
@@ -376,6 +376,13 @@ coverage only over files a test imported, so an untested module would *vanish fr
 than count as 0% — `test/coverage-manifest.test.ts` imports every library source file (discovered by
 readdir, so new files join automatically) to close that hole. CI adds a secret scan, react-doctor, and
 an automated review pass on every PR.
+
+The complete inventory — every gate with its rule, roots and allowlist, every ratchet's current value,
+every reusable test double and its consumers — is generated in
+[`docs/reference/verification-inventory.md`](docs/reference/verification-inventory.md); how to use it
+is [`docs/verification.md`](docs/verification.md). The route table is
+[`docs/reference/routes.md`](docs/reference/routes.md); environment variables and `zen.config.json`
+fields are [`docs/reference/env-and-config.md`](docs/reference/env-and-config.md).
 
 Three **anchor tests** enforce conventions a fresh session would otherwise have to be told:
 

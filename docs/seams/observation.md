@@ -7,9 +7,9 @@ three words for three hops, the runtime emits *events*, the host's mapper turns 
 reads, writes nothing, records nothing, controls nothing (#144). This is the wire between server and
 browser (#112) and the thing a log record at `debug` describes.
 
-The kinds are not restated here: [`observation-kinds.md`](observation-kinds.md) is generated from the
-union, the mapper, the prompt route and the browser adapter — one row per kind, who produces it, what
-the state layer sees — and the docs gate diffs it against its generator.
+The kinds are not restated here: [`../reference/observations.md`](../reference/observations.md) is
+generated from the union, mapper, prompt route, browser adapter, every custom event name and its
+browser consumer — one row per kind — and the docs gate diffs it against its generator.
 
 Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Refresh with
 `bun scripts/docs/refresh-fences.ts docs/seams/observation.md`.
@@ -43,8 +43,8 @@ export const ZenObservation = Type.Union([
 ```
 
 Each member is one `Type.Object` declared beside its `kind` literal in `observation.ts` — the schema
-column of [`observation-kinds.md`](observation-kinds.md) names every one, so they are not repeated
-here. The one shape shared across kinds is the accounting that rides on a text delta and a
+column of [`../reference/observations.md`](../reference/observations.md) names every one, so they are
+not repeated here. The one shape shared across kinds is the accounting that rides on a text delta and a
 message end:
 
 <!-- source: packages/core/src/observation.ts#ZenUsage -->
@@ -153,8 +153,8 @@ leaves, the registry forgets the feed and `seq` restarts with the next follower,
   compare against it: `schemas.test.ts` line 130 proves every event the mapper handles, plus the
   server-synthesised `prompt-rejected`, validates against `ZenObservation` and covers every member;
   `to-agui.test.ts` line 240 proves the adapter handles every member.
-- **The generated table**: `observation-kinds.md` must equal its generator's stdout
-  (`test/docs-gate.test.ts`), so a new kind that is not produced or not adapted shows as a diff.
+- **The generated inventory**: `docs/reference/observations.md` must equal its generator's stdout
+  (`test/docs-gate.test.ts`); a kind with no producer or consumer is printed as a finding, not omitted.
 - **Closed frames**: the three frame schemas are `additionalProperties: false` (`follow.ts` lines
   40, 50, 61); the browser refuses a frame that fails `ZenFollowFrame` with a problem record, not a
   crash (`follow-connection.ts` lines 407–410).
