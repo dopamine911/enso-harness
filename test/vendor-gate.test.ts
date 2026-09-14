@@ -24,9 +24,10 @@ import { codeOffenders, hasWordSequence, wordsOf } from './gate-support.ts'
  *
  * What it still cannot catch, said up front: it is a line scan, not a type checker.
  * `ZenThreadInspection.entries: unknown[]` carries pi's persistence format with no import and
- * no vendor name in it (goals L2). That needs a transcript type of ours; a third test —
- * vendor-prefixed identifiers outside the host, the naming gate's trick — keeps it fixed once
- * it is. A vendor name assembled at runtime (`"pi" + "cc"`) is out of reach by construction.
+ * no vendor name in it (goals L2). That needs a transcript type of ours. The third test this
+ * header once anticipated — vendor-PREFIXED identifiers outside the host — is
+ * `glossary-gate.test.ts` (#165), with L2's two files as its allowlist until the transcript
+ * type lands. A vendor name assembled at runtime (`"pi" + "cc"`) is out of reach by construction.
  */
 
 const SEARCHED_ROOTS = ['packages/core/src', 'packages/web/src', 'packages/harness'] as const

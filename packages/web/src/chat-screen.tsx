@@ -807,7 +807,7 @@ const chatComponents = {
               </div>
             ) : null}
           </div>
-          {/* The status bar (#90): activity, turns, tool calls, cost — always visible, full
+          {/* The status bar (#90): activity, prompts, tool calls, cost — always visible, full
 					    width under transcript AND debug pane, so it is the one place to look. */}
           <ThreadStatusBar messages={chat.messages} generating={chat.sessionGenerating} />
         </div>
