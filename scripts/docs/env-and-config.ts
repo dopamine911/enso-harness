@@ -8,6 +8,12 @@ import { findRepoRoot } from '../../packages/core/src/index.ts'
  * manifest resources. Small source-shape parsers keep the inventory tied to the declarations;
  * the prose that source cannot supply (purpose, default, phase, writer, lifetime) is checked
  * metadata whose source occurrence must still exist.
+ *
+ * Blind spots, named: `isCommentedAt` is line-local and sees a `//` anywhere earlier on the
+ * line as a comment, so a `process.env` read after a string containing `//` on the same line
+ * would be skipped — no such line exists, and a skipped read shows up as "metadata without a
+ * read" rather than vanishing; `NON_CODE` masks flat strings only, so a template with a nested
+ * `${…}` string is unmasked and fails the field check instead of parsing wrong.
  */
 
 const ROOT = findRepoRoot(import.meta.url)

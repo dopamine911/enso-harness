@@ -11,17 +11,25 @@ import { findRepoRoot } from '../../packages/core/src/index.ts'
  * repository's current shapes: top-level string arrays (optionally wrapped in `new Set`),
  * numeric exported constants, Biome's `noExcessiveCognitiveComplexity` objects, and exact
  * test-helper exports. A shape it cannot classify throws instead of disappearing.
+ *
+ * Blind spots, named (the wrong-and-self-consistent class this must not have):
+ * - a gate header whose backticks do not pair is REFUSED, not split into sentences;
+ * - string lexemes are masked before comment stripping, so a `//` inside `'https://…'` is not
+ *   a comment; a string that spans lines is outside the mask and would mis-strip — no gate
+ *   allowlist has one;
+ * - a test double is a consumer only through a static relative import naming the exact symbol;
+ *   a re-export or a namespace import does not count and the double shows fewer consumers.
  */
 
 const ROOT = findRepoRoot(import.meta.url)
 const TEST_ROOT = join(ROOT, 'test')
 const COVERAGE_SCRIPT = 'scripts/check-coverage.ts'
 const BIOME_CONFIG = 'biome.jsonc'
-const EXTRA_GATE_FILES: Readonly<Record<string, true>> = {
-  'coverage-manifest.test.ts': true,
-  'check-coverage.test.ts': true,
-  'no-lint-suppressions.test.ts': true,
-}
+const EXTRA_GATE_FILES = [
+  'coverage-manifest.test.ts',
+  'check-coverage.test.ts',
+  'no-lint-suppressions.test.ts',
+] as const
 
 interface ExceptionMetadata {
   readonly constant: string
@@ -273,7 +281,10 @@ function repositoryFile(path: string): string {
 
 function detectedGateFiles(): string[] {
   return readdirSync(TEST_ROOT)
-    .filter((file) => (file.includes('gate') && file.endsWith('.test.ts')) || EXTRA_GATE_FILES[file] === true)
+    .filter(
+      (file) =>
+        (file.includes('gate') && file.endsWith('.test.ts')) || (EXTRA_GATE_FILES as readonly string[]).includes(file),
+    )
     .map((file) => `test/${file}`)
     .sort()
 }
@@ -296,6 +307,9 @@ function firstHeaderSentence(source: string, file: string): string {
     .map((line) => line.replace(/^\s*\*?\s?/, '').trim())
     .join(' ')
     .replace(/\s+/g, ' ')
+  if ((prose.match(/`/g) ?? []).length % 2 !== 0) {
+    throw new Error(`${file}: header has an unpaired backtick; the sentence splitter cannot tell code from prose`)
+  }
   let sentenceStart = 0
   let inCode = false
   for (let characterIndex = 0; characterIndex < prose.length; characterIndex += 1) {
@@ -311,8 +325,11 @@ function firstHeaderSentence(source: string, file: string): string {
   throw new Error(`${file}: no non-warning sentence in header`)
 }
 
+/** Comments and string lexemes in one alternation, so a `//` inside a string is never a comment. */
+const COMMENT_OR_STRING = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g
+
 function withoutComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+  return source.replace(COMMENT_OR_STRING, (lexeme) => (lexeme.startsWith('/') ? '' : lexeme))
 }
 
 function stringArray(source: string, name: string, file: string): string[] {
@@ -468,7 +485,19 @@ function importsSymbol(testFile: string, metadata: DoubleMetadata): boolean {
   for (const match of source.matchAll(/import\s+(?:type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g)) {
     const clause = match[1] ?? ''
     const specifier = match[2] ?? ''
-    if (!(specifier.startsWith('.') && new RegExp(`\\b${metadata.symbol}\\b`).test(clause))) continue
+    if (!specifier.startsWith('.')) continue
+    const importedNames = clause
+      .replace(/[{}]/g, ' ')
+      .split(',')
+      .map(
+        (part) =>
+          part
+            .trim()
+            .split(/\s+as\s+/)[0]
+            ?.replace(/^type\s+/, '')
+            .trim() ?? '',
+      )
+    if (!importedNames.includes(metadata.symbol)) continue
     const imported = relative(ROOT, resolve(dirname(join(ROOT, testFile)), specifier)).replaceAll('\\', '/')
     if (imported === metadata.file) return true
   }
