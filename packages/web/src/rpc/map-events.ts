@@ -1,7 +1,7 @@
 import {
+  type EventDelivery,
   isZenDialogSpec,
-  type PiEventDelivery,
-  type PiRpcEvent,
+  type RuntimeEvent,
   ZEN_TOOL_RESULT_KEY,
   ZenDialogOutcome,
   type ZenDialogSpec,
@@ -101,14 +101,14 @@ export function toolResultMetadata(
 }
 
 /** The `extension_ui_request` case of {@link mapPiEvent}, on its own because of its size. */
-function mapExtensionUiRequest(event: PiRpcEvent, delivery: PiEventDelivery): ZenObservation {
+function mapExtensionUiRequest(event: RuntimeEvent, delivery: EventDelivery): ZenObservation {
   // ⚠ pi's Extension UI sub-protocol, and it splits in two (`docs/rpc.md` § Extension
   // UI Protocol):
   //
   //   DIALOG methods    select | confirm | input | editor
   //                     emit a request and BLOCK until the client answers it (over
   //                     rpc: an `extension_ui_response` line on stdin; in-process:
-  //                     `PiSession.answerDialog`) with the matching id.
+  //                     `ThreadRuntime.answerDialog`) with the matching id.
   //   FIRE-AND-FORGET   notify | setStatus | setWidget | setTitle | set_editor_text
   //                     emit and continue; a client may ignore them.
   //
@@ -178,7 +178,7 @@ function textsOf(value: unknown): string[] {
  * A message began (#112). A USER message carries its text so a second follower sees the
  * prompt another tab sent; every other role's content arrives by its own events.
  */
-function mapMessageStart(event: PiRpcEvent): ZenObservation {
+function mapMessageStart(event: RuntimeEvent): ZenObservation {
   const message = event.message as { role?: unknown; content?: unknown } | undefined
   const role = roleOf(message)
   return role === 'user'
@@ -197,7 +197,7 @@ function mapMessageStart(event: PiRpcEvent): ZenObservation {
  * getUsageCostBreakdown): assistant messages and toolResult messages WITH usage are
  * attributable spend; every other completed message is a boundary without it.
  */
-function mapMessageEnd(event: PiRpcEvent): ZenObservation {
+function mapMessageEnd(event: RuntimeEvent): ZenObservation {
   const message = event.message as { role?: unknown; usage?: unknown } | undefined
   const role = roleOf(message)
   const usage = readUsage(message?.usage)
@@ -214,7 +214,7 @@ function mapMessageEnd(event: PiRpcEvent): ZenObservation {
  * the session's own start — becomes `origin: "session-start"` on a ui request; `live` is
  * `"run"`. Defaults to live: every caller but the pump is mapping a run's stream.
  */
-export function mapPiEvent(event: PiRpcEvent, delivery: PiEventDelivery = 'live'): ZenObservation {
+export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'): ZenObservation {
   switch (event.type) {
     case 'message_update': {
       const delta = event.assistantMessageEvent as { type?: string; contentIndex?: number; delta?: string } | undefined

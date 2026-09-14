@@ -8,7 +8,7 @@ import { contentToText, descriptorFrom, toolResultMetadata } from './map-events.
  * chunks); this maps the STORED branch (session entries → messages). Neither shape is
  * stored by zen — pi's entries are the durable form, TanStack's is the browser's.
  *
- * ⚠ pi's shapes are carried, not modelled (`pi-rpc.ts`): every field is read defensively,
+ * ⚠ pi's shapes are carried, not modelled (`thread-runtime.ts`): every field is read defensively,
  * and an entry this surface does not render (`model_change`, `thinking_level_change`,
  * picc's `modes`, compaction summaries) is skipped, not invented. A malformed message
  * renders as an empty part list rather than throwing into the page.

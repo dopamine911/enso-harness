@@ -160,12 +160,12 @@ export type ZenDialogSettled = Static<typeof ZenDialogSettled>
  * labels) duplicate information that already flows as first-class observations, so they
  * stay `unmapped`.
  */
-export const ZenCustomSessionEntry = Type.Object({
+export const ZenCustomEntry = Type.Object({
   kind: Type.Literal('custom-entry'),
   customType: Type.String(),
   data: Type.Unknown(),
 })
-export type ZenCustomSessionEntry = Static<typeof ZenCustomSessionEntry>
+export type ZenCustomEntry = Static<typeof ZenCustomEntry>
 
 /**
  * A message began — pi's `message_start` (#112). The boundary AG-UI's `TEXT_MESSAGE_START`
@@ -280,7 +280,7 @@ export const ZenObservation = Type.Union([
   ZenThinkingDelta,
   ZenToolCall,
   ZenToolResultObservation,
-  ZenCustomSessionEntry,
+  ZenCustomEntry,
   ZenMessageStart,
   ZenMessageEnd,
   ZenTurnStart,

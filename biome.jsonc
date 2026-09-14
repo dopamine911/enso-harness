@@ -123,7 +123,7 @@
     {
       "includes": [
         "scripts/zen.mjs", // the launcher: quarantine, then the spawn's env
-        "scripts/zen-session.mjs", // ZEN_SERVER_URL
+        "scripts/zen-thread.mjs", // ZEN_SERVER_URL
         "scripts/zen-logs.ts", // ZEN_SERVER_URL, ZEN_LOGS_DIR
         "scripts/gate.ts", // npm_config_user_agent, and the child's FORCE_COLOR
         "packages/core/src/secrets.ts", // the quarantine's default argument — the seam itself

@@ -37,7 +37,7 @@ export interface ScriptedFetchOptions {
   /** What the stop hands back (#75): the prompts pi had queued. Answered with the 200 receipt. */
   readonly queued?: string[]
   readonly mode?: { mode: string; available: string[] }
-  /** What `GET /api/stored-threads` lists — the rail's Previous Sessions (#95). */
+  /** What `GET /api/stored-threads` lists — the rail's Previous Threads (#95). */
   readonly storedThreads?: ZenStoredThread[]
   /** What `GET /api/threads/:id/history` answers for a resume click; keyed by thread id. */
   readonly histories?: Record<string, ZenThreadHistory>

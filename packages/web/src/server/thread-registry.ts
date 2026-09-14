@@ -22,8 +22,8 @@
  * ⓘ Named non-coverage: the map is unbounded, and a client that omits `threadId` gets a
  * fresh session per request that lives for the idle window. Loopback-only, dev-only server.
  */
-import { type PiSession, type ZenObservation, type ZenThreadInspection, zenLogger } from '@zen/core'
-import type { HostedSession } from '../host/agent-host.ts'
+import { type ThreadRuntime, type ZenObservation, type ZenThreadInspection, zenLogger } from '@zen/core'
+import type { HostedThread } from '../host/agent-host.ts'
 import { createEventTail, type EventTail } from '../host/event-tail.ts'
 import { mapPiEvent } from '../rpc/map-events.ts'
 import { recordObservation } from './observation-log.ts'
@@ -68,7 +68,7 @@ const log = zenLogger('server', 'threads')
 
 export interface ThreadRegistryOptions {
   /** Builds a hosted session for a thread — `AgentHost.createSession`. Injected so tests need no pi. */
-  createSession: (threadId: string) => Promise<HostedSession>
+  createSession: (threadId: string) => Promise<HostedThread>
   /** Injectable for tests — the default is minutes. */
   idleTimeoutMs?: number
 }
@@ -146,7 +146,7 @@ export interface AbortResult {
  */
 export interface ThreadLease {
   readonly threadId: string
-  readonly session: PiSession
+  readonly runtime: ThreadRuntime
   /**
    * Which acquisition this is, counted per thread id for the server's lifetime — the fence
    * a stale lease is checked against, and the number the browser's `zen.run` receipt
@@ -170,7 +170,7 @@ export function inspectThread(view: ThreadView): ZenThreadInspection {
     cwd: inspection.cwd,
     sessionDir: inspection.sessionDir,
     sessionFile: inspection.sessionFile,
-    permissionMode: view.hosted.session.permissionModeState(),
+    permissionMode: view.hosted.runtime.permissionModeState(),
     commands: [...inspection.commands],
     busy: view.busy,
     generation: view.generation,
@@ -181,7 +181,7 @@ export function inspectThread(view: ThreadView): ZenThreadInspection {
 
 export interface ThreadView {
   readonly threadId: string
-  readonly hosted: HostedSession
+  readonly hosted: HostedThread
   /** Acquired and not yet released — a run in flight, or a dialog parked on it. */
   readonly busy: boolean
   /** The latest acquisition's number — see {@link ThreadLease.generation}. */
@@ -197,7 +197,7 @@ export interface ThreadView {
 }
 
 interface ThreadEntry {
-  hosted: HostedSession
+  hosted: HostedThread
   idleTimer: ReturnType<typeof setTimeout> | undefined
   /** The abort currently running, awaited by the next `acquire`. */
   abortInFlight: Promise<void> | undefined
@@ -281,7 +281,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
   function attachFeed(threadId: string, thread: ThreadEntry): void {
     const feed = feeds.get(threadId)
     if (feed === undefined || feed.detach !== undefined) return
-    feed.detach = thread.hosted.session.subscribe((event, delivery) => {
+    feed.detach = thread.hosted.runtime.subscribe((event, delivery) => {
       publishObservation(feed, mapPiEvent(event, delivery))
     })
   }
@@ -308,7 +308,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     // reach a follower as if the thread were alive.
     detachFeed(threadId)
     try {
-      thread.hosted.session.dispose()
+      thread.hosted.runtime.dispose()
       log.info('thread disposed: {why}', { threadId, generation: thread.generation, why })
     } catch (error) {
       log.error('dispose after {why} failed: {error}', { threadId, why, error })
@@ -325,7 +325,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
       // ⚠ Teardown must reach quiescence, not just request it: a build that was in
       // flight when `shutdown` ran would otherwise publish a live pi AFTER every other
       // session was disposed — a leak nothing would ever dispose.
-      hosted.session.dispose()
+      hosted.runtime.dispose()
       throw new Error(`thread ${threadId}: the server shut down while its session was being built`)
     }
     const thread: ThreadEntry = {
@@ -391,11 +391,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     // still told to abort. Never the other way round.
     let cleared: { steering: string[]; followUp: string[] } = { steering: [], followUp: [] }
     try {
-      cleared = thread.hosted.session.clearQueue()
+      cleared = thread.hosted.runtime.clearQueue()
     } catch (error: unknown) {
       log.error('clearing the queue failed, queued prompts lost: {error}', { threadId, error })
     }
-    const inFlight = thread.hosted.session
+    const inFlight = thread.hosted.runtime
       .abort()
       .catch((error: unknown) => log.error('abort failed: {error}', { threadId, error }))
       .finally(() => {
@@ -426,7 +426,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     }
     return {
       threadId,
-      session: thread.hosted.session,
+      runtime: thread.hosted.runtime,
       generation,
       release: () => {
         if (current('release')) release(threadId, thread)

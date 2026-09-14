@@ -9,9 +9,9 @@ import {
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
 import type { LogRecorder } from '@logtape/testing/recorder'
-import { findRepoRoot, harnessPackageDir, type PiRpcEvent } from '@zen/core'
+import { findRepoRoot, harnessPackageDir, type RuntimeEvent } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
-import { type AgentHost, createAgentHost, type HostedSession, seedMultiAccountChildProxyOff } from '../agent-host.ts'
+import { type AgentHost, createAgentHost, type HostedThread, seedMultiAccountChildProxyOff } from '../agent-host.ts'
 
 /**
  * The in-process host against the REAL harness package (#69) — every extension the manifest
@@ -31,14 +31,14 @@ import { type AgentHost, createAgentHost, type HostedSession, seedMultiAccountCh
 const repoRoot = findRepoRoot(import.meta.url)
 const harnessDir = harnessPackageDir(repoRoot)
 const agentDir = mkdtempSync(join(tmpdir(), 'zen-host-agent-'))
-const openSessions: HostedSession[] = []
+const openSessions: HostedThread[] = []
 
 let logs: LogRecorder
 beforeAll(async () => {
   logs = await recordZenLogs()
 })
 afterAll(async () => {
-  for (const hosted of openSessions) hosted.session.dispose()
+  for (const hosted of openSessions) hosted.runtime.dispose()
   await releaseZenLogs()
 })
 
@@ -53,9 +53,9 @@ const MANIFEST_EXTENSION_MARKERS = [
 ]
 
 /** Collect every event a session emits, from its first subscriber on (the host replays what came before). */
-function collectEvents(hosted: HostedSession): PiRpcEvent[] {
-  const events: PiRpcEvent[] = []
-  hosted.session.subscribe((event) => events.push(event))
+function collectEvents(hosted: HostedThread): RuntimeEvent[] {
+  const events: RuntimeEvent[] = []
+  hosted.runtime.subscribe((event) => events.push(event))
   return events
 }
 
@@ -68,7 +68,7 @@ function hostWith(extensionFactories: InlineExtension[] = []): AgentHost {
   })
 }
 
-async function hostedSession(extensionFactories: InlineExtension[] = []): Promise<HostedSession> {
+async function hostedSession(extensionFactories: InlineExtension[] = []): Promise<HostedThread> {
   const hosted = await hostWith(extensionFactories).createSession(crypto.randomUUID())
   openSessions.push(hosted)
   return hosted
@@ -185,7 +185,7 @@ test('⚠⚠ a dialog an extension opens reaches the subscriber and its answer r
   expect(typeof request?.id).toBe('string')
   expect(settled).toBe(false)
 
-  hosted.session.answerDialog({ id: String(request?.id), confirmed: true })
+  hosted.runtime.answerDialog({ id: String(request?.id), confirmed: true })
   await nextTick()
   expect(settled).toBe(true)
   expect(confirmed).toBe(true)
@@ -205,11 +205,11 @@ test("a cancelled dialog resolves to pi's cancel value, and dispose cancels what
   const hosted = await hostedSession([probe])
   const events = collectEvents(hosted)
   const select = events.find((event) => event.method === 'select')
-  hosted.session.answerDialog({ id: String(select?.id), cancelled: true })
+  hosted.runtime.answerDialog({ id: String(select?.id), cancelled: true })
   await nextTick()
   expect(answers).toEqual([undefined])
   // the input is still pending; dispose cancels it
-  hosted.session.dispose()
+  hosted.runtime.dispose()
   await nextTick()
   expect(answers).toEqual([undefined, undefined])
 })
@@ -217,7 +217,7 @@ test("a cancelled dialog resolves to pi's cancel value, and dispose cancels what
 test('an answer naming no pending dialog is reported, never thrown', async () => {
   const hosted = await hostedSession()
   logs.clear()
-  expect(() => hosted.session.answerDialog({ id: 'never-asked', cancelled: true })).not.toThrow()
+  expect(() => hosted.runtime.answerDialog({ id: 'never-asked', cancelled: true })).not.toThrow()
   logs.assertLogged({ level: 'warning', rawMessage: /unknown request id/, properties: { dialogId: 'never-asked' } })
 })
 
@@ -267,7 +267,7 @@ test('⚠ an entry an extension persists during session_start reaches the first 
 
 test("listCommands is synchronous and names picc's /mode", async () => {
   const hosted = await hostedSession()
-  const commands = hosted.session.listCommands()
+  const commands = hosted.runtime.listCommands()
   expect(commands.some((command) => command.name === 'mode' && command.source === 'extension')).toBe(true)
 })
 
@@ -294,21 +294,21 @@ test('⚠ events are held only until the FIRST subscriber; with nobody listening
   // and end it before its first token. The probe command emits a notify while no one is
   // subscribed; the next subscriber must NOT see it.
   const hosted = await hostedSession([lateNotifyProbe])
-  const firstSubscriberEvents: PiRpcEvent[] = []
-  const unsubscribeFirst = hosted.session.subscribe((event) => firstSubscriberEvents.push(event))
+  const firstSubscriberEvents: RuntimeEvent[] = []
+  const unsubscribeFirst = hosted.runtime.subscribe((event) => firstSubscriberEvents.push(event))
   // Startup records were replayed to the first subscriber.
   expect(firstSubscriberEvents.some((event) => event.method === 'notify')).toBe(true)
   unsubscribeFirst()
 
   await new Promise<void>((resolve, reject) => {
-    hosted.session.prompt(
+    hosted.runtime.prompt(
       { message: '/zen-late-notify' },
       { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )
   })
 
-  const secondSubscriberEvents: PiRpcEvent[] = []
-  hosted.session.subscribe((event) => secondSubscriberEvents.push(event))
+  const secondSubscriberEvents: RuntimeEvent[] = []
+  hosted.runtime.subscribe((event) => secondSubscriberEvents.push(event))
   expect(secondSubscriberEvents.filter((event) => String(event.message).includes('late notify'))).toHaveLength(0)
   // And the startup records are not replayed a second time either.
   expect(secondSubscriberEvents).toHaveLength(0)
@@ -325,7 +325,7 @@ test("⚠ the emitted tail records each event's provenance: held at startup, rep
   expect(atStartup.every((event) => event.provenance === 'held')).toBe(true)
   expect(atStartup.some((event) => event.type === 'entry_appended' && event.name === 'modes')).toBe(true)
 
-  const unsubscribe = hosted.session.subscribe(noopListener)
+  const unsubscribe = hosted.runtime.subscribe(noopListener)
   // The replay is recorded as it happens, in the held order, after the held rows.
   const afterSubscribe = hosted.emittedEvents()
   const heldModes = afterSubscribe.find((event) => event.provenance === 'held' && event.name === 'modes')
@@ -340,14 +340,14 @@ test("⚠ the emitted tail records each event's provenance: held at startup, rep
 
   // With a subscriber attached the command's notify is `live`; with none, `dropped`.
   await new Promise<void>((resolve, reject) => {
-    hosted.session.prompt(
+    hosted.runtime.prompt(
       { message: '/zen-late-notify' },
       { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )
   })
   unsubscribe()
   await new Promise<void>((resolve, reject) => {
-    hosted.session.prompt(
+    hosted.runtime.prompt(
       { message: '/zen-late-notify' },
       { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )
@@ -372,7 +372,7 @@ test("⚠ the emitted tail records each event's provenance: held at startup, rep
 test("⚠ subscribe delivers startup records as `replayed` and a run's events as `live` (#96)", async () => {
   const hosted = await hostedSession([lateNotifyProbe])
   const deliveries: Array<[string, string]> = []
-  hosted.session.subscribe((event, delivery) => {
+  hosted.runtime.subscribe((event, delivery) => {
     if (event.type === 'extension_ui_request' && event.method === 'notify') {
       deliveries.push([String(event.message).slice(0, 16), delivery])
     }
@@ -383,7 +383,7 @@ test("⚠ subscribe delivers startup records as `replayed` and a run's events as
   expect(deliveries.some(([message]) => message.startsWith('pi-multi-account'))).toBe(true)
 
   await new Promise<void>((resolve, reject) => {
-    hosted.session.prompt(
+    hosted.runtime.prompt(
       { message: '/zen-late-notify' },
       { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )

@@ -144,7 +144,7 @@ function readGeneration(data: unknown): number | undefined {
 // to keep "what the browser was actually told". A fixed-size ring per thread: old chunks
 // fall off the front, and a long session costs nothing extra.
 
-export interface RecordedCustomChunk {
+export interface RecordedCustomEvent {
   /** Monotonic per thread — the chunk's identity, since name + time can collide. */
   readonly sequence: number
   readonly name: string
@@ -156,13 +156,13 @@ export interface RecordedCustomChunk {
 /** Enough to see a whole run's worth (a receipt, a few entries, usage) without scrolling. */
 export const RECENT_CUSTOM_CHUNK_CAPACITY = 50
 
-export interface RecentChunksStore extends Store<readonly RecordedCustomChunk[]> {
+export interface RecentChunksStore extends Store<readonly RecordedCustomEvent[]> {
   readonly record: (name: string, value: unknown) => void
 }
 
 /** Oldest first; the snapshot is a fresh array per record, so a consumer cannot mutate the ring. */
 export function createRecentChunksStore(): RecentChunksStore {
-  const store = createStore<readonly RecordedCustomChunk[]>([])
+  const store = createStore<readonly RecordedCustomEvent[]>([])
   let nextSequence = 0
   return {
     get: store.get,

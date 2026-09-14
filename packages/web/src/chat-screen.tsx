@@ -10,8 +10,8 @@ import {
   type MessageProps,
 } from '@tanstack/ai-react/ui'
 import {
+  type DialogAnswer,
   isZenImageMimeType,
-  type PiDialogResponse,
   ZEN_IMAGE_MAX_BYTES,
   ZEN_IMAGE_MIME_TYPES,
   ZEN_PROMPT_MAX_IMAGES,
@@ -441,7 +441,7 @@ export function ZenDialogCard({
  */
 export async function settleDialog(
   stores: Pick<ThreadStores, 'connection' | 'dialog'>,
-  response: PiDialogResponse,
+  response: DialogAnswer,
 ): Promise<void> {
   const outcome = await stores.connection.answerDialog(response)
   if (outcome === 'answered' || outcome === 'gone') stores.dialog.set(undefined)
@@ -452,7 +452,7 @@ function PendingDialog(): React.ReactNode {
   const stores = useThreadStores()
   const pending = useStore(stores.dialog)
   if (pending === undefined) return null
-  const settle = (response: PiDialogResponse): void => {
+  const settle = (response: DialogAnswer): void => {
     void settleDialog(stores, response)
   }
   return (
@@ -807,7 +807,7 @@ const chatComponents = {
               </div>
             ) : null}
           </div>
-          {/* The status bar (#90): activity, turns, tool calls, cost — always visible, full
+          {/* The status bar (#90): activity, prompts, tool calls, cost — always visible, full
 					    width under transcript AND debug pane, so it is the one place to look. */}
           <ThreadStatusBar messages={chat.messages} generating={chat.sessionGenerating} />
         </div>
@@ -945,7 +945,7 @@ export function ChatScreen(): React.ReactNode {
   // pane the moment the boot's resume overlapped a rail click):
   // - HOW its own request meant to reach history: it rides with the request (`intent`).
   // - WHETHER a navigation happened since it was issued: `epoch` counts every navigation,
-  //   and an outcome from before the current one is dropped whole. New Session during the
+  //   and an outcome from before the current one is dropped whole. New Thread during the
   //   boot's "resuming…" therefore wins outright: the URL says the new thread, the pane
   //   shows it, and the boot's answer arrives to nobody.
   // `activePane` mirrors `activeThreadId` for the same closures.

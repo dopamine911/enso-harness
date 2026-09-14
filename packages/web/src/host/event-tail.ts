@@ -1,4 +1,4 @@
-import type { PiRpcEvent, ZenEventProvenance, ZenThreadEvent } from '@zen/core'
+import type { RuntimeEvent, ZenEventProvenance, ZenThreadEvent } from '@zen/core'
 
 /**
  * A thread's event tail (#97): the last N events through one funnel, with provenance.
@@ -60,9 +60,9 @@ export function createEventTail(capacity = EVENT_TAIL_CAPACITY): EventTail {
 /**
  * The inner name of a pi rpc event when its type alone reads as nothing: which custom
  * entry, which ui method, which tool. Read defensively — pi's shapes are carried, not
- * modelled (`pi-rpc.ts`).
+ * modelled (`thread-runtime.ts`).
  */
-export function describePiRpcEvent(event: PiRpcEvent): { type: string; name: string | undefined } {
+export function describeRuntimeEvent(event: RuntimeEvent): { type: string; name: string | undefined } {
   const record = event as { type: string; entry?: unknown; method?: unknown; toolName?: unknown }
   if (record.type === 'entry_appended' && typeof record.entry === 'object' && record.entry !== null) {
     const entry = record.entry as { type?: unknown; customType?: unknown }

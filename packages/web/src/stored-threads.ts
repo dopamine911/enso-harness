@@ -81,7 +81,7 @@ export async function fetchThreadHistory(threadId: string): Promise<ZenThreadHis
 
 /**
  * The rail's resume clicks, with the LAST click winning — not the first response (PR #104
- * review). Two previous sessions clicked before the first history arrives would otherwise
+ * review). Two previous threads clicked before the first history arrives would otherwise
  * both apply, so response timing chose the active thread and, with it, where the next
  * prompt went. A superseded response is dropped whole: not applied, its failure not shown.
  * The fetcher is injected so the race is testable with controlled resolution order.

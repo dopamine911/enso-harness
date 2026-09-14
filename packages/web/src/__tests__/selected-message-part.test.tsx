@@ -62,7 +62,7 @@ test('⚠ a tool call with no result in a run that has ENDED reads aborted, not 
     false,
     false,
   )
-  expect(rendered).toContain('data-zen-tool-step="aborted"')
+  expect(rendered).toContain('data-zen-tool-call="aborted"')
   expect(rendered).toContain('>aborted<')
   expect(rendered).not.toContain('running…')
   expect(rendered).not.toContain('animate-pulse')
@@ -79,7 +79,7 @@ test('the step row names the tool and its subject, and folds the output beneath'
     input: { path: 'packages/web/src/x.ts' },
     result: toolResultWith({ content: 'the file body' }),
   })
-  expect(rendered).toContain('data-zen-tool-step="done"')
+  expect(rendered).toContain('data-zen-tool-call="done"')
   expect(rendered).toContain('packages/web/src/x.ts')
   // Folded: a done row is a closed <details>, its output still in the markup for a click.
   expect(rendered).not.toContain(' open=""')
@@ -93,7 +93,7 @@ test('an errored step is marked and opens itself', () => {
     part: toolCallWith({ name: 'bash' }),
     result: toolResultWith({ error: 'exit 1: no such file' }),
   })
-  expect(rendered).toContain('data-zen-tool-step="error"')
+  expect(rendered).toContain('data-zen-tool-call="error"')
   expect(rendered).toContain(' open=""')
   expect(rendered).toContain('exit 1: no such file')
 })
@@ -107,7 +107,7 @@ test('mid-stream, before the arguments parse, the row still shows the raw argume
       state: 'input-streaming' as ToolCallPart['state'],
     }),
   })
-  expect(rendered).toContain('data-zen-tool-step="pending"')
+  expect(rendered).toContain('data-zen-tool-call="pending"')
   expect(rendered).toContain('{&quot;command&quot;:&quot;ls -')
 })
 

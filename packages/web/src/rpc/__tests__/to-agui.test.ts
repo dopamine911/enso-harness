@@ -150,7 +150,7 @@ test('a notify observation rides CUSTOM as zen.notify with its message intact', 
 
 // #29's remaining half: the mode lines read picc's "modes" entries from this chunk, so the
 // pipeline pin is wire event → mapPiEvent → toAgui with customType and data intact.
-test('a custom session entry rides CUSTOM as zen.entry with its data intact', () => {
+test('a custom entry rides CUSTOM as zen.entry with its data intact', () => {
   const observation = mapPiEvent({
     type: 'entry_appended',
     entry: { type: 'custom', customType: 'modes', data: { mode: 'acceptEdits' } },

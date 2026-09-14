@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test'
-import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { codeOffenders, hasWordSequence, wordsOf } from './gate-support.ts'
 
 /**
  * The seam has an owner: only the host and the pi extensions may name the vendor (#145).
@@ -20,55 +19,26 @@ import { join } from 'node:path'
  * dependency site adds one and must say why. Adding a ROOT, or removing one, is a design
  * conversation — the two roots are the boundary this repo is built on.
  *
- * It reads WORDS, not substrings (PR #150 review): the line is split on non-alphanumerics and
- * on `camelCase`, so `readPiccPersistedMode`, `PICC_PERMISSION_MODES` and `.cc-safety-net` all
- * count as the same mention. The two narrower matchers tried before each let a live site
- * through — `\b` missed the `_` form, a both-sides lookaround missed the camelCase one — and
- * a boundary that cannot see a dependency is not a boundary. `pickle` and `piccolo` are not
- * picc: a word is the unit.
+ * It reads WORDS, not substrings (PR #150 review), and skips comment lines — both now in
+ * `gate-support.ts`, shared with the glossary gates (#165), with the reasons recorded there.
  *
  * What it still cannot catch, said up front: it is a line scan, not a type checker.
  * `ZenThreadInspection.entries: unknown[]` carries pi's persistence format with no import and
- * no vendor name in it (goals L2). That needs a transcript type of ours; a third test —
- * vendor-prefixed identifiers outside the host, the naming gate's trick — keeps it fixed once
- * it is. A vendor name assembled at runtime (`"pi" + "cc"`) is out of reach by construction.
- *
- * `COMMENT_LINE` reads one line at a time, so a block comment whose continuation lines do not
- * lead with `*` is scanned as code (PR #150 review). That direction is the safe one: the gate
- * FAILS on prose rather than passing a dependency, and the fix is to write the comment in the
- * house style the whole repo already uses. A skip that tracked block state could hide a real
- * import inside an unterminated comment; this cannot.
+ * no vendor name in it (goals L2). That needs a transcript type of ours. The third test this
+ * header once anticipated — vendor-PREFIXED identifiers outside the host — is
+ * `glossary-gate.test.ts` (#165), with L2's two files as its allowlist until the transcript
+ * type lands. A vendor name assembled at runtime (`"pi" + "cc"`) is out of reach by construction.
  */
 
-const repositoryRoot = join(import.meta.dir, '..')
 const SEARCHED_ROOTS = ['packages/core/src', 'packages/web/src', 'packages/harness'] as const
 /** Where the vendor may be named. Removing one of these is a design conversation. */
 const VENDOR_ROOTS = ['packages/web/src/host', 'packages/harness/extensions'] as const
-const SKIPPED_DIRECTORIES = ['node_modules', 'dist', 'dist-types', 'coverage', '__tests__'] as const
-const SOURCE_EXTENSION = /\.tsx?$/
-/** A line that is only a comment: `//`, a block opener, or a block's `*`-led body. */
-const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/
 /**
  * pi and its libraries, by package scope — in ANY string that names it, not only a
  * `from "…"` clause (PR #150 review): `import("@earendil-works/…")` and
  * `import.meta.resolve("@earendil-works/…")` are the same dependency by another spelling.
  */
 const VENDOR_IMPORT = /["']@earendil-works\//
-/**
- * The words a line is made of, with `camelCase` split: `readPiccPersistedMode` is
- * `read | picc | persisted | mode`, `PICC_PERMISSION_MODES` is `picc | permission | modes`,
- * `.cc-safety-net` is `cc | safety | net`. Matching WORDS rather than substrings is what
- * catches a vendor name embedded mid-identifier — a lookaround requiring a non-alphanumeric
- * on both sides never fires inside `readPiccPersistedMode` (PR #150 review found it live).
- */
-function wordsOf(line: string): string[] {
-  const words: string[] = []
-  for (const token of line.match(/[A-Za-z0-9]+/g) ?? []) {
-    words.push(...(token.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z0-9]+|[0-9]+/g) ?? []).map((word) => word.toLowerCase()))
-  }
-  return words
-}
-
 /** One word is the whole name. */
 const VENDOR_WORD = 'picc'
 /** …and the ones spelled in several words, however they are joined (`cc-safety-net`, `ccSafetyNet`). */
@@ -79,10 +49,7 @@ const VENDOR_WORD_SEQUENCES = [
 
 function namesVendor(line: string): boolean {
   const words = wordsOf(line)
-  if (words.includes(VENDOR_WORD)) return true
-  return VENDOR_WORD_SEQUENCES.some((sequence) =>
-    words.some((_word, start) => sequence.every((part, offset) => words[start + offset] === part)),
-  )
+  return words.includes(VENDOR_WORD) || VENDOR_WORD_SEQUENCES.some((sequence) => hasWordSequence(words, sequence))
 }
 
 /**
@@ -120,32 +87,8 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   'packages/web/src/mode-lines.ts',
 ]
 
-function sourceFiles(directory: string): string[] {
-  const found: string[] = []
-  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
-    if ((SKIPPED_DIRECTORIES as readonly string[]).includes(dirent.name)) continue
-    const path = join(directory, dirent.name)
-    if (dirent.isDirectory()) found.push(...sourceFiles(path))
-    else if (SOURCE_EXTENSION.test(dirent.name)) found.push(path)
-  }
-  return found
-}
-
-function offendersMatching(names: (line: string) => boolean, allowed: readonly string[]): string[] {
-  const offenders: string[] = []
-  for (const root of SEARCHED_ROOTS) {
-    for (const path of sourceFiles(join(repositoryRoot, root))) {
-      const repositoryRelative = path.slice(repositoryRoot.length + 1)
-      if (VENDOR_ROOTS.some((vendorRoot) => repositoryRelative.startsWith(`${vendorRoot}/`))) continue
-      if (allowed.includes(repositoryRelative)) continue
-      for (const [lineIndex, line] of readFileSync(path, 'utf8').split('\n').entries()) {
-        // Code, not prose: a comment may name picc to say why a guard exists.
-        if (COMMENT_LINE.test(line)) continue
-        if (names(line)) offenders.push(`${repositoryRelative}:${lineIndex + 1}`)
-      }
-    }
-  }
-  return offenders
+function offendersMatching(lineMatches: (line: string) => boolean, allowed: readonly string[]): string[] {
+  return codeOffenders({ roots: SEARCHED_ROOTS, exemptRoots: VENDOR_ROOTS, allowed, lineMatches })
 }
 
 test('⚠ @earendil-works/* is named only by the host and the pi extensions (#145)', () => {

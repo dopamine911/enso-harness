@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createEventTail, describePiRpcEvent } from '../event-tail.ts'
+import { createEventTail, describeRuntimeEvent } from '../event-tail.ts'
 
 /**
  * #97's tail is a debugging surface: what it must not do is lie by omission. Coalescing
@@ -50,19 +50,19 @@ test('recent() is a copy: mutating it does not reach the ring', () => {
 
 test("a pi event's inner name: the custom entry's type, a ui method, a tool; nothing when there is none", () => {
   expect(
-    describePiRpcEvent({ type: 'entry_appended', entry: { type: 'custom', customType: 'modes' } } as never),
+    describeRuntimeEvent({ type: 'entry_appended', entry: { type: 'custom', customType: 'modes' } } as never),
   ).toEqual({ type: 'entry_appended', name: 'modes' })
-  expect(describePiRpcEvent({ type: 'entry_appended', entry: { type: 'message' } } as never)).toEqual({
+  expect(describeRuntimeEvent({ type: 'entry_appended', entry: { type: 'message' } } as never)).toEqual({
     type: 'entry_appended',
     name: 'message',
   })
-  expect(describePiRpcEvent({ type: 'extension_ui_request', method: 'select' } as never)).toEqual({
+  expect(describeRuntimeEvent({ type: 'extension_ui_request', method: 'select' } as never)).toEqual({
     type: 'extension_ui_request',
     name: 'select',
   })
-  expect(describePiRpcEvent({ type: 'tool_execution_start', toolName: 'bash' } as never)).toEqual({
+  expect(describeRuntimeEvent({ type: 'tool_execution_start', toolName: 'bash' } as never)).toEqual({
     type: 'tool_execution_start',
     name: 'bash',
   })
-  expect(describePiRpcEvent({ type: 'agent_settled' })).toEqual({ type: 'agent_settled', name: undefined })
+  expect(describeRuntimeEvent({ type: 'agent_settled' })).toEqual({ type: 'agent_settled', name: undefined })
 })

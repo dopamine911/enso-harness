@@ -3,8 +3,8 @@ import type { MessagePart, StreamChunk } from '@tanstack/ai'
 import type { ModelMessage, UIMessage } from '@tanstack/ai/client'
 import type { RunAgentInputContext, SubscribeConnectionAdapter } from '@tanstack/ai-client'
 import {
+  type DialogAnswer,
   isZenImageMimeType,
-  type PiDialogResponse,
   ZEN_IMAGE_MIME_TYPES,
   ZenAbortReceipt,
   type ZenFollowFrame,
@@ -205,7 +205,7 @@ export type PromptOutcome = 'queued' | 'taken' | 'refused' | 'unreachable'
 
 export interface FollowConnection extends SubscribeConnectionAdapter {
   /** Answer the thread's open question. A non-`answered` outcome is also reported with the server's reason. */
-  readonly answerDialog: (answer: PiDialogResponse) => Promise<DialogAnswerOutcome>
+  readonly answerDialog: (answer: DialogAnswer) => Promise<DialogAnswerOutcome>
   /**
    * Stop the run in flight (#116). ⚠ Not TanStack's `stop()`: that aborts this client's
    * in-flight POST, which returned at admission long ago, and touches nothing on the server.
@@ -539,7 +539,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     }
   }
 
-  async function answerDialog(answer: PiDialogResponse): Promise<DialogAnswerOutcome> {
+  async function answerDialog(answer: DialogAnswer): Promise<DialogAnswerOutcome> {
     const response = await post('dialog', `dialog ${answer.id}`, {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(answer),

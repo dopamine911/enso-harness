@@ -67,7 +67,7 @@ const STEP_DOT: Record<ToolResultState['status'], string> = {
  * `toolResultState`, the one definition the status bar and `ZenToolResult` also read; an
  * error opens itself, because a failure behind a click is a failure missed.
  */
-function ToolStep({
+function ToolCallRow({
   selected,
   runOpen,
   renderers,
@@ -83,7 +83,7 @@ function ToolStep({
     // Only an error opens itself: its body is a reason the reader needs (the guard's refusal,
     // the command's stderr). `aborted` has nothing more inside — its whole story is the one
     // word on the row (the run ended first), so opening it would show a static line.
-    <details data-zen-tool-step={status} open={status === 'error'} className="group my-1">
+    <details data-zen-tool-call={status} open={status === 'error'} className="group my-1">
       <summary className="flex cursor-pointer list-none items-center gap-2 font-mono text-muted-foreground text-xs marker:hidden">
         <span aria-hidden="true" className={STEP_DOT[status]} />
         <span className="text-foreground">{selected.part.name}</span>
@@ -159,7 +159,7 @@ export function SelectedMessagePart({
   runOpen: boolean
   renderers: ZenRendererMap
 }): React.ReactNode {
-  if (selected.key === 'toolCall') return <ToolStep selected={selected} runOpen={runOpen} renderers={renderers} />
+  if (selected.key === 'toolCall') return <ToolCallRow selected={selected} runOpen={runOpen} renderers={renderers} />
   // An UNMATCHED result (its call never streamed — a protocol wrinkle, not a normal
   // state) still renders through the same contract rather than vanishing.
   if (selected.key === 'toolResult') {

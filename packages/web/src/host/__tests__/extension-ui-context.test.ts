@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
 import type { LogRecorder } from '@logtape/testing/recorder'
-import type { PiRpcEvent } from '@zen/core'
+import type { RuntimeEvent } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
 import {
   type CustomComponentFactory,
@@ -25,13 +25,13 @@ afterAll(releaseZenLogs)
 
 const THREAD = 't-ui'
 
-function contextUnderTest(): ZenExtensionUiContext & { events: PiRpcEvent[]; requests: PiRpcEvent[] } {
+function contextUnderTest(): ZenExtensionUiContext & { events: RuntimeEvent[]; requests: RuntimeEvent[] } {
   /** Every record the host emits — requests, settles (#114), fire-and-forget. */
-  const events: PiRpcEvent[] = []
+  const events: RuntimeEvent[] = []
   /** The blocking/notify requests alone, so a test can name "the second question" without counting settles. */
-  const requests: PiRpcEvent[] = []
+  const requests: RuntimeEvent[] = []
   const context = createZenExtensionUiContext({
-    emit: (event: PiRpcEvent) => {
+    emit: (event: RuntimeEvent) => {
       events.push(event)
       if (event.type === 'extension_ui_request') requests.push(event)
     },
@@ -40,9 +40,9 @@ function contextUnderTest(): ZenExtensionUiContext & { events: PiRpcEvent[]; req
   return { ...context, events, requests }
 }
 
-const requestId = (event: PiRpcEvent | undefined): string => String(event?.id)
+const requestId = (event: RuntimeEvent | undefined): string => String(event?.id)
 /** The settle records (#114), as `{ id, outcome }` — what the follow's `dialog-settled` observation carries. */
-const settles = (events: PiRpcEvent[]): Array<{ id: unknown; outcome: unknown }> =>
+const settles = (events: RuntimeEvent[]): Array<{ id: unknown; outcome: unknown }> =>
   events.filter((event) => event.type === 'extension_ui_settled').map(({ id, outcome }) => ({ id, outcome }))
 
 test('select emits a request and resolves to the answered value', async () => {
@@ -220,7 +220,7 @@ beforeAll(async () => {
 })
 
 /** Drain microtasks until `count` records exist — the lift awaits a cached module promise, so depth is not one tick. */
-async function untilEmitted(events: PiRpcEvent[], count: number): Promise<void> {
+async function untilEmitted(events: RuntimeEvent[], count: number): Promise<void> {
   for (let drained = 0; drained < 100 && events.length < count; drained += 1) await Promise.resolve()
 }
 
@@ -274,9 +274,9 @@ test("cancelling the lifted prompt resolves picc's 'dismissed' value; a non-picc
 // ⚠ The catch that exists so a picc module that fails to load can never silently reopen #73:
 // the extension is released with "dismissed", the operator is told why, no request is emitted.
 test("⚠ a lift that rejects (picc's module did not load) fails closed: undefined to the extension, an error logged, no request", async () => {
-  const events: PiRpcEvent[] = []
+  const events: RuntimeEvent[] = []
   const { uiContext } = createZenExtensionUiContext({
-    emit: (event: PiRpcEvent) => events.push(event),
+    emit: (event: RuntimeEvent) => events.push(event),
     threadId: THREAD,
     liftDialog: () => Promise.reject(new Error('Cannot find module filePermissionDialog.ts')),
   })
@@ -319,9 +319,9 @@ test('⚠ a factory that throws or rejects against the inert terminal falls back
 })
 
 test('⚠ an async factory that never produces a component is cut off at the build budget, not awaited forever', async () => {
-  const events: PiRpcEvent[] = []
+  const events: RuntimeEvent[] = []
   const { uiContext } = createZenExtensionUiContext({
-    emit: (event: PiRpcEvent) => events.push(event),
+    emit: (event: RuntimeEvent) => events.push(event),
     threadId: THREAD,
     // The code's own timer with a tiny budget — the test awaits the promise it exposes, not a sleep.
     componentBuildTimeoutMs: 1,

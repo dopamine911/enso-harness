@@ -1,9 +1,9 @@
 import { type Static, Type } from 'typebox'
 import { ZenOpenDialog } from './dialog.ts'
 import { ZenObservation } from './observation.ts'
-import { PiPermissionModeState } from './permission-mode.ts'
-import { PiStreamingBehavior } from './pi-rpc.ts'
-import { ZenInterruptedTail } from './session-inspection.ts'
+import { ZenPermissionModeState } from './permission-mode.ts'
+import { ZenInterruptedTail } from './thread-inspection.ts'
+import { StreamingBehavior } from './thread-runtime.ts'
 
 /**
  * The server↔browser wire (#112): a thread's feed, as the follow route serves it.
@@ -30,7 +30,7 @@ export const ZenFollowSnapshot = Type.Object(
     busy: Type.Boolean(),
     /** See `ZenThreadSummary.generation`. */
     generation: Type.Integer({ minimum: 0 }),
-    permissionMode: PiPermissionModeState,
+    permissionMode: ZenPermissionModeState,
     /** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not zen's. */
     messages: Type.Array(Type.Unknown()),
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */
@@ -134,7 +134,7 @@ export type ZenPromptImage = Static<typeof ZenPromptImage>
 export const ZenPromptBody = Type.Object(
   {
     message: Type.String(),
-    streamingBehavior: Type.Optional(PiStreamingBehavior),
+    streamingBehavior: Type.Optional(StreamingBehavior),
     images: Type.Optional(Type.Array(ZenPromptImage, { minItems: 1, maxItems: ZEN_PROMPT_MAX_IMAGES })),
   },
   { additionalProperties: false },

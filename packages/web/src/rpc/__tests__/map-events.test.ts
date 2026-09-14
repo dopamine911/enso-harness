@@ -227,7 +227,7 @@ test('agent_settled is the only completion', () =>
   expect(mapPiEvent({ type: 'agent_settled' })).toEqual({ kind: 'settled' }))
 
 // --- #29's remaining half: custom session entries are promoted, other entries are not
-test('a custom session entry maps with its type and data', () =>
+test('a custom entry maps with its type and data', () =>
   expect(
     mapPiEvent({
       type: 'entry_appended',
@@ -244,7 +244,7 @@ test('a custom entry with no data still maps — the shape belongs to its extens
 
 // ⚠ Non-custom entries duplicate first-class observations (messages stream as
 // message_update), so they stay unmapped exactly as before this case existed.
-test('a non-custom session entry stays unmapped', () =>
+test('a non-custom entry stays unmapped', () =>
   expect(kindOf({ type: 'entry_appended', entry: { type: 'message', message: { role: 'user' } } })).toBe('unmapped'))
 
 test('an entry_appended with no readable entry stays unmapped', () =>

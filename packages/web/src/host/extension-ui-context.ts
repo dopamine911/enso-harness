@@ -8,9 +8,9 @@ import type {
 import { Theme } from '@earendil-works/pi-coding-agent'
 import type { Component, TUI } from '@earendil-works/pi-tui'
 import {
+  type DialogAnswer,
   isZenDialogSpec,
-  type PiDialogResponse,
-  type PiRpcEvent,
+  type RuntimeEvent,
   type ZenDialogOutcome,
   type ZenOpenDialog,
   zenLogger,
@@ -72,14 +72,14 @@ const INERT_TUI = { terminal: { rows: 24, columns: 80 } } as unknown as TUI
 const INERT_KEYBINDINGS = {} as unknown as KeybindingsManager
 
 interface PendingDialog {
-  resolve: (response: PiDialogResponse) => void
+  resolve: (response: DialogAnswer) => void
   /** What was asked — the `extension_ui_request` minus its id — so an answer can be checked against it (#112). */
   request: BlockingDialogRequest
 }
 
 export interface ZenExtensionUiContextOptions {
   /** Where every record goes — the host's event emitter, so records interleave with session events in order. */
-  emit: (event: PiRpcEvent) => void
+  emit: (event: RuntimeEvent) => void
   /** The thread this context serves — on every record it writes. */
   threadId: string
   /**
@@ -113,7 +113,7 @@ const hostLog = zenLogger('host', 'ui')
 export interface ZenExtensionUiContext {
   readonly uiContext: ExtensionUIContext
   /** Deliver an answer. Unknown ids are reported, not thrown — the extension is not waiting on them. */
-  answerDialog(response: PiDialogResponse): void
+  answerDialog(response: DialogAnswer): void
   /** Every pending question, oldest first, as the follow's snapshot lists them (#114). Empty once settled. */
   openDialogs(): ZenOpenDialog[]
   /** Cancel every pending dialog — session teardown. Each blocked extension call resolves to its cancel value. */
@@ -265,7 +265,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
     request: BlockingDialogRequest,
     dialogOptions: { signal?: AbortSignal; timeout?: number } | undefined,
     cancelValue: T,
-    mapResponse: (response: PiDialogResponse) => T,
+    mapResponse: (response: DialogAnswer) => T,
   ): Promise<T> {
     return new Promise<T>((resolve) => {
       const id = crypto.randomUUID()
@@ -287,7 +287,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         timeoutHandle = setTimeout(() => finish(cancelValue, 'timeout'), dialogOptions.timeout)
       }
       pendingDialogs.set(id, {
-        resolve: (response: PiDialogResponse) =>
+        resolve: (response: DialogAnswer) =>
           'cancelled' in response && response.cancelled
             ? finish(cancelValue, 'cancelled')
             : finish(mapResponse(response), 'answered'),
@@ -308,7 +308,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         },
         dialogOptions,
         undefined,
-        (response: PiDialogResponse) => ('value' in response ? response.value : undefined),
+        (response: DialogAnswer) => ('value' in response ? response.value : undefined),
       )
     },
     confirm(title: string, message: string, dialogOptions?: ExtensionUIDialogOptions): Promise<boolean> {
@@ -321,7 +321,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         },
         dialogOptions,
         CONFIRM_DISMISSED,
-        (response: PiDialogResponse) => ('confirmed' in response ? response.confirmed : false),
+        (response: DialogAnswer) => ('confirmed' in response ? response.confirmed : false),
       )
     },
     input(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined> {
@@ -334,7 +334,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         },
         dialogOptions,
         undefined,
-        (response: PiDialogResponse) => ('value' in response ? response.value : undefined),
+        (response: DialogAnswer) => ('value' in response ? response.value : undefined),
       )
     },
     editor(title: string, prefill?: string): Promise<string | undefined> {
@@ -342,7 +342,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         { method: 'editor', title, ...(prefill === undefined ? {} : { prefill }) },
         undefined,
         undefined,
-        (response: PiDialogResponse) => ('value' in response ? response.value : undefined),
+        (response: DialogAnswer) => ('value' in response ? response.value : undefined),
       )
     },
     notify(message: string, type?: 'info' | 'warning' | 'error'): void {
@@ -442,7 +442,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
 
   return {
     uiContext,
-    answerDialog(response: PiDialogResponse): void {
+    answerDialog(response: DialogAnswer): void {
       const pending = pendingDialogs.get(response.id)
       if (pending === undefined) {
         log.warn('dialog answer for unknown request id {dialogId} — already answered, cancelled, or never asked', {

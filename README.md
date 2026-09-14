@@ -281,9 +281,9 @@ Built so far:
 - **Mode-change notifications** rendered as chat-adjacent lines rather than lost to stderr.
 - **The URL names the thread (#142).** `?thread=<id>` is the source of truth for the active pane: a
   fresh page writes its thread's id at once, so a reload shows the thread you were in (transcript,
-  mode, the user's images — from the server, not page state); the rail and New Session push history,
+  mode, the user's images — from the server, not page state); the rail and New Thread push history,
   so back/forward walk the threads you switched between; a thread has a link. A `?thread=` that is
-  not a thread id opens a new session and says so on the rail. `history`, no router — a router earns
+  not a thread id opens a new thread and says so on the rail. `history`, no router — a router earns
   its place only if `?debug`/`?log`/`?fixture` become a real surface.
 - **Images on a prompt (#68).** Paste, drop, or attach png/jpeg/gif/webp (5 MB each, 20 per prompt);
   the composer — `prompt-input.tsx` + `attachments.tsx` ported under #121 — shows the thumbnails, and

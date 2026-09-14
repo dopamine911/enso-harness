@@ -1,6 +1,6 @@
 import {
   browserSection,
-  describeSessionEntry,
+  describeEntry,
   describeThreadEvent,
   persistedPermissionMode,
   type ZenLogLine,
@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
-import type { RecordedCustomChunk } from './custom-event-router.ts'
+import type { RecordedCustomEvent } from './custom-event-router.ts'
 import { type PermissionModeState, usePermissionMode } from './permission-mode.tsx'
 import {
   ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
@@ -60,7 +60,7 @@ function useRing(ring: Store<readonly ZenLogLine[]> | undefined): readonly ZenLo
 export interface BrowserBelief {
   readonly mode: PermissionModeState
   readonly stats: ThreadStats
-  readonly recentChunks: readonly RecordedCustomChunk[]
+  readonly recentChunks: readonly RecordedCustomEvent[]
   /** The acquisition this page's last run held (`zen.run`, #109); undefined before a run. */
   readonly generation: number | undefined
   /** This thread's records from the page's ring (#132): what the browser LOGGED, newest last. */
@@ -99,7 +99,7 @@ export interface ThreadDebugViewProps {
   readonly threadId: string
   readonly browser: BrowserBelief
   /** The server's answer, or undefined before the first refresh. */
-  readonly session: ZenThreadInspection | undefined
+  readonly inspection: ZenThreadInspection | undefined
   /** The thread's two event tails (#97), fetched alongside the inspection; undefined before the first refresh. */
   readonly events: ZenThreadEvents | undefined
   /** Why the last refresh produced nothing — a 404 for a thread that has not run yet, a down server. */
@@ -120,7 +120,7 @@ export interface ThreadDebugViewProps {
  * cased to that name: a `zen.entry` value is a session entry with a `type` too, and reads as
  * `zen.entry (custom)`, which is just as useful.
  */
-export function describeChunk(chunk: RecordedCustomChunk): string {
+export function describeChunk(chunk: RecordedCustomEvent): string {
   const value = chunk.value
   if (typeof value !== 'object' || value === null || !('type' in value) || typeof value.type !== 'string') {
     return chunk.name
@@ -135,7 +135,7 @@ export function describeChunk(chunk: RecordedCustomChunk): string {
  */
 function entryKey(entry: unknown, position: number): string {
   if (typeof entry === 'object' && entry !== null && 'id' in entry && typeof entry.id === 'string') return entry.id
-  return `${position}:${describeSessionEntry(entry)}`
+  return `${position}:${describeEntry(entry)}`
 }
 
 function Mismatch({ when, says }: { when: boolean; says: string }): React.ReactNode {
@@ -161,7 +161,7 @@ function EventTailList({ events }: { events: readonly ZenThreadEvent[] }): React
 export function ThreadDebugView({
   threadId,
   browser,
-  session,
+  inspection: session,
   events,
   error,
   copyState,
@@ -276,7 +276,7 @@ export function ThreadDebugView({
               <h4 className="mt-1 text-foreground">branch ({session.entries.length} entries)</h4>
               <ol>
                 {session.entries.map((entry, position) => (
-                  <li key={entryKey(entry, position)}>{describeSessionEntry(entry)}</li>
+                  <li key={entryKey(entry, position)}>{describeEntry(entry)}</li>
                 ))}
               </ol>
             </>
@@ -382,7 +382,7 @@ const SERVER_STATE_CHUNKS: ReadonlySet<string> = new Set([
  * The sequence of the latest server-state chunk, or undefined before any: the drawer
  * refreshes when this moves. Exported for `__tests__/thread-debug.test.tsx`.
  */
-export function latestServerStateSequence(chunks: readonly RecordedCustomChunk[]): number | undefined {
+export function latestServerStateSequence(chunks: readonly RecordedCustomEvent[]): number | undefined {
   for (let position = chunks.length - 1; position >= 0; position -= 1) {
     const chunk = chunks[position]
     if (chunk !== undefined && SERVER_STATE_CHUNKS.has(chunk.name)) return chunk.sequence
@@ -505,7 +505,7 @@ export function ThreadDebugDrawer(): React.ReactNode {
     <ThreadDebugView
       threadId={threadId}
       browser={browser}
-      session={session}
+      inspection={session}
       events={events}
       error={error}
       copyState={copyState}

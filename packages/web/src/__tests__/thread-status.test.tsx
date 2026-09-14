@@ -81,15 +81,15 @@ test('a tail the summary has no word for — an image, an unmatched result — i
 
 // ── counts ───────────────────────────────────────────────────────────────────
 
-test('turns count user messages; tool calls count every call, paired or not', () => {
+test('prompts count user messages; tool calls count every call, paired or not', () => {
   const messages = [
     user('u1', 'one'),
     assistant('a1', [call('c1', 'read'), result('c1'), call('c2', 'bash')]),
     user('u2', 'two'),
     assistant('a2', [{ type: 'text', content: 'done' }]),
   ]
-  expect(countThread(messages)).toEqual({ turns: 2, toolCalls: 2 })
-  expect(countThread([])).toEqual({ turns: 0, toolCalls: 0 })
+  expect(countThread(messages)).toEqual({ prompts: 2, toolCalls: 2 })
+  expect(countThread([])).toEqual({ prompts: 0, toolCalls: 0 })
 })
 
 // ── the view ─────────────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string 
   renderToStaticMarkup(
     <ThreadStatusView
       activity={props.activity ?? { kind: 'idle' }}
-      counts={props.counts ?? { turns: 0, toolCalls: 0 }}
+      counts={props.counts ?? { prompts: 0, toolCalls: 0 }}
       stats={props.stats ?? NO_STATS}
     />,
   )
@@ -108,7 +108,7 @@ const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string 
 test('a fresh session renders idle with zeros — never an empty string', () => {
   const rendered = render({})
   expect(rendered).toContain('idle')
-  expect(rendered).toContain('0 turns')
+  expect(rendered).toContain('0 prompts')
   expect(rendered).toContain('0 tool calls')
   expect(rendered).toContain('$0.0000')
   // No last-request figure before the first request: absent, not a fabricated zero.
@@ -123,9 +123,9 @@ test('disconnected renders as its own word, not pulsing, with the recovery in th
 })
 
 test('the running tool is named, and counts read as English', () => {
-  const rendered = render({ activity: { kind: 'running', tool: 'bash' }, counts: { turns: 1, toolCalls: 1 } })
+  const rendered = render({ activity: { kind: 'running', tool: 'bash' }, counts: { prompts: 1, toolCalls: 1 } })
   expect(rendered).toContain('running bash')
-  expect(rendered).toContain('1 turn<')
+  expect(rendered).toContain('1 prompt<')
   expect(rendered).toContain('1 tool call<')
 })
 

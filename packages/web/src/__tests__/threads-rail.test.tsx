@@ -84,7 +84,7 @@ test("a summary update reaches the list and moves the thread's activity clock; a
   expect(threadListStore.get()).toHaveLength(1)
 })
 
-test('adopting stored history restores dates, title and mode under the stored session id exactly once', () => {
+test('adopting stored history restores dates, title and mode under the stored thread id exactly once', () => {
   const history = {
     threadId: 'stored-1',
     messages: [
@@ -160,8 +160,8 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
       onNew={noop}
     />,
   )
-  expect(rendered).toContain('Active Sessions')
-  expect(rendered).toContain('New Session')
+  expect(rendered).toContain('Active Threads')
+  expect(rendered).toContain('New Thread')
   expect(rendered).toContain(UNTITLED_THREAD)
   expect(rendered).toContain('fix the login bug')
   expect(rendered).toContain('6d')
@@ -204,7 +204,7 @@ test('the earlier list distinguishes resumable, running-elsewhere, empty and fai
       earlierError={undefined}
     />,
   )
-  expect(rendered).toContain('aria-label="Previous Sessions"')
+  expect(rendered).toContain('aria-label="Previous Threads"')
   expect(rendered).toContain('resume me')
   expect(rendered).toContain('2h')
   // Running is shown, not locked (#114): the row is how a reloaded page gets back to an open question.
@@ -216,6 +216,6 @@ test('the earlier list distinguishes resumable, running-elsewhere, empty and fai
   expect(empty).toContain('none yet')
   const failed = renderToStaticMarkup(<ThreadsRail {...baseProps} earlier={[]} earlierError="connection refused" />)
   expect(failed).toContain('role="alert"')
-  expect(failed).toContain('could not list previous sessions: connection refused')
+  expect(failed).toContain('could not list previous threads: connection refused')
   expect(failed).not.toContain('none yet')
 })
