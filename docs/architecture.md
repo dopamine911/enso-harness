@@ -117,6 +117,12 @@ crosses — routes, browser, wire types. **`session`** is reserved for pi's dura
 types (`PiSession`, `SessionManager`, `AgentSession`). Before this was written the word carried four
 meanings; anything zen-owned that says "session" and means "thread" is a rename owed (#102).
 
+[`glossary.md`](./glossary.md) is the authority for every word (#161): this table is the identity
+half of its *Thread* domain, kept here because the control plane is read from this page. Its six
+domains — Thread, Control, Permission, Observation, Record, Surface — follow invariant 2 below (a
+route tells the runtime; the feed ends the run); the renames owed are its *Retired* table; the map
+from our words to the vendors' is its vendor map, the one place it names them.
+
 | Noun | Meaning | Id | Minted by | Owner, lifetime |
 |---|---|---|---|---|
 | **project** | the cwd pi reads and writes | path | server startup (`ZenServerOptions.cwd`), never a request | the server process; one project, many threads |
@@ -130,11 +136,7 @@ meanings; anything zen-owned that says "session" and means "thread" is a rename 
 | **branch** | pi's root→leaf entry chain, carried verbatim | entry `id`/`parentId` | pi | pi |
 | **fork** | pi's `/fork`: a new log whose header names `parentSession` | pi session id | pi | pi |
 
-Against deepseek-harness's vocabulary (#102): our `thread` is dsh's `SessionId`; our `run` is dsh's
-`Run` (an owned interval, not a prompt); our `HostedSession` fuses dsh's `Session` (log) and `Agent`
-(handle) — deliberately, since one id serves both; `follow` + `asOfSeq` match dsh's; `dialog` has no
-dsh counterpart because nothing parks when prompt is unary and follow is a separate stream. pi's
-"turn" is dsh's *step* (one model request plus its tool results); dsh's *turn* is our run.
+The comparison with deepseek-harness's vocabulary (#102, #109) lives in the glossary's vendor map.
 
 ### Lifecycles
 
@@ -503,7 +505,7 @@ so a reader knows where to look before touching the file.
 | The **obligation queue** | Design preserved in `concepts/agent-support-systems.md` Part 6. Un-deferred once the tool surface is stable enough to accrue against. |
 | **Cross-process coordination** on one session id (TUI and web in the same cwd) | pi appends with no lock; two live writers would fork the log silently. Nothing does it today, so it is a rule (control plane, invariant 4). Un-deferred when both surfaces can mutate the same thread. |
 | **Run-provenance entries** (git revision, config hash, active rules and skills) | Where they go is decided — pi's log, as custom entries. What they hold waits for the lineage phase, so the schema is designed once against a real fork. |
-| The `session`→`thread` **renames** in zen-owned names | Owed (#102). Done against this document's vocabulary, by LSP, after it is agreed — not before. |
+| The `session`→`thread` **renames** in zen-owned names | Owed (#102). The list is the glossary's *Retired* table (#161); done by LSP once that table is agreed — not before. |
 | **Command classification** (argument-level policy) | With confinement and recoverability in place it is friction optimisation, not safety. Accretes from real incidents. |
 | Log wiring itself | A later phase. The consent model is decided; the ingestion shape is not. |
 
@@ -525,12 +527,14 @@ so a reader knows where to look before touching the file.
 ## Reading order for a fresh session
 
 1. This document — *The control plane* first if you are touching `packages/web`.
-2. [`../README.md`](../README.md) — what is built, guard by guard and route by route; the more
+2. [`glossary.md`](./glossary.md) — what every word means, by domain; the vendor map at its end if
+   you are coming from pi's or deepseek-harness's vocabulary.
+3. [`../README.md`](../README.md) — what is built, guard by guard and route by route; the more
    implementation-accurate of the two documents.
-3. [`concepts/pi-immediate-needs.md`](./concepts/pi-immediate-needs.md) — what pi lacks, ranked, with
+4. [`concepts/pi-immediate-needs.md`](./concepts/pi-immediate-needs.md) — what pi lacks, ranked, with
    seams and effort. Phase 0 comes straight from its Tier 0.
-4. [`concepts/agent-boundaries.md`](./concepts/agent-boundaries.md) — the boundary model and why
+5. [`concepts/agent-boundaries.md`](./concepts/agent-boundaries.md) — the boundary model and why
    enforcement location matters more than rule content.
-5. [`concepts/harness-design-principles.md`](./concepts/harness-design-principles.md) — progressive
+6. [`concepts/harness-design-principles.md`](./concepts/harness-design-principles.md) — progressive
    disclosure, applied seven times.
-6. The rest of `concepts/` as needed.
+7. The rest of `concepts/` as needed.
