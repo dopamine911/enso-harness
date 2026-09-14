@@ -90,7 +90,7 @@ test('the matcher sees a retired name however it is spelled, and leaves the rese
   ]) {
     expect(pathNamesRetired(path)).toBe(true)
   }
-  expect(namesRetired('`- session: `${inspection.sessionId}``')).toBe(false)
+  expect(namesRetired("const line = '- session: ' + inspection.sessionId")).toBe(false)
   for (const line of [
     'const { sessionId, sessionDir, sessionFile } = inspection',
     "const origin: ZenUiRequestOrigin = 'session-start'",
