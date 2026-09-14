@@ -100,7 +100,7 @@ const renderWith = ({
     <ThreadDebugView
       threadId="t1"
       browser={browser}
-      session={session}
+      inspection={session}
       events={events}
       error={error}
       copyState={copyState}

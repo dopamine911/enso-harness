@@ -1,24 +1,27 @@
 import { type Static, type TObject, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
 import type { ZenOpenDialog } from './dialog.ts'
-import type { PiPermissionModeState } from './permission-mode.ts'
+import type { ZenPermissionModeState } from './permission-mode.ts'
 
 /**
- * The shapes pi hands the web surface, and the in-process session contract around them.
+ * The thread runtime: the contract the host implements for one thread, and the shapes that
+ * cross it (`docs/glossary.md` → Thread, Control). This is the seam a runtime replacement
+ * would re-implement — prompt, abort, answer, subscribe, clear the queue, dispose — with
+ * three fakes in the tests as its second implementation today.
  *
- * ⓘ WHY "rpc" IS STILL IN THE NAME. Until #69 the web server spawned `pi --mode rpc` and
- * spoke JSONL to it; that transport is deleted. What survives is the EVENT SHAPE pi's rpc
- * mode defined (`docs/rpc.md` of pi 0.84.4) — the in-process host translates
- * `AgentSession` events into exactly that shape (`host/session-events.ts`), because it is
- * the seam `map-events.ts` and its tests consume. The wire is gone; its vocabulary is the
- * contract. Renaming the module would churn every importer to say the same thing.
+ * ⓘ HISTORY. Until #69 the web server spawned the runtime in its RPC mode and spoke JSONL
+ * to it; that transport is deleted. What survives is the EVENT SHAPE that mode defined —
+ * the in-process host translates the runtime's session events into exactly that shape
+ * (`host/session-events.ts`), because it is the seam `map-events.ts` and its tests consume.
+ * The module was called `pi-rpc.ts` for that reason until #165 renamed it: the wire is
+ * gone, the contract is ours, and a name that says a vendor's transport describes neither.
  *
  * ⚠ DELIBERATELY NOT EXHAUSTIVE, AND THE EVENT SCHEMA IS OPEN. Only `type` is constrained,
- * so an unmodelled event validates and is forwarded rather than rejected. pi's event list
- * will grow, and a schema that closed every event would turn a new event type into a
- * parse failure — converting "we do not render this yet" into "the host is broken".
+ * so an unmodelled event validates and is forwarded rather than rejected. The runtime's
+ * event list will grow, and a schema that closed every event would turn a new event type
+ * into a parse failure — converting "we do not render this yet" into "the host is broken".
  *
- * ⚠ ONE SCHEMA BELOW CARRIES FUNCTIONS: `PiSession`. TypeBox can express that, and its
+ * ⚠ ONE SCHEMA BELOW CARRIES FUNCTIONS: `ThreadRuntime`. TypeBox can express that, and its
  * validator does check `typeof === "function"` — but it serialises to `{"type":
  * "function"}`, a TypeBox extension rather than standard JSON Schema, so it is NOT usable
  * by an OpenAPI consumer. Declared as a schema anyway, by decision: one rule ("every shape
@@ -27,16 +30,16 @@ import type { PiPermissionModeState } from './permission-mode.ts'
  */
 
 /** Base64 image content, accepted by `prompt`, `steer` and `follow_up`. */
-export const PiImageContent = Type.Object({
+export const PromptImageContent = Type.Object({
   type: Type.Literal('image'),
   data: Type.String(),
   mimeType: Type.String(),
 })
-export type PiImageContent = Static<typeof PiImageContent>
+export type PromptImageContent = Static<typeof PromptImageContent>
 
 /** What to do when a prompt arrives while the agent is already streaming. */
-export const PiStreamingBehavior = Type.Union([Type.Literal('steer'), Type.Literal('followUp')])
-export type PiStreamingBehavior = Static<typeof PiStreamingBehavior>
+export const StreamingBehavior = Type.Union([Type.Literal('steer'), Type.Literal('followUp')])
+export type StreamingBehavior = Static<typeof StreamingBehavior>
 
 /**
  * ⚠ Open-object types need an explicit intersection.
@@ -52,10 +55,10 @@ const openObject = <T extends Parameters<typeof Type.Object>[0]>(properties: T):
   Type.Object(properties, { additionalProperties: Type.Unknown() })
 
 /** One event from pi, in the rpc wire shape. Only `type` is constrained — see the header. */
-export const PiRpcEventSchema = openObject({
+export const RuntimeEventSchema = openObject({
   type: Type.String({ minLength: 1 }),
 })
-export type PiRpcEvent = Static<typeof PiRpcEventSchema> & OpenRecord
+export type RuntimeEvent = Static<typeof RuntimeEventSchema> & OpenRecord
 
 /**
  * One entry from pi's `get_commands`.
@@ -67,28 +70,28 @@ export type PiRpcEvent = Static<typeof PiRpcEventSchema> & OpenRecord
  * model will try to answer. See `session.ts` for why that has to be refused rather than
  * forwarded.
  */
-export const PiCommand = Type.Object({
+export const RuntimeCommand = Type.Object({
   name: Type.String(),
   source: Type.Union([Type.Literal('extension'), Type.Literal('prompt'), Type.Literal('skill')]),
   description: Type.Optional(Type.String()),
   location: Type.Optional(Type.String()),
   path: Type.Optional(Type.String()),
 })
-export type PiCommand = Static<typeof PiCommand>
+export type RuntimeCommand = Static<typeof RuntimeCommand>
 
-const commandValidator = Compile(PiCommand)
+const commandValidator = Compile(RuntimeCommand)
 
-export function isPiCommand(value: unknown): value is PiCommand {
+export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
   return commandValidator.Check(value)
 }
 
 /**
- * ── The in-process session contract (#69) ────────────────────────────────────────────────
+ * ── The thread runtime contract (#69) ───────────────────────────────────────────────────
  *
- * What the web server's streaming loop needs from a pi session, whatever hosts it. Today
- * the host is an in-process `AgentSession` (`packages/web/src/host/agent-host.ts`); the
- * shape is what `session.ts` used to obtain from the rpc subprocess through `PiRpcClient`,
- * lifted one level: typed events in, typed commands out, no wire.
+ * What the web server needs from a thread's runtime, whatever hosts it. Today the host is
+ * in-process (`packages/web/src/host/agent-host.ts`); the shape is what the server used to
+ * obtain from the RPC subprocess, lifted one level: typed events in, typed commands out,
+ * no wire.
  *
  * ⚠ ACCEPTANCE AND COMPLETION ARE SEPARATE SIGNALS, deliberately. `prompt` reports
  * acceptance through `onAccepted` — pi's `preflightResult(true)`, which fires when the
@@ -99,16 +102,16 @@ export function isPiCommand(value: unknown): value is PiCommand {
  */
 
 /** An answer to a blocking dialog, keyed to the request id the `extension_ui_request` carried. */
-export type PiDialogResponse = { id: string } & ({ cancelled: true } | { value: string } | { confirmed: boolean })
+export type DialogAnswer = { id: string } & ({ cancelled: true } | { value: string } | { confirmed: boolean })
 
-export interface PiPromptRequest {
+export interface PromptRequest {
   message: string
-  images?: readonly PiImageContent[]
+  images?: readonly PromptImageContent[]
   /** Required by pi when the session is already streaming — otherwise `prompt` rejects. */
-  streamingBehavior?: PiStreamingBehavior
+  streamingBehavior?: StreamingBehavior
 }
 
-export interface PiPromptOutcome {
+export interface PromptOutcome {
   /** Preflight accepted the prompt (or an extension command finished). NOT run completion. */
   onAccepted: () => void
   /** Preflight rejected the prompt before acceptance; the run never started. */
@@ -121,11 +124,11 @@ export interface PiPromptOutcome {
  * buffer (the session's own start), or `live`. The two deliveries a subscriber can see — the
  * event tail's `held`/`dropped` provenances (#97) never reach one.
  */
-export type PiEventDelivery = 'live' | 'replayed'
+export type EventDelivery = 'live' | 'replayed'
 
-export const PiSession = Type.Object({
+export const ThreadRuntime = Type.Object({
   /** Fire a prompt. Never awaits the run — see the section header. */
-  prompt: Type.Unsafe<(request: PiPromptRequest, outcome: PiPromptOutcome) => void>(
+  prompt: Type.Unsafe<(request: PromptRequest, outcome: PromptOutcome) => void>(
     Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
   ),
   /**
@@ -133,7 +136,7 @@ export const PiSession = Type.Object({
    * an unknown or already-settled id is reported through the host's problem channel, so
    * callers do not wrap this in a try/catch.
    */
-  answerDialog: Type.Unsafe<(response: PiDialogResponse) => void>(Type.Function([Type.Unknown()], Type.Void())),
+  answerDialog: Type.Unsafe<(response: DialogAnswer) => void>(Type.Function([Type.Unknown()], Type.Void())),
   /**
    * Every question a blocking dialog is waiting on, oldest first — what the follow's
    * snapshot lists (#114), and what an answer is validated against (#112: a select's value
@@ -142,7 +145,7 @@ export const PiSession = Type.Object({
    */
   openDialogs: Type.Unsafe<() => ZenOpenDialog[]>(Type.Function([], Type.Unknown())),
   /** The slash commands this session can run — extension commands, prompt templates, skills. Synchronous: read off the live registry, no round trip. */
-  listCommands: Type.Unsafe<() => PiCommand[]>(Type.Function([], Type.Unknown())),
+  listCommands: Type.Unsafe<() => RuntimeCommand[]>(Type.Function([], Type.Unknown())),
   /**
    * The permission-mode receipt a run starts with (#84): picc's CURRENT mode for this
    * session, computed the way picc itself restores it — the last persisted `modes` entry
@@ -152,7 +155,7 @@ export const PiSession = Type.Object({
    * Synchronous: it walks the in-memory branch and registry, no round trip — and it is
    * deliberately NOT `listCommands`, whose call count the refusal path's tests pin.
    */
-  permissionModeState: Type.Unsafe<() => PiPermissionModeState>(Type.Function([], Type.Unknown())),
+  permissionModeState: Type.Unsafe<() => ZenPermissionModeState>(Type.Function([], Type.Unknown())),
   /**
    * Receive every event in pi's rpc wire shape (the shape `map-events.ts` consumes), plus
    * `extension_ui_request` and `extension_error` records the host synthesises. Events
@@ -166,16 +169,16 @@ export const PiSession = Type.Object({
    * it into the observation's `origin`, so the browser can group startup chatter without
    * guessing from position in the stream.
    *
-   * ⚠ `Type.Unsafe` rather than `Type.Function([PiRpcEventSchema], …)`, and the reason is
+   * ⚠ `Type.Unsafe` rather than `Type.Function([RuntimeEventSchema], …)`, and the reason is
    * a cost of declaring behaviour as a schema worth recording: the latter infers its
-   * parameter as `Static<typeof PiRpcEventSchema>`, which DROPS the `& Record<string,
+   * parameter as `Static<typeof RuntimeEventSchema>`, which DROPS the `& Record<string,
    * unknown>` intersection that makes an event's unmodelled fields reachable — consumers
    * would get `{ type: string }` and could not read `event.willRetry`. `Type.Unsafe<T>`
    * keeps the schema for uniformity and the precise type for consumers; it is "unsafe"
    * because the two are no longer derived from one another, so a schema change must be
    * mirrored in the annotation by hand.
    */
-  subscribe: Type.Unsafe<(onEvent: (event: PiRpcEvent, delivery: PiEventDelivery) => void) => () => void>(
+  subscribe: Type.Unsafe<(onEvent: (event: RuntimeEvent, delivery: EventDelivery) => void) => () => void>(
     Type.Function([Type.Unknown()], Type.Unknown()),
   ),
   /** Abort the in-flight run and wait until the agent is idle. The session survives. */
@@ -190,4 +193,4 @@ export const PiSession = Type.Object({
   /** Cancel pending dialogs, tell extensions the session is shutting down, release the session. Idempotent. */
   dispose: Type.Unsafe<() => void>(Type.Function([], Type.Void())),
 })
-export type PiSession = Static<typeof PiSession>
+export type ThreadRuntime = Static<typeof ThreadRuntime>

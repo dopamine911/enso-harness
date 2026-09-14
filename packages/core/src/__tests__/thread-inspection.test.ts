@@ -1,31 +1,31 @@
 import { expect, test } from 'bun:test'
 import {
-  describeSessionEntry,
+  describeEntry,
   describeThreadEvent,
   isZenThreadId,
   threadEventColumns,
   type ZenThreadEvent,
-} from '../session-inspection.ts'
+} from '../thread-inspection.ts'
 
-// The row formats are shared by the `?debug` drawer and `zen-session.mjs` (PR #100 review: one
+// The row formats are shared by the `?debug` drawer and `zen-thread.mjs` (PR #100 review: one
 // definition, after the #86 pair had drifted). What a human reads off either surface is pinned here.
 
 test("a branch entry row: time, type, custom type, message role, and picc's mode when the entry is one", () => {
   expect(
-    describeSessionEntry({
+    describeEntry({
       type: 'custom',
       customType: 'modes',
       timestamp: '2026-09-08T12:34:56.000Z',
       data: { mode: 'plan' },
     }),
   ).toBe('12:34:56 custom:modes mode=plan')
-  expect(
-    describeSessionEntry({ type: 'message', timestamp: '2026-09-08T12:34:56.000Z', message: { role: 'user' } }),
-  ).toBe('12:34:56 message user')
+  expect(describeEntry({ type: 'message', timestamp: '2026-09-08T12:34:56.000Z', message: { role: 'user' } })).toBe(
+    '12:34:56 message user',
+  )
   // Missing fields read as absent, never as "undefined"; a non-object is shown as itself.
-  expect(describeSessionEntry({ type: 'model_change' })).toBe('model_change')
-  expect(describeSessionEntry({})).toBe('?')
-  expect(describeSessionEntry(42)).toBe('42')
+  expect(describeEntry({ type: 'model_change' })).toBe('model_change')
+  expect(describeEntry({})).toBe('?')
+  expect(describeEntry(42)).toBe('42')
 })
 
 // The id names a FILE (#95): what a filesystem could read is out; what the browser mints is in.

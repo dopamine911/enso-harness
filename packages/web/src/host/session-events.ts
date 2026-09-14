@@ -1,5 +1,5 @@
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
-import type { PiRpcEvent } from '@zen/core'
+import type { RuntimeEvent } from '@zen/core'
 
 /**
  * `AgentSessionEvent` → the rpc WIRE shape (#69).
@@ -22,7 +22,7 @@ import type { PiRpcEvent } from '@zen/core'
  * `tool_execution_*`, `entry_appended`, `queue_update`, … — which is why an unmodelled pi
  * event still reaches the browser as `zen.unmapped` (the design rule from `map-events.ts`).
  */
-export function toRpcWireEvent(event: AgentSessionEvent): PiRpcEvent {
+export function toRpcWireEvent(event: AgentSessionEvent): RuntimeEvent {
   if (event.type !== 'message_update') {
     // A copy, not a cast: the union's members are object literals, so the spread is an
     // open record and needs no type assertion to become the wire shape.

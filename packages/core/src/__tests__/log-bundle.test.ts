@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { ZEN_REDACTED, type ZenLogLine } from '../log.ts'
 import { browserSection, buildLogBundle, bundleRecordsText, isLogBundle, redactionManifest } from '../log-bundle.ts'
 import { parseZenLogLine } from '../log-process.ts'
-import type { ZenThreadInspection } from '../session-inspection.ts'
+import type { ZenThreadInspection } from '../thread-inspection.ts'
 
 const line = (message: string, properties: Record<string, unknown>): ZenLogLine => ({
   '@timestamp': '2026-09-10T01:00:00.000Z',

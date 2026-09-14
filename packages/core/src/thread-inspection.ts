@@ -1,5 +1,5 @@
 import { type Static, Type } from 'typebox'
-import { PiPermissionModeState } from './permission-mode.ts'
+import { ZenPermissionModeState } from './permission-mode.ts'
 
 /**
  * What a live thread's session ACTUALLY contains, as the server reports it (#86).
@@ -7,7 +7,7 @@ import { PiPermissionModeState } from './permission-mode.ts'
  * Everything the web surface shows is a derived view of the stream; these are the shapes
  * that let a human or an agent see the thing they derive from and cross-check. Served by
  * `GET /api/threads` and `GET /api/threads/:threadId`, rendered by the debug drawer and
- * printed by `scripts/zen-session.mjs`.
+ * printed by `scripts/zen-thread.mjs`.
  *
  * ⚠ READ-ONLY, LOOPBACK-ONLY, DEV-ONLY — the server that serves these binds `127.0.0.1`
  * and says so in its header. `entries` is the session branch itself: conversation, tool
@@ -56,7 +56,7 @@ export const ZenThreadInspection = Type.Object(
     cwd: Type.String(),
     sessionDir: Type.String(),
     sessionFile: Type.Union([Type.String(), Type.Null()]),
-    permissionMode: PiPermissionModeState,
+    permissionMode: ZenPermissionModeState,
     /** Slash commands this session registers — extensions, prompt templates, skills. */
     commands: Type.Array(Type.String()),
     busy: Type.Boolean(),
@@ -130,9 +130,9 @@ export type ZenThreadEvents = Static<typeof ZenThreadEvents>
 /**
  * One entry of the branch as a row — `12:34:56 custom:modes mode=plan` — read defensively:
  * pi's shapes are carried, not modelled. THE definition (PR #100 review): the drawer and
- * `zen-session.mjs` had one each and they had already drifted apart.
+ * `zen-thread.mjs` had one each and they had already drifted apart.
  */
-export function describeSessionEntry(entry: unknown): string {
+export function describeEntry(entry: unknown): string {
   if (typeof entry !== 'object' || entry === null) return String(entry)
   const fields = entry as {
     type?: unknown
@@ -167,7 +167,7 @@ export interface ThreadEventColumns {
 /**
  * THE definition of what each column holds — a new provenance value or inner name lands
  * here once. How the columns are joined is layout, the surface's own: the drawer joins
- * with a space (`describeThreadEvent`), `zen-session.mjs` pads them into a table.
+ * with a space (`describeThreadEvent`), `zen-thread.mjs` pads them into a table.
  */
 export function threadEventColumns(event: ZenThreadEvent): ThreadEventColumns {
   return {
@@ -252,7 +252,7 @@ export const ZenThreadHistory = Type.Object(
   {
     threadId: Type.String(),
     messages: Type.Array(Type.Unknown()),
-    permissionMode: PiPermissionModeState,
+    permissionMode: ZenPermissionModeState,
     /** Present only when the branch ends inside a turn — see {@link ZenInterruptedTail}. */
     interrupted: Type.Optional(ZenInterruptedTail),
   },

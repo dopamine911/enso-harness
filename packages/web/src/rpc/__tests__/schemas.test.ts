@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
 import {
   isZenToolResultDescriptor,
-  PiImageContent,
-  PiRpcEventSchema,
+  PromptImageContent,
+  RuntimeEventSchema,
   ZenObservation,
   ZenToolResultDescriptor,
   ZenUsage,
@@ -56,17 +56,17 @@ test('usage rejects non-integer token counts', () => {
 
 // --- pi wire schemas
 test('image content is validated, so a malformed attachment fails at the boundary', () => {
-  expect(Check(PiImageContent, { type: 'image', data: 'aGk=', mimeType: 'image/png' })).toBe(true)
-  expect(Check(PiImageContent, { type: 'file', data: 'aGk=', mimeType: 'image/png' })).toBe(false)
-  expect(Check(PiImageContent, { type: 'image', data: 'aGk=' })).toBe(false)
+  expect(Check(PromptImageContent, { type: 'image', data: 'aGk=', mimeType: 'image/png' })).toBe(true)
+  expect(Check(PromptImageContent, { type: 'file', data: 'aGk=', mimeType: 'image/png' })).toBe(false)
+  expect(Check(PromptImageContent, { type: 'image', data: 'aGk=' })).toBe(false)
 })
 
 // ⚠ The event schema is OPEN on purpose — an unmodelled field must not fail validation, or a
 // new pi event becomes "the host is broken" instead of "we don't render this yet".
 test('extra fields are accepted, so a newer pi does not break the host', () => {
-  expect(Check(PiRpcEventSchema, { type: 'some_future_event', brandNew: { nested: true } })).toBe(true)
-  expect(Check(PiRpcEventSchema, { type: '' })).toBe(false)
-  expect(Check(PiRpcEventSchema, { delta: 'x' })).toBe(false)
+  expect(Check(RuntimeEventSchema, { type: 'some_future_event', brandNew: { nested: true } })).toBe(true)
+  expect(Check(RuntimeEventSchema, { type: '' })).toBe(false)
+  expect(Check(RuntimeEventSchema, { delta: 'x' })).toBe(false)
 })
 
 // --- the mapper's output validates against the union it claims to produce

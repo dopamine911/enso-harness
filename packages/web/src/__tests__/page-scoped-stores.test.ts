@@ -19,7 +19,7 @@ const webSource = join(import.meta.dir, '..')
 const PAGE_SCOPED_BY_DESIGN: readonly string[] = [
   // The rail's list of the page's threads: one list per page, owned by the registry.
   'thread-stores.ts:threadList',
-  // The server's stored-threads listing (Previous Sessions): one per page, refreshed on settle.
+  // The server's stored-threads listing (Previous Threads): one per page, refreshed on settle.
   'chat-screen.tsx:storedThreads',
   // The page's log ring and shipper (#132): configured once by main.tsx, read by the drawer.
   'thread-stores.ts:browserLogging',

@@ -4,13 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
+  type DialogAnswer,
+  type EventDelivery,
   isZenDialogSpec,
-  type PiDialogResponse,
-  type PiEventDelivery,
-  type PiPromptOutcome,
-  type PiPromptRequest,
-  type PiRpcEvent,
-  type PiSession,
+  type PromptOutcome,
+  type PromptRequest,
+  type RuntimeEvent,
+  type ThreadRuntime,
   ZEN_IMAGE_MAX_BYTES,
   ZEN_PROMPT_BODY_MAX_BYTES,
   ZEN_PROMPT_MAX_IMAGES,
@@ -18,7 +18,7 @@ import {
   type ZenFollowFrame,
 } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
-import type { AgentHost, HostedSession } from '../../host/agent-host.ts'
+import type { AgentHost, HostedThread } from '../../host/agent-host.ts'
 import { startZenServer } from '../index.ts'
 import { type OpenFollow, openFollow as openSharedFollow } from './follow-reader.ts'
 
@@ -32,8 +32,8 @@ import { type OpenFollow, openFollow as openSharedFollow } from './follow-reader
  */
 
 interface FakeRecord {
-  prompts: PiPromptRequest[]
-  answers: PiDialogResponse[]
+  prompts: PromptRequest[]
+  answers: DialogAnswer[]
   aborts: number
   disposed: number
   /** What pi holds behind the run; a stop clears it and the route hands it back (#75). */
@@ -44,18 +44,18 @@ interface FakeHost {
   readonly host: AgentHost
   readonly built: FakeRecord[]
   /** Emit into the LAST built session — every scenario here uses one thread. */
-  readonly emit: (event: PiRpcEvent) => void
+  readonly emit: (event: RuntimeEvent) => void
   /** Fire the last prompt's acceptance (a slash command's completion signal). */
   readonly accept: () => void
 }
 
 function fakeHost(commands: string[] = ['mode']): FakeHost {
   const built: FakeRecord[] = []
-  let emit: (event: PiRpcEvent) => void = () => undefined
+  let emit: (event: RuntimeEvent) => void = () => undefined
   let accept: () => void = () => undefined
   const host: AgentHost = {
     createSession: () => {
-      const listeners = new Set<(event: PiRpcEvent, delivery: PiEventDelivery) => void>()
+      const listeners = new Set<(event: RuntimeEvent, delivery: EventDelivery) => void>()
       const record: FakeRecord = {
         prompts: [],
         answers: [],
@@ -66,19 +66,19 @@ function fakeHost(commands: string[] = ['mode']): FakeHost {
       built.push(record)
       /** Every blocking question this fake has emitted and not yet had answered — what the real host's `openDialog` reads. */
       const open = new Map<string, ZenDialogSpec>()
-      emit = (event: PiRpcEvent) => {
+      emit = (event: RuntimeEvent) => {
         if (event.type === 'extension_ui_request' && typeof event.id === 'string') {
           const { type: _type, id: _id, ...request } = event
           if (isZenDialogSpec(request)) open.set(event.id, request)
         }
         for (const listener of listeners) listener(event, 'live')
       }
-      const session: PiSession = {
-        prompt: (request: PiPromptRequest, outcome: PiPromptOutcome) => {
+      const session: ThreadRuntime = {
+        prompt: (request: PromptRequest, outcome: PromptOutcome) => {
           record.prompts.push(request)
           accept = () => outcome.onAccepted()
         },
-        answerDialog: (response: PiDialogResponse) => {
+        answerDialog: (response: DialogAnswer) => {
           record.answers.push(response)
           // What the real host does at `finish` (#114): the settle is a record on the stream.
           if (open.delete(response.id)) {
@@ -92,7 +92,7 @@ function fakeHost(commands: string[] = ['mode']): FakeHost {
         openDialogs: () => [...open].map(([id, dialog]) => ({ id, dialog })),
         listCommands: () => commands.map((name) => ({ name, source: 'extension' as const })),
         permissionModeState: () => ({ mode: 'default', available: ['default', 'plan'] }),
-        subscribe: (onEvent: (event: PiRpcEvent, delivery: PiEventDelivery) => void) => {
+        subscribe: (onEvent: (event: RuntimeEvent, delivery: EventDelivery) => void) => {
           listeners.add(onEvent)
           return () => {
             listeners.delete(onEvent)
@@ -113,8 +113,8 @@ function fakeHost(commands: string[] = ['mode']): FakeHost {
           record.disposed += 1
         },
       }
-      const hosted: HostedSession = {
-        session,
+      const hosted: HostedThread = {
+        runtime: session,
         loadedExtensionPaths: [],
         inspect: () => ({ sessionId: 's1', cwd: '/', sessionDir: '/s', sessionFile: null, entries: [], commands }),
         emittedEvents: () => [],
@@ -124,7 +124,7 @@ function fakeHost(commands: string[] = ['mode']): FakeHost {
     listSessions: () => Promise.resolve([]),
     readBranch: () => Promise.resolve(undefined),
   }
-  return { host, built, emit: (event: PiRpcEvent) => emit(event), accept: () => accept() }
+  return { host, built, emit: (event: RuntimeEvent) => emit(event), accept: () => accept() }
 }
 
 function emptyHarnessDir(): string {
@@ -187,12 +187,12 @@ async function threadSummary(url: string, threadId: string): Promise<Record<stri
   return summaries.find((summary) => summary.threadId === threadId)
 }
 
-const SETTLED: PiRpcEvent = { type: 'agent_settled' }
-const TEXT_DELTA: PiRpcEvent = {
+const SETTLED: RuntimeEvent = { type: 'agent_settled' }
+const TEXT_DELTA: RuntimeEvent = {
   type: 'message_update',
   assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'hi' },
 }
-const SELECT_DIALOG: PiRpcEvent = {
+const SELECT_DIALOG: RuntimeEvent = {
   type: 'extension_ui_request',
   id: 'd1',
   method: 'select',

@@ -482,7 +482,7 @@ test('⚠ a tool call reads running… while its run is open and aborted once th
     },
   )
   const step = (): string | null =>
-    pane.container.querySelector('[data-zen-tool-step]')?.getAttribute('data-zen-tool-step') ?? null
+    pane.container.querySelector('[data-zen-tool-call]')?.getAttribute('data-zen-tool-call') ?? null
   await eventually(() => {
     expect(step()).toBe('pending')
     expect(pane.container.textContent).toContain('running…')
@@ -537,8 +537,8 @@ test("⚠ a refused or aborted tool call's result reads error LIVE — the same 
     },
   )
   await eventually(() => {
-    const row = pane.container.querySelector('[data-zen-tool-step]')
-    expect(row?.getAttribute('data-zen-tool-step')).toBe('error')
+    const row = pane.container.querySelector('[data-zen-tool-call]')
+    expect(row?.getAttribute('data-zen-tool-call')).toBe('error')
     expect(row?.hasAttribute('open')).toBe(true) // an error opens itself
     expect(pane.container.textContent).toContain('blocked: outside the write root')
     expect(pane.status()).toContain('working') // the model has the output and is composing
@@ -632,7 +632,7 @@ test("⚠ a frame on one thread's follow changes that pane and no other — cost
   await bravo.unmount()
 })
 
-// ── the page (#90): the rail, New Session, switching, Previous Sessions, resume (#95) ───────
+// ── the page (#90): the rail, New Thread, switching, Previous Threads, resume (#95) ───────
 
 interface MountedPage {
   readonly container: HTMLElement
@@ -665,8 +665,8 @@ async function mountPage(options: ScriptedFetchOptions = {}): Promise<MountedPag
       await flush(async () => root.unmount())
       container.remove()
     },
-    activeRows: () => buttons('Active Sessions'),
-    previousRows: () => buttons('Previous Sessions'),
+    activeRows: () => buttons('Active Threads'),
+    previousRows: () => buttons('Previous Threads'),
     click: async (button: HTMLElement) => {
       await flush(async () => {
         button.click()
@@ -678,22 +678,20 @@ async function mountPage(options: ScriptedFetchOptions = {}): Promise<MountedPag
   }
 }
 
-test('New Session mints a thread, lists it in the rail as current, and shows exactly its pane', async () => {
+test('New Thread mints a thread, lists it in the rail as current, and shows exactly its pane', async () => {
   // `afterEach` cleared the module's first thread, so the page starts with none: header only.
   const page = await mountPage()
   expect(page.activeRows()).toHaveLength(0)
   expect(page.visiblePanes()).toHaveLength(0)
-  const newSession = [...page.container.querySelectorAll('button')].find(
-    (button) => button.textContent === 'New Session',
-  )
-  if (newSession === undefined) throw new Error('expected a New Session button')
-  await page.click(newSession)
+  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
+  if (newThread === undefined) throw new Error('expected a New Thread button')
+  await page.click(newThread)
   await eventually(() => {
     expect(page.activeRows()).toHaveLength(1)
     expect(page.activeRows()[0]?.getAttribute('aria-current')).toBe('true')
     expect(page.visiblePanes()).toHaveLength(1)
   })
-  await page.click(newSession)
+  await page.click(newThread)
   await eventually(() => {
     expect(page.activeRows()).toHaveLength(2)
     // Newest first, and the newest is current; one pane visible, the other mounted but hidden.
@@ -712,7 +710,7 @@ test('New Session mints a thread, lists it in the rail as current, and shows exa
   await page.unmount()
 })
 
-test("Previous Sessions lists the server's stored threads; a click resumes one with its history and mode (#95)", async () => {
+test("Previous Threads lists the server's stored threads; a click resumes one with its history and mode (#95)", async () => {
   const page = await mountPage({
     storedThreads: [
       {
@@ -771,7 +769,7 @@ test('a stored listing the server cannot serve is said in the rail, and the page
   await flush(tick)
   // One bounded line, status first, never the page (#103 receipt, step 8).
   await eventually(() => {
-    expect(container.textContent).toContain('could not list previous sessions: 500 <!doctype html>')
+    expect(container.textContent).toContain('could not list previous threads: 500 <!doctype html>')
     expect(container.textContent).not.toContain('<html>boom</html>')
   })
   await flush(async () => root.unmount())

@@ -355,13 +355,18 @@ issues, so they are defined once, here, and kept apart from the product nouns ab
 
 ## Retired
 
-Words this document takes out of circulation, and what replaces each. The table is the input to the
-glossary gate (sibling issue, in the shape of `test/vendor-gate.test.ts`); each row is one rename, done
-by LSP after this document is agreed (`architecture.md` → *Deferred*). *Legitimate* names where the
-old word may still appear: vendor code under `packages/web/src/host/` and `packages/harness/extensions/`,
-the vendor map, and the three log-locating fields.
+Words this document takes out of circulation, and what replaces each. Applied by LSP in #165, and
+held by `test/glossary-gate.test.ts`: a retired identifier or file name may not come back in code
+outside the two vendor roots. *Legitimate* names where the old word may still appear: vendor code under
+`packages/web/src/host/` and `packages/harness/extensions/`, the vendor map, the three log-locating
+fields, and the gate that spells the words in order to refuse them. The `Pi*` names of the thread
+runtime's own shapes (`PiPromptRequest`, `PiRpcEvent`, …) went with them — goals L1 — to `PromptRequest`,
+`RuntimeEvent`, `RuntimeCommand`, `DialogAnswer`, `StreamingBehavior`, `PromptImageContent`,
+`EventDelivery`, `ZenPermissionModeState`. Deliberately kept: `PiSessionEntry` and its siblings in
+`branch-to-messages.ts` and `map-events.ts`, which name the runtime's own shapes carried above the
+host — leak L2; the prefix is the marker, and the gate allowlists that one file with the reason.
 
-| Retired | Meant | Replacement | Sites today | Legitimate |
+| Retired | Meant | Replacement | Was at | Legitimate |
 |---|---|---|---|---|
 | `PiSession` | the runtime contract for one thread the host implements (prompt, abort, answer, subscribe, dispose) | **`ThreadRuntime`** — the seam has a name that says whose it is. *Decision (2):* not `HostSession` (session is reserved) and not `ZenSessionRuntime` (same reason) | `packages/core/src/pi-rpc.ts` | — |
 | `HostedSession`, `HostedSessionInspection` | the host's side of a live thread: the runtime plus inspect and the emitted tail | **`HostedThread`**, **`HostedThreadInspection`** | `packages/web/src/host/agent-host.ts` | — |
@@ -375,6 +380,9 @@ the vendor map, and the three log-locating fields.
 | `chunk` in zen-owned names (`RecordedCustomChunk`, "said as a chunk") | a custom event the browser recorded | **custom event** (`RecordedCustomEvent`) — chunk is the state layer's word and stays in its adapter | `packages/web/src/custom-event-router.ts`, comments | the adapter that derives the state layer's stream |
 | `turns` as a count of user messages | prompts | **prompts** | `packages/web/src/thread-status.tsx` | — |
 | `ToolStep`, "step" | a tool call rendered as a row | **tool call** (`ToolCallRow`) | `packages/web/src/selected-message-part.tsx` | the adapter that emits the state layer's step events |
+| `HostedThread.session` (was `hosted.session` at every call site) | the thread's runtime handle | **`HostedThread.runtime`** — found by the gate: a field that said session and held the runtime | `packages/web/src/host/agent-host.ts` and the server | — |
+| `describePiRpcEvent` | the event tail's one-line description of a runtime event | **`describeRuntimeEvent`** | `packages/web/src/host/event-tail.ts` | — |
+| `data-zen-tool-step` | the tool-call row's status attribute | **`data-zen-tool-call`** | `packages/web/src/selected-message-part.tsx` | — |
 | `conversation`, `chat` as nouns for the unit | a thread | **thread**; *transcript* for what it shows | prose | `chat` for the state layer's object, in the adapter |
 | `layer` meaning "who wrote it" in the log sense | the process | **process** for the OS process; **layer** keeps its code-region meaning | comments in `packages/core/src/log.ts` | — |
 | `surface` as a word for the runtime's interface setting | — | **none** — see *mode*, Decision (3) | not in code | — |

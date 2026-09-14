@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { hasWordSequence, wordsOf } from './gate-support.ts'
 
 /**
  * The glossary keeps its own two rules (#161, PR #164 review).
@@ -9,15 +10,15 @@ import { join } from 'node:path'
  * document instead of the source tree. `docs/glossary.md` claims that vendor names appear
  * only in its vendor map (and, quoted for renaming, in its Retired table), and that every
  * definition is ours. A document that claims a rule nobody checks is a wish; this is the
- * check. It reads WORDS, the way the vendor gate does, so `PiSession` in a domain section
- * counts as naming the vendor and `api` does not.
+ * check. It reads WORDS (`gate-support.ts`, shared with the vendor gate), so a `Pi`-prefixed
+ * identifier in a domain section counts as naming the vendor and `api` does not.
  *
  * Two more things a hand edit breaks silently and a renderer hides: a table row with the
  * wrong number of cells (GitHub renders it, misaligned, without a word), and an in-page
  * link to a heading that moved. Both are asserted here so the document stays reviewable.
  *
- * The RETIRED-WORDS gate over the source tree (the Retired table applied to code) is a
- * sibling issue under #162, not this file.
+ * The RETIRED-WORDS gate over the source tree (the Retired table applied to code) is
+ * `glossary-gate.test.ts` (#165), not this file.
  */
 
 const GLOSSARY = join(import.meta.dir, '..', 'docs', 'glossary.md')
@@ -34,19 +35,11 @@ const VENDOR_WORD_SEQUENCES = [
   ['pi', 'multi', 'account'],
 ] as const
 
-function wordsOf(line: string): string[] {
-  const words: string[] = []
-  for (const token of line.match(/[A-Za-z0-9]+/g) ?? []) {
-    words.push(...(token.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z0-9]+|[0-9]+/g) ?? []).map((word) => word.toLowerCase()))
-  }
-  return words
-}
-
 function namesVendor(line: string): boolean {
   const words = wordsOf(line)
-  if (VENDOR_WORDS.some((vendor) => words.includes(vendor))) return true
-  return VENDOR_WORD_SEQUENCES.some((sequence) =>
-    words.some((_word, start) => sequence.every((part, offset) => words[start + offset] === part)),
+  return (
+    VENDOR_WORDS.some((vendor) => words.includes(vendor)) ||
+    VENDOR_WORD_SEQUENCES.some((sequence) => hasWordSequence(words, sequence))
   )
 }
 

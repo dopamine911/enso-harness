@@ -75,7 +75,7 @@ export {
   type ZenBundleInputs,
 } from './log-bundle.ts'
 export {
-  ZenCustomSessionEntry,
+  ZenCustomEntry,
   ZenDialogOutcome,
   ZenDialogSettled,
   ZenExtensionError,
@@ -116,23 +116,10 @@ export {
   PICC_DEFAULT_PERMISSION_MODE,
   PICC_MODES_CUSTOM_TYPE,
   PICC_PERMISSION_MODES,
-  PiPermissionModeState,
   persistedPermissionMode,
   readPiccPersistedMode,
+  ZenPermissionModeState,
 } from './permission-mode.ts'
-export {
-  isPiCommand,
-  PiCommand,
-  type PiDialogResponse,
-  type PiEventDelivery,
-  PiImageContent,
-  type PiPromptOutcome,
-  type PiPromptRequest,
-  type PiRpcEvent,
-  PiRpcEventSchema,
-  PiSession,
-  PiStreamingBehavior,
-} from './pi-rpc.ts'
 export {
   isSecretShapedName,
   knownSecretValues,
@@ -143,7 +130,7 @@ export {
   readSecret,
 } from './secrets.ts'
 export {
-  describeSessionEntry,
+  describeEntry,
   describeThreadEvent,
   isZenThreadId,
   type ThreadEventColumns,
@@ -156,7 +143,20 @@ export {
   ZenThreadHistory,
   ZenThreadInspection,
   ZenThreadSummary,
-} from './session-inspection.ts'
+} from './thread-inspection.ts'
+export {
+  type DialogAnswer,
+  type EventDelivery,
+  isRuntimeCommand,
+  PromptImageContent,
+  type PromptOutcome,
+  type PromptRequest,
+  RuntimeCommand,
+  type RuntimeEvent,
+  RuntimeEventSchema,
+  StreamingBehavior,
+  ThreadRuntime,
+} from './thread-runtime.ts'
 export {
   isZenToolResultDescriptor,
   readZenToolResultDescriptor,

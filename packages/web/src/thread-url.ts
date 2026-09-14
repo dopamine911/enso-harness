@@ -25,7 +25,7 @@ export function readThreadUrl(search: string): ThreadUrl {
   if (isZenThreadId(named)) return { kind: 'resume', threadId: named }
   return {
     kind: 'fresh',
-    notice: `?thread=${String(named).slice(0, 40)} is not a thread id — opened a new session instead`,
+    notice: `?thread=${String(named).slice(0, 40)} is not a thread id — opened a new thread instead`,
   }
 }
 

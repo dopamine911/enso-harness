@@ -3,10 +3,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join, resolve } from 'node:path'
 import {
   base64DecodedBytes,
+  type DialogAnswer,
   isZenThreadId,
   PICC_DEFAULT_PERMISSION_MODE,
   PICC_PERMISSION_MODES,
-  type PiDialogResponse,
   persistedPermissionMode,
   withZenLogContext,
   ZEN_IMAGE_MAX_BYTES,
@@ -272,7 +272,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
   }
 
   // ── Session inspection (#86): what a live thread's session ACTUALLY contains, for a
-  // human (the debug drawer) or an agent (`scripts/zen-session.mjs`) to cross-check the
+  // human (the debug drawer) or an agent (`scripts/zen-thread.mjs`) to cross-check the
   // derived views against. Read-only. Never creates a session — `threads.peek`, never
   // `acquire`: looking must not be the thing that spins pi up. Loopback-only by the
   // server's bind; the branch is conversation and tool output, which is the point.
@@ -283,7 +283,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
       sessionId: inspection.sessionId,
       sessionDir: inspection.sessionDir,
       sessionFile: inspection.sessionFile,
-      mode: thread.hosted.session.permissionModeState().mode,
+      mode: thread.hosted.runtime.permissionModeState().mode,
       busy: thread.busy,
       generation: thread.generation,
       lastActivityAt: new Date(thread.lastActivityAt).toISOString(),
@@ -360,7 +360,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
       permissionMode:
         live === undefined
           ? { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] }
-          : live.hosted.session.permissionModeState(),
+          : live.hosted.runtime.permissionModeState(),
       ...(interrupted === undefined ? {} : { interrupted }),
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })
@@ -526,7 +526,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
   }
 
   async function respondToDialog(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
-    let answer: PiDialogResponse
+    let answer: DialogAnswer
     try {
       // A dialog answer is an id and a short value; nothing legitimate approaches this.
       answer = readDialogBody(await readBody(request, MAX_DIALOG_BODY_BYTES))

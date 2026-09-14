@@ -38,11 +38,11 @@ export const PICC_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassP
  * dropdown may offer: `PICC_PERMISSION_MODES` intersected with the commands this session
  * actually registers, in picc's order.
  */
-export const PiPermissionModeState = Type.Object({
+export const ZenPermissionModeState = Type.Object({
   mode: Type.String(),
   available: Type.Array(Type.String()),
 })
-export type PiPermissionModeState = Static<typeof PiPermissionModeState>
+export type ZenPermissionModeState = Static<typeof ZenPermissionModeState>
 
 /**
  * The mode carried by ONE persisted custom entry, or undefined when the entry is not

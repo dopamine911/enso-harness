@@ -12,7 +12,7 @@ import { toolResultState } from './ZenToolResult.tsx'
  *
  * ⚠ ALWAYS VISIBLE, ZEROS INCLUDED. The original bar (#45, `SessionStatsBar`, since removed) hid until the first counted
  * request so an all-zero line would not read as a broken meter. That was the wrong call for
- * a bar whose job is to be the place you look: a fresh session reading `idle · 0 turns ·
+ * a bar whose job is to be the place you look: a fresh session reading `idle · 0 prompts ·
  * $0.0000` is the honest state, the same reasoning that put `default` in the mode dropdown
  * before the first prompt (#84 round 2). A bar that appears only after the first request is
  * a bar you never learn to look at.
@@ -83,20 +83,20 @@ export function describeActivity(
 
 export interface ThreadCounts {
   /** User messages — one per thing the human asked. */
-  readonly turns: number
+  readonly prompts: number
   /** Tool calls across the whole transcript, paired or not. */
   readonly toolCalls: number
 }
 
 /** Count the transcript. Cheap enough to run per render; the list is what is on screen. */
 export function countThread(messages: ReadonlyArray<UIMessage>): ThreadCounts {
-  let turns = 0
+  let prompts = 0
   let toolCalls = 0
   for (const message of messages) {
-    if (message.role === 'user') turns += 1
+    if (message.role === 'user') prompts += 1
     for (const part of message.parts) if (part.type === 'tool-call') toolCalls += 1
   }
-  return { turns, toolCalls }
+  return { prompts, toolCalls }
 }
 
 /** `running read` — the tool named as pi names it, so it matches the transcript's step row. */
@@ -141,7 +141,7 @@ export function ThreadStatusView({ activity, counts, stats }: ThreadStatusViewPr
         {activityLabel(activity)}
       </span>
       <span title="user messages in this transcript">
-        {counts.turns} {counts.turns === 1 ? 'turn' : 'turns'}
+        {counts.prompts} {counts.prompts === 1 ? 'prompt' : 'prompts'}
       </span>
       <span title="tool calls across this transcript, finished or not">
         {counts.toolCalls} {counts.toolCalls === 1 ? 'tool call' : 'tool calls'}

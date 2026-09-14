@@ -68,11 +68,11 @@ test('the schemas the rest of the repo depends on are actually exported', () => 
     'DEFAULT_GUARD_POLICY',
     'ZenToolResultDescriptor',
     'ZenObservation',
-    'PiRpcEventSchema',
-    'PiSession',
-    'PiCommand',
-    'PiImageContent',
-    'PiStreamingBehavior',
+    'RuntimeEventSchema',
+    'ThreadRuntime',
+    'RuntimeCommand',
+    'PromptImageContent',
+    'StreamingBehavior',
   ]) {
     expect(core).toHaveProperty(name)
   }

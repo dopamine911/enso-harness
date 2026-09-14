@@ -1,12 +1,12 @@
 import type { ServerResponse } from 'node:http'
 import {
   base64DecodedBytes,
+  type DialogAnswer,
   isWholeBase64,
   PICC_PERMISSION_MODES,
-  type PiDialogResponse,
-  type PiImageContent,
-  type PiStreamingBehavior,
+  type PromptImageContent,
   persistedPermissionMode,
+  type StreamingBehavior,
   validateDialogAnswer,
   ZEN_IMAGE_MAX_BYTES,
   type ZenAbortReceipt,
@@ -63,9 +63,9 @@ export interface FollowRouteDeps {
 
 export interface PromptBody {
   readonly message: string
-  readonly streamingBehavior?: PiStreamingBehavior
+  readonly streamingBehavior?: StreamingBehavior
   /** Attached images (#68), already in pi's shape; absent — not empty — when the prompt has none. */
-  readonly images?: readonly PiImageContent[]
+  readonly images?: readonly PromptImageContent[]
 }
 
 export type PromptOutcome =
@@ -134,9 +134,9 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     permissionMode:
       nowLive === undefined
         ? { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] }
-        : nowLive.hosted.session.permissionModeState(),
+        : nowLive.hosted.runtime.permissionModeState(),
     messages,
-    openDialogs: nowLive === undefined ? [] : nowLive.hosted.session.openDialogs(),
+    openDialogs: nowLive === undefined ? [] : nowLive.hosted.runtime.openDialogs(),
     ...(interrupted === undefined ? {} : { interrupted }),
   })
 }
@@ -167,7 +167,7 @@ export function readPromptBody(raw: string): PromptBody {
   if (parsed.message.trim().length === 0 && parsed.images === undefined) {
     throw new Error('prompt body needs a message')
   }
-  const images = parsed.images?.map((image, position): PiImageContent => {
+  const images = parsed.images?.map((image, position): PromptImageContent => {
     if (!isWholeBase64(image.data)) {
       throw new Error(`prompt body must match ZenPromptBody at /images/${position}/data: must be whole base64 groups`)
     }
@@ -209,7 +209,7 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
 
   const live = threads.peek(threadId)
   if (live?.busy === true) {
-    live.hosted.session.prompt(
+    live.hosted.runtime.prompt(
       {
         message: body.message,
         streamingBehavior: body.streamingBehavior ?? 'followUp',
@@ -266,7 +266,7 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
 }
 
 /** The dialog body: pi's response shape, keyed by the request id the follow showed. */
-export function readDialogBody(raw: string): PiDialogResponse {
+export function readDialogBody(raw: string): DialogAnswer {
   let body: { id?: unknown; cancelled?: unknown; value?: unknown; confirmed?: unknown }
   try {
     body = JSON.parse(raw) as typeof body
@@ -291,10 +291,10 @@ export type DialogOutcome =
  * is an injection seam the server closes — the same check the run path's resume made. A
  * refused answer leaves the question open; a cancellation needs no validation.
  */
-export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answer: PiDialogResponse): DialogOutcome {
+export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answer: DialogAnswer): DialogOutcome {
   const live = deps.threads.peek(threadId)
   if (live === undefined) return { status: 404, reason: `no live session for thread ${threadId}` }
-  const question = live.hosted.session.openDialogs().find((open) => open.id === answer.id)?.dialog
+  const question = live.hosted.runtime.openDialogs().find((open) => open.id === answer.id)?.dialog
   if (question === undefined) {
     return {
       status: 404,
@@ -305,7 +305,7 @@ export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answ
     const refusal = validateDialogAnswer(question, answer)
     if (refusal !== undefined) return { status: 422, reason: `answer refused: ${refusal}` }
   }
-  live.hosted.session.answerDialog(answer)
+  live.hosted.runtime.answerDialog(answer)
   return { status: 204 }
 }
 

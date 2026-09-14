@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
-  type PiEventDelivery,
-  type PiPromptOutcome,
-  type PiPromptRequest,
-  type PiRpcEvent,
-  type PiSession,
+  type EventDelivery,
+  type PromptOutcome,
+  type PromptRequest,
+  type RuntimeEvent,
+  type ThreadRuntime,
   ZenStoredThread,
   ZenThreadEvents,
   ZenThreadHistory,
@@ -17,8 +17,8 @@ import {
 } from '@zen/core'
 import { Check } from 'typebox/value'
 import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
-import type { AgentHost, HostedSession, HostedSessionInspection } from '../../host/agent-host.ts'
-import { createEventTail, describePiRpcEvent } from '../../host/event-tail.ts'
+import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
+import { createEventTail, describeRuntimeEvent } from '../../host/event-tail.ts'
 import { startZenServer } from '../index.ts'
 import { openFollow } from './follow-reader.ts'
 
@@ -44,27 +44,27 @@ interface FakeSessionRecord {
 }
 
 /** How a scripted session pushes pi events at its followers. */
-type EmitPiEvent = (event: PiRpcEvent) => void
+type EmitPiEvent = (event: RuntimeEvent) => void
 
 interface FakeSessionScript {
   /** Called on every prompt; emit events through `emit`, signal acceptance via `outcome`. */
-  onPrompt: (emit: EmitPiEvent, outcome: PiPromptOutcome, message: string) => void
+  onPrompt: (emit: EmitPiEvent, outcome: PromptOutcome, message: string) => void
 }
 
-function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; record: FakeSessionRecord } {
-  const listeners = new Set<(event: PiRpcEvent, delivery: PiEventDelivery) => void>()
+function fakeHostedThread(script: FakeSessionScript): { hosted: HostedThread; record: FakeSessionRecord } {
+  const listeners = new Set<(event: RuntimeEvent, delivery: EventDelivery) => void>()
   const record: FakeSessionRecord = { aborts: 0, disposed: 0, prompts: [] }
   // The fake records into the same tail the real host does, so the events route sees the
   // real shape (coalesced rows); it delivers only live, so every row is `live`. The real
   // host's held/replayed/dropped provenance is pinned in agent-host.test.ts.
   const emitted = createEventTail()
-  const emit = (event: PiRpcEvent): void => {
-    const described = describePiRpcEvent(event)
+  const emit = (event: RuntimeEvent): void => {
+    const described = describeRuntimeEvent(event)
     emitted.record(described.type, described.name, 'live')
     for (const listener of listeners) listener(event, 'live')
   }
-  const session: PiSession = {
-    prompt: (request: PiPromptRequest, outcome: PiPromptOutcome) => {
+  const session: ThreadRuntime = {
+    prompt: (request: PromptRequest, outcome: PromptOutcome) => {
       record.prompts.push(request.message)
       script.onPrompt(emit, outcome, request.message)
     },
@@ -72,7 +72,7 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
     openDialogs: () => [],
     listCommands: () => [{ name: 'mode', source: 'extension' }],
     permissionModeState: () => ({ mode: 'default', available: ['default', 'acceptEdits'] }),
-    subscribe: (onEvent: (event: PiRpcEvent, delivery: PiEventDelivery) => void) => {
+    subscribe: (onEvent: (event: RuntimeEvent, delivery: EventDelivery) => void) => {
       listeners.add(onEvent)
       return () => {
         listeners.delete(onEvent)
@@ -89,7 +89,7 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
   }
   // A branch shaped like pi's, with a picc `modes` entry, and NO file on disk — the
   // unflushed state #86's inspection must report honestly rather than invent (#86).
-  const inspect = (): HostedSessionInspection => ({
+  const inspect = (): HostedThreadInspection => ({
     sessionId: 'session-1',
     cwd: '/fake/cwd',
     sessionDir: '/fake/agent/sessions/--fake-cwd--',
@@ -107,11 +107,11 @@ function fakeHostedSession(script: FakeSessionScript): { hosted: HostedSession; 
     ],
     commands: ['mode', 'plan'],
   })
-  return { hosted: { session, loadedExtensionPaths: [], inspect, emittedEvents: emitted.recent }, record }
+  return { hosted: { runtime: session, loadedExtensionPaths: [], inspect, emittedEvents: emitted.recent }, record }
 }
 
 /** What the fake host "has on disk" (#95): stored sessions by thread id, with their branch. */
-interface FakeStoredSession {
+interface FakeStoredThread {
   readonly branch: unknown[]
   readonly modified: Date
   readonly firstMessage: string
@@ -119,7 +119,7 @@ interface FakeStoredSession {
 
 function fakeHost(
   script: FakeSessionScript,
-  stored: Record<string, FakeStoredSession> = {},
+  stored: Record<string, FakeStoredThread> = {},
 ): { host: AgentHost; built: FakeSessionRecord[]; requested: string[] } {
   const built: FakeSessionRecord[] = []
   /** Thread ids the host was asked to build, in order — the prompt route passes the id through. */
@@ -127,7 +127,7 @@ function fakeHost(
   const host: AgentHost = {
     createSession: (threadId: string) => {
       requested.push(threadId)
-      const next = fakeHostedSession(script)
+      const next = fakeHostedThread(script)
       built.push(next.record)
       return Promise.resolve(next.hosted)
     },
@@ -154,12 +154,12 @@ function emptyHarnessDir(): string {
   return directory
 }
 
-const SETTLED: PiRpcEvent = { type: 'agent_settled' }
-const TEXT_DELTA: PiRpcEvent = {
+const SETTLED: RuntimeEvent = { type: 'agent_settled' }
+const TEXT_DELTA: RuntimeEvent = {
   type: 'message_update',
   assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'hi' },
 }
-const SELECT_DIALOG: PiRpcEvent = {
+const SELECT_DIALOG: RuntimeEvent = {
   type: 'extension_ui_request',
   id: 'd1',
   method: 'select',
@@ -173,7 +173,7 @@ function neverPrompted(): void {
 
 /** A prompt that settles synchronously — the run is over by the time the receipt is read. */
 const settlesAtOnce: FakeSessionScript = {
-  onPrompt: (emit: EmitPiEvent, outcome: PiPromptOutcome) => {
+  onPrompt: (emit: EmitPiEvent, outcome: PromptOutcome) => {
     outcome.onAccepted()
     emit(SETTLED)
   },
@@ -181,7 +181,7 @@ const settlesAtOnce: FakeSessionScript = {
 
 /** A prompt that asks a question and never settles — the thread stays busy. */
 const asksAndWaits: FakeSessionScript = {
-  onPrompt: (emit: EmitPiEvent, _outcome: PiPromptOutcome, message: string) => {
+  onPrompt: (emit: EmitPiEvent, _outcome: PromptOutcome, message: string) => {
     if (message === '/mode') emit(SELECT_DIALOG)
   },
 }
@@ -195,7 +195,7 @@ afterEach(async () => {
 
 async function startWith(
   script: FakeSessionScript,
-  stored: Record<string, FakeStoredSession> = {},
+  stored: Record<string, FakeStoredThread> = {},
 ): Promise<{ url: string; built: FakeSessionRecord[]; requested: string[] }> {
   const { host, built, requested } = fakeHost(script, stored)
   const started = startZenServer({
@@ -320,7 +320,7 @@ test('GET /api/threads/:id returns the branch as pi holds it, with sessionFile n
 // what the follower actually received.
 test('GET /api/threads/:id/events returns the emitted and sent tails of a run, in wire order, deltas coalesced', async () => {
   const { url } = await startWith({
-    onPrompt: (emit: EmitPiEvent, outcome: PiPromptOutcome) => {
+    onPrompt: (emit: EmitPiEvent, outcome: PromptOutcome) => {
       outcome.onAccepted()
       emit(TEXT_DELTA)
       emit(TEXT_DELTA)
@@ -411,7 +411,7 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
       messageCount: 2,
       busy: true,
     },
-    // A blank first message is no title — the rail says "new session", not "   ".
+    // A blank first message is no title — the rail says "new thread", not "   ".
     { threadId: 'stored-2', lastActivityAt: '2026-09-08T11:00:00.000Z', messageCount: 0, busy: false },
   ])
 })
@@ -551,6 +551,6 @@ test('the dev page and the header-less CLIs are unaffected', async () => {
   for (const origin of ['http://127.0.0.1:5178', 'http://localhost:5178', 'http://127.0.0.1:5179']) {
     expect((await fetch(`${url}/api/about`, { headers: { Origin: origin } })).status).toBe(200)
   }
-  // `zen-session.mjs` and `curl` send no Origin at all.
+  // `zen-thread.mjs` and `curl` send no Origin at all.
   expect((await fetch(`${url}/api/about`)).status).toBe(200)
 })

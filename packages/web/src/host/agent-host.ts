@@ -10,23 +10,23 @@ import {
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
 import {
+  type DialogAnswer,
+  type EventDelivery,
   findRepoRoot,
   PICC_PERMISSION_MODES,
-  type PiCommand,
-  type PiDialogResponse,
-  type PiEventDelivery,
-  type PiPermissionModeState,
-  type PiPromptOutcome,
-  type PiPromptRequest,
-  type PiRpcEvent,
-  type PiSession,
+  type PromptOutcome,
+  type PromptRequest,
   persistedPermissionMode,
   quarantineSecrets,
+  type RuntimeCommand,
+  type RuntimeEvent,
+  type ThreadRuntime,
   type ZenOpenDialog,
+  type ZenPermissionModeState,
   type ZenThreadEvent,
   zenLogger,
 } from '@zen/core'
-import { createEventTail, describePiRpcEvent } from './event-tail.ts'
+import { createEventTail, describeRuntimeEvent } from './event-tail.ts'
 import { createZenExtensionUiContext } from './extension-ui-context.ts'
 import { toRpcWireEvent } from './session-events.ts'
 
@@ -114,7 +114,7 @@ export interface AgentHostOptions {
  * stream; this is the source those views derive from, for a human or an agent to
  * cross-check against.
  */
-export interface HostedSessionInspection {
+export interface HostedThreadInspection {
   readonly sessionId: string
   readonly cwd: string
   readonly sessionDir: string
@@ -126,22 +126,22 @@ export interface HostedSessionInspection {
   readonly commands: readonly string[]
 }
 
-export interface HostedSession {
-  readonly session: PiSession
+export interface HostedThread {
+  readonly runtime: ThreadRuntime
   /** How many extensions the loader found — the load receipt a caller may assert. */
   readonly loadedExtensionPaths: readonly string[]
   /**
    * Read-only view of the session as pi holds it. Deliberately here and NOT on
-   * `PiSession`: that is the run contract, pinned by three fakes and the refusal-path
+   * `ThreadRuntime`: that is the run contract, pinned by three fakes and the refusal-path
    * tests, and inspection is a host concern.
    */
-  inspect(): HostedSessionInspection
+  inspect(): HostedThreadInspection
   /** The emitted tail (#97): what the host's `emit` funnel saw, with provenance. A fresh copy per call. */
   emittedEvents(): ZenThreadEvent[]
 }
 
 /** One of pi's session files for this workspace, as pi lists it (#95). */
-export interface StoredSession {
+export interface StoredThread {
   /** pi's session id — the thread id it was created under. */
   readonly id: string
   readonly path: string
@@ -161,9 +161,9 @@ export interface AgentHost {
    * no index file: pi's own listing is the one source, and a page-owned thread finds its
    * own file again across a server restart.
    */
-  createSession(threadId: string): Promise<HostedSession>
+  createSession(threadId: string): Promise<HostedThread>
   /** pi's session files for this workspace, newest first — the resumable listing. */
-  listSessions(): Promise<StoredSession[]>
+  listSessions(): Promise<StoredThread[]>
   /**
    * The branch of a stored session, read-only — no pi session is built, nothing is
    * written (#86's rule: looking must not build). `undefined` when no file has that id.
@@ -197,8 +197,12 @@ export function seedMultiAccountChildProxyOff(agentDir: string): void {
   writeFileSync(configPath, `${JSON.stringify({ ...existing, [MULTI_ACCOUNT_CHILD_PROXY_KEY]: false }, null, '\t')}\n`)
 }
 
-/** `PiCommand` with `description` present only when pi supplied one (`exactOptionalPropertyTypes`). */
-function describeCommand(name: string, source: PiCommand['source'], description: string | undefined): PiCommand {
+/** `RuntimeCommand` with `description` present only when pi supplied one (`exactOptionalPropertyTypes`). */
+function describeCommand(
+  name: string,
+  source: RuntimeCommand['source'],
+  description: string | undefined,
+): RuntimeCommand {
   return description === undefined ? { name, source } : { name, source, description }
 }
 
@@ -232,7 +236,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    * not flushed yet (no assistant message) have no file and are not listed — there is
    * nothing to come back to.
    */
-  async function listSessions(): Promise<StoredSession[]> {
+  async function listSessions(): Promise<StoredThread[]> {
     const listed = await SessionManager.list(cwd)
     return listed
       .map((info) => ({
@@ -256,7 +260,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     return SessionManager.open(path).getBranch()
   }
 
-  async function createSession(threadId: string): Promise<HostedSession> {
+  async function createSession(threadId: string): Promise<HostedThread> {
     // Resolved BEFORE the services so a bad id fails before anything is built.
     const storedPath = await storedSessionPath(threadId)
     const services = await createAgentSessionServices({
@@ -314,16 +318,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // end that run before its first token (the disconnect-then-prompt race). Events with
     // nobody listening after the first subscriber are dropped, like status heartbeats
     // were when no rpc client was reading the pipe.
-    const listeners = new Set<(event: PiRpcEvent, delivery: PiEventDelivery) => void>()
-    const heldUntilFirstSubscriber: PiRpcEvent[] = []
+    const listeners = new Set<(event: RuntimeEvent, delivery: EventDelivery) => void>()
+    const heldUntilFirstSubscriber: RuntimeEvent[] = []
     let hasHadSubscriber = false
     // The emitted tail (#97): every event through this funnel, with HOW it was delivered.
     // Recorded at the one place all of them pass, so the record and the delivery cannot
     // disagree — a held record's later replay is recorded again, as `replayed`, when it
     // actually reaches a subscriber (see `subscribe`).
     const emitted = createEventTail()
-    function emit(event: PiRpcEvent): void {
-      const described = describePiRpcEvent(event)
+    function emit(event: RuntimeEvent): void {
+      const described = describeRuntimeEvent(event)
       if (listeners.size === 0) {
         if (!hasHadSubscriber) {
           heldUntilFirstSubscriber.push(event)
@@ -368,8 +372,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     })
 
     let disposed = false
-    const piSession: PiSession = {
-      prompt(request: PiPromptRequest, outcome: PiPromptOutcome): void {
+    const piSession: ThreadRuntime = {
+      prompt(request: PromptRequest, outcome: PromptOutcome): void {
         let accepted = false
         // ⚠ Fire-and-forget, exactly as pi's rpc mode does: `prompt()` resolves only when
         // the whole run finishes, and awaiting it in front of the drain loop is the
@@ -396,15 +400,15 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
             if (!accepted) outcome.onRejected(error instanceof Error ? error.message : String(error))
           })
       },
-      answerDialog(response: PiDialogResponse): void {
+      answerDialog(response: DialogAnswer): void {
         ui.answerDialog(response)
       },
       openDialogs(): ZenOpenDialog[] {
         return ui.openDialogs()
       },
-      listCommands(): PiCommand[] {
+      listCommands(): RuntimeCommand[] {
         // The three sources pi's rpc `get_commands` assembles, in its order.
-        const commands: PiCommand[] = []
+        const commands: RuntimeCommand[] = []
         for (const command of session.extensionRunner.getRegisteredCommands()) {
           commands.push(describeCommand(command.invocationName, 'extension', command.description))
         }
@@ -416,7 +420,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         }
         return commands
       },
-      permissionModeState(): PiPermissionModeState {
+      permissionModeState(): ZenPermissionModeState {
         // picc's own `restoreState` walk (#84), re-run on every call — see the walk for why
         // it is never cached. `getBranch()` is one parent-pointer walk that builds a fresh
         // array; the walk is a second linear pass over it.
@@ -430,13 +434,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         )
         return { mode, available: PICC_PERMISSION_MODES.filter((candidate) => registered.has(candidate)) }
       },
-      subscribe(onEvent: (event: PiRpcEvent, delivery: PiEventDelivery) => void): () => void {
+      subscribe(onEvent: (event: RuntimeEvent, delivery: EventDelivery) => void): () => void {
         listeners.add(onEvent)
         hasHadSubscriber = true
         if (heldUntilFirstSubscriber.length > 0) {
           const held = heldUntilFirstSubscriber.splice(0)
           for (const event of held) {
-            const described = describePiRpcEvent(event)
+            const described = describeRuntimeEvent(event)
             emitted.record(described.type, described.name, 'replayed')
             // The subscriber learns it is a replay (#96): the tail's `replayed` and the
             // observation's `origin: "session-start"` are the same fact, told once here.
@@ -469,10 +473,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     }
 
     return {
-      session: piSession,
+      runtime: piSession,
       loadedExtensionPaths: extensionsResult.extensions.map((extension) => extension.path),
       emittedEvents: () => emitted.recent(),
-      inspect(): HostedSessionInspection {
+      inspect(): HostedThreadInspection {
         // ⚠ `getSessionFile()` names the path pi WILL write, from creation — but pi flushes
         // lazily, holding every entry until the first assistant message. So the path is
         // reported only once the file exists; before that the branch below is the only copy.

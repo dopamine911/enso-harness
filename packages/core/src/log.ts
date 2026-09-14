@@ -26,7 +26,11 @@ import { type Static, Type } from 'typebox'
  * the file exists.
  */
 
-/** The process a record came from. `extension` is our code inside pi's process. */
+/**
+ * The region of our code a record came from — the logger category, not the OS process
+ * (`process` on every line is that, `log-process.ts`). `extension` is our code inside the
+ * runtime's process. `docs/glossary.md` → Record.
+ */
 export type ZenLogLayer = 'server' | 'host' | 'extension' | 'browser'
 
 /**

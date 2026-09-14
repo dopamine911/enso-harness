@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { bundleRecordsText, type PiSession, ZEN_REDACTED, type ZenLogLine } from '@zen/core'
+import { bundleRecordsText, type ThreadRuntime, ZEN_REDACTED, type ZenLogLine } from '@zen/core'
 import { parseZenLogLine, zenLogFilename } from '@zen/core/log-process'
-import type { HostedSession } from '../../host/agent-host.ts'
+import type { HostedThread } from '../../host/agent-host.ts'
 import { createEventTail } from '../../host/event-tail.ts'
 import {
   BUNDLE_MAX_RECORDS,
@@ -19,7 +19,7 @@ const ignore = (): void => undefined
 
 /** A live thread as the registry would list it — the inspection is what the bundle carries. */
 function liveThread(threadId: string): ThreadView {
-  const session: PiSession = {
+  const session: ThreadRuntime = {
     prompt: ignore,
     answerDialog: ignore,
     openDialogs: () => [],
@@ -30,8 +30,8 @@ function liveThread(threadId: string): ThreadView {
     clearQueue: () => ({ steering: [], followUp: [] }),
     dispose: ignore,
   }
-  const hosted: HostedSession = {
-    session,
+  const hosted: HostedThread = {
+    runtime: session,
     loadedExtensionPaths: [],
     inspect: () => ({
       sessionId: `session-${threadId}`,

@@ -11,18 +11,18 @@
  *
  * Read-only. Talks to the loopback dev server only.
  *
- * Usage:  bun scripts/zen-session.mjs                 # every live thread, one line each
- *         bun scripts/zen-session.mjs <threadId>      # one thread: summary, then the branch
- *         bun scripts/zen-session.mjs <threadId> --events  # the event tails (#97): what the
+ * Usage:  bun scripts/zen-thread.mjs                 # every live thread, one line each
+ *         bun scripts/zen-thread.mjs <threadId>      # one thread: summary, then the branch
+ *         bun scripts/zen-thread.mjs <threadId> --events  # the event tails (#97): what the
  *                                                          # host emitted, with provenance,
  *                                                          # then what the server sent
- *         bun scripts/zen-session.mjs <threadId> --json   # the raw payload, for piping
+ *         bun scripts/zen-thread.mjs <threadId> --json   # the raw payload, for piping
  *
  * The server address defaults to the dev server's; override with ZEN_SERVER_URL.
  */
 
 // The row formats are core's, shared with the drawer: one definition, so the two views cannot drift.
-import { describeSessionEntry, threadEventColumns } from '../packages/core/src/index.ts'
+import { describeEntry, threadEventColumns } from '../packages/core/src/index.ts'
 
 /** @import { ZenThreadEvent, ZenThreadEvents, ZenThreadInspection, ZenThreadSummary } from "../packages/core/src/index.ts" */
 
@@ -41,11 +41,11 @@ async function fetchJson(path) {
   try {
     response = await fetch(`${serverUrl}${path}`)
   } catch (error) {
-    process.stderr.write(`zen-session: cannot reach ${serverUrl} — is \`bun run dev\` up? (${String(error)})\n`)
+    process.stderr.write(`zen-thread: cannot reach ${serverUrl} — is \`bun run dev\` up? (${String(error)})\n`)
     process.exit(1)
   }
   if (!response.ok) {
-    process.stderr.write(`zen-session: ${response.status} ${await response.text()}\n`)
+    process.stderr.write(`zen-thread: ${response.status} ${await response.text()}\n`)
     process.exit(1)
   }
   return /** @type {Promise<T>} */ (response.json())
@@ -113,4 +113,4 @@ process.stdout.write(
 )
 process.stdout.write(`commands    ${inspection.commands.map((commandName) => `/${commandName}`).join(' ')}\n`)
 process.stdout.write(`branch      ${inspection.entries.length} entries, root to leaf:\n`)
-for (const branchEntry of inspection.entries) process.stdout.write(`  ${describeSessionEntry(branchEntry)}\n`)
+for (const branchEntry of inspection.entries) process.stdout.write(`  ${describeEntry(branchEntry)}\n`)

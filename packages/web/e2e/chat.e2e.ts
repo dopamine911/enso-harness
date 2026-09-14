@@ -168,8 +168,8 @@ test.describe('chat surface', () => {
     await expect(page.locator("[aria-current='true']")).toHaveCount(1)
     await captureScreenshot(page, '08-thread-reloaded')
 
-    // New Session pushes; back returns to the first thread; forward to the second.
-    await page.getByRole('button', { name: 'New Session', exact: true }).click()
+    // New Thread pushes; back returns to the first thread; forward to the second.
+    await page.getByRole('button', { name: 'New Thread', exact: true }).click()
     await expect(page).not.toHaveURL(new RegExp(`thread=${first}$`))
     const second = new URL(page.url()).searchParams.get('thread') ?? ''
     expect(second).not.toBe(first)
@@ -193,7 +193,7 @@ test.describe('chat surface', () => {
     await captureScreenshot(page, '09-thread-bad-id')
   })
 
-  test('⚠ New Session during a slow boot resume wins outright: URL and pane agree, the late history is dropped (PR #143 review)', async ({
+  test('⚠ New Thread during a slow boot resume wins outright: URL and pane agree, the late history is dropped (PR #143 review)', async ({
     page,
   }) => {
     // A thread to come back to, with a mode that tells it apart from a fresh one.
@@ -212,7 +212,7 @@ test.describe('chat surface', () => {
     })
     await page.goto(`/?thread=${first}`)
     await expect(page.getByText('resuming…')).toBeVisible()
-    await page.getByRole('button', { name: 'New Session', exact: true }).click()
+    await page.getByRole('button', { name: 'New Thread', exact: true }).click()
     const fresh = new URL(page.url()).searchParams.get('thread') ?? ''
     expect(fresh).not.toBe(first)
     await expect(modeControl(page)).toHaveValue('default')
