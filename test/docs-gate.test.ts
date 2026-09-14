@@ -158,4 +158,9 @@ test('the extractor takes the doc comment, the whole statement, and nothing afte
   // (PR #169 review), so the statement ends at `})`, not inside the template or past `Last`.
   expect(extractDeclaration(source, 'Templated')?.text).toBe(source.split('\n').slice(14, 20).join('\n'))
   expect(extractDeclaration(source, 'Missing')).toBeUndefined()
+  // A template nested in a template's `${…}` is refused, never scanned as code (PR #169 review, round 2).
+  const nested = [`export const Nested = \`outer $${'{`inner`}'}`, '  still outer`', 'export const After = 1'].join(
+    '\n',
+  )
+  expect(() => extractDeclaration(nested, 'Nested')).toThrow(/nested in another/)
 })

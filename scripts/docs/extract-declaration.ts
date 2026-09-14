@@ -99,6 +99,12 @@ type Quote = '"' | "'" | '`' | undefined
  * repo's rule`), and an apostrophe read as a quote would swallow the `)` after it (measured
  * on `agent-host.ts:99`). Inside an open template a `*`-led line is template text, not a
  * comment, so the skip applies only when no quote is open.
+ *
+ * ⚠ A template nested inside a template's `${…}` is REFUSED, not scanned (PR #169 review,
+ * round 2): the inner backtick would read as the outer's close and the rest of the line as
+ * code — wrong and self-consistent, the one failure this extractor must not have. The repo
+ * has two such lines (`log-bundle.ts:100,103`), both inside a function body no page fences;
+ * fencing one turns the gate red with this message rather than a drifted span.
  */
 function bracketDelta(line: string, openQuote: Quote): { opens: number; closes: number; quote: Quote } {
   let opens = 0
@@ -108,8 +114,9 @@ function bracketDelta(line: string, openQuote: Quote): { opens: number; closes: 
   for (let characterIndex = 0; characterIndex < line.length; characterIndex += 1) {
     const character = line[characterIndex]
     if (quote !== undefined) {
-      if (character === '\\') characterIndex += 1
-      else if (character === quote) quote = undefined
+      const skipped = insideQuote(line, characterIndex, quote)
+      characterIndex = skipped.characterIndex
+      quote = skipped.quote
       continue
     }
     if (character === '/' && line[characterIndex + 1] === '/') break
@@ -119,6 +126,17 @@ function bracketDelta(line: string, openQuote: Quote): { opens: number; closes: 
   }
   // A `'` or `"` cannot span a line; only a template carries over.
   return { opens, closes, quote: quote === '`' ? quote : undefined }
+}
+
+/** One character inside a string or template: an escape skips the next; the delimiter closes; a nested template refuses. */
+function insideQuote(line: string, characterIndex: number, quote: Quote): { characterIndex: number; quote: Quote } {
+  const character = line[characterIndex]
+  if (character === '\\') return { characterIndex: characterIndex + 1, quote }
+  if (character === quote) return { characterIndex, quote: undefined }
+  if (quote === '`' && character === '$' && /^\{[^}]*`/.test(line.slice(characterIndex + 1))) {
+    throw new Error(`a template literal nested in another's \${…} is not supported: \`${line.trim()}\``)
+  }
+  return { characterIndex, quote }
 }
 
 function stripTrailingComment(line: string): string {
