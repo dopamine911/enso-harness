@@ -19,7 +19,7 @@ const ignore = (): void => undefined
 
 /** A live thread as the registry would list it — the inspection is what the bundle carries. */
 function liveThread(threadId: string): ThreadView {
-  const session: ThreadRuntime = {
+  const runtime: ThreadRuntime = {
     prompt: ignore,
     answerDialog: ignore,
     openDialogs: () => [],
@@ -31,7 +31,7 @@ function liveThread(threadId: string): ThreadView {
     dispose: ignore,
   }
   const hosted: HostedThread = {
-    runtime: session,
+    runtime,
     loadedExtensionPaths: [],
     inspect: () => ({
       sessionId: `session-${threadId}`,

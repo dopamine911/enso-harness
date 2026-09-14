@@ -223,7 +223,7 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
   const lease = await threads.acquire(threadId)
   const command = slashCommandName(body.message)
   if (command !== undefined) {
-    const available = lease.session.listCommands()
+    const available = lease.runtime.listCommands()
     if (!available.some((known) => known.name === command)) {
       lease.release()
       return {
@@ -241,7 +241,7 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
     settle.unsubscribe()
     lease.release()
   })
-  lease.session.prompt(
+  lease.runtime.prompt(
     {
       message: body.message,
       ...(body.streamingBehavior === undefined ? {} : { streamingBehavior: body.streamingBehavior }),

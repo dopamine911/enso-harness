@@ -73,7 +73,7 @@ function fakeHost(commands: string[] = ['mode']): FakeHost {
         }
         for (const listener of listeners) listener(event, 'live')
       }
-      const session: ThreadRuntime = {
+      const runtime: ThreadRuntime = {
         prompt: (request: PromptRequest, outcome: PromptOutcome) => {
           record.prompts.push(request)
           accept = () => outcome.onAccepted()
@@ -114,7 +114,7 @@ function fakeHost(commands: string[] = ['mode']): FakeHost {
         },
       }
       const hosted: HostedThread = {
-        runtime: session,
+        runtime,
         loadedExtensionPaths: [],
         inspect: () => ({ sessionId: 's1', cwd: '/', sessionDir: '/s', sessionFile: null, entries: [], commands }),
         emittedEvents: () => [],

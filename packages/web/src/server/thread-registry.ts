@@ -146,7 +146,7 @@ export interface AbortResult {
  */
 export interface ThreadLease {
   readonly threadId: string
-  readonly session: ThreadRuntime
+  readonly runtime: ThreadRuntime
   /**
    * Which acquisition this is, counted per thread id for the server's lifetime — the fence
    * a stale lease is checked against, and the number the browser's `zen.run` receipt
@@ -426,7 +426,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     }
     return {
       threadId,
-      session: thread.hosted.runtime,
+      runtime: thread.hosted.runtime,
       generation,
       release: () => {
         if (current('release')) release(threadId, thread)

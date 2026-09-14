@@ -63,7 +63,7 @@ function fakeHostedThread(script: FakeSessionScript): { hosted: HostedThread; re
     emitted.record(described.type, described.name, 'live')
     for (const listener of listeners) listener(event, 'live')
   }
-  const session: ThreadRuntime = {
+  const runtime: ThreadRuntime = {
     prompt: (request: PromptRequest, outcome: PromptOutcome) => {
       record.prompts.push(request.message)
       script.onPrompt(emit, outcome, request.message)
@@ -107,7 +107,7 @@ function fakeHostedThread(script: FakeSessionScript): { hosted: HostedThread; re
     ],
     commands: ['mode', 'plan'],
   })
-  return { hosted: { runtime: session, loadedExtensionPaths: [], inspect, emittedEvents: emitted.recent }, record }
+  return { hosted: { runtime, loadedExtensionPaths: [], inspect, emittedEvents: emitted.recent }, record }
 }
 
 /** What the fake host "has on disk" (#95): stored sessions by thread id, with their branch. */

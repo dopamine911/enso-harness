@@ -39,7 +39,7 @@ function fakeHosted(): FakeHosted {
   /** Set by a test to make the next `clearQueue` throw — pi emits to listeners inside it. */
   const failClear = { with: undefined as Error | undefined }
   let finishAbort: () => void = ignore
-  const session: ThreadRuntime = {
+  const runtime: ThreadRuntime = {
     prompt: ignore,
     answerDialog: ignore,
     openDialogs: () => [],
@@ -65,7 +65,7 @@ function fakeHosted(): FakeHosted {
     },
   }
   const hosted: HostedThread = {
-    runtime: session,
+    runtime,
     loadedExtensionPaths: [],
     inspect: () => ({ sessionId: 's', cwd: '/', sessionDir: '/s', sessionFile: null, entries: [], commands: [] }),
     emittedEvents: () => [],
@@ -92,7 +92,7 @@ test('the same thread acquired twice gets ONE session; two threads get two', asy
   const { threads, built } = fakeHost()
   const first = await threads.acquire('t1')
   const again = await threads.acquire('t1')
-  expect(again.session).toBe(first.session)
+  expect(again.runtime).toBe(first.runtime)
   expect(built).toHaveLength(1)
   await threads.acquire('t2')
   expect(built).toHaveLength(2)
@@ -102,7 +102,7 @@ test('the same thread acquired twice gets ONE session; two threads get two', asy
 test('two concurrent first requests on one thread share one build', async () => {
   const { threads, built } = fakeHost()
   const [first, second] = await Promise.all([threads.acquire('t1'), threads.acquire('t1')])
-  expect(second.session).toBe(first.session)
+  expect(second.runtime).toBe(first.runtime)
   expect(built).toHaveLength(1)
 })
 
@@ -133,7 +133,7 @@ test("acquire within the idle window cancels the disposal — #43's fix in one a
   await sleep(10)
   const second = await threads.acquire('t1')
   await sleep(30)
-  expect(second.session).toBe(first.session)
+  expect(second.runtime).toBe(first.runtime)
   expect(built[0]?.record.disposed).toBe(0)
   expect(built).toHaveLength(1)
 })

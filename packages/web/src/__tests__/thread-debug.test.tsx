@@ -77,11 +77,11 @@ const render = (
   session: ZenThreadInspection | undefined,
   error?: string,
   copyState: CopyState = 'idle',
-): string => renderWith({ browser, session, error, copyState })
+): string => renderWith({ browser, inspection: session, error, copyState })
 
 interface RenderOverrides {
   readonly browser: BrowserBelief
-  readonly session: ZenThreadInspection | undefined
+  readonly inspection: ZenThreadInspection | undefined
   readonly error?: string | undefined
   readonly copyState?: CopyState
   readonly bundleState?: BundleState
@@ -90,7 +90,7 @@ interface RenderOverrides {
 
 const renderWith = ({
   browser,
-  session,
+  inspection: session,
   error,
   copyState = 'idle',
   bundleState = 'idle',
@@ -286,16 +286,16 @@ test('the copy outcome is named beside the button', () => {
 
 // A bundle in flight, saved, or failed must each read differently — and "failed" says why.
 test('the bundle outcome is named beside the button, and building disables it', () => {
-  const building = renderWith({ browser: believing('plan'), session: inspection(), bundleState: 'building' })
+  const building = renderWith({ browser: believing('plan'), inspection: inspection(), bundleState: 'building' })
   expect(building).toContain('building the bundle…')
   expect(building).toMatch(/<button[^>]*disabled[^>]*>download log bundle/)
-  expect(renderWith({ browser: believing('plan'), session: inspection(), bundleState: 'saved' })).toContain(
+  expect(renderWith({ browser: believing('plan'), inspection: inspection(), bundleState: 'saved' })).toContain(
     'bundle saved — open it before you attach it',
   )
   expect(
-    renderWith({ browser: believing('plan'), session: inspection(), bundleState: { failed: '503 no file' } }),
+    renderWith({ browser: believing('plan'), inspection: inspection(), bundleState: { failed: '503 no file' } }),
   ).toContain('bundle failed — 503 no file')
-  expect(renderWith({ browser: believing('plan'), session: inspection() })).not.toContain('bundle failed')
+  expect(renderWith({ browser: believing('plan'), inspection: inspection() })).not.toContain('bundle failed')
 })
 
 test("the bundle is the server's file with the page's ring appended; the name is the header's, or the thread's when the header is missing", async () => {
@@ -349,7 +349,7 @@ test('both tails render under their own heading; a dropped event is marked as a 
     emitted: [threadEvent({ provenance: 'dropped', type: 'notify' })],
     sent: [threadEvent({ provenance: 'sent', type: 'RUN_FINISHED' })],
   }
-  const rendered = renderWith({ browser: believing('plan'), session: inspection(), events })
+  const rendered = renderWith({ browser: believing('plan'), inspection: inspection(), events })
   expect(rendered).toContain('the host emitted')
   expect(rendered).toContain('the server sent')
   expect(rendered).toContain('dropped notify')
