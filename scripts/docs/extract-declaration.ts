@@ -63,12 +63,14 @@ function docCommentStart(lines: readonly string[], declaredAt: number): number {
 function statementEnd(lines: readonly string[], declaredAt: number): number {
   let depth = 0
   let opened = false
+  let quote: Quote
   for (let lineIndex = declaredAt; lineIndex < lines.length; lineIndex += 1) {
     const line = lines[lineIndex] ?? ''
-    const delta = bracketDelta(line)
+    const delta = bracketDelta(line, quote)
+    quote = delta.quote
     if (delta.opens > 0) opened = true
     depth += delta.opens - delta.closes
-    if (depth > 0) continue
+    if (depth > 0 || quote !== undefined) continue
     if (opened && depth < 0) return lineIndex
     if (CONTINUES_LINE.test(stripTrailingComment(line))) continue
     if (CONTINUES_FROM_NEXT.test(lines[lineIndex + 1] ?? '')) continue
@@ -79,6 +81,7 @@ function statementEnd(lines: readonly string[], declaredAt: number): number {
 
 /** Reads `path` and extracts `symbol`; throws with the path when the symbol is not declared there. */
 export function extractDeclarationFromFile(path: string, symbol: string): Declaration {
+  if (!/^\w+$/.test(symbol)) throw new Error(`\`${symbol}\` is not an identifier`)
   const found = extractDeclaration(readFileSync(path, 'utf8'), symbol)
   if (found === undefined) throw new Error(`${path} declares no top-level \`${symbol}\``)
   return found
@@ -87,16 +90,21 @@ export function extractDeclarationFromFile(path: string, symbol: string): Declar
 /** A line that is only a comment: `//`, a block opener, or a block's `*`-led body. */
 const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/
 
+type Quote = '"' | "'" | '`' | undefined
+
 /**
- * Bracket opens and closes on one line, ignoring string, template and comment lexemes. A
- * comment line counts nothing: prose has apostrophes (`the repo's rule`), and an apostrophe
- * read as a quote would swallow the `)` after it (measured on `agent-host.ts:99`).
+ * Bracket opens and closes on one line, ignoring string, template and comment lexemes, and
+ * the quote still open at the line's end — a template literal spans lines, and its interior
+ * is not code (PR #169 review). A comment line counts nothing: prose has apostrophes (`the
+ * repo's rule`), and an apostrophe read as a quote would swallow the `)` after it (measured
+ * on `agent-host.ts:99`). Inside an open template a `*`-led line is template text, not a
+ * comment, so the skip applies only when no quote is open.
  */
-function bracketDelta(line: string): { opens: number; closes: number } {
+function bracketDelta(line: string, openQuote: Quote): { opens: number; closes: number; quote: Quote } {
   let opens = 0
   let closes = 0
-  if (COMMENT_LINE.test(line)) return { opens, closes }
-  let quote: '"' | "'" | '`' | undefined
+  let quote: Quote = openQuote
+  if (quote === undefined && COMMENT_LINE.test(line)) return { opens, closes, quote }
   for (let characterIndex = 0; characterIndex < line.length; characterIndex += 1) {
     const character = line[characterIndex]
     if (quote !== undefined) {
@@ -109,7 +117,8 @@ function bracketDelta(line: string): { opens: number; closes: number } {
     else if (character === '{' || character === '(' || character === '[') opens += 1
     else if (character === '}' || character === ')' || character === ']') closes += 1
   }
-  return { opens, closes }
+  // A `'` or `"` cannot span a line; only a template carries over.
+  return { opens, closes, quote: quote === '`' ? quote : undefined }
 }
 
 function stripTrailingComment(line: string): string {

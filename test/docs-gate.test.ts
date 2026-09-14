@@ -143,9 +143,19 @@ test('the extractor takes the doc comment, the whole statement, and nothing afte
     "  | 'a'",
     "  | 'b'",
     'export function after(): void {}',
+    'export const Templated = Type.String({',
+    '  description: `a template that spans lines',
+    '  with an unbalanced { brace and a ( paren',
+    '  * and a star-led line that is template text, not a comment',
+    '  before it closes`,',
+    '})',
+    'export const Last = 1',
   ].join('\n')
   expect(extractDeclaration(source, 'First')?.text).toBe(source.split('\n').slice(0, 5).join('\n'))
   expect(extractDeclaration(source, 'Union')?.text).toBe(source.split('\n').slice(7, 13).join('\n'))
   expect(extractDeclaration(source, 'after')?.startLine).toBe(14)
+  // A template literal's interior is not code: its braces and its `*`-led line count nothing
+  // (PR #169 review), so the statement ends at `})`, not inside the template or past `Last`.
+  expect(extractDeclaration(source, 'Templated')?.text).toBe(source.split('\n').slice(14, 20).join('\n'))
   expect(extractDeclaration(source, 'Missing')).toBeUndefined()
 })
