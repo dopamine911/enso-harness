@@ -530,12 +530,15 @@ so a reader knows where to look before touching the file.
 1. This document — *The control plane* first if you are touching `packages/web`.
 2. [`glossary.md`](./glossary.md) — what every word means, by domain; the vendor map at its end if
    you are coming from pi's or deepseek-harness's vocabulary.
-3. [`../README.md`](../README.md) — what is built, guard by guard and route by route; the more
+3. [`seams/`](./seams/README.md) — one page per contract: the source verbatim, who implements and
+   consumes it, what fences it, what leaks across it, what a pivot costs. Held equal to the code by
+   `test/docs-gate.test.ts`. Read the page for the seam you are about to touch.
+4. [`../README.md`](../README.md) — what is built, guard by guard and route by route; the more
    implementation-accurate of the two documents.
-4. [`concepts/pi-immediate-needs.md`](./concepts/pi-immediate-needs.md) — what pi lacks, ranked, with
+5. [`concepts/pi-immediate-needs.md`](./concepts/pi-immediate-needs.md) — what pi lacks, ranked, with
    seams and effort. Phase 0 comes straight from its Tier 0.
-5. [`concepts/agent-boundaries.md`](./concepts/agent-boundaries.md) — the boundary model and why
+6. [`concepts/agent-boundaries.md`](./concepts/agent-boundaries.md) — the boundary model and why
    enforcement location matters more than rule content.
-6. [`concepts/harness-design-principles.md`](./concepts/harness-design-principles.md) — progressive
+7. [`concepts/harness-design-principles.md`](./concepts/harness-design-principles.md) — progressive
    disclosure, applied seven times.
-7. The rest of `concepts/` as needed.
+8. The rest of `concepts/` as needed.
