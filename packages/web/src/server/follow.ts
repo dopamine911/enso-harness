@@ -3,9 +3,7 @@ import {
   base64DecodedBytes,
   type DialogAnswer,
   isWholeBase64,
-  PICC_PERMISSION_MODES,
   type PromptImageContent,
-  persistedPermissionMode,
   type StreamingBehavior,
   validateDialogAnswer,
   ZEN_IMAGE_MAX_BYTES,
@@ -132,9 +130,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     busy: nowLive?.busy ?? false,
     generation: nowLive?.generation ?? 0,
     permissionMode:
-      nowLive === undefined
-        ? { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] }
-        : nowLive.hosted.runtime.permissionModeState(),
+      nowLive === undefined ? deps.host.storedPermissionMode(branch) : nowLive.hosted.runtime.permissionModeState(),
     messages,
     openDialogs: nowLive === undefined ? [] : nowLive.hosted.runtime.openDialogs(),
     ...(interrupted === undefined ? {} : { interrupted }),

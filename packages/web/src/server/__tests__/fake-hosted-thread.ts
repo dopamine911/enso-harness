@@ -6,6 +6,7 @@ import {
   type RuntimeEvent,
   type ThreadRuntime,
   type ZenDialogSpec,
+  type ZenPermissionModeState,
 } from '@zen/core'
 import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
 import { createEventTail, describeRuntimeEvent } from '../../host/event-tail.ts'
@@ -147,24 +148,36 @@ function isMessageEntry(entry: unknown): boolean {
   return typeof entry === 'object' && entry !== null && 'type' in entry && entry.type === 'message'
 }
 
-/** What a fake host "has on disk" (#95): a stored thread by id, with its branch. */
+/** What a fake host "has on disk" (#95): a stored thread by id, with its branch and the mode it was left in. */
 export interface FakeStoredThread {
   readonly branch: unknown[]
   readonly modified: Date
   readonly firstMessage: string
+  /** The mode the fake reports for this thread's branch; the fresh mode when absent. */
+  readonly mode?: string
 }
+
+const FAKE_FRESH_MODE: ZenPermissionModeState = { mode: 'default', available: ['default'] }
 
 /**
  * The one fake of the storage seam (`docs/seams/storage.md`): an `AgentHost` whose listing
  * and branch reads come from `stored`, and whose `createSession` is the caller's — that is
- * where a test counts what was built and hands out a `createFakeHostedThread`.
+ * where a test counts what was built and hands out a `createFakeHostedThread`. Its mode
+ * answers are declared, not computed (L3): `fresh` is what a new thread starts in, and a
+ * stored thread's mode is the one written beside its branch.
  */
 export function createFakeAgentHost(
   createSession: AgentHost['createSession'],
   stored: Record<string, FakeStoredThread> = {},
+  fresh: ZenPermissionModeState = FAKE_FRESH_MODE,
 ): AgentHost {
   return {
     createSession,
+    freshPermissionMode: () => fresh,
+    storedPermissionMode: (branch: readonly unknown[]): ZenPermissionModeState => {
+      const storedThread = Object.values(stored).find((candidate) => candidate.branch === branch)
+      return { mode: storedThread?.mode ?? fresh.mode, available: fresh.available }
+    },
     listSessions: () =>
       Promise.resolve(
         Object.entries(stored).map(([id, storedThread]) => ({

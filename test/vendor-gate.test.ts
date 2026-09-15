@@ -66,18 +66,15 @@ const VENDOR_IMPORT_ALLOWED: readonly string[] = [
 ]
 
 const VENDOR_NAMED_ALLOWED: readonly string[] = [
-  // L3 (picc's persistence read in core): the mode's own vocabulary is picc's registered set
-  // and its persisted `customType: "modes"` entry. Leaves when the mode concept is ours.
+  // L3, the browser's half (step A moved the set, the initial mode and the walk below the
+  // host seam): core still spells the persisted `customType: "modes"` entry and its reader,
+  // because the browser's two `zen.entry` readers need them until step B.
   'packages/core/src/permission-mode.ts',
-  // …and its re-export surface: `PICC_*` is part of `@zen/core`'s public names today.
+  // …and its re-export surface: `PICC_MODES_CUSTOM_TYPE` is a `@zen/core` public name until B.
   'packages/core/src/index.ts',
   // The guard's write-allowlist names cc-safety-net's state directory: a path, not an import.
   // Leaves when the harness owns the list of directories an extension may write.
   'packages/core/src/guard.ts',
-  // The two server routes that answer `{ mode, available }`: the available set is picc's.
-  // Leaves with L3 — the host would hand the server a mode state of ours.
-  'packages/web/src/server/index.ts',
-  'packages/web/src/server/follow.ts',
   // The dropdown reads the persisted mode through `readPiccPersistedMode` and says whose
   // default a fresh thread starts in. The call leaves with L3; the sentence stops being true
   // the same day.

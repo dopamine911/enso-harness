@@ -2,7 +2,6 @@ import {
   browserSection,
   describeEntry,
   describeThreadEvent,
-  persistedPermissionMode,
   type ZenLogLine,
   type ZenThreadEvent,
   ZenThreadEvents,
@@ -172,7 +171,6 @@ export function ThreadDebugView({
 }: ThreadDebugViewProps): React.ReactNode {
   const browserMode = browser.mode.mode ?? 'unknown'
   const hostMode = session?.permissionMode.mode
-  const branchMode = session === undefined ? undefined : persistedPermissionMode(session.entries)
   const sessionMissing = error === NO_SESSION_YET
   const generationDrift =
     describeGenerationDrift(browser.generation, session?.generation) ??
@@ -263,11 +261,7 @@ export function ThreadDebugView({
                   </span>
                 )}
               </div>
-              <div>
-                host mode: {hostMode}
-                <Mismatch when={branchMode !== hostMode} says={`branch says ${branchMode}`} />
-              </div>
-              <div>branch mode: {branchMode}</div>
+              <div>host mode: {hostMode}</div>
               <div>
                 {session.busy ? 'busy' : 'idle'}, run #{session.generation}, last activity{' '}
                 {session.lastActivityAt.slice(11, 19)}

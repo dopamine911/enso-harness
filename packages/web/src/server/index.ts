@@ -5,9 +5,6 @@ import {
   base64DecodedBytes,
   type DialogAnswer,
   isZenThreadId,
-  PICC_DEFAULT_PERMISSION_MODE,
-  PICC_PERMISSION_MODES,
-  persistedPermissionMode,
   withZenLogContext,
   ZEN_IMAGE_MAX_BYTES,
   ZEN_PROMPT_BODY_MAX_BYTES,
@@ -261,14 +258,13 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
   })
 
   // The permission mode a FRESH thread starts in (#84). The browser asks once on mount,
-  // before any run exists, so the header can read `default` instead of `unknown` from the
-  // first paint. Honest by construction: every page load is a new thread, the host creates
-  // a fresh session file for it, and picc's initial mode is `default`; the option list is
-  // the set picc registers unconditionally (one command per mode). A thread's LIVE state —
+  // before any run exists, so the header can read the starting mode instead of `unknown`
+  // from the first paint. The host answers — it is the one place that knows what its mode
+  // extension starts in and registers (L3, #162 workstream 4). A thread's LIVE state —
   // after a change — rides on the run-start receipt, never here.
   function respondWithFreshThreadMode(response: ServerResponse): void {
     response.writeHead(200, { 'Content-Type': 'application/json' })
-    response.end(JSON.stringify({ mode: PICC_DEFAULT_PERMISSION_MODE, available: [...PICC_PERMISSION_MODES] }))
+    response.end(JSON.stringify(host.freshPermissionMode()))
   }
 
   // ── Session inspection (#86): what a live thread's session ACTUALLY contains, for a
@@ -358,9 +354,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
       threadId,
       messages,
       permissionMode:
-        live === undefined
-          ? { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] }
-          : live.hosted.runtime.permissionModeState(),
+        live === undefined ? host.storedPermissionMode(branch) : live.hosted.runtime.permissionModeState(),
       ...(interrupted === undefined ? {} : { interrupted }),
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })

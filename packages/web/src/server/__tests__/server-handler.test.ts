@@ -71,6 +71,9 @@ function piccShapedInspection(): Partial<HostedThreadInspection> {
   }
 }
 
+/** What this fake host says a fresh thread starts in — picc's five, in picc's order, as the real host would. */
+const FRESH_MODE = { mode: 'default', available: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto'] }
+
 function fakeHost(
   script: FakeSessionScript,
   stored: Record<string, FakeStoredThread> = {},
@@ -78,22 +81,26 @@ function fakeHost(
   const built: FakeThreadRecord[] = []
   /** Thread ids the host was asked to build, in order — the prompt route passes the id through. */
   const requested: string[] = []
-  const host = createFakeAgentHost((threadId: string) => {
-    requested.push(threadId)
-    const fake = createFakeHostedThread({
-      runtime: ({ record, emit }: FakeThreadParts) => ({
-        prompt: (request: PromptRequest, outcome: PromptOutcome) => {
-          record.prompts.push(request)
-          script.onPrompt(emit, outcome, request.message)
-        },
-        listCommands: () => [{ name: 'mode', source: 'extension' }],
-        permissionModeState: () => ({ mode: 'default', available: ['default', 'acceptEdits'] }),
-      }),
-      inspect: piccShapedInspection(),
-    })
-    built.push(fake.record)
-    return Promise.resolve(fake.hosted)
-  }, stored)
+  const host = createFakeAgentHost(
+    (threadId: string) => {
+      requested.push(threadId)
+      const fake = createFakeHostedThread({
+        runtime: ({ record, emit }: FakeThreadParts) => ({
+          prompt: (request: PromptRequest, outcome: PromptOutcome) => {
+            record.prompts.push(request)
+            script.onPrompt(emit, outcome, request.message)
+          },
+          listCommands: () => [{ name: 'mode', source: 'extension' }],
+          permissionModeState: () => ({ mode: 'default', available: ['default', 'acceptEdits'] }),
+        }),
+        inspect: piccShapedInspection(),
+      })
+      built.push(fake.record)
+      return Promise.resolve(fake.hosted)
+    },
+    stored,
+    FRESH_MODE,
+  )
   return { host, built, requested }
 }
 
@@ -189,14 +196,11 @@ test('⚠ two prompts on one thread reuse ONE session; a second thread gets its 
 
 // The header's first paint (#84): what a fresh thread starts in, answered WITHOUT building
 // a session — asking must not be the thing that spins pi up.
-test("GET /api/mode reports the fresh-thread mode and picc's modes, and builds no session", async () => {
+test('GET /api/mode reports what the HOST says a fresh thread starts in, and builds no session', async () => {
   const { url, built } = await startWith({ onPrompt: neverPrompted })
   const response = await fetch(`${url}/api/mode`)
   expect(response.status).toBe(200)
-  expect(await response.json()).toEqual({
-    mode: 'default',
-    available: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto'],
-  })
+  expect(await response.json()).toEqual(FRESH_MODE)
   expect(built).toHaveLength(0)
 })
 
@@ -368,7 +372,9 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
 })
 
 test("GET /api/threads/:id/history serves a STORED thread's branch as messages with its persisted mode, and builds no session", async () => {
-  const stored = { 'stored-1': { branch: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question' } }
+  const stored = {
+    'stored-1': { branch: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question', mode: 'plan' },
+  }
   const { url, built } = await startWith({ onPrompt: neverPrompted }, stored)
   const response = await fetch(`${url}/api/threads/stored-1/history`)
   expect(response.status).toBe(200)
@@ -391,7 +397,9 @@ test("GET /api/threads/:id/history serves a STORED thread's branch as messages w
 // ⚠ HELD IS NOT BUSY (PR #104 review). A released thread stays cached for the idle window;
 // gating on presence locked a reloaded page out of its own session for thirty minutes.
 test("⚠ a thread this server holds IDLE is resumable — /history reads pi's memory, /sessions does not mark it busy", async () => {
-  const stored = { t1: { branch: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question' } }
+  const stored = {
+    t1: { branch: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question', mode: 'plan' },
+  }
   const { url, built } = await startWith(settlesAtOnce, stored)
   await prompt(url, 't1', 'hello')
   const listed = (await (await fetch(`${url}/api/stored-threads`)).json()) as ZenStoredThread[]

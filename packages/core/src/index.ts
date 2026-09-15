@@ -112,14 +112,7 @@ export {
   zenLogsDir,
   zenSecretsPath,
 } from './paths.ts'
-export {
-  PICC_DEFAULT_PERMISSION_MODE,
-  PICC_MODES_CUSTOM_TYPE,
-  PICC_PERMISSION_MODES,
-  persistedPermissionMode,
-  readPiccPersistedMode,
-  ZenPermissionModeState,
-} from './permission-mode.ts'
+export { PICC_MODES_CUSTOM_TYPE, readPiccPersistedMode, ZenPermissionModeState } from './permission-mode.ts'
 export {
   isSecretShapedName,
   knownSecretValues,
