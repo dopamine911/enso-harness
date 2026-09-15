@@ -290,6 +290,7 @@ function repositoryFile(path: string): string {
   return readFileSync(join(ROOT, path), 'utf8')
 }
 
+/** Recursive where the flat `readdirSync` it replaced was not (#174): a gate under a `test/` subdirectory is inventoried, not missed. */
 function detectedGateFiles(): string[] {
   return filesUnder(TEST_ROOT, {
     keep: (file: string): boolean =>

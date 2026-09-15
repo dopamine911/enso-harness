@@ -24,7 +24,12 @@ export const REPOSITORY_ROOT: string = join(import.meta.dir, '..')
 /** A line that is only a comment: `//`, a block opener, or a block's `*`-led body. */
 const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/
 
-/** Every source file under `directory`, absolute paths; `__tests__` only when asked for. */
+/**
+ * Every source file under `directory`, absolute paths; `__tests__` only when asked for.
+ * The shared walker matches every JS/TS flavour where this file's own regex matched `tsx?|mjs`
+ * (#174): 0 of 196 files differed at the fold, and a `.js` added later is scanned by the
+ * gates rather than invisible to them — the widening is the safe direction.
+ */
 function sourceFiles(directory: string, includeTests = false): string[] {
   return filesUnder(directory, { skipDirectories: includeTests ? [] : ['__tests__'] })
 }
