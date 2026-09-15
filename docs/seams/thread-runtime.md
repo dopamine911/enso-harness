@@ -193,9 +193,10 @@ file-permission component into a `select`.
 
 **Consumed by the server only.** `packages/web/src/server/thread-registry.ts` holds one per live
 thread (`ThreadEntry.hosted.runtime`), subscribes it to the feed, and hands a `ThreadLease.runtime` to
-the run that acquired the thread. `server/follow.ts` calls `prompt`, `answerDialog`, `openDialogs`,
-`clearQueue`, `abort`, `permissionModeState` from the four unary routes. `server/index.ts` reads
-`permissionModeState` and `listCommands` for the thread routes. The browser never sees it: what it
+the run that acquired the thread. `server/follow.ts` calls `prompt`, `listCommands`, `answerDialog`,
+`openDialogs`, `permissionModeState` from the unary routes; the abort route goes through the registry,
+whose `abort` is the one caller of `clearQueue` and `abort` (`thread-registry.ts:394,399`).
+`server/index.ts` reads `permissionModeState` for the thread routes. The browser never sees it: what it
 gets is observations on the follow.
 
 **Proven implementable three times.** The fakes are the second implementation this seam has today —
