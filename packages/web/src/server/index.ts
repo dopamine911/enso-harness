@@ -419,7 +419,9 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
    * ladders. Every row runs under the thread's log context, so a record from any of them
    * names its thread; before the table only the wire's four did. A handler that returns a
    * promise is answered-or-failed (a rejection is a 500, the server stays up); a bad body is
-   * a 400 inside the handler, never a throw.
+   * a 400 inside the handler, never a throw. A row whose handler reads the body takes
+   * `request` as it is (`respondToPrompt`, `respondToDialog`); one that reads only the id is
+   * wrapped in `idOnly`, so the table says which is which.
    */
   type ThreadRouteHandler = (
     threadId: string,
