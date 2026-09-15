@@ -33,6 +33,10 @@ export interface AgentHost {
    * written (#86's rule: looking must not build). `undefined` when no file has that id.
    */
   readBranch(threadId: string): Promise<unknown[] | undefined>
+  /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
+  freshPermissionMode(): ZenPermissionModeState
+  /** A stored thread's state from its branch alone: nothing is built to answer (#86, #95). */
+  storedPermissionMode(branch: readonly unknown[]): ZenPermissionModeState
 }
 ```
 

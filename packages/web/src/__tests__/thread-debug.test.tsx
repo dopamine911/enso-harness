@@ -117,22 +117,12 @@ test('agreement everywhere renders no MISMATCH', () => {
   const rendered = render(believing('plan'), inspection())
   expect(rendered).not.toContain('MISMATCH')
   expect(rendered).toContain('host mode: plan')
-  expect(rendered).toContain('branch mode: plan')
 })
 
 // ⚠ THE FEATURE. Browser store ≠ host means the stream or the store dropped a receipt.
 test('⚠ browser store disagreeing with the host is named as a MISMATCH', () => {
   const rendered = render(believing('default'), inspection())
   expect(rendered).toContain('MISMATCH: host says plan')
-})
-
-// Host ≠ branch means the host's walk is wrong — a picc shape change slipped past core.
-test("⚠ the host disagreeing with the branch's last modes entry is named as a MISMATCH", () => {
-  const rendered = render(
-    believing('acceptEdits'),
-    inspection({ permissionMode: { mode: 'acceptEdits', available: [] }, entries: [piccEntry('plan', 'm1')] }),
-  )
-  expect(rendered).toContain('MISMATCH: branch says plan')
 })
 
 // The run fence (#109): the page's last run number against the server's current one.

@@ -63,20 +63,36 @@ export interface CodeLineScan {
   readonly lineMatches: (line: string) => boolean
 }
 
-/** `file:line` (or `file` for a path match) for every code line the rule refuses. */
+/**
+ * `file:line` (or `file` for a path match) for every code line the rule refuses — and
+ * `file (allowlisted, matches nothing)` for every allowlisted file the rule no longer catches.
+ * The allowlist is the leak inventory; a row for a leak that has left is inventory drift, and
+ * this is how it leaves the list the same day the leak leaves the code (#162 workstream 4).
+ */
 export function codeOffenders(scan: CodeLineScan): string[] {
   const offenders: string[] = []
   for (const root of scan.roots) {
     for (const path of sourceFiles(join(REPOSITORY_ROOT, root), scan.includeTests ?? false)) {
       const repositoryRelative = path.slice(REPOSITORY_ROOT.length + 1)
       if (scan.exemptRoots?.some((exempt) => repositoryRelative.startsWith(`${exempt}/`))) continue
-      if (scan.allowed?.includes(repositoryRelative)) continue
-      if (scan.pathMatches?.(repositoryRelative)) offenders.push(repositoryRelative)
-      for (const [lineIndex, line] of readFileSync(path, 'utf8').split('\n').entries()) {
-        if (COMMENT_LINE.test(line)) continue
-        if (scan.lineMatches(line)) offenders.push(`${repositoryRelative}:${lineIndex + 1}`)
+      const matches = fileMatches(scan, path, repositoryRelative)
+      if (scan.allowed?.includes(repositoryRelative)) {
+        if (matches.length === 0) offenders.push(`${repositoryRelative} (allowlisted, matches nothing)`)
+      } else {
+        offenders.push(...matches)
       }
     }
   }
   return offenders
+}
+
+/** Every place one file breaks the rule: its path, then each code line, as `file:line`. */
+function fileMatches(scan: CodeLineScan, path: string, repositoryRelative: string): string[] {
+  const matches: string[] = []
+  if (scan.pathMatches?.(repositoryRelative)) matches.push(repositoryRelative)
+  for (const [lineIndex, line] of readFileSync(path, 'utf8').split('\n').entries()) {
+    if (COMMENT_LINE.test(line)) continue
+    if (scan.lineMatches(line)) matches.push(`${repositoryRelative}:${lineIndex + 1}`)
+  }
+  return matches
 }
