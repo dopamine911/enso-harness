@@ -393,42 +393,92 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
 
   // The bundle (#132): today's records + the live threads + the versions, one file.
   const bundle = createBundleRoute({ threads, logsDir: options.logsDir, runtimeVersion: AGENT_RUNTIME_VERSION })
+
+  function respondWithBundle(url: string, response: ServerResponse): void {
+    const outcome = bundle(new URL(url, 'http://zen').searchParams)
+    if (outcome.status !== 200) {
+      response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
+      response.end(outcome.reason)
+      return
+    }
+    response.writeHead(outcome.status, {
+      'Content-Type': 'text/markdown; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${outcome.filename}"`,
+    })
+    response.end(outcome.body)
+  }
   const about = createAboutRoute({ runtimeVersion: AGENT_RUNTIME_VERSION })
 
   // ── The wire (#112): prompt / follow / dialog ────────────────────────────────────
   const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs }
 
-  /** The thread routes; true when the request was one of them. A bad body is a 400 here, never a throw. */
-  function dispatchFollowRoutes(request: IncomingMessage, response: ServerResponse): boolean {
+  /**
+   * The thread routes, one row each, in precedence order (#174, workstream 6): method, the
+   * path pattern with the id as its one capture, and the handler. The dispatcher below is the
+   * table, not a case per row — it was seven copies of match → decode → handler in two
+   * ladders. Every row runs under the thread's log context, so a record from any of them
+   * names its thread; before the table only the wire's four did. A handler that returns a
+   * promise is answered-or-failed (a rejection is a 500, the server stays up); a bad body is
+   * a 400 inside the handler, never a throw.
+   */
+  type ThreadRouteHandler = (
+    threadId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ) => void | Promise<void>
+  interface ThreadRoute {
+    readonly method: 'GET' | 'POST'
+    readonly route: RegExp
+    readonly respond: ThreadRouteHandler
+  }
+  /** A handler that reads no body: the row's arrow names the id and the response. */
+  function idOnly(respond: (threadId: string, response: ServerResponse) => void | Promise<void>): ThreadRouteHandler {
+    return (threadId: string, _request: IncomingMessage, response: ServerResponse) => respond(threadId, response)
+  }
+  const THREAD_ROUTES: readonly ThreadRoute[] = [
+    {
+      method: 'GET',
+      route: THREAD_EVENTS_ROUTE,
+      respond: idOnly(respondWithThreadEvents),
+    },
+    {
+      method: 'GET',
+      route: THREAD_HISTORY_ROUTE,
+      respond: idOnly(respondWithThreadHistory),
+    },
+    {
+      method: 'GET',
+      route: THREAD_ROUTE,
+      respond: idOnly(respondWithThread),
+    },
+    {
+      method: 'GET',
+      route: THREAD_FOLLOW_ROUTE,
+      respond: idOnly((threadId: string, response: ServerResponse) => followThread(followDeps, threadId, response)),
+    },
+    { method: 'POST', route: THREAD_PROMPT_ROUTE, respond: respondToPrompt },
+    { method: 'POST', route: THREAD_DIALOG_ROUTE, respond: respondToDialog },
+    {
+      method: 'POST',
+      route: THREAD_ABORT_ROUTE,
+      respond: idOnly(respondToAbort),
+    },
+  ]
+
+  /** True when the request was a thread route — answered, or refused with the 400 `decodeThreadId` wrote. */
+  function dispatchThreadRoute(request: IncomingMessage, response: ServerResponse): boolean {
     const url = request.url ?? ''
-    const followMatch = request.method === 'GET' ? THREAD_FOLLOW_ROUTE.exec(url) : null
-    if (followMatch?.[1] !== undefined) {
-      const threadId = decodeThreadId(followMatch[1], response)
+    for (const { method, route, respond } of THREAD_ROUTES) {
+      if (request.method !== method) continue
+      const segment = route.exec(url)?.[1]
+      if (segment === undefined) continue
+      const threadId = decodeThreadId(segment, response)
       if (threadId !== undefined) {
-        withZenLogContext({ threadId }, () => answerOrFail(followThread(followDeps, threadId, response), response))
+        withZenLogContext({ threadId }, () => {
+          const work = respond(threadId, request, response)
+          if (work !== undefined) answerOrFail(work, response)
+        })
       }
-      return true
-    }
-    const promptMatch = request.method === 'POST' ? THREAD_PROMPT_ROUTE.exec(url) : null
-    if (promptMatch?.[1] !== undefined) {
-      const threadId = decodeThreadId(promptMatch[1], response)
-      if (threadId !== undefined) {
-        withZenLogContext({ threadId }, () => answerOrFail(respondToPrompt(threadId, request, response), response))
-      }
-      return true
-    }
-    const dialogMatch = request.method === 'POST' ? THREAD_DIALOG_ROUTE.exec(url) : null
-    if (dialogMatch?.[1] !== undefined) {
-      const threadId = decodeThreadId(dialogMatch[1], response)
-      if (threadId !== undefined) {
-        withZenLogContext({ threadId }, () => answerOrFail(respondToDialog(threadId, request, response), response))
-      }
-      return true
-    }
-    const abortMatch = request.method === 'POST' ? THREAD_ABORT_ROUTE.exec(url) : null
-    if (abortMatch?.[1] !== undefined) {
-      const threadId = decodeThreadId(abortMatch[1], response)
-      if (threadId !== undefined) withZenLogContext({ threadId }, () => respondToAbort(threadId, response))
       return true
     }
     return false
@@ -590,9 +640,10 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
     return isLoopbackAuthority(originHost)
   }
 
-  // ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler sits at the
-  // complexity ceiling biome.jsonc pins for this file (#82), and its top-to-bottom shape is
-  // the #27/#34 teardown ordering. New routes are added to this dispatcher, not to it.
+  // ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler's top-to-bottom
+  // shape is the #27/#34 teardown ordering (#82). A literal route is one arm that calls its
+  // handler; a thread route is a row of THREAD_ROUTES. This file needed its own complexity
+  // pin (49) until the thread routes became the table (#174); it now clears the global ceiling.
   const server = createServer((request, response) => {
     const url = request.url ?? ''
     if (!fromTrustedOrigin(request)) {
@@ -626,44 +677,14 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
       return
     }
     if (request.method === 'GET' && url.startsWith('/api/logs/bundle')) {
-      const outcome = bundle(new URL(url, 'http://zen').searchParams)
-      if (outcome.status !== 200) {
-        response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
-        response.end(outcome.reason)
-        return
-      }
-      response.writeHead(outcome.status, {
-        'Content-Type': 'text/markdown; charset=utf-8',
-        'Content-Disposition': `attachment; filename="${outcome.filename}"`,
-      })
-      response.end(outcome.body)
+      respondWithBundle(url, response)
       return
     }
     if (request.method === 'POST' && url === '/api/logs') {
       answerOrFail(respondToBrowserLogs(request, response), response)
       return
     }
-    if (request.method === 'GET') {
-      const eventsMatch = THREAD_EVENTS_ROUTE.exec(url)
-      if (eventsMatch?.[1] !== undefined) {
-        const threadId = decodeThreadId(eventsMatch[1], response)
-        if (threadId !== undefined) respondWithThreadEvents(threadId, response)
-        return
-      }
-      const historyMatch = THREAD_HISTORY_ROUTE.exec(url)
-      if (historyMatch?.[1] !== undefined) {
-        const threadId = decodeThreadId(historyMatch[1], response)
-        if (threadId !== undefined) answerOrFail(respondWithThreadHistory(threadId, response), response)
-        return
-      }
-      const threadMatch = THREAD_ROUTE.exec(url)
-      if (threadMatch?.[1] !== undefined) {
-        const threadId = decodeThreadId(threadMatch[1], response)
-        if (threadId !== undefined) respondWithThread(threadId, response)
-        return
-      }
-    }
-    if (dispatchFollowRoutes(request, response)) return
+    if (dispatchThreadRoute(request, response)) return
     response.writeHead(404, { 'Content-Type': 'text/plain' })
     response.end('not found')
   })

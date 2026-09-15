@@ -32,7 +32,6 @@ and exact helper exports. Unsupported or stale shapes fail generation instead of
 | Complexity pin | level `error`, max `68` | [`biome.jsonc`](../../biome.jsonc) — `packages/harness/core/shell-segments.ts` | External shell quote/escape scanners stay linear and close to their upstream shape. |
 | Complexity pin | level `error`, max `44` | [`biome.jsonc`](../../biome.jsonc) — `packages/harness/extensions/guards/index.ts` | The security dispatch and write-denial precedence is kept in one readable control flow. |
 | Complexity pin | level `error`, max `28` | [`biome.jsonc`](../../biome.jsonc) — `packages/web/src/rpc/map-events.ts` | The mapper keeps one branch per external event-protocol kind. |
-| Complexity pin | level `error`, max `49` | [`biome.jsonc`](../../biome.jsonc) — `packages/web/src/server/index.ts` | Route dispatch and response teardown ordering stay together as one control flow. |
 | Allowlist / exception count | `3` | [`test/coverage-manifest.test.ts`](../../test/coverage-manifest.test.ts) — `ENTRY_POINT_EXCEPTIONS` | Program entry points execute at import time and are verified by live receipts. |
 | Allowlist / exception count | `1` | [`test/coverage-manifest.test.ts`](../../test/coverage-manifest.test.ts) — `VENDORED_DIRECTORIES` | Vendored presentation code shares the lint and coverage exclusion boundary. |
 | Allowlist count | `0` | [`test/docs-gate.test.ts`](../../test/docs-gate.test.ts) — stated empty allowlist | Generated pages and sourced fences have no drift exceptions. |
