@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The zen-harness web surface. Outside the pi manifest — pi does nothing with a frontend.",
+  "description": "The zen-harness web surface. Outside the pi manifest \u2014 pi does nothing with a frontend.",
   "scripts": {
     "typecheck": "tsc -b --pretty false",
     "dev:server": "bun src/server/dev.ts",
@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@ag-ui/core": "0.1.1-canary.beta.0",
+    "@earendil-works/pi-coding-agent": "^0.84.4",
     "@fontsource-variable/geist": "^5.3.0",
     "@ladbabynpm/picc-permission-modes": "0.1.1",
     "@logtape/logtape": "2.3.4",

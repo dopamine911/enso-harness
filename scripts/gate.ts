@@ -98,6 +98,15 @@ const GATES: readonly Gate[] = [
     script: 'typecheck',
   },
   {
+    // AFTER typecheck: fallow's graph is syntactic, so a file tsc refuses would be reported
+    // as findings rather than as the parse error it is. Identity baseline (#163): fails only
+    // on a finding that is NOT in `fallow-baseline.json` — the backlog is inventory, growth
+    // is the regression. Re-save the baseline only when a finding is deliberately accepted.
+    name: 'dead-code',
+    describe: 'fallow: no dead-code finding beyond the committed baseline',
+    script: 'deadcode:check',
+  },
+  {
     name: 'test',
     describe: 'bun test',
     script: 'test',

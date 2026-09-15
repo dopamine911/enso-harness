@@ -1,6 +1,6 @@
 # CI — the enforced quality gate.
 #
-# Runs the SAME gate as the local pre-commit hook (`bun run check:all` = biome → tsc →
+# Runs the SAME gate as the local pre-commit hook (`bun run check:all` = biome → tsc → fallow →
 # bun test → the total-coverage floor), so "green" means one thing whether it ran on a
 # machine or here. A commit made with `--no-verify`, or by someone without the hook
 # installed, is caught at the PR instead of slipping into main.
@@ -42,8 +42,36 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Gate (biome + tsc + tests + coverage floor)
+      - name: Gate (biome + tsc + fallow baseline + tests + coverage floor)
         run: bun run check:all
+
+  # ADVISORY, deliberately (#163): the blocking gate refuses a NEW dead-code finding; this
+  # job adds what the baseline cannot see on a PR — a changed function over the complexity
+  # ceiling, a semantic clone the diff introduces — and reports without blocking. Promote
+  # by dropping continue-on-error once a week of PRs shows its verdicts are worth a block.
+  fallow-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the base branch, for `--base`
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The pinned dev dependency, never `bunx fallow@latest`: an audit that changes its
+      # own rules between runs is not a signal.
+      - name: fallow audit (advisory — never blocks)
+        env:
+          BASE_REF: ${{ github.base_ref }} # through env, never interpolated into the shell line
+        run: bunx fallow audit --base "origin/$BASE_REF" --dead-code-baseline fallow-baseline.json
 
   # ADVISORY, deliberately: react-doctor scores the web surface (0-100) and its findings
   # are guidance, not a contract — so the job reports without ever blocking a merge.

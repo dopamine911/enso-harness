@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 143.**
+**Decision headers: 144.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -143,6 +143,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/zen.mjs` | `#20` | Launch a VANILLA pi with only zen-harness loaded. |
 | `test/check-coverage.test.ts` | `#53` | The coverage GATE's own arithmetic (#53 S2). |
 | `test/docs-gate.test.ts` | `#168` | The docs cannot drift (#168, goals §3.3): a page either quotes source and is checked against it, or is generated from source and is diffed against it. |
+| `test/fallow-config.test.ts` | `#163` | fallow's entry list cannot drift from the harness manifest (#163). |
 | `test/gate-abort.test.ts` | `#157` | The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0. |
 | `test/gate-support.ts` | `#150`, `#162`, `#165` | What the source-tree gates share (#165, #162 workstream 6): the walker, the word-splitter, the sequence matcher, the comment skip. |
 | `test/glossary-doc.test.ts` | `#161`, `#164`, `#165` | The glossary keeps its own two rules (#161, PR #164 review). |

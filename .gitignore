@@ -14,3 +14,6 @@ packages/web/e2e/output/
 
 # Playwright MCP session artifacts (snapshots/console logs the browser plugin writes into the cwd)
 .playwright-mcp/
+
+# fallow viz output (`bunx fallow viz`) — a local map, regenerated on demand
+fallow-viz.html

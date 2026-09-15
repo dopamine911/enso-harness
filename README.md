@@ -371,6 +371,7 @@ dependency into the harness's own `node_modules` — a missing one is a *silentl
 ## How this repo verifies itself
 
 `bun run check` is the single source of "green" — the pre-commit hook and CI both run it: biome, tsc,
+fallow (dead code against a committed baseline, #163),
 `bun test`, then a coverage floor over a **full denominator**. That last part matters: bun measures
 coverage only over files a test imported, so an untested module would *vanish from the table* rather
 than count as 0% — `test/coverage-manifest.test.ts` imports every library source file (discovered by

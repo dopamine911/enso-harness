@@ -12,6 +12,8 @@
   "packageManager": "bun@1.4.0",
   "scripts": {
     "typecheck": "tsc -b --pretty false",
+    "deadcode:check": "fallow dead-code --quiet --baseline fallow-baseline.json",
+    "deadcode:baseline": "fallow dead-code --quiet --save-baseline fallow-baseline.json",
     "test": "bun test",
     "lint": "biome check",
     "lint:fix": "biome check --write",
@@ -34,6 +36,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.12",
     "@types/bun": "^1.4.0",
+    "fallow": "3.25.0",
     "typescript": "~7.0.2"
   },
   "overrides": {

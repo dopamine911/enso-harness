@@ -1,0 +1,614 @@
+graph LR
+  n0["packages/core/src/__tests__/config.test.ts"]
+  n1["packages/core/src/__tests__/log-bundle.test.ts"]
+  n2["packages/core/src/__tests__/log-process.test.ts"]
+  n3["packages/core/src/__tests__/no-duplicate-paths.test.ts"]
+  n4["packages/core/src/__tests__/no-duplicate-shapes.test.ts"]
+  n5["packages/core/src/__tests__/paths.test.ts"]
+  n6["packages/core/src/__tests__/permission-mode.test.ts"]
+  n7["packages/core/src/__tests__/secrets.test.ts"]
+  n8["packages/core/src/__tests__/thread-inspection.test.ts"]
+  n9["packages/core/src/config.ts"]
+  n10["packages/core/src/dialog.ts"]
+  n11["packages/core/src/follow.ts"]
+  n12["packages/core/src/guard.ts"]
+  n13["packages/core/src/index.ts"]
+  n14["packages/core/src/log-bundle.ts"]
+  n15["packages/core/src/log-process.ts"]
+  n16["packages/core/src/log.ts"]
+  n17["packages/core/src/observation.ts"]
+  n18["packages/core/src/paths.ts"]
+  n19["packages/core/src/permission-mode.ts"]
+  n20["packages/core/src/secrets.ts"]
+  n21["packages/core/src/thread-inspection.ts"]
+  n22["packages/core/src/thread-runtime.ts"]
+  n23["packages/core/src/tool-result.ts"]
+  n24["packages/core/src/web-fetch.ts"]
+  n25["packages/core/src/web-search.ts"]
+  n26["packages/harness/core/__tests__/environment-dump.test.ts"]
+  n27["packages/harness/core/__tests__/network-egress.test.ts"]
+  n28["packages/harness/core/__tests__/paths.test.ts"]
+  n29["packages/harness/core/__tests__/read-tracker.test.ts"]
+  n30["packages/harness/core/__tests__/web-fetch-policy.test.ts"]
+  n31["packages/harness/core/__tests__/web-search-model-providers.test.ts"]
+  n32["packages/harness/core/__tests__/web-search-support.test.ts"]
+  n33["packages/harness/core/__tests__/web-search-wire.test.ts"]
+  n34["packages/harness/core/environment-dump.ts"]
+  n35["packages/harness/core/index.ts"]
+  n36["packages/harness/core/network-egress.ts"]
+  n37["packages/harness/core/paths.ts"]
+  n38["packages/harness/core/read-tracker.ts"]
+  n39["packages/harness/core/shell-segments.ts"]
+  n40["packages/harness/core/tool-identity.ts"]
+  n41["packages/harness/core/web-fetch-policy.ts"]
+  n42["packages/harness/core/web-search/anthropic-wire.ts"]
+  n43["packages/harness/core/web-search/auth.ts"]
+  n44["packages/harness/core/web-search/citations.ts"]
+  n45["packages/harness/core/web-search/providers/anthropic.ts"]
+  n46["packages/harness/core/web-search/providers/deepseek.ts"]
+  n47["packages/harness/core/web-search/providers/google.ts"]
+  n48["packages/harness/core/web-search/providers/openai.ts"]
+  n49["packages/harness/core/web-search/providers/tavily.ts"]
+  n50["packages/harness/core/web-search/sources.ts"]
+  n51["packages/harness/core/web-search/sse.ts"]
+  n52["packages/harness/core/web-search/vocabulary.ts"]
+  n53["packages/harness/core/web-search/wire-json.ts"]
+  n54["packages/harness/extensions/__tests__/log-recorder.ts"]
+  n55["packages/harness/extensions/__tests__/tool-call-participants.test.ts"]
+  n56["packages/harness/extensions/guards/__tests__/cc-safety-net-contract.test.ts"]
+  n57["packages/harness/extensions/guards/__tests__/guards.test.ts"]
+  n58["packages/harness/extensions/guards/index.ts"]
+  n59["packages/harness/extensions/logging/__tests__/logging.test.ts"]
+  n60["packages/harness/extensions/logging/index.ts"]
+  n61["packages/harness/extensions/web-fetch/__tests__/web-fetch.test.ts"]
+  n62["packages/harness/extensions/web-fetch/index.ts"]
+  n63["packages/harness/extensions/web-search/__tests__/web-search.test.ts"]
+  n64["packages/harness/extensions/web-search/index.ts"]
+  n65["packages/web/e2e/chat.e2e.ts"]
+  n66["packages/web/e2e/playwright.config.ts"]
+  n67["packages/web/index.html"]
+  n68["packages/web/src/ZenToolResult.tsx"]
+  n69["packages/web/src/__tests__/browser-logging.test.ts"]
+  n70["packages/web/src/__tests__/chat-screen.test.tsx"]
+  n71["packages/web/src/__tests__/custom-event-router.test.ts"]
+  n72["packages/web/src/__tests__/dom-environment.ts"]
+  n73["packages/web/src/__tests__/follow-connection.test.ts"]
+  n74["packages/web/src/__tests__/log-recorder.ts"]
+  n75["packages/web/src/__tests__/mode-lines.test.ts"]
+  n76["packages/web/src/__tests__/notifications.test.tsx"]
+  n77["packages/web/src/__tests__/page-scoped-stores.test.ts"]
+  n78["packages/web/src/__tests__/permission-mode.test.tsx"]
+  n79["packages/web/src/__tests__/prompt-input.test.ts"]
+  n80["packages/web/src/__tests__/scripted-server.ts"]
+  n81["packages/web/src/__tests__/selected-message-part.test.tsx"]
+  n82["packages/web/src/__tests__/stored-threads.test.ts"]
+  n83["packages/web/src/__tests__/thread-debug.test.tsx"]
+  n84["packages/web/src/__tests__/thread-pane.test.tsx"]
+  n85["packages/web/src/__tests__/thread-stats.test.tsx"]
+  n86["packages/web/src/__tests__/thread-status.test.tsx"]
+  n87["packages/web/src/__tests__/thread-url.test.ts"]
+  n88["packages/web/src/__tests__/threads-rail.test.tsx"]
+  n89["packages/web/src/__tests__/tool-result.test.tsx"]
+  n90["packages/web/src/browser-logging.ts"]
+  n91["packages/web/src/chat-screen.tsx"]
+  n92["packages/web/src/components/ai-elements/attachments.tsx"]
+  n93["packages/web/src/components/ai-elements/conversation.tsx"]
+  n94["packages/web/src/components/ai-elements/message.tsx"]
+  n95["packages/web/src/components/ai-elements/prompt-input.tsx"]
+  n96["packages/web/src/components/ai-elements/queue.tsx"]
+  n97["packages/web/src/components/ai-elements/reasoning.tsx"]
+  n98["packages/web/src/components/ui/alert.tsx"]
+  n99["packages/web/src/components/ui/button.tsx"]
+  n100["packages/web/src/components/ui/card.tsx"]
+  n101["packages/web/src/components/ui/collapsible.tsx"]
+  n102["packages/web/src/components/ui/input.tsx"]
+  n103["packages/web/src/components/ui/spinner.tsx"]
+  n104["packages/web/src/components/ui/textarea.tsx"]
+  n105["packages/web/src/components/ui/tooltip.tsx"]
+  n106["packages/web/src/custom-event-router.ts"]
+  n107["packages/web/src/fixture-conversation.ts"]
+  n108["packages/web/src/follow-connection.ts"]
+  n109["packages/web/src/host/__tests__/agent-host.test.ts"]
+  n110["packages/web/src/host/__tests__/event-tail.test.ts"]
+  n111["packages/web/src/host/__tests__/extension-ui-context.test.ts"]
+  n112["packages/web/src/host/__tests__/permission-dialog.test.ts"]
+  n113["packages/web/src/host/__tests__/session-events.test.ts"]
+  n114["packages/web/src/host/agent-host.ts"]
+  n115["packages/web/src/host/event-tail.ts"]
+  n116["packages/web/src/host/extension-ui-context.ts"]
+  n117["packages/web/src/host/permission-dialog.ts"]
+  n118["packages/web/src/host/session-events.ts"]
+  n119["packages/web/src/lib/utils.ts"]
+  n120["packages/web/src/main.tsx"]
+  n121["packages/web/src/mode-lines.ts"]
+  n122["packages/web/src/notifications.tsx"]
+  n123["packages/web/src/permission-mode.tsx"]
+  n124["packages/web/src/rpc/__tests__/branch-to-messages.test.ts"]
+  n125["packages/web/src/rpc/__tests__/map-events.test.ts"]
+  n126["packages/web/src/rpc/__tests__/observation-kinds.ts"]
+  n127["packages/web/src/rpc/__tests__/schemas.test.ts"]
+  n128["packages/web/src/rpc/__tests__/to-agui.test.ts"]
+  n129["packages/web/src/rpc/branch-to-messages.ts"]
+  n130["packages/web/src/rpc/custom-event-names.ts"]
+  n131["packages/web/src/rpc/map-events.ts"]
+  n132["packages/web/src/rpc/to-agui.ts"]
+  n133["packages/web/src/selected-message-part.tsx"]
+  n134["packages/web/src/server/__tests__/bundle-route.test.ts"]
+  n135["packages/web/src/server/__tests__/follow-reader.ts"]
+  n136["packages/web/src/server/__tests__/follow.test.ts"]
+  n137["packages/web/src/server/__tests__/logs-route.test.ts"]
+  n138["packages/web/src/server/__tests__/observation-log.test.ts"]
+  n139["packages/web/src/server/__tests__/run-timing.test.ts"]
+  n140["packages/web/src/server/__tests__/server-handler.test.ts"]
+  n141["packages/web/src/server/__tests__/thread-registry.test.ts"]
+  n142["packages/web/src/server/__tests__/vendor-links.test.ts"]
+  n143["packages/web/src/server/bun-plugin-strict-binding-workaround.ts"]
+  n144["packages/web/src/server/bundle-route.ts"]
+  n145["packages/web/src/server/dev-web.ts"]
+  n146["packages/web/src/server/dev.ts"]
+  n147["packages/web/src/server/follow.ts"]
+  n148["packages/web/src/server/index.ts"]
+  n149["packages/web/src/server/logs-route.ts"]
+  n150["packages/web/src/server/observation-log.ts"]
+  n151["packages/web/src/server/run-timing.ts"]
+  n152["packages/web/src/server/sse.ts"]
+  n153["packages/web/src/server/thread-registry.ts"]
+  n154["packages/web/src/store.ts"]
+  n155["packages/web/src/stored-threads.ts"]
+  n156["packages/web/src/styles/global.css"]
+  n157["packages/web/src/thread-debug.tsx"]
+  n158["packages/web/src/thread-stats.tsx"]
+  n159["packages/web/src/thread-status.tsx"]
+  n160["packages/web/src/thread-stores.ts"]
+  n161["packages/web/src/thread-url.ts"]
+  n162["packages/web/src/threads-rail.tsx"]
+  n163["packages/web/src/types/css-imports.d.ts"]
+  n164["scripts/__tests__/print-harness.test.ts"]
+  n165["scripts/__tests__/zen-logs.test.ts"]
+  n166["scripts/check-coverage.ts"]
+  n167["scripts/dev.mjs"]
+  n168["scripts/docs/core-exports.ts"]
+  n169["scripts/docs/decisions.ts"]
+  n170["scripts/docs/env-and-config.ts"]
+  n171["scripts/docs/extract-declaration.ts"]
+  n172["scripts/docs/observations.ts"]
+  n173["scripts/docs/ported-provenance.ts"]
+  n174["scripts/docs/refresh-fences.ts"]
+  n175["scripts/docs/routes.ts"]
+  n176["scripts/docs/verification-inventory.ts"]
+  n177["scripts/gate.ts"]
+  n178["scripts/link-vendor-packages.mjs"]
+  n179["scripts/print-harness.mjs"]
+  n180["scripts/zen-logs.ts"]
+  n181["scripts/zen-thread.mjs"]
+  n182["scripts/zen.mjs"]
+  n183["test/check-coverage.test.ts"]
+  n184["test/coverage-manifest.test.ts"]
+  n185["test/docs-gate.test.ts"]
+  n186["test/fallow-config.test.ts"]
+  n187["test/gate-abort.test.ts"]
+  n188["test/gate-support.ts"]
+  n189["test/glossary-doc.test.ts"]
+  n190["test/glossary-gate.test.ts"]
+  n191["test/logging-gate.test.ts"]
+  n192["test/naming-gate.test.ts"]
+  n193["test/no-lint-suppressions.test.ts"]
+  n194["test/presentation-gate.test.ts"]
+  n195["test/vendor-gate.test.ts"]
+
+  n0 --> n9
+  n1 --> n14
+  n1 --> n15
+  n1 --> n16
+  n1 --> n21
+  n2 --> n14
+  n2 --> n15
+  n2 --> n16
+  n3 --> n18
+  n4 --> n13
+  n5 --> n18
+  n6 --> n19
+  n7 --> n18
+  n7 --> n20
+  n8 --> n21
+  n9 --> n24
+  n9 --> n25
+  n11 --> n10
+  n11 --> n17
+  n11 --> n19
+  n11 --> n21
+  n11 --> n22
+  n13 --> n9
+  n13 --> n10
+  n13 --> n11
+  n13 --> n12
+  n13 --> n14
+  n13 --> n16
+  n13 --> n17
+  n13 --> n18
+  n13 --> n19
+  n13 --> n20
+  n13 --> n21
+  n13 --> n22
+  n13 --> n23
+  n13 --> n24
+  n13 --> n25
+  n14 --> n16
+  n14 --> n21
+  n15 --> n16
+  n15 --> n18
+  n17 --> n10
+  n17 --> n23
+  n20 --> n18
+  n21 --> n19
+  n22 --> n10
+  n22 --> n19
+  n26 --> n34
+  n27 --> n13
+  n27 --> n36
+  n27 --> n39
+  n28 --> n13
+  n28 --> n37
+  n29 --> n38
+  n30 --> n13
+  n30 --> n41
+  n31 --> n47
+  n31 --> n48
+  n31 --> n52
+  n32 --> n43
+  n32 --> n44
+  n32 --> n49
+  n32 --> n50
+  n32 --> n52
+  n33 --> n42
+  n33 --> n45
+  n33 --> n46
+  n33 --> n51
+  n33 --> n52
+  n34 --> n13
+  n34 --> n36
+  n34 --> n39
+  n35 --> n34
+  n35 --> n36
+  n35 --> n37
+  n35 --> n38
+  n35 --> n39
+  n35 --> n40
+  n35 --> n41
+  n35 --> n42
+  n35 --> n43
+  n35 --> n45
+  n35 --> n46
+  n35 --> n47
+  n35 --> n48
+  n35 --> n49
+  n35 --> n52
+  n36 --> n39
+  n36 --> n40
+  n37 --> n13
+  n38 --> n37
+  n41 --> n13
+  n42 --> n44
+  n42 --> n50
+  n42 --> n51
+  n42 --> n52
+  n42 --> n53
+  n43 --> n52
+  n44 --> n50
+  n44 --> n52
+  n45 --> n42
+  n45 --> n52
+  n45 --> n53
+  n46 --> n42
+  n46 --> n52
+  n47 --> n44
+  n47 --> n50
+  n47 --> n51
+  n47 --> n52
+  n47 --> n53
+  n48 --> n44
+  n48 --> n50
+  n48 --> n51
+  n48 --> n52
+  n48 --> n53
+  n49 --> n50
+  n49 --> n52
+  n49 --> n53
+  n50 --> n52
+  n54 --> n13
+  n55 --> n13
+  n57 --> n54
+  n57 --> n58
+  n58 --> n13
+  n58 --> n35
+  n59 --> n13
+  n59 --> n15
+  n59 --> n54
+  n59 --> n60
+  n60 --> n13
+  n60 --> n15
+  n61 --> n13
+  n61 --> n54
+  n61 --> n62
+  n62 --> n13
+  n62 --> n35
+  n63 --> n13
+  n63 --> n35
+  n63 --> n54
+  n63 --> n64
+  n64 --> n13
+  n64 --> n35
+  n65 --> n66
+  n66 --> n13
+  n67 --> n120
+  n68 --> n13
+  n69 --> n13
+  n69 --> n90
+  n70 --> n13
+  n70 --> n91
+  n70 --> n108
+  n70 --> n154
+  n70 --> n160
+  n71 --> n13
+  n71 --> n106
+  n71 --> n130
+  n71 --> n160
+  n73 --> n13
+  n73 --> n74
+  n73 --> n80
+  n73 --> n108
+  n74 --> n13
+  n75 --> n121
+  n75 --> n122
+  n76 --> n122
+  n76 --> n154
+  n76 --> n160
+  n78 --> n123
+  n79 --> n95
+  n80 --> n13
+  n81 --> n133
+  n82 --> n13
+  n82 --> n155
+  n83 --> n13
+  n83 --> n106
+  n83 --> n157
+  n83 --> n160
+  n84 --> n72
+  n84 --> n80
+  n84 --> n91
+  n84 --> n160
+  n85 --> n13
+  n85 --> n158
+  n86 --> n158
+  n86 --> n159
+  n87 --> n161
+  n88 --> n160
+  n88 --> n162
+  n89 --> n13
+  n89 --> n68
+  n90 --> n13
+  n90 --> n154
+  n91 --> n13
+  n91 --> n68
+  n91 --> n92
+  n91 --> n93
+  n91 --> n94
+  n91 --> n95
+  n91 --> n96
+  n91 --> n98
+  n91 --> n99
+  n91 --> n100
+  n91 --> n102
+  n91 --> n104
+  n91 --> n106
+  n91 --> n107
+  n91 --> n108
+  n91 --> n122
+  n91 --> n123
+  n91 --> n133
+  n91 --> n154
+  n91 --> n155
+  n91 --> n157
+  n91 --> n159
+  n91 --> n160
+  n91 --> n161
+  n91 --> n162
+  n92 --> n95
+  n92 --> n99
+  n92 --> n119
+  n93 --> n99
+  n93 --> n119
+  n94 --> n119
+  n95 --> n99
+  n95 --> n104
+  n95 --> n119
+  n96 --> n101
+  n96 --> n119
+  n97 --> n101
+  n97 --> n119
+  n98 --> n119
+  n99 --> n119
+  n100 --> n119
+  n102 --> n119
+  n103 --> n119
+  n104 --> n119
+  n105 --> n119
+  n106 --> n13
+  n106 --> n130
+  n106 --> n154
+  n106 --> n160
+  n108 --> n13
+  n108 --> n130
+  n108 --> n132
+  n109 --> n13
+  n109 --> n74
+  n109 --> n114
+  n110 --> n115
+  n111 --> n13
+  n111 --> n74
+  n111 --> n116
+  n111 --> n117
+  n112 --> n117
+  n113 --> n118
+  n114 --> n13
+  n114 --> n115
+  n114 --> n116
+  n114 --> n118
+  n115 --> n13
+  n116 --> n13
+  n116 --> n117
+  n118 --> n13
+  n120 --> n90
+  n120 --> n91
+  n120 --> n156
+  n120 --> n160
+  n121 --> n13
+  n121 --> n122
+  n122 --> n13
+  n122 --> n119
+  n122 --> n154
+  n123 --> n13
+  n123 --> n154
+  n124 --> n13
+  n124 --> n129
+  n125 --> n13
+  n125 --> n131
+  n126 --> n13
+  n127 --> n13
+  n127 --> n126
+  n127 --> n131
+  n128 --> n13
+  n128 --> n126
+  n128 --> n131
+  n128 --> n132
+  n129 --> n13
+  n129 --> n131
+  n131 --> n13
+  n132 --> n13
+  n132 --> n130
+  n133 --> n68
+  n133 --> n97
+  n134 --> n13
+  n134 --> n15
+  n134 --> n114
+  n134 --> n115
+  n134 --> n144
+  n134 --> n153
+  n135 --> n13
+  n136 --> n13
+  n136 --> n74
+  n136 --> n114
+  n136 --> n135
+  n136 --> n148
+  n137 --> n74
+  n137 --> n149
+  n138 --> n74
+  n138 --> n150
+  n138 --> n151
+  n139 --> n151
+  n140 --> n13
+  n140 --> n74
+  n140 --> n114
+  n140 --> n115
+  n140 --> n135
+  n140 --> n148
+  n141 --> n13
+  n141 --> n74
+  n141 --> n114
+  n141 --> n153
+  n142 --> n148
+  n144 --> n13
+  n144 --> n15
+  n144 --> n153
+  n145 --> n13
+  n145 --> n15
+  n145 --> n67
+  n146 --> n13
+  n146 --> n15
+  n146 --> n148
+  n147 --> n13
+  n147 --> n114
+  n147 --> n129
+  n147 --> n152
+  n147 --> n153
+  n148 --> n13
+  n148 --> n114
+  n148 --> n129
+  n148 --> n144
+  n148 --> n147
+  n148 --> n149
+  n148 --> n151
+  n148 --> n152
+  n148 --> n153
+  n149 --> n13
+  n150 --> n13
+  n150 --> n151
+  n152 --> n13
+  n153 --> n13
+  n153 --> n114
+  n153 --> n115
+  n153 --> n131
+  n153 --> n150
+  n154 --> n160
+  n155 --> n13
+  n155 --> n154
+  n157 --> n13
+  n157 --> n90
+  n157 --> n99
+  n157 --> n106
+  n157 --> n123
+  n157 --> n130
+  n157 --> n154
+  n157 --> n155
+  n157 --> n158
+  n157 --> n160
+  n158 --> n154
+  n159 --> n68
+  n159 --> n154
+  n159 --> n158
+  n160 --> n13
+  n160 --> n90
+  n160 --> n106
+  n160 --> n108
+  n160 --> n121
+  n160 --> n122
+  n160 --> n123
+  n160 --> n154
+  n160 --> n158
+  n161 --> n13
+  n162 --> n13
+  n162 --> n99
+  n162 --> n119
+  n162 --> n160
+  n164 --> n179
+  n165 --> n13
+  n165 --> n180
+  n166 --> n13
+  n167 --> n13
+  n168 --> n13
+  n169 --> n13
+  n170 --> n13
+  n172 --> n13
+  n173 --> n13
+  n174 --> n13
+  n174 --> n171
+  n175 --> n13
+  n176 --> n13
+  n178 --> n13
+  n180 --> n13
+  n180 --> n15
+  n181 --> n13
+  n182 --> n13
+  n182 --> n179
+  n183 --> n166
+  n185 --> n171
+  n185 --> n188
+  n186 --> n188
+  n187 --> n177
+  n189 --> n188
+  n190 --> n188
+  n195 --> n188
+
+  style n10,n11,n17,n23,n24,n25,n35,n36,n37,n90,n91,n108,n115,n116,n122,n144,n148,n153,n157,n159,n160,n161 fill:#ffc53d,color:#111
+  style n0,n1,n2,n3,n4,n5,n6,n7,n8,n13,n15,n26,n27,n28,n29,n30,n31,n32,n33,n55,n56,n57,n58,n59,n60,n61,n62,n63,n64,n65,n66,n67,n69,n70,n71,n73,n75,n76,n77,n78,n79,n81,n82,n83,n84,n85,n86,n87,n88,n89,n109,n110,n111,n112,n113,n120,n124,n125,n127,n128,n134,n136,n137,n138,n139,n140,n141,n142,n143,n145,n146,n163,n164,n165,n166,n167,n168,n169,n170,n171,n172,n173,n174,n175,n176,n177,n178,n180,n181,n182,n183,n184,n185,n186,n187,n189,n190,n191,n192,n193,n194,n195 fill:#30a46c,color:#fff
+

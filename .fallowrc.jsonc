@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  // fallow's static graph (#163, #162 workstream 8). Every entry below names a program whose
+  // loader fallow cannot see; without it `fallow fix` would remove the guards. The four
+  // extension entries are ASSERTED against `packages/harness/package.json` → `pi.extensions`
+  // by `test/fallow-config.test.ts`, so the manifest and this list cannot drift apart.
+  "entry": [
+    // Loaded by the runtime from the harness manifest, never imported by our code.
+    "packages/harness/extensions/logging/index.ts",
+    "packages/harness/extensions/guards/index.ts",
+    "packages/harness/extensions/web-fetch/index.ts",
+    "packages/harness/extensions/web-search/index.ts",
+    // Loaded by Bun from `packages/web/bunfig.toml` → `plugins`.
+    "packages/web/src/server/bun-plugin-strict-binding-workaround.ts",
+    // Run directly: `bun scripts/zen-thread.mjs`; not a package.json script.
+    "scripts/zen-thread.mjs",
+    // Spawned by `test/docs-gate.test.ts` and run by hand: `bun scripts/docs/<name>.ts`.
+    "scripts/docs/*.ts"
+  ],
+  "ignoreDependencies": [
+    // Loaded by the runtime from the harness manifest (`pi.extensions`, `pi.themes`).
+    "@ladbabynpm/picc-permission-modes",
+    "pi-multi-account",
+    "@mammothb/pi-tokyonight-storm",
+    // Loaded by Bun from `packages/web/bunfig.toml` → `plugins`, and by the dev server's HMR.
+    "bun-plugin-tailwind",
+    "react-refresh",
+    // The runtime's own packages, supplied by it (peer `@earendil-works/pi-coding-agent`);
+    // every import site is under the vendor gate's roots or on its allowlist (#145).
+    "@earendil-works/pi-ai",
+    "@earendil-works/pi-tui"
+  ],
+  "ignorePatterns": [".inspiration/**", ".local/**", ".zen/**", "dist-types/**"],
+  // Vendored presentation and shadcn primitives stay IN the graph (their dependencies are real)
+  // but their own findings are hidden: biome and coverage already exclude them (#31, #121), and
+  // an unused sub-component there is upstream's, kept diffable, not ours to prune.
+  "ignoreFindings": ["packages/web/src/components/**"]
+}
