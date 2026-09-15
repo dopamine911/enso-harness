@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { filesUnder } from '../scripts/source-tree.ts'
+import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
  * The naming gate's exemption for externally-fixed KEYS (#82, PR #83 review).
@@ -15,8 +17,7 @@ import { join } from 'node:path'
  * behaviour is asserted by running Biome itself.
  */
 
-const repositoryRoot = join(import.meta.dir, '..')
-const biomeBinary = join(repositoryRoot, 'node_modules', '.bin', 'biome')
+const biomeBinary = join(REPOSITORY_ROOT, 'node_modules', '.bin', 'biome')
 
 /**
  * Lints one fixture through the REPO's config and returns the 1-based line numbers at which
@@ -38,7 +39,7 @@ function namingGateLines(source: string): number[] {
   try {
     const fixture = join(directory, 'fixture.ts')
     writeFileSync(fixture, source)
-    const linted = Bun.spawnSync([biomeBinary, 'check', `--config-path=${repositoryRoot}`, fixture])
+    const linted = Bun.spawnSync([biomeBinary, 'check', `--config-path=${REPOSITORY_ROOT}`, fixture])
     const report = `${linted.stdout.toString()}${linted.stderr.toString()}`
     // Biome heads each diagnostic with `<path>:<line>:<column> <category>`.
     const flagged = new Set<number>()
@@ -81,27 +82,14 @@ const EXEMPTED_KEY_SITES = [
   // the run path; the wire carries no interrupts.)
 ] as const
 const SCANNED_ROOTS = ['packages', 'scripts'] as const
-const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', 'dist-types', 'coverage'])
-const SOURCE_EXTENSION = /\.(?:tsx?|mjs|cjs)$/
 /** `v:` / `dir:` as a property key — not preceded by a word character or a dot. */
 const EXEMPTED_KEY = /(?:^|[^A-Za-z0-9_$.])(?:v|dir)\s*:/
-
-function sourceFiles(directory: string): string[] {
-  const found: string[] = []
-  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
-    if (SKIPPED_DIRECTORIES.has(dirent.name)) continue
-    const path = join(directory, dirent.name)
-    if (dirent.isDirectory()) found.push(...sourceFiles(path))
-    else if (SOURCE_EXTENSION.test(dirent.name)) found.push(path)
-  }
-  return found
-}
 
 test('⚠ only the documented site relies on the key exemption', () => {
   const relyingFiles = new Set<string>()
   for (const root of SCANNED_ROOTS) {
-    for (const path of sourceFiles(join(repositoryRoot, root))) {
-      const repositoryRelative = path.slice(repositoryRoot.length + 1)
+    for (const path of filesUnder(join(REPOSITORY_ROOT, root))) {
+      const repositoryRelative = path.slice(REPOSITORY_ROOT.length + 1)
       // Tests are excluded from the plugin entirely, so their fixtures rely on nothing.
       if (repositoryRelative.includes('.test.')) continue
       if (EXEMPTED_KEY.test(readFileSync(path, 'utf8'))) relyingFiles.add(repositoryRelative)
