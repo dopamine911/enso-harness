@@ -203,20 +203,6 @@
           }
         }
       }
-    },
-    {
-      // The route dispatcher (49): the origin/host refusal, then one arm per
-      // route. Beside it the chat handler (29) holds the #27/#34 teardown
-      // ordering in its control flow — fragmenting that is how the
-      // response-close bug hid (see #74, #81).
-      "includes": ["packages/web/src/server/index.ts"],
-      "linter": {
-        "rules": {
-          "complexity": {
-            "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 49 } }
-          }
-        }
-      }
     }
   ],
   "assist": {

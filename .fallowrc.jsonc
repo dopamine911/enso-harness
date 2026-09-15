@@ -78,5 +78,15 @@
     "mode": "semantic",
     "ignore": ["packages/web/src/components/**", "packages/core/src/**"],
     "threshold": 4.5
+  },
+  // Complexity thresholds for `fallow audit` (the advisory job). CRAP is OFF, not raised: it is
+  // cyclomatic × (1 − coverage)³, and fallow can only ESTIMATE coverage here — Bun's LCOV has no
+  // function spans for `--coverage`, so every score is `coverage_source: estimated`, and the
+  // estimate reads from export references, which a request listener or a generator's
+  // `generate()` never has. Every complexity finding the audit raised on #180, #181 and #182
+  // was `exceeded: crap` on a function the suite drives; cyclomatic (20) and cognitive (15)
+  // never fired and stay on — cognitive is also biome's hard ceiling at 25.
+  "health": {
+    "maxCrap": 0
   }
 }
