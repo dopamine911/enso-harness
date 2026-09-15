@@ -489,12 +489,17 @@ function validateDouble(metadata: DoubleMetadata): void {
   if (!declaration.test(source)) throw new Error(`${metadata.file}: stale double metadata for ${metadata.symbol}`)
 }
 
-/** `@zen/core/<subpath>` → the file package.json's export map names; other bare specifiers → undefined. */
+/** `@zen/core/<subpath>` → the file core's export map names, read once; other bare specifiers → undefined. */
+const CORE_SUBPATH_TARGETS: ReadonlyMap<string, string> = new Map(
+  Object.entries(
+    (JSON.parse(repositoryFile('packages/core/package.json')) as { exports: Record<string, string> }).exports,
+  )
+    .filter(([subpath]) => subpath !== '.')
+    .map(([subpath, target]) => [`@zen/core/${subpath.slice(2)}`, `packages/core/${target.replace(/^\.\//, '')}`]),
+)
+
 function coreSubpathTarget(specifier: string): string | undefined {
-  if (!specifier.startsWith('@zen/core/')) return undefined
-  const manifest = JSON.parse(repositoryFile('packages/core/package.json')) as { exports: Record<string, string> }
-  const target = manifest.exports[`./${specifier.slice('@zen/core/'.length)}`]
-  return target === undefined ? undefined : `packages/core/${target.replace(/^\.\//, '')}`
+  return CORE_SUBPATH_TARGETS.get(specifier)
 }
 
 function importsSymbol(testFile: string, metadata: DoubleMetadata): boolean {
