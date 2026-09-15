@@ -82,8 +82,10 @@ export function isFetchableContentType(contentTypeHeader: string | null): boolea
 const IPV4_OCTET_COUNT = 4
 const IPV4_MAX_OCTET = 255
 
+type Ipv4Octets = readonly [number, number, number, number]
+
 /** Parse a dotted-quad string into octets, or undefined when it is not one. */
-function ipv4OctetsOf(address: string): number[] | undefined {
+function ipv4OctetsOf(address: string): Ipv4Octets | undefined {
   const parts = address.split('.')
   if (parts.length !== IPV4_OCTET_COUNT) return undefined
   const octets: number[] = []
@@ -93,7 +95,9 @@ function ipv4OctetsOf(address: string): number[] | undefined {
     if (octet > IPV4_MAX_OCTET) return undefined
     octets.push(octet)
   }
-  return octets
+  const [first, second, third, fourth] = octets
+  if (first === undefined || second === undefined || third === undefined || fourth === undefined) return undefined
+  return [first, second, third, fourth]
 }
 
 /**
@@ -121,12 +125,12 @@ const NON_PUBLIC_IPV4_CIDRS: readonly (readonly [
   [[224, 0, 0, 0], 3], // multicast + reserved (224.0.0.0/4, 240.0.0.0/4)
 ]
 
-function ipv4ToInteger(octets: readonly number[]): number {
+function ipv4ToInteger(octets: Ipv4Octets): number {
   return octets.reduce((value, octet) => value * 256 + octet, 0)
 }
 
-function isPublicIpv4(octets: readonly number[]): boolean {
-  if (octets.length !== IPV4_OCTET_COUNT) return false
+/** Callers hold `Ipv4Octets`, so a length guard here would be a branch nothing can reach. */
+function isPublicIpv4(octets: Ipv4Octets): boolean {
   const address = ipv4ToInteger(octets)
   return !NON_PUBLIC_IPV4_CIDRS.some(([base, prefix]) => {
     const size = 2 ** (32 - prefix)
