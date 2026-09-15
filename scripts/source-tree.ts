@@ -9,6 +9,10 @@ import { join } from 'node:path'
  *
  * Order is sorted by name at every level, so a generator's output does not depend on the
  * filesystem's directory order.
+ *
+ * `SOURCE_FILE` is every JS/TS flavour, a superset of each copy's own regex (`tsx?`, `tsx?|mjs`,
+ * `tsx?|jsx?|mjs|cjs`, …). Measured at each fold: 0 files newly scanned. A flavour that appears
+ * later is scanned by every gate, not invisible to some — the widening is the safe direction.
  */
 
 /** Build outputs and dependencies: never entered, by any caller. */
