@@ -99,7 +99,7 @@ export interface ZenExtensionUiContextOptions {
  * waits on terminal interaction would hang the extension forever against a TUI that will
  * never answer. Past the budget the call falls back to pi's rpc contract (`undefined`).
  */
-export const CUSTOM_COMPONENT_BUILD_TIMEOUT_MS = 2000
+const CUSTOM_COMPONENT_BUILD_TIMEOUT_MS = 2000
 
 /**
  * What `confirm` answers for every non-answer outcome — cancel, abort, timeout. pi's own

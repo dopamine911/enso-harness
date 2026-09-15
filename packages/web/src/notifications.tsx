@@ -65,7 +65,7 @@ export function createNotificationsStore(): NotificationsStore {
 }
 
 /** The grouping rule (#96), in one place: a startup notice that is merely informational. */
-export function isStartupNotice(notification: ZenNotification): boolean {
+function isStartupNotice(notification: ZenNotification): boolean {
   return notification.origin === 'session-start' && (notification.notifyType ?? 'info') === 'info'
 }
 
@@ -105,7 +105,7 @@ export function NotificationLine({ notification }: { notification: ZenNotificati
  * native `<details>` — keyboard- and screen-reader-complete without a component, and its
  * open state survives a re-render of the list because React keeps the element.
  */
-export function StartupNotices({ notifications }: { notifications: readonly ZenNotification[] }): React.ReactNode {
+function StartupNotices({ notifications }: { notifications: readonly ZenNotification[] }): React.ReactNode {
   if (notifications.length === 0) return null
   const noun = notifications.length === 1 ? 'notice' : 'notices'
   return (

@@ -465,7 +465,7 @@ function PendingDialog(): React.ReactNode {
 }
 
 /** The composer's draft with more text appended — restored prompts after what was already typed, one blank line between. */
-export function joinDrafts(current: string, ...more: readonly string[]): string {
+function joinDrafts(current: string, ...more: readonly string[]): string {
   return [current, ...more].filter((part) => part.trim().length > 0).join('\n\n')
 }
 
@@ -570,7 +570,7 @@ function ComposerBody({
  * hands the texts back to the composer of the tab that stopped. Nothing when nothing waits.
  * ⓘ Exported for `__tests__/chat-screen.test.tsx`.
  */
-export function PendingQueue(): React.ReactNode {
+function PendingQueue(): React.ReactNode {
   const stores = useThreadStores()
   const queued = useStore(stores.queue)
   if (queued.length === 0) return null

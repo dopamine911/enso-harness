@@ -137,7 +137,7 @@ export function createBundleRoute(deps: BundleRouteDeps): (query: URLSearchParam
  * answers with it, so a dashboard and a handed-over bundle cannot disagree about which
  * checkout, which runtime, which machine.
  */
-export function describeAbout(input: {
+function describeAbout(input: {
   readonly zen: string
   readonly runtimeVersion: string
   readonly at: Date

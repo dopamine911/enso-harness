@@ -62,7 +62,7 @@ interface ThreadFeed {
  * reply and type the next prompt without losing mode or read-tracker state; short enough
  * that an abandoned tab does not hold extension instances for the rest of the day.
  */
-export const THREAD_IDLE_TIMEOUT_MS = 30 * 60 * 1000
+const THREAD_IDLE_TIMEOUT_MS = 30 * 60 * 1000
 
 const log = zenLogger('server', 'threads')
 

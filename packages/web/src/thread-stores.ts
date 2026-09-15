@@ -110,7 +110,7 @@ function createThreadStores(threadId: string, history: readonly UIMessage[], fet
  * the head of the transcript's notices, never a toast, because the next prompt continues
  * from the torn tail and the user should know that before typing it.
  */
-export const INTERRUPTED_TAIL_NOTICE: Record<ZenInterruptedTail, string> = {
+const INTERRUPTED_TAIL_NOTICE: Record<ZenInterruptedTail, string> = {
   'unanswered-prompt':
     "This session's last prompt was never answered — its run was cut off before a reply. The next prompt continues from there.",
   'tool-call-without-result':
