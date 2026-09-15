@@ -1,4 +1,5 @@
 import { applyByteIndexCitations, type ByteIndexInsertion } from '../citations.ts'
+import { dispatchProviderPost } from '../dispatch.ts'
 import { titleFromUrl } from '../sources.ts'
 import { readSseEvents } from '../sse.ts'
 import type { ModelSearchRequest, WebSearchOutcome, WebSource } from '../vocabulary.ts'
@@ -121,25 +122,12 @@ export async function runGoogleProviderSearch(request: ModelSearchRequest): Prom
     tools: [{ google_search: {} }],
   }
 
-  let response: Response
-  try {
-    response = await request.fetchUrl(endpointUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(requestBody),
-      signal: request.signal,
-    })
-  } catch (error) {
-    throw new WebSearchProviderError('google', `the search request failed to send: ${String(error)}`, {
-      requestDispatched: false,
-    })
-  }
-  if (!response.ok) {
-    const errorBody = await response.text()
-    throw new WebSearchProviderError('google', `the search API answered HTTP ${response.status}: ${errorBody}`, {
-      requestDispatched: true,
-    })
-  }
+  const response = await dispatchProviderPost('google', request.fetchUrl, {
+    url: endpointUrl,
+    headers,
+    body: requestBody,
+    signal: request.signal,
+  })
 
   let accumulatedText = ''
   let groundingMetadata: Record<string, unknown> | undefined

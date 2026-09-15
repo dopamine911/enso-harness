@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 144.**
+**Decision headers: 148.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -36,6 +36,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/core/__tests__/web-search-model-providers.test.ts` | `#63` | The google and openai providers (#63) against synthetic wire fixtures. |
 | `packages/harness/core/__tests__/web-search-support.test.ts` | `#63` | The web_search support layer (#63): source hygiene, citation appliers, auth, Tavily. |
 | `packages/harness/core/__tests__/web-search-wire.test.ts` | `#63` | The Anthropic WIRE (#63) against synthetic SSE fixtures — the wire serves both the `anthropic` and `deepseek` providers, so these fixtures are the shared spine. |
+| `packages/harness/core/deadline.ts` | `#58`, `#174` | Run work under a deadline AND the caller's abort signal, as one signal (#174; the shape `web_fetch` and `web_search` each carried). |
 | `packages/harness/core/environment-dump.ts` | `#89` | The bash environment-dump deny (#89) — DEPTH, not the fix. |
 | `packages/harness/core/network-egress.ts` | `#9`, `#54`, `#55`, `#57` | The bash network deny (#9) — a BAR, deliberately not a boundary. |
 | `packages/harness/core/read-tracker.ts` | `#10`, `#11` | Session-scoped record of files whose content this session has seen (#10), and of the on-disk state they had when it saw them (#11). |
@@ -45,6 +46,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/core/web-search/anthropic-wire.ts` | `#63` | The Anthropic Messages WIRE — one streaming `/messages` call with the native `web_search` server tool, parsed into the outcome union. |
 | `packages/harness/core/web-search/auth.ts` | `#63` | Model-routed auth (#63): resolve one model's credentials THROUGH PI's model registry — the same identity the conversation bills, including the OAuth path — with the provider-env fallback pi 0.80.1+ made necessary. |
 | `packages/harness/core/web-search/citations.ts` | `#63` | Citation markers (#63): turn a provider's citation records into `[n]` markers inside the answer text plus the numbered source list those markers point at. |
+| `packages/harness/core/web-search/dispatch.ts` | `#174` | How every provider sends its request (#174): a JSON POST, and the two ways it fails — the request never left (`requestDispatched: false`, so the extension may fall through to the next provider) or the API answered but not OK (`requestDispatched: true`, the body quoted). |
 | `packages/harness/core/web-search/providers/anthropic.ts` | `#63` | The `anthropic` provider (#63): current-model routing onto the Anthropic Messages native `web_search` server tool ({@link ANTHROPIC_WEB_SEARCH_TOOL_TYPE}). |
 | `packages/harness/core/web-search/providers/deepseek.ts` | `#63` | The `deepseek` provider (#63): the DEDICATED search backend, dsh's shape (`dsh-web-search-deepseek`, MIT — the spec this follows). |
 | `packages/harness/core/web-search/providers/google.ts` | `#63` | The `google` provider (#63): Gemini "Grounding with Google Search" over the `streamGenerateContent` SSE endpoint. |
@@ -133,11 +135,13 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/docs/decisions.ts` | `#170` | Generates `docs/reference/decisions.md` (#170): one row for each owned source file whose first comment/header block cites an issue. |
 | `scripts/docs/env-and-config.ts` | `#170` | Generates `docs/reference/env-and-config.md` (#170): the explicit environment boundary, the composed `ZenConfig` shape, every `.zen/` path assembled by core, and the harness manifest resources. |
 | `scripts/docs/extract-declaration.ts` | `#168` | The docs gate's one primitive (#168): a top-level declaration, verbatim, by name. |
+| `scripts/docs/generator-support.ts` | `#174` | What every generator under `scripts/docs/` shares (#174): the exhaustiveness check that makes a metadata table refuse to be stale, and the one way a generator runs — its page to stdout, or one `name: reason` line to stderr and a non-zero exit, never a partial page. |
 | `scripts/docs/ported-provenance.ts` | `#168` | Generates `docs/seams/ported-provenance.md` (#168): one row per file under `components/ai-elements/` — the upstream path and commit its header names, and the `Modified —` line that follows. |
 | `scripts/docs/refresh-fences.ts` | `#168` | Refreshes every sourced fence in a page from the source it names (#168): the authoring and repair tool for `test/docs-gate.test.ts`. |
 | `scripts/docs/verification-inventory.ts` | `#170` | Generates `docs/reference/verification-inventory.md` (#170): enforcement gates, the numeric and count ratchets they carry, and the deliberately reusable test doubles. |
 | `scripts/link-vendor-packages.mjs` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
 | `scripts/print-harness.mjs` | `#9`, `#13`, `#20` | The PRINT-MODE harness variant (#20): the zen-harness package minus picc-permission-modes. |
+| `scripts/source-tree.ts` | `#162`, `#174` | The one walk over the source tree (#174, #162 workstream 6: one walker per gate family). |
 | `scripts/zen-logs.ts` | `#132` | See the log (#132): the day's file, rendered the way the terminal renders it live. |
 | `scripts/zen-thread.mjs` | `#86`, `#97` | Inspect the live web server's threads from a shell — the agent's half of #86. |
 | `scripts/zen.mjs` | `#20` | Launch a VANILLA pi with only zen-harness loaded. |
@@ -145,7 +149,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/docs-gate.test.ts` | `#168` | The docs cannot drift (#168, goals §3.3): a page either quotes source and is checked against it, or is generated from source and is diffed against it. |
 | `test/fallow-config.test.ts` | `#163` | fallow's entry list cannot drift from the harness manifest (#163). |
 | `test/gate-abort.test.ts` | `#157` | The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0. |
-| `test/gate-support.ts` | `#150`, `#162`, `#165` | What the source-tree gates share (#165, #162 workstream 6): the walker, the word-splitter, the sequence matcher, the comment skip. |
+| `test/gate-support.ts` | `#150`, `#162`, `#165`, `#174` | What the source-tree gates share (#165, #162 workstream 6): the word-splitter, the sequence matcher, the comment skip, over the one walker (`scripts/source-tree.ts`, #174). |
 | `test/glossary-doc.test.ts` | `#161`, `#164`, `#165` | The glossary keeps its own two rules (#161, PR #164 review). |
 | `test/glossary-gate.test.ts` | `#165` | The glossary's Retired table, applied to the source tree (#165, `docs/glossary.md` → Retired). |
 | `test/logging-gate.test.ts` | `#132` | Every record goes through the one logger (#132), and the substrate stays behind it. |

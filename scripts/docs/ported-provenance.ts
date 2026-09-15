@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/index.ts'
+import { runGenerator } from './generator-support.ts'
 
 /**
  * Generates `docs/seams/ported-provenance.md` (#168): one row per file under
@@ -43,13 +44,13 @@ function portOf(file: string): Port {
   }
 }
 
-const ports = readdirSync(join(ROOT, PORTED_DIRECTORY))
-  .filter((fileName) => /\.tsx?$/.test(fileName))
-  .sort()
-  .map(portOf)
+function generate(): string {
+  const ports = readdirSync(join(ROOT, PORTED_DIRECTORY))
+    .filter((fileName) => /\.tsx?$/.test(fileName))
+    .sort()
+    .map(portOf)
 
-process.stdout.write(
-  [
+  return [
     '<!-- generated: scripts/docs/ported-provenance.ts -->',
     '# Ported presentation files',
     '',
@@ -64,5 +65,7 @@ process.stdout.write(
         `| \`${port.file}\` | ${port.upstream} \`${port.upstreamPath}\` | \`${port.commit}\` | ${port.license} | ${port.modified} |`,
     ),
     '',
-  ].join('\n'),
-)
+  ].join('\n')
+}
+
+runGenerator('ported-provenance', generate)

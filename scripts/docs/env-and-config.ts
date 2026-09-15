@@ -1,6 +1,8 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/index.ts'
+import { filesUnder } from '../source-tree.ts'
+import { runGenerator } from './generator-support.ts'
 
 /**
  * Generates `docs/reference/env-and-config.md` (#170): the explicit environment boundary,
@@ -18,8 +20,6 @@ import { findRepoRoot } from '../../packages/core/src/index.ts'
 
 const ROOT = findRepoRoot(import.meta.url)
 const SOURCE_ROOTS = ['packages', 'scripts', 'test'] as const
-const SKIPPED_DIRECTORIES = ['node_modules', 'dist', 'dist-types', 'coverage'] as const
-const SOURCE_FILE = /\.(?:[cm]?[jt]sx?)$/
 const PROCESS_ENV_BASE = /\bprocess\s*\.\s*env\b/g
 const PROCESS_ENV_CHILD_OVERRIDE = /\{\s*\.\.\.\s*process\s*\.\s*env\s*,\s*([A-Za-z_$][\w$]*)\s*:/g
 const RUNTIME_PATH_EXPORT =
@@ -247,17 +247,6 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
   },
 ]
 
-function sourceFiles(directory: string): string[] {
-  const files: string[] = []
-  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
-    if ((SKIPPED_DIRECTORIES as readonly string[]).includes(dirent.name)) continue
-    const path = join(directory, dirent.name)
-    if (dirent.isDirectory()) files.push(...sourceFiles(path))
-    else if (dirent.isFile() && SOURCE_FILE.test(dirent.name)) files.push(path)
-  }
-  return files
-}
-
 /**
  * Enough lexical masking for the current TypeBox declarations: comments and flat strings.
  * Nested template expressions are outside the declared parser shape and fail field checks.
@@ -318,7 +307,7 @@ function isCommentedAt(source: string, index: number): boolean {
 function scanEnvironment(): EnvironmentScan {
   const found = new Map<string, EnvironmentOccurrence>()
   const directFiles = new Set<string>()
-  const files = SOURCE_ROOTS.flatMap((sourceRoot) => sourceFiles(join(ROOT, sourceRoot))).sort()
+  const files = SOURCE_ROOTS.flatMap((sourceRoot) => filesUnder(join(ROOT, sourceRoot))).sort()
   for (const path of files) {
     const source = relative(ROOT, path).replaceAll('\\', '/')
     const sourceText = readFileSync(path, 'utf8')
@@ -611,9 +600,4 @@ function generate(): string {
   ].join('\n')
 }
 
-try {
-  process.stdout.write(generate())
-} catch (error) {
-  process.stderr.write(`env-and-config: ${error instanceof Error ? error.message : String(error)}\n`)
-  process.exitCode = 1
-}
+runGenerator('env-and-config', generate)

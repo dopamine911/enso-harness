@@ -1,11 +1,13 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { filesUnder } from '../scripts/source-tree.ts'
 
 /**
- * What the source-tree gates share (#165, #162 workstream 6): the walker, the word-splitter,
- * the sequence matcher, the comment skip. A gate is one of these plus a rule and an allowlist;
- * the third copy of the walker is where this file was extracted from (`vendor-gate` had the
- * word-splitter, `logging-gate` and `naming-gate` the walker).
+ * What the source-tree gates share (#165, #162 workstream 6): the word-splitter, the sequence
+ * matcher, the comment skip, over the one walker (`scripts/source-tree.ts`, #174). A gate is
+ * these plus a rule and an allowlist; the third copy of the walker is where this file was
+ * extracted from (`vendor-gate` had the word-splitter, `logging-gate` and `naming-gate` the
+ * walker), and the fourth and fifth — the generators' — are where the walker left for.
  *
  * ⚠ Words, not substrings (PR #150 review): `readPiccPersistedMode` is `read | picc | persisted
  * | mode`, `PICC_PERMISSION_MODES` is `picc | permission | modes`, `.cc-safety-net` is `cc |
@@ -19,22 +21,17 @@ import { join } from 'node:path'
  */
 
 export const REPOSITORY_ROOT: string = join(import.meta.dir, '..')
-const SKIPPED_DIRECTORIES = ['node_modules', 'dist', 'dist-types', 'coverage'] as const
-const SOURCE_EXTENSION = /\.(?:tsx?|mjs)$/
 /** A line that is only a comment: `//`, a block opener, or a block's `*`-led body. */
 const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/
 
-/** Every source file under `directory`, absolute paths; `__tests__` only when asked for. */
+/**
+ * Every source file under `directory`, absolute paths; `__tests__` only when asked for.
+ * The shared walker matches every JS/TS flavour where this file's own regex matched `tsx?|mjs`
+ * (#174): 0 of 196 files differed at the fold, and a `.js` added later is scanned by the
+ * gates rather than invisible to them — the widening is the safe direction.
+ */
 function sourceFiles(directory: string, includeTests = false): string[] {
-  const found: string[] = []
-  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
-    if ((SKIPPED_DIRECTORIES as readonly string[]).includes(dirent.name)) continue
-    if (!includeTests && dirent.name === '__tests__') continue
-    const path = join(directory, dirent.name)
-    if (dirent.isDirectory()) found.push(...sourceFiles(path, includeTests))
-    else if (SOURCE_EXTENSION.test(dirent.name)) found.push(path)
-  }
-  return found
+  return filesUnder(directory, { skipDirectories: includeTests ? [] : ['__tests__'] })
 }
 
 /** The words a line is made of, lower-cased, with `camelCase` and every separator split. */

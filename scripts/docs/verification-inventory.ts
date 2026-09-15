@@ -1,6 +1,8 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/index.ts'
+import { filesUnder } from '../source-tree.ts'
+import { assertExactKeys, runGenerator } from './generator-support.ts'
 
 /**
  * Generates `docs/reference/verification-inventory.md` (#170): enforcement gates, the
@@ -288,24 +290,14 @@ function repositoryFile(path: string): string {
   return readFileSync(join(ROOT, path), 'utf8')
 }
 
+/** Recursive where the flat `readdirSync` it replaced was not (#174): a gate under a `test/` subdirectory is inventoried, not missed. */
 function detectedGateFiles(): string[] {
-  return readdirSync(TEST_ROOT)
-    .filter(
-      (file) =>
-        (file.includes('gate') && file.endsWith('.test.ts')) || (EXTRA_GATE_FILES as readonly string[]).includes(file),
-    )
-    .map((file) => `test/${file}`)
+  return filesUnder(TEST_ROOT, {
+    keep: (file: string): boolean =>
+      (file.includes('gate') && file.endsWith('.test.ts')) || (EXTRA_GATE_FILES as readonly string[]).includes(file),
+  })
+    .map((path) => relative(ROOT, path).replaceAll('\\', '/'))
     .sort()
-}
-
-function assertExactKeys(label: string, detected: readonly string[], recorded: readonly string[]): void {
-  const missing = detected.filter((key) => !recorded.includes(key))
-  const stale = recorded.filter((key) => !detected.includes(key))
-  if (missing.length > 0 || stale.length > 0) {
-    throw new Error(
-      `${label} metadata mismatch; missing: ${missing.join(', ') || 'none'}; stale: ${stale.join(', ') || 'none'}`,
-    )
-  }
 }
 
 function firstHeaderSentence(source: string, file: string): string {
@@ -445,25 +437,20 @@ function lastIncludes(source: string): string {
   return values[0] ?? ''
 }
 
-function filesUnder(directory: string): string[] {
-  const found: string[] = []
-  for (const dirent of readdirSync(join(ROOT, directory), { withFileTypes: true })) {
-    const path = `${directory}/${dirent.name}`
-    if (dirent.isDirectory()) found.push(...filesUnder(path))
-    else found.push(path)
-  }
-  return found
+/** Repository-relative paths under `root`, the shape every table here keys on. */
+function repositoryFilesUnder(root: string): string[] {
+  return filesUnder(join(ROOT, root)).map((path) => relative(ROOT, path).replaceAll('\\', '/'))
 }
 
 function testFiles(): string[] {
   return ['packages', 'scripts', 'test']
-    .flatMap(filesUnder)
+    .flatMap(repositoryFilesUnder)
     .filter((path) => /\.test\.tsx?$/.test(path))
     .sort()
 }
 
 function supportFiles(): string[] {
-  return filesUnder('packages')
+  return repositoryFilesUnder('packages')
     .filter((path) => path.includes('/__tests__/') && !/\.test\.tsx?$/.test(path) && /\.tsx?$/.test(path))
     .sort()
 }
@@ -638,9 +625,4 @@ function generate(): string {
   ].join('\n')
 }
 
-try {
-  process.stdout.write(generate())
-} catch (error) {
-  process.stderr.write(`verification-inventory: ${error instanceof Error ? error.message : String(error)}\n`)
-  process.exitCode = 1
-}
+runGenerator('verification-inventory', generate)

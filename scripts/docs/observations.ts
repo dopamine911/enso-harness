@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/index.ts'
+import { assertExactKeys, runGenerator } from './generator-support.ts'
 
 /**
  * Generates `docs/reference/observations.md`: every member of `ZenObservation`, its producer,
@@ -59,19 +60,6 @@ function lineAt(source: string, offset: number): number {
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values)]
-}
-
-function assertExhaustive(label: string, detected: readonly string[], metadata: Record<string, unknown>): void {
-  const detectedSet = new Set(detected)
-  const duplicates = detected.filter((key, index) => detected.indexOf(key) !== index)
-  const missing = detected.filter((key) => !(key in metadata))
-  const stale = Object.keys(metadata).filter((key) => !detectedSet.has(key))
-  if (duplicates.length > 0 || missing.length > 0 || stale.length > 0) {
-    throw new Error(
-      `${label} metadata mismatch; duplicate detections: ${[...new Set(duplicates)].join(', ') || 'none'}; ` +
-        `missing: ${missing.join(', ') || 'none'}; absent from source: ${stale.join(', ') || 'none'}`,
-    )
-  }
 }
 
 function unionMembers(source: string): string[] {
@@ -148,98 +136,98 @@ function adapterResult(source: string, kind: string, names: Record<string, strin
   }
 }
 
-const observationSource = readFileSync(join(ROOT, OBSERVATION_PATH), 'utf8')
-const mapperSource = readFileSync(join(ROOT, MAPPER_PATH), 'utf8')
-const followSource = readFileSync(join(ROOT, FOLLOW_PATH), 'utf8')
-const adapterSource = readFileSync(join(ROOT, ADAPTER_PATH), 'utf8')
-const customNamesSource = readFileSync(join(ROOT, CUSTOM_NAMES_PATH), 'utf8')
-const routerSource = readFileSync(join(ROOT, CUSTOM_ROUTER_PATH), 'utf8')
-const connectionSource = readFileSync(join(ROOT, FOLLOW_CONNECTION_PATH), 'utf8')
+function generate(): string {
+  const observationSource = readFileSync(join(ROOT, OBSERVATION_PATH), 'utf8')
+  const mapperSource = readFileSync(join(ROOT, MAPPER_PATH), 'utf8')
+  const followSource = readFileSync(join(ROOT, FOLLOW_PATH), 'utf8')
+  const adapterSource = readFileSync(join(ROOT, ADAPTER_PATH), 'utf8')
+  const customNamesSource = readFileSync(join(ROOT, CUSTOM_NAMES_PATH), 'utf8')
+  const routerSource = readFileSync(join(ROOT, CUSTOM_ROUTER_PATH), 'utf8')
+  const connectionSource = readFileSync(join(ROOT, FOLLOW_CONNECTION_PATH), 'utf8')
 
-const schemas = unionMembers(observationSource).map((schema) => schemaMember(observationSource, schema))
-const duplicateKinds = schemas.map(({ kind }) => kind).filter((kind, index, kinds) => kinds.indexOf(kind) !== index)
-if (duplicateKinds.length > 0)
-  throw new Error(`observations: duplicate union kinds: ${unique(duplicateKinds).join(', ')}`)
+  const schemas = unionMembers(observationSource).map((schema) => schemaMember(observationSource, schema))
+  const duplicateKinds = schemas.map(({ kind }) => kind).filter((kind, index, kinds) => kinds.indexOf(kind) !== index)
+  if (duplicateKinds.length > 0)
+    throw new Error(`observations: duplicate union kinds: ${unique(duplicateKinds).join(', ')}`)
 
-const mapperKinds = producedKinds(mapperSource)
-const promptRouteKinds = producedKinds(followSource)
-const names = customNames(customNamesSource)
-assertExhaustive('custom event', Object.keys(names), CUSTOM_METADATA)
+  const mapperKinds = producedKinds(mapperSource)
+  const promptRouteKinds = producedKinds(followSource)
+  const names = customNames(customNamesSource)
+  assertExactKeys('custom event', Object.keys(names), Object.keys(CUSTOM_METADATA))
 
-const emittedCustomConstants = new Set([
-  ...[...adapterSource.matchAll(/name:\s*(ZEN_CUSTOM_EVENT_\w+)/g)].map((match) => match[1] ?? ''),
-  ...[...connectionSource.matchAll(/name:\s*(ZEN_CUSTOM_EVENT_\w+)/g)].map((match) => match[1] ?? ''),
-])
-const undeclaredEmissions = [...emittedCustomConstants].filter((constant) => !(constant in names))
-if (undeclaredEmissions.length > 0)
-  throw new Error(`observations: emissions use undeclared custom names: ${undeclaredEmissions.join(', ')}`)
+  const emittedCustomConstants = new Set([
+    ...[...adapterSource.matchAll(/name:\s*(ZEN_CUSTOM_EVENT_\w+)/g)].map((match) => match[1] ?? ''),
+    ...[...connectionSource.matchAll(/name:\s*(ZEN_CUSTOM_EVENT_\w+)/g)].map((match) => match[1] ?? ''),
+  ])
+  const undeclaredEmissions = [...emittedCustomConstants].filter((constant) => !(constant in names))
+  if (undeclaredEmissions.length > 0)
+    throw new Error(`observations: emissions use undeclared custom names: ${undeclaredEmissions.join(', ')}`)
 
-for (const [constant, metadata] of Object.entries(CUSTOM_METADATA)) {
-  const hasBranch = new RegExp(`eventType\\s*(?:===|!==)\\s*${constant}\\b`).test(routerSource)
-  if (hasBranch !== metadata.routerBranch) {
-    throw new Error(
-      `observations: ${constant} router classification drifted; source=${hasBranch}, metadata=${metadata.routerBranch}`,
-    )
-  }
-}
-
-if (!/\{ type: 'observation', seq: frame\.seq, observation: frame\.observation \}/.test(followSource)) {
-  throw new Error('observations: follow.ts no longer carries observations in observation frames')
-}
-const carrierOffset = followSource.indexOf("{ type: 'observation', seq: frame.seq, observation: frame.observation }")
-const carrierLine = lineAt(followSource, carrierOffset)
-const carrier = `[\`observation\` frame](../../${FOLLOW_PATH}#L${carrierLine})`
-
-const noProducer: string[] = []
-const rows = schemas
-  .map((member) => {
-    let producer = '**nothing produces it**'
-    const mapperLine = mapperKinds.get(member.kind)
-    const promptRouteLine = promptRouteKinds.get(member.kind)
-    if (mapperLine !== undefined) producer = `[mapper](../../${MAPPER_PATH}#L${mapperLine})`
-    else if (promptRouteLine !== undefined) producer = `[prompt route](../../${FOLLOW_PATH}#L${promptRouteLine})`
-    else noProducer.push(member.kind)
-
-    const adapter = adapterResult(adapterSource, member.kind, names)
-    const consumers = unique([
-      ...adapter.constants.map((constant) => CUSTOM_METADATA[constant]?.consumer ?? `UNCLASSIFIED (${constant})`),
-      ...(adapter.labels.some((label) => label.startsWith('EventType.')) ? ['TanStack chat state'] : []),
-      ...(adapter.dropped ? ['nothing consumes the dropped branch'] : []),
-      ...(!adapter.classified ? ['UNCLASSIFIED'] : []),
-    ])
-    return {
-      ...member,
-      producer,
-      adapter: adapter.labels
-        .map((label) =>
-          label.startsWith('EventType.') || label === 'dropped' || label.startsWith('UNCLASSIFIED')
-            ? `\`${label}\``
-            : `\`${label}\` (CUSTOM)`,
-        )
-        .join('<br>'),
-      consumers: consumers.join('<br>'),
+  for (const [constant, metadata] of Object.entries(CUSTOM_METADATA)) {
+    const hasBranch = new RegExp(`eventType\\s*(?:===|!==)\\s*${constant}\\b`).test(routerSource)
+    if (hasBranch !== metadata.routerBranch) {
+      throw new Error(
+        `observations: ${constant} router classification drifted; source=${hasBranch}, metadata=${metadata.routerBranch}`,
+      )
     }
-  })
-  .sort((left, right) => left.kind.localeCompare(right.kind))
-  .map(
-    (row) =>
-      `| \`${row.kind}\` | [\`${row.schema}\`](../../${OBSERVATION_PATH}#L${row.line}) | ${row.producer} | ${carrier} | ${row.adapter} | ${row.consumers} |`,
+  }
+
+  if (!/\{ type: 'observation', seq: frame\.seq, observation: frame\.observation \}/.test(followSource)) {
+    throw new Error('observations: follow.ts no longer carries observations in observation frames')
+  }
+  const carrierOffset = followSource.indexOf("{ type: 'observation', seq: frame.seq, observation: frame.observation }")
+  const carrierLine = lineAt(followSource, carrierOffset)
+  const carrier = `[\`observation\` frame](../../${FOLLOW_PATH}#L${carrierLine})`
+
+  const noProducer: string[] = []
+  const rows = schemas
+    .map((member) => {
+      let producer = '**nothing produces it**'
+      const mapperLine = mapperKinds.get(member.kind)
+      const promptRouteLine = promptRouteKinds.get(member.kind)
+      if (mapperLine !== undefined) producer = `[mapper](../../${MAPPER_PATH}#L${mapperLine})`
+      else if (promptRouteLine !== undefined) producer = `[prompt route](../../${FOLLOW_PATH}#L${promptRouteLine})`
+      else noProducer.push(member.kind)
+
+      const adapter = adapterResult(adapterSource, member.kind, names)
+      const consumers = unique([
+        ...adapter.constants.map((constant) => CUSTOM_METADATA[constant]?.consumer ?? `UNCLASSIFIED (${constant})`),
+        ...(adapter.labels.some((label) => label.startsWith('EventType.')) ? ['TanStack chat state'] : []),
+        ...(adapter.dropped ? ['nothing consumes the dropped branch'] : []),
+        ...(!adapter.classified ? ['UNCLASSIFIED'] : []),
+      ])
+      return {
+        ...member,
+        producer,
+        adapter: adapter.labels
+          .map((label) =>
+            label.startsWith('EventType.') || label === 'dropped' || label.startsWith('UNCLASSIFIED')
+              ? `\`${label}\``
+              : `\`${label}\` (CUSTOM)`,
+          )
+          .join('<br>'),
+        consumers: consumers.join('<br>'),
+      }
+    })
+    .sort((left, right) => left.kind.localeCompare(right.kind))
+    .map(
+      (row) =>
+        `| \`${row.kind}\` | [\`${row.schema}\`](../../${OBSERVATION_PATH}#L${row.line}) | ${row.producer} | ${carrier} | ${row.adapter} | ${row.consumers} |`,
+    )
+
+  const customWithoutEmission = Object.keys(names).filter((constant) => !emittedCustomConstants.has(constant))
+  const emissionsWithoutRouter = [...emittedCustomConstants].filter(
+    (constant) => CUSTOM_METADATA[constant]?.routerBranch === false,
   )
+  const displayConstants = (constants: readonly string[]): string =>
+    constants.length === 0
+      ? 'none'
+      : [...constants]
+          .sort()
+          .map((constant: string) => `\`${names[constant] ?? constant}\` (\`${constant}\`)`)
+          .join(', ')
 
-const customWithoutEmission = Object.keys(names).filter((constant) => !emittedCustomConstants.has(constant))
-const emissionsWithoutRouter = [...emittedCustomConstants].filter(
-  (constant) => CUSTOM_METADATA[constant]?.routerBranch === false,
-)
-const displayConstants = (constants: readonly string[]): string =>
-  constants.length === 0
-    ? 'none'
-    : [...constants]
-        .sort()
-        .map((constant: string) => `\`${names[constant] ?? constant}\` (\`${constant}\`)`)
-        .join(', ')
-
-process.stdout.write(
-  [
+  return [
     '<!-- generated: scripts/docs/observations.ts -->',
     '# Observation inventory',
     '',
@@ -266,5 +254,7 @@ process.stdout.write(
     '',
     `Inventory: ${schemas.length} union members; ${Object.keys(names).length} custom event constants; all custom constants have checked browser classifications.`,
     '',
-  ].join('\n'),
-)
+  ].join('\n')
+}
+
+runGenerator('observations', generate)

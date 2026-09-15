@@ -1,4 +1,5 @@
 import { applyIndexCitations, type IndexCitation } from '../citations.ts'
+import { dispatchProviderPost } from '../dispatch.ts'
 import { cleanSources, normalizeSearchUrl, titleFromUrl } from '../sources.ts'
 import { readSseEvents } from '../sse.ts'
 import type { ModelSearchRequest, WebSearchOutcome } from '../vocabulary.ts'
@@ -184,25 +185,12 @@ export async function runOpenAiProviderSearch(request: ModelSearchRequest): Prom
   const headers = buildRequestHeaders(request, credential)
   const requestBody = buildRequestBody(request)
   const baseUrl = resolveGitHubCopilotBaseUrl(request.model, credential)
-  let response: Response
-  try {
-    response = await request.fetchUrl(resolveResponsesUrl(request.model, baseUrl), {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(requestBody),
-      signal: request.signal,
-    })
-  } catch (error) {
-    throw new WebSearchProviderError('openai', `the search request failed to send: ${String(error)}`, {
-      requestDispatched: false,
-    })
-  }
-  if (!response.ok) {
-    const errorBody = await response.text()
-    throw new WebSearchProviderError('openai', `the search API answered HTTP ${response.status}: ${errorBody}`, {
-      requestDispatched: true,
-    })
-  }
+  const response = await dispatchProviderPost('openai', request.fetchUrl, {
+    url: resolveResponsesUrl(request.model, baseUrl),
+    headers,
+    body: requestBody,
+    signal: request.signal,
+  })
 
   let accumulatedText = ''
   const citations: IndexCitation[] = []
