@@ -11,7 +11,7 @@ import { isZenThreadId } from '@zen/core'
  * with the same `isZenThreadId` the server checks it with — a malformed one is not a
  * thread, and the page says so rather than showing nothing.
  */
-export const THREAD_QUERY_PARAMETER = 'thread'
+const THREAD_QUERY_PARAMETER = 'thread'
 
 export type ThreadUrl =
   /** The URL names a thread; adopt it from `/history` before showing anything. */

@@ -35,11 +35,11 @@ import { createStore, type Store } from './store.ts'
  * (`log-process.ts`), which is why this configurator is its own file and not that one.
  */
 
-export const LOG_RING_CAPACITY = 200
+const LOG_RING_CAPACITY = 200
 /** How many records, or how long, before a batch goes. */
 export const SHIP_BATCH_SIZE = 20
-export const SHIP_FLUSH_MS = 1000
-export const LOGS_ROUTE = '/api/logs'
+const SHIP_FLUSH_MS = 1000
+const LOGS_ROUTE = '/api/logs'
 
 export interface LogRing extends Store<readonly ZenLogLine[]> {
   readonly sink: Sink

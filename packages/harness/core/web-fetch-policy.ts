@@ -82,8 +82,10 @@ export function isFetchableContentType(contentTypeHeader: string | null): boolea
 const IPV4_OCTET_COUNT = 4
 const IPV4_MAX_OCTET = 255
 
+type Ipv4Octets = readonly [number, number, number, number]
+
 /** Parse a dotted-quad string into octets, or undefined when it is not one. */
-function ipv4OctetsOf(address: string): number[] | undefined {
+function ipv4OctetsOf(address: string): Ipv4Octets | undefined {
   const parts = address.split('.')
   if (parts.length !== IPV4_OCTET_COUNT) return undefined
   const octets: number[] = []
@@ -93,26 +95,47 @@ function ipv4OctetsOf(address: string): number[] | undefined {
     if (octet > IPV4_MAX_OCTET) return undefined
     octets.push(octet)
   }
-  return octets
+  const [first, second, third, fourth] = octets
+  if (first === undefined || second === undefined || third === undefined || fourth === undefined) return undefined
+  return [first, second, third, fourth]
 }
 
-function isPublicIpv4(octets: readonly number[]): boolean {
-  const [first, second, third] = octets
-  if (first === undefined || second === undefined || third === undefined) return false
-  if (first === 0) return false // 0.0.0.0/8 "this network"
-  if (first === 10) return false // 10.0.0.0/8 private
-  if (first === 100 && second >= 64 && second <= 127) return false // 100.64.0.0/10 CGNAT
-  if (first === 127) return false // loopback
-  if (first === 169 && second === 254) return false // link-local
-  if (first === 172 && second >= 16 && second <= 31) return false // 172.16.0.0/12 private
-  if (first === 192 && second === 0 && third === 0) return false // 192.0.0.0/24 IETF assignments
-  if (first === 192 && second === 0 && third === 2) return false // 192.0.2.0/24 TEST-NET-1
-  if (first === 192 && second === 168) return false // private
-  if (first === 198 && (second === 18 || second === 19)) return false // 198.18.0.0/15 benchmarking
-  if (first === 198 && second === 51 && third === 100) return false // TEST-NET-2
-  if (first === 203 && second === 0 && third === 113) return false // TEST-NET-3
-  if (first >= 224) return false // multicast + reserved (224.0.0.0/4, 240.0.0.0/4)
-  return true
+/**
+ * The IPv4 ranges that are not public, as CIDR blocks — `[network address as octets, prefix]`,
+ * one row per RFC range with its reason beside it. The classifier below is the table, not a
+ * case per row (#175: thirteen `if`s read as the repo's most branching function while being
+ * its most regular). Extending the deny is adding a row.
+ */
+const NON_PUBLIC_IPV4_CIDRS: readonly (readonly [
+  address: readonly [number, number, number, number],
+  prefix: number,
+])[] = [
+  [[0, 0, 0, 0], 8], // "this network"
+  [[10, 0, 0, 0], 8], // private
+  [[100, 64, 0, 0], 10], // CGNAT
+  [[127, 0, 0, 0], 8], // loopback
+  [[169, 254, 0, 0], 16], // link-local
+  [[172, 16, 0, 0], 12], // private
+  [[192, 0, 0, 0], 24], // IETF protocol assignments
+  [[192, 0, 2, 0], 24], // TEST-NET-1
+  [[192, 168, 0, 0], 16], // private
+  [[198, 18, 0, 0], 15], // benchmarking
+  [[198, 51, 100, 0], 24], // TEST-NET-2
+  [[203, 0, 113, 0], 24], // TEST-NET-3
+  [[224, 0, 0, 0], 3], // multicast + reserved (224.0.0.0/4, 240.0.0.0/4)
+]
+
+function ipv4ToInteger(octets: Ipv4Octets): number {
+  return octets.reduce((value, octet) => value * 256 + octet, 0)
+}
+
+/** Callers hold `Ipv4Octets`, so a length guard here would be a branch nothing can reach. */
+function isPublicIpv4(octets: Ipv4Octets): boolean {
+  const address = ipv4ToInteger(octets)
+  return !NON_PUBLIC_IPV4_CIDRS.some(([base, prefix]) => {
+    const size = 2 ** (32 - prefix)
+    return address >= ipv4ToInteger(base) && address < ipv4ToInteger(base) + size
+  })
 }
 
 /**

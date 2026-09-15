@@ -100,7 +100,7 @@ export function countThread(messages: ReadonlyArray<UIMessage>): ThreadCounts {
 }
 
 /** `running read` — the tool named as pi names it, so it matches the transcript's step row. */
-export function activityLabel(activity: Activity): string {
+function activityLabel(activity: Activity): string {
   return activity.kind === 'running' ? `running ${activity.tool}` : activity.kind
 }
 

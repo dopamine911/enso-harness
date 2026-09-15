@@ -88,7 +88,7 @@ export interface NetworkEgressMatch {
  * refuses instead (#57). Two levels is `bash -c "sh -c '…'"`; a legitimate command does
  * not go past that, and past the cap "cannot vouch" is the honest verdict.
  */
-export const MAX_SHELL_NESTING = 3
+const MAX_SHELL_NESTING = 3
 
 /** Shells whose program is whatever they are fed when no `-c` names it — a pipe or a heredoc IS their code. */
 const STDIN_SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh'])

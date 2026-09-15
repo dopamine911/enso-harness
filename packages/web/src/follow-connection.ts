@@ -116,7 +116,7 @@ const DATA_URL = /^data:([^;,]+);base64,([A-Za-z0-9+/]*={0,2})$/
  * is posted; the server never learns of it. A `data:` URL is bytes already, so it crosses.
  * The mime type is the part's own; the server holds the allowlist and says which is refused.
  */
-export function imagesOf(parts: readonly MessagePart[]): { images: ZenPromptImage[]; refused: string[] } {
+function imagesOf(parts: readonly MessagePart[]): { images: ZenPromptImage[]; refused: string[] } {
   const images: ZenPromptImage[] = []
   const refused: string[] = []
   for (const part of parts) {

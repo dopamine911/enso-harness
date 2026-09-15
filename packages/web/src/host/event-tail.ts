@@ -24,7 +24,7 @@ import type { RuntimeEvent, ZenEventProvenance, ZenThreadEvent } from '@zen/core
  */
 
 /** Enough for a whole run with its startup replays and a few tool calls; deltas coalesce. */
-export const EVENT_TAIL_CAPACITY = 200
+const EVENT_TAIL_CAPACITY = 200
 
 export interface EventTail {
   readonly record: (type: string, name: string | undefined, provenance: ZenEventProvenance) => void

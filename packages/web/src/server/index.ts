@@ -78,7 +78,7 @@ function isLoopbackAuthority(authority: string): boolean {
 const log = zenLogger('server', 'http')
 
 /** A body that outgrew its route's cap: the read stopped, nothing was buffered past it. */
-export class BodyTooLargeError extends Error {
+class BodyTooLargeError extends Error {
   constructor(readonly maxBytes: number) {
     super(`the request body is larger than ${maxBytes} bytes`)
     this.name = 'BodyTooLargeError'

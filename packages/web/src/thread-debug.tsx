@@ -74,7 +74,7 @@ export interface BrowserBelief {
  * is a run made elsewhere; a page ahead of the server can only be a server that restarted
  * (its count begins again) — and either is the wrong-session class of bug made visible.
  */
-export function describeGenerationDrift(browser: number | undefined, server: number | undefined): string | undefined {
+function describeGenerationDrift(browser: number | undefined, server: number | undefined): string | undefined {
   if (browser === undefined || server === undefined || browser === server) return undefined
   if (server > browser) {
     const runs = server - browser
@@ -89,7 +89,7 @@ export function describeGenerationDrift(browser: number | undefined, server: num
  * fresh thread's 404 is information, not a disagreement) or while the server still
  * answers for the thread.
  */
-export function describeLostSession(browser: number | undefined, sessionMissing: boolean): string | undefined {
+function describeLostSession(browser: number | undefined, sessionMissing: boolean): string | undefined {
   // #0 is the snapshot's "no acquisition yet" — a fresh thread's receipt, not a run this page made.
   if (browser === undefined || browser === 0 || !sessionMissing) return undefined
   return `this page ran #${browser} here, and the server holds no session for the thread — it restarted, or evicted the thread`
@@ -308,7 +308,7 @@ export class InspectionFetchError extends Error {
 }
 
 /** Fetches one thread's inspection; a non-2xx becomes an `InspectionFetchError`. */
-export async function fetchThreadInspection(threadId: string): Promise<ZenThreadInspection> {
+async function fetchThreadInspection(threadId: string): Promise<ZenThreadInspection> {
   const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}`)
   if (!response.ok) throw new InspectionFetchError(response.status, boundedFailureDetail(await response.text()))
   const payload: unknown = await response.json()
@@ -317,7 +317,7 @@ export async function fetchThreadInspection(threadId: string): Promise<ZenThread
 }
 
 /** Fetches one thread's event tails (#97); the same 404 rule as the inspection. */
-export async function fetchThreadEvents(threadId: string): Promise<ZenThreadEvents> {
+async function fetchThreadEvents(threadId: string): Promise<ZenThreadEvents> {
   const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/events`)
   if (!response.ok) throw new InspectionFetchError(response.status, boundedFailureDetail(await response.text()))
   const payload: unknown = await response.json()
