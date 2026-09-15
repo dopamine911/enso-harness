@@ -1,6 +1,8 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/index.ts'
+import { filesUnder } from '../source-tree.ts'
+import { runGenerator } from './generator-support.ts'
 
 /**
  * Generates `docs/reference/decisions.md` (#170): one row for each owned source file whose
@@ -10,8 +12,6 @@ import { findRepoRoot } from '../../packages/core/src/index.ts'
 
 const ROOT = findRepoRoot(import.meta.url)
 const SOURCE_ROOTS = ['packages', 'scripts', 'test'] as const
-const SOURCE_FILE = /\.(?:[cm]?[jt]sx?)$/
-const SKIPPED_DIRECTORIES = ['node_modules', 'dist', 'dist-types', 'coverage'] as const
 const VENDORED_COMPONENTS = 'packages/web/src/components/'
 const HEADER_LINE_LIMIT = 80
 const ISSUE = /#(\d+)/g
@@ -30,17 +30,12 @@ interface DecisionRow {
   readonly unclassified: boolean
 }
 
+/** Owned source only: the vendored components' headers are their upstream's decisions, not ours. */
 function sourceFiles(directory: string): string[] {
-  const files: string[] = []
-  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
-    if ((SKIPPED_DIRECTORIES as readonly string[]).includes(dirent.name)) continue
-    const path = join(directory, dirent.name)
-    const repositoryPath = relative(ROOT, path).replaceAll('\\', '/')
-    if (repositoryPath.startsWith(VENDORED_COMPONENTS)) continue
-    if (dirent.isDirectory()) files.push(...sourceFiles(path))
-    else if (dirent.isFile() && SOURCE_FILE.test(dirent.name)) files.push(path)
-  }
-  return files
+  return filesUnder(directory, {
+    keep: (_name: string, path: string): boolean =>
+      !relative(ROOT, path).replaceAll('\\', '/').startsWith(VENDORED_COMPONENTS),
+  })
 }
 
 function leadingHeader(source: string): Header | undefined {
@@ -158,15 +153,11 @@ function generate(rows: readonly DecisionRow[]): string {
   ].join('\n')
 }
 
-try {
+runGenerator('decisions', () => {
   const rows = decisions()
-  process.stdout.write(generate(rows))
-  const unclassified = rows.filter((row) => row.unclassified)
+  const unclassified = rows.filter((row) => row.unclassified).map((row) => row.file)
   if (unclassified.length > 0) {
-    process.stderr.write(`decisions: ${unclassified.length} qualifying header(s) are UNCLASSIFIED\n`)
-    process.exitCode = 1
+    throw new Error(`${unclassified.length} qualifying header(s) are UNCLASSIFIED: ${unclassified.join(', ')}`)
   }
-} catch (error) {
-  process.stderr.write(`decisions: ${error instanceof Error ? error.message : String(error)}\n`)
-  process.exitCode = 1
-}
+  return generate(rows)
+})

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/index.ts'
+import { assertExactKeys, runGenerator } from './generator-support.ts'
 
 /**
  * Generates `docs/reference/routes.md`: the HTTP surface dispatched by the web server.
@@ -191,89 +192,76 @@ function declarationLine(source: string, declaration: string, path: string): num
   return lineAt(source, offset)
 }
 
-function assertExhaustive(label: string, detected: readonly string[], metadata: Record<string, unknown>): void {
-  const detectedSet = new Set(detected)
-  const duplicates = detected.filter((key, index) => detected.indexOf(key) !== index)
-  const missing = detected.filter((key) => !(key in metadata))
-  const stale = Object.keys(metadata).filter((key) => !detectedSet.has(key))
-  if (duplicates.length > 0 || missing.length > 0 || stale.length > 0) {
-    throw new Error(
-      `${label} metadata mismatch; duplicate detections: ${[...new Set(duplicates)].join(', ') || 'none'}; ` +
-        `missing: ${missing.join(', ') || 'none'}; absent from source: ${stale.join(', ') || 'none'}`,
-    )
+function generate(): string {
+  const server = readFileSync(join(ROOT, SERVER_PATH), 'utf8')
+  const supportingSources: Record<string, string> = {
+    [FOLLOW_PATH]: readFileSync(join(ROOT, FOLLOW_PATH), 'utf8'),
+    [BUNDLE_PATH]: readFileSync(join(ROOT, BUNDLE_PATH), 'utf8'),
+    [LOGS_PATH]: readFileSync(join(ROOT, LOGS_PATH), 'utf8'),
   }
-}
 
-const server = readFileSync(join(ROOT, SERVER_PATH), 'utf8')
-const supportingSources: Record<string, string> = {
-  [FOLLOW_PATH]: readFileSync(join(ROOT, FOLLOW_PATH), 'utf8'),
-  [BUNDLE_PATH]: readFileSync(join(ROOT, BUNDLE_PATH), 'utf8'),
-  [LOGS_PATH]: readFileSync(join(ROOT, LOGS_PATH), 'utf8'),
-}
+  const regexRoutes: DetectedRoute[] = [...server.matchAll(/^const ([A-Z][A-Z_]*_ROUTE) = \/.*\/$/gm)].map((match) => ({
+    key: match[1] ?? '',
+    method: REGEX_ROUTE_METADATA[match[1] ?? '']?.method ?? 'GET',
+    path: REGEX_ROUTE_METADATA[match[1] ?? '']?.path ?? 'UNCLASSIFIED',
+    line: lineAt(server, match.index),
+    kind: 'regex',
+  }))
+  for (const route of regexRoutes) {
+    const references = [...server.matchAll(new RegExp(`\\b${route.key}\\b`, 'g'))]
+    if (references.length < 2) throw new Error(`routes: ${route.key} is declared but not dispatched`)
+  }
+  assertExactKeys(
+    'regex route',
+    regexRoutes.map((route) => route.key),
+    Object.keys(REGEX_ROUTE_METADATA),
+  )
 
-const regexRoutes: DetectedRoute[] = [...server.matchAll(/^const ([A-Z][A-Z_]*_ROUTE) = \/.*\/$/gm)].map((match) => ({
-  key: match[1] ?? '',
-  method: REGEX_ROUTE_METADATA[match[1] ?? '']?.method ?? 'GET',
-  path: REGEX_ROUTE_METADATA[match[1] ?? '']?.path ?? 'UNCLASSIFIED',
-  line: lineAt(server, match.index),
-  kind: 'regex',
-}))
-for (const route of regexRoutes) {
-  const references = [...server.matchAll(new RegExp(`\\b${route.key}\\b`, 'g'))]
-  if (references.length < 2) throw new Error(`routes: ${route.key} is declared but not dispatched`)
-}
-assertExhaustive(
-  'regex route',
-  regexRoutes.map((route) => route.key),
-  REGEX_ROUTE_METADATA,
-)
+  const literalRoutes: DetectedRoute[] = []
+  for (const match of server.matchAll(/request\.method === '(GET|POST)' && url === '([^']+)'/g)) {
+    const method = match[1] as 'GET' | 'POST'
+    const path = match[2] ?? ''
+    literalRoutes.push({ key: `${method} ${path}`, method, path, line: lineAt(server, match.index), kind: 'literal' })
+  }
+  for (const match of server.matchAll(/request\.method === '(GET|POST)' && url\.startsWith\('([^']+)'\)/g)) {
+    const method = match[1] as 'GET' | 'POST'
+    const path = `${match[2] ?? ''}*`
+    literalRoutes.push({ key: `${method} ${path}`, method, path, line: lineAt(server, match.index), kind: 'literal' })
+  }
+  assertExactKeys(
+    'literal route',
+    literalRoutes.map((route) => route.key),
+    Object.keys(LITERAL_ROUTE_METADATA),
+  )
 
-const literalRoutes: DetectedRoute[] = []
-for (const match of server.matchAll(/request\.method === '(GET|POST)' && url === '([^']+)'/g)) {
-  const method = match[1] as 'GET' | 'POST'
-  const path = match[2] ?? ''
-  literalRoutes.push({ key: `${method} ${path}`, method, path, line: lineAt(server, match.index), kind: 'literal' })
-}
-for (const match of server.matchAll(/request\.method === '(GET|POST)' && url\.startsWith\('([^']+)'\)/g)) {
-  const method = match[1] as 'GET' | 'POST'
-  const path = `${match[2] ?? ''}*`
-  literalRoutes.push({ key: `${method} ${path}`, method, path, line: lineAt(server, match.index), kind: 'literal' })
-}
-assertExhaustive(
-  'literal route',
-  literalRoutes.map((route) => route.key),
-  LITERAL_ROUTE_METADATA,
-)
+  const routes = [...regexRoutes, ...literalRoutes]
+    .map((detected) => {
+      const metadata =
+        detected.kind === 'regex'
+          ? REGEX_ROUTE_METADATA[detected.key]
+          : { method: detected.method, path: detected.path, ...LITERAL_ROUTE_METADATA[detected.key] }
+      if (metadata === undefined) throw new Error(`routes: metadata disappeared for ${detected.key}`)
+      const sources = [`[\`${SERVER_PATH}:${detected.line}\`](../../${SERVER_PATH}#L${detected.line})`]
+      if (metadata.factory !== undefined) {
+        const source = supportingSources[metadata.factory.path]
+        if (source === undefined) throw new Error(`routes: source was not loaded for ${metadata.factory.path}`)
+        const line = declarationLine(source, metadata.factory.declaration, metadata.factory.path)
+        sources.push(`[\`${metadata.factory.path}:${line}\`](../../${metadata.factory.path}#L${line})`)
+      }
+      return { ...metadata, sources: sources.join('<br>') }
+    })
+    .sort((left, right) => {
+      if (left.path !== right.path) return left.path < right.path ? -1 : 1
+      if (left.method === right.method) return 0
+      return left.method < right.method ? -1 : 1
+    })
 
-const routes = [...regexRoutes, ...literalRoutes]
-  .map((detected) => {
-    const metadata =
-      detected.kind === 'regex'
-        ? REGEX_ROUTE_METADATA[detected.key]
-        : { method: detected.method, path: detected.path, ...LITERAL_ROUTE_METADATA[detected.key] }
-    if (metadata === undefined) throw new Error(`routes: metadata disappeared for ${detected.key}`)
-    const sources = [`[\`${SERVER_PATH}:${detected.line}\`](../../${SERVER_PATH}#L${detected.line})`]
-    if (metadata.factory !== undefined) {
-      const source = supportingSources[metadata.factory.path]
-      if (source === undefined) throw new Error(`routes: source was not loaded for ${metadata.factory.path}`)
-      const line = declarationLine(source, metadata.factory.declaration, metadata.factory.path)
-      sources.push(`[\`${metadata.factory.path}:${line}\`](../../${metadata.factory.path}#L${line})`)
-    }
-    return { ...metadata, sources: sources.join('<br>') }
-  })
-  .sort((left, right) => {
-    if (left.path !== right.path) return left.path < right.path ? -1 : 1
-    if (left.method === right.method) return 0
-    return left.method < right.method ? -1 : 1
-  })
+  const rows = routes.map(
+    (route) =>
+      `| ${route.method} | \`${route.path}\` | \`${route.handler}\` | ${route.input} | ${route.success} | ${route.errors} | ${route.routeClass} | ${route.builds} | ${route.logs} | ${route.sources} |`,
+  )
 
-const rows = routes.map(
-  (route) =>
-    `| ${route.method} | \`${route.path}\` | \`${route.handler}\` | ${route.input} | ${route.success} | ${route.errors} | ${route.routeClass} | ${route.builds} | ${route.logs} | ${route.sources} |`,
-)
-
-process.stdout.write(
-  [
+  return [
     '<!-- generated: scripts/docs/routes.ts -->',
     '# HTTP routes',
     '',
@@ -287,5 +275,7 @@ process.stdout.write(
     '',
     `Detected ${regexRoutes.length} regex route constants and ${literalRoutes.length} literal dispatcher routes; metadata is exhaustive for both sets.`,
     '',
-  ].join('\n'),
-)
+  ].join('\n')
+}
+
+runGenerator('routes', generate)

@@ -1,6 +1,7 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { dirname, join, sep as pathSeparator, relative, resolve } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/index.ts'
+import { filesUnder } from '../source-tree.ts'
 
 /**
  * Generates `docs/reference/core-exports.md` (#170): the public core barrel and the
@@ -172,18 +173,12 @@ function exportsOf(): PublicExport[] {
   )
 }
 
+/** Production modules only: no `__tests__`, no `.test`/`.spec` files. */
 function sourceFiles(directory: string): string[] {
-  const files: string[] = []
-  for (const dirent of readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
-    left.name.localeCompare(right.name),
-  )) {
-    if (dirent.name === '__tests__' || dirent.name === 'node_modules') continue
-    const path = join(directory, dirent.name)
-    if (dirent.isDirectory()) files.push(...sourceFiles(path))
-    else if (/\.(?:[cm]?[jt]sx?)$/.test(dirent.name) && !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(dirent.name))
-      files.push(path)
-  }
-  return files
+  return filesUnder(directory, {
+    skipDirectories: ['__tests__'],
+    keep: (name: string): boolean => !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(name),
+  })
 }
 
 function regionOf(path: string): Region | undefined {
