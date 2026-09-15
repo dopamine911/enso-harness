@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { filesUnder } from '../scripts/source-tree.ts'
+import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
  * Every record goes through the one logger (#132), and the substrate stays behind it.
@@ -22,10 +24,9 @@ import { join } from 'node:path'
  * is a design conversation.
  */
 
-const repositoryRoot = join(import.meta.dir, '..')
 const MIGRATED_ROOTS = ['packages/core/src', 'packages/web/src', 'packages/harness'] as const
-const SKIPPED_DIRECTORIES = ['node_modules', 'dist', 'dist-types', 'coverage', '__tests__'] as const
-const SOURCE_EXTENSION = /\.tsx?$/
+/** Production files only: a test may quote `console.log` as the thing a guard denies. */
+const sourceFiles = (directory: string): string[] => filesUnder(directory, { skipDirectories: ['__tests__'] })
 /** A line that is only a comment: `//`, a block opener, or a block's `*`-led body. */
 const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*)/
 /** The console is a sink LogTape owns; nothing here writes to it by hand. */
@@ -38,22 +39,11 @@ const LOGTAPE_ALLOWED = [
   'packages/web/src/browser-logging.ts',
 ] as const
 
-function sourceFiles(directory: string): string[] {
-  const found: string[] = []
-  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
-    if ((SKIPPED_DIRECTORIES as readonly string[]).includes(dirent.name)) continue
-    const path = join(directory, dirent.name)
-    if (dirent.isDirectory()) found.push(...sourceFiles(path))
-    else if (SOURCE_EXTENSION.test(dirent.name)) found.push(path)
-  }
-  return found
-}
-
 function offendersMatching(pattern: RegExp, allowed: readonly string[]): string[] {
   const offenders: string[] = []
   for (const root of MIGRATED_ROOTS) {
-    for (const path of sourceFiles(join(repositoryRoot, root))) {
-      const repositoryRelative = path.slice(repositoryRoot.length + 1)
+    for (const path of sourceFiles(join(REPOSITORY_ROOT, root))) {
+      const repositoryRelative = path.slice(REPOSITORY_ROOT.length + 1)
       if (allowed.includes(repositoryRelative)) continue
       const lines = readFileSync(path, 'utf8').split('\n')
       for (const [lineIndex, line] of lines.entries()) {

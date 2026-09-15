@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { filesUnder } from '../scripts/source-tree.ts'
+import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
  * The gate may not be talked out of, one line at a time.
@@ -24,12 +26,9 @@ import { join } from 'node:path'
  * config above, that is a design conversation, not a comment.
  */
 
-const repositoryRoot = join(import.meta.dir, '..')
 const SCANNED_ROOTS = ['packages', 'scripts', 'test'] as const
-const SKIPPED_DIRECTORIES = new Set(['node_modules', 'dist', 'dist-types', 'coverage'])
 /** Vendored upstream code — biome.jsonc excludes it from linting, so it has no rules to suppress. */
 const VENDORED_DIRECTORIES = ['packages/web/src/components'] as const
-const SOURCE_EXTENSION = /\.(?:tsx?|jsx?|mjs|cjs)$/
 
 /**
  * Assembled rather than written literally, so this file can scan ITSELF without matching
@@ -39,22 +38,11 @@ const SOURCE_EXTENSION = /\.(?:tsx?|jsx?|mjs|cjs)$/
  */
 const SUPPRESSION = new RegExp(`//\\s*${['biome', 'ignore'].join('-')}`)
 
-function sourceFiles(directory: string): string[] {
-  const found: string[] = []
-  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
-    if (SKIPPED_DIRECTORIES.has(dirent.name)) continue
-    const path = join(directory, dirent.name)
-    if (dirent.isDirectory()) found.push(...sourceFiles(path))
-    else if (SOURCE_EXTENSION.test(dirent.name)) found.push(path)
-  }
-  return found
-}
-
 test('⚠ no lint rule is suppressed by a comment — fix the code or record it in biome.jsonc (#82)', () => {
   const offenders: string[] = []
   for (const root of SCANNED_ROOTS) {
-    for (const path of sourceFiles(join(repositoryRoot, root))) {
-      const repositoryRelative = path.slice(repositoryRoot.length + 1)
+    for (const path of filesUnder(join(REPOSITORY_ROOT, root))) {
+      const repositoryRelative = path.slice(REPOSITORY_ROOT.length + 1)
       if (VENDORED_DIRECTORIES.some((vendored) => repositoryRelative.startsWith(vendored))) continue
       const lines = readFileSync(path, 'utf8').split('\n')
       for (const [lineIndex, line] of lines.entries()) {

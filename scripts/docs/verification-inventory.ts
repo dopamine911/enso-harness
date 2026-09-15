@@ -105,10 +105,6 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
         constant: 'LOGTAPE_ALLOWED',
         reason: 'Only the logging schema and process configurators may name the logging substrate.',
       },
-      {
-        constant: 'SKIPPED_DIRECTORIES',
-        reason: 'Generated, dependency, coverage, and test directories are outside the production-source scan.',
-      },
     ],
     limitation:
       'Line-scans direct console calls and static LogTape imports; comments and test directories are skipped.',
@@ -120,10 +116,6 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
         constant: 'EXEMPTED_KEY_SITES',
         reason: 'Pins every production file relying on an externally fixed property-key spelling.',
       },
-      {
-        constant: 'SKIPPED_DIRECTORIES',
-        reason: 'Dependency, generated, and coverage directories are outside the property-key scan.',
-      },
     ],
     limitation:
       'The executable fixture covers the externally fixed `v` and `dir` keys; the site scan recognizes those key spellings.',
@@ -131,10 +123,6 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
   'test/no-lint-suppressions.test.ts': {
     rootArrays: ['SCANNED_ROOTS'],
     exceptions: [
-      {
-        constant: 'SKIPPED_DIRECTORIES',
-        reason: 'Dependency, generated, and coverage directories are outside the source scan.',
-      },
       {
         constant: 'VENDORED_DIRECTORIES',
         reason: 'Vendored upstream code is excluded from linting and therefore from the suppression scan.',

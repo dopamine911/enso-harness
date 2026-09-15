@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
+import { filesUnder } from '../scripts/source-tree.ts'
 
 /**
  * THE COVERAGE DENOMINATOR (#slop-factory port). Bun measures coverage only over files a
@@ -44,23 +45,20 @@ const ENTRY_POINT_EXCEPTIONS = [
 /** Vendored code — biome.jsonc's exclusion boundary, applied to coverage for the same reason. */
 const VENDORED_DIRECTORIES = ['packages/web/src/components'] as const
 
-function isSourceFile(fileName: string): boolean {
-  if (fileName.endsWith('.test.ts') || fileName.endsWith('.test.tsx')) return false
-  return fileName.endsWith('.ts') || fileName.endsWith('.tsx')
-}
-
+/**
+ * The denominator: every production module under the library roots — no tests, no vendored
+ * components, no named entry point — over the one walker (`scripts/source-tree.ts`, #174).
+ */
 function collectLibrarySources(rootDirectory: string): string[] {
-  const collected: string[] = []
-  for (const dirEntry of readdirSync(rootDirectory, { withFileTypes: true, recursive: true })) {
-    if (!(dirEntry.isFile() && isSourceFile(dirEntry.name))) continue
-    const absolutePath = join(dirEntry.parentPath, dirEntry.name)
-    const repositoryRelative = relative(REPOSITORY_ROOT, absolutePath)
-    if (repositoryRelative.includes('__tests__')) continue
-    if (VENDORED_DIRECTORIES.some((vendored) => repositoryRelative.startsWith(vendored))) continue
-    if (ENTRY_POINT_EXCEPTIONS.some((entry) => repositoryRelative === entry)) continue
-    collected.push(absolutePath)
-  }
-  return collected
+  return filesUnder(rootDirectory, {
+    skipDirectories: ['__tests__'],
+    keep: (fileName: string, absolutePath: string): boolean => {
+      if (/\.test\.tsx?$/.test(fileName)) return false
+      const repositoryRelative = relative(REPOSITORY_ROOT, absolutePath)
+      if (VENDORED_DIRECTORIES.some((vendored) => repositoryRelative.startsWith(vendored))) return false
+      return !ENTRY_POINT_EXCEPTIONS.some((entry) => repositoryRelative === entry)
+    },
+  })
 }
 
 test('every named entry-point exception still exists — a rename must not widen the exclusion', () => {
