@@ -15,7 +15,7 @@ import {
 } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { Check } from 'typebox/value'
-import type { AgentHost } from '../../host/agent-host.ts'
+import type { AgentHost, HostedThreadInspection } from '../../host/agent-host.ts'
 import { startZenServer } from '../index.ts'
 import {
   createFakeAgentHost,
@@ -53,20 +53,22 @@ interface FakeSessionScript {
  * A branch shaped like pi's, with a picc `modes` entry, and NO file on disk — the unflushed
  * state #86's inspection must report honestly rather than invent (#86).
  */
-const PICC_SHAPED_INSPECTION = {
-  sessionDir: '/fake/agent/sessions/--fake-cwd--',
-  entries: [
-    { type: 'session', id: 'root', parentId: null, timestamp: '2026-09-08T00:00:00.000Z' },
-    {
-      type: 'custom',
-      customType: 'modes',
-      data: { mode: 'plan' },
-      id: 'm1',
-      parentId: 'root',
-      timestamp: '2026-09-08T00:00:01.000Z',
-    },
-  ],
-  commands: ['mode', 'plan'],
+function piccShapedInspection(): Partial<HostedThreadInspection> {
+  return {
+    sessionDir: '/fake/agent/sessions/--fake-cwd--',
+    entries: [
+      { type: 'session', id: 'root', parentId: null, timestamp: '2026-09-08T00:00:00.000Z' },
+      {
+        type: 'custom',
+        customType: 'modes',
+        data: { mode: 'plan' },
+        id: 'm1',
+        parentId: 'root',
+        timestamp: '2026-09-08T00:00:01.000Z',
+      },
+    ],
+    commands: ['mode', 'plan'],
+  }
 }
 
 function fakeHost(
@@ -87,7 +89,7 @@ function fakeHost(
         listCommands: () => [{ name: 'mode', source: 'extension' }],
         permissionModeState: () => ({ mode: 'default', available: ['default', 'acceptEdits'] }),
       }),
-      inspect: PICC_SHAPED_INSPECTION,
+      inspect: piccShapedInspection(),
     })
     built.push(fake.record)
     return Promise.resolve(fake.hosted)
