@@ -57,5 +57,26 @@
   // Vendored presentation and shadcn primitives stay IN the graph (their dependencies are real)
   // but their own findings are hidden: biome and coverage already exclude them (#31, #121), and
   // an unused sub-component there is upstream's, kept diffable, not ours to prune.
-  "ignoreFindings": ["packages/web/src/components/**"]
+  "ignoreFindings": ["packages/web/src/components/**"],
+  // Clone detection (#174). `semantic` is the mode this repo reads: `mild` (the default) found
+  // three groups and 0.29 % by tokens; the same structure under renamed identifiers is 51
+  // groups, and that is the repeated shape, so that is the number the baseline holds. Two
+  // classes are excluded by decision, each with its reason:
+  // - the vendored components, for the reason `ignoreFindings` gives above — dupes has its own
+  //   ignore list, so the decision is written twice;
+  // - `@zen/core`: "every shape is a schema" (architecture → The shared core) emits a
+  //   `Type.Object` + `Static` pair per schema on purpose, and the tool pairs those as clones.
+  //   The convention IS the repetition; a real clone in core is found by the reviewer, not here.
+  // What stays in the count and is NOT excluded: consecutive metadata rows in the generators,
+  // Playwright arrange/act blocks, the dispatcher's route branches — inventory. `threshold` is
+  // the ratchet: fallow 3.25's regression baseline carries dead-code categories only, so the
+  // duplicated-line percentage is the number that can only fall. Set to today's value after
+  // the three folds (4.5 passes, 4.49 fails); lower it when a fold lands, never raise it.
+  // Read by the advisory `fallow-audit` job (`.github/workflows/ci.yml`); promote to the gate
+  // once it has been red for a real regression once.
+  "duplicates": {
+    "mode": "semantic",
+    "ignore": ["packages/web/src/components/**", "packages/core/src/**"],
+    "threshold": 4.5
+  }
 }

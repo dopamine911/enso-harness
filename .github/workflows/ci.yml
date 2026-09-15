@@ -73,6 +73,12 @@ jobs:
           BASE_REF: ${{ github.base_ref }} # through env, never interpolated into the shell line
         run: bunx fallow audit --base "origin/$BASE_REF" --dead-code-baseline fallow-baseline.json
 
+      # The duplication ratchet (#174): `.fallowrc.jsonc` → `duplicates.threshold` is today's
+      # duplicated-line percentage; this step goes red when a PR raises it. Advisory here
+      # for the same reason as the audit above — promote once it has caught a real one.
+      - name: fallow dupes (advisory — the threshold is the ratchet)
+        run: bunx fallow dupes
+
   # ADVISORY, deliberately: react-doctor scores the web surface (0-100) and its findings
   # are guidance, not a contract — so the job reports without ever blocking a merge.
   # Promote it to a required check only after its signal has earned that (drop the
