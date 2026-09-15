@@ -1,3 +1,4 @@
+import { dispatchProviderPost } from '../dispatch.ts'
 import { cleanSources } from '../sources.ts'
 import type { FetchUrl, WebSearchOutcome, WebSearchSnippet } from '../vocabulary.ts'
 import { WebSearchProviderError } from '../vocabulary.ts'
@@ -39,28 +40,15 @@ export async function runTavilyProviderSearch(request: TavilySearchRequest): Pro
     requestBody.exclude_domains = request.excludeDomains
   }
 
-  let response: Response
-  try {
-    response = await request.fetchUrl(TAVILY_SEARCH_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${request.apiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-      signal: request.signal,
-    })
-  } catch (error) {
-    throw new WebSearchProviderError('tavily', `the search request failed to send: ${String(error)}`, {
-      requestDispatched: false,
-    })
-  }
-  if (!response.ok) {
-    const errorBody = await response.text()
-    throw new WebSearchProviderError('tavily', `the search API answered HTTP ${response.status}: ${errorBody}`, {
-      requestDispatched: true,
-    })
-  }
+  const response = await dispatchProviderPost('tavily', request.fetchUrl, {
+    url: TAVILY_SEARCH_URL,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${request.apiKey}`,
+    },
+    body: requestBody,
+    signal: request.signal,
+  })
 
   let payload: unknown
   try {

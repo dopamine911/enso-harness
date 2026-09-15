@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 146.**
+**Decision headers: 147.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -45,6 +45,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/core/web-search/anthropic-wire.ts` | `#63` | The Anthropic Messages WIRE — one streaming `/messages` call with the native `web_search` server tool, parsed into the outcome union. |
 | `packages/harness/core/web-search/auth.ts` | `#63` | Model-routed auth (#63): resolve one model's credentials THROUGH PI's model registry — the same identity the conversation bills, including the OAuth path — with the provider-env fallback pi 0.80.1+ made necessary. |
 | `packages/harness/core/web-search/citations.ts` | `#63` | Citation markers (#63): turn a provider's citation records into `[n]` markers inside the answer text plus the numbered source list those markers point at. |
+| `packages/harness/core/web-search/dispatch.ts` | `#174` | How every provider sends its request (#174): a JSON POST, and the two ways it fails — the request never left (`requestDispatched: false`, so the extension may fall through to the next provider) or the API answered but not OK (`requestDispatched: true`, the body quoted). |
 | `packages/harness/core/web-search/providers/anthropic.ts` | `#63` | The `anthropic` provider (#63): current-model routing onto the Anthropic Messages native `web_search` server tool ({@link ANTHROPIC_WEB_SEARCH_TOOL_TYPE}). |
 | `packages/harness/core/web-search/providers/deepseek.ts` | `#63` | The `deepseek` provider (#63): the DEDICATED search backend, dsh's shape (`dsh-web-search-deepseek`, MIT — the spec this follows). |
 | `packages/harness/core/web-search/providers/google.ts` | `#63` | The `google` provider (#63): Gemini "Grounding with Google Search" over the `streamGenerateContent` SSE endpoint. |

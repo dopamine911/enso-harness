@@ -1,4 +1,5 @@
 import { applyTextCitations, type CitedTextCitation } from './citations.ts'
+import { dispatchProviderPost } from './dispatch.ts'
 import { cleanSources, normalizeSearchUrl, titleFromUrl } from './sources.ts'
 import { readSseEvents } from './sse.ts'
 import type { FetchUrl, WebSearchOutcome, WebSearchProviderId } from './vocabulary.ts'
@@ -68,29 +69,12 @@ export async function runAnthropicWireSearch(options: AnthropicWireSearchOptions
     requestBody.system = options.systemTextBlocks.map((blockText) => ({ type: 'text', text: blockText }))
   }
 
-  let response: Response
-  try {
-    response = await options.fetchUrl(options.endpointUrl, {
-      method: 'POST',
-      headers: options.headers,
-      body: JSON.stringify(requestBody),
-      signal: options.signal,
-    })
-  } catch (error) {
-    throw new WebSearchProviderError(options.providerId, `the search request failed to send: ${String(error)}`, {
-      requestDispatched: false,
-    })
-  }
-  if (!response.ok) {
-    const errorBody = await response.text()
-    throw new WebSearchProviderError(
-      options.providerId,
-      `the search API answered HTTP ${response.status}: ${errorBody}`,
-      {
-        requestDispatched: true,
-      },
-    )
-  }
+  const response = await dispatchProviderPost(options.providerId, options.fetchUrl, {
+    url: options.endpointUrl,
+    headers: options.headers,
+    body: requestBody,
+    signal: options.signal,
+  })
 
   let accumulatedText = ''
   const citations: CitedTextCitation[] = []
