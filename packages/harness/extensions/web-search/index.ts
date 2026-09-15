@@ -32,6 +32,7 @@ import {
   runGoogleProviderSearch,
   runOpenAiProviderSearch,
   runTavilyProviderSearch,
+  runUnderDeadline,
   TAVILY_API_KEY_VARIABLE,
   type TavilySearchRequest,
   type WebSearchOutcome,
@@ -291,36 +292,22 @@ interface CallDeadline {
 }
 
 /** Run one provider attempt under what remains of the call's deadline AND the caller's signal. */
-async function underDeadline<T>(
+function underDeadline<T>(
   callerSignal: AbortSignal | undefined,
   deadline: CallDeadline,
   run: (deadlineSignal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-  const controller = new AbortController()
-  const deadlinePassed = (): void =>
-    controller.abort(
-      new Error(
-        `${WEB_SEARCH_TOOL_NAME} passed its deadline (${deadline.budgetMs}ms for primary and fallback together)`,
-      ),
-    )
-  const remainingMs = deadline.at - Date.now()
-  // A spent budget aborts BEFORE the attempt runs — a 0ms timer would let a fast provider
-  // answer first, and the fallback must not start what the deadline already forbade.
-  if (remainingMs <= 0) deadlinePassed()
-  const timeoutId = remainingMs > 0 ? setTimeout(deadlinePassed, remainingMs) : undefined
-  const abortWithCaller = (): void => controller.abort(callerSignal?.reason)
-  // An ALREADY-aborted signal never fires the event — same pre-abort guard as web_fetch.
-  if (callerSignal?.aborted === true) {
-    abortWithCaller()
-  } else {
-    callerSignal?.addEventListener('abort', abortWithCaller, { once: true })
-  }
-  try {
-    return await run(controller.signal)
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId)
-    callerSignal?.removeEventListener('abort', abortWithCaller)
-  }
+  return runUnderDeadline(
+    callerSignal,
+    {
+      remainingMs: deadline.at - Date.now(),
+      reason: () =>
+        new Error(
+          `${WEB_SEARCH_TOOL_NAME} passed its deadline (${deadline.budgetMs}ms for primary and fallback together)`,
+        ),
+    },
+    run,
+  )
 }
 
 function progressForwarder(onUpdate: AgentToolUpdateCallback<undefined> | undefined): (text: string) => void {

@@ -15,7 +15,13 @@ import {
   zenConfigPath,
   zenLogger,
 } from '@zen/core'
-import { isFetchableContentType, isHostAllowed, isPublicIpAddress, parseWebFetchUrl } from '../../core/index.ts'
+import {
+  isFetchableContentType,
+  isHostAllowed,
+  isPublicIpAddress,
+  parseWebFetchUrl,
+  runUnderDeadline,
+} from '../../core/index.ts'
 
 /**
  * The web_fetch tool (#54) — the sanctioned web access that replaces the ad-hoc network
@@ -197,42 +203,32 @@ async function addressGateReason(
 }
 
 /** The fetch itself, under the whole-call deadline AND the caller's abort signal. */
-async function fetchUnderDeadline(
+function fetchUnderDeadline(
   url: URL,
   rawUrl: string,
   dependencies: WebFetchDependencies,
   signal: AbortSignal | undefined,
 ): Promise<AgentToolResult<undefined>> {
-  const controller = new AbortController()
-  const timeoutId = setTimeout(
-    () => controller.abort(new Error(`${WEB_FETCH_TOOL_NAME} timed out after ${WEB_FETCH_TIMEOUT_MS}ms`)),
-    WEB_FETCH_TIMEOUT_MS,
+  return runUnderDeadline(
+    signal,
+    {
+      remainingMs: WEB_FETCH_TIMEOUT_MS,
+      reason: () => new Error(`${WEB_FETCH_TOOL_NAME} timed out after ${WEB_FETCH_TIMEOUT_MS}ms`),
+    },
+    async (deadlineSignal) => {
+      let response: Response
+      try {
+        response = await dependencies.fetchUrl(url.href, {
+          redirect: 'manual',
+          signal: deadlineSignal,
+          headers: { 'user-agent': USER_AGENT },
+        })
+      } catch (error) {
+        return refusal(rawUrl, `the request failed: ${String(error)}`)
+      }
+      return await renderResponse(url, rawUrl, response)
+    },
   )
-  const abortWithCaller = (): void => controller.abort(signal?.reason)
-  // A signal that is ALREADY aborted never fires the event (addEventListener is not
-  // retroactive), so an execute() entered post-abort would otherwise run until the
-  // deadline (PR #58 review, nit 3).
-  if (signal?.aborted === true) {
-    abortWithCaller()
-  } else {
-    signal?.addEventListener('abort', abortWithCaller, { once: true })
-  }
-  try {
-    let response: Response
-    try {
-      response = await dependencies.fetchUrl(url.href, {
-        redirect: 'manual',
-        signal: controller.signal,
-        headers: { 'user-agent': USER_AGENT },
-      })
-    } catch (error) {
-      return refusal(rawUrl, `the request failed: ${String(error)}`)
-    }
-    return await renderResponse(url, rawUrl, response)
-  } finally {
-    clearTimeout(timeoutId)
-    signal?.removeEventListener('abort', abortWithCaller)
-  }
 }
 
 const REDIRECT_STATUS_MIN = 300
