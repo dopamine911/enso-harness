@@ -15,10 +15,10 @@ the review. Two pages are generated whole (`bun <script> > <page>`) and diffed t
 |---|---|---|---|---|
 | [thread runtime](./thread-runtime.md) | Thread, Control | three fakes | vendor, glossary | L2 (event side) |
 | [storage](./storage.md) | Thread, Record | — (one file, pinned) | `no-duplicate-paths` | L2 (entries) |
-| [observation](./observation.md) · [inventory](../reference/observations.md) (generated) | Observation | `observation-kinds.ts` | — | parallel `zen.*` names |
+| [observation](./observation.md) · [inventory](../reference/observations.md) (generated) | Observation | `observation-kinds.ts` | kinds sweep (`schemas.test.ts`, `to-agui.test.ts` over the oracle) | parallel `zen.*` names |
 | [dialog](./dialog.md) | Control | extension-UI-context tests | — | L4, decided: keep |
 | [permission mode](./permission-mode.md) | Permission | — | vendor allowlist | **L3** |
-| [guards](./guards.md) | Permission | injected verdicts; analyzer contract test | — | L5 |
+| [guards](./guards.md) | Permission | injected verdicts; analyzer contract test | `tool-call-participants` | L5 |
 | [tool result](./tool-result.md) | Surface | — | — | — |
 | [presentation](./presentation.md) · [ported files](./ported-provenance.md) (generated) | Surface | — | presentation | — |
 | [logging](./logging.md) | Record | — | logging | substrate, by decision |

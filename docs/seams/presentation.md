@@ -223,9 +223,7 @@ client as the state layer, and the glossary's vendor map carries both. Their voc
 memory, in the browser, and never on the wire or stored — `rpc/to-agui.ts:17-28` says where it runs
 (the adapter calls it on each observation before handing chunks to the client; *nothing serialises the
 output of this module and nothing stores it*), and its only production importer is
-`follow-connection.ts:24`. One comment disagrees with the code: `rpc/custom-event-names.ts:2-3` calls
-`to-agui.ts` "the server-side mapper". It is not; the glossary (Observation → adapter) and `to-agui.ts`'s
-own header are right, and the comment is owed a fix.
+`follow-connection.ts:24`; `rpc/custom-event-names.ts:2-3` says the same.
 
 **The state layer's message shape crosses the history route.** `ZenThreadHistory.messages` is
 `unknown` on purpose — core must not own the client's transport shape — and `reviveHistoryMessages`
