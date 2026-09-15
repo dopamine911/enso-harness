@@ -40,11 +40,13 @@ test('⚠ no TypeBox schema is declared outside @zen/core', () => {
 
 test('every module is reachable: from the barrel, or from a subpath package.json declares', () => {
   // If a module is added to src/ and not to index.ts, a consumer would have to reach past
-  // the barrel — and "is this shape already declared?" stops being one search. The one
-  // exception is a module the BROWSER must never see: `@logtape/file` builds its sinks on
-  // `node:fs` at import and is not tree-shaken, so `log-process.ts` is a subpath export
-  // (`@zen/core/log-process`) — declared in package.json, which is checked here so the
-  // exception cannot be an undeclared file either.
+  // the barrel — and "is this shape already declared?" stops being one search. Two
+  // exceptions, each a module the BROWSER must never see, declared in package.json (checked
+  // here so an exception cannot be an undeclared file either): `@logtape/file` builds its
+  // sinks on `node:fs` at import and is not tree-shaken, so `log-process.ts` is
+  // `@zen/core/log-process`; and the tests' recording sink (#178) is `@zen/core/log-recorder`
+  // from under `__tests__`, where the logging gate's three-file LogTape inventory does not
+  // look, because it is a test sink and not a fourth production file.
   const modules = readdirSync(join(import.meta.dir, '..'), { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.ts') && entry.name !== 'index.ts')
     .map((entry) => entry.name)
@@ -55,7 +57,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   const subpathModules = Object.entries(manifest.exports)
     .filter(([subpath]) => subpath !== '.')
     .map(([, target]) => target.replace(/^\.\/src\//, ''))
-  expect(subpathModules).toEqual(['log-process.ts'])
+  expect(subpathModules).toEqual(['log-process.ts', '__tests__/log-recorder.ts'])
   const inBarrel = modules.filter((module) => barrel.includes(module))
   const expectedInBarrel = modules.filter((module) => !subpathModules.includes(module))
   expect(inBarrel.sort()).toEqual(expectedInBarrel.sort())

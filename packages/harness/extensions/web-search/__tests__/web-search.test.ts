@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test'
 import type { LogRecord } from '@logtape/logtape'
 import { EXTERNAL_WEB_CONTENT_NOTICE, WEB_SEARCH_TOOL_NAME } from '@zen/core'
+import { auditRecords, recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import type { DeepseekSearchRequest, TavilySearchRequest, WebSearchOutcome } from '../../../core/index.ts'
 import { WebSearchProviderError } from '../../../core/index.ts'
-import { auditRecords, recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
 import { createWebSearch, type WebSearchDependencies } from '../index.ts'
 
 /**

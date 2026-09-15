@@ -2,9 +2,8 @@ import { expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { bundleRecordsText, type ThreadRuntime, ZEN_REDACTED, type ZenLogLine } from '@zen/core'
+import { bundleRecordsText, ZEN_REDACTED, type ZenLogLine } from '@zen/core'
 import { parseZenLogLine, zenLogFilename } from '@zen/core/log-process'
-import type { HostedThread } from '../../host/agent-host.ts'
 import { createEventTail } from '../../host/event-tail.ts'
 import {
   BUNDLE_MAX_RECORDS,
@@ -14,35 +13,14 @@ import {
   describeCheckout,
 } from '../bundle-route.ts'
 import type { ThreadView } from '../thread-registry.ts'
-
-const ignore = (): void => undefined
+import { createFakeHostedThread } from './fake-hosted-thread.ts'
 
 /** A live thread as the registry would list it — the inspection is what the bundle carries. */
 function liveThread(threadId: string): ThreadView {
-  const runtime: ThreadRuntime = {
-    prompt: ignore,
-    answerDialog: ignore,
-    openDialogs: () => [],
-    listCommands: () => [],
-    permissionModeState: () => ({ mode: 'plan', available: ['default', 'plan'] }),
-    subscribe: () => ignore,
-    abort: () => Promise.resolve(),
-    clearQueue: () => ({ steering: [], followUp: [] }),
-    dispose: ignore,
-  }
-  const hosted: HostedThread = {
-    runtime,
-    loadedExtensionPaths: [],
-    inspect: () => ({
-      sessionId: `session-${threadId}`,
-      cwd: '/work',
-      sessionDir: '/sessions',
-      sessionFile: null,
-      entries: [],
-      commands: ['plan'],
-    }),
-    emittedEvents: () => [],
-  }
+  const { hosted } = createFakeHostedThread({
+    runtime: () => ({ permissionModeState: () => ({ mode: 'plan', available: ['default', 'plan'] }) }),
+    inspect: { sessionId: `session-${threadId}`, cwd: '/work', sessionDir: '/sessions', commands: ['plan'] },
+  })
   return {
     threadId,
     hosted,

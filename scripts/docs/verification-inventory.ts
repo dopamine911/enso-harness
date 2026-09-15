@@ -183,11 +183,11 @@ interface DoubleMetadata {
 
 const DOUBLE_METADATA: readonly DoubleMetadata[] = [
   {
-    file: 'packages/harness/extensions/__tests__/log-recorder.ts',
+    file: 'packages/core/src/__tests__/log-recorder.ts',
     symbol: 'recordZenLogs',
-    label: '`recordZenLogs` (extensions)',
-    seam: 'LogTape in-memory sink',
-    productionSurface: 'extension audit records through `zenLogger`',
+    label: '`recordZenLogs`',
+    seam: 'LogTape in-memory sink, one for every package (#178)',
+    productionSurface: 'every record through `zenLogger` — extension audits, web and server records',
     exported: true,
   },
   {
@@ -196,14 +196,6 @@ const DOUBLE_METADATA: readonly DoubleMetadata[] = [
     label: 'DOM environment / `releaseDom`',
     seam: 'process-scoped browser globals',
     productionSurface: 'mounted React components and browser events',
-    exported: true,
-  },
-  {
-    file: 'packages/web/src/__tests__/log-recorder.ts',
-    symbol: 'recordZenLogs',
-    label: '`recordZenLogs` (web)',
-    seam: 'LogTape in-memory sink',
-    productionSurface: 'web and server records through `zenLogger`',
     exported: true,
   },
   {
@@ -226,9 +218,26 @@ const DOUBLE_METADATA: readonly DoubleMetadata[] = [
     file: 'packages/web/src/server/__tests__/bundle-route.test.ts',
     symbol: 'liveThread',
     label: '`liveThread`',
-    seam: 'minimal `ThreadView` / `HostedThread` bundle fake',
+    seam: '`ThreadView` over `createFakeHostedThread`',
     productionSurface: 'diagnostic bundle serialization of live threads',
     exported: false,
+  },
+  {
+    file: 'packages/web/src/server/__tests__/fake-hosted-thread.ts',
+    symbol: 'createFakeHostedThread',
+    label: '`createFakeHostedThread`',
+    seam: 'the one fake of the thread-runtime seam (#178): recording `ThreadRuntime` / `HostedThread`',
+    productionSurface:
+      'server routes, registry lifecycle, follow feed, bundle — everything driven over a `ThreadRuntime`',
+    exported: true,
+  },
+  {
+    file: 'packages/web/src/server/__tests__/fake-hosted-thread.ts',
+    symbol: 'createFakeAgentHost',
+    label: '`createFakeAgentHost`',
+    seam: 'the one fake of the storage seam (#178): `AgentHost` over a stored-thread map',
+    productionSurface: 'stored-thread listing, history reads, thread building',
+    exported: true,
   },
   {
     file: 'packages/web/src/server/__tests__/follow-reader.ts',
@@ -242,15 +251,15 @@ const DOUBLE_METADATA: readonly DoubleMetadata[] = [
     file: 'packages/web/src/server/__tests__/follow.test.ts',
     symbol: 'fakeHost',
     label: '`fakeHost` (follow)',
-    seam: '`AgentHost` with a controllable `ThreadRuntime`',
+    seam: '`createFakeAgentHost` over `createFakeHostedThread` with a scripted prompt acceptance',
     productionSurface: 'follow snapshots, observations, dialogs, and abort behavior',
     exported: false,
   },
   {
     file: 'packages/web/src/server/__tests__/server-handler.test.ts',
-    symbol: 'fakeHostedThread',
-    label: '`fakeHostedThread`',
-    seam: 'scripted `HostedThread` / `ThreadRuntime`',
+    symbol: 'fakeHost',
+    label: '`fakeHost` (server handler)',
+    seam: '`createFakeAgentHost` over `createFakeHostedThread` with a scripted prompt and a picc-shaped inspection',
     productionSurface: 'server request routing and runtime event delivery',
     exported: false,
   },
@@ -258,7 +267,7 @@ const DOUBLE_METADATA: readonly DoubleMetadata[] = [
     file: 'packages/web/src/server/__tests__/thread-registry.test.ts',
     symbol: 'fakeHosted',
     label: '`fakeHosted`',
-    seam: 'controllable `HostedThread` / `ThreadRuntime` lifecycle',
+    seam: '`createFakeHostedThread` with a pending abort and a failing clear',
     productionSurface: 'thread registry acquire, abort, queue clearing, and disposal',
     exported: false,
   },
@@ -480,12 +489,28 @@ function validateDouble(metadata: DoubleMetadata): void {
   if (!declaration.test(source)) throw new Error(`${metadata.file}: stale double metadata for ${metadata.symbol}`)
 }
 
+/** `@zen/core/<subpath>` → the file core's export map names, read once; other bare specifiers → undefined. */
+const CORE_SUBPATH_TARGETS: ReadonlyMap<string, string> = new Map(
+  Object.entries(
+    (JSON.parse(repositoryFile('packages/core/package.json')) as { exports: Record<string, string> }).exports,
+  )
+    .filter(([subpath]) => subpath !== '.')
+    .map(([subpath, target]) => [`@zen/core/${subpath.slice(2)}`, `packages/core/${target.replace(/^\.\//, '')}`]),
+)
+
+function coreSubpathTarget(specifier: string): string | undefined {
+  return CORE_SUBPATH_TARGETS.get(specifier)
+}
+
 function importsSymbol(testFile: string, metadata: DoubleMetadata): boolean {
   const source = repositoryFile(testFile)
   for (const match of source.matchAll(/import\s+(?:type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g)) {
     const clause = match[1] ?? ''
     const specifier = match[2] ?? ''
-    if (!specifier.startsWith('.')) continue
+    const imported = specifier.startsWith('.')
+      ? relative(ROOT, resolve(dirname(join(ROOT, testFile)), specifier)).replaceAll('\\', '/')
+      : coreSubpathTarget(specifier)
+    if (imported !== metadata.file) continue
     const importedNames = clause
       .replace(/[{}]/g, ' ')
       .split(',')
@@ -497,9 +522,7 @@ function importsSymbol(testFile: string, metadata: DoubleMetadata): boolean {
             ?.replace(/^type\s+/, '')
             .trim() ?? '',
       )
-    if (!importedNames.includes(metadata.symbol)) continue
-    const imported = relative(ROOT, resolve(dirname(join(ROOT, testFile)), specifier)).replaceAll('\\', '/')
-    if (imported === metadata.file) return true
+    if (importedNames.includes(metadata.symbol)) return true
   }
   return false
 }
