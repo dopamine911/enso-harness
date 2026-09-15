@@ -4,22 +4,26 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
-  type EventDelivery,
   type PromptOutcome,
   type PromptRequest,
   type RuntimeEvent,
-  type ThreadRuntime,
   ZenStoredThread,
   ZenThreadEvents,
   ZenThreadHistory,
   ZenThreadInspection,
   ZenThreadSummary,
 } from '@zen/core'
+import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { Check } from 'typebox/value'
-import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
-import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
-import { createEventTail, describeRuntimeEvent } from '../../host/event-tail.ts'
+import type { AgentHost } from '../../host/agent-host.ts'
 import { startZenServer } from '../index.ts'
+import {
+  createFakeAgentHost,
+  createFakeHostedThread,
+  type FakeStoredThread,
+  type FakeThreadParts,
+  type FakeThreadRecord,
+} from './fake-hosted-thread.ts'
 import { openFollow } from './follow-reader.ts'
 
 let logs: LogRecorder
@@ -37,12 +41,6 @@ afterAll(releaseZenLogs)
  * `listening` yields the bound URL. The wire itself is `follow.test.ts`.
  */
 
-interface FakeSessionRecord {
-  aborts: number
-  disposed: number
-  prompts: string[]
-}
-
 /** How a scripted session pushes pi events at its followers. */
 type EmitPiEvent = (event: RuntimeEvent) => void
 
@@ -51,98 +49,49 @@ interface FakeSessionScript {
   onPrompt: (emit: EmitPiEvent, outcome: PromptOutcome, message: string) => void
 }
 
-function fakeHostedThread(script: FakeSessionScript): { hosted: HostedThread; record: FakeSessionRecord } {
-  const listeners = new Set<(event: RuntimeEvent, delivery: EventDelivery) => void>()
-  const record: FakeSessionRecord = { aborts: 0, disposed: 0, prompts: [] }
-  // The fake records into the same tail the real host does, so the events route sees the
-  // real shape (coalesced rows); it delivers only live, so every row is `live`. The real
-  // host's held/replayed/dropped provenance is pinned in agent-host.test.ts.
-  const emitted = createEventTail()
-  const emit = (event: RuntimeEvent): void => {
-    const described = describeRuntimeEvent(event)
-    emitted.record(described.type, described.name, 'live')
-    for (const listener of listeners) listener(event, 'live')
-  }
-  const runtime: ThreadRuntime = {
-    prompt: (request: PromptRequest, outcome: PromptOutcome) => {
-      record.prompts.push(request.message)
-      script.onPrompt(emit, outcome, request.message)
+/**
+ * A branch shaped like pi's, with a picc `modes` entry, and NO file on disk — the unflushed
+ * state #86's inspection must report honestly rather than invent (#86).
+ */
+const PICC_SHAPED_INSPECTION = {
+  sessionDir: '/fake/agent/sessions/--fake-cwd--',
+  entries: [
+    { type: 'session', id: 'root', parentId: null, timestamp: '2026-09-08T00:00:00.000Z' },
+    {
+      type: 'custom',
+      customType: 'modes',
+      data: { mode: 'plan' },
+      id: 'm1',
+      parentId: 'root',
+      timestamp: '2026-09-08T00:00:01.000Z',
     },
-    answerDialog: () => undefined,
-    openDialogs: () => [],
-    listCommands: () => [{ name: 'mode', source: 'extension' }],
-    permissionModeState: () => ({ mode: 'default', available: ['default', 'acceptEdits'] }),
-    subscribe: (onEvent: (event: RuntimeEvent, delivery: EventDelivery) => void) => {
-      listeners.add(onEvent)
-      return () => {
-        listeners.delete(onEvent)
-      }
-    },
-    abort: () => {
-      record.aborts += 1
-      return Promise.resolve()
-    },
-    clearQueue: () => ({ steering: [], followUp: [] }),
-    dispose: () => {
-      record.disposed += 1
-    },
-  }
-  // A branch shaped like pi's, with a picc `modes` entry, and NO file on disk — the
-  // unflushed state #86's inspection must report honestly rather than invent (#86).
-  const inspect = (): HostedThreadInspection => ({
-    sessionId: 'session-1',
-    cwd: '/fake/cwd',
-    sessionDir: '/fake/agent/sessions/--fake-cwd--',
-    sessionFile: null,
-    entries: [
-      { type: 'session', id: 'root', parentId: null, timestamp: '2026-09-08T00:00:00.000Z' },
-      {
-        type: 'custom',
-        customType: 'modes',
-        data: { mode: 'plan' },
-        id: 'm1',
-        parentId: 'root',
-        timestamp: '2026-09-08T00:00:01.000Z',
-      },
-    ],
-    commands: ['mode', 'plan'],
-  })
-  return { hosted: { runtime, loadedExtensionPaths: [], inspect, emittedEvents: emitted.recent }, record }
-}
-
-/** What the fake host "has on disk" (#95): stored sessions by thread id, with their branch. */
-interface FakeStoredThread {
-  readonly branch: unknown[]
-  readonly modified: Date
-  readonly firstMessage: string
+  ],
+  commands: ['mode', 'plan'],
 }
 
 function fakeHost(
   script: FakeSessionScript,
   stored: Record<string, FakeStoredThread> = {},
-): { host: AgentHost; built: FakeSessionRecord[]; requested: string[] } {
-  const built: FakeSessionRecord[] = []
+): { host: AgentHost; built: FakeThreadRecord[]; requested: string[] } {
+  const built: FakeThreadRecord[] = []
   /** Thread ids the host was asked to build, in order — the prompt route passes the id through. */
   const requested: string[] = []
-  const host: AgentHost = {
-    createSession: (threadId: string) => {
-      requested.push(threadId)
-      const next = fakeHostedThread(script)
-      built.push(next.record)
-      return Promise.resolve(next.hosted)
-    },
-    listSessions: () =>
-      Promise.resolve(
-        Object.entries(stored).map(([id, session]) => ({
-          id,
-          path: `/stored/${id}.jsonl`,
-          modified: session.modified,
-          messageCount: session.branch.filter((entry) => (entry as { type?: unknown }).type === 'message').length,
-          firstMessage: session.firstMessage,
-        })),
-      ),
-    readBranch: (threadId: string) => Promise.resolve(stored[threadId]?.branch),
-  }
+  const host = createFakeAgentHost((threadId: string) => {
+    requested.push(threadId)
+    const fake = createFakeHostedThread({
+      runtime: ({ record, emit }: FakeThreadParts) => ({
+        prompt: (request: PromptRequest, outcome: PromptOutcome) => {
+          record.prompts.push(request)
+          script.onPrompt(emit, outcome, request.message)
+        },
+        listCommands: () => [{ name: 'mode', source: 'extension' }],
+        permissionModeState: () => ({ mode: 'default', available: ['default', 'acceptEdits'] }),
+      }),
+      inspect: PICC_SHAPED_INSPECTION,
+    })
+    built.push(fake.record)
+    return Promise.resolve(fake.hosted)
+  }, stored)
   return { host, built, requested }
 }
 
@@ -196,7 +145,7 @@ afterEach(async () => {
 async function startWith(
   script: FakeSessionScript,
   stored: Record<string, FakeStoredThread> = {},
-): Promise<{ url: string; built: FakeSessionRecord[]; requested: string[] }> {
+): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[] }> {
   const { host, built, requested } = fakeHost(script, stored)
   const started = startZenServer({
     cwd: tmpdir(),
@@ -226,7 +175,7 @@ test('⚠ two prompts on one thread reuse ONE session; a second thread gets its 
   expect(await prompt(url, 't1', 'one')).toBe(202)
   expect(await prompt(url, 't1', 'two')).toBe(202)
   expect(built).toHaveLength(1)
-  expect(built[0]?.prompts).toEqual(['one', 'two'])
+  expect(built[0]?.prompts.map((request) => request.message)).toEqual(['one', 'two'])
   await prompt(url, 't2', 'three')
   expect(built).toHaveLength(2)
   // A settled run releases the thread and never aborts or disposes the session.

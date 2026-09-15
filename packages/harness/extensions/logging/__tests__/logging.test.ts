@@ -6,7 +6,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { reset } from '@logtape/logtape'
 import { zenLogger } from '@zen/core'
 import { isLoggingConfigured, zenLogFilename } from '@zen/core/log-process'
-import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
+import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { createLoggingExtension } from '../index.ts'
 
 /**

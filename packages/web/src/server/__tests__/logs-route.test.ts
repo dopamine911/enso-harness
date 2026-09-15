@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
 import type { LogRecorder } from '@logtape/testing/recorder'
-import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
+import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from '../logs-route.ts'
 
 /**

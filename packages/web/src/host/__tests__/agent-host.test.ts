@@ -10,7 +10,7 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { findRepoRoot, harnessPackageDir, type RuntimeEvent } from '@zen/core'
-import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
+import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { type AgentHost, createAgentHost, type HostedThread, seedMultiAccountChildProxyOff } from '../agent-host.ts'
 
 /**

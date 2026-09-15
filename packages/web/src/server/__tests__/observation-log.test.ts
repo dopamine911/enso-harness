@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import type { LogRecord } from '@logtape/logtape'
-import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
+import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { recordObservation } from '../observation-log.ts'
 import { noteRunAdmitted } from '../run-timing.ts'
 

@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
 import type { LogRecorder } from '@logtape/testing/recorder'
-import type { ThreadRuntime } from '@zen/core'
-import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
+import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import type { HostedThread } from '../../host/agent-host.ts'
 import { createThreadRegistry, type ThreadRegistry } from '../thread-registry.ts'
+import { createFakeHostedThread, type FakeHostedThread, type FakeThreadParts, takeQueue } from './fake-hosted-thread.ts'
 
 let logs: LogRecorder
 beforeAll(async () => {
@@ -16,12 +16,8 @@ function ignore(): void {
   // The lifecycle tests never prompt, answer, or subscribe — only acquire/release/stop/dispose matter.
 }
 
-/** What a fake hosted session lets a test read and steer — the lifecycle calls it recorded. */
-interface FakeHosted {
-  readonly hosted: HostedThread
-  readonly record: { disposed: number; aborts: number; queueClears: number }
-  /** What pi holds behind the run — a test fills it to see the stop hand it back (#75). */
-  readonly queue: { steering: string[]; followUp: string[] }
+/** The one fake, plus the two knobs the lifecycle races need. */
+interface FakeHosted extends FakeHostedThread {
   /** Set by a test to make the next `clearQueue` throw — pi emits to listeners inside it. */
   readonly failClear: { with: Error | undefined }
   /** Resolve the abort this fake left pending. */
@@ -29,48 +25,28 @@ interface FakeHosted {
 }
 
 /**
- * A fake hosted session that records lifecycle calls. `abort` resolves only when the test
- * says so — the disconnect-then-prompt race is about the gap between abort and idle.
+ * `abort` resolves only when the test says so — the disconnect-then-prompt race is about
+ * the gap between abort and idle.
  */
 function fakeHosted(): FakeHosted {
-  const record = { disposed: 0, aborts: 0, queueClears: 0 }
-  /** What pi holds behind the run — a test fills it to see the stop hand it back (#75). */
-  const queue = { steering: [] as string[], followUp: [] as string[] }
-  /** Set by a test to make the next `clearQueue` throw — pi emits to listeners inside it. */
   const failClear = { with: undefined as Error | undefined }
   let finishAbort: () => void = ignore
-  const runtime: ThreadRuntime = {
-    prompt: ignore,
-    answerDialog: ignore,
-    openDialogs: () => [],
-    listCommands: () => [],
-    permissionModeState: () => ({ mode: 'default', available: [] }),
-    subscribe: () => ignore,
-    abort: () => {
-      record.aborts += 1
-      return new Promise<void>((resolve) => {
-        finishAbort = resolve
-      })
-    },
-    clearQueue: () => {
-      record.queueClears += 1
-      if (failClear.with !== undefined) throw failClear.with
-      const cleared = { steering: [...queue.steering], followUp: [...queue.followUp] }
-      queue.steering = []
-      queue.followUp = []
-      return cleared
-    },
-    dispose: () => {
-      record.disposed += 1
-    },
-  }
-  const hosted: HostedThread = {
-    runtime,
-    loadedExtensionPaths: [],
-    inspect: () => ({ sessionId: 's', cwd: '/', sessionDir: '/s', sessionFile: null, entries: [], commands: [] }),
-    emittedEvents: () => [],
-  }
-  return { hosted, record, queue, failClear, finishAbort: (): void => finishAbort() }
+  const fake = createFakeHostedThread({
+    runtime: ({ record }: FakeThreadParts) => ({
+      abort: () => {
+        record.aborts += 1
+        return new Promise<void>((resolve) => {
+          finishAbort = resolve
+        })
+      },
+      clearQueue: () => {
+        record.queueClears += 1
+        if (failClear.with !== undefined) throw failClear.with
+        return takeQueue(record)
+      },
+    }),
+  })
+  return { ...fake, failClear, finishAbort: (): void => finishAbort() }
 }
 
 function fakeHost(): { threads: ThreadRegistry; built: FakeHosted[] } {
@@ -178,14 +154,14 @@ test("⚠ abort hands back the queued prompts in order and clears pi's queue; a 
   await threads.acquire('t1')
   const hosted = built[0]
   if (hosted === undefined) throw new Error('no session built')
-  hosted.queue.followUp.push('and then this', 'and this last')
-  hosted.queue.steering.push('actually, stop at the tests')
+  hosted.record.queue.followUp.push('and then this', 'and this last')
+  hosted.record.queue.steering.push('actually, stop at the tests')
   expect(threads.abort('t1')).toEqual({
     outcome: 'aborted',
     restored: ['actually, stop at the tests', 'and then this', 'and this last'],
   })
   expect(hosted.record.queueClears).toBe(1)
-  expect(hosted.queue).toEqual({ steering: [], followUp: [] })
+  expect(hosted.record.queue).toEqual({ steering: [], followUp: [] })
   // The stop is a record with the COUNT it handed back (#132) — never the texts.
   logs.assertLogged({
     level: 'info',
@@ -203,7 +179,7 @@ test('⚠ a stop must stop: if clearing the queue throws, pi is still told to ab
   await threads.acquire('t1')
   const hosted = built[0]
   if (hosted === undefined) throw new Error('no session built')
-  hosted.queue.followUp.push('would have been restored')
+  hosted.record.queue.followUp.push('would have been restored')
   hosted.failClear.with = new Error('a queue listener threw')
   expect(threads.abort('t1')).toEqual({ outcome: 'aborted', restored: [] })
   expect(hosted.record.aborts).toBe(1)

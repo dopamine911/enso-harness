@@ -4,22 +4,23 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
-  type DialogAnswer,
-  type EventDelivery,
-  isZenDialogSpec,
   type PromptOutcome,
   type PromptRequest,
   type RuntimeEvent,
-  type ThreadRuntime,
   ZEN_IMAGE_MAX_BYTES,
   ZEN_PROMPT_BODY_MAX_BYTES,
   ZEN_PROMPT_MAX_IMAGES,
-  type ZenDialogSpec,
   type ZenFollowFrame,
 } from '@zen/core'
-import { recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
-import type { AgentHost, HostedThread } from '../../host/agent-host.ts'
+import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
+import type { AgentHost } from '../../host/agent-host.ts'
 import { startZenServer } from '../index.ts'
+import {
+  createFakeAgentHost,
+  createFakeHostedThread,
+  type FakeThreadParts,
+  type FakeThreadRecord,
+} from './fake-hosted-thread.ts'
 import { type OpenFollow, openFollow as openSharedFollow } from './follow-reader.ts'
 
 /**
@@ -31,18 +32,9 @@ import { type OpenFollow, openFollow as openSharedFollow } from './follow-reader
  * event that would arrive and awaiting the frame it produces — never a guessed delay.
  */
 
-interface FakeRecord {
-  prompts: PromptRequest[]
-  answers: DialogAnswer[]
-  aborts: number
-  disposed: number
-  /** What pi holds behind the run; a stop clears it and the route hands it back (#75). */
-  queue: { steering: string[]; followUp: string[] }
-}
-
 interface FakeHost {
   readonly host: AgentHost
-  readonly built: FakeRecord[]
+  readonly built: FakeThreadRecord[]
   /** Emit into the LAST built session — every scenario here uses one thread. */
   readonly emit: (event: RuntimeEvent) => void
   /** Fire the last prompt's acceptance (a slash command's completion signal). */
@@ -50,80 +42,25 @@ interface FakeHost {
 }
 
 function fakeHost(commands: string[] = ['mode']): FakeHost {
-  const built: FakeRecord[] = []
+  const built: FakeThreadRecord[] = []
   let emit: (event: RuntimeEvent) => void = () => undefined
   let accept: () => void = () => undefined
-  const host: AgentHost = {
-    createSession: () => {
-      const listeners = new Set<(event: RuntimeEvent, delivery: EventDelivery) => void>()
-      const record: FakeRecord = {
-        prompts: [],
-        answers: [],
-        aborts: 0,
-        disposed: 0,
-        queue: { steering: [], followUp: [] },
-      }
-      built.push(record)
-      /** Every blocking question this fake has emitted and not yet had answered — what the real host's `openDialog` reads. */
-      const open = new Map<string, ZenDialogSpec>()
-      emit = (event: RuntimeEvent) => {
-        if (event.type === 'extension_ui_request' && typeof event.id === 'string') {
-          const { type: _type, id: _id, ...request } = event
-          if (isZenDialogSpec(request)) open.set(event.id, request)
-        }
-        for (const listener of listeners) listener(event, 'live')
-      }
-      const runtime: ThreadRuntime = {
+  const host = createFakeAgentHost(() => {
+    const fake = createFakeHostedThread({
+      runtime: ({ record }: FakeThreadParts) => ({
         prompt: (request: PromptRequest, outcome: PromptOutcome) => {
           record.prompts.push(request)
           accept = () => outcome.onAccepted()
         },
-        answerDialog: (response: DialogAnswer) => {
-          record.answers.push(response)
-          // What the real host does at `finish` (#114): the settle is a record on the stream.
-          if (open.delete(response.id)) {
-            emit({
-              type: 'extension_ui_settled',
-              id: response.id,
-              outcome: 'cancelled' in response ? 'cancelled' : 'answered',
-            })
-          }
-        },
-        openDialogs: () => [...open].map(([id, dialog]) => ({ id, dialog })),
         listCommands: () => commands.map((name) => ({ name, source: 'extension' as const })),
         permissionModeState: () => ({ mode: 'default', available: ['default', 'plan'] }),
-        subscribe: (onEvent: (event: RuntimeEvent, delivery: EventDelivery) => void) => {
-          listeners.add(onEvent)
-          return () => {
-            listeners.delete(onEvent)
-          }
-        },
-        abort: () => {
-          record.aborts += 1
-          return Promise.resolve()
-        },
-        clearQueue: () => {
-          const cleared = { steering: [...record.queue.steering], followUp: [...record.queue.followUp] }
-          record.queue = { steering: [], followUp: [] }
-          // pi emits the emptied queue to every follower.
-          emit({ type: 'queue_update', steering: [], followUp: [] })
-          return cleared
-        },
-        dispose: () => {
-          record.disposed += 1
-        },
-      }
-      const hosted: HostedThread = {
-        runtime,
-        loadedExtensionPaths: [],
-        inspect: () => ({ sessionId: 's1', cwd: '/', sessionDir: '/s', sessionFile: null, entries: [], commands }),
-        emittedEvents: () => [],
-      }
-      return Promise.resolve(hosted)
-    },
-    listSessions: () => Promise.resolve([]),
-    readBranch: () => Promise.resolve(undefined),
-  }
+      }),
+      inspect: { sessionId: 's1', cwd: '/', sessionDir: '/s', commands },
+    })
+    built.push(fake.record)
+    emit = fake.emit
+    return Promise.resolve(fake.hosted)
+  })
   return { host, built, emit: (event: RuntimeEvent) => emit(event), accept: () => accept() }
 }
 

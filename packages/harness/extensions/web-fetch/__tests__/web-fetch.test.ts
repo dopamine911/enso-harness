@@ -8,7 +8,7 @@ import {
   ZEN_CONFIG_FILENAME,
   zenConfigPath,
 } from '@zen/core'
-import { auditRecords, recordZenLogs, releaseZenLogs } from '../../__tests__/log-recorder.ts'
+import { auditRecords, recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { createWebFetch, type WebFetchDependencies, type WebFetchRequestInit } from '../index.ts'
 
 /**

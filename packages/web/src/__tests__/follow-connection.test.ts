@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test'
 import { EventType } from '@ag-ui/core'
 import type { StreamChunk } from '@tanstack/ai'
 import type { ZenFollowFrame } from '@zen/core'
+import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { createFollowConnection, type FollowConnection } from '../follow-connection.ts'
-import { recordZenLogs, releaseZenLogs } from './log-recorder.ts'
 import { createScriptedFetch, type ScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
 
 /**
