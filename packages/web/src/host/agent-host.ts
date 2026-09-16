@@ -465,6 +465,14 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       },
       permissionModeState: currentPermissionModeState,
       setPermissionMode(mode: string, outcome: PromptOutcome): void {
+        // Only a mode the vendor registers a command for — the runtime treats an unknown
+        // slash command as ORDINARY TEXT and would send it to the model as a chat message.
+        // Found by the first test that drove this path against the real extension rather
+        // than the fake (#162 exit criteria); the route refuses earlier (422), this is the seam's own lock.
+        if (!currentPermissionModeState().available.includes(mode)) {
+          outcome.onRejected(`mode ${mode} is not one the vendor registers a command for`)
+          return
+        }
         // The vendor's command, as the prompt path runs any extension command: fire-and-
         // forget, acceptance is completion, and the change arrives as `permission_mode`.
         runtime.prompt({ message: piccModeCommand(mode) }, outcome)

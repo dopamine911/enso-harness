@@ -12,7 +12,7 @@ import type { LogRecorder } from '@logtape/testing/recorder'
 import { findRepoRoot, harnessPackageDir, type ZenObservation } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { type AgentHost, createAgentHost, type HostedThread, seedMultiAccountChildProxyOff } from '../agent-host.ts'
-import { readPiccPersistedMode } from '../permission-mode-adapter.ts'
+import { readPiccPersistedMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
 
 /**
  * The in-process host against the REAL harness package (#69) — every extension the manifest
@@ -294,6 +294,46 @@ test("⚠ the host emits permission-mode after the vendor's modes entry — mode
   for (const probe of probeEntries) {
     expect(events[events.indexOf(probe) + 1]?.kind).not.toBe('permission-mode')
   }
+})
+
+// L3 step C's MECHANISM, at the host and against the real vendor extension: `setPermissionMode`
+// runs the vendor's per-mode slash command as a prompt, the extension persists its `modes`
+// entry, the host emits `permission-mode`, and `permissionModeState()` moves. Until this test the
+// path was exercised only through the fake, which implements `setPermissionMode` itself — the
+// one function whose whole job is this seam was executed by no test (#162 exit criteria).
+test('⚠ setPermissionMode runs the vendor command: the modes entry, the permission-mode observation and the state all say the new mode', async () => {
+  const hosted = await hostedSession()
+  const events = collectEvents(hosted)
+  expect(hosted.runtime.permissionModeState().mode).toBe('default')
+  const { promise: accepted, resolve: onAccepted, reject: onRejected } = Promise.withResolvers<void>()
+  hosted.runtime.setPermissionMode('plan', {
+    onAccepted,
+    onRejected: (reason: string): void => onRejected(new Error(reason)),
+  })
+  await accepted
+  await nextTick()
+  const change = events.find((event) => event.kind === 'permission-mode' && event.mode === 'plan')
+  expect(change).toMatchObject({ kind: 'permission-mode', mode: 'plan' })
+  expect(hosted.runtime.permissionModeState().mode).toBe('plan')
+  // The vendor persisted it: a cold read of the transcript agrees with the live state.
+  expect(storedPermissionModeState(hosted.inspect().entries).mode).toBe('plan')
+})
+
+// ⚠ Found by this test's first run: the runtime treats an unknown slash command as ordinary
+// text, so `setPermissionMode('no-such-mode')` was ACCEPTED and would have gone to the model
+// as the chat message "/no-such-mode". The route refuses earlier (422, `changeThreadMode`);
+// the host now refuses too, so the seam cannot be misused from any caller.
+test('setPermissionMode with a mode the vendor registers no command for is rejected at the host, never prompted', async () => {
+  const hosted = await hostedSession()
+  const events = collectEvents(hosted)
+  const { promise: settled, resolve } = Promise.withResolvers<'accepted' | string>()
+  hosted.runtime.setPermissionMode('no-such-mode', { onAccepted: () => resolve('accepted'), onRejected: resolve })
+  const outcome = await settled
+  expect(outcome).toContain('no-such-mode')
+  await nextTick()
+  expect(hosted.runtime.permissionModeState().mode).toBe('default')
+  // nothing was prompted: no message boundary, no text, no run
+  expect(events.some((event) => event.kind === 'message-start' || event.kind === 'text-delta')).toBe(false)
 })
 
 test("listCommands is synchronous and names picc's /mode", async () => {
