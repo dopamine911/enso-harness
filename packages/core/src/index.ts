@@ -125,7 +125,6 @@ export {
   readSecret,
 } from './secrets.ts'
 export {
-  describeEntry,
   describeThreadEvent,
   isZenThreadId,
   type ThreadEventColumns,
@@ -157,6 +156,15 @@ export {
   ZenTruncation,
   ZenTruncationUnit,
 } from './tool-result.ts'
+export {
+  describeTranscriptEntry,
+  ZenTranscriptCustom,
+  ZenTranscriptEntry,
+  ZenTranscriptMessage,
+  ZenTranscriptOther,
+  ZenTranscriptPart,
+  ZenTranscriptToolResult,
+} from './transcript.ts'
 export {
   EXTERNAL_WEB_CONTENT_NOTICE,
   WEB_FETCH_MAX_RESPONSE_BYTES,

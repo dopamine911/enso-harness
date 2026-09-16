@@ -135,10 +135,10 @@ export function toolResultState(result: ToolResultPart | undefined, runOpen: boo
 
 ## Who implements it, who consumes it
 
-**Produced by the mapper, and only the mapper.** `packages/web/src/rpc/map-events.ts` builds a descriptor
-from the runtime's `details` bag on `tool_execution_update` and `tool_execution_end` (`:258-290`), and
-`branch-to-messages.ts:117` does the same from a stored result on a cold read, so a live transcript
-and a resumed one agree. The builder:
+**Produced by the host, and only the host.** `packages/web/src/host/map-events.ts` builds a descriptor
+from the runtime's `details` bag on `tool_execution_update` and `tool_execution_end`, and
+`host/transcript.ts` does the same from a stored result on a cold read (the transcript's `tool-result`
+entry carries it), so a live transcript and a resumed one agree. The builder:
 
 <!-- source: packages/web/src/host/map-events.ts#descriptorFrom -->
 ```ts

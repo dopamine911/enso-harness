@@ -1,4 +1,4 @@
-import type { ZenPermissionModeState } from '@zen/core'
+import type { ZenPermissionModeState, ZenTranscriptEntry } from '@zen/core'
 
 /**
  * picc-permission-modes' PERSISTED MODE, as the host reads it (#84; below the seam since
@@ -81,10 +81,18 @@ export function freshPermissionModeState(): ZenPermissionModeState {
 }
 
 /**
- * A STORED thread's state, from its branch alone (#95): the walk for the mode, and the full
- * registered set for `available` — no session is built to ask what it registers (#86's
- * rule: looking must not build), so the cold answer offers what picc always offers.
+ * A STORED thread's state, from its transcript alone (#95): the walk for the mode — over
+ * entries of ours, so the custom entry's `customType` and `data` are read where the
+ * transcript already put them — and the full registered set for `available`; no session is
+ * built to ask what it registers (#86's rule: looking must not build), so the cold answer
+ * offers what picc always offers.
  */
-export function storedPermissionModeState(branch: readonly unknown[]): ZenPermissionModeState {
-  return { mode: persistedPermissionMode(branch), available: [...PICC_PERMISSION_MODES] }
+export function storedPermissionModeState(transcript: readonly ZenTranscriptEntry[]): ZenPermissionModeState {
+  for (let position = transcript.length - 1; position >= 0; position -= 1) {
+    const entry = transcript[position]
+    if (entry?.kind !== 'custom') continue
+    const persisted = readPiccPersistedMode({ customType: entry.customType, data: entry.data })
+    if (persisted !== undefined) return { mode: persisted, available: [...PICC_PERMISSION_MODES] }
+  }
+  return freshPermissionModeState()
 }

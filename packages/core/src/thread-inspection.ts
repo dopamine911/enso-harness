@@ -1,5 +1,6 @@
 import { type Static, Type } from 'typebox'
 import { ZenPermissionModeState } from './permission-mode.ts'
+import { ZenTranscriptEntry } from './transcript.ts'
 
 /**
  * What a live thread's session ACTUALLY contains, as the server reports it (#86).
@@ -64,12 +65,12 @@ export const ZenThreadInspection = Type.Object(
     generation: Type.Integer({ minimum: 0 }),
     lastActivityAt: Type.String(),
     /**
-     * The session BRANCH — root to leaf — as pi holds it, verbatim. pi's own entry shapes
-     * (`message`, `custom`, `model_change`, …), not zen's: they are carried, not modelled,
-     * so a reader sees exactly what pi sees. Consumers read the base fields (`type`, `id`,
-     * `parentId`, `timestamp`, `customType`) defensively, like every wire crossing.
+     * The session BRANCH — root to leaf — as the transcript of ours (#162 workstream 4, L2):
+     * the host decoded the runtime's stored entries below the seam, so a reader sees
+     * messages with their parts, tool results with their descriptors, an extension's custom
+     * entries, and `other` for every kind the host does not model — counted, never invented.
      */
-    entries: Type.Array(Type.Unknown()),
+    entries: Type.Array(ZenTranscriptEntry),
   },
   { additionalProperties: false },
 )
@@ -126,34 +127,6 @@ export const ZenThreadEvents = Type.Object(
   { additionalProperties: false },
 )
 export type ZenThreadEvents = Static<typeof ZenThreadEvents>
-
-/**
- * One entry of the branch as a row — `12:34:56 custom:modes mode=plan` — read defensively:
- * pi's shapes are carried, not modelled. THE definition (PR #100 review): the drawer and
- * `zen-thread.mjs` had one each and they had already drifted apart.
- */
-export function describeEntry(entry: unknown): string {
-  if (typeof entry !== 'object' || entry === null) return String(entry)
-  const fields = entry as {
-    type?: unknown
-    customType?: unknown
-    timestamp?: unknown
-    message?: unknown
-    data?: unknown
-  }
-  const kind = typeof fields.type === 'string' ? fields.type : '?'
-  const custom = typeof fields.customType === 'string' ? `:${fields.customType}` : ''
-  const role =
-    typeof fields.message === 'object' && fields.message !== null && 'role' in fields.message
-      ? ` ${String(fields.message.role)}`
-      : ''
-  const mode =
-    fields.customType === 'modes' && typeof fields.data === 'object' && fields.data !== null && 'mode' in fields.data
-      ? ` mode=${String(fields.data.mode)}`
-      : ''
-  const when = typeof fields.timestamp === 'string' ? fields.timestamp.slice(11, 19) : ''
-  return `${when} ${kind}${custom}${role}${mode}`.trim()
-}
 
 /** The three columns of an event row: `12:34:56` · `held ×3` · `entry_appended modes`. */
 export interface ThreadEventColumns {
@@ -243,10 +216,11 @@ export const ZenInterruptedTail = Type.Union([
 export type ZenInterruptedTail = Static<typeof ZenInterruptedTail>
 
 /**
- * A thread's history as the browser mounts it (#95): the branch as TanStack `UIMessage`s —
- * built by the server's `branch-to-messages` mapper, the same way the live stream is
- * mapped to AG-UI — plus the opening permission mode the branch persists. Carried as
- * `Unknown` because the shape is TanStack's, not zen's; the durable form is pi's entries.
+ * A thread's history as the browser mounts it (#95): the transcript as TanStack `UIMessage`s —
+ * assembled by the server's `transcript-to-messages` reader, the same way the live stream is
+ * adapted to AG-UI — plus the opening permission mode the transcript persists. Carried as
+ * `Unknown` because the shape is TanStack's, not zen's; the durable form is the runtime's log,
+ * decoded by the host into `ZenTranscriptEntry` (L2).
  */
 export const ZenThreadHistory = Type.Object(
   {

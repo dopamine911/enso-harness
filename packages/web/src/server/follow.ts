@@ -16,7 +16,7 @@ import {
 } from '@zen/core'
 import { Check, Errors } from 'typebox/value'
 import type { AgentHost } from '../host/agent-host.ts'
-import { branchToMessages, interruptedTail } from '../rpc/branch-to-messages.ts'
+import { interruptedTail, transcriptToMessages } from '../rpc/transcript-to-messages.ts'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
 import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
 
@@ -99,9 +99,9 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
   // BEFORE subscribing: a thread built during the read is then seen live below. A thread
   // with neither a session nor a file is an EMPTY snapshot, not a 404: observation may
   // precede the first prompt, and must, or the prompt's opening events have no follower.
-  const storedBranch = live === undefined ? await host.readBranch(threadId) : undefined
+  const storedTranscript = live === undefined ? await host.readTranscript(threadId) : undefined
   const nowLive = threads.peek(threadId)
-  const branch = nowLive === undefined ? (storedBranch ?? []) : nowLive.hosted.inspect().entries
+  const transcript = nowLive === undefined ? (storedTranscript ?? []) : nowLive.hosted.inspect().entries
 
   response.writeHead(200, SSE_HEADERS)
   const stopKeepalive = startSseKeepalive(response, deps.sseKeepaliveMs)
@@ -121,7 +121,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     follow.unsubscribe()
   })
 
-  const messages = branchToMessages(branch)
+  const messages = transcriptToMessages(transcript)
   const interrupted = interruptedTail(messages)
   writeFrame(threads, threadId, response, {
     type: 'snapshot',
@@ -131,7 +131,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     busy: nowLive?.busy ?? false,
     generation: nowLive?.generation ?? 0,
     permissionMode:
-      nowLive === undefined ? deps.host.storedPermissionMode(branch) : nowLive.hosted.runtime.permissionModeState(),
+      nowLive === undefined ? deps.host.storedPermissionMode(transcript) : nowLive.hosted.runtime.permissionModeState(),
     messages,
     openDialogs: nowLive === undefined ? [] : nowLive.hosted.runtime.openDialogs(),
     ...(interrupted === undefined ? {} : { interrupted }),

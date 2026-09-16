@@ -12,10 +12,12 @@ import {
   ZenThreadHistory,
   ZenThreadInspection,
   ZenThreadSummary,
+  type ZenTranscriptEntry,
 } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { Check } from 'typebox/value'
 import type { AgentHost, HostedThreadInspection } from '../../host/agent-host.ts'
+import { transcriptOf } from '../../host/transcript.ts'
 import { startZenServer } from '../index.ts'
 import {
   createFakeAgentHost,
@@ -51,12 +53,14 @@ interface FakeSessionScript {
 
 /**
  * A branch shaped like pi's, with a picc `modes` entry, and NO file on disk — the unflushed
- * state #86's inspection must report honestly rather than invent (#86).
+ * state #86's inspection must report honestly rather than invent (#86). The fixture is
+ * written as the file holds it and crosses the seam as the transcript of ours, through the
+ * host's own converter — what the real host hands out (L2).
  */
 function piccShapedInspection(): Partial<HostedThreadInspection> {
   return {
     sessionDir: '/fake/agent/sessions/--fake-cwd--',
-    entries: [
+    entries: transcriptOf([
       { type: 'session', id: 'root', parentId: null, timestamp: '2026-09-08T00:00:00.000Z' },
       {
         type: 'custom',
@@ -66,7 +70,7 @@ function piccShapedInspection(): Partial<HostedThreadInspection> {
         parentId: 'root',
         timestamp: '2026-09-08T00:00:01.000Z',
       },
-    ],
+    ]),
     commands: ['mode', 'plan'],
   }
 }
@@ -245,7 +249,7 @@ test('⚠ a thread id that is not thread-id shaped is a 400 at every entry point
   expect((await fetch(`${url}/api/threads`)).status).toBe(200)
 })
 
-test('GET /api/threads/:id returns the branch as pi holds it, with sessionFile null while unflushed', async () => {
+test('GET /api/threads/:id returns the branch as the transcript of ours, with sessionFile null while unflushed', async () => {
   const { url } = await startWith(settlesAtOnce)
   await prompt(url, 't1', 'hello')
   const response = await fetch(`${url}/api/threads/t1`)
@@ -262,10 +266,13 @@ test('GET /api/threads/:id returns the branch as pi holds it, with sessionFile n
     busy: false,
     generation: 1,
   })
-  // The branch is verbatim — the picc `modes` entry a reader would cross-check against.
+  // The branch as the transcript of ours (L2): the session entry the host does not model is
+  // `other` with its type, the picc `modes` entry is `custom` with its data — a reader
+  // cross-checks the mode without knowing the vendor's stored shape.
   const entries = (inspection as ZenThreadInspection).entries
   expect(entries).toHaveLength(2)
-  expect(entries[1]).toMatchObject({ type: 'custom', customType: 'modes', data: { mode: 'plan' } })
+  expect(entries[0]).toMatchObject({ kind: 'other', type: 'session' })
+  expect(entries[1]).toMatchObject({ kind: 'custom', customType: 'modes', data: { mode: 'plan' } })
 })
 
 // #97: the two tails of one run, read after it — what the host emitted and what the server
@@ -318,7 +325,7 @@ test('⚠ the events route of an unknown thread is a 404 and builds no session; 
 
 // ── resume (#95) ─────────────────────────────────────────────────────────────
 
-const STORED_BRANCH: unknown[] = [
+const STORED_BRANCH: ZenTranscriptEntry[] = transcriptOf([
   { type: 'custom', customType: 'modes', data: { mode: 'plan' }, id: 'p', parentId: null, timestamp: '' },
   {
     type: 'message',
@@ -334,7 +341,7 @@ const STORED_BRANCH: unknown[] = [
     timestamp: '2026-09-08T10:00:05.000Z',
     message: { role: 'assistant', content: [{ type: 'text', text: 'earlier answer' }] },
   },
-]
+])
 
 test("⚠ a prompt on a thread passes THAT id to the host — the thread id is pi's session id, so a stored one reopens", async () => {
   const { url, requested } = await startWith(settlesAtOnce)
@@ -345,11 +352,15 @@ test("⚠ a prompt on a thread passes THAT id to the host — the thread id is p
 test('GET /api/stored-threads lists stored threads with title, count and age, marking the ones a thread here is RUNNING', async () => {
   const stored = {
     'stored-1': {
-      branch: STORED_BRANCH,
+      transcript: STORED_BRANCH,
       modified: new Date('2026-09-08T10:00:05.000Z'),
       firstMessage: 'earlier question',
     },
-    'stored-2': { branch: [] as unknown[], modified: new Date('2026-09-08T11:00:00.000Z'), firstMessage: '   ' },
+    'stored-2': {
+      transcript: [] as ZenTranscriptEntry[],
+      modified: new Date('2026-09-08T11:00:00.000Z'),
+      firstMessage: '   ',
+    },
   }
   const { url } = await startWith(asksAndWaits, stored)
   // An open question holds stored-1 busy on this server: taken, never released.
@@ -373,7 +384,7 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
 
 test("GET /api/threads/:id/history serves a STORED thread's branch as messages with its persisted mode, and builds no session", async () => {
   const stored = {
-    'stored-1': { branch: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question', mode: 'plan' },
+    'stored-1': { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question', mode: 'plan' },
   }
   const { url, built } = await startWith({ onPrompt: neverPrompted }, stored)
   const response = await fetch(`${url}/api/threads/stored-1/history`)
@@ -398,7 +409,7 @@ test("GET /api/threads/:id/history serves a STORED thread's branch as messages w
 // gating on presence locked a reloaded page out of its own session for thirty minutes.
 test("⚠ a thread this server holds IDLE is resumable — /history reads pi's memory, /sessions does not mark it busy", async () => {
   const stored = {
-    t1: { branch: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question', mode: 'plan' },
+    t1: { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question', mode: 'plan' },
   }
   const { url, built } = await startWith(settlesAtOnce, stored)
   await prompt(url, 't1', 'hello')

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { persistedPermissionMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
+import { transcriptOf } from '../transcript.ts'
 
 const piccEntry = (mode: string, id: string): unknown => ({ type: 'custom', customType: 'modes', data: { mode }, id })
 
@@ -15,8 +16,9 @@ test("the branch's LAST modes entry wins, and a branch with none is picc's initi
   expect(persistedPermissionMode([])).toBe('default')
 })
 
-test('a stored thread answers from its branch alone: the walk for the mode, the full registered set to offer', () => {
-  expect(storedPermissionModeState([piccEntry('plan', 'a')])).toEqual({
+test('a stored thread answers from its transcript alone: the walk for the mode, the full registered set to offer', () => {
+  const transcript = transcriptOf([piccEntry('acceptEdits', 'a'), piccEntry('plan', 'b')])
+  expect(storedPermissionModeState(transcript)).toEqual({
     mode: 'plan',
     available: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto'],
   })

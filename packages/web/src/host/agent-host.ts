@@ -21,6 +21,7 @@ import {
   type ZenOpenDialog,
   type ZenPermissionModeState,
   type ZenThreadEvent,
+  type ZenTranscriptEntry,
   zenLogger,
 } from '@zen/core'
 import { createEventTail, describeObservation } from './event-tail.ts'
@@ -36,6 +37,7 @@ import {
 } from './permission-mode-adapter.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
+import { transcriptOf } from './transcript.ts'
 
 const log = zenLogger('host')
 
@@ -127,8 +129,8 @@ export interface HostedThreadInspection {
   readonly sessionDir: string
   /** The session file once pi has flushed it; null while the session lives only in memory. */
   readonly sessionFile: string | null
-  /** The branch, root to leaf, verbatim — pi's own entry shapes. */
-  readonly entries: readonly unknown[]
+  /** The branch, root to leaf, as the transcript of ours (L2): the runtime's entry shapes stay in `transcript.ts`. */
+  readonly entries: readonly ZenTranscriptEntry[]
   /** Slash commands this session registers. */
   readonly commands: readonly string[]
 }
@@ -172,14 +174,14 @@ export interface AgentHost {
   /** pi's session files for this workspace, newest first — the resumable listing. */
   listSessions(): Promise<StoredThread[]>
   /**
-   * The branch of a stored session, read-only — no pi session is built, nothing is
+   * The transcript of a stored session, read-only — no pi session is built, nothing is
    * written (#86's rule: looking must not build). `undefined` when no file has that id.
    */
-  readBranch(threadId: string): Promise<unknown[] | undefined>
+  readTranscript(threadId: string): Promise<ZenTranscriptEntry[] | undefined>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): ZenPermissionModeState
-  /** A stored thread's state from its branch alone: nothing is built to answer (#86, #95). */
-  storedPermissionMode(branch: readonly unknown[]): ZenPermissionModeState
+  /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
+  storedPermissionMode(transcript: readonly ZenTranscriptEntry[]): ZenPermissionModeState
 }
 
 /**
@@ -264,11 +266,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     return (await listSessions()).find((stored) => stored.id === threadId)?.path
   }
 
-  async function readBranch(threadId: string): Promise<unknown[] | undefined> {
+  async function readTranscript(threadId: string): Promise<ZenTranscriptEntry[] | undefined> {
     const path = await storedSessionPath(threadId)
     if (path === undefined) return undefined
     // `open` loads the file into memory and writes nothing until an append.
-    return SessionManager.open(path).getBranch()
+    return transcriptOf(SessionManager.open(path).getBranch())
   }
 
   async function createSession(threadId: string): Promise<HostedThread> {
@@ -520,7 +522,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           cwd: sessionManager.getCwd(),
           sessionDir: sessionManager.getSessionDir(),
           sessionFile: plannedFile !== undefined && existsSync(plannedFile) ? plannedFile : null,
-          entries: sessionManager.getBranch(),
+          entries: transcriptOf(sessionManager.getBranch()),
           commands: runtime.listCommands().map((command) => command.name),
         }
       },
@@ -530,7 +532,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   return {
     createSession,
     listSessions,
-    readBranch,
+    readTranscript,
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,
   }

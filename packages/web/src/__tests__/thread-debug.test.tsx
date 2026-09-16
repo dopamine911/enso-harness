@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import type { ZenLogLine, ZenThreadEvent, ZenThreadEvents, ZenThreadInspection } from '@zen/core'
+import type { ZenLogLine, ZenThreadEvent, ZenThreadEvents, ZenThreadInspection, ZenTranscriptEntry } from '@zen/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { RECENT_CUSTOM_CHUNK_CAPACITY, routeZenCustomEvent } from '../custom-event-router.ts'
 import {
@@ -33,13 +33,12 @@ const noop = (): void => {
   // Static markup runs no handlers; the callbacks exist only to satisfy the props.
 }
 
-const piccEntry = (mode: string, id: string): unknown => ({
-  type: 'custom',
+const piccEntry = (mode: string, id: string): ZenTranscriptEntry => ({
+  kind: 'custom',
   customType: 'modes',
   data: { mode },
   id,
-  parentId: null,
-  timestamp: '2026-09-08T10:00:00.000Z',
+  at: '2026-09-08T10:00:00.000Z',
 })
 
 function inspection(overrides: Partial<ZenThreadInspection> = {}): ZenThreadInspection {
@@ -54,10 +53,7 @@ function inspection(overrides: Partial<ZenThreadInspection> = {}): ZenThreadInsp
     busy: false,
     generation: 1,
     lastActivityAt: '2026-09-08T10:00:05.000Z',
-    entries: [
-      { type: 'session', id: 'root', parentId: null, timestamp: '2026-09-08T10:00:00.000Z' },
-      piccEntry('plan', 'm1'),
-    ],
+    entries: [{ kind: 'other', type: 'session', id: 'root', at: '2026-09-08T10:00:00.000Z' }, piccEntry('plan', 'm1')],
     ...overrides,
   }
 }

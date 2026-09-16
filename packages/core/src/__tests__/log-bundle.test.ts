@@ -32,7 +32,7 @@ const inspection: ZenThreadInspection = {
   busy: false,
   generation: 2,
   lastActivityAt: '2026-09-10T01:01:00.000Z',
-  entries: [{ type: 'custom', customType: 'modes', timestamp: '2026-09-10T01:00:30.000Z', data: { mode: 'plan' } }],
+  entries: [{ kind: 'custom', id: 'm1', customType: 'modes', at: '2026-09-10T01:00:30.000Z', data: { mode: 'plan' } }],
 }
 
 test('the manifest counts redaction MARKERS per field — what the reader is not seeing — and nothing else', () => {

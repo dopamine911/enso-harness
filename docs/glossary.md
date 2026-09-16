@@ -362,9 +362,9 @@ outside the two vendor roots. *Legitimate* names where the old word may still ap
 fields, and the gate that spells the words in order to refuse them. The `Pi*` names of the thread
 runtime's own shapes (`PiPromptRequest`, `PiRpcEvent`, …) went with them — goals L1 — to `PromptRequest`,
 `RuntimeEvent`, `RuntimeCommand`, `DialogAnswer`, `StreamingBehavior`, `PromptImageContent`,
-`EventDelivery`, `ZenPermissionModeState`. Deliberately kept: `PiSessionEntry` and its siblings in
-`branch-to-messages.ts` and `map-events.ts`, which name the runtime's own shapes carried above the
-host — leak L2; the prefix is the marker, and the gate allowlists that one file with the reason.
+`ZenPermissionModeState`. `RuntimeEvent` and `EventDelivery` left `@zen/core` with L2 (#162
+workstream 4): the runtime's event and stored-entry shapes are read only under `host/`
+(`runtime-event.ts`, `map-events.ts`, `transcript.ts`), where the `Pi*` prefix is allowed to say so.
 
 | Retired | Meant | Replacement | Was at | Legitimate |
 |---|---|---|---|---|

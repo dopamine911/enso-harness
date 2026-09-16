@@ -1,31 +1,39 @@
 import { expect, test } from 'bun:test'
-import {
-  describeEntry,
-  describeThreadEvent,
-  isZenThreadId,
-  threadEventColumns,
-  type ZenThreadEvent,
-} from '../thread-inspection.ts'
+import { describeThreadEvent, isZenThreadId, threadEventColumns, type ZenThreadEvent } from '../thread-inspection.ts'
+import { describeTranscriptEntry } from '../transcript.ts'
 
 // The row formats are shared by the `?debug` drawer and `zen-thread.mjs` (PR #100 review: one
 // definition, after the #86 pair had drifted). What a human reads off either surface is pinned here.
 
-test("a branch entry row: time, type, custom type, message role, and picc's mode when the entry is one", () => {
+test('a transcript entry row: time, kind, custom type, message role, tool name, and the mode when the entry carries one', () => {
   expect(
-    describeEntry({
-      type: 'custom',
+    describeTranscriptEntry({
+      kind: 'custom',
+      id: 'm',
       customType: 'modes',
-      timestamp: '2026-09-08T12:34:56.000Z',
+      at: '2026-09-08T12:34:56.000Z',
       data: { mode: 'plan' },
     }),
   ).toBe('12:34:56 custom:modes mode=plan')
-  expect(describeEntry({ type: 'message', timestamp: '2026-09-08T12:34:56.000Z', message: { role: 'user' } })).toBe(
-    '12:34:56 message user',
-  )
-  // Missing fields read as absent, never as "undefined"; a non-object is shown as itself.
-  expect(describeEntry({ type: 'model_change' })).toBe('model_change')
-  expect(describeEntry({})).toBe('?')
-  expect(describeEntry(42)).toBe('42')
+  expect(
+    describeTranscriptEntry({ kind: 'message', id: 'u', at: '2026-09-08T12:34:56.000Z', role: 'user', parts: [] }),
+  ).toBe('12:34:56 message user')
+  expect(
+    describeTranscriptEntry({
+      kind: 'tool-result',
+      id: 'r',
+      toolCallId: 'c',
+      toolName: 'bash',
+      text: '',
+      isError: true,
+    }),
+  ).toBe('tool-result bash error')
+  // An unmodelled kind shows its type; a missing time reads as absent, never as "undefined".
+  expect(describeTranscriptEntry({ kind: 'other', id: 'x', type: 'model_change' })).toBe('model_change')
+  // A non-primitive `mode` is not printed: `[object Object]` in a row reads as the row lying.
+  expect(
+    describeTranscriptEntry({ kind: 'custom', id: 'm', customType: 'modes', data: { mode: { nested: true } } }),
+  ).toBe('custom:modes')
 })
 
 // The id names a FILE (#95): what a filesystem could read is out; what the browser mints is in.

@@ -6,6 +6,7 @@ import type {
   ZenDialogSpec,
   ZenObservation,
   ZenPermissionModeState,
+  ZenTranscriptEntry,
 } from '@zen/core'
 import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
@@ -147,14 +148,9 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
   return { hosted, record, emit, open }
 }
 
-/** pi's branch entries are carried as `unknown`; a message is the one kind the listing counts. */
-function isMessageEntry(entry: unknown): boolean {
-  return typeof entry === 'object' && entry !== null && 'type' in entry && entry.type === 'message'
-}
-
-/** What a fake host "has on disk" (#95): a stored thread by id, with its branch and the mode it was left in. */
+/** What a fake host "has on disk" (#95): a stored thread by id, with its transcript and the mode it was left in. */
 export interface FakeStoredThread {
-  readonly branch: unknown[]
+  readonly transcript: ZenTranscriptEntry[]
   readonly modified: Date
   readonly firstMessage: string
   /** The mode the fake reports for this thread's branch; the fresh mode when absent. */
@@ -178,20 +174,20 @@ export function createFakeAgentHost(
   return {
     createSession,
     freshPermissionMode: () => fresh,
-    storedPermissionMode: (branch: readonly unknown[]): ZenPermissionModeState => {
-      const storedThread = Object.values(stored).find((candidate) => candidate.branch === branch)
+    storedPermissionMode: (transcript: readonly ZenTranscriptEntry[]): ZenPermissionModeState => {
+      const storedThread = Object.values(stored).find((candidate) => candidate.transcript === transcript)
       return { mode: storedThread?.mode ?? fresh.mode, available: fresh.available }
     },
     listSessions: () =>
       Promise.resolve(
-        Object.entries(stored).map(([id, storedThread]) => ({
-          id,
-          path: `/stored/${id}.jsonl`,
+        Object.entries(stored).map(([threadId, storedThread]) => ({
+          id: threadId,
+          path: `/stored/${threadId}.jsonl`,
           modified: storedThread.modified,
-          messageCount: storedThread.branch.filter(isMessageEntry).length,
+          messageCount: storedThread.transcript.filter((transcriptEntry) => transcriptEntry.kind === 'message').length,
           firstMessage: storedThread.firstMessage,
         })),
       ),
-    readBranch: (threadId: string) => Promise.resolve(stored[threadId]?.branch),
+    readTranscript: (threadId: string) => Promise.resolve(stored[threadId]?.transcript),
   }
 }

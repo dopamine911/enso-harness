@@ -562,9 +562,7 @@ test("⚠ the debug pane names a MISMATCH between the page's mode and the server
         generation: 3,
         lastActivityAt: new Date().toISOString(),
         // The branch agrees with the host (picc's modes entry says plan): the one disagreement is the page's.
-        entries: [
-          { type: 'custom', id: 'm1', parentId: null, timestamp: '', customType: 'modes', data: { mode: 'plan' } },
-        ],
+        entries: [{ kind: 'custom', id: 'm1', customType: 'modes', data: { mode: 'plan' } }],
       },
     },
   })

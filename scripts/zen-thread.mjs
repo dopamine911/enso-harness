@@ -22,7 +22,7 @@
  */
 
 // The row formats are core's, shared with the drawer: one definition, so the two views cannot drift.
-import { describeEntry, threadEventColumns } from '../packages/core/src/index.ts'
+import { describeTranscriptEntry, threadEventColumns } from '../packages/core/src/index.ts'
 
 /** @import { ZenThreadEvent, ZenThreadEvents, ZenThreadInspection, ZenThreadSummary } from "../packages/core/src/index.ts" */
 
@@ -113,4 +113,4 @@ process.stdout.write(
 )
 process.stdout.write(`commands    ${inspection.commands.map((commandName) => `/${commandName}`).join(' ')}\n`)
 process.stdout.write(`branch      ${inspection.entries.length} entries, root to leaf:\n`)
-for (const branchEntry of inspection.entries) process.stdout.write(`  ${describeEntry(branchEntry)}\n`)
+for (const branchEntry of inspection.entries) process.stdout.write(`  ${describeTranscriptEntry(branchEntry)}\n`)
