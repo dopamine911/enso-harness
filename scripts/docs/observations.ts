@@ -11,7 +11,7 @@ import { assertExactKeys, runGenerator } from './generator-support.ts'
 
 const ROOT = findRepoRoot(import.meta.url)
 const OBSERVATION_PATH = 'packages/core/src/observation.ts'
-const MAPPER_PATH = 'packages/web/src/rpc/map-events.ts'
+const MAPPER_PATH = 'packages/web/src/host/map-events.ts'
 const FOLLOW_PATH = 'packages/web/src/server/follow.ts'
 const ADAPTER_PATH = 'packages/web/src/rpc/to-agui.ts'
 const CUSTOM_NAMES_PATH = 'packages/web/src/rpc/custom-event-names.ts'

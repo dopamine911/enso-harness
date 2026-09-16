@@ -9,7 +9,7 @@ import {
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
 import type { LogRecorder } from '@logtape/testing/recorder'
-import { findRepoRoot, harnessPackageDir, type RuntimeEvent } from '@zen/core'
+import { findRepoRoot, harnessPackageDir, type ZenObservation } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { type AgentHost, createAgentHost, type HostedThread, seedMultiAccountChildProxyOff } from '../agent-host.ts'
 import { readPiccPersistedMode } from '../permission-mode-adapter.ts'
@@ -24,9 +24,9 @@ import { readPiccPersistedMode } from '../permission-mode-adapter.ts'
  *   - `childProxy: false` is seeded (else the second session in a process hangs under Bun)
  *   - exactly the manifest's five extensions load, with no load errors
  *   - `session_start` fires exactly once per session, and two sessions do not share closures
- *   - a dialog an extension opens reaches a subscriber as `extension_ui_request` and its
+ *   - a dialog an extension opens reaches a subscriber as an `extension-ui-request` observation and its
  *     answer resolves the extension's promise — the #27 round trip without a wire
- *   - a throwing `session_start` becomes an `extension_error` record; the host stays usable
+ *   - a throwing `session_start` becomes an `extension-error` observation; the host stays usable
  */
 
 const repoRoot = findRepoRoot(import.meta.url)
@@ -54,9 +54,10 @@ const MANIFEST_EXTENSION_MARKERS = [
 ]
 
 /** Collect every event a session emits, from its first subscriber on (the host replays what came before). */
-function collectEvents(hosted: HostedThread): RuntimeEvent[] {
-  const events: RuntimeEvent[] = []
-  hosted.runtime.subscribe((event) => events.push(event))
+/** Everything the runtime says to its subscriber — observations, since L2 (#162 workstream 4). */
+function collectEvents(hosted: HostedThread): ZenObservation[] {
+  const events: ZenObservation[] = []
+  hosted.runtime.subscribe((observation) => events.push(observation))
   return events
 }
 
@@ -138,9 +139,12 @@ test('⚠ multi-account resolved its config inside the scratch agent dir, not ~/
   // The startup notify is emitted during session_start — before any subscriber existed —
   // and replayed to the first one. Its text names the config path multi-account resolved.
   const startupNotify = events.find(
-    (event) => event.method === 'notify' && String(event.message).includes('provider-failover.json'),
+    (event) =>
+      event.kind === 'extension-ui-request' &&
+      event.method === 'notify' &&
+      String(event.message).includes('provider-failover.json'),
   )
-  expect(String(startupNotify?.message)).toContain(agentDir)
+  expect(startupNotify?.kind === 'extension-ui-request' ? startupNotify.message : undefined).toContain(agentDir)
 })
 
 test('⚠ session_start fires exactly once per session, and two sessions do not share an extension instance', async () => {
@@ -181,12 +185,16 @@ test('⚠⚠ a dialog an extension opens reaches the subscriber and its answer r
   }
   const hosted = await hostedSession([probe])
   const events = collectEvents(hosted)
-  const request = events.find((event) => event.type === 'extension_ui_request' && event.method === 'confirm')
-  expect(request).toMatchObject({ method: 'confirm', title: 'Apply the change?', message: 'It is reversible' })
-  expect(typeof request?.id).toBe('string')
+  const request = events.find((event) => event.kind === 'extension-ui-request' && event.method === 'confirm')
+  expect(request).toMatchObject({
+    method: 'confirm',
+    blocking: true,
+    dialog: { method: 'confirm', title: 'Apply the change?', message: 'It is reversible' },
+  })
+  expect(typeof (request as { id?: unknown })?.id).toBe('string')
   expect(settled).toBe(false)
 
-  hosted.runtime.answerDialog({ id: String(request?.id), confirmed: true })
+  hosted.runtime.answerDialog({ id: String((request as { id?: unknown })?.id), confirmed: true })
   await nextTick()
   expect(settled).toBe(true)
   expect(confirmed).toBe(true)
@@ -205,8 +213,8 @@ test("a cancelled dialog resolves to pi's cancel value, and dispose cancels what
   }
   const hosted = await hostedSession([probe])
   const events = collectEvents(hosted)
-  const select = events.find((event) => event.method === 'select')
-  hosted.runtime.answerDialog({ id: String(select?.id), cancelled: true })
+  const select = events.find((event) => event.kind === 'extension-ui-request' && event.method === 'select')
+  hosted.runtime.answerDialog({ id: String((select as { id?: unknown })?.id), cancelled: true })
   await nextTick()
   expect(answers).toEqual([undefined])
   // the input is still pending; dispose cancels it
@@ -222,7 +230,7 @@ test('an answer naming no pending dialog is reported, never thrown', async () =>
   logs.assertLogged({ level: 'warning', rawMessage: /unknown request id/, properties: { dialogId: 'never-asked' } })
 })
 
-test('⚠ a throwing session_start becomes an extension_error record; the session is still created', async () => {
+test('⚠ a throwing session_start becomes an extension-error observation; the session is still created', async () => {
   const probe: InlineExtension = {
     name: 'zen-host-throwing-probe',
     factory: (pi: ExtensionAPI) => {
@@ -233,9 +241,9 @@ test('⚠ a throwing session_start becomes an extension_error record; the sessio
   }
   const hosted = await hostedSession([probe])
   const events = collectEvents(hosted)
-  const error = events.find((event) => event.type === 'extension_error')
+  const error = events.find((event) => event.kind === 'extension-error')
   expect(error).toMatchObject({ event: 'session_start', error: 'probe: session_start threw' })
-  expect(String(error?.extensionPath)).toContain('zen-host-throwing-probe')
+  expect(String((error as { extensionPath?: unknown })?.extensionPath)).toContain('zen-host-throwing-probe')
 })
 
 // ⚠ THE HOST MUST BE LISTENING WHILE session_start RUNS (#88). Extensions persist state
@@ -255,9 +263,7 @@ test('⚠ an entry an extension persists during session_start reaches the first 
   }
   const hosted = await hostedSession([probe])
   const events = collectEvents(hosted)
-  const entries = events
-    .filter((event) => event.type === 'entry_appended')
-    .map((event) => (event as { entry?: { customType?: unknown; data?: unknown } }).entry ?? {})
+  const entries = events.flatMap((event) => (event.kind === 'custom-entry' ? [event] : []))
   const probeEntry = entries.find((entry) => entry.customType === 'probe-startup')
   expect(probeEntry?.data).toEqual({ seen: true })
   // And the one that matters in production: picc's opening mode, persisted at session start,
@@ -270,21 +276,23 @@ test('⚠ an entry an extension persists during session_start reaches the first 
 // more; the HOST says the mode, as its own event, right after the entry it saw. This is the
 // real extension persisting at session_start and the real host answering — the whole
 // reason the browser can fold `zen.mode` alone.
-test("⚠ the host emits permission_mode after the vendor's modes entry — mode and the modes it registered", async () => {
+test("⚠ the host emits permission-mode after the vendor's modes entry — mode and the modes it registered", async () => {
   const hosted = await hostedSession()
   const events = collectEvents(hosted)
-  const entryIndex = events.findIndex(
-    (event) => event.type === 'entry_appended' && readPiccPersistedMode(event.entry) !== undefined,
-  )
+  const isVendorModeEntry = (event: ZenObservation): boolean =>
+    event.kind === 'custom-entry' &&
+    readPiccPersistedMode({ customType: event.customType, data: event.data }) !== undefined
+  const entryIndex = events.findIndex(isVendorModeEntry)
   expect(entryIndex).toBeGreaterThanOrEqual(0)
   const following = events[entryIndex + 1]
-  expect(following).toMatchObject({ type: 'permission_mode', mode: 'default' })
-  expect(following?.available).toEqual(hosted.runtime.permissionModeState().available)
-  expect(following?.available).toContain('default')
-  // Another extension's custom entry is not a mode: no permission_mode follows it.
-  const probeEntries = events.filter((event) => event.type === 'entry_appended' && !readPiccPersistedMode(event.entry))
+  expect(following).toMatchObject({ kind: 'permission-mode', mode: 'default' })
+  const available = following?.kind === 'permission-mode' ? following.available : undefined
+  expect(available).toEqual(hosted.runtime.permissionModeState().available)
+  expect(available).toContain('default')
+  // Another extension's custom entry is not a mode: no permission-mode follows it.
+  const probeEntries = events.filter((event) => event.kind === 'custom-entry' && !isVendorModeEntry(event))
   for (const probe of probeEntries) {
-    expect(events[events.indexOf(probe) + 1]?.type).not.toBe('permission_mode')
+    expect(events[events.indexOf(probe) + 1]?.kind).not.toBe('permission-mode')
   }
 })
 
@@ -317,10 +325,12 @@ test('⚠ events are held only until the FIRST subscriber; with nobody listening
   // and end it before its first token. The probe command emits a notify while no one is
   // subscribed; the next subscriber must NOT see it.
   const hosted = await hostedSession([lateNotifyProbe])
-  const firstSubscriberEvents: RuntimeEvent[] = []
-  const unsubscribeFirst = hosted.runtime.subscribe((event) => firstSubscriberEvents.push(event))
+  const firstSubscriberEvents: ZenObservation[] = []
+  const unsubscribeFirst = hosted.runtime.subscribe((observation) => firstSubscriberEvents.push(observation))
   // Startup records were replayed to the first subscriber.
-  expect(firstSubscriberEvents.some((event) => event.method === 'notify')).toBe(true)
+  expect(
+    firstSubscriberEvents.some((event) => event.kind === 'extension-ui-request' && event.method === 'notify'),
+  ).toBe(true)
   unsubscribeFirst()
 
   await new Promise<void>((resolve, reject) => {
@@ -330,9 +340,13 @@ test('⚠ events are held only until the FIRST subscriber; with nobody listening
     )
   })
 
-  const secondSubscriberEvents: RuntimeEvent[] = []
-  hosted.runtime.subscribe((event) => secondSubscriberEvents.push(event))
-  expect(secondSubscriberEvents.filter((event) => String(event.message).includes('late notify'))).toHaveLength(0)
+  const secondSubscriberEvents: ZenObservation[] = []
+  hosted.runtime.subscribe((observation) => secondSubscriberEvents.push(observation))
+  expect(
+    secondSubscriberEvents.filter(
+      (event) => event.kind === 'extension-ui-request' && String(event.message).includes('late notify'),
+    ),
+  ).toHaveLength(0)
   // And the startup records are not replayed a second time either.
   expect(secondSubscriberEvents).toHaveLength(0)
 })
@@ -346,7 +360,7 @@ test("⚠ the emitted tail records each event's provenance: held at startup, rep
   // Before anyone subscribes every startup record is `held` — picc's `modes` entry among them.
   expect(atStartup.length).toBeGreaterThan(0)
   expect(atStartup.every((event) => event.provenance === 'held')).toBe(true)
-  expect(atStartup.some((event) => event.type === 'entry_appended' && event.name === 'modes')).toBe(true)
+  expect(atStartup.some((event) => event.type === 'custom-entry' && event.name === 'modes')).toBe(true)
 
   const unsubscribe = hosted.runtime.subscribe(noopListener)
   // The replay is recorded as it happens, in the held order, after the held rows.
@@ -379,7 +393,7 @@ test("⚠ the emitted tail records each event's provenance: held at startup, rep
     .emittedEvents()
     .filter(
       (event) =>
-        event.type === 'extension_ui_request' &&
+        event.type === 'extension-ui-request' &&
         event.name === 'notify' &&
         event.provenance !== 'held' &&
         event.provenance !== 'replayed',
@@ -392,17 +406,17 @@ test("⚠ the emitted tail records each event's provenance: held at startup, rep
 // start. multi-account's two startup notices arrive `replayed`; a notice the same extension
 // emits during a run arrives `live`. This is what lets the browser group the first without
 // guessing from position — and the guess would have swallowed a run's early refusal.
-test("⚠ subscribe delivers startup records as `replayed` and a run's events as `live` (#96)", async () => {
+test("⚠ subscribe delivers startup records with origin `session-start` and a run's with `run` (#96)", async () => {
   const hosted = await hostedSession([lateNotifyProbe])
   const deliveries: Array<[string, string]> = []
-  hosted.runtime.subscribe((event, delivery) => {
-    if (event.type === 'extension_ui_request' && event.method === 'notify') {
-      deliveries.push([String(event.message).slice(0, 16), delivery])
+  hosted.runtime.subscribe((observation) => {
+    if (observation.kind === 'extension-ui-request' && observation.method === 'notify') {
+      deliveries.push([String(observation.message).slice(0, 16), observation.origin])
     }
   })
   // Everything replayed so far came from session_start — multi-account's notices among them.
   expect(deliveries.length).toBeGreaterThan(0)
-  expect(deliveries.every(([, delivery]) => delivery === 'replayed')).toBe(true)
+  expect(deliveries.every(([, origin]) => origin === 'session-start')).toBe(true)
   expect(deliveries.some(([message]) => message.startsWith('pi-multi-account'))).toBe(true)
 
   await new Promise<void>((resolve, reject) => {
@@ -411,7 +425,7 @@ test("⚠ subscribe delivers startup records as `replayed` and a run's events as
       { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )
   })
-  expect(deliveries.at(-1)).toEqual(['late notify', 'live'])
+  expect(deliveries.at(-1)).toEqual(['late notify', 'run'])
 })
 
 // ── resume (#95): the thread id IS pi's session id ────────────────────────────

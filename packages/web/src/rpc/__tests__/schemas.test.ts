@@ -2,13 +2,12 @@ import { expect, test } from 'bun:test'
 import {
   isZenToolResultDescriptor,
   PromptImageContent,
-  RuntimeEventSchema,
   ZenObservation,
   ZenToolResultDescriptor,
   ZenUsage,
 } from '@zen/core'
 import { Check } from 'typebox/value'
-import { mapPiEvent } from '../map-events.ts'
+import { mapPiEvent } from '../../host/map-events.ts'
 import { observationKindsDeclaredByTheUnion } from './observation-kinds.ts'
 
 /**
@@ -59,14 +58,6 @@ test('image content is validated, so a malformed attachment fails at the boundar
   expect(Check(PromptImageContent, { type: 'image', data: 'aGk=', mimeType: 'image/png' })).toBe(true)
   expect(Check(PromptImageContent, { type: 'file', data: 'aGk=', mimeType: 'image/png' })).toBe(false)
   expect(Check(PromptImageContent, { type: 'image', data: 'aGk=' })).toBe(false)
-})
-
-// ⚠ The event schema is OPEN on purpose — an unmodelled field must not fail validation, or a
-// new pi event becomes "the host is broken" instead of "we don't render this yet".
-test('extra fields are accepted, so a newer pi does not break the host', () => {
-  expect(Check(RuntimeEventSchema, { type: 'some_future_event', brandNew: { nested: true } })).toBe(true)
-  expect(Check(RuntimeEventSchema, { type: '' })).toBe(false)
-  expect(Check(RuntimeEventSchema, { delta: 'x' })).toBe(false)
 })
 
 // --- the mapper's output validates against the union it claims to produce

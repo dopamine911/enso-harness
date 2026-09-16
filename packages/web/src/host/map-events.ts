@@ -1,7 +1,5 @@
 import {
-  type EventDelivery,
   isZenDialogSpec,
-  type RuntimeEvent,
   ZEN_TOOL_RESULT_KEY,
   ZenDialogOutcome,
   type ZenDialogSpec,
@@ -12,6 +10,7 @@ import {
   type ZenUsage,
 } from '@zen/core'
 import { Check } from 'typebox/value'
+import type { EventDelivery, RuntimeEvent } from './runtime-event.ts'
 
 /**
  * pi rpc events → the observations a surface renders (#24).

@@ -17,6 +17,7 @@ a schema in `@zen/core`") beats a finer rule that needs explaining; the module h
 
 <!-- source: packages/core/src/thread-runtime.ts#ThreadRuntime -->
 ```ts
+/** ⚠ Function-bearing — the one schema the module header's rule is written for. */
 export const ThreadRuntime = Type.Object({
   /** Fire a prompt. Never awaits the run — see the section header. */
   prompt: Type.Unsafe<(request: PromptRequest, outcome: PromptOutcome) => void>(
@@ -60,28 +61,20 @@ export const ThreadRuntime = Type.Object({
     Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
   ),
   /**
-   * Receive every event in pi's rpc wire shape (the shape `map-events.ts` consumes), plus
-   * `extension_ui_request` and `extension_error` records the host synthesises. Events
-   * emitted before the FIRST subscriber are buffered and replayed to it, so nothing an
-   * extension says at `session_start` is lost; with no subscriber after that, events are
-   * dropped (#69 PR 2 — a held `agent_settled` would end the next run). Returns the
-   * unsubscribe.
+   * Receive every observation of this thread (L2, #162 workstream 4): the runtime's events
+   * mapped to `ZenObservation` BELOW this seam, plus what the host itself observes — a
+   * dialog it opened, an extension's error, a mode its extension persisted. Nothing of the
+   * runtime's own event shape reaches a subscriber. Observations emitted before the FIRST
+   * subscriber are buffered and replayed to it, so nothing an extension says at start-up is
+   * lost; with no subscriber after that, they are dropped (#69 PR 2 — a held `settled` would
+   * end the next run). A replayed observation carries `origin: 'startup'` where the kind
+   * has an origin (#96), so the browser can group start-up chatter without guessing from
+   * position in the stream. Returns the unsubscribe.
    *
-   * The subscriber is told HOW each event reached it (`delivery`, #96): `replayed` from
-   * that held buffer — emitted during the session's own start — or `live`. The mapper turns
-   * it into the observation's `origin`, so the browser can group startup chatter without
-   * guessing from position in the stream.
-   *
-   * ⚠ `Type.Unsafe` rather than `Type.Function([RuntimeEventSchema], …)`, and the reason is
-   * a cost of declaring behaviour as a schema worth recording: the latter infers its
-   * parameter as `Static<typeof RuntimeEventSchema>`, which DROPS the `& Record<string,
-   * unknown>` intersection that makes an event's unmodelled fields reachable — consumers
-   * would get `{ type: string }` and could not read `event.willRetry`. `Type.Unsafe<T>`
-   * keeps the schema for uniformity and the precise type for consumers; it is "unsafe"
-   * because the two are no longer derived from one another, so a schema change must be
-   * mirrored in the annotation by hand.
+   * ⚠ `Type.Unsafe` keeps the schema for uniformity and the precise type for consumers; a
+   * schema change must be mirrored in the annotation by hand.
    */
-  subscribe: Type.Unsafe<(onEvent: (event: RuntimeEvent, delivery: EventDelivery) => void) => () => void>(
+  subscribe: Type.Unsafe<(onObservation: (observation: ZenObservation) => void) => () => void>(
     Type.Function([Type.Unknown()], Type.Unknown()),
   ),
   /** Abort the in-flight run and wait until the agent is idle. The session survives. */
@@ -144,30 +137,11 @@ A human's answer to a question the runtime is blocked on:
 export type DialogAnswer = { id: string } & ({ cancelled: true } | { value: string } | { confirmed: boolean })
 ```
 
-What crosses it outward — the runtime's event, deliberately open, and how a subscriber received it:
-
-<!-- source: packages/core/src/thread-runtime.ts#RuntimeEventSchema -->
-```ts
-/** One event from pi, in the rpc wire shape. Only `type` is constrained — see the header. */
-export const RuntimeEventSchema = openObject({
-  type: Type.String({ minLength: 1 }),
-})
-```
-
-<!-- source: packages/core/src/thread-runtime.ts#RuntimeEvent -->
-```ts
-export type RuntimeEvent = Static<typeof RuntimeEventSchema> & OpenRecord
-```
-
-<!-- source: packages/core/src/thread-runtime.ts#EventDelivery -->
-```ts
-/**
- * How an event reached a subscriber (#96): `replayed` from the host's until-first-subscriber
- * buffer (the session's own start), or `live`. The two deliveries a subscriber can see — the
- * event tail's `held`/`dropped` provenances (#97) never reach one.
- */
-export type EventDelivery = 'live' | 'replayed'
-```
+What crosses it outward — an observation of ours, and nothing of the runtime's (L2, #162 workstream
+4): the host maps its runtime's events below this seam, so a subscriber's callback receives
+`ZenObservation` (the union on `observation.md`). The runtime's own event shape is the host's
+business, in `packages/web/src/host/runtime-event.ts`, and the mapper that reads it,
+`packages/web/src/host/map-events.ts`, sits beside it.
 
 What the runtime says it can run — one entry per slash command:
 
@@ -237,15 +211,13 @@ A fourth, `bundle-route.test.ts`, builds a minimal one to give the bundle a live
 
 ## What crosses it that should not
 
-**`RuntimeEvent` is open on purpose, and the mapper reads inside it.** The contract constrains only
-`type`; everything else on an event is the runtime's own shape, carried verbatim so a new event kind
-becomes `unmapped` rather than a parse failure. That is the right choice at the seam — and it means
-the mapper (`packages/web/src/rpc/map-events.ts`, which sits *above* the host) reads the vendor's
-field names directly: `PiContentPart`, `PiToolDetails`, `event.assistantMessageEvent`, `event.partialResult`.
-This is leak **L2**, the event-side half (`.local/refactor/goals.md` §2; #162 workstream 4). The
-persistence-side half is on the storage page. Fixing it means the host produces the observation, or an
-event shape of ours, and the mapper stops knowing the vendor's field names; until then the two files
-are named in the glossary gate's allowlist so the leak is inventory, not surprise.
+**Nothing of the runtime's event shape, since L2** (#162 workstream 4). Until then `subscribe` handed
+out `RuntimeEvent` — open on purpose, the runtime's own fields carried verbatim — and the mapper that
+read those fields sat *above* the host. Now the host maps at delivery: a subscriber receives
+`ZenObservation`, the event shape and the mapper (`runtime-event.ts`, `map-events.ts`) are under
+`host/`, and the runtime's event types appear nowhere above it — not on the follow, not in the
+events route's tail (which records observation kinds), not in a fake (the fakes emit observations).
+The persistence-side half of L2 is on the storage page.
 
 **`listCommands` returns the runtime's command entries** (`RuntimeCommand`: name, source,
 description). The shape is ours by declaration; its `source` values are the runtime's categories
@@ -258,9 +230,8 @@ own types do not appear in this module (the vendor gate holds that).
 
 Replace the runtime and the files that change are the host's: `agent-host.ts` (build a `ThreadRuntime`
 over the new loop; the storage seam lives in the same file — see `storage.md`), `session-events.ts`
-(produce `RuntimeEvent`s, or retire the wire shape and produce observations directly),
-`extension-ui-context.ts` and `permission-dialog.ts` (or their equivalents, if the new loop has
-extensions and questions at all) — plus `map-events.ts` for as long as L2 stands, because it reads the
-old loop's field names. The server, the registry, the four routes, the follow, the browser and every
-test that drives the server over a fake do not change: that is what the three fakes prove today, and
-it is the whole point of the seam.
+and `map-events.ts` (produce the new loop's events and map them to observations — or map the
+loop's typed events directly and retire the replicated wire shape), `extension-ui-context.ts` and
+`permission-dialog.ts` (or their equivalents, if the new loop has extensions and questions at all).
+The server, the registry, the routes, the follow, the browser and every test that drives the server
+over the fake do not change: that is what the fake proves today, and it is the whole point of the seam.

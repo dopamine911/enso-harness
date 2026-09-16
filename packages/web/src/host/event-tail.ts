@@ -1,4 +1,4 @@
-import type { RuntimeEvent, ZenEventProvenance, ZenThreadEvent } from '@zen/core'
+import type { ZenEventProvenance, ZenObservation, ZenThreadEvent } from '@zen/core'
 
 /**
  * A thread's event tail (#97): the last N events through one funnel, with provenance.
@@ -58,18 +58,21 @@ export function createEventTail(capacity = EVENT_TAIL_CAPACITY): EventTail {
 }
 
 /**
- * The inner name of a pi rpc event when its type alone reads as nothing: which custom
- * entry, which ui method, which tool. Read defensively — pi's shapes are carried, not
- * modelled (`thread-runtime.ts`).
+ * The tail's row for one observation (L2, #162 workstream 4): its kind, and the inner name
+ * when the kind alone reads as nothing — which custom entry, which ui method, which tool.
+ * Since the host maps below the seam, what it emits IS observations, and the tail says so in
+ * the same vocabulary the follow carries; the runtime's event types stay inside the mapper.
  */
-export function describeRuntimeEvent(event: RuntimeEvent): { type: string; name: string | undefined } {
-  const record = event as { type: string; entry?: unknown; method?: unknown; toolName?: unknown }
-  if (record.type === 'entry_appended' && typeof record.entry === 'object' && record.entry !== null) {
-    const entry = record.entry as { type?: unknown; customType?: unknown }
-    if (typeof entry.customType === 'string') return { type: record.type, name: entry.customType }
-    if (typeof entry.type === 'string') return { type: record.type, name: entry.type }
+export function describeObservation(observation: ZenObservation): { type: string; name: string | undefined } {
+  switch (observation.kind) {
+    case 'custom-entry':
+      return { type: observation.kind, name: observation.customType }
+    case 'extension-ui-request':
+      return { type: observation.kind, name: observation.method }
+    case 'tool-call':
+    case 'tool-result':
+      return { type: observation.kind, name: observation.toolName }
+    default:
+      return { type: observation.kind, name: undefined }
   }
-  if (typeof record.method === 'string') return { type: record.type, name: record.method }
-  if (typeof record.toolName === 'string') return { type: record.type, name: record.toolName }
-  return { type: record.type, name: undefined }
 }

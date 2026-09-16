@@ -6,7 +6,7 @@ import type { LogRecorder } from '@logtape/testing/recorder'
 import {
   type PromptOutcome,
   type PromptRequest,
-  type RuntimeEvent,
+  type ZenObservation,
   ZenStoredThread,
   ZenThreadEvents,
   ZenThreadHistory,
@@ -41,8 +41,8 @@ afterAll(releaseZenLogs)
  * `listening` yields the bound URL. The wire itself is `follow.test.ts`.
  */
 
-/** How a scripted session pushes pi events at its followers. */
-type EmitPiEvent = (event: RuntimeEvent) => void
+/** How a scripted session pushes observations at its followers. */
+type EmitPiEvent = (observation: ZenObservation) => void
 
 interface FakeSessionScript {
   /** Called on every prompt; emit events through `emit`, signal acceptance via `outcome`. */
@@ -112,17 +112,16 @@ function emptyHarnessDir(): string {
   return directory
 }
 
-const SETTLED: RuntimeEvent = { type: 'agent_settled' }
-const TEXT_DELTA: RuntimeEvent = {
-  type: 'message_update',
-  assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'hi' },
-}
-const SELECT_DIALOG: RuntimeEvent = {
-  type: 'extension_ui_request',
+// What the runtime says to its subscriber — observations, since L2 (#162 workstream 4).
+const SETTLED: ZenObservation = { kind: 'settled' }
+const TEXT_DELTA: ZenObservation = { kind: 'text-delta', contentIndex: 0, delta: 'hi' }
+const SELECT_DIALOG: ZenObservation = {
+  kind: 'extension-ui-request',
   id: 'd1',
   method: 'select',
-  title: 'Pick',
-  options: ['a', 'b'],
+  blocking: true,
+  dialog: { method: 'select', title: 'Pick', options: ['a', 'b'] },
+  origin: 'run',
 }
 
 function neverPrompted(): void {
@@ -294,10 +293,11 @@ test('GET /api/threads/:id/events returns the emitted and sent tails of a run, i
   const events: unknown = await response.json()
   expect(Check(ZenThreadEvents, events)).toBe(true)
   const { emitted, sent } = events as ZenThreadEvents
-  // The host's funnel: three deltas fold into one row with an exact count, then the settle.
+  // The host's funnel: three deltas fold into one row with an exact count, then the settle —
+  // in the observation vocabulary the follow carries (L2), not the runtime's event types.
   expect(emitted.map((event) => [event.type, event.count])).toEqual([
-    ['message_update', 3],
-    ['agent_settled', 1],
+    ['text-delta', 3],
+    ['settled', 1],
   ])
   // The wire: the sent tail, expanded by its counts, IS the frame sequence the follower got
   // — from the first frame the thread was live for (the snapshot went out before it was).

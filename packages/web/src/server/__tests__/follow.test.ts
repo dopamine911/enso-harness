@@ -6,12 +6,12 @@ import type { LogRecorder } from '@logtape/testing/recorder'
 import {
   type PromptOutcome,
   type PromptRequest,
-  type RuntimeEvent,
   type ThreadRuntime,
   ZEN_IMAGE_MAX_BYTES,
   ZEN_PROMPT_BODY_MAX_BYTES,
   ZEN_PROMPT_MAX_IMAGES,
   type ZenFollowFrame,
+  type ZenObservation,
 } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import type { AgentHost } from '../../host/agent-host.ts'
@@ -37,7 +37,7 @@ interface FakeHost {
   readonly host: AgentHost
   readonly built: FakeThreadRecord[]
   /** Emit into the LAST built session — every scenario here uses one thread. */
-  readonly emit: (event: RuntimeEvent) => void
+  readonly emit: (observation: ZenObservation) => void
   /** Fire the last prompt's acceptance (a slash command's completion signal). */
   readonly accept: () => void
 }
@@ -45,7 +45,7 @@ interface FakeHost {
 /** `overrides`: a test's own answer for one runtime method, over the fake's recording default (L3 step C). */
 function fakeHost(commands: string[] = ['mode'], overrides: Partial<ThreadRuntime> = {}): FakeHost {
   const built: FakeThreadRecord[] = []
-  let emit: (event: RuntimeEvent) => void = () => undefined
+  let emit: (observation: ZenObservation) => void = () => undefined
   let accept: () => void = () => undefined
   const host = createFakeAgentHost(() => {
     const fake = createFakeHostedThread({
@@ -64,7 +64,7 @@ function fakeHost(commands: string[] = ['mode'], overrides: Partial<ThreadRuntim
     emit = fake.emit
     return Promise.resolve(fake.hosted)
   })
-  return { host, built, emit: (event: RuntimeEvent) => emit(event), accept: () => accept() }
+  return { host, built, emit: (observation: ZenObservation) => emit(observation), accept: () => accept() }
 }
 
 function emptyHarnessDir(): string {
@@ -127,17 +127,16 @@ async function threadSummary(url: string, threadId: string): Promise<Record<stri
   return summaries.find((summary) => summary.threadId === threadId)
 }
 
-const SETTLED: RuntimeEvent = { type: 'agent_settled' }
-const TEXT_DELTA: RuntimeEvent = {
-  type: 'message_update',
-  assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'hi' },
-}
-const SELECT_DIALOG: RuntimeEvent = {
-  type: 'extension_ui_request',
+// What the runtime says to its subscriber — observations, since L2 (#162 workstream 4).
+const SETTLED: ZenObservation = { kind: 'settled' }
+const TEXT_DELTA: ZenObservation = { kind: 'text-delta', contentIndex: 0, delta: 'hi' }
+const SELECT_DIALOG: ZenObservation = {
+  kind: 'extension-ui-request',
   id: 'd1',
   method: 'select',
-  title: 'Pick',
-  options: ['a', 'b'],
+  blocking: true,
+  dialog: { method: 'select', title: 'Pick', options: ['a', 'b'] },
+  origin: 'run',
 }
 
 // ── 1. prompt is admission; the thread's own settle releases it ──────────────────────
@@ -533,11 +532,12 @@ test('a confirm dialog round-trips through /dialog; a value answer to it is refu
   const follow = await openFollow(url, 't1')
   await prompt(url, 't1', '/mode')
   fake.emit({
-    type: 'extension_ui_request',
+    kind: 'extension-ui-request',
     id: 'c1',
     method: 'confirm',
-    title: 'Apply?',
-    message: 'It is reversible',
+    blocking: true,
+    dialog: { method: 'confirm', title: 'Apply?', message: 'It is reversible' },
+    origin: 'run',
   })
   await follow.untilFrames(4)
   const answerWith = (body: Record<string, unknown>): Promise<Response> =>

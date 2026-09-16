@@ -1,16 +1,14 @@
-import {
-  type DialogAnswer,
-  type EventDelivery,
-  isZenDialogSpec,
-  type PromptOutcome,
-  type PromptRequest,
-  type RuntimeEvent,
-  type ThreadRuntime,
-  type ZenDialogSpec,
-  type ZenPermissionModeState,
+import type {
+  DialogAnswer,
+  PromptOutcome,
+  PromptRequest,
+  ThreadRuntime,
+  ZenDialogSpec,
+  ZenObservation,
+  ZenPermissionModeState,
 } from '@zen/core'
 import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
-import { createEventTail, describeRuntimeEvent } from '../../host/event-tail.ts'
+import { createEventTail, describeObservation } from '../../host/event-tail.ts'
 
 /**
  * The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a
@@ -40,8 +38,8 @@ export interface FakeThreadRecord {
 /** The fake's own state, handed to an override so a scripted method can record and emit through it. */
 export interface FakeThreadParts {
   readonly record: FakeThreadRecord
-  /** Push one runtime event at every subscriber, live, and into the tail the events route reads. */
-  readonly emit: (event: RuntimeEvent) => void
+  /** Push one observation at every subscriber, live, and into the tail the events route reads (L2: the seam speaks observations). */
+  readonly emit: (observation: ZenObservation) => void
   /** Every blocking question emitted and not yet answered — what the real host's `openDialogs` reads. */
   readonly open: Map<string, ZenDialogSpec>
 }
@@ -64,7 +62,7 @@ export function takeQueue(record: FakeThreadRecord): { steering: string[]; follo
 }
 
 export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): FakeHostedThread {
-  const listeners = new Set<(event: RuntimeEvent, delivery: EventDelivery) => void>()
+  const listeners = new Set<(observation: ZenObservation) => void>()
   const record: FakeThreadRecord = {
     prompts: [],
     answers: [],
@@ -79,14 +77,13 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
   // (coalesced rows); delivers only live, so every row is `live`. The real host's
   // held/replayed/dropped provenance is pinned in agent-host.test.ts.
   const emitted = createEventTail()
-  const emit = (event: RuntimeEvent): void => {
-    if (event.type === 'extension_ui_request' && typeof event.id === 'string') {
-      const { type: _type, id: _id, ...request } = event
-      if (isZenDialogSpec(request)) open.set(event.id, request)
+  const emit = (observation: ZenObservation): void => {
+    if (observation.kind === 'extension-ui-request' && observation.blocking && observation.dialog !== undefined) {
+      open.set(observation.id, observation.dialog)
     }
-    const described = describeRuntimeEvent(event)
+    const described = describeObservation(observation)
     emitted.record(described.type, described.name, 'live')
-    for (const listener of listeners) listener(event, 'live')
+    for (const listener of listeners) listener(observation)
   }
   const parts: FakeThreadParts = { record, emit, open }
   const runtime: ThreadRuntime = {
@@ -97,11 +94,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       record.answers.push(response)
       // What the real host does at `finish` (#114): the settle is a record on the stream.
       if (open.delete(response.id)) {
-        emit({
-          type: 'extension_ui_settled',
-          id: response.id,
-          outcome: 'cancelled' in response ? 'cancelled' : 'answered',
-        })
+        emit({ kind: 'dialog-settled', id: response.id, outcome: 'cancelled' in response ? 'cancelled' : 'answered' })
       }
     },
     openDialogs: () => [...open].map(([id, dialog]) => ({ id, dialog })),
@@ -112,12 +105,12 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       // acceptance is its completion) and the change comes back as `permission_mode`.
       record.modeChanges.push(mode)
       outcome.onAccepted()
-      emit({ type: 'permission_mode', mode, available: runtime.permissionModeState().available })
+      emit({ kind: 'permission-mode', mode, available: runtime.permissionModeState().available })
     },
-    subscribe: (onEvent: (event: RuntimeEvent, delivery: EventDelivery) => void) => {
-      listeners.add(onEvent)
+    subscribe: (onObservation: (observation: ZenObservation) => void) => {
+      listeners.add(onObservation)
       return () => {
-        listeners.delete(onEvent)
+        listeners.delete(onObservation)
       }
     },
     abort: () => {
@@ -128,7 +121,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       record.queueClears += 1
       const cleared = takeQueue(record)
       // pi emits the emptied queue to every follower.
-      emit({ type: 'queue_update', steering: [], followUp: [] })
+      emit({ kind: 'queue', steering: [], followUp: [] })
       return cleared
     },
     dispose: () => {

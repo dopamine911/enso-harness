@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { EventType } from '@ag-ui/core'
 import type { StreamChunk } from '@tanstack/ai'
 import { isZenToolResultDescriptor, ZEN_TOOL_RESULT_KEY, type ZenObservation } from '@zen/core'
-import { mapPiEvent } from '../map-events.ts'
+import { mapPiEvent } from '../../host/map-events.ts'
 import { type AguiIdentifiers, observationToAguiEvents } from '../to-agui.ts'
 import { observationKindsDeclaredByTheUnion } from './observation-kinds.ts'
 

@@ -11,21 +11,21 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
-  type EventDelivery,
   findRepoRoot,
   type PromptOutcome,
   type PromptRequest,
   quarantineSecrets,
   type RuntimeCommand,
-  type RuntimeEvent,
   type ThreadRuntime,
+  type ZenObservation,
   type ZenOpenDialog,
   type ZenPermissionModeState,
   type ZenThreadEvent,
   zenLogger,
 } from '@zen/core'
-import { createEventTail, describeRuntimeEvent } from './event-tail.ts'
+import { createEventTail, describeObservation } from './event-tail.ts'
 import { createZenExtensionUiContext } from './extension-ui-context.ts'
+import { mapPiEvent } from './map-events.ts'
 import {
   freshPermissionModeState,
   PICC_PERMISSION_MODES,
@@ -34,6 +34,7 @@ import {
   readPiccPersistedMode,
   storedPermissionModeState,
 } from './permission-mode-adapter.ts'
+import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
 
 const log = zenLogger('host')
@@ -328,7 +329,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // end that run before its first token (the disconnect-then-prompt race). Events with
     // nobody listening after the first subscriber are dropped, like status heartbeats
     // were when no rpc client was reading the pipe.
-    const listeners = new Set<(event: RuntimeEvent, delivery: EventDelivery) => void>()
+    // Subscribers receive OBSERVATIONS (L2, #162 workstream 4): the runtime's event is mapped
+    // here, at delivery, and its shape never leaves the host.
+    const listeners = new Set<(observation: ZenObservation) => void>()
     const heldUntilFirstSubscriber: RuntimeEvent[] = []
     let hasHadSubscriber = false
     // The emitted tail (#97): every event through this funnel, with HOW it was delivered.
@@ -337,18 +340,22 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // actually reaches a subscriber (see `subscribe`).
     const emitted = createEventTail()
     function emit(event: RuntimeEvent): void {
-      const described = describeRuntimeEvent(event)
       if (listeners.size === 0) {
         if (!hasHadSubscriber) {
           heldUntilFirstSubscriber.push(event)
+          // Described as the observation it will become when replayed.
+          const described = describeObservation(mapPiEvent(event, 'replayed'))
           emitted.record(described.type, described.name, 'held')
           return
         }
+        const described = describeObservation(mapPiEvent(event, 'live'))
         emitted.record(described.type, described.name, 'dropped')
         return
       }
+      const observation = mapPiEvent(event, 'live')
+      const described = describeObservation(observation)
       emitted.record(described.type, described.name, 'live')
-      for (const listener of listeners) listener(event, 'live')
+      for (const listener of listeners) listener(observation)
     }
 
     const ui = createZenExtensionUiContext({ emit, threadId })
@@ -460,21 +467,22 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // forget, acceptance is completion, and the change arrives as `permission_mode`.
         runtime.prompt({ message: piccModeCommand(mode) }, outcome)
       },
-      subscribe(onEvent: (event: RuntimeEvent, delivery: EventDelivery) => void): () => void {
-        listeners.add(onEvent)
+      subscribe(onObservation: (observation: ZenObservation) => void): () => void {
+        listeners.add(onObservation)
         hasHadSubscriber = true
         if (heldUntilFirstSubscriber.length > 0) {
           const held = heldUntilFirstSubscriber.splice(0)
           for (const event of held) {
-            const described = describeRuntimeEvent(event)
-            emitted.record(described.type, described.name, 'replayed')
             // The subscriber learns it is a replay (#96): the tail's `replayed` and the
-            // observation's `origin: "session-start"` are the same fact, told once here.
-            onEvent(event, 'replayed')
+            // observation's `origin` are the same fact, told once here by the mapper.
+            const observation = mapPiEvent(event, 'replayed')
+            const described = describeObservation(observation)
+            emitted.record(described.type, described.name, 'replayed')
+            onObservation(observation)
           }
         }
         return () => {
-          listeners.delete(onEvent)
+          listeners.delete(onObservation)
         }
       },
       abort(): Promise<void> {
