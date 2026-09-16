@@ -491,7 +491,7 @@ test('createSession(threadId) with no file under that id CREATES the session und
   expect((await hostWith().listSessions()).some((stored) => stored.id === threadId)).toBe(false)
 })
 
-test('listSessions names stored sessions newest first with the first user message; readBranch reads one without building pi', async () => {
+test('listSessions names stored sessions newest first with the first user message; readTranscript reads one without building pi', async () => {
   const older = crypto.randomUUID()
   const newer = crypto.randomUUID()
   storeSession(older, 'older question', 'older answer')

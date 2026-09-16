@@ -131,7 +131,7 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
           // REFUSED or ABORTED call has (a guard block; pi's abort mid-tool). TanStack's
           // processor reads `state: "output-error"` off the chunk (a non-spec extra, legal
           // as above) and marks the result and its call `error`, with the content as the
-          // error text — the same shape `branch-to-messages` builds from the log, so a
+          // error text — the same shape `transcript-to-messages` builds from the transcript, so a
           // live transcript and a resumed one agree (#130). Before this the flag rode as
           // `zenIsError`, which nothing read: live said done, resume said error.
           ...(observation.isError ? { state: 'output-error' } : {}),
