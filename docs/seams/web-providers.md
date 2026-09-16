@@ -77,8 +77,8 @@ export class WebSearchProviderError extends Error {
 /** What a MODEL-ROUTED provider run receives (anthropic / google / openai). */
 export interface ModelSearchRequest {
   query: string
-  model: Model<Api>
-  resolveAuth: (model: Model<Api>) => Promise<ResolvedProviderAuth>
+  model: SearchModel
+  resolveAuth: (model: SearchModel) => Promise<ResolvedProviderAuth>
   fetchUrl: FetchUrl
   signal: AbortSignal | undefined
   /** Streaming progress for the UI; carries the accumulated answer text so far. */
@@ -223,17 +223,18 @@ drives the three model-routed `run*` functions over scripted SSE, and `web-searc
 
 ## What crosses it that should not
 
-**L6 — the model API's types, at the provider seam.** `vocabulary.ts:1` imports `Api` and `Model` as
-types from `@earendil-works/pi-ai`; `auth.ts:1-2` imports the same two types and, as a value,
-`getEnvApiKey` from `@earendil-works/pi-ai/compat`. `ModelSearchRequest.model` is therefore the
-runtime's model shape, and `resolveAuth` takes it. The vendor gate allows both files with this reason
-(`test/vendor-gate.test.ts:62-63`): *pi-ai's `Api`/`Model` types and its env-key fallback: the PROVIDER
-seam, not the loop. Leaves when web-search's provider contract names its own model/credential types.*
-Its header (55-59) draws the line the same way: the provider seam is *a different boundary (a model
-API, not the agent loop)*. goals §2 L6 says of model providers *pi's coupling, not ours. Note it; do
-nothing.* — which is what this page does. `auth.ts:13-17` records the wire fact behind the value
-import: the runtime's registry returns `{ ok: true }` with no key when auth comes only from provider
-env vars, so this code mirrors the runtime's own fallback because it calls `fetch` directly.
+**Nothing of the runtime's, since L6 closed (#162).** `ModelSearchRequest.model` is `SearchModel` —
+the seven fields the providers read, declared in `vocabulary.ts` as ours — and `resolveAuth` takes it;
+`resolveModelAuth` takes the environment-key reader as a parameter instead of importing the runtime's.
+The runtime's model record is converted once, at the composition root
+(`extensions/web-search/index.ts#searchModelOf`), and the registry is asked with the runtime's record
+inside a closure the provider never sees. `harness/core` imports nothing from `@earendil-works/*`; the
+vendor gate's import allowlist is empty. Until then `vocabulary.ts` and `auth.ts` imported pi-ai's
+`Api`/`Model` types and `getEnvApiKey`, allowlisted with the reason *leaves when web-search's provider
+contract names its own model/credential types* — which is what happened. `auth.ts`'s header still
+records the wire fact behind the env fallback: the runtime's registry returns `{ ok: true }` with no
+key when auth comes only from provider env vars, so this code mirrors that fallback because it calls
+`fetch` directly.
 
 **The composition roots import the runtime's extension API** (`ExtensionAPI`, `AgentToolResult`,
 `ExtensionContext`) — under `packages/harness/extensions/`, a root the vendor gate permits, and the

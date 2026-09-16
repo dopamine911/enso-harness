@@ -1,5 +1,3 @@
-import type { Api, Model } from '@earendil-works/pi-ai'
-
 /**
  * The web_search vocabulary (#63): provider ids, the outcome union, and the request
  * shapes every provider module accepts. Providers live in `./providers/`, one module
@@ -92,11 +90,30 @@ export type ResolvedProviderAuth =
   | { ok: true; apiKey?: string; headers?: Record<string, string>; baseUrl?: string }
   | { ok: false; error: string }
 
+/**
+ * The model the conversation runs on, as the PROVIDER SEAM sees it (L6 closed, #162): the
+ * seven fields the providers read, declared here as ours. The runtime's own model record is
+ * converted once, at the extension (`extensions/web-search/index.ts#searchModelOf`), and
+ * nothing under `harness/core` imports the runtime's type for it any more. A provider that
+ * needs an eighth field adds it here, where the seam is, not by reaching for the vendor's.
+ */
+export interface SearchModel {
+  id: string
+  /** The wire API the model speaks — `anthropic-messages`, `openai-responses`, … — which routes the search. */
+  api: string
+  /** The provider's id, which names the environment key that may authenticate it. */
+  provider: string
+  baseUrl: string
+  reasoning: boolean
+  maxTokens: number
+  headers?: Record<string, string> | undefined
+}
+
 /** What a MODEL-ROUTED provider run receives (anthropic / google / openai). */
 export interface ModelSearchRequest {
   query: string
-  model: Model<Api>
-  resolveAuth: (model: Model<Api>) => Promise<ResolvedProviderAuth>
+  model: SearchModel
+  resolveAuth: (model: SearchModel) => Promise<ResolvedProviderAuth>
   fetchUrl: FetchUrl
   signal: AbortSignal | undefined
   /** Streaming progress for the UI; carries the accumulated answer text so far. */
@@ -109,7 +126,7 @@ export interface ModelSearchRequest {
  * (pi registers DeepSeek models as `openai-completions`, so they land here as
  * `undefined` too: the DeepSeek backend is config-pinned, never model-routed — #63.)
  */
-export function routedProviderIdForModel(model: Model<Api>): 'anthropic' | 'google' | 'openai' | undefined {
+export function routedProviderIdForModel(model: SearchModel): 'anthropic' | 'google' | 'openai' | undefined {
   if (model.provider === 'google-generative-ai' || model.api === 'google-generative-ai') return 'google'
   if (
     model.api === 'openai-responses' ||

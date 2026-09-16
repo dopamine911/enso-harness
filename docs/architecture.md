@@ -488,7 +488,7 @@ page's own lead sentence, so it cannot say a leak is open after the page says it
 | [storage](./seams/storage.md) | Thread, Record | `no-duplicate-paths`; boundaries (the forbidden-call rule) | Nothing of the runtime's persistence format, since L2 |
 | [the thread runtime](./seams/thread-runtime.md) | Thread, Control | vendor gate; glossary gate; boundaries | Nothing of the runtime's event shape, since L2 |
 | [the tool result descriptor](./seams/tool-result.md) | Surface | — | Nothing of ours leaks. |
-| [web providers](./seams/web-providers.md) | Permission (egress), Control | vendor gate | L6 — the model API's types, at the provider seam. |
+| [web providers](./seams/web-providers.md) | Permission (egress), Control | vendor gate | Nothing of the runtime's, since L6 closed (#162). |
 <!-- /generated-block -->
 
 ---

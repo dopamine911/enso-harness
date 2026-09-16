@@ -3,7 +3,7 @@ import { resolveModelAuth } from '../web-search/auth.ts'
 import { applyByteIndexCitations, applyIndexCitations, applyTextCitations } from '../web-search/citations.ts'
 import { runTavilyProviderSearch, TAVILY_SEARCH_URL } from '../web-search/providers/tavily.ts'
 import { cleanSources, isLikelyJunkSearchUrl, normalizeSearchUrl, titleFromUrl } from '../web-search/sources.ts'
-import type { FetchUrl, FetchUrlInit } from '../web-search/vocabulary.ts'
+import type { FetchUrl, FetchUrlInit, SearchModel } from '../web-search/vocabulary.ts'
 import { WebSearchProviderError } from '../web-search/vocabulary.ts'
 
 /** The web_search support layer (#63): source hygiene, citation appliers, auth, Tavily. */
@@ -93,8 +93,18 @@ test('applyByteIndexCitations inserts at BYTE offsets without corrupting multi-b
 
 // --- auth ---
 
+const MODEL: SearchModel = {
+  id: 'm',
+  api: 'anthropic-messages',
+  provider: 'zen-test-provider',
+  baseUrl: 'https://example.test',
+  reasoning: false,
+  maxTokens: 1,
+}
+/** No environment key for any provider — the env reader is a parameter now (L6), so the test says so. */
+const noEnvironmentKey = (): undefined => undefined
+
 test('resolveModelAuth strips null headers and passes failures through', async () => {
-  const model = { provider: 'zen-test-nonexistent-provider' } as never
   const resolved = await resolveModelAuth(
     {
       getApiKeyAndHeaders: async () => ({
@@ -103,22 +113,31 @@ test('resolveModelAuth strips null headers and passes failures through', async (
         headers: { keep: 'yes', drop: null },
       }),
     },
-    model,
+    MODEL,
+    noEnvironmentKey,
   )
   expect(resolved).toEqual({ ok: true, apiKey: 'key-1', headers: { keep: 'yes' } })
 
-  const failed = await resolveModelAuth({ getApiKeyAndHeaders: async () => ({ ok: false, error: 'nope' }) }, model)
+  const failed = await resolveModelAuth(
+    { getApiKeyAndHeaders: async () => ({ ok: false, error: 'nope' }) },
+    MODEL,
+    noEnvironmentKey,
+  )
   expect(failed).toEqual({ ok: false, error: 'nope' })
 })
 
-test('resolveModelAuth without key or auth header falls to provider env — absent here, so unchanged', async () => {
-  // The provider name cannot exist in pi-ai's env map, so the fallback resolves nothing —
-  // which is the assertable half of the fallback without reading process.env in a test.
+test('resolveModelAuth without key or auth header asks the environment reader for the PROVIDER, and takes nothing when it has nothing', async () => {
+  const asked: string[] = []
   const resolved = await resolveModelAuth(
     { getApiKeyAndHeaders: async () => ({ ok: true, headers: { 'x-unrelated': '1' } }) },
-    { provider: 'zen-test-nonexistent-provider' } as never,
+    MODEL,
+    (provider: string): undefined => {
+      asked.push(provider)
+      return undefined
+    },
   )
   expect(resolved).toEqual({ ok: true, headers: { 'x-unrelated': '1' } })
+  expect(asked).toEqual(['zen-test-provider'])
 })
 
 // --- tavily ---
@@ -190,7 +209,7 @@ test('tavily HTTP and body failures throw with the dispatched bit set', async ()
 // The POSITIVE half of the env fallback (PR #64 review gap): the reader is a seam, so
 // the test injects it instead of touching process.env.
 test('resolveModelAuth falls back to the provider env key — and only when nothing else authenticates', async () => {
-  const model = { provider: 'some-provider' } as never
+  const model: SearchModel = { ...MODEL, provider: 'some-provider' }
   const readerCalls: string[] = []
   const readKey = (provider: string): string | undefined => {
     readerCalls.push(provider)

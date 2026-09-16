@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import type { Api, Model } from '@earendil-works/pi-ai'
+import { getEnvApiKey } from '@earendil-works/pi-ai/compat'
 import type {
   AgentToolResult,
   AgentToolUpdateCallback,
@@ -33,6 +34,7 @@ import {
   runOpenAiProviderSearch,
   runTavilyProviderSearch,
   runUnderDeadline,
+  type SearchModel,
   TAVILY_API_KEY_VARIABLE,
   type TavilySearchRequest,
   type WebSearchOutcome,
@@ -93,6 +95,22 @@ interface PrimaryFailure {
   reason: string
   /** True when an HTTP request left the process — the honest "may have billed" bit. */
   requestDispatched: boolean
+}
+
+/**
+ * The runtime's model record → the provider seam's `SearchModel` (L6): the seven fields the
+ * providers read, copied — nothing of the runtime's type crosses into `harness/core`.
+ */
+function searchModelOf(model: Model<Api>): SearchModel {
+  return {
+    id: model.id,
+    api: model.api,
+    provider: model.provider,
+    baseUrl: model.baseUrl,
+    reasoning: model.reasoning,
+    maxTokens: model.maxTokens,
+    ...(model.headers === undefined ? {} : { headers: model.headers }),
+  }
 }
 
 export function createWebSearch(dependencies: WebSearchDependencies): (pi: ExtensionAPI) => void {
@@ -244,7 +262,7 @@ async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome 
     if (currentModel === undefined) {
       return { providerId: undefined, reason: 'no model is selected', requestDispatched: false }
     }
-    const routedProviderId = routedProviderIdForModel(currentModel)
+    const routedProviderId = routedProviderIdForModel(searchModelOf(currentModel))
     if (routedProviderId === undefined) {
       return {
         providerId: undefined,
@@ -254,11 +272,18 @@ async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome 
         requestDispatched: false,
       }
     }
+    // L6 closed: the runtime's model record crosses the provider seam as OURS, converted here
+    // and nowhere else; the registry (the runtime's) is asked with the runtime's record, which
+    // this closure holds — the provider never sees it.
     const modelRequest = (deadlineSignal: AbortSignal): ModelSearchRequest => ({
       query,
-      model: currentModel,
-      resolveAuth: (model: Model<Api>): Promise<ResolvedProviderAuth> =>
-        resolveModelAuth(extensionContext.modelRegistry, model),
+      model: searchModelOf(currentModel),
+      resolveAuth: (model: SearchModel): Promise<ResolvedProviderAuth> =>
+        resolveModelAuth(
+          { getApiKeyAndHeaders: () => extensionContext.modelRegistry.getApiKeyAndHeaders(currentModel) },
+          model,
+          getEnvApiKey,
+        ),
       fetchUrl: dependencies.fetchUrl,
       signal: deadlineSignal,
       onProgress,
