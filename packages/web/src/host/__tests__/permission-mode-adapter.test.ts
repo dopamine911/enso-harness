@@ -1,5 +1,10 @@
 import { expect, test } from 'bun:test'
-import { persistedPermissionMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
+import {
+  freshPermissionModeState,
+  persistedPermissionMode,
+  piccModeCommand,
+  storedPermissionModeState,
+} from '../permission-mode-adapter.ts'
 import { transcriptOf } from '../transcript.ts'
 
 const piccEntry = (mode: string, id: string): unknown => ({ type: 'custom', customType: 'modes', data: { mode }, id })
@@ -22,4 +27,20 @@ test('a stored thread answers from its transcript alone: the walk for the mode, 
     mode: 'plan',
     available: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto'],
   })
+})
+
+// A stored thread with NO mode entry reads exactly as a fresh one — the same object shape, the
+// same set to offer — so a cold rail and a new thread never disagree about what "default" is.
+test('a transcript with no modes entry is the fresh state, identically', () => {
+  expect(storedPermissionModeState([])).toEqual(freshPermissionModeState())
+  expect(
+    storedPermissionModeState(transcriptOf([{ type: 'message', id: 'x', parentId: null, timestamp: '' }])),
+  ).toEqual(freshPermissionModeState())
+  expect(freshPermissionModeState().available).toContain(freshPermissionModeState().mode)
+})
+
+// The vendor's setter is its per-mode slash command, named exactly the mode (L3 step C).
+test('the mode command is the mode, as a slash command', () => {
+  expect(piccModeCommand('plan')).toBe('/plan')
+  expect(piccModeCommand('acceptEdits')).toBe('/acceptEdits')
 })

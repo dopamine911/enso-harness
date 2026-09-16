@@ -651,3 +651,27 @@ test('a tool_result with no input is handled without throwing', () => {
     runtime.toolResult({ type: 'tool_result', toolCallId: 't', toolName: 'read', isError: false }, { cwd }),
   ).not.toThrow()
 })
+
+// ── two deny branches of the HANDLER that no test had reached (#162 exit criteria) ─────────
+// The core functions beneath them (`findDeniedNetworkEgress`, `looksLikeSecret`) are pinned in
+// their own suites; these pin the WIRING — that the handler turns each verdict into a block
+// with the reason a model can act on. Both branches are security-relevant, and a handler that
+// dropped either would have left every core test green.
+
+test('⚠ an egress construct the deny cannot see through is REFUSED by the handler, naming the construct and the sanctioned path', () => {
+  // A command substitution with quoting inside it: not a denied name, a shape the scanner cannot vouch for (#57).
+  const verdict = call('bash', { command: 'x=$(echo "cu"rl); $x http://example.com' })
+  expect(verdict?.block).toBe(true)
+  expect(verdict?.reason).toContain('cannot vouch')
+  expect(verdict?.reason).toContain('command substitution')
+  expect(verdict?.reason).toContain('web_fetch')
+})
+
+test('⚠ a write to a credential-shaped path inside the workspace is blocked as a credential, not as internals or persistence', () => {
+  // Not `.git/` (internals), not a shell rc (persistence): the third refusal, by secret pattern alone.
+  const verdict = call('write', { path: 'deploy/.aws/credentials', content: 'aws_access_key_id = x' })
+  expect(verdict?.block).toBe(true)
+  expect(verdict?.reason).toContain('credential pattern')
+  expect(verdict?.reason).not.toContain('protected internals')
+  expect(verdict?.reason).not.toContain('persistence')
+})
