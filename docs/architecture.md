@@ -564,6 +564,7 @@ touching a file, read its header and the seam page it belongs to.
 | **Run-provenance entries** (git revision, config hash, active rules and skills) | Where they go is decided — pi's log, as custom entries. What they hold waits for the lineage phase, so the schema is designed once against a real fork. |
 | **Command classification** (argument-level policy) | With confinement and recoverability in place it is friction optimisation, not safety. Accretes from real incidents. |
 | Log wiring itself | A later phase. The consent model is decided; the ingestion shape is not. |
+| **Extension points** — #16's four properties (priority over load order, registration returns unsubscribe, claim-or-skip, cross-adapter dismissal) at the guards, the tool-result renderers and the dialog renderer (#162 workstream 10) | Built only where a second implementation is real, and measured 2026-09-16: none is. Guards: two `tool_call` participants with aligned fail direction and no arbiter — a third handler is the trigger, and `tool-call-participants.test.ts` fires on it (`seams/guards.md`). Renderers: one surface holds a `ZenRendererMap`; the terminal has none (`seams/tool-result.md` → *Second implementation*). Dialogs: `createZenExtensionUiContext` is implemented once and one card renders it (`seams/dialog.md`). An extension point with one implementation is an interface drawn where no seam was measured — the thing #162's second constraint forbids. |
 
 ---
 
