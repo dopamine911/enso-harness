@@ -280,16 +280,14 @@ function RunProblem(): React.ReactNode {
 
 /**
  * The composer row's permission-mode control (#84): the thread's current mode, and a
- * dropdown that switches it by sending picc's per-mode slash command — `/acceptEdits`,
- * exactly what typing it does.
+ * dropdown that switches it through the mode route (L3 step C) — a control, not a prompt.
  * Beside the composer rather than in the page header (#90 PR 3): it is per THREAD, and
  * deepseek-harness keeps the mode selector in the composer chrome for the same reason.
  *
- * ⚠ Sent as a prompt on purpose, not through a dedicated endpoint: picc's `setMode` is
- * closure-private with no API, its registered commands are the only way in, and the
- * server already routes a slash command down the no-model extension-command path. The
- * indicator then updates from the `zen.entry` receipt that run carries — the mode picc
- * actually set — never from the click.
+ * ⚠ `POST …/mode`, never a prompt: the browser says a mode; how the host's extension is
+ * told is the host's (for picc, its per-mode command). The indicator then updates from the
+ * `zen.mode` receipt the host emits once the mode is persisted — the mode actually set —
+ * never from the click. Invariant 2: a route tells pi; the feed ends the story.
  *
  * ⚠ Disabled while a run is in flight, the same rule the send button follows: a mode
  * change mid-run would collide with the busy-thread semantics #75 is deciding.
@@ -310,8 +308,7 @@ function PermissionModeControl(): React.ReactNode {
       mode={mode}
       available={available}
       disabled={chat.sessionGenerating}
-      // picc registers one command per mode, named exactly the mode (index.ts:526-536).
-      onSelect={(next: string) => void chat.sendMessage(`/${next}`)}
+      onSelect={(next: string) => void stores.connection.changeMode(next)}
     />
   )
 }

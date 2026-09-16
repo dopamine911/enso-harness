@@ -4,11 +4,11 @@ The policy a run's tools execute under, as the server reads it and the browser s
 domain: **Permission** (the mode *concept*: what may run without asking) with one foot in **Thread**
 (the custom entry that persists it) and one in **Observation** (the receipt that carries it). This is
 the honest page: the concept is ours, the implementation today is a vendor extension read three
-layers away from it — leak **L3**, the seam #162 workstream 4 owns in three steps. A and B are done:
-everything the vendor persists and registers is read *below* the `AgentHost` seam, in
-`web/src/host/permission-mode-adapter.ts`; the server asks the host; the host emits the
-`permission-mode` observation on a change and the browser folds that alone. `@zen/core` is
-`ZenPermissionModeState`. Step C is named under *Pivot cost*.
+layers away from it — leak **L3**, which #162 workstream 4 closed in three steps. Everything the
+vendor persists, registers and is *told* is below the `AgentHost` / `ThreadRuntime` seam, in
+`web/src/host/permission-mode-adapter.ts` and `agent-host.ts`; the server asks the host; the host emits
+the `permission-mode` observation on a change and the browser folds that alone; changing the mode is a
+control route. `@zen/core` is `ZenPermissionModeState` and the route's body.
 
 Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Refresh with
 `bun scripts/docs/refresh-fences.ts docs/seams/permission-mode.md`.
@@ -45,6 +45,21 @@ export const ZenPermissionModeState = Type.Object({
 export const ZenPermissionMode = Type.Object({
   kind: Type.Literal('permission-mode'),
   ...ZenPermissionModeState.properties,
+})
+```
+
+And what crosses the other way — the one thing the browser may say about the mode:
+
+<!-- source: packages/core/src/permission-mode.ts#ZenPermissionModeChange -->
+```ts
+/**
+ * The body of `POST /api/threads/:threadId/mode` (L3 step C): the mode to switch to. A
+ * control route, not a prompt — the server refuses a mode the thread does not offer (422)
+ * and a busy thread (409); the change itself arrives on the follow as `permission-mode`,
+ * never from the click.
+ */
+export const ZenPermissionModeChange = Type.Object({
+  mode: Type.String({ minLength: 1 }),
 })
 ```
 
@@ -165,9 +180,12 @@ the same `zen.mode` chunk the run-start receipt rides. The vendor's `custom-entr
 (`packages/web/src/follow-connection.ts`) and from every change — is routed to *both* views
 (`custom-event-router.ts`): `permission-mode.tsx` (the composer's `<select>`, which says `unknown` until
 a real value has arrived) and `mode-lines.ts` (one transcript line per distinct value, worded as state).
-Neither knows what a vendor entry is. Changing the mode is still a prompt: the select sends `/${mode}`
-(`chat-screen.tsx`), because the extension's setter is closure-private and its commands are the only
-way in — step C.
+Neither knows what a vendor entry is. **Changing the mode is a control route** (step C):
+`POST …/mode` with `ZenPermissionModeChange` (`follow-connection.ts#changeMode`, from the composer's
+select in `chat-screen.tsx`) → `changeThreadMode` (`server/follow.ts`: acquires like a prompt, 409 while
+busy, 422 for a mode the thread does not offer) → `ThreadRuntime.setPermissionMode` → the host runs the
+vendor's per-mode command as a prompt (`permission-mode-adapter.ts#piccModeCommand`). Invariant 2: the
+route tells pi; the feed carries the change as `permission-mode`. The click moves no store.
 
 **Second implementation:** the fakes (#178). `createFakeHostedThread` answers a literal
 `permissionModeState` for a live thread and `createFakeAgentHost` *declares* its fresh and stored
@@ -193,17 +211,16 @@ last entry wins, none is `default`, another extension's custom entry is not a mo
 
 ## What crosses it that should not
 
-**L3, what is left** (`.local/refactor/goals.md` §2): the composer switches mode by sending the
-vendor's slash command by name as a *prompt* (`chat-screen.tsx`), because the extension's setter is
-closure-private. That is step C. Nothing above the host reads the vendor's persisted entry or spells
-its set any more; the vendor gate's allowlist has no row for this seam.
+**Nothing.** Above the host, no surface reads the vendor's persisted entry, spells its set, or names
+its commands; the vendor gate's allowlist has no row for this seam. What the browser knows of the mode
+is `ZenPermissionModeState` in, `ZenPermissionModeChange` out.
 
 ## Pivot cost
 
 **Replace the mode extension** and the files that change are `permission-mode-adapter.ts` (the set,
-the initial mode, the walk, the entry reader) and `agent-host.ts` (the command-name intersection and
-the `permission_mode` emission) under `host/` — plus, until step C, `chat-screen.tsx` (the slash
-command the select sends).
+the initial mode, the walk, the entry reader, the command a mode is set with) and `agent-host.ts` (the
+command-name intersection, the `permission_mode` emission, `setPermissionMode`) under `host/`. Nothing
+above them.
 `ZenFollowSnapshot`, the inspection, the summary, the router, the store's fold and both server cold
 paths do not change: they hold `{ mode, available }` and the fakes prove the server runs on that alone.
 
@@ -219,7 +236,9 @@ implementation the host adapts"), in three steps:
   a custom entry's shape; the tooltip stopped naming the vendor. `readPiccPersistedMode` and the
   `customType` followed the rest below the seam; `@zen/core` is `ZenPermissionModeState` alone. Four
   allowlist lines deleted.
-- **C.** Changing the mode becomes a control route (`POST …/mode` → `ThreadRuntime`), the host
-  translating to the vendor's slash command; the select stops sending a prompt.
+- **C — done.** `POST …/mode` → `changeThreadMode` → `ThreadRuntime.setPermissionMode`; the host
+  translates to the vendor's command; the select posts a mode and sends no prompt. Pinned on the wire
+  (`follow.test.ts`: 204 + the `permission-mode` observation, 422 unoffered, 409 busy, 400 malformed)
+  and in the browser (`follow-connection.test.ts`).
 
 `guard.ts`'s line stays: a path, not an import.

@@ -344,6 +344,49 @@ test('answerDialog names what the server did: answered (204), gone (404), refuse
   expect(refused.problems).toEqual([expect.stringContaining('refused: 422')])
 })
 
+// ── the mode route (L3 step C) ──────────────────────────────────────────────────────
+test('changeMode is one POST to …/mode carrying a MODE, never a command; the store moves only when the feed says so', async () => {
+  const server = scripted()
+  server.frame(SNAPSHOT_IDLE)
+  await server.untilChunks(3)
+  expect(await server.connection.changeMode('plan')).toBe('told')
+  expect(server.modeChanges).toEqual([{ mode: 'plan' }])
+  expect(server.prompts).toEqual([])
+  // Nothing in the stream yet: the click moved no store. The host's receipt does.
+  expect(
+    server.chunks.some(
+      (chunk) =>
+        chunk.type === EventType.CUSTOM &&
+        chunk.name === 'zen.mode' &&
+        (chunk.value as { mode?: string }).mode === 'plan',
+    ),
+  ).toBe(false)
+  server.frame({
+    type: 'observation',
+    seq: 1,
+    observation: { kind: 'permission-mode', mode: 'plan', available: ['default', 'plan'] },
+  })
+  await server.untilChunks(4)
+  expect(server.chunks.at(-1)).toMatchObject({ type: EventType.CUSTOM, name: 'zen.mode', value: { mode: 'plan' } })
+  expect(server.problems).toEqual([])
+  server.abort()
+})
+
+test('a refused mode change names the outcome and is reported — busy is not a failure of this page', async () => {
+  const busy = createScriptedFetch({ modeStatus: 409 })
+  const busyProblems: string[] = []
+  const busyConnection = createFollowConnection({
+    threadId: 't1',
+    fetch: busy.fetch,
+    onProblem: (p: unknown) => busyProblems.push(String(p)),
+  })
+  expect(await busyConnection.changeMode('plan')).toBe('busy')
+  expect(busyProblems).toHaveLength(1)
+  const refused = createScriptedFetch({ modeStatus: 422 })
+  const refusedConnection = createFollowConnection({ threadId: 't1', fetch: refused.fetch, onProblem: () => undefined })
+  expect(await refusedConnection.changeMode('nope')).toBe('refused')
+})
+
 test('abort is one POST to …/abort and names what the server did; it closes no run itself — the feed does (#116)', async () => {
   const server = scripted()
   server.frame(SNAPSHOT_IDLE)

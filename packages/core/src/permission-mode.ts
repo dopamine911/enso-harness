@@ -20,3 +20,14 @@ export const ZenPermissionModeState = Type.Object({
   available: Type.Array(Type.String({ minLength: 1 })),
 })
 export type ZenPermissionModeState = Static<typeof ZenPermissionModeState>
+
+/**
+ * The body of `POST /api/threads/:threadId/mode` (L3 step C): the mode to switch to. A
+ * control route, not a prompt — the server refuses a mode the thread does not offer (422)
+ * and a busy thread (409); the change itself arrives on the follow as `permission-mode`,
+ * never from the click.
+ */
+export const ZenPermissionModeChange = Type.Object({
+  mode: Type.String({ minLength: 1 }),
+})
+export type ZenPermissionModeChange = Static<typeof ZenPermissionModeChange>

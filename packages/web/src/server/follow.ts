@@ -9,6 +9,7 @@ import {
   ZEN_IMAGE_MAX_BYTES,
   type ZenAbortReceipt,
   type ZenFollowFrame,
+  ZenPermissionModeChange,
   ZenPromptBody,
   type ZenPromptReceipt,
   zenLogger,
@@ -303,6 +304,61 @@ export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answ
   }
   live.hosted.runtime.answerDialog(answer)
   return { status: 204 }
+}
+
+export type ModeChangeOutcome =
+  | { readonly status: 204 }
+  | { readonly status: 409; readonly reason: string }
+  | { readonly status: 422; readonly reason: string }
+
+/**
+ * Switch a thread's permission mode (L3 step C, #162 workstream 4): a control route, not a
+ * prompt. The thread is acquired like a prompt would acquire it — a fresh page changes mode
+ * before its first prompt — and refused while busy (409): a mode change is not queued
+ * behind a run (#75's rule), and the composer's select is disabled then for the same
+ * reason. The mode must be one the thread offers now (422). The change itself arrives on
+ * the follow as `permission-mode`, said by the host when its extension has persisted it;
+ * an extension command's acceptance is its completion, so the lease is released on
+ * acceptance as `promptThread` releases a slash command's.
+ */
+export async function changeThreadMode(
+  deps: FollowRouteDeps,
+  threadId: string,
+  change: ZenPermissionModeChange,
+): Promise<ModeChangeOutcome> {
+  const { threads } = deps
+  const live = threads.peek(threadId)
+  if (live?.busy === true)
+    return { status: 409, reason: `thread ${threadId} is running; change the mode when it settles` }
+  const lease = await threads.acquire(threadId)
+  const { available } = lease.runtime.permissionModeState()
+  if (!available.includes(change.mode)) {
+    lease.release()
+    return {
+      status: 422,
+      reason: `mode ${change.mode} is not offered here. Available: ${available.length === 0 ? 'none' : available.join(', ')}`,
+    }
+  }
+  lease.runtime.setPermissionMode(change.mode, {
+    onAccepted: () => lease.release(),
+    onRejected: (reason: string) => {
+      log.warn('mode change to {mode} rejected: {reason}', { threadId, mode: change.mode, reason })
+      lease.release()
+    },
+  })
+  return { status: 204 }
+}
+
+/** The mode-change body, checked against its schema — a control route takes exactly its shape. */
+export function readModeChangeBody(raw: string): ZenPermissionModeChange {
+  let body: unknown
+  try {
+    body = JSON.parse(raw)
+  } catch (error) {
+    throw new Error(`malformed mode body: ${String(error)}`)
+  }
+  if (!Check(ZenPermissionModeChange, body)) throw new Error('mode body needs a non-empty `mode`')
+  return body
 }
 
 export type AbortRouteOutcome =

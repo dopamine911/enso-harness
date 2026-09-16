@@ -219,7 +219,16 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * `streamingBehavior: followUp`, so pi queues it and every follower sees it.
    */
   readonly prompt: (text: string, images?: readonly ZenPromptImage[]) => Promise<PromptOutcome>
+  /**
+   * Switch the permission mode (L3 step C): `POST …/mode`, a control route, never a prompt —
+   * the browser says a mode and no command. The change arrives on the follow as `zen.mode`,
+   * said by the host once its extension has persisted it; a refusal is reported with the
+   * server's reason and moves nothing.
+   */
+  readonly changeMode: (mode: string) => Promise<ModeChangeOutcome>
 }
+
+export type ModeChangeOutcome = 'told' | 'busy' | 'refused' | 'unreachable'
 
 export function createFollowConnection(options: FollowConnectionOptions): FollowConnection {
   const { threadId } = options
@@ -570,6 +579,18 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     return { outcome, restored: [] }
   }
 
+  async function changeMode(mode: string): Promise<ModeChangeOutcome> {
+    const response = await post('mode', `mode ${mode}`, {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    })
+    if (response === undefined) return 'unreachable'
+    if (response.status === 204) return 'told'
+    const outcome: ModeChangeOutcome = response.status === 409 ? 'busy' : 'refused'
+    problem('mode change {outcome}: {status} {body}', { outcome, status: response.status, body: await response.text() })
+    return outcome
+  }
+
   async function prompt(text: string, images: readonly ZenPromptImage[] = []): Promise<PromptOutcome> {
     const body: ZenPromptBody = {
       message: text,
@@ -602,5 +623,5 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     return 'queued'
   }
 
-  return { subscribe, send, answerDialog, abort, prompt }
+  return { subscribe, send, answerDialog, abort, prompt, changeMode }
 }

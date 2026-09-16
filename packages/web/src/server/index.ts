@@ -9,6 +9,7 @@ import {
   ZEN_IMAGE_MAX_BYTES,
   ZEN_PROMPT_BODY_MAX_BYTES,
   ZEN_PROMPT_MAX_IMAGES,
+  type ZenPermissionModeChange,
   type ZenStoredThread,
   type ZenThreadEvents,
   type ZenThreadHistory,
@@ -21,11 +22,13 @@ import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
   abortThread,
   answerThreadDialog,
+  changeThreadMode,
   type FollowRouteDeps,
   followThread,
   type PromptBody,
   promptThread,
   readDialogBody,
+  readModeChangeBody,
   readPromptBody,
 } from './follow.ts'
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
@@ -44,6 +47,8 @@ const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/
 const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/
 const THREAD_DIALOG_ROUTE = /^\/api\/threads\/([^/?#]+)\/dialog$/
 const THREAD_ABORT_ROUTE = /^\/api\/threads\/([^/?#]+)\/abort$/
+/** `POST …/mode` (#162 workstream 4, L3 step C): switch the mode as a control route, not a prompt. */
+const THREAD_MODE_ROUTE = /^\/api\/threads\/([^/?#]+)\/mode$/
 
 /**
  * The dev backend: the thread routes the browser's `FollowConnection` talks to (#112), and
@@ -454,6 +459,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
     },
     { method: 'POST', route: THREAD_PROMPT_ROUTE, respond: respondToPrompt },
     { method: 'POST', route: THREAD_DIALOG_ROUTE, respond: respondToDialog },
+    { method: 'POST', route: THREAD_MODE_ROUTE, respond: respondToModeChange },
     {
       method: 'POST',
       route: THREAD_ABORT_ROUTE,
@@ -598,6 +604,41 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
       return
     }
     log.info('dialog {dialogId} answered', { threadId, dialogId: answer.id })
+    response.writeHead(204)
+    response.end()
+  }
+
+  async function respondToModeChange(
+    threadId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    let change: ZenPermissionModeChange
+    try {
+      // A mode name; nothing legitimate approaches the dialog cap either.
+      change = readModeChangeBody(await readBody(request, MAX_DIALOG_BODY_BYTES))
+    } catch (error) {
+      if (error instanceof BodyTooLargeError) {
+        endAndClose(request, response, 413, `a mode change is at most ${MAX_DIALOG_BODY_BYTES} bytes`)
+        return
+      }
+      response.writeHead(400, { 'Content-Type': 'text/plain' })
+      response.end((error as Error).message)
+      return
+    }
+    const outcome = await changeThreadMode(followDeps, threadId, change)
+    if (outcome.status !== 204) {
+      log.warn('mode change to {mode} refused ({status}): {reason}', {
+        threadId,
+        mode: change.mode,
+        status: outcome.status,
+        reason: outcome.reason,
+      })
+      response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
+      response.end(outcome.reason)
+      return
+    }
+    log.info('mode change to {mode} told', { threadId, mode: change.mode })
     response.writeHead(204)
     response.end()
   }
