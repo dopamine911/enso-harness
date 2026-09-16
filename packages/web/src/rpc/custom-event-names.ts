@@ -38,13 +38,14 @@ export const ZEN_CUSTOM_EVENT_OPEN_DIALOGS = 'zen.open-dialogs'
  * refetches, so a session the server no longer holds is not shown as its last fetch.
  */
 export const ZEN_CUSTOM_EVENT_FOLLOW_ENDED = 'zen.follow-ended'
-/** An extension persisted a custom session entry (#29). Value: the `custom-entry` observation. */
+/** An extension persisted a custom session entry (#29). Value: the `custom-entry` observation. Recorded, rendered by nothing since L3. */
 export const ZEN_CUSTOM_EVENT_ENTRY = 'zen.entry'
 /**
- * The permission mode a run STARTS in, plus the modes the dropdown may offer (#84). A
- * state receipt the SERVER synthesises at run start — not a pi event — because picc only
- * persists a `modes` entry on a change, so a fresh thread's `default` never crosses on
- * its own. Value: `{ mode: string, available: string[] }`.
+ * The permission mode, plus the modes the dropdown may offer (#84; L3, #162 workstream 4):
+ * at run start, a state receipt the SERVER synthesises from the snapshot (so a fresh
+ * thread's starting mode crosses whether or not anything was persisted), and on every
+ * change, the `permission-mode` observation the HOST emits when its mode extension
+ * persists one. One chunk, one value shape: `{ mode: string, available: string[] }`.
  */
 export const ZEN_CUSTOM_EVENT_MODE = 'zen.mode'
 /**

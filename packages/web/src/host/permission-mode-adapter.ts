@@ -1,4 +1,4 @@
-import { readPiccPersistedMode, type ZenPermissionModeState } from '@zen/core'
+import type { ZenPermissionModeState } from '@zen/core'
 
 /**
  * picc-permission-modes' PERSISTED MODE, as the host reads it (#84; below the seam since
@@ -15,8 +15,26 @@ import { readPiccPersistedMode, type ZenPermissionModeState } from '@zen/core'
  * display order.
  */
 
+/** The `customType` picc persists its state under. */
+const PICC_MODES_CUSTOM_TYPE = 'modes'
+
 /** picc's initial mode — a fresh session with no `modes` entry is in this mode by construction. */
 const PICC_DEFAULT_PERMISSION_MODE = 'default'
+
+/**
+ * The mode carried by ONE persisted custom entry, or undefined when the entry is not
+ * picc's (`customType` differs), is malformed, or carries no mode. Reads defensively —
+ * every wire crossing does — so an unrelated extension's custom entry is ignored, never a
+ * throw inside a stream loop.
+ */
+export function readPiccPersistedMode(entry: unknown): string | undefined {
+  if (typeof entry !== 'object' || entry === null) return undefined
+  if (!('customType' in entry) || entry.customType !== PICC_MODES_CUSTOM_TYPE) return undefined
+  if (!('data' in entry) || typeof entry.data !== 'object' || entry.data === null) return undefined
+  if (!('mode' in entry.data)) return undefined
+  const { mode } = entry.data
+  return typeof mode === 'string' && mode.length > 0 ? mode : undefined
+}
 
 /** Every mode picc registers a per-mode slash command for, in picc's order. */
 export const PICC_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto'] as const

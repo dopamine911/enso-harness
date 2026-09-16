@@ -84,6 +84,7 @@ export {
   ZenMessageStart,
   ZenNotifyType,
   ZenObservation,
+  ZenPermissionMode,
   ZenPromptRejected,
   ZenQueue,
   ZenRunEnded,
@@ -112,7 +113,7 @@ export {
   zenLogsDir,
   zenSecretsPath,
 } from './paths.ts'
-export { PICC_MODES_CUSTOM_TYPE, readPiccPersistedMode, ZenPermissionModeState } from './permission-mode.ts'
+export { ZenPermissionModeState } from './permission-mode.ts'
 export {
   isSecretShapedName,
   knownSecretValues,

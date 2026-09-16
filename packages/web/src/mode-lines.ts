@@ -1,39 +1,32 @@
-import { readPiccPersistedMode } from '@zen/core'
+import { ZenPermissionModeState } from '@zen/core'
+import { Check } from 'typebox/value'
 import type { NotificationsStore } from './notifications.tsx'
 
 /**
  * Permission-mode lines in the transcript (#29, the remaining half).
  *
- * A SUCCESSFUL mode change is silent at the source: picc-permission-modes' `setMode`
- * changes the mode, persists, and never notifies (its only `ctx.ui.notify` is the
- * unknown-mode error path), and its `updateStatus` is a stub — a TUI concern that never
- * reaches RPC. The one RPC-observable artifact of a mode change is the CUSTOM session
- * entry picc persists, which arrives here as a `zen.entry` chunk.
+ * A SUCCESSFUL mode change is silent at the source: the mode extension changes the mode,
+ * persists, and never notifies. The host sees the persist and emits the `permission-mode`
+ * observation (L3, #162 workstream 4), which arrives here as the `zen.mode` chunk — the same
+ * chunk the run-start receipt rides, so this store never learns which extension's entry it
+ * was or what that entry looks like.
  *
- * ⚠ That entry is a STATE receipt, not a change event: picc persists at session start
- * and on rule updates too, with the mode unchanged. So this store renders one line per
- * DISTINCT mode value — worded as state ("Mode: acceptEdits"), which is never false — and
- * repeated persists of the same mode render nothing. The first arriving value renders too:
- * state wording makes a first line honest whether it is a change or a restatement.
- * ⓘ A fresh thread's first line here IS its initial `default` — picc persists `modes:
- * default` during `session_start`, and since #88 the host subscribes to session events
- * BEFORE `bindExtensions`, so that entry rides #69's held-until-first-subscriber buffer
- * into the first run like every other startup record. Until #88 it did not: the host
- * subscribed after binding, the entry was emitted to nobody, and the first line a user saw
- * was the first CHANGE. Two earlier notes here got the cause wrong (a race with the run
- * stream; picc persisting only on a change); the #86 drawer found the real one within
- * minutes of existing. The CURRENT mode is still a different view — `permission-mode.tsx`,
- * fed by the receipt the server synthesises at run start, deterministic on its own.
+ * ⚠ The chunk is a STATE receipt, not a change event: the extension persists at session start
+ * and on rule updates too, with the mode unchanged, and the run-start receipt restates it. So
+ * this store renders one line per DISTINCT mode value — worded as state ("Mode: acceptEdits"),
+ * which is never false — and repeated receipts of the same mode render nothing. The first
+ * arriving value renders too: state wording makes a first line honest whether it is a change
+ * or a restatement. ⓘ A fresh thread's first line here IS its initial mode — the extension
+ * persists it during `session_start`, and since #88 the host subscribes to session events
+ * BEFORE `bindExtensions`, so that receipt rides #69's held-until-first-subscriber buffer into
+ * the first run like every other startup record. The CURRENT mode is a different view —
+ * `permission-mode.tsx`, fed by the same chunk.
  *
- * ⚠ VENDOR SHAPE — read through `readPiccPersistedMode` in `@zen/core`, which is the ONE
- * place picc's `modes` entry (`pi.appendEntry("modes", { mode, … })`, v0.1.1) is spelled
- * out; the host reads a thread's current mode through the same helper (#84). An
- * unrecognised `customType`, or a `data` without a string `mode`, is ignored here — some
- * other extension's state, not ours to render.
+ * A malformed value is ignored, never thrown on: this runs inside the state layer's stream.
  */
 
 export interface ModeLines {
-  /** The `zen.entry` CUSTOM-chunk consumer — called by the router with the chunk's value. */
+  /** The `zen.mode` CUSTOM-chunk consumer — called by the router with the chunk's value. */
   readonly apply: (value: unknown) => void
 }
 
@@ -42,13 +35,12 @@ export function createModeLines(notifications: NotificationsStore): ModeLines {
   let lastRenderedMode: string | undefined
   return {
     apply: (value: unknown) => {
-      const mode = readPiccPersistedMode(value)
-      if (mode === undefined) return
-      if (mode === lastRenderedMode) return
-      lastRenderedMode = mode
+      if (!Check(ZenPermissionModeState, value)) return
+      if (value.mode === lastRenderedMode) return
+      lastRenderedMode = value.mode
       // The harness's own line, not an extension's notice: never grouped with the startup
-      // chatter (#96), however early the entry was replayed — #84/#88 made it visible.
-      notifications.push(`Mode: ${mode}`, 'info', 'run')
+      // chatter (#96), however early the receipt was replayed — #84/#88 made it visible.
+      notifications.push(`Mode: ${value.mode}`, 'info', 'run')
     },
   }
 }

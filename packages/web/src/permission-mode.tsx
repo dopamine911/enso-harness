@@ -1,4 +1,3 @@
-import { readPiccPersistedMode } from '@zen/core'
 import { createStore, type Store, useStore, useThreadStores } from './store.ts'
 
 /**
@@ -9,14 +8,11 @@ import { createStore, type Store, useStore, useThreadStores } from './store.ts'
  * refused with `user dismissed dialog` (#73) can see they are in `default` instead of
  * reading the refusal as a bug.
  *
- * Two feeds, one store:
- *   • `zen.mode` — the receipt the server synthesises at every run start, carrying the mode
- *     the run begins in and the modes this session's picc registers. This is what makes
- *     `default` visible deterministically, whether or not picc's own session-start entry
- *     crosses (it does since #88; it did not before).
- *   • `zen.entry` — picc's persisted `modes` entry when the mode CHANGES mid-run, read
- *     through the same `readPiccPersistedMode` the host uses, so both sides share one
- *     definition of picc's shape.
+ * One feed, one store: `zen.mode`, carrying `{ mode, available }` — the receipt the server
+ * synthesises at every run start (the mode the run begins in and the modes this session
+ * registers), and the same chunk again whenever the host sees its mode extension persist a
+ * change mid-run (the `permission-mode` observation, L3). This store never learns which
+ * extension's entry a change was or what that entry looks like.
  *
  * ⚠ HONESTY RULE: `mode` is `undefined` — rendered as `unknown` — until a real value has
  * arrived. Never assumed. Before the first prompt no session exists yet, and the one case
@@ -28,9 +24,9 @@ import { createStore, type Store, useStore, useThreadStores } from './store.ts'
  */
 
 export interface PermissionModeState {
-  /** picc's current mode, or undefined until a receipt has arrived. */
+  /** The current mode, or undefined until a receipt has arrived. */
   mode: string | undefined
-  /** The modes the dropdown may offer — the server's intersection of picc's set with what this session registers. */
+  /** The modes the dropdown may offer — the host's intersection of its extension's set with what this session registers. */
   available: readonly string[]
 }
 
@@ -39,12 +35,6 @@ const UNKNOWN: PermissionModeState = { mode: undefined, available: [] }
 export interface PermissionModeStore extends Store<PermissionModeState> {
   /** Fold one `zen.mode` receipt's value in. Defensive like every wire crossing: a malformed value changes nothing. */
   readonly applyReceipt: (data: unknown) => void
-  /**
-   * Fold one `zen.entry` chunk's value in — a mode CHANGE persisted by picc. Any other
-   * extension's custom entry, or a malformed one, is ignored here: `readPiccPersistedMode`
-   * is the one place that decides what counts as picc's.
-   */
-  readonly applyPersistedEntry: (data: unknown) => void
   /**
    * Seed from the server's fresh-thread state (`GET /api/mode`) so the control reads
    * `default` from the first paint instead of `unknown` until the first run.
@@ -94,11 +84,6 @@ export function createPermissionModeStore(): PermissionModeStore {
     get: store.get,
     subscribe: store.subscribe,
     applyReceipt,
-    applyPersistedEntry: (data: unknown) => {
-      const mode = readPiccPersistedMode(data)
-      if (mode === undefined) return
-      store.set({ mode, available: store.get().available })
-    },
     seed: (fetchFreshThreadState: () => Promise<unknown>) => {
       if (store.get().mode !== undefined) return Promise.resolve()
       seeding ??= seedOnce(fetchFreshThreadState).finally(() => {
@@ -124,7 +109,7 @@ export interface PermissionModeSelectProps {
 }
 
 /**
- * The composer-row control: current mode, and a native `<select>` of the modes picc offers.
+ * The composer-row control: current mode, and a native `<select>` of the modes the host offers.
  *
  * Presentational and chat-agnostic on purpose — it can be rendered statically in a test
  * with no chat context. `chat-screen.tsx` wraps it with the send + loading wiring. A native
@@ -132,7 +117,7 @@ export interface PermissionModeSelectProps {
  * out of the box, and this repo has spent effort on what each vendored dependency costs.
  *
  * ⓘ Empty `available` (nothing received yet) disables the control rather than offering a
- * hardcoded list: the options are picc's to declare, not ours to assume.
+ * hardcoded list: the options are the mode extension's to declare, not ours to assume.
  */
 export function PermissionModeSelect({
   mode,
@@ -147,7 +132,7 @@ export function PermissionModeSelect({
       title={
         known
           ? "pi's permission mode for this thread — change it here or with /mode"
-          : "not known until the first prompt has run — a fresh thread starts in picc's default"
+          : 'not known until the first prompt has run — a fresh thread starts in the default mode'
       }
     >
       <span>mode</span>

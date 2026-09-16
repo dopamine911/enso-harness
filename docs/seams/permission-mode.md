@@ -4,29 +4,47 @@ The policy a run's tools execute under, as the server reads it and the browser s
 domain: **Permission** (the mode *concept*: what may run without asking) with one foot in **Thread**
 (the custom entry that persists it) and one in **Observation** (the receipt that carries it). This is
 the honest page: the concept is ours, the implementation today is a vendor extension read three
-layers away from it — leak **L3**, the seam #162 workstream 4 owns in three steps. Step A is done:
+layers away from it — leak **L3**, the seam #162 workstream 4 owns in three steps. A and B are done:
 everything the vendor persists and registers is read *below* the `AgentHost` seam, in
-`web/src/host/permission-mode-adapter.ts`, and the server asks the host. Steps B and C are named under
-*Pivot cost*.
+`web/src/host/permission-mode-adapter.ts`; the server asks the host; the host emits the
+`permission-mode` observation on a change and the browser folds that alone. `@zen/core` is
+`ZenPermissionModeState`. Step C is named under *Pivot cost*.
 
 Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Refresh with
 `bun scripts/docs/refresh-fences.ts docs/seams/permission-mode.md`.
 
 ## The contract
 
-What crosses to the browser: the mode a run is in, and the modes it may switch to.
+What crosses to the browser: the mode a run is in, and the modes it may switch to — at run start as
+the receipt, and on every change as the observation, one shape for both.
 
 <!-- source: packages/core/src/permission-mode.ts#ZenPermissionModeState -->
 ```ts
 /**
  * The receipt a run starts with (#84) — and the value of the `zen.mode` CUSTOM chunk that
- * carries it to the browser. `mode` is picc's current mode; `available` is what the mode
- * dropdown may offer: the modes the runtime's mode extension registers, intersected with the
- * commands this session actually registers, in the extension's order (the host decides).
+ * carries it to the browser, at run start and on every change. `mode` is the current mode;
+ * `available` is what the mode dropdown may offer: the modes the runtime's mode extension
+ * registers, intersected with the commands this session actually registers, in the
+ * extension's order (the host decides).
  */
 export const ZenPermissionModeState = Type.Object({
-  mode: Type.String(),
-  available: Type.Array(Type.String()),
+  mode: Type.String({ minLength: 1 }),
+  available: Type.Array(Type.String({ minLength: 1 })),
+})
+```
+
+<!-- source: packages/core/src/observation.ts#ZenPermissionMode -->
+```ts
+/**
+ * The permission mode changed, and what a run may switch to now (#162 workstream 4, L3).
+ * The HOST emits this when its mode extension persists a change — the one observation the
+ * browser reads the mode from mid-run, so no surface knows which extension's entry it was
+ * or what that entry looks like. The same `{ mode, available }` a run starts with
+ * (`ZenPermissionModeState`): one shape for the receipt and for the change.
+ */
+export const ZenPermissionMode = Type.Object({
+  kind: Type.Literal('permission-mode'),
+  ...ZenPermissionModeState.properties,
 })
 ```
 
@@ -58,7 +76,7 @@ export function persistedPermissionMode(branch: readonly unknown[]): string {
 }
 ```
 
-<!-- source: packages/core/src/permission-mode.ts#readPiccPersistedMode -->
+<!-- source: packages/web/src/host/permission-mode-adapter.ts#readPiccPersistedMode -->
 ```ts
 /**
  * The mode carried by ONE persisted custom entry, or undefined when the entry is not
@@ -68,10 +86,10 @@ export function persistedPermissionMode(branch: readonly unknown[]): string {
  */
 export function readPiccPersistedMode(entry: unknown): string | undefined {
   if (typeof entry !== 'object' || entry === null) return undefined
-  const { customType, data } = entry as { customType?: unknown; data?: unknown }
-  if (customType !== PICC_MODES_CUSTOM_TYPE) return undefined
-  if (typeof data !== 'object' || data === null) return undefined
-  const { mode } = data as { mode?: unknown }
+  if (!('customType' in entry) || entry.customType !== PICC_MODES_CUSTOM_TYPE) return undefined
+  if (!('data' in entry) || typeof entry.data !== 'object' || entry.data === null) return undefined
+  if (!('mode' in entry.data)) return undefined
+  const { mode } = entry.data
   return typeof mode === 'string' && mode.length > 0 ? mode : undefined
 }
 ```
@@ -104,15 +122,8 @@ export function storedPermissionModeState(branch: readonly unknown[]): ZenPermis
 }
 ```
 
-The vendor's shape and vocabulary, once each. The `customType` and its reader are the one vendor fact
-still in `@zen/core` (the browser's two `zen.entry` readers need them until step B); the registered set
-lives with the walk, below the seam.
-
-<!-- source: packages/core/src/permission-mode.ts#PICC_MODES_CUSTOM_TYPE -->
-```ts
-/** The `customType` picc persists its state under. */
-export const PICC_MODES_CUSTOM_TYPE = 'modes'
-```
+The vendor's registered set, once, below the seam with the walk and the entry reader (the
+`customType` it reads is a private constant of the same file):
 
 <!-- source: packages/web/src/host/permission-mode-adapter.ts#PICC_PERMISSION_MODES -->
 ```ts
@@ -143,15 +154,20 @@ route does the same in `server/index.ts`). The inspection and summary report the
 (`ZenPromptReceipt`, `packages/core/src/follow.ts:158-169`) does **not** carry the mode; it carries
 `messageId`, `generation` and `queued` only.
 
-**Shown by the browser, two views.** The snapshot's `permissionMode` becomes the `zen.mode` custom
-event (`packages/web/src/follow-connection.ts:349`), routed to the per-thread mode store
-(`custom-event-router.ts:49-51`). A mid-run change arrives as the `custom-entry` observation the mapper
-emits for any custom entry (`rpc/map-events.ts:315-316`), routed as `zen.entry` to *both* views
-(`custom-event-router.ts:42-47`): `permission-mode.tsx` (the composer's `<select>`, which says
-`unknown` until a real value has arrived, `permission-mode.tsx:21-23,165-169`) and `mode-lines.ts`
-(one transcript line per distinct value, worded as state, `mode-lines.ts:13-17,44-52`). Changing the
-mode is a prompt: the select sends `/${mode}` (`chat-screen.tsx:288-292,314`), because the extension's
-setter is closure-private and its commands are the only way in.
+**Said by the host, mid-run.** When the host's session subscription sees the vendor persist a mode, it
+emits its own `permission_mode` event right after it (`host/agent-host.ts`, the session subscription;
+pinned by `agent-host.test.ts` against the real extension). The mapper carries it as the
+`permission-mode` observation (`rpc/map-events.ts#mapPermissionMode`), and `rpc/to-agui.ts` emits it as
+the same `zen.mode` chunk the run-start receipt rides. The vendor's `custom-entry` still crosses as
+`zen.entry` — recorded and counted by the debug pane, rendered by nothing.
+
+**Shown by the browser, two views, one feed.** `zen.mode` — from the snapshot
+(`packages/web/src/follow-connection.ts`) and from every change — is routed to *both* views
+(`custom-event-router.ts`): `permission-mode.tsx` (the composer's `<select>`, which says `unknown` until
+a real value has arrived) and `mode-lines.ts` (one transcript line per distinct value, worded as state).
+Neither knows what a vendor entry is. Changing the mode is still a prompt: the select sends `/${mode}`
+(`chat-screen.tsx`), because the extension's setter is closure-private and its commands are the only
+way in — step C.
 
 **Second implementation:** the fakes (#178). `createFakeHostedThread` answers a literal
 `permissionModeState` for a live thread and `createFakeAgentHost` *declares* its fresh and stored
@@ -165,19 +181,10 @@ last entry wins, none is `default`, another extension's custom entry is not a mo
 - **The vendor gate** (`test/vendor-gate.test.ts`, #145): a vendor extension's name may appear in
   code only under `packages/web/src/host/` and `packages/harness/extensions/`. Every other file that
   spells it is one allowlist line, each with its reason — and every line below is this seam's:
-  - `packages/core/src/permission-mode.ts` — "L3 (picc's persistence read in core): the mode's own
-    vocabulary is picc's registered set and its persisted `customType: "modes"` entry. Leaves when the
-    mode concept is ours."
-  - `packages/core/src/index.ts` — "its re-export surface: `PICC_*` is part of `@zen/core`'s public
-    names today."
-  - `packages/web/src/server/index.ts`, `packages/web/src/server/follow.ts` — "The two server routes
-    that answer `{ mode, available }`: the available set is picc's. Leaves with L3."
-  - `packages/web/src/permission-mode.tsx` — "The dropdown reads the persisted mode through
-    `readPiccPersistedMode` and says whose default a fresh thread starts in. The call leaves with L3;
-    the sentence stops being true the same day."
-  - `packages/web/src/mode-lines.ts` — "The status line's second reader of the same persisted entry
-    … Leaves with L3."
-  (`vendor-gate.test.ts:68-88`. The seventh line, `packages/core/src/guard.ts`, is the guards page's.)
+  none for this seam any more: the six lines L3 needed (`core/permission-mode.ts`, `core/index.ts`,
+  `server/index.ts`, `server/follow.ts`, `permission-mode.tsx`, `mode-lines.ts`) left with steps A and
+  B, and the gate refuses a row that matches nothing, so they cannot come back unnoticed. The one line
+  left, `packages/core/src/guard.ts`, is the guards page's.
 - **The tool-call participants tripwire** (`packages/harness/extensions/__tests__/tool-call-participants.test.ts`)
   names the mode extension as the second of exactly two `tool_call` handlers, so it cannot be silently
   replaced by a third — see the guards page.
@@ -186,25 +193,17 @@ last entry wins, none is `default`, another extension's custom entry is not a mo
 
 ## What crosses it that should not
 
-**L3, the browser's half** (`.local/refactor/goals.md` §2). After step A, what still crosses above
-the host:
-
-- `@zen/core` still knows the vendor's persisted entry — `customType: "modes"`, `data.mode` — as
-  `PICC_MODES_CUSTOM_TYPE` and `readPiccPersistedMode`, because the browser reads it.
-- The browser reads the persisted entry itself, in two files, and its tooltip says whose default a
-  fresh thread starts in (`permission-mode.tsx`). The composer switches mode by sending the vendor's
-  slash command by name as a prompt (`chat-screen.tsx`).
-
-What no longer crosses: the registered set, the initial mode and the walk — the server asks the host.
-The leak is inventory (four allowlist lines: `core/permission-mode.ts`, `core/index.ts`,
-`permission-mode.tsx`, `mode-lines.ts`), not surprise.
+**L3, what is left** (`.local/refactor/goals.md` §2): the composer switches mode by sending the
+vendor's slash command by name as a *prompt* (`chat-screen.tsx`), because the extension's setter is
+closure-private. That is step C. Nothing above the host reads the vendor's persisted entry or spells
+its set any more; the vendor gate's allowlist has no row for this seam.
 
 ## Pivot cost
 
 **Replace the mode extension** and the files that change are `permission-mode-adapter.ts` (the set,
-the initial mode, the walk) and `agent-host.ts` (the command-name intersection) under `host/` — plus,
-until steps B and C, `permission-mode.ts` (the entry reader), `permission-mode.tsx` and `mode-lines.ts`
-(the browser's two readers) and `chat-screen.tsx` (the slash command the select sends).
+the initial mode, the walk, the entry reader) and `agent-host.ts` (the command-name intersection and
+the `permission_mode` emission) under `host/` — plus, until step C, `chat-screen.tsx` (the slash
+command the select sends).
 `ZenFollowSnapshot`, the inspection, the summary, the router, the store's fold and both server cold
 paths do not change: they hold `{ mode, available }` and the fakes prove the server runs on that alone.
 
@@ -215,10 +214,11 @@ implementation the host adapts"), in three steps:
   `permission-mode-adapter.ts`; `AgentHost` gained `freshPermissionMode` and `storedPermissionMode`;
   the server's cold paths ask the host; the `?debug` drawer stopped re-walking the vendor's entries in
   the browser. Two allowlist lines deleted (`server/index.ts`, `server/follow.ts`).
-- **B.** The host emits a mode observation when it sees the vendor's entry; the browser's two
-  `zen.entry` readers fold `zen.mode` instead and stop knowing a custom entry's shape; the tooltip
-  stops naming the vendor. `readPiccPersistedMode` and `PICC_MODES_CUSTOM_TYPE` follow the rest below
-  the seam and `@zen/core` is `ZenPermissionModeState` alone. Four allowlist lines deleted.
+- **B — done.** The host emits `permission_mode` when it sees the vendor's entry; the mapper carries
+  it as the `permission-mode` observation; the browser's two readers fold `zen.mode` and stopped knowing
+  a custom entry's shape; the tooltip stopped naming the vendor. `readPiccPersistedMode` and the
+  `customType` followed the rest below the seam; `@zen/core` is `ZenPermissionModeState` alone. Four
+  allowlist lines deleted.
 - **C.** Changing the mode becomes a control route (`POST …/mode` → `ThreadRuntime`), the host
   translating to the vendor's slash command; the select stops sending a prompt.
 

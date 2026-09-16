@@ -7,6 +7,7 @@ import {
   type ZenDialogSpec,
   ZenNotifyType,
   type ZenObservation,
+  ZenPermissionModeState,
   type ZenToolResultDescriptor,
   type ZenUsage,
 } from '@zen/core'
@@ -175,6 +176,18 @@ function textsOf(value: unknown): string[] {
 }
 
 /**
+ * The host's own event (L3, #162 workstream 4): it saw its mode extension persist a change
+ * and says what the mode is now and what may be switched to — the browser never learns which
+ * entry that was. Checked like every crossing: a malformed one is carried as unmapped, never
+ * dropped.
+ */
+function mapPermissionMode(event: RuntimeEvent): ZenObservation {
+  const { type: _type, ...state } = event
+  if (Check(ZenPermissionModeState, state)) return { kind: 'permission-mode', ...state }
+  return { kind: 'unmapped', event }
+}
+
+/**
  * A message began (#112). A USER message carries its text so a second follower sees the
  * prompt another tab sent; every other role's content arrives by its own events.
  */
@@ -303,6 +316,9 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
       }
       return { kind: 'unmapped', event }
     }
+
+    case 'permission_mode':
+      return mapPermissionMode(event)
 
     case 'entry_appended': {
       // ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via

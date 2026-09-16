@@ -1,5 +1,6 @@
 import { type Static, Type } from 'typebox'
 import { ZenDialogSpec } from './dialog.ts'
+import { ZenPermissionModeState } from './permission-mode.ts'
 import { ZenToolResultDescriptor } from './tool-result.ts'
 
 /**
@@ -168,6 +169,19 @@ export const ZenCustomEntry = Type.Object({
 export type ZenCustomEntry = Static<typeof ZenCustomEntry>
 
 /**
+ * The permission mode changed, and what a run may switch to now (#162 workstream 4, L3).
+ * The HOST emits this when its mode extension persists a change — the one observation the
+ * browser reads the mode from mid-run, so no surface knows which extension's entry it was
+ * or what that entry looks like. The same `{ mode, available }` a run starts with
+ * (`ZenPermissionModeState`): one shape for the receipt and for the change.
+ */
+export const ZenPermissionMode = Type.Object({
+  kind: Type.Literal('permission-mode'),
+  ...ZenPermissionModeState.properties,
+})
+export type ZenPermissionMode = Static<typeof ZenPermissionMode>
+
+/**
  * A message began — pi's `message_start` (#112). The boundary AG-UI's `TEXT_MESSAGE_START`
  * supplied and the observation vocabulary lacked. `text` rides only on a USER message: a
  * second follower of the same thread sees the prompt another tab sent (dsh's
@@ -281,6 +295,7 @@ export const ZenObservation = Type.Union([
   ZenToolCall,
   ZenToolResultObservation,
   ZenCustomEntry,
+  ZenPermissionMode,
   ZenMessageStart,
   ZenMessageEnd,
   ZenTurnStart,

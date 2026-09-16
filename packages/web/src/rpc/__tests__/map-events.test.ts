@@ -242,6 +242,19 @@ test('a custom entry with no data still maps — the shape belongs to its extens
     data: undefined,
   }))
 
+// --- L3 (#162 workstream 4): the host's own mode event, so no surface reads a vendor entry
+test("the host's permission_mode event maps to the permission-mode observation, state intact", () =>
+  expect(mapPiEvent({ type: 'permission_mode', mode: 'plan', available: ['default', 'plan'] })).toEqual({
+    kind: 'permission-mode',
+    mode: 'plan',
+    available: ['default', 'plan'],
+  }))
+
+test('a permission_mode event without a well-formed state is carried as unmapped, never dropped', () => {
+  expect(kindOf({ type: 'permission_mode', mode: 'plan' })).toBe('unmapped')
+  expect(kindOf({ type: 'permission_mode', mode: 7, available: [] })).toBe('unmapped')
+})
+
 // ⚠ Non-custom entries duplicate first-class observations (messages stream as
 // message_update), so they stay unmapped exactly as before this case existed.
 test('a non-custom entry stays unmapped', () =>
