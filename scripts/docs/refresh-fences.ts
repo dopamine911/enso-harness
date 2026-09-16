@@ -50,7 +50,8 @@ export function refreshFences(text: string): { text: string; refreshed: number }
     if (marker === null) continue
     if (!TS_FENCE_OPEN.test(lines[lineIndex + 1] ?? '')) continue
     const closeIndex = lines.findIndex((candidate, index) => index > lineIndex + 1 && FENCE_CLOSE.test(candidate))
-    if (closeIndex === -1) break
+    // Refuse, never truncate — the same rule as the generated block above.
+    if (closeIndex === -1) throw new Error(`line ${lineIndex + 2}: sourced ts fence is never closed`)
     const declaration = extractDeclarationFromFile(join(ROOT, marker[1] ?? ''), marker[2] ?? '')
     output.push(lines[lineIndex + 1] ?? '', declaration.text, lines[closeIndex] ?? '')
     refreshed += 1

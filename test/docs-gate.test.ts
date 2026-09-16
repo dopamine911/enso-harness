@@ -57,13 +57,20 @@ interface Fence {
   readonly source: { path: string; symbol: string } | undefined
 }
 
-/** Every ```` ```ts ```` fence in a page, with the `source:` marker directly above it when there is one. */
-function fencesOf(lines: readonly string[]): Fence[] {
+/**
+ * Every ```` ```ts ```` fence in a page, with the `source:` marker directly above it when there
+ * is one. An unclosed fence is an offender, not the end of the scan: the page after it is
+ * unreadable as markdown, and a fence the scan cannot see is a fence it cannot check.
+ */
+function fencesOf(page: string, lines: readonly string[], offenders: string[]): Fence[] {
   const fences: Fence[] = []
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     if (!TS_FENCE_OPEN.test(lines[lineIndex] ?? '')) continue
     const closeIndex = lines.findIndex((line, index) => index > lineIndex && FENCE_CLOSE.test(line))
-    if (closeIndex === -1) break
+    if (closeIndex === -1) {
+      offenders.push(`${page}:${lineIndex + 1}: ts fence is never closed`)
+      break
+    }
     const marker = SOURCE_MARKER.exec(lines[lineIndex - 1] ?? '')
     fences.push({
       openLine: lineIndex + 1,
@@ -77,7 +84,7 @@ function fencesOf(lines: readonly string[]): Fence[] {
 
 function sourcedFenceOffenders(page: string, lines: readonly string[], fenceMustBeSourced: boolean): string[] {
   const offenders: string[] = []
-  for (const fence of fencesOf(lines)) {
+  for (const fence of fencesOf(page, lines, offenders)) {
     if (fence.source === undefined) {
       if (fenceMustBeSourced) offenders.push(`${page}:${fence.openLine}: ts fence without a <!-- source: --> marker`)
       continue
