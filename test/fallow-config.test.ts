@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import fallowConfig from '../.fallowrc.jsonc'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
@@ -18,7 +19,6 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
  * vendored ones under `node_modules/` are dependencies, ignored by name in the config.
  */
 
-const config = readFileSync(join(REPOSITORY_ROOT, '.fallowrc.jsonc'), 'utf8')
 const manifest = JSON.parse(readFileSync(join(REPOSITORY_ROOT, 'packages/harness/package.json'), 'utf8')) as {
   pi: { extensions: string[] }
 }
@@ -28,6 +28,45 @@ test('⚠ every repository extension in the harness manifest is a fallow entry, 
     .filter((path) => path.startsWith('./'))
     .map((path) => `packages/harness/${path.slice(2)}`)
     .sort()
-  const listed = [...config.matchAll(/"(packages\/harness\/extensions\/[^"]+)"/g)].map((match) => match[1] ?? '').sort()
+  const listed = (fallowConfig as { entry: string[] }).entry
+    .filter((path) => path.startsWith('packages/harness/extensions/'))
+    .sort()
   expect(listed).toEqual(declared)
+})
+
+/**
+ * The zone table in `docs/architecture.md` → *Ownership boundary* is prose restating
+ * `.fallowrc.jsonc` → `boundaries` (#173) — which #167's rule forbids unless it is checked. This
+ * checks it: one row per zone, its directories, and the zones it may import, in config order.
+ * The config is the source; the page is read back into the same shape.
+ */
+
+interface BoundaryConfig {
+  zones: { name: string; patterns: string[] }[]
+  rules: { from: string; allow: string[] }[]
+}
+
+const boundaries: BoundaryConfig = (fallowConfig as { boundaries: BoundaryConfig }).boundaries
+const architecture = readFileSync(join(REPOSITORY_ROOT, 'docs/architecture.md'), 'utf8')
+
+const ZONE_ROW = /^\| `([\w-]+)` \| (.+?) \| (.+?) \|$/gm
+
+test('⚠ the architecture page’s zone table equals the boundaries config (#173)', () => {
+  const fromConfig = boundaries.zones.map((zone) => {
+    const rule = boundaries.rules.find((candidate) => candidate.from === zone.name)
+    const directories = zone.patterns.map((pattern) => pattern.replace(/\*\*$/, ''))
+    const allow = rule?.allow ?? []
+    return { name: zone.name, directories, allow }
+  })
+  const everyZone = boundaries.zones.map((zone) => zone.name)
+  const fromPage = [...architecture.matchAll(ZONE_ROW)].map((match) => {
+    const [, name = '', directoryCell = '', allowCell = ''] = match
+    const directories = [...directoryCell.matchAll(/`([^`]+)`/g)].map((code) => code[1] ?? '')
+    let allow: string[]
+    if (allowCell === 'nothing') allow = []
+    else if (allowCell === 'anything') allow = everyZone.filter((zoneName) => zoneName !== name)
+    else allow = [...allowCell.matchAll(/`([^`]+)`/g)].map((code) => code[1] ?? '')
+    return { name, directories, allow }
+  })
+  expect(fromPage).toEqual(fromConfig)
 })

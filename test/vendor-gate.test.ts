@@ -22,6 +22,11 @@ import { codeOffenders, hasWordSequence, wordsOf } from './gate-support.ts'
  * It reads WORDS, not substrings (PR #150 review), and skips comment lines — both now in
  * `gate-support.ts`, shared with the glossary gates (#165), with the reasons recorded there.
  *
+ * A second sensor sits BESIDE this one, not instead of it: `.fallowrc.jsonc` → `boundaries`
+ * (#173) checks the same rule on the import graph — re-export chains, type-only imports, a
+ * barrel that leaks a zone — which a line scan cannot follow. This scan still catches what
+ * the graph cannot: a vendor's NAME in a string literal. Architecture → *Ownership boundary*.
+ *
  * What it still cannot catch, said up front: it is a line scan, not a type checker.
  * `ZenThreadInspection.entries: unknown[]` carries pi's persistence format with no import and
  * no vendor name in it (goals L2). That needs a transcript type of ours. The third test this
