@@ -36,7 +36,8 @@ export function refreshFences(text: string): { text: string; refreshed: number }
     const block = BLOCK_OPEN.exec(line)
     if (block !== null) {
       const closeIndex = lines.findIndex((candidate, index) => index > lineIndex && BLOCK_CLOSE.test(candidate))
-      if (closeIndex === -1) break
+      // Refuse, never truncate: a page with an unclosed block is left exactly as it was.
+      if (closeIndex === -1) throw new Error(`line ${lineIndex + 1}: generated-block for ${block[1]} is never closed`)
       const generated = Bun.spawnSync(['bun', block[1] ?? ''], { cwd: ROOT })
       if (generated.exitCode !== 0)
         throw new Error(`${block[1]} exited ${generated.exitCode}: ${generated.stderr.toString()}`)

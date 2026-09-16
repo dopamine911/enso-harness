@@ -177,18 +177,25 @@ function architectureTreePaths(text: string): string[] {
   const open = text.indexOf('```\n', start)
   const close = text.indexOf('\n```', open + 4)
   if (start < 0 || open < 0 || close < 0) throw new Error('architecture.md has no Package structure tree')
-  const stack: string[] = []
+  // Each stack level is the directory a deeper line nests under. A line naming several
+  // siblings (`skills/ prompts/ themes/`) pushes no directory: a child under it would have
+  // no unambiguous parent, so such a child is refused rather than resolved against the first.
+  const stack: (string | undefined)[] = []
   const paths: string[] = []
   for (const line of text.slice(open + 4, close).split('\n')) {
     const names = (line.split('#')[0] ?? '').trim()
     if (names === '') continue
     const depth = ((/^ */.exec(line)?.[0].length ?? 0) / 2) | 0
     stack.length = depth
+    if (stack.some((segment) => segment === undefined)) {
+      throw new Error(`architecture.md tree: "${names}" nests under a line that names several siblings`)
+    }
     const parent = stack.join('')
-    for (const name of names.split(/\s+/)) {
+    const siblings = names.split(/\s+/)
+    for (const name of siblings) {
       if (!name.includes('*')) paths.push(parent + name)
     }
-    stack.push(names.split(/\s+/)[0] ?? '')
+    stack.push(siblings.length === 1 ? siblings[0] : undefined)
   }
   return paths
 }
