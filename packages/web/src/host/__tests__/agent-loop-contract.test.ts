@@ -24,9 +24,15 @@ test(`⚠ CONTRACT: pi-agent-core@${version} turns a blocking tool_call verdict 
   // The block branch, verbatim in shape: the verdict's reason IS the result's content.
   expect(agentLoopSource).toContain('if (beforeResult?.block) {')
   expect(agentLoopSource).toContain('createErrorToolResult(beforeResult.reason || "Tool execution was blocked")')
-  // …and it is flagged as an error, which is the one signal the mapper reads.
-  const blockBranch = agentLoopSource.slice(agentLoopSource.indexOf('if (beforeResult?.block) {'))
-  expect(blockBranch.slice(0, 400)).toContain('isError: true')
+  // …and it is flagged as an error, which is the one signal the mapper reads: the branch's
+  // own `return {…}` — from the `if` to the first `return` that follows it, through its
+  // closing `};` — carries `isError: true`. Bounded by the branch's syntax, not a character count.
+  const branchStart = agentLoopSource.indexOf('if (beforeResult?.block) {')
+  const returnStart = agentLoopSource.indexOf('return {', branchStart)
+  const returnEnd = agentLoopSource.indexOf('};', returnStart)
+  expect(returnStart).toBeGreaterThan(branchStart)
+  expect(returnEnd).toBeGreaterThan(returnStart)
+  expect(agentLoopSource.slice(returnStart, returnEnd)).toContain('isError: true')
   // No distinct "blocked" event exists for the mapper to read instead.
   expect(agentLoopSource).not.toMatch(/type:\s*["']tool_execution_blocked["']/)
 })
