@@ -221,12 +221,17 @@ test('⚠ every path the architecture tree names exists, or is gitignored (#162 
   expect(missing).toEqual([])
 })
 
-/** Relative links in a page (`](./x.md)`, `](../y/z.json)`), with the line they sit on; URLs and anchors-only skipped. */
+/**
+ * Relative links in a page — `](./x.md)`, `](../y/z.json)` and the bare `](docs/x.md)` README
+ * uses — with the line they sit on. Skipped: URLs with a scheme, absolute paths, `#anchor`-only.
+ */
 function relativeLinks(text: string): { target: string; line: number }[] {
   const links: { target: string; line: number }[] = []
   text.split('\n').forEach((line, index) => {
-    for (const match of line.matchAll(/\]\((\.{1,2}\/[^)#\s]+)(?:#[^)]*)?\)/g)) {
-      links.push({ target: match[1] ?? '', line: index + 1 })
+    for (const match of line.matchAll(/\]\(([^)#\s]+)(?:#[^)]*)?\)/g)) {
+      const target = match[1] ?? ''
+      if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('/')) continue
+      links.push({ target, line: index + 1 })
     }
   })
   return links
