@@ -1,4 +1,4 @@
-import { ZenObservation } from '@zen/core'
+import { ZenObservation } from '../observation.ts'
 
 /**
  * The oracle both "every observation" sweeps compare against (#53 S1.4): every `kind`

@@ -95,10 +95,9 @@
   "health": {
     "maxCrap": 0
   },
-  // `warn` until the re-cut lands (#173 acceptance 3): the day-one list is recorded on the issue
-  // and is the move list; the same PR that empties it promotes this to `error`. Coverage and
-  // forbidden-call findings share the token, so they are advisory too until then.
-  "rules": { "boundary-violation": "warn" },
+  // `error` since the day-one list (five, all `rpc/`, recorded on #173) reached zero: a crossing
+  // now fails the dead-code gate step. Coverage and forbidden-call findings share the severity.
+  "rules": { "boundary-violation": "error" },
   // Architecture boundaries (#173, #162 workstream 9): the vendor gate and the storage seam read
   // TEXT; this reads the IMPORT GRAPH, and catches what text cannot — a re-export chain, a
   // type-only import, a barrel that leaks a zone. Zones are the TARGET layout of the re-cut,

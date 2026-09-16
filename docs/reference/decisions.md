@@ -13,6 +13,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/__tests__/log-process.test.ts` | `#132` | The file a user hands us (#132), end to end through the real configurator: what a line looks like, what never reaches it, what every line under a route carries — and the knob. |
 | `packages/core/src/__tests__/log-recorder.ts` | `#132`, `#178` | The tests' sink (#132), one for every package (#178): every `zen` record, at every level, into memory — a guard's verdict, an audit line or a route's problem is asserted as the record it is, the way a bundle reader would read it, not as a line on stderr. |
 | `packages/core/src/__tests__/no-duplicate-paths.test.ts` | `#59` | The anti-duplication anchor for path resolution (#59) — Daniel: "this should live in core and prevent duplicate code again." |
+| `packages/core/src/__tests__/observation-kinds.ts` | `#53` | The oracle both "every observation" sweeps compare against (#53 S1.4): every `kind` literal the ZenObservation union declares, sorted. |
 | `packages/core/src/__tests__/secrets.test.ts` | `#89` | #89: secrets stay out of the environment the model's tools inherit. |
 | `packages/core/src/__tests__/thread-inspection.test.ts` | `#86`, `#100` | The row formats are shared by the `?debug` drawer and `zen-thread.mjs` (PR #100 review: one definition, after the #86 pair had drifted). |
 | `packages/core/src/config.ts` | `#59` | zen-harness's ONE committed config file (#59): `zen.config.json` at the repository root. |
@@ -106,17 +107,15 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/mode-lines.ts` | `#29`, `#69`, `#88`, `#162` | Permission-mode lines in the transcript (#29, the remaining half). |
 | `packages/web/src/notifications.tsx` | `#29`, `#84`, `#94`, `#96` | pi's `notify` messages, rendered (#29). |
 | `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |
-| `packages/web/src/rpc/__tests__/observation-kinds.ts` | `#53` | The oracle both "every observation" sweeps compare against (#53 S1.4): every `kind` literal the ZenObservation union declares, sorted. |
-| `packages/web/src/rpc/__tests__/transcript-to-messages.test.ts` | `#95`, `#162` | #95: a stored branch mounts as the messages a live run would have left behind. |
 | `packages/web/src/rpc/custom-event-names.ts` | `#29`, `#53`, `#112` | The AG-UI CUSTOM chunk names zen derives in the browser — the contract between the adapter (`to-agui.ts`, which emits them from observations, in memory, never on the wire since #112) and the router (`custom-event-router.ts`, which dispatches on them). |
 | `packages/web/src/rpc/to-agui.ts` | `#18`, `#24`, `#112` | `ZenObservation` → AG-UI `StreamChunk` (#24, #112). |
-| `packages/web/src/rpc/transcript-to-messages.ts` | `#93`, `#95`, `#162` | The transcript → TanStack `UIMessage`s (#95): the history a resumed thread mounts with. |
 | `packages/web/src/server/__tests__/fake-hosted-thread.ts` | `#178` | The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a `ThreadRuntime` from plain closures that records every call, so the server, the registry and the routes are driven over it and asserted through what it recorded. |
 | `packages/web/src/server/__tests__/follow.test.ts` | `#109`, `#112` | The wire, measured (#109's receipt, kept as the contract — #112). |
 | `packages/web/src/server/__tests__/logs-route.test.ts` | `#132` | `POST /api/logs` (#132 slice 3): the browser's batch into this process's logger, under the browser's own category, at its level, marked as the browser's — or a 4xx that is never a record of its own. |
 | `packages/web/src/server/__tests__/observation-log.test.ts` | `#144` | The tier an observation lands at, and the one record that is not an observation at all: the run's time to first token (#144). |
 | `packages/web/src/server/__tests__/run-timing.test.ts` | `#144` | Time to first token, once per run (#144). |
 | `packages/web/src/server/__tests__/server-handler.test.ts` | `#76`, `#86`, `#95`, `#97` | The server's routes beside the wire, over real HTTP (#76, #86, #95, #97): what the inspection, history and session-listing routes report about threads the prompt route built. |
+| `packages/web/src/server/__tests__/transcript-to-messages.test.ts` | `#95`, `#162` | #95: a stored branch mounts as the messages a live run would have left behind. |
 | `packages/web/src/server/bundle-route.ts` | `#132`, `#137` | `GET /api/logs/bundle[?thread=<id or prefix>]` (#132 item 5): the day's records, the live threads' inspections, and the versions, as ONE markdown file with the records fenced as JSONL — `bun run logs --file` reads it back. |
 | `packages/web/src/server/dev-web.ts` | `#9`, `#36` | Dev entry point for the web surface — Bun's fullstack dev server, replacing vite (#36). |
 | `packages/web/src/server/dev.ts` | `#9`, `#132` | Dev entry point for the zen server. |
@@ -126,6 +125,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/run-timing.ts` | `#144` | When a run was admitted, so its FIRST delta can be recorded as a latency (#144 slice 1). |
 | `packages/web/src/server/sse.ts` | `#109` | The SSE plumbing every streaming route shares: the response headers and the keepalive. |
 | `packages/web/src/server/thread-registry.ts` | `#43`, `#69`, `#113`, `#116` | One pi session per chat THREAD, held across runs (#69 PR 2 — closes #43). |
+| `packages/web/src/server/transcript-to-messages.ts` | `#93`, `#95`, `#162` | The transcript → TanStack `UIMessage`s (#95): the history a resumed thread mounts with. |
 | `packages/web/src/store.ts` | `#90` | The smallest external store React can subscribe to: one value, replaced whole, and a listener set. |
 | `packages/web/src/stored-threads.ts` | `#29`, `#86`, `#95` | The sessions a user can come back to (#95): pi's session files for this workspace, as the server lists them. |
 | `packages/web/src/thread-stats.tsx` | `#44`, `#45`, `#90` | The thread-stats STORE (#45, phase 1): cost so far + the last request's prompt size. |

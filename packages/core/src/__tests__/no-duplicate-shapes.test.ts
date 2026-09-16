@@ -46,7 +46,9 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   // sinks on `node:fs` at import and is not tree-shaken, so `log-process.ts` is
   // `@zen/core/log-process`; and the tests' recording sink (#178) is `@zen/core/log-recorder`
   // from under `__tests__`, where the logging gate's three-file LogTape inventory does not
-  // look, because it is a test sink and not a fourth production file.
+  // look, because it is a test sink and not a fourth production file. A third, test-only as
+  // well: the observation-kinds oracle (#173) is `@zen/core/observation-kinds` because its two
+  // sweeps sit in `host/` and the browser, zones that may import only `core`.
   const modules = readdirSync(join(import.meta.dir, '..'), { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.ts') && entry.name !== 'index.ts')
     .map((entry) => entry.name)
@@ -57,7 +59,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   const subpathModules = Object.entries(manifest.exports)
     .filter(([subpath]) => subpath !== '.')
     .map(([, target]) => target.replace(/^\.\/src\//, ''))
-  expect(subpathModules).toEqual(['log-process.ts', '__tests__/log-recorder.ts'])
+  expect(subpathModules).toEqual(['log-process.ts', '__tests__/log-recorder.ts', '__tests__/observation-kinds.ts'])
   const inBarrel = modules.filter((module) => barrel.includes(module))
   const expectedInBarrel = modules.filter((module) => !subpathModules.includes(module))
   expect(inBarrel.sort()).toEqual(expectedInBarrel.sort())
