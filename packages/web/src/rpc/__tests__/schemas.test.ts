@@ -120,7 +120,10 @@ test('EVERY observation the mapper can emit validates against ZenObservation', (
   // sweep in to-agui.test.ts to 9 and left this one at 8), and a count cannot say WHICH
   // kind is missing. Kinds the SERVER synthesises (never off a pi event) are named here,
   // and must validate too.
-  const synthesised = [{ kind: 'prompt-rejected', messageId: 'm', reason: 'r' }] as const
+  const synthesised = [
+    { kind: 'prompt-rejected', messageId: 'm', reason: 'r' },
+    { kind: 'permission-mode-rejected', mode: 'plan', reason: 'r' },
+  ] as const
   for (const observation of synthesised) expect(Check(ZenObservation, observation)).toBe(true)
   const coveredKinds: string[] = [
     ...new Set([

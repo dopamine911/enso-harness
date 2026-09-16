@@ -182,6 +182,19 @@ export const ZenPermissionMode = Type.Object({
 export type ZenPermissionMode = Static<typeof ZenPermissionMode>
 
 /**
+ * A mode change the route told the runtime about was REJECTED after the 204 went out (L3
+ * step C): the vendor's command refused, or failed before acceptance. The SERVER announces
+ * it, as it announces `prompt-rejected` — the feed is the browser's only way to hear that a
+ * click did nothing, and every follower hears it alike. The mode is unchanged.
+ */
+export const ZenPermissionModeRejected = Type.Object({
+  kind: Type.Literal('permission-mode-rejected'),
+  mode: Type.String({ minLength: 1 }),
+  reason: Type.String(),
+})
+export type ZenPermissionModeRejected = Static<typeof ZenPermissionModeRejected>
+
+/**
  * A message began — pi's `message_start` (#112). The boundary AG-UI's `TEXT_MESSAGE_START`
  * supplied and the observation vocabulary lacked. `text` rides only on a USER message: a
  * second follower of the same thread sees the prompt another tab sent (dsh's
@@ -296,6 +309,7 @@ export const ZenObservation = Type.Union([
   ZenToolResultObservation,
   ZenCustomEntry,
   ZenPermissionMode,
+  ZenPermissionModeRejected,
   ZenMessageStart,
   ZenMessageEnd,
   ZenTurnStart,

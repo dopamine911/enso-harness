@@ -45,6 +45,7 @@
         "ZenDialogSettled",
         "ZenMessageStart",
         "ZenPermissionMode",
+        "ZenPermissionModeRejected",
         "ZenPromptRejected",
         "ZenQueue",
         "ZenTurnEnd",

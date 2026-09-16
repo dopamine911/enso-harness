@@ -7,6 +7,7 @@ import {
   type PromptOutcome,
   type PromptRequest,
   type RuntimeEvent,
+  type ThreadRuntime,
   ZEN_IMAGE_MAX_BYTES,
   ZEN_PROMPT_BODY_MAX_BYTES,
   ZEN_PROMPT_MAX_IMAGES,
@@ -41,7 +42,8 @@ interface FakeHost {
   readonly accept: () => void
 }
 
-function fakeHost(commands: string[] = ['mode']): FakeHost {
+/** `overrides`: a test's own answer for one runtime method, over the fake's recording default (L3 step C). */
+function fakeHost(commands: string[] = ['mode'], overrides: Partial<ThreadRuntime> = {}): FakeHost {
   const built: FakeThreadRecord[] = []
   let emit: (event: RuntimeEvent) => void = () => undefined
   let accept: () => void = () => undefined
@@ -54,6 +56,7 @@ function fakeHost(commands: string[] = ['mode']): FakeHost {
         },
         listCommands: () => commands.map((name) => ({ name, source: 'extension' as const })),
         permissionModeState: () => ({ mode: 'default', available: ['default', 'plan'] }),
+        ...overrides,
       }),
       inspect: { sessionId: 's1', cwd: '/', sessionDir: '/s', commands },
     })
@@ -284,6 +287,39 @@ test('⚠ POST …/mode tells the runtime a MODE, never a command, and the chang
   logs.assertLogged({
     level: 'info',
     rawMessage: 'mode change to {mode} told',
+    properties: { threadId: 't1', mode: 'plan' },
+  })
+  follow.close()
+})
+
+test('⚠ a mode change the runtime REJECTS after the 204 is said on the follow — the click did nothing, every follower hears it', async () => {
+  const fake = fakeHost(['mode'], {
+    setPermissionMode: (_mode: string, outcome: PromptOutcome) => outcome.onRejected('the vendor command refused'),
+  })
+  const url = await startWith(fake)
+  const follow = await openFollow(url, 't1')
+  await follow.untilFrames(1)
+  const told = await fetch(`${url}/api/threads/t1/mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'plan' }),
+  })
+  expect(told.status).toBe(204)
+  await follow.untilFrames(4)
+  expect(follow.frames).toContainEqual({
+    type: 'observation',
+    seq: 1,
+    observation: { kind: 'permission-mode-rejected', mode: 'plan', reason: 'the vendor command refused' },
+  })
+  // …and no permission-mode: the mode did not change.
+  expect(
+    follow.frames.some((frame) => frame.type === 'observation' && frame.observation.kind === 'permission-mode'),
+  ).toBe(false)
+  // The lease was released on rejection: the thread is not left busy.
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: false })
+  logs.assertLogged({
+    level: 'warning',
+    rawMessage: /^mode change to \{mode\} rejected/,
     properties: { threadId: 't1', mode: 'plan' },
   })
   follow.close()

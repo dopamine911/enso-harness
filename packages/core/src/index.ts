@@ -85,6 +85,7 @@ export {
   ZenNotifyType,
   ZenObservation,
   ZenPermissionMode,
+  ZenPermissionModeRejected,
   ZenPromptRejected,
   ZenQueue,
   ZenRunEnded,

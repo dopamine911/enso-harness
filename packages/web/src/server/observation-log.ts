@@ -80,6 +80,8 @@ function compactOf(observation: ZenObservation): ZenLogProperties {
       return { customType: observation.customType }
     case 'permission-mode':
       return { mode: observation.mode }
+    case 'permission-mode-rejected':
+      return { mode: observation.mode, reason: observation.reason }
     case 'extension-error':
       return { extensionPath: observation.extensionPath, event: observation.event }
     case 'run-ended':

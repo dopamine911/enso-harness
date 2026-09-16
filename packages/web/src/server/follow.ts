@@ -319,7 +319,8 @@ export type ModeChangeOutcome =
  * reason. The mode must be one the thread offers now (422). The change itself arrives on
  * the follow as `permission-mode`, said by the host when its extension has persisted it;
  * an extension command's acceptance is its completion, so the lease is released on
- * acceptance as `promptThread` releases a slash command's.
+ * acceptance as `promptThread` releases a slash command's. A rejection after the 204 is
+ * announced on the feed as `permission-mode-rejected`, as `promptThread` announces its own.
  */
 export async function changeThreadMode(
   deps: FollowRouteDeps,
@@ -342,7 +343,9 @@ export async function changeThreadMode(
   lease.runtime.setPermissionMode(change.mode, {
     onAccepted: () => lease.release(),
     onRejected: (reason: string) => {
+      // The 204 has gone out; the feed is the one way to say the click did nothing.
       log.warn('mode change to {mode} rejected: {reason}', { threadId, mode: change.mode, reason })
+      threads.announce(threadId, { kind: 'permission-mode-rejected', mode: change.mode, reason })
       lease.release()
     },
   })
