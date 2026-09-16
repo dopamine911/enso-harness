@@ -195,7 +195,7 @@
       // against pi's protocol doc. The complexity is the protocol's. Was 48 until
       // the `extension_ui_request` arm moved to `mapExtensionUiRequest` (#96), which
       // clears the default on its own; ratcheted down to the measured value.
-      "includes": ["packages/web/src/rpc/map-events.ts"],
+      "includes": ["packages/web/src/host/map-events.ts"],
       "linter": {
         "rules": {
           "complexity": {

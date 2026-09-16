@@ -120,7 +120,8 @@ export const ZenFollowStatus = Type.Object(
 
 ## Who implements it, who consumes it
 
-**Produced in two places.** The mapper, `mapPiEvent` in `packages/web/src/rpc/map-events.ts`
+**Produced in two places.** The mapper, `mapPiEvent` in `packages/web/src/host/map-events.ts` (below
+the thread-runtime seam since L2, #162 workstream 4)
 (line 217, top-level; not fenced here because the declaration is the whole 120-line switch): one
 runtime event in, one observation out, never `undefined` (header lines 25–28). Its second parameter is
 the delivery the host tagged (#96): `replayed` becomes `origin: "session-start"` on a ui request, `live`
@@ -175,12 +176,12 @@ rename cannot land on one side only (header lines 2–7); the glossary keeps *cu
 browser's word and owes one vocabulary per observation — #162 workstream 5. Not a vendor leak, and
 not numbered in goals §2; a second naming of our own thing, inventoried here.
 
-**The mapper reads the runtime's field names.** `map-events.ts` declares `PiContentPart` and
-`PiToolDetails` (lines 34–44) and reads `event.assistantMessageEvent` (line 220): leak **L2**, the
-event-side half, stated with its exit on `thread-runtime.md` and allowlisted with its reason in
-`test/glossary-gate.test.ts` line 64. The observation shapes themselves are ours; `ZenUnmapped.event`
-is `Type.Unknown()` on purpose (`observation.ts` lines 269–271) and is the one place a raw event
-crosses to the browser.
+**The mapper reads the runtime's field names — below the seam.** `map-events.ts` declares
+`PiContentPart` and `PiToolDetails` and reads `event.assistantMessageEvent`; since L2 (#162 workstream
+4) it lives under `host/`, where the vendor's names are allowed, and the host calls it at delivery so
+`ThreadRuntime.subscribe` hands out observations. Nothing above the host reads an event. The
+observation shapes themselves are ours; `ZenUnmapped.event` is `Type.Unknown()` on purpose and is the
+one place a raw event crosses to the browser.
 
 **`messages` on the snapshot is the state layer's shape**, carried as `Unknown` (`follow.ts` line 34)
 — the storage seam's rebuild, not an observation; see `storage.md`.
@@ -189,10 +190,10 @@ crosses to the browser.
 
 Replace the runtime and the vocabulary does not move: the union, the frames, the follow route, the
 registry's feed, the browser adapter, the kinds table and both sweeps stay. What changes is the
-producer — `map-events.ts` learns the new loop's event names, or the host produces observations
-directly and the mapper retires (the L2 exit on `thread-runtime.md`). The three fakes that drive the
-server (`follow.test.ts` in particular, which asserts frames one by one: snapshot, `seq`, status,
-dialog outcomes) prove the consumer side today without a runtime at all.
+producer — the host's `map-events.ts` learns the new loop's event names, or maps its typed events
+directly. The fake that drives the server (`follow.test.ts` in particular, which asserts frames one
+by one: snapshot, `seq`, status, dialog outcomes) emits observations and proves the consumer side
+today without a runtime at all.
 
 Replace the state layer instead and the adapter goes: `to-agui.ts`, `custom-event-names.ts`, the
 router — "a renderer that stops speaking AG-UI deletes it and the adapter" (`to-agui.ts` line 28).

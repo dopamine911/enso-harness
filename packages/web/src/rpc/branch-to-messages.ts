@@ -1,6 +1,8 @@
 import type { MessagePart, UIMessage } from '@tanstack/ai-client'
 import type { ZenInterruptedTail } from '@zen/core'
-import { contentToText, descriptorFrom, toolResultMetadata } from './map-events.ts'
+// L2-P's crossing: these read the runtime's stored content parts, which is why they live below
+// the seam; this file follows them there when it reads a transcript of ours instead.
+import { contentToText, descriptorFrom, toolResultMetadata } from '../host/map-events.ts'
 
 /**
  * pi's session branch → TanStack `UIMessage`s (#95): the history a resumed thread mounts

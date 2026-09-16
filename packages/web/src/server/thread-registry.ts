@@ -25,7 +25,6 @@
 import { type ThreadRuntime, type ZenObservation, type ZenThreadInspection, zenLogger } from '@zen/core'
 import type { HostedThread } from '../host/agent-host.ts'
 import { createEventTail, type EventTail } from '../host/event-tail.ts'
-import { mapPiEvent } from '../rpc/map-events.ts'
 import { recordObservation } from './observation-log.ts'
 
 /**
@@ -281,8 +280,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
   function attachFeed(threadId: string, thread: ThreadEntry): void {
     const feed = feeds.get(threadId)
     if (feed === undefined || feed.detach !== undefined) return
-    feed.detach = thread.hosted.runtime.subscribe((event, delivery) => {
-      publishObservation(feed, mapPiEvent(event, delivery))
+    feed.detach = thread.hosted.runtime.subscribe((observation) => {
+      publishObservation(feed, observation)
     })
   }
 

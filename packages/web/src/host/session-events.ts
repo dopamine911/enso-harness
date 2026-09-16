@@ -1,5 +1,5 @@
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
-import type { RuntimeEvent } from '@zen/core'
+import type { RuntimeEvent } from './runtime-event.ts'
 
 /**
  * `AgentSessionEvent` → the rpc WIRE shape (#69).

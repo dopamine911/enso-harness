@@ -7,15 +7,9 @@ import type {
 } from '@earendil-works/pi-coding-agent'
 import { Theme } from '@earendil-works/pi-coding-agent'
 import type { Component, TUI } from '@earendil-works/pi-tui'
-import {
-  type DialogAnswer,
-  isZenDialogSpec,
-  type RuntimeEvent,
-  type ZenDialogOutcome,
-  type ZenOpenDialog,
-  zenLogger,
-} from '@zen/core'
+import { type DialogAnswer, isZenDialogSpec, type ZenDialogOutcome, type ZenOpenDialog, zenLogger } from '@zen/core'
 import { type LiftedPermissionDialog, liftPermissionDialog } from './permission-dialog.ts'
+import type { RuntimeEvent } from './runtime-event.ts'
 
 /** The factory `ExtensionUIContext.custom` receives, named so the method can be written without `Parameters<>`. */
 export type CustomComponentFactory<T> = (

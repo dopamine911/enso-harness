@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
 import type { LogRecorder } from '@logtape/testing/recorder'
-import type { RuntimeEvent } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import {
   type CustomComponentFactory,
@@ -8,6 +7,7 @@ import {
   type ZenExtensionUiContext,
 } from '../extension-ui-context.ts'
 import { PICC_PERMISSION_DIALOG_MODULE } from '../permission-dialog.ts'
+import type { RuntimeEvent } from '../runtime-event.ts'
 
 /**
  * The `ExtensionUIContext` the host binds (#69), driven directly: the blocking methods

@@ -141,14 +141,11 @@ export {
 } from './thread-inspection.ts'
 export {
   type DialogAnswer,
-  type EventDelivery,
   isRuntimeCommand,
   PromptImageContent,
   type PromptOutcome,
   type PromptRequest,
   RuntimeCommand,
-  type RuntimeEvent,
-  RuntimeEventSchema,
   StreamingBehavior,
   ThreadRuntime,
 } from './thread-runtime.ts'

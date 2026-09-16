@@ -269,7 +269,7 @@ const COMPLEXITY_REASONS: Readonly<Record<string, string>> = {
     'External shell quote/escape scanners stay linear and close to their upstream shape.',
   'packages/harness/extensions/guards/index.ts':
     'The security dispatch and write-denial precedence is kept in one readable control flow.',
-  'packages/web/src/rpc/map-events.ts': 'The mapper keeps one branch per external event-protocol kind.',
+  'packages/web/src/host/map-events.ts': 'The mapper keeps one branch per external event-protocol kind.',
 }
 
 function repositoryFile(path: string): string {

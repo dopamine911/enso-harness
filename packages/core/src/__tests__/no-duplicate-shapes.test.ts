@@ -70,7 +70,6 @@ test('the schemas the rest of the repo depends on are actually exported', () => 
     'DEFAULT_GUARD_POLICY',
     'ZenToolResultDescriptor',
     'ZenObservation',
-    'RuntimeEventSchema',
     'ThreadRuntime',
     'RuntimeCommand',
     'PromptImageContent',

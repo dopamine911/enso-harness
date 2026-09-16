@@ -1,6 +1,7 @@
-import { type Static, type TObject, Type } from 'typebox'
+import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
 import type { ZenOpenDialog } from './dialog.ts'
+import type { ZenObservation } from './observation.ts'
 import type { ZenPermissionModeState } from './permission-mode.ts'
 
 /**
@@ -10,16 +11,12 @@ import type { ZenPermissionModeState } from './permission-mode.ts'
  * three fakes in the tests as its second implementation today.
  *
  * ⓘ HISTORY. Until #69 the web server spawned the runtime in its RPC mode and spoke JSONL
- * to it; that transport is deleted. What survives is the EVENT SHAPE that mode defined —
- * the in-process host translates the runtime's session events into exactly that shape
- * (`host/session-events.ts`), because it is the seam `map-events.ts` and its tests consume.
- * The module was called `pi-rpc.ts` for that reason until #165 renamed it: the wire is
- * gone, the contract is ours, and a name that says a vendor's transport describes neither.
- *
- * ⚠ DELIBERATELY NOT EXHAUSTIVE, AND THE EVENT SCHEMA IS OPEN. Only `type` is constrained,
- * so an unmodelled event validates and is forwarded rather than rejected. The runtime's
- * event list will grow, and a schema that closed every event would turn a new event type
- * into a parse failure — converting "we do not render this yet" into "the host is broken".
+ * to it; that transport is deleted, and until #162 workstream 4 (L2) the EVENT SHAPE that
+ * mode defined survived as what `subscribe` handed out — the runtime's own fields, mapped
+ * to observations above this seam. Now the host maps below it: a subscriber receives
+ * `ZenObservation` and nothing of the runtime's. The module was called `pi-rpc.ts` until
+ * #165 renamed it: the wire is gone, the contract is ours, and a name that says a vendor's
+ * transport describes neither.
  *
  * ⚠ ONE SCHEMA BELOW CARRIES FUNCTIONS: `ThreadRuntime`. TypeBox can express that, and its
  * validator does check `typeof === "function"` — but it serialises to `{"type":
@@ -40,25 +37,6 @@ export type PromptImageContent = Static<typeof PromptImageContent>
 /** What to do when a prompt arrives while the agent is already streaming. */
 export const StreamingBehavior = Type.Union([Type.Literal('steer'), Type.Literal('followUp')])
 export type StreamingBehavior = Static<typeof StreamingBehavior>
-
-/**
- * ⚠ Open-object types need an explicit intersection.
- *
- * `additionalProperties: Type.Unknown()` makes the SCHEMA accept extra fields, but
- * `Static<>` does not synthesise an index signature from it — verified against typebox
- * 1.3.25. So the runtime shape comes from the schema and the open-record ergonomics come
- * from the intersection. Both halves are needed; neither alone is enough.
- */
-type OpenRecord = Record<string, unknown>
-
-const openObject = <T extends Parameters<typeof Type.Object>[0]>(properties: T): TObject<T> =>
-  Type.Object(properties, { additionalProperties: Type.Unknown() })
-
-/** One event from pi, in the rpc wire shape. Only `type` is constrained — see the header. */
-export const RuntimeEventSchema = openObject({
-  type: Type.String({ minLength: 1 }),
-})
-export type RuntimeEvent = Static<typeof RuntimeEventSchema> & OpenRecord
 
 /**
  * One entry from pi's `get_commands`.
@@ -119,13 +97,6 @@ export interface PromptOutcome {
 }
 
 /** ⚠ Function-bearing — the one schema the module header's rule is written for. */
-/**
- * How an event reached a subscriber (#96): `replayed` from the host's until-first-subscriber
- * buffer (the session's own start), or `live`. The two deliveries a subscriber can see — the
- * event tail's `held`/`dropped` provenances (#97) never reach one.
- */
-export type EventDelivery = 'live' | 'replayed'
-
 export const ThreadRuntime = Type.Object({
   /** Fire a prompt. Never awaits the run — see the section header. */
   prompt: Type.Unsafe<(request: PromptRequest, outcome: PromptOutcome) => void>(
@@ -169,28 +140,20 @@ export const ThreadRuntime = Type.Object({
     Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
   ),
   /**
-   * Receive every event in pi's rpc wire shape (the shape `map-events.ts` consumes), plus
-   * `extension_ui_request` and `extension_error` records the host synthesises. Events
-   * emitted before the FIRST subscriber are buffered and replayed to it, so nothing an
-   * extension says at `session_start` is lost; with no subscriber after that, events are
-   * dropped (#69 PR 2 — a held `agent_settled` would end the next run). Returns the
-   * unsubscribe.
+   * Receive every observation of this thread (L2, #162 workstream 4): the runtime's events
+   * mapped to `ZenObservation` BELOW this seam, plus what the host itself observes — a
+   * dialog it opened, an extension's error, a mode its extension persisted. Nothing of the
+   * runtime's own event shape reaches a subscriber. Observations emitted before the FIRST
+   * subscriber are buffered and replayed to it, so nothing an extension says at start-up is
+   * lost; with no subscriber after that, they are dropped (#69 PR 2 — a held `settled` would
+   * end the next run). A replayed observation carries `origin: 'session-start'` where the kind
+   * has an origin (#96), so the browser can group start-up chatter without guessing from
+   * position in the stream. Returns the unsubscribe.
    *
-   * The subscriber is told HOW each event reached it (`delivery`, #96): `replayed` from
-   * that held buffer — emitted during the session's own start — or `live`. The mapper turns
-   * it into the observation's `origin`, so the browser can group startup chatter without
-   * guessing from position in the stream.
-   *
-   * ⚠ `Type.Unsafe` rather than `Type.Function([RuntimeEventSchema], …)`, and the reason is
-   * a cost of declaring behaviour as a schema worth recording: the latter infers its
-   * parameter as `Static<typeof RuntimeEventSchema>`, which DROPS the `& Record<string,
-   * unknown>` intersection that makes an event's unmodelled fields reachable — consumers
-   * would get `{ type: string }` and could not read `event.willRetry`. `Type.Unsafe<T>`
-   * keeps the schema for uniformity and the precise type for consumers; it is "unsafe"
-   * because the two are no longer derived from one another, so a schema change must be
-   * mirrored in the annotation by hand.
+   * ⚠ `Type.Unsafe` keeps the schema for uniformity and the precise type for consumers; a
+   * schema change must be mirrored in the annotation by hand.
    */
-  subscribe: Type.Unsafe<(onEvent: (event: RuntimeEvent, delivery: EventDelivery) => void) => () => void>(
+  subscribe: Type.Unsafe<(onObservation: (observation: ZenObservation) => void) => () => void>(
     Type.Function([Type.Unknown()], Type.Unknown()),
   ),
   /** Abort the in-flight run and wait until the agent is idle. The session survives. */

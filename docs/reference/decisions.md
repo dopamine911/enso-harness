@@ -25,7 +25,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/permission-mode.ts` | `#84`, `#162` | The permission mode's shape on the wire (#84; #162 workstream 4, L3): what a run starts in and what it may switch to. |
 | `packages/core/src/secrets.ts` | `#7`, `#89`, `#98` | Secrets stay OUT of the environment the model's tools inherit (#89). |
 | `packages/core/src/thread-inspection.ts` | `#86` | What a live thread's session ACTUALLY contains, as the server reports it (#86). |
-| `packages/core/src/thread-runtime.ts` | `#69`, `#165` | The thread runtime: the contract the host implements for one thread, and the shapes that cross it (`docs/glossary.md` → Thread, Control). |
+| `packages/core/src/thread-runtime.ts` | `#69`, `#162`, `#165` | The thread runtime: the contract the host implements for one thread, and the shapes that cross it (`docs/glossary.md` → Thread, Control). |
 | `packages/core/src/tool-result.ts` | `#16`, `#17`, `#18` | The tool-result payload contract (#18), as a TypeBox schema. |
 | `packages/core/src/web-fetch.ts` | `#9`, `#54`, `#59` | The web_fetch tool's shapes and policy constants (#54). |
 | `packages/core/src/web-search.ts` | `#63` | The web_search tool's shapes and config section (#63). |
@@ -96,17 +96,17 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/session-events.test.ts` | `#69` | The replica of pi's unexported `toJsonEvent` (#69): what `map-events.ts` consumes must be byte-for-byte the rpc wire shape. |
 | `packages/web/src/host/agent-host.ts` | `#27`, `#69`, `#89` | pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning `pi --mode rpc` per prompt. |
 | `packages/web/src/host/event-tail.ts` | `#69`, `#84`, `#86`, `#88`, `#97` | A thread's event tail (#97): the last N events through one funnel, with provenance. |
+| `packages/web/src/host/map-events.ts` | `#24` | pi rpc events → the observations a surface renders (#24). |
 | `packages/web/src/host/permission-dialog.ts` | `#27`, `#69`, `#73` | picc's permission prompt, lifted to a question the web surface can ask (#73). |
 | `packages/web/src/host/permission-mode-adapter.ts` | `#84`, `#162` | picc-permission-modes' PERSISTED MODE, as the host reads it (#84; below the seam since #162 workstream 4, L3). |
+| `packages/web/src/host/runtime-event.ts` | `#69`, `#162` | The runtime's event, as the host receives it — BELOW the thread-runtime seam since #162 workstream 4 (L2). |
 | `packages/web/src/host/session-events.ts` | `#69` | `AgentSessionEvent` → the rpc WIRE shape (#69). |
 | `packages/web/src/mode-lines.ts` | `#29`, `#69`, `#88`, `#162` | Permission-mode lines in the transcript (#29, the remaining half). |
 | `packages/web/src/notifications.tsx` | `#29`, `#84`, `#94`, `#96` | pi's `notify` messages, rendered (#29). |
 | `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |
 | `packages/web/src/rpc/__tests__/branch-to-messages.test.ts` | `#95` | #95: a stored branch mounts as the messages a live run would have left behind. |
 | `packages/web/src/rpc/__tests__/observation-kinds.ts` | `#53` | The oracle both "every observation" sweeps compare against (#53 S1.4): every `kind` literal the ZenObservation union declares, sorted. |
-| `packages/web/src/rpc/branch-to-messages.ts` | `#93`, `#95` | pi's session branch → TanStack `UIMessage`s (#95): the history a resumed thread mounts with. |
 | `packages/web/src/rpc/custom-event-names.ts` | `#29`, `#53`, `#112` | The AG-UI CUSTOM chunk names zen derives in the browser — the contract between the adapter (`to-agui.ts`, which emits them from observations, in memory, never on the wire since #112) and the router (`custom-event-router.ts`, which dispatches on them). |
-| `packages/web/src/rpc/map-events.ts` | `#24` | pi rpc events → the observations a surface renders (#24). |
 | `packages/web/src/rpc/to-agui.ts` | `#18`, `#24`, `#112` | `ZenObservation` → AG-UI `StreamChunk` (#24, #112). |
 | `packages/web/src/server/__tests__/fake-hosted-thread.ts` | `#178` | The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a `ThreadRuntime` from plain closures that records every call, so the server, the registry and the routes are driven over it and asserted through what it recorded. |
 | `packages/web/src/server/__tests__/follow.test.ts` | `#109`, `#112` | The wire, measured (#109's receipt, kept as the contract — #112). |

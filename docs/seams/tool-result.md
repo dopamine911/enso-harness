@@ -140,7 +140,7 @@ from the runtime's `details` bag on `tool_execution_update` and `tool_execution_
 `branch-to-messages.ts:117` does the same from a stored result on a cold read, so a live transcript
 and a resumed one agree. The builder:
 
-<!-- source: packages/web/src/rpc/map-events.ts#descriptorFrom -->
+<!-- source: packages/web/src/host/map-events.ts#descriptorFrom -->
 ```ts
 /**
  * Build our descriptor from pi's `details`.

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createEventTail, describeRuntimeEvent } from '../event-tail.ts'
+import { createEventTail, describeObservation } from '../event-tail.ts'
 
 /**
  * #97's tail is a debugging surface: what it must not do is lie by omission. Coalescing
@@ -48,21 +48,17 @@ test('recent() is a copy: mutating it does not reach the ring', () => {
   expect(tail.recent()).toHaveLength(1)
 })
 
-test("a pi event's inner name: the custom entry's type, a ui method, a tool; nothing when there is none", () => {
+test("an observation's inner name: the custom entry's type, a ui method, a tool; nothing when there is none", () => {
+  expect(describeObservation({ kind: 'custom-entry', customType: 'modes', data: { mode: 'plan' } })).toEqual({
+    type: 'custom-entry',
+    name: 'modes',
+  })
   expect(
-    describeRuntimeEvent({ type: 'entry_appended', entry: { type: 'custom', customType: 'modes' } } as never),
-  ).toEqual({ type: 'entry_appended', name: 'modes' })
-  expect(describeRuntimeEvent({ type: 'entry_appended', entry: { type: 'message' } } as never)).toEqual({
-    type: 'entry_appended',
-    name: 'message',
-  })
-  expect(describeRuntimeEvent({ type: 'extension_ui_request', method: 'select' } as never)).toEqual({
-    type: 'extension_ui_request',
-    name: 'select',
-  })
-  expect(describeRuntimeEvent({ type: 'tool_execution_start', toolName: 'bash' } as never)).toEqual({
-    type: 'tool_execution_start',
+    describeObservation({ kind: 'extension-ui-request', id: 'u1', method: 'select', blocking: true, origin: 'run' }),
+  ).toEqual({ type: 'extension-ui-request', name: 'select' })
+  expect(describeObservation({ kind: 'tool-call', toolCallId: 'c', toolName: 'bash', args: {} })).toEqual({
+    type: 'tool-call',
     name: 'bash',
   })
-  expect(describeRuntimeEvent({ type: 'agent_settled' })).toEqual({ type: 'agent_settled', name: undefined })
+  expect(describeObservation({ kind: 'settled' })).toEqual({ type: 'settled', name: undefined })
 })

@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test'
 import { ZEN_TOOL_RESULT_KEY, type ZenObservation } from '@zen/core'
+import { Check } from 'typebox/value'
 import { mapPiEvent, toolResultMetadata } from '../map-events.ts'
+import { RuntimeEventSchema } from '../runtime-event.ts'
 
 const kindOf = (event: Parameters<typeof mapPiEvent>[0]): ZenObservation['kind'] => mapPiEvent(event).kind
 
@@ -441,4 +443,13 @@ test("⚠ a ui request's origin comes from how the host delivered it: replayed i
   expect(
     mapPiEvent({ type: 'extension_ui_request', id: 'd1', method: 'select', title: 'Pick', options: ['a'] }, 'replayed'),
   ).toMatchObject({ kind: 'extension-ui-request', blocking: true, origin: 'session-start' })
+})
+
+// ⚠ The event schema is OPEN on purpose — an unmodelled field must not fail validation, or a
+// new pi event becomes "the host is broken" instead of "we don't render this yet". Host-internal
+// since L2: nothing above the host sees an event, so this is the mapper's own contract now.
+test('extra fields are accepted, so a newer pi does not break the host', () => {
+  expect(Check(RuntimeEventSchema, { type: 'some_future_event', brandNew: { nested: true } })).toBe(true)
+  expect(Check(RuntimeEventSchema, { type: '' })).toBe(false)
+  expect(Check(RuntimeEventSchema, { delta: 'x' })).toBe(false)
 })
