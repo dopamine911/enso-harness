@@ -516,8 +516,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // handler DOES return. Before this, Stop during a permission question waited on
         // the card: the loop awaited the handler, the handler awaited the human. If the
         // user says stop, it's stop (Daniel, 2026-09-16); the card drops, the run ends.
-        await session.abort()
-        ui.abortAllDialogs()
+        // A stop must stop (thread-registry.test.ts's rule): the dialogs settle even if the
+        // runtime's abort rejects — the rejection still propagates, the card still drops.
+        try {
+          await session.abort()
+        } finally {
+          ui.abortAllDialogs()
+        }
       },
       clearQueue(): { steering: string[]; followUp: string[] } {
         return session.clearQueue()
