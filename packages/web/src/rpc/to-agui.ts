@@ -5,6 +5,7 @@ import {
   ZEN_CUSTOM_EVENT_DIALOG,
   ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
   ZEN_CUSTOM_EVENT_ENTRY,
+  ZEN_CUSTOM_EVENT_MODE,
   ZEN_CUSTOM_EVENT_NOTIFY,
   ZEN_CUSTOM_EVENT_QUEUE,
   ZEN_CUSTOM_EVENT_UNMAPPED,
@@ -270,12 +271,26 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
         },
       ]
 
+    case 'permission-mode':
+      // The mode changed mid-run (L3): the same `zen.mode` chunk the run-start receipt
+      // rides, with the same `{ mode, available }` value — one chunk, one shape, whether
+      // the mode was read at start or changed since. The browser's mode store and the
+      // transcript's mode line both fold this and nothing else.
+      return [
+        {
+          type: EventType.CUSTOM,
+          name: ZEN_CUSTOM_EVENT_MODE,
+          value: { mode: observation.mode, available: observation.available },
+        },
+      ]
+
     case 'custom-entry':
-      // An extension persisted state (#29) — a receipt the browser may render (the mode
-      // indicator reads picc's "modes" entries from this). Rides CUSTOM for the same
-      // reason unmapped does, below. ⚠ The value is the whole observation, so a consumer
-      // dispatches on `customType` rather than on a per-type chunk name — one chunk name
-      // per vendor entry type would put vendor knowledge in the transport.
+      // An extension persisted state (#29) — a receipt, recorded and counted (the debug
+      // pane's chunk tally) but rendered by nothing since L3 moved the mode onto its own
+      // observation. Rides CUSTOM for the same reason unmapped does, below. ⚠ The value is
+      // the whole observation, so a consumer dispatches on `customType` rather than on a
+      // per-type chunk name — one chunk name per vendor entry type would put vendor
+      // knowledge in the transport.
       return [
         {
           type: EventType.CUSTOM,

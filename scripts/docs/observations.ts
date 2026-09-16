@@ -35,8 +35,11 @@ const CUSTOM_METADATA: Record<string, CustomMetadata> = {
   ZEN_CUSTOM_EVENT_DIALOG_SETTLED: { consumer: '`recentChunks`; `dialog`', routerBranch: true },
   ZEN_CUSTOM_EVENT_OPEN_DIALOGS: { consumer: '`recentChunks`; `dialog`', routerBranch: true },
   ZEN_CUSTOM_EVENT_FOLLOW_ENDED: { consumer: '`recentChunks`; `disconnected`; `notifications`', routerBranch: true },
-  ZEN_CUSTOM_EVENT_ENTRY: { consumer: '`recentChunks`; `modeLines`; `permissionMode`', routerBranch: true },
-  ZEN_CUSTOM_EVENT_MODE: { consumer: '`recentChunks`; `permissionMode`', routerBranch: true },
+  ZEN_CUSTOM_EVENT_ENTRY: {
+    consumer: '`recentChunks` only; recorded and counted, rendered by nothing (L3)',
+    routerBranch: false,
+  },
+  ZEN_CUSTOM_EVENT_MODE: { consumer: '`recentChunks`; `permissionMode`; `modeLines`', routerBranch: true },
   ZEN_CUSTOM_EVENT_RUN: { consumer: '`recentChunks`; `generation`; `disconnected`', routerBranch: true },
   ZEN_CUSTOM_EVENT_UNMAPPED: { consumer: '`recentChunks` only; nothing else consumes it', routerBranch: false },
 }

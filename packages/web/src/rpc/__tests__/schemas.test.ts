@@ -106,6 +106,7 @@ test('EVERY observation the mapper can emit validates against ZenObservation', (
     { type: 'turn_end', message: {}, toolResults: [] },
     { type: 'queue_update', steering: [], followUp: ['x'] },
     { type: 'entry_appended', entry: { type: 'custom', customType: 'modes', data: { mode: 'acceptEdits' } } },
+    { type: 'permission_mode', mode: 'acceptEdits', available: ['default', 'acceptEdits'] },
     { type: 'agent_end', willRetry: true },
     { type: 'agent_settled' },
     { type: 'totally_unknown', payload: [1, 2, 3] },

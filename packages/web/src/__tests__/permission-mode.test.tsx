@@ -18,10 +18,6 @@ const receipt = (
   mode: string,
   available: string[] = ['default', 'acceptEdits', 'plan'],
 ): { mode: string; available: string[] } => ({ mode, available })
-const piccEntry = (mode: string): { customType: string; data: { mode: string } } => ({
-  customType: 'modes',
-  data: { mode },
-})
 
 // ── the store ────────────────────────────────────────────────────────────────
 
@@ -37,25 +33,18 @@ test('a run-start receipt sets both the mode and the modes on offer', () => {
   expect(store.get()).toEqual({ mode: 'default', available: ['default', 'acceptEdits', 'plan'] })
 })
 
-// ⚠ THE TWO FEEDS COMPOSE. A change mid-run arrives as picc's persisted entry, which
-// carries no option list; it must move the mode WITHOUT wiping the list the receipt set.
-test("a persisted picc entry moves the mode and keeps the receipt's option list", () => {
+// ⚠ ONE FEED (L3). A change mid-run arrives as the same `zen.mode` receipt the run started
+// with — the host says the mode AND the list, so nothing here knows what a vendor entry is.
+test('a mid-run receipt moves the mode and the option list together', () => {
   store.applyReceipt(receipt('default'))
-  store.applyPersistedEntry(piccEntry('acceptEdits'))
-  expect(store.get()).toEqual({ mode: 'acceptEdits', available: ['default', 'acceptEdits', 'plan'] })
-})
-
-test("another extension's custom entry is not a mode change", () => {
-  store.applyReceipt(receipt('default'))
-  store.applyPersistedEntry({ customType: 'someone-elses-state', data: { mode: 'plan' } })
-  expect(store.get().mode).toBe('default')
+  store.applyReceipt(receipt('acceptEdits', ['default', 'acceptEdits']))
+  expect(store.get()).toEqual({ mode: 'acceptEdits', available: ['default', 'acceptEdits'] })
 })
 
 test('malformed values never throw and never move the store', () => {
   store.applyReceipt(receipt('plan'))
   for (const bad of [null, undefined, 42, 'acceptEdits', {}, { mode: '' }, { mode: 7 }, { customType: 'modes' }]) {
     store.applyReceipt(bad)
-    store.applyPersistedEntry(bad)
   }
   expect(store.get().mode).toBe('plan')
 })
@@ -72,9 +61,9 @@ test('subscribers are told on every change, and unsubscribing stops it', () => {
     notified += 1
   })
   store.applyReceipt(receipt('default'))
-  store.applyPersistedEntry(piccEntry('plan'))
+  store.applyReceipt(receipt('plan'))
   stop()
-  store.applyPersistedEntry(piccEntry('auto'))
+  store.applyReceipt(receipt('auto'))
   expect(notified).toBe(2)
 })
 
@@ -88,7 +77,7 @@ test("the seed fills an unknown store from the server's fresh-thread state", asy
 // ⚠ THE REMOUNT HAZARD. The store outlives the component; a remount re-runs the seed. If
 // the thread already switched modes, the fresh-thread default must NOT overwrite it.
 test('⚠ the seed never clobbers a mode the store already holds', async () => {
-  store.applyPersistedEntry(piccEntry('acceptEdits'))
+  store.applyReceipt(receipt('acceptEdits'))
   await store.seed(() => Promise.resolve(receipt('default')))
   expect(store.get().mode).toBe('acceptEdits')
 })

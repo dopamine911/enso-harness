@@ -30,6 +30,7 @@ import {
   freshPermissionModeState,
   PICC_PERMISSION_MODES,
   persistedPermissionMode,
+  readPiccPersistedMode,
   storedPermissionModeState,
 } from './permission-mode-adapter.ts'
 import { toRpcWireEvent } from './session-events.ts'
@@ -359,9 +360,33 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // the branch had two. The `ui` notifies always crossed because `ui` binds `emit` directly.
     // Nothing session_start emits is run progress (`agent_settled` comes from the run loop
     // only), so replaying it into the first run's pump is inert.
+    /**
+     * The mode NOW (#84): picc's own `restoreState` walk over the live branch, re-run on
+     * every call — see the walk for why it is never cached (`getBranch()` is one
+     * parent-pointer walk that builds a fresh array; the walk is a second linear pass).
+     * The dropdown offers picc's modes AS REGISTERED HERE: picc names one command per
+     * mode, exactly after it, so the intersection is a name lookup. Read off the registry
+     * directly rather than through `listCommands` — that call's count is a contract the
+     * refusal path's tests pin, and this is not a refusal lookup.
+     */
+    function currentPermissionModeState(): ZenPermissionModeState {
+      const mode = persistedPermissionMode(sessionManager.getBranch())
+      const registered = new Set(
+        session.extensionRunner.getRegisteredCommands().map((command) => command.invocationName),
+      )
+      return { mode, available: PICC_PERMISSION_MODES.filter((candidate) => registered.has(candidate)) }
+    }
+
     const unsubscribeSession = session.subscribe((event) => {
       try {
-        emit(toRpcWireEvent(event))
+        const wire = toRpcWireEvent(event)
+        emit(wire)
+        // L3 (#162 workstream 4): the mode extension persisted a mode. Above this seam no
+        // surface knows that entry's shape, so the host says what the mode is now, as its
+        // own event; the mapper carries it as the `permission-mode` observation.
+        if (wire.type === 'entry_appended' && readPiccPersistedMode(wire.entry) !== undefined) {
+          emit({ type: 'permission_mode', ...currentPermissionModeState() })
+        }
       } catch (error) {
         log.error('a session event could not be emitted: {error}', { threadId, error })
       }
@@ -428,20 +453,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         }
         return commands
       },
-      permissionModeState(): ZenPermissionModeState {
-        // picc's own `restoreState` walk (#84), re-run on every call — see the walk for why
-        // it is never cached. `getBranch()` is one parent-pointer walk that builds a fresh
-        // array; the walk is a second linear pass over it.
-        const mode = persistedPermissionMode(sessionManager.getBranch())
-        // The dropdown offers picc's modes AS REGISTERED HERE: picc names one command per
-        // mode, exactly after it, so the intersection is a name lookup. Read off the
-        // registry directly rather than through `listCommands` — that call's count is a
-        // contract the refusal path's tests pin, and this is not a refusal lookup.
-        const registered = new Set(
-          session.extensionRunner.getRegisteredCommands().map((command) => command.invocationName),
-        )
-        return { mode, available: PICC_PERMISSION_MODES.filter((candidate) => registered.has(candidate)) }
-      },
+      permissionModeState: currentPermissionModeState,
       subscribe(onEvent: (event: RuntimeEvent, delivery: EventDelivery) => void): () => void {
         listeners.add(onEvent)
         hasHadSubscriber = true

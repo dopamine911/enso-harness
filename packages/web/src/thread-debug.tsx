@@ -361,10 +361,11 @@ export function latestWins<T>(issue: () => Promise<T>): () => Promise<T | undefi
 /**
  * The chunks that mean "the server's view of this thread changed" — the moments the pane's
  * server columns can be stale (#103): a status frame (`zen.run`, sent at every busy
- * transition, this page's run or another tab's), a persisted mode change (`zen.entry`), a
- * question settling (`zen.dialog-settled`), and the follow ending under this page
- * (`zen.follow-ended`) — after which the last fetch describes a session the server may no
- * longer hold.
+ * transition, this page's run or another tab's), an extension persisting state (`zen.entry`
+ * — a mode change persists one, which is how a change refetches), a question settling
+ * (`zen.dialog-settled`), and the follow ending under this page (`zen.follow-ended`) — after
+ * which the last fetch describes a session the server may no longer hold. NOT `zen.mode`:
+ * this page's own run start sends it too, and that is not the server changing.
  */
 const SERVER_STATE_CHUNKS: ReadonlySet<string> = new Set([
   ZEN_CUSTOM_EVENT_RUN,

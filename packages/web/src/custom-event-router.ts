@@ -3,7 +3,6 @@ import { Check } from 'typebox/value'
 import {
   ZEN_CUSTOM_EVENT_DIALOG,
   ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
-  ZEN_CUSTOM_EVENT_ENTRY,
   ZEN_CUSTOM_EVENT_FOLLOW_ENDED,
   ZEN_CUSTOM_EVENT_MODE,
   ZEN_CUSTOM_EVENT_NOTIFY,
@@ -39,15 +38,11 @@ import type { ThreadStores } from './thread-stores.ts'
  */
 export function routeZenCustomEvent(stores: ThreadStores, eventType: string, data: unknown): void {
   stores.recentChunks.record(eventType, data)
-  if (eventType === ZEN_CUSTOM_EVENT_ENTRY) {
-    // One persisted entry, two views (#84): the transcript line (history) and the
-    // current-mode store (state). Both read picc's shape through the same core helper.
-    stores.modeLines.apply(data)
-    stores.permissionMode.applyPersistedEntry(data)
-    return
-  }
   if (eventType === ZEN_CUSTOM_EVENT_MODE) {
+    // One receipt, two views (#84, L3): the current-mode store (state) and the transcript
+    // line (history). The run-start receipt and a mid-run change ride the same chunk.
     stores.permissionMode.applyReceipt(data)
+    stores.modeLines.apply(data)
     return
   }
   if (eventType === ZEN_CUSTOM_EVENT_RUN) {

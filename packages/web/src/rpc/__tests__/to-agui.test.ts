@@ -150,6 +150,15 @@ test('a notify observation rides CUSTOM as zen.notify with its message intact', 
 
 // #29's remaining half: the mode lines read picc's "modes" entries from this chunk, so the
 // pipeline pin is wire event → mapPiEvent → toAgui with customType and data intact.
+test('a mode change rides CUSTOM as zen.mode — the SAME chunk and value shape as the run-start receipt (L3)', () => {
+  const [event] = toAgui({ kind: 'permission-mode', mode: 'plan', available: ['default', 'plan'] })
+  expect(event).toEqual({
+    type: EventType.CUSTOM,
+    name: 'zen.mode',
+    value: { mode: 'plan', available: ['default', 'plan'] },
+  })
+})
+
 test('a custom entry rides CUSTOM as zen.entry with its data intact', () => {
   const observation = mapPiEvent({
     type: 'entry_appended',
@@ -207,6 +216,7 @@ test('nothing is silently dropped: every kind except an in-flight result and a b
       message: 'Mode: acceptEdits',
     },
     { kind: 'custom-entry', customType: 'modes', data: { mode: 'acceptEdits' } },
+    { kind: 'permission-mode', mode: 'acceptEdits', available: ['default', 'acceptEdits'] },
     {
       kind: 'message-end',
       role: 'assistant',

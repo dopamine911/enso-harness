@@ -32,25 +32,26 @@ afterEach(() => clearThreadsForTest())
 const route = (eventType: string, data: unknown): void => routeZenCustomEvent(stores, eventType, data)
 const notificationMessages = (): string[] => stores.notifications.get().map((notification) => notification.message)
 
-// ⚠ ONE ENTRY, TWO VIEWS (#84). A picc modes entry is both history (the transcript line)
-// and state (the current-mode store). Dropping either `apply*` call from the entry branch
-// leaves the other view green, so both are read here.
-test('zen.entry reaches BOTH the mode-lines store and the current-mode store', () => {
-  route(ZEN_CUSTOM_EVENT_ENTRY, {
-    kind: 'custom-entry',
-    customType: 'modes',
-    data: { mode: 'acceptEdits' },
-  })
+// ⚠ ONE RECEIPT, TWO VIEWS (#84, L3). The `zen.mode` receipt — at run start and on every
+// mid-run change — is both state (the current-mode store) and history (the transcript
+// line). Dropping either `apply*` call from the branch leaves the other view green, so both
+// are read here.
+test('zen.mode reaches BOTH the current-mode store and the mode-lines store', () => {
+  route(ZEN_CUSTOM_EVENT_MODE, { mode: 'acceptEdits', available: ['default', 'acceptEdits'] })
+  expect(stores.permissionMode.get()).toEqual({ mode: 'acceptEdits', available: ['default', 'acceptEdits'] })
   expect(notificationMessages()).toEqual(['Mode: acceptEdits'])
-  expect(stores.permissionMode.get().mode).toBe('acceptEdits')
   // and it did NOT land in the stats store (the swap-the-two-apply-calls mutation)
   expect(stores.stats.get().totalCost).toBe(0)
 })
 
-test('zen.mode reaches the current-mode store and nothing else — it is state, not a transcript line', () => {
-  route(ZEN_CUSTOM_EVENT_MODE, { mode: 'default', available: ['default', 'plan'] })
-  expect(stores.permissionMode.get()).toEqual({ mode: 'default', available: ['default', 'plan'] })
+// ⚠ THE BROWSER NO LONGER READS A VENDOR ENTRY (L3). A persisted `modes` entry still crosses
+// as `zen.entry` (recorded, counted) but moves nothing: the mode arrives as `zen.mode`, said
+// by the host. If this ever renders a line, a reader has learned the vendor's shape again.
+test('zen.entry is recorded but renders nothing and moves no store', () => {
+  route(ZEN_CUSTOM_EVENT_ENTRY, { kind: 'custom-entry', customType: 'modes', data: { mode: 'acceptEdits' } })
   expect(notificationMessages()).toEqual([])
+  expect(stores.permissionMode.get().mode).toBeUndefined()
+  expect(stores.recentChunks.get().map((chunk) => chunk.name)).toContain(ZEN_CUSTOM_EVENT_ENTRY)
 })
 
 test("zen.run sets the thread's run generation; a malformed value leaves the last one standing (#109)", () => {

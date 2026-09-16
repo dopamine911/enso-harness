@@ -27,6 +27,7 @@ export const ZenObservation = Type.Union([
   ZenToolCall,
   ZenToolResultObservation,
   ZenCustomEntry,
+  ZenPermissionMode,
   ZenMessageStart,
   ZenMessageEnd,
   ZenTurnStart,

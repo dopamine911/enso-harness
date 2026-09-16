@@ -78,6 +78,8 @@ function compactOf(observation: ZenObservation): ZenLogProperties {
       return { messageId: observation.messageId, reason: observation.reason }
     case 'custom-entry':
       return { customType: observation.customType }
+    case 'permission-mode':
+      return { mode: observation.mode }
     case 'extension-error':
       return { extensionPath: observation.extensionPath, event: observation.event }
     case 'run-ended':

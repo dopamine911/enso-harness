@@ -22,7 +22,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/log-process.ts` | `#132` | A process's sink (#132 item 2): ONE log for the harness — `.zen/logs/zen-YYYY-MM-DD.jsonl`, every process appending to the same day's file, every record redacted by field name before it is written, and — for a terminal — a pretty console sink beside it at its own level. |
 | `packages/core/src/log.ts` | `#132` | The harness's log record (#132): one shape for every process, so a bundle a user hands us reads the same whichever layer wrote the line. |
 | `packages/core/src/paths.ts` | `#58`, `#59` | The workspace path helpers (#59) — THE one place that walks the filesystem for roots. |
-| `packages/core/src/permission-mode.ts` | `#84`, `#162` | The permission mode's shape on the wire (#84), and — until #162 workstream 4's step B lands — the one vendor fact the browser still reads: picc-permission-modes persists its mode as a session entry (`pi.appendEntry("modes", { mode, … })`), and two browser readers (`permission-mode.tsx`, `mode-lines.ts`) take a mode change from that entry as it rides the `zen.entry` chunk. |
+| `packages/core/src/permission-mode.ts` | `#84`, `#162` | The permission mode's shape on the wire (#84; #162 workstream 4, L3): what a run starts in and what it may switch to. |
 | `packages/core/src/secrets.ts` | `#7`, `#89`, `#98` | Secrets stay OUT of the environment the model's tools inherit (#89). |
 | `packages/core/src/thread-inspection.ts` | `#86` | What a live thread's session ACTUALLY contains, as the server reports it (#86). |
 | `packages/core/src/thread-runtime.ts` | `#69`, `#165` | The thread runtime: the contract the host implements for one thread, and the shapes that cross it (`docs/glossary.md` → Thread, Control). |
@@ -99,9 +99,9 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/permission-dialog.ts` | `#27`, `#69`, `#73` | picc's permission prompt, lifted to a question the web surface can ask (#73). |
 | `packages/web/src/host/permission-mode-adapter.ts` | `#84`, `#162` | picc-permission-modes' PERSISTED MODE, as the host reads it (#84; below the seam since #162 workstream 4, L3). |
 | `packages/web/src/host/session-events.ts` | `#69` | `AgentSessionEvent` → the rpc WIRE shape (#69). |
-| `packages/web/src/mode-lines.ts` | `#29`, `#69`, `#84`, `#86`, `#88` | Permission-mode lines in the transcript (#29, the remaining half). |
+| `packages/web/src/mode-lines.ts` | `#29`, `#69`, `#88`, `#162` | Permission-mode lines in the transcript (#29, the remaining half). |
 | `packages/web/src/notifications.tsx` | `#29`, `#84`, `#94`, `#96` | pi's `notify` messages, rendered (#29). |
-| `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#88`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |
+| `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |
 | `packages/web/src/rpc/__tests__/branch-to-messages.test.ts` | `#95` | #95: a stored branch mounts as the messages a live run would have left behind. |
 | `packages/web/src/rpc/__tests__/observation-kinds.ts` | `#53` | The oracle both "every observation" sweeps compare against (#53 S1.4): every `kind` literal the ZenObservation union declares, sorted. |
 | `packages/web/src/rpc/branch-to-messages.ts` | `#93`, `#95` | pi's session branch → TanStack `UIMessage`s (#95): the history a resumed thread mounts with. |

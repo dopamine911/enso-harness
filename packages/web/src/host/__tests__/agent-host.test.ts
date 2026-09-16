@@ -12,6 +12,7 @@ import type { LogRecorder } from '@logtape/testing/recorder'
 import { findRepoRoot, harnessPackageDir, type RuntimeEvent } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { type AgentHost, createAgentHost, type HostedThread, seedMultiAccountChildProxyOff } from '../agent-host.ts'
+import { readPiccPersistedMode } from '../permission-mode-adapter.ts'
 
 /**
  * The in-process host against the REAL harness package (#69) — every extension the manifest
@@ -263,6 +264,28 @@ test('⚠ an entry an extension persists during session_start reaches the first 
   // is the transcript's first `Mode:` line only if it crosses — it is what #88 was missing.
   const openingMode = entries.find((entry) => entry.customType === 'modes')
   expect(openingMode?.data).toMatchObject({ mode: 'default' })
+})
+
+// ⚠ L3 (#162 workstream 4). Above the host no surface reads the vendor's `modes` entry any
+// more; the HOST says the mode, as its own event, right after the entry it saw. This is the
+// real extension persisting at session_start and the real host answering — the whole
+// reason the browser can fold `zen.mode` alone.
+test("⚠ the host emits permission_mode after the vendor's modes entry — mode and the modes it registered", async () => {
+  const hosted = await hostedSession()
+  const events = collectEvents(hosted)
+  const entryIndex = events.findIndex(
+    (event) => event.type === 'entry_appended' && readPiccPersistedMode(event.entry) !== undefined,
+  )
+  expect(entryIndex).toBeGreaterThanOrEqual(0)
+  const following = events[entryIndex + 1]
+  expect(following).toMatchObject({ type: 'permission_mode', mode: 'default' })
+  expect(following?.available).toEqual(hosted.runtime.permissionModeState().available)
+  expect(following?.available).toContain('default')
+  // Another extension's custom entry is not a mode: no permission_mode follows it.
+  const probeEntries = events.filter((event) => event.type === 'entry_appended' && !readPiccPersistedMode(event.entry))
+  for (const probe of probeEntries) {
+    expect(events[events.indexOf(probe) + 1]?.type).not.toBe('permission_mode')
+  }
 })
 
 test("listCommands is synchronous and names picc's /mode", async () => {

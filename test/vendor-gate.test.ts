@@ -66,22 +66,9 @@ const VENDOR_IMPORT_ALLOWED: readonly string[] = [
 ]
 
 const VENDOR_NAMED_ALLOWED: readonly string[] = [
-  // L3, the browser's half (step A moved the set, the initial mode and the walk below the
-  // host seam): core still spells the persisted `customType: "modes"` entry and its reader,
-  // because the browser's two `zen.entry` readers need them until step B.
-  'packages/core/src/permission-mode.ts',
-  // …and its re-export surface: `PICC_MODES_CUSTOM_TYPE` is a `@zen/core` public name until B.
-  'packages/core/src/index.ts',
   // The guard's write-allowlist names cc-safety-net's state directory: a path, not an import.
   // Leaves when the harness owns the list of directories an extension may write.
   'packages/core/src/guard.ts',
-  // The dropdown reads the persisted mode through `readPiccPersistedMode` and says whose
-  // default a fresh thread starts in. The call leaves with L3; the sentence stops being true
-  // the same day.
-  'packages/web/src/permission-mode.tsx',
-  // The status line's second reader of the same persisted entry (`readPiccPersistedMode`) —
-  // found by the widened matcher, not by the first one (PR #150 review). Leaves with L3.
-  'packages/web/src/mode-lines.ts',
 ]
 
 function offendersMatching(lineMatches: (line: string) => boolean, allowed: readonly string[]): string[] {
