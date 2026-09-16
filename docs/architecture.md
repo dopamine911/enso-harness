@@ -102,6 +102,32 @@ graph TB
 `getAllRegisteredTools`), so a guarded `write` declared before any vendor extension cannot be silently
 replaced. Load order is therefore a security property — see *Decided constraints*.
 
+**The boundary is enforced twice, by two sensors.** The vendor gate (`test/vendor-gate.test.ts`, #145)
+reads *text*: `@earendil-works/*` is imported, and a vendor extension is named, only under `web/src/host/`
+and `harness/extensions/`. `.fallowrc.jsonc` → `boundaries` (#173) reads the *import graph*: the zone
+table below is the target layout of the re-cut (workstream 9), and a crossing it reports is either a
+planned move or a numbered leak. The graph catches what a text scan cannot — a re-export chain, a
+type-only import, a barrel that leaks a zone; the text scan catches what a graph cannot — a vendor's
+*name* in a string. Neither replaces the other. A zone is a directory glob, so "may import the
+runtime" is not a zone rule; that stays the text scan's. `allowTypeOnly` is granted nowhere: a
+type-only crossing is still a dependency.
+
+| Zone | Directory | May import (ours) |
+|---|---|---|
+| `core` | `packages/core/src/` | nothing |
+| `harness-core` | `packages/harness/core/` | `core` |
+| `harness-extensions` | `packages/harness/extensions/` | `core`, `harness-core` |
+| `host` | `packages/web/src/host/` | `core` |
+| `server` | `packages/web/src/server/` | `core`, `host` |
+| `browser` | `packages/web/src/` (all else) | `core` |
+| `scripts` | `scripts/` | `core` |
+| `test` | `test/`, `packages/web/e2e/` | anything |
+
+Every owned source file must fall in a zone (`coverage.requireAllFiles`; `index.html` is the one
+excused file). The storage seam is a forbidden call: `SessionManager.*` from `server` or `browser`
+is a finding, beside `no-duplicate-paths`. Severity is `warn` until the re-cut empties the day-one
+list recorded on #173; the same PR promotes it to `error`.
+
 ---
 
 ## The control plane

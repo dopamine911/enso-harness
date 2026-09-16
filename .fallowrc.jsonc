@@ -94,5 +94,49 @@
   // never fired and stay on — cognitive is also biome's hard ceiling at 25.
   "health": {
     "maxCrap": 0
+  },
+  // `warn` until the re-cut lands (#173 acceptance 3): the day-one list is recorded on the issue
+  // and is the move list; the same PR that empties it promotes this to `error`. Coverage and
+  // forbidden-call findings share the token, so they are advisory too until then.
+  "rules": { "boundary-violation": "warn" },
+  // Architecture boundaries (#173, #162 workstream 9): the vendor gate and the storage seam read
+  // TEXT; this reads the IMPORT GRAPH, and catches what text cannot — a re-export chain, a
+  // type-only import, a barrel that leaks a zone. Zones are the TARGET layout of the re-cut,
+  // written before the tree matches it; the violation list is the move list. What it cannot say:
+  // a zone is a directory glob, so "may import the runtime" (an npm package) stays the vendor
+  // gate's text scan. `allowTypeOnly` is deliberately absent: a type-only crossing is still a
+  // dependency (#145's rule).
+  "boundaries": {
+    "zones": [
+      { "name": "core", "patterns": ["packages/core/src/**"] },
+      { "name": "harness-core", "patterns": ["packages/harness/core/**"] },
+      { "name": "harness-extensions", "patterns": ["packages/harness/extensions/**"] },
+      { "name": "host", "patterns": ["packages/web/src/host/**"] },
+      { "name": "server", "patterns": ["packages/web/src/server/**"] },
+      { "name": "browser", "patterns": ["packages/web/src/**"] },
+      { "name": "scripts", "patterns": ["scripts/**"] },
+      { "name": "test", "patterns": ["test/**", "packages/web/e2e/**"] }
+    ],
+    "rules": [
+      { "from": "core", "allow": [] },
+      { "from": "harness-core", "allow": ["core"] },
+      { "from": "harness-extensions", "allow": ["core", "harness-core"] },
+      { "from": "host", "allow": ["core"] },
+      { "from": "server", "allow": ["core", "host"] },
+      { "from": "browser", "allow": ["core"] },
+      { "from": "scripts", "allow": ["core"] },
+      {
+        "from": "test",
+        "allow": ["core", "harness-core", "harness-extensions", "host", "server", "browser", "scripts"]
+      }
+    ],
+    "coverage": { "requireAllFiles": true, "allowUnmatched": ["packages/web/index.html"] },
+    // The storage seam (`no-duplicate-paths`): one file constructs the session manager.
+    "calls": {
+      "forbidden": [
+        { "from": "server", "callee": "SessionManager.*" },
+        { "from": "browser", "callee": "SessionManager.*" }
+      ]
+    }
   }
 }
