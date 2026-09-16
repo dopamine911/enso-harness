@@ -15,7 +15,7 @@ import { createThreadStatsStore, type ThreadStatsStore } from './thread-stats.ts
  * ⚠ WHY INSTANCES, NOT MODULE STATE. Until this, every store was a module singleton — one
  * mode, one cost, one notification list per PAGE — which was correct only while a page
  * held exactly one thread. The sessions rail holds several and switches between them; a
- * run in one keeps streaming while another is on screen, and its `zen.usage` must land in
+ * run in one keeps streaming while another is on screen, and its `message-end` must land in
  * ITS cost, not the visible thread's. So each thread gets its own set, created here, and
  * the pane that renders a thread provides them through `ThreadStoresContext`.
  *
@@ -39,32 +39,32 @@ export interface ThreadStores {
   readonly recentChunks: RecentChunksStore
   /**
    * The server-side acquisition this page's LAST run on the thread held, from its
-   * `zen.run` receipt (#109); undefined until a run starts. The debug pane compares it
+   * `status` frame's `generation` (#109); undefined until a run starts. The debug pane compares it
    * with the server's current `generation`: a difference names a run this page did not
    * make — another tab, or a rebuild after the idle window.
    */
   readonly generation: WritableStore<number | undefined>
   /**
    * The question this page shows pi blocked on; undefined when none. Fed by three chunks
-   * (#112, #114): `zen.dialog` opens it, `zen.dialog-settled` clears it by id, and a
-   * snapshot's `zen.open-dialogs` replaces it wholesale. ONE slot is the browser's choice,
+   * (#112, #114): `extension-ui-request` opens it, `dialog-settled` clears it by id, and a
+   * snapshot's `openDialogs` replaces it wholesale. ONE slot is the browser's choice,
    * not pi's — extensions can hold several questions at once (`openDialogs()` lists them);
-   * this page shows the oldest, and a second only once a snapshot lists it (see
-   * `routeDialogEvent`). Also cleared by an answer this page sends that the server takes
+   * this page shows the oldest, and a second only once a snapshot lists it (the router's
+   * `snapshot` branch and `routeUiRequest`). Also cleared by an answer this page sends that the server takes
    * or reports gone.
    */
   readonly dialog: WritableStore<ZenPendingDialog | undefined>
   /**
    * The follow ended under this page (#119): the server closed, restarted, or dropped the
    * connection, and nothing here reconnects — the thread's state on this page is as of that
-   * moment. Set by `zen.follow-ended`; cleared by the next `zen.run`, which only a live
+   * moment. Set by `follow-ended`; cleared by the next `status` or `snapshot` frame, which only a live
    * follow delivers. While true the status bar says `disconnected` and no stop is offered,
    * whatever the run flag still holds: the page cannot know what the server is doing.
    */
   readonly disconnected: WritableStore<boolean>
   /**
    * What waits behind the run in flight, as pi holds it (#75): the texts, steering first,
-   * from every `zen.queue` frame — one list for every follower, so a second tab sees what
+   * from every `queue` frame — one list for every follower, so a second tab sees what
    * the first queued. Empty when nothing waits. Rendered above the composer; a stop hands
    * these back to the composer through the abort receipt, not from here (the frame that
    * empties this can beat the receipt).

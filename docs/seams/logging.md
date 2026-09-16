@@ -31,7 +31,7 @@ export type ZenLogLayer = 'server' | 'host' | 'extension' | 'browser'
  */
 export interface ZenLogProperties {
   readonly threadId?: string
-  /** The acquisition the record belongs to (`zen.run`, #109). */
+  /** The acquisition the record belongs to (the `status` frame's `generation`, #109). */
   readonly generation?: number
   /** The observation's sequence on the follow, where the record is about one (#112). */
   readonly seq?: number

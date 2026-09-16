@@ -33,7 +33,7 @@ test('a run-start receipt sets both the mode and the modes on offer', () => {
   expect(store.get()).toEqual({ mode: 'default', available: ['default', 'acceptEdits', 'plan'] })
 })
 
-// ⚠ ONE FEED (L3). A change mid-run arrives as the same `zen.mode` receipt the run started
+// ⚠ ONE FEED (L3). A change mid-run arrives as the same `permission-mode` receipt the run started
 // with — the host says the mode AND the list, so nothing here knows what a vendor entry is.
 test('a mid-run receipt moves the mode and the option list together', () => {
   store.applyReceipt(receipt('default'))

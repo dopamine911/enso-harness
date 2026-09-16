@@ -5,11 +5,11 @@ import { type Static, Type } from 'typebox'
  * in and what it may switch to. Nothing here says which extension implements the mode or
  * how it persists it — that lives below the `AgentHost` seam, in
  * `web/src/host/permission-mode-adapter.ts`, and reaches the browser as the
- * `permission-mode` observation and the `zen.mode` receipt, both carrying this one shape.
+ * `permission-mode` observation and the snapshot's `permissionMode`, both carrying this one shape.
  */
 
 /**
- * The receipt a run starts with (#84) — and the value of the `zen.mode` CUSTOM chunk that
+ * The receipt a run starts with (#84) — and the value of the `permission-mode` CUSTOM chunk that
  * carries it to the browser, at run start and on every change. `mode` is the current mode;
  * `available` is what the mode dropdown may offer: the modes the runtime's mode extension
  * registers, intersected with the commands this session actually registers, in the

@@ -12,14 +12,8 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
 import { Button } from './components/ui/button.tsx'
-import type { RecordedCustomEvent } from './custom-event-router.ts'
+import { FOLLOW_ENDED_CUSTOM_EVENT, type RecordedCustomEvent } from './custom-event-router.ts'
 import { type PermissionModeState, usePermissionMode } from './permission-mode.tsx'
-import {
-  ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
-  ZEN_CUSTOM_EVENT_ENTRY,
-  ZEN_CUSTOM_EVENT_FOLLOW_ENDED,
-  ZEN_CUSTOM_EVENT_RUN,
-} from './rpc/custom-event-names.ts'
 import { type Store, useStore, useThreadStores } from './store.ts'
 import { boundedFailureDetail } from './stored-threads.ts'
 import type { ThreadStats } from './thread-stats.tsx'
@@ -61,7 +55,7 @@ export interface BrowserBelief {
   readonly mode: PermissionModeState
   readonly stats: ThreadStats
   readonly recentChunks: readonly RecordedCustomEvent[]
-  /** The acquisition this page's last run held (`zen.run`, #109); undefined before a run. */
+  /** The acquisition this page's last run held (the `status` frame's `generation`, #109); undefined before a run. */
   readonly generation: number | undefined
   /** This thread's records from the page's ring (#132): what the browser LOGGED, newest last. */
   readonly logged: readonly ZenLogLine[]
@@ -114,18 +108,23 @@ export interface ThreadDebugViewProps {
 }
 
 /**
- * A chunk's name, plus the inner `type` its value carries when there is one. The case that
- * needs it is `zen.unmapped` — pi's raw event, and a model turn produces a run of them (tool
- * starts, thinking, message ends) that read as identical rows without it. It is not special-
- * cased to that name: a `zen.entry` value is a session entry with a `type` too, and reads as
- * `zen.entry (custom)`, which is just as useful.
+ * A chunk's name — which since #162 workstream 5 is the observation's `kind` or the frame's
+ * `type` — plus, for `unmapped` only, the runtime event type the value carries: a model turn
+ * produces a run of those (tool starts, thinking, message ends) that would read as identical
+ * rows without it.
  */
 export function describeChunk(chunk: RecordedCustomEvent): string {
+  // An `unmapped` observation names the runtime event it carries — the one chunk whose
+  // name says less than its value does.
   const value = chunk.value
-  if (typeof value !== 'object' || value === null || !('type' in value) || typeof value.type !== 'string') {
+  if (chunk.name !== 'unmapped' || typeof value !== 'object' || value === null || !('event' in value)) {
     return chunk.name
   }
-  return `${chunk.name} (${value.type})`
+  const { event } = value
+  if (typeof event !== 'object' || event === null || !('type' in event) || typeof event.type !== 'string') {
+    return chunk.name
+  }
+  return `${chunk.name} (${event.type})`
 }
 
 /**
@@ -360,18 +359,19 @@ export function latestWins<T>(issue: () => Promise<T>): () => Promise<T | undefi
 
 /**
  * The chunks that mean "the server's view of this thread changed" — the moments the pane's
- * server columns can be stale (#103): a status frame (`zen.run`, sent at every busy
- * transition, this page's run or another tab's), an extension persisting state (`zen.entry`
+ * server columns can be stale (#103): a `status` or `snapshot` frame (sent at every busy
+ * transition, this page's run or another tab's), an extension persisting state (`custom-entry`
  * — a mode change persists one, which is how a change refetches), a question settling
- * (`zen.dialog-settled`), and the follow ending under this page (`zen.follow-ended`) — after
- * which the last fetch describes a session the server may no longer hold. NOT `zen.mode`:
+ * (`dialog-settled`), and the follow ending under this page (`follow-ended`) — after
+ * which the last fetch describes a session the server may no longer hold. NOT `permission-mode`:
  * this page's own run start sends it too, and that is not the server changing.
  */
 const SERVER_STATE_CHUNKS: ReadonlySet<string> = new Set([
-  ZEN_CUSTOM_EVENT_RUN,
-  ZEN_CUSTOM_EVENT_ENTRY,
-  ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
-  ZEN_CUSTOM_EVENT_FOLLOW_ENDED,
+  'snapshot',
+  'status',
+  'custom-entry',
+  'dialog-settled',
+  FOLLOW_ENDED_CUSTOM_EVENT,
 ])
 /**
  * The sequence of the latest server-state chunk, or undefined before any: the drawer
@@ -469,7 +469,7 @@ export function ThreadDebugDrawer(): React.ReactNode {
   useEffect(() => {
     refresh() // on open, and again for a new thread
     // Then on every server-state chunk: a subscription rather than a render dependency,
-    // so a `zen.usage` or an unmapped delta re-renders the list without refetching.
+    // so a `message-end` or an unmapped delta re-renders the list without refetching.
     let seen = latestServerStateSequence(stores.recentChunks.get())
     return stores.recentChunks.subscribe(() => {
       const latest = latestServerStateSequence(stores.recentChunks.get())

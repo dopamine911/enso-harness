@@ -6,7 +6,7 @@ import { createStore, type Store, useStore, useThreadStores } from './store.ts'
 /**
  * pi's `notify` messages, rendered (#29).
  *
- * A notify arrives as an AG-UI CUSTOM chunk (`zen.notify`), and TanStack's designated
+ * A notify arrives as an AG-UI CUSTOM chunk (`extension-ui-request`), and TanStack's designated
  * path for those is the `onCustomEvent` chat option — an imperative callback on the
  * OPTIONS object. So the bridge to React state is this store, one per thread
  * (`thread-stores.ts`): `custom-event-router.ts` pushes into it, and

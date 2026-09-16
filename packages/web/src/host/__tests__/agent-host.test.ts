@@ -251,7 +251,7 @@ test('⚠ a throwing session_start becomes an extension-error observation; the s
 // `entry_appended` for it to whoever is subscribed AT THAT MOMENT. Subscribing after
 // `bindExtensions` returned meant those entries were emitted to nobody: the held-until-
 // first-subscriber buffer sits behind the host's subscription, so nothing put them in it.
-// Found by the #86 drawer: two `modes` entries on the branch, one `zen.entry` in the browser.
+// Found by the #86 drawer: two `modes` entries on the branch, one `custom-entry` in the browser.
 test('⚠ an entry an extension persists during session_start reaches the first subscriber (#88)', async () => {
   const probe: InlineExtension = {
     name: 'zen-host-startup-entry-probe',
@@ -275,7 +275,7 @@ test('⚠ an entry an extension persists during session_start reaches the first 
 // ⚠ L3 (#162 workstream 4). Above the host no surface reads the vendor's `modes` entry any
 // more; the HOST says the mode, as its own event, right after the entry it saw. This is the
 // real extension persisting at session_start and the real host answering — the whole
-// reason the browser can fold `zen.mode` alone.
+// reason the browser can fold `permission-mode` alone.
 test("⚠ the host emits permission-mode after the vendor's modes entry — mode and the modes it registered", async () => {
   const hosted = await hostedSession()
   const events = collectEvents(hosted)

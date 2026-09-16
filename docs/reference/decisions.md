@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 153.**
+**Decision headers: 152.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -71,7 +71,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/ZenToolResult.tsx` | `#18` | The web renderer for a zen tool result — the React half of #18's contract. |
 | `packages/web/src/__tests__/browser-logging.test.ts` | `#132` | The page's logging (#132 slice 3): the ring the drawer reads, the shipper to the server, and the `?log=` knob — driven through a real `configure`, asserted at the sinks. |
 | `packages/web/src/__tests__/chat-screen.test.tsx` | `#27`, `#49` | #49, first pass: the dialog components had live receipts (#27, the e2e smoke) and no unit render, so chat-screen.tsx sat at ~14% lines. |
-| `packages/web/src/__tests__/custom-event-router.test.ts` | `#53`, `#90` | #53 S1.3: the CUSTOM-chunk router was an inline closure no test reached — renaming `zen.entry`, dropping the notify-type allowlist, or swapping the two `apply*` calls all left the suite green. |
+| `packages/web/src/__tests__/custom-event-router.test.ts` | `#53`, `#90`, `#162` | #53 S1.3: the CUSTOM-chunk router was an inline closure no test reached — renaming a chunk, dropping the notify-type allowlist, or swapping the two `apply*` calls all left the suite green. |
 | `packages/web/src/__tests__/dom-environment.ts` | `#118` | A browser DOM for the tests that MOUNT React (#118) — the mounted-pane tests, which need effects, `useSyncExternalStore` subscriptions and TanStack's `useChat` to actually run. |
 | `packages/web/src/__tests__/follow-connection.test.ts` | `#112` | The adapter is the ONLY place AG-UI is made (#112). |
 | `packages/web/src/__tests__/mode-lines.test.ts` | `#29`, `#90` | #29's remaining half: a mode change becomes a visible transcript line. |
@@ -82,12 +82,12 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/scripted-server.ts` | `#112`, `#118` | A scripted server behind `fetch` (#112, #118): one follow body the test writes SSE frames into, and unary routes the test scripts the answers of. |
 | `packages/web/src/__tests__/stored-threads.test.ts` | `#103` | #103 receipt, step 8: the dev proxy answered a dead API with Bun's whole HTML error page, and quoting it filled the rail. |
 | `packages/web/src/__tests__/thread-debug.test.tsx` | `#86` | #86: the drawer's one job is to NAME a disagreement between what the browser believes and what pi's session holds. |
-| `packages/web/src/__tests__/thread-stats.test.tsx` | `#45`, `#90` | #45's browser half: `zen.usage` chunks become the stats the status bar renders (#90, thread-status.test.tsx). |
+| `packages/web/src/__tests__/thread-stats.test.tsx` | `#45`, `#90` | #45's browser half: `message-end` chunks become the stats the status bar renders (#90, thread-status.test.tsx). |
 | `packages/web/src/__tests__/thread-status.test.tsx` | `#45`, `#90` | #90 PR 1: the always-on status bar. |
 | `packages/web/src/__tests__/thread-url.test.ts` | `#142` | The URL is the source of truth for the active thread (#142): what it names, and what it cannot. |
 | `packages/web/src/__tests__/threads-rail.test.tsx` | `#90` | #90 PR 3: the sessions rail and the page's thread list behind it. |
 | `packages/web/src/browser-logging.ts` | `#86`, `#132` | The browser's logging (#132 slice 3). |
-| `packages/web/src/custom-event-router.ts` | `#29`, `#53`, `#90` | The browser's ONE path from an AG-UI CUSTOM chunk to a thread's stores (mode lines, current mode, session stats, notifications, the debug record). |
+| `packages/web/src/custom-event-router.ts` | `#103` | The one chunk that is neither an observation nor a frame: the follow ended without this page leaving it (#103 receipt) — the server closed, restarted, or dropped the connection. |
 | `packages/web/src/fixture-conversation.ts` | `#27`, `#31` | The styling dev loop (#31): a scripted conversation streamed through the REAL `useChat` pipeline as local AG-UI events — no server, no pi. |
 | `packages/web/src/follow-connection.ts` | `#112` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |
 | `packages/web/src/host/__tests__/agent-host.test.ts` | `#27`, `#69` | The in-process host against the REAL harness package (#69) — every extension the manifest names loads, and inline probe extensions observe what the host does. |
@@ -107,7 +107,6 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/mode-lines.ts` | `#29`, `#69`, `#88`, `#162` | Permission-mode lines in the transcript (#29, the remaining half). |
 | `packages/web/src/notifications.tsx` | `#29`, `#84`, `#94`, `#96` | pi's `notify` messages, rendered (#29). |
 | `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |
-| `packages/web/src/rpc/custom-event-names.ts` | `#29`, `#53`, `#112` | The AG-UI CUSTOM chunk names zen derives in the browser — the contract between the adapter (`to-agui.ts`, which emits them from observations, in memory, never on the wire since #112) and the router (`custom-event-router.ts`, which dispatches on them). |
 | `packages/web/src/rpc/to-agui.ts` | `#18`, `#24`, `#112` | `ZenObservation` → AG-UI `StreamChunk` (#24, #112). |
 | `packages/web/src/server/__tests__/fake-hosted-thread.ts` | `#178` | The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a `ThreadRuntime` from plain closures that records every call, so the server, the registry and the routes are driven over it and asserted through what it recorded. |
 | `packages/web/src/server/__tests__/follow.test.ts` | `#109`, `#112` | The wire, measured (#109's receipt, kept as the contract — #112). |

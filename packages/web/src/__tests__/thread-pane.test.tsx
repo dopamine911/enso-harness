@@ -577,7 +577,7 @@ test("⚠ the debug pane names a MISMATCH between the page's mode and the server
     expect(mismatches()).toBe(1)
   })
   // The host's mode observation brings the page's store to plan — the same value the host already
-  // reports — so the MISMATCH goes with no refetch: `zen.mode` is deliberately NOT a refetch trigger.
+  // reports — so the MISMATCH goes with no refetch: a `permission-mode` chunk is deliberately NOT a refetch trigger.
   await pane.settle({
     type: 'observation',
     seq: 1,

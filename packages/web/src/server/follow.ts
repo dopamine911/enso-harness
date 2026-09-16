@@ -39,7 +39,7 @@ import { interruptedTail, transcriptToMessages } from './transcript-to-messages.
  *   POST /api/threads/:id/abort    unary (#116). Stop the run in flight: pi is told, and the
  *                                  prompts waiting behind the run come back in the answer
  *                                  (#75, clear-and-restore — pi's queue is cleared, every
- *                                  follower sees `zen.queue` empty). The
+ *                                  follower sees `queue` empty). The
  *                                  run ENDS ON THE FOLLOW like any other — `agent_settled`
  *                                  is emitted from pi's own `finally` — so every follower
  *                                  sees the same `settled` + `status`, and the thread is

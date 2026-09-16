@@ -15,12 +15,7 @@ import {
   zenLogger,
 } from '@zen/core'
 import { Check } from 'typebox/value'
-import {
-  ZEN_CUSTOM_EVENT_FOLLOW_ENDED,
-  ZEN_CUSTOM_EVENT_MODE,
-  ZEN_CUSTOM_EVENT_OPEN_DIALOGS,
-  ZEN_CUSTOM_EVENT_RUN,
-} from './rpc/custom-event-names.ts'
+import { FOLLOW_ENDED_CUSTOM_EVENT } from './custom-event-router.ts'
 import { type AguiIdentifiers, observationToAguiEvents } from './rpc/to-agui.ts'
 
 /**
@@ -48,7 +43,7 @@ import { type AguiIdentifiers, observationToAguiEvents } from './rpc/to-agui.ts'
  * path produced, so the renderers see nothing new. Per-message boundaries are on the wire
  * (`message-start`/`message-end`) for a later fold that wants them.
  *
- * DIALOGS. A blocking question is a `zen.dialog` CUSTOM chunk (`to-agui.ts`) into the thread's
+ * DIALOGS. A blocking question is an `extension-ui-request` CUSTOM chunk (`to-agui.ts`) into the thread's
  * dialog store; the answer is `answerDialog` below — a unary POST. No interrupt: the run keeps
  * going on the follow and nothing on the server parks. An unreadable blocking request is
  * declined here on pi's behalf, and the run error `to-agui.ts` emits tells the user.
@@ -195,7 +190,7 @@ export interface AbortResult {
 /**
  * What the server did with a prompt sent DURING a run (#75):
  * `queued` pi holds it behind the run in flight (202, `queued: true`) — the follow's
- * `zen.queue` lists it for every follower; pi claims it when the run's turn ends.
+ * `queue` lists it for every follower; pi claims it when the run's turn ends.
  * `taken` the run had ended by the time it arrived, so it started a run of its own (202,
  * `queued: false`); the follow opens that run as it would another tab's.
  * `refused` pi would not take it (a `prompt-rejected` on the follow, or a non-202).
@@ -221,7 +216,7 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
   readonly prompt: (text: string, images?: readonly ZenPromptImage[]) => Promise<PromptOutcome>
   /**
    * Switch the permission mode (L3 step C): `POST …/mode`, a control route, never a prompt —
-   * the browser says a mode and no command. The change arrives on the follow as `zen.mode`,
+   * the browser says a mode and no command. The change arrives on the follow as `permission-mode`,
    * said by the host once its extension has persisted it; a refusal is reported with the
    * server's reason and moves nothing.
    */
@@ -335,7 +330,6 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   function observeStatus(busy: boolean, generation: number): void {
     serverGeneration = generation
     serverBusy = busy
-    push({ type: EventType.CUSTOM, name: ZEN_CUSTOM_EVENT_RUN, value: { generation } })
     if (!busy) {
       finishRunsThrough(generation)
       return
@@ -354,15 +348,11 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   function observe(frame: ZenFollowFrame): void {
-    if (frame.type === 'snapshot') {
-      push({ type: EventType.CUSTOM, name: ZEN_CUSTOM_EVENT_MODE, value: frame.permissionMode })
-      // The complete list, every snapshot (#114): a reconnect's snapshot is the resync,
-      // so an empty list is a fact ("nothing is waiting") the browser must apply too.
-      push({ type: EventType.CUSTOM, name: ZEN_CUSTOM_EVENT_OPEN_DIALOGS, value: { open: frame.openDialogs } })
-      observeStatus(frame.busy, frame.generation)
-      return
-    }
-    if (frame.type === 'status') {
+    if (frame.type === 'snapshot' || frame.type === 'status') {
+      // The frame crosses to the router WHOLE, named by its type (#162 workstream 5): the
+      // run-start receipts — mode, the complete open-question list, the generation — are
+      // read off it there, not re-shaped here into a second vocabulary of names.
+      push({ type: EventType.CUSTOM, name: frame.type, value: frame })
       observeStatus(frame.busy, frame.generation)
       return
     }
@@ -436,7 +426,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
         // with no run open nothing else would mention it, and the pane would keep
         // presenting its last fetch of a session that may no longer exist as current.
         if (!abort.aborted) {
-          push({ type: EventType.CUSTOM, name: ZEN_CUSTOM_EVENT_FOLLOW_ENDED, value: { threadId } })
+          push({ type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId } })
         }
         wake?.()
         wake = undefined

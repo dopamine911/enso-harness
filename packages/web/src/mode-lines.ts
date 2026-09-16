@@ -7,7 +7,7 @@ import type { NotificationsStore } from './notifications.tsx'
  *
  * A SUCCESSFUL mode change is silent at the source: the mode extension changes the mode,
  * persists, and never notifies. The host sees the persist and emits the `permission-mode`
- * observation (L3, #162 workstream 4), which arrives here as the `zen.mode` chunk — the same
+ * observation (L3, #162 workstream 4), which arrives here as the `permission-mode` chunk — the same
  * chunk the run-start receipt rides, so this store never learns which extension's entry it
  * was or what that entry looks like.
  *
@@ -26,7 +26,7 @@ import type { NotificationsStore } from './notifications.tsx'
  */
 
 export interface ModeLines {
-  /** The `zen.mode` CUSTOM-chunk consumer — called by the router with the chunk's value. */
+  /** The `permission-mode` CUSTOM-chunk consumer — called by the router with the chunk's value. */
   readonly apply: (value: unknown) => void
 }
 

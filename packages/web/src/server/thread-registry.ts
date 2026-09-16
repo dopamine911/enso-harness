@@ -148,7 +148,7 @@ export interface ThreadLease {
   readonly runtime: ThreadRuntime
   /**
    * Which acquisition this is, counted per thread id for the server's lifetime — the fence
-   * a stale lease is checked against, and the number the browser's `zen.run` receipt
+   * a stale lease is checked against, and the number the browser's `status` frame
    * carries so the two can be compared (`ZenThreadInspection.generation`).
    */
   readonly generation: number

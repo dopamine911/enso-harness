@@ -17,7 +17,7 @@ beforeEach(() => {
   modeLines = createModeLines(notifications)
 })
 
-/** The `zen.mode` receipt's value: what the host says the mode is now. */
+/** The `permission-mode` receipt's value: what the host says the mode is now. */
 const modeState = (mode: unknown): { mode: unknown; available: string[] } => ({ mode, available: ['default', 'plan'] })
 const renderedMessages = (): string[] => notifications.get().map((notification) => notification.message)
 

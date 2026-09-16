@@ -8,7 +8,7 @@ import { createStore, type Store, useStore, useThreadStores } from './store.ts'
  * refused with `user dismissed dialog` (#73) can see they are in `default` instead of
  * reading the refusal as a bug.
  *
- * One feed, one store: `zen.mode`, carrying `{ mode, available }` — the receipt the server
+ * One feed, one store: `permission-mode`, carrying `{ mode, available }` — the receipt the server
  * synthesises at every run start (the mode the run begins in and the modes this session
  * registers), and the same chunk again whenever the host sees its mode extension persist a
  * change mid-run (the `permission-mode` observation, L3). This store never learns which
@@ -33,7 +33,7 @@ export interface PermissionModeState {
 const UNKNOWN: PermissionModeState = { mode: undefined, available: [] }
 
 export interface PermissionModeStore extends Store<PermissionModeState> {
-  /** Fold one `zen.mode` receipt's value in. Defensive like every wire crossing: a malformed value changes nothing. */
+  /** Fold one `permission-mode` receipt's value in. Defensive like every wire crossing: a malformed value changes nothing. */
   readonly applyReceipt: (data: unknown) => void
   /**
    * Seed from the server's fresh-thread state (`GET /api/mode`) so the control reads
