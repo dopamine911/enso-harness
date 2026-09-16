@@ -184,7 +184,7 @@ export function createFakeAgentHost(
           id: threadId,
           path: `/stored/${threadId}.jsonl`,
           modified: storedThread.modified,
-          messageCount: storedThread.transcript.filter((entry) => entry.kind === 'message').length,
+          messageCount: storedThread.transcript.filter((transcriptEntry) => transcriptEntry.kind === 'message').length,
           firstMessage: storedThread.firstMessage,
         })),
       ),
