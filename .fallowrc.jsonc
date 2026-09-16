@@ -53,6 +53,10 @@
       ]
     },
     { "file": "packages/core/src/tool-result.ts", "exports": ["ZenTruncation", "ZenTruncationUnit"] },
+    {
+      "file": "packages/core/src/transcript.ts",
+      "exports": ["ZenTranscriptCustom", "ZenTranscriptMessage", "ZenTranscriptOther", "ZenTranscriptToolResult"]
+    },
     { "file": "packages/core/src/web-fetch.ts", "exports": ["WebFetchConfig"] },
     { "file": "packages/core/src/web-search.ts", "exports": ["WebSearchToolParameters"] }
   ],

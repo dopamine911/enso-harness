@@ -22,6 +22,12 @@ test('an allowlisted file with a match is silent — that is what the row is for
   expect(codeOffenders({ ...scan, allowed: ['packages/core/src/log.ts'] })).toEqual([])
 })
 
+test('⚠ an allowlisted file the walk never visits is reported too: a renamed or deleted file is the same drift', () => {
+  expect(
+    codeOffenders({ ...scan, allowed: ['packages/core/src/log.ts', 'packages/core/src/no-such-file.ts'] }),
+  ).toEqual(['packages/core/src/no-such-file.ts (allowlisted, matches nothing)'])
+})
+
 test('⚠ an allowlisted file with NO match is reported: the row outlived its leak', () => {
   expect(codeOffenders({ ...scan, allowed: ['packages/core/src/log.ts', 'packages/core/src/config.ts'] })).toEqual([
     'packages/core/src/config.ts (allowlisted, matches nothing)',

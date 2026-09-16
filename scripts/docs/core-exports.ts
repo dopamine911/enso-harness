@@ -41,6 +41,7 @@ const CLASSIFICATION_BY_MODULE: Readonly<Record<string, Classification>> = {
   'thread-inspection.ts': 'wire',
   'thread-runtime.ts': 'host contract',
   'tool-result.ts': 'wire',
+  'transcript.ts': 'wire',
   'web-fetch.ts': 'config/policy',
   'web-search.ts': 'config/policy',
 }
@@ -61,6 +62,7 @@ const DOMAIN_BY_MODULE: Readonly<Record<string, string>> = {
   'thread-inspection.ts': 'Thread, Observation',
   'thread-runtime.ts': 'Thread, Control',
   'tool-result.ts': 'Surface, Observation',
+  'transcript.ts': 'Thread, Record',
   'web-fetch.ts': 'Permission, Control',
   'web-search.ts': 'Permission, Control',
 }

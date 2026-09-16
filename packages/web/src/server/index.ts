@@ -17,7 +17,7 @@ import {
   zenLogger,
 } from '@zen/core'
 import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost } from '../host/agent-host.ts'
-import { branchToMessages, interruptedTail } from '../rpc/branch-to-messages.ts'
+import { interruptedTail, transcriptToMessages } from '../rpc/transcript-to-messages.ts'
 import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
   abortThread,
@@ -347,19 +347,19 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
    */
   async function respondWithThreadHistory(threadId: string, response: ServerResponse): Promise<void> {
     const live = threads.peek(threadId)
-    const branch = live === undefined ? await host.readBranch(threadId) : live.hosted.inspect().entries
-    if (branch === undefined) {
+    const transcript = live === undefined ? await host.readTranscript(threadId) : live.hosted.inspect().entries
+    if (transcript === undefined) {
       response.writeHead(404, { 'Content-Type': 'text/plain' })
       response.end(`no session for thread ${threadId}`)
       return
     }
-    const messages = branchToMessages(branch)
+    const messages = transcriptToMessages(transcript)
     const interrupted = interruptedTail(messages)
     const payload: ZenThreadHistory = {
       threadId,
       messages,
       permissionMode:
-        live === undefined ? host.storedPermissionMode(branch) : live.hosted.runtime.permissionModeState(),
+        live === undefined ? host.storedPermissionMode(transcript) : live.hosted.runtime.permissionModeState(),
       ...(interrupted === undefined ? {} : { interrupted }),
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })

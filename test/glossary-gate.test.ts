@@ -56,11 +56,6 @@ const RETIRED_PATH_SEQUENCES = [...RETIRED_WORD_SEQUENCES, ['session', 'inspecti
 const RETIRED_ALLOWED: readonly string[] = [
   // The gate itself: it names the retired words in order to refuse them.
   'test/glossary-gate.test.ts',
-  // `PiSessionEntry`, `PiStoredMessage`, the content parts: the runtime's persistence shapes,
-  // carried not modelled, above the host — leak L2's persistence side (#162 workstream 4; the
-  // event side left with the mapper, now under host/). The prefix is the marker; renaming
-  // would hide the leak. Leaves when the host produces a transcript of ours.
-  'packages/web/src/rpc/branch-to-messages.ts',
   // `PiPathsModule`: a contract test that imports the runtime's own `utils/paths.js` to keep
   // the guard's replica honest. The type IS the vendor's module, in the one test written to
   // read it; the name says so. Stays as long as the replica does.

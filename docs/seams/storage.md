@@ -1,8 +1,9 @@
 # Seam: storage
 
 The contract between the runtime's durable log and everything above the host: build or reopen a session
-under a thread's id, list what is on disk, read a stored branch without building, report what one live
-session contains. Glossary domains: **Record** — the *storage seam* is the mechanism named there, "the
+under a thread's id, list what is on disk, read a stored transcript without building, report what one
+live session contains — and since #162 workstream 4 (L2), what crosses is the transcript of OURS
+(`ZenTranscriptEntry`): the host decodes the runtime's stored entries below this seam. Glossary domains: **Record** — the *storage seam* is the mechanism named there, "the
 only file that touches the runtime's session manager or its file layout", a later store a one-file
 change (#102 §1) — and **Thread** (*stored thread*, *entry*, *branch* are what cross).
 
@@ -29,14 +30,14 @@ export interface AgentHost {
   /** pi's session files for this workspace, newest first — the resumable listing. */
   listSessions(): Promise<StoredThread[]>
   /**
-   * The branch of a stored session, read-only — no pi session is built, nothing is
+   * The transcript of a stored session, read-only — no pi session is built, nothing is
    * written (#86's rule: looking must not build). `undefined` when no file has that id.
    */
-  readBranch(threadId: string): Promise<unknown[] | undefined>
+  readTranscript(threadId: string): Promise<ZenTranscriptEntry[] | undefined>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): ZenPermissionModeState
-  /** A stored thread's state from its branch alone: nothing is built to answer (#86, #95). */
-  storedPermissionMode(branch: readonly unknown[]): ZenPermissionModeState
+  /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
+  storedPermissionMode(transcript: readonly ZenTranscriptEntry[]): ZenPermissionModeState
 }
 ```
 
@@ -73,8 +74,8 @@ export interface HostedThreadInspection {
   readonly sessionDir: string
   /** The session file once pi has flushed it; null while the session lives only in memory. */
   readonly sessionFile: string | null
-  /** The branch, root to leaf, verbatim — pi's own entry shapes. */
-  readonly entries: readonly unknown[]
+  /** The branch, root to leaf, as the transcript of ours (L2): the runtime's entry shapes stay in `transcript.ts`. */
+  readonly entries: readonly ZenTranscriptEntry[]
   /** Slash commands this session registers. */
   readonly commands: readonly string[]
 }
@@ -147,12 +148,12 @@ export const ZenThreadInspection = Type.Object(
     generation: Type.Integer({ minimum: 0 }),
     lastActivityAt: Type.String(),
     /**
-     * The session BRANCH — root to leaf — as pi holds it, verbatim. pi's own entry shapes
-     * (`message`, `custom`, `model_change`, …), not zen's: they are carried, not modelled,
-     * so a reader sees exactly what pi sees. Consumers read the base fields (`type`, `id`,
-     * `parentId`, `timestamp`, `customType`) defensively, like every wire crossing.
+     * The session BRANCH — root to leaf — as the transcript of ours (#162 workstream 4, L2):
+     * the host decoded the runtime's stored entries below the seam, so a reader sees
+     * messages with their parts, tool results with their descriptors, an extension's custom
+     * entries, and `other` for every kind the host does not model — counted, never invented.
      */
-    entries: Type.Array(Type.Unknown()),
+    entries: Type.Array(ZenTranscriptEntry),
   },
   { additionalProperties: false },
 )
@@ -163,10 +164,11 @@ A thread's history as the browser mounts it, live or cold: `GET …/history` and
 <!-- source: packages/core/src/thread-inspection.ts#ZenThreadHistory -->
 ```ts
 /**
- * A thread's history as the browser mounts it (#95): the branch as TanStack `UIMessage`s —
- * built by the server's `branch-to-messages` mapper, the same way the live stream is
- * mapped to AG-UI — plus the opening permission mode the branch persists. Carried as
- * `Unknown` because the shape is TanStack's, not zen's; the durable form is pi's entries.
+ * A thread's history as the browser mounts it (#95): the transcript as TanStack `UIMessage`s —
+ * assembled by the server's `transcript-to-messages` reader, the same way the live stream is
+ * adapted to AG-UI — plus the opening permission mode the transcript persists. Carried as
+ * `Unknown` because the shape is TanStack's, not zen's; the durable form is the runtime's log,
+ * decoded by the host into `ZenTranscriptEntry` (L2).
  */
 export const ZenThreadHistory = Type.Object(
   {
@@ -199,28 +201,30 @@ export const ZenInterruptedTail = Type.Union([
 ## Who implements it, who consumes it
 
 **Implemented once**, in `packages/web/src/host/agent-host.ts`, the only file that imports the runtime's
-`SessionManager` (line 10). `listSessions` (line 239) goes through the runtime's own listing, never a
-directory scan, newest first. `readBranch` (line 256) resolves the id to a path through that listing
-and opens the file into memory; nothing is written until an append. `createSession` (line 263)
-resolves the same path, then *opens* the file or *creates* one under the thread's id (lines 304–307):
-the thread id IS the session id (#95), so resume needs no mapping and no index file. `inspect()`
-(line 479) reads branch, ids and directory straight off the session manager. The host is tested
-against the real session manager in `host/__tests__/agent-host.test.ts`.
+`SessionManager`. `listSessions` goes through the runtime's own listing, never a directory scan,
+newest first. `readTranscript` resolves the id to a path through that listing, opens the file into
+memory (nothing is written until an append) and converts the branch through
+`packages/web/src/host/transcript.ts` — the one place above `session-events.ts` that reads the
+runtime's stored entry shapes. `createSession` resolves the same path, then *opens* the file or
+*creates* one under the thread's id: the thread id IS the session id (#95), so resume needs no mapping
+and no index file. `inspect()` reads ids and directory straight off the session manager and converts
+the live branch the same way. The host is tested against the real session manager in
+`host/__tests__/agent-host.test.ts`.
 
 **Consumed by the server.** `packages/web/src/server/index.ts` owns the read routes:
-`GET /api/stored-threads` (line 617 → `respondWithStoredThreads`, line 319) maps each `StoredThread` to
-a `ZenStoredThread`, marking `busy` by peeking the registry; `GET …/history` (line 655 →
-`respondWithThreadHistory`, line 347) reads `inspect().entries` when the thread is live and
-`host.readBranch` when it is cold, 404 when neither has it; `GET /api/threads` summarises each live
-thread from `inspect()` (line 279). `packages/web/src/server/thread-registry.ts` is the only builder
-(index.ts line 260 wires `host.createSession` into it), and its `inspectThread` (line 165) is the one
-place a `ZenThreadInspection` is assembled, so the thread route (index.ts line 391) and the bundle
-(`bundle-route.ts` line 112) cannot drift. `server/follow.ts` (lines 103–105) does the same
-live-or-cold read for the snapshot's `messages`; both rebuild through
-`packages/web/src/rpc/branch-to-messages.ts` (`branchToMessages`, line 133; `interruptedTail`,
-line 174), the read-side twin of the live mapper. Every server test drives the seam over a fake
-`AgentHost`: `server-handler.test.ts` (`listSessions` and `readBranch` over an in-memory table,
-lines 134–144), `follow.test.ts` (line 124), `thread-registry.test.ts`, `bundle-route.test.ts`.
+`GET /api/stored-threads` → `respondWithStoredThreads` maps each `StoredThread` to a `ZenStoredThread`,
+marking `busy` by peeking the registry; `GET …/history` → `respondWithThreadHistory` reads
+`inspect().entries` when the thread is live and `host.readTranscript` when it is cold, 404 when neither
+has it; `GET /api/threads` summarises each live thread from `inspect()`.
+`packages/web/src/server/thread-registry.ts` is the only builder (it is handed `host.createSession`),
+and its `inspectThread` is the one place a `ZenThreadInspection` is assembled, so the thread route and
+the bundle cannot drift. `server/follow.ts` does the same live-or-cold read for the snapshot's
+`messages`; both assemble through `packages/web/src/rpc/transcript-to-messages.ts`
+(`transcriptToMessages`, `interruptedTail`), the read-side twin of the live adapter — and since L2 it
+assembles from entries of ours and decodes nothing. Every server test drives the seam over the fake
+`AgentHost` (`server/__tests__/fake-hosted-thread.ts`), whose stored threads carry transcripts of ours;
+`server-handler.test.ts`'s fixtures are written as the file holds them and cross through the host's own
+converter, so the test reads what the real host would hand out.
 
 ## What fences it
 
@@ -235,39 +239,30 @@ lines 134–144), `follow.test.ts` (line 124), `thread-registry.test.ts`, `bundl
 
 ## What crosses it that should not
 
-**The runtime's persistence format crosses past the host.** Leak **L2**, the persistence-side half
-(`.local/refactor/goals.md` §2; #162 workstream 4; the event-side half is on `thread-runtime.md`).
-`HostedThreadInspection.entries` and `AgentHost.readBranch` return `readonly unknown[]` — "pi's own
-entry shapes" (agent-host.ts line 123) — and `ZenThreadInspection` carries them to the wire as
-`Type.Array(Type.Unknown())`, "carried, not modelled" (thread-inspection.ts lines 66–72). Above the
-host, three readers know the vendor's field names:
-
-- `packages/web/src/rpc/branch-to-messages.ts` declares `PiSessionEntry`, `PiStoredMessage`,
-  `PiAssistantContentPart`, `PiUserContentPart` (lines 22–53) and rebuilds messages from them.
-- `describeEntry` in `packages/core/src/thread-inspection.ts` (line 135) formats one entry as a row from
-  `type`, `customType`, `message.role` and `data.mode`, for the drawer and `scripts/zen-thread.mjs`.
-- `persistedPermissionMode` in core walks the entries for the mode extension's custom entry (leak L3,
-  `permission-mode.md`), from `server/index.ts` line 362, `follow.ts` line 136 and the drawer.
-
-`test/glossary-gate.test.ts` allowlists the first (line 62) with the reason: the `Pi` prefix is the
-marker, renaming would hide the leak, the line leaves when the host produces a transcript of ours.
-Until then every reader reads defensively; an entry kind it does not render is skipped, not invented
-(branch-to-messages.ts lines 11–14).
+**Nothing of the runtime's persistence format, since L2** (#162 workstream 4). Until then
+`AgentHost.readBranch` and `HostedThreadInspection.entries` returned `readonly unknown[]` — the
+runtime's own entry shapes — and `ZenThreadInspection` carried them to the wire "carried, not
+modelled", with three readers above the host knowing the vendor's field names. Now the host converts
+the branch in `packages/web/src/host/transcript.ts` — the one place above `session-events.ts` that
+reads a stored entry — and hands out `ZenTranscriptEntry[]` from `readTranscript` and `inspect()`;
+`rpc/transcript-to-messages.ts` assembles messages from ours and decodes nothing;
+`describeTranscriptEntry` in core formats ours for the drawer and `zen-thread.mjs`; the stored mode
+walk reads our `custom` entries. The glossary gate's row for the old reader is gone, and the gate
+now refuses an allowlisted file it cannot find, so it cannot come back unnoticed.
 
 **`sessionFile` is a lagging copy.** The runtime persists lazily — nothing reaches disk until the first
-assistant message — so `inspect()` reports the path only once the file exists and `null` before
-(agent-host.ts lines 480–488; thread-inspection.ts lines 18–21); a thread that has only run slash
-commands has a full branch and no file, and `listSessions` omits it (lines 235–237).
-`server-handler.test.ts` line 294 pins the `null`. `sessionDir` and `sessionFile` cross as debug text
-only (glossary Decision 1: they name the log); nothing above the host opens them.
+assistant message — so `inspect()` reports the path only once the file exists and `null` before;
+a thread that has only run slash commands has a full branch and no file, and `listSessions` omits it.
+`server-handler.test.ts` pins the `null`. `sessionDir` and `sessionFile` cross as debug text only
+(glossary Decision 1: they name the log); nothing above the host opens them.
 
 ## Pivot cost
 
 Replace the store — another file layout, a database, a remote log — and the file that changes is
-`packages/web/src/host/agent-host.ts`: `listSessions`, `readBranch`, the open-or-create in
-`createSession`, and `inspect()`. That is what the storage-seam test measures: a second importer of
-the session manager anywhere else is a failing test with the file named. While L2 stands,
-`packages/web/src/rpc/branch-to-messages.ts` changes too, because a new store's entries would not be
-the old runtime's shapes — and `describeEntry` in core with it. The server routes, the registry, the
-follow's snapshot, the wire schemas, the browser and every server test over a fake host do not change:
-the fakes already implement `AgentHost` from plain closures and are the seam's second implementation.
+`packages/web/src/host/agent-host.ts` (`listSessions`, `readTranscript`, the open-or-create in
+`createSession`, `inspect()`) and `packages/web/src/host/transcript.ts` (the new store's entries → the
+transcript of ours). That is what the storage-seam test measures: a second importer of the session
+manager anywhere else is a failing test with the file named. The server routes, the registry, the
+follow's snapshot, the wire schemas, the reader, the drawer, the browser and every server test over
+the fake host do not change: the fake implements `AgentHost` from plain closures over stored
+transcripts of ours and is the seam's second implementation.

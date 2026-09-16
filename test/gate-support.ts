@@ -65,24 +65,27 @@ export interface CodeLineScan {
 
 /**
  * `file:line` (or `file` for a path match) for every code line the rule refuses — and
- * `file (allowlisted, matches nothing)` for every allowlisted file the rule no longer catches.
- * The allowlist is the leak inventory; a row for a leak that has left is inventory drift, and
- * this is how it leaves the list the same day the leak leaves the code (#162 workstream 4).
+ * `file (allowlisted, matches nothing)` for every allowlisted file the rule no longer catches,
+ * including one the walk never visits (renamed, deleted, or moved under an exempt root). The
+ * allowlist is the leak inventory; a row for a leak that has left is inventory drift, and this
+ * is how it leaves the list the same day the leak leaves the code (#162 workstream 4).
  */
 export function codeOffenders(scan: CodeLineScan): string[] {
   const offenders: string[] = []
+  const unvisited = new Set(scan.allowed ?? [])
   for (const root of scan.roots) {
     for (const path of sourceFiles(join(REPOSITORY_ROOT, root), scan.includeTests ?? false)) {
       const repositoryRelative = path.slice(REPOSITORY_ROOT.length + 1)
       if (scan.exemptRoots?.some((exempt) => repositoryRelative.startsWith(`${exempt}/`))) continue
       const matches = fileMatches(scan, path, repositoryRelative)
-      if (scan.allowed?.includes(repositoryRelative)) {
+      if (unvisited.delete(repositoryRelative)) {
         if (matches.length === 0) offenders.push(`${repositoryRelative} (allowlisted, matches nothing)`)
       } else {
         offenders.push(...matches)
       }
     }
   }
+  for (const missing of unvisited) offenders.push(`${missing} (allowlisted, matches nothing)`)
   return offenders
 }
 

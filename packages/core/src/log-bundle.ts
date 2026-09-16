@@ -1,5 +1,6 @@
 import { ZEN_REDACTED, ZEN_REDACTED_VALUE, type ZenLogLine } from './log.ts'
-import { describeEntry, type ZenThreadInspection } from './thread-inspection.ts'
+import type { ZenThreadInspection } from './thread-inspection.ts'
+import { describeTranscriptEntry } from './transcript.ts'
 
 /**
  * The bundle (#132 item 5): ONE plaintext file a user attaches to an issue, built from
@@ -102,7 +103,7 @@ function threadSection(inspection: ZenThreadInspection): string {
     `- ${inspection.busy ? 'busy' : 'idle'}, run #${inspection.generation}, last activity ${inspection.lastActivityAt}`,
     `- commands: ${inspection.commands.map((command) => `/${command}`).join(' ')}`,
     `- branch (${inspection.entries.length} entries):`,
-    ...inspection.entries.map((sessionEntry) => `    - ${describeEntry(sessionEntry)}`),
+    ...inspection.entries.map((sessionEntry) => `    - ${describeTranscriptEntry(sessionEntry)}`),
   ]
   return `### thread ${inspection.threadId}\n\n${rows.join('\n')}\n`
 }

@@ -477,10 +477,9 @@ test('âš  createSession(threadId) OPENS the session file already under that id â
   const inspection = hosted.inspect()
   expect(inspection.sessionId).toBe(threadId)
   expect(inspection.sessionFile).toBe(file)
-  const messages = inspection.entries
-    .filter((entry) => (entry as { type?: unknown }).type === 'message')
-    .map((entry) => (entry as { message: { role: string } }).message.role)
-  expect(messages.slice(0, 2)).toEqual(['user', 'assistant'])
+  // The transcript of ours (L2): the file's messages, decoded below the seam.
+  const roles = inspection.entries.flatMap((entry) => (entry.kind === 'message' ? [entry.role] : []))
+  expect(roles.slice(0, 2)).toEqual(['user', 'assistant'])
 })
 
 test('createSession(threadId) with no file under that id CREATES the session under it, so the file it flushes is found next time', async () => {
@@ -506,7 +505,7 @@ test('listSessions names stored sessions newest first with the first user messag
     firstMessage: 'newer question',
     messageCount: 2,
   })
-  const branch = await host.readBranch(older)
-  expect(branch?.some((entry) => (entry as { message?: { role?: string } }).message?.role === 'assistant')).toBe(true)
-  expect(await host.readBranch('never-stored')).toBeUndefined()
+  const transcript = await host.readTranscript(older)
+  expect(transcript?.some((entry) => entry.kind === 'message' && entry.role === 'assistant')).toBe(true)
+  expect(await host.readTranscript('never-stored')).toBeUndefined()
 })

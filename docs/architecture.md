@@ -185,7 +185,7 @@ question so a reconnect renders the card at once.
 ### Persistence
 
 **The storage seam is `AgentHost`** (`packages/web/src/host/agent-host.ts`): the only file that
-touches `SessionManager` or the session-file layout (`listSessions`, `readBranch`, `createSession`).
+touches `SessionManager` or the session-file layout (`listSessions`, `readTranscript`, `createSession`).
 `@zen/core` and the browser never see a path except as debug text. Keep it so — this is the state
 abstraction #102 §1 asks for, and it costs one test.
 

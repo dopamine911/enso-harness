@@ -205,9 +205,8 @@ A fourth, `bundle-route.test.ts`, builds a minimal one to give the bundle a live
 - **The glossary gate** (`test/glossary-gate.test.ts`, #165): the seam's own names may not regress —
   `PiSession`, `pi-rpc`, and any `Pi`-prefixed identifier outside the host are refused. The contract
   was called `PiSession` in a module called `pi-rpc.ts` until #166.
-- **Two allowlist lines** name the leak below: `packages/web/src/rpc/map-events.ts` and
-  `packages/web/src/rpc/branch-to-messages.ts` in the glossary gate's `RETIRED_ALLOWED`, each with
-  its reason.
+- **No allowlist line names this seam** any more: the two L2 rows in the glossary gate's
+  `RETIRED_ALLOWED` left with the mapper (under `host/`) and the reader (which reads entries of ours).
 
 ## What crosses it that should not
 
