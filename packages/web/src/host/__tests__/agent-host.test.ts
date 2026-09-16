@@ -11,7 +11,13 @@ import {
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { findRepoRoot, harnessPackageDir, type ZenObservation } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
-import { type AgentHost, createAgentHost, type HostedThread, seedMultiAccountChildProxyOff } from '../agent-host.ts'
+import {
+  type AgentHost,
+  createAgentHost,
+  type HostedThread,
+  seedMultiAccountChildProxyOff,
+  stopRunThenSettleDialogs,
+} from '../agent-host.ts'
 import { readPiccPersistedMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
 
 /**
@@ -436,6 +442,31 @@ test("⚠ Stop stops: the run's abort settles a pending dialog as `aborted` — 
   hosted.runtime.answerDialog({ id: dialogId, confirmed: true })
   await nextTick()
   expect(outcome).toBe(false)
+})
+
+// A stop must stop, even when the runtime's abort rejects: the dialogs settle and the
+// rejection still propagates — the same rule thread-registry.test.ts pins for a queue clear
+// that throws, one layer down.
+test("⚠ a stop must stop: when the runtime's abort rejects, the dialogs still settle and the rejection still propagates", async () => {
+  const order: string[] = []
+  const stopping = stopRunThenSettleDialogs(
+    async () => {
+      order.push('runtime told')
+      throw new Error('the runtime would not stop')
+    },
+    () => order.push('dialogs settled'),
+  )
+  await expect(stopping).rejects.toThrow('the runtime would not stop')
+  expect(order).toEqual(['runtime told', 'dialogs settled'])
+  // and the ordinary order, for the record: runtime first, dialogs after
+  order.length = 0
+  await stopRunThenSettleDialogs(
+    async () => {
+      order.push('runtime told')
+    },
+    () => order.push('dialogs settled'),
+  )
+  expect(order).toEqual(['runtime told', 'dialogs settled'])
 })
 
 test('abort with no pending dialog settles nothing and says nothing', async () => {
