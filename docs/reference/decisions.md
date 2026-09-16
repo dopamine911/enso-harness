@@ -61,7 +61,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/extensions/guards/__tests__/cc-safety-net-contract.test.ts` | `#4`, `#9` | The cc-safety-net CONTRACT TEST (#9) — the condition #4's comments set for adopting a vendor as a library: exact pin + a fixed command set asserted verdict-by-verdict, so a vendor bump that shifts the boundary goes red here instead of silently moving it. |
 | `packages/harness/extensions/guards/index.ts` | `#4`, `#9`, `#10`, `#20`, `#21`, `#69` | Tier 0 guards — see `docs/concepts/pi-immediate-needs.md`. |
 | `packages/harness/extensions/logging/__tests__/logging.test.ts` | `#132` | The extension's two branches (#132): pi as a CHILD configures its own sink; pi IN-PROCESS leaves the server's alone. |
-| `packages/harness/extensions/logging/index.ts` | `#132`, `#144` | The extension process's logging (#132), and the one record only an extension can write: the provider's own request id (#144). |
+| `packages/harness/extensions/logging/index.ts` | `#132`, `#144`, `#167` | The extension process's logging (#132), and the one record only an extension can write: the provider's own request id (#144). |
 | `packages/harness/extensions/web-fetch/__tests__/web-fetch.test.ts` | `#54` | The web_fetch extension (#54), against injected IO seams — no test here touches the network, DNS, or the committed config file (one shape-pin at the bottom reads the real `zen.config.json`, read-only). |
 | `packages/harness/extensions/web-fetch/index.ts` | `#9`, `#54`, `#59` | The web_fetch tool (#54) — the sanctioned web access that replaces the ad-hoc network clients #9 denies in bash. |
 | `packages/harness/extensions/web-search/__tests__/web-search.test.ts` | `#63` | The web_search extension (#63) against injected seams — the SELECTION and FALLBACK policy, and the ACCURATE rendering contract. |
@@ -151,7 +151,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/zen.mjs` | `#20` | Launch a VANILLA pi with only zen-harness loaded. |
 | `test/check-coverage.test.ts` | `#53` | The coverage GATE's own arithmetic (#53 S2). |
 | `test/code-offenders.test.ts` | `#162` | The allowlist is the leak inventory (#162 workstream 4): a row hides a file's matches, and a row for a file with no matches is drift and is reported. |
-| `test/docs-gate.test.ts` | `#162`, `#168` | The docs cannot drift (#168, goals §3.3): a page either quotes source and is checked against it, or is generated from source and is diffed against it. |
+| `test/docs-gate.test.ts` | `#162`, `#167`, `#168` | The docs cannot drift (#168, goals §3.3): a page either quotes source and is checked against it, or is generated from source and is diffed against it. |
 | `test/fallow-config.test.ts` | `#163` | fallow's entry list cannot drift from the harness manifest (#163). |
 | `test/gate-abort.test.ts` | `#157` | The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0. |
 | `test/gate-support.ts` | `#150`, `#162`, `#165`, `#174` | What the source-tree gates share (#165, #162 workstream 6): the word-splitter, the sequence matcher, the comment skip, over the one walker (`scripts/source-tree.ts`, #174). |

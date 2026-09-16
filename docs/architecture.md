@@ -196,8 +196,8 @@ question so a reconnect renders the card at once.
    closes a run. This is why abort (#116), dialogs (#113, #114) and resume (#95) landed without
    regressions: each added a unary route and changed nothing about how a run ends.
 2. **A route tells pi; the feed ends the run.** `prompt` answers at admission (202 + receipt), `abort`
-   answers 204 when pi was told, `dialog` answers 204 when the question was spent. Their effects
-   arrive on the follow for every follower alike.
+   answers 200 with the queue it handed back (`ZenAbortReceipt`, #116 / #75) once pi was told, `dialog`
+   answers 204 when the question was spent. Their effects arrive on the follow for every follower alike.
 3. **The snapshot is the resync.** Nothing is replayed by cursor; a follow opens with the thread as of
    `asOfSeq` and continues from there.
 4. **One live writer per pi session id.** pi appends with no lock. Within the web server the registry
@@ -360,6 +360,7 @@ zen-harness/
     glossary.md             # what a word means (gated)
     verification.md         # how the repo proves itself
     seams/                  # one page per contract, source verbatim, drift-checked
+    flows/                  # one page per control-plane sequence; every pinning test cited and checked
     reference/              # generated tables (core exports, decisions, observations, routes, …)
     concepts/               # the live design notes; concepts/archive/ the pre-build ones
   .fallowrc.jsonc           # fallow: entries, baseline, duplicates, architecture boundaries (the zones)
@@ -589,15 +590,18 @@ touching a file, read its header and the seam page it belongs to.
 3. [`seams/`](./seams/README.md) — one page per contract: the source verbatim, who implements and
    consumes it, what fences it, what leaks across it, what a pivot costs. Held equal to the code by
    `test/docs-gate.test.ts`. Read the page for the seam you are about to touch.
-4. [`reference/`](./reference/README.md) — generated current facts: routes, observations, core exports,
+4. [`flows/`](./flows/README.md) — one page per control-plane sequence: the order of events, the
+   invariants it demonstrates, and the tests that pin each — every citation checked by the same gate.
+   Read the flow you are about to change before the code that implements it.
+5. [`reference/`](./reference/README.md) — generated current facts: routes, observations, core exports,
    environment and configuration, code-local decisions, gates, ratchets and test doubles.
-5. [`verification.md`](./verification.md) — what "green" means, how to use the gates and fakes, and
+6. [`verification.md`](./verification.md) — what "green" means, how to use the gates and fakes, and
    which runtime proof a change needs.
-6. [`../README.md`](../README.md) — quick start and what is built, feature by feature.
-7. [`concepts/pi-immediate-needs.md`](./concepts/pi-immediate-needs.md) — what pi lacks, ranked, with
+7. [`../README.md`](../README.md) — quick start and what is built, feature by feature.
+8. [`concepts/pi-immediate-needs.md`](./concepts/pi-immediate-needs.md) — what pi lacks, ranked, with
    seams and effort. Phase 0 comes straight from its Tier 0.
-8. [`concepts/archive/agent-boundaries.md`](./concepts/archive/agent-boundaries.md) — the boundary model and why
+9. [`concepts/archive/agent-boundaries.md`](./concepts/archive/agent-boundaries.md) — the boundary model and why
    enforcement location matters more than rule content.
-9. [`concepts/harness-design-principles.md`](./concepts/harness-design-principles.md) — progressive
+10. [`concepts/harness-design-principles.md`](./concepts/harness-design-principles.md) — progressive
    disclosure, applied seven times.
-10. The rest of `concepts/` as needed.
+11. The rest of `concepts/` as needed.
