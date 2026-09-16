@@ -229,7 +229,7 @@ need none: an upstream re-port is the second implementation, and the gate is wha
 **Nothing of the vendor kind.** The state layer (TanStack AI) and the stream vocabulary its processor
 consumes (AG-UI) are vendored by decision, not leaked: `architecture.md` → Presentation names the
 client as the state layer, and the glossary's vendor map carries both. Their vocabulary is derived in
-memory, in the browser, and never on the wire or stored — `rpc/to-agui.ts:17-28` says where it runs
+memory, in the browser, and never on the wire or stored — `to-agui.ts:17-28` says where it runs
 (the adapter calls it on each observation before handing chunks to the client; *nothing serialises the
 output of this module and nothing stores it*), and its only production importer is
 `follow-connection.ts`.
@@ -249,7 +249,7 @@ else; `RecordedCustomEvent` and `ToolCallRow` are the names on our side.
 
 Replace the state layer and the files that change are the adapter and its two neighbours:
 `follow-connection.ts` (a new send/subscribe shape, or none), `custom-event-router.ts` (the client's
-`onCustomEvent` is the entry; the dispatch to stores stays), `rpc/to-agui.ts` (deleted — its header
+`onCustomEvent` is the entry; the dispatch to stores stays), `to-agui.ts` (deleted — its header
 says so: *a renderer that stops speaking AG-UI deletes it and the adapter*), the chat factory in
 `chat-screen.tsx` (`threadChatOptions` and `createThreadChatHook`, lines 171-209, and the widget map
 written against the client's `ChatUIHost`), plus the history crossing: `ThreadStores.history`,

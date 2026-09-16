@@ -4,7 +4,7 @@
 Generated from the named re-export blocks in `packages/core/src/index.ts`, the top-level exports
 of `packages/core/src/log-process.ts`, and static named imports in production source. Counts are
 importing files, not reference occurrences; tests are excluded. `web/browser` is web source outside
-`host/` and `server/` (including `rpc/`). The generator recognizes `@zen/core`,
+`host/` and `server/`. The generator recognizes `@zen/core`,
 `@zen/core/log-process`, and relative imports resolving to those entrypoints.
 
 Parser limits: named static imports and named re-export blocks only. Default/star exports, dynamic

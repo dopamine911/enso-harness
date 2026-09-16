@@ -16,7 +16,7 @@ import {
 } from '@zen/core'
 import { Check } from 'typebox/value'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from './custom-event-router.ts'
-import { type AguiIdentifiers, observationToAguiEvents } from './rpc/to-agui.ts'
+import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
 
 /**
  * The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over

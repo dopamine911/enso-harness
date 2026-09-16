@@ -141,7 +141,7 @@ one frame per feed frame — `observation` with its `seq`, `status` with `live`/
 (lines 92–94, 127–141). In the browser `packages/web/src/follow-connection.ts` checks every frame
 against `ZenFollowFrame` (line 407), pushes the snapshot and status frames whole as chunks named by
 their type (lines 348–354), closes runs on `settled` (line 361) and matches `prompt-rejected` to the prompt it
-queued (line 369). `packages/web/src/rpc/to-agui.ts` is the adapter proper: observation → state-layer
+queued (line 369). `packages/web/src/to-agui.ts` is the adapter proper: observation → state-layer
 chunk, run in the page, never serialised or stored (header lines 17–28).
 
 **The resync rule.** Nothing is replayed by cursor. A reconnect opens a new follow and gets a new
@@ -155,7 +155,7 @@ leaves, the registry forgets the feed and `seq` restarts with the next follower,
   literal from the union itself — never a hard-coded count, which drifted once (566e8b1). Two sweeps
   compare against it: `host/__tests__/observation-sweep.test.ts` proves every event the mapper
   handles, plus the server-synthesised kinds, validates against `ZenObservation` and covers every
-  member; `rpc/__tests__/to-agui.test.ts` proves the adapter handles every member. The oracle lives
+  member; `__tests__/to-agui.test.ts` proves the adapter handles every member. The oracle lives
   in `@zen/core` because both sweeps sit in zones that may import only `core` (#173).
 - **The generated inventory**: `docs/reference/observations.md` must equal its generator's stdout
   (`test/docs-gate.test.ts`); a kind with no producer or consumer is printed as a finding, not omitted.
