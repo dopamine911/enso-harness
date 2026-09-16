@@ -28,7 +28,7 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
  *   it" is checked, so a renamed or deleted test fails the page that cites it. Every flow
  *   page must cite at least one.
  *
- * And one rule for `docs/seams/`: every ```` ```ts ```` fence carries a `source:` marker.
+ * And one rule for `docs/seams/` and `docs/flows/`: every ```` ```ts ```` fence carries a `source:` marker.
  * Prose may surround a fence; prose may not restate what a fence says, and a fence with no
  * source is prose wearing a code font.
  *
@@ -38,7 +38,7 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
 
 const DOCS_ROOT = join(REPOSITORY_ROOT, 'docs')
 /** Where every fence must be sourced. Other docs are checked only where they carry a marker. */
-const SOURCED_FENCE_DIRECTORIES = ['docs/seams'] as const
+const SOURCED_FENCE_DIRECTORIES = ['docs/seams', 'docs/flows'] as const
 const SOURCE_MARKER = /^<!--\s*source:\s*(\S+?)#(\w+)\s*-->$/
 const GENERATED_MARKER = /^<!--\s*generated:\s*(\S+)\s*-->$/
 const BLOCK_OPEN = /^<!--\s*generated-block:\s*(\S+)\s*-->$/

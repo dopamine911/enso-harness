@@ -36,7 +36,9 @@ sequenceDiagram
 2. **Logging is first, and configures only when nothing has.** As a child of the terminal launcher
    nothing has configured, so the extension does — the same day's file, `process: "pi"`, no console
    sink. In-process the server's launcher configured first and it configures nothing; a second
-   `configure` throws by design. *Stated gap:* no file read for this page says why the entry is first.
+   `configure` throws by design. Why first: the sink is configured at load, and no extension writes
+   a record before `session_start` today, so the position decides nothing yet — it is first so that
+   stays true when one does (`extensions/logging/index.ts` header, *Why first in the manifest*).
 3. **Isolation is three mechanisms, each closing a different hole — the same three at both launch
    points.** `PI_CODING_AGENT_DIR` points the runtime at `.zen/pi-agent`: none of the user's packages,
    settings or credentials are visible. `--no-extensions` turns discovery off — including this repo's
@@ -127,4 +129,5 @@ The terminal launcher: [`scripts/zen.mjs`](../../scripts/zen.mjs) (header). The 
 linker: [`scripts/link-vendor-packages.mjs`](../../scripts/link-vendor-packages.mjs) (`requiredPackageNames`).
 In-process: `packages/web/src/host/agent-host.ts` (header ⚠⚠ items, `createSession`), `server/index.ts#assertVendorLinks`.
 Load order as a security property: `packages/harness/extensions/guards/index.ts` (header), [`seams/guards.md`](../seams/guards.md);
-the configurators: [`seams/logging.md`](../seams/logging.md); the manifest as a table: [`reference/env-and-config.md`](../reference/env-and-config.md).
+the configurators: [`seams/logging.md`](../seams/logging.md); why logging is first:
+[`extensions/logging/index.ts`](../../packages/harness/extensions/logging/index.ts) (header, *Why first in the manifest*); the manifest as a table: [`reference/env-and-config.md`](../reference/env-and-config.md).
