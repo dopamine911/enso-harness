@@ -128,77 +128,50 @@ test('an extension error becomes RUN_ERROR naming the extension and the hook', (
   })
 })
 
-// #29: the notify payload must survive the LAST hop too — the browser's onCustomEvent
-// receives exactly this event's `value`, so a message dropped here is a message dropped
-// on screen. The first hop (runtime event → observation) is pinned in host/__tests__/
-// map-events.test.ts; the two meet on `ZenObservation`, which the mapper sweep validates.
-test('a notify observation rides CUSTOM as zen.notify with its message intact', () => {
-  const [event] = toAgui({
-    kind: 'extension-ui-request',
-    id: 'n1',
-    method: 'notify',
-    blocking: false,
-    origin: 'run',
-    message: 'Mode set to Plan Mode',
-    notifyType: 'warning',
-  })
-  expect(event).toMatchObject({ type: EventType.CUSTOM, name: 'zen.notify' })
-  expect((event as { value: unknown }).value).toMatchObject({
-    message: 'Mode set to Plan Mode',
-    notifyType: 'warning',
-  })
-})
-
-// #29's remaining half: the mode lines read the "modes" entries from this chunk, so
-// customType and data must cross intact.
-test('a mode change rides CUSTOM as zen.mode — the SAME chunk and value shape as the run-start receipt (L3)', () => {
-  const [event] = toAgui({ kind: 'permission-mode', mode: 'plan', available: ['default', 'plan'] })
-  expect(event).toEqual({
-    type: EventType.CUSTOM,
-    name: 'zen.mode',
-    value: { mode: 'plan', available: ['default', 'plan'] },
-  })
-})
-
-test('a rejected mode change is a WARNING notice on zen.notify — the click did nothing and the user is told (L3)', () => {
-  const [event] = toAgui({ kind: 'permission-mode-rejected', mode: 'plan', reason: 'the command refused' })
-  expect(event).toEqual({
-    type: EventType.CUSTOM,
-    name: 'zen.notify',
-    value: { message: 'mode change to plan rejected: the command refused', notifyType: 'warning', origin: 'run' },
-  })
-})
-
-test('a custom entry rides CUSTOM as zen.entry with its data intact', () => {
-  const [event] = toAgui({ kind: 'custom-entry', customType: 'modes', data: { mode: 'acceptEdits' } })
-  expect(event).toMatchObject({ type: EventType.CUSTOM, name: 'zen.entry' })
-  expect((event as { value: unknown }).value).toMatchObject({
-    customType: 'modes',
-    data: { mode: 'acceptEdits' },
-  })
-})
-
-// --- #45: a completed request's accounting crosses as zen.usage, the whole observation
-test('a message-end observation rides CUSTOM as zen.usage with role and usage intact', () => {
-  const [event] = toAgui({
-    kind: 'message-end',
-    role: 'assistant',
-    usage: { input: 1200, output: 40, cacheRead: 300, cacheWrite: 50, totalCost: 0.0132 },
-  })
-  expect(event).toMatchObject({ type: EventType.CUSTOM, name: 'zen.usage' })
-  expect((event as { value: unknown }).value).toEqual({
-    kind: 'message-end',
-    role: 'assistant',
-    usage: { input: 1200, output: 40, cacheRead: 300, cacheWrite: 50, totalCost: 0.0132 },
-  })
-})
-
-// ⚠ CUSTOM, not RAW. @ag-ui/core defines RAW and it looks made for this, but TanStack
-// NARROWS AGUIEvent and RAW is not in the narrowed union — found only by removing a cast.
-test('an unmapped observation rides CUSTOM, because RAW is not a valid StreamChunk', () => {
-  const [event] = toAgui({ kind: 'unmapped', event: { type: 'some_future_event', detail: 1 } })
-  expect(event).toMatchObject({ type: EventType.CUSTOM, name: 'zen.unmapped' })
-  expect((event as { value: unknown }).value).toEqual({ type: 'some_future_event', detail: 1 })
+// ⚠ ONE VOCABULARY (#162 workstream 5). Whatever AG-UI has no word for rides CUSTOM named by
+// `ZenObservation.kind` and carrying the observation WHOLE — so #29's "the notify payload must
+// survive the last hop" and #45's "role and usage intact" are the same fact: the value IS the
+// observation, and the router reads it by the kind the mapper gave it. The first hop
+// (runtime event → observation) is pinned in host/__tests__/map-events.test.ts; the two
+// meet on `ZenObservation`, which the mapper sweep validates.
+test('every CUSTOM chunk is named by its kind and carries the observation whole — nothing re-shaped, nothing forged', () => {
+  const custom: ZenObservation[] = [
+    {
+      kind: 'extension-ui-request',
+      id: 'n1',
+      method: 'notify',
+      blocking: false,
+      origin: 'run',
+      message: 'Mode set to Plan Mode',
+      notifyType: 'warning',
+    },
+    {
+      kind: 'extension-ui-request',
+      id: 'd1',
+      method: 'select',
+      blocking: true,
+      origin: 'run',
+      dialog: { method: 'select', title: 'Pick', options: ['a', 'b'] },
+    },
+    { kind: 'dialog-settled', id: 'd1', outcome: 'answered' },
+    { kind: 'permission-mode', mode: 'plan', available: ['default', 'plan'] },
+    // L3 step C: crosses as itself; the ROUTER composes the warning. Before this the adapter
+    // forged a notify observation here — a second shape for one fact.
+    { kind: 'permission-mode-rejected', mode: 'plan', reason: 'the command refused' },
+    { kind: 'custom-entry', customType: 'modes', data: { mode: 'acceptEdits' } },
+    {
+      kind: 'message-end',
+      role: 'assistant',
+      usage: { input: 1200, output: 40, cacheRead: 300, cacheWrite: 50, totalCost: 0.0132 },
+    },
+    { kind: 'queue', steering: ['stop'], followUp: ['then'] },
+    // ⚠ CUSTOM, not RAW. @ag-ui/core defines RAW and it looks made for this, but TanStack
+    // NARROWS AGUIEvent and RAW is not in the narrowed union — found only by removing a cast.
+    { kind: 'unmapped', event: { type: 'some_future_event', detail: 1 } },
+  ]
+  for (const observation of custom) {
+    expect(toAgui(observation)).toEqual([{ type: EventType.CUSTOM, name: observation.kind, value: observation }])
+  }
 })
 
 test('nothing is silently dropped: every kind except an in-flight result and a bare message boundary yields an event', () => {

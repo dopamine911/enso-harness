@@ -8,7 +8,7 @@ reads, writes nothing, records nothing, controls nothing (#144). This is the wir
 browser (#112) and the thing a log record at `debug` describes.
 
 The kinds are not restated here: [`../reference/observations.md`](../reference/observations.md) is
-generated from the union, mapper, prompt route, browser adapter, every custom event name and its
+generated from the union, mapper, prompt route, browser adapter, every chunk name and its
 browser consumer — one row per kind — and the docs gate diffs it against its generator.
 
 Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Refresh with
@@ -139,8 +139,8 @@ through the mapper (lines 284–286); the prompt route's `announce` (line 466) e
 one frame per feed frame — `observation` with its `seq`, `status` with `live`/`busy`/`generation`
 (lines 109–119) — after a snapshot taken in the same tick as the subscription, exact as of `asOfSeq`
 (lines 92–94, 127–141). In the browser `packages/web/src/follow-connection.ts` checks every frame
-against `ZenFollowFrame` (line 407), turns the snapshot into the mode and open-dialog custom events
-(lines 348–354), closes runs on `settled` (line 361) and matches `prompt-rejected` to the prompt it
+against `ZenFollowFrame` (line 407), pushes the snapshot and status frames whole as chunks named by
+their type (lines 348–354), closes runs on `settled` (line 361) and matches `prompt-rejected` to the prompt it
 queued (line 369). `packages/web/src/rpc/to-agui.ts` is the adapter proper: observation → state-layer
 chunk, run in the page, never serialised or stored (header lines 17–28).
 
@@ -167,15 +167,13 @@ leaves, the registry forgets the feed and `seq` restarts with the next follower,
 
 ## What crosses it that should not
 
-**Two names for one observation.** The browser routes observations to its stores by a parallel
-vocabulary, the `zen.*` custom-event names in `packages/web/src/rpc/custom-event-names.ts` —
-`zen.notify` for an `extension-ui-request` that is a notify, `zen.dialog` for one that is a question,
-`zen.dialog-settled`, `zen.entry`, `zen.queue`, `zen.usage` (a `message-end` with accounting),
-`zen.unmapped`, plus `zen.mode`, `zen.run`, `zen.open-dialogs` and `zen.follow-ended` for state
-receipts the adapter synthesises from a snapshot or a dropped connection. The module exists so a
-rename cannot land on one side only (header lines 2–7); the glossary keeps *custom event* as the
-browser's word and owes one vocabulary per observation — #162 workstream 5. Not a vendor leak, and
-not numbered in goals §2; a second naming of our own thing, inventoried here.
+**Nothing, since #162 workstream 5.** The browser used to route observations to its stores by a
+parallel vocabulary — eleven `zen.*` custom-event names, `zen.mode` for a `permission-mode`,
+`zen.notify` for an `extension-ui-request`, a forged notify for a `permission-mode-rejected` — and a
+rename had two sides to land on. A CUSTOM chunk is now named by `ZenObservation.kind` and carries the
+observation whole (`to-agui.ts#custom`); the snapshot and status frames cross whole, named by
+`ZenFollowFrame.type`; the one chunk that is neither — the follow ending under the page — is
+`FOLLOW_ENDED_CUSTOM_EVENT`, declared by its only reader, the router. `custom-event-names.ts` is gone.
 
 **The mapper reads the runtime's field names — below the seam.** `map-events.ts` declares
 `PiContentPart` and `PiToolDetails` and reads `event.assistantMessageEvent`; since L2 (#162 workstream
@@ -196,6 +194,6 @@ directly. The fake that drives the server (`follow.test.ts` in particular, which
 by one: snapshot, `seq`, status, dialog outcomes) emits observations and proves the consumer side
 today without a runtime at all.
 
-Replace the state layer instead and the adapter goes: `to-agui.ts`, `custom-event-names.ts`, the
+Replace the state layer instead and the adapter goes: `to-agui.ts` and the
 router — "a renderer that stops speaking AG-UI deletes it and the adapter" (`to-agui.ts` line 28).
 The wire is untouched, because the state layer's vocabulary is derived in memory and never on it.

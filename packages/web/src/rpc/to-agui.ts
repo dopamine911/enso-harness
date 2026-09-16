@@ -1,16 +1,6 @@
 import { EventType } from '@ag-ui/core'
 import type { StreamChunk } from '@tanstack/ai'
 import { ZEN_TOOL_RESULT_KEY, type ZenObservation } from '@zen/core'
-import {
-  ZEN_CUSTOM_EVENT_DIALOG,
-  ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
-  ZEN_CUSTOM_EVENT_ENTRY,
-  ZEN_CUSTOM_EVENT_MODE,
-  ZEN_CUSTOM_EVENT_NOTIFY,
-  ZEN_CUSTOM_EVENT_QUEUE,
-  ZEN_CUSTOM_EVENT_UNMAPPED,
-  ZEN_CUSTOM_EVENT_USAGE,
-} from './custom-event-names.ts'
 
 /**
  * `ZenObservation` → AG-UI `StreamChunk` (#24, #112).
@@ -76,6 +66,16 @@ export interface AguiIdentifiers {
  * `CUSTOM` progress event the renderer understands; it is not built, and pretending
  * otherwise by faking a result would be worse than the gap.
  */
+/**
+ * An observation AG-UI has no vocabulary for rides a CUSTOM chunk NAMED BY ITS KIND and
+ * carrying the observation whole (#162 workstream 5). One vocabulary: the router dispatches
+ * on `ZenObservation.kind`, the same word the mapper, the follow and the debug pane use —
+ * there is no second list of names to rename on one side only.
+ */
+function custom(observation: ZenObservation): StreamChunk {
+  return { type: EventType.CUSTOM, name: observation.kind, value: observation }
+}
+
 export function observationToAguiEvents(observation: ZenObservation, ids: AguiIdentifiers): StreamChunk[] {
   switch (observation.kind) {
     case 'text-delta':
@@ -140,17 +140,11 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
     }
 
     case 'extension-ui-request':
-      // A blocking question the browser can render crosses whole as `zen.dialog` (#112):
-      // the adapter's dialog store shows it, and the answer is a unary POST — no
-      // interrupt, no run boundary. The run keeps going on the follow meanwhile.
+      // A blocking question the browser can render crosses whole (#112): the router opens
+      // the dialog store on it, and the answer is a unary POST — no interrupt, no run
+      // boundary. The run keeps going on the follow meanwhile.
       if (observation.blocking && observation.dialog !== undefined && observation.id.length > 0) {
-        return [
-          {
-            type: EventType.CUSTOM,
-            name: ZEN_CUSTOM_EVENT_DIALOG,
-            value: { id: observation.id, dialog: observation.dialog },
-          },
-        ]
+        return [custom(observation)]
       }
       // ⚠ THE DEGENERATE CASE: a blocking request whose fields did not form a
       // `ZenDialogSpec` (or that carried no id). The connection declines it on pi's
@@ -175,9 +169,7 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
         ]
       }
       // `notify` carries a message meant for a HUMAN, so it crosses.
-      if (observation.method === 'notify') {
-        return [{ type: EventType.CUSTOM, name: ZEN_CUSTOM_EVENT_NOTIFY, value: observation }]
-      }
+      if (observation.method === 'notify') return [custom(observation)]
       // ⚠ Everything else fire-and-forget — setStatus, setWidget, setTitle,
       // set_editor_text — is dropped, and the justification is NOT "we do not recognise
       // it". These are addressed to a TERMINAL: powerline widgets, LSP status lines,
@@ -226,18 +218,10 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 
     case 'message-end':
       // One completed message's accounting (#45) — the thread-stats bar sums these.
-      // CUSTOM because AG-UI has no usage vocabulary; the value is the whole observation
-      // so the consumer reads `role` and `usage` off one shape declared in @zen/core. A
-      // boundary without spend has nothing for this view.
-      return observation.usage === undefined
-        ? []
-        : [
-            {
-              type: EventType.CUSTOM,
-              name: ZEN_CUSTOM_EVENT_USAGE,
-              value: observation,
-            },
-          ]
+      // CUSTOM because AG-UI has no usage vocabulary; the consumer reads `role` and `usage`
+      // off the one shape declared in @zen/core. A boundary without spend has nothing for
+      // this view.
+      return observation.usage === undefined ? [] : [custom(observation)]
 
     case 'turn-start':
       return [{ type: EventType.STEP_STARTED, stepName: 'turn' }]
@@ -247,13 +231,7 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 
     case 'queue':
       // Queue depth (#75). CUSTOM: AG-UI has no queue vocabulary.
-      return [
-        {
-          type: EventType.CUSTOM,
-          name: ZEN_CUSTOM_EVENT_QUEUE,
-          value: observation,
-        },
-      ]
+      return [custom(observation)]
 
     case 'prompt-rejected':
       // pi refused the prompt at preflight (#112) — the run the client thinks it started never
@@ -263,57 +241,27 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
     case 'dialog-settled':
       // The question stopped waiting (#114). CUSTOM: nothing on the run ended for it,
       // exactly as nothing started for the question. The browser drops the card by id.
-      return [
-        {
-          type: EventType.CUSTOM,
-          name: ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
-          value: { id: observation.id, outcome: observation.outcome },
-        },
-      ]
+      return [custom(observation)]
 
     case 'permission-mode':
-      // The mode changed mid-run (L3): the same `zen.mode` chunk the run-start receipt
-      // rides, with the same `{ mode, available }` value — one chunk, one shape, whether
-      // the mode was read at start or changed since. The browser's mode store and the
-      // transcript's mode line both fold this and nothing else.
-      return [
-        {
-          type: EventType.CUSTOM,
-          name: ZEN_CUSTOM_EVENT_MODE,
-          value: { mode: observation.mode, available: observation.available },
-        },
-      ]
+      // The mode changed mid-run (L3). The run-start receipt is the snapshot frame's
+      // `permissionMode`, the same `ZenPermissionModeState` shape; the browser's mode store
+      // and the transcript's mode line fold both and nothing else.
+      return [custom(observation)]
 
     case 'permission-mode-rejected':
-      // The click did nothing and the user must be told (L3 step C): a warning notice,
-      // through the same `zen.notify` chunk an extension's own notice rides, so the
-      // notifications store renders it with no shape of its own.
-      return [
-        {
-          type: EventType.CUSTOM,
-          name: ZEN_CUSTOM_EVENT_NOTIFY,
-          value: {
-            message: `mode change to ${observation.mode} rejected: ${observation.reason}`,
-            notifyType: 'warning',
-            origin: 'run',
-          },
-        },
-      ]
+      // The click did nothing and the user must be told (L3 step C). Crosses as itself;
+      // the router composes the warning notice — before this the adapter forged a notify
+      // observation, a second shape for one fact.
+      return [custom(observation)]
 
     case 'custom-entry':
       // An extension persisted state (#29) — a receipt, recorded and counted (the debug
       // pane's chunk tally) but rendered by nothing since L3 moved the mode onto its own
-      // observation. Rides CUSTOM for the same reason unmapped does, below. ⚠ The value is
-      // the whole observation, so a consumer dispatches on `customType` rather than on a
-      // per-type chunk name — one chunk name per vendor entry type would put vendor
-      // knowledge in the transport.
-      return [
-        {
-          type: EventType.CUSTOM,
-          name: ZEN_CUSTOM_EVENT_ENTRY,
-          value: observation,
-        },
-      ]
+      // observation. Rides CUSTOM for the same reason unmapped does, below. ⚠ A consumer
+      // dispatches on `customType` inside the value, never on a per-type chunk name — one
+      // chunk name per vendor entry type would put vendor knowledge in the transport.
+      return [custom(observation)]
 
     case 'unmapped':
       // ⚠ CUSTOM, not RAW. `@ag-ui/core` defines a RAW event and it looks made for this —
@@ -325,12 +273,6 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
       //
       // The design rule from map-events.ts therefore survives the second hop: an
       // unrecognised event is carried, never discarded.
-      return [
-        {
-          type: EventType.CUSTOM,
-          name: ZEN_CUSTOM_EVENT_UNMAPPED,
-          value: observation.event,
-        },
-      ]
+      return [custom(observation)]
   }
 }

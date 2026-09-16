@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import type { ZenLogLine, ZenThreadEvent, ZenThreadEvents, ZenThreadInspection, ZenTranscriptEntry } from '@zen/core'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { RECENT_CUSTOM_CHUNK_CAPACITY, routeZenCustomEvent } from '../custom-event-router.ts'
+import { FOLLOW_ENDED_CUSTOM_EVENT, RECENT_CUSTOM_CHUNK_CAPACITY, routeZenCustomEvent } from '../custom-event-router.ts'
 import {
   type BrowserBelief,
   type BundleState,
@@ -169,10 +169,10 @@ test('before the first fetch, and on a failed one, the session column says why',
 // ── the router's record ──────────────────────────────────────────────────────
 
 test('every CUSTOM chunk the router sees is recorded, oldest first, with a stable identity', () => {
-  routeZenCustomEvent(stores, 'zen.mode', { mode: 'default', available: [] })
-  routeZenCustomEvent(stores, 'zen.unmapped', { type: 'some_future_event' })
+  routeZenCustomEvent(stores, 'permission-mode', { kind: 'permission-mode', mode: 'default', available: [] })
+  routeZenCustomEvent(stores, 'unmapped', { kind: 'unmapped', event: { type: 'some_future_event' } })
   const recorded = stores.recentChunks.get()
-  expect(recorded.map((chunk) => chunk.name)).toEqual(['zen.mode', 'zen.unmapped'])
+  expect(recorded.map((chunk) => chunk.name)).toEqual(['permission-mode', 'unmapped'])
   expect(recorded[0]?.sequence).toBeLessThan(recorded[1]?.sequence ?? 0)
 })
 
@@ -180,44 +180,57 @@ test('every CUSTOM chunk the router sees is recorded, oldest first, with a stabl
 // page's own run flag toggles — a run another tab started never toggles it.
 test('⚠ the refresh trigger moves on a status frame, a persisted mode or a settled question — and on nothing else', () => {
   expect(latestServerStateSequence(stores.recentChunks.get())).toBeUndefined()
-  routeZenCustomEvent(stores, 'zen.mode', { mode: 'default', available: [] })
-  routeZenCustomEvent(stores, 'zen.usage', {})
+  routeZenCustomEvent(stores, 'permission-mode', { kind: 'permission-mode', mode: 'default', available: [] })
+  routeZenCustomEvent(stores, 'message-end', { kind: 'message-end', role: 'assistant' })
   expect(latestServerStateSequence(stores.recentChunks.get())).toBeUndefined()
-  routeZenCustomEvent(stores, 'zen.run', { generation: 1 })
+  routeZenCustomEvent(stores, 'status', { type: 'status', live: true, busy: false, generation: 1 })
   const afterStatus = latestServerStateSequence(stores.recentChunks.get())
   expect(afterStatus).toBeDefined()
   // Chunks that do not mean "the server changed" leave the trigger where it was.
-  routeZenCustomEvent(stores, 'zen.unmapped', { type: 'message_update' })
-  routeZenCustomEvent(stores, 'zen.notify', { message: 'm' })
+  routeZenCustomEvent(stores, 'unmapped', { kind: 'unmapped', event: { type: 'message_update' } })
+  routeZenCustomEvent(stores, 'extension-ui-request', {
+    kind: 'extension-ui-request',
+    id: '',
+    method: 'notify',
+    blocking: false,
+    origin: 'run',
+    message: 'm',
+  })
   expect(latestServerStateSequence(stores.recentChunks.get())).toBe(afterStatus)
-  routeZenCustomEvent(stores, 'zen.dialog-settled', { id: 'd1', outcome: 'answered' })
+  routeZenCustomEvent(stores, 'dialog-settled', { kind: 'dialog-settled', id: 'd1', outcome: 'answered' })
   expect(latestServerStateSequence(stores.recentChunks.get())).toBeGreaterThan(afterStatus ?? 0)
   const afterSettle = latestServerStateSequence(stores.recentChunks.get())
-  routeZenCustomEvent(stores, 'zen.entry', { type: 'custom', customType: 'modes', data: { mode: 'plan' } })
+  routeZenCustomEvent(stores, 'custom-entry', { kind: 'custom-entry', customType: 'modes', data: { mode: 'plan' } })
   const afterEntry = latestServerStateSequence(stores.recentChunks.get())
   expect(afterEntry).toBeGreaterThan(afterSettle ?? 0)
   // The follow ending under the page (step 8): the last fetch may describe a session that is gone.
-  routeZenCustomEvent(stores, 'zen.follow-ended', { threadId: 't1' })
+  routeZenCustomEvent(stores, FOLLOW_ENDED_CUSTOM_EVENT, { threadId: 't1' })
   expect(latestServerStateSequence(stores.recentChunks.get())).toBeGreaterThan(afterEntry ?? 0)
 })
 
 test('the record is a ring: beyond capacity the oldest chunks fall off', () => {
   for (let sent = 0; sent < RECENT_CUSTOM_CHUNK_CAPACITY + 5; sent += 1) {
-    routeZenCustomEvent(stores, 'zen.unmapped', { sent })
+    routeZenCustomEvent(stores, 'unmapped', { sent })
   }
   const recorded = stores.recentChunks.get()
   expect(recorded).toHaveLength(RECENT_CUSTOM_CHUNK_CAPACITY)
   expect(recorded[0]?.value).toEqual({ sent: 5 })
 })
 
-// A model turn is a run of `zen.unmapped` chunks; without the inner type they are
+// A model turn is a run of `unmapped` chunks; without the inner event type they are
 // indistinguishable rows, which is the opposite of what a debug list is for.
-test('an unmapped chunk is described by the pi event it carries; a receipt just by its name', () => {
-  routeZenCustomEvent(stores, 'zen.unmapped', { type: 'tool_execution_start', toolName: 'bash' })
-  routeZenCustomEvent(stores, 'zen.mode', { mode: 'plan', available: [] })
-  const [unmapped, receipt] = stores.recentChunks.get()
-  expect(unmapped && describeChunk(unmapped)).toBe('zen.unmapped (tool_execution_start)')
-  expect(receipt && describeChunk(receipt)).toBe('zen.mode')
+test('an unmapped chunk is described by the runtime event it carries; every other chunk by its name', () => {
+  routeZenCustomEvent(stores, 'unmapped', {
+    kind: 'unmapped',
+    event: { type: 'tool_execution_start', toolName: 'bash' },
+  })
+  routeZenCustomEvent(stores, 'permission-mode', { kind: 'permission-mode', mode: 'plan', available: [] })
+  routeZenCustomEvent(stores, 'status', { type: 'status', live: true, busy: false, generation: 1 })
+  const [unmapped, receipt, statusChunk] = stores.recentChunks.get()
+  expect(unmapped && describeChunk(unmapped)).toBe('unmapped (tool_execution_start)')
+  expect(receipt && describeChunk(receipt)).toBe('permission-mode')
+  // a frame's own `type` field is its name already — not repeated in parentheses
+  expect(statusChunk && describeChunk(statusChunk)).toBe('status')
 })
 
 // ── the refetch race (PR #87 review) ─────────────────────────────────────────

@@ -49,7 +49,7 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
   readonly prompt: (text: string, images?: readonly ZenPromptImage[]) => Promise<PromptOutcome>
   /**
    * Switch the permission mode (L3 step C): `POST …/mode`, a control route, never a prompt —
-   * the browser says a mode and no command. The change arrives on the follow as `zen.mode`,
+   * the browser says a mode and no command. The change arrives on the follow as `permission-mode`,
    * said by the host once its extension has persisted it; a refusal is reported with the
    * server's reason and moves nothing.
    */
@@ -95,7 +95,7 @@ thread on the page gets its own:
  * ⚠ WHY INSTANCES, NOT MODULE STATE. Until this, every store was a module singleton — one
  * mode, one cost, one notification list per PAGE — which was correct only while a page
  * held exactly one thread. The sessions rail holds several and switches between them; a
- * run in one keeps streaming while another is on screen, and its `zen.usage` must land in
+ * run in one keeps streaming while another is on screen, and its `message-end` must land in
  * ITS cost, not the visible thread's. So each thread gets its own set, created here, and
  * the pane that renders a thread provides them through `ThreadStoresContext`.
  *
@@ -119,15 +119,15 @@ export interface ThreadStores {
   readonly recentChunks: RecentChunksStore
   /**
    * The server-side acquisition this page's LAST run on the thread held, from its
-   * `zen.run` receipt (#109); undefined until a run starts. The debug pane compares it
+   * `status` frame's `generation` (#109); undefined until a run starts. The debug pane compares it
    * with the server's current `generation`: a difference names a run this page did not
    * make — another tab, or a rebuild after the idle window.
    */
   readonly generation: WritableStore<number | undefined>
   /**
    * The question this page shows pi blocked on; undefined when none. Fed by three chunks
-   * (#112, #114): `zen.dialog` opens it, `zen.dialog-settled` clears it by id, and a
-   * snapshot's `zen.open-dialogs` replaces it wholesale. ONE slot is the browser's choice,
+   * (#112, #114): `extension-ui-request` opens it, `dialog-settled` clears it by id, and a
+   * snapshot's `openDialogs` replaces it wholesale. ONE slot is the browser's choice,
    * not pi's — extensions can hold several questions at once (`openDialogs()` lists them);
    * this page shows the oldest, and a second only once a snapshot lists it (see
    * `routeDialogEvent`). Also cleared by an answer this page sends that the server takes
@@ -137,14 +137,14 @@ export interface ThreadStores {
   /**
    * The follow ended under this page (#119): the server closed, restarted, or dropped the
    * connection, and nothing here reconnects — the thread's state on this page is as of that
-   * moment. Set by `zen.follow-ended`; cleared by the next `zen.run`, which only a live
+   * moment. Set by `follow-ended`; cleared by the next `status` or `snapshot` frame, which only a live
    * follow delivers. While true the status bar says `disconnected` and no stop is offered,
    * whatever the run flag still holds: the page cannot know what the server is doing.
    */
   readonly disconnected: WritableStore<boolean>
   /**
    * What waits behind the run in flight, as pi holds it (#75): the texts, steering first,
-   * from every `zen.queue` frame — one list for every follower, so a second tab sees what
+   * from every `queue` frame — one list for every follower, so a second tab sees what
    * the first queued. Empty when nothing waits. Rendered above the composer; a stop hands
    * these back to the composer through the abort receipt, not from here (the frame that
    * empties this can beat the receipt).
@@ -156,12 +156,14 @@ export interface ThreadStores {
 ```
 
 The one path from a custom event to those stores is `routeZenCustomEvent` (`custom-event-router.ts:40-101`,
-62 lines, in prose): it records every event in `recentChunks`, then dispatches by name — `zen.entry`
-to the mode lines and the current mode, `zen.mode` to the mode receipt, `zen.run` to `generation` (and
-clears `disconnected`), the three dialog names to the one dialog slot, `zen.usage` to `stats`,
-`zen.queue` to `queue`, `zen.follow-ended` to `disconnected` plus a notice, `zen.notify` to
-`notifications`. Every value is read defensively: a malformed one renders as nothing rather than
-throwing inside the state layer's stream loop, where a throw would end the run (header, lines 35-38).
+in prose): it records every event in `recentChunks`, then dispatches on the name, which is the
+observation's `kind` or the frame's `type` (#162 workstream 5) — a `snapshot` to the mode stores, the
+dialog slot and `generation`; a `status` to `generation` (and clears `disconnected`);
+`permission-mode` to the current mode and the mode lines; a blocking `extension-ui-request` to the
+dialog slot and a notify to `notifications`; `dialog-settled` to the slot; `message-end` to `stats`;
+`queue` to `queue`; `permission-mode-rejected` to a warning notice; `follow-ended` to `disconnected`
+plus a notice. Every value is validated against its schema: a malformed one moves no store rather than
+throwing inside the state layer's stream loop, where a throw would end the run.
 
 ## Who implements it, who consumes it
 
@@ -230,7 +232,7 @@ client as the state layer, and the glossary's vendor map carries both. Their voc
 memory, in the browser, and never on the wire or stored — `rpc/to-agui.ts:17-28` says where it runs
 (the adapter calls it on each observation before handing chunks to the client; *nothing serialises the
 output of this module and nothing stores it*), and its only production importer is
-`follow-connection.ts:24`; `rpc/custom-event-names.ts:2-3` says the same.
+`follow-connection.ts`.
 
 **The state layer's message shape crosses the history route.** `ZenThreadHistory.messages` is
 `unknown` on purpose — core must not own the client's transport shape — and `reviveHistoryMessages`

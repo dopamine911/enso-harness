@@ -14,7 +14,6 @@ const OBSERVATION_PATH = 'packages/core/src/observation.ts'
 const MAPPER_PATH = 'packages/web/src/host/map-events.ts'
 const FOLLOW_PATH = 'packages/web/src/server/follow.ts'
 const ADAPTER_PATH = 'packages/web/src/rpc/to-agui.ts'
-const CUSTOM_NAMES_PATH = 'packages/web/src/rpc/custom-event-names.ts'
 const CUSTOM_ROUTER_PATH = 'packages/web/src/custom-event-router.ts'
 const FOLLOW_CONNECTION_PATH = 'packages/web/src/follow-connection.ts'
 
@@ -23,25 +22,40 @@ interface CustomMetadata {
   readonly routerBranch: boolean
 }
 
-/** Browser destinations are checked against every custom constant declared in `custom-event-names.ts`. */
+/**
+ * Browser destinations, by the chunk's name — which is the observation's `kind` (#162
+ * workstream 5). Checked against the adapter's `custom(observation)` emissions and the
+ * router's `case '<kind>':` branches, both directions, so a kind that gains or loses a
+ * branch fails here rather than drifting.
+ */
 const CUSTOM_METADATA: Record<string, CustomMetadata> = {
-  ZEN_CUSTOM_EVENT_NOTIFY: { consumer: '`recentChunks`; `notifications`', routerBranch: true },
-  ZEN_CUSTOM_EVENT_USAGE: { consumer: '`recentChunks`; `stats`', routerBranch: true },
-  ZEN_CUSTOM_EVENT_QUEUE: { consumer: '`recentChunks`; `queue`', routerBranch: true },
-  ZEN_CUSTOM_EVENT_DIALOG: {
-    consumer: '`recentChunks`; `dialog` (or `notifications` if malformed)',
+  'extension-ui-request': {
+    consumer:
+      '`recentChunks`; `dialog` (a blocking question; or `notifications` if unreadable); `notifications` (a notify)',
     routerBranch: true,
   },
-  ZEN_CUSTOM_EVENT_DIALOG_SETTLED: { consumer: '`recentChunks`; `dialog`', routerBranch: true },
-  ZEN_CUSTOM_EVENT_OPEN_DIALOGS: { consumer: '`recentChunks`; `dialog`', routerBranch: true },
-  ZEN_CUSTOM_EVENT_FOLLOW_ENDED: { consumer: '`recentChunks`; `disconnected`; `notifications`', routerBranch: true },
-  ZEN_CUSTOM_EVENT_ENTRY: {
+  'message-end': { consumer: '`recentChunks`; `stats`', routerBranch: true },
+  queue: { consumer: '`recentChunks`; `queue`', routerBranch: true },
+  'dialog-settled': { consumer: '`recentChunks`; `dialog`', routerBranch: true },
+  'permission-mode': { consumer: '`recentChunks`; `permissionMode`; `modeLines`', routerBranch: true },
+  'permission-mode-rejected': { consumer: '`recentChunks`; `notifications` (a warning)', routerBranch: true },
+  'custom-entry': {
     consumer: '`recentChunks` only; recorded and counted, rendered by nothing (L3)',
     routerBranch: false,
   },
-  ZEN_CUSTOM_EVENT_MODE: { consumer: '`recentChunks`; `permissionMode`; `modeLines`', routerBranch: true },
-  ZEN_CUSTOM_EVENT_RUN: { consumer: '`recentChunks`; `generation`; `disconnected`', routerBranch: true },
-  ZEN_CUSTOM_EVENT_UNMAPPED: { consumer: '`recentChunks` only; nothing else consumes it', routerBranch: false },
+  unmapped: { consumer: '`recentChunks` only; nothing else consumes it', routerBranch: false },
+}
+
+/**
+ * The chunks that are not observations: the follow's frames, named by `ZenFollowFrame.type`
+ * and carried whole, and the adapter's own `follow-ended`. Checked against the adapter's
+ * `name: frame.type` push and the router's `eventType === '<name>'` branches.
+ */
+const FRAME_METADATA: Record<string, string> = {
+  snapshot:
+    '`recentChunks`; `permissionMode`; `modeLines`; `dialog` (the complete open list); `generation`; `disconnected`',
+  status: '`recentChunks`; `generation`; `disconnected`',
+  'follow-ended': '`recentChunks`; `disconnected`; `notifications`',
 }
 
 interface SchemaMember {
@@ -52,7 +66,7 @@ interface SchemaMember {
 
 interface AdapterResult {
   readonly labels: readonly string[]
-  readonly constants: readonly string[]
+  readonly custom: boolean
   readonly dropped: boolean
   readonly classified: boolean
 }
@@ -96,23 +110,11 @@ function producedKinds(source: string): Map<string, number> {
   return kinds
 }
 
-function customNames(source: string): Record<string, string> {
-  const entries = [...source.matchAll(/export const (ZEN_CUSTOM_EVENT_\w+) = '([^']+)'/g)].map((match) => [
-    match[1] ?? '',
-    match[2] ?? '',
-  ])
-  const constants = entries.map(([constant]) => constant ?? '')
-  if (constants.length !== new Set(constants).size) {
-    throw new Error('observations: custom-event-names.ts repeats a custom constant')
-  }
-  return Object.fromEntries(entries)
-}
-
-function adapterResult(source: string, kind: string, names: Record<string, string>): AdapterResult {
+function adapterResult(source: string, kind: string): AdapterResult {
   const cases = [...source.matchAll(/^\s+case '([a-z-]+)':/gm)]
   const matchingCases = cases.filter((caseMatch) => caseMatch[1] === kind)
   if (matchingCases.length === 0)
-    return { labels: ['UNCLASSIFIED (no adapter case)'], constants: [], dropped: false, classified: false }
+    return { labels: ['UNCLASSIFIED (no adapter case)'], custom: false, dropped: false, classified: false }
   if (matchingCases.length > 1) throw new Error(`observations: adapter repeats case ${kind}`)
   const current = matchingCases[0]
   if (current === undefined) throw new Error(`observations: adapter case index disappeared for ${kind}`)
@@ -121,19 +123,17 @@ function adapterResult(source: string, kind: string, names: Record<string, strin
   const end = cases[position + 1]?.index ?? source.indexOf('\n  }\n}', start)
   if (end < 0) throw new Error(`observations: could not delimit adapter case ${kind}`)
   const block = source.slice(start, end)
-  const constants = unique([...block.matchAll(/ZEN_CUSTOM_EVENT_\w+/g)].map((match) => match[0]))
-  const eventTypes = unique(
-    [...block.matchAll(/EventType\.(\w+)/g)].map((match) => `EventType.${match[1] ?? ''}`),
-  ).filter((eventType) => constants.length === 0 || eventType !== 'EventType.CUSTOM')
-  const unknownConstants = constants.filter((constant) => !(constant in names))
-  if (unknownConstants.length > 0)
-    throw new Error(`observations: adapter uses undeclared custom names: ${unknownConstants.join(', ')}`)
-  const labels = [...eventTypes, ...constants.map((constant) => names[constant] ?? `UNCLASSIFIED (${constant})`)]
+  // `custom(observation)` is the one way an observation rides CUSTOM: named by its kind.
+  const custom = /\bcustom\(observation\)/.test(block)
+  if (custom && /EventType\.CUSTOM/.test(block))
+    throw new Error(`observations: adapter case ${kind} spells CUSTOM twice`)
+  const eventTypes = unique([...block.matchAll(/EventType\.(\w+)/g)].map((match) => `EventType.${match[1] ?? ''}`))
+  const labels = [...eventTypes, ...(custom ? [kind] : [])]
   const dropped = /(?:return|\?)\s*\[\]/.test(block)
   if (dropped) labels.push('dropped')
   return {
     labels: labels.length === 0 ? ['UNCLASSIFIED (case has no recognized output)'] : labels,
-    constants,
+    custom,
     dropped,
     classified: labels.length > 0,
   }
@@ -144,7 +144,6 @@ function generate(): string {
   const mapperSource = readFileSync(join(ROOT, MAPPER_PATH), 'utf8')
   const followSource = readFileSync(join(ROOT, FOLLOW_PATH), 'utf8')
   const adapterSource = readFileSync(join(ROOT, ADAPTER_PATH), 'utf8')
-  const customNamesSource = readFileSync(join(ROOT, CUSTOM_NAMES_PATH), 'utf8')
   const routerSource = readFileSync(join(ROOT, CUSTOM_ROUTER_PATH), 'utf8')
   const connectionSource = readFileSync(join(ROOT, FOLLOW_CONNECTION_PATH), 'utf8')
 
@@ -155,24 +154,37 @@ function generate(): string {
 
   const mapperKinds = producedKinds(mapperSource)
   const promptRouteKinds = producedKinds(followSource)
-  const names = customNames(customNamesSource)
-  assertExactKeys('custom event', Object.keys(names), Object.keys(CUSTOM_METADATA))
-
-  const emittedCustomConstants = new Set([
-    ...[...adapterSource.matchAll(/name:\s*(ZEN_CUSTOM_EVENT_\w+)/g)].map((match) => match[1] ?? ''),
-    ...[...connectionSource.matchAll(/name:\s*(ZEN_CUSTOM_EVENT_\w+)/g)].map((match) => match[1] ?? ''),
-  ])
-  const undeclaredEmissions = [...emittedCustomConstants].filter((constant) => !(constant in names))
-  if (undeclaredEmissions.length > 0)
-    throw new Error(`observations: emissions use undeclared custom names: ${undeclaredEmissions.join(', ')}`)
-
-  for (const [constant, metadata] of Object.entries(CUSTOM_METADATA)) {
-    const hasBranch = new RegExp(`eventType\\s*(?:===|!==)\\s*${constant}\\b`).test(routerSource)
+  // The kinds the adapter puts on CUSTOM are exactly the metadata's keys, both directions.
+  const adapterResults = new Map(schemas.map((member) => [member.kind, adapterResult(adapterSource, member.kind)]))
+  const customKinds = [...adapterResults].filter(([, result]) => result.custom).map(([kind]) => kind)
+  assertExactKeys('custom chunk kind', customKinds, Object.keys(CUSTOM_METADATA))
+  if (!/name: observation\.kind, value: observation/.test(adapterSource)) {
+    throw new Error('observations: to-agui.ts no longer names a CUSTOM chunk by the observation kind')
+  }
+  for (const [kind, metadata] of Object.entries(CUSTOM_METADATA)) {
+    const hasBranch = new RegExp(`^\\s+case '${kind}':`, 'm').test(routerSource)
     if (hasBranch !== metadata.routerBranch) {
       throw new Error(
-        `observations: ${constant} router classification drifted; source=${hasBranch}, metadata=${metadata.routerBranch}`,
+        `observations: ${kind} router classification drifted; source=${hasBranch}, metadata=${metadata.routerBranch}`,
       )
     }
+  }
+
+  // The frame chunks: the connection pushes each frame named by its type; the router branches on each.
+  if (!/name: frame\.type, value: frame/.test(connectionSource)) {
+    throw new Error('observations: follow-connection.ts no longer pushes frames named by their type')
+  }
+  if (
+    !(
+      /name: FOLLOW_ENDED_CUSTOM_EVENT/.test(connectionSource) &&
+      /FOLLOW_ENDED_CUSTOM_EVENT = 'follow-ended'/.test(routerSource)
+    )
+  ) {
+    throw new Error('observations: the follow-ended chunk is not declared by the router and pushed by the connection')
+  }
+  for (const name of Object.keys(FRAME_METADATA)) {
+    const branch = name === 'follow-ended' ? 'eventType === FOLLOW_ENDED_CUSTOM_EVENT' : `eventType === '${name}'`
+    if (!routerSource.includes(branch)) throw new Error(`observations: the router has no branch for the ${name} chunk`)
   }
 
   if (!/\{ type: 'observation', seq: frame\.seq, observation: frame\.observation \}/.test(followSource)) {
@@ -192,9 +204,9 @@ function generate(): string {
       else if (promptRouteLine !== undefined) producer = `[prompt route](../../${FOLLOW_PATH}#L${promptRouteLine})`
       else noProducer.push(member.kind)
 
-      const adapter = adapterResult(adapterSource, member.kind, names)
+      const adapter = adapterResults.get(member.kind) ?? adapterResult(adapterSource, member.kind)
       const consumers = unique([
-        ...adapter.constants.map((constant) => CUSTOM_METADATA[constant]?.consumer ?? `UNCLASSIFIED (${constant})`),
+        ...(adapter.custom ? [CUSTOM_METADATA[member.kind]?.consumer ?? `UNCLASSIFIED (${member.kind})`] : []),
         ...(adapter.labels.some((label) => label.startsWith('EventType.')) ? ['TanStack chat state'] : []),
         ...(adapter.dropped ? ['nothing consumes the dropped branch'] : []),
         ...(!adapter.classified ? ['UNCLASSIFIED'] : []),
@@ -218,29 +230,29 @@ function generate(): string {
         `| \`${row.kind}\` | [\`${row.schema}\`](../../${OBSERVATION_PATH}#L${row.line}) | ${row.producer} | ${carrier} | ${row.adapter} | ${row.consumers} |`,
     )
 
-  const customWithoutEmission = Object.keys(names).filter((constant) => !emittedCustomConstants.has(constant))
-  const emissionsWithoutRouter = [...emittedCustomConstants].filter(
-    (constant) => CUSTOM_METADATA[constant]?.routerBranch === false,
+  const recordedOnly = customKinds.filter((kind) => CUSTOM_METADATA[kind]?.routerBranch === false).sort()
+  const frameRows = Object.entries(FRAME_METADATA).map(
+    ([name, consumer]) =>
+      `| \`${name}\` | ${name === 'follow-ended' ? `the adapter, when the follow closes under the page ([\`follow-connection.ts\`](../../${FOLLOW_CONNECTION_PATH}))` : `the follow's \`${name}\` frame, whole ([\`follow.ts\`](../../packages/core/src/follow.ts))`} | ${consumer} |`,
   )
-  const displayConstants = (constants: readonly string[]): string =>
-    constants.length === 0
-      ? 'none'
-      : [...constants]
-          .sort()
-          .map((constant: string) => `\`${names[constant] ?? constant}\` (\`${constant}\`)`)
-          .join(', ')
 
   return [
     '<!-- generated: scripts/docs/observations.ts -->',
     '# Observation inventory',
     '',
-    'Generated from `ZenObservation`, the pi-event mapper, the prompt route, the follow carrier, the AG-UI adapter, all custom event names, their emitters, and the browser custom-event router.',
+    'Generated from `ZenObservation`, the pi-event mapper, the prompt route, the follow carrier, the AG-UI adapter and the browser chunk router. One vocabulary (#162 workstream 5): a CUSTOM chunk is named by the observation `kind` (or the frame `type`) it carries whole.',
     '',
-    '> Parser limitation: schemas must be direct identifiers in `ZenObservation = Type.Union([…])` and direct `Type.Object` declarations with one inline `kind` literal. Producers are recognized from object-literal `kind` fields. Adapter output recognizes `case` blocks, `EventType.*`, `ZEN_CUSTOM_EVENT_*`, and explicit empty-array branches; browser store semantics remain explicit checked metadata.',
+    "> Parser limitation: schemas must be direct identifiers in `ZenObservation = Type.Union([…])` and direct `Type.Object` declarations with one inline `kind` literal. Producers are recognized from object-literal `kind` fields. Adapter output recognizes `case` blocks, `EventType.*`, `custom(observation)` and explicit empty-array branches; router branches are `case '<kind>':` lines; browser store semantics remain explicit checked metadata.",
     '',
     '| Kind | Schema | Producer | Follow carrier | Adapter emissions | Browser consumer / store |',
     '|---|---|---|---|---|---|',
     ...rows,
+    '',
+    '## Chunks that are not observations',
+    '',
+    '| Chunk | Carries | Browser consumer / store |',
+    '|---|---|---|',
+    ...frameRows,
     '',
     '## Diagnostics',
     '',
@@ -252,10 +264,9 @@ function generate(): string {
             .map((kind) => `\`${kind}\``)
             .join(', ')
     }`,
-    `- Custom names with no emission: ${displayConstants(customWithoutEmission)}`,
-    `- Emissions with no router branch: ${displayConstants(emissionsWithoutRouter)}`,
+    `- CUSTOM kinds the router records but does not route: ${recordedOnly.length === 0 ? 'none' : recordedOnly.map((kind) => `\`${kind}\``).join(', ')}`,
     '',
-    `Inventory: ${schemas.length} union members; ${Object.keys(names).length} custom event constants; all custom constants have checked browser classifications.`,
+    `Inventory: ${schemas.length} union members; ${customKinds.length} ride CUSTOM by kind; ${Object.keys(FRAME_METADATA).length} chunks that are not observations; every chunk name has a checked browser classification.`,
     '',
   ].join('\n')
 }

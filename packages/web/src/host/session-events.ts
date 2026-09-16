@@ -20,7 +20,7 @@ import type { RuntimeEvent } from './runtime-event.ts'
  *
  * Every other event type passes through unchanged — `agent_end`, `agent_settled`,
  * `tool_execution_*`, `entry_appended`, `queue_update`, … — which is why an unmodelled pi
- * event still reaches the browser as `zen.unmapped` (the design rule from `map-events.ts`).
+ * event still reaches the browser as `unmapped` (the design rule from `map-events.ts`).
  */
 export function toRpcWireEvent(event: AgentSessionEvent): RuntimeEvent {
   if (event.type !== 'message_update') {

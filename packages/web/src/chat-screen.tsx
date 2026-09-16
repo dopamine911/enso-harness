@@ -153,7 +153,7 @@ const useChatContext: ChatUIContexts['useChatContext'] = chatContexts.useChatCon
  * ⚠ ONE CHAT FACTORY PER THREAD (#90 PR 3), built by the thread's pane. Two facts force it:
  *
  *   • TanStack hands `onCustomEvent` only `(name, value, { toolCallId })` — no thread id —
- *     and the option is bound on the factory, not per call. The only way a `zen.usage`
+ *     and the option is bound on the factory, not per call. The only way a `message-end`
  *     chunk lands in the right thread's cost is a callback that belongs to exactly one
  *     thread: this closure over its stores.
  *   • Changing `threadId` on a single `useChat` disposes the old client — `stop()` then
@@ -286,7 +286,7 @@ function RunProblem(): React.ReactNode {
  *
  * ⚠ `POST …/mode`, never a prompt: the browser says a mode; how the host's extension is
  * told is the host's (for picc, its per-mode command). The indicator then updates from the
- * `zen.mode` receipt the host emits once the mode is persisted — the mode actually set —
+ * `permission-mode` receipt the host emits once the mode is persisted — the mode actually set —
  * never from the click. Invariant 2: a route tells pi; the feed ends the story.
  *
  * ⚠ Disabled while a run is in flight, the same rule the send button follows: a mode
@@ -322,7 +322,7 @@ function PermissionModeControl(): React.ReactNode {
 /**
  * pi's blocking dialogs — `select`, `confirm`, `input`, `editor` — answered from the page (#27, #112).
  *
- * The question arrives on the follow as a `zen.dialog` chunk (the `ZenDialogSpec` the
+ * The question arrives on the follow as a blocking `extension-ui-request` (the `ZenDialogSpec` the
  * server built, validated again by the router before it reaches the store), and the answer
  * is one `POST /api/threads/:id/dialog`. No interrupt: the run keeps going on the follow
  * while the human decides, and nothing on the server is parked.
@@ -562,7 +562,7 @@ function ComposerBody({
 }
 
 /**
- * What waits behind the run, as pi holds it (#75) — the `zen.queue` list, rendered above the
+ * What waits behind the run, as pi holds it (#75) — the `queue` list, rendered above the
  * composer with ai-elements' Queue shell (#121). Every follower sees the same list; a stop
  * hands the texts back to the composer of the tab that stopped. Nothing when nothing waits.
  * ⓘ Exported for `__tests__/chat-screen.test.tsx`.
@@ -667,7 +667,7 @@ const chatComponents = {
         // holds a send in its own queue while the run it started is open and delivers it at
         // settle — the browser's queue, invisible to other tabs, lost on reload. So the user
         // message goes into the transcript here, and the text goes to pi now: pi lists it on
-        // the follow for every follower (`zen.queue`, the list above this composer) and claims
+        // the follow for every follower (`queue`, the list above this composer) and claims
         // it when the run's turn ends. Refused or unreachable, the words come back to the
         // draft. ⚠ The images do not: pi's queue hands back texts (`ZenAbortReceipt.restored`),
         // and the composer's attachments are the form's, not this component's — re-attach.
@@ -859,7 +859,7 @@ const chatComponents = {
   // arrangement replaced (`partsComponents.toolCall` sat here for weeks, unreachable).
   partsComponents: {},
   // No `interruptsComponents`: pi's questions are not AG-UI interrupts on this surface
-  // (#112) — they arrive as `zen.dialog` chunks and render through `PendingDialog` above.
+  // (#112) — they arrive as blocking `extension-ui-request` chunks and render through `PendingDialog` above.
 }
 
 /**

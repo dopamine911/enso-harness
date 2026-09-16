@@ -21,7 +21,7 @@ the receipt, and on every change as the observation, one shape for both.
 <!-- source: packages/core/src/permission-mode.ts#ZenPermissionModeState -->
 ```ts
 /**
- * The receipt a run starts with (#84) — and the value of the `zen.mode` CUSTOM chunk that
+ * The receipt a run starts with (#84) — and the value of the `permission-mode` CUSTOM chunk that
  * carries it to the browser, at run start and on every change. `mode` is the current mode;
  * `available` is what the mode dropdown may offer: the modes the runtime's mode extension
  * registers, intersected with the commands this session actually registers, in the
@@ -181,11 +181,12 @@ route does the same in `server/index.ts`). The inspection and summary report the
 emits its own `permission_mode` event right after it (`host/agent-host.ts`, the session subscription;
 pinned by `agent-host.test.ts` against the real extension). The mapper carries it as the
 `permission-mode` observation (`host/map-events.ts#mapPermissionMode`), and `rpc/to-agui.ts` emits it as
-the same `zen.mode` chunk the run-start receipt rides. The vendor's `custom-entry` still crosses as
-`zen.entry` — recorded and counted by the debug pane, rendered by nothing.
+a CUSTOM chunk named `permission-mode`, carrying the observation whole; the run-start receipt is the
+snapshot's `permissionMode`, the same `ZenPermissionModeState` shape. The vendor's `custom-entry`
+still crosses as itself — recorded and counted by the debug pane, rendered by nothing.
 
-**Shown by the browser, two views, one feed.** `zen.mode` — from the snapshot
-(`packages/web/src/follow-connection.ts`) and from every change — is routed to *both* views
+**Shown by the browser, two views, one feed.** The mode — off the snapshot
+(`packages/web/src/follow-connection.ts`) and from every `permission-mode` observation — is routed to *both* views
 (`custom-event-router.ts`): `permission-mode.tsx` (the composer's `<select>`, which says `unknown` until
 a real value has arrived) and `mode-lines.ts` (one transcript line per distinct value, worded as state).
 Neither knows what a vendor entry is. **Changing the mode is a control route** (step C):
@@ -240,7 +241,7 @@ implementation the host adapts"), in three steps:
   the server's cold paths ask the host; the `?debug` drawer stopped re-walking the vendor's entries in
   the browser. Two allowlist lines deleted (`server/index.ts`, `server/follow.ts`).
 - **B — done.** The host emits `permission_mode` when it sees the vendor's entry; the mapper carries
-  it as the `permission-mode` observation; the browser's two readers fold `zen.mode` and stopped knowing
+  it as the `permission-mode` observation; the browser's two readers fold the `permission-mode` observation and stopped knowing
   a custom entry's shape; the tooltip stopped naming the vendor. `readPiccPersistedMode` and the
   `customType` followed the rest below the seam; `@zen/core` is `ZenPermissionModeState` alone. Four
   allowlist lines deleted.

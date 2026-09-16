@@ -4,7 +4,7 @@ import { createStore, type Store } from './store.ts'
  * The thread-stats STORE (#45, phase 1): cost so far + the last request's prompt size.
  * Rendered by the status bar in thread-status.tsx (#90), which subscribes to it.
  *
- * Usage arrives as an AG-UI CUSTOM chunk (`zen.usage`) — one per COMPLETED model request,
+ * Usage arrives as an AG-UI CUSTOM chunk (`message-end`) — one per COMPLETED model request,
  * emitted by map-events.ts off pi's `message_end` (never the per-delta cumulative usage,
  * which would multiply cost by the delta count). TanStack's path for CUSTOM chunks is the
  * `onCustomEvent` chat option — so the bridge to React state is this store, one per thread
@@ -61,7 +61,7 @@ function readUsageShape(raw: unknown): ZenUsageShape | undefined {
 
 export interface ThreadStatsStore extends Store<ThreadStats> {
   /**
-   * Fold one `zen.usage` chunk's value into the stats. Defensive like every wire crossing in
+   * Fold one `message-end` chunk's value into the stats. Defensive like every wire crossing in
    * chat-screen.tsx: a malformed value changes nothing rather than throwing in the stream loop.
    *
    * ⚠ Cost sums over EVERY counted message (assistant and toolResult summaries — pi's own

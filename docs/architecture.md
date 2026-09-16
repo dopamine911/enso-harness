@@ -183,9 +183,9 @@ stateDiagram-v2
 **A run in the browser** (`follow-connection.ts`). Opened by a receipt (own prompt) or by a status
 frame that says busy with no run to match (another tab's — `external-<generation>`). Closed by the
 feed's `settled` + `status`, never by a click or a returning POST. A dropped follow is said as a chunk
-(`zen.follow-ended`) so the page can say so; the next follow's snapshot is the resync (#103, #114).
+(`follow-ended`) so the page can say so; the next follow's snapshot is the resync (#103, #114).
 
-**A dialog.** pi blocks; the follow carries `zen.dialog`; an answer is `POST …/dialog`, validated
+**A dialog.** pi blocks; the follow carries a blocking `extension-ui-request`; an answer is `POST …/dialog`, validated
 against the question (#112); every settle path — answered, cancelled, timeout, abort — emits
 `dialog-settled` from the host so every follower drops the card (#114). The snapshot lists every open
 question so a reconnect renders the card at once.

@@ -201,9 +201,9 @@ card at once (`follow.ts` line 139; `openDialogs` at extension-ui-context.ts lin
 request with `isZenDialogSpec` rather than casting, line 461).
 
 **Consumed by the browser.** The question arrives as an `extension-ui-request` observation whose
-`dialog` the mapper checked with `isZenDialogSpec` (`map-events.ts` line 131); the adapter turns it
-into the dialog custom event (`to-agui.ts` line 149) and the router checks it again against
-`ZenOpenDialog` before it reaches the store (`custom-event-router.ts` line 118). `ZenDialogCard` in
+`dialog` the mapper checked with `isZenDialogSpec` (`map-events.ts` line 131); the adapter passes the
+observation whole on a CUSTOM chunk named by its kind (`to-agui.ts#custom`) and the router checks
+`{ id, dialog }` again against `ZenOpenDialog` before it reaches the store (`custom-event-router.ts#routeUiRequest`). `ZenDialogCard` in
 `packages/web/src/chat-screen.tsx` (line 406) renders one card and hands `answerDialog` in
 `packages/web/src/follow-connection.ts` (line 542) exactly the answer shapes — `{ value }`,
 `{ confirmed }`, `{ cancelled: true }` — because the server forwards them verbatim (chat-screen.tsx

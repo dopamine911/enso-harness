@@ -8,7 +8,7 @@ import { Compile } from 'typebox/compile'
  * emit an `extension_ui_request` and BLOCK the extension until an `extension_ui_response`
  * with the matching id arrives (pi `rpc-types.d.ts`, read at v0.84.4). These schemas are
  * the harness's model of that exchange: the QUESTION (`ZenDialogSpec`), which rides to the
- * browser on the follow as a `zen.dialog` chunk, and the ANSWER (`ZenDialogAnswer`), which
+ * browser on the follow as a blocking `extension-ui-request`, and the ANSWER (`ZenDialogAnswer`), which
  * rides back in `POST /api/threads/:id/dialog`.
  *
  * ⚠ The answer shapes mirror pi's response contract EXACTLY, minus the envelope

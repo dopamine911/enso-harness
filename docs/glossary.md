@@ -219,7 +219,7 @@ observation; stop, answer and prompt are Control, and never share a surface with
 - **status** — the frame that says whether the thread is live, busy, and at which generation. Closes a
   run in every browser alike; a status that says busy with no run to match opens an *external* run.
 - **follow** — one browser's subscription to a thread: snapshot, then frames, until the page or the
-  server drops it. A dropped follow is said (`zen.follow-ended`), never silent. *Id:* none — per page,
+  server drops it. A dropped follow is said (`follow-ended`), never silent. *Id:* none — per page,
   per thread. *Minted by:* the follow route. *Owner:* the page.
 - **tail** — the recent events kept for inspection (#97). Two per thread: the **emitted tail** (what
   the host received from the runtime, with how) and the **sent tail** (what the server put on the
@@ -234,9 +234,9 @@ observation; stop, answer and prompt are Control, and never share a surface with
   mode, what it may run. `ZenThreadInspection` on `GET …/threads/:id`; a **summary** is the same at a
   glance, for the list. Peeks, never builds.
 - **custom event** — in the browser, an observation that is not part of the transcript proper — mode,
-  queue, run receipt, dialog settled, follow ended — routed by name (`zen.*`) to its store. The
-  browser's word for these is *custom event*, not chunk. (One vocabulary per observation is owed:
-  #162 workstream 5.)
+  queue, dialog settled, follow ended — routed to its store by the name it already has: the
+  observation's `kind`, or the frame's `type` for a snapshot or status (#162 workstream 5). The
+  browser's word for these is *custom event*, not chunk.
 
 **Mechanism** — how observations move:
 

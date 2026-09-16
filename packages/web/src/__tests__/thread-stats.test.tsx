@@ -3,7 +3,7 @@ import type { ZenMessageEnd } from '@zen/core'
 import { createThreadStatsStore, type ThreadStatsStore } from '../thread-stats.tsx'
 
 /**
- * #45's browser half: `zen.usage` chunks become the stats the status bar renders (#90,
+ * #45's browser half: `message-end` chunks become the stats the status bar renders (#90,
  * thread-status.test.tsx). One store per thread (#90 PR 3); each case builds a fresh one.
  */
 

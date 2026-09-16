@@ -92,7 +92,7 @@ test.describe('chat surface', () => {
 
     await modeOption.click()
     await waitForRunToSettle(page)
-    // The answer's receipt is picc's `zen.entry` status line, not assistant text — an
+    // The answer's receipt is picc's status line (a `custom-entry`), not assistant text — an
     // extension command produces no model turn, so the assistant container stays empty
     // (and Playwright reads an empty block as hidden; receipt: first run of this spec).
     await expect(page.getByText(MODE_ANSWERED_STATUS)).toBeVisible()

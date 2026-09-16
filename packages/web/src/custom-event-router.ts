@@ -1,24 +1,41 @@
-import { ZenNotifyType, ZenOpenDialog, ZenQueue, ZenUiRequestOrigin } from '@zen/core'
-import { Check } from 'typebox/value'
 import {
-  ZEN_CUSTOM_EVENT_DIALOG,
-  ZEN_CUSTOM_EVENT_DIALOG_SETTLED,
-  ZEN_CUSTOM_EVENT_FOLLOW_ENDED,
-  ZEN_CUSTOM_EVENT_MODE,
-  ZEN_CUSTOM_EVENT_NOTIFY,
-  ZEN_CUSTOM_EVENT_OPEN_DIALOGS,
-  ZEN_CUSTOM_EVENT_QUEUE,
-  ZEN_CUSTOM_EVENT_RUN,
-  ZEN_CUSTOM_EVENT_USAGE,
-} from './rpc/custom-event-names.ts'
+  ZenFollowSnapshot,
+  ZenFollowStatus,
+  ZenObservation,
+  ZenOpenDialog,
+  type ZenPermissionModeState,
+} from '@zen/core'
+import { Check } from 'typebox/value'
 import { createStore, type Store } from './store.ts'
 import type { ThreadStores } from './thread-stores.ts'
+
+/**
+ * The one chunk that is neither an observation nor a frame: the follow ended without this
+ * page leaving it (#103 receipt) — the server closed, restarted, or dropped the connection.
+ * The adapter (`follow-connection.ts`) says it; this router, its only reader, names it.
+ * Value: `{ threadId }`.
+ */
+export const FOLLOW_ENDED_CUSTOM_EVENT = 'follow-ended'
 
 /**
  * The browser's ONE path from an AG-UI CUSTOM chunk to a thread's stores (mode lines,
  * current mode, session stats, notifications, the debug record). TanStack's
  * `onCustomEvent` fires this with `(chunk.name, chunk.value)` for every CUSTOM chunk —
  * verified against its stream processor (#29).
+ *
+ * ONE VOCABULARY (#162 workstream 5). A chunk's name is a discriminator a type of ours
+ * already declares, and its value is that whole thing:
+ *
+ *   `ZenObservation.kind`     value: the observation — what the adapter derives from the
+ *                             follow's `observation` frames (`to-agui.ts#custom`)
+ *   `ZenFollowFrame.type`     `snapshot` | `status` — value: the frame, as it came off the
+ *                             wire; the run-start receipts (mode, open questions, generation)
+ *                             are read off the snapshot itself, not re-shaped into names
+ *   `FOLLOW_ENDED_CUSTOM_EVENT`      the adapter's own fact, above
+ *
+ * Before this the adapter emitted a parallel `zen.*` vocabulary — `zen.mode` for a
+ * `permission-mode`, `zen.notify` for an `extension-ui-request`, a forged notify for a
+ * `permission-mode-rejected` — and every rename had two sides to land on (#53 S1.3).
  *
  * ⚠ THE THREAD COMES FROM THE CALLER, NOT THE CHUNK. TanStack hands `onCustomEvent` only
  * `(name, value, { toolCallId })` — no thread id — and the option is bound per chat
@@ -31,46 +48,14 @@ import type { ThreadStores } from './thread-stores.ts'
  * allowlist, or swapping two `apply*` calls all left the suite green. The tests drive this
  * function directly with a fresh set of stores and read their snapshots.
  *
- * ⚠ Every value is read defensively, the way every wire crossing in the browser is: a
- * malformed value renders as nothing rather than throwing inside TanStack's stream loop,
- * where a throw would end the run. Chunk names this surface does not render
- * (`zen.unmapped`) fall through untouched — see the mapper for why they exist at all.
+ * ⚠ Every value is validated against its schema, the way every wire crossing in the browser
+ * is: a malformed value moves no store rather than throwing inside TanStack's stream loop,
+ * where a throw would end the run. Kinds this surface does not render (`custom-entry`,
+ * `unmapped`) are recorded and fall through — see the mapper for why they exist at all.
  */
 export function routeZenCustomEvent(stores: ThreadStores, eventType: string, data: unknown): void {
   stores.recentChunks.record(eventType, data)
-  if (eventType === ZEN_CUSTOM_EVENT_MODE) {
-    // One receipt, two views (#84, L3): the current-mode store (state) and the transcript
-    // line (history). The run-start receipt and a mid-run change ride the same chunk.
-    stores.permissionMode.applyReceipt(data)
-    stores.modeLines.apply(data)
-    return
-  }
-  if (eventType === ZEN_CUSTOM_EVENT_RUN) {
-    const generation = readGeneration(data)
-    if (generation !== undefined) stores.generation.set(generation)
-    // A status frame reaches this page only over a live follow (#119).
-    if (stores.disconnected.get()) stores.disconnected.set(false)
-    return
-  }
-  if (
-    eventType === ZEN_CUSTOM_EVENT_DIALOG ||
-    eventType === ZEN_CUSTOM_EVENT_DIALOG_SETTLED ||
-    eventType === ZEN_CUSTOM_EVENT_OPEN_DIALOGS
-  ) {
-    routeDialogEvent(stores, eventType, data)
-    return
-  }
-  if (eventType === ZEN_CUSTOM_EVENT_USAGE) {
-    stores.stats.applyUsage(data)
-    return
-  }
-  if (eventType === ZEN_CUSTOM_EVENT_QUEUE) {
-    // pi's queue, whole (#75): steering first, then follow-ups. A malformed frame leaves the
-    // last list standing rather than clearing a real queue.
-    if (Check(ZenQueue, data)) stores.queue.set([...data.steering, ...data.followUp])
-    return
-  }
-  if (eventType === ZEN_CUSTOM_EVENT_FOLLOW_ENDED) {
+  if (eventType === FOLLOW_ENDED_CUSTOM_EVENT) {
     // The server went away under this page (#103 receipt): said where the human looks —
     // a notice, and the status bar's own state (#119), since with no run open nothing else
     // on the page would change and with one open the run flag would still say so.
@@ -82,56 +67,89 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
     )
     return
   }
-  if (eventType !== ZEN_CUSTOM_EVENT_NOTIFY) return
-  if (typeof data !== 'object' || data === null) return
-  const observation = data as { message?: unknown; notifyType?: unknown; origin?: unknown }
-  if (typeof observation.message !== 'string') return
-  // The three declared notify types come from the schema, not a second literal list: an
-  // unrecognised value degrades to an untyped notification, never a validation failure.
-  const notifyType = Check(ZenNotifyType, observation.notifyType) ? observation.notifyType : undefined
-  // An unreadable origin degrades to `run` — the OPEN rendering (#96): when the tag cannot
-  // be trusted, a notice is shown, never grouped away.
-  const origin = Check(ZenUiRequestOrigin, observation.origin) ? observation.origin : 'run'
-  stores.notifications.push(observation.message, notifyType, origin)
+  if (eventType === 'snapshot') {
+    if (!Check(ZenFollowSnapshot, data)) return
+    applyPermissionMode(stores, data.permissionMode)
+    // The complete list, every snapshot (#114): a reconnect's snapshot is the resync, so an
+    // empty list is a fact ("nothing is waiting") this page must apply too — it clears a
+    // card for a question that settled while the page was away. One card at a time: a
+    // second concurrent question shows once the first settles and the next snapshot lists it.
+    stores.dialog.set(data.openDialogs[0])
+    applyStatus(stores, data.generation)
+    return
+  }
+  if (eventType === 'status') {
+    if (Check(ZenFollowStatus, data)) applyStatus(stores, data.generation)
+    return
+  }
+  if (!Check(ZenObservation, data) || data.kind !== eventType) return
+  routeObservation(stores, data)
+}
+
+/** One receipt, two views (#84, L3): the current-mode store (state) and the transcript line (history). */
+function applyPermissionMode(stores: ThreadStores, state: ZenPermissionModeState): void {
+  stores.permissionMode.applyReceipt(state)
+  stores.modeLines.apply(state)
+}
+
+/** The thread's server-side acquisition (#109); a status frame reaches this page only over a live follow (#119). */
+function applyStatus(stores: ThreadStores, generation: number): void {
+  stores.generation.set(generation)
+  if (stores.disconnected.get()) stores.disconnected.set(false)
+}
+
+function routeObservation(stores: ThreadStores, observation: ZenObservation): void {
+  switch (observation.kind) {
+    case 'permission-mode':
+      // The run-start receipt and a mid-run change fold into the same two stores.
+      applyPermissionMode(stores, { mode: observation.mode, available: observation.available })
+      return
+    case 'permission-mode-rejected':
+      // The click did nothing and the user is told (L3 step C) — a warning, composed here
+      // where notices are rendered, not forged upstream as a notify observation.
+      stores.notifications.push(`mode change to ${observation.mode} rejected: ${observation.reason}`, 'warning', 'run')
+      return
+    case 'extension-ui-request':
+      routeUiRequest(stores, observation)
+      return
+    case 'dialog-settled': {
+      // The question stopped waiting — drops the card if it is the one shown. Any other id
+      // is one this page never showed or already dropped.
+      const shown = stores.dialog.get()
+      if (shown !== undefined && shown.id === observation.id) stores.dialog.set(undefined)
+      return
+    }
+    case 'message-end':
+      if (observation.usage !== undefined) stores.stats.applyUsage(observation)
+      return
+    case 'queue':
+      // pi's queue, whole (#75): steering first, then follow-ups.
+      stores.queue.set([...observation.steering, ...observation.followUp])
+      return
+    default:
+      // Recorded above; rendered by nothing. `custom-entry` since L3, `unmapped` by design.
+      return
+  }
 }
 
 /**
- * The thread's ONE open-question slot (#112, #114), and the three chunks that move it:
- *
- *   zen.dialog          a question pi just asked — opens the slot. A malformed value opens
- *                       nothing and SAYS so: a question that vanished silently is the #4 shape.
- *   zen.dialog-settled  the question stopped waiting — drops the card if it is the one shown.
- *                       Any other id is one this page never showed or already dropped.
- *   zen.open-dialogs    a snapshot's COMPLETE list — replaces the slot, so an empty list
- *                       clears a card for a question that settled while the page was away.
- *                       One card at a time: a second concurrent question shows once the
- *                       first settles and the next snapshot lists it. A malformed list is
- *                       left alone rather than clearing a real question.
+ * A question pi just asked opens the thread's ONE open-question slot (#112, #114); a
+ * `notify` is a message meant for a human. The adapter has already dropped what is
+ * addressed to a terminal and turned an unreadable blocking request into a run error, so
+ * what reaches here is one of those two.
  */
-function routeDialogEvent(stores: ThreadStores, eventType: string, data: unknown): void {
-  if (eventType === ZEN_CUSTOM_EVENT_DIALOG) {
-    if (Check(ZenOpenDialog, data)) stores.dialog.set(data)
+function routeUiRequest(stores: ThreadStores, observation: ZenObservation & { kind: 'extension-ui-request' }): void {
+  if (observation.blocking) {
+    const open = { id: observation.id, dialog: observation.dialog }
+    if (Check(ZenOpenDialog, open)) stores.dialog.set(open)
     else
       stores.notifications.push('pi asked a question this page could not read; it was left unanswered', 'error', 'run')
     return
   }
-  if (eventType === ZEN_CUSTOM_EVENT_DIALOG_SETTLED) {
-    const shown = stores.dialog.get()
-    if (shown !== undefined && typeof data === 'object' && data !== null && 'id' in data && data.id === shown.id) {
-      stores.dialog.set(undefined)
-    }
-    return
-  }
-  if (typeof data !== 'object' || data === null || !('open' in data) || !Array.isArray(data.open)) return
-  const first: unknown = data.open[0]
-  stores.dialog.set(Check(ZenOpenDialog, first) ? first : undefined)
-}
-
-/** The `zen.run` value's number, or undefined for anything that is not a non-negative integer. */
-function readGeneration(data: unknown): number | undefined {
-  if (typeof data !== 'object' || data === null || !('generation' in data)) return undefined
-  const { generation } = data
-  return typeof generation === 'number' && Number.isInteger(generation) && generation >= 0 ? generation : undefined
+  // A notify without a message has nothing for a human; the schema already validated the
+  // notify type and the origin, so no second literal list is consulted here (#96).
+  if (observation.method !== 'notify' || observation.message === undefined) return
+  stores.notifications.push(observation.message, observation.notifyType, observation.origin)
 }
 
 // ── the last N chunks, for the debug drawer (#86) ─────────────────────────────

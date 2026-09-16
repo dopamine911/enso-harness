@@ -37,8 +37,8 @@ export const ZenThreadSummary = Type.Object(
     busy: Type.Boolean(),
     /**
      * How many runs have taken this thread since the server started (#109) — the fence a
-     * late run handle is checked against on the server, and the number a run's `zen.run`
-     * receipt hands the browser: a difference between the two says another client, or a
+     * late run handle is checked against on the server, and the number the `status`
+     * frame hands the browser: a difference between the two says another client, or a
      * rebuild after idle, has moved the thread on since this page's last run.
      */
     generation: Type.Integer({ minimum: 0 }),
