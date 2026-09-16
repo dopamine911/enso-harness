@@ -1,5 +1,7 @@
 # Agent support systems — ask-user, todo, memory, advisor, compaction
 
+> **Status (#167, #162 workstream 11):** archived — pre-build design note (2026-09-02) on ask-user, todo, memory, advisor, compaction. The dialog seam (`docs/seams/dialog.md`) is the one of these that exists here; the others are the harness's, not this repo's.
+
 **Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the zen-harness project.
 
 Five systems that shape how well an agent works, none of which act on the world — they act on the
@@ -10,9 +12,9 @@ They interact heavily, which is why this is one document: memory should reuse th
 compaction and memory both live or die on provenance, ask-user and advisor both need mandatory trigger
 points rather than availability, and todo only makes sense once you know what it is *not*.
 
-Companion to [`agent-tooling.md`](./agent-tooling.md) (what the current tools get right),
-[`pi-immediate-needs.md`](./pi-immediate-needs.md) (what pi lacks), and
-[`prompt-cache-architecture.md`](./prompt-cache-architecture.md) (where any per-turn injection must sit).
+Companion to [`agent-tooling.md`](../agent-tooling.md)) (what the current tools get right),
+[`pi-immediate-needs.md`](../pi-immediate-needs.md)) (what pi lacks), and
+[`prompt-cache-architecture.md`](../prompt-cache-architecture.md)) (where any per-turn injection must sit).
 
 **Shelved for later:** the obligation queue. Its design is not lost — the settled decisions are recorded
 in Part 6 so the next pass starts from them.
@@ -37,7 +39,7 @@ to make.
 ### The contract
 
 - **Index always loaded, one line per entry, body on demand.** This is the progressive-disclosure
-  pattern from [`harness-design-principles.md`](./harness-design-principles.md) §Part 1. The index line
+  pattern from [`harness-design-principles.md`](../harness-design-principles.md)) §Part 1. The index line
   must *discriminate* — a title is not enough, a one-line hook that names the lesson is. An index whose
   entries run to three sentences becomes a body wearing an index's name; measured drift in this project
   reached 21 KB before a harness limit warned about it.
@@ -206,7 +208,7 @@ keep the line that mattered."
 Clearing mid-history invalidates the cached prefix from that point on, so dropping the *oldest* dead
 weight is the most expensive operation available, not the cheapest. Batch at natural boundaries, and
 treat a prune of ancient history as deliberate rather than routine. Detail in
-[`prompt-cache-architecture.md`](./prompt-cache-architecture.md) §Part 2.3.
+[`prompt-cache-architecture.md`](../prompt-cache-architecture.md)) §Part 2.3.
 
 ---
 
@@ -242,7 +244,7 @@ is not something minimalism gives you for free.
 
 ### The discipline goes in the tool description
 
-Per [`agent-tooling.md`](./agent-tooling.md) §Part 2.3, behavioural spec belongs in the description
+Per [`agent-tooling.md`](../agent-tooling.md)) §Part 2.3, behavioural spec belongs in the description
 rather than in a rule elsewhere. And there is measured reason to write it carefully: quill-works run 002
 had **seven of eight menus declined**, and four of those refusals landed 74 minutes before the first
 typed correction. The failure was not asking too often — it was asking badly, and the refusal channel was
@@ -345,6 +347,6 @@ determine whether any of it happens.
 
 **And the strongest version of the principle came from reading `oh-my-pi` after writing the rest.** Its
 advisor is not triggered at all — it runs alongside. Its TTSR rules are not resident in context — they
-watch the output stream and interrupt (see [`agent-boundaries.md`](./agent-boundaries.md) §Phase 6a).
+watch the output stream and interrupt (see [`agent-boundaries.md`](./agent-boundaries.md)) §Phase 6a).
 Both are the same move: when a capability depends on the agent choosing to use it, the reliable fix is
 usually to take the choice out rather than to make the reminder louder.

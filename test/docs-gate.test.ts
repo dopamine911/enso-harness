@@ -18,6 +18,11 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
  *   `<!-- generated: <script> -->` on a page's first line: the page must equal the
  *   script's stdout. Regenerate with `bun <script> > <page>`.
  *
+ *   `<!-- generated-block: <script> -->` … `<!-- /generated-block -->` inside a hand-written
+ *   page: the lines between must equal the script's stdout (#162 workstream 11 — the seams
+ *   table lives in architecture.md and is read off the seam pages). Refresh with
+ *   `bun scripts/docs/refresh-fences.ts <page>`, which handles both marker kinds.
+ *
  * And one rule for `docs/seams/`: every ```` ```ts ```` fence carries a `source:` marker.
  * Prose may surround a fence; prose may not restate what a fence says, and a fence with no
  * source is prose wearing a code font.
@@ -31,6 +36,8 @@ const DOCS_ROOT = join(REPOSITORY_ROOT, 'docs')
 const SOURCED_FENCE_DIRECTORIES = ['docs/seams'] as const
 const SOURCE_MARKER = /^<!--\s*source:\s*(\S+?)#(\w+)\s*-->$/
 const GENERATED_MARKER = /^<!--\s*generated:\s*(\S+)\s*-->$/
+const BLOCK_OPEN = /^<!--\s*generated-block:\s*(\S+)\s*-->$/
+const BLOCK_CLOSE = /^<!--\s*\/generated-block\s*-->$/
 const TS_FENCE_OPEN = /^```(?:ts|typescript)\s*$/
 const FENCE_CLOSE = /^```\s*$/
 
@@ -94,17 +101,51 @@ function sourcedFenceOffenders(page: string, lines: readonly string[], fenceMust
   return offenders
 }
 
-function generatedOffenders(page: string, text: string): string[] {
-  const marker = GENERATED_MARKER.exec(text.split('\n')[0] ?? '')
-  if (!marker) return []
-  const script = marker[1] ?? ''
-  if (!existsSync(join(REPOSITORY_ROOT, script))) return [`${page}:1: generator ${script} does not exist`]
+/** The script's stdout, or the offender line when it cannot be produced. */
+function generatorOutput(page: string, line: number, script: string): { text: string } | { offender: string } {
+  if (!existsSync(join(REPOSITORY_ROOT, script)))
+    return { offender: `${page}:${line}: generator ${script} does not exist` }
   const generated = Bun.spawnSync(['bun', script], { cwd: REPOSITORY_ROOT })
-  if (generated.exitCode !== 0)
-    return [`${page}:1: ${script} exited ${generated.exitCode}: ${generated.stderr.toString().trim()}`]
-  if (generated.stdout.toString().trim() !== text.trim())
-    return [`${page}: differs from \`bun ${script}\` — regenerate`]
-  return []
+  if (generated.exitCode !== 0) {
+    return {
+      offender: `${page}:${line}: ${script} exited ${generated.exitCode}: ${generated.stderr.toString().trim()}`,
+    }
+  }
+  return { text: generated.stdout.toString() }
+}
+
+function generatedOffenders(page: string, text: string): string[] {
+  const lines = text.split('\n')
+  const marker = GENERATED_MARKER.exec(lines[0] ?? '')
+  if (marker) {
+    const output = generatorOutput(page, 1, marker[1] ?? '')
+    if ('offender' in output) return [output.offender]
+    return output.text.trim() === text.trim() ? [] : [`${page}: differs from \`bun ${marker[1] ?? ''}\` — regenerate`]
+  }
+  const offenders: string[] = []
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const open = BLOCK_OPEN.exec(lines[lineIndex] ?? '')
+    if (!open) continue
+    const script = open[1] ?? ''
+    const closeIndex = lines.findIndex((candidate, index) => index > lineIndex && BLOCK_CLOSE.test(candidate))
+    if (closeIndex === -1) {
+      offenders.push(`${page}:${lineIndex + 1}: generated-block for ${script} is never closed`)
+      break
+    }
+    const output = generatorOutput(page, lineIndex + 1, script)
+    if ('offender' in output) offenders.push(output.offender)
+    else if (
+      output.text.trim() !==
+      lines
+        .slice(lineIndex + 1, closeIndex)
+        .join('\n')
+        .trim()
+    ) {
+      offenders.push(`${page}:${lineIndex + 1}: block differs from \`bun ${script}\` — refresh`)
+    }
+    lineIndex = closeIndex
+  }
+  return offenders
 }
 
 test('⚠ every sourced fence equals its declaration; every seam-page fence is sourced (#168)', () => {
@@ -118,11 +159,67 @@ test('⚠ every sourced fence equals its declaration; every seam-page fence is s
   expect(offenders).toEqual([])
 })
 
-test('⚠ every generated page equals its generator (#168)', () => {
+test('⚠ every generated page, and every generated block, equals its generator (#168)', () => {
   const offenders: string[] = []
   for (const path of markdownFiles(DOCS_ROOT)) {
     const page = path.slice(REPOSITORY_ROOT.length + 1)
     offenders.push(...generatedOffenders(page, readFileSync(path, 'utf8')))
+  }
+  expect(offenders).toEqual([])
+})
+
+/**
+ * The paths `docs/architecture.md` → *Package structure* names, resolved by indentation (two
+ * spaces per level; several names on one line are siblings; a `*` is a glob and is not checked).
+ */
+function architectureTreePaths(text: string): string[] {
+  const start = text.indexOf('## Package structure')
+  const open = text.indexOf('```\n', start)
+  const close = text.indexOf('\n```', open + 4)
+  if (start < 0 || open < 0 || close < 0) throw new Error('architecture.md has no Package structure tree')
+  const stack: string[] = []
+  const paths: string[] = []
+  for (const line of text.slice(open + 4, close).split('\n')) {
+    const names = (line.split('#')[0] ?? '').trim()
+    if (names === '') continue
+    const depth = ((/^ */.exec(line)?.[0].length ?? 0) / 2) | 0
+    stack.length = depth
+    const parent = stack.join('')
+    for (const name of names.split(/\s+/)) {
+      if (!name.includes('*')) paths.push(parent + name)
+    }
+    stack.push(names.split(/\s+/)[0] ?? '')
+  }
+  return paths
+}
+
+test('⚠ every path the architecture tree names exists (#162 workstream 11)', () => {
+  const text = readFileSync(join(DOCS_ROOT, 'architecture.md'), 'utf8')
+  const paths = architectureTreePaths(text)
+  expect(paths.length).toBeGreaterThan(20)
+  // the root line is the repository itself
+  const missing = paths.filter((path) => !existsSync(join(REPOSITORY_ROOT, path.replace(/^zen-harness\//, ''))))
+  expect(missing).toEqual([])
+})
+
+/** Relative links in a page (`](./x.md)`, `](../y/z.json)`), with the line they sit on; URLs and anchors-only skipped. */
+function relativeLinks(text: string): { target: string; line: number }[] {
+  const links: { target: string; line: number }[] = []
+  text.split('\n').forEach((line, index) => {
+    for (const match of line.matchAll(/\]\((\.{1,2}\/[^)#\s]+)(?:#[^)]*)?\)/g)) {
+      links.push({ target: match[1] ?? '', line: index + 1 })
+    }
+  })
+  return links
+}
+
+test('⚠ every relative link under docs/ and in README resolves to a file (#162 workstream 11)', () => {
+  const offenders: string[] = []
+  for (const path of [...markdownFiles(DOCS_ROOT), join(REPOSITORY_ROOT, 'README.md')]) {
+    const page = path.slice(REPOSITORY_ROOT.length + 1)
+    for (const link of relativeLinks(readFileSync(path, 'utf8'))) {
+      if (!existsSync(join(path, '..', link.target))) offenders.push(`${page}:${link.line}: ${link.target}`)
+    }
   }
   expect(offenders).toEqual([])
 })

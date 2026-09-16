@@ -2,7 +2,7 @@
 
 **Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the zen-harness project.
 
-Companion to [`agent-boundaries.md`](./agent-boundaries.md) (safety and permissions) and
+Companion to [`agent-boundaries.md`](./archive/agent-boundaries.md) (safety and permissions) and
 [`agent-tooling.md`](./agent-tooling.md) (tools from the consumer side). This one is about
 *architecture* — the patterns worth carrying into a new harness regardless of which tools or rules it
 ships.
@@ -138,7 +138,7 @@ mechanism gave no signal that it had acted. Deterministic precedence is not the 
 precedence, and only the first is solved here.
 
 The precedence semantics worth copying are asymmetric on purpose (detail in
-[`agent-boundaries.md`](./agent-boundaries.md) §7): restrictions merge from every scope, permissions can
+[`agent-boundaries.md`](./archive/agent-boundaries.md) §7): restrictions merge from every scope, permissions can
 be locked so lower scopes cannot broaden them, and some booleans are any-source-true. **Precedence must
 be monotone toward restriction.** A lower layer may narrow and may never widen.
 

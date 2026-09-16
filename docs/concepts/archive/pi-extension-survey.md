@@ -1,9 +1,11 @@
 # Off-the-shelf survey — what covers `pi-immediate-needs`, and what does not
 
+> **Status (#167, #162 workstream 11):** archived — pre-build survey (2026-09-03) of off-the-shelf extensions against `pi-immediate-needs`. The choices it led to are the vendored packages in `packages/harness/package.json` → `pi.extensions`; the survey itself is dated the day it was written.
+
 **Written** 2026-09-03 by Claude (Opus 5) at Daniel's request, for the zen-harness project.
 
 The "use off-the-shelf plugins and extensions first" strategy, checked against the eleven needs in
-[`pi-immediate-needs.md`](./pi-immediate-needs.md). Sources: the pi package catalogue
+[`pi-immediate-needs.md`](../pi-immediate-needs.md)). Sources: the pi package catalogue
 (`pi.dev/packages?type=extension`, 58 extensions listed on 2026-09-03), the sixteen packages installed
 on this machine, and `@oh-my-pi/pi-coding-agent` 17.2.14 as a source of ports.
 

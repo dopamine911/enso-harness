@@ -11,18 +11,7 @@ and who consumes it · what fences it · what crosses it that should not · pivo
 marker names. When it does, `bun scripts/docs/refresh-fences.ts <page>` is the fix and the diff is
 the review. Two pages are generated whole (`bun <script> > <page>`) and diffed the same way.
 
-| Seam | Domain | Second implementation today | Gate | Leak |
-|---|---|---|---|---|
-| [thread runtime](./thread-runtime.md) | Thread, Control | three fakes | vendor, glossary | L2 (event side) |
-| [storage](./storage.md) | Thread, Record | — (one file, pinned) | `no-duplicate-paths` | L2 (entries) |
-| [observation](./observation.md) · [inventory](../reference/observations.md) (generated) | Observation | `observation-kinds.ts` | kinds sweep (`observation-sweep.test.ts`, `to-agui.test.ts` over the oracle) | parallel `zen.*` names |
-| [dialog](./dialog.md) | Control | extension-UI-context tests | — | L4, decided: keep |
-| [permission mode](./permission-mode.md) | Permission | — | vendor allowlist | **L3** |
-| [guards](./guards.md) | Permission | injected verdicts; analyzer contract test | `tool-call-participants` | L5 |
-| [tool result](./tool-result.md) | Surface | — | — | — |
-| [presentation](./presentation.md) · [ported files](./ported-provenance.md) (generated) | Surface | — | presentation | — |
-| [logging](./logging.md) | Record | — | logging | substrate, by decision |
-| [web providers](./web-providers.md) | Permission (egress), Control | five providers | vendor allowlist | L6 |
-
-The leak numbers are `.local/refactor/goals.md` §2's; fixing them is #162 workstream 4. A page states
-its leak; it does not fix it.
+The table of seams — domain, gate, and each page's own statement of what crosses it — lives in
+[`architecture.md` → *Seams*](../architecture.md#seams), generated from these pages by
+`scripts/docs/seams-table.ts` so it cannot restate a leak a page has closed. A page states its leak;
+it does not fix it.

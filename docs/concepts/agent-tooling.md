@@ -1,5 +1,7 @@
 # Agent tooling — what earns its place, and what is missing
 
+> **Status (#167, #162 workstream 11):** a triage inventory from the consumer side (2026-09-02), kept live. Landed from Part 2: `ask` (the dialog seam), `logs` (`scripts/zen-logs.ts`, the debug drawer), `health` (`bun run check:all`). The rest is the backlog it always was; `architecture.md` → *Deferred* is where a deferral is recorded.
+
 **Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the zen-harness project.
 
 A first-person report from the consumer side. Everything in Part 1 is ranked by observed value in one
