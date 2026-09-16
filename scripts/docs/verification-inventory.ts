@@ -146,7 +146,7 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     exceptions: [
       {
         constant: 'VENDOR_IMPORT_ALLOWED',
-        reason: 'Named provider-seam files may import vendor-scoped model types and authentication helpers.',
+        reason: 'Empty since L6 (#162): no first-party file outside the vendor roots imports a vendor-scoped package.',
       },
       {
         constant: 'VENDOR_NAMED_ALLOWED',
@@ -328,7 +328,8 @@ function stringArray(source: string, name: string, file: string): string[] {
   const clean = withoutComments(body)
   const values = [...clean.matchAll(/(['"])(.*?)\1/g)].map((match) => match[2] ?? '')
   const residue = clean.replace(/(['"])(.*?)\1/g, '').replace(/[\s,]/g, '')
-  if (values.length === 0 || residue.length > 0) throw new Error(`${file}: ${name} is not a flat string array`)
+  // An EMPTY allowlist is a state the gates aim for (the vendor gate's import list since L6), not a parse failure.
+  if (residue.length > 0) throw new Error(`${file}: ${name} is not a flat string array`)
   return values
 }
 

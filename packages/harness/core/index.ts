@@ -63,6 +63,7 @@ export {
   type ModelSearchRequest,
   type ResolvedProviderAuth,
   routedProviderIdForModel,
+  type SearchModel,
   type WebSearchOutcome,
   WebSearchProviderError,
   type WebSearchProviderId,

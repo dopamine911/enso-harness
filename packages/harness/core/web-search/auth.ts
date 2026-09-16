@@ -1,6 +1,4 @@
-import type { Api, Model } from '@earendil-works/pi-ai'
-import { getEnvApiKey } from '@earendil-works/pi-ai/compat'
-import type { ResolvedProviderAuth } from './vocabulary.ts'
+import type { ResolvedProviderAuth, SearchModel } from './vocabulary.ts'
 
 /**
  * Model-routed auth (#63): resolve one model's credentials THROUGH PI's model registry —
@@ -23,7 +21,7 @@ import type { ResolvedProviderAuth } from './vocabulary.ts'
  * {@link resolveModelAuth} strips into the clean {@link ResolvedProviderAuth}).
  */
 export interface ModelAuthSource {
-  getApiKeyAndHeaders(model: Model<Api>): Promise<
+  getApiKeyAndHeaders(model: SearchModel): Promise<
     | {
         ok: true
         apiKey?: string | undefined
@@ -60,8 +58,8 @@ function hasAuthHeader(headers: Record<string, string> | undefined): boolean {
  */
 export async function resolveModelAuth(
   authSource: ModelAuthSource,
-  model: Model<Api>,
-  readProviderEnvironmentKey: (provider: string) => string | undefined = getEnvApiKey,
+  model: SearchModel,
+  readProviderEnvironmentKey: (provider: string) => string | undefined,
 ): Promise<ResolvedProviderAuth> {
   const resolved = await authSource.getApiKeyAndHeaders(model)
   if (!resolved.ok) return resolved

@@ -349,7 +349,9 @@ issues, so they are defined once, here, and kept apart from the product nouns ab
   the thread runtime, the storage seam, the observation vocabulary, the dialog vocabulary, the mode.
   A seam is proven by the second implementation, not designed against the first.
 - **leak** — a place where a vendor's name or shape crosses a seam it should not. Numbered in
-  `.local/refactor/goals.md` §2 (L1–L6); each is one allowlist line until fixed.
+  `.local/refactor/goals.md` §2 (L1–L6); each is one allowlist line until fixed. All six are fixed or
+  decided (#162): the vendor gate's import allowlist is empty, and the seams table on the
+  architecture page reads each seam's own statement of what crosses it.
 
 ---
 

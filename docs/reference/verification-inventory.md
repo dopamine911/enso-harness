@@ -20,7 +20,7 @@ and exact helper exports. Unsupported or stale shapes fail generation instead of
 | [`test/naming-gate.test.ts`](../../test/naming-gate.test.ts) | The naming gate's exemption for externally-fixed KEYS (#82, PR #83 review). | `packages`<br>`scripts` | `EXEMPTED_KEY_SITES` = 1 | The executable fixture covers the externally fixed `v` and `dir` keys; the site scan recognizes those key spellings. |
 | [`test/no-lint-suppressions.test.ts`](../../test/no-lint-suppressions.test.ts) | The gate may not be talked out of, one line at a time. | `packages`<br>`scripts`<br>`test` | `VENDORED_DIRECTORIES` = 1<br>stated allowlist = 0 | Matches line-comment Biome suppressions in known source extensions; vendored code is outside the scan. |
 | [`test/presentation-gate.test.ts`](../../test/presentation-gate.test.ts) | Presentation stays presentation (#121 item 4, #31). | `packages/web/src/components/ai-elements` | none (0) | Matches provenance text and static imports; dynamically assembled dependencies are outside the import matcher. |
-| [`test/vendor-gate.test.ts`](../../test/vendor-gate.test.ts) | The seam has an owner: only the host and the pi extensions may name the vendor (#145). | `packages/core/src`<br>`packages/web/src`<br>`packages/harness` | `VENDOR_IMPORT_ALLOWED` = 2<br>`VENDOR_NAMED_ALLOWED` = 1<br>`VENDOR_ROOTS` = 2 | Line-scans static words and package strings; structural type leaks and runtime-assembled names are not visible. |
+| [`test/vendor-gate.test.ts`](../../test/vendor-gate.test.ts) | The seam has an owner: only the host and the pi extensions may name the vendor (#145). | `packages/core/src`<br>`packages/web/src`<br>`packages/harness` | `VENDOR_IMPORT_ALLOWED` = 0<br>`VENDOR_NAMED_ALLOWED` = 1<br>`VENDOR_ROOTS` = 2 | Line-scans static words and package strings; structural type leaks and runtime-assembled names are not visible. |
 
 ## Ratchets
 
@@ -41,7 +41,7 @@ and exact helper exports. Unsupported or stale shapes fail generation instead of
 | Allowlist / exception count | `1` | [`test/naming-gate.test.ts`](../../test/naming-gate.test.ts) — `EXEMPTED_KEY_SITES` | Pins every production file relying on an externally fixed property-key spelling. |
 | Allowlist / exception count | `1` | [`test/no-lint-suppressions.test.ts`](../../test/no-lint-suppressions.test.ts) — `VENDORED_DIRECTORIES` | Vendored upstream code is excluded from linting and therefore from the suppression scan. |
 | Allowlist count | `0` | [`test/no-lint-suppressions.test.ts`](../../test/no-lint-suppressions.test.ts) — stated empty allowlist | Lint suppressions have no per-file or per-line allowance. |
-| Allowlist / exception count | `2` | [`test/vendor-gate.test.ts`](../../test/vendor-gate.test.ts) — `VENDOR_IMPORT_ALLOWED` | Named provider-seam files may import vendor-scoped model types and authentication helpers. |
+| Allowlist / exception count | `0` | [`test/vendor-gate.test.ts`](../../test/vendor-gate.test.ts) — `VENDOR_IMPORT_ALLOWED` | Empty since L6 (#162): no first-party file outside the vendor roots imports a vendor-scoped package. |
 | Allowlist / exception count | `1` | [`test/vendor-gate.test.ts`](../../test/vendor-gate.test.ts) — `VENDOR_NAMED_ALLOWED` | Pins every first-party code site that still names a vendor extension. |
 | Allowlist / exception count | `2` | [`test/vendor-gate.test.ts`](../../test/vendor-gate.test.ts) — `VENDOR_ROOTS` | The host and extension roots own the vendor boundary and may name it. |
 

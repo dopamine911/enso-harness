@@ -58,17 +58,13 @@ function namesVendor(line: string): boolean {
 }
 
 /**
- * Measured on `main` @ #149. The bundle's `about` no longer imports pi's `VERSION` — the host
- * exports `AGENT_RUNTIME_VERSION` and the route takes the string — so what is left is the
- * provider seam under `harness/core`, which is a different boundary (a model API, not the
- * agent loop) and is fenced by `web-search`'s five-providers-behind-one-contract shape.
+ * EMPTY, and the gate keeps it so. #149 removed the bundle's import of pi's `VERSION`; L6
+ * (#162) removed the last two — pi-ai's `Model<Api>` type and its env-key fallback at the
+ * provider seam — when `web-search`'s contract named its own `SearchModel` and took the env
+ * reader as a parameter (`extensions/web-search/index.ts#searchModelOf`, the one conversion).
+ * A new row here is a new dependency site, and must say why.
  */
-const VENDOR_IMPORT_ALLOWED: readonly string[] = [
-  // pi-ai's `Api`/`Model` types and its env-key fallback: the PROVIDER seam, not the loop.
-  // Leaves when web-search's provider contract names its own model/credential types.
-  'packages/harness/core/web-search/vocabulary.ts',
-  'packages/harness/core/web-search/auth.ts',
-]
+const VENDOR_IMPORT_ALLOWED: readonly string[] = []
 
 const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // The guard's write-allowlist names cc-safety-net's state directory: a path, not an import.

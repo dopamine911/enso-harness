@@ -1,8 +1,13 @@
 import { expect, test } from 'bun:test'
-import type { Api, Model } from '@earendil-works/pi-ai'
 import { runGoogleProviderSearch } from '../web-search/providers/google.ts'
 import { runOpenAiProviderSearch } from '../web-search/providers/openai.ts'
-import type { FetchUrl, FetchUrlInit, ModelSearchRequest, ResolvedProviderAuth } from '../web-search/vocabulary.ts'
+import type {
+  FetchUrl,
+  FetchUrlInit,
+  ModelSearchRequest,
+  ResolvedProviderAuth,
+  SearchModel,
+} from '../web-search/vocabulary.ts'
 import { WebSearchProviderError } from '../web-search/vocabulary.ts'
 
 /**
@@ -34,7 +39,8 @@ function sseResponse(events: unknown[]): Response {
 
 const TEST_AUTH: ResolvedProviderAuth = { ok: true, apiKey: 'model-key' }
 
-function fakeModel(overrides: Partial<Model<Api>>): Model<Api> {
+// The provider seam's own model (L6): what the providers read, nothing of the runtime's.
+function fakeModel(overrides: Partial<SearchModel>): SearchModel {
   return {
     id: 'test-model',
     provider: 'test-provider',
@@ -43,10 +49,10 @@ function fakeModel(overrides: Partial<Model<Api>>): Model<Api> {
     maxTokens: 8192,
     reasoning: false,
     ...overrides,
-  } as Model<Api>
+  }
 }
 
-function modelRequest(model: Model<Api>, fetchUrl: FetchUrl): ModelSearchRequest {
+function modelRequest(model: SearchModel, fetchUrl: FetchUrl): ModelSearchRequest {
   return {
     query: 'what is zen-harness',
     model,
