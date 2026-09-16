@@ -67,6 +67,8 @@ const INERT_KEYBINDINGS = {} as unknown as KeybindingsManager
 
 interface PendingDialog {
   resolve: (response: DialogAnswer) => void
+  /** Settle as the RUN's abort (#162 flows: "if the user says stop, it's stop"): the cancel value, outcome `aborted`. */
+  abort: () => void
   /** What was asked — the `extension_ui_request` minus its id — so an answer can be checked against it (#112). */
   request: BlockingDialogRequest
 }
@@ -112,6 +114,12 @@ export interface ZenExtensionUiContext {
   openDialogs(): ZenOpenDialog[]
   /** Cancel every pending dialog — session teardown. Each blocked extension call resolves to its cancel value. */
   cancelAllDialogs(): void
+  /**
+   * Settle every pending dialog as the RUN's abort: each blocked call resolves to its cancel
+   * value with outcome `aborted` — the glossary's word for exactly this, produced by no code
+   * until Stop was made to stop. The asking extension need not have passed a signal.
+   */
+  abortAllDialogs(): void
   /** How many dialogs are blocked right now — observable state for tests and for the idle-timeout logic. */
   pendingDialogCount(): number
 }
@@ -285,6 +293,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
           'cancelled' in response && response.cancelled
             ? finish(cancelValue, 'cancelled')
             : finish(mapResponse(response), 'answered'),
+        abort: () => finish(cancelValue, 'aborted'),
         request,
       })
       emit({ type: 'extension_ui_request', id, ...request })
@@ -460,6 +469,9 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
       for (const [dialogId, pending] of [...pendingDialogs]) {
         pending.resolve({ id: dialogId, cancelled: true })
       }
+    },
+    abortAllDialogs(): void {
+      for (const pending of [...pendingDialogs.values()]) pending.abort()
     },
     pendingDialogCount(): number {
       return pendingDialogs.size

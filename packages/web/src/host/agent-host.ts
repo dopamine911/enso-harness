@@ -175,6 +175,29 @@ export interface StoredThread {
   readonly firstMessage: string
 }
 
+/**
+ * Stop: the runtime FIRST, so its loop holds the abort signal when a blocked `tool_call`
+ * handler returns — then every pending question settles as `aborted`, and the handler DOES
+ * return. Before this, Stop during a permission question waited on the card: the loop awaited
+ * the handler, the handler awaited the human. If the user says stop, it's stop (Daniel,
+ * 2026-09-16); the card drops, the run ends.
+ *
+ * A stop must stop (thread-registry.test.ts's rule, one layer down): the dialogs settle even
+ * if the runtime's abort rejects — the rejection still propagates, the cards still drop.
+ * Exported so that path is pinned against a stop that rejects, which the real runtime's is
+ * not made to do.
+ */
+export async function stopRunThenSettleDialogs(
+  stopRuntime: () => Promise<void>,
+  settleDialogs: () => void,
+): Promise<void> {
+  try {
+    await stopRuntime()
+  } finally {
+    settleDialogs()
+  }
+}
+
 export interface AgentHost {
   /**
    * A session for this thread, with its own services, extensions bound, events flowing.
@@ -511,7 +534,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         }
       },
       abort(): Promise<void> {
-        return session.abort()
+        return stopRunThenSettleDialogs(
+          () => session.abort(),
+          () => ui.abortAllDialogs(),
+        )
       },
       clearQueue(): { steering: string[]; followUp: string[] } {
         return session.clearQueue()

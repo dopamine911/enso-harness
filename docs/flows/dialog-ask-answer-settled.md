@@ -56,12 +56,13 @@ sequenceDiagram
    map in insertion order — oldest first — checking each request with `isZenDialogSpec` rather than
    casting; the snapshot carries that list whole, so a reconnect renders the card and an empty list
    clears one.
-6. **The run's abort does not settle a dialog — a record, not a rule.** The glossary defines the
-   outcome `aborted` as "the run's abort", but `awaitDialog` fires `'aborted'` only from the `signal`
-   the *extension* passed in `dialogOptions`, `agent-host.ts#abort` delegates to `session.abort()`
-   without touching the pending map, and the vendor's permission prompt passes no signal. So Stop
-   during a permission question waits on the card. Pinned as a record test (below); if the host starts
-   settling dialogs on abort, the record goes red and this invariant is rewritten.
+6. **Stop stops: the run's abort settles every pending dialog as `aborted`.** `agent-host.ts#abort`
+   tells the runtime first — so its loop holds the abort signal when a blocked `tool_call` handler
+   returns — then `abortAllDialogs()` resolves each pending question to its cancel value with the
+   glossary's outcome for exactly this, `aborted`, and every follower hears `dialog-settled`. Before
+   2026-09-16 the host settled nothing on abort, and the vendor's permission prompt passes no signal
+   of its own, so Stop during a permission question waited on the card until a human answered it
+   (decided: *if the user says stop, it's stop*).
 
 ## The validation contract
 
@@ -121,9 +122,12 @@ Each marker is checked by `test/docs-gate.test.ts`: a renamed or deleted test wi
 <!-- test: packages/web/src/__tests__/custom-event-router.test.ts#dialog-settled drops the card for ITS id and no other (#114) -->
 - **Invariant 5, in the browser** — [`custom-event-router.test.ts`](../../packages/web/src/__tests__/custom-event-router.test.ts).
 
-<!-- test: packages/web/src/host/__tests__/agent-host.test.ts#⚠ RECORD: the run's abort leaves a pending dialog pending — Stop waits on the card until a human answers it -->
-- **Invariant 6, as a record** — [`agent-host.test.ts`](../../packages/web/src/host/__tests__/agent-host.test.ts):
-  abort settles nothing; an answer does.
+<!-- test: packages/web/src/host/__tests__/agent-host.test.ts#⚠ Stop stops: the run's abort settles a pending dialog as `aborted` — the card drops, the extension resumes with its cancel value -->
+- **Invariant 6, at the host** — [`agent-host.test.ts`](../../packages/web/src/host/__tests__/agent-host.test.ts):
+  abort → `dialog-settled` with outcome `aborted`; the extension resumes with its cancel value; a
+  late answer is reported, not applied.
+<!-- test: packages/web/src/host/__tests__/extension-ui-context.test.ts#abortAllDialogs settles every pending dialog as aborted, each blocked call resolving to its cancel value, once -->
+- **Invariant 6, the settle itself** — every pending question, once, under the glossary's word.
 
 ## Where it is stated
 

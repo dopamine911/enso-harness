@@ -11,7 +11,13 @@ import {
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { findRepoRoot, harnessPackageDir, type ZenObservation } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
-import { type AgentHost, createAgentHost, type HostedThread, seedMultiAccountChildProxyOff } from '../agent-host.ts'
+import {
+  type AgentHost,
+  createAgentHost,
+  type HostedThread,
+  seedMultiAccountChildProxyOff,
+  stopRunThenSettleDialogs,
+} from '../agent-host.ts'
 import { readPiccPersistedMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
 
 /**
@@ -402,17 +408,13 @@ test('⚠ first block is final: a later extension cannot un-block the guards, an
   expect(read).toEqual({ block: true, reason: 'the later participant refuses reads' })
 })
 
-// ── the run's abort and a pending dialog (docs/flows/dialog-ask-answer-settled.md, stated gap) ──
-// ⚠ A RECORD, not a protection (README → How this repo verifies itself). Asked empirically: the
-// host's `abort()` is the RUN's stop (`session.abort()`) and touches no pending dialog; `aborted`
-// as an outcome fires only from an AbortSignal the asking extension itself passed, and the
-// vendor's permission prompt passes none (`picc-permission-modes/index.ts` — `ctx.ui.custom(…)`
-// with no signal, no timeout). So Stop during a permission question does not stop: the runtime's
-// loop awaits the handler, the handler awaits the card, and the run ends when a human answers.
-// The glossary already names the outcome that SHOULD happen (`aborted`, "the run's abort"); no
-// code of ours produces it. If this test goes red, the host started settling dialogs on abort —
-// update the flow page and this comment, not the assertion's intent.
-test("⚠ RECORD: the run's abort leaves a pending dialog pending — Stop waits on the card until a human answers it", async () => {
+// ── the run's abort and a pending dialog (docs/flows/dialog-ask-answer-settled.md) ──
+// Was a RECORD: abort() settled nothing, so Stop during a permission question waited on the
+// card until a human answered (the vendor's prompt passes no signal; the runtime's loop awaits
+// the handler; the handler awaited the human). Decided 2026-09-16: if the user says stop, it's
+// stop. `abort()` settles every pending question as `aborted` — the glossary's word for it —
+// AFTER telling the runtime, so the loop holds the signal when the handler returns.
+test("⚠ Stop stops: the run's abort settles a pending dialog as `aborted` — the card drops, the extension resumes with its cancel value", async () => {
   let outcome: unknown = 'unsettled'
   const probe: InlineExtension = {
     name: 'zen-host-abort-dialog-probe',
@@ -428,16 +430,51 @@ test("⚠ RECORD: the run's abort leaves a pending dialog pending — Stop waits
   const events = collectEvents(hosted)
   const openBefore = hosted.runtime.openDialogs()
   expect(openBefore).toHaveLength(1)
+  const dialogId = openBefore[0]?.id ?? ''
+  const settled = untilObservation(hosted, (event) => event.kind === 'dialog-settled')
   await hosted.runtime.abort()
-  await nextTick()
-  expect(hosted.runtime.openDialogs()).toHaveLength(1)
-  expect(outcome).toBe('unsettled')
-  expect(events.some((event) => event.kind === 'dialog-settled')).toBe(false)
-  // What does settle it: an answer, by id.
-  hosted.runtime.answerDialog({ id: openBefore[0]?.id ?? '', confirmed: false })
+  expect(await settled).toEqual({ kind: 'dialog-settled', id: dialogId, outcome: 'aborted' })
+  expect(hosted.runtime.openDialogs()).toHaveLength(0)
+  // confirm's cancel value is `false`: the extension resumed and was told no
+  expect(outcome).toBe(false)
+  expect(events.filter((event) => event.kind === 'dialog-settled')).toHaveLength(1)
+  // an answer arriving after the abort is the "already settled" path: reported, not thrown, nothing moves
+  hosted.runtime.answerDialog({ id: dialogId, confirmed: true })
   await nextTick()
   expect(outcome).toBe(false)
-  expect(hosted.runtime.openDialogs()).toHaveLength(0)
+})
+
+// A stop must stop, even when the runtime's abort rejects: the dialogs settle and the
+// rejection still propagates — the same rule thread-registry.test.ts pins for a queue clear
+// that throws, one layer down.
+test("⚠ a stop must stop: when the runtime's abort rejects, the dialogs still settle and the rejection still propagates", async () => {
+  const order: string[] = []
+  const stopping = stopRunThenSettleDialogs(
+    async () => {
+      order.push('runtime told')
+      throw new Error('the runtime would not stop')
+    },
+    () => order.push('dialogs settled'),
+  )
+  await expect(stopping).rejects.toThrow('the runtime would not stop')
+  expect(order).toEqual(['runtime told', 'dialogs settled'])
+  // and the ordinary order, for the record: runtime first, dialogs after
+  order.length = 0
+  await stopRunThenSettleDialogs(
+    async () => {
+      order.push('runtime told')
+    },
+    () => order.push('dialogs settled'),
+  )
+  expect(order).toEqual(['runtime told', 'dialogs settled'])
+})
+
+test('abort with no pending dialog settles nothing and says nothing', async () => {
+  const hosted = await hostedSession()
+  const events = collectEvents(hosted)
+  await hosted.runtime.abort()
+  await nextTick()
+  expect(events.some((event) => event.kind === 'dialog-settled')).toBe(false)
 })
 
 test("listCommands is synchronous and names picc's /mode", async () => {

@@ -152,6 +152,45 @@ test('cancelAllDialogs settles every pending dialog as cancelled; a second answe
   })
 })
 
+// The run's abort (Daniel, 2026-09-16: if the user says stop, it's stop): the same settle as
+// teardown's, under the glossary's word for it. A dialog whose extension passed its own
+// aborted signal is already gone by then and is not settled twice.
+test('abortAllDialogs settles every pending dialog as aborted, each blocked call resolving to its cancel value, once', async () => {
+  const { uiContext, abortAllDialogs, requests, events } = contextUnderTest()
+  const a = uiContext.confirm('A?', 'm')
+  const b = uiContext.select('B', ['x', 'y'])
+  // picc's permission prompt, exactly as it asks it — lifted to a select on the same pending map (#73)
+  const permission = uiContext.custom<string | null>(createFilePermissionDialogFactory(WRITE_PROMPT), { overlay: true })
+  await untilEmitted(requests, 3)
+  abortAllDialogs()
+  expect(await a).toBe(false)
+  expect(await b).toBeUndefined()
+  // picc reads `choice === "Yes"`; the cancel value is not "Yes", so the tool is denied
+  expect(await permission).toBeUndefined()
+  expect(settles(events).map((settle) => settle.outcome)).toEqual(['aborted', 'aborted', 'aborted'])
+  abortAllDialogs()
+  expect(settles(events)).toHaveLength(3)
+})
+
+// A dialog whose extension passed its OWN signal, already fired, is settled by that signal
+// (`aborted`, once) and is not on the pending map when the run's abort sweeps — never twice.
+test('a dialog already settled by its own abort signal is skipped by abortAllDialogs, not settled again', async () => {
+  const { uiContext, abortAllDialogs, requests, events, pendingDialogCount } = contextUnderTest()
+  const own = new AbortController()
+  const withSignal = uiContext.input('Name?', undefined, { signal: own.signal })
+  const without = uiContext.input('Other?')
+  await untilEmitted(requests, 2)
+  own.abort()
+  expect(await withSignal).toBeUndefined()
+  expect(pendingDialogCount()).toBe(1)
+  abortAllDialogs()
+  expect(await without).toBeUndefined()
+  expect(settles(events).map((settle) => [settle.id, settle.outcome])).toEqual([
+    [requestId(requests[0]), 'aborted'],
+    [requestId(requests[1]), 'aborted'],
+  ])
+})
+
 test('fire-and-forget methods emit the rpc-shaped record and return immediately', () => {
   const { uiContext, events } = contextUnderTest()
   uiContext.notify('hello', 'warning')
