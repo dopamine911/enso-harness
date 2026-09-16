@@ -235,7 +235,7 @@ output of this module and nothing stores it*), and its only production importer 
 **The state layer's message shape crosses the history route.** `ZenThreadHistory.messages` is
 `unknown` on purpose — core must not own the client's transport shape — and `reviveHistoryMessages`
 (`thread-stores.ts:165-191`) restores it at the browser boundary; `ThreadStores.history` is typed as the
-client's `UIMessage` (line 34). The server builds those messages in `rpc/transcript-to-messages.ts`, the
+client's `UIMessage` (line 34). The server builds those messages in `server/transcript-to-messages.ts`, the
 read-side twin of `to-agui.ts`. Not a vendor-of-the-loop leak and not numbered in goals §2, but it is
 the one place the state layer's shape exists outside the page, and a pivot pays for it (below).
 
@@ -251,7 +251,7 @@ Replace the state layer and the files that change are the adapter and its two ne
 says so: *a renderer that stops speaking AG-UI deletes it and the adapter*), the chat factory in
 `chat-screen.tsx` (`threadChatOptions` and `createThreadChatHook`, lines 171-209, and the widget map
 written against the client's `ChatUIHost`), plus the history crossing: `ThreadStores.history`,
-`reviveHistoryMessages` and `rpc/transcript-to-messages.ts`, which produce the client's message shape today.
+`reviveHistoryMessages` and `server/transcript-to-messages.ts`, which produce the client's message shape today.
 The per-thread stores, the router's dispatch, and the fixture path are shaped by the thread, not the
 client, and survive.
 

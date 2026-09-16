@@ -125,8 +125,8 @@ type-only crossing is still a dependency.
 
 Every owned source file must fall in a zone (`coverage.requireAllFiles`; `index.html` is the one
 excused file). The storage seam is a forbidden call: `SessionManager.*` from `server` or `browser`
-is a finding, beside `no-duplicate-paths`. Severity is `warn` until the re-cut empties the day-one
-list recorded on #173; the same PR promotes it to `error`.
+is a finding, beside `no-duplicate-paths`. Severity is `error`: the day-one list (five crossings, all in
+`rpc/`, recorded on #173) was emptied by moving the files, not by widening a rule.
 
 ---
 
@@ -349,7 +349,7 @@ zen-harness/
     web/                    # the web app — outside the pi manifest
       src/server/           #   routes (prompt · follow · dialog · abort), thread registry
       src/host/             #   AgentHost: the storage seam, pi events → observations, dialogs
-      src/rpc/              #   observation → AG-UI mapping, branch → messages
+      src/rpc/              #   observation → AG-UI adapter and the zen.* custom-event names (browser)
       src/components/       #   ai-elements (ported) · shadcn ui
   docs/
     architecture.md         # this file

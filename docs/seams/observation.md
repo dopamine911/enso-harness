@@ -151,11 +151,12 @@ leaves, the registry forgets the feed and `seq` restarts with the next follower,
 
 ## What fences it
 
-- **The kinds oracle**: `packages/web/src/rpc/__tests__/observation-kinds.ts` derives every `kind`
+- **The kinds oracle**: `packages/core/src/__tests__/observation-kinds.ts` (`@zen/core/observation-kinds`) derives every `kind`
   literal from the union itself — never a hard-coded count, which drifted once (566e8b1). Two sweeps
-  compare against it: `schemas.test.ts` line 130 proves every event the mapper handles, plus the
-  server-synthesised `prompt-rejected`, validates against `ZenObservation` and covers every member;
-  `to-agui.test.ts` line 240 proves the adapter handles every member.
+  compare against it: `host/__tests__/observation-sweep.test.ts` proves every event the mapper
+  handles, plus the server-synthesised kinds, validates against `ZenObservation` and covers every
+  member; `rpc/__tests__/to-agui.test.ts` proves the adapter handles every member. The oracle lives
+  in `@zen/core` because both sweeps sit in zones that may import only `core` (#173).
 - **The generated inventory**: `docs/reference/observations.md` must equal its generator's stdout
   (`test/docs-gate.test.ts`); a kind with no producer or consumer is printed as a finding, not omitted.
 - **Closed frames**: the three frame schemas are `additionalProperties: false` (`follow.ts` lines

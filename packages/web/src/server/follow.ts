@@ -16,9 +16,9 @@ import {
 } from '@zen/core'
 import { Check, Errors } from 'typebox/value'
 import type { AgentHost } from '../host/agent-host.ts'
-import { interruptedTail, transcriptToMessages } from '../rpc/transcript-to-messages.ts'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
 import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
+import { interruptedTail, transcriptToMessages } from './transcript-to-messages.ts'
 
 /**
  * The prompt/follow split (#112) — the server↔browser wire.

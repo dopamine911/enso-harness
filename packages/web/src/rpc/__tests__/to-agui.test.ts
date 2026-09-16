@@ -2,9 +2,8 @@ import { expect, test } from 'bun:test'
 import { EventType } from '@ag-ui/core'
 import type { StreamChunk } from '@tanstack/ai'
 import { isZenToolResultDescriptor, ZEN_TOOL_RESULT_KEY, type ZenObservation } from '@zen/core'
-import { mapPiEvent } from '../../host/map-events.ts'
+import { observationKindsDeclaredByTheUnion } from '@zen/core/observation-kinds'
 import { type AguiIdentifiers, observationToAguiEvents } from '../to-agui.ts'
-import { observationKindsDeclaredByTheUnion } from './observation-kinds.ts'
 
 const ids: AguiIdentifiers = { messageId: 'm1', runId: 'r1', threadId: 't1' }
 const toAgui = (observation: ZenObservation): StreamChunk[] => observationToAguiEvents(observation, ids)
@@ -131,16 +130,18 @@ test('an extension error becomes RUN_ERROR naming the extension and the hook', (
 
 // #29: the notify payload must survive the LAST hop too — the browser's onCustomEvent
 // receives exactly this event's `value`, so a message dropped here is a message dropped
-// on screen. The full pipeline pin: pi wire event → mapPiEvent → toAgui, message intact.
+// on screen. The first hop (runtime event → observation) is pinned in host/__tests__/
+// map-events.test.ts; the two meet on `ZenObservation`, which the mapper sweep validates.
 test('a notify observation rides CUSTOM as zen.notify with its message intact', () => {
-  const observation = mapPiEvent({
-    type: 'extension_ui_request',
+  const [event] = toAgui({
+    kind: 'extension-ui-request',
     id: 'n1',
     method: 'notify',
+    blocking: false,
+    origin: 'run',
     message: 'Mode set to Plan Mode',
     notifyType: 'warning',
   })
-  const [event] = toAgui(observation)
   expect(event).toMatchObject({ type: EventType.CUSTOM, name: 'zen.notify' })
   expect((event as { value: unknown }).value).toMatchObject({
     message: 'Mode set to Plan Mode',
@@ -148,8 +149,8 @@ test('a notify observation rides CUSTOM as zen.notify with its message intact', 
   })
 })
 
-// #29's remaining half: the mode lines read picc's "modes" entries from this chunk, so the
-// pipeline pin is wire event → mapPiEvent → toAgui with customType and data intact.
+// #29's remaining half: the mode lines read the "modes" entries from this chunk, so
+// customType and data must cross intact.
 test('a mode change rides CUSTOM as zen.mode — the SAME chunk and value shape as the run-start receipt (L3)', () => {
   const [event] = toAgui({ kind: 'permission-mode', mode: 'plan', available: ['default', 'plan'] })
   expect(event).toEqual({
@@ -169,11 +170,7 @@ test('a rejected mode change is a WARNING notice on zen.notify — the click did
 })
 
 test('a custom entry rides CUSTOM as zen.entry with its data intact', () => {
-  const observation = mapPiEvent({
-    type: 'entry_appended',
-    entry: { type: 'custom', customType: 'modes', data: { mode: 'acceptEdits' } },
-  })
-  const [event] = toAgui(observation)
+  const [event] = toAgui({ kind: 'custom-entry', customType: 'modes', data: { mode: 'acceptEdits' } })
   expect(event).toMatchObject({ type: EventType.CUSTOM, name: 'zen.entry' })
   expect((event as { value: unknown }).value).toMatchObject({
     customType: 'modes',
@@ -183,14 +180,11 @@ test('a custom entry rides CUSTOM as zen.entry with its data intact', () => {
 
 // --- #45: a completed request's accounting crosses as zen.usage, the whole observation
 test('a message-end observation rides CUSTOM as zen.usage with role and usage intact', () => {
-  const observation = mapPiEvent({
-    type: 'message_end',
-    message: {
-      role: 'assistant',
-      usage: { input: 1200, output: 40, cacheRead: 300, cacheWrite: 50, cost: { total: 0.0132 } },
-    },
+  const [event] = toAgui({
+    kind: 'message-end',
+    role: 'assistant',
+    usage: { input: 1200, output: 40, cacheRead: 300, cacheWrite: 50, totalCost: 0.0132 },
   })
-  const [event] = toAgui(observation)
   expect(event).toMatchObject({ type: EventType.CUSTOM, name: 'zen.usage' })
   expect((event as { value: unknown }).value).toEqual({
     kind: 'message-end',
@@ -255,22 +249,28 @@ test('nothing is silently dropped: every kind except an in-flight result and a b
   }
   observations.push(...bareBoundaries)
   // every member covered — the oracle is the union itself, never a hard-coded count (the
-  // count here and in schemas.test.ts drifted apart once; a set diff names the missing kind)
+  // count here and in the mapper sweep drifted apart once; a set diff names the missing kind)
   const coveredKinds: string[] = [...new Set(observations.map((observation) => observation.kind))]
   expect(coveredKinds.sort()).toEqual(observationKindsDeclaredByTheUnion())
 })
 
-// ⚠⚠ THE END-TO-END ASSERTION: #18's descriptor must survive BOTH hops.
-// pi rpc event → ZenObservation → AG-UI StreamChunk, and still be readable.
-test('the tool-result descriptor survives pi → observation → AG-UI intact', () => {
-  const observation = mapPiEvent({
-    type: 'tool_execution_end',
-    toolCallId: 'c1',
-    toolName: 'bash',
-    result: { content: 'trimmed output', details: { truncation: { shown: 500, total: 4000, unit: 'lines' } } },
-    isError: false,
-  })
-  const [event] = observationToAguiEvents(observation, ids)
+// ⚠⚠ #18's descriptor must survive the LAST hop: ZenObservation → AG-UI StreamChunk, and
+// still be readable. The first hop (the runtime's `details` bag → descriptor) is the host's
+// and is pinned in host/__tests__/map-events.test.ts; `ZenToolResult.descriptor` is the type
+// the two hops meet on.
+test('the tool-result descriptor survives observation → AG-UI intact', () => {
+  const [event] = observationToAguiEvents(
+    {
+      kind: 'tool-result',
+      toolCallId: 'c1',
+      toolName: 'bash',
+      text: 'trimmed output',
+      complete: true,
+      isError: false,
+      descriptor: { kind: 'pi.tool.bash', props: {}, truncated: { shown: 500, total: 4000, unit: 'lines' } },
+    },
+    ids,
+  )
   const carried = (event as Record<string, unknown>)[ZEN_TOOL_RESULT_KEY]
   expect(isZenToolResultDescriptor(carried)).toBe(true)
   expect(carried).toMatchObject({
@@ -283,13 +283,14 @@ test('the tool-result descriptor survives pi → observation → AG-UI intact', 
 })
 
 test('a result with no descriptor carries no descriptor key at all', () => {
-  const observation = mapPiEvent({
-    type: 'tool_execution_end',
+  const observation: ZenObservation = {
+    kind: 'tool-result',
     toolCallId: 'c1',
     toolName: 'bash',
-    result: { content: 'plain' },
+    text: 'plain',
+    complete: true,
     isError: false,
-  })
+  }
   expect(observationToAguiEvents(observation, ids)[0]).not.toHaveProperty(ZEN_TOOL_RESULT_KEY)
 })
 

@@ -180,7 +180,7 @@ route does the same in `server/index.ts`). The inspection and summary report the
 **Said by the host, mid-run.** When the host's session subscription sees the vendor persist a mode, it
 emits its own `permission_mode` event right after it (`host/agent-host.ts`, the session subscription;
 pinned by `agent-host.test.ts` against the real extension). The mapper carries it as the
-`permission-mode` observation (`rpc/map-events.ts#mapPermissionMode`), and `rpc/to-agui.ts` emits it as
+`permission-mode` observation (`host/map-events.ts#mapPermissionMode`), and `rpc/to-agui.ts` emits it as
 the same `zen.mode` chunk the run-start receipt rides. The vendor's `custom-entry` still crosses as
 `zen.entry` — recorded and counted by the debug pane, rendered by nothing.
 

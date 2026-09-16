@@ -17,7 +17,6 @@ import {
   zenLogger,
 } from '@zen/core'
 import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost } from '../host/agent-host.ts'
-import { interruptedTail, transcriptToMessages } from '../rpc/transcript-to-messages.ts'
 import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
   abortThread,
@@ -35,6 +34,7 @@ import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
 import { noteRunAdmitted } from './run-timing.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
+import { interruptedTail, transcriptToMessages } from './transcript-to-messages.ts'
 
 /** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
 const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/

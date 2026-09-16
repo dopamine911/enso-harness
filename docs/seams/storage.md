@@ -219,7 +219,7 @@ has it; `GET /api/threads` summarises each live thread from `inspect()`.
 `packages/web/src/server/thread-registry.ts` is the only builder (it is handed `host.createSession`),
 and its `inspectThread` is the one place a `ZenThreadInspection` is assembled, so the thread route and
 the bundle cannot drift. `server/follow.ts` does the same live-or-cold read for the snapshot's
-`messages`; both assemble through `packages/web/src/rpc/transcript-to-messages.ts`
+`messages`; both assemble through `packages/web/src/server/transcript-to-messages.ts`
 (`transcriptToMessages`, `interruptedTail`), the read-side twin of the live adapter — and since L2 it
 assembles from entries of ours and decodes nothing. Every server test drives the seam over the fake
 `AgentHost` (`server/__tests__/fake-hosted-thread.ts`), whose stored threads carry transcripts of ours;
@@ -245,7 +245,7 @@ runtime's own entry shapes — and `ZenThreadInspection` carried them to the wir
 modelled", with three readers above the host knowing the vendor's field names. Now the host converts
 the branch in `packages/web/src/host/transcript.ts` — the one place above `session-events.ts` that
 reads a stored entry — and hands out `ZenTranscriptEntry[]` from `readTranscript` and `inspect()`;
-`rpc/transcript-to-messages.ts` assembles messages from ours and decodes nothing;
+`server/transcript-to-messages.ts` assembles messages from ours and decodes nothing;
 `describeTranscriptEntry` in core formats ours for the drawer and `zen-thread.mjs`; the stored mode
 walk reads our `custom` entries. The glossary gate's row for the old reader is gone, and the gate
 now refuses an allowlisted file it cannot find, so it cannot come back unnoticed.
