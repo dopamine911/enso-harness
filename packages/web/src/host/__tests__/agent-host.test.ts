@@ -76,10 +76,20 @@ async function hostedSession(extensionFactories: InlineExtension[] = []): Promis
   return hosted
 }
 
-/** Resolves with the first observation matching `matches`, or rejects after a second — a deadline, never a tick count. */
+/**
+ * How long an awaited observation may take before the test fails BY NAME. Generous on purpose:
+ * the vendor's persistence is a few microtasks on any machine, and the deadline exists so a
+ * missing observation is a named failure rather than a stale assertion — not to time it.
+ */
+const OBSERVATION_DEADLINE_MILLISECONDS = 5000
+
+/** Resolves with the first observation matching `matches`, or rejects at the deadline — never a tick count. */
 function untilObservation(hosted: HostedThread, matches: (event: ZenObservation) => boolean): Promise<ZenObservation> {
   const { promise, resolve, reject } = Promise.withResolvers<ZenObservation>()
-  const timer = setTimeout(() => reject(new Error('no matching observation within 1s')), 1000)
+  const timer = setTimeout(
+    () => reject(new Error(`no matching observation within ${OBSERVATION_DEADLINE_MILLISECONDS}ms`)),
+    OBSERVATION_DEADLINE_MILLISECONDS,
+  )
   const unsubscribe = hosted.runtime.subscribe((observation) => {
     if (!matches(observation)) return
     clearTimeout(timer)
