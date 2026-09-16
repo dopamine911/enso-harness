@@ -76,6 +76,19 @@ async function hostedSession(extensionFactories: InlineExtension[] = []): Promis
   return hosted
 }
 
+/** Resolves with the first observation matching `matches`, or rejects after a second — a deadline, never a tick count. */
+function untilObservation(hosted: HostedThread, matches: (event: ZenObservation) => boolean): Promise<ZenObservation> {
+  const { promise, resolve, reject } = Promise.withResolvers<ZenObservation>()
+  const timer = setTimeout(() => reject(new Error('no matching observation within 1s')), 1000)
+  const unsubscribe = hosted.runtime.subscribe((observation) => {
+    if (!matches(observation)) return
+    clearTimeout(timer)
+    unsubscribe()
+    resolve(observation)
+  })
+  return promise
+}
+
 const nextTick = (): Promise<void> => {
   const { promise, resolve } = Promise.withResolvers<void>()
   setTimeout(resolve, 0)
@@ -306,14 +319,17 @@ test('⚠ setPermissionMode runs the vendor command: the modes entry, the permis
   const events = collectEvents(hosted)
   expect(hosted.runtime.permissionModeState().mode).toBe('default')
   const { promise: accepted, resolve: onAccepted, reject: onRejected } = Promise.withResolvers<void>()
+  // Wait for the OBSERVATION, not a tick count: acceptance is the command's completion, and the
+  // vendor's persistence may land any number of turns later.
+  const modeChanged = untilObservation(hosted, (event) => event.kind === 'permission-mode' && event.mode === 'plan')
   hosted.runtime.setPermissionMode('plan', {
     onAccepted,
     onRejected: (reason: string): void => onRejected(new Error(reason)),
   })
   await accepted
-  await nextTick()
-  const change = events.find((event) => event.kind === 'permission-mode' && event.mode === 'plan')
+  const change = await modeChanged
   expect(change).toMatchObject({ kind: 'permission-mode', mode: 'plan' })
+  expect(events).toContain(change)
   expect(hosted.runtime.permissionModeState().mode).toBe('plan')
   // The vendor persisted it: a cold read of the transcript agrees with the live state.
   expect(storedPermissionModeState(hosted.inspect().entries).mode).toBe('plan')
@@ -329,7 +345,7 @@ test('setPermissionMode with a mode the vendor registers no command for is rejec
   const { promise: settled, resolve } = Promise.withResolvers<'accepted' | string>()
   hosted.runtime.setPermissionMode('no-such-mode', { onAccepted: () => resolve('accepted'), onRejected: resolve })
   const outcome = await settled
-  expect(outcome).toContain('no-such-mode')
+  expect(outcome).toBe('mode no-such-mode is not one this thread offers')
   await nextTick()
   expect(hosted.runtime.permissionModeState().mode).toBe('default')
   // nothing was prompted: no message boundary, no text, no run

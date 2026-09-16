@@ -470,7 +470,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // Found by the first test that drove this path against the real extension rather
         // than the fake (#162 exit criteria); the route refuses earlier (422), this is the seam's own lock.
         if (!currentPermissionModeState().available.includes(mode)) {
-          outcome.onRejected(`mode ${mode} is not one the vendor registers a command for`)
+          outcome.onRejected(`mode ${mode} is not one this thread offers`)
           return
         }
         // The vendor's command, as the prompt path runs any extension command: fire-and-
