@@ -23,6 +23,11 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
  *   table lives in architecture.md and is read off the seam pages). Refresh with
  *   `bun scripts/docs/refresh-fences.ts <page>`, which handles both marker kinds.
  *
+ *   `<!-- test: <path>#<exact test title> -->` (#167 item 3, `docs/flows/`): the file must
+ *   exist and declare a test with exactly that title. A flow page's claim "this test pins
+ *   it" is checked, so a renamed or deleted test fails the page that cites it. Every flow
+ *   page must cite at least one.
+ *
  * And one rule for `docs/seams/`: every ```` ```ts ```` fence carries a `source:` marker.
  * Prose may surround a fence; prose may not restate what a fence says, and a fence with no
  * source is prose wearing a code font.
@@ -37,6 +42,9 @@ const SOURCED_FENCE_DIRECTORIES = ['docs/seams'] as const
 const SOURCE_MARKER = /^<!--\s*source:\s*(\S+?)#(\w+)\s*-->$/
 const GENERATED_MARKER = /^<!--\s*generated:\s*(\S+)\s*-->$/
 const BLOCK_OPEN = /^<!--\s*generated-block:\s*(\S+)\s*-->$/
+const TEST_MARKER = /^<!--\s*test:\s*(\S+?)#(.+?)\s*-->$/
+/** Where every page must cite at least one pinning test. */
+const TEST_CITING_DIRECTORIES = ['docs/flows'] as const
 const BLOCK_CLOSE = /^<!--\s*\/generated-block\s*-->$/
 const TS_FENCE_OPEN = /^```(?:ts|typescript)\s*$/
 const FENCE_CLOSE = /^```\s*$/
@@ -236,6 +244,49 @@ function relativeLinks(text: string): { target: string; line: number }[] {
   })
   return links
 }
+
+/** The `test:` markers in a page, with the line they sit on. */
+function testMarkers(text: string): { path: string; title: string; line: number }[] {
+  const markers: { path: string; title: string; line: number }[] = []
+  text.split('\n').forEach((line, index) => {
+    const match = TEST_MARKER.exec(line)
+    if (match) markers.push({ path: match[1] ?? '', title: match[2] ?? '', line: index + 1 })
+  })
+  return markers
+}
+
+const escapeForRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** Does `source` declare `test('<title>'` (any quote style, `test` or `test.skip`/`.only` refused)? */
+function declaresTest(source: string, title: string): boolean {
+  const escaped = escapeForRegExp(title)
+  return new RegExp(`^\\s*test\\(\\s*(?:'${escaped}'|"${escaped}"|\`${escaped}\`)\\s*,`, 'm').test(source)
+}
+
+test('⚠ every cited test exists with exactly that title; every flow page cites one (#167 item 3)', () => {
+  const offenders: string[] = []
+  for (const path of markdownFiles(DOCS_ROOT)) {
+    const page = path.slice(REPOSITORY_ROOT.length + 1)
+    const text = readFileSync(path, 'utf8')
+    const markers = testMarkers(text)
+    const isFlowPage =
+      TEST_CITING_DIRECTORIES.some((directory) => page.startsWith(`${directory}/`)) && !page.endsWith('/README.md')
+    if (isFlowPage && markers.length === 0) {
+      offenders.push(`${page}: a flow page cites no pinning test (<!-- test: <path>#<title> -->)`)
+    }
+    for (const marker of markers) {
+      const testPath = join(REPOSITORY_ROOT, marker.path)
+      if (!existsSync(testPath)) {
+        offenders.push(`${page}:${marker.line}: ${marker.path} does not exist`)
+        continue
+      }
+      if (!declaresTest(readFileSync(testPath, 'utf8'), marker.title)) {
+        offenders.push(`${page}:${marker.line}: ${marker.path} declares no test titled "${marker.title}"`)
+      }
+    }
+  }
+  expect(offenders).toEqual([])
+})
 
 test('⚠ every relative link under docs/ and in README resolves to a file (#162 workstream 11)', () => {
   const offenders: string[] = []

@@ -22,7 +22,7 @@ import { readPiccPersistedMode, storedPermissionModeState } from '../permission-
  *   - the isolation env is set before the first services (else multi-account reads ~/.pi/agent) —
  *     proven by WHERE multi-account resolved its config, not by reading the env back
  *   - `childProxy: false` is seeded (else the second session in a process hangs under Bun)
- *   - exactly the manifest's five extensions load, with no load errors
+ *   - exactly the manifest's six extensions load, with no load errors
  *   - `session_start` fires exactly once per session, and two sessions do not share closures
  *   - a dialog an extension opens reaches a subscriber as an `extension-ui-request` observation and its
  *     answer resolves the extension's promise — the #27 round trip without a wire
@@ -146,7 +146,7 @@ test('⚠ creating a host removes secret-shaped variables from its environment, 
   expect(JSON.stringify(notice)).not.toContain('must-not-survive')
 })
 
-test("exactly the manifest's five extensions load, in order, with no load errors", async () => {
+test("exactly the manifest's six extensions load, in order, with no load errors", async () => {
   const hosted = await hostedSession()
   const loaded = hosted.loadedExtensionPaths
   expect(loaded).toHaveLength(MANIFEST_EXTENSION_MARKERS.length)
