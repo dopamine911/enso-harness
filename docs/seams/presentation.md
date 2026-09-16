@@ -47,6 +47,13 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * `streamingBehavior: followUp`, so pi queues it and every follower sees it.
    */
   readonly prompt: (text: string, images?: readonly ZenPromptImage[]) => Promise<PromptOutcome>
+  /**
+   * Switch the permission mode (L3 step C): `POST …/mode`, a control route, never a prompt —
+   * the browser says a mode and no command. The change arrives on the follow as `zen.mode`,
+   * said by the host once its extension has persisted it; a refusal is reported with the
+   * server's reason and moves nothing.
+   */
+  readonly changeMode: (mode: string) => Promise<ModeChangeOutcome>
 }
 ```
 

@@ -85,6 +85,7 @@ export {
   ZenNotifyType,
   ZenObservation,
   ZenPermissionMode,
+  ZenPermissionModeRejected,
   ZenPromptRejected,
   ZenQueue,
   ZenRunEnded,
@@ -113,7 +114,7 @@ export {
   zenLogsDir,
   zenSecretsPath,
 } from './paths.ts'
-export { ZenPermissionModeState } from './permission-mode.ts'
+export { ZenPermissionModeChange, ZenPermissionModeState } from './permission-mode.ts'
 export {
   isSecretShapedName,
   knownSecretValues,

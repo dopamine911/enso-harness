@@ -36,6 +36,16 @@ export function readPiccPersistedMode(entry: unknown): string | undefined {
   return typeof mode === 'string' && mode.length > 0 ? mode : undefined
 }
 
+/**
+ * How a mode is SET (L3 step C): picc's setter is closure-private; its per-mode slash
+ * command — named exactly the mode (picc index.ts:526-536) — is the only way in, run as a
+ * prompt. The host runs this for `ThreadRuntime.setPermissionMode`; nothing above the seam
+ * spells a command.
+ */
+export function piccModeCommand(mode: string): string {
+  return `/${mode}`
+}
+
 /** Every mode picc registers a per-mode slash command for, in picc's order. */
 export const PICC_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto'] as const
 

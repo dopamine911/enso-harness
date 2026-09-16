@@ -157,6 +157,18 @@ export const ThreadRuntime = Type.Object({
    */
   permissionModeState: Type.Unsafe<() => ZenPermissionModeState>(Type.Function([], Type.Unknown())),
   /**
+   * Switch the mode (L3 step C, #162 workstream 4). The host translates to whatever its mode
+   * extension accepts — for picc, the per-mode slash command, run as a prompt the same way
+   * `prompt` runs one — so the caller says a mode and never a command. Fire-and-forget like
+   * `prompt`: acceptance is `outcome.onAccepted` (an extension command's acceptance IS its
+   * completion), the change itself is the `permission_mode` event on the feed, and a
+   * rejection after acceptance is lost the same way. The caller has already checked the
+   * mode is one `permissionModeState().available` offers.
+   */
+  setPermissionMode: Type.Unsafe<(mode: string, outcome: PromptOutcome) => void>(
+    Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
+  ),
+  /**
    * Receive every event in pi's rpc wire shape (the shape `map-events.ts` consumes), plus
    * `extension_ui_request` and `extension_error` records the host synthesises. Events
    * emitted before the FIRST subscriber are buffered and replayed to it, so nothing an

@@ -112,6 +112,19 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     logs: 'yes',
     factory: { path: FOLLOW_PATH, declaration: 'export function abortThread' },
   },
+  THREAD_MODE_ROUTE: {
+    method: 'POST',
+    path: '/api/threads/:threadId/mode',
+    handler: 'respondToModeChange → changeThreadMode',
+    input: 'path: `threadId`; body: `ZenPermissionModeChange`',
+    success: '204 empty; the change arrives on the follow as `permission-mode`',
+    errors:
+      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 mode not offered; 500 handler failure',
+    routeClass: 'control',
+    builds: 'yes',
+    logs: 'yes',
+    factory: { path: FOLLOW_PATH, declaration: 'export async function changeThreadMode' },
+  },
 }
 
 const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'path'>> = {

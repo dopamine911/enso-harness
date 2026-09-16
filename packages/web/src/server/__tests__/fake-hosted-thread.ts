@@ -2,6 +2,7 @@ import {
   type DialogAnswer,
   type EventDelivery,
   isZenDialogSpec,
+  type PromptOutcome,
   type PromptRequest,
   type RuntimeEvent,
   type ThreadRuntime,
@@ -27,6 +28,8 @@ import { createEventTail, describeRuntimeEvent } from '../../host/event-tail.ts'
 export interface FakeThreadRecord {
   readonly prompts: PromptRequest[]
   readonly answers: DialogAnswer[]
+  /** Every mode the server asked for, in order (L3 step C). */
+  readonly modeChanges: string[]
   aborts: number
   queueClears: number
   disposed: number
@@ -65,6 +68,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
   const record: FakeThreadRecord = {
     prompts: [],
     answers: [],
+    modeChanges: [],
     aborts: 0,
     queueClears: 0,
     disposed: 0,
@@ -103,6 +107,13 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     openDialogs: () => [...open].map(([id, dialog]) => ({ id, dialog })),
     listCommands: () => [],
     permissionModeState: () => ({ mode: 'default', available: ['default'] }),
+    setPermissionMode: (mode: string, outcome: PromptOutcome) => {
+      // What the real host does: the vendor's command is accepted (an extension command's
+      // acceptance is its completion) and the change comes back as `permission_mode`.
+      record.modeChanges.push(mode)
+      outcome.onAccepted()
+      emit({ type: 'permission_mode', mode, available: runtime.permissionModeState().available })
+    },
     subscribe: (onEvent: (event: RuntimeEvent, delivery: EventDelivery) => void) => {
       listeners.add(onEvent)
       return () => {

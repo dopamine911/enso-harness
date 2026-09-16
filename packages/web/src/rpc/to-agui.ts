@@ -284,6 +284,22 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
         },
       ]
 
+    case 'permission-mode-rejected':
+      // The click did nothing and the user must be told (L3 step C): a warning notice,
+      // through the same `zen.notify` chunk an extension's own notice rides, so the
+      // notifications store renders it with no shape of its own.
+      return [
+        {
+          type: EventType.CUSTOM,
+          name: ZEN_CUSTOM_EVENT_NOTIFY,
+          value: {
+            message: `mode change to ${observation.mode} rejected: ${observation.reason}`,
+            notifyType: 'warning',
+            origin: 'run',
+          },
+        },
+      ]
+
     case 'custom-entry':
       // An extension persisted state (#29) — a receipt, recorded and counted (the debug
       // pane's chunk tally) but rendered by nothing since L3 moved the mode onto its own

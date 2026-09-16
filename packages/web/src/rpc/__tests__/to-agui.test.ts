@@ -159,6 +159,15 @@ test('a mode change rides CUSTOM as zen.mode — the SAME chunk and value shape 
   })
 })
 
+test('a rejected mode change is a WARNING notice on zen.notify — the click did nothing and the user is told (L3)', () => {
+  const [event] = toAgui({ kind: 'permission-mode-rejected', mode: 'plan', reason: 'the command refused' })
+  expect(event).toEqual({
+    type: EventType.CUSTOM,
+    name: 'zen.notify',
+    value: { message: 'mode change to plan rejected: the command refused', notifyType: 'warning', origin: 'run' },
+  })
+})
+
 test('a custom entry rides CUSTOM as zen.entry with its data intact', () => {
   const observation = mapPiEvent({
     type: 'entry_appended',
@@ -217,6 +226,7 @@ test('nothing is silently dropped: every kind except an in-flight result and a b
     },
     { kind: 'custom-entry', customType: 'modes', data: { mode: 'acceptEdits' } },
     { kind: 'permission-mode', mode: 'acceptEdits', available: ['default', 'acceptEdits'] },
+    { kind: 'permission-mode-rejected', mode: 'plan', reason: 'the command refused' },
     {
       kind: 'message-end',
       role: 'assistant',

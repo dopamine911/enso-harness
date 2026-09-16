@@ -7,6 +7,7 @@ import {
   type PromptOutcome,
   type PromptRequest,
   type RuntimeEvent,
+  type ThreadRuntime,
   ZEN_IMAGE_MAX_BYTES,
   ZEN_PROMPT_BODY_MAX_BYTES,
   ZEN_PROMPT_MAX_IMAGES,
@@ -41,7 +42,8 @@ interface FakeHost {
   readonly accept: () => void
 }
 
-function fakeHost(commands: string[] = ['mode']): FakeHost {
+/** `overrides`: a test's own answer for one runtime method, over the fake's recording default (L3 step C). */
+function fakeHost(commands: string[] = ['mode'], overrides: Partial<ThreadRuntime> = {}): FakeHost {
   const built: FakeThreadRecord[] = []
   let emit: (event: RuntimeEvent) => void = () => undefined
   let accept: () => void = () => undefined
@@ -54,6 +56,7 @@ function fakeHost(commands: string[] = ['mode']): FakeHost {
         },
         listCommands: () => commands.map((name) => ({ name, source: 'extension' as const })),
         permissionModeState: () => ({ mode: 'default', available: ['default', 'plan'] }),
+        ...overrides,
       }),
       inspect: { sessionId: 's1', cwd: '/', sessionDir: '/s', commands },
     })
@@ -253,6 +256,106 @@ test('⚠ POST …/abort tells pi once and answers with the restored queue; the 
   expect(await idle.text()).toContain('nothing is running')
   expect(fake.built[0]?.aborts).toBe(1)
   follow.close()
+})
+
+// ── the mode route (L3 step C): a control, not a prompt ─────────────────────────────
+
+test('⚠ POST …/mode tells the runtime a MODE, never a command, and the change comes back on the follow as permission-mode', async () => {
+  const fake = fakeHost()
+  const url = await startWith(fake)
+  const follow = await openFollow(url, 't1')
+  await follow.untilFrames(1)
+  // Before any prompt: the route builds the thread the way a prompt would.
+  const told = await fetch(`${url}/api/threads/t1/mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'plan' }),
+  })
+  expect(told.status).toBe(204)
+  expect(fake.built[0]?.modeChanges).toEqual(['plan'])
+  // No prompt was sent: the runtime heard a mode.
+  expect(fake.built[0]?.prompts).toEqual([])
+  // The receipt is the feed's: the host's own event, as the permission-mode observation.
+  await follow.untilFrames(3)
+  expect(follow.frames.at(-1)).toEqual({
+    type: 'observation',
+    seq: 1,
+    observation: { kind: 'permission-mode', mode: 'plan', available: ['default', 'plan'] },
+  })
+  // An extension command's acceptance is its completion: the thread is idle again.
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: false })
+  logs.assertLogged({
+    level: 'info',
+    rawMessage: 'mode change to {mode} told',
+    properties: { threadId: 't1', mode: 'plan' },
+  })
+  follow.close()
+})
+
+test('⚠ a mode change the runtime REJECTS after the 204 is said on the follow — the click did nothing, every follower hears it', async () => {
+  const fake = fakeHost(['mode'], {
+    setPermissionMode: (_mode: string, outcome: PromptOutcome) => outcome.onRejected('the vendor command refused'),
+  })
+  const url = await startWith(fake)
+  const follow = await openFollow(url, 't1')
+  await follow.untilFrames(1)
+  const told = await fetch(`${url}/api/threads/t1/mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'plan' }),
+  })
+  expect(told.status).toBe(204)
+  await follow.untilFrames(4)
+  expect(follow.frames).toContainEqual({
+    type: 'observation',
+    seq: 1,
+    observation: { kind: 'permission-mode-rejected', mode: 'plan', reason: 'the vendor command refused' },
+  })
+  // …and no permission-mode: the mode did not change.
+  expect(
+    follow.frames.some((frame) => frame.type === 'observation' && frame.observation.kind === 'permission-mode'),
+  ).toBe(false)
+  // The lease was released on rejection: the thread is not left busy.
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: false })
+  logs.assertLogged({
+    level: 'warning',
+    rawMessage: /^mode change to \{mode\} rejected/,
+    properties: { threadId: 't1', mode: 'plan' },
+  })
+  follow.close()
+})
+
+test('⚠ a mode the thread does not offer is a 422 and moves nothing; a malformed body is a 400', async () => {
+  const fake = fakeHost()
+  const url = await startWith(fake)
+  const unoffered = await fetch(`${url}/api/threads/t1/mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'bypassPermissions' }),
+  })
+  expect(unoffered.status).toBe(422)
+  expect(await unoffered.text()).toContain('Available: default, plan')
+  expect(fake.built[0]?.modeChanges).toEqual([])
+  logs.assertLogged({ level: 'warning', rawMessage: /^mode change to \{mode\} refused/, properties: { status: 422 } })
+  for (const body of ['not json', '{}', '{"mode":""}', '{"mode":7}']) {
+    const malformed = await fetch(`${url}/api/threads/t1/mode`, { method: 'POST', body })
+    expect(malformed.status).toBe(400)
+  }
+})
+
+test('⚠ a mode change while the thread is busy is a 409 — not queued behind the run', async () => {
+  const fake = fakeHost()
+  const url = await startWith(fake)
+  await prompt(url, 't1', 'hello')
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: true })
+  const busy = await fetch(`${url}/api/threads/t1/mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'plan' }),
+  })
+  expect(busy.status).toBe(409)
+  expect(fake.built[0]?.modeChanges).toEqual([])
+  fake.emit(SETTLED)
 })
 
 // ── 2. a dialog parks nothing ─────────────────────────────────────────────────────────

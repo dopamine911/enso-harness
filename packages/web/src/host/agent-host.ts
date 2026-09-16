@@ -30,6 +30,7 @@ import {
   freshPermissionModeState,
   PICC_PERMISSION_MODES,
   persistedPermissionMode,
+  piccModeCommand,
   readPiccPersistedMode,
   storedPermissionModeState,
 } from './permission-mode-adapter.ts'
@@ -454,6 +455,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         return commands
       },
       permissionModeState: currentPermissionModeState,
+      setPermissionMode(mode: string, outcome: PromptOutcome): void {
+        // The vendor's command, as the prompt path runs any extension command: fire-and-
+        // forget, acceptance is completion, and the change arrives as `permission_mode`.
+        runtime.prompt({ message: piccModeCommand(mode) }, outcome)
+      },
       subscribe(onEvent: (event: RuntimeEvent, delivery: EventDelivery) => void): () => void {
         listeners.add(onEvent)
         hasHadSubscriber = true

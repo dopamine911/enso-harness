@@ -24,6 +24,8 @@ export interface ScriptedFetch {
   readonly closeFollow: () => void
   readonly prompts: Array<{ message: string; streamingBehavior?: string; images?: unknown[] }>
   readonly dialogs: unknown[]
+  /** Every body `POST …/mode` received (L3 step C). */
+  readonly modeChanges: unknown[]
   /** How many `POST …/abort` the server saw (#116). */
   readonly abortCount: () => number
   /** Hold the next prompt's answer; returns the release. */
@@ -34,6 +36,8 @@ export interface ScriptedFetchOptions {
   readonly promptStatus?: { status: number; body: unknown }
   readonly dialogStatus?: number
   readonly abortStatus?: number
+  /** What `POST …/mode` answers; 204 by default. */
+  readonly modeStatus?: number
   /** What the stop hands back (#75): the prompts pi had queued. Answered with the 200 receipt. */
   readonly queued?: string[]
   readonly mode?: { mode: string; available: string[] }
@@ -57,6 +61,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   }
   const dialogStatus = options.dialogStatus ?? 204
   const abortStatus = options.abortStatus ?? 200
+  const modeStatus = options.modeStatus ?? 204
   const mode = options.mode ?? { mode: 'default', available: ['default', 'plan'] }
   let aborts = 0
   let write: (text: string) => void = () => undefined
@@ -65,6 +70,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   let promptGate = { promise: Promise.resolve() } as { promise: Promise<void>; resolve?: () => void }
   const prompts: Array<{ message: string; streamingBehavior?: string; images?: unknown[] }> = []
   const dialogs: unknown[] = []
+  const modeChanges: unknown[] = []
   /** The follow: one SSE body per subscription; the latest one is where `frame` writes. */
   const openFollow = (): Response => {
     const body = new ReadableStream<Uint8Array>({
@@ -100,27 +106,36 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   }
   /** A thread route's last segment — `/api/threads/<id>/<action>` — or undefined for anything else. */
   const threadAction = (path: string): string | undefined => /^\/api\/threads\/[^/]+\/([^/]+)$/.exec(path)?.[1]
-  const fetchImpl = ((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    // Relative URLs, as the browser issues them; the base only makes `pathname` parse.
-    const path = new URL(String(input), 'http://localhost').pathname
-    const action = threadAction(path)
-    if (action === 'follow') return Promise.resolve(openFollow())
-    if (action === 'prompt') {
+  /** One scripted answer per thread action, keyed the way the server's own route table is. */
+  const threadActions: Record<string, (init: RequestInit | undefined) => Promise<Response>> = {
+    follow: (): Promise<Response> => Promise.resolve(openFollow()),
+    prompt: (init: RequestInit | undefined): Promise<Response> => {
       prompts.push(
         JSON.parse(String(init?.body)) as { message: string; streamingBehavior?: string; images?: unknown[] },
       )
       const body = typeof promptStatus.body === 'string' ? promptStatus.body : JSON.stringify(promptStatus.body)
       return promptGate.promise.then(() => new Response(body, { status: promptStatus.status }))
-    }
-    if (action === 'dialog') {
+    },
+    dialog: (init: RequestInit | undefined): Promise<Response> => {
       dialogs.push(JSON.parse(String(init?.body)))
       return Promise.resolve(new Response(dialogStatus === 204 ? null : 'no', { status: dialogStatus }))
-    }
-    if (action === 'abort' && init?.method === 'POST') {
+    },
+    mode: (init: RequestInit | undefined): Promise<Response> => {
+      modeChanges.push(JSON.parse(String(init?.body)))
+      return Promise.resolve(new Response(modeStatus === 204 ? null : 'no', { status: modeStatus }))
+    },
+    abort: (): Promise<Response> => {
       aborts += 1
       if (abortStatus !== 200) return Promise.resolve(new Response('no', { status: abortStatus }))
       return Promise.resolve(Response.json({ threadId: 't1', restored: options.queued ?? [] }))
-    }
+    },
+  }
+  const fetchImpl = ((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    // Relative URLs, as the browser issues them; the base only makes `pathname` parse.
+    const path = new URL(String(input), 'http://localhost').pathname
+    const action = threadAction(path)
+    const respond = action === undefined ? undefined : threadActions[action]
+    if (respond !== undefined) return respond(init)
     return Promise.resolve(pageRead(path) ?? new Response('not found', { status: 404 }))
   }) as typeof fetch
   return {
@@ -129,6 +144,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     closeFollow: () => close(),
     prompts,
     dialogs,
+    modeChanges,
     abortCount: () => aborts,
     holdPrompt: () => {
       const gate = Promise.withResolvers<void>()
