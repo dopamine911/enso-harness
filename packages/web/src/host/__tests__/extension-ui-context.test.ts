@@ -152,6 +152,21 @@ test('cancelAllDialogs settles every pending dialog as cancelled; a second answe
   })
 })
 
+// The run's abort (Daniel, 2026-09-16: if the user says stop, it's stop): the same settle as
+// teardown's, under the glossary's word for it. A dialog whose extension passed its own
+// aborted signal is already gone by then and is not settled twice.
+test('abortAllDialogs settles every pending dialog as aborted, each blocked call resolving to its cancel value, once', async () => {
+  const { uiContext, abortAllDialogs, events } = contextUnderTest()
+  const a = uiContext.confirm('A?', 'm')
+  const b = uiContext.select('B', ['x', 'y'])
+  abortAllDialogs()
+  expect(await a).toBe(false)
+  expect(await b).toBeUndefined()
+  expect(settles(events).map((settle) => settle.outcome)).toEqual(['aborted', 'aborted'])
+  abortAllDialogs()
+  expect(settles(events)).toHaveLength(2)
+})
+
 test('fire-and-forget methods emit the rpc-shaped record and return immediately', () => {
   const { uiContext, events } = contextUnderTest()
   uiContext.notify('hello', 'warning')

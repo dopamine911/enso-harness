@@ -170,6 +170,12 @@ export interface ZenExtensionUiContext {
   openDialogs(): ZenOpenDialog[]
   /** Cancel every pending dialog — session teardown. Each blocked extension call resolves to its cancel value. */
   cancelAllDialogs(): void
+  /**
+   * Settle every pending dialog as the RUN's abort: each blocked call resolves to its cancel
+   * value with outcome `aborted` — the glossary's word for exactly this, produced by no code
+   * until Stop was made to stop. The asking extension need not have passed a signal.
+   */
+  abortAllDialogs(): void
   /** How many dialogs are blocked right now — observable state for tests and for the idle-timeout logic. */
   pendingDialogCount(): number
 }

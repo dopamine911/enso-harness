@@ -510,8 +510,14 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           listeners.delete(onObservation)
         }
       },
-      abort(): Promise<void> {
-        return session.abort()
+      async abort(): Promise<void> {
+        // The runtime first, so its loop holds the abort signal when a blocked `tool_call`
+        // handler returns — then every pending question settles as `aborted`, and the
+        // handler DOES return. Before this, Stop during a permission question waited on
+        // the card: the loop awaited the handler, the handler awaited the human. If the
+        // user says stop, it's stop (Daniel, 2026-09-16); the card drops, the run ends.
+        await session.abort()
+        ui.abortAllDialogs()
       },
       clearQueue(): { steering: string[]; followUp: string[] } {
         return session.clearQueue()
