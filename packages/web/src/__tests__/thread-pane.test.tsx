@@ -752,6 +752,54 @@ test("Previous Threads lists the server's stored threads; a click resumes one wi
   await page.unmount()
 })
 
+// docs/flows/resume.md, stated gap: the reader was pinned to produce an image part from the file
+// (transcript-to-messages.test.ts); nothing asserted the PAGE renders it. A resumed thread's
+// image must come back as an <img> from the server's history — no page state involved.
+test("a resumed thread's image renders as an <img> from the stored history, bytes inline (#68, #95)", async () => {
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+  const page = await mountPage({
+    storedThreads: [
+      {
+        threadId: 'stored-img',
+        title: 'what does this say?',
+        lastActivityAt: new Date().toISOString(),
+        messageCount: 1,
+        busy: false,
+      },
+    ],
+    histories: {
+      'stored-img': {
+        threadId: 'stored-img',
+        messages: [
+          {
+            id: 'u1',
+            role: 'user',
+            parts: [
+              { type: 'text', content: 'what does this say?' },
+              { type: 'image', source: { type: 'data', value: PNG, mimeType: 'image/png' } },
+            ],
+          },
+        ],
+        permissionMode: { mode: 'default', available: ['default'] },
+      },
+    },
+  })
+  const row = await eventually(() => {
+    const found = page.previousRows()[0]
+    if (found === undefined) throw new Error('expected a stored row')
+    return found
+  })
+  await page.click(row)
+  await eventually(() => {
+    const image = page.container.querySelector('img[alt="attached by the user"]')
+    expect(image).not.toBeNull()
+    expect(image?.getAttribute('src')).toBe(`data:image/png;base64,${PNG}`)
+    // and it is the user's, beside the text it was sent with
+    expect(page.container.textContent).toContain('what does this say?')
+  })
+  await page.unmount()
+})
+
 test('a stored listing the server cannot serve is said in the rail, and the page still works', async () => {
   const server = createScriptedFetch()
   const failing = ((input: string | URL | Request, init?: RequestInit): Promise<Response> =>

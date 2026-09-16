@@ -42,8 +42,8 @@ sequenceDiagram
    runs DeepSeek only when `zen.config.json` says `webSearch.backend: "deepseek"`; otherwise
    `routedProviderIdForModel` reads `model.provider` and `model.api` — Google by either, the three
    Responses APIs to `openai`, `anthropic-messages` to `anthropic` — and anything else (the runtime
-   registers DeepSeek chat models as `openai-completions`) selects nothing: a failure record. Not
-   pinned through the extension: the `google` and `openai` branches, and the absent-model record.
+   registers DeepSeek chat models as `openai-completions`) selects nothing: a failure record. The
+   `google` and `openai` branches are driven through the tool (below); the absent-model record is not.
 2. **Auth is the conversation's identity; the provider env key is the last resort.** `resolveModelAuth`
    asks the runtime's model registry, passes a failure through, drops null-valued headers, and reads
    the environment only when neither a key nor an `authorization` / `x-api-key` / `x-goog-api-key`
@@ -61,8 +61,7 @@ sequenceDiagram
    second section of every `searched` result; `renderUngrounded` omits it and the via-line.
 6. **One deadline, one progress update, one audit record.** `WEB_SEARCH_TIMEOUT_MS` (60 s) covers
    both attempts to stay under the server's 90 s no-progress cutoff (#98); the fallback's announcement
-   is tool progress (#99). `auditLine` logs `warn` for a refusal, `info` otherwise — a record, not the
-   "stderr" the header still says (#132).
+   is tool progress (#99). `auditLine` logs `warn` for a refusal, `info` otherwise — a record (#132).
 7. **`web_fetch`, the sibling, gates cheapest-first and each refusal is final:** URL parse → config
    problem → empty allowlist → exact host match → the advisory public-address gate (one non-public
    answer refuses) → one fetch with `redirect: 'manual'`; a redirect is reported, never followed.
@@ -101,6 +100,11 @@ export type WebSearchOutcome =
 
 Each marker below is checked by `test/docs-gate.test.ts`: a renamed or deleted pin fails this page.
 
+<!-- test: packages/harness/extensions/web-search/__tests__/web-search.test.ts#a Gemini model routes to the google provider through the tool, and the audit names it -->
+- **Invariant 1, the google branch through the tool** — the wrong providers' fakes throw, so a
+  wrong selection fails by name.
+<!-- test: packages/harness/extensions/web-search/__tests__/web-search.test.ts#every Responses-family api routes to the openai provider through the tool: openai, azure, codex -->
+- **Invariant 1, the three Responses APIs** — each to `openai`, through the tool.
 <!-- test: packages/harness/extensions/web-search/__tests__/web-search.test.ts#a searched primary renders the via-line, the notice, the answer, and the sources -->
 - **Invariants 5 and 6, the happy path** — [`web-search.test.ts`](../../packages/harness/extensions/web-search/__tests__/web-search.test.ts):
   Tavily is not called; exactly one audit record names provider and outcome.

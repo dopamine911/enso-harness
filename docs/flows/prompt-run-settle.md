@@ -113,12 +113,17 @@ that title, so a renamed or deleted pin fails this page.
 <!-- test: packages/web/src/__tests__/follow-connection.test.ts#⚠ a rejection that beats its own receipt is held and still ends the run with its reason -->
 - **Invariant 5, the ordering case** — nothing closes until the receipt names the run.
 
-**Stated gaps.** The server half of the rejected case — `onRejected` reaching a follower through
-`announce` — has no test driving it: the browser tests script the observation onto the wire, the
-only server-side check is the schema sweep in `packages/web/src/host/__tests__/observation-sweep.test.ts`,
-and the mode route's sibling is pinned in `follow.test.ts` where the prompt route's is not. And a
-rejection the runtime raises *after* acceptance never reaches the feed: the host drops it on purpose
-(`agent-host.ts`, the `prompt` implementation's comment) — the run ends through `settled`, the reason is lost.
+**Stated, by design.** A rejection the runtime raises *after* acceptance never reaches the feed: the
+host drops it on purpose (`agent-host.ts`, the `prompt` implementation's comment) — the run ends
+through `settled`, the reason is lost. The server half of a rejection *before* acceptance — `onRejected`
+→ `announce` → every follower, and the lease released or the run left open — is pinned below for both
+paths, the idle thread's and the queued prompt's.
+
+<!-- test: packages/web/src/server/__tests__/follow.test.ts#⚠ a prompt the runtime REJECTS after the 202 is said on the follow with the receipt's message id, and the thread is released -->
+- **The rejected case, the server's half** — `onRejected` → `announce` → the follower, by the
+  receipt's message id; the lease released.
+<!-- test: packages/web/src/server/__tests__/follow.test.ts#⚠ a QUEUED prompt the runtime rejects is said on the follow too, and the run it queued behind stays open -->
+- **The rejected case, queued** — said on the feed; the run in flight untouched.
 
 ## Where it is stated
 

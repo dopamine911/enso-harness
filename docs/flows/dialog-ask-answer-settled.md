@@ -56,11 +56,12 @@ sequenceDiagram
    map in insertion order — oldest first — checking each request with `isZenDialogSpec` rather than
    casting; the snapshot carries that list whole, so a reconnect renders the card and an empty list
    clears one.
-6. **Stated gap — the run's abort does not settle a dialog in the code read for this page.** The
-   glossary defines the outcome `aborted` as "the run's abort", but `awaitDialog` fires `'aborted'`
-   only from the `signal` the *extension* passed in `dialogOptions`, and `agent-host.ts#abort`
-   delegates to `session.abort()` without touching the pending map. Whether the runtime aborts its
-   extensions' signals is not visible in this repository; no test pins it.
+6. **The run's abort does not settle a dialog — a record, not a rule.** The glossary defines the
+   outcome `aborted` as "the run's abort", but `awaitDialog` fires `'aborted'` only from the `signal`
+   the *extension* passed in `dialogOptions`, `agent-host.ts#abort` delegates to `session.abort()`
+   without touching the pending map, and the vendor's permission prompt passes no signal. So Stop
+   during a permission question waits on the card. Pinned as a record test (below); if the host starts
+   settling dialogs on abort, the record goes red and this invariant is rewritten.
 
 ## The validation contract
 
@@ -119,6 +120,10 @@ Each marker is checked by `test/docs-gate.test.ts`: a renamed or deleted test wi
 - **Invariant 3, `aborted` and `timeout`, and the never-asked exception.**
 <!-- test: packages/web/src/__tests__/custom-event-router.test.ts#dialog-settled drops the card for ITS id and no other (#114) -->
 - **Invariant 5, in the browser** — [`custom-event-router.test.ts`](../../packages/web/src/__tests__/custom-event-router.test.ts).
+
+<!-- test: packages/web/src/host/__tests__/agent-host.test.ts#⚠ RECORD: the run's abort leaves a pending dialog pending — Stop waits on the card until a human answers it -->
+- **Invariant 6, as a record** — [`agent-host.test.ts`](../../packages/web/src/host/__tests__/agent-host.test.ts):
+  abort settles nothing; an answer does.
 
 ## Where it is stated
 

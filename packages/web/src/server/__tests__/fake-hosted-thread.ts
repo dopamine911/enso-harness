@@ -144,6 +144,8 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     loadedExtensionPaths: [],
     inspect: () => inspection,
     emittedEvents: emitted.recent,
+    // The fake loads no extensions: every probe is the hook's silence.
+    probeToolCall: async (): Promise<undefined> => undefined,
   }
   return { hosted, record, emit, open }
 }

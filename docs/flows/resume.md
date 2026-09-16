@@ -117,10 +117,14 @@ that title, so a renamed or deleted pin fails this page.
 <!-- test: packages/web/e2e/chat.e2e.ts#⚠ New Thread during a slow boot resume wins outright: URL and pane agree, the late history is dropped (PR #143 review) -->
 - **Invariant 6, the slow boot** — the late history changes nothing.
 
-**Stated gaps.** The pane's messages come from `/history` (`adoptThread`); the snapshot carries the
-same `messages`, but `custom-event-router.ts` reads only mode, open dialogs and generation off it, and
-no browser test asserts an `<img>` from a resumed transcript — the pin is at the reader. The host's
-name for the listing is `listSessions`; there is no `listThreads`.
+**Where the messages come from.** The pane's messages come from `/history` (`adoptThread`); the snapshot
+carries the same `messages`, but `custom-event-router.ts` reads only mode, open dialogs and generation
+off it. The image's rendering from a resumed history is pinned at the page (below), beside the reader's
+pin. The host's name for the listing is `listSessions`; there is no `listThreads`.
+
+<!-- test: packages/web/src/__tests__/thread-pane.test.tsx#a resumed thread's image renders as an <img> from the stored history, bytes inline (#68, #95) -->
+- **The image, at the page** — [`thread-pane.test.tsx`](../../packages/web/src/__tests__/thread-pane.test.tsx):
+  a resumed history's image is an `<img>` with the bytes inline.
 
 ## Where it is stated
 

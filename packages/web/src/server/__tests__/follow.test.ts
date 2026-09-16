@@ -210,6 +210,69 @@ test("prompt answers at admission with a message id; the run is released by pi's
   follow.close()
 })
 
+// ── the server half of a rejected prompt (docs/flows/prompt-run-settle.md, stated gap) ──
+// The browser tests script `prompt-rejected` onto the wire; nothing had driven the ROUTE's
+// `onRejected` → `announce` → follower path. Two paths, two leases to get right.
+
+test("⚠ a prompt the runtime REJECTS after the 202 is said on the follow with the receipt's message id, and the thread is released", async () => {
+  const fake = fakeHost([], {
+    prompt: (_request: PromptRequest, outcome: PromptOutcome) => outcome.onRejected('the runtime would not take it'),
+  })
+  const url = await startWith(fake)
+  const follow = await openFollow(url, 't1')
+  await follow.untilFrames(1)
+  const admitted = await prompt(url, 't1', 'hello')
+  expect(admitted.status).toBe(202)
+  const messageId = String(admitted.body.messageId)
+  await follow.untilFrames(4)
+  // The rejection names the SAME message id the receipt carried: that is how the browser matches it to its run.
+  expect(follow.frames).toContainEqual({
+    type: 'observation',
+    seq: 1,
+    observation: { kind: 'prompt-rejected', messageId, reason: 'the runtime would not take it' },
+  })
+  // The lease was released on rejection: not left busy behind a run that never started.
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: false })
+  logs.assertLogged({
+    level: 'warning',
+    rawMessage: /^prompt \{messageId\} rejected/,
+    properties: { threadId: 't1', messageId },
+  })
+  follow.close()
+})
+
+test('⚠ a QUEUED prompt the runtime rejects is said on the follow too, and the run it queued behind stays open', async () => {
+  let prompts = 0
+  const fake = fakeHost([], {
+    prompt: (_request: PromptRequest, outcome: PromptOutcome) => {
+      prompts += 1
+      // the first prompt opens the run and is accepted; the second — queued behind it — is refused
+      if (prompts === 2) outcome.onRejected('Agent is already processing')
+    },
+  })
+  const url = await startWith(fake)
+  const follow = await openFollow(url, 't1')
+  await follow.untilFrames(1)
+  const first = await prompt(url, 't1', 'first')
+  expect(first.body).toMatchObject({ queued: false, generation: 1 })
+  await follow.untilFrames(3)
+  const second = await prompt(url, 't1', 'second')
+  expect(second.body).toMatchObject({ queued: true, generation: 1 })
+  await follow.untilFrames(4)
+  expect(follow.frames.at(-1)).toEqual({
+    type: 'observation',
+    seq: 1,
+    observation: {
+      kind: 'prompt-rejected',
+      messageId: String(second.body.messageId),
+      reason: 'Agent is already processing',
+    },
+  })
+  // The refused prompt was the queued one; the run in flight is untouched.
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: true, generation: 1 })
+  follow.close()
+})
+
 test('⚠ POST …/abort tells pi once and answers with the restored queue; the run still ends on the follow by its settle, not by the route (#116, #75)', async () => {
   const fake = fakeHost()
   const url = await startWith(fake)

@@ -362,6 +362,84 @@ test('setPermissionMode with a mode the vendor registers no command for is rejec
   expect(events.some((event) => event.kind === 'message-start' || event.kind === 'text-delta')).toBe(false)
 })
 
+// ── the guard through the RUNTIME's hook runner (docs/flows/guarded-tool-call.md, stated gap) ──
+// guards.test.ts pins the handler against a hand-built ExtensionAPI. These ask the real runner,
+// with the real load order and the real participants, what a model's call would meet.
+
+test('⚠ through the runtime, the real guards refuse a write outside the workspace with their reason; a read inside passes', async () => {
+  const hosted = await hostedSession()
+  const refused = await hosted.probeToolCall('write', { path: '/etc/passwd', content: 'x' })
+  expect(refused).toMatchObject({ block: true })
+  expect(refused?.reason).toContain('/etc/passwd')
+  const passed = await hosted.probeToolCall('read', { path: 'package.json' })
+  expect(passed).toBeUndefined()
+})
+
+// ⚠ FIRST BLOCK WINS — the runtime's behaviour the guards header rests on (guards/index.ts:20-25),
+// pinned by no test of ours until now. An extension loaded AFTER guards that answers "allow"
+// (returns nothing) cannot un-block; one that blocks a call guards allow adds its own block.
+test('⚠ first block is final: a later extension cannot un-block the guards, and its own block on an allowed call stands', async () => {
+  const seen: string[] = []
+  const laterExtension: InlineExtension = {
+    name: 'zen-host-later-participant-probe',
+    factory: (pi: ExtensionAPI) => {
+      pi.on('tool_call', (event) => {
+        seen.push(event.toolName)
+        // "allow" for every write — which is exactly what must NOT un-block the guards' refusal…
+        if (event.toolName === 'write') return undefined
+        // …and a block of its own on a read the guards allow.
+        return { block: true, reason: 'the later participant refuses reads' }
+      })
+    },
+  }
+  const hosted = await hostedSession([laterExtension])
+  const write = await hosted.probeToolCall('write', { path: '/etc/passwd', content: 'x' })
+  expect(write?.block).toBe(true)
+  expect(write?.reason).not.toContain('later participant')
+  // the guards blocked first, so the later handler never ran for the write
+  expect(seen).not.toContain('write')
+  const read = await hosted.probeToolCall('read', { path: 'package.json' })
+  expect(read).toEqual({ block: true, reason: 'the later participant refuses reads' })
+})
+
+// ── the run's abort and a pending dialog (docs/flows/dialog-ask-answer-settled.md, stated gap) ──
+// ⚠ A RECORD, not a protection (README → How this repo verifies itself). Asked empirically: the
+// host's `abort()` is the RUN's stop (`session.abort()`) and touches no pending dialog; `aborted`
+// as an outcome fires only from an AbortSignal the asking extension itself passed, and the
+// vendor's permission prompt passes none (`picc-permission-modes/index.ts` — `ctx.ui.custom(…)`
+// with no signal, no timeout). So Stop during a permission question does not stop: the runtime's
+// loop awaits the handler, the handler awaits the card, and the run ends when a human answers.
+// The glossary already names the outcome that SHOULD happen (`aborted`, "the run's abort"); no
+// code of ours produces it. If this test goes red, the host started settling dialogs on abort —
+// update the flow page and this comment, not the assertion's intent.
+test("⚠ RECORD: the run's abort leaves a pending dialog pending — Stop waits on the card until a human answers it", async () => {
+  let outcome: unknown = 'unsettled'
+  const probe: InlineExtension = {
+    name: 'zen-host-abort-dialog-probe',
+    factory: (pi: ExtensionAPI) => {
+      pi.on('session_start', (_event, extensionContext) => {
+        void extensionContext.ui.confirm('Still here?', 'after an abort').then((answer) => {
+          outcome = answer
+        })
+      })
+    },
+  }
+  const hosted = await hostedSession([probe])
+  const events = collectEvents(hosted)
+  const openBefore = hosted.runtime.openDialogs()
+  expect(openBefore).toHaveLength(1)
+  await hosted.runtime.abort()
+  await nextTick()
+  expect(hosted.runtime.openDialogs()).toHaveLength(1)
+  expect(outcome).toBe('unsettled')
+  expect(events.some((event) => event.kind === 'dialog-settled')).toBe(false)
+  // What does settle it: an answer, by id.
+  hosted.runtime.answerDialog({ id: openBefore[0]?.id ?? '', confirmed: false })
+  await nextTick()
+  expect(outcome).toBe(false)
+  expect(hosted.runtime.openDialogs()).toHaveLength(0)
+})
+
 test("listCommands is synchronous and names picc's /mode", async () => {
   const hosted = await hostedSession()
   const commands = hosted.runtime.listCommands()
