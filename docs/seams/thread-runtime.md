@@ -67,7 +67,7 @@ export const ThreadRuntime = Type.Object({
    * runtime's own event shape reaches a subscriber. Observations emitted before the FIRST
    * subscriber are buffered and replayed to it, so nothing an extension says at start-up is
    * lost; with no subscriber after that, they are dropped (#69 PR 2 — a held `settled` would
-   * end the next run). A replayed observation carries `origin: 'startup'` where the kind
+   * end the next run). A replayed observation carries `origin: 'session-start'` where the kind
    * has an origin (#96), so the browser can group start-up chatter without guessing from
    * position in the stream. Returns the unsubscribe.
    *
