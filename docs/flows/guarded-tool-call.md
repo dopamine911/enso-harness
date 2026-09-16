@@ -115,6 +115,10 @@ that title, so a renamed or deleted pin fails this page.
 - **Invariant 8, resumed** — [`transcript-to-messages.test.ts`](../../packages/web/src/server/__tests__/transcript-to-messages.test.ts):
   the rebuilt branch agrees with the live derivation.
 
+<!-- test: packages/web/src/host/__tests__/agent-loop-contract.test.ts#⚠ CONTRACT: pi-agent-core@${version} turns a blocking tool_call verdict into an error result carrying the reason -->
+- **Invariant 8, the vendor's half** — [`agent-loop-contract.test.ts`](../../packages/web/src/host/__tests__/agent-loop-contract.test.ts):
+  the installed runtime's loop turns a block into an error result carrying the reason; a bump that
+  moves it goes red here.
 <!-- test: packages/web/src/host/__tests__/agent-host.test.ts#⚠ through the runtime, the real guards refuse a write outside the workspace with their reason; a read inside passes -->
 - **Through the real runner** — [`agent-host.test.ts`](../../packages/web/src/host/__tests__/agent-host.test.ts):
   the loaded guards, asked through the runtime's hook runner, refuse with their reason and pass a read.

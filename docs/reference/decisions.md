@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 153.**
+**Decision headers: 154.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -91,6 +91,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/fixture-conversation.ts` | `#27`, `#31` | The styling dev loop (#31): a scripted conversation streamed through the REAL `useChat` pipeline as local AG-UI events — no server, no pi. |
 | `packages/web/src/follow-connection.ts` | `#112` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |
 | `packages/web/src/host/__tests__/agent-host.test.ts` | `#27`, `#69` | The in-process host against the REAL harness package (#69) — every extension the manifest names loads, and inline probe extensions observe what the host does. |
+| `packages/web/src/host/__tests__/agent-loop-contract.test.ts` | `#130` | A CONTRACT TEST on the runtime's loop, the shape of `cc-safety-net-contract.test.ts`: the wire shape of a refused tool call is the vendor's doing — a guard's `{ block, reason }` becomes an error result with the reason as its content, `isError: true` — and `map-events.ts` relies on it (the `tool_execution_end` case, "isError is the only signal a refused call has"). |
 | `packages/web/src/host/__tests__/event-tail.test.ts` | `#97` | #97's tail is a debugging surface: what it must not do is lie by omission. |
 | `packages/web/src/host/__tests__/extension-ui-context.test.ts` | `#69` | The `ExtensionUIContext` the host binds (#69), driven directly: the blocking methods become `extension_ui_request` records and resolve on an answer, a cancel, an abort signal or a timeout; the fire-and-forget methods emit and return; the terminal-only surface is inert — pi's rpc mode's behaviour, which extensions already tolerate. |
 | `packages/web/src/host/__tests__/permission-dialog.test.ts` | `#73` | The coupling to picc's `FilePermissionDialog` (#73), pinned against the REAL class: the lift reads TypeScript-private fields by name, so this is what fails — loudly — when a picc refactor renames one. |
