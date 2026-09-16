@@ -176,7 +176,7 @@ one place the key is written onto a part's `metadata`.
 
 **Carried** on the observation (`ZenToolResultObservation.descriptor`), then onto the state layer's
 result event under the same key — as an extra field, because that event declares `content` and
-nothing else (`packages/web/src/rpc/to-agui.ts:30-42,126-128`).
+nothing else (`packages/web/src/to-agui.ts:30-42,126-128`).
 
 **Rendered by `ZenToolResult`** (`packages/web/src/ZenToolResult.tsx:69-129`), reached from every tool
 row (`selected-message-part.tsx:103-106,166`). The order is fixed: pending (`running…`) while the run

@@ -13,7 +13,7 @@ const ROOT = findRepoRoot(import.meta.url)
 const OBSERVATION_PATH = 'packages/core/src/observation.ts'
 const MAPPER_PATH = 'packages/web/src/host/map-events.ts'
 const FOLLOW_PATH = 'packages/web/src/server/follow.ts'
-const ADAPTER_PATH = 'packages/web/src/rpc/to-agui.ts'
+const ADAPTER_PATH = 'packages/web/src/to-agui.ts'
 const CUSTOM_ROUTER_PATH = 'packages/web/src/custom-event-router.ts'
 const FOLLOW_CONNECTION_PATH = 'packages/web/src/follow-connection.ts'
 
