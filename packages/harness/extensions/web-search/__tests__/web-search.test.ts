@@ -198,6 +198,74 @@ test('a primary failure AFTER dispatch falls back and admits it may have billed'
   expect(text).toContain('HTTP 500')
 })
 
+// ── routing, through the EXTENSION (docs/flows/web-search-call.md, stated gap) ──
+// `routedProviderIdForModel` is pinned in isolation; these drive the google and openai
+// branches through the tool itself, so the selection the model sees is the one asserted.
+// A wrong branch fails by name: the fake for the wrong provider throws.
+
+test('a Gemini model routes to the google provider through the tool, and the audit names it', async () => {
+  const calls = { google: 0 }
+  const loaded = loadWebSearch({
+    runProviders: {
+      anthropic: async () => {
+        throw new Error('anthropic must not run for a Gemini model')
+      },
+      google: async () => {
+        calls.google += 1
+        return { ...SEARCHED, providerId: 'google' }
+      },
+      openai: async () => {
+        throw new Error('openai must not run for a Gemini model')
+      },
+      deepseek: async () => {
+        throw new Error('deepseek is config-pinned, never routed')
+      },
+      tavily: async () => {
+        throw new Error('the fallback must not fire on a searched primary')
+      },
+    },
+  })
+  const GEMINI_MODEL = {
+    id: 'gemini-test',
+    provider: 'google-generative-ai',
+    api: 'google-generative-ai',
+    maxTokens: 8192,
+  }
+  const { audits } = await withAuditCapture(() => run(loaded, { model: GEMINI_MODEL }))
+  expect(calls.google).toBe(1)
+  expect(audits[0]?.properties).toMatchObject({ provider: 'google', outcome: 'searched' })
+})
+
+test('every Responses-family api routes to the openai provider through the tool: openai, azure, codex', async () => {
+  for (const api of ['openai-responses', 'azure-openai-responses', 'openai-codex-responses']) {
+    const calls = { openai: 0 }
+    const loaded = loadWebSearch({
+      runProviders: {
+        anthropic: async () => {
+          throw new Error(`anthropic must not run for ${api}`)
+        },
+        google: async () => {
+          throw new Error(`google must not run for ${api}`)
+        },
+        openai: async () => {
+          calls.openai += 1
+          return { ...SEARCHED, providerId: 'openai' }
+        },
+        deepseek: async () => {
+          throw new Error('deepseek is config-pinned, never routed')
+        },
+        tavily: async () => {
+          throw new Error('the fallback must not fire on a searched primary')
+        },
+      },
+    })
+    const model = { id: `model-for-${api}`, provider: 'openai', api, maxTokens: 8192 }
+    const { audits } = await withAuditCapture(() => run(loaded, { model }))
+    expect(calls.openai).toBe(1)
+    expect(audits[0]?.properties).toMatchObject({ provider: 'openai', outcome: 'searched' })
+  }
+})
+
 test('an unrouted model with no Tavily key refuses, naming the arming env var', async () => {
   const loaded = loadWebSearch()
   const { value: text } = await withAuditCapture(() => run(loaded, { model: UNROUTED_MODEL }))

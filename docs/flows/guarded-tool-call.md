@@ -75,11 +75,12 @@ sequenceDiagram
    `state: "output-error"` so the state layer marks the call and its result `error` with the text as
    the message — the same shape the transcript rebuild produces on resume.
 
-**Stated gaps.** The mapper's comment marks the wire shape of a guard block *UNVERIFIED*: the runtime
-documents no distinct "blocked" event, so any `isError` result is treated as displayable. No test read
-for this page drives a `{ block, reason }` through the runtime to an `isError` observation; the
-browser-side pins start from one. And *first block wins* is the runtime's behaviour, stated in two
-headers and pinned by no test of ours.
+**What is pinned where.** A guard's `{ block, reason }` becomes an error result in the runtime's own
+loop — `pi-agent-core/dist/agent-loop.js`, the `beforeResult?.block` branch: `createErrorToolResult(reason)`,
+`isError: true` — which is the vendor's code, verified by reading it (the mapper's comment cites it).
+What is ours is pinned through the runtime's hook runner: `HostedThread.probeToolCall` asks the real
+runner, with the real load order and participants, what a call would meet — the guards' refusal with
+its reason, and *first block wins*: a later extension cannot un-block, and its own block stands.
 
 ## The tests that pin it
 
@@ -113,6 +114,12 @@ that title, so a renamed or deleted pin fails this page.
 <!-- test: packages/web/src/server/__tests__/transcript-to-messages.test.ts#a refused tool call (isError) reads as an error on both the call and the result — a denial must not render as success -->
 - **Invariant 8, resumed** — [`transcript-to-messages.test.ts`](../../packages/web/src/server/__tests__/transcript-to-messages.test.ts):
   the rebuilt branch agrees with the live derivation.
+
+<!-- test: packages/web/src/host/__tests__/agent-host.test.ts#⚠ through the runtime, the real guards refuse a write outside the workspace with their reason; a read inside passes -->
+- **Through the real runner** — [`agent-host.test.ts`](../../packages/web/src/host/__tests__/agent-host.test.ts):
+  the loaded guards, asked through the runtime's hook runner, refuse with their reason and pass a read.
+<!-- test: packages/web/src/host/__tests__/agent-host.test.ts#⚠ first block is final: a later extension cannot un-block the guards, and its own block on an allowed call stands -->
+- **Invariant 1, first block wins** — a later participant cannot un-block; its own block stands.
 
 ## Where it is stated
 

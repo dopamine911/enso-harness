@@ -60,8 +60,8 @@ import {
  *    answer is never rendered as a search result — with no fallback armed it is returned
  *    labeled "no web search was performed". searched-vs-ungrounded is keyed on native
  *    search-activity blocks in the stream, never on source count.
- * 4. **One audit line per call** (stderr): provider, outcome, query, fallback reason —
- *    never a key.
+ * 4. **One audit record per call** (#132 — a log record, not a stderr line): provider,
+ *    outcome, query, fallback reason — never a key.
  *
  * Config is read ONCE at extension load (the web_fetch discipline, #54): a session
  * cannot re-point its own search backend by editing the file mid-run. An unreadable

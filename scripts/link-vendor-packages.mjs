@@ -33,10 +33,6 @@ import { findRepoRoot, harnessPackageDir } from '../packages/core/src/index.ts'
 
 const VENDOR_PATH_PREFIX = 'node_modules/'
 
-const repoRoot = findRepoRoot(import.meta.url)
-const packageRoot = harnessPackageDir(repoRoot)
-const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
-
 /**
  * Every package that must exist inside the harness package's own node_modules.
  *
@@ -50,8 +46,11 @@ const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf
  *     the list insufficient: `@zen/core` appears nowhere in the manifest paths, only as an
  *     import in the source, so a manifest-only sweep left it unlinked and the extension
  *     failed at load rather than at typecheck.
+ *
+ * @param {{ dependencies?: Record<string, string>, pi?: Record<string, unknown> }} manifest
+ * @returns {string[]}
  */
-function requiredPackageNames() {
+export function requiredPackageNames(manifest) {
   const names = new Set(Object.keys(manifest.dependencies ?? {}))
   for (const paths of Object.values(manifest.pi ?? {})) {
     for (const resourcePath of Array.isArray(paths) ? paths : [paths]) {
@@ -66,36 +65,60 @@ function requiredPackageNames() {
   return [...names]
 }
 
-const verified = []
-const linked = []
-for (const packageName of requiredPackageNames()) {
-  const target = join(packageRoot, 'node_modules', packageName)
-  // existsSync FOLLOWS symlinks, so a bun-made link into the `.bun` store passes here
-  // while a broken link falls through to the fix branch below.
-  if (existsSync(target)) {
-    verified.push(packageName)
-    continue
+/**
+ * Verify-or-fix: every required package is reachable at `<packageRoot>/node_modules/<name>`,
+ * linked from the repo root's hoisted copy when it is not. A package at neither is an
+ * error naming it — the caller decides whether that ends the process.
+ *
+ * @param {string} repoRoot
+ * @param {string} packageRoot
+ * @param {{ dependencies?: Record<string, string>, pi?: Record<string, unknown> }} manifest
+ * @returns {{ verified: string[], linked: string[] }}
+ */
+export function linkVendorPackages(repoRoot, packageRoot, manifest) {
+  const verified = []
+  const linked = []
+  for (const packageName of requiredPackageNames(manifest)) {
+    const target = join(packageRoot, 'node_modules', packageName)
+    // existsSync FOLLOWS symlinks, so a bun-made link into the `.bun` store passes here
+    // while a broken link falls through to the fix branch below.
+    if (existsSync(target)) {
+      verified.push(packageName)
+      continue
+    }
+    const hoisted = join(repoRoot, 'node_modules', packageName)
+    if (!existsSync(hoisted)) {
+      throw new Error(
+        `link-vendor-packages: ${packageName} is at neither ${target} nor the repo root — run bun install`,
+      )
+    }
+    mkdirSync(dirname(target), { recursive: true })
+    // lstat, not exists: a broken symlink must be replaced, and exists() follows links.
+    try {
+      lstatSync(target)
+      rmSync(target, { recursive: true, force: true })
+    } catch {
+      // nothing there yet
+    }
+    symlinkSync(relative(dirname(target), hoisted), target, 'dir')
+    linked.push(packageName)
   }
-  const hoisted = join(repoRoot, 'node_modules', packageName)
-  if (!existsSync(hoisted)) {
-    process.stderr.write(
-      `link-vendor-packages: ${packageName} is at neither ${target} nor the repo root — run bun install\n`,
-    )
-    process.exit(1)
-  }
-  mkdirSync(dirname(target), { recursive: true })
-  // lstat, not exists: a broken symlink must be replaced, and exists() follows links.
-  try {
-    lstatSync(target)
-    rmSync(target, { recursive: true, force: true })
-  } catch {
-    // nothing there yet
-  }
-  symlinkSync(relative(dirname(target), hoisted), target, 'dir')
-  linked.push(packageName)
+  return { verified, linked }
 }
 
-process.stderr.write(
-  `link-vendor-packages: ${verified.length} already in place (${verified.join(', ') || 'none'}); ` +
-    `linked ${linked.length} (${linked.join(', ') || 'none'})\n`,
-)
+if (import.meta.main) {
+  const repoRoot = findRepoRoot(import.meta.url)
+  const packageRoot = harnessPackageDir(repoRoot)
+  const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
+  let outcome
+  try {
+    outcome = linkVendorPackages(repoRoot, packageRoot, manifest)
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+    process.exit(1)
+  }
+  process.stderr.write(
+    `link-vendor-packages: ${outcome.verified.length} already in place (${outcome.verified.join(', ') || 'none'}); ` +
+      `linked ${outcome.linked.length} (${outcome.linked.join(', ') || 'none'})\n`,
+  )
+}

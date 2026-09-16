@@ -65,7 +65,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/extensions/web-fetch/__tests__/web-fetch.test.ts` | `#54` | The web_fetch extension (#54), against injected IO seams — no test here touches the network, DNS, or the committed config file (one shape-pin at the bottom reads the real `zen.config.json`, read-only). |
 | `packages/harness/extensions/web-fetch/index.ts` | `#9`, `#54`, `#59` | The web_fetch tool (#54) — the sanctioned web access that replaces the ad-hoc network clients #9 denies in bash. |
 | `packages/harness/extensions/web-search/__tests__/web-search.test.ts` | `#63` | The web_search extension (#63) against injected seams — the SELECTION and FALLBACK policy, and the ACCURATE rendering contract. |
-| `packages/harness/extensions/web-search/index.ts` | `#54`, `#63`, `#89` | The web_search tool (#63) — provider-native search with a Tavily fallback, consumed from pi-web-search 1.4.0 (© ttttmr, MIT) and retyped behind zen's seams. |
+| `packages/harness/extensions/web-search/index.ts` | `#54`, `#63`, `#89`, `#132` | The web_search tool (#63) — provider-native search with a Tavily fallback, consumed from pi-web-search 1.4.0 (© ttttmr, MIT) and retyped behind zen's seams. |
 | `packages/web/e2e/chat.e2e.ts` | `#27`, `#71` | Manual web smoke (#71): drive the real chat surface and leave screenshots behind. |
 | `packages/web/e2e/playwright.config.ts` | `#71` | Playwright config for the MANUAL web smoke (#71). |
 | `packages/web/src/ZenToolResult.tsx` | `#18` | The web renderer for a zen tool result — the React half of #18's contract. |

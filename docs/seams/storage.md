@@ -57,6 +57,15 @@ export interface HostedThread {
   inspect(): HostedThreadInspection
   /** The emitted tail (#97): what the host's `emit` funnel saw, with provenance. A fresh copy per call. */
   emittedEvents(): ZenThreadEvent[]
+  /**
+   * What the loaded extensions would say about a tool call, through the runtime's own hook
+   * runner — the verdict a model's call would meet, without a model. Inspection, like the
+   * rest of this interface: the guards' contract is pinned in their own suite against a
+   * hand-built ExtensionAPI; this is the one place the REAL runner, the real load order and
+   * the real participants are asked together (docs/flows/guarded-tool-call.md, stated gap).
+   * Runs no tool: a pass here is the hook's silence, not an execution.
+   */
+  probeToolCall(toolName: string, input: Record<string, unknown>): Promise<ToolCallVerdict | undefined>
 }
 ```
 

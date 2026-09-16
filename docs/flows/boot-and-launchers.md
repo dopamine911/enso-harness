@@ -118,9 +118,13 @@ that title, so a renamed or deleted pin fails this page.
 <!-- test: scripts/__tests__/print-harness.test.ts#materializePrintHarness writes the filtered manifest and symlinks into the real package -->
 - **Invariant 6, the mirror** — every sibling linked, idempotent, a dead link removed.
 
-*Not pinned:* the terminal launcher itself. `scripts/zen.mjs` spawns at top level and has no test — its
-flags (invariants 3 and 4), print-run trigger and vendor refusal are stated in its header and mirrored by
-the host's and the server's tested copies above. `link-vendor-packages.mjs` has no test either.
+<!-- test: scripts/__tests__/zen-launch.test.ts#pi is launched with --no-extensions, --no-skills and -e <package>, ahead of the user’s arguments -->
+- **Invariants 3 and 4, the launcher's own decisions** — [`zen-launch.test.ts`](../../scripts/__tests__/zen-launch.test.ts):
+  the isolation triple's two argument legs, in order, ahead of the user's; the print-run trigger; the
+  vendor paths the launcher refuses on. (`zen.mjs` spawns; `zen-launch.mjs` decides, and is what is pinned.)
+<!-- test: scripts/__tests__/link-vendor-packages.test.ts#verify-or-fix: a present package is verified, an absent one is linked from the hoisted copy, and the link resolves -->
+- **Invariant 5, the linker** — [`link-vendor-packages.test.ts`](../../scripts/__tests__/link-vendor-packages.test.ts):
+  both sources of required packages; verify-or-fix; a broken link replaced; a missing package named.
 
 ## Where it is stated
 

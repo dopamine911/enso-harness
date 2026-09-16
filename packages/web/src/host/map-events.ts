@@ -292,10 +292,12 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
         toolName,
         text: contentToText(result?.content),
         complete: true,
-        // ⚠ `isError` is the only signal a refused call has. pi documents no distinct
-        // "blocked" event, so a guard's `{block: true, reason}` is UNVERIFIED as to
-        // which shape it takes on the wire. Treating any error result as displayable
-        // covers it either way — see also `extension_error` below.
+        // ⚠ `isError` is the only signal a refused call has: the runtime turns a guard's
+        // `{block: true, reason}` into an error result with the reason as its content —
+        // `pi-agent-core/dist/agent-loop.js`, the `beforeResult?.block` branch
+        // (`createErrorToolResult(reason)`, `isError: true`; read 2026-09-16). No distinct
+        // "blocked" event exists. Treating any error result as displayable covers it — see
+        // also `extension_error` below.
         isError: event.isError === true,
         ...(descriptor === undefined ? {} : { descriptor }),
       }
