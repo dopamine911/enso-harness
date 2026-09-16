@@ -20,6 +20,13 @@ import { configureProcessLogging, isLoggingConfigured, logsDirFrom, parseZenLogL
  *
  * The knobs are the same: `ZEN_LOG_LEVEL` for the file's tier, per-category overrides in
  * it; `ZEN_LOG_CONSOLE` is ignored here on purpose.
+ *
+ * WHY FIRST IN THE MANIFEST (`packages/harness/package.json` → `pi.extensions`): the sink is
+ * configured here, at load, awaited. Today no extension writes a record before
+ * `session_start` — guards, web-fetch and web-search log only inside handlers, which fire
+ * after every extension has loaded — so the position decides nothing yet (checked
+ * 2026-09-16, #167). It is first so that stays true: an extension that one day logs while
+ * loading finds the file already open, instead of a record that lands nowhere.
  */
 export function createLoggingExtension(
   environment: Readonly<Record<string, string | undefined>>,
