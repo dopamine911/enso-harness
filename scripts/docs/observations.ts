@@ -182,9 +182,12 @@ function generate(): string {
   ) {
     throw new Error('observations: the follow-ended chunk is not declared by the router and pushed by the connection')
   }
-  for (const name of Object.keys(FRAME_METADATA)) {
-    const branch = name === 'follow-ended' ? 'eventType === FOLLOW_ENDED_CUSTOM_EVENT' : `eventType === '${name}'`
-    if (!routerSource.includes(branch)) throw new Error(`observations: the router has no branch for the ${name} chunk`)
+  for (const chunkName of Object.keys(FRAME_METADATA)) {
+    const branch =
+      chunkName === 'follow-ended' ? 'eventType === FOLLOW_ENDED_CUSTOM_EVENT' : `eventType === '${chunkName}'`
+    if (!routerSource.includes(branch)) {
+      throw new Error(`observations: the router has no branch for the ${chunkName} chunk`)
+    }
   }
 
   if (!/\{ type: 'observation', seq: frame\.seq, observation: frame\.observation \}/.test(followSource)) {
