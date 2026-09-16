@@ -94,7 +94,16 @@ function transcriptEntryOf(raw: unknown, position: number): ZenTranscriptEntry {
   const entry = (typeof raw === 'object' && raw !== null ? raw : {}) as PiSessionEntry
   const id = typeof entry.id === 'string' ? entry.id : `entry-${position}`
   const type = typeof entry.type === 'string' ? entry.type : 'unknown'
-  if (type === 'message') return messageEntry(entry, id) ?? { kind: 'other', id, ...stampOf(entry), type }
+  if (type === 'message') {
+    // A message this does not render (a role that is not user/assistant/toolResult, or a
+    // result without its call id) is `other` with the role in its type — `message:system` —
+    // so the drawer's row says what it was, not just that it was unknown.
+    const role =
+      typeof entry.message === 'object' && entry.message !== null && 'role' in entry.message
+        ? String(entry.message.role)
+        : 'malformed'
+    return messageEntry(entry, id) ?? { kind: 'other', id, ...stampOf(entry), type: `message:${role}` }
+  }
   if (type === 'custom' && typeof entry.customType === 'string') {
     return { kind: 'custom', id, ...stampOf(entry), customType: entry.customType, data: entry.data }
   }

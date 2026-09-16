@@ -90,6 +90,10 @@ export type ZenTranscriptEntry = Static<typeof ZenTranscriptEntry>
  * row is checking which mode the branch ended in; the entry's own shape is otherwise not
  * this function's to know.
  */
+function isPrimitive(value: unknown): value is string | number | boolean {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+}
+
 export function describeTranscriptEntry(entry: ZenTranscriptEntry): string {
   const when = entry.at === undefined ? '' : entry.at.slice(11, 19)
   switch (entry.kind) {
@@ -98,8 +102,9 @@ export function describeTranscriptEntry(entry: ZenTranscriptEntry): string {
     case 'tool-result':
       return `${when} tool-result ${entry.toolName}${entry.isError ? ' error' : ''}`.trim()
     case 'custom': {
+      // A primitive `mode` only: an object would print as `[object Object]`, which reads as a row lying.
       const mode =
-        typeof entry.data === 'object' && entry.data !== null && 'mode' in entry.data
+        typeof entry.data === 'object' && entry.data !== null && 'mode' in entry.data && isPrimitive(entry.data.mode)
           ? ` mode=${String(entry.data.mode)}`
           : ''
       return `${when} custom:${entry.customType}${mode}`.trim()

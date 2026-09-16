@@ -30,6 +30,10 @@ test('a transcript entry row: time, kind, custom type, message role, tool name, 
   ).toBe('tool-result bash error')
   // An unmodelled kind shows its type; a missing time reads as absent, never as "undefined".
   expect(describeTranscriptEntry({ kind: 'other', id: 'x', type: 'model_change' })).toBe('model_change')
+  // A non-primitive `mode` is not printed: `[object Object]` in a row reads as the row lying.
+  expect(
+    describeTranscriptEntry({ kind: 'custom', id: 'm', customType: 'modes', data: { mode: { nested: true } } }),
+  ).toBe('custom:modes')
 })
 
 // The id names a FILE (#95): what a filesystem could read is out; what the browser mints is in.

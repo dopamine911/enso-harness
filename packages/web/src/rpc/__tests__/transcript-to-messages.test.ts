@@ -163,6 +163,11 @@ test('entries that are not messages, and malformed messages, never throw: skippe
     ['user', [{ type: 'text', content: '[image content]' }]],
   ])
   expect(messages[1]).not.toHaveProperty('createdAt')
+  // …and the transcript itself keeps the unrendered message as `other` with its role in the
+  // type, so the drawer's row says `message:somethingElse`, not merely that it was unknown.
+  expect(transcriptOf([entry('x1', { role: 'somethingElse', content: '?' })])).toEqual([
+    { kind: 'other', id: 'x1', at: '2026-09-08T12:00:00.000Z', type: 'message:somethingElse' },
+  ])
 })
 
 // ── the interrupted tail (#109) ───────────────────────────────────────────────
