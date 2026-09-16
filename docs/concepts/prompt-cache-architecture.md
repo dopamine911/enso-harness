@@ -5,7 +5,7 @@
 Mechanics here come from the bundled Anthropic API reference read on 2026-09-02, not from recollection —
 which matters, because writing this from memory would have missed three purpose-built primitives and
 produced advice that was worse than the platform's own answer. That near-miss is catalogued as error #8
-in [`agent-failure-modes.md`](./agent-failure-modes.md).
+in [`agent-failure-modes.md`](./archive/agent-failure-modes.md).
 
 **Why this belongs in a harness design document rather than a tuning guide:** cache efficiency is a
 function of *layout order*, and layout order is decided when you design the prompt assembly. Retrofitting
@@ -106,7 +106,7 @@ Ordered by consequence. These are decisions, not tuning.
 2. **Never change the tool set mid-conversation.** Tools render at position 0; adding, removing, or
    reordering one invalidates the whole cache. If you want modes, do **not** swap tools — pass the mode
    as message content, or give the model a tool that records the transition.
-   ⚠ This collides with a recommendation in [`agent-boundaries.md`](./agent-boundaries.md) §Phase 4,
+   ⚠ This collides with a recommendation in [`agent-boundaries.md`](./archive/agent-boundaries.md) §Phase 4,
    where I argued for implementing modes by tool mounting because an absent tool cannot be reasoned
    around. Both are true: **mount per session, not per turn.** A mode switch that remounts tools should
    start a new session or accept a full cache reset as its price.

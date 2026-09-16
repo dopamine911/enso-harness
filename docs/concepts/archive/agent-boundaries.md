@@ -1,5 +1,7 @@
 # Agent boundaries — what Claude Code gets right, and where a new harness should start
 
+> **Status (#167, #162 workstream 11):** archived — pre-build design note (2026-09-02), written before the tree existed. What it argued for landed as the guard suite (`packages/harness/extensions/guards/`, `docs/seams/guards.md`) and the permission-mode seam; the rest is context, not a plan.
+
 **Written** 2026-09-02, by Claude (Opus 5) at Daniel's request, for the zen-harness project.
 
 **Perspective and bias, stated up front.** I operate under the boundaries described here, which makes

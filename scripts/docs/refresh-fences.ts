@@ -14,12 +14,17 @@ import { extractDeclarationFromFile } from './extract-declaration.ts'
  * — run `bun scripts/docs/refresh-fences.ts docs/seams/thread-runtime.md`, and the fence
  * holds the declaration. When the gate goes red after a source change, the same command is
  * the fix; the diff it produces is the review.
+ *
+ * The same command refreshes a generated block — `<!-- generated-block: <script> -->` …
+ * `<!-- /generated-block -->` — from the script's stdout (#162 workstream 11).
  */
 
 const ROOT = findRepoRoot(import.meta.url)
 const SOURCE_MARKER = /^<!--\s*source:\s*(\S+?)#(\w+)\s*-->$/
 const TS_FENCE_OPEN = /^```(?:ts|typescript)\s*$/
 const FENCE_CLOSE = /^```\s*$/
+const BLOCK_OPEN = /^<!--\s*generated-block:\s*(\S+)\s*-->$/
+const BLOCK_CLOSE = /^<!--\s*\/generated-block\s*-->$/
 
 export function refreshFences(text: string): { text: string; refreshed: number } {
   const lines = text.split('\n')
@@ -28,11 +33,25 @@ export function refreshFences(text: string): { text: string; refreshed: number }
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const line = lines[lineIndex] ?? ''
     output.push(line)
+    const block = BLOCK_OPEN.exec(line)
+    if (block !== null) {
+      const closeIndex = lines.findIndex((candidate, index) => index > lineIndex && BLOCK_CLOSE.test(candidate))
+      // Refuse, never truncate: a page with an unclosed block is left exactly as it was.
+      if (closeIndex === -1) throw new Error(`line ${lineIndex + 1}: generated-block for ${block[1]} is never closed`)
+      const generated = Bun.spawnSync(['bun', block[1] ?? ''], { cwd: ROOT })
+      if (generated.exitCode !== 0)
+        throw new Error(`${block[1]} exited ${generated.exitCode}: ${generated.stderr.toString()}`)
+      output.push(generated.stdout.toString().trimEnd(), lines[closeIndex] ?? '')
+      refreshed += 1
+      lineIndex = closeIndex
+      continue
+    }
     const marker = SOURCE_MARKER.exec(line)
     if (marker === null) continue
     if (!TS_FENCE_OPEN.test(lines[lineIndex + 1] ?? '')) continue
     const closeIndex = lines.findIndex((candidate, index) => index > lineIndex + 1 && FENCE_CLOSE.test(candidate))
-    if (closeIndex === -1) break
+    // Refuse, never truncate — the same rule as the generated block above.
+    if (closeIndex === -1) throw new Error(`line ${lineIndex + 2}: sourced ts fence is never closed`)
     const declaration = extractDeclarationFromFile(join(ROOT, marker[1] ?? ''), marker[2] ?? '')
     output.push(lines[lineIndex + 1] ?? '', declaration.text, lines[closeIndex] ?? '')
     refreshed += 1

@@ -270,7 +270,7 @@ graph TB
 
 Pane provenance, so intent is not lost: **Chat** takes its shape from deepseek-harness. **Context** takes
 its interface from `dsh-context` and its data from our own backend, with editing added. **Health** takes
-its signal catalogue from Magpie (`concepts/magpie-harvest.md`), carrying the field verdicts rather than
+its signal catalogue from Magpie (`concepts/archive/magpie-harvest.md`), carrying the field verdicts rather than
 the weights. **Project** is three interfaces, not one.
 
 ---
@@ -351,11 +351,23 @@ zen-harness/
       src/host/             #   AgentHost: the storage seam, pi events → observations, dialogs
       src/rpc/              #   observation → AG-UI adapter and the zen.* custom-event names (browser)
       src/components/       #   ai-elements (ported) · shadcn ui
+      src/__tests__/        #   tests beside their subjects (also src/*/__tests__/); fakes under server/__tests__/
+      e2e/                  #   Playwright, against the real dev server
+  scripts/                  # gate, coverage floor, docs generators (scripts/docs/), zen-thread / zen-logs
+  test/                     # the gates: text scans over the tree (vendor, glossary, naming, logging, docs, …)
   docs/
-    architecture.md         # this file
-    concepts/               # the research
+    architecture.md         # this file: why
+    glossary.md             # what a word means (gated)
+    verification.md         # how the repo proves itself
+    seams/                  # one page per contract, source verbatim, drift-checked
+    reference/              # generated tables (core exports, decisions, observations, routes, …)
+    concepts/               # the live design notes; concepts/archive/ the pre-build ones
+  .fallowrc.jsonc           # fallow: entries, baseline, duplicates, architecture boundaries (the zones)
   .zen/                     # secrets, pi agent dir (gitignored)
 ```
+
+Every path in this tree exists — `test/docs-gate.test.ts` checks the ones it can name, so a move
+or deletion fails the docs before it fails a reader.
 
 `web/` sits outside the manifest deliberately: pi packages carry only `extensions`, `skills`, `prompts`
 and `themes`, and pi does nothing with a frontend. Settings likewise live outside — see `pi-share` for
@@ -451,7 +463,32 @@ Three rules:
 3. **Every entity carries `id` and `url`.** `url` makes "open the real thing" one click; `id` lets a
    renderer key and diff across updates. And **`truncated` is explicit** whenever a result is bounded —
    a bounded result that does not say so produces confident wrong claims
-   (`concepts/agent-failure-modes.md`).
+   (`concepts/archive/agent-failure-modes.md`).
+
+---
+
+## Seams
+
+The contracts the decisions protect: one implementation on each side, a fake for tests, a gate that
+names the boundary. One page per seam under [`seams/`](./seams/README.md) — the source verbatim,
+who implements and consumes it, what fences it, what crosses it that should not, and what a pivot
+costs. This table is read off those pages (`scripts/docs/seams-table.ts`): the leak column is each
+page's own lead sentence, so it cannot say a leak is open after the page says it closed.
+
+<!-- generated-block: scripts/docs/seams-table.ts -->
+| Seam | Domain | Gate | What crosses it that should not (the page’s own words) |
+|---|---|---|---|
+| [the dialog vocabulary](./seams/dialog.md) | Control | extension-UI-context tests | The four kinds are the runtime's extension-UI method names — kept, by decision. |
+| [the guards](./seams/guards.md) | Permission | `tool-call-participants`; analyzer contract test | L5 — the tool names are the runtime's, and the guard is the runtime's extension. |
+| [logging](./seams/logging.md) | Record | logging gate | The substrate is vendored, by decision, and it shows in exactly three files. |
+| [the observation vocabulary](./seams/observation.md) | Observation | kinds sweeps over `@zen/core/observation-kinds`; `observations.md` generated | Nothing, since #162 workstream 5. |
+| [the permission mode](./seams/permission-mode.md) | Permission | vendor gate; `code-offenders` stale-row check | Nothing. |
+| [presentation](./seams/presentation.md) | Surface | presentation gate; `ported-provenance.md` generated | Nothing of the vendor kind. |
+| [storage](./seams/storage.md) | Thread, Record | `no-duplicate-paths`; boundaries (the forbidden-call rule) | Nothing of the runtime's persistence format, since L2 |
+| [the thread runtime](./seams/thread-runtime.md) | Thread, Control | vendor gate; glossary gate; boundaries | Nothing of the runtime's event shape, since L2 |
+| [the tool result descriptor](./seams/tool-result.md) | Surface | — | Nothing of ours leaks. |
+| [web providers](./seams/web-providers.md) | Permission (egress), Control | vendor gate | L6 — the model API's types, at the provider seam. |
+<!-- /generated-block -->
 
 ---
 
@@ -522,7 +559,7 @@ touching a file, read its header and the seam page it belongs to.
 | Deferred | Why, and what would change it |
 |---|---|
 | Cross-surface **push** (live alerts, shared presence) | Files give shared *state*; push needs a service. Un-deferred when alerts have to arrive rather than be polled. |
-| The **obligation queue** | Design preserved in `concepts/agent-support-systems.md` Part 6. Un-deferred once the tool surface is stable enough to accrue against. |
+| The **obligation queue** | Design preserved in `concepts/archive/agent-support-systems.md` Part 6. Un-deferred once the tool surface is stable enough to accrue against. |
 | **Cross-process coordination** on one session id (TUI and web in the same cwd) | pi appends with no lock; two live writers would fork the log silently. Nothing does it today, so it is a rule (control plane, invariant 4). Un-deferred when both surfaces can mutate the same thread. |
 | **Run-provenance entries** (git revision, config hash, active rules and skills) | Where they go is decided — pi's log, as custom entries. What they hold waits for the lineage phase, so the schema is designed once against a real fork. |
 | **Command classification** (argument-level policy) | With confinement and recoverability in place it is friction optimisation, not safety. Accretes from real incidents. |
@@ -558,7 +595,7 @@ touching a file, read its header and the seam page it belongs to.
 6. [`../README.md`](../README.md) — quick start and what is built, feature by feature.
 7. [`concepts/pi-immediate-needs.md`](./concepts/pi-immediate-needs.md) — what pi lacks, ranked, with
    seams and effort. Phase 0 comes straight from its Tier 0.
-8. [`concepts/agent-boundaries.md`](./concepts/agent-boundaries.md) — the boundary model and why
+8. [`concepts/archive/agent-boundaries.md`](./concepts/archive/agent-boundaries.md) — the boundary model and why
    enforcement location matters more than rule content.
 9. [`concepts/harness-design-principles.md`](./concepts/harness-design-principles.md) — progressive
    disclosure, applied seven times.

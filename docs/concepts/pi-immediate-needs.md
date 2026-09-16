@@ -1,5 +1,7 @@
 # pi — immediate needs
 
+> **Status (#167, #162 workstream 11):** a triage inventory, kept live. Landed: the guard suite (path confinement, bash timeout, secret denial, network egress — `docs/seams/guards.md`), `web_fetch`/`web_search` behind one provider seam (`docs/seams/web-providers.md`), the log (`docs/seams/logging.md`), the permission mode as our seam. Deferred, deliberately: see `architecture.md` → *Deferred*. Items here are not re-triaged; the seam pages are the current statement.
+
 **Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the zen-harness project.
 
 What has to exist before pi is safe to run unattended on a real repository. Grounded in the source, not
@@ -7,7 +9,7 @@ in the docs' exclusion list — every absence below was checked by reading the f
 
 Paths are repo-relative to `packages/coding-agent/`. Read from a clone on 2026-09-02.
 
-Companion to [`agent-boundaries.md`](./agent-boundaries.md), which argues the general ordering
+Companion to [`agent-boundaries.md`](./archive/agent-boundaries.md), which argues the general ordering
 (containment before recoverability before classification). This applies that ordering to pi specifically.
 
 ---
@@ -147,7 +149,7 @@ a tool the agent can call to stop and surface a question, plus a convention that
 returns a reason the agent is expected to escalate rather than route around.
 
 **Seam:** register an `ask` tool; pair it with the `tool_call` block reason. **Effort:** small, and it is
-a prerequisite for every mode design in [`agent-boundaries.md`](./agent-boundaries.md) §Phase 4.
+a prerequisite for every mode design in [`agent-boundaries.md`](./archive/agent-boundaries.md) §Phase 4.
 
 ### 9. No mode concept at all
 

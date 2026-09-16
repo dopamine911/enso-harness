@@ -211,8 +211,8 @@ writes are *our* layers' jobs (`:36-41`).
 
 ## What crosses it that should not
 
-**L5** (`.local/refactor/goals.md` §2): the tool names are the runtime's (`bash`, `write`, `edit`,
-`read`, `powershell` — `guards/index.ts:103-107`), and the guard is the runtime's extension: it
+**L5 — the tool names are the runtime's, and the guard is the runtime's extension.** (`.local/refactor/goals.md` §2.) The names: `bash`, `write`, `edit`,
+`read`, `powershell` — `guards/index.ts:103-107`; the extension: it
 registers through `pi.on('tool_call')` and returns the runtime's `ToolCallEventResult`
 (`:2,341`). The analyzer is a vendored library — `cc-safety-net/api`'s `checkCommand` (`:4`) — held
 behind our verdict: its `{ kind, reason, ruleId }` never leaves `shellCommandDenial`, which turns it into
