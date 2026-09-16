@@ -193,12 +193,17 @@ function architectureTreePaths(text: string): string[] {
   return paths
 }
 
-test('⚠ every path the architecture tree names exists (#162 workstream 11)', () => {
+/** A path git ignores is not in a checkout — CI has no `.zen/` — so its absence is not drift. */
+function isGitIgnored(path: string): boolean {
+  return Bun.spawnSync(['git', 'check-ignore', '-q', path], { cwd: REPOSITORY_ROOT }).exitCode === 0
+}
+
+test('⚠ every path the architecture tree names exists, or is gitignored (#162 workstream 11)', () => {
   const text = readFileSync(join(DOCS_ROOT, 'architecture.md'), 'utf8')
-  const paths = architectureTreePaths(text)
-  expect(paths.length).toBeGreaterThan(20)
   // the root line is the repository itself
-  const missing = paths.filter((path) => !existsSync(join(REPOSITORY_ROOT, path.replace(/^zen-harness\//, ''))))
+  const paths = architectureTreePaths(text).map((path) => path.replace(/^zen-harness\//, ''))
+  expect(paths.length).toBeGreaterThan(20)
+  const missing = paths.filter((path) => !(existsSync(join(REPOSITORY_ROOT, path)) || isGitIgnored(path)))
   expect(missing).toEqual([])
 })
 
