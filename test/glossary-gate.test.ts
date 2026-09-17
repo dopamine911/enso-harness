@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test'
-import { codeOffenders, hasWordSequence, wordsOf } from './gate-support.ts'
+import { readFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
+import { codeOffenders, hasWordSequence, isCommentLine, REPOSITORY_ROOT, sourceFiles, wordsOf } from './gate-support.ts'
 
 /**
  * The glossary's Retired table, applied to the source tree (#165, `docs/glossary.md` → Retired).
@@ -20,6 +22,14 @@ import { codeOffenders, hasWordSequence, wordsOf } from './gate-support.ts'
  *
  * What it cannot catch: a retired MEANING under a fresh word (`conversation` for a thread).
  * That is a review question; this file holds the words that were decided.
+ *
+ * The second test reads the table's OTHER column. #241: two rows named replacements that were
+ * in no source file (`describeRuntimeEvent` for what is `describeObservation`, `describeEntry`
+ * for `describeTranscriptEntry`) — the table claims to be the rename authority, and half of it
+ * was unverified prose, so a session applying it would have coined the wrong name beside the
+ * right one. Bold + backticks in the Replacement column is the decided code name; it must
+ * exist. Prose replacements (**threads**, **prompts**, **kept**, **none**) carry no backticks
+ * and are not claims about identifiers.
  */
 
 const SEARCHED_ROOTS = ['packages/core/src', 'packages/web/src', 'packages/harness', 'scripts', 'test'] as const
@@ -85,6 +95,51 @@ test('⚠ a retired word does not come back — as an identifier, a string, or a
       lineMatches: namesRetired,
     }),
   ).toEqual([])
+})
+
+/** The Retired table's rows: the section runs to the next `## ` heading. */
+function retiredTableRows(): string[] {
+  const glossary = readFileSync(join(REPOSITORY_ROOT, 'docs/glossary.md'), 'utf8')
+  const section = glossary.slice(glossary.indexOf('\n## Retired')).split('\n## ').slice(0, 2).join('')
+  return section
+    .split('\n')
+    .filter((line) => line.startsWith('|') && !line.startsWith('|---') && !line.startsWith('| Retired |'))
+}
+
+/** Every decided replacement name: bold + backticks, in the Replacement column only. */
+function decidedReplacements(rows: readonly string[]): string[] {
+  const names: string[] = []
+  for (const row of rows) {
+    const replacement = row.split('|')[3] ?? ''
+    for (const bolded of replacement.matchAll(/\*\*`([^`]+)`\*\*/g)) names.push(bolded[1] ?? '')
+  }
+  return names
+}
+
+test('⚠ every replacement the Retired table decided is a name that exists (#241)', () => {
+  const rows = retiredTableRows()
+  // The table is the subject: an empty parse would pass every assertion below.
+  expect(rows.length).toBe(20)
+  const sources = SEARCHED_ROOTS.flatMap((root) => sourceFiles(join(REPOSITORY_ROOT, root), true))
+  // ⚠ CODE lines, not the file's text: this gate's own header names `describeRuntimeEvent` to
+  // explain #241, and scanning text let that comment vouch for the name — the first probe
+  // passed when it had to fail. Prose may say what a thing is NOT called; only code declares.
+  const texts = sources.map((path) => ({
+    name: basename(path),
+    code: readFileSync(path, 'utf8')
+      .split('\n')
+      .filter((line) => !isCommentLine(line))
+      .join('\n'),
+  }))
+  const spells = (name: string): boolean =>
+    texts.some((source) => source.code.includes(name) || source.name.includes(name))
+  const missing = decidedReplacements(rows).filter((replacement) =>
+    // A dotted replacement names a member (`HostedThread.runtime`): each part is a name, and
+    // no single line has to spell the access. What it cannot check is that the field is on
+    // that type — the type checker does, at every call site.
+    replacement.split('.').some((part) => !spells(part)),
+  )
+  expect(missing).toEqual([])
 })
 
 test('the matcher sees a retired name however it is spelled, and leaves the reserved word alone', () => {
