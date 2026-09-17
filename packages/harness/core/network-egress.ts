@@ -377,7 +377,7 @@ function gateCommandLine(
     return { matched: `a shell nested more than ${MAX_SHELL_NESTING} deep`, via: 'unresolvable' }
   }
   const segments = extractFlatShellCommandSegments(command)
-  if (segments.length === 0) return unscannableFloor(command) ?? 'escalate-unparseable'
+  if (segments.length === 0) return unscannableFloor(command, denied, deniedBinaries, depth) ?? 'escalate-unparseable'
   // Two distinct unknowable-word escalations (PR #55 review, one round each), and they
   // must NOT share a path:
   // - runtime-expansion (`$C https://…`): the coarse scan of the WHOLE command may catch
@@ -419,7 +419,12 @@ function gateCommandLine(
  * `cat <<EOF > file` with any body, `sh migrate.sh <<EOF` (the heredoc is the SCRIPT's
  * stdin): none of these trip it.
  */
-function unscannableFloor(command: string): NetworkEgressMatch | undefined {
+function unscannableFloor(
+  command: string,
+  denied: Set<string>,
+  deniedBinaries: readonly string[],
+  depth: number,
+): NetworkEgressMatch | undefined {
   const heredocs = heredocBodies(command)
   const expanded = withoutRanges(
     command,
@@ -446,12 +451,13 @@ function unscannableFloor(command: string): NetworkEgressMatch | undefined {
     .split('\n')
     .filter((line) => !SHELL_COMMENT_LINE.test(line))
     .join('\n')
-  const commandPosition = commandPositionFinding(runnableLines)
-  if (commandPosition !== undefined) return commandPosition
+  // The stream check FIRST: a shell fed a heredoc/herestring is refused by that class — its
+  // program is data — before any command position is classified, or the wrapper scan would
+  // read the stream's text and report a name where the point is that no name can be trusted.
   if (/<</.test(commandLines) && shellFedByStream(commandLines)) {
     return { matched: 'a shell reading its program from a heredoc', via: 'unresolvable' }
   }
-  return undefined
+  return commandPositionFinding(runnableLines, denied, deniedBinaries, depth)
 }
 
 /**
@@ -519,7 +525,22 @@ function commandPositionPieces(text: string): string[] {
   return pieces
 }
 
-function commandPositionFinding(commandLines: string): NetworkEgressMatch | undefined {
+/**
+ * The first refusal at any command position of the (unsegmentable) command lines, or
+ * undefined. Each piece between separators is a command position and is handed to
+ * `gateSegment` — THE segment classifier, keywords and wrappers included — not to a copy of
+ * its first step (review of #203, round 3: the floor checked one word, so `$(true); sudo
+ * cur[l] …` shielded the synthesis behind the wrapper). Two floor-only checks come first,
+ * because the segmenter never sees a masked substitution: a substitution alone as the
+ * command word passes to the raw scan; one joined to text is refused. A piece the
+ * classifier would escalate is left to the raw scan, as on the segmented path.
+ */
+function commandPositionFinding(
+  commandLines: string,
+  denied: Set<string>,
+  deniedBinaries: readonly string[],
+  depth: number,
+): NetworkEgressMatch | undefined {
   for (const piece of commandPositionPieces(maskSubstitutions(commandLines))) {
     const rest = withoutLeadingCompoundKeywords(piece)
     if (rest.length === 0) continue
@@ -532,9 +553,8 @@ function commandPositionFinding(commandLines: string): NetworkEgressMatch | unde
       continue // a substitution alone as the command: its body meets the raw scan
     }
     if (word.startsWith('${')) return { matched: 'a parameter expansion at command position', via: 'unresolvable' }
-    if (commandWordOf(word).kind === 'deny-synthesis') {
-      return { matched: `word synthesis at command position (${word})`, via: 'unresolvable' }
-    }
+    const verdict = gateSegment({ text: rest, pipedStdin: false }, denied, deniedBinaries, depth)
+    if (verdict !== undefined && verdict !== 'escalate') return verdict
   }
   return undefined
 }
@@ -678,7 +698,7 @@ export function findDeniedNetworkEgress(
     if (verdict === 'escalate') {
       // A parseable command with an unresolvable word: the floor has not seen this text
       // yet (the unparseable path runs it itself); then coarse over the whole command.
-      const floor = unscannableFloor(command)
+      const floor = unscannableFloor(command, denied, deniedBinaries, 0)
       if (floor !== undefined) return floor
     } else if (verdict !== 'escalate-unparseable') {
       return verdict
