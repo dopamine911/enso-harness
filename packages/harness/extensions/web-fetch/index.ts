@@ -4,7 +4,6 @@ import { isIP } from 'node:net'
 import type { AgentToolResult, ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import {
   EXTERNAL_WEB_CONTENT_NOTICE,
-  findRepoRoot,
   parseZenConfig,
   WEB_FETCH_MAX_RESPONSE_BYTES,
   WEB_FETCH_TIMEOUT_MS,
@@ -12,9 +11,9 @@ import {
   WebFetchToolParameters,
   ZEN_CONFIG_EXAMPLE,
   ZEN_CONFIG_FILENAME,
-  zenConfigPath,
   zenLogger,
 } from '@zen/core'
+import { findRepoRoot, zenConfigPath } from '@zen/core/paths'
 import {
   isFetchableContentType,
   isHostAllowed,

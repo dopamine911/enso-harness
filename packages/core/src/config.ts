@@ -1,4 +1,3 @@
-import { join } from 'node:path'
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
 import { WebFetchConfig } from './web-fetch.ts'
@@ -69,9 +68,4 @@ export function parseZenConfig(fileText: string): ZenConfigParseResult {
     }
   }
   return { kind: 'ok', config: parsed }
-}
-
-/** The config file's path under a repository root (see `findRepoRoot` in paths.ts). */
-export function zenConfigPath(repoRoot: string): string {
-  return join(repoRoot, ZEN_CONFIG_FILENAME)
 }

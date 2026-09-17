@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { arch, platform, release } from 'node:os'
 import { join } from 'node:path'
-import { buildLogBundle, findRepoRoot, isZenThreadId, type ZenBundleAbout, type ZenLogLine } from '@zen/core'
+import { buildLogBundle, isZenThreadId, type ZenBundleAbout, type ZenLogLine } from '@zen/core'
 import { parseZenLogLine, zenLogFilename } from '@zen/core/log-process'
+import { findRepoRoot } from '@zen/core/paths'
 import { inspectThread, type ThreadView } from './thread-registry.ts'
 
 /**

@@ -29,7 +29,7 @@
  */
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
-import { findRepoRoot, harnessPackageDir } from '../packages/core/src/index.ts'
+import { findRepoRoot, harnessPackageDir } from '../packages/core/src/paths.ts'
 
 const VENDOR_PATH_PREFIX = 'node_modules/'
 

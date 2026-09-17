@@ -24,7 +24,7 @@
 import { existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
-import { bundleRecordsText, findRepoRoot, isLogBundle, type ZenLogLine } from '../packages/core/src/index.ts'
+import { bundleRecordsText, isLogBundle, type ZenLogLine } from '../packages/core/src/index.ts'
 import {
   logRecordOf,
   logsDirFrom,
@@ -32,6 +32,7 @@ import {
   zenLogFilename,
   zenLogLineRenderer,
 } from '../packages/core/src/log-process.ts'
+import { findRepoRoot } from '../packages/core/src/paths.ts'
 
 const LEVEL_RANK: Readonly<Record<string, number>> = {
   trace: 0,

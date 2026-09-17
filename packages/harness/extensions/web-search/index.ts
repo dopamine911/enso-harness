@@ -9,17 +9,16 @@ import type {
 } from '@earendil-works/pi-coding-agent'
 import {
   EXTERNAL_WEB_CONTENT_NOTICE,
-  findRepoRoot,
   parseZenConfig,
-  readSecret,
   WEB_SEARCH_TIMEOUT_MS,
   WEB_SEARCH_TOOL_NAME,
   type WebSearchConfig,
   WebSearchToolParameters,
   ZEN_CONFIG_FILENAME,
-  zenConfigPath,
   zenLogger,
 } from '@zen/core'
+import { findRepoRoot, zenConfigPath } from '@zen/core/paths'
+import { readSecret } from '@zen/core/secrets'
 import {
   DEEPSEEK_API_KEY_VARIABLE,
   type DeepseekSearchRequest,

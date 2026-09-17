@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join, sep as pathSeparator, relative, resolve } from 'node:path'
-import { findRepoRoot } from '../../packages/core/src/index.ts'
+import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { filesUnder } from '../source-tree.ts'
 
 /**
@@ -17,7 +17,16 @@ import { filesUnder } from '../source-tree.ts'
 const ROOT = findRepoRoot(import.meta.url)
 const CORE_SOURCE = join(ROOT, 'packages/core/src')
 const BARREL = join(CORE_SOURCE, 'index.ts')
-const LOG_PROCESS = join(CORE_SOURCE, 'log-process.ts')
+/**
+ * The node-only subpaths (#211): declared in package.json `exports`, never on the barrel, so
+ * the browser graph cannot reach `node:*` through `@zen/core`. Each is read like the barrel is.
+ */
+const SUBPATH_MODULES: readonly { readonly file: string; readonly entrypoint: SubpathEntrypoint }[] = [
+  { file: 'log-process.ts', entrypoint: '@zen/core/log-process' },
+  { file: 'paths.ts', entrypoint: '@zen/core/paths' },
+  { file: 'secrets.ts', entrypoint: '@zen/core/secrets' },
+]
+type SubpathEntrypoint = '@zen/core/log-process' | '@zen/core/paths' | '@zen/core/secrets'
 
 type Classification = 'wire' | 'host contract' | 'config/policy' | 'node-only utility'
 type Region = 'web/host' | 'web/server' | 'web/browser' | 'harness' | 'scripts'
@@ -71,7 +80,7 @@ interface PublicExport {
   readonly symbol: string
   readonly kind: Kind
   readonly module: string
-  readonly entrypoint: '@zen/core' | '@zen/core/log-process'
+  readonly entrypoint: '@zen/core' | SubpathEntrypoint
   readonly declarationLine: number
   readonly classification: Classification
   readonly domain: string
@@ -135,26 +144,26 @@ function barrelExports(source: string): PublicExport[] {
   return exports
 }
 
-function subpathExports(source: string): PublicExport[] {
+function subpathExports(source: string, module: string, entrypoint: SubpathEntrypoint): PublicExport[] {
   const exports: PublicExport[] = []
   const declaration = /^export\s+(?:async\s+)?(const|let|type|interface|function|class|enum)\s+([$A-Z_a-z][$\w]*)\b/gm
   for (const match of source.matchAll(declaration)) {
     const keyword = match[1] ?? ''
     const symbol = match[2] ?? ''
     exports.push(
-      checkedExport(
-        symbol,
-        keyword === 'type' || keyword === 'interface' ? 'type' : 'value',
-        'log-process.ts',
-        '@zen/core/log-process',
-      ),
+      checkedExport(symbol, keyword === 'type' || keyword === 'interface' ? 'type' : 'value', module, entrypoint),
     )
   }
   return exports
 }
 
 function exportsOf(): PublicExport[] {
-  const exports = [...barrelExports(readFileSync(BARREL, 'utf8')), ...subpathExports(readFileSync(LOG_PROCESS, 'utf8'))]
+  const exports = [
+    ...barrelExports(readFileSync(BARREL, 'utf8')),
+    ...SUBPATH_MODULES.flatMap((subpath) =>
+      subpathExports(readFileSync(join(CORE_SOURCE, subpath.file), 'utf8'), subpath.file, subpath.entrypoint),
+    ),
+  ]
   const seen = new Set<string>()
   const detectedModules = new Set<string>()
   for (const publicExport of exports) {
@@ -195,12 +204,13 @@ function regionOf(path: string): Region | undefined {
 
 function importedEntrypoint(importer: string, specifier: string): PublicExport['entrypoint'] | undefined {
   if (specifier === '@zen/core') return '@zen/core'
-  if (specifier === '@zen/core/log-process') return '@zen/core/log-process'
+  const bySpecifier = SUBPATH_MODULES.find((subpath) => subpath.entrypoint === specifier)
+  if (bySpecifier !== undefined) return bySpecifier.entrypoint
   if (!specifier.startsWith('.')) return undefined
   const target = resolve(dirname(importer), specifier)
   if (target === BARREL) return '@zen/core'
-  if (target === LOG_PROCESS) return '@zen/core/log-process'
-  return undefined
+  const byFile = SUBPATH_MODULES.find((subpath) => join(CORE_SOURCE, subpath.file) === target)
+  return byFile?.entrypoint
 }
 
 function importerCounts(exports: readonly PublicExport[]): Map<string, Readonly<Record<Region, number>>> {

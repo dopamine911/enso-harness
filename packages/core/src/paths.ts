@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ZEN_CONFIG_FILENAME } from './config.ts'
 
 /**
  * The workspace path helpers (#59) — THE one place that walks the filesystem for roots.
@@ -150,4 +151,9 @@ export function harnessPackageDir(repoRoot: string): string {
 /** The web package — the cwd both dev surfaces run in. */
 export function webPackageDir(repoRoot: string): string {
   return join(repoRoot, 'packages', 'web')
+}
+
+/** The committed config file's path under a repository root (#59): `zen.config.json`, beside `package.json`. */
+export function zenConfigPath(repoRoot: string): string {
+  return join(repoRoot, ZEN_CONFIG_FILENAME)
 }

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
-import { findRepoRoot } from '../../packages/core/src/index.ts'
+import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { filesUnder } from '../source-tree.ts'
 import { assertExactKeys, runGenerator } from './generator-support.ts'
 
@@ -48,6 +48,12 @@ interface GateMetadata {
 }
 
 const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
+  'test/browser-bundle-gate.test.ts': {
+    roots: ['packages/web/src/main.tsx'],
+    exceptions: [],
+    limitation:
+      'Builds the web entry for the browser target; a node:-only module reachable from it fails by the bundler’s own error. It does not run the bundle.',
+  },
   'test/check-coverage.test.ts': {
     roots: [COVERAGE_SCRIPT],
     exceptions: [],

@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { findRepoRoot } from '../../packages/core/src/index.ts'
+import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { extractDeclarationFromFile } from './extract-declaration.ts'
 
 /**

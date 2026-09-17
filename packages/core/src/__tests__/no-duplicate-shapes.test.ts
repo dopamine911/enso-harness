@@ -40,15 +40,21 @@ test('⚠ no TypeBox schema is declared outside @zen/core', () => {
 
 test('every module is reachable: from the barrel, or from a subpath package.json declares', () => {
   // If a module is added to src/ and not to index.ts, a consumer would have to reach past
-  // the barrel — and "is this shape already declared?" stops being one search. Two
-  // exceptions, each a module the BROWSER must never see, declared in package.json (checked
-  // here so an exception cannot be an undeclared file either): `@logtape/file` builds its
-  // sinks on `node:fs` at import and is not tree-shaken, so `log-process.ts` is
-  // `@zen/core/log-process`; and the tests' recording sink (#178) is `@zen/core/log-recorder`
-  // from under `__tests__`, where the logging gate's three-file LogTape inventory does not
-  // look, because it is a test sink and not a fourth production file. A third, test-only as
-  // well: the observation-kinds oracle (#173) is `@zen/core/observation-kinds` because its two
-  // sweeps sit in `host/` and the browser, zones that may import only `core`.
+  // the barrel — and "is this shape already declared?" stops being one search. The
+  // exceptions are declared in package.json (checked here so an exception cannot be an
+  // undeclared file either), and every one is a module the BROWSER MUST NEVER SEE:
+  //
+  //   `log-process.ts`  `@logtape/file` builds its sinks on `node:fs` at import
+  //   `paths.ts`        `node:fs`/`node:url` — the repo-root walker and the harness's paths (#211)
+  //   `secrets.ts`      `node:fs` — the secrets file's reader (#211)
+  //
+  // ⚠ Tree-shaking does not save a bundle from a bare `node:*` specifier: it is resolved at
+  // link time, before anything is shaken, so a node-only module ON the barrel breaks a
+  // browser build outright — measured on #211, and `test/browser-bundle-gate.test.ts` is
+  // the sensor. Two more are test-only: the recording sink (#178) is
+  // `@zen/core/log-recorder` and the observation-kinds oracle (#173) is
+  // `@zen/core/observation-kinds`, both from under `__tests__`, where the logging gate's
+  // three-file LogTape inventory does not look.
   const modules = readdirSync(join(import.meta.dir, '..'), { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.ts') && entry.name !== 'index.ts')
     .map((entry) => entry.name)
@@ -59,8 +65,18 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   const subpathModules = Object.entries(manifest.exports)
     .filter(([subpath]) => subpath !== '.')
     .map(([, target]) => target.replace(/^\.\/src\//, ''))
-  expect(subpathModules).toEqual(['log-process.ts', '__tests__/log-recorder.ts', '__tests__/observation-kinds.ts'])
-  const inBarrel = modules.filter((module) => barrel.includes(module))
+  expect(subpathModules).toEqual([
+    'log-process.ts',
+    'paths.ts',
+    'secrets.ts',
+    '__tests__/log-recorder.ts',
+    '__tests__/observation-kinds.ts',
+  ])
+  // ⚠ The barrel's RE-EXPORTS, not its text: `barrel.includes(module)` read a filename in a
+  // comment as an export, so this assertion passed on prose (#211 — the new header names the
+  // node-only modules to say they are NOT here, and that turned the check red).
+  const reExported = new Set([...barrel.matchAll(/ from '\.\/([^']+)'$/gm)].map((match) => match[1] ?? ''))
+  const inBarrel = modules.filter((module) => reExported.has(module))
   const expectedInBarrel = modules.filter((module) => !subpathModules.includes(module))
   expect(inBarrel.sort()).toEqual(expectedInBarrel.sort())
 })

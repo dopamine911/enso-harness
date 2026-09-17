@@ -1,14 +1,8 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import {
-  findRepoRoot,
-  parseZenConfig,
-  WEB_FETCH_MAX_RESPONSE_BYTES,
-  WEB_FETCH_TOOL_NAME,
-  ZEN_CONFIG_FILENAME,
-  zenConfigPath,
-} from '@zen/core'
+import { parseZenConfig, WEB_FETCH_MAX_RESPONSE_BYTES, WEB_FETCH_TOOL_NAME, ZEN_CONFIG_FILENAME } from '@zen/core'
 import { auditRecords, recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
+import { findRepoRoot, zenConfigPath } from '@zen/core/paths'
 import { createWebFetch, type WebFetchDependencies, type WebFetchRequestInit } from '../index.ts'
 
 /**

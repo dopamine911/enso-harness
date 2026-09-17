@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { findRepoRoot } from '../../packages/core/src/index.ts'
+import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { filesUnder } from '../source-tree.ts'
 import { runGenerator } from './generator-support.ts'
 

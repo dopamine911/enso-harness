@@ -1,5 +1,5 @@
 import { basename } from 'node:path'
-import { isSecretShapedName } from '@zen/core'
+import { isSecretShapedName } from '@zen/core/secrets'
 import { TRANSPARENT_COMMAND_WRAPPERS } from './network-egress.ts'
 import {
   extractFlatShellCommandSegments,

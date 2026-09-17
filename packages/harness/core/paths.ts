@@ -2,13 +2,12 @@ import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, sep as pathSeparator, resolve } from 'node:path'
 import {
-  fileUrlToPath,
-  isFileUrl,
   PERSISTENCE_WRITE_BASENAMES,
   PERSISTENCE_WRITE_DIRECTORIES,
   SECRET_BASENAME_PATTERNS,
   ZEN_PERSISTENCE_WRITE_DIRECTORIES,
 } from '@zen/core'
+import { fileUrlToPath, isFileUrl } from '@zen/core/paths'
 
 /**
  * The full directory-segment deny set: picc's vendored corpus plus the zen additions
