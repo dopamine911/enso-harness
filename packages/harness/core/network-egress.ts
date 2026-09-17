@@ -108,7 +108,19 @@ const UNSCANNABLE_CHARACTERS = /['"\\{[*?]/
  * cheap direction to be wrong in, but a gate that fires on a comment teaches people to
  * route around the gate.
  */
-const EXPANSION_COMMAND_WORD = /(?:^|[;&|])[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*=\S*[ \t]+)*\$\{/
+/**
+ * Where a command word can begin on a line the segmenter declined (#160): the list
+ * separators, AND the compound-command delimiters the segmenter refuses — `(`/`)` (a
+ * substitution's `$(` is masked first) and a `{`/`}` standing alone as a word (a group;
+ * inside a word it is brace expansion and stays for the classifier). Quote-aware, like the
+ * segmenter it stands in for: a separator inside `'…'` or `"…"` is text (review of #203 —
+ * `echo "note: { {w,}get removed }"` is a string, not a group with synthesis in it).
+ */
+// `time` is NOT here: it is a TRANSPARENT_COMMAND_WRAPPER, and wrapper mode — every word of
+// the segment, `time bash -c "…"` included — is the more thorough owner (review of #203).
+const COMPOUND_KEYWORD = /^(?:if|then|else|elif|while|until|do|done|fi|esac|!)$/
+/** A masked `$( … )` / backtick substitution: one token, no separators, so a joined tail stays joined. */
+const SUBSTITUTION_MASK = '\u0001'
 const SHELL_COMMENT_LINE = /^[ \t]*#/
 
 /** bash's built-in TCP/UDP redirection devices — no legitimate use in this harness. */
@@ -176,8 +188,25 @@ export const TRANSPARENT_COMMAND_WRAPPERS = new Set([
  */
 const WRAPPER_WORD_EXEMPTIONS = new Set(['[', '{}'])
 
+/**
+ * A segment's leading compound keywords are not its command: `then cur[l] …` runs `cur[l]`.
+ * The segmenter leaves keywords in place (it splits on separators, not on grammar), so the
+ * classifier steps over them here — for the segmented path and the floor alike (#160 §1,
+ * review of #203: the keyword form with bare glob synthesis segmented cleanly and only
+ * `then` was ever inspected).
+ */
+function withoutLeadingCompoundKeywords(text: string): string {
+  let rest = text.trim()
+  for (;;) {
+    const [head = ''] = rest.split(/[ \t]/, 1)
+    if (!COMPOUND_KEYWORD.test(head)) return rest
+    rest = rest.slice(head.length).trim()
+  }
+}
+
 function commandWordOf(segmentText: string): CommandWordResult {
-  const withoutAssignments = (withoutLeadingEnvironmentAssignments(segmentText) ?? segmentText).trim()
+  const afterKeywords = withoutLeadingCompoundKeywords(segmentText)
+  const withoutAssignments = (withoutLeadingEnvironmentAssignments(afterKeywords) ?? afterKeywords).trim()
   const resolved = literalShellWord(withoutAssignments)
   if (resolved.kind === 'word-synthesis') {
     // ⚠ The one legitimate synthesis character at command position: a word that IS
@@ -348,7 +377,7 @@ function gateCommandLine(
     return { matched: `a shell nested more than ${MAX_SHELL_NESTING} deep`, via: 'unresolvable' }
   }
   const segments = extractFlatShellCommandSegments(command)
-  if (segments.length === 0) return unscannableFloor(command) ?? 'escalate-unparseable'
+  if (segments.length === 0) return unscannableFloor(command, denied, deniedBinaries, depth) ?? 'escalate-unparseable'
   // Two distinct unknowable-word escalations (PR #55 review, one round each), and they
   // must NOT share a path:
   // - runtime-expansion (`$C https://…`): the coarse scan of the WHOLE command may catch
@@ -390,7 +419,12 @@ function gateCommandLine(
  * `cat <<EOF > file` with any body, `sh migrate.sh <<EOF` (the heredoc is the SCRIPT's
  * stdin): none of these trip it.
  */
-function unscannableFloor(command: string): NetworkEgressMatch | undefined {
+function unscannableFloor(
+  command: string,
+  denied: Set<string>,
+  deniedBinaries: readonly string[],
+  depth: number,
+): NetworkEgressMatch | undefined {
   const heredocs = heredocBodies(command)
   const expanded = withoutRanges(
     command,
@@ -405,18 +439,122 @@ function unscannableFloor(command: string): NetworkEgressMatch | undefined {
     command,
     heredocs.map((body) => [body.start, body.end]),
   )
-  // ⚠ A `${…}` ANYWHERE makes the whole command unsegmentable (the segmenter refuses it),
-  // so every such command lands here and, until this rule, fell through to a raw scan that
-  // cannot see `P=cur; ${P}l …` — the name is assembled at expansion time, exactly the
-  // synthesis blindness `{c,}url` is denied for. Refused only AT COMMAND POSITION:
-  // `echo "${HOME}/x"` and `git commit -m "${message}"` expand into ARGUMENTS, where the
-  // command word is still literal and the scan still exact, so they stay allowed.
-  const runnableLines = commandLines.split('\n').filter((line) => !SHELL_COMMENT_LINE.test(line))
-  if (runnableLines.some((line) => EXPANSION_COMMAND_WORD.test(line))) {
-    return { matched: 'a parameter expansion at command position', via: 'unresolvable' }
-  }
+  // ⚠ Every command position on these lines meets the SAME classifier a segment's word
+  // does (#160: the floor used to enumerate constructs — `${` after `;`/`&`/`|` — and a
+  // synthesised word inside `( )`, `{ }` or after `then` walked past every rule built to
+  // catch it). Refused by class, never by spelling: brace/glob/ANSI-C synthesis at command
+  // position, a `${…}` at command position (`P=cur; ${P}l`), and a substitution JOINED to
+  // text at command position (`$(echo cur)l` — bash word-splits it to `curl`). Arguments
+  // are untouched: `echo "${HOME}/x"`, `echo $(date)` and `"$(cat msg.txt)"` stay allowed,
+  // and a bare `$C` still escalates to the raw scan, which can see a sibling `C=curl`.
+  const runnableLines = commandLines
+    .split('\n')
+    .filter((line) => !SHELL_COMMENT_LINE.test(line))
+    .join('\n')
+  // The stream check FIRST: a shell fed a heredoc/herestring is refused by that class — its
+  // program is data — before any command position is classified, or the wrapper scan would
+  // read the stream's text and report a name where the point is that no name can be trusted.
   if (/<</.test(commandLines) && shellFedByStream(commandLines)) {
     return { matched: 'a shell reading its program from a heredoc', via: 'unresolvable' }
+  }
+  return commandPositionFinding(runnableLines, denied, deniedBinaries, depth)
+}
+
+/**
+ * Replace every `$( … )` and backtick pair with one mask character, so a substitution is a
+ * single token to the splitter and anything bash would join to it stays joined to the mask.
+ */
+function maskSubstitutions(text: string): string {
+  let masked = ''
+  for (let characterIndex = 0; characterIndex < text.length; characterIndex += 1) {
+    if (text[characterIndex] === '$' && text[characterIndex + 1] === '(') {
+      const close = closingParenAfter(text, characterIndex + 2)
+      masked += SUBSTITUTION_MASK
+      characterIndex = close
+    } else if (text[characterIndex] === '`') {
+      const close = text.indexOf('`', characterIndex + 1)
+      masked += SUBSTITUTION_MASK
+      characterIndex = close === -1 ? text.length : close
+    } else {
+      masked += text[characterIndex]
+    }
+  }
+  return masked
+}
+
+/**
+ * The first refusal at any command position of the (unsegmentable) command lines, or
+ * undefined. Each piece between separators is a command position; leading compound
+ * keywords and `NAME=value` assignments are stepped over; the word is then what
+ * `commandWordOf` sees for a segment.
+ */
+/** Split at every unquoted command-position boundary; a backslash escapes the next character outside single quotes. */
+function commandPositionPieces(text: string): string[] {
+  const pieces: string[] = []
+  let current = ''
+  let inSingle = false
+  let inDouble = false
+  const isWordBoundary = (position: number): boolean =>
+    position < 0 || position >= text.length || /\s/.test(text[position] ?? '')
+  for (let characterIndex = 0; characterIndex < text.length; characterIndex += 1) {
+    const character = text[characterIndex] ?? ''
+    if (!inSingle && character === '\\') {
+      current += character + (text[characterIndex + 1] ?? '')
+      characterIndex += 1
+      continue
+    }
+    if (character === "'" && !inDouble) inSingle = !inSingle
+    else if (character === '"' && !inSingle) inDouble = !inDouble
+    if (inSingle || inDouble) {
+      current += character
+      continue
+    }
+    const standaloneBrace =
+      (character === '{' || character === '}') &&
+      isWordBoundary(characterIndex - 1) &&
+      isWordBoundary(characterIndex + 1)
+    const listSeparator = character === ';' || character === '&' || character === '|' || character === '\n'
+    if (listSeparator || character === '(' || character === ')' || standaloneBrace) {
+      pieces.push(current)
+      current = ''
+      continue
+    }
+    current += character
+  }
+  pieces.push(current)
+  return pieces
+}
+
+/**
+ * The first refusal at any command position of the (unsegmentable) command lines, or
+ * undefined. Each piece between separators is a command position and is handed to
+ * `gateSegment` — THE segment classifier, keywords and wrappers included — not to a copy of
+ * its first step (review of #203, round 3: the floor checked one word, so `$(true); sudo
+ * cur[l] …` shielded the synthesis behind the wrapper). Two floor-only checks come first,
+ * because the segmenter never sees a masked substitution: a substitution alone as the
+ * command word passes to the raw scan; one joined to text is refused. A piece the
+ * classifier would escalate is left to the raw scan, as on the segmented path.
+ */
+function commandPositionFinding(
+  commandLines: string,
+  denied: Set<string>,
+  deniedBinaries: readonly string[],
+  depth: number,
+): NetworkEgressMatch | undefined {
+  for (const piece of commandPositionPieces(maskSubstitutions(commandLines))) {
+    const rest = withoutLeadingCompoundKeywords(piece)
+    if (rest.length === 0) continue
+    const word = (withoutLeadingEnvironmentAssignments(rest) ?? rest).trim().split(/[ \t]/, 1)[0] ?? ''
+    if (word.length === 0) continue
+    if (word.includes(SUBSTITUTION_MASK)) {
+      if (word !== SUBSTITUTION_MASK) {
+        return { matched: 'a command substitution joined to text at command position', via: 'unresolvable' }
+      }
+      continue // a substitution alone as the command: its body meets the raw scan
+    }
+    if (word.startsWith('${')) return { matched: 'a parameter expansion at command position', via: 'unresolvable' }
+    const verdict = gateSegment({ text: rest, pipedStdin: false }, denied, deniedBinaries, depth)
+    if (verdict !== undefined && verdict !== 'escalate') return verdict
   }
   return undefined
 }
@@ -560,7 +698,7 @@ export function findDeniedNetworkEgress(
     if (verdict === 'escalate') {
       // A parseable command with an unresolvable word: the floor has not seen this text
       // yet (the unparseable path runs it itself); then coarse over the whole command.
-      const floor = unscannableFloor(command)
+      const floor = unscannableFloor(command, denied, deniedBinaries, 0)
       if (floor !== undefined) return floor
     } else if (verdict !== 'escalate-unparseable') {
       return verdict
