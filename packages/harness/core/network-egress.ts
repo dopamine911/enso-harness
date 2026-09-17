@@ -486,12 +486,13 @@ function commandPositionPieces(text: string): string[] {
   let current = ''
   let inSingle = false
   let inDouble = false
-  const isWordBoundary = (index: number): boolean => index < 0 || index >= text.length || /\s/.test(text[index] ?? '')
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index] ?? ''
+  const isWordBoundary = (position: number): boolean =>
+    position < 0 || position >= text.length || /\s/.test(text[position] ?? '')
+  for (let characterIndex = 0; characterIndex < text.length; characterIndex += 1) {
+    const character = text[characterIndex] ?? ''
     if (!inSingle && character === '\\') {
-      current += character + (text[index + 1] ?? '')
-      index += 1
+      current += character + (text[characterIndex + 1] ?? '')
+      characterIndex += 1
       continue
     }
     if (character === "'" && !inDouble) inSingle = !inSingle
@@ -501,7 +502,9 @@ function commandPositionPieces(text: string): string[] {
       continue
     }
     const standaloneBrace =
-      (character === '{' || character === '}') && isWordBoundary(index - 1) && isWordBoundary(index + 1)
+      (character === '{' || character === '}') &&
+      isWordBoundary(characterIndex - 1) &&
+      isWordBoundary(characterIndex + 1)
     const listSeparator = character === ';' || character === '&' || character === '|' || character === '\n'
     if (listSeparator || character === '(' || character === ')' || standaloneBrace) {
       pieces.push(current)
