@@ -9,8 +9,9 @@ import {
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
 import type { LogRecorder } from '@logtape/testing/recorder'
-import { findRepoRoot, harnessPackageDir, type ZenObservation } from '@zen/core'
+import type { ZenObservation } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
+import { findRepoRoot, harnessPackageDir } from '@zen/core/paths'
 import {
   type AgentHost,
   createAgentHost,

@@ -36,7 +36,7 @@
  */
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { findRepoRoot } from '../packages/core/src/index.ts'
+import { findRepoRoot } from '../packages/core/src/paths.ts'
 
 export const TOTAL_LINE_COVERAGE_FLOOR = 0.91
 export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89

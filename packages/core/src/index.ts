@@ -6,9 +6,15 @@
  * this package exists, and it stops working the moment consumers reach past it.
  */
 // ⚠ NAMED re-exports, not `export *` (noReExportAll): the barrel doubles as the public
-// inventory — every shape this package declares is literally listed here — and named lists
-// are what lets a bundler tree-shake the web surface. Adding an export to a module means
-// adding its name here too; forgetting is caught at the consumer's import, loudly.
+// inventory — every shape this package declares is literally listed here. Adding an export
+// to a module means adding its name here too; forgetting is caught at the consumer's import.
+//
+// ⚠ NOTHING `node:`-ONLY IS ON THE BARREL (#211). Tree-shaking does not save a browser
+// bundle from a bare `node:fs` specifier — it is resolved at link time, before anything is
+// shaken — so `paths.ts` and `secrets.ts` (and `log-process.ts` before them) are subpaths:
+// `@zen/core/paths`, `@zen/core/secrets`, `@zen/core/log-process`. The barrel is what the
+// browser may import; `test/browser-bundle-gate.test.ts` builds the web surface for the browser
+// target and fails if a `node:` module is ever reachable from it again.
 
 export {
   parseZenConfig,
@@ -16,7 +22,6 @@ export {
   ZEN_CONFIG_FILENAME,
   ZenConfig,
   type ZenConfigParseResult,
-  zenConfigPath,
 } from './config.ts'
 export {
   isZenDialogSpec,
@@ -100,30 +105,7 @@ export {
   ZenUnmapped,
   ZenUsage,
 } from './observation.ts'
-export {
-  fileUrlToPath,
-  findRepoRoot,
-  harnessPackageDir,
-  isFileUrl,
-  printHarnessDir,
-  RepoRootNotFoundError,
-  realpathOrSelf,
-  rootDotenvPath,
-  webPackageDir,
-  zenAgentDir,
-  zenLogsDir,
-  zenSecretsPath,
-} from './paths.ts'
 export { ZenPermissionModeChange, ZenPermissionModeState } from './permission-mode.ts'
-export {
-  isSecretShapedName,
-  knownSecretValues,
-  parseDotenv,
-  type QuarantineReport,
-  quarantineSecrets,
-  readDotenvFile,
-  readSecret,
-} from './secrets.ts'
 export {
   describeThreadEvent,
   isZenThreadId,

@@ -22,7 +22,7 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from '@playwright/test'
-import { findRepoRoot } from '@zen/core'
+import { findRepoRoot } from '@zen/core/paths'
 
 const e2eDirectory = dirname(fileURLToPath(import.meta.url))
 // `bun run dev` must run from the repo root: scripts/dev.mjs resolves the web package

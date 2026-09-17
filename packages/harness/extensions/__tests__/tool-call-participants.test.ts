@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { findRepoRoot, harnessPackageDir } from '@zen/core'
+import { findRepoRoot, harnessPackageDir } from '@zen/core/paths'
 
 /**
  * THE #4 TRIPWIRE — the arbiter trigger, made structural.

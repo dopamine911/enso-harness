@@ -46,13 +46,8 @@
  */
 import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import {
-  findRepoRoot,
-  harnessPackageDir,
-  printHarnessDir,
-  quarantineSecrets,
-  zenAgentDir,
-} from '../packages/core/src/index.ts'
+import { findRepoRoot, harnessPackageDir, printHarnessDir, zenAgentDir } from '../packages/core/src/paths.ts'
+import { quarantineSecrets } from '../packages/core/src/secrets.ts'
 import { buildPrintManifest, materializePrintHarness } from './print-harness.mjs'
 import { declaredResources, isPrintRun, missingVendorPaths, piArguments } from './zen-launch.mjs'
 

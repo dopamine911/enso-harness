@@ -15,7 +15,7 @@
  * Usage:  bun run dev                 # pi runs in the repo root
  *         bun run dev /some/path      # pi runs there instead
  */
-import { findRepoRoot, webPackageDir } from '../packages/core/src/index.ts'
+import { findRepoRoot, webPackageDir } from '../packages/core/src/paths.ts'
 
 const SERVER_HEAD_START_MS = 1200
 

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
-import { parseZenConfig, ZEN_CONFIG_EXAMPLE, zenConfigPath } from '../config.ts'
+import { parseZenConfig, ZEN_CONFIG_EXAMPLE } from '../config.ts'
+import { zenConfigPath } from '../paths.ts'
 
 /**
  * The zen.config.json loading contract (#59): parse fails CLOSED — every non-conforming

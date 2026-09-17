@@ -11,10 +11,8 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
-  findRepoRoot,
   type PromptOutcome,
   type PromptRequest,
-  quarantineSecrets,
   type RuntimeCommand,
   type ThreadRuntime,
   type ZenObservation,
@@ -24,6 +22,8 @@ import {
   type ZenTranscriptEntry,
   zenLogger,
 } from '@zen/core'
+import { findRepoRoot } from '@zen/core/paths'
+import { quarantineSecrets } from '@zen/core/secrets'
 import { createEventTail, describeObservation } from './event-tail.ts'
 import { createZenExtensionUiContext } from './extension-ui-context.ts'
 import { mapPiEvent } from './map-events.ts'

@@ -12,8 +12,10 @@
  */
 
 import { mkdirSync } from 'node:fs'
-import { findRepoRoot, harnessPackageDir, knownSecretValues, zenAgentDir, zenLogger } from '@zen/core'
+import { zenLogger } from '@zen/core'
 import { configureProcessLogging, logsDirFrom, parseZenLogLevels } from '@zen/core/log-process'
+import { findRepoRoot, harnessPackageDir, zenAgentDir } from '@zen/core/paths'
+import { knownSecretValues } from '@zen/core/secrets'
 import { startZenServer } from './index.ts'
 
 const cwdArgument: string | undefined = process.argv[2]

@@ -1,6 +1,8 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
-import { findRepoRoot, knownSecretValues, zenLogger } from '@zen/core'
+import { zenLogger } from '@zen/core'
 import { configureProcessLogging, isLoggingConfigured, logsDirFrom, parseZenLogLevels } from '@zen/core/log-process'
+import { findRepoRoot } from '@zen/core/paths'
+import { knownSecretValues } from '@zen/core/secrets'
 
 /**
  * The extension process's logging (#132), and the one record only an extension can write:

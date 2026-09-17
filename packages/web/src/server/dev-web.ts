@@ -15,8 +15,10 @@
  * unconfined (#9), neither surface may be reachable from another host.
  */
 import { join } from 'node:path'
-import { findRepoRoot, knownSecretValues, webPackageDir, zenLogger } from '@zen/core'
+import { zenLogger } from '@zen/core'
 import { configureProcessLogging, logsDirFrom, parseZenLogLevels } from '@zen/core/log-process'
+import { findRepoRoot, webPackageDir } from '@zen/core/paths'
+import { knownSecretValues } from '@zen/core/secrets'
 import homepage from '../../index.html'
 
 const WEB_PORT = 5178
