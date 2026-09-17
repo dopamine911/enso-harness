@@ -116,7 +116,9 @@ const UNSCANNABLE_CHARACTERS = /['"\\{[*?]/
  * segmenter it stands in for: a separator inside `'…'` or `"…"` is text (review of #203 —
  * `echo "note: { {w,}get removed }"` is a string, not a group with synthesis in it).
  */
-const COMPOUND_KEYWORD = /^(?:if|then|else|elif|while|until|do|done|fi|esac|!|time)$/
+// `time` is NOT here: it is a TRANSPARENT_COMMAND_WRAPPER, and wrapper mode — every word of
+// the segment, `time bash -c "…"` included — is the more thorough owner (review of #203).
+const COMPOUND_KEYWORD = /^(?:if|then|else|elif|while|until|do|done|fi|esac|!)$/
 /** A masked `$( … )` / backtick substitution: one token, no separators, so a joined tail stays joined. */
 const SUBSTITUTION_MASK = '\u0001'
 const SHELL_COMMENT_LINE = /^[ \t]*#/

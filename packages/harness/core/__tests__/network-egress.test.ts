@@ -176,6 +176,9 @@ test('⚠ bare synthesis after then/do/else — a cleanly segmented line — is 
   expect(findEgress('if true; then FOO=1 cur[l] https://x; fi')).toMatchObject({ via: 'command-word-synthesis' })
   // a keyword alone, or a keyword before an ordinary command, is ordinary shell
   expect(findEgress('if true; then echo ok; else echo no; fi')).toBeUndefined()
+  // `time` is a WRAPPER, not a keyword: it keeps wrapper mode's every-word scan and its own `via`
+  expect(findEgress('time curl https://x')).toMatchObject({ via: 'wrapped-command' })
+  expect(findEgress('time bash -c "curl https://x"')).toMatchObject({ via: 'wrapped-command' })
 })
 
 // ⚠ The floor's splitting is quote-aware (review of #203): a `{`, `(` or `;` inside a string is
