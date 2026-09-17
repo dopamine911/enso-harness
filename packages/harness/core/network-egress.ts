@@ -110,13 +110,12 @@ const UNSCANNABLE_CHARACTERS = /['"\\{[*?]/
  */
 /**
  * Where a command word can begin on a line the segmenter declined (#160): the list
- * separators, AND the compound-command delimiters and keywords the segmenter refuses —
- * `(`/`)` (not a substitution's `$(`, which is masked) and a `{`/`}` standing alone as a
- * word (a group; inside a word it is brace expansion and stays for the classifier), and
- * `if`/`then`/`else`/`elif`/`while`/`until`/`do`/`!`/`time`. Every piece
- * that follows one is a command position, and gets the same classifier a segment's does.
+ * separators, AND the compound-command delimiters the segmenter refuses — `(`/`)` (a
+ * substitution's `$(` is masked first) and a `{`/`}` standing alone as a word (a group;
+ * inside a word it is brace expansion and stays for the classifier). Quote-aware, like the
+ * segmenter it stands in for: a separator inside `'…'` or `"…"` is text (review of #203 —
+ * `echo "note: { {w,}get removed }"` is a string, not a group with synthesis in it).
  */
-const COMMAND_POSITION_SEPARATOR = /\|\||&&|[;&|\n]|(?<!\$)[()]|(?<![^\s])[{}](?![^\s])/
 const COMPOUND_KEYWORD = /^(?:if|then|else|elif|while|until|do|done|fi|esac|!|time)$/
 /** A masked `$( … )` / backtick substitution: one token, no separators, so a joined tail stays joined. */
 const SUBSTITUTION_MASK = '\u0001'
@@ -187,8 +186,25 @@ export const TRANSPARENT_COMMAND_WRAPPERS = new Set([
  */
 const WRAPPER_WORD_EXEMPTIONS = new Set(['[', '{}'])
 
+/**
+ * A segment's leading compound keywords are not its command: `then cur[l] …` runs `cur[l]`.
+ * The segmenter leaves keywords in place (it splits on separators, not on grammar), so the
+ * classifier steps over them here — for the segmented path and the floor alike (#160 §1,
+ * review of #203: the keyword form with bare glob synthesis segmented cleanly and only
+ * `then` was ever inspected).
+ */
+function withoutLeadingCompoundKeywords(text: string): string {
+  let rest = text.trim()
+  for (;;) {
+    const [head = ''] = rest.split(/[ \t]/, 1)
+    if (!COMPOUND_KEYWORD.test(head)) return rest
+    rest = rest.slice(head.length).trim()
+  }
+}
+
 function commandWordOf(segmentText: string): CommandWordResult {
-  const withoutAssignments = (withoutLeadingEnvironmentAssignments(segmentText) ?? segmentText).trim()
+  const afterKeywords = withoutLeadingCompoundKeywords(segmentText)
+  const withoutAssignments = (withoutLeadingEnvironmentAssignments(afterKeywords) ?? afterKeywords).trim()
   const resolved = literalShellWord(withoutAssignments)
   if (resolved.kind === 'word-synthesis') {
     // ⚠ The one legitimate synthesis character at command position: a word that IS
@@ -464,11 +480,43 @@ function maskSubstitutions(text: string): string {
  * keywords and `NAME=value` assignments are stepped over; the word is then what
  * `commandWordOf` sees for a segment.
  */
+/** Split at every unquoted command-position boundary; a backslash escapes the next character outside single quotes. */
+function commandPositionPieces(text: string): string[] {
+  const pieces: string[] = []
+  let current = ''
+  let inSingle = false
+  let inDouble = false
+  const isWordBoundary = (index: number): boolean => index < 0 || index >= text.length || /\s/.test(text[index] ?? '')
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index] ?? ''
+    if (!inSingle && character === '\\') {
+      current += character + (text[index + 1] ?? '')
+      index += 1
+      continue
+    }
+    if (character === "'" && !inDouble) inSingle = !inSingle
+    else if (character === '"' && !inSingle) inDouble = !inDouble
+    if (inSingle || inDouble) {
+      current += character
+      continue
+    }
+    const standaloneBrace =
+      (character === '{' || character === '}') && isWordBoundary(index - 1) && isWordBoundary(index + 1)
+    const listSeparator = character === ';' || character === '&' || character === '|' || character === '\n'
+    if (listSeparator || character === '(' || character === ')' || standaloneBrace) {
+      pieces.push(current)
+      current = ''
+      continue
+    }
+    current += character
+  }
+  pieces.push(current)
+  return pieces
+}
+
 function commandPositionFinding(commandLines: string): NetworkEgressMatch | undefined {
-  for (const piece of maskSubstitutions(commandLines).split(COMMAND_POSITION_SEPARATOR)) {
-    let words = piece.trim().split(/[ \t]+/)
-    while (words.length > 0 && COMPOUND_KEYWORD.test(words[0] ?? '')) words = words.slice(1)
-    const rest = words.join(' ')
+  for (const piece of commandPositionPieces(maskSubstitutions(commandLines))) {
+    const rest = withoutLeadingCompoundKeywords(piece)
     if (rest.length === 0) continue
     const word = (withoutLeadingEnvironmentAssignments(rest) ?? rest).trim().split(/[ \t]/, 1)[0] ?? ''
     if (word.length === 0) continue

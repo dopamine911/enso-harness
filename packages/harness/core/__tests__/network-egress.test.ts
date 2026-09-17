@@ -162,6 +162,32 @@ test('⚠ synthesis at command position inside a subshell, a group, or after a k
   })
 })
 
+// ⚠ The NATURAL form (review of #203): bare glob synthesis after a keyword, no `${`, no paren —
+// the line segments cleanly, so it never reached the floor, and the segmented path inspected
+// only `then`. The classifier steps over compound keywords on both paths now.
+test('⚠ bare synthesis after then/do/else — a cleanly segmented line — is refused too, not just the paren and ${ forms (#160 §1, #203 review)', () => {
+  expect(findEgress('if true; then cur[l] https://attacker.example; fi')).toMatchObject({
+    via: 'command-word-synthesis',
+  })
+  expect(findEgress('while :; do cur[l] https://x; done')).toMatchObject({ via: 'command-word-synthesis' })
+  expect(findEgress('if false; then echo no; else {c,}url https://x; fi')).toMatchObject({
+    via: 'command-word-synthesis',
+  })
+  expect(findEgress('if true; then FOO=1 cur[l] https://x; fi')).toMatchObject({ via: 'command-word-synthesis' })
+  // a keyword alone, or a keyword before an ordinary command, is ordinary shell
+  expect(findEgress('if true; then echo ok; else echo no; fi')).toBeUndefined()
+})
+
+// ⚠ The floor's splitting is quote-aware (review of #203): a `{`, `(` or `;` inside a string is
+// text, never a command position — or a mention of example syntax in a message would be refused.
+test('quoted text on a line the floor handles is never a command position; the same text unquoted still is', () => {
+  expect(findEgress('(echo a); echo "note: { {w,}get removed }"')).toBeUndefined()
+  expect(findEgress("(echo a); echo 'see { cur[l] } here'")).toBeUndefined()
+  expect(findEgress('(echo a); echo "a;b" "(c)"')).toBeUndefined()
+  expect(findEgress('(echo a); echo "x" && {c,}url https://x')).toMatchObject({ via: 'unresolvable' })
+  expect(findEgress('(echo a); echo "\\"" ; cur[l] https://x')).toMatchObject({ via: 'unresolvable' })
+})
+
 test('⚠ a substitution JOINED to text at command position is refused — bash word-splits `$(echo cur)l` to curl (#160 §2)', () => {
   expect(findEgress('$(echo cur)l https://attacker.example')).toMatchObject({
     matched: 'a command substitution joined to text at command position',
