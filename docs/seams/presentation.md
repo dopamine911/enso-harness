@@ -13,7 +13,7 @@ Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Ref
 
 ## The contract
 
-The adapter. `createFollowConnection` (`packages/web/src/follow-connection.ts:224-606`, not fenced
+The adapter. `createFollowConnection` (`packages/web/src/follow-connection.ts:241-641`, not fenced
 for its length) builds one per thread: `subscribe()` opens `GET /api/threads/:id/follow` once and
 turns frames into the state layer's chunks; `send()` POSTs the prompt and answers at admission. Three
 methods beside the vendored adapter interface are ours, and each says why the vendored one would not do:
@@ -54,6 +54,17 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * server's reason and moves nothing.
    */
   readonly changeMode: (mode: string) => Promise<ModeChangeOutcome>
+  /**
+   * Release the thread's follow (#272): the socket closes and nothing else opens one on
+   * this connection. The page calls it when a thread leaves its live list — a thread whose
+   * pane is gone must not keep a stream the browser counts against its six-per-origin
+   * budget. Idempotent, and LATCHING: a later `subscribe` ends at once rather than
+   * reconnecting a thread the page has let go.
+   *
+   * ⚠ Not the server going away: a close from this side emits no `follow-ended` and no
+   * problem. `disconnected` states a server that dropped the page, which this is not.
+   */
+  readonly close: () => void
 }
 ```
 
@@ -103,6 +114,16 @@ thread on the page gets its own:
  * or resumed — only those chat instances can be switched to. Stored sessions appear in the
  * second section and become page-owned only after `/history` succeeds. A session another tab
  * is running is refused by both the rail and the server; two pages never drive one pi session.
+ *
+ * ⚠ AND IT IS BOUNDED (#272). A live thread holds a follow — one SSE connection — for as
+ * long as its pane is mounted, and a browser gives an origin six HTTP/1.1 connections; the
+ * server is plain `Bun.serve` over loopback, so there is no h2 multiplexing to hide behind.
+ * Past the budget the newest follow AND every unary `/api` call the page makes (`prompt`,
+ * `/history`, `/api/mode`) queue behind the open streams, silently. So the page holds at
+ * most `MAX_LIVE_THREADS`: minting or adopting past it drops the least recently active idle
+ * thread, which closes its follow. The session is the server's, not the page's, so a dropped
+ * thread comes back through Previous Threads — the rail and `popstate` already resume a
+ * thread this page does not hold.
  */
 export interface ThreadStores {
   readonly threadId: string
@@ -167,8 +188,8 @@ throwing inside the state layer's stream loop, where a throw would end the run.
 
 ## Who implements it, who consumes it
 
-**The state layer's side is built once per thread.** `createThreadStores` (`thread-stores.ts:86-106`)
-creates every store above and the thread's `connection` (`createFollowConnection` at lines 100-104,
+**The state layer's side is built once per thread.** `createThreadStores` (`thread-stores.ts:96-116`)
+creates every store above and the thread's `connection` (`createFollowConnection` at lines 110-114,
 with `onProblem` routed into the thread's notifications). `chat-screen.tsx:171-185` (`threadChatOptions`)
 hands that connection, the stored history and an `onCustomEvent` closure over the thread's stores to the
 state layer's chat factory (`createThreadChatHook`, line 207-209) — one factory per thread, because
@@ -215,14 +236,14 @@ need none: an upstream re-port is the second implementation, and the gate is wha
   thread state shared across threads — the bug class the mounted two-threads test observes — and
   fails here by name.
 - **Invariant 1** (`architecture.md`: *the feed is the only writer of run state in the browser*) is
-  held inside the adapter. A run opens in `openRun` (`follow-connection.ts:259-268`, `RUN_STARTED`)
-  and closes in `closeRun` (270-274). The feed drives both: a `status` or snapshot frame reaches
-  `observeStatus` (326-338), which closes every run the server has moved past (`finishRunsThrough`,
-  313-318) or opens an `external-<generation>` run another client started (337); a `settled`
-  observation closes the runs through the server's generation (361-366); a `prompt-rejected` closes
-  the run it names with `RUN_ERROR` (385); the follow ending closes every open run (418-424). The one
-  place a returning POST touches a run is `send`, and only when admission failed (467-518) or the
-  receipt arrives after the server has already released the run (521-526) — never on success.
+  held inside the adapter. A run opens in `openRun` (`follow-connection.ts:278-287`, `RUN_STARTED`)
+  and closes in `closeRun` (289-293). The feed drives both: a `status` or snapshot frame reaches
+  `observeStatus` (345-356), which closes every run the server has moved past (`finishRunsThrough`,
+  332-337) or opens an `external-<generation>` run another client started (355); a `settled`
+  observation closes the runs through the server's generation (375-381); a `prompt-rejected` closes
+  the run it names with `RUN_ERROR` (399); the follow ending closes every open run (435-441). The one
+  place a returning POST touches a run is `send`, and only when admission failed (480-536) or the
+  receipt arrives after the server has already released the run (538-543) — never on success.
 
 ## What crosses it that should not
 
@@ -236,7 +257,7 @@ output of this module and nothing stores it*), and its only production importer 
 
 **The state layer's message shape crosses the history route.** `ZenThreadHistory.messages` is
 `unknown` on purpose — core must not own the client's transport shape — and `reviveHistoryMessages`
-(`thread-stores.ts:165-191`) restores it at the browser boundary; `ThreadStores.history` is typed as the
+(`thread-stores.ts:247-268`) restores it at the browser boundary; `ThreadStores.history` is typed as the
 client's `UIMessage` (line 34). The server builds those messages in `server/transcript-to-messages.ts`, the
 read-side twin of `to-agui.ts`. Not a vendor-of-the-loop leak and not numbered in goals §2, but it is
 the one place the state layer's shape exists outside the page, and a pivot pays for it (below).

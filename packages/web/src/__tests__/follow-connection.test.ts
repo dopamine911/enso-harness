@@ -632,3 +632,19 @@ test('a frame that fails the wire schema is reported and skipped, never rendered
   expect(server.chunks[0]).toMatchObject({ name: 'snapshot' })
   server.abort()
 })
+
+test('⚠ close() releases the follow and latches it: the page letting a thread go is not the server going away (#272)', async () => {
+  const server = scripted()
+  server.frame(SNAPSHOT_IDLE)
+  await server.untilChunks(1)
+  server.connection.close()
+  // Latched: the thread's pane may remount, but a released connection opens no socket.
+  const afterRelease: StreamChunk[] = []
+  for await (const chunk of server.connection.subscribe()) afterRelease.push(chunk)
+  expect(afterRelease).toEqual([])
+  // ⚠ No `follow-ended`, no problem: `disconnected` states a server that dropped this page.
+  expect(
+    server.chunks.some((chunk) => chunk.type === EventType.CUSTOM && chunk.name === FOLLOW_ENDED_CUSTOM_EVENT),
+  ).toBe(false)
+  expect(server.problems).toEqual([])
+})
