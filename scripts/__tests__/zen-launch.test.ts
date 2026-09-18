@@ -107,3 +107,18 @@ test('a pi whose version cannot be read, or is a prerelease of the excluded vers
   // …and a version printed with company around it is still read: `pi --version` may grow a banner.
   expect(piVersionSupported('pi 0.84.7 (bun 1.4.0)')).toBe(true)
 })
+
+// ⚠ WHOSE number is it (PR #294 review). "The first triple in the output" read bun's version
+// when a banner named bun first — a wrong refusal when that number falls outside the range and
+// a wrong ACCEPTANCE when it falls inside, on the one gate standing between the guard and a
+// deny computed against the wrong target. pi's own name decides; a bare triple is the fallback.
+test("the version read is pi's, whatever else the banner names first (#217)", () => {
+  // The dangerous shape: another component's number is in range, pi's is not.
+  expect(piVersionSupported('bun 0.84.5 / pi 0.85.3')).toBe(false)
+  // …and its mirror: the leading number is out of range, pi's is in it.
+  expect(piVersionSupported('bun 1.4.0 / pi 0.84.7')).toBe(true)
+  expect(piVersionSupported('pi@0.84.7')).toBe(true)
+  expect(piVersionSupported('pi v0.84.7')).toBe(true)
+  // A banner that names no pi version at all is no version claim: refused.
+  expect(piVersionSupported('bun 1.4.0 (linux x64)')).toBe(false)
+})

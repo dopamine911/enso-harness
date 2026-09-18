@@ -71,13 +71,25 @@ export function piVersionText(version) {
   return `${version.major}.${version.minor}.${version.patch}`
 }
 
+/** `pi 0.84.7`, `pi@0.84.7`, `pi/0.84.7`, `pi v0.84.7` — the version with pi's own name on it. */
+const PI_NAMED_VERSION = /\bpi[@ /]?\s*v?(\d+)\.(\d+)\.(\d+)/i
+/** `0.84.4`, `v0.84.4` — a banner that is only the version, which is what today's pi prints. */
+const LEADING_VERSION = /^\s*v?(\d+)\.(\d+)\.(\d+)/
+
 /**
- * The first `major.minor.patch` in the text, or null when it carries none.
+ * The version `pi --version` reported, or null when its output carries none.
+ *
+ * ⚠ Not "the first triple anywhere" (PR #294 review). This gate stands between the guard and
+ * computing a deny against the wrong target, and a banner naming another component first —
+ * `bun 1.4.0 / pi 0.84.7` — would have matched bun's number: a wrong refusal at best, and a
+ * wrong ACCEPTANCE whenever the other component's number happens to fall inside the range.
+ * So pi's own name is looked for first, and a bare leading triple (today's output) second. A
+ * banner that names neither reads as no version, which is refused.
  * @param {string} text
  * @returns {PiVersion | null}
  */
 function versionIn(text) {
-  const match = /(\d+)\.(\d+)\.(\d+)/.exec(text)
+  const match = PI_NAMED_VERSION.exec(text) ?? LEADING_VERSION.exec(text)
   if (match === null) return null
   const [, major, minor, patch] = match
   return { major: Number(major), minor: Number(minor), patch: Number(patch) }

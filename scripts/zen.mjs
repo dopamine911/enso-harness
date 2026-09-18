@@ -121,11 +121,43 @@ const args = piArguments(packageToLoad, passthroughArgs)
  * the new pi (`scripts/__tests__/pi-version-parity.test.ts` is what holds those two together), not by a flag
  * on a launch. The cost is one extra process per launch, ~30 ms.
  */
+/**
+ * ⚠ The probe is BOUNDED, and its exit is read (PR #294 review). A precondition that can hang
+ * is not a precondition: a wedged `pi --version` parked the launcher with no output at all,
+ * which is worse than the refusal it exists to print. And a probe that exits non-zero has not
+ * reported anything — whatever landed on stdout is not a version claim, so it is refused
+ * rather than parsed. Both fail the way the range check does: closed, and named.
+ *
+ * The deadline races the READ, not just the process. Killing the child does not necessarily
+ * end the stream: a shell shim's own child inherits the pipe and holds it open after its
+ * parent dies, so awaiting stdout to EOF hung for the full 30s of a `sleep` shim even with the
+ * kill armed. Measured, then fixed by racing.
+ */
+const PI_PROBE_TIMEOUT_MS = 5000
 let reportedPiVersion = ''
 try {
   const probe = Bun.spawn(['pi', '--version'], { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' })
-  reportedPiVersion = (await new Response(probe.stdout).text()).trim()
-  await probe.exited
+  const reported = (async () => ({
+    text: (await new Response(probe.stdout).text()).trim(),
+    status: await probe.exited,
+  }))()
+  const outcome = await Promise.race([reported, Bun.sleep(PI_PROBE_TIMEOUT_MS).then(() => null)])
+  if (outcome === null) {
+    probe.kill('SIGKILL')
+    process.stderr.write(
+      `zen: \`pi --version\` did not answer within ${PI_PROBE_TIMEOUT_MS / 1000}s, so the version the guards ` +
+        'are pinned against could not be read (#217)\n',
+    )
+    process.exit(1)
+  }
+  if (outcome.status !== 0) {
+    process.stderr.write(
+      `zen: \`pi --version\` exited ${outcome.status}, so the version the guards are pinned against ` +
+        'could not be read (#217)\n',
+    )
+    process.exit(1)
+  }
+  reportedPiVersion = outcome.text
 } catch {
   process.stderr.write('zen: no `pi` on PATH — the terminal surface spawns it, so install it first\n')
   process.exit(1)
