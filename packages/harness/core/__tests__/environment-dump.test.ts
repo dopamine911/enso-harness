@@ -96,3 +96,28 @@ test('the PowerShell path: $env:<secret> and the Env: drive listing, coarse', ()
   expect(coarse('gci env: | Sort-Object Name')).toBe('powershell')
   expect(coarse('Write-Output $env:PATH')).toBeUndefined()
 })
+
+// ── #206: the tripwire has to know `find -exec`, and one wrapper shape it still misses ─────
+// This deny is the sensor for a secrets-quarantine regression, so an unlisted bypass makes
+// it report "no regression" either way. Measured 2026-09-17: `find . -exec env ;` passed.
+test('⚠ a listing command reached through find -exec is denied, naming the wrapped command (#206)', () => {
+  expect(denied('find . -maxdepth 0 -exec env ;')).toBe('wrapped-command')
+  expect(denied('find . -exec printenv \\;')).toBe('wrapped-command')
+  expect(denied('find . -exec env +')).toBe('wrapped-command')
+  // The exec-only wrappers added with it reach the listing too.
+  expect(denied('unshare -r env')).toBe('wrapped-command')
+  expect(denied('runuser -u nobody -- printenv')).toBe('wrapped-command')
+  // find's predicates are arguments, not commands: a file NAMED env is not a listing.
+  expect(denied('find . -name env -type f')).toBeUndefined()
+  expect(denied('find . -exec wc -l {} ;')).toBeUndefined()
+})
+
+// ⚠ STATED RESIDUAL, pinned: a wrapper whose OWN operand follows the wrapped command reads
+// as "env runs that operand" and passes. Closing it means counting a wrapper's trailing
+// operands as the listing's arguments, which denies `sudo env FOO=1 make build` — a command
+// that lists nothing. The sensor takes the miss rather than that false positive, and says so
+// here. A red line means someone closed it: keep the false-positive cost in view.
+test('recorded residual: a wrapper operand after the listing hides it (#206)', () => {
+  expect(denied('script -qc env /dev/null')).toBeUndefined()
+  expect(denied('sudo env FOO=1 make build')).toBeUndefined()
+})
