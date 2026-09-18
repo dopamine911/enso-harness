@@ -25,6 +25,36 @@
 const COMMENT_OR_STRING = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g
 
 /**
+ * From just past an opening `[` to its MATCHING `]`: depth counted, string lexemes skipped.
+ *
+ * ⚠ Not a non-greedy `[…]` capture (PR #302 review). That ended the array at the first `]`
+ * it saw, wherever it came from: a bracket in an allowlist's REASON comment published a short
+ * count (13 entries read as 9), and a bracket inside a quoted ENTRY — a path, a pattern —
+ * makes the whole declaration unreadable, which this file then reports as "absent from
+ * source", naming the wrong cause. No allowlist carries one today, which is exactly how long
+ * a latent miscount stays invisible.
+ */
+function arrayBody(source: string, start: number): string | undefined {
+  let depth = 1
+  let quote = ''
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index] ?? ''
+    if (quote !== '') {
+      if (character === '\\') index += 1
+      else if (character === quote) quote = ''
+      continue
+    }
+    if (character === "'" || character === '"' || character === '`') quote = character
+    else if (character === '[') depth += 1
+    else if (character === ']') {
+      depth -= 1
+      if (depth === 0) return source.slice(start, index)
+    }
+  }
+  return undefined
+}
+
+/**
  * The body of a top-level flat-string-array declaration under `name`, or `undefined` when no
  * declaration under that name has this shape at all.
  *
@@ -34,20 +64,20 @@ const COMMENT_OR_STRING = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\
  * able to confuse with the first.
  */
 function stringArrayBody(source: string, name: string): string | undefined {
-  const pattern = new RegExp(
-    `\\bconst\\s+${name}\\b(?:\\s*:[^=]+)?\\s*=\\s*(?:new\\s+Set\\s*\\()?\\s*\\[([\\s\\S]*?)\\]`,
-  )
-  return pattern.exec(source)?.[1]
+  const opening = new RegExp(`\\bconst\\s+${name}\\b(?:\\s*:[^=]+)?\\s*=\\s*(?:new\\s+Set\\s*\\()?\\s*\\[`).exec(source)
+  if (opening === null) return undefined
+  return arrayBody(source, opening.index + opening[0].length)
 }
 
 export function stringArray(source: string, name: string, file: string): string[] {
-  const body = stringArrayBody(source, name)
-  if (body === undefined) throw new Error(`${file}: cannot parse string array ${name}`)
   // Comments are dropped, string lexemes kept, in one pass — so a `//` inside a quoted entry
-  // is never read as a comment and an entry is never read as one.
-  const clean = body.replace(COMMENT_OR_STRING, (lexeme) => (lexeme.startsWith('/') ? '' : lexeme))
-  const values = [...clean.matchAll(/(['"])(.*?)\1/g)].map((match) => match[2] ?? '')
-  const residue = clean.replace(/(['"])(.*?)\1/g, '').replace(/[\s,]/g, '')
+  // is never read as a comment and an entry is never read as one. Before the body is located,
+  // because a bracket in a comment used to end the array early.
+  const clean = source.replace(COMMENT_OR_STRING, (lexeme) => (lexeme.startsWith('/') ? '' : lexeme))
+  const body = stringArrayBody(clean, name)
+  if (body === undefined) throw new Error(`${file}: cannot parse string array ${name}`)
+  const values = [...body.matchAll(/(['"])(.*?)\1/g)].map((match) => match[2] ?? '')
+  const residue = body.replace(/(['"])(.*?)\1/g, '').replace(/[\s,]/g, '')
   // An EMPTY allowlist is a state the gates aim for (the vendor gate's import list since L6), not a parse failure.
   if (residue.length > 0) throw new Error(`${file}: ${name} is not a flat string array`)
   return values
@@ -85,10 +115,13 @@ export function detectedExceptionConstants(source: string, file: string): string
       (constantName) =>
         /(?:ALLOWED|ALLOWLIST|EXCEPTION|EXEMPT|SKIPPED|VENDORED)/.test(constantName) || constantName === 'VENDOR_ROOTS',
     )
+  // Comments off once, for the same reason `stringArray` takes them off: a bracket in a
+  // reason comment is not the array's.
+  const clean = source.replace(COMMENT_OR_STRING, (lexeme) => (lexeme.startsWith('/') ? '' : lexeme))
   const detected: string[] = []
   for (const constantName of candidates) {
     // A name match that declares no array — `const MAX_ALLOWED = 5` — is not an allowlist.
-    if (stringArrayBody(source, constantName) === undefined) continue
+    if (stringArrayBody(clean, constantName) === undefined) continue
     // Read it for the refusal: an allowlist this cannot read flat is an error, not a gap.
     stringArray(source, constantName, file)
     detected.push(constantName)

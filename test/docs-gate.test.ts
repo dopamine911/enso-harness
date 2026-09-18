@@ -389,6 +389,18 @@ test('each gate-source reader answers its shape, and refuses rather than guessin
     'packages/a.ts',
     'https://x/y',
   ])
+  // ⚠ A `]` inside an ENTRY is content, not the end of the array (PR #302 review). The
+  // non-greedy capture this replaced stopped there: the comment case published a short count
+  // (13 read as 9) and the entry case made the whole declaration unreadable, which the
+  // generator then reported as "absent from source" — the wrong cause, naming the author.
+  expect(stringArray("const A = ['packages/a[1].tsx', 'packages/b.ts']", 'A', 'probe.ts')).toEqual([
+    'packages/a[1].tsx',
+    'packages/b.ts',
+  ])
+  // …and a bracket in a REASON comment is not the array's end either.
+  expect(stringArray("const A = [\n  // see index[0]\n  'packages/b.ts',\n]", 'A', 'probe.ts')).toEqual([
+    'packages/b.ts',
+  ])
   // An EMPTY allowlist is the state the gates aim for, not a parse failure.
   expect(stringArray('const A: readonly string[] = []', 'A', 'probe.ts')).toEqual([])
   expect(() => stringArray('const B = []', 'A', 'probe.ts')).toThrow(/probe\.ts: cannot parse string array A/)
