@@ -61,6 +61,16 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
     '/.netrc',
     '/.pgpass',
     '/.kube/config',
+    // The harness's OWN credential dir (#204): `.zen/secrets.env` (#89) and, under
+    // `.zen/pi-agent/`, pi's `auth.json`, the provider-failover files and every session
+    // transcript — all `0600` on disk, i.e. the operator's own umask calls them secret.
+    // The basename gate below covered `secrets.env` alone, so `auth.json` was readable
+    // and `grep path=.zen` recursed the lot; `containsPathFragment` appends a separator,
+    // so this one entry denies the directory itself and everything under it.
+    // ⚠ THE COST, stated: the agent can no longer read `.zen/logs/*.jsonl` with a tool.
+    // Reading the log is a human command — `bun run logs` — which uses node fs and never
+    // passes this guard. Writes were already denied (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`).
+    '/.zen/',
   ],
   // `zen.config.json` is zen-harness's committed config (#59) and carries web_fetch's
   // host allowlist (#54): a write there widens the harness's egress for every FUTURE
@@ -97,10 +107,10 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
 Four more top-level constants in the same module are corpus, not schema, and are read by
 `packages/harness/core/paths.ts`: `PERSISTENCE_WRITE_BASENAMES` and `PERSISTENCE_WRITE_DIRECTORIES`
 (vendored lists of shell-init, git, editor and agent-config paths a write would *install* something
-into, matched by exact basename — `guard.ts:79-116`), `ZEN_PERSISTENCE_WRITE_DIRECTORIES` (`.pi`,
+into, matched by exact basename — `guard.ts:89-126`), `ZEN_PERSISTENCE_WRITE_DIRECTORIES` (`.pi`,
 `.agents`, `.zen`, `.cc-safety-net`: the runtime's and the harness's own persistence surfaces, kept
-apart so the vendored block stays byte-comparable, `guard.ts:118-140`), and `SECRET_BASENAME_PATTERNS`
-(`guard.ts:142-151`).
+apart so the vendored block stays byte-comparable, `guard.ts:128-150`), and `SECRET_BASENAME_PATTERNS`
+(`guard.ts:152-161`).
 
 What the extension takes, and what it is:
 
@@ -152,32 +162,35 @@ There is no third value — the glossary's Retired table refuses `allow`/`abstai
 
 **Implemented once**, by `packages/harness/extensions/guards/index.ts`. The default export is
 `createGuards({ analyzeBashCommand: checkCommand })` — the real analyzer wired at the composition root
-(`:184-185`). `guardsWithDependencies` registers three hooks: `session_start` resets the read tracker and
-verifies the policy's tool names against the live tool list (`:311-314`); `tool_result` records which
+(`:185-186`). `guardsWithDependencies` registers three hooks: `session_start` resets the read tracker and
+verifies the policy's tool names against the live tool list (`:334-337`); `tool_result` records which
 files the session has seen, from *results* only — a blocked call produces no result and a failed one
-arrives `isError` (`:316-336`); `tool_call` calls `decide` and logs the verdict (`:341-352`).
+arrives `isError` (`:339-359`); `tool_call` calls `decide` and logs the verdict (`:364-375`).
 
-**`decide`'s order** (`:354-480`) — nested, so described, not fenced:
+**`decide`'s order** (`:377-503`) — nested, so described, not fenced:
 
 1. **The fail-closed floor** (#4). If the policy names a tool the runtime does not register, or the tool
-   list could not be enumerated, every call is denied with the mismatch in the reason (`:361-369`).
+   list could not be enumerated, every call is denied with the mismatch in the reason (`:384-392`).
    Checked lazily here if `session_start` has not fired yet, so the floor never depends on event order.
-2. **Shell** (`bash`, `powershell`; `:374-386`) — `shellCommandDenial`, deny first, patch last:
-   the analyzer (bash only; a throw is a deny per its contract, `:212-228`), then the network deny by
+2. **Shell** (`bash`, `powershell`; `:397-409`) — `shellCommandDenial`, deny first, patch last:
+   the analyzer (bash only; a throw is a deny per its contract, `:220-236`), then the network deny by
    name at command position per segment, with the *cannot vouch* floor for a construct it cannot
-   resolve (`:230-254`), then the environment-dump deny (`:256-267`). Only a command that passed all
-   three gets the default timeout injected (`:382-384`), so no denied command has mutated input.
-3. **No `path` argument** → pass (`:388-389`).
-4. **Writes** (`write`, `edit`; `:394-461`), in order: outside the write roots (the cwd when none are
+   resolve (`:238-262`), then the environment-dump deny (`:264-275`), then the secret-path deny —
+   the reader gate's own policy over every literal word of the command (#204, `:277-290`). Only a
+   command that passed all four gets the default timeout injected (`:405-407`), so no denied command
+   has mutated input.
+3. **No `path` argument** → pass (`:411-412`).
+4. **Writes** (`write`, `edit`; `:417-484`), in order: outside the write roots (the cwd when none are
    configured), a protected fragment, a persistence target, a credential pattern, then the session's
    knowledge of the file — *stale* refuses both tools, *unknown and existing* refuses `write` only
-   (#10, #11; the comment at `:428-439` says why the two messages differ).
+   (#10, #11; the comment at `:451-462` says why the two messages differ).
 5. **Every other tool with a `path` is a reader**, by exclusion, and a credential pattern denies it
-   (`:463-477`). Exclusion, not inclusion: an inclusion list naming only `read` once let `grep` over
-   `~/.aws` through (header, `:27-33`).
+   (`:486-500`). Exclusion, not inclusion: an inclusion list naming only `read` once let `grep` over
+   `~/.aws` through (header, `:27-33`). Since #204 the same policy also runs on the shell route, so
+   `read .zen/pi-agent/auth.json` and `cat .zen/pi-agent/auth.json` agree — they did not.
 
 **Every verdict is a record** (#132): a denial at `warn` with the tool, the path and the reason; an
-allow at `debug`; never silent (`:338-350`; pinned by `guards.test.ts:77-97`).
+allow at `debug`; never silent (`:361-373`; pinned by `guards.test.ts:77-97`).
 
 **Consumed by the runtime.** Handlers stack; the first `block` returns and cannot be un-blocked by a
 later extension, whatever the load order (header, `:20-25`). The participants and their load order are
@@ -212,34 +225,35 @@ writes are *our* layers' jobs (`:36-41`).
 ## What crosses it that should not
 
 **L5 — the tool names are the runtime's, and the guard is the runtime's extension.** (`.local/refactor/goals.md` §2.) The names: `bash`, `write`, `edit`,
-`read`, `powershell` — `guards/index.ts:103-107`; the extension: it
+`read`, `powershell` — `guards/index.ts:104-108`; the extension: it
 registers through `pi.on('tool_call')` and returns the runtime's `ToolCallEventResult`
-(`:2,341`). The analyzer is a vendored library — `cc-safety-net/api`'s `checkCommand` (`:4`) — held
+(`:2,364`). The analyzer is a vendored library — `cc-safety-net/api`'s `checkCommand` (`:4`) — held
 behind our verdict: its `{ kind, reason, ruleId }` never leaves `shellCommandDenial`, which turns it into
-`{ block, reason }` (`:223-227`). So the library and the verdict shape survive a runtime change; the
+`{ block, reason }` (`:231-235`). So the library and the verdict shape survive a runtime change; the
 registration and the hook's event types do not. That is already the arbiter's shape (#4): one handler
 owning the verdict, participants as libraries beneath it — designed, deferred while the count is two
 with aligned fail direction (`tool-call-participants.test.ts:9-21`).
 
 A smaller crossing, named: `guard.ts`'s `ZEN_PERSISTENCE_WRITE_DIRECTORIES` spells the analyzer's state
-directory as a path (`:134-138`), which is the gate's one guard line.
+directory as a path (`:144-148`), which is the gate's one guard line.
 
 ## Pivot cost
 
 **Replace the runtime** and the file that changes is `packages/harness/extensions/guards/index.ts`: the
 registration (`pi.on`), the event types it takes (`ToolCallEvent`, `ToolResultEvent`), the
-tool-list read in `verifyPolicyToolNames` (`:296`), and the verdict's return type. `decide`'s order,
+tool-list read in `verifyPolicyToolNames` (`:319`), and the verdict's return type. `decide`'s order,
 the reasons, and the three hooks' responsibilities carry over as they are.
 
 **What does not change**, and what proves it: `packages/harness/core/` — `paths.ts`, `network-egress.ts`,
-`shell-segments.ts`, `environment-dump.ts`, `read-tracker.ts`, `tool-identity.ts` — take strings,
-paths and a cwd and return matches or states (`core/index.ts:13-34`); nothing in them imports the
-runtime, which the vendor gate holds for every file outside `extensions/` and the host. Their tests
-(`core/__tests__/paths.test.ts`, `network-egress.test.ts`, `environment-dump.test.ts`,
-`read-tracker.test.ts`) drive them without an extension. `packages/core/src/guard.ts` is data. The
-contract test pins the analyzer independently of any hook.
+`shell-segments.ts`, `environment-dump.ts`, `shell-secret-paths.ts`, `read-tracker.ts`,
+`tool-identity.ts` — take strings, paths and a cwd and return matches or states (`core/index.ts:13-43`);
+nothing in them imports the runtime, which the vendor gate holds for every file outside `extensions/`
+and the host. Their tests (`core/__tests__/paths.test.ts`, `network-egress.test.ts`,
+`environment-dump.test.ts`, `shell-secret-paths.test.ts`, `read-tracker.test.ts`) drive them without an
+extension. `packages/core/src/guard.ts` is data. The contract test pins the analyzer independently of
+any hook.
 
 **Replace the analyzer** and `GuardDependencies` is the seam: one function `{ command, cwd } →
-{ kind, reason, ruleId? }`, injected at `:185`; the contract test is rewritten for the new library,
+{ kind, reason, ruleId? }`, injected at `:186`; the contract test is rewritten for the new library,
 `shellCommandDenial`'s first block reads the new verdict, and the two allowlist mentions of its state
-directory (`guard.ts:140`, the gate line) go with it.
+directory (`guard.ts:150`, the gate line) go with it.

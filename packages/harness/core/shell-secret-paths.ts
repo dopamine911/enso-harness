@@ -1,0 +1,135 @@
+import { looksLikeSecret, resolveAgainstCwd, textLooksLikeSecretPath } from './paths.ts'
+import { extractFlatShellCommandSegments, literalShellWord, shellWordsOf } from './shell-segments.ts'
+
+/**
+ * The bash/powershell secret-path deny (#204) — the read gate's own policy, on the shell route.
+ *
+ * The reader gate in the guards extension refuses a credential path for every tool that
+ * carries one (`read`, `grep`, `find`, `ls`). `bash` carries a COMMAND, so it never reached
+ * that gate: the guard's three shell denies are about destruction (cc-safety-net), egress
+ * (#9) and environment listing (#89), and none of them resolves a path. Measured before
+ * this module existed, with the real handler and the real analyzer: `read .zen/secrets.env`
+ * was refused while `cat .zen/secrets.env`, `cat .zen/pi-agent/auth.json` and
+ * `cat ~/.aws/credentials` were all ALLOWED — the same bytes, one tool over.
+ *
+ * So this deny is not a second corpus. It resolves each word of the command the way the
+ * reader gate resolves a path argument and asks `looksLikeSecret` the same question with
+ * the same `policy.secretPathFragments`. ONE policy, both routes.
+ *
+ * ⚠ It gates WORDS, not reads: a word that merely NAMES a credential path is refused even
+ * where the command would not open it (`grep -rn '\.zen/secrets\.env' packages/` is denied;
+ * so is `git log -- .zen/secrets.env`). That is the deliberate direction. The gate cannot
+ * know which operand a program will open, and over-refusing a mention fails safe and says
+ * so, while under-refusing hands over a key. `shell-secret-paths.test.ts` pins both
+ * directions, the false positives included, so the cost stays visible rather than becoming
+ * a surprise.
+ *
+ * STATED NON-COVERAGE — a bar, not a boundary, exactly like the egress deny:
+ *   - A name assembled at runtime that the word's own text does not contain:
+ *     `K=.zen/secrets.env; cat $K`, `$'\056zen/secrets.env'`, `cat .z*n/sec*`. A word whose
+ *     value is not knowable from the text (expansion, brace/glob synthesis, malformed
+ *     quoting) falls back to a scan of that word's raw TEXT, which catches the common
+ *     `"$HOME/.zen/secrets.env"` and nothing spelled indirectly.
+ *   - Interpreters: `bun -e 'await Bun.file(".zen/secrets.env").text()'` — the path is a
+ *     word of the `-e` payload, so the scan does see this one, but a program that builds
+ *     the name from pieces at runtime is outside any text scan. `network-egress.ts` states
+ *     the same interpreter non-coverage for the same reason.
+ *   - Anything already read: this deny is about disclosure at the shell, not about what a
+ *     session that has the bytes then does with them.
+ */
+
+/** How the deny matched — carried into the block reason so a denial is explainable. */
+export interface SecretPathMatch {
+  /** The offending word, as written in the command. */
+  matched: string
+  /**
+   * `resolved` — the word's literal value, resolved against the session cwd, matched the
+   * read policy (the reader gate's own question). `text` — the value was not knowable from
+   * the text (expansion, synthesis, malformed quoting), and the raw word carried a
+   * credential fragment or basename anyway.
+   */
+  via: 'resolved' | 'text'
+}
+
+/** A redirection operator fused to its target (`<file`, `2>file`, `&>file`): the target is the path. */
+const ATTACHED_REDIRECT_PREFIX = /^(?:\d*(?:<<<|<<-?|<>|>>|>|<)|&>>?)/
+/** `--file=PATH`, `-o=PATH`: the option name is not the path, the value after `=` is. */
+const FLAG_VALUE_PREFIX = /^--?[A-Za-z0-9][-A-Za-z0-9_]*=/
+/** Coarse split: whitespace and the shell/PowerShell operators that can abut a path. */
+const COARSE_WORD_BOUNDARY = /[\s;|&()]+/
+/** PowerShell (and Git-Bash-typed) separators, so a text scan sees `.zen\secrets.env` as a path. */
+const BACKSLASH_SEPARATOR = /\\/g
+
+/** The word with a fused redirection operator or option name removed — what is left is the path candidate. */
+function pathCandidateOf(word: string): string {
+  return word.replace(ATTACHED_REDIRECT_PREFIX, '').replace(FLAG_VALUE_PREFIX, '')
+}
+
+/**
+ * The word as TEXT, made comparable to a resolved path: PowerShell separators folded, and a
+ * LEADING separator added — a directory fragment carries one (`/.zen/`), and a relative
+ * mention (`.zen/$KEY`) has nothing before its first segment, so without this the fragment
+ * pass would see `.zen/...` and match nothing while `<cwd>/.zen/...` matches.
+ */
+function textCandidateOf(word: string): string {
+  const folded = pathCandidateOf(word).replace(BACKSLASH_SEPARATOR, '/')
+  return folded.startsWith('/') ? folded : `/${folded}`
+}
+
+/**
+ * Judge ONE word. A word whose literal value is knowable gets the reader gate's exact
+ * question; a word whose value is not gets a scan of its own text, which is where
+ * `"$HOME/.zen/secrets.env"` and `.zen/$KEY` are caught.
+ */
+function wordFinding(word: string, fragments: readonly string[], cwd: string): SecretPathMatch | undefined {
+  const candidate = pathCandidateOf(word)
+  if (candidate.length === 0) return undefined
+  const literal = literalShellWord(candidate)
+  if (literal.kind === 'literal') {
+    if (literal.value.length === 0) return undefined
+    const target = resolveAgainstCwd(literal.value, cwd)
+    return looksLikeSecret(target, fragments) ? { matched: word, via: 'resolved' } : undefined
+  }
+  return textLooksLikeSecretPath(textCandidateOf(candidate), fragments) ? { matched: word, via: 'text' } : undefined
+}
+
+/**
+ * The coarse pass: every whitespace/operator-delimited token, judged by TEXT only.
+ * PowerShell always takes this (the segmenter speaks POSIX, not PS), and so does a POSIX
+ * command the segmenter declined — the same escalation the other two shell denies make.
+ */
+function coarseFinding(command: string, fragments: readonly string[]): SecretPathMatch | undefined {
+  for (const token of command.split(COARSE_WORD_BOUNDARY)) {
+    if (token.length === 0) continue
+    if (textLooksLikeSecretPath(textCandidateOf(token), fragments)) return { matched: token, via: 'text' }
+  }
+  return undefined
+}
+
+/**
+ * Find the first word of a shell command that names credential material, or undefined when
+ * none does. `coarse` forces the text pass (the PowerShell path).
+ */
+export function findSecretPathWord(
+  command: string,
+  fragments: readonly string[],
+  cwd: string,
+  options: { coarse?: boolean } = {},
+): SecretPathMatch | undefined {
+  if (options.coarse === true) return coarseFinding(command, fragments)
+  const segments = extractFlatShellCommandSegments(command)
+  if (segments.length === 0) return coarseFinding(command, fragments)
+  for (const segment of segments) {
+    const words = shellWordsOf(segment.text)
+    if (words === null) {
+      const finding = coarseFinding(segment.text, fragments)
+      if (finding !== undefined) return finding
+      continue
+    }
+    for (const word of words) {
+      const finding = wordFinding(word, fragments, cwd)
+      if (finding !== undefined) return finding
+    }
+  }
+  return undefined
+}
