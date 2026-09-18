@@ -14,9 +14,23 @@ import {
   ZenPromptReceipt,
   zenLogger,
 } from '@zen/core'
+import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from './custom-event-router.ts'
 import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
+
+/**
+ * The wire validator, compiled once at module load — the `@zen/core` convention
+ * (`config.ts:47`, `dialog.ts:83-84`, `thread-runtime.ts:60`, `tool-result.ts:94`).
+ *
+ * `Compile` rather than `Check` because this runs on EVERY frame off the follow — once per
+ * streamed token — against a union whose snapshot arm is the whole transcript. Measured
+ * (#281): 13.16 µs interpreted against 0.035 µs compiled for a `text-delta` frame, and
+ * 41.5 µs against 0.57 µs for a 50-message snapshot. The receipt checks below stay
+ * interpreted on purpose: one per prompt and one per abort is not a hot path, and compiling
+ * them would imply otherwise.
+ */
+const followFrameValidator = Compile(ZenFollowFrameSchema)
 
 /**
  * The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over
@@ -447,7 +461,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     const pump = (async () => {
       try {
         for await (const raw of frames) {
-          if (!Check(ZenFollowFrameSchema, raw)) {
+          if (!followFrameValidator.Check(raw)) {
             problem('a frame off the wire fails ZenFollowFrame: {frame}', { frame: raw })
             continue
           }

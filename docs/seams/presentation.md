@@ -13,7 +13,7 @@ Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Ref
 
 ## The contract
 
-The adapter. `createFollowConnection` (`packages/web/src/follow-connection.ts:241-641`, not fenced
+The adapter. `createFollowConnection` (`packages/web/src/follow-connection.ts:255-681`, not fenced
 for its length) builds one per thread: `subscribe()` opens `GET /api/threads/:id/follow` once and
 turns frames into the state layer's chunks; `send()` POSTs the prompt and answers at admission. Three
 methods beside the vendored adapter interface are ours, and each says why the vendored one would not do:
@@ -236,14 +236,14 @@ need none: an upstream re-port is the second implementation, and the gate is wha
   thread state shared across threads — the bug class the mounted two-threads test observes — and
   fails here by name.
 - **Invariant 1** (`architecture.md`: *the feed is the only writer of run state in the browser*) is
-  held inside the adapter. A run opens in `openRun` (`follow-connection.ts:278-287`, `RUN_STARTED`)
-  and closes in `closeRun` (289-293). The feed drives both: a `status` or snapshot frame reaches
-  `observeStatus` (345-356), which closes every run the server has moved past (`finishRunsThrough`,
-  332-337) or opens an `external-<generation>` run another client started (355); a `settled`
-  observation closes the runs through the server's generation (375-381); a `prompt-rejected` closes
-  the run it names with `RUN_ERROR` (399); the follow ending closes every open run (435-441). The one
-  place a returning POST touches a run is `send`, and only when admission failed (480-536) or the
-  receipt arrives after the server has already released the run (538-543) — never on success.
+  held inside the adapter. A run opens in `openRun` (`follow-connection.ts:292-301`, `RUN_STARTED`)
+  and closes in `closeRun` (303-307). The feed drives both: a `status` or snapshot frame reaches
+  `observeStatus` (359-370), which closes every run the server has moved past (`finishRunsThrough`,
+  346-351) or opens an `external-<generation>` run another client started (369); a `settled`
+  observation closes the runs through the server's generation (389-395); a `prompt-rejected` closes
+  the run it names with `RUN_ERROR` (413); the follow ending closes every open run (475-481). The one
+  place a returning POST touches a run is `send`, and only when admission failed (520-576) or the
+  receipt arrives after the server has already released the run (578-583) — never on success.
 
 ## What crosses it that should not
 
