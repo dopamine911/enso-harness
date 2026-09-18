@@ -284,6 +284,148 @@ test('an input dialog: what is typed is the answer, one POST …/dialog, uncontr
   await pane.unmount()
 })
 
+// #275: the card stays mounted for the whole round trip (`settleDialog` clears the slot only
+// once the server has taken the answer), and the server SPENDS a question on its first answer.
+// So a second click — a double-click on `Yes`, a second option on a `select` — used to send a
+// second POST, get the 404 for the spent question, and put a red `dialog d4 gone: 404 …` line
+// on screen for an answer that had in fact landed. Measured before the guard: three POSTs
+// (`alpha`, `alpha`, `bravo`) and that notice.
+test('⚠ an open question is answered ONCE: extra clicks post nothing and no failure is reported for an answer that landed', async () => {
+  const pane = await mountPane()
+  const askSelect = async (id: string): Promise<void> => {
+    await pane.settle({
+      type: 'observation',
+      seq: id === 'd4' ? 1 : 2,
+      observation: {
+        kind: 'extension-ui-request',
+        id,
+        method: 'select',
+        blocking: true,
+        origin: 'run',
+        dialog: { method: 'select', title: `Pick one (${id})`, options: ['alpha', 'bravo'] },
+      },
+    })
+  }
+  await pane.settle(SNAPSHOT_IDLE)
+  await askSelect('d4')
+  const options = await eventually(() => {
+    const found = [...pane.container.querySelectorAll('button')].filter(
+      (button) => button.textContent === 'alpha' || button.textContent === 'bravo',
+    )
+    if (found.length !== 2) throw new Error("expected the select's two options as buttons")
+    return found
+  })
+  // All in one task, before the first POST resolves: the double-click and a different option.
+  await flush(async () => {
+    options[0]?.click()
+    options[0]?.click()
+    options[1]?.click()
+    await tick()
+  })
+  await eventually(() => {
+    expect(pane.server.dialogs).toEqual([{ id: 'd4', value: 'alpha' }])
+    expect(pane.container.textContent).not.toContain('Pick one (d4)')
+    expect(pane.container.textContent).not.toContain('gone: 404')
+  })
+
+  // ⚠ And the NEXT question is answerable: the flag is per-question state, so a fresh card
+  // must not inherit the spent one's. A red line here means the guard latched for the thread.
+  await askSelect('d5')
+  const nextOption = await eventually(() => {
+    const found = [...pane.container.querySelectorAll('button')].find((button) => button.textContent === 'bravo')
+    if (found === undefined) throw new Error("expected the next question's options")
+    if (found.disabled) throw new Error('the next question arrived with its controls disabled')
+    return found
+  })
+  await flush(async () => {
+    nextOption.click()
+    await tick()
+  })
+  await eventually(() => {
+    expect(pane.server.dialogs).toEqual([
+      { id: 'd4', value: 'alpha' },
+      { id: 'd5', value: 'bravo' },
+    ])
+    expect(pane.container.textContent).not.toContain('Pick one (d5)')
+  })
+  await pane.unmount()
+})
+
+// #276: the one surface that parks pi on a human used to carry no role, no accessible name and
+// no focus — a screen-reader user could not tell a parked thread from a slow one, and a
+// keyboard user had to tab the whole transcript to find the question. The name and the focus
+// move are the behaviour: read through the accessibility properties of the DOM, never a class.
+test('a blocking question announces itself: a group named by the question, and focus on the control that answers it', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE, {
+    type: 'observation',
+    seq: 1,
+    observation: {
+      kind: 'extension-ui-request',
+      id: 'd6',
+      method: 'confirm',
+      blocking: true,
+      origin: 'run',
+      dialog: { method: 'confirm', title: 'Apply the edit?', message: 'It is reversible' },
+    },
+  })
+  const card = await eventually(() => {
+    const found = pane.container.querySelector<HTMLElement>('[role="group"]')
+    if (found === null) throw new Error('expected the question as a named group')
+    return found
+  })
+  // The accessible name is the question itself — `aria-labelledby` resolved the way a screen
+  // reader resolves it, and the title is a heading so the rotor can reach it.
+  const nameSource = document.getElementById(card.getAttribute('aria-labelledby') ?? '')
+  expect(nameSource?.textContent).toBe('Apply the edit?')
+  expect(nameSource?.getAttribute('role')).toBe('heading')
+  // Focus is inside the group, on the control a human answers with — not still in the transcript.
+  await eventually(() => {
+    expect(card.contains(document.activeElement)).toBe(true)
+    expect(document.activeElement?.textContent).toBe('Yes')
+  })
+  await pane.unmount()
+})
+
+// ── the accessible names the e2e spec selects by (#277) ──────────────────────────────────
+
+/**
+ * `packages/web/e2e/chat.e2e.ts` finds the composer by these three names and nothing checked
+ * them: `STOP_BUTTON_NAME` read `'stop the current response'` from before #116 renamed the
+ * control to `stop the run`, so the one e2e that proves a run started could never match. The
+ * spec does not run in CI, so the contract is gated in two halves that meet here: this test
+ * pins name → RENDERED MARKUP, and `test/e2e-selectors.test.ts` pins the spec's constants →
+ * the names in `chat-screen.tsx`. Renaming a control fails both; editing a constant fails the
+ * gate. (⚠ The spec cannot be read from here: `packages/web/src` is the browser zone and
+ * fallow refuses a browser → test edge. The names are literal on purpose.)
+ */
+test("⚠ the composer's e2e selectors match the rendered markup, and the spec's settle gate is false mid-run", async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  const stopByName = (): number => pane.container.querySelectorAll('button[aria-label="stop the run"]').length
+  await eventually(() => {
+    expect(pane.composer().placeholder).toBe('ask pi something')
+    expect(pane.sendButton().getAttribute('aria-label')).toBe('send message')
+    // Settled, so the spec's settle gate — the stop control's absence — holds.
+    expect(stopByName()).toBe(0)
+  })
+
+  // Mid-run it is FALSE, which is what makes it a gate: send is rendered the whole time (only
+  // disabled), so the old reading "send is visible" was already true on the empty page.
+  await pane.settle({ type: 'status', live: true, busy: true, generation: 1 })
+  await eventually(() => {
+    expect(stopByName()).toBe(1)
+    expect(pane.sendButton().isConnected).toBe(true)
+  })
+
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'settled' } },
+    { type: 'status', live: true, busy: false, generation: 1 },
+  )
+  await eventually(() => expect(stopByName()).toBe(0))
+  await pane.unmount()
+})
+
 // PR #129 review: the take-back runs after a network round trip, from a closure an older
 // render made. It must act on the transcript as it is THEN — not revert what streamed in between.
 test('⚠ a queued prompt refused after a delay takes back only its own bubble; deltas that streamed meanwhile stay', async () => {

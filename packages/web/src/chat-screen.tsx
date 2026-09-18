@@ -54,7 +54,7 @@ import { Input } from './components/ui/input.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
 import { routeZenCustomEvent } from './custom-event-router.ts'
 import { createFixtureChat } from './fixture-conversation.ts'
-import type { FollowConnection } from './follow-connection.ts'
+import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.ts'
 import { ThreadNotifications } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
@@ -340,19 +340,22 @@ function PermissionModeControl(): React.ReactNode {
 export function DialogAnswerControls({
   dialog,
   answer,
+  disabled,
 }: {
   dialog: ZenDialogSpec
   answer: (payload: { value: string } | { confirmed: boolean }) => void
+  /** An answer is already in flight: every control refuses a second one — see {@link OpenQuestion} (#275). */
+  disabled: boolean
 }): React.ReactNode {
   if (dialog.method === 'confirm') {
     return (
       <div className="flex flex-col gap-3">
         <p className="text-sm">{dialog.message}</p>
         <div className="flex gap-2">
-          <Button type="button" onClick={() => answer({ confirmed: true })}>
+          <Button type="button" disabled={disabled} onClick={() => answer({ confirmed: true })}>
             Yes
           </Button>
-          <Button type="button" variant="outline" onClick={() => answer({ confirmed: false })}>
+          <Button type="button" variant="outline" disabled={disabled} onClick={() => answer({ confirmed: false })}>
             No
           </Button>
         </div>
@@ -371,7 +374,13 @@ export function DialogAnswerControls({
         )}
         <div className="flex flex-wrap gap-2">
           {dialog.options.map((option) => (
-            <Button key={option} type="button" variant="outline" onClick={() => answer({ value: option })}>
+            <Button
+              key={option}
+              type="button"
+              variant="outline"
+              disabled={disabled}
+              onClick={() => answer({ value: option })}
+            >
               {option}
             </Button>
           ))}
@@ -391,35 +400,62 @@ export function DialogAnswerControls({
       className="flex items-start gap-2"
     >
       {dialog.method === 'editor' ? (
-        <Textarea name="answer" defaultValue={dialog.prefill ?? ''} rows={6} className="flex-1" />
+        <Textarea name="answer" defaultValue={dialog.prefill ?? ''} rows={6} disabled={disabled} className="flex-1" />
       ) : (
-        <Input name="answer" placeholder={dialog.placeholder ?? ''} autoComplete="off" className="flex-1" />
+        <Input
+          name="answer"
+          placeholder={dialog.placeholder ?? ''}
+          autoComplete="off"
+          disabled={disabled}
+          className="flex-1"
+        />
       )}
-      <Button type="submit">Answer</Button>
+      <Button type="submit" disabled={disabled}>
+        Answer
+      </Button>
     </form>
   )
 }
 
+/**
+ * The question as a card — the one surface that parks pi on a human, so it is a NAMED GROUP
+ * (#276): `role="group"` whose accessible name is the question, with the title carrying a
+ * heading role so a screen reader can jump straight to it. NOT `role="dialog"`/`aria-modal`:
+ * the run keeps going behind it and the rest of the page stays usable, so claiming modality
+ * would be a lie a screen reader acts on. {@link OpenQuestion} moves focus into the group on
+ * arrival, and that focus move is what announces it — which is why there is no live region
+ * here: a polite region wrapping the card would read the whole question a second time.
+ */
 export function ZenDialogCard({
+  dialogId,
   dialog,
   answer,
   cancel,
+  disabled,
+  ref,
 }: {
+  /** The open question's id — unique per question, so the `aria-labelledby` target is too. */
+  dialogId: string
   dialog: ZenDialogSpec
   answer: (payload: { value: string } | { confirmed: boolean }) => void
   cancel: () => void
+  disabled: boolean
+  ref?: React.Ref<HTMLDivElement>
 }): React.ReactNode {
+  const titleId = `zen-dialog-title-${dialogId}`
   return (
-    <Card className="my-4">
+    <Card ref={ref} role="group" aria-labelledby={titleId} className="my-4">
       <CardHeader>
         <CardDescription className="uppercase tracking-wide">pi is asking</CardDescription>
-        <CardTitle className="text-base">{dialog.title}</CardTitle>
+        <CardTitle id={titleId} role="heading" aria-level={2} className="text-base">
+          {dialog.title}
+        </CardTitle>
       </CardHeader>
       <CardContent>
-        <DialogAnswerControls dialog={dialog} answer={answer} />
+        <DialogAnswerControls dialog={dialog} answer={answer} disabled={disabled} />
       </CardContent>
       <CardFooter>
-        <Button type="button" variant="ghost" size="sm" onClick={cancel}>
+        <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={cancel}>
           Cancel — decline the question
         </Button>
       </CardFooter>
@@ -433,30 +469,70 @@ export function ZenDialogCard({
  * tab or expired (`gone`). A `refused` answer (an unoffered value, 422) leaves the question
  * open on the server, so it stays on screen with the reason as a notice: nothing would
  * re-show it otherwise, and the thread would sit busy behind a card that vanished (PR #113
- * review). `unreachable` (the request never arrived) leaves it open the same way.
+ * review). `unreachable` (the request never arrived) leaves it open the same way. The outcome
+ * is handed back so the caller can tell a spent question from one still standing (#275).
  * ⓘ Exported for `__tests__/chat-screen.test.tsx`.
  */
 export async function settleDialog(
   stores: Pick<ThreadStores, 'connection' | 'dialog'>,
   response: DialogAnswer,
-): Promise<void> {
+): Promise<DialogAnswerOutcome> {
   const outcome = await stores.connection.answerDialog(response)
   if (outcome === 'answered' || outcome === 'gone') stores.dialog.set(undefined)
+  return outcome
 }
 
-/** The thread's open question, if any — see {@link settleDialog}. */
+/** The thread's open question, if any — see {@link OpenQuestion}. */
 function PendingDialog(): React.ReactNode {
   const stores = useThreadStores()
   const pending = useStore(stores.dialog)
   if (pending === undefined) return null
+  // ⚠ Keyed by the question's id: the in-flight flag and the focus move are per-QUESTION
+  // state, so the next question arrives on a fresh mount instead of inheriting either.
+  return <OpenQuestion key={pending.id} id={pending.id} dialog={pending.dialog} />
+}
+
+/**
+ * One open question: answered ONCE (#275), and announced on arrival (#276).
+ *
+ * The card stays mounted for the whole round trip — `settleDialog` clears the slot only once
+ * the server has taken the answer — so nothing but this flag stops a second click from
+ * sending a second `POST …/dialog`. The server 404s the spent question, the adapter reports
+ * `gone`, and the user reads a red `dialog <id> gone: 404 …` line for an answer that in fact
+ * landed. ⚠ The flag is a REF as well as state: two clicks in one task (a double-click on
+ * `Yes`, a second option on a `select`) both read the state from before the first re-render,
+ * so the state is what disables the controls and the ref is what closes that race. A
+ * `refused` (422) or `unreachable` answer leaves the question standing, so those re-open the
+ * controls; anything else spends it and this unmounts.
+ */
+function OpenQuestion({ id, dialog }: { id: string; dialog: ZenDialogSpec }): React.ReactNode {
+  const stores = useThreadStores()
+  const [settling, setSettling] = useState(false)
+  const inFlight = useRef(false)
+  const card = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    // The run is parked on a human, so the question takes focus: it announces the group (whose
+    // name IS the question) and spares a keyboard user the whole transcript to find it.
+    card.current?.querySelector<HTMLElement>('button, input, textarea')?.focus()
+  }, [])
   const settle = (response: DialogAnswer): void => {
-    void settleDialog(stores, response)
+    if (inFlight.current) return
+    inFlight.current = true
+    setSettling(true)
+    void settleDialog(stores, response).then((outcome) => {
+      if (outcome !== 'refused' && outcome !== 'unreachable') return
+      inFlight.current = false
+      setSettling(false)
+    })
   }
   return (
     <ZenDialogCard
-      dialog={pending.dialog}
-      answer={(payload: { value: string } | { confirmed: boolean }) => settle({ id: pending.id, ...payload })}
-      cancel={() => settle({ id: pending.id, cancelled: true })}
+      ref={card}
+      dialogId={id}
+      dialog={dialog}
+      disabled={settling}
+      answer={(payload: { value: string } | { confirmed: boolean }) => settle({ id, ...payload })}
+      cancel={() => settle({ id, cancelled: true })}
     />
   )
 }
