@@ -11,13 +11,31 @@
  * Ordering is cheap-first: a fast Biome failure surfaces before the slower
  * typecheck and test gates run.
  *
- * The checks:
- *   1. biome     — lint + format + import-organize (check-only, no writes). This
+ * The checks, in the order GATES lists them:
+ *   1. biome     — `biome check`: lint + format + import-organize (check-only, no writes). This
  *                  also enforces the discipline rules Biome can express, e.g.
  *                  `noTsIgnore` is set to error in biome.jsonc, so a banned
  *                  suppression directive fails the gate rather than merely warning.
- *   2. typecheck — `tsc --noEmit` over the package.
- *   3. test      — `vitest run`.
+ *   2. typecheck — `tsc -b --pretty false`: a project-reference BUILD, not `--noEmit`. The
+ *                  blueprint's `--noEmit` is not available here and the difference is not
+ *                  cosmetic: `composite` is required by project references, `composite` requires
+ *                  declaration emit, and `tsc -b --noEmit` is refused outright — measured
+ *                  2026-09-18, `error TS6310: Referenced project '…/packages/core' may not
+ *                  disable emit`. So this gate WRITES: `emitDeclarationOnly` declarations into
+ *                  each package's `dist-types/`, gitignored, and fallow skips them.
+ *   3. dead-code — `fallow dead-code --quiet --baseline fallow-baseline.json`: fails on a finding
+ *                  that is not already in the committed identity baseline. After typecheck,
+ *                  because fallow's graph is syntactic.
+ *   4. test      — `bun test`, not `vitest run`. bunfig keeps coverage always on, so this
+ *                  writes `coverage/lcov.info` for gate 5.
+ *   5. coverage  — `bun scripts/check-coverage.ts`: the TOTAL line and function floors over the
+ *                  full denominator, which bun's own per-file `coverageThreshold` cannot express.
+ *
+ * ⚠ Each row's name and first backticked command is CHECKED against GATES and package.json by
+ * `test/gate-abort.test.ts`, because this list is the documented authority for what "green" means
+ * (`docs/verification.md`) and a header nothing checks is a header that drifts. It did: it named
+ * three checks, `vitest run`, and `tsc --noEmit` (#257), so a reader auditing coverage of the gate
+ * list concluded that fallow and the coverage floor were not part of green.
  *
  * ADDING A GATE. This is the extension point a project adopting the blueprint is
  * expected to use: append an entry to GATES and every caller (the pre-commit hook,
@@ -86,15 +104,19 @@ interface Gate {
   readonly script: string
 }
 
-const GATES: readonly Gate[] = [
+/** Exported for `test/gate-abort.test.ts`, which holds the header above equal to this list (#257). */
+export const GATES: readonly Gate[] = [
   {
     name: 'biome',
     describe: 'lint + format + import-organize (check-only)',
     script: 'lint',
   },
   {
+    // `tsc -b`, not `tsc --noEmit`: project references require `composite`, `composite` requires
+    // declaration emit, and `tsc -b --noEmit` is refused with TS6310. The gate emits into
+    // `dist-types/` by design, so calling it a no-emit check was wrong in both words (#257).
     name: 'typecheck',
-    describe: 'tsc --noEmit',
+    describe: 'tsc -b (project-reference build; emits declarations)',
     script: 'typecheck',
   },
   {

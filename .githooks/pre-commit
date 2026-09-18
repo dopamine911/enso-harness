@@ -1,10 +1,32 @@
 #!/bin/sh
-# Pre-commit gate — runs the full check:all (lint + tsc --noEmit + tests), the single source of
-# "green" (scripts/gate.ts). Wired via core.hooksPath, set by the package.json `prepare` script on
-# install. For a deliberate work-in-progress commit, bypass with `git commit --no-verify`.
+# Pre-commit gate — runs the full check:all (biome + tsc -b + fallow + bun test + the coverage
+# floor), the single source of "green" (scripts/gate.ts). Wired via core.hooksPath, set by the
+# package.json `prepare` script on install. For a deliberate work-in-progress commit, bypass with
+# `git commit --no-verify`.
 #
 # Git runs hooks from the repo root, which is where package.json lives, so `run check:all` resolves
 # without changing directory.
+#
+# WHAT THE GATE IS RUN OVER — the guarantee, and where it stops. It ran over the WORKING TREE, so a
+# partial commit (`git add -p`, or staged changes sitting alongside unstaged ones) was validated
+# against content that is not what gets committed: green locally, red in CI, which is precisely the
+# claim this hook makes and the case a WIP-discipline repo hits most. Measured 2026-09-18 with a
+# throwaway repo whose gate printed the file it saw: index `STAGED`, working tree `DIRTY`, the gate
+# read `DIRTY` and the commit contained `STAGED`. So the unstaged remainder is now stashed for the
+# duration of the run and restored afterwards, and the gate sees the snapshot being committed.
+#
+# WHEN IT DOES NOT ISOLATE, and why that is right rather than a gap. `git commit -a` and
+# `git commit -- <path>` hand the hook a TEMPORARY index (`GIT_INDEX_FILE` pointed at
+# `.git/index.lock` and `.git/next-index-*.lock` respectively — measured the same day); stashing
+# would operate on that temporary snapshot, not on the developer's. For `-a` the working tree IS
+# what is being committed, so running over it is correct. For a path-limited commit it is a
+# superset, so the gate is stricter than the commit, never looser. Isolation therefore runs only
+# when the hook holds the real index, and the run says which mode it took.
+#
+# RECOVERY. The stash is a normal stash entry with a named message, not a detached object: if the
+# automatic restore ever fails, the working tree is one `git stash pop --index` away, and the hook
+# prints that command rather than leaving you to guess. Ignored paths (`coverage/`, `dist-types/`)
+# are never stashed, so the gate's own output is untouched by any of this.
 #
 # WHY THE MANAGER IS DETECTED RATHER THAN NAMED. This file is copied VERBATIM into the generated
 # project — it is not a template — so the package manager cannot be interpolated into it. Hardcoding
@@ -19,10 +41,58 @@
 # `git init` before the first install — still gets a comprehensible failure from the gate itself.
 set -e
 
-if [ -f bun.lock ] || [ -f bun.lockb ]; then
-  bun run check:all
-elif [ -f pnpm-lock.yaml ]; then
-  pnpm run check:all
-else
-  npm run check:all
+run_gate() {
+  if [ -f bun.lock ] || [ -f bun.lockb ]; then
+    bun run check:all
+  elif [ -f pnpm-lock.yaml ]; then
+    pnpm run check:all
+  else
+    npm run check:all
+  fi
+}
+
+# The hook holds the developer's own index only when GIT_INDEX_FILE is unset or names `index`.
+# Git's temporary indexes are `index.lock` (`commit -a`) and `next-index-<pid>.lock` (a
+# path-limited commit); see WHEN IT DOES NOT ISOLATE above. Match on the FILE NAME, not on a path
+# comparison against `git rev-parse --git-path index` — that command honours GIT_INDEX_FILE and
+# echoes the override straight back, so the comparison can never fail (measured 2026-09-18: it
+# reported `.git/index.lock` as the real index during `git commit -a`).
+index_name="${GIT_INDEX_FILE##*/}"
+if [ -n "${index_name}" ] && [ "${index_name}" != 'index' ]; then
+  echo "pre-commit: gating the working tree — git built a temporary index (${index_name}) for this commit."
+  run_gate
+  exit 0
 fi
+
+stash_message="pre-commit gate: unstaged remainder, restored automatically"
+stash_before=$(git rev-parse -q --verify refs/stash || true)
+git stash push --keep-index --include-untracked --quiet --message "${stash_message}"
+stash_after=$(git rev-parse -q --verify refs/stash || true)
+
+# Compare the ref, never `git stash list`: with nothing unstaged to save, `stash push` succeeds and
+# creates NOTHING, and a restore that assumed otherwise would pop a stash the developer made
+# earlier and call it cleanup.
+if [ "${stash_before}" = "${stash_after}" ]; then
+  run_gate
+  exit 0
+fi
+
+restore() {
+  status=$?
+  trap - EXIT INT TERM HUP
+  # `reset --hard` first: `stash pop` applies a diff against HEAD, and after --keep-index the
+  # working tree already carries the staged half of it, so popping straight onto it conflicts on
+  # exactly the files a partial commit touches. Resetting to HEAD is the state the stash was taken
+  # from. Nothing is lost by it — every change, staged and unstaged, is inside the stash entry, and
+  # `pop --index` puts both halves back where they were. Ignored build output is not touched.
+  if git reset --hard --quiet && git stash pop --index --quiet; then
+    exit "${status}"
+  fi
+  echo "pre-commit: could not restore your working tree automatically." >&2
+  echo "pre-commit: nothing is lost — your changes are the top stash entry:" >&2
+  echo "pre-commit:   git stash pop --index   # \"${stash_message}\"" >&2
+  exit 1
+}
+trap restore EXIT INT TERM HUP
+
+run_gate

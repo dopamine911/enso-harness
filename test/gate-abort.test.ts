@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { reportsWorkerAbort } from '../scripts/gate.ts'
+import { GATES, reportsWorkerAbort } from '../scripts/gate.ts'
 
 /**
  * The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0.
@@ -29,6 +29,35 @@ test('ordinary stderr is not an abort — diagnostics, warnings and an empty str
   // A test NAMING the banner (this file does) is prose in someone's output, not an abort of
   // the tool that printed it — the scan reads the running tool's stderr, nothing else.
   expect(reportsWorkerAbort('the message says stack overflow when it aborts')).toBe(false)
+})
+
+/**
+ * The second way `bun run check` reports a green it has not earned (#257): the header of
+ * `scripts/gate.ts` is the documented authority for what "green" means
+ * (`docs/verification.md`: "each gate's header is the authority"), and it had drifted to the
+ * ported blueprint's — three checks where the file runs five, `vitest run` for `bun test`,
+ * `tsc --noEmit` for a project-reference build that emits declarations. Nothing exited non-zero;
+ * a reader auditing the gate list simply concluded fallow and the coverage floor were not part
+ * of green. Same class as the abort above — the run says nothing is wrong — so it is checked
+ * here, where the subject is already `scripts/gate.ts`.
+ *
+ * It pins the row STRUCTURE, never the prose: the ordered names and the first backticked command
+ * on each row. The reasoning around them is free to be rewritten.
+ */
+const HEADER_GATE_ROW = /^\s*\*\s+\d+\.\s+(\S+)\s+—\s+`([^`]+)`/
+
+test('⚠ the header of scripts/gate.ts names the gates the file actually runs, with their real commands', async () => {
+  const source = await Bun.file(join(import.meta.dir, '..', 'scripts', 'gate.ts')).text()
+  const rows = source
+    .split('\n')
+    .map((line) => HEADER_GATE_ROW.exec(line))
+    .filter((match) => match !== null)
+    .map((match) => ({ name: match[1] ?? '', command: match[2] ?? '' }))
+  const packageScripts = (await Bun.file(join(import.meta.dir, '..', 'package.json')).json()).scripts as Record<
+    string,
+    string
+  >
+  expect(rows).toEqual(GATES.map((gate) => ({ name: gate.name, command: packageScripts[gate.script] ?? '' })))
 })
 
 /**

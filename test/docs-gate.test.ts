@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { extractDeclaration } from '../scripts/docs/extract-declaration.ts'
+import { FENCE_OPEN, SOURCEABLE_FENCE_LANGUAGE } from '../scripts/docs/refresh-fences.ts'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
@@ -28,9 +29,18 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
  *   it" is checked, so a renamed or deleted test fails the page that cites it. Every flow
  *   page must cite at least one.
  *
- * And one rule for `docs/seams/` and `docs/flows/`: every ```` ```ts ```` fence carries a `source:` marker.
- * Prose may surround a fence; prose may not restate what a fence says, and a fence with no
- * source is prose wearing a code font.
+ * And one rule for `docs/seams/` and `docs/flows/`: EVERY fence carries a `source:` marker, or is a
+ * `mermaid` diagram. Prose may surround a fence; prose may not restate what a fence says, and a
+ * fence with no source is prose wearing a code font.
+ *
+ * ⚠ The rule is over the fence, not over one language tag (#258). The open pattern used to accept
+ * exactly ```` ```ts ```` and `typescript`, so a `tsx` fence, an `sh` fence, or a `ts`
+ * fence carrying an info string was invisible to the WHOLE gate — neither required to carry a
+ * marker in a seam page nor checked against source when it had one. Measured 2026-09-18: three
+ * such fences planted in a seam page ran green. The docs use four fence languages (`ts`, `mermaid`,
+ * `sh`, `bash`); of those only TypeScript and JavaScript can BE a declaration, so those are the
+ * sourceable set, `mermaid` is exempt by name because a diagram is not a quote of source, and
+ * anything else in a seam or flow page is an offender rather than an oversight.
  *
  * The allowlist is EMPTY and stays so. A page that cannot keep its fences equal to the
  * source is describing a different program.
@@ -46,7 +56,14 @@ const TEST_MARKER = /^<!--\s*test:\s*(\S+?)#(.+?)\s*-->$/
 /** Where every page must cite at least one pinning test. */
 const TEST_CITING_DIRECTORIES = ['docs/flows'] as const
 const BLOCK_CLOSE = /^<!--\s*\/generated-block\s*-->$/
-const TS_FENCE_OPEN = /^```(?:ts|typescript)\s*$/
+// `FENCE_OPEN` and `SOURCEABLE_FENCE_LANGUAGE` come from the refresher, which owns them: the gate
+// that demands a sourced fence and the tool that fills one must read the same surface (#258).
+/**
+ * The one unsourced fence a seam or flow page may carry. A mermaid diagram cannot equal a
+ * declaration, so requiring a marker on it would be a rule nothing could satisfy; `docs/flows`
+ * holds eight of them. Naming the exemption keeps it a decision instead of a hole.
+ */
+const DIAGRAM_FENCE_LANGUAGE = 'mermaid'
 const FENCE_CLOSE = /^```\s*$/
 
 function markdownFiles(directory: string): string[] {
@@ -61,27 +78,35 @@ function markdownFiles(directory: string): string[] {
 
 interface Fence {
   readonly openLine: number
+  /** The fence's language tag, lowercased; `''` for a bare ```` ``` ````. */
+  readonly language: string
   readonly body: string
   readonly source: { path: string; symbol: string } | undefined
 }
 
 /**
- * Every ```` ```ts ```` fence in a page, with the `source:` marker directly above it when there
+ * EVERY fence in a page, with its language and the `source:` marker directly above it when there
  * is one. An unclosed fence is an offender, not the end of the scan: the page after it is
  * unreadable as markdown, and a fence the scan cannot see is a fence it cannot check.
+ *
+ * The scan jumps to each fence's close before looking for the next open, which is what lets the
+ * same `^```` pattern serve as both: a bare ```` ``` ```` is an opening delimiter when the walk is
+ * outside a fence and a closing one when it is inside, exactly as markdown reads it.
  */
 function fencesOf(page: string, lines: readonly string[], offenders: string[]): Fence[] {
   const fences: Fence[] = []
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    if (!TS_FENCE_OPEN.test(lines[lineIndex] ?? '')) continue
+    const open = FENCE_OPEN.exec(lines[lineIndex] ?? '')
+    if (open === null) continue
     const closeIndex = lines.findIndex((line, index) => index > lineIndex && FENCE_CLOSE.test(line))
     if (closeIndex === -1) {
-      offenders.push(`${page}:${lineIndex + 1}: ts fence is never closed`)
+      offenders.push(`${page}:${lineIndex + 1}: fence is never closed`)
       break
     }
     const marker = SOURCE_MARKER.exec(lines[lineIndex - 1] ?? '')
     fences.push({
       openLine: lineIndex + 1,
+      language: (open[1] ?? '').toLowerCase(),
       body: lines.slice(lineIndex + 1, closeIndex).join('\n'),
       source: marker ? { path: marker[1] ?? '', symbol: marker[2] ?? '' } : undefined,
     })
@@ -90,11 +115,33 @@ function fencesOf(page: string, lines: readonly string[], offenders: string[]): 
   return fences
 }
 
+/** How a fence with no marker reads in an offender line: `sh`, or `unlabelled` for a bare fence. */
+function describeLanguage(language: string): string {
+  return language === '' ? 'unlabelled' : `\`${language}\``
+}
+
 function sourcedFenceOffenders(page: string, lines: readonly string[], fenceMustBeSourced: boolean): string[] {
   const offenders: string[] = []
   for (const fence of fencesOf(page, lines, offenders)) {
+    const sourceable = SOURCEABLE_FENCE_LANGUAGE.test(fence.language)
     if (fence.source === undefined) {
-      if (fenceMustBeSourced) offenders.push(`${page}:${fence.openLine}: ts fence without a <!-- source: --> marker`)
+      // A page that must source its fences: TypeScript needs a marker, a diagram is exempt by
+      // name, and anything else is a third thing the rule never decided to allow.
+      if (!fenceMustBeSourced) continue
+      if (fence.language === DIAGRAM_FENCE_LANGUAGE) continue
+      offenders.push(
+        sourceable
+          ? `${page}:${fence.openLine}: ${describeLanguage(fence.language)} fence without a <!-- source: --> marker`
+          : `${page}:${fence.openLine}: ${describeLanguage(fence.language)} fence — a fence here is a sourced quote or a mermaid diagram, nothing else`,
+      )
+      continue
+    }
+    // A marker above a fence the extractor cannot fill is a claim nothing checks — the half of
+    // the blind spot that hid a MARKED fence rather than an unmarked one (#258).
+    if (!sourceable) {
+      offenders.push(
+        `${page}:${fence.openLine}: <!-- source: --> marker above a ${describeLanguage(fence.language)} fence — only a TypeScript or JavaScript fence can equal a declaration`,
+      )
       continue
     }
     const sourcePath = join(REPOSITORY_ROOT, fence.source.path)

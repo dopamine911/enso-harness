@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 155.**
+**Decision headers: 156.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -12,7 +12,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/__tests__/config.test.ts` | `#59` | The zen.config.json loading contract (#59): parse fails CLOSED — every non-conforming input comes back `unreadable`, never as a silently-empty config. |
 | `packages/core/src/__tests__/log-process.test.ts` | `#132` | The file a user hands us (#132), end to end through the real configurator: what a line looks like, what never reaches it, what every line under a route carries — and the knob. |
 | `packages/core/src/__tests__/log-recorder.ts` | `#132`, `#178` | The tests' sink (#132), one for every package (#178): every `zen` record, at every level, into memory — a guard's verdict, an audit line or a route's problem is asserted as the record it is, the way a bundle reader would read it, not as a line on stderr. |
-| `packages/core/src/__tests__/no-duplicate-paths.test.ts` | `#59` | The anti-duplication anchor for path resolution (#59) — Daniel: "this should live in core and prevent duplicate code again." |
+| `packages/core/src/__tests__/no-duplicate-paths.test.ts` | `#59`, `#256` | The anti-duplication anchor for path resolution (#59) — Daniel: "this should live in core and prevent duplicate code again." |
 | `packages/core/src/__tests__/observation-kinds.ts` | `#53` | The oracle both "every observation" sweeps compare against (#53 S1.4): every `kind` literal the ZenObservation union declares, sorted. |
 | `packages/core/src/__tests__/secrets.test.ts` | `#89` | #89: secrets stay out of the environment the model's tools inherit. |
 | `packages/core/src/__tests__/thread-inspection.test.ts` | `#86`, `#100` | The row formats are shared by the `?debug` drawer and `zen-thread.mjs` (PR #100 review: one definition, after the #86 pair had drifted). |
@@ -144,6 +144,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/docs/refresh-fences.ts` | `#162`, `#168` | Refreshes every sourced fence in a page from the source it names (#168): the authoring and repair tool for `test/docs-gate.test.ts`. |
 | `scripts/docs/seams-table.ts` | `#162`, `#167` | Generates the seams table (#162 workstream 11, #167 item 4) — the block `docs/architecture.md` and `docs/seams/README.md` embed between `<!-- generated-block: … -->` markers. |
 | `scripts/docs/verification-inventory.ts` | `#170` | Generates `docs/reference/verification-inventory.md` (#170): enforcement gates, the numeric and count ratchets they carry, and the deliberately reusable test doubles. |
+| `scripts/gate.ts` | `#257` | Ported from slop-factory's bun example (examples/bun/scripts/gate.ts) — the shape is deliberately identical so improvements travel in either direction. |
 | `scripts/link-vendor-packages.mjs` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
 | `scripts/print-harness.mjs` | `#9`, `#13`, `#20` | The PRINT-MODE harness variant (#20): the zen-harness package minus picc-permission-modes. |
 | `scripts/source-tree.ts` | `#162`, `#174` | The one walk over the source tree (#174, #162 workstream 6: one walker per gate family). |
@@ -153,12 +154,12 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/browser-bundle-gate.test.ts` | `#211` | The browser zone must bundle for the browser (#211). |
 | `test/check-coverage.test.ts` | `#53` | The coverage GATE's own arithmetic (#53 S2). |
 | `test/code-offenders.test.ts` | `#162` | The allowlist is the leak inventory (#162 workstream 4): a row hides a file's matches, and a row for a file with no matches is drift and is reported. |
-| `test/docs-gate.test.ts` | `#162`, `#167`, `#168` | The docs cannot drift (#168, goals §3.3): a page either quotes source and is checked against it, or is generated from source and is diffed against it. |
+| `test/docs-gate.test.ts` | `#162`, `#167`, `#168`, `#258` | The docs cannot drift (#168, goals §3.3): a page either quotes source and is checked against it, or is generated from source and is diffed against it. |
 | `test/fallow-config.test.ts` | `#163` | fallow's entry list cannot drift from the harness manifest (#163). |
 | `test/gate-abort.test.ts` | `#157` | The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0. |
 | `test/gate-support.ts` | `#150`, `#162`, `#165`, `#174` | What the source-tree gates share (#165, #162 workstream 6): the word-splitter, the sequence matcher, the comment skip, over the one walker (`scripts/source-tree.ts`, #174). |
 | `test/glossary-doc.test.ts` | `#161`, `#164`, `#165` | The glossary keeps its own two rules (#161, PR #164 review). |
-| `test/glossary-gate.test.ts` | `#165` | The glossary's Retired table, applied to the source tree (#165, `docs/glossary.md` → Retired). |
+| `test/glossary-gate.test.ts` | `#165`, `#257` | The glossary's Retired table, applied to the source tree (#165, `docs/glossary.md` → Retired). |
 | `test/logging-gate.test.ts` | `#132` | Every record goes through the one logger (#132), and the substrate stays behind it. |
 | `test/naming-gate.test.ts` | `#82`, `#83` | The naming gate's exemption for externally-fixed KEYS (#82, PR #83 review). |
 | `test/no-lint-suppressions.test.ts` | `#82` | The gate may not be talked out of, one line at a time. |
