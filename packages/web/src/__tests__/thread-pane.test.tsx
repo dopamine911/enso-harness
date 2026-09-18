@@ -546,6 +546,62 @@ test("⚠ a refused or aborted tool call's result reads error LIVE — the same 
   await pane.unmount()
 })
 
+/**
+ * ⚠ THE INVARIANT THE WHOLE-TRANSCRIPT SELECTION EXISTS FOR (#280).
+ *
+ * pi claiming a queued prompt rotates the assistant bubble (`follow-connection.ts`, the user
+ * `message-start`), so a tool result can land on a LATER message than its call. The earlier
+ * bubble must still pair them — and that bubble's own message object never changed, so any
+ * memoisation keyed on message identity (which is what TanStack's `memo(MessageView)` does)
+ * leaves this call reading `running…` for the rest of the session. A red line here means the
+ * row is bailing out on something other than what it draws.
+ */
+test('⚠ a tool result the wire lands on a LATER message still completes the call in the earlier bubble', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  await flush(async () => {
+    typeInto(pane.composer(), 'list them')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 2, observation: { kind: 'text-delta', contentIndex: 0, delta: 'calling it ' } },
+    {
+      type: 'observation',
+      seq: 3,
+      observation: { kind: 'tool-call', toolCallId: 'c3', toolName: 'bash', args: { command: 'ls' } },
+    },
+  )
+  const call = (): Element | null => pane.container.querySelector('[data-zen-tool-call]')
+  await eventually(() => expect(call()?.getAttribute('data-zen-tool-call')).toBe('pending'))
+
+  // pi takes the queued prompt: this ENDS the bubble holding the call and opens a new one,
+  // and everything after it — the result included — belongs to the new message.
+  await pane.settle({ type: 'observation', seq: 4, observation: { kind: 'message-start', role: 'user' } })
+  await pane.settle(
+    {
+      type: 'observation',
+      seq: 5,
+      observation: {
+        kind: 'tool-result',
+        toolCallId: 'c3',
+        toolName: 'bash',
+        text: 'a.ts b.ts',
+        complete: true,
+        isError: false,
+      },
+    },
+    { type: 'observation', seq: 6, observation: { kind: 'text-delta', contentIndex: 0, delta: 'two files' } },
+  )
+  await eventually(() => {
+    expect(call()?.getAttribute('data-zen-tool-call')).toBe('done')
+    expect(pane.container.textContent).toContain('a.ts b.ts')
+    expect(pane.container.textContent).not.toContain('running…')
+  })
+  await pane.unmount()
+})
+
 // ── #125 item 3: runtime truth vs browser belief, through the mounted debug pane (#86) ──
 
 test("⚠ the debug pane names a MISMATCH between the page's mode and the server's, and drops it once they agree", async () => {

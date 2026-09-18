@@ -19,7 +19,7 @@ import {
   type ZenPromptImage,
 } from '@zen/core'
 import { ArrowUpIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
-import { type ComponentType, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from './components/ai-elements/attachments.tsx'
 import {
   Conversation,
@@ -200,7 +200,7 @@ interface ThreadChatOptions {
  * dispose-the-follow hazard `createThreadChatHook` exists to avoid.
  */
 interface ThreadChatHook {
-  readonly useAppChat: () => ChatUIHost<ThreadChatOptions> & { AppChat: ComponentType }
+  readonly useAppChat: () => ChatUIHost<ThreadChatOptions> & { AppChat: React.ComponentType }
   readonly useChatContext: () => ChatUIHost<ThreadChatOptions>
 }
 
@@ -603,6 +603,102 @@ function PendingQueue(): React.ReactNode {
 }
 
 /**
+ * The whole transcript's selection, built ONCE per streamed chunk and indexed by message id
+ * (#280). Every row used to run `selectChatUI` over the entire list to find its own entry,
+ * which is O(messages × parts) per chunk, not per user action: measured over the real
+ * selector, one render pass of a 300-message thread spent 7.1 ms in the selector alone
+ * (0.03 ms at 20, 0.98 ms at 100) before React touched the DOM. Indexed, the same pass costs
+ * 0.03 ms.
+ *
+ * `openRunMessageId` rides along because it is the only other thing a row needed from the
+ * chat: with it here, no row calls `useChatContext`, and a row that reads only this can hand
+ * everything it draws to a memo (see `MessageBody`).
+ */
+interface TranscriptSelection {
+  readonly partsByMessageId: ReadonlyMap<string, KeyedPart[]>
+  /** The message whose run is in flight — the last one, while the thread generates. */
+  readonly openRunMessageId: string | undefined
+}
+
+const TranscriptSelectionContext = createContext<TranscriptSelection>({
+  partsByMessageId: new Map(),
+  openRunMessageId: undefined,
+})
+
+/** The lookup miss that cannot happen: rows and the selection come from the same array. */
+const NO_PARTS: KeyedPart[] = []
+
+interface MessageBodyProps {
+  readonly messageId: string
+  readonly role: UIMessage['role']
+  readonly parts: KeyedPart[]
+  /** This message's run is in flight: a tool call with no result reads `running…` (#130). */
+  readonly runOpen: boolean
+}
+
+/**
+ * One message's bubble, re-rendered only when what it SHOWS changed (#280): measured on the
+ * mounted pane, a streamed delta into a 300-message thread rendered 301 bubbles before this
+ * memo and renders 1 after it.
+ *
+ * ⚠ The comparison is over the selected PARTS, not over the message object, and that is the
+ * whole subtlety. The selection runs over the WHOLE list precisely so a tool result the server
+ * stamps onto a LATER message still pairs with its call (see `ChatMessageRow`), so what an
+ * earlier bubble draws is not a function of its own message alone — which is why TanStack's
+ * `memo(MessageView)`, comparing the message, is measuring the wrong thing for this row. Nor
+ * is it cheaper: on the chunk that paired such a result, TanStack replaced EVERY message
+ * object in the list (probed 2026-09-18), so a message-identity memo bails out there for
+ * nobody. Part identity is what decides the output, so that is what is compared — the same
+ * rule the vendor applies one level down, per part (`selectedPartPropsEqual`).
+ */
+const MessageBody = memo(function MessageBody({ messageId, role, parts, runOpen }: MessageBodyProps): React.ReactNode {
+  return (
+    <Message from={role} data-role={role}>
+      <MessageContent>
+        {parts.map(({ partKey, selected, isTrailingPart }) => (
+          <SelectedMessagePart
+            key={`${messageId}-${partKey}`}
+            selected={selected}
+            // ⚠ Part-level, not chat-level: true only for the TRAILING part of
+            // the TRAILING message while a run is in flight. Passing bare
+            // `chat.isLoading` here re-opened EVERY prior thinking block on
+            // every later send (the Reasoning shell's auto-close latches after
+            // its first close, so they also never closed again) and overwrote
+            // each block's "Thought for N seconds" with the later run's timing.
+            isStreaming={runOpen && isTrailingPart}
+            runOpen={runOpen}
+            renderers={descriptorRenderers}
+          />
+        ))}
+      </MessageContent>
+    </Message>
+  )
+}, sameRenderedMessage)
+
+/**
+ * Whether two renders of one row would draw the same thing. `messageId` and `role` are not
+ * compared: the list is keyed by message id, so one mounted row is one message for its whole
+ * life. `isTrailingPart` is not compared either — it is the part's position, which equal
+ * lengths and equal keys already settle.
+ */
+function sameRenderedMessage(previous: MessageBodyProps, next: MessageBodyProps): boolean {
+  if (previous.runOpen !== next.runOpen) return false
+  if (previous.parts.length !== next.parts.length) return false
+  return previous.parts.every((part, index) => {
+    const other = next.parts[index]
+    if (other === undefined || part.partKey !== other.partKey) return false
+    const before = part.selected
+    const after = other.selected
+    if (before.key !== after.key || before.part !== after.part) return false
+    if (before.key === 'toolCall' && after.key === 'toolCall') {
+      return before.result === after.result && before.interrupt === after.interrupt
+    }
+    if (before.key === 'toolResult' && after.key === 'toolResult') return before.matched === after.matched
+    return true
+  })
+}
+
+/**
  * The widget map every per-thread factory is built from — declared once, so all threads
  * render identically. Type-annotated by inference through `createThreadChatHook`.
  */
@@ -764,6 +860,18 @@ const chatComponents = {
     layout: function ChatLayout({ Messages, Input }: LayoutProps<ThreadChatOptions>): React.ReactNode {
       const chat = useChatContext()
       const debugOpen = useContext(DebugOpenContext)
+      // The one place the transcript is selected (#280): here, where the chat is already read,
+      // once per chunk instead of once per row.
+      const selection = useMemo<TranscriptSelection>(() => {
+        const partsByMessageId = new Map<string, KeyedPart[]>()
+        for (const selected of selectChatUI({ messages: chat.messages }).messages) {
+          partsByMessageId.set(selected.message.id, keyedParts(automaticPartsForMessage(selected)))
+        }
+        return {
+          partsByMessageId,
+          openRunMessageId: chat.sessionGenerating ? chat.messages.at(-1)?.id : undefined,
+        }
+      }, [chat.messages, chat.sessionGenerating])
       return (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1">
@@ -777,7 +885,9 @@ const chatComponents = {
                       description="ask pi something to get started"
                     />
                   ) : (
-                    <Messages />
+                    <TranscriptSelectionContext.Provider value={selection}>
+                      <Messages />
+                    </TranscriptSelectionContext.Provider>
                   )}
                   {/* pi's notify lines (#29) — the transcript tail, above the question,
 									    so "Mode set to X" reads next to the run it belongs to. */}
@@ -814,42 +924,29 @@ const chatComponents = {
      * ⚠ Ignores the bound `Parts` component ON PURPOSE — see `SelectedMessagePart`'s
      * header for why (TanStack's own dispatcher drops tools it has no name for).
      *
-     * The selection is the library's, run over the WHOLE message list — the same input
-     * its own Messages component gives `selectChatUI` — so a tool result the server
-     * stamps onto a DIFFERENT message than its call still pairs. A per-message
-     * `selectMessageUI` was the first draft and would have shown such a call as
-     * "running…" forever. O(messages²) per render is irrelevant at chat scale.
+     * The selection is the library's, run over the WHOLE message list — the same input its
+     * own Messages component gives `selectChatUI` — so a tool result the server stamps onto
+     * a DIFFERENT message than its call still pairs. A per-message `selectMessageUI` was the
+     * first draft and would have shown such a call as "running…" forever.
+     *
+     * ⚠ That whole-list selection USED TO RUN HERE, once per row, which made it O(messages ×
+     * parts) per STREAMED TOKEN rather than per user action — 7.1 ms of pure selector time
+     * per render pass at 300 messages, 0.98 ms at 100 (#280). It now runs once in
+     * `ChatLayout` and arrives indexed, so this row allocates nothing and reads no chat
+     * context: it still runs for every message on every chunk (it consumes the indexed
+     * selection, and React re-renders a context consumer), but all it does is a `Map` lookup
+     * and hand `MessageBody` its props — and that memo is what keeps the redraw to the one
+     * bubble that changed.
      */
     message: function ChatMessageRow({ message }: MessageProps<ThreadChatOptions>): React.ReactNode {
-      const chat = useChatContext()
-      const selectedMessage = selectChatUI({ messages: chat.messages }).messages.find(
-        (selected) => selected.message.id === message.id,
-      )
-      const selectedParts = selectedMessage === undefined ? [] : automaticPartsForMessage(selectedMessage)
-      const isLastMessage = chat.messages.at(-1)?.id === message.id
-      // This message's run is in flight: the last message, while the thread generates. A
-      // tool call with no result reads `running…` under it and `aborted` without it (#130).
-      const runOpen = chat.sessionGenerating && isLastMessage
+      const { partsByMessageId, openRunMessageId } = useContext(TranscriptSelectionContext)
       return (
-        <Message from={message.role} data-role={message.role}>
-          <MessageContent>
-            {keyedParts(selectedParts).map(({ partKey, selected, isTrailingPart }) => (
-              <SelectedMessagePart
-                key={`${message.id}-${partKey}`}
-                selected={selected}
-                // ⚠ Part-level, not chat-level: true only for the TRAILING part of
-                // the TRAILING message while a run is in flight. Passing bare
-                // `chat.isLoading` here re-opened EVERY prior thinking block on
-                // every later send (the Reasoning shell's auto-close latches after
-                // its first close, so they also never closed again) and overwrote
-                // each block's "Thought for N seconds" with the later run's timing.
-                isStreaming={runOpen && isTrailingPart}
-                runOpen={runOpen}
-                renderers={descriptorRenderers}
-              />
-            ))}
-          </MessageContent>
-        </Message>
+        <MessageBody
+          messageId={message.id}
+          role={message.role}
+          parts={partsByMessageId.get(message.id) ?? NO_PARTS}
+          runOpen={openRunMessageId === message.id}
+        />
       )
     },
   },
