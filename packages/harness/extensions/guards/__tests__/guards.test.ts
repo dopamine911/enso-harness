@@ -327,14 +327,23 @@ test('re-reading the changed file clears the staleness and the write passes', ()
  * (PR #287). Everything these commands need is on the command line or in the temp repo, so the
  * child is given an environment rather than inheriting one, and a developer's global gitconfig
  * (`core.hooksPath`, `init.defaultBranch`) cannot reach the fixture either.
+ *
+ * The env therefore carries no `PATH`, and the binary is ABSOLUTE for exactly that reason (PR
+ * #287 review). A bare `git` under this env was not portable, it was lucky: with no `PATH` in
+ * the child environment, `execvp` falls back to the system default path, so it resolved only
+ * because git is `/usr/bin/git`. Measured for a binary that is on the caller's `PATH` and
+ * nowhere else — a git under `~/.local/bin`, a nix profile, Homebrew — both Bun's `spawnSync`
+ * and `child_process.spawn` raise ENOENT. `Bun.which` does that lookup ONCE, against the real
+ * environment, and an absolute path then needs no lookup in any runtime.
  */
 const FIXTURE_GIT_ENV: Record<string, string> = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' }
-
-const isGitAvailable = Bun.which('git') !== null
+/** Absolute, resolved once; empty when git is not installed, and then nothing spawns. */
+const GIT_BINARY: string = Bun.which('git') ?? ''
+const isGitAvailable = GIT_BINARY !== ''
 test.skipIf(!isGitAvailable)('the incident shape: staged, mutated, restored from index — the write is refused', () => {
   const repo = mkdtempSync(join(tmpdir(), 'zen-guard-incident-'))
   const runGit = (...args: string[]): void => {
-    const result = Bun.spawnSync(['git', ...args], { cwd: repo, env: FIXTURE_GIT_ENV })
+    const result = Bun.spawnSync([GIT_BINARY, ...args], { cwd: repo, env: FIXTURE_GIT_ENV })
     if (result.exitCode !== 0) {
       throw new Error(`git ${args[0]} failed: ${result.stderr.toString()}`)
     }
