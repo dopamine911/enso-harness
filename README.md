@@ -179,9 +179,12 @@ so the reader knows what is missing). Never uploaded anywhere: the user attaches
 
 ## The vendored pi packages
 
-Declared explicitly in `packages/harness/package.json` → `pi.extensions`, guards first — pi resolves
-tools first-wins, so **load order is a security property** and a directory glob (which orders by
-filename) is not acceptable. Riding along at exact-pinned versions:
+Declared explicitly in `packages/harness/package.json` → `pi.extensions`, **guards before any vendor
+extension** — pi resolves *tools* first-wins, so a vendor extension must never get to register a tool
+name ahead of ours; a directory glob (which orders by filename) cannot promise that. Logging is
+declared first, ahead of the guards, for a different reason: it configures the sink at load, so it has
+to run before anything can write a record (`docs/flows/boot-and-launchers.md`, invariant 2). Riding
+along at exact-pinned versions:
 [`@ladbabynpm/picc-permission-modes`](https://www.npmjs.com/package/@ladbabynpm/picc-permission-modes)
 (Claude-Code-style permission modes — default / acceptEdits / plan / bypass — interactive runs only),
 [`pi-multi-account`](https://www.npmjs.com/package/pi-multi-account), and a theme. pi loads packages

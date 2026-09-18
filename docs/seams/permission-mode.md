@@ -157,7 +157,7 @@ export const PICC_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassP
 ## Who implements it, who consumes it
 
 **Persisted by the mode extension, not by us.** The extension keeps its live mode in a closure with
-no getter (`permission-mode.ts:6-9`); the one observable artifact is the custom entry it appends on
+no getter (`packages/web/src/host/permission-mode-adapter.ts:5-8`); the one observable artifact is the custom entry it appends on
 every change, `customType: "modes"`. The harness never writes one.
 
 **Read by the host, and only there.** `packages/web/src/host/agent-host.ts` implements
