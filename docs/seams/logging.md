@@ -235,9 +235,10 @@ what is ours — the layers, the properties, the one way to get a logger — and
 this file and the configurators imports the substrate. The three allowlisted files import it by name
 (LogTape: `@logtape/logtape`, `@logtape/file`, `@logtape/pretty`, `@logtape/redaction`), and
 `ZenLogLine`'s header (`log.ts:151-156`) admits the on-disk shape is the substrate's JSON-lines
-formatter, pinned so a formatter change goes red instead of reshaping the file. Not one of goals §2's
-numbered leaks — L1–L6 are the loop's boundary — but the same kind of thing, stated: one maintainer,
-one seam, one gate, and a `ZenLogger` that never exposes the substrate's `Logger`.
+formatter, pinned so a formatter change goes red instead of reshaping the file. Not one of the
+[numbered leaks](./README.md#leak-numbers) — L1–L6 are the loop's boundary — but the same kind of
+thing, stated: one maintainer, one seam, one gate, and a `ZenLogger` that never exposes the
+substrate's `Logger`.
 
 Nothing else. `ZenLogProperties` is open (`[key: string]: unknown`, line 48) — whatever a caller adds
 is carried, and field-name redaction at write is the only check it passes; that is the design, not a
