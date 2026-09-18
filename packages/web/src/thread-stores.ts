@@ -238,17 +238,46 @@ export const threadListStore: Store<readonly ThreadSummary[]> = threadList
 /** One line, from the first user message's text — deepseek-harness titles its sessions exactly this way. */
 export const TITLE_MAX_CHARS = 60
 
-export function titleFromMessages(messages: ReadonlyArray<UIMessage>): string | undefined {
-  const first = messages.find((message) => message.role === 'user')
-  if (first === undefined) return undefined
-  const text = first.parts
-    .filter((part): part is Extract<UIMessage['parts'][number], { type: 'text' }> => part.type === 'text')
-    .map((part) => part.content)
-    .join(' ')
+/**
+ * The message's text parts, joined, whitespace-collapsed and trimmed — the same string
+ * `parts.join(' ').replace(/\s+/g, ' ').trim()` produced, computed over a WINDOW twice the
+ * cap instead of over the whole prompt.
+ *
+ * A window that collapses to more than the cap already contains the title, and collapsing
+ * is left-to-right, so its first `TITLE_MAX_CHARS + 1` characters are the full string's.
+ * The whole prompt is scanned only when the window collapses to LESS than the cap — a
+ * prompt that opens with more whitespace than text — where there is no shorter correct
+ * answer. The first prompt is routinely a pasted file or stack trace, and this ran per
+ * streamed token (#283): 14.9 µs for 20 KB, now 0.19 µs.
+ */
+function titleTextOf(message: UIMessage): string {
+  let source = ''
+  for (const part of message.parts) {
+    if (part.type !== 'text') continue
+    source = source.length === 0 ? part.content : `${source} ${part.content}`
+  }
+  const window = source
+    .slice(0, TITLE_MAX_CHARS * 2)
     .replace(/\s+/g, ' ')
     .trim()
+  if (window.length > TITLE_MAX_CHARS || source.length <= TITLE_MAX_CHARS * 2) return window
+  return source.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * One thread's title, from ONE message — the first user one. Exported so a caller can
+ * depend on that message's identity rather than on the list's: the list gets a new identity
+ * per streamed chunk, and the title cannot have changed (#283).
+ */
+export function titleFromMessage(message: UIMessage): string | undefined {
+  const text = titleTextOf(message)
   if (text.length === 0) return undefined
   return text.length > TITLE_MAX_CHARS ? `${text.slice(0, TITLE_MAX_CHARS)}…` : text
+}
+
+export function titleFromMessages(messages: ReadonlyArray<UIMessage>): string | undefined {
+  const first = messages.find((message) => message.role === 'user')
+  return first === undefined ? undefined : titleFromMessage(first)
 }
 
 /** Test seam: forget every thread. Never called from production code. */
