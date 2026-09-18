@@ -338,6 +338,26 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
   return dispose
 }
 
+/**
+ * The stop contract every launcher owes a supervisor (#267): flush the file, then exit the
+ * way the signal would have — `128 + the signal's number`, so 130 for `SIGINT` and 143 for
+ * `SIGTERM`. `128 + n` is read by a hub, a shell and systemd alike, which makes the table a
+ * CONTRACT and not an implementation detail; it lived twice, verbatim, in the two dev
+ * launchers, where a third signal or a changed flush order would have reached one of them.
+ *
+ * `once`, not `on`: a second signal during the flush must not start a second dispose.
+ */
+export function installLoggingShutdown(dispose: () => Promise<void>): void {
+  for (const [signal, code] of [
+    ['SIGINT', 130],
+    ['SIGTERM', 143],
+  ] as const) {
+    process.once(signal, () => {
+      void dispose().finally(() => process.exit(code))
+    })
+  }
+}
+
 // ── Reading the file back (#132: `bun run logs`, and the bundle's reader) ─────────────────
 
 const PLACEHOLDER = /\{([^{}]+)\}/g

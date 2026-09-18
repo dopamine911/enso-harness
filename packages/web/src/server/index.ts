@@ -3,13 +3,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join, resolve } from 'node:path'
 import {
   base64DecodedBytes,
-  type DialogAnswer,
   isZenThreadId,
   withZenLogContext,
   ZEN_IMAGE_MAX_BYTES,
   ZEN_PROMPT_BODY_MAX_BYTES,
   ZEN_PROMPT_MAX_IMAGES,
-  type ZenPermissionModeChange,
   type ZenStoredThread,
   type ZenThreadEvents,
   type ZenThreadHistory,
@@ -24,7 +22,6 @@ import {
   changeThreadMode,
   type FollowRouteDeps,
   followThread,
-  type PromptBody,
   promptThread,
   readDialogBody,
   readModeChangeBody,
@@ -123,6 +120,68 @@ function readBody(request: IncomingMessage, maxBytes = Number.POSITIVE_INFINITY)
 function endAndClose(request: IncomingMessage, response: ServerResponse, status: number, text: string): void {
   response.writeHead(status, { 'Content-Type': 'text/plain', Connection: 'close' })
   response.end(text, () => request.destroy())
+}
+
+/** A route's read cap and the sentence a body over it is refused with. */
+interface BodyCap {
+  readonly maxBytes: number
+  readonly capText: string
+}
+
+/**
+ * The read-cap rule, once (#265): the body up to `maxBytes`, or `undefined` once the 413 has
+ * been written. A body over the cap is the one case that MUST tear the connection down —
+ * `readBody` stopped mid-stream, so the socket cannot carry another request — and `capText`
+ * is the sentence that says which cap was hit. Anything else the read throws is the caller's
+ * to answer: the three JSON routes go through `readJsonBody` below, which turns it into a
+ * 400; the browser-logs route calls THIS function directly and lets a read failure reach
+ * `answerOrFail`'s 500, because that route parses downstream and has no body to quote.
+ */
+async function readCappedBody(
+  request: IncomingMessage,
+  response: ServerResponse,
+  cap: BodyCap,
+): Promise<string | undefined> {
+  try {
+    return await readBody(request, cap.maxBytes)
+  } catch (error) {
+    if (!(error instanceof BodyTooLargeError)) throw error
+    endAndClose(request, response, 413, cap.capText)
+    return undefined
+  }
+}
+
+/**
+ * A capped body through its reader, or `undefined` once the refusal has been written: the
+ * cap's 413 from `readCappedBody`, and a 400 carrying the message for everything else — a
+ * socket that failed mid-read and a body the reader rejects are both "the caller's body is
+ * not usable", answered with the reason rather than a 500 that says nothing.
+ */
+async function readJsonBody<T>(
+  request: IncomingMessage,
+  response: ServerResponse,
+  cap: BodyCap & { readonly parse: (text: string) => T },
+): Promise<T | undefined> {
+  try {
+    const text = await readCappedBody(request, response, cap)
+    return text === undefined ? undefined : cap.parse(text)
+  } catch (error) {
+    response.writeHead(400, { 'Content-Type': 'text/plain' })
+    response.end((error as Error).message)
+    return undefined
+  }
+}
+
+/**
+ * A refused outcome, answered (#265): the status the decision carries and its reason AS the
+ * body, in `text/plain` — five routes wrote this pair by hand. The route logs first, in its
+ * own words: the record names the object that was refused (a prompt, a dialog id, a mode),
+ * which is what makes the log searchable, and the browser-logs route deliberately writes no
+ * record at all.
+ */
+function refuseWith(response: ServerResponse, outcome: { readonly status: number; readonly reason: string }): void {
+  response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
+  response.end(outcome.reason)
 }
 
 /**
@@ -487,23 +546,12 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
   }
 
   async function respondToPrompt(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
-    let body: PromptBody
-    try {
-      body = readPromptBody(await readBody(request, ZEN_PROMPT_BODY_MAX_BYTES))
-    } catch (error) {
-      if (error instanceof BodyTooLargeError) {
-        endAndClose(
-          request,
-          response,
-          413,
-          `a prompt body is at most ${ZEN_PROMPT_BODY_MAX_BYTES} bytes (${ZEN_PROMPT_MAX_IMAGES} images of ${ZEN_IMAGE_MAX_BYTES} bytes, base64, plus text)`,
-        )
-        return
-      }
-      response.writeHead(400, { 'Content-Type': 'text/plain' })
-      response.end((error as Error).message)
-      return
-    }
+    const body = await readJsonBody(request, response, {
+      maxBytes: ZEN_PROMPT_BODY_MAX_BYTES,
+      capText: `a prompt body is at most ${ZEN_PROMPT_BODY_MAX_BYTES} bytes (${ZEN_PROMPT_MAX_IMAGES} images of ${ZEN_IMAGE_MAX_BYTES} bytes, base64, plus text)`,
+      parse: readPromptBody,
+    })
+    if (body === undefined) return
     if (body.images !== undefined) {
       // The audit line (#68): what crossed, never the bytes. One record per prompt with images.
       log.info('prompt carries {count} image(s): {mimeTypes}, {bytes} bytes', {
@@ -516,8 +564,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
     const outcome = await promptThread(followDeps, threadId, body)
     if (outcome.status === 400) {
       log.warn('prompt refused: {reason}', { threadId, reason: outcome.reason })
-      response.writeHead(400, { 'Content-Type': 'text/plain' })
-      response.end(outcome.reason)
+      refuseWith(response, outcome)
       return
     }
     const { messageId, generation, queued } = outcome.receipt
@@ -539,21 +586,17 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
   async function respondToBrowserLogs(request: IncomingMessage, response: ServerResponse): Promise<void> {
     // The cap is passed, not left to the schema check downstream: `receiveBrowserLogs` can
     // only refuse a batch it has already buffered whole, which is the thing `readBody`'s
-    // `maxBytes` exists to avoid.
-    let body: string
-    try {
-      body = await readBody(request, MAX_LOG_BODY_BYTES)
-    } catch (error) {
-      if (error instanceof BodyTooLargeError) {
-        endAndClose(request, response, 413, `a log batch is at most ${MAX_LOG_BODY_BYTES} bytes`)
-        return
-      }
-      throw error
-    }
+    // `maxBytes` exists to avoid. The CAP helper and not `readJsonBody`: this route parses
+    // its batch downstream, so a read that fails for any other reason is deliberately left
+    // to `answerOrFail`'s 500 rather than answered as a 400 the other three routes give.
+    const body = await readCappedBody(request, response, {
+      maxBytes: MAX_LOG_BODY_BYTES,
+      capText: `a log batch is at most ${MAX_LOG_BODY_BYTES} bytes`,
+    })
+    if (body === undefined) return
     const outcome = receiveBrowserLogs(body)
     if (outcome.status !== 204) {
-      response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
-      response.end(outcome.reason)
+      refuseWith(response, outcome)
       return
     }
     response.writeHead(204)
@@ -565,8 +608,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
     const outcome = abortThread(followDeps, threadId)
     if (outcome.status !== 200) {
       log.warn('abort refused ({status}): {reason}', { threadId, status: outcome.status, reason: outcome.reason })
-      response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
-      response.end(outcome.reason)
+      refuseWith(response, outcome)
       return
     }
     log.info('abort: queue of {restored} restored to the caller', {
@@ -578,19 +620,13 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
   }
 
   async function respondToDialog(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
-    let answer: DialogAnswer
-    try {
-      // A dialog answer is an id and a short value; nothing legitimate approaches this.
-      answer = readDialogBody(await readBody(request, MAX_DIALOG_BODY_BYTES))
-    } catch (error) {
-      if (error instanceof BodyTooLargeError) {
-        endAndClose(request, response, 413, `a dialog answer is at most ${MAX_DIALOG_BODY_BYTES} bytes`)
-        return
-      }
-      response.writeHead(400, { 'Content-Type': 'text/plain' })
-      response.end((error as Error).message)
-      return
-    }
+    // A dialog answer is an id and a short value; nothing legitimate approaches this.
+    const answer = await readJsonBody(request, response, {
+      maxBytes: MAX_DIALOG_BODY_BYTES,
+      capText: `a dialog answer is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+      parse: readDialogBody,
+    })
+    if (answer === undefined) return
     const outcome = answerThreadDialog(followDeps, threadId, answer)
     if (outcome.status !== 204) {
       log.warn('dialog {dialogId} answer refused ({status}): {reason}', {
@@ -599,8 +635,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
         status: outcome.status,
         reason: outcome.reason,
       })
-      response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
-      response.end(outcome.reason)
+      refuseWith(response, outcome)
       return
     }
     log.info('dialog {dialogId} answered', { threadId, dialogId: answer.id })
@@ -613,19 +648,13 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> {
-    let change: ZenPermissionModeChange
-    try {
-      // A mode name; nothing legitimate approaches the dialog cap either.
-      change = readModeChangeBody(await readBody(request, MAX_DIALOG_BODY_BYTES))
-    } catch (error) {
-      if (error instanceof BodyTooLargeError) {
-        endAndClose(request, response, 413, `a mode change is at most ${MAX_DIALOG_BODY_BYTES} bytes`)
-        return
-      }
-      response.writeHead(400, { 'Content-Type': 'text/plain' })
-      response.end((error as Error).message)
-      return
-    }
+    // A mode name; nothing legitimate approaches the dialog cap either.
+    const change = await readJsonBody(request, response, {
+      maxBytes: MAX_DIALOG_BODY_BYTES,
+      capText: `a mode change is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+      parse: readModeChangeBody,
+    })
+    if (change === undefined) return
     const outcome = await changeThreadMode(followDeps, threadId, change)
     if (outcome.status !== 204) {
       log.warn('mode change to {mode} refused ({status}): {reason}', {
@@ -634,8 +663,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
         status: outcome.status,
         reason: outcome.reason,
       })
-      response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
-      response.end(outcome.reason)
+      refuseWith(response, outcome)
       return
     }
     log.info('mode change to {mode} told', { threadId, mode: change.mode })

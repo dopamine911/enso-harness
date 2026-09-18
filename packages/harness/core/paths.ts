@@ -131,8 +131,15 @@ export function realpathOfNearestExisting(absolutePath: string): string {
   }
 }
 
-/** True when `absolutePath` is `root` or lives beneath it. Compares with a trailing separator so `/a/bc` is not inside `/a/b`. */
-export function isInsideRoot(absolutePath: string, root: string): boolean {
+/**
+ * True when `absolutePath` is `root` or lives beneath it. Compares with a trailing separator
+ * so `/a/bc` is not inside `/a/b`.
+ *
+ * File-local (#263): `isInsideAnyRoot` below is the only caller and the only shape any guard
+ * needs — a single-root check that ignores the symlink pass is the mistake this file exists
+ * to prevent, so it is deliberately not reachable from outside.
+ */
+function isInsideRoot(absolutePath: string, root: string): boolean {
   const normalizedRoot = resolve(root)
   if (absolutePath === normalizedRoot) return true
   return absolutePath.startsWith(

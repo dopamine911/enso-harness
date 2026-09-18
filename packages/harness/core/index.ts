@@ -15,7 +15,6 @@ export { type EnvironmentDumpMatch, findEnvironmentDump } from './environment-du
 export { findDeniedNetworkEgress, type NetworkEgressMatch } from './network-egress.ts'
 export {
   isInsideAnyRoot,
-  isInsideRoot,
   isPersistenceWriteTarget,
   isProtectedForWrite,
   looksLikeSecret,
