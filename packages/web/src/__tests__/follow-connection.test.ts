@@ -694,6 +694,9 @@ test('a fetch that throws is the same fact, and this page leaving is not (#274)'
     { type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId: 't1' } },
   ])
   expect(thrown.problems).toEqual([expect.stringContaining('network down')])
+  // Symmetrical with the 500 above (PR #305 review): the chunk says it to the page AND the
+  // throw still reaches the caller. Asserting only the chunk would pass if the rethrow went.
+  expect(String(thrown.failure)).toContain('network down')
 
   // ⚠ The asymmetry that must hold: an ABORT is this page releasing the thread, not the
   // server dropping it, so it arms nothing — the same rule `close()` follows above.
@@ -705,4 +708,35 @@ test('a fetch that throws is the same fact, and this page leaving is not (#274)'
   )
   expect(leaving.chunks).toEqual([])
   expect(leaving.problems).toEqual([])
+})
+
+// ⚠ The race the latch does not cover (PR #301 review): released while the socket is still
+// OPENING. The abort lands on the fetch itself, and its rejection had nowhere to go but out of
+// the generator, at whoever is iterating — a thrown AbortError for the page's own silent close,
+// which is exactly what `close()` promises not to produce. Eviction (`thread-stores.ts` drops
+// the least recently active thread) closes connections at arbitrary moments, so this is the
+// shape the budget makes ordinary rather than exotic.
+test('close() during the opening fetch ends the subscription instead of throwing at the consumer (#272)', async () => {
+  let socketOpening: (() => void) | undefined
+  const opening = new Promise<void>((resolve) => {
+    socketOpening = resolve
+  })
+  const connection = createFollowConnection({
+    threadId: 't1',
+    fetch: ((_input: string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        socketOpening?.()
+        // The socket never opens; the abort is what settles it, as a real fetch does.
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+      })) as typeof fetch,
+  })
+  const chunks: StreamChunk[] = []
+  const drained = (async () => {
+    for await (const chunk of connection.subscribe()) chunks.push(chunk)
+  })()
+  // Past the latch at the top of `subscribe`: the fetch is in flight, which is the race.
+  await opening
+  connection.close()
+  await drained
+  expect(chunks).toEqual([])
 })

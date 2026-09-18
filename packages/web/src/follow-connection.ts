@@ -435,25 +435,55 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     yield { type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId } }
   }
 
+  /**
+   * What the open produced: a live response, this page's own release, or a refusal with the
+   * detail to report. Separate from `subscribe` so the three answers are one `switch` there
+   * instead of three interleaved with the pump's own control flow.
+   */
+  type FollowOpening =
+    | { readonly kind: 'opened'; readonly response: Response }
+    | { readonly kind: 'released' }
+    | { readonly kind: 'refused'; readonly detail: string; readonly failure: Error }
+
+  async function openFollow(abort: AbortSignal): Promise<FollowOpening> {
+    let response: Response
+    try {
+      response = await fetchImpl(`${base}/follow`, { signal: abort })
+    } catch (error) {
+      // ⚠ Released while the socket was still OPENING (PR #301 review). `close()` is silent by
+      // contract — the page letting a thread go is not an error the page should be shown — but
+      // the abort lands on this fetch, whose rejection had nowhere to go but out of the
+      // generator, at whoever is iterating it. Our own release ends the iteration instead.
+      if (released.signal.aborted) return { kind: 'released' }
+      const failure = error instanceof Error ? error : new Error(String(error))
+      return { kind: 'refused', detail: String(error), failure }
+    }
+    if (response.ok && response.body !== null) return { kind: 'opened', response }
+    // ⚠ The status is the fact; the body is colour (PR #305 review). Reading it can itself
+    // reject — a truncated or aborted body — and that rejection would have thrown past the
+    // arming in `subscribe`, leaving the page saying "live" for a follow the server just
+    // refused, which is the state #274 exists to end. The read cannot decide whether the
+    // contract is armed.
+    const body = await response.text().catch((error: unknown) => `(body unreadable: ${String(error)})`)
+    const detail = `${response.status} ${body}`
+    return { kind: 'refused', detail, failure: new Error(`follow ${threadId}: ${detail}`) }
+  }
+
   async function* subscribe(signal?: AbortSignal): AsyncIterable<StreamChunk> {
     // The page's own end (#272) rides with TanStack's: either one closes the socket, and a
     // connection already released never opens one.
     if (released.signal.aborted) return
     const abort = signal === undefined ? released.signal : AbortSignal.any([signal, released.signal])
-    let response: Response
-    try {
-      response = await fetchImpl(`${base}/follow`, { signal: abort })
-    } catch (error) {
-      // A throwing fetch is the same fact as a refusing one — unless this page is the one
-      // leaving, in which case there is nothing to report.
-      if (!abort.aborted) yield* followNeverOpened(String(error))
-      throw error
+    const opening = await openFollow(abort)
+    if (opening.kind === 'released') return
+    if (opening.kind === 'refused') {
+      // A throwing fetch is the same fact as a refusing one (#274) — unless the CALLER is the
+      // one leaving, in which case there is nothing to report and the cancel is theirs to see.
+      if (!abort.aborted) yield* followNeverOpened(opening.detail)
+      throw opening.failure
     }
-    if (!response.ok || response.body === null) {
-      const detail = `${response.status} ${await response.text()}`
-      if (!abort.aborted) yield* followNeverOpened(detail)
-      throw new Error(`follow ${threadId}: ${detail}`)
-    }
+    const response = opening.response
+    if (response.body === null) return
     const frames = readSseFrames(response.body, abort)
     // Frames are consumed on their own loop so `send` can interleave chunks; this loop
     // yields whatever is queued, waiting when nothing is.
