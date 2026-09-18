@@ -159,8 +159,10 @@ answer before a tool runs; nothing after it does.
   (interactive, non-interactive, driven in-process) is **not given a word of ours**: no zen code
   tracks it, and `surface` — the candidate — already means TUI-or-web. It stays under the host and in
   the vendor map.
-- **guard** — the extension that answers the tool-call hook before a tool runs; asserted at startup to
-  be ours for `write`, `bash` and `read`. A guard *decides*; nothing else on the path does.
+- **guard** — the extension that answers the tool-call hook before a tool runs. What startup asserts is
+  that the policy's gated names are REGISTERED (`verifyPolicyToolNames`, presence), never that they
+  resolve to our implementation: identity is unasserted, and the veto does not depend on it. A guard
+  *decides*; nothing else on the path does.
 - **verdict** — a guard's answer: a **denial with its reason**, or nothing — the call passes. There is
   no third value today. *Cannot vouch* (an unparseable construct at command position) is refused with
   the construct named, so the rewrite is obvious; routing it to a human instead is the ask channel's
