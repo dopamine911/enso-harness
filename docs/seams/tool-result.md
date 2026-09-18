@@ -115,6 +115,49 @@ export const ZenToolResultObservation = Type.Object({
 })
 ```
 
+Because `text` is accumulated, a partial result is not a small message: at pi's `bash` cadence
+(`BASH_UPDATE_THROTTLE_MS = 100`, each update carrying `output.snapshot()`) writing every update
+costs O(output × ticks). Measured on the real wire, a 3-second command producing 240 KB wrote
+3724 KB of partial `observation` frames, and the browser's only consumer of the kind — the
+`tool-result` case of `observationToAguiEvents` in `packages/web/src/to-agui.ts`, which returns
+`[]` for `complete: false` — discarded all 30 of them. So **a partial `tool-result` does not cross
+the follow at all** (#279): the wire carries the completed result, whole. The elision is in the one
+place every frame crosses (`packages/web/src/server/follow.ts:98-103`):
+
+<!-- source: packages/web/src/server/follow.ts#writeFrame -->
+```ts
+/**
+ * Write one frame, recording it into the thread's sent tail (#97) when the thread is live
+ * — the one place every frame crosses to a browser, so the record and the wire agree.
+ *
+ * ⚠ One frame does not cross at all (#279): a `tool-result` observation that is not
+ * complete. pi's tools report progress with the ACCUMULATED output, not a delta (see
+ * `docs/seams/tool-result.md`), and `bash` does it every 100 ms, so writing them costs
+ * O(output × ticks) — measured, a 3-second command producing 240 KB of output wrote
+ * 3724 KB of partial frames. The only browser consumer of the kind,
+ * `observationToAguiEvents` (`to-agui.ts`, its `tool-result` case), returns `[]` for
+ * `complete: false`: all 3724 KB were serialised, pushed through the SSE socket and
+ * schema-checked for no rendered pixel. The OBSERVATION is untouched — the feed still
+ * numbers it, `recordObservation` still logs it and the emitted tail still counts it, so
+ * the partial text is still in the `trace` record and in `/api/threads/:id/events`; this
+ * elides the WIRE. Frame `seq` therefore skips the elided numbers, which nothing on the
+ * browser side reads, and the sent tail does not record them either: it claims only what
+ * crossed.
+ */
+function writeFrame(threads: ThreadRegistry, threadId: string, response: ServerResponse, frame: ZenFollowFrame): void {
+  if (frame.type === 'observation' && frame.observation.kind === 'tool-result' && !frame.observation.complete) return
+  const name = frame.type === 'observation' ? frame.observation.kind : undefined
+  threads.peek(threadId)?.sent.record(frame.type, name, 'sent')
+  response.write(`data: ${JSON.stringify(frame)}\n\n`)
+}
+```
+
+Nothing above the wire changed: the mapper still builds the accumulated partial from
+`tool_execution_update`, the observation log still records it at `trace`, and the `emitted` tail
+of `/api/threads/:id/events` still counts it — only the `sent` tail and the socket omit it. A
+browser that wants live tool output gets it by un-eliding this one branch and giving the adapter
+a `complete: false` emission to make, not by changing the wire schema.
+
 The web's half — renderers keyed by kind, and the one definition of what state a call is in:
 
 <!-- source: packages/web/src/ZenToolResult.tsx#ZenRendererMap -->
@@ -170,7 +213,7 @@ export function descriptorFrom(toolName: string, details: unknown): ZenToolResul
 Only truncation is mapped, and the `kind` is `pi.tool.<toolName>` with empty `props` — the floor, not
 the ceiling: a tool that wants a richer descriptor should emit one (`:72-78`). **No tool does today.**
 `web-fetch` and `web-search` return `details: undefined` on every path
-(`packages/harness/extensions/web-fetch/index.ts:165,282,314`; `web-search/index.ts:328,333,347,377`),
+(`packages/harness/extensions/web-fetch/index.ts:170,277,309`; `web-search/index.ts:339,344,358,388`),
 so no extension of ours attaches a descriptor. `toolResultMetadata` (`map-events.ts:97-101`) is the
 one place the key is written onto a part's `metadata`.
 
