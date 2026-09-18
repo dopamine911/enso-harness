@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 155.**
+**Decision headers: 157.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -107,6 +107,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/transcript.ts` | `#162` | The runtime's session branch → the transcript of ours (#162 workstream 4, L2's persistence side). |
 | `packages/web/src/mode-lines.ts` | `#29`, `#69`, `#88`, `#162` | Permission-mode lines in the transcript (#29, the remaining half). |
 | `packages/web/src/notifications.tsx` | `#29`, `#84`, `#94`, `#96` | pi's `notify` messages, rendered (#29). |
+| `packages/web/src/page-clock.ts` | `#278` | The page's clock as a store (#278): the one value that changes with no input. |
 | `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |
 | `packages/web/src/server/__tests__/fake-hosted-thread.ts` | `#178` | The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a `ThreadRuntime` from plain closures that records every call, so the server, the registry and the routes are driven over it and asserted through what it recorded. |
 | `packages/web/src/server/__tests__/follow.test.ts` | `#109`, `#112` | The wire, measured (#109's receipt, kept as the contract — #112). |
@@ -131,7 +132,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/thread-status.tsx` | `#45`, `#51`, `#84`, `#90`, `#103` | The status bar (#90 PR 1): the always-on line that says what this session is doing and what it has cost, so the answer to "is anything happening?" |
 | `packages/web/src/thread-stores.ts` | `#90` | Everything the browser knows about one thread beyond its messages (#90 PR 3). |
 | `packages/web/src/thread-url.ts` | `#95`, `#142` | The thread a page URL names (#142): `?thread=<id>`. |
-| `packages/web/src/threads-rail.tsx` | `#90`, `#95`, `#104` | The threads rail (#90 PR 3): which conversation am I in, what else is live on this page, how do I start over. |
+| `packages/web/src/threads-rail.tsx` | `#90`, `#95`, `#104`, `#278` | The threads rail (#90 PR 3): which conversation am I in, what else is live on this page, how do I start over. |
 | `packages/web/src/to-agui.ts` | `#18`, `#24`, `#112` | `ZenObservation` → AG-UI `StreamChunk` (#24, #112). |
 | `scripts/__tests__/zen-logs.test.ts` | `#132` | The reader's own logic (#132, `bun run logs`): the flags, and what a line must be to print. |
 | `scripts/check-coverage.ts` | `#49`, `#118` | The TOTAL coverage floor — the gate that bunfig.toml cannot express. |
@@ -163,6 +164,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/naming-gate.test.ts` | `#82`, `#83` | The naming gate's exemption for externally-fixed KEYS (#82, PR #83 review). |
 | `test/no-lint-suppressions.test.ts` | `#82` | The gate may not be talked out of, one line at a time. |
 | `test/presentation-gate.test.ts` | `#31`, `#121` | Presentation stays presentation (#121 item 4, #31). |
+| `test/scripts-extensions.test.ts` | `#269`, `#308` | `scripts/` is TypeScript, and the exceptions are named (#269). |
 | `test/vendor-gate.test.ts` | `#69`, `#145`, `#150`, `#165`, `#173` | The seam has an owner: only the host and the pi extensions may name the vendor (#145). |
 
 **Parser limit.** The parser considers the first block or contiguous line comment beginning within the

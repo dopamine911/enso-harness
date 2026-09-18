@@ -9,8 +9,8 @@ import { join, relative } from 'node:path'
  * every thread on the page — the bug class the mounted two-threads test observes
  * (thread-pane.test.tsx) and this test refuses at the source, by name.
  *
- * Two module-level stores are PAGE state by design and are listed here with their reason.
- * Adding a third means adding it here, with its reason — not making the check looser.
+ * The module-level stores are PAGE state by design and are listed here with their reason.
+ * Adding another means adding it here, with its reason — not making the check looser.
  */
 
 const webSource = join(import.meta.dir, '..')
@@ -23,6 +23,8 @@ const PAGE_SCOPED_BY_DESIGN: readonly string[] = [
   'chat-screen.tsx:storedThreads',
   // The page's log ring and shipper (#132): configured once by main.tsx, read by the drawer.
   'thread-stores.ts:browserLogging',
+  // The page's clock (#278): one interval, every relative age on the page subscribed to it.
+  'page-clock.ts:pageClock',
 ]
 
 const MODULE_LEVEL_STORE = /^(?:export )?const (\w+)(?::[^=]+)? = create\w*(?:Store|Lines)\w*(?:<[^\n]*?>)?\(/gm
