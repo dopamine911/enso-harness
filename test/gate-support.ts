@@ -89,13 +89,45 @@ export function codeOffenders(scan: CodeLineScan): string[] {
   return offenders
 }
 
+/** One code line: 1-based number and text, as the gates address it. */
+export interface CodeLine {
+  /** Repository-relative path of the file it came from. */
+  readonly file: string
+  /** 1-based, so `file:number` is what an editor jumps to. */
+  readonly number: number
+  readonly text: string
+}
+
+/** A file's code lines, comment-only lines dropped. The one read-and-split. */
+function codeLinesOf(path: string, repositoryRelative: string): CodeLine[] {
+  const lines: CodeLine[] = []
+  for (const [lineIndex, text] of readFileSync(path, 'utf8').split('\n').entries()) {
+    if (COMMENT_LINE.test(text)) continue
+    lines.push({ file: repositoryRelative, number: lineIndex + 1, text })
+  }
+  return lines
+}
+
+/**
+ * Every code line under `roots`, for a gate that needs the LINES rather than a verdict —
+ * `dependency-gate.test.ts` reads import specifiers out of them (#223). Same walk, same
+ * comment skip as `codeOffenders`: a gate that scanned its own way would disagree with the
+ * others about what a comment is, which is the duplication this file exists to prevent.
+ */
+export function codeLinesUnder(roots: readonly string[], includeTests = false): CodeLine[] {
+  return roots.flatMap((root) =>
+    sourceFiles(join(REPOSITORY_ROOT, root), includeTests).flatMap((path) =>
+      codeLinesOf(path, path.slice(REPOSITORY_ROOT.length + 1)),
+    ),
+  )
+}
+
 /** Every place one file breaks the rule: its path, then each code line, as `file:line`. */
 function fileMatches(scan: CodeLineScan, path: string, repositoryRelative: string): string[] {
   const matches: string[] = []
   if (scan.pathMatches?.(repositoryRelative)) matches.push(repositoryRelative)
-  for (const [lineIndex, line] of readFileSync(path, 'utf8').split('\n').entries()) {
-    if (COMMENT_LINE.test(line)) continue
-    if (scan.lineMatches(line)) matches.push(`${repositoryRelative}:${lineIndex + 1}`)
+  for (const line of codeLinesOf(path, repositoryRelative)) {
+    if (scan.lineMatches(line.text)) matches.push(`${repositoryRelative}:${line.number}`)
   }
   return matches
 }

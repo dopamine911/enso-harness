@@ -33,9 +33,32 @@ import { codeOffenders, hasWordSequence, wordsOf } from './gate-support.ts'
  * header once anticipated — vendor-PREFIXED identifiers outside the host — is
  * `glossary-gate.test.ts` (#165), with L2's two files as its allowlist until the transcript
  * type lands. A vendor name assembled at runtime (`"pi" + "cc"`) is out of reach by construction.
+ *
+ * ⚠ REACH, measured, because "the allowlist IS the leak inventory" is only true of what the
+ * walk visits (#215). It scanned three roots with `__tests__` skipped, which left `scripts/`,
+ * `packages/web/e2e/` and every `__tests__/` directory invisible: widening to every source
+ * root the repo has, tests included, surfaced 2 import lines and 45 name lines in 12 files
+ * that the allowlist did not know about — the launcher's picc filter, the docs generator, and
+ * ten test files. Every one is a row below now. What is STILL outside the walk, stated rather
+ * than implied: `docs/**` (prose may name a vendor; `glossary-doc.test.ts` fences the glossary
+ * page), comment lines anywhere (same reason), and MANIFESTS — `package.json`'s
+ * `@ladbabynpm/picc-permission-modes` and `packages/harness/package.json`'s `pi.extensions`
+ * are where a dependency is declared, not leaked, and `SOURCE_FILE` (`scripts/source-tree.ts`)
+ * matches JS/TS only. `test/fallow-config.test.ts` is the gate that holds the manifest honest.
  */
 
-const SEARCHED_ROOTS = ['packages/core/src', 'packages/web/src', 'packages/harness'] as const
+/**
+ * Every source root the repo has — `filesUnder` walks each one, `__tests__` included. A root
+ * missing from here is a blind spot, not a scope decision: that was #215.
+ */
+const SEARCHED_ROOTS = [
+  'packages/core/src',
+  'packages/web/src',
+  'packages/harness',
+  'packages/web/e2e',
+  'scripts',
+  'test',
+] as const
 /** Where the vendor may be named. Removing one of these is a design conversation. */
 const VENDOR_ROOTS = ['packages/web/src/host', 'packages/harness/extensions'] as const
 /**
@@ -58,22 +81,75 @@ function namesVendor(line: string): boolean {
 }
 
 /**
- * EMPTY, and the gate keeps it so. #149 removed the bundle's import of pi's `VERSION`; L6
- * (#162) removed the last two — pi-ai's `Model<Api>` type and its env-key fallback at the
- * provider seam — when `web-search`'s contract named its own `SearchModel` and took the env
- * reader as a parameter (`extensions/web-search/index.ts#searchModelOf`, the one conversion).
- * A new row here is a new dependency site, and must say why.
+ * The bundle has none, and the gate keeps it so. #149 removed the bundle's import of pi's
+ * `VERSION`; L6 (#162) removed the last two — pi-ai's `Model<Api>` type and its env-key
+ * fallback at the provider seam — when `web-search`'s contract named its own `SearchModel` and
+ * took the env reader as a parameter (`extensions/web-search/index.ts#searchModelOf`, the one
+ * conversion). The single row is what widening the walk to `__tests__` found (#215): it was
+ * always there, the walk just never reached it. A new row is a new dependency site, and must
+ * say why.
  */
-const VENDOR_IMPORT_ALLOWED: readonly string[] = []
+const VENDOR_IMPORT_ALLOWED: readonly string[] = [
+  // `import.meta.resolve('@earendil-works/pi-coding-agent')` twice, to load pi's own
+  // `utils/paths.js` and pin the guard's replica of `resolveToCwd` and
+  // `normalizeWindowsShellPath` against it on every input. The corpus IS the vendor's
+  // implementation, so the import is the test. Leaves when the replica does — i.e. when the
+  // runtime exports those two functions, or the guard stops needing to agree with them.
+  'packages/harness/core/__tests__/paths.test.ts',
+]
 
+/**
+ * The leak inventory. Twelve of these thirteen rows arrived with #215's widening — the sites
+ * were live and unlisted, not new. Grouped by what a pi replacement would have to do with each.
+ */
 const VENDOR_NAMED_ALLOWED: readonly string[] = [
+  // ── Production code ──
   // The guard's write-allowlist names cc-safety-net's state directory: a path, not an import.
   // Leaves when the harness owns the list of directories an extension may write.
   'packages/core/src/guard.ts',
+  // `PICC_EXTENSION_FRAGMENT` — the print variant exists to REMOVE picc from the manifest
+  // (#20: no permission modes under `--print`), so it must name the extension it filters, in
+  // the constant and in the shape error that fires when no entry matches. Leaves when the
+  // harness owns the print manifest instead of a launcher deriving it.
+  'scripts/print-harness.mjs',
+  // One inventory row's `seam` prose says a fake serves "a picc-shaped inspection" — it is
+  // generated INTO docs/reference/verification-inventory.md, so the name is data here, not a
+  // comment. Leaves when that fake stops replicating picc's `modes` custom entry.
+  'scripts/docs/verification-inventory.ts',
+  // ── The gates that have to spell the names ──
+  // This file: it names the vendors in order to refuse them. Never leaves.
+  'test/vendor-gate.test.ts',
+  // The glossary page's own fence names the same vendors as the words it permits only under
+  // `## Retired`. Never leaves, for the same reason.
+  'test/glossary-doc.test.ts',
+  // ── Tests that pin a vendor-shaped input ──
+  // The three launcher tests carry `pi.extensions` manifests verbatim —
+  // `node_modules/@ladbabynpm/picc-permission-modes/index.ts` and `node_modules/pi-multi-account/index.ts`
+  // are the resources whose linking, filtering and missing-path refusal is under test. A fake
+  // manifest that did not name the real vendors would not be testing the real manifest.
+  'scripts/__tests__/link-vendor-packages.test.ts',
+  'scripts/__tests__/print-harness.test.ts',
+  'scripts/__tests__/zen-launch.test.ts',
+  // The server's refusal names the missing vendor path, so the test that pins the message
+  // names it too. Leaves with `scripts/__tests__/link-vendor-packages.test.ts`.
+  'packages/web/src/server/__tests__/vendor-links.test.ts',
+  // `piccShapedInspection` — the fake host hands out the session-file layout and `modes`
+  // custom entry as picc writes them (L2: the inspection's untyped `entries` array carries
+  // pi's persistence format). Leaves with L2, when a transcript type of ours replaces it.
+  'packages/web/src/server/__tests__/server-handler.test.ts',
+  // `piccEntry` — same L2 shape, from the browser side.
+  'packages/web/src/__tests__/thread-debug.test.tsx',
+  // Two pi-multi-account startup banners, verbatim, because the bug was the banner being read
+  // as an assistant message and swallowing a guard refusal. The strings ARE the fixture.
+  // Leaves when that extension leaves the manifest.
+  'packages/web/src/__tests__/notifications.test.tsx',
+  // One test name says whose the permission modes are to declare. Prose, but in a string
+  // literal, which this gate correctly refuses to treat as a comment.
+  'packages/web/src/__tests__/permission-mode.test.tsx',
 ]
 
 function offendersMatching(lineMatches: (line: string) => boolean, allowed: readonly string[]): string[] {
-  return codeOffenders({ roots: SEARCHED_ROOTS, exemptRoots: VENDOR_ROOTS, allowed, lineMatches })
+  return codeOffenders({ roots: SEARCHED_ROOTS, includeTests: true, exemptRoots: VENDOR_ROOTS, allowed, lineMatches })
 }
 
 test('⚠ @earendil-works/* is named only by the host and the pi extensions (#145)', () => {
