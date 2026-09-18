@@ -23,7 +23,8 @@ import {
  *   `printenv PATH` passes; `printenv <secret-shaped name>` does not.
  * - `export` / `declare` / `typeset` in their listing forms (bare, `-p`, `-x`), and bare
  *   `set`. `export FOO=1`, `set -e`, `set -o pipefail` pass — they set, they do not list.
- * - the same command past a transparent wrapper (`timeout 5 env`, `sudo printenv`).
+ * - the same command past a transparent wrapper (`timeout 5 env`, `sudo printenv`), and the
+ *   payload of a `find -exec` (#206) — a payload is a command line, so it is gated as one.
  * And anywhere in the raw string, regardless of parse:
  * - `/proc/<pid>/environ` — the kernel's copy of the same list.
  * - a `$NAME` / `${NAME…}` expansion of a secret-shaped name (`echo $TAVILY_API_KEY`).
@@ -105,6 +106,23 @@ function gateSegment(segmentText: string): EnvironmentDumpMatch | undefined {
   const stripped = (withoutLeadingEnvironmentAssignments(segmentText) ?? segmentText).trim()
   const words = shellWordsOf(stripped)
   if (words === null || words.length === 0) return undefined
+  return gateWords(words)
+}
+
+/**
+ * One command line, as words: a listing command, a `find` whose exec payload IS one, or a
+ * wrapper with one behind it.
+ *
+ * ⚠ A payload is a command line, so it goes back through THIS function rather than having
+ * its first word looked up (PR #290 review). Checking `payload[0]` alone let the sensor miss
+ * what it catches everywhere else — `find . -exec sh -c 'env' ;` and `find . -exec sudo env ;`
+ * read as "sh" and "sudo", neither a listing command, while the same two lines without the
+ * `find` are caught by the wrapper scan below. The egress deny already recursed its payload
+ * through `gateCommandLine`; this is the same shape, so both denies know the construct
+ * equally instead of only claiming to. Recursion terminates: a payload is strictly shorter
+ * than the words it came from.
+ */
+function gateWords(words: readonly string[]): EnvironmentDumpMatch | undefined {
   const command = commandNameOf(words[0] ?? '')
   if (command === undefined) return undefined
   if (LISTING_COMMANDS.has(command)) return listsEnvironment(command, words.slice(1))
@@ -113,9 +131,7 @@ function gateSegment(segmentText: string): EnvironmentDumpMatch | undefined {
   // wrapper mode: find's predicates carry globs that are ordinary arguments.
   if (command === FIND_COMMAND) {
     for (const payload of findExecPayloads(words.slice(1))) {
-      const wrapped = commandNameOf(payload[0] ?? '')
-      if (wrapped === undefined || !LISTING_COMMANDS.has(wrapped)) continue
-      const verdict = listsEnvironment(wrapped, payload.slice(1))
+      const verdict = gateWords(payload)
       if (verdict !== undefined) return { matched: verdict.matched, via: 'wrapped-command' }
     }
     return undefined

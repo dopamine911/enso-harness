@@ -38,7 +38,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/core/__tests__/web-search-support.test.ts` | `#63` | The web_search support layer (#63): source hygiene, citation appliers, auth, Tavily. |
 | `packages/harness/core/__tests__/web-search-wire.test.ts` | `#63` | The Anthropic WIRE (#63) against synthetic SSE fixtures — the wire serves both the `anthropic` and `deepseek` providers, so these fixtures are the shared spine. |
 | `packages/harness/core/deadline.ts` | `#58`, `#174` | Run work under a deadline AND the caller's abort signal, as one signal (#174; the shape `web_fetch` and `web_search` each carried). |
-| `packages/harness/core/environment-dump.ts` | `#89` | The bash environment-dump deny (#89) — DEPTH, not the fix. |
+| `packages/harness/core/environment-dump.ts` | `#89`, `#206` | The bash environment-dump deny (#89) — DEPTH, not the fix. |
 | `packages/harness/core/network-egress.ts` | `#9`, `#54`, `#55`, `#57`, `#206` | The bash network deny (#9) — a BAR, deliberately not a boundary. |
 | `packages/harness/core/read-tracker.ts` | `#10`, `#11` | Session-scoped record of files whose content this session has seen (#10), and of the on-disk state they had when it saw them (#11). |
 | `packages/harness/core/shell-segments.ts` | `#9` | Conservative shell command segmenter — the parsing floor under the bash network deny (#9). |

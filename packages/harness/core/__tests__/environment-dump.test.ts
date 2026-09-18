@@ -112,6 +112,19 @@ test('⚠ a listing command reached through find -exec is denied, naming the wra
   expect(denied('find . -exec wc -l {} ;')).toBeUndefined()
 })
 
+// ⚠ A payload is a command line, not a command NAME (PR #290 review). Checking `payload[0]`
+// alone made the sensor miss inside `find -exec` exactly what it catches outside it — the
+// asymmetry a sensor cannot afford, since a silent miss reads as "no regression".
+test('a wrapper or nested shell INSIDE a find -exec payload is denied too (#206)', () => {
+  expect(denied("find . -exec sh -c 'env' ;")).toBe('wrapped-command')
+  expect(denied('find . -exec sudo env ;')).toBe('wrapped-command')
+  // The same two lines without the `find` were already denied: that is the asymmetry.
+  expect(denied("sh -c 'env'")).toBe('wrapped-command')
+  expect(denied('sudo env')).toBe('wrapped-command')
+  // Still a payload, still not a listing: the recursion refuses no more than the gate does.
+  expect(denied("find . -exec sh -c 'wc -l' ;")).toBeUndefined()
+})
+
 // ⚠ STATED RESIDUAL, pinned: a wrapper whose OWN operand follows the wrapped command reads
 // as "env runs that operand" and passes. Closing it means counting a wrapper's trailing
 // operands as the listing's arguments, which denies `sudo env FOO=1 make build` — a command
