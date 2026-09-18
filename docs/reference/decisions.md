@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 155.**
+**Decision headers: 156.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -139,11 +139,12 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/docs/decisions.ts` | `#170` | Generates `docs/reference/decisions.md` (#170): one row for each owned source file whose first comment/header block cites an issue. |
 | `scripts/docs/env-and-config.ts` | `#170` | Generates `docs/reference/env-and-config.md` (#170): the explicit environment boundary, the composed `ZenConfig` shape, every `.zen/` path assembled by core, and the harness manifest resources. |
 | `scripts/docs/extract-declaration.ts` | `#168` | The docs gate's one primitive (#168): a top-level declaration, verbatim, by name. |
+| `scripts/docs/gate-source.ts` | `#170`, `#262` | Reading a declared constant back out of a gate's source (#170, split out on #262). |
 | `scripts/docs/generator-support.ts` | `#174` | What every generator under `scripts/docs/` shares (#174): the exhaustiveness check that makes a metadata table refuse to be stale, and the one way a generator runs — its page to stdout, or one `name: reason` line to stderr and a non-zero exit, never a partial page. |
 | `scripts/docs/ported-provenance.ts` | `#168` | Generates `docs/seams/ported-provenance.md` (#168): one row per file under `components/ai-elements/` — the upstream path and commit its header names, and the `Modified —` line that follows. |
 | `scripts/docs/refresh-fences.ts` | `#162`, `#168` | Refreshes every sourced fence in a page from the source it names (#168): the authoring and repair tool for `test/docs-gate.test.ts`. |
 | `scripts/docs/seams-table.ts` | `#162`, `#167` | Generates the seams table (#162 workstream 11, #167 item 4) — the block `docs/architecture.md` and `docs/seams/README.md` embed between `<!-- generated-block: … -->` markers. |
-| `scripts/docs/verification-inventory.ts` | `#170` | Generates `docs/reference/verification-inventory.md` (#170): enforcement gates, the numeric and count ratchets they carry, and the deliberately reusable test doubles. |
+| `scripts/docs/verification-inventory.ts` | `#170`, `#262` | Generates `docs/reference/verification-inventory.md` (#170): enforcement gates, the numeric and count ratchets they carry, and the deliberately reusable test doubles. |
 | `scripts/link-vendor-packages.mjs` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
 | `scripts/print-harness.mjs` | `#9`, `#13`, `#20` | The PRINT-MODE harness variant (#20): the zen-harness package minus picc-permission-modes. |
 | `scripts/source-tree.ts` | `#162`, `#174` | The one walk over the source tree (#174, #162 workstream 6: one walker per gate family). |
