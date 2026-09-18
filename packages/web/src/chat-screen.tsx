@@ -625,7 +625,14 @@ const TranscriptSelectionContext = createContext<TranscriptSelection>({
   openRunMessageId: undefined,
 })
 
-/** The lookup miss that cannot happen: rows and the selection come from the same array. */
+/**
+ * The empty selection, for a lookup that finds nothing.
+ *
+ * ⚠ Reached only if `selectChatUI` ever returns a different message SET than `chat.messages`
+ * (PR #304 review): rows iterate the latter and the index is built from the former. Nothing
+ * here checks that — the per-row code this replaced returned `[]` on the same miss, so the
+ * assumption is carried, not introduced. A bubble drawn empty is the symptom.
+ */
 const NO_PARTS: KeyedPart[] = []
 
 interface MessageBodyProps {
