@@ -155,7 +155,7 @@ export interface ThreadStores {
 }
 ```
 
-The one path from a custom event to those stores is `routeZenCustomEvent` (`custom-event-router.ts:40-101`,
+The one path from a custom event to those stores is `routeZenCustomEvent` (`custom-event-router.ts:77-108`,
 in prose): it records every event in `recentChunks`, then dispatches on the name, which is the
 observation's `kind` or the frame's `type` (#162 workstream 5) — a `snapshot` to the mode stores, the
 dialog slot and `generation`; a `status` to `generation` (and clears `disconnected`);
