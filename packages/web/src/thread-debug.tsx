@@ -277,7 +277,10 @@ export function ThreadDebugView({
         </section>
         {/* The event tails (#97): the ordering view. `emitted` is what the host's funnel saw,
 				    with how each was delivered; `sent` is what the server wrote to this browser.
-				    A disagreement with the two sections above names the layer a bug lives in. */}
+				    A disagreement with the two sections above names the layer a bug lives in.
+				    ⚠ One disagreement is BY DESIGN (#279): a partial `tool-result` is elided at
+				    `writeFrame`, so `emitted` counts every accumulated tick and `sent` counts only
+				    the completed one. A `tool-result` gap here is the elision, not a #88 drop. */}
         <section>
           <h3 className="font-semibold text-foreground">the host emitted</h3>
           {events === undefined ? <div>not fetched yet</div> : <EventTailList events={events.emitted} />}
