@@ -334,6 +334,8 @@ test('every secret path fragment is load-bearing on its own — a basename regex
     '/.netrc': '/home/u/.netrc',
     '/.pgpass': '/home/u/.pgpass',
     '/.kube/config': '/home/u/.kube/config',
+    // #204: `auth.json` matches no basename pattern, which is exactly how it was readable.
+    '/.zen/': '/home/u/project/.zen/pi-agent/auth.json',
   }
   // The map must cover the policy exactly — a fragment added without a case here is a gap.
   expect(Object.keys(onlyTheFragmentCatches).sort()).toEqual([...fragments].sort())
