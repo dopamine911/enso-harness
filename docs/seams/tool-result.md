@@ -213,7 +213,7 @@ export function descriptorFrom(toolName: string, details: unknown): ZenToolResul
 Only truncation is mapped, and the `kind` is `pi.tool.<toolName>` with empty `props` — the floor, not
 the ceiling: a tool that wants a richer descriptor should emit one (`:72-78`). **No tool does today.**
 `web-fetch` and `web-search` return `details: undefined` on every path
-(`packages/harness/extensions/web-fetch/index.ts:165,282,314`; `web-search/index.ts:328,333,347,377`),
+(`packages/harness/extensions/web-fetch/index.ts:170,277,309`; `web-search/index.ts:339,344,358,388`),
 so no extension of ours attaches a descriptor. `toolResultMetadata` (`map-events.ts:97-101`) is the
 one place the key is written onto a part's `metadata`.
 
