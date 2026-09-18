@@ -172,6 +172,18 @@ function containsPathFragment(absolutePath: string, fragments: readonly string[]
 const PROC_ENVIRON_PATH = /^\/proc\/[^/]+\/environ$/
 
 /**
+ * True when the TEXT of a path-shaped string carries credential material, by directory
+ * fragment or by basename. No filesystem access and no resolution: this is the question to
+ * ask about a shell word whose value is not knowable from the text (`"$HOME/.zen/auth.json"`
+ * — see `shell-secret-paths.ts`), where {@link looksLikeSecret}'s realpath leg has nothing
+ * to resolve.
+ */
+export function textLooksLikeSecretPath(text: string, fragments: readonly string[]): boolean {
+  if (containsPathFragment(text, fragments)) return true
+  return SECRET_BASENAME_PATTERNS.some((pattern) => pattern.test(basename(text)))
+}
+
+/**
  * True when the path looks like credential material, by directory fragment, by basename,
  * or because it is a process's environment.
  *
@@ -183,9 +195,8 @@ const PROC_ENVIRON_PATH = /^\/proc\/[^/]+\/environ$/
  */
 export function looksLikeSecret(absolutePath: string, fragments: readonly string[]): boolean {
   for (const candidate of [absolutePath, realpathOfNearestExisting(absolutePath)]) {
-    if (containsPathFragment(candidate, fragments)) return true
+    if (textLooksLikeSecretPath(candidate, fragments)) return true
     if (PROC_ENVIRON_PATH.test(candidate)) return true
-    if (SECRET_BASENAME_PATTERNS.some((pattern) => pattern.test(basename(candidate)))) return true
   }
   return false
 }
