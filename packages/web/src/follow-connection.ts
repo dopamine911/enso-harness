@@ -410,7 +410,19 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     // connection already released never opens one.
     if (released.signal.aborted) return
     const abort = signal === undefined ? released.signal : AbortSignal.any([signal, released.signal])
-    const response = await fetchImpl(`${base}/follow`, { signal: abort })
+    let response: Response
+    try {
+      response = await fetchImpl(`${base}/follow`, { signal: abort })
+    } catch (error) {
+      // ⚠ Released while the socket was still OPENING (PR #301 review). `close()` is silent by
+      // contract — the page letting a thread go is not an error the page should be shown — but
+      // the abort lands on this fetch, whose rejection had nowhere to go but out of the
+      // generator, at whoever is iterating it. Our own release ends the iteration instead.
+      // An abort from the CALLER's signal still throws: that is the consumer's own cancel, and
+      // a transport failure is theirs to see either way.
+      if (released.signal.aborted) return
+      throw error
+    }
     if (!response.ok || response.body === null) {
       throw new Error(`follow ${threadId}: ${response.status} ${await response.text()}`)
     }
