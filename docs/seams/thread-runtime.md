@@ -4,7 +4,7 @@ The contract the host implements for one thread and the server drives: prompt, a
 what it may run, read its mode, subscribe to its events, abort, clear its queue, dispose. Glossary
 domain: **Thread** (the runtime session behind a live thread) and **Control** (what the routes tell
 it). This is the seam a runtime replacement would re-implement — the one pivot the repo has already
-survived (#69, RPC subprocess → in-process) crossed exactly here, with the three fakes below and the
+survived (#69, RPC subprocess → in-process) crossed exactly here, with the fake below and the
 refusal-path tests unchanged.
 
 Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Refresh with
@@ -185,16 +185,26 @@ whose `abort` is the one caller of `clearQueue` and `abort` (`thread-registry.ts
 `server/index.ts` reads `permissionModeState` for the thread routes. The browser never sees it: what it
 gets is observations on the follow.
 
-**Proven implementable three times.** The fakes are the second implementation this seam has today —
-each builds a `ThreadRuntime` from plain closures and drives the real server or registry over it:
+**Proven implementable a second time, once.** The fake is the second implementation this seam has
+today: `createFakeHostedThread` (`packages/web/src/server/__tests__/fake-hosted-thread.ts`) builds the
+whole `ThreadRuntime` from plain closures that record every call, and the real server, registry and
+routes run over it. #178 consolidated the four per-file fakes this page used to list into that one
+builder — before it, "four tests each built the nine methods, and a change to the contract was five
+edits that could disagree about what the contract was" (the file's own header). What varies per
+consumer is one method replaced over the fake's own parts (`FakeHostedThreadOptions.runtime`, handed
+`FakeThreadParts`), not another implementation of the seam:
 
-| Fake | Where | What it exercises |
+| Consumer | What it replaces | What it exercises |
 |---|---|---|
-| `fakeHostedThread` | `packages/web/src/server/__tests__/server-handler.test.ts` | the whole HTTP surface over a scripted runtime: prompt, follow, dialog, abort, history, bundle |
-| `fakeHosted` | `packages/web/src/server/__tests__/thread-registry.test.ts` | the registry's lifecycle: acquire, lease, release, idle, dispose, the abort-then-prompt race |
-| the inline `runtime` | `packages/web/src/server/__tests__/follow.test.ts` | the prompt/follow split frame by frame: snapshot, `seq`, status, dialog outcomes |
+| `server-handler.test.ts` (`fakeHost`) | a scripted `prompt` that emits through the fake's `emit`, a literal `listCommands` / `permissionModeState`, a picc-shaped `inspect` | the whole HTTP surface: prompt, follow, dialog, abort, history, bundle |
+| `thread-registry.test.ts` (`fakeHosted`) | an `abort` that resolves only when the test says so, a `clearQueue` a test can make throw | the registry's lifecycle: acquire, lease, release, idle, dispose, the abort-then-prompt race |
+| `follow.test.ts` (`fakeHost`) | a `prompt` that holds its `outcome` so the test accepts when it chooses | the prompt/follow split frame by frame: snapshot, `seq`, status, dialog outcomes |
+| `bundle-route.test.ts` (`liveThread`) | one literal `permissionModeState`, plus the inspection | the bundle's serialization of a live thread |
 
-A fourth, `bundle-route.test.ts`, builds a minimal one to give the bundle a live thread to inspect.
+Everything else is the builder's default and shared: recorded answers, the open-dialog map, the queue
+hand-back, the real event tail (`createEventTail`, so the events route sees the real shape), dispose.
+The generated [*Test doubles*](../reference/verification-inventory.md#test-doubles) table counts the
+same one builder with its four consumers.
 
 ## What fences it
 
