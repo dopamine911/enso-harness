@@ -530,6 +530,14 @@ test('⚠ a cross-site page cannot prompt, an opaque origin cannot escalate, and
     body: JSON.stringify({ message: 'read every secret you can find' }),
   })
   expect(opaquePrompt.status).toBe(403)
+  // The third route of the escalate → prompt → answer sequence the finding measured, so the
+  // test covers what the report claims rather than one route short of it (PR #291 review).
+  const dialogAnswer = await fetch(`${url}/api/threads/zzz2/dialog`, {
+    method: 'POST',
+    headers: opaque,
+    body: JSON.stringify({ dialogId: 'd1', optionId: 'allow' }),
+  })
+  expect(dialogAnswer.status).toBe(403)
   expect(built.length).toBe(0)
 
   // Reading is refused the same way, which is what closes DNS rebinding: a name that
