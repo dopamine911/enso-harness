@@ -30,6 +30,8 @@ import { codeOffenders, hasWordSequence, isCommentLine, REPOSITORY_ROOT, sourceF
  * right one. Bold + backticks in the Replacement column is the decided code name; it must
  * exist. Prose replacements (**threads**, **prompts**, **kept**, **none**) carry no backticks
  * and are not claims about identifiers.
+ * A decided name must be DECLARED, not contained (PR #287 review): the matcher reads whole
+ * tokens, for the reason on `spelledNames`.
  */
 
 const SEARCHED_ROOTS = ['packages/core/src', 'packages/web/src', 'packages/harness', 'scripts', 'test'] as const
@@ -116,6 +118,25 @@ function decidedReplacements(rows: readonly string[]): string[] {
   return names
 }
 
+/**
+ * Every whole name a file's code spells: tokens, split on what cannot be part of a name.
+ *
+ * ⚠ Tokens — not substrings, and NOT the sibling gate's word sequences (PR #287 review). The
+ * two matchers answer opposite questions. Refusing a retired word wants breadth, so
+ * `hasWordSequence` matches a longer name's prefix on purpose: `hosted_session` and
+ * `HostedSession` are one mention. Asking whether a decided name EXISTS wants the opposite —
+ * `describe | observation` are the first two words of `describeObservationList`, and
+ * `includes()` finds the name inside it, so either matcher would vouch for a name nothing
+ * declares, which is the hole #241 found by hand. A hyphen is part of a name here: a status
+ * attribute is one token, not three words.
+ */
+function spelledNames(code: string): Set<string> {
+  return new Set(code.split(/[^\w$-]+/))
+}
+
+/** A replacement that names a file rather than an identifier. */
+const FILE_NAME = /\.(?:ts|tsx|mjs)$/
+
 test('⚠ every replacement the Retired table decided is a name that exists (#241)', () => {
   const rows = retiredTableRows()
   // The table is the subject: an empty parse would pass every assertion below.
@@ -124,20 +145,24 @@ test('⚠ every replacement the Retired table decided is a name that exists (#24
   // ⚠ CODE lines, not the file's text: this gate's own header names `describeRuntimeEvent` to
   // explain #241, and scanning text let that comment vouch for the name — the first probe
   // passed when it had to fail. Prose may say what a thing is NOT called; only code declares.
-  const texts = sources.map((path) => ({
+  const files = sources.map((path) => ({
     name: basename(path),
-    code: readFileSync(path, 'utf8')
-      .split('\n')
-      .filter((line) => !isCommentLine(line))
-      .join('\n'),
+    spelled: spelledNames(
+      readFileSync(path, 'utf8')
+        .split('\n')
+        .filter((line) => !isCommentLine(line))
+        .join('\n'),
+    ),
   }))
-  const spells = (name: string): boolean =>
-    texts.some((source) => source.code.includes(name) || source.name.includes(name))
+  // A file-name replacement must BE a file: the table sends a reader to a module, which an
+  // identifier sharing its stem does not satisfy. A dotted replacement names a member
+  // (`HostedThread.runtime`) — each part is a name, and no single line has to spell the
+  // access. What it cannot check is that the field is on that type; the type checker does, at
+  // every call site.
   const missing = decidedReplacements(rows).filter((replacement) =>
-    // A dotted replacement names a member (`HostedThread.runtime`): each part is a name, and
-    // no single line has to spell the access. What it cannot check is that the field is on
-    // that type — the type checker does, at every call site.
-    replacement.split('.').some((part) => !spells(part)),
+    FILE_NAME.test(replacement)
+      ? !files.some((file) => file.name === replacement)
+      : replacement.split('.').some((part) => !files.some((file) => file.spelled.has(part))),
   )
   expect(missing).toEqual([])
 })
@@ -172,4 +197,15 @@ test('the matcher sees a retired name however it is spelled, and leaves the rese
   ]) {
     expect(namesRetired(line)).toBe(false)
   }
+})
+
+test('a decided name has to be declared, not merely contained (#241, PR #287 review)', () => {
+  const spelled = spelledNames("export function describeObservationList(entries: string[]) { return 'ok' }")
+  expect(spelled.has('describeObservationList')).toBe(true)
+  expect(spelled.has('describeObservation')).toBe(false)
+  // Why not the sibling matcher: it says yes to the same longer name, by design.
+  expect(hasWordSequence(wordsOf('describeObservationList'), ['describe', 'observation'])).toBe(true)
+  // A hyphenated attribute is one name, so a longer attribute is not it.
+  expect(spelledNames('<span data-zen-tool-call="running" />').has('data-zen-tool-call')).toBe(true)
+  expect(spelledNames('<span data-zen-tool-call-status="running" />').has('data-zen-tool-call')).toBe(false)
 })
