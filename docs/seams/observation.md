@@ -16,7 +16,7 @@ Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Ref
 
 ## The contract
 
-The union. Closed, and with no "skip" member by design (module header, `observation.ts` lines 8–12):
+The union. Closed, and with no "skip" member by design (module header, `observation.ts` lines 9–13):
 an event the mapper has no word for becomes `unmapped`, so dropping is inexpressible.
 
 <!-- source: packages/core/src/observation.ts#ZenObservation -->
@@ -122,11 +122,11 @@ export const ZenFollowStatus = Type.Object(
 
 **Produced in two places.** The mapper, `mapPiEvent` in `packages/web/src/host/map-events.ts` (below
 the thread-runtime seam since L2, #162 workstream 4)
-(line 217, top-level; not fenced here because the declaration is the whole 120-line switch): one
+(line 229, top-level; not fenced here because the declaration is the whole 120-line switch): one
 runtime event in, one observation out, never `undefined` (header lines 25–28). Its second parameter is
 the delivery the host tagged (#96): `replayed` becomes `origin: "session-start"` on a ui request, `live`
-becomes `"run"` (lines 213–215). The one kind the server synthesises itself is `prompt-rejected`: the
-prompt route in `packages/web/src/server/follow.ts` announces it (line 207) when the runtime refuses
+becomes `"run"` (lines 225–227). The one kind the server synthesises itself is `prompt-rejected`: the
+prompt route in `packages/web/src/server/follow.ts` announces it (line 204) when the runtime refuses
 a prompt after its receipt went out. Both are grounded in the kinds table's "Produced by" column.
 
 **Minted once.** The registry, `packages/web/src/server/thread-registry.ts`, is the only place a `seq`
@@ -135,17 +135,17 @@ is assigned: `publishObservation` (line 289) increments the feed's counter, reco
 payload), then publishes. The feed subscribes the runtime once per live thread and routes every event
 through the mapper (lines 284–286); the prompt route's `announce` (line 466) enters the same counter.
 
-**Consumed by the follow route and the browser.** `followThread` (`server/follow.ts` line 96) writes
+**Consumed by the follow route and the browser.** `followThread` (`server/follow.ts` line 95) writes
 one frame per feed frame — `observation` with its `seq`, `status` with `live`/`busy`/`generation`
-(lines 109–119) — after a snapshot taken in the same tick as the subscription, exact as of `asOfSeq`
-(lines 92–94, 127–141). In the browser `packages/web/src/follow-connection.ts` checks every frame
+(lines 110–117) — after a snapshot taken in the same tick as the subscription, exact as of `asOfSeq`
+(lines 91–93, 126–138). In the browser `packages/web/src/follow-connection.ts` checks every frame
 against `ZenFollowFrame` (line 407), pushes the snapshot and status frames whole as chunks named by
 their type (lines 348–354), closes runs on `settled` (line 361) and matches `prompt-rejected` to the prompt it
 queued (line 369). `packages/web/src/to-agui.ts` is the adapter proper: observation → state-layer
-chunk, run in the page, never serialised or stored (header lines 17–28).
+chunk, run in the page, never serialised or stored (header lines 14–19).
 
 **The resync rule.** Nothing is replayed by cursor. A reconnect opens a new follow and gets a new
-snapshot (`follow.ts` header lines 13–15; `server/follow.ts` lines 92–94); when the last follower
+snapshot (`follow.ts` header lines 13–15; `server/follow.ts` lines 91–93); when the last follower
 leaves, the registry forgets the feed and `seq` restarts with the next follower, snapshot-first
 (`thread-registry.ts` lines 483–486). `asOfSeq` is the watermark the snapshot is complete through.
 
