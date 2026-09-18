@@ -39,6 +39,20 @@ test('a fused redirection or option name is not mistaken for the path — its ta
   expect(find('openssl enc --in=.zen/pi-agent/auth.json')?.via).toBe('resolved')
 })
 
+// ⚠ The space before a redirect is optional to the shell and was load-bearing to this deny
+// (PR #288 review): the word splitter breaks on whitespace, so `cat<PATH` stayed ONE word,
+// resolved to `<cwd>/cat<.zen/…`, and the `/.zen/` fragment no longer sat behind a separator.
+// Every file the fragment exists for — `auth.json`, `provider-failover*.json`, a transcript —
+// was readable through that one keystroke; `secrets.env` survived only on its basename.
+test('a redirect fused to the command name with no space is still cut at the operator', () => {
+  expect(find('cat<.zen/pi-agent/auth.json')).toEqual({ matched: 'cat<.zen/pi-agent/auth.json', via: 'resolved' })
+  expect(find('wc -l<.zen/pi-agent/auth.json')?.via).toBe('resolved')
+  expect(find('tee>.zen/pi-agent/auth.json')?.via).toBe('resolved')
+  expect(find('cat 2<.zen/pi-agent/auth.json')?.via).toBe('resolved')
+  // The operator is a boundary, not a match: an ordinary redirect names nothing credential.
+  expect(find('bun test packages/core>out.txt')).toBeUndefined()
+})
+
 test('a word whose value is not knowable from the text is judged by its text', () => {
   // Expansion: the literal value is unknowable, but the fragment is right there.
   expect(find('cat "$HOME/.zen/secrets.env"')).toEqual({ matched: '"$HOME/.zen/secrets.env"', via: 'text' })

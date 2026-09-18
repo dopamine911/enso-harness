@@ -60,8 +60,15 @@ export interface SecretPathMatch {
   via: 'resolved' | 'text'
 }
 
-/** A redirection operator fused to its target (`<file`, `2>file`, `&>file`): the target is the path. */
-const ATTACHED_REDIRECT_PREFIX = /^(?:\d*(?:<<<|<<-?|<>|>>|>|<)|&>>?)/
+/**
+ * A redirection operator, wherever it sits in a word: `<file`, `2>file`, `&>file` — and
+ * `cat<file`, which is the same syntax with the space the shell never required. The word
+ * splitter breaks on whitespace only, so a fused operator left `cat<.zen/pi-agent/auth.json`
+ * as ONE word that resolved to `<cwd>/cat<.zen/…` and carried the `/.zen/` fragment past the
+ * match (PR #288 review). The operator is a word boundary here for the same reason it is one
+ * to the shell: what follows it is a path.
+ */
+const REDIRECT_OPERATOR = /\d*(?:<<<|<<-?|<>|>>|>|<)|&>>?/g
 /** `--file=PATH`, `-o=PATH`: the option name is not the path, the value after `=` is. */
 const FLAG_VALUE_PREFIX = /^--?[A-Za-z0-9][-A-Za-z0-9_]*=/
 /** Coarse split: whitespace and the shell/PowerShell operators that can abut a path. */
@@ -77,20 +84,29 @@ const BACKSLASH_SEPARATOR = /\\/g
  */
 const QUOTE_CHARACTERS = /['"]/g
 
-/** The word with a fused redirection operator or option name removed — what is left is the path candidate. */
-function pathCandidateOf(word: string): string {
-  return word.replace(ATTACHED_REDIRECT_PREFIX, '').replace(FLAG_VALUE_PREFIX, '')
+/**
+ * The path candidates one word carries: the word cut at every redirection operator, each
+ * piece with a fused option name (`--file=PATH`, `-o=PATH`) removed — the option name is not
+ * the path, the value after `=` is.
+ */
+function pathCandidatesOf(word: string): string[] {
+  const candidates: string[] = []
+  for (const piece of word.split(REDIRECT_OPERATOR)) {
+    const candidate = piece.replace(FLAG_VALUE_PREFIX, '')
+    if (candidate.length > 0) candidates.push(candidate)
+  }
+  return candidates
 }
 
 /**
- * The word as TEXT, made comparable to a resolved path: quoting removed, PowerShell
+ * A candidate as TEXT, made comparable to a resolved path: quoting removed, PowerShell
  * separators folded, and a LEADING separator added — a directory fragment carries one
  * (`/.zen/`), and a relative mention (`.zen/$KEY`) has nothing before its first segment, so
  * without this the fragment pass would see `.zen/...` and match nothing while
  * `<cwd>/.zen/...` matches.
  */
-function textCandidateOf(word: string): string {
-  const folded = pathCandidateOf(word).replace(BACKSLASH_SEPARATOR, '/').replace(QUOTE_CHARACTERS, '')
+function textCandidateOf(candidate: string): string {
+  const folded = candidate.replace(BACKSLASH_SEPARATOR, '/').replace(QUOTE_CHARACTERS, '')
   return folded.startsWith('/') ? folded : `/${folded}`
 }
 
@@ -100,15 +116,16 @@ function textCandidateOf(word: string): string {
  * `"$HOME/.zen/secrets.env"` and `.zen/$KEY` are caught.
  */
 function wordFinding(word: string, fragments: readonly string[], cwd: string): SecretPathMatch | undefined {
-  const candidate = pathCandidateOf(word)
-  if (candidate.length === 0) return undefined
-  const literal = literalShellWord(candidate)
-  if (literal.kind === 'literal') {
-    if (literal.value.length === 0) return undefined
-    const target = resolveAgainstCwd(literal.value, cwd)
-    return looksLikeSecret(target, fragments) ? { matched: word, via: 'resolved' } : undefined
+  for (const candidate of pathCandidatesOf(word)) {
+    const literal = literalShellWord(candidate)
+    if (literal.kind !== 'literal') {
+      if (textLooksLikeSecretPath(textCandidateOf(candidate), fragments)) return { matched: word, via: 'text' }
+      continue
+    }
+    if (literal.value.length === 0) continue
+    if (looksLikeSecret(resolveAgainstCwd(literal.value, cwd), fragments)) return { matched: word, via: 'resolved' }
   }
-  return textLooksLikeSecretPath(textCandidateOf(candidate), fragments) ? { matched: word, via: 'text' } : undefined
+  return undefined
 }
 
 /**
@@ -118,8 +135,9 @@ function wordFinding(word: string, fragments: readonly string[], cwd: string): S
  */
 function coarseFinding(command: string, fragments: readonly string[]): SecretPathMatch | undefined {
   for (const token of command.split(COARSE_WORD_BOUNDARY)) {
-    if (token.length === 0) continue
-    if (textLooksLikeSecretPath(textCandidateOf(token), fragments)) return { matched: token, via: 'text' }
+    for (const candidate of pathCandidatesOf(token)) {
+      if (textLooksLikeSecretPath(textCandidateOf(candidate), fragments)) return { matched: token, via: 'text' }
+    }
   }
   return undefined
 }
