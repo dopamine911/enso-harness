@@ -376,7 +376,8 @@ workstream 4): the runtime's event and stored-entry shapes are read only under `
 | `HostedSession`, `HostedSessionInspection` | the host's side of a live thread: the runtime plus inspect and the emitted tail | **`HostedThread`**, **`HostedThreadInspection`** | `packages/web/src/host/agent-host.ts` | — |
 | `StoredSession` | a thread whose log is on disk, as the host lists it | **`StoredThread`** — the wire already says `ZenStoredThread` | `packages/web/src/host/agent-host.ts` | — |
 | `ZenCustomSessionEntry` | a custom entry observation | **`ZenCustomEntry`** | `packages/core/src/observation.ts` | — |
-| `session-inspection.ts`, `describeSessionEntry` | the thread inspection module and its entry formatter | **`thread-inspection.ts`**, **`describeEntry`** | `packages/core/src/` | — |
+| `session-inspection.ts` | the thread inspection module | **`thread-inspection.ts`** | `packages/core/src/` | — |
+| `describeSessionEntry` | the formatter for one entry of a transcript | **`describeTranscriptEntry`**, in `transcript.ts` — the entry is the transcript's, so the formatter moved there with it | `packages/core/src/` | — |
 | `pi-rpc.ts` | the module holding the runtime contract and its wire shapes | **`thread-runtime.ts`** — the name says a transport it no longer is (#69) | `packages/core/src/` | — |
 | `zen-session.mjs` | the thread inspection CLI | **`zen-thread.mjs`** | `scripts/` | — |
 | "sessions" (rail heading, prose in the browser) | threads | **threads** | `packages/web/src/threads-rail.tsx` | — |
@@ -385,7 +386,7 @@ workstream 4): the runtime's event and stored-entry shapes are read only under `
 | `turns` as a count of user messages | prompts | **prompts** | `packages/web/src/thread-status.tsx` | — |
 | `ToolStep`, "step" | a tool call rendered as a row | **tool call** (`ToolCallRow`) | `packages/web/src/selected-message-part.tsx` | the adapter that emits the state layer's step events |
 | `HostedThread.session` (was `hosted.session` at every call site) | the thread's runtime handle | **`HostedThread.runtime`** — found by the gate: a field that said session and held the runtime | `packages/web/src/host/agent-host.ts` and the server | — |
-| `describePiRpcEvent` | the event tail's one-line description of a runtime event | **`describeRuntimeEvent`** | `packages/web/src/host/event-tail.ts` | — |
+| `describePiRpcEvent` | the event tail's one-line description of what arrived | **`describeObservation`** — it describes an OBSERVATION, which is what the tail holds now (L2) | `packages/web/src/host/event-tail.ts` | — |
 | `data-zen-tool-step` | the tool-call row's status attribute | **`data-zen-tool-call`** | `packages/web/src/selected-message-part.tsx` | — |
 | `conversation`, `chat` as nouns for the unit | a thread | **thread**; *transcript* for what it shows | prose | `chat` for the state layer's object, in the adapter |
 | `layer` meaning "who wrote it" in the log sense | the process | **process** for the OS process; **layer** keeps its code-region meaning | comments in `packages/core/src/log.ts` | — |
