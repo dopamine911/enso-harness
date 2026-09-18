@@ -317,11 +317,24 @@ test('re-reading the changed file clears the staleness and the write passes', ()
 // error anywhere — untracked files fail loudly, and that asymmetry is the trap. The two
 // contents are the SAME LENGTH deliberately, so only the mtime leg of the stamp can catch
 // the restore — this test is what pins that git's restore actually moves mtime.
+/**
+ * The fixture's git, hermetic: not the caller's environment, and not the caller's config.
+ *
+ * ⚠ This suite runs INSIDE a git hook — `.githooks/pre-commit` runs the gate — and git exports
+ * an absolute `GIT_INDEX_FILE` to a hook. A git spawned here with the inherited environment
+ * therefore writes THIS repository's index instead of the temp repo's: `git add work.ts` below
+ * staged a fixture file into a real commit of this project, and every `--amend` re-staged it
+ * (PR #287). Everything these commands need is on the command line or in the temp repo, so the
+ * child is given an environment rather than inheriting one, and a developer's global gitconfig
+ * (`core.hooksPath`, `init.defaultBranch`) cannot reach the fixture either.
+ */
+const FIXTURE_GIT_ENV: Record<string, string> = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' }
+
 const isGitAvailable = Bun.which('git') !== null
 test.skipIf(!isGitAvailable)('the incident shape: staged, mutated, restored from index — the write is refused', () => {
   const repo = mkdtempSync(join(tmpdir(), 'zen-guard-incident-'))
   const runGit = (...args: string[]): void => {
-    const result = Bun.spawnSync(['git', ...args], { cwd: repo })
+    const result = Bun.spawnSync(['git', ...args], { cwd: repo, env: FIXTURE_GIT_ENV })
     if (result.exitCode !== 0) {
       throw new Error(`git ${args[0]} failed: ${result.stderr.toString()}`)
     }
