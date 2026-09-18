@@ -259,5 +259,8 @@ distinction, or with one queue class or three, invalidates `StreamingBehavior`, 
 `ZenPromptBody.streamingBehavior` in `@zen/core`; the prompt route's default and its `PromptBody`
 type; the thread route that forwards it; the browser's send and the queue store the router fills; and
 the mapper under `host/`. Measured on `main`: 13 production files and 11 test files name
-`streamingBehavior`, `StreamingBehavior` or the queue's `steering`/`followUp`. That is a wire-schema
-change and a browser change, and it is priced here rather than at zero.
+`streamingBehavior`, `StreamingBehavior` or the queue's `steering`/`followUp` — all four tokens over
+`packages/` and `scripts/`, counting SOURCE only, since `dist-types/` carries a generated copy of the
+same declarations and would report seven more (PR #297 review reproduced the count and got a different
+number from a narrower token set; the recipe is here so the next reader gets this one).
+That is a wire-schema change and a browser change, and it is priced here rather than at zero.
