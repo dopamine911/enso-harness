@@ -405,14 +405,40 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     push(...observationToAguiEvents(observation, idsOf(current)))
   }
 
+  /**
+   * A follow that NEVER OPENED, said the same way a follow that ended says it (#274).
+   *
+   * ⚠ Yielded, never `push`ed: `push` only enqueues, and the subscription loop that drains
+   * the queue is BELOW the open — a chunk pushed here and then thrown past is a chunk the
+   * router never sees. Measured before this existed: a 500 on `…/follow` moved no store, so
+   * `disconnected` stayed false and every reading on the page said the thread was live —
+   * the composer took prompts, the stop button was offered for a run nothing could observe,
+   * and the status bar said idle. The only signal was the client's own "the run failed"
+   * alert, which names the wrong thing.
+   */
+  function* followNeverOpened(detail: string): Generator<StreamChunk> {
+    problem('the follow could not be opened: {detail}', { detail })
+    yield { type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId } }
+  }
+
   async function* subscribe(signal?: AbortSignal): AsyncIterable<StreamChunk> {
     // The page's own end (#272) rides with TanStack's: either one closes the socket, and a
     // connection already released never opens one.
     if (released.signal.aborted) return
     const abort = signal === undefined ? released.signal : AbortSignal.any([signal, released.signal])
-    const response = await fetchImpl(`${base}/follow`, { signal: abort })
+    let response: Response
+    try {
+      response = await fetchImpl(`${base}/follow`, { signal: abort })
+    } catch (error) {
+      // A throwing fetch is the same fact as a refusing one — unless this page is the one
+      // leaving, in which case there is nothing to report.
+      if (!abort.aborted) yield* followNeverOpened(String(error))
+      throw error
+    }
     if (!response.ok || response.body === null) {
-      throw new Error(`follow ${threadId}: ${response.status} ${await response.text()}`)
+      const detail = `${response.status} ${await response.text()}`
+      if (!abort.aborted) yield* followNeverOpened(detail)
+      throw new Error(`follow ${threadId}: ${detail}`)
     }
     const frames = readSseFrames(response.body, abort)
     // Frames are consumed on their own loop so `send` can interleave chunks; this loop
