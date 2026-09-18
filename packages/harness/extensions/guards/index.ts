@@ -393,7 +393,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     }
 
     // --- bash/powershell (#9): deny first, patch last — a denied command must never
-    // have had its input mutated. The three denies live in `shellCommandDenial` so this
+    // have had its input mutated. The four denies live in `shellCommandDenial` so this
     // handler stays under the complexity ceiling biome.jsonc pins.
     if (toolName === TOOL_BASH || toolName === TOOL_POWERSHELL) {
       const input = inputRecordOf(event)
