@@ -2,7 +2,12 @@ import { expect, test } from 'bun:test'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { extractDeclaration } from '../scripts/docs/extract-declaration.ts'
-import { detectedExceptionConstants } from '../scripts/docs/gate-source.ts'
+import {
+  detectedExceptionConstants,
+  numericConstant,
+  stringArray,
+  stringConstant,
+} from '../scripts/docs/gate-source.ts'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
@@ -372,4 +377,28 @@ test('⚠ an allowlist the reader cannot parse is REFUSED, not skipped (#262)', 
       /probe\.ts: EXEMPT_PATHS is not a flat string array/,
     )
   }
+})
+
+// The other three readers, answered directly (PR #300 review). The split's stated reason was
+// that a reader is a question about a string and needs no generator to ask — which applies to
+// all of them, not only the detector. Each publishes a row of the inventory, so a reader that
+// silently returns the wrong value publishes a wrong claim about what a gate enforces.
+test('each gate-source reader answers its shape, and refuses rather than guessing', () => {
+  // The comment mask is the subtle one: a `//` inside a quoted entry is an entry, not a comment.
+  expect(stringArray("const A = ['packages/a.ts', 'https://x/y'] // trailing", 'A', 'probe.ts')).toEqual([
+    'packages/a.ts',
+    'https://x/y',
+  ])
+  // An EMPTY allowlist is the state the gates aim for, not a parse failure.
+  expect(stringArray('const A: readonly string[] = []', 'A', 'probe.ts')).toEqual([])
+  expect(() => stringArray('const B = []', 'A', 'probe.ts')).toThrow(/probe\.ts: cannot parse string array A/)
+  expect(stringConstant("const ROOT = 'packages/web'", 'ROOT', 'probe.ts')).toBe('packages/web')
+  expect(() => stringConstant('const ROOT = someCall()', 'ROOT', 'probe.ts')).toThrow(
+    /probe\.ts: cannot parse string constant ROOT/,
+  )
+  // Exported and fractional, because a threshold is both (`.fallowrc` pins 4.52).
+  expect(numericConstant('export const FLOOR = 91.5', 'FLOOR', 'probe.ts')).toBe(91.5)
+  expect(() => numericConstant('const FLOOR = computed', 'FLOOR', 'probe.ts')).toThrow(
+    /probe\.ts: cannot parse numeric constant FLOOR/,
+  )
 })
