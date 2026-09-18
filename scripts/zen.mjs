@@ -41,6 +41,11 @@
  *   every mutating tool where no prompt can be shown. See the `isPrintRun` block below
  *   and scripts/print-harness.mjs (#20). Interactive runs keep the full permission model.
  *
+ * ⚠ THE `pi` SPAWNED HERE IS VERSION-GATED (#217). It comes from `PATH`, while the guard's
+ *   replica of pi's path resolver is pinned against the pi in the workspace tree — two
+ *   resolutions that nothing held together. The version is read before the spawn and refused
+ *   outside `zen-launch.mjs#SUPPORTED_PI_VERSIONS`; see the block below.
+ *
  * Usage:  bun run zen -p "hello"
  *         ZEN_AGENT_DIR=/somewhere/else bun run zen
  */
@@ -49,7 +54,15 @@ import { join } from 'node:path'
 import { findRepoRoot, harnessPackageDir, printHarnessDir, zenAgentDir } from '../packages/core/src/paths.ts'
 import { quarantineSecrets } from '../packages/core/src/secrets.ts'
 import { buildPrintManifest, materializePrintHarness } from './print-harness.mjs'
-import { declaredResources, isPrintRun, missingVendorPaths, piArguments } from './zen-launch.mjs'
+import {
+  declaredResources,
+  isPrintRun,
+  missingVendorPaths,
+  piArguments,
+  piVersionSupported,
+  piVersionText,
+  SUPPORTED_PI_VERSIONS,
+} from './zen-launch.mjs'
 
 const repoRoot = findRepoRoot(import.meta.url)
 const packageRoot = harnessPackageDir(repoRoot)
@@ -93,8 +106,44 @@ const packageToLoad = printRun
 // The isolation triple's two argument legs: `zen-launch.mjs#piArguments`.
 const args = piArguments(packageToLoad, passthroughArgs)
 
+/**
+ * ⚠ THE PI ON `PATH` IS NOT NECESSARILY THE PI THE GUARD WAS PINNED AGAINST (#217). The guard
+ * REPLICATES pi's path normaliser (`packages/harness/core/paths.ts`) and the corpus pins the
+ * copy against the pi in the WORKSPACE tree; this spawn takes whatever `pi` comes first on
+ * `PATH`, which is a different resolution that no manifest bounded. Reproduced 2026-09-18 with
+ * a shim printing `0.85.0` earlier on `PATH`: it launched, and the whole suite stayed green —
+ * the guard resolving a path differently from the tool it gates is exactly the failure the
+ * replica exists to prevent. So the version is read BEFORE the spawn and refused when it falls
+ * outside `zen-launch.mjs#SUPPORTED_PI_VERSIONS`, the shape `assertVendorLinks` already uses on
+ * the other surface: one precondition, enforced at both launch points.
+ *
+ * There is no override flag, deliberately: the range is widened by running the corpus against
+ * the new pi (`scripts/__tests__/pi-version-parity.test.ts` is what holds those two together), not by a flag
+ * on a launch. The cost is one extra process per launch, ~30 ms.
+ */
+let reportedPiVersion = ''
+try {
+  const probe = Bun.spawn(['pi', '--version'], { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' })
+  reportedPiVersion = (await new Response(probe.stdout).text()).trim()
+  await probe.exited
+} catch {
+  process.stderr.write('zen: no `pi` on PATH — the terminal surface spawns it, so install it first\n')
+  process.exit(1)
+}
+if (!piVersionSupported(reportedPiVersion)) {
+  process.stderr.write(
+    `zen: the \`pi\` on PATH reports ${reportedPiVersion === '' ? 'no version' : reportedPiVersion}, ` +
+      `outside the range the guards are pinned against ` +
+      `(>=${piVersionText(SUPPORTED_PI_VERSIONS.minimum)} <${piVersionText(SUPPORTED_PI_VERSIONS.below)}).\n` +
+      "The guard replicates pi's path resolver; against an unpinned pi a deny can be computed against the wrong\n" +
+      'target (#217). Either use the pinned pi, or run the corpus against this one and widen the range:\n' +
+      '  bun test packages/harness/core/__tests__/paths.test.ts   then scripts/zen-launch.mjs#SUPPORTED_PI_VERSIONS\n',
+  )
+  process.exit(1)
+}
+
 process.stderr.write(
-  `zen: vanilla pi | agent-dir=${agentDir} | package=${packageToLoad}` +
+  `zen: vanilla pi ${reportedPiVersion} | agent-dir=${agentDir} | package=${packageToLoad}` +
     `${printRun ? ' (print variant, no permission modes — #20)' : ''} | ` +
     `${resources.length} declared resource path(s)\n`,
 )

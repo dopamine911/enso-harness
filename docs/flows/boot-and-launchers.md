@@ -20,6 +20,7 @@ sequenceDiagram
   Z->>M: read pi.* — every node_modules/ path must exist, or refuse (exit 1, naming each path and `bun install`)
   S->>M: assertVendorLinks — the same check, the same message, before the host is created
   Z->>Z: isPrintRun (-p · --print · stdin not a TTY) → buildPrintManifest + materializePrintHarness → .zen/print-harness
+  Z->>Z: pi --version — inside the range the guard corpus was run against, or refuse (exit 1, naming both bounds)
   Z->>R: quarantineSecrets, then spawn pi --no-extensions --no-skills -e the package dir · env PI_CODING_AGENT_DIR = the agent dir
   S->>S: process.env.PI_CODING_AGENT_DIR = agentDir → childProxy pinned off → quarantineSecrets
   S->>R: per thread — createAgentSessionServices { noExtensions, noSkills, additionalExtensionPaths: [harness] }
@@ -59,6 +60,16 @@ sequenceDiagram
    filtered manifest (the fence below) plus a symlink for EVERY package-root entry, by `readdir`, since
    extensions import siblings by relative path. `zen.config.json` is not mirrored and must not be:
    `findRepoRoot` realpaths out of the mirror first. A print run has our guards only — `bash` unconfined (#9).
+7. **The terminal launcher refuses a `pi` it was not pinned against (#217).** The two surfaces resolve
+   pi differently and only one was bounded: in-process imports the WORKSPACE copy, while the terminal
+   launcher spawns the first `pi` on `PATH`. The guard REPLICATES pi's path resolver (`resolveToCwd` is
+   not on pi's export map) and the corpus that keeps the copy honest reads the workspace copy — so on
+   the terminal surface the guard could resolve a path differently from the tool it gates, and compute
+   a deny against the wrong target, with the whole suite green (reproduced with a shim printing
+   `0.85.0` earlier on `PATH`). So `zen.mjs` reads `pi --version` before the spawn and refuses outside
+   `zen-launch.mjs#SUPPORTED_PI_VERSIONS` — no override flag, because the range means "the corpus has
+   been run against this", and `packages/harness/package.json` → `peerDependencies` states the same
+   bound. What it does NOT cover: the versions of the libraries inside the pi binary's own tree.
 
 ## The print-variant contract
 
@@ -125,6 +136,13 @@ that title, so a renamed or deleted pin fails this page.
 <!-- test: scripts/__tests__/link-vendor-packages.test.ts#verify-or-fix: a present package is verified, an absent one is linked from the hoisted copy, and the link resolves -->
 - **Invariant 5, the linker** — [`link-vendor-packages.test.ts`](../../scripts/__tests__/link-vendor-packages.test.ts):
   both sources of required packages; verify-or-fix; a broken link replaced; a missing package named.
+<!-- test: scripts/__tests__/pi-version-parity.test.ts#⚠ the pi the guard corpus pins against is a pi the terminal launcher will run (#217) -->
+- **Invariant 7, the two resolutions** — [`pi-version-parity.test.ts`](../../scripts/__tests__/pi-version-parity.test.ts):
+  the workspace pi the guard corpus resolves is inside the range the launcher enforces, and the
+  harness's `peerDependencies` states that same bound.
+<!-- test: scripts/__tests__/zen-launch.test.ts#the tested pi range includes its minimum and excludes the version it stops below -->
+- **Invariant 7, the range itself** — the boundaries of `piVersionSupported`, and its fail-closed
+  reading of a version it cannot parse.
 
 ## Where it is stated
 
