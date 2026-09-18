@@ -392,13 +392,21 @@ test.skipIf(!isGitAvailable)('the incident shape: staged, mutated, restored from
 // the victim repository is asserted untouched afterwards. That is a behavioural sensor, not
 // an assertion on a literal: delete `env: FIXTURE_GIT_ENV` from the spawn above and this
 // goes red, naming the leg that leaked.
+//
+// It is also what pins the RUNTIME property the fix rests on (PR #296 review): that a spawn
+// given `env` REPLACES the environment rather than merging into it. Nothing in the diff can
+// state that — a Bun that started merging would reopen the hazard in silence, and this test
+// is the thing that would go red.
 test.skipIf(!isGitAvailable)(
   '⚠ the incident fixture cannot reach the repository that runs it (GIT_DIR, GIT_INDEX_FILE)',
   () => {
     const victim = mkdtempSync(join(tmpdir(), 'zen-guard-victim-'))
     const hermetic: Record<string, string> = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' }
     const victimGit = (...args: string[]): string => {
-      const result = Bun.spawnSync(['git', ...args], { cwd: victim, env: hermetic })
+      // Absolute, and the child below gets a PATH: a bare name under an env with no PATH
+      // resolves only through `execvp`'s default path, so it works until git is installed
+      // somewhere else (`~/.local/bin`, a nix profile, Homebrew).
+      const result = Bun.spawnSync([GIT_BINARY, ...args], { cwd: victim, env: hermetic })
       return result.stdout.toString().trim()
     }
     victimGit('init', '-q')
