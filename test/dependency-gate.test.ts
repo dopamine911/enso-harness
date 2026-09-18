@@ -100,6 +100,20 @@ test('⚠ the root `overrides` block is exactly the state-layer packages the cod
   )
 })
 
+// The skip above is load-bearing in BOTH directions, so it is asserted here rather than
+// borrowed from another gate's fixture (PR #302 review). It is what keeps an import-shaped
+// string out of the graph — and, if it ever widened, what would quietly drop a real package
+// and make the `overrides` equality above pass by omission.
+test('an import-shaped string that names no installed package is not an import (#223)', () => {
+  // The fixture that taught the gate this: a matcher's own example, naming a package that has
+  // never existed (the real one is `@tanstack/ai-react`).
+  expect(imports.has('@tanstack/react-ai')).toBe(false)
+  expect(existsSync(join(REPOSITORY_ROOT, 'node_modules', '@tanstack/react-ai'))).toBe(false)
+  // …and the near neighbour it is one transposition from IS in the graph, so the skip is a
+  // resolution test and not a spelling rule.
+  expect(imports.get('@tanstack/ai-react')).toEqual(expect.arrayContaining(['packages/web/src/chat-screen.tsx']))
+})
+
 /**
  * A `__tests__` import may be a devDependency; an import the browser bundle can reach may
  * not. If `fixture-conversation.ts` ever reaches the helper through a dynamic `import()`

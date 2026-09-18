@@ -334,20 +334,45 @@ function withoutComments(source: string): string {
 }
 
 /**
- * ⚠ Comments come off BEFORE the array is located, not after. The `[…]` capture is
- * non-greedy, so a bracket inside an allowlist's REASON comment ended the match early and
- * this generator published a SHORT count — measured on #215's widened vendor gate:
- * `VENDOR_NAMED_ALLOWED` has 13 entries and the page said 9, because one reason named
- * `unknown` followed by an empty index pair. A ratchet row that silently undercounts is worse
- * than one that throws. `withoutComments` is lexeme-aware, so a bracket inside a string
- * entry survives.
+ * From just past an opening `[` to its MATCHING `]`: depth counted, string lexemes skipped.
+ *
+ * ⚠ Not a non-greedy `[…]` capture (PR #302 review). That ended the array at the first `]`
+ * it saw, wherever it came from, and this generator published a SHORT count — measured on
+ * #215's widened vendor gate: `VENDOR_NAMED_ALLOWED` has 13 entries and the page said 9,
+ * because one reason comment named `unknown` followed by an empty index pair. Stripping
+ * comments first fixed that instance and left the SHAPE: a `]` inside a quoted entry — a
+ * path, a pattern — truncates the same way, and no allowlist carries one today, which is
+ * exactly how long a latent undercount stays invisible. A ratchet row that silently
+ * undercounts is worse than one that throws, so the reader counts brackets.
  */
+function arrayBody(source: string, start: number): string | undefined {
+  let depth = 1
+  let quote = ''
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index] ?? ''
+    if (quote !== '') {
+      if (character === '\\') index += 1
+      else if (character === quote) quote = ''
+      continue
+    }
+    if (character === "'" || character === '"' || character === '`') quote = character
+    else if (character === '[') depth += 1
+    else if (character === ']') {
+      depth -= 1
+      if (depth === 0) return source.slice(start, index)
+    }
+  }
+  return undefined
+}
+
 function stringArray(source: string, name: string, file: string): string[] {
-  const pattern = new RegExp(
-    `\\bconst\\s+${name}\\b(?:\\s*:[^=]+)?\\s*=\\s*(?:new\\s+Set\\s*\\()?\\s*\\[([\\s\\S]*?)\\]`,
-  )
-  const body = pattern.exec(withoutComments(source))?.[1]
-  if (body === undefined) throw new Error(`${file}: cannot parse string array ${name}`)
+  // Comments come off BEFORE the array is located, and `withoutComments` is lexeme-aware, so
+  // a `//` inside a quoted entry stays an entry rather than starting a comment.
+  const clean = withoutComments(source)
+  const opening = new RegExp(`\\bconst\\s+${name}\\b(?:\\s*:[^=]+)?\\s*=\\s*(?:new\\s+Set\\s*\\()?\\s*\\[`).exec(clean)
+  if (opening === null) throw new Error(`${file}: cannot parse string array ${name}`)
+  const body = arrayBody(clean, opening.index + opening[0].length)
+  if (body === undefined) throw new Error(`${file}: ${name} has no closing bracket`)
   const values = [...body.matchAll(/(['"])(.*?)\1/g)].map((match) => match[2] ?? '')
   const residue = body.replace(/(['"])(.*?)\1/g, '').replace(/[\s,]/g, '')
   // An EMPTY allowlist is a state the gates aim for (the vendor gate's import list since L6), not a parse failure.
