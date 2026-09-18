@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 155.**
+**Decision headers: 157.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -80,6 +80,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/permission-mode.test.tsx` | `#84`, `#90` | #84's browser half: the CURRENT permission mode as state, and the control that changes it. |
 | `packages/web/src/__tests__/prompt-input.test.ts` | `#141` | ⚠ Upstream reported a refusal only when the WHOLE batch failed; a mixed drop lost files silently (PR #141 review). |
 | `packages/web/src/__tests__/scripted-server.ts` | `#112`, `#118` | A scripted server behind `fetch` (#112, #118): one follow body the test writes SSE frames into, and unary routes the test scripts the answers of. |
+| `packages/web/src/__tests__/static-markup.ts` | `#236` | What a `<select>` in a `renderToStaticMarkup` string offers, read through a DOM (#236). |
 | `packages/web/src/__tests__/stored-threads.test.ts` | `#103` | #103 receipt, step 8: the dev proxy answered a dead API with Bun's whole HTML error page, and quoting it filled the rail. |
 | `packages/web/src/__tests__/thread-debug.test.tsx` | `#86` | #86: the drawer's one job is to NAME a disagreement between what the browser believes and what pi's session holds. |
 | `packages/web/src/__tests__/thread-stats.test.tsx` | `#45`, `#90` | #45's browser half: `message-end` chunks become the stats the status bar renders (#90, thread-status.test.tsx). |
@@ -108,6 +109,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/mode-lines.ts` | `#29`, `#69`, `#88`, `#162` | Permission-mode lines in the transcript (#29, the remaining half). |
 | `packages/web/src/notifications.tsx` | `#29`, `#84`, `#94`, `#96` | pi's `notify` messages, rendered (#29). |
 | `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |
+| `packages/web/src/server/__tests__/bun-plugin-strict-binding-workaround.test.ts` | `#237` | The dev bundle's one source rewrite, executed (#237). |
 | `packages/web/src/server/__tests__/fake-hosted-thread.ts` | `#178` | The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a `ThreadRuntime` from plain closures that records every call, so the server, the registry and the routes are driven over it and asserted through what it recorded. |
 | `packages/web/src/server/__tests__/follow.test.ts` | `#109`, `#112` | The wire, measured (#109's receipt, kept as the contract — #112). |
 | `packages/web/src/server/__tests__/logs-route.test.ts` | `#132` | `POST /api/logs` (#132 slice 3): the browser's batch into this process's logger, under the browser's own category, at its level, marked as the browser's — or a 4xx that is never a record of its own. |
@@ -134,7 +136,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/threads-rail.tsx` | `#90`, `#95`, `#104` | The threads rail (#90 PR 3): which conversation am I in, what else is live on this page, how do I start over. |
 | `packages/web/src/to-agui.ts` | `#18`, `#24`, `#112` | `ZenObservation` → AG-UI `StreamChunk` (#24, #112). |
 | `scripts/__tests__/zen-logs.test.ts` | `#132` | The reader's own logic (#132, `bun run logs`): the flags, and what a line must be to print. |
-| `scripts/check-coverage.ts` | `#49`, `#118` | The TOTAL coverage floor — the gate that bunfig.toml cannot express. |
+| `scripts/check-coverage.ts` | `#49`, `#118`, `#234` | The TOTAL coverage floor — the gate that bunfig.toml cannot express. |
 | `scripts/docs/core-exports.ts` | `#170` | Generates `docs/reference/core-exports.md` (#170): the public core barrel and the node-only logging subpath, with their defining declarations and production importers. |
 | `scripts/docs/decisions.ts` | `#170` | Generates `docs/reference/decisions.md` (#170): one row for each owned source file whose first comment/header block cites an issue. |
 | `scripts/docs/env-and-config.ts` | `#170` | Generates `docs/reference/env-and-config.md` (#170): the explicit environment boundary, the composed `ZenConfig` shape, every `.zen/` path assembled by core, and the harness manifest resources. |

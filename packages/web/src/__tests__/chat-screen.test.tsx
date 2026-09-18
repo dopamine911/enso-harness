@@ -14,6 +14,7 @@ import {
 import type { DialogAnswerOutcome, FollowConnection } from '../follow-connection.ts'
 import { createStore } from '../store.ts'
 import { adoptThread, clearThreadsForTest, mintThread } from '../thread-stores.ts'
+import { selectIn } from './static-markup.ts'
 
 /**
  * #49, first pass: the dialog components had live receipts (#27, the e2e smoke) and no unit
@@ -171,7 +172,7 @@ test('⚠ two mounted panes with ?debug open render exactly ONE debug column, in
   expect(closed).not.toContain('id="thread-debug-pane"')
 })
 
-test('a resumed pane mounts with the stored user and assistant messages already visible', () => {
+test('a resumed pane mounts with the stored messages and the stored permission mode already visible', () => {
   const stored = adoptThread({
     threadId: 'stored-1',
     messages: [
@@ -183,7 +184,8 @@ test('a resumed pane mounts with the stored user and assistant messages already 
   const rendered = renderToStaticMarkup(<ThreadPane threadId={stored.threadId} active={true} debugOpen={false} />)
   expect(rendered).toContain('Earlier question')
   expect(rendered).toContain('Earlier answer')
-  expect(rendered).toContain('<option value="plan" selected="">plan</option>')
+  // The stored mode is the control's selection — not how React 19 happens to spell `selected`.
+  expect(selectIn(rendered).selected).toBe('plan')
 })
 
 // A file the composer would not take is SAID, with how many and the cap by name (#68) — never dropped silently.

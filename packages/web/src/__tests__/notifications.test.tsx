@@ -63,16 +63,13 @@ test('a notification line renders its message', () => {
   expect(rendered).toContain('role="status"')
 })
 
-test('an error notification styles with the destructive token; others stay muted', () => {
-  const errorLine = renderToStaticMarkup(
-    <NotificationLine notification={{ id: 1, message: 'x', notifyType: 'error', origin: 'run', at: new Date(0) }} />,
-  )
-  const infoLine = renderToStaticMarkup(
-    <NotificationLine notification={{ id: 2, message: 'x', notifyType: undefined, origin: 'run', at: new Date(0) }} />,
-  )
-  expect(errorLine).toContain('text-destructive')
-  expect(infoLine).toContain('text-muted-foreground')
-})
+// ⚠ DELETED (#236): "an error notification styles with the destructive token; others stay muted"
+// asserted `toContain('text-destructive')` and `toContain('text-muted-foreground')` — Tailwind
+// class names, which go red on a token rename that breaks nothing and stay green on any
+// behaviour change. What a reader observes of a notification is its message and its role, and
+// the test above asserts both. The error/info difference that remains is the colour token and
+// which lucide icon renders; neither is behaviour a test can pin without pinning a vendored
+// component's markup, so it is deliberately NOT gated. Do not restore a class assertion here.
 
 test("the session block renders nothing while the thread's store is empty, then every line", () => {
   const thread = mintThread()

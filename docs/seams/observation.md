@@ -130,10 +130,10 @@ prompt route in `packages/web/src/server/follow.ts` announces it (line 207) when
 a prompt after its receipt went out. Both are grounded in the kinds table's "Produced by" column.
 
 **Minted once.** The registry, `packages/web/src/server/thread-registry.ts`, is the only place a `seq`
-is assigned: `publishObservation` (line 289) increments the feed's counter, records the observation
+is assigned: `publishObservation` (line 315) increments the feed's counter, records the observation
 (`observation-log.ts` — `info` for the spine kinds, `debug` for every observation, `trace` with the
 payload), then publishes. The feed subscribes the runtime once per live thread and routes every event
-through the mapper (lines 284–286); the prompt route's `announce` (line 466) enters the same counter.
+through the mapper (lines 310–312); the prompt route's `announce` (line 485) enters the same counter.
 
 **Consumed by the follow route and the browser.** `followThread` (`server/follow.ts` line 96) writes
 one frame per feed frame — `observation` with its `seq`, `status` with `live`/`busy`/`generation`
@@ -147,7 +147,7 @@ chunk, run in the page, never serialised or stored (header lines 17–28).
 **The resync rule.** Nothing is replayed by cursor. A reconnect opens a new follow and gets a new
 snapshot (`follow.ts` header lines 13–15; `server/follow.ts` lines 92–94); when the last follower
 leaves, the registry forgets the feed and `seq` restarts with the next follower, snapshot-first
-(`thread-registry.ts` lines 483–486). `asOfSeq` is the watermark the snapshot is complete through.
+(`thread-registry.ts` lines 504–508). `asOfSeq` is the watermark the snapshot is complete through.
 
 ## What fences it
 

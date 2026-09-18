@@ -181,7 +181,7 @@ file-permission component into a `select`.
 thread (`ThreadEntry.hosted.runtime`), subscribes it to the feed, and hands a `ThreadLease.runtime` to
 the run that acquired the thread. `server/follow.ts` calls `prompt`, `listCommands`, `answerDialog`,
 `openDialogs`, `permissionModeState` from the unary routes; the abort route goes through the registry,
-whose `abort` is the one caller of `clearQueue` and `abort` (`thread-registry.ts:394,399`).
+whose `abort` is the one caller of `clearQueue` and `abort` (`thread-registry.ts:417,422`).
 `server/index.ts` reads `permissionModeState` for the thread routes. The browser never sees it: what it
 gets is observations on the follow.
 
