@@ -73,7 +73,11 @@ function stateLayerTarget(fromFile: string, specifier: string): string | undefin
   if (!(aliased || specifier.startsWith('.'))) return undefined
   const resolved = aliased ? join(webRoot, specifier.slice(2)) : resolve(dirname(fromFile), specifier)
   const inside = relative(webRoot, resolved)
-  if (inside === '' || inside === '..' || inside.startsWith(`..${sep}`)) return undefined
+  // ⚠ An escape is not an allowance (PR #293 review). `@/../thread-stores.ts` and
+  // `../../../core/src/observation.ts` land ABOVE `src`, where nothing a ported file may
+  // import lives — reading that as "allowed" would reopen by spelling exactly what resolving
+  // closed by shape. Refused, named by the path it really reaches.
+  if (inside === '' || inside === '..' || inside.startsWith(`..${sep}`)) return relative(repositoryRoot, resolved)
   return PRESENTATION_DIRECTORIES.includes(inside.split(sep)[0] ?? '') ? undefined : `${WEB_SOURCE_ROOT}/${inside}`
 }
 
@@ -124,6 +128,10 @@ test('the state-layer resolver catches every spelling — the alias, the relativ
     '@/thread-status.tsx',
     '@/to-agui.ts',
     '../../host/extension-ui-context.ts',
+    // An escape is a spelling too (PR #293 review): a path that climbs OUT of `src` reaches
+    // nothing presentation may import, so "outside the tree" may not read as "allowed".
+    '@/../../core/src/observation.ts',
+    '../../../../core/src/guard.ts',
     '@zen/core',
     '@zen/core/log-process',
     '@tanstack/react-ai',
