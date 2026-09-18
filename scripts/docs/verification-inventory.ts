@@ -84,6 +84,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Recognizes generated first-line markers and TypeScript fences backed by current top-level declaration shapes.',
   },
+  'test/duplicate-shapes-gate.test.ts': {
+    rootArrays: ['SEARCHED_ROOTS'],
+    exceptions: [],
+    limitation:
+      'Matches a named TypeBox declaration in any export spelling, across line breaks, whole-file — so a commented-out declaration is reported and a schema built by a helper rather than declared is not.',
+  },
   'test/gate-abort.test.ts': {
     roots: ['scripts/gate.ts'],
     exceptions: [],
@@ -113,7 +119,7 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
       },
     ],
     limitation:
-      'Line-scans direct console calls and static LogTape imports; comments and test directories are skipped.',
+      'Line-scans direct console calls and any string naming the LogTape substrate; comments and test directories are skipped, and an allowlist row that matches nothing is reported.',
   },
   'test/naming-gate.test.ts': {
     rootArrays: ['SCANNED_ROOTS'],
@@ -124,7 +130,7 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
       },
     ],
     limitation:
-      'The executable fixture covers the externally fixed `v` and `dir` keys; the site scan recognizes those key spellings.',
+      'The executable fixture covers the externally fixed `dir` key and asserts each diagnostic’s severity; the site scan recognizes that key spelling and reports an exemption no file spells. The counted `EXEMPTED_KEY_SITES` row counts exempted FILES — the exempted NAMES live in `.biome/naming.grit`, which this generator does not parse.',
   },
   'test/no-lint-suppressions.test.ts': {
     rootArrays: ['SCANNED_ROOTS'],

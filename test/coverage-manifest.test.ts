@@ -44,6 +44,11 @@ const ENTRY_POINT_EXCEPTIONS = [
 
 /** Vendored code — biome.jsonc's exclusion boundary, applied to coverage for the same reason. */
 const VENDORED_DIRECTORIES = ['packages/web/src/components'] as const
+/**
+ * The same list as bunfig must spell it. ONE source of truth, the way `test/fallow-config.test.ts`
+ * holds the fallow entry list equal to the harness manifest.
+ */
+const VENDORED_IGNORE_PATTERNS = VENDORED_DIRECTORIES.map((directory) => `**/${directory}/**`)
 
 /**
  * The denominator: every production module under the library roots — no tests, no vendored
@@ -100,4 +105,24 @@ test('the total coverage floor is wired into the gate at the intended level', as
   expect(gate).toMatch(/script:\s*['"]coverage:check['"]/)
   const bunfig = await Bun.file(join(REPOSITORY_ROOT, 'bunfig.toml')).text()
   expect(bunfig).toMatch(/^coverage = true$/m)
+})
+
+// ⚠ The OTHER half of the denominator (#252). Two things decide which files the floor is
+// measured over: which files a test imports (the manifest above) and
+// `coveragePathIgnorePatterns`, which drops an imported file from the report anyway. The
+// gate pinned only that coverage was ON, so one extra glob in that key lowered the floor's
+// real bar with every gate still green and no test naming the change — measured 2026-09-18,
+// adding `**/chat-screen.tsx` (the repo's largest single line-coverage debt) took
+// `check-coverage` from 99 files at 93.61%/92.96% to 98 files at 93.74%/93.47%
+// (lines/functions), and the whole suite stayed green. That is the back door on the one
+// ratchet this repo calls unfalsifiable-by-construction, and `scripts/check-coverage.ts`
+// says the floor moves in its own PR with the reason. So the exclusion is pinned to its
+// EXACT value, derived from the vendored list above: widening it is a red test with a
+// named diff. The key is unbounded — nothing else in the repo reads it.
+test('⚠ the coverage exclusion is exactly the vendored directories — nothing else leaves the denominator', async () => {
+  const bunfig = await Bun.file(join(REPOSITORY_ROOT, 'bunfig.toml')).text()
+  const declared = /^coveragePathIgnorePatterns = \[([^\]]*)\]$/m.exec(bunfig)
+  if (declared === null) throw new Error('bunfig.toml: coveragePathIgnorePatterns is not a single-line array')
+  const patterns = [...(declared[1] ?? '').matchAll(/"([^"]*)"/g)].map((match) => match[1] ?? '')
+  expect(patterns).toEqual([...VENDORED_IGNORE_PATTERNS])
 })

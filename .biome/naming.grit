@@ -110,22 +110,25 @@ predicate is_allowlisted($name) { $name <: r"^(?:cn)$" }
 // exempts every tier: we owe the external shape its spelling, not ourselves.
 //
 // Each entry needs a RECEIPT naming the contract, same bar as the allowlist:
-//   • `v`   — TanStack's `tanstack:interruptBinding` stamp is `{v, kind, interruptId,
-//             interruptedRunId, generation}`; `v` is its schema-version field. Renaming
-//             it breaks resume resolution (packages/web/src/server/session.ts).
 //   • `dir` — `Bun.serve`'s static directory-route option bag is `{ dir }`
 //             (packages/web/src/server/dev-web.ts).
+//
+// `v` was the second entry — TanStack's `tanstack:interruptBinding` stamp — until #251
+// retired it: #112 removed the run path the stamp belonged to, the receipt named a module
+// (`packages/web/src/server/session.ts`) that no longer exists, and no first-party file
+// spelled the key. An exemption whose leak has left is a hole nobody is watching, so the
+// name is refused again by both single-character tiers.
 //
 // Replaces two per-line `// biome-ignore lint:` comments (#82). Those suppressed
 // EVERY rule on their line; these exempt one name, in one tier, with a receipt.
 //
-// ⚠ Keyed on the NAME, so it reaches further than the two lines it replaced. That
-// blast radius is bounded by `test/naming-gate.test.ts`, which pins the exemption
-// to exactly the two files receipted above and fails on a third — so adding one is
-// a design conversation, not a silent pass (PR #83 review). That test also asserts
-// the key/binding split, which is what breaks if this is ever folded into
+// ⚠ Keyed on the NAME, so it reaches further than the line it replaced. That blast radius
+// is bounded by `test/naming-gate.test.ts`, which reads THIS regex and holds it against the
+// files that actually spell an exempted key — in both directions, so a third `{ dir: … }`
+// and an exemption nothing relies on are equally a failing gate (PR #83 review, #251). That
+// test also asserts the key/binding split, which is what breaks if this is ever folded into
 // `is_allowlisted`.
-predicate is_external_contract_key($name) { $name <: r"^(?:v|dir)$" }
+predicate is_external_contract_key($name) { $name <: r"^(?:dir)$" }
 
 // Single source of truth for the advisory tier: the generic iteration-name list
 // AND the `info` diagnostic it emits. Called by both `generic_iteration_callback_var`
@@ -161,12 +164,20 @@ pattern abbreviation_key() {
 // ── Single-character tiers ───────────────────────────────────────────────────
 // One-letter declared name. Exempt: `_` and the conventional single-char binding
 // `z`. `i`/`j`/`k` are flagged (not exempt) — name what the loop walks.
+//
+// ⚠ `error`, like every other FLAGGING tier, and that is load-bearing: `biome check` exits
+// **0** on warnings, so the `warn` this carried until #251 reported `const v = 1` and landed
+// it anyway, while the abbreviation tier beside it (`const dir = …`) blocked. Measured
+// 2026-09-18 out-of-tree through the repo config: one-line fixture, "Found 1 warning",
+// exit 0. Only the advisory `info` tier above is deliberately non-blocking, and it says so.
+// `test/naming-gate.test.ts` now reads the SEVERITY of each diagnostic, not just its line,
+// so a tier that reports without blocking is a failing gate.
 pattern single_char_binding() {
   JsIdentifierBinding() as $name where {
     $name <: r"^[a-z]$",
     not $name <: r"^(?:_|z)$",
     not is_allowlisted($name),
-    register_diagnostic(span=$name, message="Single-character name — use a descriptive name. Exempt: underscore, z. See naming-and-style.md.", severity="warn")
+    register_diagnostic(span=$name, message="Single-character name — use a descriptive name. Exempt: underscore, z. See naming-and-style.md.", severity="error")
   }
 }
 
