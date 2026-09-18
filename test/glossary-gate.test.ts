@@ -134,8 +134,38 @@ function spelledNames(code: string): Set<string> {
   return new Set(code.split(/[^\w$-]+/))
 }
 
-/** A replacement that names a file rather than an identifier. */
-const FILE_NAME = /\.(?:ts|tsx|mjs)$/
+interface SpelledFile {
+  /** The file's base name — what a replacement that names a MODULE has to equal. */
+  readonly name: string
+  /** Every whole name its non-comment code spells. */
+  readonly spelled: ReadonlySet<string>
+}
+
+/** A type's member: the one dotted shape that is not a file name (`HostedThread.runtime`). */
+const TYPE_MEMBER = /^[A-Z][A-Za-z0-9]*\.[A-Za-z_$][\w$]*$/
+
+/**
+ * Whether the tree declares `replacement` — by SHAPE, and fail-closed on a shape it does not
+ * know (PR #287 review).
+ *
+ * An undotted name is an identifier and must be spelled as a whole token. A dotted name is a
+ * FILE and must equal a base name: the table sends a reader to a module, which an identifier
+ * sharing the module's stem does not satisfy. The one exception is a type's member, checked
+ * per part — no single line has to spell the access, and whether the field is on that type is
+ * the type checker's job at every call site.
+ *
+ * ⚠ No extension list. Naming the extensions a file may end in (`ts|tsx|mjs`) meant a future
+ * `.js`, `.json` or `.css` row fell through to the per-part check and was satisfied by its own
+ * stem — the stem match this test exists to refuse, re-admitted by the row that grows the
+ * table. An unrecognised dotted shape is now REPORTED rather than guessed at: a false red that
+ * names the row, not a silent green.
+ */
+function declares(files: readonly SpelledFile[], replacement: string): boolean {
+  if (!replacement.includes('.')) return files.some((file) => file.spelled.has(replacement))
+  if (files.some((file) => file.name === replacement)) return true
+  if (!TYPE_MEMBER.test(replacement)) return false
+  return replacement.split('.').every((part) => files.some((file) => file.spelled.has(part)))
+}
 
 test('⚠ every replacement the Retired table decided is a name that exists (#241)', () => {
   const rows = retiredTableRows()
@@ -154,16 +184,7 @@ test('⚠ every replacement the Retired table decided is a name that exists (#24
         .join('\n'),
     ),
   }))
-  // A file-name replacement must BE a file: the table sends a reader to a module, which an
-  // identifier sharing its stem does not satisfy. A dotted replacement names a member
-  // (`HostedThread.runtime`) — each part is a name, and no single line has to spell the
-  // access. What it cannot check is that the field is on that type; the type checker does, at
-  // every call site.
-  const missing = decidedReplacements(rows).filter((replacement) =>
-    FILE_NAME.test(replacement)
-      ? !files.some((file) => file.name === replacement)
-      : replacement.split('.').some((part) => !files.some((file) => file.spelled.has(part))),
-  )
+  const missing = decidedReplacements(rows).filter((replacement) => !declares(files, replacement))
   expect(missing).toEqual([])
 })
 
@@ -208,4 +229,17 @@ test('a decided name has to be declared, not merely contained (#241, PR #287 rev
   // A hyphenated attribute is one name, so a longer attribute is not it.
   expect(spelledNames('<span data-zen-tool-call="running" />').has('data-zen-tool-call')).toBe(true)
   expect(spelledNames('<span data-zen-tool-call-status="running" />').has('data-zen-tool-call')).toBe(false)
+})
+
+test('a replacement is resolved by shape, and an unknown shape is reported (#241, PR #287 review)', () => {
+  const files: SpelledFile[] = [
+    { name: 'thread-inspection.ts', spelled: new Set(['thread-inspection', 'HostedThread', 'runtime']) },
+  ]
+  expect(declares(files, 'thread-inspection.ts')).toBe(true)
+  expect(declares(files, 'HostedThread.runtime')).toBe(true)
+  expect(declares(files, 'HostedThread.session')).toBe(false)
+  // The extension list's hole: a module the tree does not have, satisfied by its own stem.
+  expect(declares(files, 'thread-inspection.js')).toBe(false)
+  // A shape the resolver does not know is refused, not guessed at — a red that names the row.
+  expect(declares(files, 'styles/global.css')).toBe(false)
 })
