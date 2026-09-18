@@ -122,7 +122,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
   })
 
   const messages = transcriptToMessages(transcript)
-  const interrupted = interruptedTail(messages)
+  const interrupted = interruptedTail(transcript)
   writeFrame(threads, threadId, response, {
     type: 'snapshot',
     threadId,

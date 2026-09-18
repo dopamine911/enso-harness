@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 155.**
+**Decision headers: 160.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -14,6 +14,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/__tests__/log-recorder.ts` | `#132`, `#178` | The tests' sink (#132), one for every package (#178): every `zen` record, at every level, into memory — a guard's verdict, an audit line or a route's problem is asserted as the record it is, the way a bundle reader would read it, not as a line on stderr. |
 | `packages/core/src/__tests__/no-duplicate-paths.test.ts` | `#59` | The anti-duplication anchor for path resolution (#59) — Daniel: "this should live in core and prevent duplicate code again." |
 | `packages/core/src/__tests__/observation-kinds.ts` | `#53` | The oracle both "every observation" sweeps compare against (#53 S1.4): every `kind` literal the ZenObservation union declares, sorted. |
+| `packages/core/src/__tests__/pi-manifest.test.ts` | `#221` | pi's manifest-resource layout, now owned in one place (#221 — it was implemented three times: the terminal launcher, the postinstall linker, and the server's `assertVendorLinks`). |
+| `packages/core/src/__tests__/picc-corpus-contract.test.ts` | `#7`, `#20`, `#222` | The picc CORPUS CONTRACT TEST (#222), the shape of `cc-safety-net-contract.test.ts` and `agent-loop-contract.test.ts`: read the installed vendor, assert the shape we copied. |
 | `packages/core/src/__tests__/secrets.test.ts` | `#89` | #89: secrets stay out of the environment the model's tools inherit. |
 | `packages/core/src/__tests__/thread-inspection.test.ts` | `#86`, `#100` | The row formats are shared by the `?debug` drawer and `zen-thread.mjs` (PR #100 review: one definition, after the #86 pair had drifted). |
 | `packages/core/src/config.ts` | `#59` | zen-harness's ONE committed config file (#59): `zen.config.json` at the repository root. |
@@ -24,6 +26,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/log.ts` | `#132` | The harness's log record (#132): one shape for every process, so a bundle a user hands us reads the same whichever layer wrote the line. |
 | `packages/core/src/paths.ts` | `#58`, `#59` | The workspace path helpers (#59) — THE one place that walks the filesystem for roots. |
 | `packages/core/src/permission-mode.ts` | `#84`, `#162` | The permission mode's shape on the wire (#84; #162 workstream 4, L3): what a run starts in and what it may switch to. |
+| `packages/core/src/pi-manifest.ts` | `#211`, `#221` | What a pi package's manifest declares, and where pi will look for it (#221) — THE one place that knows pi's manifest-resource layout. |
 | `packages/core/src/secrets.ts` | `#7`, `#89`, `#98` | Secrets stay OUT of the environment the model's tools inherit (#89). |
 | `packages/core/src/thread-inspection.ts` | `#86` | What a live thread's session ACTUALLY contains, as the server reports it (#86). |
 | `packages/core/src/thread-runtime.ts` | `#69`, `#162`, `#165` | The thread runtime: the contract the host implements for one thread, and the shapes that cross it (`docs/glossary.md` → Thread, Control). |
@@ -124,7 +127,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/run-timing.ts` | `#144` | When a run was admitted, so its FIRST delta can be recorded as a latency (#144 slice 1). |
 | `packages/web/src/server/sse.ts` | `#109` | The SSE plumbing every streaming route shares: the response headers and the keepalive. |
 | `packages/web/src/server/thread-registry.ts` | `#43`, `#69`, `#113`, `#116` | One pi session per chat THREAD, held across runs (#69 PR 2 — closes #43). |
-| `packages/web/src/server/transcript-to-messages.ts` | `#93`, `#95`, `#162` | The transcript → TanStack `UIMessage`s (#95): the history a resumed thread mounts with. |
+| `packages/web/src/server/transcript-to-messages.ts` | `#93`, `#95`, `#162`, `#220` | The transcript → TanStack `UIMessage`s (#95): the history a resumed thread mounts with. |
 | `packages/web/src/store.ts` | `#90` | The smallest external store React can subscribe to: one value, replaced whole, and a listener set. |
 | `packages/web/src/stored-threads.ts` | `#29`, `#86`, `#95` | The sessions a user can come back to (#95): pi's session files for this workspace, as the server lists them. |
 | `packages/web/src/thread-stats.tsx` | `#44`, `#45`, `#90` | The thread-stats STORE (#45, phase 1): cost so far + the last request's prompt size. |
@@ -133,6 +136,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/thread-url.ts` | `#95`, `#142` | The thread a page URL names (#142): `?thread=<id>`. |
 | `packages/web/src/threads-rail.tsx` | `#90`, `#95`, `#104` | The threads rail (#90 PR 3): which conversation am I in, what else is live on this page, how do I start over. |
 | `packages/web/src/to-agui.ts` | `#18`, `#24`, `#112` | `ZenObservation` → AG-UI `StreamChunk` (#24, #112). |
+| `scripts/__tests__/zen-launch.test.ts` | `#221` | The terminal launcher's decisions (docs/flows/boot-and-launchers.md, stated gap: `zen.mjs` had no test of its own). |
 | `scripts/__tests__/zen-logs.test.ts` | `#132` | The reader's own logic (#132, `bun run logs`): the flags, and what a line must be to print. |
 | `scripts/check-coverage.ts` | `#49`, `#118` | The TOTAL coverage floor — the gate that bunfig.toml cannot express. |
 | `scripts/docs/core-exports.ts` | `#170` | Generates `docs/reference/core-exports.md` (#170): the public core barrel and the node-only logging subpath, with their defining declarations and production importers. |
@@ -147,6 +151,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/link-vendor-packages.mjs` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
 | `scripts/print-harness.mjs` | `#9`, `#13`, `#20` | The PRINT-MODE harness variant (#20): the zen-harness package minus picc-permission-modes. |
 | `scripts/source-tree.ts` | `#162`, `#174` | The one walk over the source tree (#174, #162 workstream 6: one walker per gate family). |
+| `scripts/zen-launch.mjs` | `#221` | The terminal launcher's decisions, apart from the launch (`zen.mjs` spawns; this decides): the isolation triple as pi's arguments and the print-run trigger. |
 | `scripts/zen-logs.ts` | `#132` | See the log (#132): the day's file, rendered the way the terminal renders it live. |
 | `scripts/zen-thread.mjs` | `#86`, `#97` | Inspect the live web server's threads from a shell — the agent's half of #86. |
 | `scripts/zen.mjs` | `#20` | Launch a VANILLA pi with only zen-harness loaded. |

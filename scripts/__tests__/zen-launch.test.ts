@@ -1,29 +1,13 @@
-import { afterAll, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { declaredResources, isPrintRun, missingVendorPaths, piArguments } from '../zen-launch.mjs'
+import { expect, test } from 'bun:test'
+import { isPrintRun, piArguments } from '../zen-launch.mjs'
 
 /**
  * The terminal launcher's decisions (docs/flows/boot-and-launchers.md, stated gap: `zen.mjs`
- * had no test of its own). The launcher spawns pi and is not driven here; the three things it
- * decides before spawning are, against a manifest and a package root of the test's making.
+ * had no test of its own). The launcher spawns pi and is not driven here; what it decides
+ * before spawning is. The vendor-path precondition moved out with #221 — it is pi's manifest
+ * layout, not the launcher's decision, and is pinned at its owner
+ * (`packages/core/src/__tests__/pi-manifest.test.ts`).
  */
-
-const scratch = mkdtempSync(join(tmpdir(), 'zen-launch-'))
-afterAll(() => rmSync(scratch, { recursive: true, force: true }))
-
-const MANIFEST = {
-  pi: {
-    extensions: [
-      './extensions/logging/index.ts',
-      './extensions/guards/index.ts',
-      'node_modules/@ladbabynpm/picc-permission-modes/index.ts',
-      'node_modules/pi-multi-account/index.ts',
-    ],
-    themes: 'node_modules/@mammothb/pi-tokyonight-storm/theme.json',
-  },
-}
 
 // ⚠ THE ISOLATION TRIPLE. Two legs are arguments and one is the environment; the arguments
 // must be exactly these, in this order, BEFORE whatever the user passed — a flag the user adds
@@ -39,37 +23,4 @@ test('a print run is -p, --print, or stdin that is not a TTY; an interactive run
   expect(isPrintRun([], false)).toBe(true)
   expect(isPrintRun([], true)).toBe(false)
   expect(isPrintRun(['--model', 'x'], true)).toBe(false)
-})
-
-test('declared resources are every pi.* path, arrays and singles alike; a non-string entry is not one', () => {
-  expect(declaredResources(MANIFEST)).toEqual([
-    './extensions/logging/index.ts',
-    './extensions/guards/index.ts',
-    'node_modules/@ladbabynpm/picc-permission-modes/index.ts',
-    'node_modules/pi-multi-account/index.ts',
-    'node_modules/@mammothb/pi-tokyonight-storm/theme.json',
-  ])
-  expect(declaredResources({ pi: { extensions: [42, './x.ts'] } })).toEqual(['./x.ts'])
-  expect(declaredResources({})).toEqual([])
-})
-
-// ⚠ pi skips a missing manifest resource SILENTLY; the launcher must refuse instead. Only the
-// vendor (`node_modules/…`) paths are checked — the repo-local ones are the package's own.
-test('the vendor paths a manifest declares that are not under the package root are named, and only those', () => {
-  const packageRoot = join(scratch, 'harness')
-  const put = (relativePath: string): void => {
-    mkdirSync(join(packageRoot, relativePath, '..'), { recursive: true })
-    writeFileSync(join(packageRoot, relativePath), '')
-  }
-  put('node_modules/pi-multi-account/index.ts')
-  expect(missingVendorPaths(MANIFEST, packageRoot)).toEqual([
-    'node_modules/@ladbabynpm/picc-permission-modes/index.ts',
-    'node_modules/@mammothb/pi-tokyonight-storm/theme.json',
-  ])
-  // a directory alone is not the resource: the path names a file, and the file must be there
-  mkdirSync(join(packageRoot, 'node_modules', '@mammothb', 'pi-tokyonight-storm'), { recursive: true })
-  expect(missingVendorPaths(MANIFEST, packageRoot)).toHaveLength(2)
-  put('node_modules/@mammothb/pi-tokyonight-storm/theme.json')
-  put('node_modules/@ladbabynpm/picc-permission-modes/index.ts')
-  expect(missingVendorPaths(MANIFEST, packageRoot)).toEqual([])
 })
