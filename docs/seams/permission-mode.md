@@ -171,8 +171,10 @@ tests pin). For a thread that is not live, `AgentHost.freshPermissionMode()` and
 
 **Consumed by the server, three ways — none of them spelling the vendor.** The follow's snapshot
 carries `permissionMode` (`packages/core/src/follow.ts:33`), filled from the live runtime or, for a
-cold thread, from `host.storedPermissionMode(branch)` (`packages/web/src/server/follow.ts`; the history
-route does the same in `server/index.ts`). The inspection and summary report the live mode. And
+cold thread, from `host.storedPermissionMode(branch)`. That choice is made once, in
+`packages/web/src/server/thread-read.ts` (`readThreadMount`), and the follow and the history route
+both read it from there — one reader, so the two cannot answer differently about a thread that goes
+live mid-read (#214). The inspection and summary report the live mode. And
 `GET /api/mode` answers `host.freshPermissionMode()` before any run exists. The run receipt
 (`ZenPromptReceipt`, `packages/core/src/follow.ts:158-169`) does **not** carry the mode; it carries
 `messageId`, `generation` and `queued` only.

@@ -214,7 +214,7 @@ need none: an upstream re-port is the second implementation, and the gate is wha
   `thread-stores.ts:browserLogging` (the page's log ring and shipper). A fourth module-level store is
   thread state shared across threads — the bug class the mounted two-threads test observes — and
   fails here by name.
-- **Invariant 1** (`architecture.md`: *the feed is the only writer of run state in the browser*) is
+- **Invariant 1** (`architecture.md`: *the feed is the only source of run state in the browser*) is
   held inside the adapter. A run opens in `openRun` (`follow-connection.ts:259-268`, `RUN_STARTED`)
   and closes in `closeRun` (270-274). The feed drives both: a `status` or snapshot frame reaches
   `observeStatus` (326-338), which closes every run the server has moved past (`finishRunsThrough`,

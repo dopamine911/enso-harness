@@ -222,13 +222,17 @@ the live branch the same way. The host is tested against the real session manage
 
 **Consumed by the server.** `packages/web/src/server/index.ts` owns the read routes:
 `GET /api/stored-threads` → `respondWithStoredThreads` maps each `StoredThread` to a `ZenStoredThread`,
-marking `busy` by peeking the registry; `GET …/history` → `respondWithThreadHistory` reads
-`inspect().entries` when the thread is live and `host.readTranscript` when it is cold, 404 when neither
-has it; `GET /api/threads` summarises each live thread from `inspect()`.
+marking `busy` by peeking the registry; `GET /api/threads` summarises each live thread from `inspect()`.
 `packages/web/src/server/thread-registry.ts` is the only builder (it is handed `host.createSession`),
 and its `inspectThread` is the one place a `ZenThreadInspection` is assembled, so the thread route and
-the bundle cannot drift. `server/follow.ts` does the same live-or-cold read for the snapshot's
-`messages`; both assemble through `packages/web/src/server/transcript-to-messages.ts`
+the bundle cannot drift. The LIVE-OR-COLD read — `inspect().entries` when the thread is live,
+`host.readTranscript` when it is cold — is `packages/web/src/server/thread-read.ts`
+(`readThreadMount`), and it has one caller shape: `GET …/history` (404 when the server holds neither)
+and the follow's snapshot (an empty snapshot instead). ⚠ It was written twice until #214, and the two
+copies disagreed: the follow re-peeked the registry after the awaited file read and the history route
+did not, so a thread built DURING the read was served the file's messages and the file's mode by
+`/history` under a follow that already reported it live. The reader assembles through
+`packages/web/src/server/transcript-to-messages.ts`
 (`transcriptToMessages`, `interruptedTail`), the read-side twin of the live adapter — and since L2 it
 assembles from entries of ours and decodes nothing. Every server test drives the seam over the fake
 `AgentHost` (`server/__tests__/fake-hosted-thread.ts`), whose stored threads carry transcripts of ours;

@@ -157,6 +157,8 @@ afterEach(async () => {
 async function startWith(
   script: FakeSessionScript,
   stored: Record<string, FakeStoredThread> = {},
+  /** Wrap the fake host — a test that needs something to happen mid-read replaces one method. */
+  wrapHost: (host: AgentHost) => AgentHost = (host: AgentHost) => host,
 ): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[] }> {
   const { host, built, requested } = fakeHost(script, stored)
   const started = startZenServer({
@@ -165,7 +167,7 @@ async function startWith(
     agentDir: mkdtempSync(join(tmpdir(), 'zen-handler-agent-')),
     logsDir: mkdtempSync(join(tmpdir(), 'zen-logs-')),
     port: 0,
-    host,
+    host: wrapHost(host),
   })
   openServers.push(started)
   const url = await started.listening
@@ -424,6 +426,51 @@ test("⚠ a thread this server holds IDLE is resumable — /history reads pi's m
   // Its in-memory branch carries no messages (a session-start entry and picc's modes entry).
   expect(history.messages).toEqual([])
   expect(built).toHaveLength(1)
+})
+
+// ⚠ THE COLD READ IS RACED, AND THE RACE IS ON THE BOOT PATH (#214). Boot adopts a named
+// thread from /history before showing a pane, so another tab — or `zen-thread` — can prompt
+// the same id while the file is being read. Both routes decide what they hold AFTER that
+// read (`thread-read.ts#readThreadMount`). Before #214 only the follow re-peeked and
+// /history answered from the peek it took BEFORE the await, so the two disagreed: the file's
+// messages and the file's mode under a follow that reported the thread live with pi's branch
+// and the session's own mode. A red line here means a pane can mount a transcript, and an
+// opening mode, that the server itself no longer considers current — invariant 5's shape with
+// no MISMATCH to name it, since each side is internally consistent.
+test('⚠ a thread built WHILE /history reads the file is served pi\u2019s branch, and the follow opened after it agrees (#214)', async () => {
+  const stored = {
+    t1: { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question', mode: 'plan' },
+  }
+  let promptDuringRead: (() => Promise<number>) | undefined
+  const { url } = await startWith(settlesAtOnce, stored, (host: AgentHost) => ({
+    ...host,
+    readTranscript: async (threadId: string) => {
+      const transcript = await host.readTranscript(threadId)
+      await promptDuringRead?.()
+      promptDuringRead = undefined
+      return transcript
+    },
+  }))
+  promptDuringRead = (): Promise<number> => prompt(url, 't1', 'hello')
+
+  const response = await fetch(`${url}/api/threads/t1/history`)
+  expect(response.status).toBe(200)
+  const history = (await response.json()) as ZenThreadHistory
+
+  const controller = new AbortController()
+  openFollows.push(controller)
+  const follow = await openFollow(url, 't1', controller)
+  await follow.untilFrames(1)
+  const snapshot = follow.frames[0]
+  if (snapshot?.type !== 'snapshot') throw new Error('the first frame is the snapshot')
+
+  // pi holds this thread now: its in-memory branch carries no messages, and the mode is the
+  // session's own — not the file's two messages and not the `plan` its branch persists.
+  expect(snapshot.live).toBe(true)
+  expect(history.permissionMode).toEqual({ mode: 'default', available: ['default', 'acceptEdits'] })
+  expect(history.messages).toEqual([])
+  expect(history.messages).toEqual(snapshot.messages)
+  expect(history.permissionMode).toEqual(snapshot.permissionMode)
 })
 
 test('⚠ GET /api/threads/:id/history serves a thread that is BUSY here — a reload under an open question can come back (#114)', async () => {

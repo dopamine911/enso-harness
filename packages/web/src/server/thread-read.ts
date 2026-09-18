@@ -1,0 +1,81 @@
+import type { UIMessage } from '@tanstack/ai-client'
+import type { ZenInterruptedTail, ZenOpenDialog, ZenPermissionModeState } from '@zen/core'
+import type { AgentHost } from '../host/agent-host.ts'
+import type { ThreadRegistry } from './thread-registry.ts'
+import { interruptedTail, transcriptToMessages } from './transcript-to-messages.ts'
+
+/**
+ * THE LIVE-OR-COLD READ, ONCE (#214). What the server holds for one thread, as a pane
+ * mounts it: the branch as messages, whether it is live, and the mode it opens in.
+ * `GET …/follow`'s snapshot and `GET …/history`'s payload are the same question asked by
+ * two routes; they were implemented twice and had drifted apart in two visible ways. The
+ * follow re-peeked the registry after the awaited cold read and the history route did not,
+ * so a thread built DURING the read was served the FILE's messages and the FILE's
+ * permission mode by `/history`, while the follow opened a tick later reported the same
+ * thread live with pi's own branch and the session's own mode. That is the shape invariant
+ * 5 refuses — a surface presenting one state while the server holds another — with no
+ * MISMATCH to name it, because each side is internally consistent. It is on the boot path:
+ * boot adopts a named thread from `/history` before showing a pane, so another tab or
+ * `zen-thread` prompting the same id during that fetch is enough.
+ *
+ * ⚠ THE RE-PEEK IS THE POINT, and it is why the cold read is awaited BEFORE anything is
+ * decided: a thread that went live during the read is then read from pi's memory, which is
+ * fresher than the file and resumable. Deciding any field from the PRE-await peek is the
+ * bug this file exists to have exactly one copy of.
+ *
+ * The two routes differ in one thing, and it is a contract rather than drift: for an id the
+ * server holds neither live nor on disk, `/history` is a 404 while a follow is an EMPTY
+ * snapshot — observation may precede the first prompt, and must, or the prompt's opening
+ * events have no follower. `present` is that difference, and the only branch a caller takes.
+ *
+ * The cost, stated: `/history` asks for `busy`, `generation` and `openDialogs` it does not
+ * send. One read of a live runtime's open questions is cheaper than two shapes of this
+ * answer — two shapes is what drifted.
+ *
+ * Named for what it produces rather than #214's suggested `readThreadView`: `ThreadView` is
+ * already the registry's word for a live entry, and this is the answer a pane mounts with,
+ * live or cold.
+ */
+
+export interface ThreadReadDeps {
+  readonly threads: ThreadRegistry
+  readonly host: AgentHost
+}
+
+/** One thread as of this read: what a pane mounts with, and what the follow's snapshot says. */
+export interface ThreadMount {
+  /** Does the server hold this id at all — a live thread or a file? `false` is `/history`'s 404. */
+  readonly present: boolean
+  /** The branch as the messages a chat mounts with: pi's memory when live, the file when cold. */
+  readonly messages: UIMessage[]
+  /** Set only when the branch ends inside a turn (#109). */
+  readonly interrupted: ZenInterruptedTail | undefined
+  readonly live: boolean
+  readonly busy: boolean
+  readonly generation: number
+  /** The live session's own mode, or the one this branch persists. */
+  readonly permissionMode: ZenPermissionModeState
+  /** Every question pi is blocked on, oldest first (#114); empty when the thread is not live. */
+  readonly openDialogs: ZenOpenDialog[]
+}
+
+export async function readThreadMount(deps: ThreadReadDeps, threadId: string): Promise<ThreadMount> {
+  const { threads, host } = deps
+  const live = threads.peek(threadId)
+  /** The file, read only for a thread that is not live here — nothing is built to answer (#86). */
+  const stored = live === undefined ? await host.readTranscript(threadId) : undefined
+  const nowLive = threads.peek(threadId)
+  const transcript = nowLive === undefined ? (stored ?? []) : nowLive.hosted.inspect().entries
+  const messages = transcriptToMessages(transcript)
+  return {
+    present: nowLive !== undefined || stored !== undefined,
+    messages,
+    interrupted: interruptedTail(messages),
+    live: nowLive !== undefined,
+    busy: nowLive?.busy ?? false,
+    generation: nowLive?.generation ?? 0,
+    permissionMode:
+      nowLive === undefined ? host.storedPermissionMode(transcript) : nowLive.hosted.runtime.permissionModeState(),
+    openDialogs: nowLive === undefined ? [] : nowLive.hosted.runtime.openDialogs(),
+  }
+}
