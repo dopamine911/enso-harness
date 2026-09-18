@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { mkdirSync } from 'node:fs'
+import { closeSync, fchmodSync, fstatSync, mkdirSync, openSync } from 'node:fs'
+import { join } from 'node:path'
 import { getTimeRotatingFileSink } from '@logtape/file'
 import {
   compareLogLevel,
@@ -165,13 +166,13 @@ function lowestOf(levels: ZenLogLevels): LogLevel {
 }
 
 /**
- * A sink wrapper that replaces every known secret VALUE, wherever it appears, with
- * `ZEN_REDACTED_VALUE` (#139) — in the rendered message, in the raw template, and in every
- * string property, however deeply the property nests.
+ * The value pass (#139): every known secret VALUE, wherever it appears, replaced with
+ * `ZEN_REDACTED_VALUE` — in the rendered message, in the raw template, and in every string
+ * property, however deeply the property nests. `undefined` when there is nothing to scan
+ * for, so a process with no secret store pays nothing on the write path.
  *
  * One pre-built alternation over the known values, so the cost is a single regex pass per
- * string rather than one pass per secret. With no known values it is the identity: no
- * allocation, no scan, nothing on the write path at all.
+ * string rather than one pass per secret.
  *
  * ⚠ LONGEST FIRST (PR #153 review). A JS alternation takes the first branch that matches at
  * a position, not the longest, so with `sk-live-abc` listed before `sk-live-abcdef99` the
@@ -179,9 +180,9 @@ function lowestOf(levels: ZenLogLevels): LogLevel {
  * under-redaction, in exactly the case that matters most: two live keys from one provider,
  * or a key and its rotation. Reproduced before this line existed: `[REDACTED:value]def99`.
  */
-function redactingKnownValues(values: readonly string[]): (sink: Sink) => Sink {
+function valueScrubber(values: readonly string[]): ((value: unknown) => unknown) | undefined {
   const scannable = values.filter((secret) => secret.length > 0).sort((left, right) => right.length - left.length)
-  if (scannable.length === 0) return (sink: Sink): Sink => sink
+  if (scannable.length === 0) return undefined
   const pattern = new RegExp(scannable.map((secret) => secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g')
   const scrubbed = (value: unknown): unknown => {
     if (typeof value === 'string') return value.replace(pattern, ZEN_REDACTED_VALUE)
@@ -204,13 +205,49 @@ function redactingKnownValues(values: readonly string[]): (sink: Sink) => Sink {
     }
     return value
   }
+  return scrubbed
+}
+
+/**
+ * A sink wrapper that runs the value pass over every record.
+ *
+ * A plain array is compiled once, at configure, and with an empty one the wrapper is the
+ * identity: no allocation, no scan, nothing on the write path at all.
+ *
+ * ⚠ A THUNK is asked per record, which is the point (#207): the READER is per call —
+ * `readSecret` re-reads `.zen/secrets.env` every time, and web-search's own refusal tells the
+ * operator to rotate a key with the launcher running — so a snapshot taken at configure left
+ * every rotated key readable and unredactable for the rest of the process's life. The
+ * alternation is rebuilt only when the thunk hands back a DIFFERENT array
+ * (`knownSecretValuesTracking` changes identity exactly when the file does), so the steady
+ * state costs one `stat` and one reference compare per record: measured over 20k records,
+ * 9.4 µs per record tracking against 7.5 µs snapshot and 7.3 µs with no value pass at all
+ * (`.local` benchmark, #207). A 50k-record `trace` day pays ~0.1 s for it.
+ */
+function redactingKnownValues(values: readonly string[] | (() => readonly string[])): (sink: Sink) => Sink {
+  const rotating = typeof values === 'function' ? values : undefined
+  let scrubbed = typeof values === 'function' ? undefined : valueScrubber(values)
+  if (rotating === undefined && scrubbed === undefined) return (sink: Sink): Sink => sink
+  let source: readonly string[] | undefined
   return (sink: Sink): Sink =>
     (record: LogRecord): void => {
+      if (rotating !== undefined) {
+        const latest = rotating()
+        if (latest !== source) {
+          source = latest
+          scrubbed = valueScrubber(latest)
+        }
+      }
+      if (scrubbed === undefined) {
+        sink(record)
+        return
+      }
+      const scrub = scrubbed
       sink({
         ...record,
-        message: record.message.map(scrubbed),
-        rawMessage: typeof record.rawMessage === 'string' ? (scrubbed(record.rawMessage) as string) : record.rawMessage,
-        properties: scrubbed(record.properties) as LogRecord['properties'],
+        message: record.message.map(scrub),
+        rawMessage: typeof record.rawMessage === 'string' ? (scrub(record.rawMessage) as string) : record.rawMessage,
+        properties: scrub(record.properties) as LogRecord['properties'],
       })
     }
 }
@@ -225,8 +262,13 @@ export interface ProcessLoggingOptions {
   /**
    * The secret values to scrub wherever they appear, from `knownSecretValues` (#139).
    * Omitted — a test, a process with no secret store — means the value pass does not run.
+   *
+   * A THUNK — `knownSecretValuesTracking(repoRoot)` — is what a launcher passes (#207): it is
+   * asked per record, so a key rotated in `.zen/secrets.env` while the process runs is
+   * redacted from the next record on, matching the reader, which was always per call. An
+   * array is a snapshot of the set at configure time and stays one.
    */
-  readonly secretValues?: readonly string[]
+  readonly secretValues?: readonly string[] | (() => readonly string[])
 }
 
 /**
@@ -255,6 +297,43 @@ const ZEN_LOG_FILENAME = /^zen-(\d{4}-\d{2}-\d{2})\.jsonl$/
 const KEEP_DAYS = 14
 const DAY_MS = 24 * 60 * 60 * 1000
 
+/**
+ * Create today's file before anything opens it, owner-only, and tighten it if an earlier
+ * build or a wider umask left it readable by the group (#207).
+ *
+ * The day file quotes the material of files that are themselves `0600` — `.zen/secrets.env`
+ * through a record that carries a value the redactor did not know yet, a guard `reason`
+ * echoing a command, a `trace` payload — and it was created `0664`, because LogTape's node
+ * driver opens with `fs.openSync(path, 'a')` and the sink takes no mode. "The file stays safe
+ * at rest" then rested on redaction alone. Every reader is the same user: `bun run logs`, the
+ * bundle route inside the server, and the three writers (`server`, `web`, `pi`) are all
+ * processes the operator started.
+ *
+ * Returned as a closure the writer calls per record because the sink re-opens at LOCAL
+ * midnight: without this, a launcher running across the boundary creates tomorrow's file
+ * `0664`. One `Date.now()` and one compare per record; the open happens once per day.
+ *
+ * Owner bits are left alone — an operator who made it `0400` meant it. Only group and other
+ * are stripped.
+ */
+function owningTheDayFile(logsDir: string): () => void {
+  let ownedThrough = 0
+  return (): void => {
+    const now = Date.now()
+    if (now < ownedThrough) return
+    const today = new Date(now)
+    const descriptor = openSync(join(logsDir, zenLogFilename(today)), 'a', 0o600)
+    try {
+      const mode = fstatSync(descriptor).mode & 0o777
+      if ((mode & 0o077) !== 0) fchmodSync(descriptor, mode & 0o700)
+    } finally {
+      closeSync(descriptor)
+    }
+    today.setHours(24, 0, 0, 0) // the next local midnight: when the sink will name a new file
+    ownedThrough = today.getTime()
+  }
+}
+
 /** True once some configurator has run in this process — pi in-process shares the server's. */
 export function isLoggingConfigured(): boolean {
   return getConfig() !== null
@@ -264,6 +343,9 @@ export function isLoggingConfigured(): boolean {
 export async function configureProcessLogging(options: ProcessLoggingOptions): Promise<() => Promise<void>> {
   const levels: ZenLogLevels = options.levels ?? { file: DEFAULT_FILE_LEVEL, console: undefined, overrides: [] }
   mkdirSync(options.logsDir, { recursive: true })
+  // Before the sink opens the file: it opens eagerly, with no mode of its own (#207).
+  const ownTheDayFile = owningTheDayFile(options.logsDir)
+  ownTheDayFile()
   const fileSink = getTimeRotatingFileSink({
     directory: options.logsDir,
     interval: 'daily',
@@ -283,6 +365,8 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
   let written = 0
   const stamped: Sink = (record: LogRecord) => {
     written += 1
+    // Today's file may be tomorrow's by now: own it before the sink rotates into it.
+    ownTheDayFile()
     fileSink({ ...record, properties: { process: options.process, sequence: written, ...record.properties } })
   }
   const file: Sink = withFilter(

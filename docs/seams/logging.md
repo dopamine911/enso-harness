@@ -152,7 +152,7 @@ export const ZenBrowserLogBatch = Type.Object(
 ```
 
 A process's sink is configured once, from `@zen/core/log-process` (a subpath, never the barrel —
-`log-process.ts:36-40`: the file sink builds on `node:fs` at module evaluation and took the page down
+`log-process.ts:37-41`: the file sink builds on `node:fs` at module evaluation and took the page down
 when it was exported from `index.ts`). The configurator's options:
 
 <!-- source: packages/core/src/log-process.ts#ProcessLoggingOptions -->
@@ -167,22 +167,29 @@ export interface ProcessLoggingOptions {
   /**
    * The secret values to scrub wherever they appear, from `knownSecretValues` (#139).
    * Omitted — a test, a process with no secret store — means the value pass does not run.
+   *
+   * A THUNK — `knownSecretValuesTracking(repoRoot)` — is what a launcher passes (#207): it is
+   * asked per record, so a key rotated in `.zen/secrets.env` while the process runs is
+   * redacted from the next record on, matching the reader, which was always per call. An
+   * array is a snapshot of the set at configure time and stays one.
    */
-  readonly secretValues?: readonly string[]
+  readonly secretValues?: readonly string[] | (() => readonly string[])
 }
 ```
 
-`configureProcessLogging` (`log-process.ts:264-339`, in prose) builds a date-named file sink with
-`bufferSize: 0` (line 279; measured, header lines 52-61: the buffered sink held the last record until
-the next one), stamps `process` and a per-process `sequence` on every record (284-287), filters by the
-category's effective level (288-291), and wraps the file sink — and the console sink when one is
-configured (305-312) — in field-name redaction then the value pass (296-302).
+`configureProcessLogging` (`log-process.ts:343-423`, in prose) builds a date-named file sink with
+`bufferSize: 0` (line 361; measured, header lines 53-62: the buffered sink held the last record until
+the next one), creates today's file `0600` before the sink opens it and again on each record, so a
+rollover at local midnight does not leave a `0664` file behind (299-334, 345-347, 366-371, #207),
+stamps `process` and a per-process `sequence` on every record (366-371), filters by the category's
+effective level (372-375), and wraps the file sink — and the console sink when one is configured
+(389-396) — in field-name redaction then the value pass (380-386).
 
 ## Who implements it, who consumes it
 
 **Three configurators, one per process kind**, each writing into the same day's file: the server
-(`packages/web/src/server/dev.ts:28-34`, `process: 'server'`), the web launcher (`dev-web.ts:30-36`,
-`'web'`) and the runtime as a child (`packages/harness/extensions/logging/index.ts:31-38`, `'pi'`).
+(`packages/web/src/server/dev.ts:30-37`, `process: 'server'`), the web launcher (`dev-web.ts:32-39`,
+`'web'`) and the runtime as a child (`packages/harness/extensions/logging/index.ts:40-48`, `'pi'`).
 
 The extension is the interesting one (`logging/index.ts:9-19`): in-process under the web host the
 server configured before the runtime existed, `isLoggingConfigured()` is true, and it configures
@@ -190,7 +197,7 @@ nothing — the extensions' records land in the server's file through the server
 of the terminal launcher nothing has configured, so it does, with no console sink (stderr is the
 terminal's). A second `configure` throws by the substrate's design; that is the whole reason the check
 exists. The same extension writes the one record only an extension can: the provider's request id
-and rate-limit headers, from an explicit four-name list (lines 47-57) so an `authorization` or
+and rate-limit headers, from an explicit four-name list (lines 56-67) so an `authorization` or
 `set-cookie` header is never echoed into a file the manifest says is safe.
 
 **The browser is the fourth layer and has its own configurator** (`packages/web/src/browser-logging.ts:13-36`):
@@ -204,7 +211,7 @@ failed POST is dropped: *it is the log, and the log must never make more log* (l
 (lines 12-16): a page in a loop sending garbage would otherwise write one line per attempt.
 
 **`process` versus `layer`** (glossary Record, decision 4). `ProcessLoggingOptions.process`
-(`log-process.ts:221-222`) is *which launcher this is — `server`, `web`, `pi` — on every record it
+(`log-process.ts:258-259`) is *which launcher this is — `server`, `web`, `pi` — on every record it
 writes, since the file is shared*: the operating-system process. `ZenLogLayer` is the region of our
 code: `extension` is our code inside the runtime's process, and under the web host that process is
 `server`. Orthogonal on purpose — a browser record is `process: "browser"` because the server

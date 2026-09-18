@@ -1,5 +1,5 @@
 import { afterEach, expect, spyOn, test } from 'bun:test'
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { reset } from '@logtape/logtape'
@@ -15,6 +15,8 @@ import {
   zenLogFilename,
   zenLogLineRenderer,
 } from '../log-process.ts'
+import { zenSecretsPath } from '../paths.ts'
+import { knownSecretValuesTracking, readSecret } from '../secrets.ts'
 
 /**
  * The file a user hands us (#132), end to end through the real configurator: what a line
@@ -360,4 +362,65 @@ test('⚠ the terminal gets the value pass too: a known secret never reaches con
   } finally {
     spy.mockRestore()
   }
+})
+
+// #207: the read path was per call and the redaction path was a boot snapshot. A key added
+// or rotated in `.zen/secrets.env` while a launcher runs is immediately live for
+// `readSecret` — web-search's own refusal tells the operator to do exactly this — and was
+// absent from every sink's alternation for the remaining lifetime of that process.
+test('⚠ a key rotated while the process runs is redacted from the next record on, no restart (#207)', async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), 'zen-rotation-root-'))
+  mkdirSync(join(repoRoot, '.zen'))
+  const secretsFile = zenSecretsPath(repoRoot)
+  writeFileSync(secretsFile, 'TAVILY_API_KEY=tvly-notarealsecret-BOOT-000\n')
+  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-rotation-'))
+  const dispose = await configureProcessLogging({
+    logsDir,
+    process: 'server',
+    secretValues: knownSecretValuesTracking(repoRoot, {}),
+  })
+  const log = zenLogger('server', 'probe')
+  log.warn('bash command refused: {reason}', {
+    reason: 'the command carried --token tvly-notarealsecret-BOOT-000',
+  })
+  // The rotation, with the launcher still running.
+  writeFileSync(secretsFile, 'TAVILY_API_KEY=tvly-notarealsecret-ROTATED-999\n')
+  expect(readSecret(repoRoot, 'TAVILY_API_KEY')).toBe('tvly-notarealsecret-ROTATED-999')
+  log.warn('bash command refused: {reason}', {
+    reason: 'the command carried --token tvly-notarealsecret-ROTATED-999',
+  })
+  await dispose()
+
+  const text = readFileSync(join(logsDir, zenLogFilename(new Date())), 'utf8')
+  // Reproduced before the thunk existed: this line held the rotated key verbatim.
+  expect(text).not.toContain('ROTATED-999')
+  // …and the key the snapshot did know is still redacted: the rebuild replaces the set, it
+  // does not shift a window over it.
+  expect(text).not.toContain('BOOT-000')
+  expect(text.split(ZEN_REDACTED_VALUE)).toHaveLength(3)
+})
+
+// #207, same surface: the day file was `0664` while every source it may quote — the secrets
+// file itself, through a record carrying a value the redactor did not know yet — is `0600`.
+// Every reader is the same user: `bun run logs`, the bundle route in the server, and the
+// three writers are all processes the operator started.
+//
+// ⚠ NOT covered: the LOCAL-MIDNIGHT rollover, where the sink names a new file and the
+// writer owns it on the next record. It needs a fake clock inside LogTape's sink; a red line
+// here would mean today's file, not tomorrow's.
+test('⚠ the day file is created owner-only (#207)', async () => {
+  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-mode-'))
+  const dispose = await configureProcessLogging({ logsDir, process: 'server' })
+  await dispose()
+  expect(statSync(join(logsDir, zenLogFilename(new Date()))).mode & 0o777).toBe(0o600)
+})
+
+test('a day file an older build left group-readable is tightened when a process configures (#207)', async () => {
+  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-mode-legacy-'))
+  const legacyFile = join(logsDir, zenLogFilename(new Date()))
+  writeFileSync(legacyFile, '')
+  chmodSync(legacyFile, 0o664)
+  const dispose = await configureProcessLogging({ logsDir, process: 'server' })
+  await dispose()
+  expect(statSync(legacyFile).mode & 0o777).toBe(0o600)
 })

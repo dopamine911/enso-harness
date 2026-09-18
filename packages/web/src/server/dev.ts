@@ -15,7 +15,7 @@ import { mkdirSync } from 'node:fs'
 import { zenLogger } from '@zen/core'
 import { configureProcessLogging, logsDirFrom, parseZenLogLevels } from '@zen/core/log-process'
 import { findRepoRoot, harnessPackageDir, zenAgentDir } from '@zen/core/paths'
-import { knownSecretValues } from '@zen/core/secrets'
+import { knownSecretValuesTracking } from '@zen/core/secrets'
 import { startZenServer } from './index.ts'
 
 const cwdArgument: string | undefined = process.argv[2]
@@ -31,8 +31,9 @@ const disposeLogging: () => Promise<void> = await configureProcessLogging({
   logsDir,
   process: 'server',
   levels: parseZenLogLevels(process.env, { console: 'info' }),
-  // The value pass (#139): what a token quoted in a message or a trace payload is scrubbed against.
-  secretValues: knownSecretValues(repoRoot),
+  // The value pass (#139): what a token quoted in a message or a trace payload is scrubbed
+  // against — asked per record, so a key rotated while the server runs is redacted too (#207).
+  secretValues: knownSecretValuesTracking(repoRoot),
 })
 const log = zenLogger('server', 'dev')
 

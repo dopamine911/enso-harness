@@ -3,7 +3,14 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { rootDotenvPath, zenSecretsPath } from '../paths.ts'
-import { isSecretShapedName, knownSecretValues, parseDotenv, quarantineSecrets, readSecret } from '../secrets.ts'
+import {
+  isSecretShapedName,
+  knownSecretValues,
+  knownSecretValuesTracking,
+  parseDotenv,
+  quarantineSecrets,
+  readSecret,
+} from '../secrets.ts'
 
 /**
  * #89: secrets stay out of the environment the model's tools inherit. The reader takes
@@ -152,4 +159,31 @@ test("⚠ the logger's value set is the secrets file plus secret-shaped env name
 
 test('no secrets file and no secret-shaped names: an empty set, so the value pass never runs', () => {
   expect(knownSecretValues(scratchRepoRoot(), { PUBLIC_URL: 'https://example.com' })).toEqual([])
+})
+
+// #207: the reader was per call and the redactor was a boot snapshot, so a key rotated while
+// a launcher ran was live for `readSecret` and absent from every sink's alternation for the
+// rest of that process's life.
+test('⚠ the tracking set follows a rotation, and hands back the SAME array while the file is unchanged', () => {
+  const root = scratchRepoRoot()
+  writeFileSync(zenSecretsPath(root), 'TAVILY_API_KEY=tvly-notarealsecret-first\n')
+  const tracking = knownSecretValuesTracking(root, {})
+  expect(tracking()).toEqual(['tvly-notarealsecret-first'])
+  // ⚠ IDENTITY, not contents: `redactingKnownValues` asks per record and rebuilds its
+  // alternation only when the array changes, so a tracker that allocated a fresh array per
+  // call would recompile the regex on every record written. A red line here is that cost
+  // coming back, not a wrong redaction.
+  expect(tracking()).toBe(tracking())
+  const before = tracking()
+  writeFileSync(zenSecretsPath(root), 'TAVILY_API_KEY=tvly-notarealsecret-rotated\n')
+  expect(tracking()).toEqual(['tvly-notarealsecret-rotated'])
+  expect(tracking()).not.toBe(before)
+})
+
+test('the tracking set starts empty when there is no file and picks the file up when one appears', () => {
+  const root = scratchRepoRoot()
+  const tracking = knownSecretValuesTracking(root, {})
+  expect(tracking()).toEqual([])
+  writeFileSync(zenSecretsPath(root), 'TAVILY_API_KEY=tvly-notarealsecret-appeared\n')
+  expect(tracking()).toEqual(['tvly-notarealsecret-appeared'])
 })
