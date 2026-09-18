@@ -221,6 +221,11 @@ writes are *our* layers' jobs (`:36-41`).
   Leaves when the harness owns the list of directories an extension may write."
 - **The schema rule**: `packages/harness/core/index.ts:4-9` — no TypeBox schema is declared there; the
   policy is imported from `@zen/core` or does not exist.
+- **The pi-version parity gate** (#217, `scripts/__tests__/pi-version-parity.test.ts`): the replica's
+  agreement with pi is pinned against the WORKSPACE copy only; the `pi` the terminal launcher spawns is
+  bounded instead by `scripts/zen-launch.mjs#SUPPORTED_PI_VERSIONS`, which the launcher refuses outside
+  and that test holds equal to the corpus's pi. Without it the corpus described a pi the terminal
+  surface need never have run.
 
 ## What crosses it that should not
 
