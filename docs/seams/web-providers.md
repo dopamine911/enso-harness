@@ -254,7 +254,7 @@ do not change; `web-search.test.ts` runs against scripted providers and does not
 **Replacing the model API** — a runtime whose model registry has a different shape — changes
 `vocabulary.ts` (`ModelSearchRequest.model`, `ResolvedProviderAuth`, `routedProviderIdForModel`, which
 reads `model.provider` and `model.api`) and `auth.ts` (`ModelAuthSource`, `resolveModelAuth`), plus the
-one call site that builds a `ModelSearchRequest` from the runtime's context (`web-search/index.ts:256-264`).
+one call site that builds a `ModelSearchRequest` from the runtime's context (`web-search/index.ts:284-296`).
 The five providers read only `request.model` fields through the request and `resolveAuth`; the wire
 modules, the outcome union, the config sections, web_fetch and every test that scripts a provider do
 not change. That is what the allowlist's two lines say: the leak is those two files, and fixing it

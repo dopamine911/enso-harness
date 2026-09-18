@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
+  type DialogAnswer,
   type PromptOutcome,
   type PromptRequest,
   type ThreadRuntime,
@@ -15,6 +16,7 @@ import {
 } from '@zen/core'
 import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import type { AgentHost } from '../../host/agent-host.ts'
+import { answerThreadDialog, type FollowRouteDeps } from '../follow.ts'
 import { startZenServer } from '../index.ts'
 import {
   createFakeAgentHost,
@@ -613,6 +615,44 @@ test('a confirm dialog round-trips through /dialog; a value answer to it is refu
   expect((await answerWith({ id: 'c1', confirmed: true })).status).toBe(204)
   expect(fake.built[0]?.answers).toEqual([{ id: 'c1', confirmed: true }])
   follow.close()
+})
+
+/**
+ * ⚠ `answerThreadDialog` decides "is this a cancellation?" by the VALUE of `cancelled`, never by
+ * the key being present. Before #225 `DialogAnswer`'s three arms overlapped, the guard read
+ * `'cancelled' in answer`, and ANY object carrying that key — `cancelled: false` included —
+ * skipped `validateDialogAnswer` and handed pi an unoffered select value verbatim. The route's own
+ * `readDialogBody` never builds such an object; it is every OTHER producer of a `DialogAnswer`
+ * (`ThreadRuntime.answerDialog`'s public signature, a runtime fake, a future surface) that the
+ * type now stops. A red line here means the select-injection fence is open again.
+ */
+test('⚠ a cancellation is a value, not a key: `cancelled: false` carrying an unoffered value is refused (#225)', () => {
+  const answers: DialogAnswer[] = []
+  const deps = {
+    threads: {
+      peek: () => ({
+        hosted: {
+          runtime: {
+            openDialogs: () => [{ id: 'd1', dialog: { method: 'select', title: 'Pick', options: ['a', 'b'] } }],
+            answerDialog: (answer: DialogAnswer) => answers.push(answer),
+          },
+        },
+      }),
+    },
+  } as unknown as FollowRouteDeps
+
+  // The cast is the finding: this shape is no longer a `DialogAnswer`, so only a producer
+  // outside the contract can present it — which is exactly who the guard has to survive.
+  const smuggled = { id: 'd1', cancelled: false, value: 'zzz' } as unknown as DialogAnswer
+  expect(answerThreadDialog(deps, 't1', smuggled)).toMatchObject({ status: 422 })
+  expect(answers).toEqual([])
+
+  // …and the compile-level half of the same claim. If the union goes untagged again this
+  // directive is unused and `bun run check` fails at tsc, before any of the above runs.
+  // @ts-expect-error — a cancellation cannot also carry a confirm payload (#225)
+  const mixed: DialogAnswer = { id: 'd1', cancelled: true, confirmed: true }
+  expect(answerThreadDialog(deps, 't1', mixed)).toEqual({ status: 204 })
+  expect(answers).toEqual([mixed])
 })
 
 // ── 5. a busy thread queues through pi (#75) ──────────────────────────────────────────

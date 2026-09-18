@@ -5,7 +5,6 @@
   "type": "module",
   "description": "The zen-harness web surface. Outside the pi manifest \u2014 pi does nothing with a frontend.",
   "scripts": {
-    "typecheck": "tsc -b --pretty false",
     "dev:server": "bun src/server/dev.ts",
     "dev:web": "bun src/server/dev-web.ts"
   },
@@ -43,7 +42,6 @@
     "bun-plugin-tailwind": "0.1.2",
     "happy-dom": "20.14.0",
     "react-refresh": "^0.18.0",
-    "tailwindcss": "^4.3.3",
-    "typescript": "^5.7.0"
+    "tailwindcss": "^4.3.3"
   }
 }

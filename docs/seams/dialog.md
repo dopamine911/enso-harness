@@ -73,8 +73,21 @@ The answer, as it crosses `POST /api/threads/:id/dialog` and reaches the runtime
 
 <!-- source: packages/core/src/thread-runtime.ts#DialogAnswer -->
 ```ts
-/** An answer to a blocking dialog, keyed to the request id the `extension_ui_request` carried. */
-export type DialogAnswer = { id: string } & ({ cancelled: true } | { value: string } | { confirmed: boolean })
+/**
+ * An answer to a blocking dialog, keyed to the request id the `extension_ui_request` carried.
+ *
+ * ⚠ THE ARMS ARE MUTUALLY EXCLUSIVE, and the `?: never` members are what says so (#225). Without
+ * them the union is untagged — `{ id, cancelled: true, confirmed: true }` satisfies two arms at
+ * once — and a reader can only ask whether a key EXISTS, never what it holds. `answerThreadDialog`
+ * asked exactly that and skipped `validateDialogAnswer` for anything carrying a `cancelled` key,
+ * which is the select-injection fence (`dialog.ts`) open for an answer that also carried a value.
+ * With the arms disjoint, `answer.cancelled === true` narrows, so every reader tests the VALUE.
+ */
+export type DialogAnswer = { id: string } & (
+  | { cancelled: true; value?: never; confirmed?: never }
+  | { value: string; cancelled?: never; confirmed?: never }
+  | { confirmed: boolean; cancelled?: never; value?: never }
+)
 ```
 
 The two checks both sides enforce — is this a question, does this payload answer *this* question:

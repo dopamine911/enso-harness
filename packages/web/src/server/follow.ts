@@ -286,7 +286,7 @@ export type DialogOutcome =
  * Deliver the answer to the LIVE session's OPEN question. Validated against what was
  * asked (#112): pi hands a select's value to the extension VERBATIM, so an unoffered value
  * is an injection seam the server closes — the same check the run path's resume made. A
- * refused answer leaves the question open; a cancellation needs no validation.
+ * refused answer leaves the question open; only a real `cancelled: true` skips the check (#225).
  */
 export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answer: DialogAnswer): DialogOutcome {
   const live = deps.threads.peek(threadId)
@@ -298,7 +298,7 @@ export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answ
       reason: `no open question ${answer.id} on thread ${threadId} — answered, expired, or never asked`,
     }
   }
-  if (!('cancelled' in answer)) {
+  if (answer.cancelled !== true) {
     const refusal = validateDialogAnswer(question, answer)
     if (refusal !== undefined) return { status: 422, reason: `answer refused: ${refusal}` }
   }

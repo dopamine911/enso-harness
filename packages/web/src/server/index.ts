@@ -217,16 +217,35 @@ export interface ZenServerHandle {
  * `scripts/zen.mjs` already refuses to launch on the same condition. The server had no
  * equivalent, which is the asymmetry this closes: two launch points, one precondition, and
  * it must be enforced at both or the unenforced one becomes the confusing path.
+ *
+ * ⚠ THE MANIFEST IS UNTRUSTED INPUT, not a typed value (#226). `scripts/zen-launch.mjs`
+ * narrows it at runtime; this used to assert `Record<string, string | string[]>` and read
+ * `.startsWith` off whatever arrived. A bare-string `pi` made `Object.values` iterate
+ * CHARACTERS, so `missing` came back empty and the guard passed silently — the very
+ * failure mode the paragraph above exists to prevent. A `pi` that is not an object is now
+ * a named refusal, and a non-string resource path is dropped, as the launcher drops it.
+ */
+function declaredResourcePaths(manifest: unknown): string[] {
+  if (typeof manifest !== 'object' || manifest === null || !('pi' in manifest)) return []
+  const pi: unknown = manifest.pi
+  if (pi === undefined) return []
+  if (typeof pi !== 'object' || pi === null || Array.isArray(pi)) {
+    throw new Error('zen-server: the harness package.json declares a `pi` that is not an object')
+  }
+  return Object.values(pi)
+    .flatMap((paths: unknown) => (Array.isArray(paths) ? paths : [paths]))
+    .filter((resourcePath: unknown): resourcePath is string => typeof resourcePath === 'string')
+}
+
+/**
+ * Refuse to start if the harness package's vendor links are missing — see above.
  */
 function assertVendorLinks(harnessPackageDir: string): void {
   const manifestPath = join(harnessPackageDir, 'package.json')
   if (!existsSync(manifestPath)) {
     throw new Error(`zen-server: no package.json at ${harnessPackageDir}`)
   }
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
-    pi?: Record<string, string | string[]>
-  }
-  const declared = Object.values(manifest.pi ?? {}).flatMap((paths) => (Array.isArray(paths) ? paths : [paths]))
+  const declared = declaredResourcePaths(JSON.parse(readFileSync(manifestPath, 'utf8')))
   const missing = declared
     .filter((vendorPath) => vendorPath.startsWith('node_modules/'))
     .filter((vendorPath) => !existsSync(resolve(harnessPackageDir, vendorPath)))
