@@ -210,6 +210,26 @@ A fourth, `bundle-route.test.ts`, builds a minimal one to give the bundle a live
 
 ## What crosses it that should not
 
+**The steer/follow-up dichotomy is the runtime's, and it does not stop at this seam.**
+`StreamingBehavior` (`thread-runtime.ts` line 38) is declared as a Zen schema whose two literals are
+pi's own words, with pi's rule attached to the field that carries it: `PromptRequest.streamingBehavior`
+is "required by pi when the session is already streaming". It is then a field of `ZenPromptBody`
+(`packages/core/src/follow.ts:137`), the declared body of `POST /api/threads/:id/prompt` — so the
+browser's `prompt()` sends the literal `followUp` (`follow-connection.ts`), `promptThread` defaults to
+the same literal when the body omits it (`server/follow.ts`), the thread route forwards it
+(`server/index.ts`), and the host hands the string verbatim to the runtime's `prompt` option of the
+same name (`agent-host.ts:471`). `ZenPromptBody` is closed, so a Zen-owned word — `interrupt`,
+`enqueue` — is a 400 today: pi's vocabulary is not merely carried across the wire, it is the only
+vocabulary the wire accepts. Outbound it is the same dichotomy: `ZenQueue.steering` / `.followUp` on
+the follow's SSE stream, and `clearQueue` returning `{ steering, followUp }` from pi's
+`AgentSession.clearQueue()`. See `observation.md` → *What crosses it that should not* for the queue
+half. The vendor gate cannot see any of it — no import, no vendor word — and #216 is the open
+question of whether to rename it.
+
+**`listCommands` returns the runtime's command entries** (`RuntimeCommand`: name, source,
+description). The shape is ours by declaration; its `source` values are the runtime's categories
+carried as strings. Small, stated.
+
 **Nothing of the runtime's event shape, since L2** (#162 workstream 4). Until then `subscribe` handed
 out `RuntimeEvent` — open on purpose, the runtime's own fields carried verbatim — and the mapper that
 read those fields sat *above* the host. Now the host maps at delivery: a subscriber receives
@@ -218,12 +238,12 @@ read those fields sat *above* the host. Now the host maps at delivery: a subscri
 events route's tail (which records observation kinds), not in a fake (the fakes emit observations).
 The persistence-side half of L2 is on the storage page.
 
-**`listCommands` returns the runtime's command entries** (`RuntimeCommand`: name, source,
-description). The shape is ours by declaration; its `source` values are the runtime's categories
-carried as strings. Small, stated.
+Nothing else. Prompt, outcome, answer and delivery are ours, and the runtime's own TYPES do not appear
+in this module (the vendor gate holds that). Its vocabulary does, in the two shapes above.
 
-Nothing else. Prompt, outcome, answer, delivery and streaming behavior are ours, and the runtime's
-own types do not appear in this module (the vendor gate holds that).
+Ordered live crossings first, then the closed receipt: the bold lead of this section is the
+architecture table's leak column (`scripts/docs/seams-table.ts`), and this page used to lead with the
+closed leak and deny the open one in its last line (#216).
 
 ## Pivot cost
 
@@ -233,4 +253,11 @@ and `map-events.ts` (produce the new loop's events and map them to observations 
 loop's typed events directly and retire the replicated wire shape), `extension-ui-context.ts` and
 `permission-dialog.ts` (or their equivalents, if the new loop has extensions and questions at all).
 The server, the registry, the routes, the follow, the browser and every test that drives the server
-over the fake do not change: that is what the fake proves today, and it is the whole point of the seam.
+over the fake do not change — that is what the fake proves today, and it is the whole point of the
+seam — with ONE exception: the steer/follow-up vocabulary named above. A runtime with no such
+distinction, or with one queue class or three, invalidates `StreamingBehavior`, `ZenQueue` and
+`ZenPromptBody.streamingBehavior` in `@zen/core`; the prompt route's default and its `PromptBody`
+type; the thread route that forwards it; the browser's send and the queue store the router fills; and
+the mapper under `host/`. Measured on `main`: 13 production files and 11 test files name
+`streamingBehavior`, `StreamingBehavior` or the queue's `steering`/`followUp`. That is a wire-schema
+change and a browser change, and it is priced here rather than at zero.
