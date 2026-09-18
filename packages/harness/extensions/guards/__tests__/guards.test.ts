@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
-import { mkdtempSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createCodingTools, createPowerShellTool, createReadOnlyTools } from '@earendil-works/pi-coding-agent'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
@@ -368,6 +368,61 @@ test.skipIf(!isGitAvailable)('the incident shape: staged, mutated, restored from
   expect(result?.block).toBe(true)
   expect(result?.reason).toContain('CHANGED')
 })
+
+// ── the sensor for FIXTURE_GIT_ENV above ──────────────────────────────────────────────────
+// The hermetic environment is load-bearing and invisible: with the caller's environment
+// inherited, the fixture's `git add`/`git checkout` ran against the REPOSITORY BEING
+// COMMITTED — a stray `work.ts` in real commits, an author rewritten, `core.bare` flipped on
+// a config every worktree shares, and `checkout --` silently reverting tracked content,
+// which is the leg that destroys work rather than dirtying a tree.
+//
+// ⚠ It cannot be pinned in-process: arming the hazard means a poisoned GIT_* in the
+// environment this suite runs in, and `noProcessEnv` scopes environment reads to the #89
+// inventory, which a test fixture has no business joining. So the suite is re-run in a CHILD
+// given exactly that environment — the real fixture, the real spawn, the real hazard — and
+// the victim repository is asserted untouched afterwards. That is a behavioural sensor, not
+// an assertion on a literal: delete `env: FIXTURE_GIT_ENV` from the spawn above and this
+// goes red, naming the leg that leaked.
+test.skipIf(!isGitAvailable)(
+  '⚠ the incident fixture cannot reach the repository that runs it (GIT_DIR, GIT_INDEX_FILE)',
+  () => {
+    const victim = mkdtempSync(join(tmpdir(), 'zen-guard-victim-'))
+    const hermetic: Record<string, string> = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' }
+    const victimGit = (...args: string[]): string => {
+      const result = Bun.spawnSync(['git', ...args], { cwd: victim, env: hermetic })
+      return result.stdout.toString().trim()
+    }
+    victimGit('init', '-q')
+    victimGit('config', '--local', 'user.email', 'victim@example.invalid')
+    victimGit('config', '--local', 'user.name', 'victim')
+    const tracked = join(victim, 'work.ts')
+    writeFileSync(tracked, 'victim-committed\n')
+    victimGit('add', 'work.ts')
+    victimGit('commit', '-q', '-m', 'victim')
+    // An unstaged mutation on top: the shape that has something to lose to `checkout --`.
+    writeFileSync(tracked, 'victim-unstaged\n')
+
+    // The child is handed what a git hook hands its children, and nothing else it does not need.
+    const child = Bun.spawnSync([process.execPath, 'test', import.meta.path, '-t', 'the incident shape'], {
+      cwd: dirname(import.meta.path),
+      env: {
+        ...hermetic,
+        PATH: dirname(Bun.which('git') ?? '/usr/bin/git'),
+        GIT_DIR: join(victim, '.git'),
+        GIT_INDEX_FILE: join(victim, '.git', 'index'),
+        GIT_WORK_TREE: victim,
+      },
+    })
+    // The fixture still passes under the hazard — the point is that it passes HARMLESSLY.
+    expect(child.stderr.toString()).toContain('1 pass')
+    // The destructive leg first: the victim's unstaged work survived `checkout --`.
+    expect(readFileSync(tracked, 'utf8')).toBe('victim-unstaged\n')
+    // Then the noisy ones: no fixture author written over the victim's, and nothing staged.
+    expect(victimGit('config', '--local', '--get', 'user.name')).toBe('victim')
+    expect(victimGit('diff', '--cached', '--name-only')).toBe('')
+    expect(victimGit('config', '--local', '--get', 'core.bare')).toBe('false')
+  },
+)
 
 // ⚠ The session's OWN successful edit must not make the file stale to itself: an edit
 // moves mtime/size, confers no whole-file knowledge (#10), but must refresh the stamp of
