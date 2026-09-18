@@ -87,6 +87,24 @@ test('recorded false positives: a command that merely NAMES a credential path is
   expect(find('grep -rn "secrets.env" packages/')?.via).toBe('resolved')
   // A bare word that is not a path at all, but whose basename matches the read policy.
   expect(find('aws configure get credentials')?.via).toBe('resolved')
+  // ⚠ The costliest class: a quoted word is ONE word, so PROSE carrying the fragment is
+  // refused — including the commit message that ships a change to this policy. The escape
+  // is to spell it so it is not a path, which the refusal text says: `'/\.zen/'` passes.
+  expect(find('git commit -m "guards: add /.zen/ to the read policy (#204)"')?.via).toBe('resolved')
+  expect(find("rg -n '/\\.zen/' packages/")).toBeUndefined()
+  // Harness maintenance through the shell goes with it: the log dir is a credential dir.
+  expect(find('wc -l .zen/logs/zen-2026-09-18.jsonl')?.via).toBe('resolved')
+  expect(find('du -sh .zen')?.via).toBe('resolved')
+})
+
+// ⚠ Quoting must not splice the fragment out of reach. `ln -s "$PWD/.zen" n` creates a name
+// whose target does not exist at gate time — so `looksLikeSecret`'s realpath leg has nothing
+// to follow — and the next segment reads `n/pi-agent/auth.json`, a path matching nothing.
+// The text pass drops quote characters for exactly this: the link word is refused instead.
+test('⚠ a same-command symlink into the credential dir is refused at the link, not missed', () => {
+  expect(find('ln -s "$PWD/.zen" n && cat n/pi-agent/auth.json')?.via).toBe('text')
+  expect(find('ln -s .zen n')?.via).toBe('resolved')
+  expect(find('ln -s $(pwd)/.zen n')?.via).toBe('text')
 })
 
 /**
@@ -99,6 +117,14 @@ test('recorded residual: a name assembled at runtime is not seen', () => {
   // The harness dir named through a variable: no `.zen` in the text, and `auth.json`
   // matches no basename pattern — which is exactly why the fragment had to be added.
   expect(find('cat $ZEN_DIR/pi-agent/auth.json')).toBeUndefined()
-  expect(find("cat $'\\056zen/secrets.env'")).toBeUndefined()
+  // The symlink route once the NAME is assembled too, not merely quoted.
+  expect(find("D=$(printf '.z%sn' e); ln -s $D n; cat n/pi-agent/auth.json")).toBeUndefined()
+  // Octal-spelled DIRECTORY, with a basename the policy does not know: nothing to match.
+  // (`$'\056zen/secrets.env'` IS refused, but by its basename, not by the fragment.)
+  expect(find("cat $'\\056zen'/pi-agent/auth.json")).toBeUndefined()
+  expect(find("cat $'\\056zen/secrets.env'")?.via).toBe('text')
   expect(find('cat .z*n/sec*')).toBeUndefined()
+  // An ASSIGNMENT keeps its prefix, so the dir inside one is invisible — the price of
+  // leaving `ZEN_LOGS_DIR=.zen/logs bun run dev` alone, which reads nothing.
+  expect(find('ZEN_LOGS_DIR=.zen/logs bun run dev')).toBeUndefined()
 })

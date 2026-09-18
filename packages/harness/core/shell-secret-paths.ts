@@ -26,10 +26,19 @@ import { extractFlatShellCommandSegments, literalShellWord, shellWordsOf } from 
  *
  * STATED NON-COVERAGE — a bar, not a boundary, exactly like the egress deny:
  *   - A name assembled at runtime that the word's own text does not contain:
- *     `K=.zen/secrets.env; cat $K`, `$'\056zen/secrets.env'`, `cat .z*n/sec*`. A word whose
- *     value is not knowable from the text (expansion, brace/glob synthesis, malformed
- *     quoting) falls back to a scan of that word's raw TEXT, which catches the common
- *     `"$HOME/.zen/secrets.env"` and nothing spelled indirectly.
+ *     `D=$(printf '.z%sn' e); ln -s $D n; cat n/pi-agent/auth.json`, `cat .z*n/sec*`,
+ *     `cat $ZEN_DIR/pi-agent/auth.json`. A word whose value is not knowable from the text
+ *     (expansion, brace/glob synthesis, malformed quoting) falls back to a scan of that
+ *     word's raw TEXT with quoting removed, which catches `"$HOME/.zen/secrets.env"`,
+ *     `ln -s "$PWD/.zen" n` and `.zen/$KEY` — and nothing spelled indirectly.
+ *   - A `NAME=value` word keeps its prefix, so a path inside an ASSIGNMENT resolves to
+ *     `<cwd>/NAME=.zen/…` and matches no directory fragment. Deliberate: stripping it
+ *     would refuse `ZEN_LOGS_DIR=.zen/logs bun run dev`, which reads nothing. (The
+ *     basename pass still catches an assignment ending in a credential basename.)
+ *   - A `-c` payload is not re-parsed one level down the way `network-egress.ts` re-parses
+ *     a wrapper's argument vector: `bash -c 'cat .zen/secrets.env'` is caught because that
+ *     one quoted word's literal value contains the fragment, not because the payload was
+ *     analysed as a command. A payload that assembles the name is outside this deny.
  *   - Interpreters: `bun -e 'await Bun.file(".zen/secrets.env").text()'` — the path is a
  *     word of the `-e` payload, so the scan does see this one, but a program that builds
  *     the name from pieces at runtime is outside any text scan. `network-egress.ts` states
@@ -59,6 +68,14 @@ const FLAG_VALUE_PREFIX = /^--?[A-Za-z0-9][-A-Za-z0-9_]*=/
 const COARSE_WORD_BOUNDARY = /[\s;|&()]+/
 /** PowerShell (and Git-Bash-typed) separators, so a text scan sees `.zen\secrets.env` as a path. */
 const BACKSLASH_SEPARATOR = /\\/g
+/**
+ * Quote characters, removed for the TEXT pass. Without this, quoting splices the fragment
+ * out of reach at the END of a word: `ln -s "$PWD/.zen" n` leaves `"` between `.zen` and
+ * the separator the fragment pass appends, so `/.zen/` did not match and the link — whose
+ * target does not exist yet, so there is no realpath to follow — carried the whole dir into
+ * a name the next segment could read. Quotes are not part of any path the shell opens.
+ */
+const QUOTE_CHARACTERS = /['"]/g
 
 /** The word with a fused redirection operator or option name removed — what is left is the path candidate. */
 function pathCandidateOf(word: string): string {
@@ -66,13 +83,14 @@ function pathCandidateOf(word: string): string {
 }
 
 /**
- * The word as TEXT, made comparable to a resolved path: PowerShell separators folded, and a
- * LEADING separator added — a directory fragment carries one (`/.zen/`), and a relative
- * mention (`.zen/$KEY`) has nothing before its first segment, so without this the fragment
- * pass would see `.zen/...` and match nothing while `<cwd>/.zen/...` matches.
+ * The word as TEXT, made comparable to a resolved path: quoting removed, PowerShell
+ * separators folded, and a LEADING separator added — a directory fragment carries one
+ * (`/.zen/`), and a relative mention (`.zen/$KEY`) has nothing before its first segment, so
+ * without this the fragment pass would see `.zen/...` and match nothing while
+ * `<cwd>/.zen/...` matches.
  */
 function textCandidateOf(word: string): string {
-  const folded = pathCandidateOf(word).replace(BACKSLASH_SEPARATOR, '/')
+  const folded = pathCandidateOf(word).replace(BACKSLASH_SEPARATOR, '/').replace(QUOTE_CHARACTERS, '')
   return folded.startsWith('/') ? folded : `/${folded}`
 }
 

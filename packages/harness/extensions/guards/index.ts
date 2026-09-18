@@ -282,10 +282,11 @@ function shellCommandDenial(
         `${toolName} command refused: "${secret.matched}" names credential material ` +
         `(matched by ${secret.via}). The read gate refuses that path for read/grep/find/ls, ` +
         `so this route refuses it too (#204) — one policy, both routes, because a secret ` +
-        `read is the precondition for exfiltration. This gates the WORD, not the read: ` +
-        `rewrite the command without naming the path. The harness's own credential dir ` +
-        `(.zen/) is off limits for inspection; the log-reading path is "bun run logs", ` +
-        `which is a human command and not a tool call.`,
+        `read is the precondition for exfiltration. This gates the WORD, not the read, so a ` +
+        `mention counts: if the word is prose or a search pattern rather than a path, spell ` +
+        `it so it is not one (an escaped dot, '/\\.zen/', passes). The harness's own ` +
+        `credential dir (.zen/) is off limits for inspection either way; the log-reading ` +
+        `path is "bun run logs", a human command and not a tool call.`,
     }
   }
   return undefined
