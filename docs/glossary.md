@@ -171,8 +171,10 @@ answer before a tool runs; nothing after it does.
 - **rule** — one line of a policy, or one named check of the command analyzer (`ruleId`): the identity
   of *which* rule caught a call, asserted where identity matters and elided where only the direction
   does.
-- **participant** — one handler on the tool-call hook. Load order is first-wins, so registration
-  order is a security property and extensions are enumerated explicitly, guards first.
+- **participant** — one handler on the tool-call hook. Handlers are additive: every participant's handler
+  runs and the first denial ends the call, so a denial is final whatever the load order. First-wins
+  resolution applies to registered *tools*, not to handlers, and the guard registers none — see
+  [architecture](./architecture.md), *Ownership boundary*.
 - **arbiter** — the one handler that would own the verdict, with participants as libraries beneath it
   (#4). Designed, deferred: two participants with aligned fail direction are tolerable. A design word,
   not a code identifier.
