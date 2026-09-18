@@ -317,11 +317,33 @@ test('re-reading the changed file clears the staleness and the write passes', ()
 // error anywhere — untracked files fail loudly, and that asymmetry is the trap. The two
 // contents are the SAME LENGTH deliberately, so only the mtime leg of the stamp can catch
 // the restore — this test is what pins that git's restore actually moves mtime.
-const isGitAvailable = Bun.which('git') !== null
+/**
+ * The fixture's git, hermetic: not the caller's environment, and not the caller's config.
+ *
+ * ⚠ This suite runs INSIDE a git hook — `.githooks/pre-commit` runs the gate — and git exports
+ * an absolute `GIT_INDEX_FILE` to a hook. A git spawned here with the inherited environment
+ * therefore writes THIS repository's index instead of the temp repo's: `git add work.ts` below
+ * staged a fixture file into a real commit of this project, and every `--amend` re-staged it
+ * (PR #287). Everything these commands need is on the command line or in the temp repo, so the
+ * child is given an environment rather than inheriting one, and a developer's global gitconfig
+ * (`core.hooksPath`, `init.defaultBranch`) cannot reach the fixture either.
+ *
+ * The env therefore carries no `PATH`, and the binary is ABSOLUTE for exactly that reason (PR
+ * #287 review). A bare `git` under this env was not portable, it was lucky: with no `PATH` in
+ * the child environment, `execvp` falls back to the system default path, so it resolved only
+ * because git is `/usr/bin/git`. Measured for a binary that is on the caller's `PATH` and
+ * nowhere else — a git under `~/.local/bin`, a nix profile, Homebrew — both Bun's `spawnSync`
+ * and `child_process.spawn` raise ENOENT. `Bun.which` does that lookup ONCE, against the real
+ * environment, and an absolute path then needs no lookup in any runtime.
+ */
+const FIXTURE_GIT_ENV: Record<string, string> = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' }
+/** Absolute, resolved once; empty when git is not installed, and then nothing spawns. */
+const GIT_BINARY: string = Bun.which('git') ?? ''
+const isGitAvailable = GIT_BINARY !== ''
 test.skipIf(!isGitAvailable)('the incident shape: staged, mutated, restored from index — the write is refused', () => {
   const repo = mkdtempSync(join(tmpdir(), 'zen-guard-incident-'))
   const runGit = (...args: string[]): void => {
-    const result = Bun.spawnSync(['git', ...args], { cwd: repo })
+    const result = Bun.spawnSync([GIT_BINARY, ...args], { cwd: repo, env: FIXTURE_GIT_ENV })
     if (result.exitCode !== 0) {
       throw new Error(`git ${args[0]} failed: ${result.stderr.toString()}`)
     }
