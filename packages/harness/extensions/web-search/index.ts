@@ -308,11 +308,13 @@ async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome 
 }
 
 /**
- * Why the fallback runs. It ALWAYS runs from here: the `searched` arm never reaches this
- * function, because the call site branched on the discriminant instead of on this string
- * being `undefined` (#227). The type says so, so "the primary stands" can no longer be
- * expressed as a return value at all. ⓘ Exported for `__tests__/web-search.test.ts`, which
- * pins both halves of that signature at compile time.
+ * Why the fallback runs.
+ *
+ * It ALWAYS runs from here: the `searched` arm never reaches this function, because the call
+ * site branched on the discriminant instead of on this string being `undefined` (#227). The
+ * type says so, so "the primary stands" can no longer be expressed as a return value at all. ⓘ
+ * Exported for `__tests__/web-search.test.ts`, which pins both halves of that signature at
+ * compile time.
  */
 export function fallbackReasonFor(primary: Extract<WebSearchOutcome, { kind: 'ungrounded' }> | PrimaryFailure): string {
   if ('kind' in primary) {

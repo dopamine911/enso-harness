@@ -22,10 +22,11 @@ the receipt, and on every change as the observation, one shape for both.
 ```ts
 /**
  * The receipt a run starts with (#84) — and the value of the `permission-mode` CUSTOM chunk that
- * carries it to the browser, at run start and on every change. `mode` is the current mode;
- * `available` is what the mode dropdown may offer: the modes the runtime's mode extension
- * registers, intersected with the commands this session actually registers, in the
- * extension's order (the host decides).
+ * carries it to the browser, at run start and on every change.
+ *
+ * `mode` is the current mode; `available` is what the mode dropdown may offer: the modes the
+ * runtime's mode extension registers, intersected with the commands this session actually
+ * registers, in the extension's order (the host decides).
  */
 export const ZenPermissionModeState = Type.Object({
   mode: Type.String({ minLength: 1 }),
@@ -37,9 +38,10 @@ export const ZenPermissionModeState = Type.Object({
 ```ts
 /**
  * The permission mode changed, and what a run may switch to now (#162 workstream 4, L3).
+ *
  * The HOST emits this when its mode extension persists a change — the one observation the
- * browser reads the mode from mid-run, so no surface knows which extension's entry it was
- * or what that entry looks like. The same `{ mode, available }` a run starts with
+ * browser reads the mode from mid-run, so no surface knows which extension's entry it was or
+ * what that entry looks like. The same `{ mode, available }` a run starts with
  * (`ZenPermissionModeState`): one shape for the receipt and for the change.
  */
 export const ZenPermissionMode = Type.Object({
@@ -53,10 +55,11 @@ And what crosses the other way — the one thing the browser may say about the m
 <!-- source: packages/core/src/permission-mode.ts#ZenPermissionModeChange -->
 ```ts
 /**
- * The body of `POST /api/threads/:threadId/mode` (L3 step C): the mode to switch to. A
- * control route, not a prompt — the server refuses a mode the thread does not offer (422)
- * and a busy thread (409); the change itself arrives on the follow as `permission-mode`,
- * never from the click.
+ * The body of `POST /api/threads/:threadId/mode` (L3 step C): the mode to switch to.
+ *
+ * A control route, not a prompt — the server refuses a mode the thread does not offer (422) and
+ * a busy thread (409); the change itself arrives on the follow as `permission-mode`, never from
+ * the click.
  */
 export const ZenPermissionModeChange = Type.Object({
   mode: Type.String({ minLength: 1 }),
@@ -71,9 +74,10 @@ whose rule this is, and why it is never cached.
 ```ts
 /**
  * picc's own `restoreState` rule, applied to a branch (#84): the LAST `modes` entry wins,
- * and a branch with none is the initial mode. Walked from the end so the newest entry is
- * the first hit. THE definition — a live thread's `permissionModeState` and a stored
- * thread's opening mode (#95) both read this one walk.
+ * and a branch with none is the initial mode.
+ *
+ * Walked from the end so the newest entry is the first hit. THE definition — a live thread's
+ * `permissionModeState` and a stored thread's opening mode (#95) both read this one walk.
  *
  * ⚠ Deliberately NOT cached anywhere (PR #85 review): the branch is not append-only —
  * `/tree`, `/fork` and `/branch` move the leaf onto a path whose last `modes` entry can
@@ -95,9 +99,10 @@ export function persistedPermissionMode(branch: readonly unknown[]): string {
 ```ts
 /**
  * The mode carried by ONE persisted custom entry, or undefined when the entry is not
- * picc's (`customType` differs), is malformed, or carries no mode. Reads defensively —
- * every wire crossing does — so an unrelated extension's custom entry is ignored, never a
- * throw inside a stream loop.
+ * picc's (`customType` differs), is malformed, or carries no mode.
+ *
+ * Reads defensively — every wire crossing does — so an unrelated extension's custom entry is
+ * ignored, never a throw inside a stream loop.
  */
 export function readPiccPersistedMode(entry: unknown): string | undefined {
   if (typeof entry !== 'object' || entry === null) return undefined
@@ -116,9 +121,11 @@ its branch — so the server never spells the vendor's set:
 ```ts
 /**
  * What a FRESH thread starts in (#84): picc's initial mode, and every mode picc registers
- * unconditionally. Honest by construction — a new thread is a new session file with no
- * `modes` entry — and served before any run exists, so the header reads `default` from the
- * first paint rather than `unknown`.
+ * unconditionally.
+ *
+ * Honest by construction — a new thread is a new session file with no `modes` entry — and
+ * served before any run exists, so the header reads `default` from the first paint rather than
+ * `unknown`.
  */
 export function freshPermissionModeState(): ZenPermissionModeState {
   return { mode: PICC_DEFAULT_PERMISSION_MODE, available: [...PICC_PERMISSION_MODES] }

@@ -31,8 +31,10 @@ import { createStore, type Store } from './store.ts'
 const PAGE_CLOCK_PERIOD_MS = 5000
 
 /**
- * A clock that ticks every `periodMs` while it has a subscriber. The period is a parameter
- * so a test can drive one at test speed; the page's own clock is {@link pageClock}.
+ * A clock that ticks every `periodMs` while it has a subscriber.
+ *
+ * The period is a parameter so a test can drive one at test speed; the page's own clock is
+ * {@link pageClock}.
  */
 export function createClockStore(periodMs: number): Store<Date> {
   const store = createStore(new Date())

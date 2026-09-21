@@ -29,9 +29,11 @@ export const GuardPolicy = Type.Object({
 export type GuardPolicy = Static<typeof GuardPolicy>
 
 /**
- * Defaults. Deliberately conservative on reads of credential material and on
- * writes outside the workspace — the two cases from `docs/concepts/pi-immediate-needs.md`
- * Tier 0 where pi ships no confinement at all.
+ * Defaults.
+ *
+ * Deliberately conservative on reads of credential material and on writes outside the workspace
+ * — the two cases from `docs/concepts/pi-immediate-needs.md` Tier 0 where pi ships no
+ * confinement at all.
  */
 export const DEFAULT_GUARD_POLICY: GuardPolicy = {
   writeRoots: [],
@@ -90,8 +92,10 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
  * Basenames whose WRITE is a persistence vector (#21): the write itself is harmless, and
  * the execution happens later, outside the session, under the user's own identity — a
  * shell rc runs on the next login, `.gitconfig` hooks run on the next git command, agent
- * config hijacks the next agent session. Not secrets, so `looksLikeSecret` cannot catch
- * them: nothing is exfiltrated, something is installed.
+ * config hijacks the next agent session.
+ *
+ * Not secrets, so `looksLikeSecret` cannot catch them: nothing is exfiltrated, something is
+ * installed.
  *
  * ⚠ Matched by EXACT basename (case-insensitive), never as a fragment — `.profile` as a
  * fragment would catch `~/work/.profile-notes/x.ts`.
@@ -119,17 +123,21 @@ export const PERSISTENCE_WRITE_BASENAMES: readonly string[] = [
 
 /**
  * Directory names (any single path segment) whose CONTENTS are write-persistence vectors
- * — editor tasks, agent settings, git internals. Same provenance and matching rules as
- * {@link PERSISTENCE_WRITE_BASENAMES}. `.git` overlaps `protectedWriteFragments`'
- * `/.git/` deliberately; the fragment also catches the bare repo case and predates this.
+ * — editor tasks, agent settings, git internals.
+ *
+ * Same provenance and matching rules as {@link PERSISTENCE_WRITE_BASENAMES}. `.git` overlaps
+ * `protectedWriteFragments`' `/.git/` deliberately; the fragment also catches the bare repo
+ * case and predates this.
  */
 export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.git', '.vscode', '.idea', '.claude']
 
 /**
- * ZEN ADDITIONS — NOT from picc. Kept as a separate constant so the vendored block above
- * stays byte-comparable against upstream. picc's corpus protects the agent picc ships in
- * (Claude Code: `.claude`, `.claude.json`, `.mcp.json`); the agent running THIS harness is
- * pi, whose persistence surfaces upstream has no reason to know:
+ * ZEN ADDITIONS — NOT from picc.
+ *
+ * Kept as a separate constant so the vendored block above stays byte-comparable against
+ * upstream. picc's corpus protects the agent picc ships in (Claude Code: `.claude`,
+ * `.claude.json`, `.mcp.json`); the agent running THIS harness is pi, whose persistence
+ * surfaces upstream has no reason to know:
  *
  *   `.pi`      — a project-local `.pi/settings.json` installs an extension package that
  *                loads on the user's next plain `pi` session in that repo (the exact

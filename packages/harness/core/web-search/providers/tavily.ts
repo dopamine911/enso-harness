@@ -6,11 +6,12 @@ import { asRecord, asString } from '../wire-json.ts'
 
 /**
  * The `tavily` provider (#63): the FALLBACK — a dedicated retrieval API, not a model.
+ *
  * One POST to Tavily's search endpoint returns title/url/snippet results; there is no
- * synthesized answer and no searched/ungrounded ambiguity (a response IS a search).
- * Armed solely by `TAVILY_API_KEY` being present in the environment — no config knob;
- * the key never enters `zen.config.json` and is never logged. Domain include/exclude
- * (the `webSearch.tavily` config section) pass through to the API verbatim.
+ * synthesized answer and no searched/ungrounded ambiguity (a response IS a search). Armed
+ * solely by `TAVILY_API_KEY` being present in the environment — no config knob; the key never
+ * enters `zen.config.json` and is never logged. Domain include/exclude (the `webSearch.tavily`
+ * config section) pass through to the API verbatim.
  */
 
 export const TAVILY_SEARCH_URL = 'https://api.tavily.com/search'

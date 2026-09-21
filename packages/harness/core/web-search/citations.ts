@@ -3,8 +3,9 @@ import type { WebSource } from './vocabulary.ts'
 
 /**
  * Citation markers (#63): turn a provider's citation records into `[n]` markers inside
- * the answer text plus the numbered source list those markers point at. Three appliers
- * for three wire shapes:
+ * the answer text plus the numbered source list those markers point at.
+ *
+ * Three appliers for three wire shapes:
  *
  * - {@link applyTextCitations} — Anthropic: citations carry the quoted `cited_text`, so
  *   the marker lands after the first occurrence of that quote.

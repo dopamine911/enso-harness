@@ -10,8 +10,10 @@ import {
  * How every provider sends its request (#174): a JSON POST, and the two ways it fails —
  * the request never left (`requestDispatched: false`, so the extension may fall through to
  * the next provider) or the API answered but not OK (`requestDispatched: true`, the body
- * quoted). Four copies of this block existed; the wording and the two flags are the
- * contract the extension's fallback reads, so they live once.
+ * quoted).
+ *
+ * Four copies of this block existed; the wording and the two flags are the contract the
+ * extension's fallback reads, so they live once.
  */
 export interface ProviderPost {
   readonly url: string
@@ -50,11 +52,12 @@ export async function dispatchProviderPost(
 }
 
 /**
- * The credential, or the refusal — the other half of the same rule (#266). Three providers
- * held a verbatim copy of this block, so the fallback wording and `requestDispatched: false`
- * were duplicated per provider; a fourth that forgot the flag would turn a fall-through into
- * a hard failure. `deepseek` and `openai`'s key-specific refusals stay where they are: those
- * name the missing variable, which is the point of them.
+ * The credential, or the refusal — the other half of the same rule (#266).
+ *
+ * Three providers held a verbatim copy of this block, so the fallback wording and
+ * `requestDispatched: false` were duplicated per provider; a fourth that forgot the flag would
+ * turn a fall-through into a hard failure. `deepseek` and `openai`'s key-specific refusals stay
+ * where they are: those name the missing variable, which is the point of them.
  */
 export async function resolveProviderCredential(
   providerId: WebSearchProviderId,

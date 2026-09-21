@@ -5,8 +5,10 @@ import { WebSearchConfig } from './web-search.ts'
 
 /**
  * zen-harness's ONE committed config file (#59): `zen.config.json` at the repository
- * root. Daniel's scope, 2026-09-04: "just a config file for zen-harness only, separate
- * from pi" — nothing here rides pi's settings or agent-dir surfaces.
+ * root.
+ *
+ * Daniel's scope, 2026-09-04: "just a config file for zen-harness only, separate from pi" —
+ * nothing here rides pi's settings or agent-dir surfaces.
  *
  * ⚠ THE CONFIG BELONGS TO THE ZEN-HARNESS INSTALL, NOT THE SESSION. It is located from
  * the harness's own file tree (`findRepoRoot` on a module inside this repo), NEVER from
@@ -30,10 +32,11 @@ export const ZEN_CONFIG_FILENAME = 'zen.config.json'
 export const ZEN_CONFIG_EXAMPLE = `{ "webFetch": { "allowedHosts": ["docs.example.com"] } }`
 
 /**
- * The whole config file. One section per consumer; every section's schema lives with its
- * owner. ⚠ New sections are added `Type.Optional`, load-bearing (#63): a required section
- * would make every already-committed config unreadable, and unreadable fails CLOSED for
- * every consumer at once.
+ * The whole config file.
+ *
+ * One section per consumer; every section's schema lives with its owner. ⚠ New sections are
+ * added `Type.Optional`, load-bearing (#63): a required section would make every
+ * already-committed config unreadable, and unreadable fails CLOSED for every consumer at once.
  */
 export const ZenConfig = Type.Object(
   {
@@ -49,8 +52,10 @@ const zenConfigValidator = Compile(ZenConfig)
 export type ZenConfigParseResult = { kind: 'ok'; config: ZenConfig } | { kind: 'unreadable'; reason: string }
 
 /**
- * Parse the config file's text. Any failure comes back as `unreadable`, and the caller
- * must fail CLOSED on it — "could not read the policy" must never render as "no policy".
+ * Parse the config file's text.
+ *
+ * Any failure comes back as `unreadable`, and the caller must fail CLOSED on it — "could not
+ * read the policy" must never render as "no policy".
  */
 export function parseZenConfig(fileText: string): ZenConfigParseResult {
   let parsed: unknown

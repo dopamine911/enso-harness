@@ -8,11 +8,12 @@ import { asRecord, asString } from './wire-json.ts'
 
 /**
  * The Anthropic Messages WIRE — one streaming `/messages` call with the native
- * `web_search` server tool, parsed into the outcome union. ⚠ Shared by TWO providers:
- * `anthropic` (current-model routing, pi-resolved auth) and `deepseek` (the dedicated
- * backend — DeepSeek's search endpoint speaks this exact wire at its Anthropic-compatible
- * base, #63). Callers own endpoint, headers, model id and budgets; this module owns the
- * request body, the stream parse, and the searched/ungrounded verdict.
+ * `web_search` server tool, parsed into the outcome union.
+ *
+ * ⚠ Shared by TWO providers: `anthropic` (current-model routing, pi-resolved auth) and
+ * `deepseek` (the dedicated backend — DeepSeek's search endpoint speaks this exact wire at its
+ * Anthropic-compatible base, #63). Callers own endpoint, headers, model id and budgets; this
+ * module owns the request body, the stream parse, and the searched/ungrounded verdict.
  *
  * Adapted from pi-web-search 1.4.0 (github.com/ttttmr/pi-web-search), © ttttmr, MIT
  * (declared in its package.json; the repo ships no LICENSE file).
@@ -25,9 +26,11 @@ import { asRecord, asString } from './wire-json.ts'
  */
 
 /**
- * The server-tool type both wires accept. 2026-09-04: DeepSeek's Anthropic-compatible
- * API documents exactly this dated identifier (dsh `web-search-deepseek` sends it), so a
- * NEWER Anthropic tool date must not be adopted here without re-verifying DeepSeek.
+ * The server-tool type both wires accept.
+ *
+ * 2026-09-04: DeepSeek's Anthropic-compatible API documents exactly this dated identifier (dsh
+ * `web-search-deepseek` sends it), so a NEWER Anthropic tool date must not be adopted here
+ * without re-verifying DeepSeek.
  */
 export const ANTHROPIC_WEB_SEARCH_TOOL_TYPE = 'web_search_20250305'
 

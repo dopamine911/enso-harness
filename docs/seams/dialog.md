@@ -64,7 +64,9 @@ A question while it waits — what the snapshot lists, keyed by the id the answe
 /**
  * One question pi is blocked on, as the follow's snapshot lists it (#114) — so a follow
  * opened while pi waits renders the card at once, instead of a busy thread with nothing to
- * answer. `id` is the request id the answer is keyed by.
+ * answer.
+ *
+ * `id` is the request id the answer is keyed by.
  */
 export const ZenOpenDialog = Type.Object({ id: Type.String({ minLength: 1 }), dialog: ZenDialogSpec })
 ```
@@ -138,10 +140,11 @@ How the wait ended, and where the question was raised — both tagged at the sou
 <!-- source: packages/core/src/observation.ts#ZenDialogOutcome -->
 ```ts
 /**
- * How a blocking question stopped waiting (#114). A closed union: `answered` is a human's
- * value, the other three are pi's cancel value delivered for a reason — the browser's
- * cancel or the session's teardown (`cancelled`), the extension's own `timeout`, or the
- * caller's abort signal (`aborted`).
+ * How a blocking question stopped waiting (#114).
+ *
+ * A closed union: `answered` is a human's value, the other three are pi's cancel value
+ * delivered for a reason — the browser's cancel or the session's teardown (`cancelled`), the
+ * extension's own `timeout`, or the caller's abort signal (`aborted`).
  */
 export const ZenDialogOutcome = Type.Union([
   Type.Literal('answered'),
@@ -207,7 +210,7 @@ outcome (line 279) and resolves the extension with its value — `undefined` for
 `editor`, `false` for `confirm`, on every non-answer outcome (lines 259–260). That is why the settle
 observation exists at all: the runtime has no event for a question ending (lines 262–264).
 `agent-host.ts` binds one context per session (line 401) and delegates the runtime contract's
-`answerDialog` and `openDialogs` to it (lines 501–506); `cancelAllDialogs` cancels every pending
+`answerDialog` and `openDialogs` to it (lines 507–512); `cancelAllDialogs` cancels every pending
 question at session teardown (line 468, called from `agent-host.ts:548`), so teardown is a settle
 path too.
 

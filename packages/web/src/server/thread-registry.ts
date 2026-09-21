@@ -29,10 +29,12 @@ import { recordObservation } from './observation-log.ts'
 
 /**
  * One frame of a thread's feed (SPIKE #109 — the `follow` half of deepseek-harness's
- * prompt/follow split). An `observation` is a pi event through the mapper with the feed's
- * own monotonic `seq`; a `status` is the thread's lifecycle as this registry sees it —
- * built, taken by a run, released, disposed. The feed exists whether or not a run does:
- * that independence is the whole experiment.
+ * prompt/follow split).
+ *
+ * An `observation` is a pi event through the mapper with the feed's own monotonic `seq`; a
+ * `status` is the thread's lifecycle as this registry sees it — built, taken by a run,
+ * released, disposed. The feed exists whether or not a run does: that independence is the whole
+ * experiment.
  */
 export type ThreadFeedFrame =
   | { readonly kind: 'observation'; readonly seq: number; readonly observation: ZenObservation }

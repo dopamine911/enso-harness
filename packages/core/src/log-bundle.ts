@@ -19,8 +19,9 @@ import { describeTranscriptEntry } from './transcript.ts'
 
 /**
  * What the bundle says about the machine and the run — the header a triage reads first.
- * The log levels are NOT here: the first record of every process says which levels it ran
- * at (`log-process.ts`), and that record is in the records section — one home per fact.
+ *
+ * The log levels are NOT here: the first record of every process says which levels it ran at
+ * (`log-process.ts`), and that record is in the records section — one home per fact.
  */
 export interface ZenBundleAbout {
   /** When the bundle was made, ISO UTC. */

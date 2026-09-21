@@ -17,9 +17,11 @@ import { type Static, Type } from 'typebox'
 export const WEB_FETCH_TOOL_NAME = 'web_fetch'
 
 /**
- * web_fetch's section of `zen.config.json`. `allowedHosts` are exact hostnames
- * (case-insensitive, no wildcards, no ports) — each entry is one reviewable grant.
- * Strict on unknown keys for the same reason the whole config is — see `config.ts`.
+ * web_fetch's section of `zen.config.json`.
+ *
+ * `allowedHosts` are exact hostnames (case-insensitive, no wildcards, no ports) — each entry is
+ * one reviewable grant. Strict on unknown keys for the same reason the whole config is — see
+ * `config.ts`.
  */
 export const WebFetchConfig = Type.Object(
   {
@@ -36,9 +38,10 @@ export const WebFetchToolParameters = Type.Object({
 export type WebFetchToolParameters = Static<typeof WebFetchToolParameters>
 
 /**
- * URL length cap. Follows deepseek-harness's `web-fetch-http` policy (MIT): a URL past
- * 2048 characters is either malformed or smuggling a payload, and refusing it is cheaper
- * than reasoning about it.
+ * URL length cap.
+ *
+ * Follows deepseek-harness's `web-fetch-http` policy (MIT): a URL past 2048 characters is
+ * either malformed or smuggling a payload, and refusing it is cheaper than reasoning about it.
  */
 export const WEB_FETCH_MAX_URL_LENGTH = 2048
 

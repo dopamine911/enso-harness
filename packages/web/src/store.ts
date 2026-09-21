@@ -3,9 +3,11 @@ import type { ThreadStores } from './thread-stores.ts'
 
 /**
  * The smallest external store React can subscribe to: one value, replaced whole, and a
- * listener set. Every per-thread store (mode, stats, notifications, …) is one of these
- * with domain methods on top — see `thread-stores.ts` for why they are instances rather
- * than module state (#90 PR 3: a page holds several threads, and each needs its own).
+ * listener set.
+ *
+ * Every per-thread store (mode, stats, notifications, …) is one of these with domain methods on
+ * top — see `thread-stores.ts` for why they are instances rather than module state (#90 PR 3: a
+ * page holds several threads, and each needs its own).
  *
  * A leaf module on purpose: the domain modules import `useThreadStores` from here, and
  * `thread-stores.ts` imports the domain factories, so the type import above is the only

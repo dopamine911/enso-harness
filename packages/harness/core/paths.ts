@@ -32,9 +32,10 @@ const WINDOWS_PLATFORM = 'win32'
 
 /**
  * Convert a Git Bash / MSYS / Cygwin / WSL drive path (`/c/x`, `/mnt/c/x`, `/cygdrive/c/x`)
- * to the native Windows form pi would resolve. Only reached on win32 — kept so the
- * agreement with pi (see {@link normalizeLikePi}) holds on every platform, not just the
- * ones this harness is run on today.
+ * to the native Windows form pi would resolve.
+ *
+ * Only reached on win32 — kept so the agreement with pi (see {@link normalizeLikePi}) holds on
+ * every platform, not just the ones this harness is run on today.
  *
  * Exported for the tests ONLY: the function is pure, so its agreement with pi's exported
  * `normalizeWindowsShellPath` is pinned on Linux by a corpus of its own — the CALL above
@@ -180,10 +181,11 @@ const PROC_ENVIRON_PATH = /^\/proc\/[^/]+\/environ$/
 
 /**
  * True when the TEXT of a path-shaped string carries credential material, by directory
- * fragment or by basename. No filesystem access and no resolution: this is the question to
- * ask about a shell word whose value is not knowable from the text (`"$HOME/.zen/auth.json"`
- * — see `shell-secret-paths.ts`), where {@link looksLikeSecret}'s realpath leg has nothing
- * to resolve.
+ * fragment or by basename.
+ *
+ * No filesystem access and no resolution: this is the question to ask about a shell word whose
+ * value is not knowable from the text (`"$HOME/.zen/auth.json"` — see `shell-secret-paths.ts`),
+ * where {@link looksLikeSecret}'s realpath leg has nothing to resolve.
  */
 export function textLooksLikeSecretPath(text: string, fragments: readonly string[]): boolean {
   if (containsPathFragment(text, fragments)) return true

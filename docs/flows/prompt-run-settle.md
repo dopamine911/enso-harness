@@ -66,10 +66,12 @@ sequenceDiagram
 <!-- source: packages/core/src/follow.ts#ZenPromptReceipt -->
 ```ts
 /**
- * What `POST /api/threads/:id/prompt` answers with: ADMISSION, not a result. A run is not
- * one prompt's reply — interrupting prompts, enqueued ones and retries can all land inside it — so the
- * receipt names the message and the acquisition it took or queued behind, and the follow
- * carries everything after (deepseek-harness: `followup()` returns void).
+ * What `POST /api/threads/:id/prompt` answers with: ADMISSION, not a result.
+ *
+ * A run is not one prompt's reply — interrupting prompts, enqueued ones and retries can all
+ * land inside it — so the receipt names the message and the acquisition it took or queued
+ * behind, and the follow carries everything after (deepseek-harness: `followup()` returns
+ * void).
  */
 export const ZenPromptReceipt = Type.Object(
   {

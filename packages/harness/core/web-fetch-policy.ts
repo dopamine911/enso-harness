@@ -52,10 +52,12 @@ export function parseWebFetchUrl(rawUrl: string): WebFetchUrlDecision {
 }
 
 /**
- * Exact, case-insensitive hostname match. No wildcards and no subdomain inheritance,
- * deliberately: one allowlist entry is one reviewable grant, and `api.example.com` is a
- * different grant from `example.com`. Ports are not part of the match — the protocol gate
- * already confines the scheme, and a host grant is a host grant on any port.
+ * Exact, case-insensitive hostname match.
+ *
+ * No wildcards and no subdomain inheritance, deliberately: one allowlist entry is one
+ * reviewable grant, and `api.example.com` is a different grant from `example.com`. Ports are
+ * not part of the match — the protocol gate already confines the scheme, and a host grant is a
+ * host grant on any port.
  */
 export function isHostAllowed(hostname: string, allowedHosts: readonly string[]): boolean {
   const candidate = hostname.toLowerCase()
@@ -68,8 +70,10 @@ const FETCHABLE_EXACT_MEDIA_TYPES: readonly string[] = ['application/json', 'app
 const FETCHABLE_MEDIA_TYPE_SUFFIXES: readonly string[] = ['+json', '+xml']
 
 /**
- * True for response bodies worth returning as text. An ABSENT Content-Type header is
- * refused — web_fetch is a docs-reader, and "the server did not say" fails closed.
+ * True for response bodies worth returning as text.
+ *
+ * An ABSENT Content-Type header is refused — web_fetch is a docs-reader, and "the server did
+ * not say" fails closed.
  */
 export function isFetchableContentType(contentTypeHeader: string | null): boolean {
   if (contentTypeHeader === null) return false
@@ -140,8 +144,9 @@ function isPublicIpv4(octets: Ipv4Octets): boolean {
 
 /**
  * ADVISORY public-address classifier — see the module header's stated non-coverage.
- * Anything not provably public (unparseable included) classifies as non-public: the
- * check gates a refusal, so unknown must fail closed.
+ *
+ * Anything not provably public (unparseable included) classifies as non-public: the check gates
+ * a refusal, so unknown must fail closed.
  */
 export function isPublicIpAddress(address: string): boolean {
   const trimmed = address.trim().toLowerCase()

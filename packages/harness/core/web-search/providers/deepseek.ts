@@ -4,10 +4,11 @@ import { WebSearchProviderError } from '../vocabulary.ts'
 
 /**
  * The `deepseek` provider (#63): the DEDICATED search backend, dsh's shape
- * (`dsh-web-search-deepseek`, MIT — the spec this follows). One full Messages call
- * against DeepSeek's Anthropic-compatible endpoint with the native `web_search` server
- * tool; the shared wire module parses the structured `web_search_tool_result` blocks and
- * never scrapes URLs out of model prose.
+ * (`dsh-web-search-deepseek`, MIT — the spec this follows).
+ *
+ * One full Messages call against DeepSeek's Anthropic-compatible endpoint with the native
+ * `web_search` server tool; the shared wire module parses the structured
+ * `web_search_tool_result` blocks and never scrapes URLs out of model prose.
  *
  * ⚠ NEVER model-routed: pi's catalog registers every DeepSeek model as
  * `openai-completions` at `https://api.deepseek.com` (verified 2026-09-04), and the

@@ -28,11 +28,13 @@ export type WebSearchProviderId = 'anthropic' | 'google' | 'openai' | 'deepseek'
 ```ts
 /**
  * What one provider run produced — the ACCURATE outcome union (#63, Daniel's
- * requirement). ⚠ `searched` vs `ungrounded` is keyed on evidence that a native search
- * actually ran (a `server_tool_use` block on the Anthropic wire; each provider names its
- * own signal), NEVER on source count: a real search can return zero results, and an
- * ungrounded answer citing a hallucinated URL would read as grounded. Upstream's
- * `grounded = sources.length > 0` had exactly that defect.
+ * requirement).
+ *
+ * ⚠ `searched` vs `ungrounded` is keyed on evidence that a native search actually ran (a
+ * `server_tool_use` block on the Anthropic wire; each provider names its own signal), NEVER on
+ * source count: a real search can return zero results, and an ungrounded answer citing a
+ * hallucinated URL would read as grounded. Upstream's `grounded = sources.length > 0` had
+ * exactly that defect.
  */
 export type WebSearchOutcome =
   | {
@@ -55,9 +57,11 @@ export type WebSearchOutcome =
 <!-- source: packages/harness/core/web-search/vocabulary.ts#WebSearchProviderError -->
 ```ts
 /**
- * Thrown by provider runs on failure. `requestDispatched` says whether the HTTP request
- * left the process — an honest "may have billed" bit (whether a failed request billed is
- * the provider's accounting, not knowable here), surfaced when the fallback re-searches.
+ * Thrown by provider runs on failure.
+ *
+ * `requestDispatched` says whether the HTTP request left the process — an honest "may have
+ * billed" bit (whether a failed request billed is the provider's accounting, not knowable
+ * here), surfaced when the fallback re-searches.
  */
 export class WebSearchProviderError extends Error {
   readonly providerId: WebSearchProviderId
@@ -146,9 +150,11 @@ unreadable config refuses all web_fetch calls too.
 <!-- source: packages/core/src/web-fetch.ts#WebFetchConfig -->
 ```ts
 /**
- * web_fetch's section of `zen.config.json`. `allowedHosts` are exact hostnames
- * (case-insensitive, no wildcards, no ports) — each entry is one reviewable grant.
- * Strict on unknown keys for the same reason the whole config is — see `config.ts`.
+ * web_fetch's section of `zen.config.json`.
+ *
+ * `allowedHosts` are exact hostnames (case-insensitive, no wildcards, no ports) — each entry is
+ * one reviewable grant. Strict on unknown keys for the same reason the whole config is — see
+ * `config.ts`.
  */
 export const WebFetchConfig = Type.Object(
   {

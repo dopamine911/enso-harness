@@ -113,10 +113,11 @@ export function zenAgentDir(repoRoot: string): string {
 }
 
 /**
- * The harness's secrets file (#89): `.zen/secrets.env`, NOT `.env` at the root. bun
- * auto-loads `.env*` from the cwd into EVERY bun process — including a `bun -e` the model
- * runs from the repo root — so a root `.env` reaches a tool child no matter what the
- * parent scrubbed (verified with `env -i`).
+ * The harness's secrets file (#89): `.zen/secrets.env`, NOT `.env` at the root.
+ *
+ * bun auto-loads `.env*` from the cwd into EVERY bun process — including a `bun -e` the model
+ * runs from the repo root — so a root `.env` reaches a tool child no matter what the parent
+ * scrubbed (verified with `env -i`).
  *
  * `.zen/` is git-ignored, write-protected (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`) and
  * read-denied on BOTH tool routes by the `/.zen/` fragment in
@@ -142,8 +143,9 @@ export function printHarnessDir(repoRoot: string): string {
 /**
  * Where the harness's log lives (#132): `.zen/logs/zen-YYYY-MM-DD.jsonl`, ONE file per day
  * that every process appends to (dated, never renamed, so a second writer is safe — see
- * `web/server/logging.ts`). Under `.zen/` so bun never autoloads from it and the write gate
- * already knows it (guard.ts).
+ * `web/server/logging.ts`).
+ *
+ * Under `.zen/` so bun never autoloads from it and the write gate already knows it (guard.ts).
  */
 export function zenLogsDir(repoRoot: string): string {
   return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'logs')

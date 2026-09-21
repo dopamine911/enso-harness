@@ -130,7 +130,7 @@ prompt route in `packages/web/src/server/follow.ts` announces it (line 219) when
 a prompt after its receipt went out. Both are grounded in the kinds table's "Produced by" column.
 
 **Minted once.** The registry, `packages/web/src/server/thread-registry.ts`, is the only place a `seq`
-is assigned: `publishObservation` (line 322) increments the feed's counter, records the observation
+is assigned: `publishObservation` (line 324) increments the feed's counter, records the observation
 (`observation-log.ts` — `info` for the spine kinds, `debug` for every observation, `trace` with the
 payload), then publishes. The feed subscribes the runtime once per live thread and routes every event
 through the mapper (lines 317–319); the prompt route's `announce` (line 496) enters the same counter.

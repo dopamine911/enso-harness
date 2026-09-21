@@ -76,8 +76,9 @@ function resourceDeclarations(manifest: unknown): unknown[] {
 
 /**
  * Every resource path the manifest declares under `pi.*`, flattened, in declaration order.
- * A non-string entry is not a resource path and is dropped rather than coerced — a
- * hand-edited manifest should not turn into a check against `"42"`.
+ *
+ * A non-string entry is not a resource path and is dropped rather than coerced — a hand-edited
+ * manifest should not turn into a check against `"42"`.
  */
 export function declaredResources(manifest: unknown): string[] {
   const resources: string[] = []

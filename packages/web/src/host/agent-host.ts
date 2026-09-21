@@ -136,9 +136,10 @@ export interface AgentHostOptions {
 
 /**
  * What pi's session for one hosted thread actually contains, read straight off the
- * `SessionManager` (#86). Everything a run shows the browser is derived from the event
- * stream; this is the source those views derive from, for a human or an agent to
- * cross-check against.
+ * `SessionManager` (#86).
+ *
+ * Everything a run shows the browser is derived from the event stream; this is the source those
+ * views derive from, for a human or an agent to cross-check against.
  */
 export interface HostedThreadInspection {
   readonly sessionId: string
@@ -195,8 +196,10 @@ export interface StoredThread {
 /**
  * Stop: the runtime FIRST, so its loop holds the abort signal when a blocked `tool_call`
  * handler returns — then every pending question settles as `aborted`, and the handler DOES
- * return. Before this, Stop during a permission question waited on the card: the loop awaited
- * the handler, the handler awaited the human. If the user says stop, it's stop (Daniel,
+ * return.
+ *
+ * Before this, Stop during a permission question waited on the card: the loop awaited the
+ * handler, the handler awaited the human. If the user says stop, it's stop (Daniel,
  * 2026-09-16); the card drops, the run ends.
  *
  * A stop must stop (thread-registry.test.ts's rule, one layer down): the dialogs settle even
@@ -240,14 +243,17 @@ export interface AgentHost {
 }
 
 /**
- * The agent runtime this build is bound to, by version. The ONE place outside this host that
- * needs pi's version is the log bundle's `about` (#132), and it takes this string rather than
- * the import — the vendor gate (#145) keeps the import inside `host/`.
+ * The agent runtime this build is bound to, by version.
+ *
+ * The ONE place outside this host that needs pi's version is the log bundle's `about` (#132),
+ * and it takes this string rather than the import — the vendor gate (#145) keeps the import
+ * inside `host/`.
  */
 export const AGENT_RUNTIME_VERSION: string = PI_VERSION
 
 /**
  * Pin `childProxy: false` in the agent dir's multi-account config — see the module header.
+ *
  * Creates the file if absent; otherwise reads, sets the one key, writes. Any other key the
  * operator set is preserved verbatim.
  */

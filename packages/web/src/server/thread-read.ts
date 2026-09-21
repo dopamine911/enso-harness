@@ -5,18 +5,19 @@ import type { ThreadRegistry } from './thread-registry.ts'
 import { interruptedTail, transcriptToMessages } from './transcript-to-messages.ts'
 
 /**
- * THE LIVE-OR-COLD READ, ONCE (#214). What the server holds for one thread, as a pane
- * mounts it: the branch as messages, whether it is live, and the mode it opens in.
- * `GET …/follow`'s snapshot and `GET …/history`'s payload are the same question asked by
- * two routes; they were implemented twice and had drifted apart in two visible ways. The
- * follow re-peeked the registry after the awaited cold read and the history route did not,
- * so a thread built DURING the read was served the FILE's messages and the FILE's
- * permission mode by `/history`, while the follow opened a tick later reported the same
- * thread live with pi's own branch and the session's own mode. That is the shape invariant
- * 5 refuses — a surface presenting one state while the server holds another — with no
- * MISMATCH to name it, because each side is internally consistent. It is on the boot path:
- * boot adopts a named thread from `/history` before showing a pane, so another tab or
- * `zen-thread` prompting the same id during that fetch is enough.
+ * THE LIVE-OR-COLD READ, ONCE (#214).
+ *
+ * What the server holds for one thread, as a pane mounts it: the branch as messages, whether it
+ * is live, and the mode it opens in. `GET …/follow`'s snapshot and `GET …/history`'s payload
+ * are the same question asked by two routes; they were implemented twice and had drifted apart
+ * in two visible ways. The follow re-peeked the registry after the awaited cold read and the
+ * history route did not, so a thread built DURING the read was served the FILE's messages and
+ * the FILE's permission mode by `/history`, while the follow opened a tick later reported the
+ * same thread live with pi's own branch and the session's own mode. That is the shape invariant
+ * 5 refuses — a surface presenting one state while the server holds another — with no MISMATCH
+ * to name it, because each side is internally consistent. It is on the boot path: boot adopts a
+ * named thread from `/history` before showing a pane, so another tab or `zen-thread` prompting
+ * the same id during that fetch is enough.
  *
  * ⚠ THE RE-PEEK IS THE POINT, and it is why the cold read is awaited BEFORE anything is
  * decided: a thread that went live during the read is then read from pi's memory, which is

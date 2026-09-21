@@ -118,10 +118,11 @@ export const ZenExtensionUiRequest = Type.Object({
 })
 
 /**
- * How a blocking question stopped waiting (#114). A closed union: `answered` is a human's
- * value, the other three are pi's cancel value delivered for a reason — the browser's
- * cancel or the session's teardown (`cancelled`), the extension's own `timeout`, or the
- * caller's abort signal (`aborted`).
+ * How a blocking question stopped waiting (#114).
+ *
+ * A closed union: `answered` is a human's value, the other three are pi's cancel value
+ * delivered for a reason — the browser's cancel or the session's teardown (`cancelled`), the
+ * extension's own `timeout`, or the caller's abort signal (`aborted`).
  */
 export const ZenDialogOutcome = Type.Union([
   Type.Literal('answered'),
@@ -132,10 +133,12 @@ export const ZenDialogOutcome = Type.Union([
 export type ZenDialogOutcome = Static<typeof ZenDialogOutcome>
 
 /**
- * A blocking question is no longer waiting (#114). The HOST synthesises this at the one
- * point every settle path crosses — pi has no event for it, because in rpc mode the client
- * that answered already knows. Here a second follower does not: without this, a question
- * answered in one tab lingered in every other until that tab tried and got `gone`.
+ * A blocking question is no longer waiting (#114).
+ *
+ * The HOST synthesises this at the one point every settle path crosses — pi has no event for
+ * it, because in rpc mode the client that answered already knows. Here a second follower does
+ * not: without this, a question answered in one tab lingered in every other until that tab
+ * tried and got `gone`.
  */
 export const ZenDialogSettled = Type.Object({
   kind: Type.Literal('dialog-settled'),
@@ -170,9 +173,10 @@ export type ZenCustomEntry = Static<typeof ZenCustomEntry>
 
 /**
  * The permission mode changed, and what a run may switch to now (#162 workstream 4, L3).
+ *
  * The HOST emits this when its mode extension persists a change — the one observation the
- * browser reads the mode from mid-run, so no surface knows which extension's entry it was
- * or what that entry looks like. The same `{ mode, available }` a run starts with
+ * browser reads the mode from mid-run, so no surface knows which extension's entry it was or
+ * what that entry looks like. The same `{ mode, available }` a run starts with
  * (`ZenPermissionModeState`): one shape for the receipt and for the change.
  */
 export const ZenPermissionMode = Type.Object({
@@ -183,9 +187,11 @@ export type ZenPermissionMode = Static<typeof ZenPermissionMode>
 
 /**
  * A mode change the route told the runtime about was REJECTED after the 204 went out (L3
- * step C): the vendor's command refused, or failed before acceptance. The SERVER announces
- * it, as it announces `prompt-rejected` — the feed is the browser's only way to hear that a
- * click did nothing, and every follower hears it alike. The mode is unchanged.
+ * step C): the vendor's command refused, or failed before acceptance.
+ *
+ * The SERVER announces it, as it announces `prompt-rejected` — the feed is the browser's only
+ * way to hear that a click did nothing, and every follower hears it alike. The mode is
+ * unchanged.
  */
 export const ZenPermissionModeRejected = Type.Object({
   kind: Type.Literal('permission-mode-rejected'),
@@ -195,10 +201,11 @@ export const ZenPermissionModeRejected = Type.Object({
 export type ZenPermissionModeRejected = Static<typeof ZenPermissionModeRejected>
 
 /**
- * A message began — pi's `message_start` (#112). The boundary AG-UI's `TEXT_MESSAGE_START`
- * supplied and the observation vocabulary lacked. `text` rides only on a USER message: a
- * second follower of the same thread sees the prompt another tab sent (dsh's
- * `user/message`); assistant text arrives as deltas.
+ * A message began — pi's `message_start` (#112).
+ *
+ * The boundary AG-UI's `TEXT_MESSAGE_START` supplied and the observation vocabulary lacked.
+ * `text` rides only on a USER message: a second follower of the same thread sees the prompt
+ * another tab sent (dsh's `user/message`); assistant text arrives as deltas.
  */
 export const ZenMessageStart = Type.Object({
   kind: Type.Literal('message-start'),
@@ -231,10 +238,12 @@ export const ZenMessageEnd = Type.Object({
 export type ZenMessageEnd = Static<typeof ZenMessageEnd>
 
 /**
- * pi's `turn_start` / `turn_end` (#112). ⚠ pi's "turn" is ONE model request plus the tool
- * results it produced — what deepseek-harness calls a *step*; dsh's *turn* (input claimed
- * through nothing owed) is pi's whole run, `settled`. Carried under pi's name so a reader
- * of pi's docs and a reader of this stream agree; the dsh mapping is this comment.
+ * pi's `turn_start` / `turn_end` (#112).
+ *
+ * ⚠ pi's "turn" is ONE model request plus the tool results it produced — what deepseek-harness
+ * calls a *step*; dsh's *turn* (input claimed through nothing owed) is pi's whole run,
+ * `settled`. Carried under pi's name so a reader of pi's docs and a reader of this stream
+ * agree; the dsh mapping is this comment.
  */
 export const ZenTurnStart = Type.Object({ kind: Type.Literal('turn-start') })
 export type ZenTurnStart = Static<typeof ZenTurnStart>
@@ -247,11 +256,12 @@ export type ZenTurnEnd = Static<typeof ZenTurnEnd>
 
 /**
  * What is waiting behind the run in flight (#75, #112, #216): prompts that will INTERRUPT at
- * the next step boundary, and prompts ENQUEUED until the run settles. The TEXTS, in order, as
- * the runtime holds them: the page shows what is waiting (the queue list above the composer),
- * every follower sees the same list, and a stop hands them back to the composer (#75,
- * clear-and-restore). Empty lists when nothing waits — the frame emitted after a claim or a
- * clear.
+ * the next step boundary, and prompts ENQUEUED until the run settles.
+ *
+ * The TEXTS, in order, as the runtime holds them: the page shows what is waiting (the queue
+ * list above the composer), every follower sees the same list, and a stop hands them back to
+ * the composer (#75, clear-and-restore). Empty lists when nothing waits — the frame emitted
+ * after a claim or a clear.
  *
  * ⚠ ZEN's words, not the runtime's. The fields were `steering`/`followUp` — pi's own, on the
  * SSE wire, with `host/map-events.ts` passing them through rather than mapping them. Every
@@ -269,8 +279,9 @@ export type ZenQueue = Static<typeof ZenQueue>
 /**
  * pi refused a prompt at preflight (#112) — the one observation the SERVER synthesises,
  * because the refusal arrives on the prompt's callback, after `POST …/prompt` has already
- * answered 202: the follow is the only place a client can learn of it. `messageId` is the
- * receipt's, so the client can name which prompt.
+ * answered 202: the follow is the only place a client can learn of it.
+ *
+ * `messageId` is the receipt's, so the client can name which prompt.
  */
 export const ZenPromptRejected = Type.Object({
   kind: Type.Literal('prompt-rejected'),

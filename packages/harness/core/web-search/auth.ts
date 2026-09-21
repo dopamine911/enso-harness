@@ -16,8 +16,9 @@ import type { ResolvedProviderAuth, SearchModel } from './vocabulary.ts'
  */
 
 /**
- * The slice of pi's ModelRegistry this module needs — injectable in tests. The result
- * shape mirrors pi's `ResolvedRequestAuth` (its headers admit `null` values, which
+ * The slice of pi's ModelRegistry this module needs — injectable in tests.
+ *
+ * The result shape mirrors pi's `ResolvedRequestAuth` (its headers admit `null` values, which
  * {@link resolveModelAuth} strips into the clean {@link ResolvedProviderAuth}).
  */
 export interface ModelAuthSource {

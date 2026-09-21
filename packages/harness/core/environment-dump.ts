@@ -172,9 +172,10 @@ function rawScan(command: string, coarse: boolean): EnvironmentDumpMatch | undef
 }
 
 /**
- * Find the first environment dump in a shell command, or undefined when none. `coarse`
- * forces the raw scan (the PowerShell path); a POSIX command the segmenter cannot parse
- * takes it too.
+ * Find the first environment dump in a shell command, or undefined when none.
+ *
+ * `coarse` forces the raw scan (the PowerShell path); a POSIX command the segmenter cannot
+ * parse takes it too.
  */
 export function findEnvironmentDump(
   command: string,

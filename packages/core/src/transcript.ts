@@ -3,9 +3,11 @@ import { ZenToolResultDescriptor } from './tool-result.ts'
 
 /**
  * The transcript (#162 workstream 4, leak L2's persistence side): a thread's branch, root to
- * leaf, as entries of OURS. The host reads the runtime's session log and produces these
- * below the `AgentHost` seam; nothing above it — the history route, the cold snapshot, the
- * `?debug` drawer, `zen-thread.ts`, the mode walk — sees the runtime's stored shapes.
+ * leaf, as entries of OURS.
+ *
+ * The host reads the runtime's session log and produces these below the `AgentHost` seam;
+ * nothing above it — the history route, the cold snapshot, the `?debug` drawer,
+ * `zen-thread.ts`, the mode walk — sees the runtime's stored shapes.
  *
  * The same discipline as `ZenObservation`: decoded, not carried. A message's content is
  * already parts of ours (text, thinking, an image, a tool call), a tool result is already a

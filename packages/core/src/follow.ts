@@ -66,9 +66,10 @@ export const ZenFollowFrame = Type.Union([ZenFollowSnapshot, ZenFollowObservatio
 export type ZenFollowFrame = Static<typeof ZenFollowFrame>
 
 /**
- * The image types the Anthropic wire accepts (#68). pi documents no limit of its own and
- * passes the bytes through; anything outside this set would be refused by the provider
- * after the upload, with a worse message than ours.
+ * The image types the Anthropic wire accepts (#68).
+ *
+ * pi documents no limit of its own and passes the bytes through; anything outside this set
+ * would be refused by the provider after the upload, with a worse message than ours.
  */
 export const ZenImageMimeType = Type.Union([
   Type.Literal('image/png'),
@@ -89,8 +90,9 @@ export const ZEN_IMAGE_MAX_BYTES = 5 * 1024 * 1024
 export const ZEN_PROMPT_MAX_IMAGES = 20
 /**
  * The most a prompt body may be on the wire: every image at its cap in base64 (4/3 of the
- * bytes, rounded up to a 4-byte group), plus room for the text. The route stops READING at
- * this size rather than buffering first and refusing after.
+ * bytes, rounded up to a 4-byte group), plus room for the text.
+ *
+ * The route stops READING at this size rather than buffering first and refusing after.
  */
 export const ZEN_PROMPT_BODY_MAX_BYTES: number =
   ZEN_PROMPT_MAX_IMAGES * Math.ceil(ZEN_IMAGE_MAX_BYTES / 3) * 4 + 1024 * 1024
@@ -107,6 +109,7 @@ const BASE64 = '^[A-Za-z0-9+/]*={0,2}$'
 
 /**
  * With `BASE64`, strict standard base64: whole 4-character groups, the last padded to four.
+ *
  * Refused as "not base64" rather than decoded leniently into a truncated image.
  */
 export function isWholeBase64(data: string): boolean {
@@ -114,10 +117,12 @@ export function isWholeBase64(data: string): boolean {
 }
 
 /**
- * One image on a prompt (#68): the bytes, base64, and what they are. Not TanStack's
- * `ImagePart` — that union admits a `url` source, and a server-side fetch is egress the
- * guards do not cover (`web_fetch`'s allowlist is the only sanctioned fetch path, #54), so
- * the browser resolves every attachment to bytes before it crosses and a URL cannot arrive.
+ * One image on a prompt (#68): the bytes, base64, and what they are.
+ *
+ * Not TanStack's `ImagePart` — that union admits a `url` source, and a server-side fetch is
+ * egress the guards do not cover (`web_fetch`'s allowlist is the only sanctioned fetch path,
+ * #54), so the browser resolves every attachment to bytes before it crosses and a URL cannot
+ * arrive.
  */
 export const ZenPromptImage = Type.Object(
   {
@@ -150,10 +155,12 @@ export function base64DecodedBytes(data: string): number {
 }
 
 /**
- * What `POST /api/threads/:id/prompt` answers with: ADMISSION, not a result. A run is not
- * one prompt's reply — interrupting prompts, enqueued ones and retries can all land inside it — so the
- * receipt names the message and the acquisition it took or queued behind, and the follow
- * carries everything after (deepseek-harness: `followup()` returns void).
+ * What `POST /api/threads/:id/prompt` answers with: ADMISSION, not a result.
+ *
+ * A run is not one prompt's reply — interrupting prompts, enqueued ones and retries can all
+ * land inside it — so the receipt names the message and the acquisition it took or queued
+ * behind, and the follow carries everything after (deepseek-harness: `followup()` returns
+ * void).
  */
 export const ZenPromptReceipt = Type.Object(
   {
@@ -173,8 +180,10 @@ export type ZenPromptReceipt = Static<typeof ZenPromptReceipt>
  * What `POST /api/threads/:id/abort` answers with when pi was told (#116, #75): the prompts
  * that were WAITING behind the stopped run, in order, the interrupting ones first — cleared from the
  * queue and handed back so the stopping tab can put them in its composer (pi's TUI does the
- * same). Never delivered silently on the next turn, never dropped. Empty when nothing waited.
- * The run's own end still arrives on the follow.
+ * same).
+ *
+ * Never delivered silently on the next turn, never dropped. Empty when nothing waited. The
+ * run's own end still arrives on the follow.
  */
 export const ZenAbortReceipt = Type.Object(
   {

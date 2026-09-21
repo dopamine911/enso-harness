@@ -49,8 +49,10 @@ export function isSecretShapedName(name: string): boolean {
 /**
  * The subset of dotenv this harness needs: `NAME=value` and `export NAME=value` lines,
  * `#` comments, blank lines, single- or double-quoted values (quotes stripped, `\n` in
- * double quotes expanded), unquoted values trimmed. No interpolation, no multi-line
- * values — a secrets file is one key per line, and anything fancier is a smell.
+ * double quotes expanded), unquoted values trimmed.
+ *
+ * No interpolation, no multi-line values — a secrets file is one key per line, and anything
+ * fancier is a smell.
  */
 export function parseDotenv(text: string): Map<string, string> {
   const values = new Map<string, string>()
@@ -92,9 +94,10 @@ export function readSecret(repoRoot: string, name: string): string | undefined {
 const SHORTEST_SCANNABLE_SECRET = 8
 
 /**
- * The secret VALUES this harness knows, for the logger's value pass (#139). Redaction by
- * field name cannot see a token quoted inside a message, a guard's `reason`, or a `trace`
- * payload; this is the set those passes scan for.
+ * The secret VALUES this harness knows, for the logger's value pass (#139).
+ *
+ * Redaction by field name cannot see a token quoted inside a message, a guard's `reason`, or a
+ * `trace` payload; this is the set those passes scan for.
  *
  * Two sources, both ours: `.zen/secrets.env` — everything in it is a secret by definition —
  * and the environment's own secret-shaped names, for a process configured before
@@ -122,12 +125,14 @@ export function knownSecretValues(
 
 /**
  * The same set as `knownSecretValues`, as a THUNK that re-reads `.zen/secrets.env` when the
- * file changes (#207). The reader is per call — `readSecret` re-reads the file every time, so
- * a rotated key is live for the next web-search call and the refusal message says so — while
- * the logger's value alternation was compiled once, at configure. A key added or rotated
- * while a launcher runs was therefore readable and unredactable for the rest of that
- * process's life, which is the one window the design invites. Reproduced before this existed:
- * a `warn` quoting the rotated value landed in the day file verbatim.
+ * file changes (#207).
+ *
+ * The reader is per call — `readSecret` re-reads the file every time, so a rotated key is live
+ * for the next web-search call and the refusal message says so — while the logger's value
+ * alternation was compiled once, at configure. A key added or rotated while a launcher runs was
+ * therefore readable and unredactable for the rest of that process's life, which is the one
+ * window the design invites. Reproduced before this existed: a `warn` quoting the rotated value
+ * landed in the day file verbatim.
  *
  * The identity of the returned array is the CHANGE SIGNAL, not just its contents: unchanged
  * file, same array, and `redactingKnownValues` keeps its compiled regex. Callers may rely on

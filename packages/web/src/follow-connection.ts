@@ -183,19 +183,21 @@ async function* readSseFrames(body: ReadableStream<Uint8Array>, signal: AbortSig
 /**
  * What the server did with a dialog answer (#112, PR #113 review):
  * `answered` taken (204) — the question is spent.
+ *
  * `gone` no such open question (404) — answered from another tab, or expired. Spent too.
  * `refused` the answer did not fit the question (422: an unoffered value). The question is
- * STILL OPEN on the server and must stay on screen.
- * `unreachable` the request never got an answer (network). Nothing changed; still open.
+ * STILL OPEN on the server and must stay on screen. `unreachable` the request never got an
+ * answer (network). Nothing changed; still open.
  */
 export type DialogAnswerOutcome = 'answered' | 'gone' | 'refused' | 'unreachable'
 
 /**
  * What the server did with an abort (#116):
- * `aborted` pi was told (204). The run ends ON THE FOLLOW — `settled`, then `status` — so
- * nothing here closes it; the same frames close it for every follower.
- * `idle` nothing was in flight (409) — the run ended between the click and the request.
- * `gone` the thread is not live on the server (404).
+ * `aborted` pi was told (204).
+ *
+ * The run ends ON THE FOLLOW — `settled`, then `status` — so nothing here closes it; the same
+ * frames close it for every follower. `idle` nothing was in flight (409) — the run ended
+ * between the click and the request. `gone` the thread is not live on the server (404).
  * `unreachable` the request never got an answer (network). The run is still in flight.
  */
 export type AbortOutcome = 'aborted' | 'idle' | 'gone' | 'unreachable'
@@ -210,10 +212,11 @@ export interface AbortResult {
  * What the server did with a prompt sent DURING a run (#75):
  * `queued` pi holds it behind the run in flight (202, `queued: true`) — the follow's
  * `queue` lists it for every follower; pi claims it when the run's turn ends.
+ *
  * `taken` the run had ended by the time it arrived, so it started a run of its own (202,
- * `queued: false`); the follow opens that run as it would another tab's.
- * `refused` pi would not take it (a `prompt-rejected` on the follow, or a non-202).
- * `unreachable` the request never got an answer (network). Nothing changed.
+ * `queued: false`); the follow opens that run as it would another tab's. `refused` pi would not
+ * take it (a `prompt-rejected` on the follow, or a non-202). `unreachable` the request never
+ * got an answer (network). Nothing changed.
  */
 export type PromptOutcome = 'queued' | 'taken' | 'refused' | 'unreachable'
 
