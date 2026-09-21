@@ -686,16 +686,26 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
    * 1. `Host` must name loopback. Node does not validate it, and a DNS name that resolves
    *    to 127.0.0.1 (rebinding) makes the READ side — `/api/threads/:id`, the verbatim
    *    branch, and the log bundle — same-origin readable. A rebound name is not loopback.
-   * 2. `Origin`, when the caller sends one, must be loopback too. Browsers always send it
-   *    on cross-origin POSTs; `curl` and the repo's own CLIs send none, so they are
+   * 2. `Origin`, when the header is PRESENT, must parse and name loopback. Browsers always
+   *    send it on cross-origin POSTs; `curl` and the repo's own CLIs send none, so they are
    *    unaffected. Either dev port satisfies it, and the 5178 proxy forwards both headers
    *    unchanged.
+   *
+   * ⚠ An ABSENT header is trusted; the literal string `null` is NOT (#205, #160 §3). An
+   * opaque-origin browsing context — a sandboxed iframe, a `file://` page, a `data:`
+   * document — sends `Origin: null`, which is a browser saying "cross-origin, and I will
+   * not name who". Trusting it left the whole control plane open to a page the operator
+   * merely visits: measured before this fix, `Origin: null` escalated a thread to
+   * `bypassPermissions` (204), drove a run on an id nobody owned (202) and approved the
+   * permission dialog that run opened (204). `new URL('null')` throws, so the string needs
+   * no arm of its own — it fails the parse below. Only the absent header is trusted, and
+   * only because no browser can produce it.
    */
   function fromTrustedOrigin(request: IncomingMessage): boolean {
     const hostHeader = request.headers.host
     if (hostHeader === undefined || !isLoopbackAuthority(hostHeader)) return false
     const origin = request.headers.origin
-    if (origin === undefined || origin === 'null') return true
+    if (origin === undefined) return true
     let originHost: string
     try {
       originHost = new URL(origin).host
