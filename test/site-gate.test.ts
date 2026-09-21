@@ -33,7 +33,7 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
  * `site` gate step, which builds and crawls; this file is about what goes IN.
  */
 
-const CONFIG = 'site/astro.config.mjs'
+const CONFIG = 'site/astro.config.ts'
 
 /** Every `{ slug: '…' }` the sidebar names, in config order. */
 function sidebarSlugs(): string[] {
@@ -117,4 +117,37 @@ test('a missing API reference refuses by its own name, not as a dead link (#188)
   const refusal = missingApiReference(relative(REPOSITORY_ROOT, empty))
   // It names the step to run, so the reader does not go looking for a broken link.
   expect(refusal).toContain('bun run docs:api')
+})
+
+/**
+ * THE PUBLISHED SITE'S BASE PATH IS DERIVED, AND THE ORDER OF ITS TWO BUILDS IS NOT OPTIONAL.
+ *
+ * A GitHub project site is served from `/<repository>`, which is not this repository's short
+ * name. Built with the wrong `base`, Astro emits perfectly valid HTML whose every internal link
+ * 404s — and nothing fails: the build succeeds, the upload succeeds, the deployment succeeds,
+ * and the site is broken in a way that reads as broken documentation. So the workflow takes the
+ * base from the repository rather than repeating a literal that rots on a rename or a fork.
+ *
+ * ⚠ The local build's default is the OTHER value (`/zen-harness`), which is exactly why this is
+ * checked here: the two are supposed to differ, so neither one being wrong is visible by
+ * comparing them. What is checkable is that the published one is derived at all.
+ */
+const PUBLISH_WORKFLOW = '.github/workflows/docs-site.yml'
+
+test('⚠ the docs-site workflow derives its base and builds the API first (#188)', () => {
+  const workflow = readFileSync(join(REPOSITORY_ROOT, PUBLISH_WORKFLOW), 'utf8')
+  // Manual only: the gate already builds and crawls the site on every PR, so a push trigger
+  // would re-prove it on someone else's minutes.
+  expect(workflow).toContain('workflow_dispatch:')
+  expect(workflow).not.toMatch(/^\s{2}(?:push|pull_request):/m)
+  // Derived from the repository, never a literal — the failure this test exists for.
+  expect(workflow).toContain('ZEN_SITE_BASE: /${{ github.event.repository.name }}')
+  expect(workflow).not.toMatch(/ZEN_SITE_BASE:\s*\/[a-z]/)
+  // `docs:api` writes what `docs:site` serves and crawls; reversed, the crawl refuses by name.
+  const apiAt = workflow.indexOf('bun run docs:api')
+  const siteAt = workflow.indexOf('bun run docs:site')
+  expect(apiAt).toBeGreaterThan(-1)
+  expect(siteAt).toBeGreaterThan(apiAt)
+  // What is uploaded is what was crawled.
+  expect(workflow).toContain('path: site/dist')
 })

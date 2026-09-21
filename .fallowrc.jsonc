@@ -137,11 +137,16 @@
       { "from": "server", "allow": ["core", "host"] },
       { "from": "browser", "allow": ["core"] },
       { "from": "scripts", "allow": ["core"] },
-      // The site is presentation over generated output: it imports Astro and Starlight and
-      // nothing of this repository's. Its CONTENT arrives as files `scripts/docs/site-content.ts`
-      // writes, never as an import, so an empty allow-list is the shape — a site that reached
-      // into `core` would be a renderer with opinions about contracts.
-      { "from": "site", "allow": [] },
+      // The site is presentation over generated output: it renders Astro and Starlight, and its
+      // CONTENT arrives as files `scripts/docs/site-content.ts` writes, never as an import. It
+      // may read `scripts` for ONE thing — the base path the site is served under, which the
+      // projector, the link crawl and Astro must agree on to the character. Three literals would
+      // agree until the day it is published elsewhere and then disagree silently: a wrong base
+      // yields working HTML whose every link 404s, and a crawl carrying the same wrong literal
+      // reports green over it. One import beats a gate comparing two strings.
+      //
+      // What it still may NOT reach is `core`: a renderer with opinions about contracts.
+      { "from": "site", "allow": ["scripts"] },
       {
         "from": "test",
         "allow": ["core", "harness-core", "harness-extensions", "host", "server", "browser", "scripts"]

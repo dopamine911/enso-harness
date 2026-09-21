@@ -138,7 +138,8 @@
         "packages/harness/extensions/logging/index.ts", // the pi entry point's own environment
         "packages/web/src/host/agent-host.ts", // pins PI_CODING_AGENT_DIR, then quarantines
         "packages/web/src/server/dev.ts", // launcher: logs dir + levels
-        "packages/web/src/server/dev-web.ts" // launcher: logs dir + levels
+        "packages/web/src/server/dev-web.ts", // launcher: logs dir + levels
+        "scripts/docs/site-base.ts" // ZEN_SITE_BASE: where the published site is served from
       ],
       "linter": {
         "rules": {

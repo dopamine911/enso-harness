@@ -56,7 +56,7 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
       'Holds that every documented export carries `@group`, that the subdivided group carries `@category`, and that both names are declared in the config’s order lists. Which group a symbol belongs in is a judgement it cannot make.',
   },
   'test/site-gate.test.ts': {
-    roots: ['docs', 'site/astro.config.mjs'],
+    roots: ['docs', 'site/astro.config.ts', '.github/workflows/docs-site.yml'],
     exceptions: [],
     limitation:
       'Holds that every page under `docs/` projects with a title, that every page the sidebar names exists, and that each link class is rewritten for a route. Whether the BUILT site serves them is the `site` gate step, which builds and crawls.',
