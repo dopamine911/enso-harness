@@ -32,9 +32,23 @@ const composerSource = readFileSync(join(REPOSITORY_ROOT, COMPOSER_PATH), 'utf8'
 /** The spec's selector constants, by name — each declared as a single-quoted string. */
 const SELECTOR_CONSTANTS = ['COMPOSER_PLACEHOLDER', 'SEND_BUTTON_NAME', 'STOP_BUTTON_NAME'] as const
 
-/** Every single- or double-quoted one-line string literal in a source file. */
+/**
+ * Comments and string lexemes in one alternation, so a `//` inside a quoted string is not a
+ * comment — the shape `gate-support.ts` uses for the same reason.
+ */
+const COMMENT_OR_STRING = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"/g
+
+/**
+ * Every single- or double-quoted one-line string literal a file DECLARES, comments removed.
+ *
+ * ⚠ Comments first (PR #317 review). This side answers "does the composer render this name",
+ * and a comment string is not markup: with prose in scope, renaming a rendered `aria-label`
+ * while a comment still mentioned the old one kept the gate green — the exact drift the file
+ * claims to catch, one side of it unheld.
+ */
 function quotedLiterals(source: string): string[] {
-  return [...source.matchAll(/'([^'\n]*)'|"([^"\n]*)"/g)].map((match) => match[1] ?? match[2] ?? '')
+  const code = source.replace(COMMENT_OR_STRING, (lexeme) => (lexeme.startsWith('/') ? '' : lexeme))
+  return [...code.matchAll(/'([^'\n]*)'|"([^"\n]*)"/g)].map((match) => match[1] ?? match[2] ?? '')
 }
 
 test('⚠ every e2e selector constant is a name the composer actually renders (#277)', () => {

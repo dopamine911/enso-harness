@@ -351,6 +351,54 @@ test('⚠ an open question is answered ONCE: extra clicks post nothing and no fa
   await pane.unmount()
 })
 
+// ⚠ The other half of the guard (PR #317 review): a REFUSED answer leaves the question
+// standing on the server, so the card has to become answerable again. Without the reset the
+// card is inert with its question still open — the thread parks on a human who can no longer
+// answer, which is a worse failure than the double post the guard was added for. The store
+// layer's own tests cover the 422; this is the one that proves the CONTROLS come back.
+test('a refused answer re-opens the card: the question is still open, so it must stay answerable (#275)', async () => {
+  const pane = await mountPane({ server: { dialogStatus: 422 } })
+  await pane.settle(SNAPSHOT_IDLE, {
+    type: 'observation',
+    seq: 1,
+    observation: {
+      kind: 'extension-ui-request',
+      id: 'd6',
+      method: 'select',
+      blocking: true,
+      origin: 'run',
+      dialog: { method: 'select', title: 'Pick one (d6)', options: ['alpha', 'bravo'] },
+    },
+  })
+  const alpha = await eventually(() => {
+    const found = [...pane.container.querySelectorAll('button')].find((button) => button.textContent === 'alpha')
+    if (found === undefined) throw new Error("expected the select's options as buttons")
+    return found
+  })
+  await flush(async () => {
+    alpha.click()
+    await tick()
+  })
+  // The card stays, and its controls are live again — a second, different answer gets through.
+  const bravo = await eventually(() => {
+    const found = [...pane.container.querySelectorAll('button')].find((button) => button.textContent === 'bravo')
+    if (found === undefined) throw new Error('the refused question lost its card')
+    if (found.disabled) throw new Error('the refused question stayed disabled: it can never be answered')
+    return found
+  })
+  await flush(async () => {
+    bravo.click()
+    await tick()
+  })
+  await eventually(() => {
+    expect(pane.server.dialogs).toEqual([
+      { id: 'd6', value: 'alpha' },
+      { id: 'd6', value: 'bravo' },
+    ])
+  })
+  await pane.unmount()
+})
+
 // #276: the one surface that parks pi on a human used to carry no role, no accessible name and
 // no focus — a screen-reader user could not tell a parked thread from a slow one, and a
 // keyboard user had to tab the whole transcript to find the question. The name and the focus
