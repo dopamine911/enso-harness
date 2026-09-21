@@ -200,16 +200,16 @@ configured (305-312) — in field-name redaction then the value pass (296-302).
 ## Who implements it, who consumes it
 
 **Three configurators, one per process kind**, each writing into the same day's file: the server
-(`packages/web/src/server/dev.ts:28-34`, `process: 'server'`), the web launcher (`dev-web.ts:30-36`,
-`'web'`) and the runtime as a child (`packages/harness/extensions/logging/index.ts:31-38`, `'pi'`).
+(`packages/web/src/server/dev.ts:30-36`, `process: 'server'`), the web launcher (`dev-web.ts:32-38`,
+`'web'`) and the runtime as a child (`packages/harness/extensions/logging/index.ts:40-47`, `'pi'`).
 
-The extension is the interesting one (`logging/index.ts:9-19`): in-process under the web host the
+The extension is the interesting one (`logging/index.ts:11-21`): in-process under the web host the
 server configured before the runtime existed, `isLoggingConfigured()` is true, and it configures
 nothing — the extensions' records land in the server's file through the server's sinks. As a child
 of the terminal launcher nothing has configured, so it does, with no console sink (stderr is the
 terminal's). A second `configure` throws by the substrate's design; that is the whole reason the check
 exists. The same extension writes the one record only an extension can: the provider's request id
-and rate-limit headers, from an explicit four-name list (lines 47-57) so an `authorization` or
+and rate-limit headers, from an explicit four-name list (lines 61-66) so an `authorization` or
 `set-cookie` header is never echoed into a file the manifest says is safe.
 
 **The browser is the fourth layer and has its own configurator** (`packages/web/src/browser-logging.ts:13-36`):
@@ -229,24 +229,24 @@ code: `extension` is our code inside the runtime's process, and under the web ho
 `server`. Orthogonal on purpose — a browser record is `process: "browser"` because the server
 re-emitted it, and `layer: browser` because the page wrote it.
 
-**The redaction manifest** (`log-bundle.ts:46-63`, `redactionManifest`) reads the markers back: a
+**The redaction manifest** (`log-bundle.ts:47-64`, `redactionManifest`) reads the markers back: a
 property valued `ZEN_REDACTED` counts under its field name; a line containing `ZEN_REDACTED_VALUE`
-counts under `values`. Two counts on purpose (lines 49-52): a field redacted is a record shaped
+counts under `values`. Two counts on purpose (lines 50-53): a field redacted is a record shaped
 right; a `values` row is a leak that was caught. No bookkeeping in the writer.
 
 ## What fences it
 
 - **The logging gate** (`test/logging-gate.test.ts`, #132) holds two lines, both ratchets, over
-  `packages/core/src`, `packages/web/src` and `packages/harness` (header lines 11-19):
+  `packages/core/src`, `packages/web/src` and `packages/harness` (header lines 10-21):
   1. *No production `console.*` in a migrated root* — a `console.error` is a record with no level, no
-     thread, no file, and no test that can hear it. The allowlist is empty (line 70).
+     thread, no file, and no test that can hear it. The allowlist is empty (line 60).
   2. *`@logtape/*` is imported only where the schema lives and where a process configures its sink* —
-     `LOGTAPE_ALLOWED` (lines 35-39) is `core/src/log.ts`, `core/src/log-process.ts` and
+     `LOGTAPE_ALLOWED` (lines 36-40) is `core/src/log.ts`, `core/src/log-process.ts` and
      `web/src/browser-logging.ts`, three files, so the record shape is ours to hold and the substrate
-     is ours to swap. Comment lines are skipped (line 61), so a guard's doc may quote `console.log`.
+     is ours to swap. Comment lines are skipped (line 51), so a guard's doc may quote `console.log`.
 - **`log-process.test.ts`** pins that a redacted value never lands (`log.ts:151`), that a payload
   thunk runs only for a record the tier admits (#284), and that a second configure in one process
-  throws (`logging/index.ts:16-17`).
+  throws (`logging/index.ts:18-19`).
 
 ## What crosses it that should not
 

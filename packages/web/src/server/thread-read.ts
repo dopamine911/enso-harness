@@ -70,7 +70,11 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
   return {
     present: nowLive !== undefined || stored !== undefined,
     messages,
-    interrupted: interruptedTail(messages),
+    // The ENTRIES, not the messages this function just mapped (#220): a transcript's last
+    // entry can be a tool result or a custom entry, and asking the mapped messages answers
+    // about the last MESSAGE instead. The merge that brought #220 here left this call reading
+    // the wrong one.
+    interrupted: interruptedTail(transcript),
     live: nowLive !== undefined,
     busy: nowLive?.busy ?? false,
     generation: nowLive?.generation ?? 0,
