@@ -11,13 +11,14 @@
  * Ordering is cheap-first: a fast Biome failure surfaces before the slower
  * typecheck and test gates run.
  *
- * The checks:
- *   1. biome     — lint + format + import-organize (check-only, no writes). This
- *                  also enforces the discipline rules Biome can express, e.g.
- *                  `noTsIgnore` is set to error in biome.jsonc, so a banned
- *                  suppression directive fails the gate rather than merely warning.
- *   2. typecheck — `tsc --noEmit` over the package.
- *   3. test      — `vitest run`.
+ * The checks are GATES below, each with the package.json script it runs. This header does
+ * not restate them: the copy that used to live here had drifted into fiction — it said
+ * `tsc --noEmit` for a step that runs `tsc -b` and EMITS declarations, and `vitest run`
+ * for a step that runs `bun test`, and it listed three of the five.
+ *
+ * What a one-line describe cannot say: biome is check-only, with no writes, and also
+ * enforces the discipline rules Biome can express — `noTsIgnore` is set to error in
+ * biome.jsonc, so a banned suppression directive fails the gate rather than merely warning.
  *
  * ADDING A GATE. This is the extension point a project adopting the blueprint is
  * expected to use: append an entry to GATES and every caller (the pre-commit hook,
@@ -93,8 +94,12 @@ const GATES: readonly Gate[] = [
     script: 'lint',
   },
   {
+    // `tsc -b`, never `--noEmit` (#229): project references need `composite`, which needs
+    // declaration emit, so this step WRITES — each project's own `dist-types/`, gitignored.
+    // It is the only gate that leaves build state behind, which is why two checkouts running
+    // it over one tree fight, and why the operator is told it emits.
     name: 'typecheck',
-    describe: 'tsc --noEmit',
+    describe: 'tsc -b: typecheck + declaration emit into each project dist-types/',
     script: 'typecheck',
   },
   {
