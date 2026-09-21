@@ -401,12 +401,12 @@ test.skipIf(!isGitAvailable)(
   '⚠ the incident fixture cannot reach the repository that runs it (GIT_DIR, GIT_INDEX_FILE)',
   () => {
     const victim = mkdtempSync(join(tmpdir(), 'zen-guard-victim-'))
-    const hermetic: Record<string, string> = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' }
+    // The fixture's own baseline, not a second copy of it (PR #296 review).
     const victimGit = (...args: string[]): string => {
       // Absolute, and the child below gets a PATH: a bare name under an env with no PATH
       // resolves only through `execvp`'s default path, so it works until git is installed
       // somewhere else (`~/.local/bin`, a nix profile, Homebrew).
-      const result = Bun.spawnSync([GIT_BINARY, ...args], { cwd: victim, env: hermetic })
+      const result = Bun.spawnSync([GIT_BINARY, ...args], { cwd: victim, env: FIXTURE_GIT_ENV })
       return result.stdout.toString().trim()
     }
     victimGit('init', '-q')
@@ -423,7 +423,7 @@ test.skipIf(!isGitAvailable)(
     const child = Bun.spawnSync([process.execPath, 'test', import.meta.path, '-t', 'the incident shape'], {
       cwd: dirname(import.meta.path),
       env: {
-        ...hermetic,
+        ...FIXTURE_GIT_ENV,
         PATH: dirname(Bun.which('git') ?? '/usr/bin/git'),
         GIT_DIR: join(victim, '.git'),
         GIT_INDEX_FILE: join(victim, '.git', 'index'),
@@ -431,7 +431,10 @@ test.skipIf(!isGitAvailable)(
       },
     })
     // The fixture still passes under the hazard — the point is that it passes HARMLESSLY.
-    expect(child.stderr.toString()).toContain('1 pass')
+    // ⚠ Line-anchored (PR #296 review): `1 pass` is a substring of `21 pass`, and this is the
+    // control that exists to catch a pass for the wrong reason — a second test matching the
+    // `-t` filter would otherwise widen the count under an assertion that never noticed.
+    expect(child.stderr.toString()).toMatch(/(?:^|\n)\s*1 pass\b/)
     // The destructive leg first: the victim's unstaged work survived `checkout --`.
     expect(readFileSync(tracked, 'utf8')).toBe('victim-unstaged\n')
     // Then the noisy ones: no fixture author written over the victim's, and nothing staged.
