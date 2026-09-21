@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { filesUnder } from '../source-tree.ts'
+import { detectedExceptionConstants, numericConstant, stringArray, stringConstant } from './gate-source.ts'
 import { assertExactKeys, runGenerator } from './generator-support.ts'
 
 /**
@@ -9,18 +10,17 @@ import { assertExactKeys, runGenerator } from './generator-support.ts'
  * numeric and count ratchets they carry, and the deliberately reusable test doubles.
  * `test/docs-gate.test.ts` keeps the checked-in page equal to this output.
  *
- * This is intentionally a source reader, not a TypeScript/JSONC parser. It understands the
- * repository's current shapes: top-level string arrays (optionally wrapped in `new Set`),
- * numeric exported constants, Biome's `noExcessiveCognitiveComplexity` objects, and exact
- * test-helper exports. A shape it cannot classify throws instead of disappearing.
+ * The constants the page publishes are read back out of the gates' source by
+ * `./gate-source.ts`, which owns every shape this understands and every refusal it makes.
  *
  * Blind spots, named (the wrong-and-self-consistent class this must not have):
  * - a gate header whose backticks do not pair is REFUSED, not split into sentences;
- * - string lexemes are masked before comment stripping, so a `//` inside `'https://…'` is not
- *   a comment; a string that spans lines is outside the mask and would mis-strip — no gate
- *   allowlist has one;
  * - a test double is a consumer only through a static relative import naming the exact symbol;
- *   a re-export or a namespace import does not count and the double shows fewer consumers.
+ *   a re-export or a namespace import does not count and the double shows fewer consumers;
+ * - an allowlist-shaped constant with no array declaration under its name (`const MAX_ALLOWED
+ *   = 5`) is SKIPPED by `gate-source.ts`; one whose array is found and cannot be read flat is
+ *   REFUSED (#262). The two used to be one swallowed exception, which made this page's
+ *   completeness claim silently untrue at exactly the constants hardest to parse.
  */
 
 const ROOT = findRepoRoot(import.meta.url)
@@ -145,7 +145,7 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
       reason: 'Lint suppressions have no per-file or per-line allowance.',
     },
     limitation:
-      'Matches line-comment Biome suppressions in known source extensions; vendored code is outside the scan.',
+      'Matches the linter, dead-code and type-checker suppression pragmas by family prefix, anywhere in a line and in any comment form, across known source extensions; vendored code is outside the scan, and a suppression written in a file extension the walker does not read is not seen.',
   },
   'test/presentation-gate.test.ts': {
     rootStrings: ['PORTED_DIRECTORY'],
@@ -326,89 +326,6 @@ function firstHeaderSentence(source: string, file: string): string {
   throw new Error(`${file}: no non-warning sentence in header`)
 }
 
-/** Comments and string lexemes in one alternation, so a `//` inside a string is never a comment. */
-const COMMENT_OR_STRING = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g
-
-function withoutComments(source: string): string {
-  return source.replace(COMMENT_OR_STRING, (lexeme) => (lexeme.startsWith('/') ? '' : lexeme))
-}
-
-/**
- * From just past an opening `[` to its MATCHING `]`: depth counted, string lexemes skipped.
- *
- * ⚠ Not a non-greedy `[…]` capture (PR #302 review). That ended the array at the first `]`
- * it saw, wherever it came from, and this generator published a SHORT count — measured on
- * #215's widened vendor gate: `VENDOR_NAMED_ALLOWED` has 13 entries and the page said 9,
- * because one reason comment named `unknown` followed by an empty index pair. Stripping
- * comments first fixed that instance and left the SHAPE: a `]` inside a quoted entry — a
- * path, a pattern — truncates the same way, and no allowlist carries one today, which is
- * exactly how long a latent undercount stays invisible. A ratchet row that silently
- * undercounts is worse than one that throws, so the reader counts brackets.
- */
-function arrayBody(source: string, start: number): string | undefined {
-  let depth = 1
-  let quote = ''
-  for (let index = start; index < source.length; index += 1) {
-    const character = source[index] ?? ''
-    if (quote !== '') {
-      if (character === '\\') index += 1
-      else if (character === quote) quote = ''
-      continue
-    }
-    if (character === "'" || character === '"' || character === '`') quote = character
-    else if (character === '[') depth += 1
-    else if (character === ']') {
-      depth -= 1
-      if (depth === 0) return source.slice(start, index)
-    }
-  }
-  return undefined
-}
-
-function stringArray(source: string, name: string, file: string): string[] {
-  // Comments come off BEFORE the array is located, and `withoutComments` is lexeme-aware, so
-  // a `//` inside a quoted entry stays an entry rather than starting a comment.
-  const clean = withoutComments(source)
-  const opening = new RegExp(`\\bconst\\s+${name}\\b(?:\\s*:[^=]+)?\\s*=\\s*(?:new\\s+Set\\s*\\()?\\s*\\[`).exec(clean)
-  if (opening === null) throw new Error(`${file}: cannot parse string array ${name}`)
-  const body = arrayBody(clean, opening.index + opening[0].length)
-  if (body === undefined) throw new Error(`${file}: ${name} has no closing bracket`)
-  const values = [...body.matchAll(/(['"])(.*?)\1/g)].map((match) => match[2] ?? '')
-  const residue = body.replace(/(['"])(.*?)\1/g, '').replace(/[\s,]/g, '')
-  // An EMPTY allowlist is a state the gates aim for (the vendor gate's import list since L6), not a parse failure.
-  if (residue.length > 0) throw new Error(`${file}: ${name} is not a flat string array`)
-  return values
-}
-
-function stringConstant(source: string, name: string, file: string): string {
-  const value = new RegExp(`\\bconst\\s+${name}\\b(?:\\s*:[^=]+)?\\s*=\\s*(['"])(.*?)\\1`).exec(source)?.[2]
-  if (value === undefined) throw new Error(`${file}: cannot parse string constant ${name}`)
-  return value
-}
-
-function numericConstant(source: string, name: string, file: string): number {
-  const value = new RegExp(`\\b(?:export\\s+)?const\\s+${name}\\b[^=]*=\\s*(\\d+(?:\\.\\d+)?)`).exec(source)?.[1]
-  if (value === undefined) throw new Error(`${file}: cannot parse numeric constant ${name}`)
-  return Number(value)
-}
-
-function detectedExceptionConstants(source: string): string[] {
-  const candidates = [...source.matchAll(/^const\s+([A-Z][A-Z0-9_]*)\b/gm)]
-    .map((match) => match[1] ?? '')
-    .filter(
-      (constantName) =>
-        /(?:ALLOWED|ALLOWLIST|EXCEPTION|EXEMPT|SKIPPED|VENDORED)/.test(constantName) || constantName === 'VENDOR_ROOTS',
-    )
-  return candidates.filter((constantName) => {
-    try {
-      stringArray(source, constantName, 'gate source')
-      return true
-    } catch {
-      return false
-    }
-  })
-}
-
 function rootsOf(source: string, file: string, metadata: GateMetadata): string[] {
   return [
     ...(metadata.roots ?? []),
@@ -563,7 +480,7 @@ function generate(): string {
     const source = repositoryFile(file)
     const metadata = GATE_METADATA[file]
     if (metadata === undefined) throw new Error(`${file}: missing gate metadata`)
-    const detectedExceptions = detectedExceptionConstants(source).sort()
+    const detectedExceptions = detectedExceptionConstants(source, file).sort()
     const recordedExceptions = metadata.exceptions.map((exception) => exception.constant).sort()
     assertExactKeys(`${file} exception`, detectedExceptions, recordedExceptions)
     const exceptionCounts = metadata.exceptions.map((exception) => {

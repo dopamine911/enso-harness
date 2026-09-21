@@ -96,6 +96,11 @@ const VENDOR_IMPORT_ALLOWED: readonly string[] = [
   // implementation, so the import is the test. Leaves when the replica does — i.e. when the
   // runtime exports those two functions, or the guard stops needing to agree with them.
   'packages/harness/core/__tests__/paths.test.ts',
+  // `import.meta.resolve('@earendil-works/pi-coding-agent')` once, to read the WORKSPACE pi's
+  // version and assert the launcher's supported range still covers the pi that corpus is
+  // pinned against (#217, arrived with #294). Naming the package IS the question it asks:
+  // which pi did `import.meta` reach. Leaves with the range, or with the replica it protects.
+  'scripts/__tests__/pi-version-parity.test.ts',
 ]
 
 /**
