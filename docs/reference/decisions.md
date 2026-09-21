@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 186.**
+**Decision headers: 190.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -158,11 +158,14 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/docs/decisions.ts` | `#170` | Generates `docs/reference/decisions.md` (#170): one row for each owned source file whose first comment/header block cites an issue. |
 | `scripts/docs/env-and-config.ts` | `#170` | Generates `docs/reference/env-and-config.md` (#170): the explicit environment boundary, the composed `ZenConfig` shape, every `.zen/` path assembled by core, and the harness manifest resources. |
 | `scripts/docs/extract-declaration.ts` | `#168` | The docs gate's one primitive (#168): a top-level declaration, by name, whole. |
+| `scripts/docs/flow-diagrams.ts` | `#188` | Generates `docs/reference/flows.md` (#188): the control plane and the observation pipeline as Mermaid, drawn from the SAME discovery the reference tables use. |
 | `scripts/docs/gate-source.ts` | `#170`, `#262` | Reading a declared constant back out of a gate's source (#170, split out on #262). |
 | `scripts/docs/generator-support.ts` | `#174` | What every generator under `scripts/docs/` shares (#174): the exhaustiveness check that makes a metadata table refuse to be stale, and the one way a generator runs — its page to stdout, or one `name: reason` line to stderr and a non-zero exit, never a partial page. |
 | `scripts/docs/ported-provenance.ts` | `#168` | Generates `docs/seams/ported-provenance.md` (#168): one row per file under `components/ai-elements/` — the upstream path and commit its header names, and the `Modified —` line that follows. |
 | `scripts/docs/refresh-fences.ts` | `#162`, `#168` | Refreshes every sourced fence in a page from the source it names (#168): the authoring and repair tool for `test/docs-gate.test.ts`. |
 | `scripts/docs/seams-table.ts` | `#162`, `#167`, `#213` | Generates the seams table (#162 workstream 11, #167 item 4) — the block `docs/architecture.md` embeds between `<!-- generated-block: … -->` markers. |
+| `scripts/docs/site-content.ts` | `#188`, `#213` | Projects `docs/` into the Starlight site's content collection (#188). |
+| `scripts/docs/site-links.ts` | `#188` | Every internal link in the BUILT site resolves to something the site serves (#188). |
 | `scripts/docs/verification-inventory.ts` | `#170`, `#262` | Generates `docs/reference/verification-inventory.md` (#170): enforcement gates, the numeric and count ratchets they carry, and the deliberately reusable test doubles. |
 | `scripts/gate.ts` | `#188`, `#257` | Ported from slop-factory's bun example (examples/bun/scripts/gate.ts) — the shape is deliberately identical so improvements travel in either direction. |
 | `scripts/link-vendor-packages.ts` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
@@ -194,6 +197,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/prose-citation-gate.test.ts` | `#226`, `#227`, `#244`, `#316`, `#320` | THE PROSE LINE CITATION, RESOLVED (#244, #320 review). |
 | `test/scripts-extensions.test.ts` | `#269`, `#308` | `scripts/` is TypeScript, with nothing left to except (#269, #308). |
 | `test/secret-scan-gate.test.ts` | `#209` | The range `.github/workflows/secret-scan.yml` hands gitleaks is the coverage of the only gate that stops a committed secret, so it is asserted here rather than read (#209). |
+| `test/site-gate.test.ts` | `#188`, `#213` | THE SITE IS A PROJECTION OF `docs/`, AND THE PROJECTION IS TOTAL (#188). |
 | `test/vendor-gate.test.ts` | `#69`, `#145`, `#150`, `#165`, `#173`, `#215` | The seam has an owner: only the host and the pi extensions may name the vendor (#145). |
 
 **Parser limit.** The parser considers the first block or contiguous line comment beginning within the
