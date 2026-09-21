@@ -31,6 +31,7 @@ const EXTRA_GATE_FILES = [
   'coverage-manifest.test.ts',
   'check-coverage.test.ts',
   'no-lint-suppressions.test.ts',
+  'complexity-ratchet.test.ts',
 ] as const
 
 interface ExceptionMetadata {
@@ -59,6 +60,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     exceptions: [],
     limitation: 'Exercises synthetic LCOV records; it does not run the suite or measure live coverage.',
   },
+  'test/complexity-ratchet.test.ts': {
+    roots: [BIOME_CONFIG],
+    exceptions: [],
+    limitation:
+      'Re-measures today’s scores and asserts each file pin equals its own worst function; whether the pinned complexity is warranted is not a question it can ask.',
+  },
   'test/coverage-manifest.test.ts': {
     rootArrays: ['LIBRARY_SOURCE_ROOTS'],
     exceptions: [
@@ -73,6 +80,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     ],
     limitation:
       'Importability enters files into Bun’s denominator; it does not prove that their behavior was exercised.',
+  },
+  'test/dependency-gate.test.ts': {
+    rootArrays: ['SOURCE_ROOTS'],
+    exceptions: [],
+    limitation:
+      'Reads import specifiers from code lines — type-only imports included, which is the point — and versions from the manifests. That the installer honoured a pin is bun.lock’s record, not this scan’s; a specifier resolving to no installed package is treated as a matcher fixture and left to tsc.',
   },
   'test/docs-gate.test.ts': {
     roots: ['docs'],
@@ -152,11 +165,13 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     exceptions: [
       {
         constant: 'VENDOR_IMPORT_ALLOWED',
-        reason: 'Empty since L6 (#162): no first-party file outside the vendor roots imports a vendor-scoped package.',
+        reason:
+          'One row since #215 widened the walk to tests: the guard corpus resolves the runtime to pin its path replica against it. The bundle has imported no vendor-scoped package since L6 (#162).',
       },
       {
         constant: 'VENDOR_NAMED_ALLOWED',
-        reason: 'Pins every first-party code site that still names a vendor extension.',
+        reason:
+          'Pins every first-party code site that still names a vendor extension, tests included — twelve of the thirteen rows are sites #215 revealed rather than sites that were added.',
       },
       {
         constant: 'VENDOR_ROOTS',
