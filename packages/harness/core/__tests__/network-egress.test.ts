@@ -2,15 +2,10 @@ import { expect, test } from 'bun:test'
 import { DEFAULT_GUARD_POLICY } from '@zen/core'
 import { findDeniedNetworkEgress, type NetworkEgressMatch } from '../network-egress.ts'
 import { extractFlatShellCommandSegments } from '../shell-segments.ts'
+import { braced } from './shell-fixtures.ts'
 
 const DENIED: string[] = DEFAULT_GUARD_POLICY.deniedNetworkBinaries
 const findEgress = (command: string): NetworkEgressMatch | undefined => findDeniedNetworkEgress(command, DENIED)
-/**
- * `${…}` built rather than written: a literal `${` inside a quoted JS string reads to
- * Biome as a botched template literal (`noTemplateCurlyInString`), and these are SHELL
- * strings handed to the scanner as data. The escapes are `{` and `}`.
- */
-const braced = (expansionBody: string): string => `$\u007b${expansionBody}\u007d`
 
 // ── the segmenter's [] contract — the deny's fail-closed leg depends on it ────────────────
 // ⚠ A "better" segmenter that returned partial segments for these inputs would silently
