@@ -104,8 +104,11 @@ const VENDOR_IMPORT_ALLOWED: readonly string[] = [
 ]
 
 /**
- * The leak inventory. Twelve of these thirteen rows arrived with #215's widening — the sites
- * were live and unlisted, not new. Grouped by what a pi replacement would have to do with each.
+ * The leak inventory. Most rows arrived with #215's widening — the sites were live and
+ * unlisted, not new — and #221's move brought the two under `packages/core/src/__tests__/`.
+ * Grouped by what a pi replacement would have to do with each. No count in this sentence: the
+ * generated inventory reads one off the constant, and a second one written here went stale
+ * inside a single PR (#222 review).
  */
 const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // ── Production code ──
@@ -135,7 +138,7 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   'scripts/__tests__/link-vendor-packages.test.ts',
   'scripts/__tests__/print-harness.test.ts',
   // ⚠ `scripts/__tests__/zen-launch.test.ts` is NOT here any more: `declaredResources` and
-  // `missingVendorPaths` moved to `@zen/core` with #220, the manifests moved with them, and
+  // `missingVendorPaths` moved to `@zen/core` with #221, the manifests moved with them, and
   // the gate reported the leftover row as `allowlisted, matches nothing` rather than letting
   // it sit. The inventory shrinks when the leak does; that is the half of a ratchet that is
   // easy to omit.
