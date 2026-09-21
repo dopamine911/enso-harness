@@ -194,16 +194,17 @@ outcome (line 279) and resolves the extension with its value — `undefined` for
 `editor`, `false` for `confirm`, on every non-answer outcome (lines 259–260). That is why the settle
 observation exists at all: the runtime has no event for a question ending (lines 262–264).
 `agent-host.ts` binds one context per session (line 401) and delegates the runtime contract's
-`answerDialog` and `openDialogs` to it (lines 484–489); `dispose` cancels every pending question
-(line 545), so teardown is a settle path too.
+`answerDialog` and `openDialogs` to it (lines 484–489); `cancelAllDialogs` cancels every pending
+question at session teardown (line 468, called from `agent-host.ts:548`), so teardown is a settle
+path too.
 
-**Consumed by the server.** `answerThreadDialog` in `packages/web/src/server/follow.ts` (line 291)
-finds the open question by id on the live thread (line 294; 404 when the thread is not live or the
-question is spent, lines 293–300), validates a non-cancel answer against the question's kind
-(lines 301–303; 422 with the refusal, and the question stays open), then hands it to the runtime
-(line 305) and answers 204 (line 306). `server/index.ts` maps that outcome to the response (lines
+**Consumed by the server.** `answerThreadDialog` in `packages/web/src/server/follow.ts` (line 306)
+finds the open question by id on the live thread (line 309; 404 when the thread is not live or the
+question is spent, lines 308–315), validates a non-cancel answer against the question's kind
+(lines 316–319; 422 with the refusal, and the question stays open), then hands it to the runtime
+(line 320) and answers 204 (line 321). `server/index.ts` maps that outcome to the response (lines
 594–608). The follow's snapshot lists every open question, oldest first, so a reconnect renders the
-card at once (`follow.ts` line 136; `openDialogs` at extension-ui-context.ts line 458 checks each
+card at once (`follow.ts` line 151; `openDialogs` at extension-ui-context.ts line 458 checks each
 request with `isZenDialogSpec` rather than casting, line 464).
 
 **Consumed by the browser.** The question arrives as an `extension-ui-request` observation whose
