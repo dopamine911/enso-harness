@@ -107,6 +107,31 @@ const packageToLoad = printRun
 const args = piArguments(packageToLoad, passthroughArgs)
 
 /**
+ * ⚠ SECRETS OUT BEFORE ANY CHILD (#89). bun auto-loaded a root `.env` into THIS process's
+ * environment; the spread below would carry every key into pi and from there into every
+ * `bash` child — which is how `TAVILY_API_KEY` ended up in a transcript. The extensions
+ * that need a key read `.zen/secrets.env` directly (`readSecret`); the environment carries
+ * none, and a root `.env` that still holds a secret is reported as misplaced.
+ *
+ * ⚠ FIRST, not just before the pi spawn (PR #294 review). `secrets.ts` says "before any
+ * session or child process exists", and #217 added a child ahead of it: the `pi --version`
+ * probe below, handed the un-scrubbed environment — to the one binary this launcher has not
+ * yet decided it trusts, which is the entire premise of the version gate. A pi that prints
+ * its environment diagnostically, or a shadowing pi earlier on `PATH`, could read a key out
+ * of `--version`. Quarantining here makes the probe's inherited environment the scrubbed
+ * one, so the ordering matches the invariant instead of contradicting it eight lines down.
+ */
+const quarantine = quarantineSecrets(process.env, repoRoot)
+if (quarantine.removed.length > 0)
+  process.stderr.write(`zen: secrets kept out of pi's environment (#89): ${quarantine.removed.join(', ')}\n`)
+if (quarantine.misplaced.length > 0) {
+  process.stderr.write(
+    `zen: ⚠ the root .env defines ${quarantine.misplaced.join(', ')} — bun autoloads .env into every bun child, ` +
+      'so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env.\n',
+  )
+}
+
+/**
  * ⚠ THE PI ON `PATH` IS NOT NECESSARILY THE PI THE GUARD WAS PINNED AGAINST (#217). The guard
  * REPLICATES pi's path normaliser (`packages/harness/core/paths.ts`) and the corpus pins the
  * copy against the pi in the WORKSPACE tree; this spawn takes whatever `pi` comes first on
@@ -179,23 +204,6 @@ process.stderr.write(
     `${printRun ? ' (print variant, no permission modes — #20)' : ''} | ` +
     `${resources.length} declared resource path(s)\n`,
 )
-
-/**
- * ⚠ SECRETS OUT BEFORE THE SPAWN (#89). bun auto-loaded a root `.env` into THIS process's
- * environment; the spread below would carry every key into pi and from there into every
- * `bash` child — which is how `TAVILY_API_KEY` ended up in a transcript. The extensions
- * that need a key read `.zen/secrets.env` directly (`readSecret`); the environment carries
- * none, and a root `.env` that still holds a secret is reported as misplaced.
- */
-const quarantine = quarantineSecrets(process.env, repoRoot)
-if (quarantine.removed.length > 0)
-  process.stderr.write(`zen: secrets kept out of pi's environment (#89): ${quarantine.removed.join(', ')}\n`)
-if (quarantine.misplaced.length > 0) {
-  process.stderr.write(
-    `zen: ⚠ the root .env defines ${quarantine.misplaced.join(', ')} — bun autoloads .env into every bun child, ` +
-      'so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env.\n',
-  )
-}
 
 const pi = Bun.spawn(['pi', ...args], {
   stdio: ['inherit', 'inherit', 'inherit'],
