@@ -764,6 +764,27 @@ test('⚠ a write to a credential-shaped path inside the workspace is blocked as
   expect(verdict?.reason).not.toContain('persistence')
 })
 
+// ── #210: the ownership-boundary claim `docs/architecture.md` makes, held by class ─────────
+// The page said guards "override built-ins by name" and that load order is therefore a
+// security property. Neither is how this guard works (see this extension's own header, WHY A
+// `tool_call` HANDLER RATHER THAN A TOOL OVERRIDE): participation is one additive handler and
+// pi returns on the first `block`, so a denial is final at any position in the manifest.
+// That order-independence holds only while the guard registers NO tool — a registered `write`
+// would put the guarded implementation back behind first-wins resolution, where load order
+// decides. This is the check for the corrected page: ANY tool registration from this
+// extension, whatever it is named, goes red here rather than quietly making the page false.
+test('⚠ the guard registers no tool: it participates through tool_call only, so no load order can un-guard it', () => {
+  const registered: string[] = []
+  const events: string[] = []
+  createGuards({ analyzeBashCommand: ALLOW_ALL_ANALYZER })({
+    on: (event: string) => events.push(event),
+    registerTool: (tool: { name: string }) => registered.push(tool.name),
+    getAllTools: () => PI_SHIPPED_TOOL_NAMES.map((name) => ({ name })),
+  } as never)
+  expect(registered).toEqual([])
+  expect(events).toContain('tool_call')
+})
+
 // ── #204: the harness's own credential dir, on BOTH tool routes ────────────────────────────
 // The finding, measured through this handler with the real analyzer: `read .zen/secrets.env`
 // was refused while `read .zen/pi-agent/auth.json`, `grep path=.zen`, `cat .zen/secrets.env`
