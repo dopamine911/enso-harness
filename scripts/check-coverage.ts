@@ -33,6 +33,15 @@
  * mounted under a DOM over the scripted server (chat-screen.tsx 69.6% → 97.7% lines, 54% →
  * 87.5% functions — the handlers the static renders materialised now actually run). Same
  * margin: ~2.5 points under, rounded down.
+ *
+ * ⚠ THE REPORT MUST BE THE WHOLE SUITE'S (#234). `coverage = true` is global and `coverageDir`
+ * is fixed, so ANY targeted run — `bun test test/docs-gate.test.ts`, one package's file —
+ * overwrites `coverage/lcov.info`, and this script would then pass a repository verdict over
+ * whatever was left behind. Measured 2026-09-18 on this tree: the two-file report three scoped
+ * gate files leave behind read 100.00% lines / 100.00% functions and PASSED; the first 20
+ * records of the full report read 99.65% / 96.04% and passed. Both are green over a fraction of
+ * the code, printing the same sentence they print for the whole suite. So size is a gate too —
+ * see `MINIMUM_REPORTED_FILES`.
  */
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -40,6 +49,17 @@ import { findRepoRoot } from '../packages/core/src/paths.ts'
 
 export const TOTAL_LINE_COVERAGE_FLOOR = 0.91
 export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89
+
+/**
+ * The fewest file records a whole-suite report can hold. Measured 2026-09-18: the full suite
+ * writes 99 — the 84 owned library sources, every one of them, because
+ * `test/coverage-manifest.test.ts` imports the lot, plus the test doubles and scripts that ran.
+ * Floored ~10% under those 84 on the same convention as the rate floors above: deleting a
+ * module is not a red, while both partial reports measured in #234 (2 and 20 records) are.
+ * `test/coverage-manifest.test.ts` pins this between the denominator it walks and 80% of it, so
+ * it can neither overshoot into a spurious red nor rot into vacuity as the tree grows.
+ */
+export const MINIMUM_REPORTED_FILES = 75
 
 const LCOV_PATH = join(findRepoRoot(import.meta.url), 'coverage', 'lcov.info')
 
@@ -79,6 +99,21 @@ export function summarizeLcov(lcovText: string): CoverageTotals {
   }
 }
 
+/**
+ * Why this report cannot be the whole suite's, or `undefined` when its size says it can be.
+ * Separate from the rates on purpose: a partial report's arithmetic is fine and says nothing
+ * about the repository, which is exactly how a two-file 100% report reads as green.
+ */
+export function partialReportComplaint(fileCount: number): string | undefined {
+  if (fileCount >= MINIMUM_REPORTED_FILES) return undefined
+  return (
+    `check-coverage: ${fileCount} file records, fewer than the ${MINIMUM_REPORTED_FILES} a whole-suite ` +
+    `report holds — this is NOT the whole suite's report, so the floors above mean nothing. A targeted ` +
+    `\`bun test <file>\` overwrites coverage/lcov.info with a partial one; run \`bun test\` (\`bun run check\` ` +
+    `does) and measure again.\n`
+  )
+}
+
 function formatPercent(rate: number): string {
   return `${(rate * 100).toFixed(2)}%`
 }
@@ -90,14 +125,18 @@ if (import.meta.main) {
     process.exit(1)
   }
   const totals = summarizeLcov(await Bun.file(LCOV_PATH).text())
-  const lineOk = totals.lineRate >= TOTAL_LINE_COVERAGE_FLOOR
-  const functionOk = totals.functionRate >= TOTAL_FUNCTION_COVERAGE_FLOOR
   process.stderr.write(
     `check-coverage: ${totals.fileCount} files — lines ${formatPercent(totals.lineRate)} ` +
       `(floor ${formatPercent(TOTAL_LINE_COVERAGE_FLOOR)}), functions ${formatPercent(totals.functionRate)} ` +
       `(floor ${formatPercent(TOTAL_FUNCTION_COVERAGE_FLOOR)})\n`,
   )
-  if (!(lineOk && functionOk)) {
+  // Size before rates: a verdict over a fraction of the suite is not a verdict.
+  const complaint = partialReportComplaint(totals.fileCount)
+  if (complaint !== undefined) {
+    process.stderr.write(complaint)
+    process.exit(1)
+  }
+  if (!(totals.lineRate >= TOTAL_LINE_COVERAGE_FLOOR && totals.functionRate >= TOTAL_FUNCTION_COVERAGE_FLOOR)) {
     process.stderr.write(
       'check-coverage: BELOW the floor. Add tests, or lower the floor in its own PR with the reason.\n',
     )

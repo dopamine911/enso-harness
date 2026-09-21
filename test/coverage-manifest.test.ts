@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
+import { MINIMUM_REPORTED_FILES } from '../scripts/check-coverage.ts'
 import { filesUnder } from '../scripts/source-tree.ts'
 
 /**
@@ -100,4 +101,22 @@ test('the total coverage floor is wired into the gate at the intended level', as
   expect(gate).toMatch(/script:\s*['"]coverage:check['"]/)
   const bunfig = await Bun.file(join(REPOSITORY_ROOT, 'bunfig.toml')).text()
   expect(bunfig).toMatch(/^coverage = true$/m)
+})
+
+/**
+ * ⚠ THE REPORT'S SIZE is the other half of the denominator (#234): the gate refuses a report
+ * holding fewer records than a whole-suite run produces, because `coverage = true` is global and
+ * any targeted `bun test <file>` overwrites the report with a partial one that reads as green.
+ * That minimum is a hand-set number in a script — this test is what keeps it honest against the
+ * denominator this file actually walks: never above it (a full report would go red for nothing),
+ * never far under it (a two-file report would sail through).
+ */
+const MINIMUM_REPORT_SHARE_OF_DENOMINATOR = 0.8
+
+test("⚠ the gate's minimum report size stays under the walked denominator, and not far under", () => {
+  const sources = LIBRARY_SOURCE_ROOTS.flatMap((root) => collectLibrarySources(join(REPOSITORY_ROOT, root)))
+  expect(MINIMUM_REPORTED_FILES).toBeLessThanOrEqual(sources.length)
+  expect(MINIMUM_REPORTED_FILES).toBeGreaterThanOrEqual(
+    Math.floor(sources.length * MINIMUM_REPORT_SHARE_OF_DENOMINATOR),
+  )
 })
