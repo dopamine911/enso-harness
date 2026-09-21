@@ -21,6 +21,14 @@
       "!.zen",
       "!.playwright-mcp",
       "!.codegraph",
+      // Vendored upstream presentation — shadcn/ui primitives and the ai-elements port —
+      // kept diffable against its registry/commit receipt rather than reformatted to our
+      // style. This is ONE of three exclusions drawn at this path (the others are bunfig's
+      // `coveragePathIgnorePatterns` and `.fallowrc.jsonc`'s `ignoreFindings`), and what
+      // makes them defensible is `test/presentation-gate.test.ts`: since #253 it scans this
+      // whole tree recursively, requires a provenance receipt per vendored subdirectory, and
+      // refuses any import of the state layer. Widen this line and that gate widens with it;
+      // narrow it and the files it uncovers must pass every rule above.
       "!packages/web/src/components"
     ]
   },

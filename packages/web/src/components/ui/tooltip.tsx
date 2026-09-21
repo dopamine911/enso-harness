@@ -1,3 +1,8 @@
+/**
+ * Vendored from the shadcn/ui registry — item `tooltip`, `shadcn/ui radix-nova` style
+ * (packages/web/components.json), fetched by `shadcn@4.20.1` in cc84ab4 (#31). MIT.
+ * See README.md here for the re-fetch procedure and the local changes.
+ */
 import * as React from "react"
 import { Tooltip as TooltipPrimitive } from "radix-ui"
 
