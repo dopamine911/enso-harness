@@ -5,9 +5,16 @@
  * (declared in its package.json; the repo ships no LICENSE file).
  *
  * Reads `event:`/`data:` lines, JSON-parses each event's data, and hands
- * `{ eventName, data }` to the callback. Non-JSON data lines and `[DONE]` sentinels are
- * skipped. The callback may return `true` to stop reading early (the OpenAI Codex stream
- * never closes on its own after `response.completed`).
+ * `{ eventName, data }` to the callback. The callback may return `true` to stop reading early
+ * (the OpenAI Codex stream never closes on its own after `response.completed`).
+ *
+ * Two cases that used to share one branch (#268). A `[DONE]` sentinel carries no data and is
+ * SKIPPED — it is the protocol saying the stream is over. A `data:` payload that does not
+ * parse as JSON is DATA LOSS inside a grounded answer, so it THROWS: the three callers turn
+ * a stream throw into a `WebSearchProviderError` with `requestDispatched: true`, which is
+ * what every other layer in this seam does with a mid-stream failure. Dropping it silently
+ * returned the surviving frames as a successful `searched` outcome with no record that
+ * anything was lost.
  */
 
 export interface SseEvent {
@@ -46,7 +53,9 @@ export async function readSseEvents(
     try {
       data = JSON.parse(rawData)
     } catch {
-      return false
+      throw new Error(
+        `the search stream carried an unparseable ${eventName.length > 0 ? `${eventName} ` : ''}frame of ${rawData.length} characters`,
+      )
     }
     return onEvent({ eventName, data }) === true
   }
