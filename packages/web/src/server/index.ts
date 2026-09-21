@@ -574,12 +574,18 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
     // The clock the first-delta record measures from (#144); a queued prompt joins the run
     // already in flight and does not restart it.
     noteRunAdmitted(threadId, generation)
+    // ⚠ TWO DIFFERENT FACTS, TWO NAMES (PR #326 review). `admission` is what the SERVER did —
+    // `queued` or `opened`, the record #132 asks for — and `requestedAdmission` is what the
+    // CLIENT asked for. #216's rename gave the request the word `admission` too, and an object
+    // literal's later key wins: the spread silently overwrote the outcome on every queued
+    // prompt the browser sends, which is every prompt typed while a run is in flight. The
+    // wire field keeps its name; the record's older one keeps its meaning.
     log.info('prompt {messageId} {admission} on run {generation}', {
       threadId,
       messageId,
       generation,
       admission: queued ? 'queued' : 'opened',
-      ...(body.admission === undefined ? {} : { admission: body.admission }),
+      ...(body.admission === undefined ? {} : { requestedAdmission: body.admission }),
     })
     response.writeHead(202, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify(outcome.receipt))

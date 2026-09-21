@@ -676,6 +676,26 @@ test('a prompt on a busy thread is enqueued through the runtime, not refused and
   expect(await threadSummary(url, 't1')).toMatchObject({ busy: true, generation: 1 })
 })
 
+// ⚠ The record on the BUSY path, which is the one nothing asserted (PR #326 review). Two facts
+// are logged here — what the SERVER did (`queued`) and what the CLIENT asked for (`enqueue`) —
+// and #216's rename briefly gave both the key `admission`, so the object literal's spread
+// silently overwrote the outcome on every prompt typed while a run is in flight. The idle-path
+// assertion above could not see it: there is no requested admission to collide with when the
+// thread is idle, which is exactly why the coverage read as complete and was not.
+test('⚠ the queued prompt records BOTH what the server did and what the client asked for (#132, #216)', async () => {
+  const fake = fakeHost()
+  const url = await startWith(fake)
+  await prompt(url, 't1', 'one')
+  logs.clear()
+  const queuedPrompt = await promptWith(url, 't1', { message: 'two', admission: 'enqueue' })
+  expect(queuedPrompt.status).toBe(202)
+  logs.assertLogged({
+    level: 'info',
+    rawMessage: 'prompt {messageId} {admission} on run {generation}',
+    properties: { threadId: 't1', generation: 1, admission: 'queued', requestedAdmission: 'enqueue' },
+  })
+})
+
 // ── 7. two threads are two feeds (#103 invariant 1) ────────────────────────────────
 
 test("⚠ what happens on thread A is on A's feed only: B's follow, snapshot, summary and dialog route see none of it", async () => {
