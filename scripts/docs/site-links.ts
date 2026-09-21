@@ -24,6 +24,8 @@ import { findRepoRoot } from '../../packages/core/src/paths.ts'
 const ROOT = findRepoRoot(import.meta.url)
 const DIST = 'site/dist'
 const BASE = '/zen-harness'
+/** What the `api-docs` gate step writes, and what the sidebar's `/api/` link serves. */
+const API_OUTPUT = 'site/public/api'
 
 /** Every built HTML page, repo-relative. */
 function builtPages(): string[] {
@@ -48,7 +50,15 @@ export function internalHrefs(html: string): string[] {
     .filter((href) => href !== '' && !/^(?:https?:|mailto:|#|data:)/.test(href))
 }
 
-/** Where `href` lands on disk, given the page that carries it. */
+/**
+ * Where `href` lands on disk, given the page that carries it.
+ *
+ * The three branches produce paths in two different frames, which is why the last line strips
+ * rather than always prefixing: a site-absolute href (`/zen-harness/x/`, or `/x/`) names a path
+ * INSIDE the built site and has to be joined onto `site/dist/`, while a relative href resolved
+ * against the page — which already lives under `site/dist/` — comes back carrying that prefix
+ * from `relative(ROOT, …)`. Stripping first makes both frames one.
+ */
 export function resolveHref(href: string, page: string): string {
   const withoutFragment = (href.split('#')[0] ?? '').split('?')[0] ?? ''
   if (withoutFragment === '') return page
@@ -57,8 +67,10 @@ export function resolveHref(href: string, page: string): string {
     if (withoutFragment.startsWith('/')) return withoutFragment.slice(1)
     return relative(ROOT, resolve(ROOT, page, '..', withoutFragment))
   })()
-  return join(DIST, fromBase.replace(new RegExp(`^${DIST.replace('/', '\\/')}\\/`), ''))
+  const insideDist = fromBase.startsWith(`${DIST}/`) ? fromBase.slice(DIST.length + 1) : fromBase
+  return join(DIST, insideDist)
 }
+
 /** A path the built site serves: the file itself, or the directory's `index.html`. */
 function isServed(path: string): boolean {
   const absolute = join(ROOT, path)
@@ -76,9 +88,30 @@ export function deadLinks(): string[] {
   return dead
 }
 
+/**
+ * The API reference is built by the `api-docs` step (`typedoc` → `site/public/api/`), not by
+ * this one, and the sidebar links `/api/` unconditionally.
+ *
+ * ⚠ A MISSING PREREQUISITE MUST NOT REPORT AS A DEAD LINK. `bun run docs:site` on its own —
+ * before `docs:api` has ever run — builds a site with no `api/` in it, and the crawl below
+ * would then name `/api/` on all 46 pages as broken documentation. It is not: it is one step
+ * that has not run. `scripts/gate.ts` orders `api-docs` before `site`, so the gate never sees
+ * it; a developer running the script by hand does, and gets the true sentence instead of 46
+ * false ones.
+ */
+export function missingApiReference(output: string = API_OUTPUT): string | undefined {
+  if (existsSync(join(ROOT, output, 'index.html'))) return undefined
+  return `site-links: ${output}/ is empty — run \`bun run docs:api\` first (it builds what the sidebar's /api/ link serves)`
+}
+
 if (import.meta.main) {
   if (!existsSync(join(ROOT, DIST))) {
     process.stderr.write(`site-links: ${DIST} does not exist — run \`bun run docs:site\` first\n`)
+    process.exit(1)
+  }
+  const missing = missingApiReference()
+  if (missing !== undefined) {
+    process.stderr.write(`${missing}\n`)
     process.exit(1)
   }
   const dead = deadLinks()
