@@ -29,11 +29,6 @@ const segmentsOf = (command: string): Array<[string, boolean]> =>
   extractFlatShellCommandSegments(command).map((segment) => [segment.text, segment.pipedStdin])
 const textsOf = (command: string): string[] => extractFlatShellCommandSegments(command).map((segment) => segment.text)
 
-/**
- * `${…}` built rather than written: a literal `${` inside a quoted JS string reads to
- * Biome as a botched template literal (`noTemplateCurlyInString`), and these are SHELL
- * strings handed to the scanner as data. The escapes are `{` and `}`.
- */
 const BACKTICK = '`'
 
 // ── extractFlatShellCommandSegments: where the boundaries are ─────────────────────────

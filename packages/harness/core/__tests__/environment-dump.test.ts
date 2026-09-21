@@ -10,12 +10,6 @@ import { braced } from './shell-fixtures.ts'
 
 const denied = (command: string): string | undefined => findEnvironmentDump(command)?.via
 
-/**
- * `${NAME}` built rather than written: a literal `${` inside a quoted JS string reads to
- * Biome as a botched template literal (`noTemplateCurlyInString`), and these are SHELL
- * strings handed to the scanner as data. The escapes are `{` and `}`.
- */
-
 // ── listings at command position ─────────────────────────────────────────────
 
 test('a bare env, printenv, set, export -p, declare -p is a listing', () => {
