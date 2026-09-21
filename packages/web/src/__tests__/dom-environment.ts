@@ -19,16 +19,32 @@ import { GlobalRegistrator } from '@happy-dom/global-registrator'
  * the wrong fetch and the wrong Response. So this is not a `bunfig.toml` preload: the importing
  * file calls {@link releaseDom} in its `afterAll`, which unregisters everything and gives the
  * real `fetch` back.
+ *
+ * ⚠ AND THE MODULE IS EVALUATED ONCE for the whole process, so the SECOND mounting file to run
+ * imports a module that the first one has already released — it would find no `document` and
+ * then fail its own `afterAll` unregistering nothing. Hence {@link ensureDom}: every mounting
+ * file calls it above its `react-dom/client` import, and it registers whenever there is no DOM.
  */
 
 const realFetch: typeof fetch = globalThis.fetch
 
-GlobalRegistrator.register({ url: 'http://localhost/' })
-// React's `act` warns without this — it is how a test tells React it will flush updates itself.
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+let registered = false
+
+/** Register a DOM unless this process already has one — including after a {@link releaseDom}. */
+export function ensureDom(): void {
+  if (registered) return
+  GlobalRegistrator.register({ url: 'http://localhost/' })
+  // React's `act` warns without this — it is how a test tells React it will flush updates itself.
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  registered = true
+}
+
+ensureDom()
 
 /** Tear the DOM down and give `fetch` back — `afterAll` in every file that imports this module. */
 export async function releaseDom(): Promise<void> {
+  if (!registered) return
   globalThis.fetch = realFetch
   await GlobalRegistrator.unregister()
+  registered = false
 }

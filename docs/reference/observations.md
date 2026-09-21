@@ -41,5 +41,6 @@ A carrier marked **ELIDED** does not reach the browser in that state (#279): the
 
 - Schemas with no producer: none
 - CUSTOM kinds the router records but does not route: `custom-entry`, `unmapped`
+- Kinds with an unclassified cell: none
 
 Inventory: 19 union members; 8 ride CUSTOM by kind; 3 chunks that are not observations; every chunk name has a checked browser classification.

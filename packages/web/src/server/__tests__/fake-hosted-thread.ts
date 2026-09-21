@@ -95,7 +95,11 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       record.answers.push(response)
       // What the real host does at `finish` (#114): the settle is a record on the stream.
       if (open.delete(response.id)) {
-        emit({ kind: 'dialog-settled', id: response.id, outcome: 'cancelled' in response ? 'cancelled' : 'answered' })
+        emit({
+          kind: 'dialog-settled',
+          id: response.id,
+          outcome: response.cancelled === true ? 'cancelled' : 'answered',
+        })
       }
     },
     openDialogs: () => [...open].map(([id, dialog]) => ({ id, dialog })),

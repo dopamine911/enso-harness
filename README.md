@@ -184,9 +184,12 @@ so the reader knows what is missing). Never uploaded anywhere: the user attaches
 
 ## The vendored pi packages
 
-Declared explicitly in `packages/harness/package.json` → `pi.extensions`, guards first — pi resolves
-tools first-wins, so **load order is a security property** and a directory glob (which orders by
-filename) is not acceptable. Riding along at exact-pinned versions:
+Declared explicitly in `packages/harness/package.json` → `pi.extensions`, **guards before any vendor
+extension** — pi resolves *tools* first-wins, so a vendor extension must never get to register a tool
+name ahead of ours; a directory glob (which orders by filename) cannot promise that. Logging is
+declared first, ahead of the guards, for a different reason: it configures the sink at load, so it has
+to run before anything can write a record (`docs/flows/boot-and-launchers.md`, invariant 2). Riding
+along at exact-pinned versions:
 [`@ladbabynpm/picc-permission-modes`](https://www.npmjs.com/package/@ladbabynpm/picc-permission-modes)
 (Claude-Code-style permission modes — default / acceptEdits / plan / bypass — interactive runs only),
 [`pi-multi-account`](https://www.npmjs.com/package/pi-multi-account), and a theme. pi loads packages
@@ -201,6 +204,16 @@ every path it names exists. `docs/` itself: `architecture.md` (why), `glossary.m
 `seams/` (one page per contract, source verbatim), `reference/` (generated tables),
 `verification.md` (what green means), `concepts/` (the live design notes; `concepts/archive/` the
 pre-build ones).
+
+**`scripts/` is TypeScript** (#269). Everything there is started by bun — every `package.json` script
+that runs one runs `bun scripts/<name>`, `postinstall` included, and the launchers' own shebang is
+`#!/usr/bin/env bun` — and bun loads `.ts` directly, so nothing under `scripts/` needs to be
+JavaScript and a new script is `.ts` with no decision to make. Six files predate the rule and are
+still JavaScript: `dev.mjs`, `link-vendor-packages.mjs`, `print-harness.mjs`, `zen-launch.mjs`,
+`zen-thread.mjs`, `zen.mjs` — they pay for their types in JSDoc (`@param`, `@template`, `@import`)
+instead of in the language, which is what moving them buys (#308).
+`test/scripts-extensions.test.ts` holds that list equal to what is on disk, both directions: a
+seventh `.mjs` fails the gate, and a renamed one has to leave the sentence above.
 
 ## How this repo verifies itself
 
