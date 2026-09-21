@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 157.**
+**Decision headers: 159.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -33,14 +33,16 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/web-search.ts` | `#63` | The web_search tool's shapes and config section (#63). |
 | `packages/harness/core/__tests__/environment-dump.test.ts` | `#89` | #89's depth layer: the bash environment-dump deny. |
 | `packages/harness/core/__tests__/paths.test.ts` | `#53` | ⚠ FAIL CLOSED (#53 S3): no roots means nothing is inside — a misconfigured policy with an empty root list must deny, not allow, every write. |
+| `packages/harness/core/__tests__/shell-secret-paths.test.ts` | `#204` | The bash/powershell secret-path deny (#204). |
 | `packages/harness/core/__tests__/web-fetch-policy.test.ts` | `#54`, `#55` | web_fetch's pure policy (#54). |
 | `packages/harness/core/__tests__/web-search-model-providers.test.ts` | `#63` | The google and openai providers (#63) against synthetic wire fixtures. |
 | `packages/harness/core/__tests__/web-search-support.test.ts` | `#63` | The web_search support layer (#63): source hygiene, citation appliers, auth, Tavily. |
 | `packages/harness/core/__tests__/web-search-wire.test.ts` | `#63` | The Anthropic WIRE (#63) against synthetic SSE fixtures — the wire serves both the `anthropic` and `deepseek` providers, so these fixtures are the shared spine. |
 | `packages/harness/core/deadline.ts` | `#58`, `#174` | Run work under a deadline AND the caller's abort signal, as one signal (#174; the shape `web_fetch` and `web_search` each carried). |
-| `packages/harness/core/environment-dump.ts` | `#89` | The bash environment-dump deny (#89) — DEPTH, not the fix. |
-| `packages/harness/core/network-egress.ts` | `#9`, `#54`, `#55`, `#57` | The bash network deny (#9) — a BAR, deliberately not a boundary. |
+| `packages/harness/core/environment-dump.ts` | `#89`, `#206` | The bash environment-dump deny (#89) — DEPTH, not the fix. |
+| `packages/harness/core/network-egress.ts` | `#9`, `#54`, `#55`, `#57`, `#206` | The bash network deny (#9) — a BAR, deliberately not a boundary. |
 | `packages/harness/core/read-tracker.ts` | `#10`, `#11` | Session-scoped record of files whose content this session has seen (#10), and of the on-disk state they had when it saw them (#11). |
+| `packages/harness/core/shell-secret-paths.ts` | `#9`, `#89`, `#204` | The bash/powershell secret-path deny (#204) — the read gate's own policy, on the shell route. |
 | `packages/harness/core/shell-segments.ts` | `#9` | Conservative shell command segmenter — the parsing floor under the bash network deny (#9). |
 | `packages/harness/core/tool-identity.ts` | `#4` | Canonical tool identity (#4, gap 2). |
 | `packages/harness/core/web-fetch-policy.ts` | `#54`, `#55` | web_fetch's pure policy (#54) — every decision that needs no IO. |
@@ -159,7 +161,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/gate-abort.test.ts` | `#157` | The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0. |
 | `test/gate-support.ts` | `#150`, `#162`, `#165`, `#174` | What the source-tree gates share (#165, #162 workstream 6): the word-splitter, the sequence matcher, the comment skip, over the one walker (`scripts/source-tree.ts`, #174). |
 | `test/glossary-doc.test.ts` | `#161`, `#164`, `#165` | The glossary keeps its own two rules (#161, PR #164 review). |
-| `test/glossary-gate.test.ts` | `#165` | The glossary's Retired table, applied to the source tree (#165, `docs/glossary.md` → Retired). |
+| `test/glossary-gate.test.ts` | `#165`, `#241`, `#287` | The glossary's Retired table, applied to the source tree (#165, `docs/glossary.md` → Retired). |
 | `test/logging-gate.test.ts` | `#132` | Every record goes through the one logger (#132), and the substrate stays behind it. |
 | `test/naming-gate.test.ts` | `#82`, `#83` | The naming gate's exemption for externally-fixed KEYS (#82, PR #83 review). |
 | `test/no-lint-suppressions.test.ts` | `#82` | The gate may not be talked out of, one line at a time. |

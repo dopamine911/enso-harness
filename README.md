@@ -50,8 +50,13 @@ bun run check:all      # THE gate: biome → tsc → fallow → bun test → cov
 packages, settings, keybindings, or credentials are visible), `--no-extensions` suppresses discovery
 (including this repo's own `.pi/settings.json`, which would otherwise load the package twice), and
 `--no-skills` (pi discovers skills from `~/.agents/skills/` too, which the agent dir does not
-redirect). The scratch dir has no credentials: either `/login` once inside it, or export
-`ANTHROPIC_API_KEY` — which works precisely because there is no `auth.json` to shadow it.
+redirect). The scratch dir has no credentials, so `/login` once inside it (or a
+[`pi-multi-account`](https://www.npmjs.com/package/pi-multi-account) slot) is how they get there.
+⚠ An exported `ANTHROPIC_API_KEY` does NOT reach pi: `#89`'s quarantine deletes every
+secret-shaped environment variable before the spawn, and says which on stderr (`zen: secrets kept
+out of pi's environment`). Provider auth lives in pi's own `auth.json`, by design —
+[`packages/core/src/secrets.ts`](packages/core/src/secrets.ts) holds the rule, and
+[`docs/reference/env-and-config.md`](docs/reference/env-and-config.md) the environment it leaves.
 
 ---
 

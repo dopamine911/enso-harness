@@ -226,24 +226,37 @@ need none: an upstream re-port is the second implementation, and the gate is wha
 
 ## What crosses it that should not
 
-**Nothing of the vendor kind.** The state layer (TanStack AI) and the stream vocabulary its processor
-consumes (AG-UI) are vendored by decision, not leaked: `architecture.md` → Presentation names the
-client as the state layer, and the glossary's vendor map carries both. Their vocabulary is derived in
-memory, in the browser, and never on the wire or stored — `to-agui.ts:17-28` says where it runs
-(the adapter calls it on each observation before handing chunks to the client; *nothing serialises the
-output of this module and nothing stores it*), and its only production importer is
-`follow-connection.ts`.
+**The state layer's message shape crosses two wire payloads.** `ZenThreadHistory.messages`
+(`thread-inspection.ts` line 228) and `ZenFollowSnapshot.messages` (`follow.ts` line 35) are both
+`Type.Array(Type.Unknown())` on purpose — core must not own the client's transport shape — and both
+carry the client's `UIMessage`s. They are built by `transcriptToMessages` in
+`server/transcript-to-messages.ts`, the read-side twin of `to-agui.ts`, which imports `MessagePart`
+and `UIMessage` from `@tanstack/ai-client` on its first line; the history route (`server/index.ts`)
+and the follow's opening snapshot (`server/follow.ts`) each call it and put the result on the wire.
+`Unknown` here is a deliberate hole, not an absence: the shape crosses with nothing to diff, so a
+partially-deployed change to it raises no schema error on either side. Of the two, only the history
+payload is read — `reviveHistoryMessages` (`thread-stores.ts:165-191`) restores the `Date` that JSON
+flattened and drops rows that cannot be UI messages, and `ThreadStores.history` is typed as the
+client's `UIMessage` (line 34). The snapshot's copy is written and read by nobody: the router's
+`snapshot` branch takes `permissionMode`, `openDialogs` and `generation` off the frame and never
+looks at `messages`. Not a vendor-of-the-loop leak and not numbered in goals §2, but it is where the
+state layer's shape exists outside the page, and a pivot pays for it (below).
 
-**The state layer's message shape crosses the history route.** `ZenThreadHistory.messages` is
-`unknown` on purpose — core must not own the client's transport shape — and `reviveHistoryMessages`
-(`thread-stores.ts:165-191`) restores it at the browser boundary; `ThreadStores.history` is typed as the
-client's `UIMessage` (line 34). The server builds those messages in `server/transcript-to-messages.ts`, the
-read-side twin of `to-agui.ts`. Not a vendor-of-the-loop leak and not numbered in goals §2, but it is
-the one place the state layer's shape exists outside the page, and a pivot pays for it (below).
+**Nothing else of the vendor kind.** The state layer (TanStack AI) and the stream vocabulary its
+processor consumes (AG-UI) are vendored by decision, not leaked: `architecture.md` → Presentation
+names the client as the state layer, and the glossary's vendor map carries both. Apart from the
+message shape above, their vocabulary is derived in memory, in the browser, and never on the wire or
+stored — `to-agui.ts:17-28` says where it runs (the adapter calls it on each observation before
+handing chunks to the client; *nothing serialises the output of this module and nothing stores it*),
+and its only production importer is `follow-connection.ts`.
 
 **Two vendored words are kept in the adapter by decision.** The glossary's Retired table keeps
 `chunk` and `step` legitimate in "the adapter that derives the state layer's stream" and nowhere
 else; `RecordedCustomEvent` and `ToolCallRow` are the names on our side.
+
+Ordered live-crossing-first on purpose: the bold lead of this section is the architecture table's leak
+column (`scripts/docs/seams-table.ts`), and this page used to open "nothing of the vendor kind" and
+admit the opposite three paragraphs later (#219).
 
 ## Pivot cost
 
@@ -252,12 +265,19 @@ Replace the state layer and the files that change are the adapter and its two ne
 `onCustomEvent` is the entry; the dispatch to stores stays), `to-agui.ts` (deleted — its header
 says so: *a renderer that stops speaking AG-UI deletes it and the adapter*), the chat factory in
 `chat-screen.tsx` (`threadChatOptions` and `createThreadChatHook`, lines 171-209, and the widget map
-written against the client's `ChatUIHost`), plus the history crossing: `ThreadStores.history`,
-`reviveHistoryMessages` and `server/transcript-to-messages.ts`, which produce the client's message shape today.
+written against the client's `ChatUIHost`), plus the message-shape crossing, which is seven sites and
+not three: `ThreadStores.history` and `reviveHistoryMessages` in the browser,
+`server/transcript-to-messages.ts` as the producer, its two callers in `server/follow.ts` (the follow
+snapshot) and `server/index.ts` (the history route), and the two schema fields that carry the result,
+`packages/core/src/follow.ts:35` and `packages/core/src/thread-inspection.ts:228`.
 The per-thread stores, the router's dispatch, and the fixture path are shaped by the thread, not the
 client, and survive.
 
 What does not change: the six ported components — the gate proves none imports a store, the
 connection, `@zen/core` or the client, so a state layer they have never seen cannot reach them — and
-every shape in `@zen/core`, because the wire carries observations and the client's vocabulary was
-only ever made in memory from them.
+every shape in `@zen/core` EXCEPT the two named above, because the wire otherwise carries observations
+and the client's stream vocabulary was only ever made in memory from them. `ZenThreadHistory.messages`
+and `ZenFollowSnapshot.messages` are the exception, and the cheapest kind to miss: their declarations
+need not change at all, since `Unknown` admits a new message shape as silently as the old one — which
+is why the pivot has to find their two producers and the reviver by hand, with no schema diff and no
+type error pointing at them.
