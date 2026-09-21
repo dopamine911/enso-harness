@@ -119,12 +119,22 @@ export function zenAgentDir(repoRoot: string): string {
  * runs from the repo root — so a root `.env` reaches a tool child no matter what the parent
  * scrubbed (verified with `env -i`).
  *
- * `.zen/` is git-ignored, write-protected (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`) and
- * read-denied on BOTH tool routes by the `/.zen/` fragment in
- * {@link core/src!DEFAULT_GUARD_POLICY | DEFAULT_GUARD_POLICY}: the reader gate for every tool carrying a path, and the
- * shell deny (#204) for a literal path word in `bash`/`powershell`. ⚠ The shell leg is a
- * bar, not a boundary — `shell-secret-paths.ts` states what a runtime-assembled name
- * still gets past.
+ * `.zen/` is git-ignored, write-protected (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`) and read-denied
+ * on BOTH tool routes by the `/.zen/` fragment in
+ * {@link core/src!DEFAULT_GUARD_POLICY | DEFAULT_GUARD_POLICY}: the reader gate for every tool
+ * carrying a path, and the shell deny (#204) for a literal path word in `bash`/`powershell`.
+ * ⚠ The shell leg is a bar, not a boundary — `shell-secret-paths.ts` states what a
+ * runtime-assembled name still gets past.
+ *
+ * ⚠ THE `core/src!` QUALIFIER IS LOAD-BEARING, and the obvious simplification does not work
+ * (#188). `guard.ts` is not imported here, so TypeScript's own link resolution — which TypeDoc
+ * prefers by default — has nothing in scope, and a bare `{@link DEFAULT_GUARD_POLICY}` is an
+ * unresolved link. The documented root-scoped form `{@link !DEFAULT_GUARD_POLICY}` does not
+ * help either: with several entry points, the PROJECT's children are the modules, not their
+ * symbols, so resolution from the root finds nothing. Tested, all three spellings. The module
+ * source is therefore named, which couples this link to the entry-point layout in
+ * `typedoc.json` — and that coupling breaks LOUDLY, because an unresolved link is a fatal
+ * warning in the `api-docs` gate.
  */
 export function zenSecretsPath(repoRoot: string): string {
   return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'secrets.env')
