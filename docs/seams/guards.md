@@ -253,10 +253,16 @@ the reasons, and the three hooks' responsibilities carry over as they are.
 `shell-segments.ts`, `environment-dump.ts`, `shell-secret-paths.ts`, `read-tracker.ts`,
 `tool-identity.ts` — take strings, paths and a cwd and return matches or states (`core/index.ts:13-43`);
 nothing in them imports the runtime, which the vendor gate holds for every file outside `extensions/`
-and the host. Their tests (`core/__tests__/paths.test.ts`, `network-egress.test.ts`,
+and the host across every source root the repo has — `packages/core/src`, `packages/web/src`,
+`packages/harness`, `packages/web/e2e`, `scripts` and `test`, `__tests__` directories included since
+#215. Their tests (`core/__tests__/paths.test.ts`, `network-egress.test.ts`,
 `environment-dump.test.ts`, `shell-secret-paths.test.ts`, `read-tracker.test.ts`) drive them without an
-extension. `packages/core/src/guard.ts` is data. The contract test pins the analyzer independently of
-any hook.
+extension — with one allowlisted exception, stated because the gate now sees it:
+`core/__tests__/paths.test.ts` DOES import the runtime, by
+`import.meta.resolve('@earendil-works/pi-coding-agent')`, to pin the replica of `resolveToCwd` and
+`normalizeWindowsShellPath` against pi's own `utils/paths.js` on every input. That import is the
+corpus, and it leaves when the replica does. `packages/core/src/guard.ts` is data. The contract test
+pins the analyzer independently of any hook.
 
 **Replace the analyzer** and `GuardDependencies` is the seam: one function `{ command, cwd } →
 { kind, reason, ruleId? }`, injected at `:186`; the contract test is rewritten for the new library,
