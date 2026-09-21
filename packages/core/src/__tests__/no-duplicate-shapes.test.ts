@@ -70,7 +70,7 @@ test('the schemas the rest of the repo depends on are actually exported', () => 
     'ThreadRuntime',
     'RuntimeCommand',
     'PromptImageContent',
-    'StreamingBehavior',
+    'ZenPromptAdmission',
   ]) {
     expect(core).toHaveProperty(name)
   }

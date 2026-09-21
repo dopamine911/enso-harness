@@ -22,7 +22,7 @@ export interface ScriptedFetch {
   readonly frame: (frame: ZenFollowFrame) => void
   /** End the follow body — the server went away. */
   readonly closeFollow: () => void
-  readonly prompts: Array<{ message: string; streamingBehavior?: string; images?: unknown[] }>
+  readonly prompts: Array<{ message: string; admission?: string; images?: unknown[] }>
   /** Every body `POST …/dialog` received — a second answer for the same id included (#275). */
   readonly dialogs: unknown[]
   /** Every body `POST …/mode` received (L3 step C). */
@@ -82,7 +82,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   let close: () => void = () => undefined
   /** The prompt route answers only once this resolves — open by default; a test may hold it. */
   let promptGate = { promise: Promise.resolve() } as { promise: Promise<void>; resolve?: () => void }
-  const prompts: Array<{ message: string; streamingBehavior?: string; images?: unknown[] }> = []
+  const prompts: Array<{ message: string; admission?: string; images?: unknown[] }> = []
   const dialogs: unknown[] = []
   const modeChanges: unknown[] = []
   /** Question ids the server has TAKEN an answer for — the shape of the real route's 404. */
@@ -126,9 +126,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   const threadActions: Record<string, (init: RequestInit | undefined) => Promise<Response>> = {
     follow: (): Promise<Response> => Promise.resolve(openFollow()),
     prompt: (init: RequestInit | undefined): Promise<Response> => {
-      prompts.push(
-        JSON.parse(String(init?.body)) as { message: string; streamingBehavior?: string; images?: unknown[] },
-      )
+      prompts.push(JSON.parse(String(init?.body)) as { message: string; admission?: string; images?: unknown[] })
       const body = typeof promptStatus.body === 'string' ? promptStatus.body : JSON.stringify(promptStatus.body)
       return promptGate.promise.then(() => new Response(body, { status: promptStatus.status }))
     },

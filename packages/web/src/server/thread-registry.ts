@@ -423,7 +423,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     // A stop must stop (PR #129 review): if clearing the queue throws — pi emits the
     // emptied queue to its listeners inside it — the texts are lost and said, and pi is
     // still told to abort. Never the other way round.
-    let cleared: { steering: string[]; followUp: string[] } = { steering: [], followUp: [] }
+    let cleared: { interrupting: string[]; enqueued: string[] } = { interrupting: [], enqueued: [] }
     try {
       cleared = thread.hosted.runtime.clearQueue()
     } catch (error: unknown) {
@@ -439,9 +439,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     log.info('run {generation} told to abort; {restored} queued prompt(s) handed back', {
       threadId,
       generation: thread.generation,
-      restored: cleared.steering.length + cleared.followUp.length,
+      restored: cleared.interrupting.length + cleared.enqueued.length,
     })
-    return { outcome: 'aborted', restored: [...cleared.steering, ...cleared.followUp] }
+    return { outcome: 'aborted', restored: [...cleared.interrupting, ...cleared.enqueued] }
   }
 
   function leaseOf(threadId: string, thread: ThreadEntry): ThreadLease {

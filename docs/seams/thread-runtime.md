@@ -80,12 +80,12 @@ export const ThreadRuntime = Type.Object({
   /** Abort the in-flight run and wait until the agent is idle. The session survives. */
   abort: Type.Unsafe<() => Promise<void>>(Type.Function([], Type.Unknown())),
   /**
-   * Drop every prompt waiting behind the run and return the texts, steering first (#75,
-   * clear-and-restore): pi's `AgentSession.clearQueue()`, which also emits the
-   * `queue_update` every follower reads. The stop route hands the texts back to the tab
-   * that stopped, so nothing typed is lost and nothing runs unasked on the next turn.
+   * Drop every prompt waiting behind the run and return the texts, interrupting first (#75,
+   * clear-and-restore): the runtime also emits the queue observation every follower reads.
+   * The stop route hands the texts back to the tab that stopped, so nothing typed is lost and
+   * nothing runs unasked on the next turn. ZEN's two words (#216) — the host maps them.
    */
-  clearQueue: Type.Unsafe<() => { steering: string[]; followUp: string[] }>(Type.Function([], Type.Unknown())),
+  clearQueue: Type.Unsafe<() => { interrupting: string[]; enqueued: string[] }>(Type.Function([], Type.Unknown())),
   /** Cancel pending dialogs, tell extensions the session is shutting down, release the session. Idempotent. */
   dispose: Type.Unsafe<() => void>(Type.Function([], Type.Void())),
 })
@@ -98,8 +98,8 @@ What crosses it inward — a prompt and what admission reports back:
 export interface PromptRequest {
   message: string
   images?: readonly PromptImageContent[]
-  /** Required by pi when the session is already streaming — otherwise `prompt` rejects. */
-  streamingBehavior?: StreamingBehavior
+  /** How the runtime should take it when a run is already streaming; the host maps it. */
+  admission?: ZenPromptAdmission
 }
 ```
 
@@ -113,10 +113,24 @@ export interface PromptOutcome {
 }
 ```
 
-<!-- source: packages/core/src/thread-runtime.ts#StreamingBehavior -->
+<!-- source: packages/core/src/thread-runtime.ts#ZenPromptAdmission -->
 ```ts
-/** What to do when a prompt arrives while the agent is already streaming. */
-export const StreamingBehavior = Type.Union([Type.Literal('steer'), Type.Literal('followUp')])
+/**
+ * What to do when a prompt arrives while the agent is already streaming — ZEN's two words,
+ * not the runtime's (#216).
+ *
+ * ⚠ IT WAS `StreamingBehavior = 'steer' | 'followUp'`: pi's own option name and pi's own
+ * literals, declared as a Zen schema and published on `ZenPromptBody`, so the vendor's model
+ * was the only vocabulary the wire accepted — and `docs/seams/thread-runtime.md` said the
+ * opposite in the same breath. The vendor gate cannot see that class of leak: no import, no
+ * vendor word. pi's spelling is produced in ONE place now, `host/agent-host.ts`, which is
+ * where a vendor word belongs; a runtime that admits prompts differently becomes a host
+ * change, which is this seam's whole promise.
+ *
+ * `interrupt` — take the prompt at the next step boundary. `enqueue` — after the run settles.
+ * Two because the runtime has two; a third is a literal here and a mapping there.
+ */
+export const ZenPromptAdmission = Type.Union([Type.Literal('interrupt'), Type.Literal('enqueue')])
 ```
 
 <!-- source: packages/core/src/thread-runtime.ts#PromptImageContent -->
@@ -233,21 +247,27 @@ same one builder with its four consumers.
 
 ## What crosses it that should not
 
-**The steer/follow-up dichotomy is the runtime's, and it does not stop at this seam.**
-`StreamingBehavior` (`thread-runtime.ts` line 38) is declared as a Zen schema whose two literals are
-pi's own words, with pi's rule attached to the field that carries it: `PromptRequest.streamingBehavior`
-is "required by pi when the session is already streaming". It is then a field of `ZenPromptBody`
-(`packages/core/src/follow.ts:137`), the declared body of `POST /api/threads/:id/prompt` — so the
-browser's `prompt()` sends the literal `followUp` (`follow-connection.ts`), `promptThread` defaults to
-the same literal when the body omits it (`server/follow.ts`), the thread route forwards it
-(`server/index.ts`), and the host hands the string verbatim to the runtime's `prompt` option of the
-same name (`agent-host.ts:471`). `ZenPromptBody` is closed, so a Zen-owned word — `interrupt`,
-`enqueue` — is a 400 today: pi's vocabulary is not merely carried across the wire, it is the only
-vocabulary the wire accepts. Outbound it is the same dichotomy: `ZenQueue.steering` / `.followUp` on
-the follow's SSE stream, and `clearQueue` returning `{ steering, followUp }` from pi's
-`AgentSession.clearQueue()`. See `observation.md` → *What crosses it that should not* for the queue
-half. The vendor gate cannot see any of it — no import, no vendor word — and #216 is the open
-question of whether to rename it.
+**The admission vocabulary is ours now, and the mapping is one table (#216, closed).** It was not:
+`StreamingBehavior = 'steer' | 'followUp'` was pi's own option name and pi's own literals, declared
+as a Zen schema and published on `ZenPromptBody` — and because that body is closed, a Zen-owned word
+was a 400. The vendor's model was not merely carried across the wire, it was **the only vocabulary
+the wire accepted**, while this page's last line said the opposite. The vendor gate could not see it:
+no import, no vendor word.
+
+What replaced it: `ZenPromptAdmission = 'interrupt' | 'enqueue'` (`thread-runtime.ts`),
+`ZenPromptBody.admission` on the wire, `ZenQueue.interrupting` / `.enqueued` on the follow's SSE
+stream, and `clearQueue` returning `{ interrupting, enqueued }`. pi's two spellings are produced in
+exactly two places, both under `host/`: `agent-host.ts#STREAMING_BEHAVIOR_OF` inbound (whose value
+type is pi's own `PromptOptions['streamingBehavior']`, so a vendor rename is a compile error in the
+table) and `map-events.ts` outbound, where `queue_update`'s `steering`/`followUp` are read. A runtime
+that admits prompts differently is a literal in `@zen/core` and a row in that table.
+
+⚠ It is a BREAKING wire change, deliberately and once: `ZenPromptBody` is closed and its union is
+closed, so there was no overlap window in either direction — an old tab posting `followUp` gets a 400
+against the new server exactly as a new tab posting `enqueue` would have against the old one. The
+alternative was to delete the field (no consumer uses the distinction: `steer` was sent by nothing,
+and the two queue lists are concatenated on arrival), but that removes the HTTP steering #75 exposed
+on purpose, so the rename preserves the capability and leaves that decision open.
 
 **`listCommands` returns the runtime's command entries** (`RuntimeCommand`: name, source,
 description). The shape is ours by declaration; its `source` values are the runtime's categories
@@ -277,13 +297,10 @@ loop's typed events directly and retire the replicated wire shape), `extension-u
 `permission-dialog.ts` (or their equivalents, if the new loop has extensions and questions at all).
 The server, the registry, the routes, the follow, the browser and every test that drives the server
 over the fake do not change — that is what the fake proves today, and it is the whole point of the
-seam — with ONE exception: the steer/follow-up vocabulary named above. A runtime with no such
-distinction, or with one queue class or three, invalidates `StreamingBehavior`, `ZenQueue` and
-`ZenPromptBody.streamingBehavior` in `@zen/core`; the prompt route's default and its `PromptBody`
-type; the thread route that forwards it; the browser's send and the queue store the router fills; and
-the mapper under `host/`. Measured on `main`: 13 production files and 11 test files name
-`streamingBehavior`, `StreamingBehavior` or the queue's `steering`/`followUp` — all four tokens over
-`packages/` and `scripts/`, counting SOURCE only, since `dist-types/` carries a generated copy of the
-same declarations and would report seven more (PR #297 review reproduced the count and got a different
-number from a narrower token set; the recipe is here so the next reader gets this one).
-That is a wire-schema change and a browser change, and it is priced here rather than at zero.
+seam. The steer/follow-up exception this section used to carry is gone with #216: a runtime with no
+such distinction, or with one queue class or three, is now `ZenPromptAdmission`'s literals, the two
+host-side tables that map them, and whatever the page renders — not the wire schema, not the prompt
+route, not the browser's send. The rename itself cost 24 files (13 production, 11 test) plus five doc
+pages, measured over `packages/` and `scripts/`, SOURCE only — `dist-types/` carries a generated copy
+of the same declarations and would report seven more (PR #297 review reproduced the old count from a
+narrower token set; the recipe is here so the next reader gets the same number).

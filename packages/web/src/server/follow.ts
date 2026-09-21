@@ -4,12 +4,12 @@ import {
   type DialogAnswer,
   isWholeBase64,
   type PromptImageContent,
-  type StreamingBehavior,
   validateDialogAnswer,
   ZEN_IMAGE_MAX_BYTES,
   type ZenAbortReceipt,
   type ZenFollowFrame,
   ZenPermissionModeChange,
+  type ZenPromptAdmission,
   ZenPromptBody,
   type ZenPromptReceipt,
   zenLogger,
@@ -71,7 +71,7 @@ export interface FollowRouteDeps {
 
 export interface PromptBody {
   readonly message: string
-  readonly streamingBehavior?: StreamingBehavior
+  readonly admission?: ZenPromptAdmission
   /** Attached images (#68), already in pi's shape; absent — not empty — when the prompt has none. */
   readonly images?: readonly PromptImageContent[]
 }
@@ -199,7 +199,7 @@ export function readPromptBody(raw: string): PromptBody {
   })
   return {
     message: parsed.message,
-    ...(parsed.streamingBehavior === undefined ? {} : { streamingBehavior: parsed.streamingBehavior }),
+    ...(parsed.admission === undefined ? {} : { admission: parsed.admission }),
     ...(images === undefined ? {} : { images }),
   }
 }
@@ -208,7 +208,7 @@ export function readPromptBody(raw: string): PromptBody {
  * Fire a prompt and answer at admission.
  *
  * A BUSY thread (a run in flight, or a dialog the follow is showing) is not refused and
- * not acquired again: the message goes to pi with a streaming behaviour (`followUp` unless
+ * not acquired again: the message goes to the runtime with an admission (`enqueue` unless
  * the caller asked to `steer`), which is #75's decision. The run in flight keeps its lease;
  * its `settled` releases the thread once everything queued has run.
  *
@@ -230,7 +230,7 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
     live.hosted.runtime.prompt(
       {
         message: body.message,
-        streamingBehavior: body.streamingBehavior ?? 'followUp',
+        admission: body.admission ?? 'enqueue',
         ...(body.images === undefined ? {} : { images: body.images }),
       },
       { onAccepted: () => undefined, onRejected: rejected },
@@ -262,7 +262,7 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
   lease.runtime.prompt(
     {
       message: body.message,
-      ...(body.streamingBehavior === undefined ? {} : { streamingBehavior: body.streamingBehavior }),
+      ...(body.admission === undefined ? {} : { admission: body.admission }),
       ...(body.images === undefined ? {} : { images: body.images }),
     },
     {

@@ -338,13 +338,13 @@ test("pi's turn boundaries cross with the tool-result count, not the results", (
 test('queue_update crosses with the texts, in order; a non-string entry is dropped, an absent list is empty (#75)', () => {
   expect(mapPiEvent({ type: 'queue_update', steering: ['a'], followUp: ['b', 'c'] })).toEqual({
     kind: 'queue',
-    steering: ['a'],
-    followUp: ['b', 'c'],
+    interrupting: ['a'],
+    enqueued: ['b', 'c'],
   })
   expect(mapPiEvent({ type: 'queue_update', steering: [1, 'x'], followUp: undefined })).toEqual({
     kind: 'queue',
-    steering: ['x'],
-    followUp: [],
+    interrupting: ['x'],
+    enqueued: [],
   })
 })
 

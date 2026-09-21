@@ -44,7 +44,7 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * Send a prompt while a run is in flight (#75). ⚠ Not `chat.sendMessage`: TanStack holds a
    * send in its own queue while the run it started is open, and delivers it at settle — the
    * browser's queue, invisible to other tabs and lost on reload. This POSTs now with
-   * `streamingBehavior: followUp`, so pi queues it and every follower sees it.
+   * `admission: enqueue`, so the runtime queues it and every follower sees it.
    */
   readonly prompt: (text: string, images?: readonly ZenPromptImage[]) => Promise<PromptOutcome>
   /**
@@ -168,7 +168,7 @@ export interface ThreadStores {
    */
   readonly disconnected: WritableStore<boolean>
   /**
-   * What waits behind the run in flight, as pi holds it (#75): the texts, steering first,
+   * What waits behind the run in flight (#75): the texts, the interrupting ones first,
    * from every `queue` frame — one list for every follower, so a second tab sees what
    * the first queued. Empty when nothing waits. Rendered above the composer; a stop hands
    * these back to the composer through the abort receipt, not from here (the frame that

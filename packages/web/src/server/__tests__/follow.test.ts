@@ -287,11 +287,11 @@ test('⚠ POST …/abort tells pi once and answers with the restored queue; the 
   expect((await abortWith('never')).status).toBe(404)
   await prompt(url, 't1', 'hello')
   await follow.untilFrames(3)
-  // Two prompts wait behind the run (pi's queue); the stop hands them back, steering first.
+  // Two prompts wait behind the run; the stop hands them back, the interrupting one first.
   const built = fake.built[0]
   if (built === undefined) throw new Error('no session built')
-  built.queue.followUp.push('then this')
-  built.queue.steering.push('wait — stop at the tests')
+  built.queue.enqueued.push('then this')
+  built.queue.interrupting.push('wait — stop at the tests')
   const told = await abortWith('t1')
   expect(told.status).toBe(200)
   expect(await told.json()).toEqual({ threadId: 't1', restored: ['wait — stop at the tests', 'then this'] })
@@ -299,7 +299,7 @@ test('⚠ POST …/abort tells pi once and answers with the restored queue; the 
   // Both outcomes are records: the 404 above named its thread; the stop names what it handed back.
   logs.assertLogged({ level: 'warning', rawMessage: /^abort refused/, properties: { threadId: 'never', status: 404 } })
   logs.assertLogged({ level: 'info', rawMessage: /^abort: queue of/, properties: { threadId: 't1', restored: 2 } })
-  expect(built.queue).toEqual({ steering: [], followUp: [] })
+  expect(built.queue).toEqual({ interrupting: [], enqueued: [] })
   // The route released nothing: the thread is still busy until pi's own settle arrives.
   expect(await threadSummary(url, 't1')).toMatchObject({ busy: true, generation: 1 })
   // Every follower saw the queue empty (pi's queue_update from clearQueue), then the settle.
@@ -307,7 +307,7 @@ test('⚠ POST …/abort tells pi once and answers with the restored queue; the 
   expect(follow.frames[3]).toEqual({
     type: 'observation',
     seq: 1,
-    observation: { kind: 'queue', steering: [], followUp: [] },
+    observation: { kind: 'queue', interrupting: [], enqueued: [] },
   })
   fake.emit(SETTLED)
   await follow.untilFrames(6)
@@ -664,7 +664,7 @@ test('⚠ a cancellation is a value, not a key: `cancelled: false` carrying an u
 
 // ── 5. a busy thread queues through pi (#75) ──────────────────────────────────────────
 
-test('a prompt on a busy thread is queued through pi as a followUp, not refused and not re-acquired', async () => {
+test('a prompt on a busy thread is enqueued through the runtime, not refused and not re-acquired', async () => {
   const fake = fakeHost()
   const url = await startWith(fake)
   const first = await prompt(url, 't1', 'one')
@@ -672,8 +672,28 @@ test('a prompt on a busy thread is queued through pi as a followUp, not refused 
   const second = await prompt(url, 't1', 'two')
   expect(second.status).toBe(202)
   expect(second.body).toMatchObject({ generation: 1, queued: true })
-  expect(fake.built[0]?.prompts).toEqual([{ message: 'one' }, { message: 'two', streamingBehavior: 'followUp' }])
+  expect(fake.built[0]?.prompts).toEqual([{ message: 'one' }, { message: 'two', admission: 'enqueue' }])
   expect(await threadSummary(url, 't1')).toMatchObject({ busy: true, generation: 1 })
+})
+
+// ⚠ The record on the BUSY path, which is the one nothing asserted (PR #326 review). Two facts
+// are logged here — what the SERVER did (`queued`) and what the CLIENT asked for (`enqueue`) —
+// and #216's rename briefly gave both the key `admission`, so the object literal's spread
+// silently overwrote the outcome on every prompt typed while a run is in flight. The idle-path
+// assertion above could not see it: there is no requested admission to collide with when the
+// thread is idle, which is exactly why the coverage read as complete and was not.
+test('⚠ the queued prompt records BOTH what the server did and what the client asked for (#132, #216)', async () => {
+  const fake = fakeHost()
+  const url = await startWith(fake)
+  await prompt(url, 't1', 'one')
+  logs.clear()
+  const queuedPrompt = await promptWith(url, 't1', { message: 'two', admission: 'enqueue' })
+  expect(queuedPrompt.status).toBe(202)
+  logs.assertLogged({
+    level: 'info',
+    rawMessage: 'prompt {messageId} {admission} on run {generation}',
+    properties: { threadId: 't1', generation: 1, admission: 'queued', requestedAdmission: 'enqueue' },
+  })
 })
 
 // ── 7. two threads are two feeds (#103 invariant 1) ────────────────────────────────
@@ -801,7 +821,7 @@ test('[WARN] a text-only prompt has NO images key (the committed shape), and ima
   expect(queued.status).toBe(202)
   expect(fake.built[0]?.prompts[1]).toEqual({
     message: 'and this',
-    streamingBehavior: 'followUp',
+    admission: 'enqueue',
     images: [{ type: 'image', mimeType: 'image/webp', data }],
   })
 })

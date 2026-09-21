@@ -519,11 +519,11 @@ page's own lead sentence, so it cannot say a leak is open after the page says it
 | [the dialog vocabulary](./seams/dialog.md) | Control | extension-UI-context tests | The four kinds are the runtime's extension-UI method names — kept, by decision. |
 | [the guards](./seams/guards.md) | Permission | `tool-call-participants`; analyzer contract test | L5 — the tool names are the runtime's, and the guard is the runtime's extension. |
 | [logging](./seams/logging.md) | Record | logging gate | The substrate is vendored, by decision, and it shows in exactly three files. |
-| [the observation vocabulary](./seams/observation.md) | Observation | kinds sweeps over `@zen/core/observation-kinds`; `observations.md` generated | `ZenQueue` is the runtime's model in our schema. |
+| [the observation vocabulary](./seams/observation.md) | Observation | kinds sweeps over `@zen/core/observation-kinds`; `observations.md` generated | `ZenQueue` keeps the runtime's SHAPE, under our words (#216). |
 | [the permission mode](./seams/permission-mode.md) | Permission | vendor gate; `code-offenders` stale-row check | Nothing. |
 | [presentation](./seams/presentation.md) | Surface | presentation gate; `ported-provenance.md` generated | The state layer's message shape crosses two wire payloads. |
 | [storage](./seams/storage.md) | Thread, Record | `no-duplicate-paths`; boundaries (the forbidden-call rule) | Nothing of the runtime's persistence format, since L2 |
-| [the thread runtime](./seams/thread-runtime.md) | Thread, Control | vendor gate; glossary gate; boundaries | The steer/follow-up dichotomy is the runtime's, and it does not stop at this seam. |
+| [the thread runtime](./seams/thread-runtime.md) | Thread, Control | vendor gate; glossary gate; boundaries | The admission vocabulary is ours now, and the mapping is one table (#216, closed). |
 | [the tool result descriptor](./seams/tool-result.md) | Surface | — | Nothing of ours leaks. |
 | [web providers](./seams/web-providers.md) | Permission (egress), Control | vendor gate | Nothing of the runtime's, since L6 closed (#162). |
 <!-- /generated-block -->

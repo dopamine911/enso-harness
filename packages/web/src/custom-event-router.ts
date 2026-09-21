@@ -144,8 +144,8 @@ function routeObservation(stores: ThreadStores, observation: ZenObservation): vo
       if (observation.usage !== undefined) stores.stats.applyUsage(observation)
       return
     case 'queue':
-      // pi's queue, whole (#75): steering first, then follow-ups.
-      stores.queue.set([...observation.steering, ...observation.followUp])
+      // The whole queue (#75): what cuts in first, then what waits its turn.
+      stores.queue.set([...observation.interrupting, ...observation.enqueued])
       return
     default:
       // Recorded above; rendered by nothing. `custom-entry` since L3, `unmapped` by design.

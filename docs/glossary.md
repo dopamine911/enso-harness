@@ -120,10 +120,11 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
   method also says *receipt run* for a repeatable verification with evidence — see project vocabulary.)
 - **prompt-rejected** — an observation, not an HTTP error: the runtime refused a prompt after admission,
   named by `messageId`, with its reason.
-- **streaming behavior** — what a prompt asks for when a run is already in flight: **steer** (enter at
-  the next turn boundary) or **follow-up** (wait for settle). Required then; rejected otherwise.
-- **queue** — the prompts waiting behind the run in flight, as the runtime holds them: steering first,
-  then follow-ups. An observation every follower sees; the list above the composer.
+- **admission** — what a prompt asks for when a run is already in flight: **interrupt** (enter at the
+  next turn boundary) or **enqueue** (wait for settle). Required then; rejected otherwise. Zen's two
+  words since #216; the runtime's own pair is produced under `host/` and nowhere else.
+- **queue** — the prompts waiting behind the run in flight: the interrupting ones first, then the
+  enqueued. An observation every follower sees; the list above the composer.
 - **abort, stop** — by thread, not by lease (#116): "whatever runs now". Clears the queue first and hands
   the texts back — **clear-and-restore** (#75): to the tab that stopped, never delivered unasked on the
   next turn, never dropped. Settle still ends the run.
@@ -371,7 +372,7 @@ outside the two vendor roots. *Legitimate* names where the old word may still ap
 `packages/web/src/host/` and `packages/harness/extensions/`, the vendor map, the three log-locating
 fields, and the gate that spells the words in order to refuse them. The `Pi*` names of the thread
 runtime's own shapes (`PiPromptRequest`, `PiRpcEvent`, …) went with them — goals L1 — to `PromptRequest`,
-`RuntimeEvent`, `RuntimeCommand`, `DialogAnswer`, `StreamingBehavior`, `PromptImageContent`,
+`RuntimeEvent`, `RuntimeCommand`, `DialogAnswer`, `ZenPromptAdmission`, `PromptImageContent`,
 `ZenPermissionModeState`. `RuntimeEvent` and `EventDelivery` left `@zen/core` with L2 (#162
 workstream 4): the runtime's event and stored-entry shapes are read only under `host/`
 (`runtime-event.ts`, `map-events.ts`, `transcript.ts`), where the `Pi*` prefix is allowed to say so.
@@ -433,7 +434,7 @@ cc-safety-net, the command analyzer the bash guard wires as a library. *log subs
 | frame / snapshot / asOfSeq | — | `follow()` snapshot frame; `asOfSeq` projection watermark | — | — |
 | follow | — | `follow(address)` | `SubscribeConnectionAdapter.subscribe` | — |
 | prompt / receipt | `prompt()` | `prompt()` unary → `{ messageId }` | `SubscribeConnectionAdapter.send` | — |
-| steer / follow-up | `streamingBehavior`: `steer` or `followUp`; `steer()` / `follow_up()` | inbox `next-step` / `next-turn` | — | — |
+| admission (#216) | `streamingBehavior`: `steer` or `followUp`; `steer()` / `follow_up()` | inbox `next-step` / `next-turn` | — | — |
 | queue | `queue_update`, `clearQueue()` | inbox `claimed` / `discarded` | the browser queue we do **not** use | — |
 | dialog / dialog kind | `extension_ui_request`; `ctx.ui.select / confirm / input / editor` | approval `request()` inside a turn | — | mode extension's `FilePermissionDialog`, lifted to `select` |
 | notify | `ctx.ui.notify`; `setStatus` is dropped | — | — | — |
