@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 162.**
+**Decision headers: 165.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -36,7 +36,9 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/web-search.ts` | `#63` | The web_search tool's shapes and config section (#63). |
 | `packages/harness/core/__tests__/environment-dump.test.ts` | `#89` | #89's depth layer: the bash environment-dump deny. |
 | `packages/harness/core/__tests__/paths.test.ts` | `#53` | ⚠ FAIL CLOSED (#53 S3): no roots means nothing is inside — a misconfigured policy with an empty root list must deny, not allow, every write. |
+| `packages/harness/core/__tests__/shell-fixtures.ts` | `#261`, `#289` | Shell-shaped literals the scanner tests write, in one place (#261, PR #289 review). |
 | `packages/harness/core/__tests__/shell-secret-paths.test.ts` | `#204` | The bash/powershell secret-path deny (#204). |
+| `packages/harness/core/__tests__/shell-segments.test.ts` | `#9`, `#89`, `#261` | The tokenizer's own contract (#261) — the parsing floor under the network deny (#9) and the environment-dump deny (#89), pinned directly instead of transitively. |
 | `packages/harness/core/__tests__/web-fetch-policy.test.ts` | `#54`, `#55` | web_fetch's pure policy (#54). |
 | `packages/harness/core/__tests__/web-search-model-providers.test.ts` | `#63` | The google and openai providers (#63) against synthetic wire fixtures. |
 | `packages/harness/core/__tests__/web-search-support.test.ts` | `#63` | The web_search support layer (#63): source hygiene, citation appliers, auth, Tavily. |
@@ -138,6 +140,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/thread-url.ts` | `#95`, `#142` | The thread a page URL names (#142): `?thread=<id>`. |
 | `packages/web/src/threads-rail.tsx` | `#90`, `#95`, `#104` | The threads rail (#90 PR 3): which conversation am I in, what else is live on this page, how do I start over. |
 | `packages/web/src/to-agui.ts` | `#18`, `#24`, `#112` | `ZenObservation` → AG-UI `StreamChunk` (#24, #112). |
+| `scripts/__tests__/pi-version-parity.test.ts` | `#69`, `#217` | THE TWO PI RESOLUTIONS, HELD TOGETHER (#217). |
 | `scripts/__tests__/zen-launch.test.ts` | `#221` | The terminal launcher's decisions (docs/flows/boot-and-launchers.md, stated gap: `zen.mjs` had no test of its own). |
 | `scripts/__tests__/zen-logs.test.ts` | `#132` | The reader's own logic (#132, `bun run logs`): the flags, and what a line must be to print. |
 | `scripts/check-coverage.ts` | `#49`, `#118` | The TOTAL coverage floor — the gate that bunfig.toml cannot express. |
@@ -153,10 +156,10 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/link-vendor-packages.mjs` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
 | `scripts/print-harness.mjs` | `#9`, `#13`, `#20` | The PRINT-MODE harness variant (#20): the zen-harness package minus picc-permission-modes. |
 | `scripts/source-tree.ts` | `#162`, `#174` | The one walk over the source tree (#174, #162 workstream 6: one walker per gate family). |
-| `scripts/zen-launch.mjs` | `#221` | The terminal launcher's decisions, apart from the launch (`zen.mjs` spawns; this decides): the isolation triple as pi's arguments and the print-run trigger. |
+| `scripts/zen-launch.mjs` | `#221` | The terminal launcher's decisions, apart from the launch (`zen.mjs` spawns; this decides): the isolation triple as pi's arguments, the print-run trigger, and whether the pi it is about to spawn is one the guard was pinned against. |
 | `scripts/zen-logs.ts` | `#132` | See the log (#132): the day's file, rendered the way the terminal renders it live. |
 | `scripts/zen-thread.mjs` | `#86`, `#97` | Inspect the live web server's threads from a shell — the agent's half of #86. |
-| `scripts/zen.mjs` | `#20` | Launch a VANILLA pi with only zen-harness loaded. |
+| `scripts/zen.mjs` | `#20`, `#217` | Launch a VANILLA pi with only zen-harness loaded. |
 | `test/browser-bundle-gate.test.ts` | `#211` | The browser zone must bundle for the browser (#211). |
 | `test/check-coverage.test.ts` | `#53` | The coverage GATE's own arithmetic (#53 S2). |
 | `test/code-offenders.test.ts` | `#162` | The allowlist is the leak inventory (#162 workstream 4): a row hides a file's matches, and a row for a file with no matches is drift and is reported. |
