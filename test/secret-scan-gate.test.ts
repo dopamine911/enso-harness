@@ -132,3 +132,45 @@ test('⚠ the secret gate still walks a secret a merge resolution REMOVED (#209)
   // does not carry a line the resolution deleted: the secret would be scanned by nothing.
   expect(walked).toContain(MARKER)
 })
+
+/**
+ * THE CONFIG THE SCAN ACTUALLY USES, and the one line whose absence is invisible (#209).
+ *
+ * gitleaks auto-detects `.gitleaks.toml` at the repository root and that file REPLACES the
+ * default ruleset, so adding one moves the workflow onto its `if` branch: the baseline it
+ * writes for a config-less repository stops being applied. Two failures follow from that, and
+ * neither is visible in a diff:
+ *
+ *   1. A config without `[extend] useDefault = true` disables EVERY built-in rule. The scan
+ *      then exits 0 on a repository full of secrets and reads as a clean result — the one
+ *      failure mode where a green gate is worse than no gate.
+ *   2. A config whose allowlist is narrower than the baseline re-opens the false positives the
+ *      baseline exists to settle, and the fix people reach for under a red check is deleting
+ *      the rule rather than the pattern.
+ *
+ * So: the file exists, it extends the defaults, and it allows everything the baseline allowed.
+ */
+const REPOSITORY_CONFIG = '.gitleaks.toml'
+
+/** The quoted `'''…'''` patterns of a TOML allowlist, in order. */
+function allowlistPatterns(toml: string): string[] {
+  const block = /regexes\s*=\s*\[([\s\S]*?)\n\s*\]/.exec(toml)?.[1]
+  if (block === undefined) throw new Error('no `regexes = [...]` allowlist to read')
+  return [...block.matchAll(/'''([\s\S]*?)'''/g)].map((pattern) => pattern[1] ?? '')
+}
+
+test('⚠ the repository gitleaks config extends the defaults — without it every rule is off (#209)', () => {
+  const config = readFileSync(join(REPOSITORY_ROOT, REPOSITORY_CONFIG), 'utf8')
+  // Not a substring check on the words: the assignment, with `useDefault` true and not commented.
+  expect(/^\s*\[extend\]\s*\n\s*useDefault\s*=\s*true\s*$/m.test(config)).toBe(true)
+})
+
+test('⚠ the repository allowlist keeps every pattern the workflow baseline had (#209)', () => {
+  const config = allowlistPatterns(readFileSync(join(REPOSITORY_ROOT, REPOSITORY_CONFIG), 'utf8'))
+  // The baseline lives in the workflow's heredoc, and is only applied when no config exists —
+  // which is why it is read from there rather than restated here: one source, both branches.
+  const workflow = readFileSync(join(REPOSITORY_ROOT, WORKFLOW), 'utf8')
+  const baseline = allowlistPatterns(workflow.slice(workflow.indexOf('[extend]')))
+  expect(baseline.length).toBeGreaterThan(0)
+  expect(config).toEqual(expect.arrayContaining(baseline))
+})
