@@ -137,13 +137,25 @@ function routeObservation(stores: ThreadStores, observation: ZenObservation): vo
  * `notify` is a message meant for a human. The adapter has already dropped what is
  * addressed to a terminal and turned an unreadable blocking request into a run error, so
  * what reaches here is one of those two.
+ *
+ * ⚠ THE OLDEST QUESTION HOLDS THE SLOT (#271). The host genuinely holds several questions
+ * at once (`host/extension-ui-context.ts`'s `Map`, oldest first) and a snapshot — the only
+ * thing that replaces the slot wholesale — arrives once, when a follow opens. So a second
+ * live ask that overwrote the slot would make the question being read vanish mid-read and,
+ * once the newer one was answered, leave the page blank while pi stayed parked on a
+ * question it no longer rendered. Holding costs the reverse and less: the newer question
+ * waits on the server, unrendered until the next snapshot lists it — which is exactly what
+ * `ThreadStores.dialog` says this page does.
  */
 function routeUiRequest(stores: ThreadStores, observation: ZenObservation & { kind: 'extension-ui-request' }): void {
   if (observation.blocking) {
     const open = { id: observation.id, dialog: observation.dialog }
-    if (Check(ZenOpenDialog, open)) stores.dialog.set(open)
-    else
+    if (!Check(ZenOpenDialog, open)) {
+      // Said even when a card is up: the unreadable question is parked on the server either way.
       stores.notifications.push('pi asked a question this page could not read; it was left unanswered', 'error', 'run')
+      return
+    }
+    if (stores.dialog.get() === undefined) stores.dialog.set(open)
     return
   }
   // A notify without a message has nothing for a human; the schema already validated the
