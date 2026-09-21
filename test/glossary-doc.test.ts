@@ -105,6 +105,14 @@ test('every in-page link resolves to a heading', () => {
 /**
  * A count the glossary states in prose, and the generated table it is read off. `regionStart` is
  * the line opening that table's region: a heading, or the marker of the block a generator fills.
+ * It is matched WHOLE, so a heading reworded on the far page fails here rather than counting the
+ * wrong table — and the failure below names the constant to re-point (PR #307 review).
+ *
+ * ⚠ **leak** is deliberately absent. L1–L6 is a closed historical enumeration with no generated
+ * table behind it — the *Leak numbers* section of `docs/seams/README.md` is hand-written, and a
+ * seventh leak is not something a generator would learn about. Counting it here would pin prose
+ * against prose, which says nothing. `gate` and `seam` are censuses of tables a generator fills
+ * from the tree, which is exactly what drifts.
  */
 interface Census {
   /** The project-vocabulary entry that states the count. */
@@ -170,7 +178,9 @@ function entryOf(word: string): { text: string; line: number } | undefined {
 function tableRowCount(page: string, regionStart: string): number | string {
   const source = readFileSync(join(import.meta.dir, '..', page), 'utf8').split('\n')
   const start = source.indexOf(regionStart)
-  if (start < 0) return `${page}: no line reads "${regionStart}"`
+  // Names the constant, not just the miss: a reworded heading on the far page is the usual
+  // cause, and re-pointing `CENSUSES[…].regionStart` is the usual fix (PR #307 review).
+  if (start < 0) return `${page}: no line reads "${regionStart}" — re-point CENSUSES[…].regionStart`
   const table: string[] = []
   for (const line of source.slice(start + 1)) {
     if (line.startsWith('## ') || line === '<!-- /generated-block -->') break
