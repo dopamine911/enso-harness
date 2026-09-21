@@ -7,7 +7,7 @@ how to use it. It does not repeat the inventory.
 
 ## One definition of green
 
-`bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Five gates, in order, stopping
+`bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Seven gates, in order, stopping
 at the first failure:
 
 1. **Biome** — formatting, lint, import organisation and the repository naming plugin, check-only.
@@ -33,6 +33,14 @@ at the first failure:
 4. **Bun test** — the complete test tree, with text and LCOV coverage reporters.
 5. **Aggregate coverage** — `scripts/check-coverage.ts` reads LCOV and enforces the total line and
    function floors. The current values are generated under *Ratchets* in the inventory.
+6. **API docs** — `typedoc` over both barrels with `treatWarningsAsErrors` (#188). TypeDoc's warnings
+   *are* documentation drift — a `{@link}` whose target was renamed, a type a documented signature
+   exposes but nothing exports — and none of them is visible to `tsc`. It writes the HTML the site
+   serves, so the API reference is built once, by the step that owns it.
+7. **Site** — projects `docs/` into the Starlight site, builds it, then crawls every built page for
+   dead internal links (#188). **The build is not the check.** `astro build` reported success over 139
+   dead links on the first run, because a page's `./routes.md` and `../../packages/…#L47` are both
+   correct on GitHub and both 404 as routes; `scripts/docs/site-links.ts` is what notices.
 
 The local pre-commit hook (`.githooks/pre-commit`) and the blocking CI job
 (`.github/workflows/ci.yml`) call that same script. The hook runs it over the snapshot being
@@ -42,7 +50,7 @@ two exceptions are `git commit -a` and `git commit -- <path>`, where git hands t
 temporary index; there it gates the working tree and says so on the first line of its output.
 CI adds independent jobs or advisory steps — secret
 scan, automated review, React Doctor, `fallow audit` over the changed files — but none replaces the
-five-step gate. A green editor or a
+seven-step gate. A green editor or a
 single test is not repository green.
 
 `test/coverage-manifest.test.ts` closes Bun's denominator hole: Bun reports coverage only for files a

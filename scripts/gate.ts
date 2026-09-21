@@ -33,7 +33,12 @@
  *   6. api-docs  — `typedoc`: the owned contract surface across both barrels, with warnings
  *                  FATAL. TypeDoc's warnings are documentation drift — a `{@link}` whose target
  *                  was renamed, a type a documented signature exposes but nothing exports — and
- *                  none of them is visible to `tsc`. Writes `.local/api/`, gitignored (#188).
+ *                  none of them is visible to `tsc`. Writes `site/public/api/`, gitignored (#188).
+ *   7. site      — `bun scripts/docs/site-content.ts && bun run --cwd site build && bun scripts/docs/site-links.ts`:
+ *                  projects `docs/` into the Starlight site, builds it, and
+ *                  crawls every built page for dead internal links. The BUILD is not the check —
+ *                  `astro build` reported success over 139 dead links, because a page's
+ *                  `./routes.md` is correct on GitHub and a 404 as a route. The crawl is (#188).
  *
  * ⚠ Each row's name and first backticked command is CHECKED against GATES and package.json by
  * `test/gate-abort.test.ts`, because this list is the documented authority for what "green" means
@@ -157,13 +162,27 @@ export const GATES: readonly Gate[] = [
     // program — each is a doc that has stopped matching the code, and none of them is visible
     // to `tsc`. Two were live when the step was added and both are fixed in the same commit.
     //
-    // It writes `.local/api/` (gitignored) rather than a checked-in artifact: the HTML is a
-    // view, and diffing rendered markup would gate the renderer's version, not this repo's
+    // It writes `site/public/api/` (gitignored) rather than a checked-in artifact: the HTML is
+    // a view, and diffing rendered markup would gate the renderer's version, not this repo's
     // contracts. What is gated is that the surface still DOCUMENTS — the source comments are
-    // the artifact, and the fences and the docs gate already hold those to the code.
+    // the artifact, and the fences and the docs gate already hold those to the code. The site
+    // step below serves what this step writes, so the API is built once, by its owner.
     name: 'api-docs',
     describe: 'typedoc: the owned contract surface documents, with warnings fatal',
     script: 'docs:api',
+  },
+  {
+    // ⚠ THE SITE BUILD IS NOT THE CHECK; THE LINK CRAWL IS. `astro build` reported success over
+    // 139 dead internal links on the first build — a markdown page's `./routes.md` and
+    // `../../packages/…#L47` are both correct on GitHub and both 404 as routes, and nothing in
+    // the build has an opinion about that. `docs:site` projects `docs/` into the site, builds,
+    // and then crawls every built page: a link that resolves to nothing names itself.
+    //
+    // Runs LAST because it consumes what the steps above produce — the generated reference
+    // pages the docs gate holds, and the API HTML `api-docs` writes.
+    name: 'site',
+    describe: 'starlight: the docs site builds from docs/, and every internal link resolves',
+    script: 'docs:site',
   },
 ]
 

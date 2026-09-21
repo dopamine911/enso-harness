@@ -10,11 +10,11 @@ import { assertExactKeys, runGenerator } from './generator-support.ts'
  */
 
 const ROOT = findRepoRoot(import.meta.url)
-const OBSERVATION_PATH = 'packages/core/src/observation.ts'
-const MAPPER_PATH = 'packages/web/src/host/map-events.ts'
+export const OBSERVATION_PATH = 'packages/core/src/observation.ts'
+export const MAPPER_PATH = 'packages/web/src/host/map-events.ts'
 const FOLLOW_PATH = 'packages/web/src/server/follow.ts'
-const ADAPTER_PATH = 'packages/web/src/to-agui.ts'
-const CUSTOM_ROUTER_PATH = 'packages/web/src/custom-event-router.ts'
+export const ADAPTER_PATH = 'packages/web/src/to-agui.ts'
+export const CUSTOM_ROUTER_PATH = 'packages/web/src/custom-event-router.ts'
 const FOLLOW_CONNECTION_PATH = 'packages/web/src/follow-connection.ts'
 
 interface CustomMetadata {
@@ -58,7 +58,7 @@ const FRAME_METADATA: Record<string, string> = {
   'follow-ended': '`recentChunks`; `disconnected`; `notifications`',
 }
 
-interface SchemaMember {
+export interface SchemaMember {
   readonly schema: string
   readonly kind: string
   readonly line: number
@@ -79,7 +79,7 @@ function unique(values: readonly string[]): string[] {
   return [...new Set(values)]
 }
 
-function unionMembers(source: string): string[] {
+export function unionMembers(source: string): string[] {
   const union = /export const ZenObservation = Type\.Union\(\[([\s\S]*?)\n\]\)/.exec(source)
   if (union?.[1] === undefined) throw new Error('observations: could not find the ZenObservation union')
   const members = union[1]
@@ -90,7 +90,7 @@ function unionMembers(source: string): string[] {
   return members
 }
 
-function schemaMember(source: string, schema: string): SchemaMember {
+export function schemaMember(source: string, schema: string): SchemaMember {
   const declaration = `export const ${schema} = Type.Object(`
   const offset = source.indexOf(declaration)
   if (offset < 0) throw new Error(`observations: union member ${schema} is not a direct Type.Object schema`)
@@ -101,7 +101,7 @@ function schemaMember(source: string, schema: string): SchemaMember {
   return { schema, kind: kinds[0] ?? '', line: lineAt(source, offset) }
 }
 
-function producedKinds(source: string): Map<string, number> {
+export function producedKinds(source: string): Map<string, number> {
   const kinds = new Map<string, number>()
   for (const match of source.matchAll(/\bkind: '([a-z-]+)'/g)) {
     const kind = match[1] ?? ''
@@ -317,4 +317,5 @@ function generate(): string {
   ].join('\n')
 }
 
-runGenerator('observations', generate)
+// Importable: `flow-diagrams.ts` reuses these extractors, and importing must not print a page.
+if (import.meta.main) runGenerator('observations', generate)

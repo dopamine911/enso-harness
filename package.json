@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "site"
   ],
   "engines": {
     "bun": ">=1.4.0",
@@ -32,7 +33,8 @@
     "e2e:model": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep @model",
     "coverage:check": "bun scripts/check-coverage.ts",
     "doctor": "bunx react-doctor --verbose",
-    "docs:api": "typedoc"
+    "docs:api": "typedoc",
+    "docs:site": "bun scripts/docs/site-content.ts && bun run --cwd site build && bun scripts/docs/site-links.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.12",

@@ -205,7 +205,20 @@ function declarationLine(source: string, declaration: string, path: string): num
   return lineAt(source, offset)
 }
 
-function generate(): string {
+/** A discovered route with its metadata and the lines that prove both ends of it. */
+export interface ResolvedRoute extends RouteMetadata {
+  readonly dispatch: { readonly path: string; readonly line: number }
+  readonly factoryLine?: number
+}
+
+/**
+ * Every route the server dispatches, with its checked metadata — the page's rows, and the
+ * control-plane diagram's nodes (#188), from ONE discovery.
+ *
+ * Exported because a second reader of the same dispatcher would be a second answer to
+ * "what routes exist": `flow-diagrams.ts` draws these, it does not re-find them.
+ */
+export function discoverRoutes(): ResolvedRoute[] {
   const server = readFileSync(join(ROOT, SERVER_PATH), 'utf8')
   const supportingSources: Record<string, string> = {
     [FOLLOW_PATH]: readFileSync(join(ROOT, FOLLOW_PATH), 'utf8'),
@@ -247,32 +260,50 @@ function generate(): string {
     Object.keys(LITERAL_ROUTE_METADATA),
   )
 
-  const routes = [...regexRoutes, ...literalRoutes]
-    .map((detected) => {
-      const metadata =
-        detected.kind === 'regex'
-          ? REGEX_ROUTE_METADATA[detected.key]
-          : { method: detected.method, path: detected.path, ...LITERAL_ROUTE_METADATA[detected.key] }
-      if (metadata === undefined) throw new Error(`routes: metadata disappeared for ${detected.key}`)
-      const sources = [`[\`${SERVER_PATH}:${detected.line}\`](../../${SERVER_PATH}#L${detected.line})`]
-      if (metadata.factory !== undefined) {
-        const source = supportingSources[metadata.factory.path]
-        if (source === undefined) throw new Error(`routes: source was not loaded for ${metadata.factory.path}`)
-        const line = declarationLine(source, metadata.factory.declaration, metadata.factory.path)
-        sources.push(`[\`${metadata.factory.path}:${line}\`](../../${metadata.factory.path}#L${line})`)
+  return [...regexRoutes, ...literalRoutes]
+    .map((detected): ResolvedRoute => {
+      // `assertExactKeys` above already proved every detected key has metadata; these throws are
+      // the type system asking for the same proof, and they name the key if it ever stops holding.
+      const metadata = ((): RouteMetadata => {
+        if (detected.kind === 'regex') {
+          const regex = REGEX_ROUTE_METADATA[detected.key]
+          if (regex === undefined) throw new Error(`routes: metadata disappeared for ${detected.key}`)
+          return regex
+        }
+        const literal = LITERAL_ROUTE_METADATA[detected.key]
+        if (literal === undefined) throw new Error(`routes: metadata disappeared for ${detected.key}`)
+        return { method: detected.method, path: detected.path, ...literal }
+      })()
+      const dispatch = { path: SERVER_PATH, line: detected.line }
+      if (metadata.factory === undefined) return { ...metadata, dispatch }
+      const source = supportingSources[metadata.factory.path]
+      if (source === undefined) throw new Error(`routes: source was not loaded for ${metadata.factory.path}`)
+      return {
+        ...metadata,
+        dispatch,
+        factoryLine: declarationLine(source, metadata.factory.declaration, metadata.factory.path),
       }
-      return { ...metadata, sources: sources.join('<br>') }
     })
     .sort((left, right) => {
       if (left.path !== right.path) return left.path < right.path ? -1 : 1
       if (left.method === right.method) return 0
       return left.method < right.method ? -1 : 1
     })
+}
 
-  const rows = routes.map(
-    (route) =>
-      `| ${route.method} | \`${route.path}\` | \`${route.handler}\` | ${route.input} | ${route.success} | ${route.errors} | ${route.routeClass} | ${route.builds} | ${route.logs} | ${route.sources} |`,
-  )
+function generate(): string {
+  const routes = discoverRoutes()
+  const regexCount = Object.keys(REGEX_ROUTE_METADATA).length
+  const literalCount = Object.keys(LITERAL_ROUTE_METADATA).length
+
+  const sourceLink = (path: string, line: number): string => `[\`${path}:${line}\`](../../${path}#L${line})`
+  const rows = routes.map((route) => {
+    const sources = [sourceLink(route.dispatch.path, route.dispatch.line)]
+    if (route.factory !== undefined && route.factoryLine !== undefined) {
+      sources.push(sourceLink(route.factory.path, route.factoryLine))
+    }
+    return `| ${route.method} | \`${route.path}\` | \`${route.handler}\` | ${route.input} | ${route.success} | ${route.errors} | ${route.routeClass} | ${route.builds} | ${route.logs} | ${sources.join('<br>')} |`
+  })
 
   return [
     '<!-- generated: scripts/docs/routes.ts -->',
@@ -286,9 +317,10 @@ function generate(): string {
     '|---|---|---|---|---|---|---|---|---|---|',
     ...rows,
     '',
-    `Detected ${regexRoutes.length} regex route constants and ${literalRoutes.length} literal dispatcher routes; metadata is exhaustive for both sets.`,
+    `Detected ${regexCount} regex route constants and ${literalCount} literal dispatcher routes; metadata is exhaustive for both sets.`,
     '',
   ].join('\n')
 }
 
-runGenerator('routes', generate)
+// Importable: `flow-diagrams.ts` reuses `discoverRoutes`, and importing must not print a page.
+if (import.meta.main) runGenerator('routes', generate)

@@ -141,7 +141,8 @@ type-only crossing is still a dependency.
 | `server` | `packages/web/src/server/` | `core`, `host` |
 | `browser` | `packages/web/src/` (all else) | `core` |
 | `scripts` | `scripts/` | `core` |
-| `test` | `test/`, `packages/web/e2e/` | anything |
+| `test` | `test/`, `packages/web/e2e/` | `core`, `harness-core`, `harness-extensions`, `host`, `server`, `browser`, `scripts` |
+| `site` | `site/` | nothing |
 
 Every owned source file must fall in a zone (`coverage.requireAllFiles`; `index.html` is the one
 excused file). The storage seam is a forbidden call: `SessionManager.*` from `server` or `browser`

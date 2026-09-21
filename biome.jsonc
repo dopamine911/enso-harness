@@ -149,7 +149,13 @@
       }
     },
     {
-      "includes": ["**", "!**/*.test.ts", "!**/*.test.tsx"],
+      // ⚠ `site/src/content.config.ts` is excluded because its ONE object is Starlight's, not
+      // ours: the collection must be keyed `docs` for `docsLoader()`/`docsSchema()` to find it
+      // (@astrojs/starlight 0.42.2, #188), and the file declares nothing else. Excluded as a
+      // FILE rather than by adding `docs` to `is_external_contract_key`, because that list is
+      // keyed on the NAME and would exempt the word everywhere — three other files spell it,
+      // and `test/naming-gate.test.ts` reported all three the moment it was tried.
+      "includes": ["**", "!**/*.test.ts", "!**/*.test.tsx", "!site/src/content.config.ts"],
       "plugins": ["./.biome/naming.grit"]
     },
 

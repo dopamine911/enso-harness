@@ -126,7 +126,8 @@
       { "name": "server", "patterns": ["packages/web/src/server/**"] },
       { "name": "browser", "patterns": ["packages/web/src/**"] },
       { "name": "scripts", "patterns": ["scripts/**"] },
-      { "name": "test", "patterns": ["test/**", "packages/web/e2e/**"] }
+      { "name": "test", "patterns": ["test/**", "packages/web/e2e/**"] },
+      { "name": "site", "patterns": ["site/**"] }
     ],
     "rules": [
       { "from": "core", "allow": [] },
@@ -136,6 +137,11 @@
       { "from": "server", "allow": ["core", "host"] },
       { "from": "browser", "allow": ["core"] },
       { "from": "scripts", "allow": ["core"] },
+      // The site is presentation over generated output: it imports Astro and Starlight and
+      // nothing of this repository's. Its CONTENT arrives as files `scripts/docs/site-content.ts`
+      // writes, never as an import, so an empty allow-list is the shape — a site that reached
+      // into `core` would be a renderer with opinions about contracts.
+      { "from": "site", "allow": [] },
       {
         "from": "test",
         "allow": ["core", "harness-core", "harness-extensions", "host", "server", "browser", "scripts"]

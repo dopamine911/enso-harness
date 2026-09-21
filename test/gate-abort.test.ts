@@ -61,6 +61,30 @@ test('⚠ the header of scripts/gate.ts names the gates the file actually runs, 
 })
 
 /**
+ * The same drift, one file further out (#188): `docs/verification.md` is the page a reader is
+ * pointed at for what green means, and it said **five gates** for the whole life of the sixth.
+ * #327 added `api-docs` to `GATES`, to the gate header — which this file already held — and to
+ * the generated inventory, and the hand-written page beside them went on saying five, twice, in
+ * a numbered list that stopped one step early. Nothing exited non-zero.
+ *
+ * It pins the COUNT and the ordered numbered names, not the prose: each step's paragraph is
+ * free to be rewritten, and the word is checked in the two places the page states it.
+ */
+const NUMBERED_STEP = /^(\d+)\.\s+\*\*(.+?)\*\*/gm
+const COUNT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'] as const
+
+test('⚠ docs/verification.md counts and numbers the gates the file actually runs (#188)', async () => {
+  const page = await Bun.file(join(import.meta.dir, '..', 'docs', 'verification.md')).text()
+  const steps = [...page.matchAll(NUMBERED_STEP)].map((match) => Number(match[1]))
+  expect(steps).toEqual(GATES.map((_gate, index) => index + 1))
+  const word = COUNT_WORDS[GATES.length]
+  if (word === undefined) throw new Error(`gate-abort: no English word for ${GATES.length} gates`)
+  // Both statements: the lead sentence and the CI paragraph's "<word>-step gate".
+  expect(page).toContain(`${word.charAt(0).toUpperCase()}${word.slice(1)} gates, in order`)
+  expect(page).toContain(`${word}-step gate`)
+})
+
+/**
  * Builds a throwaway package whose `lint` gate runs `body`, then runs the real
  * `scripts/gate.ts` against it.
  */

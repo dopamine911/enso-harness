@@ -55,6 +55,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Holds that every documented export carries `@group`, that the subdivided group carries `@category`, and that both names are declared in the config’s order lists. Which group a symbol belongs in is a judgement it cannot make.',
   },
+  'test/site-gate.test.ts': {
+    roots: ['docs', 'site/astro.config.mjs'],
+    exceptions: [],
+    limitation:
+      'Holds that every page under `docs/` projects with a title, that every page the sidebar names exists, and that each link class is rewritten for a route. Whether the BUILT site serves them is the `site` gate step, which builds and crawls.',
+  },
   'test/browser-bundle-gate.test.ts': {
     roots: ['packages/web/src/main.tsx'],
     exceptions: [],

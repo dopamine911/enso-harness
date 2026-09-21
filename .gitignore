@@ -17,3 +17,9 @@ packages/web/e2e/output/
 
 # fallow viz output (`bunx fallow viz`) — a local map, regenerated on demand
 fallow-viz.html
+
+# The site is a build product of `docs/` and TypeDoc, never an editable copy (#188).
+site/src/content/docs/
+site/public/api/
+site/dist/
+site/.astro/
