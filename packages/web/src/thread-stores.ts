@@ -30,9 +30,11 @@ import { createThreadStatsStore, type ThreadStatsStore } from './thread-stats.ts
  * Past the budget the newest follow AND every unary `/api` call the page makes (`prompt`,
  * `/history`, `/api/mode`) queue behind the open streams, silently. So the page holds at
  * most `MAX_LIVE_THREADS`: minting or adopting past it drops the least recently active idle
- * thread, which closes its follow. The session is the server's, not the page's, so a dropped
- * thread comes back through Previous Threads — the rail and `popstate` already resume a
- * thread this page does not hold.
+ * thread, which closes its follow. Neither a thread with a run in flight nor the one ON
+ * SCREEN is ever the victim — a follow the page is showing or streaming is not spare
+ * capacity — so a page made only of those goes over budget and records it. The session is
+ * the server's, not the page's, so a dropped thread comes back through Previous Threads —
+ * the rail and `popstate` already resume a thread this page does not hold.
  */
 export interface ThreadStores {
   readonly threadId: string
@@ -170,11 +172,44 @@ function publishThreadList(): void {
  */
 export const MAX_LIVE_THREADS = 4
 
-/** The drop candidate: the least recently active thread with no run in flight. */
+/**
+ * The pane the user is looking at. Undefined only while a URL-named thread is being adopted
+ * and nothing is on screen (`chat-screen.tsx`).
+ */
+let activeThreadId: string | undefined
+
+/**
+ * The active pane changed. Two effects, and the first is the load-bearing one (PR #301
+ * review): the visible thread stops being a drop candidate, and its clock restarts so it is
+ * not the first to go the moment the user switches away.
+ *
+ * ⚠ Reading a thread is activity. `updateThreadSummary` only fires on a title or a busy
+ * transition, so without this a thread the user is READING — finished reply, idle, not busy —
+ * ages like an abandoned one.
+ */
+export function markThreadActive(threadId: string | undefined): void {
+  activeThreadId = threadId
+  if (threadId === undefined) return
+  const current = summaries.get(threadId)
+  if (current === undefined) return
+  summaries.set(threadId, { ...current, lastActivityAt: new Date() })
+  publishThreadList()
+}
+
+/**
+ * The drop candidate: the least recently active thread that is neither running nor on screen.
+ *
+ * ⚠ THE ACTIVE PANE IS NEVER A CANDIDATE (PR #301 review). Recency alone does not protect it:
+ * open a thread, read its finished reply, then open four more, and the one being read was the
+ * least recently active of them. Dropping it unmounts the pane under the user — `active`
+ * resolves to undefined, the header falls back to the untitled label, the content area goes
+ * blank, and nothing says why. The page exceeds its budget instead, exactly as it does for a
+ * run in flight, and for the same reason: a follow this page is showing is not spare capacity.
+ */
 function leastRecentlyActiveIdle(): ThreadSummary | undefined {
   let oldest: ThreadSummary | undefined
   for (const summary of summaries.values()) {
-    if (summary.busy) continue
+    if (summary.busy || summary.threadId === activeThreadId) continue
     if (oldest === undefined || summary.lastActivityAt < oldest.lastActivityAt) oldest = summary
   }
   return oldest
@@ -200,15 +235,16 @@ function dropThread(threadId: string): void {
  * Make room for one more live thread, so the page never holds more follows than the
  * budget.
  *
- * ⚠ A thread with a run in flight is never dropped: cutting its follow would leave a run
- * nobody on this page can see or stop. A page whose every live thread is running therefore
- * exceeds the budget deliberately, and says so in the record rather than in silence.
+ * ⚠ Two kinds of thread are never dropped: one with a run in flight, because cutting its
+ * follow would leave a run nobody on this page can see or stop, and the one on screen,
+ * because its pane would vanish mid-read. A page made entirely of those exceeds the budget
+ * deliberately, and says so in the record rather than in silence.
  */
 function makeRoomForOneMore(): void {
   while (threads.size >= MAX_LIVE_THREADS) {
     const victim = leastRecentlyActiveIdle()
     if (victim === undefined) {
-      threadLog.warn('every live thread is running: {live} follows open, over the budget of {budget}', {
+      threadLog.warn('every live thread is running or on screen: {live} follows open, over the budget of {budget}', {
         live: threads.size,
         budget: MAX_LIVE_THREADS,
       })
@@ -366,5 +402,6 @@ export function clearThreadsForTest(): void {
   for (const stores of threads.values()) stores.connection.close()
   threads.clear()
   summaries.clear()
+  activeThreadId = undefined
   publishThreadList()
 }
