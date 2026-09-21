@@ -180,7 +180,7 @@ export interface ProcessLoggingOptions {
 `configureProcessLogging` (`log-process.ts:347-427`, in prose) builds a date-named file sink with
 `bufferSize: 0` (line 365; measured, header lines 53-62: the buffered sink held the last record until
 the next one), creates today's file `0600` before the sink opens it and again on each record, so a
-rollover at local midnight does not leave a `0664` file behind (303-338, 349-352, 370-375, #207),
+rollover at local midnight does not leave a `0664` file behind (323-339, 349-352, 370-375, #207),
 stamps `process` and a per-process `sequence` on every record (370-375), filters by the category's
 effective level (376-379), and wraps the file sink — and the console sink when one is configured
 (393-398) — in field-name redaction then the value pass (384-390).
