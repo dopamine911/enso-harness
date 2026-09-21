@@ -143,6 +143,38 @@ const pressEnter = (field: HTMLTextAreaElement): boolean =>
 const railBusy = (threadId: string): boolean | undefined =>
   threadListStore.get().find((thread) => thread.threadId === threadId)?.busy
 
+/** The rail's own reading of a thread's title — what the summary effect writes (#283). */
+const railTitle = (threadId: string): string | undefined =>
+  threadListStore.get().find((thread) => thread.threadId === threadId)?.title
+
+// ⚠ The LIVE title path, end to end (PR #310 review): a thread the page mints, a first user
+// message typed into the composer, and the rail row that must carry its title. Every other
+// title test drives the pure functions or a STORED thread whose title the server supplied —
+// so the wiring #283 rewrote (first-user-message → memo → effect → `updateThreadSummary`)
+// was covered nowhere. Depending on the message instead of the list is what stopped the
+// effect firing per token; a memo keyed on the wrong thing would still title, so this test
+// asserts the title ARRIVES, and the ones beside it assert what it is.
+test('a live thread titles its rail row from the first user message (#283)', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  expect(railTitle(pane.stores.threadId)).toBeUndefined()
+  await flush(async () => {
+    typeInto(pane.composer(), 'fix the login bug before the release')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await eventually(() => expect(railTitle(pane.stores.threadId)).toBe('fix the login bug before the release'))
+  // …and a second prompt does not retitle: the FIRST user message is the title.
+  await flush(async () => {
+    typeInto(pane.composer(), 'and the logout one too')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await eventually(() => expect(pane.server.prompts.length).toBe(2))
+  expect(railTitle(pane.stores.threadId)).toBe('fix the login bug before the release')
+  await pane.unmount()
+})
+
 // ── #125 item 1: the in-flight readings flip with the wire's status frames ───────────────
 
 test('⚠ busy on the wire → working, stop offered, mode select disabled, rail busy; settled → idle, all back', async () => {
@@ -542,6 +574,62 @@ test("⚠ a refused or aborted tool call's result reads error LIVE — the same 
     expect(row?.hasAttribute('open')).toBe(true) // an error opens itself
     expect(pane.container.textContent).toContain('blocked: outside the write root')
     expect(pane.status()).toContain('working') // the model has the output and is composing
+  })
+  await pane.unmount()
+})
+
+/**
+ * ⚠ THE INVARIANT THE WHOLE-TRANSCRIPT SELECTION EXISTS FOR (#280).
+ *
+ * pi claiming a queued prompt rotates the assistant bubble (`follow-connection.ts`, the user
+ * `message-start`), so a tool result can land on a LATER message than its call. The earlier
+ * bubble must still pair them — and that bubble's own message object never changed, so any
+ * memoisation keyed on message identity (which is what TanStack's `memo(MessageView)` does)
+ * leaves this call reading `running…` for the rest of the session. A red line here means the
+ * row is bailing out on something other than what it draws.
+ */
+test('⚠ a tool result the wire lands on a LATER message still completes the call in the earlier bubble', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  await flush(async () => {
+    typeInto(pane.composer(), 'list them')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    { type: 'observation', seq: 2, observation: { kind: 'text-delta', contentIndex: 0, delta: 'calling it ' } },
+    {
+      type: 'observation',
+      seq: 3,
+      observation: { kind: 'tool-call', toolCallId: 'c3', toolName: 'bash', args: { command: 'ls' } },
+    },
+  )
+  const call = (): Element | null => pane.container.querySelector('[data-zen-tool-call]')
+  await eventually(() => expect(call()?.getAttribute('data-zen-tool-call')).toBe('pending'))
+
+  // pi takes the queued prompt: this ENDS the bubble holding the call and opens a new one,
+  // and everything after it — the result included — belongs to the new message.
+  await pane.settle({ type: 'observation', seq: 4, observation: { kind: 'message-start', role: 'user' } })
+  await pane.settle(
+    {
+      type: 'observation',
+      seq: 5,
+      observation: {
+        kind: 'tool-result',
+        toolCallId: 'c3',
+        toolName: 'bash',
+        text: 'a.ts b.ts',
+        complete: true,
+        isError: false,
+      },
+    },
+    { type: 'observation', seq: 6, observation: { kind: 'text-delta', contentIndex: 0, delta: 'two files' } },
+  )
+  await eventually(() => {
+    expect(call()?.getAttribute('data-zen-tool-call')).toBe('done')
+    expect(pane.container.textContent).toContain('a.ts b.ts')
+    expect(pane.container.textContent).not.toContain('running…')
   })
   await pane.unmount()
 })

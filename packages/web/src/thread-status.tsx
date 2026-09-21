@@ -1,5 +1,5 @@
 import type { UIMessage } from '@tanstack/ai-client'
-import { automaticPartsForMessage, selectChatUI } from '@tanstack/ai-client/ui'
+import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
 import { useStore, useThreadStores } from './store.ts'
 import type { ThreadStats } from './thread-stats.tsx'
 import { toolResultState } from './ZenToolResult.tsx'
@@ -59,6 +59,19 @@ export type Activity =
  * summary with no room for per-kind detail, and `working` is TRUE of an image, a document,
  * or an unmatched result at the tail — the run is in flight. The part itself is still on
  * screen in the transcript; nothing is hidden by summarising it.
+ *
+ * ⚠ `selectMessageUI` HERE, `selectChatUI` in `chat-screen.tsx` (#282) — the opposite of
+ * that module's choice, and deliberately. The transcript renderer needs the whole-list
+ * selection because it renders EVERY message, so a call in an earlier message whose result
+ * the server stamped onto a later one must still pair or it reads `running…` for ever
+ * (`chat-screen.tsx`'s `message` component says so). This function reads only the LAST
+ * message, where that shape cannot arise: a result is normalised into the message holding
+ * its call, and a result whose call is absent from the transcript is unmatched under BOTH
+ * selections. The pairing this loses is pairing across messages, which the tail read never
+ * consults. What it buys: the whole-transcript selection allocated a selected part per part
+ * plus two Maps and a Set on every streamed token to use one element — 76.4 µs per delta at
+ * 600 messages and rising for the life of the thread, against 0.32 µs here (#282's
+ * measurement, reproduced). `thread-status.test.tsx` pins the cross-message shapes.
  */
 export function describeActivity(
   messages: ReadonlyArray<UIMessage>,
@@ -67,7 +80,8 @@ export function describeActivity(
 ): Activity {
   if (disconnected) return { kind: 'disconnected' }
   if (!generating) return { kind: 'idle' }
-  const last = selectChatUI({ messages }).messages.at(-1)
+  const message = messages.at(-1)
+  const last = message === undefined ? undefined : selectMessageUI(message, {})
   if (last === undefined || last.message.role !== 'assistant') return { kind: 'working' }
   const tail = automaticPartsForMessage(last).at(-1)
   if (tail === undefined) return { kind: 'working' }

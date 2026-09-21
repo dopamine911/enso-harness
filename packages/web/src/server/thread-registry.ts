@@ -109,6 +109,13 @@ export interface ThreadRegistry {
    * not be the thing that spins pi up; `acquire` is for runs.
    */
   peek(threadId: string): ThreadView | undefined
+  /**
+   * The thread's `sent` tail if it is live — the ONE field the follow writer needs, per
+   * frame. `peek` builds a whole `ThreadView` to hand it over, which is an object per
+   * token for a field read (#285); the routes that want the view keep using `peek`.
+   * Never creates.
+   */
+  sentTail(threadId: string): EventTail | undefined
   /** Every live thread, for the inspection listing. Never creates. */
   list(): ThreadView[]
   /** Dispose every session — server shutdown. */
@@ -339,11 +346,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     threads.set(threadId, thread)
     attachFeed(threadId, thread)
     publishStatus(threadId, thread)
+    // ⚠ ONE inspection, read twice (#285). `inspect()` decodes the whole branch into the
+    // transcript and stats the session file; for a thread resumed from a long stored
+    // session that is the entire history, and this line is at `info`, so nothing drops it.
+    const inspection = hosted.inspect()
     log.info('thread built: session {sessionId} in {sessionDir}', {
       threadId,
       generation: thread.generation,
-      sessionId: hosted.inspect().sessionId,
-      sessionDir: hosted.inspect().sessionDir,
+      sessionId: inspection.sessionId,
+      sessionDir: inspection.sessionDir,
       extensions: hosted.loadedExtensionPaths.length,
     })
     return thread
@@ -491,6 +502,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     peek(threadId: string): ThreadView | undefined {
       const thread = threads.get(threadId)
       return thread === undefined ? undefined : viewOf(threadId, thread)
+    },
+    sentTail(threadId: string): EventTail | undefined {
+      return threads.get(threadId)?.sent
     },
     list(): ThreadView[] {
       return [...threads.entries()].map(([threadId, thread]) => viewOf(threadId, thread))

@@ -93,14 +93,34 @@ graph TB
 
   EV --> G
   EV --> T
-  BT -.->|"first-wins override"| G
+  BT -.->|"tool_call · first block final"| G
   T --> ST
   T --> R
 ```
 
-**Guards override built-ins by name.** pi resolves tools **first-wins** (`runner.ts`,
-`getAllRegisteredTools`), so a guarded `write` declared before any vendor extension cannot be silently
-replaced. Load order is therefore a security property — see *Decided constraints*.
+**Guards veto calls to built-ins; they never replace them.** The guard registers no tool at all — in
+this repository `registerTool` is called only under `extensions/web-fetch/` and `extensions/web-search/`,
+and each of those adds a *new* tool. The guard is one additive `tool_call` handler
+(`extensions/guards/index.ts`, decision header *WHY A `tool_call` HANDLER RATHER THAN A TOOL OVERRIDE*):
+every extension's handlers run and pi returns on the first `block`, so a denial here is final **whatever
+the load order**. An override of `write` would be the opposite — safe only while this package loads first.
+What load order therefore decides is the logging configurator
+([boot and launchers](./flows/boot-and-launchers.md) invariant 2, `extensions/logging/index.ts`), not the
+guard's verdict. ⚠ Tool *identity* is asserted nowhere: a vendor extension registering `write` would
+shadow pi's built-in (registered tools are merged over the built-in definitions, first registration per
+name winning) and no check in this repository would report it. What survives that case is the veto — the
+guard sees the call under that name and gates it exactly as before — which is why the guard, and not the
+manifest's order, is the property this boundary rests on.
+
+**What the guard asserts at startup, and what it does not.** On `session_start` it checks that the five
+tool names its policy gates (`read`, `write`, `edit`, `bash`, `powershell`) are present in pi's live
+`getAllTools()` — `verifyPolicyToolNames` in `extensions/guards/index.ts`. Presence, not identity: it
+catches an upstream rename that would otherwise turn the guard into a silent no-op, and says nothing about
+whose implementation answers the name. It never throws — a throwing `session_start` handler wedges print
+mode — and a mismatch fails closed by denying every subsequent tool call instead.
+
+<!-- test: packages/harness/extensions/guards/__tests__/guards.test.ts#⚠ the guard registers no tool: it participates through tool_call only, so no load order can un-guard it -->
+<!-- test: packages/harness/extensions/guards/__tests__/guards.test.ts#a policy tool missing from pi's registry denies every subsequent call, naming it -->
 
 **The boundary is enforced twice, by two sensors.** The vendor gate (`test/vendor-gate.test.ts`, #145)
 reads *text*: `@earendil-works/*` is imported, and a vendor extension is named, only under `web/src/host/`
@@ -342,7 +362,7 @@ zen-harness/
   packages/
     core/                   # @zen/core — every TypeBox schema and shared type, one place
     harness/                # the pi package
-      package.json          #   pi manifest: extensions declared EXPLICITLY, guards first
+      package.json          #   pi manifest: extensions declared EXPLICITLY, logging first
       core/                 #   guard logic, shell segmentation, egress, web-search
       extensions/           #   guards · web-fetch · web-search
       skills/ prompts/ themes/
@@ -482,11 +502,11 @@ page's own lead sentence, so it cannot say a leak is open after the page says it
 | [the dialog vocabulary](./seams/dialog.md) | Control | extension-UI-context tests | The four kinds are the runtime's extension-UI method names — kept, by decision. |
 | [the guards](./seams/guards.md) | Permission | `tool-call-participants`; analyzer contract test | L5 — the tool names are the runtime's, and the guard is the runtime's extension. |
 | [logging](./seams/logging.md) | Record | logging gate | The substrate is vendored, by decision, and it shows in exactly three files. |
-| [the observation vocabulary](./seams/observation.md) | Observation | kinds sweeps over `@zen/core/observation-kinds`; `observations.md` generated | Nothing, since #162 workstream 5. |
+| [the observation vocabulary](./seams/observation.md) | Observation | kinds sweeps over `@zen/core/observation-kinds`; `observations.md` generated | `ZenQueue` is the runtime's model in our schema. |
 | [the permission mode](./seams/permission-mode.md) | Permission | vendor gate; `code-offenders` stale-row check | Nothing. |
-| [presentation](./seams/presentation.md) | Surface | presentation gate; `ported-provenance.md` generated | Nothing of the vendor kind. |
+| [presentation](./seams/presentation.md) | Surface | presentation gate; `ported-provenance.md` generated | The state layer's message shape crosses two wire payloads. |
 | [storage](./seams/storage.md) | Thread, Record | `no-duplicate-paths`; boundaries (the forbidden-call rule) | Nothing of the runtime's persistence format, since L2 |
-| [the thread runtime](./seams/thread-runtime.md) | Thread, Control | vendor gate; glossary gate; boundaries | Nothing of the runtime's event shape, since L2 |
+| [the thread runtime](./seams/thread-runtime.md) | Thread, Control | vendor gate; glossary gate; boundaries | The steer/follow-up dichotomy is the runtime's, and it does not stop at this seam. |
 | [the tool result descriptor](./seams/tool-result.md) | Surface | — | Nothing of ours leaks. |
 | [web providers](./seams/web-providers.md) | Permission (egress), Control | vendor gate | Nothing of the runtime's, since L6 closed (#162). |
 <!-- /generated-block -->
@@ -502,8 +522,8 @@ Settled. Each carries its reason so a later session can tell when the reason has
 | pi owns the loop; both surfaces are clients | One brain. Features written once work in both. |
 | Start as a **package**, never a fork | A package cannot entangle. omp forked and its features are now hard to lift. |
 | **One package, multiple extensions** | Vendored and custom side by side, one install, one version. |
-| Extensions **enumerated explicitly**, guards first | Load order is first-wins, so it is a security property. A directory glob orders by filename, which is incidental. |
-| Assert guard integrity at startup | `write`/`bash`/`read` must resolve to our implementations, failing loudly otherwise. |
+| Extensions **enumerated explicitly**, logging first | A directory glob orders by filename, which is incidental; a hand-written manifest is reviewable. What the order decides is the logging configurator — first, so that stays true when an extension logs before `session_start`. It does not decide the guard: that is a `tool_call` block and is final at any position (*Ownership boundary*). |
+| On `session_start` assert that the guard policy's tool names are registered | `verifyPolicyToolNames` checks the gated names against pi's live `getAllTools()`: presence, not identity — a tool pi renames would otherwise make the guard a silent no-op. A mismatch fails closed by denying every call, never by throwing (a throwing `session_start` wedges print mode). Tool identity is deliberately not asserted; the veto does not depend on it. |
 | **All schemas TypeBox in `@zen/core`** | One library, no bridge. TypeBox is mandatory at pi's tool API and *is* JSON Schema at the HTTP boundary — two of three destinations, zero conversion. |
 | Adapter boundaries map explicitly, never via schema transforms | Keeps validation separate from translation, which is what makes a provider swappable. |
 | **Durable state is pi's session log plus `.zen/` files, never process memory only** | Both surfaces read the same files; a service later is optional. The one cost: one live writer per session id (control plane, invariant 4). |
@@ -532,7 +552,7 @@ Settled. Each carries its reason so a later session can tell when the reason has
 | **The vocabulary is fenced the same way** (#161, #165) | `docs/glossary.md` decides what a word means; its *Retired* table was applied by LSP in one PR, and `test/glossary-gate.test.ts` refuses a retired identifier or file name outside the two vendor roots, with an allowlist that names the one leak kept on purpose (L2) and nothing else. The source-tree gates share one walker and one word-splitter, `test/gate-support.ts`. |
 | **Dead code is gated on growth, not on a count** (#163) | `fallow dead-code --baseline fallow-baseline.json` is gate three of `check:all`: the committed identity baseline is the backlog as inventory (54 findings at #163, every one a named symbol), and only a finding not in it fails the build — the same shape as a gate allowlist. fallow cannot see the runtime's manifest loader, so `.fallowrc.jsonc` lists the four extensions, the Bun plugin and the direct-run scripts as entries with their reasons, and `test/fallow-config.test.ts` holds the extension entries equal to `pi.extensions` in both directions; before that config, 24 of 28 "unused files" were the guards. Vendored components stay in the graph with their findings hidden, so their dependencies count as used. The gate runs in default mode — tests are consumers — because production mode would call a test-only export deletable. Re-save the baseline only to accept a finding on purpose. |
 | **A debugging surface is observation: it reads, it writes nothing, it makes no records, it offers no control** (#144) | The rule stands before the dashboard's first line of code, because a surface that accretes instrumentation is how the log stops being the record. Four parts. *Reads only* — no route it calls creates a session, takes a lease or touches pi (#86: looking must not build). *No records* — the routes it uses do not log themselves (`POST /api/logs` already does not; `GET /api/about` does not), so the tail never appears in the tail (#97). *No control* — stop, abort, answer and prompt stay on the chat page; mixing the two on one surface is how a stop that may stop nothing gets clicked from the wrong tab (invariant 5). *The log is the source, the dashboard is a view* — if a question cannot be answered from the file, fix the file (one home per fact), never add a side channel the bundle cannot see, so a handed-over bundle and the dashboard tell the same story. The three records slice 1 added are exactly that discipline: `pid`/`startedAt` on each process's first record, one `info` line per run at its first delta (time to first token was `debug`-only), and the provider's own `request-id` from `after_provider_response` with an explicit four-header allowlist — never the whole header bag, which would put a credential in the file the redaction manifest calls safe. |
-| **Loopback is a network boundary, not an authorization one: the server also checks `Host` and `Origin`** | Binding `127.0.0.1` stops a remote socket and nothing else. A page the operator merely visits can POST to the API — `/api/threads/<id>/prompt` is a CORS-*simple* request (the body is `JSON.parse`d without consulting `Content-Type`, so no preflight is issued) and `threads.acquire` mints a session for any well-formed id, so no existing thread need be known. The side effect is a full run of an agent with unconfined `bash` in the operator's tree; the opaque response costs the attacker nothing. So every request is admitted by one check in the dispatcher: `Host` must name loopback (a hostname that merely *resolves* to 127.0.0.1 is DNS rebinding, and rebinding is what makes the read side — the verbatim branch, the log bundle — same-origin readable), and an `Origin`, when the caller sends one, must be loopback too. Browsers always send it cross-origin; `curl` and this repo's CLIs send none and are unaffected. Verified live: 403 for `Origin: https://evil.example` and for `Host: attacker.example`, 200 for the page on either dev port. |
+| **Loopback is a network boundary, not an authorization one: the server also checks `Host` and `Origin`** | Binding `127.0.0.1` stops a remote socket and nothing else. A page the operator merely visits can POST to the API — `/api/threads/<id>/prompt` is a CORS-*simple* request (the body is `JSON.parse`d without consulting `Content-Type`, so no preflight is issued) and `threads.acquire` mints a session for any well-formed id, so no existing thread need be known. The side effect is a full run of an agent with unconfined `bash` in the operator's tree; the opaque response costs the attacker nothing. So every request is admitted by one check in the dispatcher: `Host` must name loopback (a hostname that merely *resolves* to 127.0.0.1 is DNS rebinding, and rebinding is what makes the read side — the verbatim branch, the log bundle — same-origin readable), and an `Origin`, when the header is present, must parse and name loopback. Browsers always send it cross-origin; `curl` and this repo's CLIs send none and are unaffected — an ABSENT header is trusted, the literal string `null` is not (#205). That string is a browser declining to name a cross-origin caller, which is what an opaque-origin browsing context sends — a sandboxed iframe, a `file://` page, a `data:` document — so it is exactly the cross-origin case the row exists to refuse; trusting it had left the escalate-mode-then-prompt-then-approve-the-dialog sequence open. Verified live: 403 for `Origin: https://evil.example`, for `Origin: null` (mode change and prompt, with no session acquired on the way), and for `Host: attacker.example`; 200 for the page on either dev port. |
 | Load-bearing decisions are **written where the code is**, with the issue number | The issue is the discussion; the comment is the decision. The table below is the index. |
 
 ---

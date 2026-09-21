@@ -159,8 +159,10 @@ answer before a tool runs; nothing after it does.
   (interactive, non-interactive, driven in-process) is **not given a word of ours**: no zen code
   tracks it, and `surface` — the candidate — already means TUI-or-web. It stays under the host and in
   the vendor map.
-- **guard** — the extension that answers the tool-call hook before a tool runs; asserted at startup to
-  be ours for `write`, `bash` and `read`. A guard *decides*; nothing else on the path does.
+- **guard** — the extension that answers the tool-call hook before a tool runs. What startup asserts is
+  that the policy's gated names are **registered** (`verifyPolicyToolNames`, presence), never that they
+  resolve to our implementation: identity is unasserted, and the veto does not depend on it. A guard
+  *decides*; nothing else on the path does.
 - **verdict** — a guard's answer: a **denial with its reason**, or nothing — the call passes. There is
   no third value today. *Cannot vouch* (an unparseable construct at command position) is refused with
   the construct named, so the rewrite is obvious; routing it to a human instead is the ask channel's
@@ -171,8 +173,10 @@ answer before a tool runs; nothing after it does.
 - **rule** — one line of a policy, or one named check of the command analyzer (`ruleId`): the identity
   of *which* rule caught a call, asserted where identity matters and elided where only the direction
   does.
-- **participant** — one handler on the tool-call hook. Load order is first-wins, so registration
-  order is a security property and extensions are enumerated explicitly, guards first.
+- **participant** — one handler on the tool-call hook. Handlers are additive: every participant's handler
+  runs and the first denial ends the call, so a denial is final whatever the load order. First-wins
+  resolution applies to registered *tools*, not to handlers, and the guard registers none — see
+  [architecture](./architecture.md), *Ownership boundary*.
 - **arbiter** — the one handler that would own the verdict, with participants as libraries beneath it
   (#4). Designed, deferred: two participants with aligned fail direction are tolerable. A design word,
   not a code identifier.
@@ -374,7 +378,8 @@ workstream 4): the runtime's event and stored-entry shapes are read only under `
 | `HostedSession`, `HostedSessionInspection` | the host's side of a live thread: the runtime plus inspect and the emitted tail | **`HostedThread`**, **`HostedThreadInspection`** | `packages/web/src/host/agent-host.ts` | — |
 | `StoredSession` | a thread whose log is on disk, as the host lists it | **`StoredThread`** — the wire already says `ZenStoredThread` | `packages/web/src/host/agent-host.ts` | — |
 | `ZenCustomSessionEntry` | a custom entry observation | **`ZenCustomEntry`** | `packages/core/src/observation.ts` | — |
-| `session-inspection.ts`, `describeSessionEntry` | the thread inspection module and its entry formatter | **`thread-inspection.ts`**, **`describeEntry`** | `packages/core/src/` | — |
+| `session-inspection.ts` | the thread inspection module | **`thread-inspection.ts`** | `packages/core/src/` | — |
+| `describeSessionEntry` | the formatter for one entry of a transcript | **`describeTranscriptEntry`**, in `transcript.ts` — the entry is the transcript's, so the formatter moved there with it | `packages/core/src/` | — |
 | `pi-rpc.ts` | the module holding the runtime contract and its wire shapes | **`thread-runtime.ts`** — the name says a transport it no longer is (#69) | `packages/core/src/` | — |
 | `zen-session.mjs` | the thread inspection CLI | **`zen-thread.mjs`** | `scripts/` | — |
 | "sessions" (rail heading, prose in the browser) | threads | **threads** | `packages/web/src/threads-rail.tsx` | — |
@@ -383,7 +388,7 @@ workstream 4): the runtime's event and stored-entry shapes are read only under `
 | `turns` as a count of user messages | prompts | **prompts** | `packages/web/src/thread-status.tsx` | — |
 | `ToolStep`, "step" | a tool call rendered as a row | **tool call** (`ToolCallRow`) | `packages/web/src/selected-message-part.tsx` | the adapter that emits the state layer's step events |
 | `HostedThread.session` (was `hosted.session` at every call site) | the thread's runtime handle | **`HostedThread.runtime`** — found by the gate: a field that said session and held the runtime | `packages/web/src/host/agent-host.ts` and the server | — |
-| `describePiRpcEvent` | the event tail's one-line description of a runtime event | **`describeRuntimeEvent`** | `packages/web/src/host/event-tail.ts` | — |
+| `describePiRpcEvent` | the event tail's one-line description of what arrived | **`describeObservation`** — it describes an OBSERVATION, which is what the tail holds now (L2) | `packages/web/src/host/event-tail.ts` | — |
 | `data-zen-tool-step` | the tool-call row's status attribute | **`data-zen-tool-call`** | `packages/web/src/selected-message-part.tsx` | — |
 | `conversation`, `chat` as nouns for the unit | a thread | **thread**; *transcript* for what it shows | prose | `chat` for the state layer's object, in the adapter |
 | `layer` meaning "who wrote it" in the log sense | the process | **process** for the OS process; **layer** keeps its code-region meaning | comments in `packages/core/src/log.ts` | — |
@@ -431,7 +436,7 @@ cc-safety-net, the command analyzer the bash guard wires as a library. *log subs
 | permission mode | — | `permission/preset` + knobs; `custom` derived | — | mode extension's modes (`default`, `acceptEdits`, `plan`, `bypassPermissions`), persisted as `customType: "modes"` |
 | (no word) — the runtime's interface setting | `ctx.mode`: `interactive` / `rpc` / `print` | — | — | — |
 | verdict | `ToolCallEventResult`: `{ block, reason }` or `undefined` | — | — | analyzer `checkCommand` → `kind` `allow` or `deny`, with `ruleId`; a throw is a deny |
-| participant / arbiter | `pi.on("tool_call")`, first-wins | — | — | — |
+| participant / arbiter | `pi.on("tool_call")`, additive: every handler runs, the first block ends the call | — | — | — |
 | tool identity | tool names `bash`, `write`, `edit`, `read` | — | — | the `picc-*` packages register `Bash` / `Edit` |
 | record / level / sink | — | — | — | log substrate's `LogRecord`, categories, sinks |
 | layer | — | — | — | log substrate category segment two |

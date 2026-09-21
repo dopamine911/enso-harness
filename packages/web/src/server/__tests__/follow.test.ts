@@ -846,14 +846,81 @@ test('[WARN] a body past the wire cap is a 413 and the read stops — the server
       controller.close()
     },
   })
-  const response = await fetch(`${url}/api/threads/t1/prompt`, {
+  // `duplex` is required for a streaming request body and absent from the DOM lib's
+  // `RequestInit`; widened here rather than suppressed (#249), so every other field in this
+  // init is still type-checked instead of the whole call being exempted.
+  const init: RequestInit & { readonly duplex: 'half' } = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
-    // @ts-expect-error — Bun accepts a streaming body with duplex; the lib types lag.
     duplex: 'half',
-  })
+  }
+  const response = await fetch(`${url}/api/threads/t1/prompt`, init)
   expect(response.status).toBe(413)
   expect(await response.text()).toContain('a prompt body is at most')
   expect(fake.built).toHaveLength(0)
+})
+
+// ── 10. the wire does not carry what the browser throws away (#279) ──────────────────
+
+/** pi's cadence: the whole output SO FAR, every tick — `bash` reports one every 100 ms. */
+function partialToolResult(text: string): ZenObservation {
+  return { kind: 'tool-result', toolCallId: 'call-1', toolName: 'bash', text, complete: false, isError: false }
+}
+
+test('⚠ an accumulated partial tool result never crosses the follow, the completed one does whole, and the sent tail counts only what crossed (#279)', async () => {
+  const fake = fakeHost()
+  const url = await startWith(fake)
+  // Prompted BEFORE the follow opens, so the snapshot is recorded on a live thread and the
+  // build/acquire status frames are already behind us: every frame below is an observation.
+  await prompt(url, 't1', 'run the build')
+  const follow = await openFollow(url, 't1')
+  await follow.untilFrames(1)
+
+  for (const text of ['a', 'ab', 'abc']) fake.emit(partialToolResult(text))
+  // A different kind, emitted after them through the same writer: its arrival is what makes
+  // the absence of the three above a decision rather than a delay.
+  fake.emit(TEXT_DELTA)
+  await follow.untilFrames(2)
+  fake.emit({
+    kind: 'tool-result',
+    toolCallId: 'call-1',
+    toolName: 'bash',
+    text: 'abc',
+    complete: true,
+    isError: false,
+  })
+  await follow.untilFrames(3)
+
+  // The partials are numbered in-process — the completed result is seq 5, not seq 2 — and
+  // the text that crossed is the whole accumulated output, unshortened.
+  expect(follow.frames).toEqual([
+    expect.objectContaining({ type: 'snapshot', threadId: 't1' }),
+    { type: 'observation', seq: 4, observation: TEXT_DELTA },
+    {
+      type: 'observation',
+      seq: 5,
+      observation: {
+        kind: 'tool-result',
+        toolCallId: 'call-1',
+        toolName: 'bash',
+        text: 'abc',
+        complete: true,
+        isError: false,
+      },
+    },
+  ])
+
+  // The sent tail (#97) claims exactly the frames that crossed: one `tool-result` row, and
+  // a total equal to the frames the follower actually read.
+  const events = (await (await fetch(`${url}/api/threads/t1/events`)).json()) as {
+    sent: Array<{ type: string; name?: string; count: number }>
+  }
+  expect(events.sent.map(({ type, name, count }) => ({ type, name, count }))).toEqual([
+    { type: 'snapshot', name: undefined, count: 1 },
+    { type: 'observation', name: 'text-delta', count: 1 },
+    { type: 'observation', name: 'tool-result', count: 1 },
+  ])
+  expect(events.sent.reduce((total, event) => total + event.count, 0)).toBe(follow.frames.length)
+  follow.close()
 })

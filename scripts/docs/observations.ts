@@ -110,6 +110,22 @@ function producedKinds(source: string): Map<string, number> {
   return kinds
 }
 
+/**
+ * Kinds the follow writer ELIDES instead of writing (#279), by the `writeFrame` guard that
+ * does it: `tool-result` frames that are not complete carry pi's ACCUMULATED output, which
+ * the browser's adapter discards. Keyed by kind, valued by the guard's line and the field
+ * that decides it, so the carrier column says what the wire actually does — and so removing
+ * the guard changes this page.
+ */
+function elidedKinds(source: string): Map<string, { line: number; field: string }> {
+  const elided = new Map<string, { line: number; field: string }>()
+  const guard = /frame\.observation\.kind === '([a-z-]+)' && !frame\.observation\.(\w+)\) return/g
+  for (const match of source.matchAll(guard)) {
+    elided.set(match[1] ?? '', { line: lineAt(source, match.index), field: match[2] ?? '' })
+  }
+  return elided
+}
+
 function adapterResult(source: string, kind: string): AdapterResult {
   const cases = [...source.matchAll(/^\s+case '([a-z-]+)':/gm)]
   const matchingCases = cases.filter((caseMatch) => caseMatch[1] === kind)
@@ -196,6 +212,7 @@ function generate(): string {
   const carrierOffset = followSource.indexOf("{ type: 'observation', seq: frame.seq, observation: frame.observation }")
   const carrierLine = lineAt(followSource, carrierOffset)
   const carrier = `[\`observation\` frame](../../${FOLLOW_PATH}#L${carrierLine})`
+  const elided = elidedKinds(followSource)
 
   const noProducer: string[] = []
   // An unclassified cell is a FINDING here, not a generation failure (`docs/reference/README.md`,
@@ -214,6 +231,7 @@ function generate(): string {
       else if (promptRouteLine !== undefined) producer = `[prompt route](../../${FOLLOW_PATH}#L${promptRouteLine})`
       else noProducer.push(member.kind)
 
+      const elision = elided.get(member.kind)
       const adapter = adapterResults.get(member.kind) ?? adapterResult(adapterSource, member.kind)
       const consumers = unique([
         ...(adapter.custom ? [CUSTOM_METADATA[member.kind]?.consumer ?? `UNCLASSIFIED (${member.kind})`] : []),
@@ -226,6 +244,10 @@ function generate(): string {
       return {
         ...member,
         producer,
+        carrier:
+          elision === undefined
+            ? carrier
+            : `${carrier} — [ELIDED](../../${FOLLOW_PATH}#L${elision.line}) while \`${elision.field}: false\``,
         adapter: adapter.labels
           .map((label) =>
             label.startsWith('EventType.') || label === 'dropped' || label.startsWith('UNCLASSIFIED')
@@ -239,7 +261,7 @@ function generate(): string {
     .sort((left, right) => left.kind.localeCompare(right.kind))
     .map(
       (row) =>
-        `| \`${row.kind}\` | [\`${row.schema}\`](../../${OBSERVATION_PATH}#L${row.line}) | ${row.producer} | ${carrier} | ${row.adapter} | ${row.consumers} |`,
+        `| \`${row.kind}\` | [\`${row.schema}\`](../../${OBSERVATION_PATH}#L${row.line}) | ${row.producer} | ${row.carrier} | ${row.adapter} | ${row.consumers} |`,
     )
 
   const recordedOnly = customKinds.filter((kind) => CUSTOM_METADATA[kind]?.routerBranch === false).sort()
@@ -255,6 +277,8 @@ function generate(): string {
     'Generated from `ZenObservation`, the pi-event mapper, the prompt route, the follow carrier, the AG-UI adapter and the browser chunk router. One vocabulary (#162 workstream 5): a CUSTOM chunk is named by the observation `kind` (or the frame `type`) it carries whole.',
     '',
     "> Parser limitation: schemas must be direct identifiers in `ZenObservation = Type.Union([…])` and direct `Type.Object` declarations with one inline `kind` literal. Producers are recognized from object-literal `kind` fields. Adapter output recognizes `case` blocks, `EventType.*`, `custom(observation)` and explicit empty-array branches; router branches are `case '<kind>':` lines; browser store semantics remain explicit checked metadata.",
+    '',
+    'A carrier marked **ELIDED** does not reach the browser in that state (#279): the observation is still numbered, still logged at `trace` and still counted in the `emitted` tail of `/api/threads/:id/events`, but no frame is written — the adapter emission for that state is `dropped`, so the bytes would be serialised and schema-checked for nothing. The `sent` tail claims only what crossed, and frame `seq` skips the elided numbers.',
     '',
     '| Kind | Schema | Producer | Follow carrier | Adapter emissions | Browser consumer / store |',
     '|---|---|---|---|---|---|',

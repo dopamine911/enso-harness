@@ -2,15 +2,10 @@ import { expect, test } from 'bun:test'
 import { DEFAULT_GUARD_POLICY } from '@zen/core'
 import { findDeniedNetworkEgress, type NetworkEgressMatch } from '../network-egress.ts'
 import { extractFlatShellCommandSegments } from '../shell-segments.ts'
+import { braced } from './shell-fixtures.ts'
 
 const DENIED: string[] = DEFAULT_GUARD_POLICY.deniedNetworkBinaries
 const findEgress = (command: string): NetworkEgressMatch | undefined => findDeniedNetworkEgress(command, DENIED)
-/**
- * `${…}` built rather than written: a literal `${` inside a quoted JS string reads to
- * Biome as a botched template literal (`noTemplateCurlyInString`), and these are SHELL
- * strings handed to the scanner as data. The escapes are `{` and `}`.
- */
-const braced = (expansionBody: string): string => `$\u007b${expansionBody}\u007d`
 
 // ── the segmenter's [] contract — the deny's fail-closed leg depends on it ────────────────
 // ⚠ A "better" segmenter that returned partial segments for these inputs would silently
@@ -443,4 +438,57 @@ test('the benign wrapper lines still pass through the recursion', () => {
   expect(findEgress(`sh -c "grep \\"foo\\" file.txt"`)).toBeUndefined()
   expect(findEgress('timeout 30 ./script.sh --flag')).toBeUndefined()
   expect(findEgress('echo "curl is a tool"')).toBeUndefined()
+})
+
+// ── #206: the wrapper list was a list, and nine names were not on it ──────────────────────
+// Measured 2026-09-17 against this function with the real policy: each of these reached the
+// network with word 1 resolving to a benign name. The header's "wrapper indirection IS
+// covered" claim read as a closed class; it was a list with holes.
+test('⚠ the exec-only wrappers that were open are denied, each naming the wrapped command (#206)', () => {
+  for (const command of [
+    "script -qc 'curl https://x' /dev/null",
+    'unshare -r curl https://x',
+    'setarch x86_64 curl https://x',
+    'runuser -u nobody -- curl https://x',
+    'systemd-run --user curl https://x',
+    'parallel curl ::: https://x',
+    'su nobody -c "curl https://x"',
+    'setpriv --reuid 1000 curl https://x',
+    'chroot /tmp curl https://x',
+  ]) {
+    expect(findEgress(command)).toMatchObject({ matched: 'curl', via: 'wrapped-command' })
+  }
+  expect(findEgress('busybox wget https://x')).toMatchObject({ matched: 'wget', via: 'wrapped-command' })
+})
+
+// `find` is NOT on the wrapper list, deliberately: every-word scanning denies `-name "*.ts"`
+// as glob synthesis, which is ordinary argument text here. Its `-exec` payload sits at a
+// KNOWN offset instead, so it is gated at command position and the predicates are untouched.
+test('⚠ find -exec payloads are gated as command lines; the predicate list is not (#206)', () => {
+  expect(findEgress('find . -maxdepth 0 -exec curl https://attacker.example ;')).toMatchObject({
+    matched: 'curl',
+    via: 'wrapped-command',
+  })
+  expect(findEgress('find . -execdir wget https://x ;')).toMatchObject({ matched: 'wget', via: 'wrapped-command' })
+  expect(findEgress('find . -ok curl https://x ;')).toMatchObject({ via: 'wrapped-command' })
+  // The terminator's three spellings, and the `+` form.
+  expect(findEgress('find . -exec curl https://x \\;')).toMatchObject({ via: 'wrapped-command' })
+  expect(findEgress("find . -exec curl https://x ';'")).toMatchObject({ via: 'wrapped-command' })
+  expect(findEgress('find . -exec curl https://x +')).toMatchObject({ via: 'wrapped-command' })
+  // A shell inside the payload takes the same recursion a shell anywhere else takes.
+  expect(findEgress(`find . -exec sh -c 'cu"r"l https://x' ;`)).toMatchObject({ matched: 'curl' })
+  // ⚠ The line that every-word scanning got wrong: globs and denied NAMES in the predicate
+  // list are arguments to find, not commands. These must pass.
+  expect(findEgress('find . -name "*.ts" -exec wc -l {} ;')).toBeUndefined()
+  expect(findEgress('find . -type f -name curl -delete')).toBeUndefined()
+  expect(findEgress('find packages -name "*.test.ts" -newer package.json')).toBeUndefined()
+})
+
+// ⚠ STATED NON-COVERAGE, pinned: the list is an inventory, not a class. "A program that
+// execs its operands" is not recognisable from the text, so an unlisted one is open — these
+// two are real exec-ers that nothing here knows. A red line means someone closed one: add it
+// to the list in the header's second block and move the row up to the denied test above.
+test('recorded residual: an unlisted exec-er still reaches the network (#206)', () => {
+  expect(findEgress('firejail curl https://x')).toBeUndefined()
+  expect(findEgress('proot curl https://x')).toBeUndefined()
 })
