@@ -5,10 +5,10 @@ import { assertExactKeys, runGenerator } from './generator-support.ts'
 
 /**
  * Generates the seams table (#162 workstream 11, #167 item 4) — the block `docs/architecture.md`
- * and `docs/seams/README.md` embed between `<!-- generated-block: … -->` markers. One row per
- * page under `docs/seams/`: the seam's name from its H1, the LEAK COLUMN VERBATIM from the bold
- * lead of its *What crosses it that should not* section, and two columns of checked metadata
- * (domain, gate) keyed by file, so a page added or removed fails here rather than going unlisted.
+ * embeds between `<!-- generated-block: … -->` markers. One row per page under `docs/seams/`: the
+ * seam's name from its H1, the LEAK COLUMN VERBATIM from the bold lead of its *What crosses it
+ * that should not* section, and two columns of checked metadata (domain, gate) keyed by file, so a
+ * page added or removed fails here rather than going unlisted.
  *
  * ⚠ THAT CLAIM WAS FALSE FOR ONE CASE, AND IT WAS THE GROWTH CASE (#213). The page list used to
  * be filtered by `PAGE_TITLE` before the exhaustiveness check ran, so a new page whose H1 did not
