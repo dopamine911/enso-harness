@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { filesUnder } from '../scripts/source-tree.ts'
+import { filesUnder, SOURCE_FILE } from '../scripts/source-tree.ts'
 import { markdownFiles, REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
@@ -55,7 +55,18 @@ const SOURCE_ROOTS: readonly string[] = ['packages', 'scripts']
  * the symbol and the file a citation resolves against are the ones that actually precede it.
  */
 const TOKEN = /`([^`\n]+)`|\(([^)]*?\blines?\s+(\d+)(?:\s*[–-]\s*(\d+))?[^)]*)\)/g
-const SOURCE_MENTION = /\.(?:tsx?|mjs)(?::\d+(?:[–-]\d+)?)?$/
+/** The `:12` or `:12–20` a mention may carry: `vocabulary.ts:3-5` is a file, not an identifier. */
+const MENTION_LINES: string = String.raw`(?::\d+(?:[–-]\d+)?)?$`
+/**
+ * A backticked literal that names a source file. ⚠ DERIVED from the walker's own extension
+ * set, never restated (PR #323 review): a narrower copy does not report a `.cjs` or `.mts`
+ * mention as wrong, it stops seeing it — the literal matches neither this nor `IDENTIFIER`,
+ * so the citation beside it is dropped and the page goes unchecked. That is the silent
+ * staleness this gate exists to close, reopened for one extension.
+ */
+const SOURCE_MENTION: RegExp = new RegExp(SOURCE_FILE.source.replace(/\$$/, '') + MENTION_LINES)
+/** The same set again, as a file named INSIDE a citation: "(`server/follow.ts` line 126)". */
+const CITED_FILE: RegExp = new RegExp(String.raw`\`([^\`]+${SOURCE_FILE.source.replace(/\$$/, '')})\``)
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 /** An import statement, blanked before the declaration scan: an imported name is not declared here. */
 const IMPORT_STATEMENT = /^import[\s\S]*?from\s+'[^']*'$/gm
@@ -69,14 +80,22 @@ function resolveSource(mention: string): string | undefined {
   return found.length === 1 ? found[0] : undefined
 }
 
-/** The line a construct's body opens on ends in `{` — `writeFrame(` at statement position does not. */
+/**
+ * Does a body open here? Scanned from the candidate line to the end of its signature: a
+ * declaration's opening line, or the line its parameter list closes on, ends in `{`;
+ * `writeFrame(` at statement position closes on `)` and ends in nothing.
+ *
+ * ⚠ The `{` test comes FIRST and covers the closing paren too (PR #323 review), which is why
+ * there is no separate branch for `)`: `): void {` already ended in `{`, and a bare `)` is a
+ * call — the dedent test below it is what stops the scan, and returning false there says the
+ * same thing once.
+ */
 function opensABody(lines: readonly string[], first: number): boolean {
   const indent = /^\s*/.exec(lines[first - 1] ?? '')?.[0] ?? ''
   for (let index = first - 1; index < lines.length; index += 1) {
     const text = lines[index] ?? ''
     if (text.trimEnd().endsWith('{')) return true
-    // The signature's own closing paren: past it, whatever follows belongs to something else.
-    if (index > first - 1 && text.startsWith(`${indent})`)) return text.trimEnd().endsWith('{')
+    // Out of the signature: a line at or left of the candidate's indent belongs to something else.
     if (index > first - 1 && !text.startsWith(`${indent} `) && text.trim() !== '') return false
   }
   return false
@@ -155,7 +174,7 @@ function readCitation(paragraph: string, match: RegExpExecArray, naming: Naming)
   if (symbol === undefined || symbolEnd < 0) return undefined
   const between = paragraph.slice(symbolEnd, match.index)
   if (between.length > ADJACENCY || /[,.;:]/.test(between) || /\bheaders?\b/.test(citation)) return undefined
-  const named = /`([^`]+\.(?:tsx?|mjs))`/.exec(citation)?.[1]
+  const named = CITED_FILE.exec(citation)?.[1]
   const file = named === undefined ? naming.file : resolveSource(named)
   if (file === undefined) return undefined
   const from = Number(match[3])
@@ -232,18 +251,58 @@ test('the span is the doc comment through the closing line, and a use is not a d
   expect(declarationSpan("import { type Frame } from './frame.ts'\nconst x = 1", 'Frame')).toBeUndefined()
 })
 
+/**
+ * ⚠ THE NUMBERS ARE DERIVED, NOT WRITTEN. This test cites a real file, which makes it the one
+ * thing it is about: a hand-written `line 33` here rots the moment `source-tree.ts` grows a
+ * line, and it did — between writing this file and reviewing it. So the span is measured and
+ * the prose is built from it; what is asserted is the RELATIONSHIP, which is the contract.
+ */
 test('a citation is read when it is beside its symbol, and skipped when it is only near one', () => {
   const page = (prose: string): string[] => offencesIn('fixture.md', prose).map((offence) => offence.cited)
+  const walker = 'scripts/source-tree.ts'
+  const span = declarationSpan(readFileSync(join(REPOSITORY_ROOT, walker), 'utf8'), 'filesUnder')
+  if (span === undefined) throw new Error(`${walker} no longer declares filesUnder exactly once`)
+  const outside = span.start - 1
+  const inside = span.start
   // The shape that broke twice: a symbol, its file, a number outside the declaration.
-  expect(page('`filesUnder` (`scripts/source-tree.ts` line 3) walks')).toEqual(['3'])
+  expect(page(`\`filesUnder\` (\`${walker}\` line ${outside}) walks`)).toEqual([`${outside}`])
   // …and the same citation landing inside it is silent.
-  expect(page('`filesUnder` (`scripts/source-tree.ts` line 33) walks')).toEqual([])
+  expect(page(`\`filesUnder\` (\`${walker}\` line ${inside}) walks`)).toEqual([])
   // A range that touches the declaration passes whole: one range, four sibling members.
-  expect(page('`filesUnder` (`scripts/source-tree.ts` lines 3–40)')).toEqual([])
+  expect(page(`\`filesUnder\` (\`${walker}\` lines ${outside}–${span.end})`)).toEqual([])
   // Prose between the two is a different claim — the number is not about the symbol.
-  expect(page('`filesUnder` in `scripts/source-tree.ts`, called by every gate (line 3)')).toEqual([])
+  expect(page(`\`filesUnder\` in \`${walker}\`, called by every gate (line ${outside})`)).toEqual([])
   // "header" is the file's in one page and the construct's in another: one word, two referents.
-  expect(page('`filesUnder` (`scripts/source-tree.ts` header lines 3–5)')).toEqual([])
+  expect(page(`\`filesUnder\` (\`${walker}\` header lines ${outside}–${outside})`)).toEqual([])
   // A fenced block carries its own numbers, and they are not citations.
-  expect(page('```ts\n`filesUnder` (`scripts/source-tree.ts` line 3)\n```')).toEqual([])
+  expect(page(`\`\`\`ts\n\`filesUnder\` (\`${walker}\` line ${outside})\n\`\`\``)).toEqual([])
+})
+
+// ⚠ The extension surface, asserted rather than assumed (PR #323 review). An unrecognised
+// mention is not a reported offence — it is a citation this gate never sees, so a narrow copy
+// of the walker's set reopens exactly the silent staleness above for whichever flavour is
+// added next. These are the flavours `scripts/source-tree.ts` walks; none is in the tree
+// today, which is the point: the day one arrives it is cited and checked, not skipped.
+test('a mention in every flavour the walker reads is a file, not an unread literal (#323 review)', () => {
+  for (const mention of [
+    'follow.ts',
+    'chat-screen.tsx',
+    'zen.mjs',
+    'legacy.js',
+    'widget.jsx',
+    'tool.cjs',
+    'shim.mts',
+    'shim.cts',
+    'vocabulary.ts:3-5',
+  ]) {
+    expect(SOURCE_MENTION.test(mention)).toBe(true)
+  }
+  // …and a backticked identifier is still a symbol, not a file.
+  for (const symbol of ['followThread', 'ZenFollowFrame', 'settled']) {
+    expect(SOURCE_MENTION.test(symbol)).toBe(false)
+    expect(IDENTIFIER.test(symbol)).toBe(true)
+  }
+  // The same set inside a citation: "(`server/follow.ts` line 126)".
+  expect(CITED_FILE.exec('`scripts/zen.mjs` line 4')?.[1]).toBe('scripts/zen.mjs')
+  expect(CITED_FILE.exec('`packages/web/src/shim.mts` line 4')?.[1]).toBe('packages/web/src/shim.mts')
 })

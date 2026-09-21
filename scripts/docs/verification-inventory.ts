@@ -160,17 +160,17 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Matches the linter, dead-code and type-checker suppression pragmas by family prefix, anywhere in a line and in any comment form, across known source extensions; vendored code is outside the scan, and a suppression written in a file extension the walker does not read is not seen.',
   },
-  'test/prose-citation-gate.test.ts': {
-    roots: ['docs'],
-    exceptions: [],
-    limitation:
-      'Resolves a line citation written beside a symbol the cited file declares exactly once; a bare range with no symbol beside it, and a symbol the file only uses, are outside it.',
-  },
   'test/presentation-gate.test.ts': {
     rootStrings: ['PORTED_DIRECTORY'],
     exceptions: [],
     limitation:
       'Matches provenance text and static imports; dynamically assembled dependencies are outside the import matcher.',
+  },
+  'test/prose-citation-gate.test.ts': {
+    roots: ['docs'],
+    exceptions: [],
+    limitation:
+      'Resolves a line citation written beside a symbol the cited file declares exactly once; a bare range with no symbol beside it, and a symbol the file only uses, are outside it.',
   },
   'test/vendor-gate.test.ts': {
     rootArrays: ['SEARCHED_ROOTS'],
