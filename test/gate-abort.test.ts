@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { reportsWorkerAbort } from '../scripts/gate.ts'
+import { GATES, reportsWorkerAbort } from '../scripts/gate.ts'
 
 /**
  * The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0.
@@ -29,6 +29,35 @@ test('ordinary stderr is not an abort — diagnostics, warnings and an empty str
   // A test NAMING the banner (this file does) is prose in someone's output, not an abort of
   // the tool that printed it — the scan reads the running tool's stderr, nothing else.
   expect(reportsWorkerAbort('the message says stack overflow when it aborts')).toBe(false)
+})
+
+/**
+ * The second way `bun run check` reports a green it has not earned (#257): the header of
+ * `scripts/gate.ts` is the documented authority for what "green" means
+ * (`docs/verification.md`: "each gate's header is the authority"), and it had drifted to the
+ * ported blueprint's — three checks where the file runs five, `vitest run` for `bun test`,
+ * `tsc --noEmit` for a project-reference build that emits declarations. Nothing exited non-zero;
+ * a reader auditing the gate list simply concluded fallow and the coverage floor were not part
+ * of green. Same class as the abort above — the run says nothing is wrong — so it is checked
+ * here, where the subject is already `scripts/gate.ts`.
+ *
+ * It pins the row STRUCTURE, never the prose: the ordered names and the first backticked command
+ * on each row. The reasoning around them is free to be rewritten.
+ */
+const HEADER_GATE_ROW = /^\s*\*\s+\d+\.\s+(\S+)\s+—\s+`([^`]+)`/
+
+test('⚠ the header of scripts/gate.ts names the gates the file actually runs, with their real commands', async () => {
+  const source = await Bun.file(join(import.meta.dir, '..', 'scripts', 'gate.ts')).text()
+  const rows = source
+    .split('\n')
+    .map((line) => HEADER_GATE_ROW.exec(line))
+    .filter((match) => match !== null)
+    .map((match) => ({ name: match[1] ?? '', command: match[2] ?? '' }))
+  const packageScripts = (await Bun.file(join(import.meta.dir, '..', 'package.json')).json()).scripts as Record<
+    string,
+    string
+  >
+  expect(rows).toEqual(GATES.map((gate) => ({ name: gate.name, command: packageScripts[gate.script] ?? '' })))
 })
 
 /**
@@ -82,6 +111,15 @@ test('⚠ end to end: a gate script that prints the banner and exits 0 still fai
  * scanned as it passes, never accumulated, so there is no size at which the gate stops
  * reading — a buffered read would have hit its 1 MB ceiling here and reported the crash as
  * something else entirely.
+ *
+ * ⚠ AND THE VERDICT HAS TO SURVIVE THE EXIT. This test was intermittent — roughly one run in
+ * three here, and a CI failure on an unrelated PR — because `gate.ts` ended with
+ * `process.exit(1)`. Both of the gate's own streams are pipes under `spawnSync`, so its
+ * writes were queued rather than performed, and exiting threw the queue away: 2 MB of
+ * backlog ahead of them meant the ABORTED line and the failure line, written microseconds
+ * before, never reached the reader. Measured 12 of 12 runs losing both, 12 of 12 keeping
+ * them once the gate set `exitCode` and returned instead. The last assertion is the one that
+ * fails if that regresses — detecting the abort is worth nothing if saying so is dropped.
  */
 test('⚠ megabytes of stderr before the banner does not hide the abort', () => {
   const run = runGateOver(
@@ -90,6 +128,7 @@ test('⚠ megabytes of stderr before the banner does not hide the abort', () => 
   expect(run.status).toBe(1)
   expect(run.output).toContain('ABORTED')
   expect(run.output).not.toContain('failed to spawn')
+  expect(run.output).toContain('✗ gate "biome" failed.')
 })
 
 /**

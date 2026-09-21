@@ -12,6 +12,18 @@ import { findRepoRoot } from '../paths.ts'
  * the way `no-duplicate-shapes.test.ts` refuses a stray schema: a convention with no
  * check is a convention that has already been broken somewhere nobody has looked.
  *
+ * ⚠ It refuses the SHAPE, not a list of spellings (#256). A rule expressed as two literals is one
+ * rename away from blind: `new URL('../..', import.meta.url)` reproduces the eighth copy exactly
+ * and matched neither of the original needles — measured 2026-09-18, a planted resolver spelled
+ * that way ran GREEN through all four tests here. The pattern below matches the construction.
+ *
+ * What it cannot catch: a root derived from `process.cwd()` rather than from a module's location.
+ * That is a different failure — it breaks when you run from a subdirectory, not when a file moves
+ * — the one non-test use in source is a CLI `--cwd` default (`packages/web/src/server/dev.ts`),
+ * and no text pattern separates "cwd as the directory the user is in" from "cwd walked up from".
+ * `paths.ts` states that rule in prose ("do not 'fix' this to consult `process.cwd()`"); review
+ * enforces it.
+ *
  * Tests are excluded — a test legitimately builds fixture paths and reads its own
  * location. The rules gate SOURCE, where a duplicate resolver silently drifts.
  */
@@ -78,9 +90,25 @@ test("⚠ fileURLToPath lives ONLY in core's paths module — pass import.meta.u
   expect(offendersContaining('fileURLToPath(', [PATHS_MODULE])).toEqual([])
 })
 
-test('⚠ no source resolves siblings via import.meta.dir — that is the seven-copies shape returning', () => {
-  // Exact property name: `import.meta.main` (check-coverage's entry idiom) must not match.
-  expect(offendersContaining('import.meta.dir', [])).toEqual([])
+/**
+ * Resolution from a module's OWN location, in every spelling it has. `new URL` alone is not the
+ * offence — the web server and the fetch guard parse request URLs with it — so the match requires
+ * `import.meta.url` inside the same call. The `import.meta` accessors are bounded by the exact
+ * property name, so `import.meta.main` (check-coverage's entry idiom) does not match, and neither
+ * does `import.meta.url` handed straight to `findRepoRoot`, which is the sanctioned call.
+ *
+ * ⚠ The gap between the call and the argument is bounded by the LINE, not by the first `)`
+ * (PR #319 review). `[^)]*` stopped at the first closing bracket, so `new URL(join('..', '..'),
+ * import.meta.url)` — a helper call before the base — matched nothing: the spelling-not-shape
+ * blind spot this gate was rewritten to close, reproduced one nesting level down.
+ */
+const RESOLVES_FROM_OWN_LOCATION = /new URL\s*\([^;\n]*import\.meta\.url|import\.meta\.(?:dirname|filename|dir)\b/
+
+test('⚠ no source resolves a path from its own location — that is the seven-copies shape returning', () => {
+  // The allowlist is EMPTY and paths.ts needs no entry: the one sanctioned walk takes its start
+  // location as an ARGUMENT (`findRepoRoot(startPathOrFileUrl)`), so not even the module that owns
+  // the walk resolves from wherever it happens to sit. An entry here would be the first regression.
+  expect(offendersMatching(RESOLVES_FROM_OWN_LOCATION, [], 'a path resolved from its own location')).toEqual([])
 })
 
 test('⚠ the ".zen" literal is assembled only in paths.ts (plus guard.ts, where it is corpus data)', () => {
