@@ -4,39 +4,16 @@ import { join } from 'node:path'
 import * as core from '../index.ts'
 
 /**
- * Anchors for the reason this package exists.
+ * Anchors for the reason this package exists: one place for every shape, reachable by one
+ * search.
  *
- * ⚠ These are not unit tests of a schema — they are the enforcement of "one place". Without
- * them, nothing stops the next session declaring `Type.Object` beside a consumer, which is
- * exactly the drift that made centralising them necessary. A convention with no check is a
- * convention that has already been broken somewhere nobody has looked.
+ * ⚠ These are not unit tests of a schema — they are the enforcement of "one place". The half
+ * that walks the REPOSITORY for a second declaration site is `test/duplicate-shapes-gate.test.ts`
+ * (moved there by #255, when it grew to `packages`/`scripts`/`test` over the shared walker,
+ * which a test inside this package's `rootDir` cannot import). What stays here is the half
+ * about this package: every module reachable from the barrel or a declared subpath, and the
+ * schemas the rest of the repo depends on actually exported.
  */
-
-const packagesDir = join(import.meta.dir, '..', '..', '..')
-// Matches `export const X = Type.…` AND the annotated form `export const X: TSchema = Type.…`
-// (#53 S3: the bare regex let an annotated declaration through).
-const SCHEMA_DECLARATION = /^export const [A-Za-z][A-Za-z0-9]*(?:: [^=\n]+)? = Type\./m
-
-/** Every `.ts`/`.tsx` under `packages/`, excluding node_modules and build output. */
-function sourceFiles(directory: string): string[] {
-  const found: string[] = []
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name === 'dist-types') continue
-    const path = join(directory, entry.name)
-    if (entry.isDirectory()) found.push(...sourceFiles(path))
-    else if (/\.tsx?$/.test(entry.name)) found.push(path)
-  }
-  return found
-}
-
-test('⚠ no TypeBox schema is declared outside @zen/core', () => {
-  const offenders = sourceFiles(packagesDir)
-    .filter((path) => !path.includes(`${join('packages', 'core')}`))
-    .filter((path) => SCHEMA_DECLARATION.test(readFileSync(path, 'utf8')))
-    .map((path) => path.slice(packagesDir.length + 1))
-  // Named, not counted — a count cannot say which file to look at.
-  expect(offenders).toEqual([])
-})
 
 test('every module is reachable: from the barrel, or from a subpath package.json declares', () => {
   // If a module is added to src/ and not to index.ts, a consumer would have to reach past

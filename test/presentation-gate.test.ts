@@ -1,18 +1,23 @@
 import { expect, test } from 'bun:test'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
+import { filesUnder } from '../scripts/source-tree.ts'
 
 /**
  * Presentation stays presentation (#121 item 4, #31).
  *
  * ⚠ Enforcement, not a unit test — the shape of `logging-gate.test.ts` and
- * `vendor-gate.test.ts`. Two lines about `components/ai-elements/`, which is the one
- * directory in this repo whose files came from somewhere else:
+ * `vendor-gate.test.ts`. Three lines about `packages/web/src/components/`, the directory in
+ * this repo whose files came from somewhere else:
  *
- *   1. **Every file names its origin.** The pinned upstream commit in a provenance header,
- *      so a reader knows the file is ported, and a port that drifts can be diffed against
- *      the pin. A vendored file without provenance is just code nobody dares touch.
- *   2. **Nothing under it holds APPLICATION state.** The distinction that makes the rule
+ *   1. **Every vendored subdirectory names its origin.** A receipt per subdirectory — the
+ *      pinned upstream commit for `ai-elements`, the registry and style for `ui` — and the
+ *      receipt set is held against what is on DISK in both directions, so a new vendored
+ *      subdirectory fails until it arrives with one instead of quietly inheriting the
+ *      exclusions. A vendored file without provenance is just code nobody dares touch.
+ *   2. **Every file names its subdirectory's receipt**, so a port that drifts can be diffed
+ *      against the pin and a file that moves between subdirectories cannot keep the wrong one.
+ *   3. **Nothing under it holds APPLICATION state.** The distinction that makes the rule
  *      usable: a disclosure's open flag, an IME composing flag, the attachment strip before
  *      submit — component-local `useState`/`useRef` — is what a presentation component IS,
  *      and forbidding it would forbid the components. What may not cross is the *state
@@ -20,17 +25,36 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
  *      component that reads a thread's store is no longer portable, no longer replaceable
  *      by an upstream re-port, and the seam README rule 3 names has moved.
  *
- * So the gate matches imports, not hooks. Today the six ported files import React, two ui
- * primitives, `lucide-react`, `use-stick-to-bottom` and each other — nothing else — and the
- * point of the test is that the first import of a store fails the build instead of passing
- * review.
+ * So the gate matches imports, not hooks. The ported files import React, the `ui` primitives,
+ * `lucide-react`, `radix-ui`, `class-variance-authority`, `use-stick-to-bottom` and each
+ * other — nothing else — and the point of the test is that the first import of a store fails
+ * the build instead of passing review.
+ *
+ * ⚠ The scan is the EXCLUSION BOUNDARY, recursively (#253). It read `components/ai-elements`
+ * only, non-recursively, while three separate exclusions — `biome.jsonc` → `files.includes`,
+ * `bunfig.toml` → `coveragePathIgnorePatterns`, `.fallowrc.jsonc` → `ignoreFindings` — are
+ * all drawn at `components`. So the eight `ui/*.tsx` shadcn primitives were unlinted,
+ * unmeasured, exempt from dead-code findings, carried no provenance, and were held to no
+ * state-layer rule: `import { useStore } from "@/store.ts"` in `ui/card.tsx` passed every
+ * gate in the repo, and so did any new file one directory below `ai-elements/`. The fence is
+ * now the boundary it justifies, over the one walker (`scripts/source-tree.ts`, #174), whose
+ * extension set is a superset of the `\.tsx?$` this used to apply.
  */
 
 const repositoryRoot = join(import.meta.dir, '..')
-const PORTED_DIRECTORY = 'packages/web/src/components/ai-elements'
-/** The pin every ported file carries; bump it here when the clone moves (the #31 procedure). */
-const UPSTREAM_PIN = '6a9d5b1822ffb10bba4bd97175f01edd7d8651cd'
-const SOURCE_EXTENSION = /\.tsx?$/
+/** The exclusion boundary the three exclusions are drawn at, and therefore the fence. */
+const PORTED_DIRECTORY = 'packages/web/src/components'
+/**
+ * The receipt each vendored subdirectory's files must name; bump one here when its clone or
+ * registry moves (the #31 procedure). `ai-elements` is commit-addressable, so the receipt IS
+ * the commit. The shadcn registry is not — components are re-fetched by style, not by sha —
+ * so its receipt is the registry and style `packages/web/components.json` names, and
+ * `ui/README.md` carries the rest (CLI version, the commit that added them, what diverged).
+ */
+const PROVENANCE_RECEIPTS: Record<string, string> = {
+  'ai-elements': '6a9d5b1822ffb10bba4bd97175f01edd7d8651cd',
+  ui: 'shadcn/ui radix-nova',
+}
 
 /**
  * The state layer, DERIVED (#273). `packages/web/tsconfig.json` maps `@/*` to `./src/*`, so
@@ -81,21 +105,78 @@ function stateLayerTarget(fromFile: string, specifier: string): string | undefin
   return PRESENTATION_DIRECTORIES.includes(inside.split(sep)[0] ?? '') ? undefined : `${WEB_SOURCE_ROOT}/${inside}`
 }
 
+/** A module beside the app, whatever its extension — the class the old `\.ts` pattern could not see. */
+const SOURCE_EXTENSION = /\.(?:ts|tsx|mjs)$/
+
+/** Every vendored file, at any depth under the boundary. */
 function portedFiles(): string[] {
-  const directory = join(repositoryRoot, PORTED_DIRECTORY)
-  return readdirSync(directory)
-    .filter((name) => SOURCE_EXTENSION.test(name))
-    .map((name) => join(directory, name))
+  return filesUnder(join(repositoryRoot, PORTED_DIRECTORY))
 }
 
-test('⚠ every ported presentation file names its upstream pin (#31, #121)', () => {
-  const withoutProvenance = portedFiles()
-    .filter((path) => !readFileSync(path, 'utf8').includes(UPSTREAM_PIN))
-    .map((path) => path.slice(repositoryRoot.length + 1))
+/** The vendored subdirectory a file belongs to, or `undefined` for a file sitting at the root. */
+function vendoredSubdirectory(path: string): string | undefined {
+  const [head, ...rest] = relative(join(repositoryRoot, PORTED_DIRECTORY), path).split(sep)
+  return rest.length > 0 ? head : undefined
+}
+
+test('⚠ every vendored subdirectory has a receipt, and every receipt a subdirectory (#31, #253)', () => {
+  const onDisk = readdirSync(join(repositoryRoot, PORTED_DIRECTORY), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort()
+  // Both directions, because each is a different rot: a subdirectory with no receipt is
+  // upstream code that inherited three exclusions without saying where it came from, and a
+  // receipt with no subdirectory is a pin nobody can check (the `v` shape of #251).
+  expect(onDisk).toEqual(Object.keys(PROVENANCE_RECEIPTS).sort())
+})
+
+test('⚠ every ported presentation file names its subdirectory’s receipt (#31, #121, #253)', () => {
+  const withoutProvenance: string[] = []
+  for (const path of portedFiles()) {
+    const subdirectory = vendoredSubdirectory(path)
+    const receipt = subdirectory === undefined ? undefined : PROVENANCE_RECEIPTS[subdirectory]
+    // A file at the root belongs to no receipted port: it is first-party code in an excluded
+    // tree, which is the one thing this directory may not hold.
+    if (receipt === undefined || !readFileSync(path, 'utf8').includes(receipt))
+      withoutProvenance.push(path.slice(repositoryRoot.length + 1))
+  }
   expect(withoutProvenance).toEqual([])
 })
 
-test('⚠ nothing under ai-elements reaches the state layer — component-local state only (#121 item 4)', () => {
+/**
+ * ⚠ THE `ui` RECEIPT IS A REPRODUCTION RECIPE, AND A RECIPE CAN GO STALE (PR #321 review).
+ * The test above proves a file's header NAMES the receipt; it cannot prove the file still
+ * equals what the registry serves, because the shadcn registry is not commit-addressable —
+ * `ui/README.md` says so, and that limitation stands. What it CAN prove is that the recipe
+ * still describes this repository: the style the receipt names is the style
+ * `components.json` fetches with, and the CLI version `README.md` tells the next person to
+ * run is the one the package manifest pins. Both drift by ordinary edits — a `style` bump in
+ * `components.json`, a `shadcn` version bump in `package.json` — and either leaves every
+ * header in the directory naming a fetch nobody can reproduce, with the presence check still
+ * green. Presence is not equality; this is what keeps presence worth anything.
+ */
+test('⚠ the ui receipt still names the style and CLI version this repository fetches with (#31, #253)', () => {
+  const manifest = JSON.parse(readFileSync(join(repositoryRoot, 'packages/web/components.json'), 'utf8')) as {
+    style?: string
+  }
+  const style = manifest.style ?? ''
+  expect(style.length).toBeGreaterThan(0)
+  expect(PROVENANCE_RECEIPTS.ui).toBe(`shadcn/ui ${style}`)
+
+  const web = JSON.parse(readFileSync(join(repositoryRoot, 'packages/web/package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>
+    devDependencies?: Record<string, string>
+  }
+  const pinned = (web.dependencies?.shadcn ?? web.devDependencies?.shadcn ?? '').replace(/^[^\d]*/, '')
+  expect(pinned.length).toBeGreaterThan(0)
+  // The README's procedure names the version to re-fetch with; a bump that leaves it behind
+  // sends the next reader to a CLI this repository does not install.
+  const readme = readFileSync(join(repositoryRoot, PORTED_DIRECTORY, 'ui', 'README.md'), 'utf8')
+  expect(readme).toContain(`shadcn@${pinned}`)
+  expect(readme).toContain(`\`${PROVENANCE_RECEIPTS.ui}\``)
+})
+
+test('⚠ nothing under components/ reaches the state layer — component-local state only (#121 item 4, #253)', () => {
   const offenders: string[] = []
   for (const path of portedFiles()) {
     for (const [lineIndex, line] of readFileSync(path, 'utf8').split('\n').entries()) {

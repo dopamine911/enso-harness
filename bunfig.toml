@@ -21,8 +21,18 @@ linker = "hoisted"
 coverage = true
 coverageReporter = ["text", "lcov"]
 coverageDir = "coverage"
-# The vendored shadcn/ai-elements components share biome.json's exclusion boundary:
+# The vendored shadcn/ai-elements components share biome.jsonc's exclusion boundary:
 # upstream's code, kept diffable, not held to our floor. chat-screen.tsx imports them
 # transitively, so test/coverage-manifest.test.ts not importing them is not enough — this
 # pattern is what keeps them out of the DENOMINATOR.
-coveragePathIgnorePatterns = ["**/src/components/**"]
+#
+# ⚠ This key is HALF the denominator, so it is PINNED (#252): test/coverage-manifest.test.ts
+# asserts this array equals `**/<directory>/**` for each of its own `VENDORED_DIRECTORIES`,
+# one source of truth. Widening it is how a coverage floor falls without anybody editing
+# TOTAL_LINE_COVERAGE_FLOOR. Measured 2026-09-18: adding `**/chat-screen.tsx` — the repo's
+# largest single line-coverage debt — took the denominator from 99 files to 98 and the
+# measured total from 93.61%/92.96% to 93.74%/93.47% (lines/functions), every gate green
+# and no test naming the change. The key is unbounded, so the pin is the only sensor.
+# Written as the full repository-relative path for that reason: the pattern and the
+# directory it excludes are then the same string.
+coveragePathIgnorePatterns = ["**/packages/web/src/components/**"]

@@ -6,7 +6,7 @@ layer** is components ported file by file from an upstream library, retyped as t
 component-local state and nothing of ours. Glossary domain: **Surface** (surface, state layer,
 presentation layer, pane, transcript, composer, card) and the browser's side of **Observation** (the
 adapter, custom event). The contract below is what the state layer exposes to the rest of the page;
-the rule is that nothing under `components/ai-elements/` may reach it.
+the rule is that nothing under `components/` may reach it.
 
 Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Refresh with
 `bun scripts/docs/refresh-fences.ts docs/seams/presentation.md`.
@@ -202,8 +202,10 @@ the state layer passes `onCustomEvent` no thread id (lines 153-161).
 
 **The presentation layer is consumed by two files.** `chat-screen.tsx`'s imports at lines 23-49 pull
 `attachments`, `conversation`, `message`, `prompt-input` and `queue` from `components/ai-elements/`;
-`selected-message-part.tsx:7` pulls `reasoning`. The six ported files and their pins are the generated
-table in [`ported-provenance.md`](./ported-provenance.md).
+`selected-message-part.tsx:7` pulls `reasoning`. Those six ai-elements files and their commit pins are
+the generated table in [`ported-provenance.md`](./ported-provenance.md); the eight `ui/` shadcn
+primitives beneath the same fence are receipted by [`components/ui/README.md`](../../packages/web/src/components/ui/README.md)
+instead, because the shadcn registry is re-fetched by style and version rather than by commit.
 The renderers that stay ours are outside the ported directory: the dialog card is `ZenDialogCard` in
 `chat-screen.tsx` itself (`#ZenDialogCard`), and the tool-result descriptor renderer, notices, the mode select
 and the status bar are the `SelectedMessagePart`, `ThreadNotifications`, `PermissionModeSelect`,
@@ -218,11 +220,21 @@ need none: an upstream re-port is the second implementation, and the gate is wha
 
 ## What fences it
 
-- **The presentation gate** (`test/presentation-gate.test.ts`, #121 item 4, #31) holds two lines
-  about `components/ai-elements/`, in its header (lines 12-21):
-  1. *Every file names its origin* — the pinned upstream commit in a provenance header, so a port that
-     drifts can be diffed against the pin (`UPSTREAM_PIN`, line 32).
-  2. *Nothing under it holds APPLICATION state* — component-local `useState`/`useRef` is what a
+- **The presentation gate** (`test/presentation-gate.test.ts`, #121 item 4, #31, #253) holds three
+  lines about all of `packages/web/src/components/` — the path at which three separate exclusions are
+  drawn (`biome.jsonc` → `files.includes`, `bunfig.toml` → `coveragePathIgnorePatterns`,
+  `.fallowrc.jsonc` → `ignoreFindings`), which is why the fence is that path and not a subdirectory
+  of it. Until #253 it scanned `components/ai-elements` non-recursively, so the eight `ui/*.tsx`
+  primitives were unlinted, unmeasured, exempt from dead-code findings, carried no provenance and were
+  held to no state-layer rule; `import { useStore } from "@/store.ts"` in `ui/card.tsx` passed every
+  gate in the repo. The three lines, in its header:
+  1. *Every vendored subdirectory has a receipt, and every receipt a subdirectory* — checked against
+     what is on disk in both directions (`PROVENANCE_RECEIPTS`), so a new vendored subdirectory fails
+     until it arrives with one rather than inheriting the three exclusions in silence.
+  2. *Every file names its subdirectory's receipt* — `ai-elements` the pinned upstream commit, `ui`
+     the registry style — so a port that drifts can be diffed against its receipt, and a file at the
+     fence's root, belonging to no receipted port, fails as well.
+  3. *Nothing under it holds APPLICATION state* — component-local `useState`/`useRef` is what a
      presentation component is; what may not cross is the state layer: our stores, the follow
      connection, the wire schemas, the vendored client. The gate matches imports, not hooks, and
      it does not spell them: `stateLayerTarget` (line 68) RESOLVES every specifier a ported file
@@ -237,9 +249,10 @@ need none: an upstream re-port is the second implementation, and the gate is wha
      (#273). The proof that it cannot go stale again is a test, not a comment: every module
      sitting beside `chat-screen.tsx` is read off the directory and must be refused under both
      spellings (line 154).
-- **The rule** the gate enforces is the ported directory's README (`components/ai-elements/README.md`,
-  rules 1-4): provenance header; a standing fork updated by diff against the pin; presentation only —
-  state, the stream protocol, the dialog renderer and the tool-result renderer live outside it; and
+- **The rule** the gate enforces is each ported directory's README (`components/ai-elements/README.md`
+  rules 1-4, `components/ui/README.md` rules 1-3): a provenance receipt per file; a standing fork
+  updated by diff against that receipt; presentation only — state, the stream protocol, the dialog
+  renderer and the tool-result renderer live outside it; and, for the ai-elements port,
   `import … from "ai"` never survives the crossing. `architecture.md` → Presentation states the same
   as *port before you build*: hand-rolling needs its reason in the file header.
 - **`page-scoped-stores.test.ts`** (`packages/web/src/__tests__/`) walks every non-test, non-component
@@ -311,7 +324,7 @@ snapshot) and `server/index.ts` (the history route), and the two schema fields t
 The per-thread stores, the router's dispatch, and the fixture path are shaped by the thread, not the
 client, and survive.
 
-What does not change: the six ported components — the gate proves none imports a store, the
+What does not change: the fourteen ported components — the gate proves none imports a store, the
 connection, `@zen/core` or the client, so a state layer they have never seen cannot reach them — and
 every shape in `@zen/core` EXCEPT the two named above, because the wire otherwise carries observations
 and the client's stream vocabulary was only ever made in memory from them. `ZenThreadHistory.messages`

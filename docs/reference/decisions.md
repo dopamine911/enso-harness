@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 179.**
+**Decision headers: 181.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -13,6 +13,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/__tests__/log-process.test.ts` | `#132` | The file a user hands us (#132), end to end through the real configurator: what a line looks like, what never reaches it, what every line under a route carries — and the knob. |
 | `packages/core/src/__tests__/log-recorder.ts` | `#132`, `#178` | The tests' sink (#132), one for every package (#178): every `zen` record, at every level, into memory — a guard's verdict, an audit line or a route's problem is asserted as the record it is, the way a bundle reader would read it, not as a line on stderr. |
 | `packages/core/src/__tests__/no-duplicate-paths.test.ts` | `#59`, `#256` | The anti-duplication anchor for path resolution (#59) — Daniel: "this should live in core and prevent duplicate code again." |
+| `packages/core/src/__tests__/no-duplicate-shapes.test.ts` | `#255` | Anchors for the reason this package exists: one place for every shape, reachable by one search. |
 | `packages/core/src/__tests__/observation-kinds.ts` | `#53` | The oracle both "every observation" sweeps compare against (#53 S1.4): every `kind` literal the ZenObservation union declares, sorted. |
 | `packages/core/src/__tests__/pi-manifest.test.ts` | `#221` | pi's manifest-resource layout, now owned in one place (#221 — it was implemented three times: the terminal launcher, the postinstall linker, and the server's `assertVendorLinks`). |
 | `packages/core/src/__tests__/picc-corpus-contract.test.ts` | `#7`, `#20`, `#222` | The picc CORPUS CONTRACT TEST (#222), the shape of `cc-safety-net-contract.test.ts` and `agent-loop-contract.test.ts`: read the installed vendor, assert the shape we copied. |
@@ -176,16 +177,17 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/complexity-ratchet.test.ts` | `#264` | Re-measures the cognitive-complexity pins, per FUNCTION (#264). |
 | `test/dependency-gate.test.ts` | `#218`, `#223` | What the dependency manifests claim, held against what the code actually imports (#218, #223). |
 | `test/docs-gate.test.ts` | `#162`, `#167`, `#168`, `#258` | The docs cannot drift (#168, goals §3.3): a page either quotes source and is checked against it, or is generated from source and is diffed against it. |
+| `test/duplicate-shapes-gate.test.ts` | `#53`, `#174`, `#255` | One place for every shape: no TypeBox schema is declared outside `@zen/core` (#53, #255). |
 | `test/e2e-selectors.test.ts` | `#116`, `#277` | THE E2E SELECTOR CONTRACT (#277). |
 | `test/fallow-config.test.ts` | `#163` | fallow's entry list cannot drift from the harness manifest (#163). |
 | `test/gate-abort.test.ts` | `#157` | The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0. |
 | `test/gate-support.ts` | `#150`, `#162`, `#165`, `#174` | What the source-tree gates share (#165, #162 workstream 6): the word-splitter, the sequence matcher, the comment skip, over the one walker (`scripts/source-tree.ts`, #174). |
 | `test/glossary-doc.test.ts` | `#161`, `#164`, `#165`, `#245` | The glossary keeps its own three rules (#161, PR #164 review; #245). |
 | `test/glossary-gate.test.ts` | `#165`, `#241`, `#257`, `#287` | The glossary's Retired table, applied to the source tree (#165, `docs/glossary.md` → Retired). |
-| `test/logging-gate.test.ts` | `#132` | Every record goes through the one logger (#132), and the substrate stays behind it. |
-| `test/naming-gate.test.ts` | `#82`, `#83` | The naming gate's exemption for externally-fixed KEYS (#82, PR #83 review). |
+| `test/logging-gate.test.ts` | `#132`, `#162`, `#254` | Every record goes through the one logger (#132), and the substrate stays behind it. |
+| `test/naming-gate.test.ts` | `#82`, `#83`, `#250` | The naming gate's exemption for externally-fixed KEYS (#82, PR #83 review), and the severity that decides whether a tier blocks (#250) or merely mentions. |
 | `test/no-lint-suppressions.test.ts` | `#82` | The gate may not be talked out of, one line at a time. |
-| `test/presentation-gate.test.ts` | `#31`, `#121` | Presentation stays presentation (#121 item 4, #31). |
+| `test/presentation-gate.test.ts` | `#31`, `#121`, `#174`, `#253` | Presentation stays presentation (#121 item 4, #31). |
 | `test/scripts-extensions.test.ts` | `#269`, `#308` | `scripts/` is TypeScript, and the exceptions are named (#269). |
 | `test/vendor-gate.test.ts` | `#69`, `#145`, `#150`, `#165`, `#173`, `#215` | The seam has an owner: only the host and the pi extensions may name the vendor (#145). |
 
