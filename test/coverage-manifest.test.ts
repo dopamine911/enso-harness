@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
+import { MINIMUM_REPORTED_FILES } from '../scripts/check-coverage.ts'
 import { filesUnder } from '../scripts/source-tree.ts'
 
 /**
@@ -107,22 +108,40 @@ test('the total coverage floor is wired into the gate at the intended level', as
   expect(bunfig).toMatch(/^coverage = true$/m)
 })
 
-// ⚠ The OTHER half of the denominator (#252). Two things decide which files the floor is
-// measured over: which files a test imports (the manifest above) and
-// `coveragePathIgnorePatterns`, which drops an imported file from the report anyway. The
-// gate pinned only that coverage was ON, so one extra glob in that key lowered the floor's
-// real bar with every gate still green and no test naming the change — measured 2026-09-18,
-// adding `**/chat-screen.tsx` (the repo's largest single line-coverage debt) took
-// `check-coverage` from 99 files at 93.61%/92.96% to 98 files at 93.74%/93.47%
-// (lines/functions), and the whole suite stayed green. That is the back door on the one
-// ratchet this repo calls unfalsifiable-by-construction, and `scripts/check-coverage.ts`
-// says the floor moves in its own PR with the reason. So the exclusion is pinned to its
-// EXACT value, derived from the vendored list above: widening it is a red test with a
-// named diff. The key is unbounded — nothing else in the repo reads it.
+// ⚠ ONE OF TWO OTHER HALVES OF THE DENOMINATOR (#252). Three things decide which files the
+// floor is measured over: which files a test imports (the manifest above),
+// `coveragePathIgnorePatterns`, which drops an imported file from the report anyway, and the
+// report's own size (#234, below). The gate pinned only that coverage was ON, so one extra
+// glob in that key lowered the floor's real bar with every gate still green and no test
+// naming the change — measured 2026-09-18, adding `**/chat-screen.tsx` (the repo's largest
+// single line-coverage debt) took `check-coverage` from 99 files at 93.61%/92.96% to 98 files
+// at 93.74%/93.47% (lines/functions), and the whole suite stayed green. That is the back door
+// on the one ratchet this repo calls unfalsifiable-by-construction, and
+// `scripts/check-coverage.ts` says the floor moves in its own PR with the reason. So the
+// exclusion is pinned to its EXACT value, derived from the vendored list above: widening it is
+// a red test with a named diff. The key is unbounded — nothing else in the repo reads it.
 test('⚠ the coverage exclusion is exactly the vendored directories — nothing else leaves the denominator', async () => {
   const bunfig = await Bun.file(join(REPOSITORY_ROOT, 'bunfig.toml')).text()
   const declared = /^coveragePathIgnorePatterns = \[([^\]]*)\]$/m.exec(bunfig)
   if (declared === null) throw new Error('bunfig.toml: coveragePathIgnorePatterns is not a single-line array')
   const patterns = [...(declared[1] ?? '').matchAll(/"([^"]*)"/g)].map((match) => match[1] ?? '')
   expect(patterns).toEqual([...VENDORED_IGNORE_PATTERNS])
+})
+
+/**
+ * ⚠ THE REPORT'S SIZE is the third, and the one #234 closed: the gate refuses a report
+ * holding fewer records than a whole-suite run produces, because `coverage = true` is global and
+ * any targeted `bun test <file>` overwrites the report with a partial one that reads as green.
+ * That minimum is a hand-set number in a script — this test is what keeps it honest against the
+ * denominator this file actually walks: never above it (a full report would go red for nothing),
+ * never far under it (a two-file report would sail through).
+ */
+const MINIMUM_REPORT_SHARE_OF_DENOMINATOR = 0.8
+
+test("⚠ the gate's minimum report size stays under the walked denominator, and not far under", () => {
+  const sources = LIBRARY_SOURCE_ROOTS.flatMap((root) => collectLibrarySources(join(REPOSITORY_ROOT, root)))
+  expect(MINIMUM_REPORTED_FILES).toBeLessThanOrEqual(sources.length)
+  expect(MINIMUM_REPORTED_FILES).toBeGreaterThanOrEqual(
+    Math.floor(sources.length * MINIMUM_REPORT_SHARE_OF_DENOMINATOR),
+  )
 })

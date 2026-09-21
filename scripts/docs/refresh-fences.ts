@@ -21,7 +21,27 @@ import { extractDeclarationFromFile } from './extract-declaration.ts'
 
 const ROOT = findRepoRoot(import.meta.url)
 const SOURCE_MARKER = /^<!--\s*source:\s*(\S+?)#(\w+)\s*-->$/
-const TS_FENCE_OPEN = /^```(?:ts|typescript)\s*$/
+/**
+ * A fence open line with its language tag captured, tolerating an info string after the tag. The
+ * tag may be empty — a bare fence is still a fence, and `test/docs-gate.test.ts` has to see it.
+ */
+export const FENCE_OPEN = /^```(\S*)/
+/**
+ * The languages a `source:` marker can quote: every TypeScript and JavaScript flavour, because the
+ * extractor works on a top-level declaration and does not care which extension it came from.
+ * Anchored, so it matches a fence's whole language tag and never a prefix of one.
+ *
+ * ⚠ Exported because the gate and this refresher MUST read the same surface (#258). They were two
+ * copies of a pattern that accepted only `ts` and `typescript` with nothing after them, and a
+ * fence the gate demands be sourced but the refresher silently skips is a red gate with no repair
+ * command. One pattern, imported twice.
+ */
+export const SOURCEABLE_FENCE_LANGUAGE = /^(?:tsx?|typescript|mts|cts|jsx?|javascript|mjs|cjs)$/
+
+/** A fence's language tag, lowercased; `''` for a bare fence and for a line that opens none. */
+export function fenceLanguage(line: string): string {
+  return (FENCE_OPEN.exec(line)?.[1] ?? '').toLowerCase()
+}
 const FENCE_CLOSE = /^```\s*$/
 const BLOCK_OPEN = /^<!--\s*generated-block:\s*(\S+)\s*-->$/
 const BLOCK_CLOSE = /^<!--\s*\/generated-block\s*-->$/
@@ -48,10 +68,13 @@ export function refreshFences(text: string): { text: string; refreshed: number }
     }
     const marker = SOURCE_MARKER.exec(line)
     if (marker === null) continue
-    if (!TS_FENCE_OPEN.test(lines[lineIndex + 1] ?? '')) continue
+    // Refuse, never skip: a marker above a fence the extractor cannot fill — a diagram, a shell
+    // block — is exactly what the gate refuses, so the repair tool must not quietly walk past it.
+    if (!SOURCEABLE_FENCE_LANGUAGE.test(fenceLanguage(lines[lineIndex + 1] ?? '')))
+      throw new Error(`line ${lineIndex + 1}: source marker is not above a TypeScript or JavaScript fence`)
     const closeIndex = lines.findIndex((candidate, index) => index > lineIndex + 1 && FENCE_CLOSE.test(candidate))
     // Refuse, never truncate — the same rule as the generated block above.
-    if (closeIndex === -1) throw new Error(`line ${lineIndex + 2}: sourced ts fence is never closed`)
+    if (closeIndex === -1) throw new Error(`line ${lineIndex + 2}: sourced fence is never closed`)
     const declaration = extractDeclarationFromFile(join(ROOT, marker[1] ?? ''), marker[2] ?? '')
     output.push(lines[lineIndex + 1] ?? '', declaration.text, lines[closeIndex] ?? '')
     refreshed += 1

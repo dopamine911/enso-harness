@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import type { HostedThread } from '../../host/agent-host.ts'
-import { createThreadRegistry, type ThreadRegistry } from '../thread-registry.ts'
+import { createThreadRegistry, type ScheduleIdleDisposal, type ThreadRegistry } from '../thread-registry.ts'
 import { createFakeHostedThread, type FakeHostedThread, type FakeThreadParts, takeQueue } from './fake-hosted-thread.ts'
 
 let logs: LogRecorder
@@ -49,8 +49,50 @@ function fakeHosted(): FakeHosted {
   return { ...fake, failClear, finishAbort: (): void => finishAbort() }
 }
 
-function fakeHost(): { threads: ThreadRegistry; built: FakeHosted[] } {
+/**
+ * The registry's idle clock, advanced by hand (#235).
+ *
+ * ⚠ The idle-window tests assert a NEGATIVE — "the disposal has not fired yet". Against wall
+ * time that was a 5–15 ms margin on a 20 ms timer: it passed here and would lose the race on a
+ * loaded runner, reporting the #43 regression as broken when it is not. Advancing the clock by
+ * hand makes both halves facts, and pins the WINDOW itself: measured 2026-09-18, a registry
+ * that disposed 5 ms early passed all 14 wall-clock tests five times over.
+ */
+interface ManualIdleClock {
+  /** The seam the registry is built with. */
+  schedule: ScheduleIdleDisposal
+  /** Let `ms` of the registry's idle time pass, firing whatever fell due. */
+  advance: (ms: number) => void
+  /** How many disposals are armed — 0 once they are cancelled or fired. */
+  pending: () => number
+}
+
+function manualIdleClock(): ManualIdleClock {
+  let elapsedMs = 0
+  let scheduled: { dueAtMs: number; dispose: () => void }[] = []
+  return {
+    schedule: (dispose: () => void, afterMs: number) => {
+      const entry = { dueAtMs: elapsedMs + afterMs, dispose }
+      scheduled.push(entry)
+      return {
+        cancel: (): void => {
+          scheduled = scheduled.filter((other) => other !== entry)
+        },
+      }
+    },
+    advance: (ms: number): void => {
+      elapsedMs += ms
+      const due = scheduled.filter((entry) => entry.dueAtMs <= elapsedMs)
+      scheduled = scheduled.filter((entry) => entry.dueAtMs > elapsedMs)
+      for (const entry of due) entry.dispose()
+    },
+    pending: (): number => scheduled.length,
+  }
+}
+
+function fakeHost(): { threads: ThreadRegistry; built: FakeHosted[]; clock: ManualIdleClock } {
   const built: FakeHosted[] = []
+  const clock = manualIdleClock()
   const threads = createThreadRegistry({
     createSession: () => {
       const next = fakeHosted()
@@ -58,8 +100,9 @@ function fakeHost(): { threads: ThreadRegistry; built: FakeHosted[] } {
       return Promise.resolve(next.hosted)
     },
     idleTimeoutMs: 20,
+    scheduleIdleDisposal: clock.schedule,
   })
-  return { threads, built }
+  return { threads, built, clock }
 }
 
 const sleep = (ms: number): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -83,12 +126,13 @@ test('two concurrent first requests on one thread share one build', async () => 
 })
 
 test('release starts the idle clock; the session is disposed after the window, and a later acquire rebuilds', async () => {
-  const { threads, built } = fakeHost()
+  const { threads, built, clock } = fakeHost()
   const lease = await threads.acquire('t1')
   lease.release()
-  await sleep(5)
+  // One millisecond short of the window, and then on it: the edge itself, not a margin.
+  clock.advance(19)
   expect(built[0]?.record.disposed).toBe(0)
-  await sleep(30)
+  clock.advance(1)
   expect(built[0]?.record.disposed).toBe(1)
   expect(threads.liveThreadCount()).toBe(0)
   // The disposal is a record that says why (#132) — the idle window, by its length.
@@ -103,12 +147,14 @@ test('release starts the idle clock; the session is disposed after the window, a
 })
 
 test("acquire within the idle window cancels the disposal — #43's fix in one assertion", async () => {
-  const { threads, built } = fakeHost()
+  const { threads, built, clock } = fakeHost()
   const first = await threads.acquire('t1')
   first.release()
-  await sleep(10)
+  clock.advance(19)
   const second = await threads.acquire('t1')
-  await sleep(30)
+  // Cancelled, not deferred: nothing is armed, so no amount of idle time disposes it.
+  expect(clock.pending()).toBe(0)
+  clock.advance(1000)
   expect(second.runtime).toBe(first.runtime)
   expect(built[0]?.record.disposed).toBe(0)
   expect(built).toHaveLength(1)
@@ -130,7 +176,9 @@ test('abort stops the run and never disposes; a repeat while it is pending is th
   const pending = threads.acquire('t1').then(() => {
     acquired = true
   })
-  await sleep(5)
+  // No timer is in play here: nothing but `finishAbort` can resolve that acquire, so one turn of
+  // the microtask queue is the whole wait — there is no margin to lose.
+  await Promise.resolve()
   expect(acquired).toBe(false)
   hosted.finishAbort()
   await pending
@@ -221,10 +269,10 @@ test('⚠ a lease superseded by a later acquire is stale: its release touches no
 })
 
 test('⚠ a lease from before a rebuild is stale, and the rebuilt thread continues the count', async () => {
-  const { threads, built } = fakeHost()
+  const { threads, built, clock } = fakeHost()
   const before = await threads.acquire('t1')
   before.release()
-  await sleep(30) // idle window: disposed
+  clock.advance(20) // the idle window: disposed
   expect(threads.liveThreadCount()).toBe(0)
   before.release()
   logs.assertLogged({
@@ -256,15 +304,17 @@ test('a failed build leaves no entry, so the next request retries', async () => 
 })
 
 test('shutdown disposes every live session and clears pending idle timers', async () => {
-  const { threads, built } = fakeHost()
+  const { threads, built, clock } = fakeHost()
   const t1 = await threads.acquire('t1')
   await threads.acquire('t2')
   t1.release()
+  expect(clock.pending()).toBe(1)
   threads.shutdown()
   expect(built.map((hosted) => hosted.record.disposed)).toEqual([1, 1])
   expect(threads.liveThreadCount()).toBe(0)
-  await sleep(30)
-  // The idle timer for t1 must not fire a second dispose.
+  // The idle timer for t1 was cleared, so it cannot fire a second dispose — ever, not just soon.
+  expect(clock.pending()).toBe(0)
+  clock.advance(1000)
   expect(built[0]?.record.disposed).toBe(1)
 })
 

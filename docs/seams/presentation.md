@@ -207,7 +207,7 @@ the generated table in [`ported-provenance.md`](./ported-provenance.md); the eig
 primitives beneath the same fence are receipted by [`components/ui/README.md`](../../packages/web/src/components/ui/README.md)
 instead, because the shadcn registry is re-fetched by style and version rather than by commit.
 The renderers that stay ours are outside the ported directory: the dialog card is `ZenDialogCard` in
-`chat-screen.tsx` itself (line 406), and the tool-result descriptor renderer, notices, the mode select
+`chat-screen.tsx` itself (`#ZenDialogCard`), and the tool-result descriptor renderer, notices, the mode select
 and the status bar are the `SelectedMessagePart`, `ThreadNotifications`, `PermissionModeSelect`,
 `ThreadStatusBar` and `ZenRendererMap` imports at lines 55-81.
 

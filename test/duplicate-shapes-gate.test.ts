@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { filesUnder } from '../scripts/source-tree.ts'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
@@ -27,6 +27,17 @@ const SEARCHED_ROOTS = ['packages', 'scripts', 'test'] as const
 const CORE_PACKAGE = join('packages', 'core')
 
 /**
+ * Is this path inside `packages/core`? A SEGMENT test, not a substring one (PR #321 review).
+ * `path.includes('packages/core')` also swallows a future `packages/core-extensions/`, which
+ * would leave a whole package unscanned by the gate whose job is to say where a schema may be
+ * declared — and silently, because an excluded file can never be an offender.
+ */
+function insideCore(path: string): boolean {
+  const relative = path.slice(REPOSITORY_ROOT.length + 1)
+  return relative === CORE_PACKAGE || relative.startsWith(`${CORE_PACKAGE}${sep}`)
+}
+
+/**
  * A TypeBox schema declaration, independent of the export keyword and of line breaks (#255).
  *
  * ⚠ The needle it replaced required `export const`, the name and `= Type.` on ONE PHYSICAL
@@ -49,11 +60,23 @@ const SCHEMA_DECLARATION =
 
 test('⚠ no TypeBox schema is declared outside @zen/core (#53, #255)', () => {
   const offenders = SEARCHED_ROOTS.flatMap((root) => filesUnder(join(REPOSITORY_ROOT, root)))
-    .filter((path) => !path.includes(CORE_PACKAGE))
+    .filter((path) => !insideCore(path))
     .filter((path) => SCHEMA_DECLARATION.test(readFileSync(path, 'utf8')))
     .map((path) => path.slice(REPOSITORY_ROOT.length + 1))
   // Named, not counted — a count cannot say which file to look at.
   expect(offenders).toEqual([])
+})
+
+// The exclusion decides what the scan never looks at, so its edge is asserted rather than
+// assumed: an excluded file cannot be an offender, and a widened exclusion is a gate that
+// reports nothing about a whole package while staying green.
+test('the core exclusion is a path segment, so a sibling package is still scanned (#321 review)', () => {
+  const inside = (relative: string): boolean => insideCore(join(REPOSITORY_ROOT, relative))
+  expect(inside(join('packages', 'core', 'src', 'follow.ts'))).toBe(true)
+  expect(inside(join('packages', 'core'))).toBe(true)
+  // The shape a substring match would swallow: a sibling whose name starts with the same word.
+  expect(inside(join('packages', 'core-extensions', 'src', 'shape.ts'))).toBe(false)
+  expect(inside(join('packages', 'web', 'src', 'store.ts'))).toBe(false)
 })
 
 // The gate can only gate what its needle sees, and the scan above is green only because the

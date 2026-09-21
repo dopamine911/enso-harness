@@ -63,6 +63,30 @@ interface ThreadFeed {
  */
 const THREAD_IDLE_TIMEOUT_MS = 30 * 60 * 1000
 
+/** A scheduled idle disposal. `cancel` is idempotent and safe once it has fired. */
+interface IdleDisposal {
+  cancel: () => void
+}
+
+/**
+ * How the idle window is TIMED (#235) — the default is a real `setTimeout`, and the lifecycle
+ * tests pass a hand-advanced clock instead.
+ *
+ * ⚠ Those tests assert a NEGATIVE: "the idle timer has not fired yet". Against wall time that is
+ * a 5–15 ms margin on a 20 ms timer, and on a loaded runner it loses the race and reports a
+ * lifecycle bug that does not exist — the worst red a ratcheted gate can print, the one
+ * reviewers learn to re-run rather than read. With the clock injected, "not yet" is a fact:
+ * nothing is due until the test says the time has passed.
+ */
+export type ScheduleIdleDisposal = (dispose: () => void, afterMs: number) => IdleDisposal
+
+const wallClock: ScheduleIdleDisposal = (dispose: () => void, afterMs: number): IdleDisposal => {
+  const timer = setTimeout(dispose, afterMs)
+  // A pending disposal must never hold the process open on shutdown.
+  timer.unref?.()
+  return { cancel: (): void => clearTimeout(timer) }
+}
+
 const log = zenLogger('server', 'threads')
 
 export interface ThreadRegistryOptions {
@@ -70,6 +94,8 @@ export interface ThreadRegistryOptions {
   createSession: (threadId: string) => Promise<HostedThread>
   /** Injectable for tests — the default is minutes. */
   idleTimeoutMs?: number
+  /** How the idle window is timed; the lifecycle tests advance it by hand (#235). */
+  scheduleIdleDisposal?: ScheduleIdleDisposal
 }
 
 export interface ThreadRegistry {
@@ -204,7 +230,7 @@ export interface ThreadView {
 
 interface ThreadEntry {
   hosted: HostedThread
-  idleTimer: ReturnType<typeof setTimeout> | undefined
+  idleTimer: IdleDisposal | undefined
   /** The abort currently running, awaited by the next `acquire`. */
   abortInFlight: Promise<void> | undefined
   /** Set by `acquire`, cleared by `release` — so a parked thread reads busy until its resume releases. */
@@ -229,6 +255,7 @@ function viewOf(threadId: string, thread: ThreadEntry): ThreadView {
 export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegistry {
   const { createSession } = options
   const idleTimeoutMs = options.idleTimeoutMs ?? THREAD_IDLE_TIMEOUT_MS
+  const scheduleIdleDisposal = options.scheduleIdleDisposal ?? wallClock
 
   const threads = new Map<string, ThreadEntry>()
   /** Builds in progress, so two concurrent first requests on one thread share one session. */
@@ -309,7 +336,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     const thread = threads.get(threadId)
     if (thread === undefined) return
     threads.delete(threadId)
-    clearTimeout(thread.idleTimer)
+    thread.idleTimer?.cancel()
     // Listeners first, then the kill — a late event from the disposing session must not
     // reach a follower as if the thread were alive.
     detachFeed(threadId)
@@ -361,11 +388,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
   }
 
   function release(threadId: string, thread: ThreadEntry): void {
-    clearTimeout(thread.idleTimer)
-    const idleTimer = setTimeout(() => disposeThread(threadId, `${idleTimeoutMs}ms idle`), idleTimeoutMs)
-    // A pending disposal must never hold the process open on shutdown.
-    idleTimer.unref?.()
-    thread.idleTimer = idleTimer
+    thread.idleTimer?.cancel()
+    thread.idleTimer = scheduleIdleDisposal(() => disposeThread(threadId, `${idleTimeoutMs}ms idle`), idleTimeoutMs)
     thread.busy = false
     thread.lastActivityAt = Date.now()
     publishStatus(threadId, thread)
@@ -456,10 +480,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
         }
         thread = await build
       }
-      if (thread.idleTimer !== undefined) {
-        clearTimeout(thread.idleTimer)
-        thread.idleTimer = undefined
-      }
+      thread.idleTimer?.cancel()
+      thread.idleTimer = undefined
       if (thread.abortInFlight !== undefined) {
         await thread.abortInFlight
       }

@@ -143,6 +143,39 @@ test('⚠ every ported presentation file names its subdirectory’s receipt (#31
   expect(withoutProvenance).toEqual([])
 })
 
+/**
+ * ⚠ THE `ui` RECEIPT IS A REPRODUCTION RECIPE, AND A RECIPE CAN GO STALE (PR #321 review).
+ * The test above proves a file's header NAMES the receipt; it cannot prove the file still
+ * equals what the registry serves, because the shadcn registry is not commit-addressable —
+ * `ui/README.md` says so, and that limitation stands. What it CAN prove is that the recipe
+ * still describes this repository: the style the receipt names is the style
+ * `components.json` fetches with, and the CLI version `README.md` tells the next person to
+ * run is the one the package manifest pins. Both drift by ordinary edits — a `style` bump in
+ * `components.json`, a `shadcn` version bump in `package.json` — and either leaves every
+ * header in the directory naming a fetch nobody can reproduce, with the presence check still
+ * green. Presence is not equality; this is what keeps presence worth anything.
+ */
+test('⚠ the ui receipt still names the style and CLI version this repository fetches with (#31, #253)', () => {
+  const manifest = JSON.parse(readFileSync(join(repositoryRoot, 'packages/web/components.json'), 'utf8')) as {
+    style?: string
+  }
+  const style = manifest.style ?? ''
+  expect(style.length).toBeGreaterThan(0)
+  expect(PROVENANCE_RECEIPTS.ui).toBe(`shadcn/ui ${style}`)
+
+  const web = JSON.parse(readFileSync(join(repositoryRoot, 'packages/web/package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>
+    devDependencies?: Record<string, string>
+  }
+  const pinned = (web.dependencies?.shadcn ?? web.devDependencies?.shadcn ?? '').replace(/^[^\d]*/, '')
+  expect(pinned.length).toBeGreaterThan(0)
+  // The README's procedure names the version to re-fetch with; a bump that leaves it behind
+  // sends the next reader to a CLI this repository does not install.
+  const readme = readFileSync(join(repositoryRoot, PORTED_DIRECTORY, 'ui', 'README.md'), 'utf8')
+  expect(readme).toContain(`shadcn@${pinned}`)
+  expect(readme).toContain(`\`${PROVENANCE_RECEIPTS.ui}\``)
+})
+
 test('⚠ nothing under components/ reaches the state layer — component-local state only (#121 item 4, #253)', () => {
   const offenders: string[] = []
   for (const path of portedFiles()) {
