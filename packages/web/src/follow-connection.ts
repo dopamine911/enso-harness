@@ -20,24 +20,14 @@ import { FOLLOW_ENDED_CUSTOM_EVENT } from './custom-event-router.ts'
 import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
 
 /**
- * The wire validator, compiled once at module load — the `@zen/core` convention
- * (`config.ts:47`, `dialog.ts:83-84`, `thread-runtime.ts:60`, `tool-result.ts:94`).
- *
- * `Compile` rather than `Check` because this runs on EVERY frame off the follow — once per
- * streamed token — against a union whose snapshot arm is the whole transcript. Measured
- * (#281): 13.16 µs interpreted against 0.035 µs compiled for a `text-delta` frame, and
- * 41.5 µs against 0.57 µs for a 50-message snapshot. The receipt checks below stay
- * interpreted on purpose: one per prompt and one per abort is not a hot path, and compiling
- * them would imply otherwise.
- */
-const followFrameValidator = Compile(ZenFollowFrameSchema)
-
-/**
  * The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over
  * the prompt/follow split.
  *
  *   subscribe()  opens `GET /api/threads/:id/follow` once and turns its frames into AG-UI
- *                chunks for as long as the view is attached.
+ *                chunks for as long as the view is attached. A follow that never opens —
+ *                refused, or a fetch that throws — arms `disconnected` before it rethrows
+ *                (#274), so the page says so instead of waiting on a stream that will
+ *                never arrive.
  *   send()       POSTs `/api/threads/:id/prompt` and answers at admission; the run's events
  *                arrive on the subscription, not on the POST.
  *   close()      releases that subscription's socket when the page lets the thread go (#272);
@@ -66,6 +56,19 @@ const followFrameValidator = Compile(ZenFollowFrameSchema)
  */
 
 const followLog = zenLogger('browser', 'follow')
+
+/**
+ * The wire validator, compiled once at module load — the `@zen/core` convention
+ * (`config.ts:47`, `dialog.ts:83-84`, `thread-runtime.ts:60`, `tool-result.ts:94`).
+ *
+ * `Compile` rather than `Check` because this runs on EVERY frame off the follow — once per
+ * streamed token — against a union whose snapshot arm is the whole transcript. Measured
+ * (#281): 13.16 µs interpreted against 0.035 µs compiled for a `text-delta` frame, and
+ * 41.5 µs against 0.57 µs for a 50-message snapshot. The receipt checks below stay
+ * interpreted on purpose: one per prompt and one per abort is not a hot path, and compiling
+ * them would imply otherwise.
+ */
+const followFrameValidator = Compile(ZenFollowFrameSchema)
 
 /** The template with its values in, as a notice reads it: `dialog {id} {outcome}` → `dialog d1 refused`. */
 function sentence(template: string, properties: Record<string, unknown>): string {
@@ -441,7 +444,9 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
    * instead of three interleaved with the pump's own control flow.
    */
   type FollowOpening =
-    | { readonly kind: 'opened'; readonly response: Response }
+    // The BODY, not the response: `openFollow` has already established there is one, and a
+    // `Response` here would make `subscribe` re-check a null it cannot receive (PR #305 review).
+    | { readonly kind: 'opened'; readonly body: ReadableStream<Uint8Array> }
     | { readonly kind: 'released' }
     | { readonly kind: 'refused'; readonly detail: string; readonly failure: Error }
 
@@ -458,7 +463,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       const failure = error instanceof Error ? error : new Error(String(error))
       return { kind: 'refused', detail: String(error), failure }
     }
-    if (response.ok && response.body !== null) return { kind: 'opened', response }
+    if (response.ok && response.body !== null) return { kind: 'opened', body: response.body }
     // ⚠ The status is the fact; the body is colour (PR #305 review). Reading it can itself
     // reject — a truncated or aborted body — and that rejection would have thrown past the
     // arming in `subscribe`, leaving the page saying "live" for a follow the server just
@@ -482,9 +487,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       if (!abort.aborted) yield* followNeverOpened(opening.detail)
       throw opening.failure
     }
-    const response = opening.response
-    if (response.body === null) return
-    const frames = readSseFrames(response.body, abort)
+    const frames = readSseFrames(opening.body, abort)
     // Frames are consumed on their own loop so `send` can interleave chunks; this loop
     // yields whatever is queued, waiting when nothing is.
     let ended = false
