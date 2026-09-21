@@ -217,3 +217,29 @@ test('⚠ the installed TypeScript is one TypeDoc supports — the reason the ma
   // …and the compiler API TypeDoc reads is actually on disk, which is the thing 7.x drops.
   expect(existsSync(join(REPOSITORY_ROOT, 'node_modules/typescript/lib/typescript.js'))).toBe(true)
 })
+
+/**
+ * ⚠ THE DOWNGRADE INSTALLED A SECOND TYPESCRIPT, and #228 spent a PR removing one (PR #327
+ * review).
+ *
+ * `fallow-type-aware` declares its own `typescript` and shared the root's copy while that was
+ * 7.0.2; the root moving to 6.0.3 split them, so `bun.lock` now carries a nested
+ * `fallow-type-aware/typescript@7.0.2`. That is the installer doing its job, not lock drift —
+ * but it is exactly the shape #228 refused, and the difference has to be checkable rather than
+ * explained in a pull-request body nobody reads twice.
+ *
+ * The difference: #228's rule is that no WORKSPACE package pins a TypeScript of its own, so
+ * `tsc -b` compiles this tree with one compiler. A vendor's private copy is that vendor's
+ * business — it never reaches `tsc -b`, the barrels, or the build. This holds the rule where
+ * #228 drew it and states the exception where the installer put it.
+ */
+test('⚠ only the root declares TypeScript — a second copy is a vendor’s, never a workspace’s (#228, #188)', () => {
+  const workspaces = ['packages/core', 'packages/harness', 'packages/web'].map((workspace) => ({
+    workspace,
+    declares: manifest(`${workspace}/package.json`).devDependencies?.typescript,
+  }))
+  expect(workspaces.filter((entry) => entry.declares !== undefined)).toEqual([])
+  expect(manifest('package.json').devDependencies?.typescript).toBe('~6.0.3')
+  // The vendor's private copy, named so the next reader does not take it for drift.
+  expect(existsSync(join(REPOSITORY_ROOT, 'node_modules/fallow-type-aware/node_modules/typescript'))).toBe(true)
+})

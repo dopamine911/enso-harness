@@ -121,7 +121,7 @@ export function zenAgentDir(repoRoot: string): string {
  *
  * `.zen/` is git-ignored, write-protected (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`) and
  * read-denied on BOTH tool routes by the `/.zen/` fragment in
- * {@link core/src!DEFAULT_GUARD_POLICY}: the reader gate for every tool carrying a path, and the
+ * {@link core/src!DEFAULT_GUARD_POLICY | DEFAULT_GUARD_POLICY}: the reader gate for every tool carrying a path, and the
  * shell deny (#204) for a literal path word in `bash`/`powershell`. ⚠ The shell leg is a
  * bar, not a boundary — `shell-secret-paths.ts` states what a runtime-assembled name
  * still gets past.
