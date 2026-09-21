@@ -73,7 +73,7 @@ import {
   mintThread,
   type ThreadStores,
   threadListStore,
-  titleFromMessages,
+  titleFromMessage,
   updateThreadSummary,
 } from './thread-stores.ts'
 import { readThreadUrl, type ThreadUrl, urlForThread } from './thread-url.ts'
@@ -987,9 +987,18 @@ export function ThreadPane({
   const stores = getThreadStores(threadId)
   const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores])
   const chat = useAppChat()
+  // ⚠ The title depends on the FIRST user message and nothing else, but `chat.messages`
+  // gets a new identity on every streamed chunk — so an effect over the list re-derived it
+  // per token and threw the answer away (#283). Depend on that message instead; the list's
+  // churn does not reach it, and `updateThreadSummary` is no longer called per token.
+  const firstUserMessage = chat.messages.find((message) => message.role === 'user')
+  const title = useMemo(
+    () => (firstUserMessage === undefined ? undefined : titleFromMessage(firstUserMessage)),
+    [firstUserMessage],
+  )
   useEffect(() => {
-    updateThreadSummary(threadId, { title: titleFromMessages(chat.messages), busy: chat.sessionGenerating })
-  }, [threadId, chat.messages, chat.sessionGenerating])
+    updateThreadSummary(threadId, { title, busy: chat.sessionGenerating })
+  }, [threadId, title, chat.sessionGenerating])
   return (
     <div className={active ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
       <ThreadStoresContext.Provider value={stores}>
