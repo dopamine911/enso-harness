@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 162.**
+**Decision headers: 164.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -77,6 +77,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/chat-screen.test.tsx` | `#27`, `#49` | #49, first pass: the dialog components had live receipts (#27, the e2e smoke) and no unit render, so chat-screen.tsx sat at ~14% lines. |
 | `packages/web/src/__tests__/custom-event-router.test.ts` | `#53`, `#90`, `#162` | #53 S1.3: the CUSTOM-chunk router was an inline closure no test reached — renaming a chunk, dropping the notify-type allowlist, or swapping the two `apply*` calls all left the suite green. |
 | `packages/web/src/__tests__/dom-environment.ts` | `#118` | A browser DOM for the tests that MOUNT React (#118) — the mounted-pane tests, which need effects, `useSyncExternalStore` subscriptions and TanStack's `useChat` to actually run. |
+| `packages/web/src/__tests__/fixture-conversation.test.ts` | `#27`, `#218` | The compatibility probe that used to live in a PR body (#218). |
 | `packages/web/src/__tests__/follow-connection.test.ts` | `#112` | The adapter is the ONLY place AG-UI is made (#112). |
 | `packages/web/src/__tests__/mode-lines.test.ts` | `#29`, `#90` | #29's remaining half: a mode change becomes a visible transcript line. |
 | `packages/web/src/__tests__/notifications.test.tsx` | `#29`, `#90` | #29's browser half: notify messages become visible transcript lines. |
@@ -159,6 +160,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/browser-bundle-gate.test.ts` | `#211` | The browser zone must bundle for the browser (#211). |
 | `test/check-coverage.test.ts` | `#53` | The coverage GATE's own arithmetic (#53 S2). |
 | `test/code-offenders.test.ts` | `#162` | The allowlist is the leak inventory (#162 workstream 4): a row hides a file's matches, and a row for a file with no matches is drift and is reported. |
+| `test/dependency-gate.test.ts` | `#218`, `#223` | What the dependency manifests claim, held against what the code actually imports (#218, #223). |
 | `test/docs-gate.test.ts` | `#162`, `#167`, `#168` | The docs cannot drift (#168, goals §3.3): a page either quotes source and is checked against it, or is generated from source and is diffed against it. |
 | `test/fallow-config.test.ts` | `#163` | fallow's entry list cannot drift from the harness manifest (#163). |
 | `test/gate-abort.test.ts` | `#157` | The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0. |
@@ -170,7 +172,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/no-lint-suppressions.test.ts` | `#82` | The gate may not be talked out of, one line at a time. |
 | `test/presentation-gate.test.ts` | `#31`, `#121` | Presentation stays presentation (#121 item 4, #31). |
 | `test/secret-scan-gate.test.ts` | `#209` | The range `.github/workflows/secret-scan.yml` hands gitleaks is the coverage of the only gate that stops a committed secret, so it is asserted here rather than read (#209). |
-| `test/vendor-gate.test.ts` | `#69`, `#145`, `#150`, `#165`, `#173` | The seam has an owner: only the host and the pi extensions may name the vendor (#145). |
+| `test/vendor-gate.test.ts` | `#69`, `#145`, `#150`, `#165`, `#173`, `#215` | The seam has an owner: only the host and the pi extensions may name the vendor (#145). |
 
 **Parser limit.** The parser considers the first block or contiguous line comment beginning within the
 first 80 lines of TypeScript/JavaScript source under `packages/`, `scripts/`,
