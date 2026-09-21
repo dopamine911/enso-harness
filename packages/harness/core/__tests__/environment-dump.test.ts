@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { findEnvironmentDump } from '../environment-dump.ts'
+import { braced } from './shell-fixtures.ts'
 
 /**
  * #89's depth layer: the bash environment-dump deny. The quarantine is the fix; this
@@ -14,7 +15,6 @@ const denied = (command: string): string | undefined => findEnvironmentDump(comm
  * Biome as a botched template literal (`noTemplateCurlyInString`), and these are SHELL
  * strings handed to the scanner as data. The escapes are `{` and `}`.
  */
-const braced = (variableName: string): string => `$\u007b${variableName}\u007d`
 
 // ── listings at command position ─────────────────────────────────────────────
 

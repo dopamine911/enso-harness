@@ -5,6 +5,7 @@ import {
   shellWordsOf,
   withoutLeadingEnvironmentAssignments,
 } from '../shell-segments.ts'
+import { braced } from './shell-fixtures.ts'
 
 /**
  * The tokenizer's own contract (#261) — the parsing floor under the network deny (#9) and
@@ -31,7 +32,6 @@ const textsOf = (command: string): string[] => extractFlatShellCommandSegments(c
  * Biome as a botched template literal (`noTemplateCurlyInString`), and these are SHELL
  * strings handed to the scanner as data. The escapes are `{` and `}`.
  */
-const braced = (expansionBody: string): string => `$\u007b${expansionBody}\u007d`
 const BACKTICK = '`'
 
 // ── extractFlatShellCommandSegments: where the boundaries are ─────────────────────────
