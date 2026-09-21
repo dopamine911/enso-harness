@@ -649,6 +649,85 @@ test('⚠ close() releases the follow and latches it: the page letting a thread 
   expect(server.problems).toEqual([])
 })
 
+// ── #274: the mirror of the case above — a follow that NEVER OPENED ───────────────────────
+// The `disconnected` contract (#119) had exactly one arming path: a follow that opened and
+// then ended. Measured before this: a 500 on `…/follow` threw out of `subscribe` having
+// moved no store, so the page kept saying the thread was live — the composer took prompts,
+// the stop button was offered for a run nothing could observe, the status bar said idle.
+// ⚠ The chunk is YIELDED, not pushed: the queue is drained by a loop below the open, so a
+// pushed chunk would be dropped by the throw that follows it.
+
+/** One subscription over a fetch that fails, with the chunks and the failure it produced. */
+async function subscribeOverFailingFetch(
+  fetchImpl: () => Promise<Response>,
+  signal?: AbortSignal,
+): Promise<{ chunks: StreamChunk[]; problems: string[]; failure: unknown }> {
+  const problems: string[] = []
+  const connection = createFollowConnection({
+    threadId: 't1',
+    fetch: fetchImpl as unknown as typeof fetch,
+    onProblem: (problem: unknown) => problems.push(String(problem)),
+  })
+  const chunks: StreamChunk[] = []
+  let failure: unknown
+  try {
+    for await (const chunk of connection.subscribe(signal)) chunks.push(chunk)
+  } catch (error) {
+    failure = error
+  }
+  return { chunks, problems, failure }
+}
+
+test('⚠ a follow the server refuses arms the disconnected contract, like one that ends (#274)', async () => {
+  const { chunks, problems, failure } = await subscribeOverFailingFetch(() =>
+    Promise.resolve(new Response('upstream is down', { status: 500 })),
+  )
+  expect(chunks).toEqual([{ type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId: 't1' } }])
+  expect(problems).toEqual([expect.stringContaining('the follow could not be opened')])
+  // The failure still reaches the caller: the chunk says it to the page, the throw to TanStack.
+  expect(String(failure)).toContain('500')
+})
+
+// ⚠ The status is the fact, the body is colour (PR #305 review): a refused response whose
+// BODY read rejects — truncated, or aborted mid-read — must still arm the contract. Before
+// the `.catch`, that rejection threw past the arming and left the page reading "live" for a
+// follow the server had just refused, which is the state #274 exists to end.
+test('a refusal whose body cannot be read still arms the contract (#274)', async () => {
+  const unreadable = new ReadableStream<Uint8Array>({
+    start: (controller: ReadableStreamDefaultController<Uint8Array>): void =>
+      controller.error(new Error('the body died mid-read')),
+  })
+  const { chunks, problems, failure } = await subscribeOverFailingFetch(() =>
+    Promise.resolve(new Response(unreadable, { status: 503 })),
+  )
+  expect(chunks).toEqual([{ type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId: 't1' } }])
+  expect(problems).toEqual([expect.stringContaining('body unreadable')])
+  // …and the caller still learns the status, which is the part that was never in doubt.
+  expect(String(failure)).toContain('503')
+})
+
+test('a fetch that throws is the same fact, and this page leaving is not (#274)', async () => {
+  const thrown = await subscribeOverFailingFetch(() => Promise.reject(new Error('network down')))
+  expect(thrown.chunks).toEqual([
+    { type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId: 't1' } },
+  ])
+  expect(thrown.problems).toEqual([expect.stringContaining('network down')])
+  // Symmetrical with the 500 above (PR #305 review): the chunk says it to the page AND the
+  // throw still reaches the caller. Asserting only the chunk would pass if the rethrow went.
+  expect(String(thrown.failure)).toContain('network down')
+
+  // ⚠ The asymmetry that must hold: an ABORT is this page releasing the thread, not the
+  // server dropping it, so it arms nothing — the same rule `close()` follows above.
+  const controller = new AbortController()
+  controller.abort()
+  const leaving = await subscribeOverFailingFetch(
+    () => Promise.reject(new DOMException('aborted', 'AbortError')),
+    controller.signal,
+  )
+  expect(leaving.chunks).toEqual([])
+  expect(leaving.problems).toEqual([])
+})
+
 // ⚠ The race the latch does not cover (PR #301 review): released while the socket is still
 // OPENING. The abort lands on the fetch itself, and its rejection had nowhere to go but out of
 // the generator, at whoever is iterating — a thrown AbortError for the page's own silent close,
