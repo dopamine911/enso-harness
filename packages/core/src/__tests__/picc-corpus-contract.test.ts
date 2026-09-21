@@ -36,13 +36,38 @@ const piccPackage = require.resolve('@ladbabynpm/picc-permission-modes/package.j
 const { version } = JSON.parse(readFileSync(piccPackage, 'utf8')) as { version: string }
 const permissionContextSource = readFileSync(join(dirname(piccPackage), 'permissionContext.ts'), 'utf8')
 
-/** The string literals of an `export const <symbol> = [ … ]`, in declaration order. */
+/**
+ * The string literals of an `export const <symbol> = [ … ]`, in declaration order.
+ *
+ * ⚠ The array ends at its MATCHING bracket, not the first `]` after it (PR #314 review). A
+ * `]` inside an entry — upstream adding a bracketed note or a regex-shaped name — would
+ * otherwise truncate the slice and compare a PARTIAL list, which is the one outcome this
+ * file's header promises cannot happen: a divergence has to be red, never quietly narrower.
+ * Quoted entries are skipped while scanning so a bracket inside one is content.
+ */
 function declaredCorpus(symbol: string): string[] {
-  const start = permissionContextSource.indexOf(`export const ${symbol} = [`)
+  const opening = `export const ${symbol} = [`
+  const start = permissionContextSource.indexOf(opening)
   if (start < 0) {
     throw new Error(`@ladbabynpm/picc-permission-modes@${version} declares no ${symbol} in permissionContext.ts`)
   }
-  const end = permissionContextSource.indexOf(']', start)
+  let depth = 1
+  let quote = ''
+  let end = -1
+  for (let index = start + opening.length; index < permissionContextSource.length; index += 1) {
+    const character = permissionContextSource[index] ?? ''
+    if (quote !== '') {
+      if (character === '\\') index += 1
+      else if (character === quote) quote = ''
+      continue
+    }
+    if (character === "'" || character === '"' || character === '`') quote = character
+    else if (character === '[') depth += 1
+    else if (character === ']' && --depth === 0) {
+      end = index
+      break
+    }
+  }
   if (end < 0) throw new Error(`${symbol} is not a closed array literal`)
   const body = permissionContextSource.slice(start, end)
   return [...body.matchAll(/["']([^"']+)["']/g)].map((match) => match[1] ?? '')

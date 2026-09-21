@@ -62,6 +62,9 @@ function malformedTable(shape: string): Error {
  * we do not model yet, and it is `zen-launch.mjs`'s long-standing behaviour.
  */
 function resourceDeclarations(manifest: unknown): unknown[] {
+  // `in` narrows the object type itself, so `manifest.pi` reads as `unknown` with no cast
+  // (TS 4.9+). Casting to `Record<string, unknown>` would be the same check written twice,
+  // and a cast is exactly what this function exists to remove from its callers (PR #314 review).
   if (typeof manifest !== 'object' || manifest === null || !('pi' in manifest)) return []
   const table = manifest.pi
   if (table === undefined) return []
