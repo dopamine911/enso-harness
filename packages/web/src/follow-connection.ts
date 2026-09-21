@@ -14,6 +14,7 @@ import {
   ZenPromptReceipt,
   zenLogger,
 } from '@zen/core'
+import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from './custom-event-router.ts'
 import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
@@ -23,7 +24,10 @@ import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
  * the prompt/follow split.
  *
  *   subscribe()  opens `GET /api/threads/:id/follow` once and turns its frames into AG-UI
- *                chunks for as long as the view is attached.
+ *                chunks for as long as the view is attached. A follow that never opens —
+ *                refused, or a fetch that throws — arms `disconnected` before it rethrows
+ *                (#274), so the page says so instead of waiting on a stream that will
+ *                never arrive.
  *   send()       POSTs `/api/threads/:id/prompt` and answers at admission; the run's events
  *                arrive on the subscription, not on the POST.
  *   close()      releases that subscription's socket when the page lets the thread go (#272);
@@ -52,6 +56,19 @@ import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
  */
 
 const followLog = zenLogger('browser', 'follow')
+
+/**
+ * The wire validator, compiled once at module load — the `@zen/core` convention
+ * (`config.ts:47`, `dialog.ts:83-84`, `thread-runtime.ts:60`, `tool-result.ts:94`).
+ *
+ * `Compile` rather than `Check` because this runs on EVERY frame off the follow — once per
+ * streamed token — against a union whose snapshot arm is the whole transcript. Measured
+ * (#281): 13.16 µs interpreted against 0.035 µs compiled for a `text-delta` frame, and
+ * 41.5 µs against 0.57 µs for a 50-message snapshot. The receipt checks below stay
+ * interpreted on purpose: one per prompt and one per abort is not a hot path, and compiling
+ * them would imply otherwise.
+ */
+const followFrameValidator = Compile(ZenFollowFrameSchema)
 
 /** The template with its values in, as a notice reads it: `dialog {id} {outcome}` → `dialog d1 refused`. */
 function sentence(template: string, properties: Record<string, unknown>): string {
@@ -405,11 +422,35 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     push(...observationToAguiEvents(observation, idsOf(current)))
   }
 
-  async function* subscribe(signal?: AbortSignal): AsyncIterable<StreamChunk> {
-    // The page's own end (#272) rides with TanStack's: either one closes the socket, and a
-    // connection already released never opens one.
-    if (released.signal.aborted) return
-    const abort = signal === undefined ? released.signal : AbortSignal.any([signal, released.signal])
+  /**
+   * A follow that NEVER OPENED, said the same way a follow that ended says it (#274).
+   *
+   * ⚠ Yielded, never `push`ed: `push` only enqueues, and the subscription loop that drains
+   * the queue is BELOW the open — a chunk pushed here and then thrown past is a chunk the
+   * router never sees. Measured before this existed: a 500 on `…/follow` moved no store, so
+   * `disconnected` stayed false and every reading on the page said the thread was live —
+   * the composer took prompts, the stop button was offered for a run nothing could observe,
+   * and the status bar said idle. The only signal was the client's own "the run failed"
+   * alert, which names the wrong thing.
+   */
+  function* followNeverOpened(detail: string): Generator<StreamChunk> {
+    problem('the follow could not be opened: {detail}', { detail })
+    yield { type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId } }
+  }
+
+  /**
+   * What the open produced: a live response, this page's own release, or a refusal with the
+   * detail to report. Separate from `subscribe` so the three answers are one `switch` there
+   * instead of three interleaved with the pump's own control flow.
+   */
+  type FollowOpening =
+    // The BODY, not the response: `openFollow` has already established there is one, and a
+    // `Response` here would make `subscribe` re-check a null it cannot receive (PR #305 review).
+    | { readonly kind: 'opened'; readonly body: ReadableStream<Uint8Array> }
+    | { readonly kind: 'released' }
+    | { readonly kind: 'refused'; readonly detail: string; readonly failure: Error }
+
+  async function openFollow(abort: AbortSignal): Promise<FollowOpening> {
     let response: Response
     try {
       response = await fetchImpl(`${base}/follow`, { signal: abort })
@@ -418,22 +459,42 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       // contract — the page letting a thread go is not an error the page should be shown — but
       // the abort lands on this fetch, whose rejection had nowhere to go but out of the
       // generator, at whoever is iterating it. Our own release ends the iteration instead.
-      // An abort from the CALLER's signal still throws: that is the consumer's own cancel, and
-      // a transport failure is theirs to see either way.
-      if (released.signal.aborted) return
-      throw error
+      if (released.signal.aborted) return { kind: 'released' }
+      const failure = error instanceof Error ? error : new Error(String(error))
+      return { kind: 'refused', detail: String(error), failure }
     }
-    if (!response.ok || response.body === null) {
-      throw new Error(`follow ${threadId}: ${response.status} ${await response.text()}`)
+    if (response.ok && response.body !== null) return { kind: 'opened', body: response.body }
+    // ⚠ The status is the fact; the body is colour (PR #305 review). Reading it can itself
+    // reject — a truncated or aborted body — and that rejection would have thrown past the
+    // arming in `subscribe`, leaving the page saying "live" for a follow the server just
+    // refused, which is the state #274 exists to end. The read cannot decide whether the
+    // contract is armed.
+    const body = await response.text().catch((error: unknown) => `(body unreadable: ${String(error)})`)
+    const detail = `${response.status} ${body}`
+    return { kind: 'refused', detail, failure: new Error(`follow ${threadId}: ${detail}`) }
+  }
+
+  async function* subscribe(signal?: AbortSignal): AsyncIterable<StreamChunk> {
+    // The page's own end (#272) rides with TanStack's: either one closes the socket, and a
+    // connection already released never opens one.
+    if (released.signal.aborted) return
+    const abort = signal === undefined ? released.signal : AbortSignal.any([signal, released.signal])
+    const opening = await openFollow(abort)
+    if (opening.kind === 'released') return
+    if (opening.kind === 'refused') {
+      // A throwing fetch is the same fact as a refusing one (#274) — unless the CALLER is the
+      // one leaving, in which case there is nothing to report and the cancel is theirs to see.
+      if (!abort.aborted) yield* followNeverOpened(opening.detail)
+      throw opening.failure
     }
-    const frames = readSseFrames(response.body, abort)
+    const frames = readSseFrames(opening.body, abort)
     // Frames are consumed on their own loop so `send` can interleave chunks; this loop
     // yields whatever is queued, waiting when nothing is.
     let ended = false
     const pump = (async () => {
       try {
         for await (const raw of frames) {
-          if (!Check(ZenFollowFrameSchema, raw)) {
+          if (!followFrameValidator.Check(raw)) {
             problem('a frame off the wire fails ZenFollowFrame: {frame}', { frame: raw })
             continue
           }
