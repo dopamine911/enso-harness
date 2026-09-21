@@ -1,7 +1,11 @@
 name: Claude PR Review
 
-# A single-pass Claude review on every non-draft pull request. One agent, no subagents, cheap enough to run
-# on each push.
+# A single-pass Claude review on a non-draft pull request, run ONCE (open/reopen/ready-for-review) rather than
+# on every push. Measured cost of re-running on every `synchronize`: 25 runs / 5.7h averaging 12.1 minutes
+# each (~303 minutes) on this repo's active branches alone — ~87% of a day that used 1000 Actions minutes.
+# This is not a required status check (see ci.yml / secret-scan.yml for those), so skipping later commits
+# costs nothing but staleness: push more commits and this review will not automatically re-run against them.
+# To force a fresh review after further pushes, close and reopen the pull request.
 #
 # REQUIRES the repository secret `CLAUDE_CODE_OAUTH_TOKEN`. Without it the job writes a note to the run
 # summary and stops — see "Check for the Claude token" below. A fresh clone therefore stays green rather than
@@ -29,7 +33,7 @@ name: Claude PR Review
 # improvements no longer arrive centrally.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review]
 
 concurrency:
   group: claude-pr-review-${{ github.event.pull_request.number || github.ref }}
