@@ -11,7 +11,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { linkVendorPackages, requiredPackageNames } from '../link-vendor-packages.mjs'
+import { linkVendorPackages, requiredPackageNames } from '../link-vendor-packages.ts'
 
 /**
  * The postinstall linker (docs/flows/boot-and-launchers.md, stated gap: no test of its own).

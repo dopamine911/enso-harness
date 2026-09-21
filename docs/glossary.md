@@ -385,7 +385,7 @@ workstream 4): the runtime's event and stored-entry shapes are read only under `
 | `session-inspection.ts` | the thread inspection module | **`thread-inspection.ts`** | `packages/core/src/` | — |
 | `describeSessionEntry` | the formatter for one entry of a transcript | **`describeTranscriptEntry`**, in `transcript.ts` — the entry is the transcript's, so the formatter moved there with it | `packages/core/src/` | — |
 | `pi-rpc.ts` | the module holding the runtime contract and its wire shapes | **`thread-runtime.ts`** — the name says a transport it no longer is (#69) | `packages/core/src/` | — |
-| `zen-session.mjs` | the thread inspection CLI | **`zen-thread.mjs`** | `scripts/` | — |
+| `zen-session.mjs` | the thread inspection CLI | **`zen-thread.ts`** | `scripts/` | — |
 | "sessions" (rail heading, prose in the browser) | threads | **threads** | `packages/web/src/threads-rail.tsx` | — |
 | `sessionId`, `sessionDir`, `sessionFile` | where the runtime's log is | **kept** — they name the log, which is what session means | inspections, the CLI | yes |
 | `chunk` in zen-owned names (`RecordedCustomChunk`, "said as a chunk") | a custom event the browser recorded | **custom event** (`RecordedCustomEvent`) — chunk is the state layer's word and stays in its adapter | `packages/web/src/custom-event-router.ts`, comments | the adapter that derives the state layer's stream |

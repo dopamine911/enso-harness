@@ -133,13 +133,13 @@ export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.git', '.vscod
  *
  *   `.pi`      — a project-local `.pi/settings.json` installs an extension package that
  *                loads on the user's next plain `pi` session in that repo (the exact
- *                mechanism scripts/zen.mjs suppresses with --no-extensions).
+ *                mechanism scripts/zen.ts suppresses with --no-extensions).
  *   `.agents`  — pi discovers skills from `~/.agents/skills/` even under a redirected
- *                agent dir (scripts/zen.mjs's --no-skills note); a written skill loads
+ *                agent dir (scripts/zen.ts's --no-skills note); a written skill loads
  *                next session.
  *   `.zen`     — the harness's own agent dir (`.zen/pi-agent`: settings, extensions,
  *                auth.json). No agent task legitimately writes there via write/edit;
- *                scripts/zen.mjs writes `.zen/print-harness` through node fs, which never
+ *                scripts/zen.ts writes `.zen/print-harness` through node fs, which never
  *                passes this guard.
  *   `.cc-safety-net` — cc-safety-net's own policy dir (#9). Probed 2026-09-04: its
  *                checkCommand DENIES `rm -rf .cc-safety-net` but ALLOWS a shell redirect

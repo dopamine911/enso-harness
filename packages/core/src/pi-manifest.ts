@@ -21,8 +21,8 @@ import { resolve } from 'node:path'
  * reported). That is why `missingVendorPaths` exists at all, and why both launch points
  * refuse on a non-empty result instead of starting.
  *
- * ⚠ ONE COPY. Before #221 the flatten-and-filter existed three times — `scripts/zen.mjs`'s
- * launcher decisions, `scripts/link-vendor-packages.mjs`, and the server's
+ * ⚠ ONE COPY. Before #221 the flatten-and-filter existed three times — `scripts/zen.ts`'s
+ * launcher decisions, `scripts/link-vendor-packages.ts`, and the server's
  * `assertVendorLinks` — with the prefix spelled as a constant in two of them and as a bare
  * literal in the third, which is why the `no-duplicate-shapes` gate never named them. The
  * cost of three was that a change in how pi resolves resources would have to land in three
@@ -59,7 +59,7 @@ function malformedTable(shape: string): Error {
  * `node_modules/`, the check comes back empty and the server boots with its vendor
  * precondition silently unenforced. So it throws, naming the shape it got. A non-string
  * value INSIDE the table is different and is skipped, not fatal: that is a resource kind
- * we do not model yet, and it is `zen-launch.mjs`'s long-standing behaviour.
+ * we do not model yet, and it is `zen-launch.ts`'s long-standing behaviour.
  */
 function resourceDeclarations(manifest: unknown): unknown[] {
   // `in` narrows the object type itself, so `manifest.pi` reads as `unknown` with no cast

@@ -8,7 +8,7 @@ import { ZenTranscriptEntry } from './transcript.ts'
  * Everything the web surface shows is a derived view of the stream; these are the shapes
  * that let a human or an agent see the thing they derive from and cross-check. Served by
  * `GET /api/threads` and `GET /api/threads/:threadId`, rendered by the debug drawer and
- * printed by `scripts/zen-thread.mjs`.
+ * printed by `scripts/zen-thread.ts`.
  *
  * ⚠ READ-ONLY, LOOPBACK-ONLY, DEV-ONLY — the server that serves these binds `127.0.0.1`
  * and says so in its header. `entries` is the session branch itself: conversation, tool
@@ -140,7 +140,7 @@ export interface ThreadEventColumns {
 /**
  * THE definition of what each column holds — a new provenance value or inner name lands
  * here once. How the columns are joined is layout, the surface's own: the drawer joins
- * with a space (`describeThreadEvent`), `zen-thread.mjs` pads them into a table.
+ * with a space (`describeThreadEvent`), `zen-thread.ts` pads them into a table.
  */
 export function threadEventColumns(event: ZenThreadEvent): ThreadEventColumns {
   return {

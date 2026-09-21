@@ -149,7 +149,7 @@ export function zenLogsDir(repoRoot: string): string {
   return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'logs')
 }
 
-/** The harness package — the directory `zen.mjs` hands to pi's `-e`. */
+/** The harness package — the directory `zen.ts` hands to pi's `-e`. */
 export function harnessPackageDir(repoRoot: string): string {
   return join(repoRoot, 'packages', 'harness')
 }

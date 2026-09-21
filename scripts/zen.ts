@@ -39,12 +39,12 @@
  * ⚠ A NON-INTERACTIVE RUN (`-p`, or piped stdin) loads a PRINT VARIANT of the package —
  *   the harness minus picc-permission-modes, which would otherwise fail closed and deny
  *   every mutating tool where no prompt can be shown. See the `isPrintRun` block below
- *   and scripts/print-harness.mjs (#20). Interactive runs keep the full permission model.
+ *   and scripts/print-harness.ts (#20). Interactive runs keep the full permission model.
  *
  * ⚠ THE `pi` SPAWNED HERE IS VERSION-GATED (#217). It comes from `PATH`, while the guard's
  *   replica of pi's path resolver is pinned against the pi in the workspace tree — two
  *   resolutions that nothing held together. The version is read before the spawn and refused
- *   outside `zen-launch.mjs#SUPPORTED_PI_VERSIONS`; see the block below.
+ *   outside `zen-launch.ts#SUPPORTED_PI_VERSIONS`; see the block below.
  *
  * Usage:  bun run zen -p "hello"
  *         ZEN_AGENT_DIR=/somewhere/else bun run zen
@@ -54,8 +54,8 @@ import { join } from 'node:path'
 import { findRepoRoot, harnessPackageDir, printHarnessDir, zenAgentDir } from '../packages/core/src/paths.ts'
 import { declaredResources, missingVendorPaths } from '../packages/core/src/pi-manifest.ts'
 import { quarantineSecrets } from '../packages/core/src/secrets.ts'
-import { buildPrintManifest, materializePrintHarness } from './print-harness.mjs'
-import { isPrintRun, piArguments, piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from './zen-launch.mjs'
+import { buildPrintManifest, materializePrintHarness } from './print-harness.ts'
+import { isPrintRun, piArguments, piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from './zen-launch.ts'
 
 const repoRoot = findRepoRoot(import.meta.url)
 const packageRoot = harnessPackageDir(repoRoot)
@@ -63,7 +63,7 @@ const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf
 
 // A malformed `pi` is a refusal, not an empty list (#226) — reported as a line, not a stack:
 // every other precondition here reads as one, and a stack trace from a launcher reads as a bug.
-let resources
+let resources: string[] | undefined
 try {
   resources = declaredResources(manifest)
 } catch (error) {
@@ -84,7 +84,7 @@ if (missing.length > 0) {
   process.exit(1)
 }
 
-const agentDir = process.env.ZEN_AGENT_DIR ?? zenAgentDir(repoRoot)
+const agentDir: string = process.env.ZEN_AGENT_DIR ?? zenAgentDir(repoRoot)
 mkdirSync(agentDir, { recursive: true })
 
 const passthroughArgs = process.argv.slice(2)
@@ -93,18 +93,18 @@ const passthroughArgs = process.argv.slice(2)
  * ⚠ PRINT RUNS LOAD A VARIANT PACKAGE WITHOUT picc-permission-modes (#20).
  * picc fails closed when it cannot prompt — every mutating tool denied, no escape hatch —
  * so a `-p` run under the full package can chat and nothing else. The variant (built by
- * scripts/print-harness.mjs) is the harness minus that one extension: guards and
+ * scripts/print-harness.ts) is the harness minus that one extension: guards and
  * multi-account still load, skills/prompts/themes still load, and the run has OUR guards
  * only — bash unconfined (#9), the pre-picc posture. Launch-time mode selection upstream
- * (#13) is the durable fix; this is the honest interim. The trigger: `zen-launch.mjs#isPrintRun`.
+ * (#13) is the durable fix; this is the honest interim. The trigger: `zen-launch.ts#isPrintRun`.
  */
 const printRun = isPrintRun(passthroughArgs, process.stdin.isTTY === true)
 
-const packageToLoad = printRun
+const packageToLoad: string = printRun
   ? materializePrintHarness(printHarnessDir(repoRoot), packageRoot, buildPrintManifest(manifest))
   : packageRoot
 
-// The isolation triple's two argument legs: `zen-launch.mjs#piArguments`.
+// The isolation triple's two argument legs: `zen-launch.ts#piArguments`.
 const args = piArguments(packageToLoad, passthroughArgs)
 
 /**
@@ -140,7 +140,7 @@ if (quarantine.misplaced.length > 0) {
  * a shim printing `0.85.0` earlier on `PATH`: it launched, and the whole suite stayed green —
  * the guard resolving a path differently from the tool it gates is exactly the failure the
  * replica exists to prevent. So the version is read BEFORE the spawn and refused when it falls
- * outside `zen-launch.mjs#SUPPORTED_PI_VERSIONS`, the shape `assertVendorLinks` already uses on
+ * outside `zen-launch.ts#SUPPORTED_PI_VERSIONS`, the shape `assertVendorLinks` already uses on
  * the other surface: one precondition, enforced at both launch points.
  *
  * There is no override flag, deliberately: the range is widened by running the corpus against
@@ -205,7 +205,7 @@ if (!piVersionSupported(reportedPiVersion)) {
       `(>=${piVersionText(SUPPORTED_PI_VERSIONS.minimum)} <${piVersionText(SUPPORTED_PI_VERSIONS.below)}).\n` +
       "The guard replicates pi's path resolver; against an unpinned pi a deny can be computed against the wrong\n" +
       'target (#217). Either use the pinned pi, or run the corpus against this one and widen the range:\n' +
-      '  bun test packages/harness/core/__tests__/paths.test.ts   then scripts/zen-launch.mjs#SUPPORTED_PI_VERSIONS\n',
+      '  bun test packages/harness/core/__tests__/paths.test.ts   then scripts/zen-launch.ts#SUPPORTED_PI_VERSIONS\n',
   )
   process.exit(1)
 }

@@ -133,7 +133,7 @@ green gate.
 uses the `@model` slice and its required credentials. Unit tests prove folds and races; they do not
 prove layout or interaction.
 
-**TUI / launcher behavior:** run `scripts/zen.mjs` or the relevant CLI and observe its output/state.
+**TUI / launcher behavior:** run `scripts/zen.ts` or the relevant CLI and observe its output/state.
 Typecheck and unit tests cannot prove process environment, package loading, terminal rendering or
 provider access.
 

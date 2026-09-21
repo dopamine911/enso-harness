@@ -193,9 +193,9 @@ along at exact-pinned versions:
 [`@ladbabynpm/picc-permission-modes`](https://www.npmjs.com/package/@ladbabynpm/picc-permission-modes)
 (Claude-Code-style permission modes — default / acceptEdits / plan / bypass — interactive runs only),
 [`pi-multi-account`](https://www.npmjs.com/package/pi-multi-account), and a theme. pi loads packages
-with separate module roots, so `scripts/link-vendor-packages.mjs` (postinstall) symlinks every harness
+with separate module roots, so `scripts/link-vendor-packages.ts` (postinstall) symlinks every harness
 dependency into the harness's own `node_modules` — a missing one is a *silently skipped* resource, so
-`zen.mjs` refuses to launch when it detects the gap.
+`zen.ts` refuses to launch when it detects the gap.
 
 ## Repo layout
 
@@ -205,15 +205,15 @@ every path it names exists. `docs/` itself: `architecture.md` (why), `glossary.m
 `verification.md` (what green means), `concepts/` (the live design notes; `concepts/archive/` the
 pre-build ones).
 
-**`scripts/` is TypeScript** (#269). Everything there is started by bun — every `package.json` script
-that runs one runs `bun scripts/<name>`, `postinstall` included, and the launchers' own shebang is
-`#!/usr/bin/env bun` — and bun loads `.ts` directly, so nothing under `scripts/` needs to be
-JavaScript and a new script is `.ts` with no decision to make. Six files predate the rule and are
-still JavaScript: `dev.mjs`, `link-vendor-packages.mjs`, `print-harness.mjs`, `zen-launch.mjs`,
-`zen-thread.mjs`, `zen.mjs` — they pay for their types in JSDoc (`@param`, `@template`, `@import`)
-instead of in the language, which is what moving them buys (#308).
-`test/scripts-extensions.test.ts` holds that list equal to what is on disk, both directions: a
-seventh `.mjs` fails the gate, and a renamed one has to leave the sentence above.
+**`scripts/` is TypeScript** (#269, #308). Everything there is started by bun — every `package.json`
+script that runs one runs `bun scripts/<name>`, `postinstall` included, and the launchers' own
+shebang is `#!/usr/bin/env bun` — and bun loads `.ts` directly, so nothing under `scripts/` needs to
+be JavaScript and a new script is `.ts` with no decision to make. The six files that predated the
+rule moved with #308, and their JSDoc types (39 `@param`/`@template`/`@import`/`@returns` tags)
+became real ones, so the rule now has no exceptions to name. `scripts/tsconfig.json` no longer sets
+`allowJs`, which is what makes a seventh impossible rather than merely gated: a `.mjs` there is
+outside its `include` and is not type-checked at all. `test/scripts-extensions.test.ts` holds both
+directions — a non-`.ts` file under `scripts/` fails, and so does prose here that names one.
 
 ## How this repo verifies itself
 

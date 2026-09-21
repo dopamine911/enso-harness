@@ -598,6 +598,6 @@ test('the dev page and the header-less CLIs are unaffected', async () => {
   for (const origin of ['http://127.0.0.1:5178', 'http://localhost:5178', 'http://127.0.0.1:5179']) {
     expect((await fetch(`${url}/api/about`, { headers: { Origin: origin } })).status).toBe(200)
   }
-  // `zen-thread.mjs` and `curl` send no Origin at all.
+  // `zen-thread.ts` and `curl` send no Origin at all.
   expect((await fetch(`${url}/api/about`)).status).toBe(200)
 })

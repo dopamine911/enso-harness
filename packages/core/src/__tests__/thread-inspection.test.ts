@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { describeThreadEvent, isZenThreadId, threadEventColumns, type ZenThreadEvent } from '../thread-inspection.ts'
 import { describeTranscriptEntry } from '../transcript.ts'
 
-// The row formats are shared by the `?debug` drawer and `zen-thread.mjs` (PR #100 review: one
+// The row formats are shared by the `?debug` drawer and `zen-thread.ts` (PR #100 review: one
 // definition, after the #86 pair had drifted). What a human reads off either surface is pinned here.
 
 test('a transcript entry row: time, kind, custom type, message role, tool name, and the mode when the entry carries one', () => {

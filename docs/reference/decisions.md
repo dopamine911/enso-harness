@@ -18,7 +18,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/__tests__/pi-manifest.test.ts` | `#221` | pi's manifest-resource layout, now owned in one place (#221 — it was implemented three times: the terminal launcher, the postinstall linker, and the server's `assertVendorLinks`). |
 | `packages/core/src/__tests__/picc-corpus-contract.test.ts` | `#7`, `#20`, `#222` | The picc CORPUS CONTRACT TEST (#222), the shape of `cc-safety-net-contract.test.ts` and `agent-loop-contract.test.ts`: read the installed vendor, assert the shape we copied. |
 | `packages/core/src/__tests__/secrets.test.ts` | `#89` | #89: secrets stay out of the environment the model's tools inherit. |
-| `packages/core/src/__tests__/thread-inspection.test.ts` | `#86`, `#100` | The row formats are shared by the `?debug` drawer and `zen-thread.mjs` (PR #100 review: one definition, after the #86 pair had drifted). |
+| `packages/core/src/__tests__/thread-inspection.test.ts` | `#86`, `#100` | The row formats are shared by the `?debug` drawer and `zen-thread.ts` (PR #100 review: one definition, after the #86 pair had drifted). |
 | `packages/core/src/config.ts` | `#59` | zen-harness's ONE committed config file (#59): `zen.config.json` at the repository root. |
 | `packages/core/src/dialog.ts` | `#27`, `#112` | pi's blocking extension dialogs, as data (#27, #112). |
 | `packages/core/src/follow.ts` | `#112` | The server↔browser wire (#112): a thread's feed, as the follow route serves it. |
@@ -151,7 +151,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/threads-rail.tsx` | `#90`, `#95`, `#104`, `#278` | The threads rail (#90 PR 3): which conversation am I in, what else is live on this page, how do I start over. |
 | `packages/web/src/to-agui.ts` | `#18`, `#24`, `#112` | `ZenObservation` → AG-UI `StreamChunk` (#24, #112). |
 | `scripts/__tests__/pi-version-parity.test.ts` | `#69`, `#217` | THE TWO PI RESOLUTIONS, HELD TOGETHER (#217). |
-| `scripts/__tests__/zen-launch.test.ts` | `#221` | The terminal launcher's decisions (docs/flows/boot-and-launchers.md, stated gap: `zen.mjs` had no test of its own). |
+| `scripts/__tests__/zen-launch.test.ts` | `#221` | The terminal launcher's decisions (docs/flows/boot-and-launchers.md, stated gap: `zen.ts` had no test of its own). |
 | `scripts/__tests__/zen-logs.test.ts` | `#132` | The reader's own logic (#132, `bun run logs`): the flags, and what a line must be to print. |
 | `scripts/check-coverage.ts` | `#49`, `#118`, `#234` | The TOTAL coverage floor — the gate that bunfig.toml cannot express. |
 | `scripts/docs/core-exports.ts` | `#170` | Generates `docs/reference/core-exports.md` (#170): the public core barrel and the node-only logging subpath, with their defining declarations and production importers. |
@@ -165,13 +165,13 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/docs/seams-table.ts` | `#162`, `#167`, `#213` | Generates the seams table (#162 workstream 11, #167 item 4) — the block `docs/architecture.md` embeds between `<!-- generated-block: … -->` markers. |
 | `scripts/docs/verification-inventory.ts` | `#170`, `#262` | Generates `docs/reference/verification-inventory.md` (#170): enforcement gates, the numeric and count ratchets they carry, and the deliberately reusable test doubles. |
 | `scripts/gate.ts` | `#257` | Ported from slop-factory's bun example (examples/bun/scripts/gate.ts) — the shape is deliberately identical so improvements travel in either direction. |
-| `scripts/link-vendor-packages.mjs` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
-| `scripts/print-harness.mjs` | `#9`, `#13`, `#20` | The PRINT-MODE harness variant (#20): the zen-harness package minus picc-permission-modes. |
+| `scripts/link-vendor-packages.ts` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
+| `scripts/print-harness.ts` | `#9`, `#13`, `#20` | The PRINT-MODE harness variant (#20): the zen-harness package minus picc-permission-modes. |
 | `scripts/source-tree.ts` | `#162`, `#174` | The one walk over the source tree (#174, #162 workstream 6: one walker per gate family). |
-| `scripts/zen-launch.mjs` | `#221` | The terminal launcher's decisions, apart from the launch (`zen.mjs` spawns; this decides): the isolation triple as pi's arguments, the print-run trigger, and whether the pi it is about to spawn is one the guard was pinned against. |
+| `scripts/zen-launch.ts` | `#221` | The terminal launcher's decisions, apart from the launch (`zen.ts` spawns; this decides): the isolation triple as pi's arguments, the print-run trigger, and whether the pi it is about to spawn is one the guard was pinned against. |
 | `scripts/zen-logs.ts` | `#132` | See the log (#132): the day's file, rendered the way the terminal renders it live. |
-| `scripts/zen-thread.mjs` | `#86`, `#97` | Inspect the live web server's threads from a shell — the agent's half of #86. |
-| `scripts/zen.mjs` | `#20`, `#217` | Launch a VANILLA pi with only zen-harness loaded. |
+| `scripts/zen-thread.ts` | `#86`, `#97` | Inspect the live web server's threads from a shell — the agent's half of #86. |
+| `scripts/zen.ts` | `#20`, `#217` | Launch a VANILLA pi with only zen-harness loaded. |
 | `test/browser-bundle-gate.test.ts` | `#211` | The browser zone must bundle for the browser (#211). |
 | `test/check-coverage.test.ts` | `#53` | The coverage GATE's own arithmetic (#53 S2). |
 | `test/code-offenders.test.ts` | `#162` | The allowlist is the leak inventory (#162 workstream 4): a row hides a file's matches, and a row for a file with no matches is drift and is reported. |
@@ -191,7 +191,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/no-lint-suppressions.test.ts` | `#82` | The gate may not be talked out of, one line at a time. |
 | `test/presentation-gate.test.ts` | `#31`, `#121`, `#174`, `#253` | Presentation stays presentation (#121 item 4, #31). |
 | `test/prose-citation-gate.test.ts` | `#226`, `#227`, `#244`, `#316`, `#320` | THE PROSE LINE CITATION, RESOLVED (#244, #320 review). |
-| `test/scripts-extensions.test.ts` | `#269`, `#308` | `scripts/` is TypeScript, and the exceptions are named (#269). |
+| `test/scripts-extensions.test.ts` | `#269`, `#308` | `scripts/` is TypeScript, with nothing left to except (#269, #308). |
 | `test/secret-scan-gate.test.ts` | `#209` | The range `.github/workflows/secret-scan.yml` hands gitleaks is the coverage of the only gate that stops a committed secret, so it is asserted here rather than read (#209). |
 | `test/vendor-gate.test.ts` | `#69`, `#145`, `#150`, `#165`, `#173`, `#215` | The seam has an owner: only the host and the pi extensions may name the vendor (#145). |
 

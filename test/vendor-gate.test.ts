@@ -119,7 +119,7 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // (#20: no permission modes under `--print`), so it must name the extension it filters, in
   // the constant and in the shape error that fires when no entry matches. Leaves when the
   // harness owns the print manifest instead of a launcher deriving it.
-  'scripts/print-harness.mjs',
+  'scripts/print-harness.ts',
   // One inventory row's `seam` prose says a fake serves "a picc-shaped inspection" — it is
   // generated INTO docs/reference/verification-inventory.md, so the name is data here, not a
   // comment. Leaves when that fake stops replicating picc's `modes` custom entry.

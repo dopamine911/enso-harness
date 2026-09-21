@@ -66,15 +66,15 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
   },
   {
     key: 'PI_CODING_AGENT_DIR',
-    source: 'scripts/zen.mjs',
-    reader: '`scripts/zen.mjs` (pi child environment write)',
+    source: 'scripts/zen.ts',
+    reader: '`scripts/zen.ts` (pi child environment write)',
     purposeAndDefault: 'Required pin to the selected agent directory in the spawned pi process.',
     phase: 'boot',
   },
   {
     key: 'ZEN_AGENT_DIR',
-    source: 'scripts/zen.mjs',
-    reader: '`scripts/zen.mjs`',
+    source: 'scripts/zen.ts',
+    reader: '`scripts/zen.ts`',
     purposeAndDefault: 'Optional agent-directory override; defaults to `.zen/pi-agent`.',
     phase: 'boot',
   },
@@ -110,8 +110,8 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
   },
   {
     key: 'ZEN_SERVER_URL',
-    source: 'scripts/zen-thread.mjs',
-    reader: '`scripts/zen-thread.mjs`',
+    source: 'scripts/zen-thread.ts',
+    reader: '`scripts/zen-thread.ts`',
     purposeAndDefault: 'Optional live-server URL for thread inspection; defaults to `http://127.0.0.1:5179`.',
     phase: 'boot',
   },
@@ -214,10 +214,10 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
     helper: 'printHarnessDir',
     path: '.zen/print-harness',
     writer:
-      '`scripts/print-harness.mjs#materializePrintHarness` rebuilds the package mirror ' +
+      '`scripts/print-harness.ts#materializePrintHarness` rebuilds the package mirror ' +
       'for non-interactive launches.',
     lifetime: 'Machine-local scratch; reconciled on every print launch.',
-    check: { file: 'scripts/print-harness.mjs', contains: 'export function materializePrintHarness' },
+    check: { file: 'scripts/print-harness.ts', contains: 'export function materializePrintHarness' },
   },
   {
     helper: 'zenAgentDir',

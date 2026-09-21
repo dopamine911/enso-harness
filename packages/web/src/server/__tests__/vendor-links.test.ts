@@ -11,7 +11,7 @@ import { startZenServer } from '../index.ts'
  * hoisted linker leaves the harness tree to our postinstall), pi skips a missing
  * manifest resource path
  * SILENTLY, and the visible symptom was an HTTP 400 from the provider several layers away.
- * `scripts/zen.mjs` already refused to launch on this; the server did not. These assert it
+ * `scripts/zen.ts` already refused to launch on this; the server did not. These assert it
  * now does, at both launch points.
  */
 
@@ -135,7 +135,7 @@ test('a `pi` that is not an object is refused by name, not walked character by c
 /**
  * The other half: a resource path that is neither a string nor a string array — the obvious
  * future edit is a nested object for a new resource kind — is DROPPED, as
- * `scripts/zen-launch.mjs` drops it. It used to reach `.startsWith` and throw a `TypeError`
+ * `scripts/zen-launch.ts` drops it. It used to reach `.startsWith` and throw a `TypeError`
  * out of the boot path, so `bun run dev` died with an unrelated message while `bun run zen`
  * launched fine.
  */

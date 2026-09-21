@@ -5,18 +5,20 @@ import { filesUnder } from '../scripts/source-tree.ts'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
- * `scripts/` is TypeScript, and the exceptions are named (#269).
+ * `scripts/` is TypeScript, with nothing left to except (#269, #308).
  *
- * The split was a coin flip: six programs there are `.mjs` and nine are `.ts`, one
- * `scripts/tsconfig.json` covers both with `allowJs`, and both halves are started the same
- * way — so a new script had no rule to land on. There is one now, in `README.md` →
- * *Repo layout*: bun starts everything under `scripts/` and loads `.ts` directly, so nothing
- * there needs to be JavaScript. The six are historical and #308 moves them.
+ * The split was a coin flip: six programs there were `.mjs` and nine `.ts`, one
+ * `scripts/tsconfig.json` covered both with `allowJs`, and both halves were started the same
+ * way — so a new script had no rule to land on. #269 wrote the rule in `README.md` →
+ * *Repo layout* and named the six as historical; #308 moved them and dropped `allowJs`, so
+ * the exception list is gone and the MECHANISM is what makes a seventh impossible rather
+ * than this gate: a `.mjs` under `scripts/` is outside `scripts/tsconfig.json`'s `include`
+ * and is not type-checked at all.
  *
  * ⚠ Enforcement, not a unit test — the shape of `fallow-config.test.ts`, pointed at a
  * sentence instead of a manifest. A rule written in a README is a wish; these hold it to the
- * disk (a seventh `.mjs` fails, and a moved one has to leave the sentence) and to the reason
- * it was written for (a script invoked by something other than bun would expire it).
+ * disk (a `.mjs` fails, and prose that still names one fails with it) and to the reason it
+ * was written for (a script invoked by something other than bun would expire it).
  *
  * What it does not check: the shebang of a file nobody invokes through `package.json`, and a
  * `node scripts/…` spelled inside a workflow or a hook rather than in a script entry.
@@ -43,14 +45,17 @@ function scriptEntries(): [string, string][] {
   return entries
 }
 
-test('⚠ every non-TypeScript file under scripts/ is one the README names, and every name is still there (#269)', () => {
-  const named = [...LAYOUT_SECTION.matchAll(/`([\w.-]+\.mjs)`/g)].map((match) => match[1] ?? '').sort()
-  const onDisk = filesUnder(join(REPOSITORY_ROOT, 'scripts'), {
+test('⚠ every file under scripts/ is TypeScript, and the README claims no exception (#269, #308)', () => {
+  const notTypeScript = filesUnder(join(REPOSITORY_ROOT, 'scripts'), {
     keep: (file: string): boolean => !file.endsWith('.ts'),
-  })
-    .map((path) => basename(path))
-    .sort()
-  expect(onDisk).toEqual(named)
+  }).map((path) => basename(path))
+  // Named, not counted: the offender IS the file to move.
+  expect(notTypeScript).toEqual([])
+  // The other direction, and it is how the rule rots rather than breaks: prose naming an
+  // exception the tree no longer has. #269's list was correct until #308 emptied it.
+  expect([...LAYOUT_SECTION.matchAll(/`([\w.-]+\.mjs)`/g)].map((match) => match[1])).toEqual([])
+  // The rule has no reason to exist over an empty directory.
+  expect(filesUnder(join(REPOSITORY_ROOT, 'scripts')).length).toBeGreaterThan(5)
 })
 
 /**

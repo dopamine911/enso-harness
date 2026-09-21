@@ -112,7 +112,7 @@ test('anything inside a dangerous directory is a persistence write target', () =
 })
 
 // ⚠ The ZEN ADDITIONS: pi's OWN persistence surfaces, which picc's Claude-Code corpus
-// cannot know about. Each line is a real load path (receipts in scripts/zen.mjs's header).
+// cannot know about. Each line is a real load path (receipts in scripts/zen.ts's header).
 test("pi's own persistence surfaces are write targets — the zen additions", () => {
   // A project-local .pi/settings.json installs an extension for the next plain `pi` run.
   expect(isPersistenceWriteTarget(join(root, '.pi', 'settings.json'))).toBe(true)
@@ -220,7 +220,7 @@ test("⚠ a unicode space in the cwd is NOT collapsed — pi's base-directory op
  *
  * ⚠ WHICH pi, exactly: the one in the WORKSPACE tree, which is the one the in-process host
  * imports (#69) and NOT, by construction, the `pi` the terminal launcher finds on `PATH`.
- * That second resolution is bounded by `scripts/zen-launch.mjs#SUPPORTED_PI_VERSIONS` — the
+ * That second resolution is bounded by `scripts/zen-launch.ts#SUPPORTED_PI_VERSIONS` — the
  * launcher refuses a pi outside the range this corpus has been run against, and
  * `scripts/__tests__/pi-version-parity.test.ts` asserts the range still covers the pi resolved here (#217).
  *

@@ -12,8 +12,8 @@
     "packages/harness/extensions/web-search/index.ts",
     // Loaded by Bun from `packages/web/bunfig.toml` → `plugins`.
     "packages/web/src/server/bun-plugin-strict-binding-workaround.ts",
-    // Run directly: `bun scripts/zen-thread.mjs`; not a package.json script.
-    "scripts/zen-thread.mjs",
+    // Run directly: `bun scripts/zen-thread.ts`; not a package.json script.
+    "scripts/zen-thread.ts",
     // Spawned by `test/docs-gate.test.ts` and run by hand: `bun scripts/docs/<name>.ts`.
     "scripts/docs/*.ts"
   ],
