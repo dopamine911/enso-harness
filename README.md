@@ -205,6 +205,16 @@ every path it names exists. `docs/` itself: `architecture.md` (why), `glossary.m
 `verification.md` (what green means), `concepts/` (the live design notes; `concepts/archive/` the
 pre-build ones).
 
+**`scripts/` is TypeScript** (#269). Everything there is started by bun — every `package.json` script
+that runs one runs `bun scripts/<name>`, `postinstall` included, and the launchers' own shebang is
+`#!/usr/bin/env bun` — and bun loads `.ts` directly, so nothing under `scripts/` needs to be
+JavaScript and a new script is `.ts` with no decision to make. Six files predate the rule and are
+still JavaScript: `dev.mjs`, `link-vendor-packages.mjs`, `print-harness.mjs`, `zen-launch.mjs`,
+`zen-thread.mjs`, `zen.mjs` — they pay for their types in JSDoc (`@param`, `@template`, `@import`)
+instead of in the language, which is what moving them buys (#308).
+`test/scripts-extensions.test.ts` holds that list equal to what is on disk, both directions: a
+seventh `.mjs` fails the gate, and a renamed one has to leave the sentence above.
+
 ## How this repo verifies itself
 
 `bun run check:all` is the single source of "green" — the pre-commit hook and CI both run it: biome,

@@ -1160,7 +1160,6 @@ export function ChatScreen(): React.ReactNode {
           activeThreadId={activeThreadId}
           earlier={storedThreadsNotOnThisPage(stored.threads, pageThreadIds)}
           earlierError={stored.error ?? resumeError}
-          now={new Date()}
           onSelect={(threadId: string) => navigate(threadId, 'push')}
           onResume={(threadId: string) => resumeFrom(threadId, 'push')}
           onNew={() => navigate(mintThread().threadId, 'push')}

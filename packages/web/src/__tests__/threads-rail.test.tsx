@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import type { UIMessage } from '@tanstack/ai-client'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { pageClock } from '../page-clock.ts'
 import {
   adoptThread,
   clearThreadsForTest,
@@ -15,7 +16,9 @@ import { relativeAge, ThreadsRail, UNTITLED_THREAD } from '../threads-rail.tsx'
 
 /**
  * #90 PR 3: the sessions rail and the page's thread list behind it. The rail is rendered
- * statically with an injected `now`; the list is driven through `mintThread` and
+ * statically — where nothing subscribes to `pageClock`, so every age is computed once
+ * against its snapshot, which is what the dates below are relative to; that the ages MOVE
+ * is `page-clock.test.tsx`, which has to mount. The list is driven through `mintThread` and
  * `updateThreadSummary`, the two calls the page makes.
  */
 
@@ -166,7 +169,9 @@ test('history revival drops malformed rows and invalid dates instead of handing 
 // ── the rail ─────────────────────────────────────────────────────────────────
 
 test('the rail names the active thread, titles the untitled honestly, and marks a busy one', () => {
-  const now = new Date('2026-09-08T12:00:00Z')
+  // The clock a static render reads, so an age of exactly six days reads as six and not as
+  // five days and 999 ms.
+  const now = pageClock.get()
   const rendered = renderToStaticMarkup(
     <ThreadsRail
       threads={[
@@ -181,7 +186,6 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
       activeThreadId="t1"
       earlier={[]}
       earlierError={undefined}
-      now={now}
       onSelect={noop}
       onResume={noop}
       onNew={noop}
@@ -201,11 +205,10 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
 })
 
 test('the earlier list distinguishes resumable, running-elsewhere, empty and failed states', () => {
-  const now = new Date('2026-09-08T12:00:00Z')
+  const now = pageClock.get()
   const baseProps = {
     threads: [{ threadId: 'here', title: 'current', lastActivityAt: now, busy: false }],
     activeThreadId: 'here',
-    now,
     onSelect: noop,
     onResume: noop,
     onNew: noop,
