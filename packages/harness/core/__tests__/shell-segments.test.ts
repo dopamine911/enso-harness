@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test'
+import { DEFAULT_GUARD_POLICY } from '@zen/core'
+import { findDeniedNetworkEgress } from '../network-egress.ts'
 import {
   extractFlatShellCommandSegments,
   literalShellWord,
@@ -215,9 +217,19 @@ test('leading assignments are stripped until the command word is exposed', () =>
 // Red: both return a string the caller would treat as a command. `FOO=1` alone has no
 // command at all; the unterminated value means the split point is a guess — and guessing
 // here hands `gateSegment` a prefix of the real command.
-// ⚠ Deliberate residual: `FOO=1` returns null, the same value as "nothing to strip". That
-// is safe because callers fall back to the original text, which still gates to no binary.
-test('assignment-only and unterminated-value inputs yield null', () => {
+// ⚠ Deliberate residual: `FOO=1` returns null, the same value as "nothing to strip". That is
+// safe because callers fall back to the original text, which still gates to no binary — and
+// that fallback is now asserted rather than argued (PR #289 review), since a refactor of the
+// caller could otherwise invalidate the safety claim with nothing here going red. The caller
+// is the egress gate, so the assertion is the verdict it reaches, not the null.
+test('assignment-only and unterminated-value inputs yield null, and the caller still gates them', () => {
   expect(withoutLeadingEnvironmentAssignments('FOO=1')).toBeNull()
   expect(withoutLeadingEnvironmentAssignments('FOO="a b curl')).toBeNull()
+  const denied = DEFAULT_GUARD_POLICY.deniedNetworkBinaries
+  // Assignment-only: no command word, so no binary — the null read as "nothing to strip"
+  // costs nothing. A denied name as the assigned VALUE is still not a command.
+  expect(findDeniedNetworkEgress('FOO=1', denied)).toBeUndefined()
+  expect(findDeniedNetworkEgress('FOO=curl', denied)).toBeUndefined()
+  // …and the shape the stripper exists for still reaches the binary behind the assignments.
+  expect(findDeniedNetworkEgress('FOO=1 curl https://x', denied)?.matched).toBe('curl')
 })
