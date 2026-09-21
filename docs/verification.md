@@ -11,7 +11,9 @@ how to use it. It does not repeat the inventory.
 at the first failure:
 
 1. **Biome** — formatting, lint, import organisation and the repository naming plugin, check-only.
-2. **TypeScript** — project-reference build with no emit.
+2. **TypeScript** — `tsc -b`, a project-reference build. It emits: project references require
+   `composite`, `composite` requires declaration output, and `tsc -b --noEmit` is refused with
+   TS6310, so the declarations land in each package's gitignored `dist-types/`.
 3. **Dead code** — `fallow dead-code --baseline fallow-baseline.json` (#163): fails on any unused file,
    export, type or dependency that is *not* in the committed identity baseline. The baseline is the
    backlog as inventory; growth is the regression. `.fallowrc.jsonc` names every program fallow cannot
@@ -22,7 +24,12 @@ at the first failure:
    function floors. The current values are generated under *Ratchets* in the inventory.
 
 The local pre-commit hook (`.githooks/pre-commit`) and the blocking CI job
-(`.github/workflows/ci.yml`) call that same script. CI adds independent jobs or advisory steps — secret
+(`.github/workflows/ci.yml`) call that same script. The hook runs it over the snapshot being
+committed, not over the working tree: the unstaged remainder is stashed for the duration and
+restored afterwards, so a partial commit (`git add -p`) is gated on what CI will see (#259). The
+two exceptions are `git commit -a` and `git commit -- <path>`, where git hands the hook a
+temporary index; there it gates the working tree and says so on the first line of its output.
+CI adds independent jobs or advisory steps — secret
 scan, automated review, React Doctor, `fallow audit` over the changed files — but none replaces the
 five-step gate. A green editor or a
 single test is not repository green.
