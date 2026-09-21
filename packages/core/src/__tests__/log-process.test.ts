@@ -146,6 +146,47 @@ test('⚠ two processes, one file: every line lands whole — the property the d
   expect(parsed.filter((record) => record.properties?.process === 'bravo')).toHaveLength(201)
 })
 
+test('⚠ a stop signal flushes the file and exits 128 + the signal (#267): SIGINT 130, SIGTERM 143', async () => {
+  // In a CHILD, because the contract IS the exit code a supervisor reads, and the handler's
+  // last act is `process.exit`. A red line here means a stop either loses the records still
+  // in the sink or reports a code the hub cannot tell an orderly stop from a crash by.
+  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-'))
+  const child = join(logsDir, 'stoppable.ts')
+  writeFileSync(
+    child,
+    [
+      `import { zenLogger } from ${JSON.stringify(join(import.meta.dir, '..', 'log.ts'))};`,
+      `import { configureProcessLogging, installLoggingShutdown } from ${JSON.stringify(join(import.meta.dir, '..', 'log-process.ts'))};`,
+      `const dispose = await configureProcessLogging({ logsDir: ${JSON.stringify(logsDir)}, process: process.argv[2] });`,
+      `installLoggingShutdown(dispose);`,
+      `zenLogger("server", "stoppable").info("the record written before the stop by {who}", { who: process.argv[2] });`,
+      `process.stdout.write("ready\\n");`,
+      // Alive until signalled by an open stdin handle, not a timer: nothing here waits on a clock.
+      `process.stdin.resume();`,
+    ].join('\n'),
+  )
+  for (const [signal, code] of [
+    ['SIGINT', 130],
+    ['SIGTERM', 143],
+  ] as const) {
+    const running = Bun.spawn(['bun', child, signal], {
+      cwd: join(import.meta.dir, '..'),
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    for await (const chunk of running.stdout) {
+      if (new TextDecoder().decode(chunk).includes('ready')) break
+    }
+    running.kill(signal)
+    expect(await running.exited).toBe(code)
+    const written = readdirSync(logsDir).filter((name) => /^zen-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name))
+    const records = linesOf(join(logsDir, written[0] ?? '')).map((line) => JSON.parse(line) as ZenLogLine)
+    // Flushed, not just registered: the record the child wrote before the signal is in the file.
+    expect(records.some((record) => record.properties?.who === signal)).toBe(true)
+  }
+})
+
 test('a second configure in the same process is refused — one configurator per process, or it is a bug', async () => {
   const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-'))
   await configureProcessLogging({ logsDir, process: 'server' })
