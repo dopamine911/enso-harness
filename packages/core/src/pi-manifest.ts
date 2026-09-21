@@ -117,7 +117,14 @@ export function vendorPackageNames(manifest: unknown): string[] {
   for (const resourcePath of vendorResourcePaths(manifest)) {
     const [scopeOrName, scopedName] = resourcePath.slice(VENDOR_PATH_PREFIX.length).split('/')
     if (scopeOrName === undefined || scopeOrName.length === 0) continue
-    names.add(scopeOrName.startsWith('@') && scopedName !== undefined ? `${scopeOrName}/${scopedName}` : scopeOrName)
+    if (!scopeOrName.startsWith('@')) {
+      names.add(scopeOrName)
+      continue
+    }
+    // ⚠ A scope with nothing after it names NO package (PR #314 review): `node_modules/@scope`
+    // would otherwise be handed to the linker as a package called `@scope`, which cannot
+    // resolve — a malformed declaration reported as a missing dependency instead of as itself.
+    if (scopedName !== undefined && scopedName.length > 0) names.add(`${scopeOrName}/${scopedName}`)
   }
   return [...names]
 }

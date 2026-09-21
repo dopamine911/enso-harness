@@ -45,17 +45,17 @@ const permissionContextSource = readFileSync(join(dirname(piccPackage), 'permiss
  * file's header promises cannot happen: a divergence has to be red, never quietly narrower.
  * Quoted entries are skipped while scanning so a bracket inside one is content.
  */
-function declaredCorpus(symbol: string): string[] {
+function declaredCorpus(symbol: string, source: string = permissionContextSource): string[] {
   const opening = `export const ${symbol} = [`
-  const start = permissionContextSource.indexOf(opening)
+  const start = source.indexOf(opening)
   if (start < 0) {
     throw new Error(`@ladbabynpm/picc-permission-modes@${version} declares no ${symbol} in permissionContext.ts`)
   }
   let depth = 1
   let quote = ''
   let end = -1
-  for (let index = start + opening.length; index < permissionContextSource.length; index += 1) {
-    const character = permissionContextSource[index] ?? ''
+  for (let index = start + opening.length; index < source.length; index += 1) {
+    const character = source[index] ?? ''
     if (quote !== '') {
       if (character === '\\') index += 1
       else if (character === quote) quote = ''
@@ -69,7 +69,7 @@ function declaredCorpus(symbol: string): string[] {
     }
   }
   if (end < 0) throw new Error(`${symbol} is not a closed array literal`)
-  const body = permissionContextSource.slice(start, end)
+  const body = source.slice(start, end)
   return [...body.matchAll(/["']([^"']+)["']/g)].map((match) => match[1] ?? '')
 }
 
@@ -79,4 +79,18 @@ test(`⚠ CONTRACT: the persistence-write basenames still match picc@${version}'
 
 test(`⚠ CONTRACT: the persistence-write directories still match picc@${version}'s DANGEROUS_DIRECTORIES`, () => {
   expect(PERSISTENCE_WRITE_DIRECTORIES).toEqual(declaredCorpus('DANGEROUS_DIRECTORIES'))
+})
+
+// ⚠ The READER itself, over a fixture (PR #314 review). The two contracts above read the
+// installed corpus, which carries no bracket inside an entry — so the scanner that replaced
+// `indexOf(']')` is exercised by nothing there, and an off-by-one in its escape handling
+// would surface as a quietly SHORTER list: the one failure this file promises cannot happen.
+test('the corpus reader ends at the array’s own bracket, whatever the entries contain', () => {
+  const source = "export const DANGEROUS_FILES = ['a]b', 'plain', 'trailing']\nexport const OTHER = ['not mine']"
+  expect(declaredCorpus('DANGEROUS_FILES', source)).toEqual(['a]b', 'plain', 'trailing'])
+  // A nested array is still inside the same literal, so the scan does not stop early either.
+  expect(declaredCorpus('X', "export const X = [['a'], 'b']")).toEqual(['a', 'b'])
+  // A symbol that is not declared is named, never read as empty.
+  expect(() => declaredCorpus('MISSING', source)).toThrow(/declares no MISSING/)
+  expect(() => declaredCorpus('X', 'export const X = [')).toThrow(/not a closed array literal/)
 })

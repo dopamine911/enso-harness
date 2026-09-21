@@ -2,7 +2,7 @@ import { afterAll, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { declaredResources, missingVendorPaths } from '../pi-manifest.ts'
+import { declaredResources, missingVendorPaths, vendorPackageNames } from '../pi-manifest.ts'
 
 /**
  * pi's manifest-resource layout, now owned in one place (#221 — it was implemented three
@@ -83,4 +83,22 @@ test('the vendor paths a manifest declares that are not under the package root a
   put('node_modules/@mammothb/pi-tokyonight-storm/theme.json')
   put('node_modules/@ladbabynpm/picc-permission-modes/index.ts')
   expect(missingVendorPaths(MANIFEST, packageRoot)).toEqual([])
+})
+
+// ⚠ The linker's question, asked directly (PR #314 review): it was covered only through
+// `requiredPackageNames`, so a second consumer would inherit an untested edge. A scope is two
+// segments and a bare name is one, which is the whole difficulty — and a truncated scope
+// (`node_modules/@scope` with nothing after it) must not become a package called `@scope`.
+test('a vendored resource path names its package: a scope is two segments, a bare name one (#221)', () => {
+  expect(
+    vendorPackageNames({
+      pi: {
+        themes: ['node_modules/@mammothb/pi-tokyonight-storm/theme.json'],
+        extensions: ['node_modules/cc-safety-net/index.ts', 'node_modules/cc-safety-net/other.ts'],
+      },
+    }),
+  ).toEqual(['@mammothb/pi-tokyonight-storm', 'cc-safety-net'])
+  // Not a resource path at all, and a scope with no package after it: neither names a package.
+  expect(vendorPackageNames({ pi: { skills: ['skills/local.md', 'node_modules/@scope'] } })).toEqual([])
+  expect(vendorPackageNames({})).toEqual([])
 })
