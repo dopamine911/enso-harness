@@ -172,6 +172,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Resolves a line citation written beside a symbol the cited file declares exactly once; a bare range with no symbol beside it, and a symbol the file only uses, are outside it.',
   },
+  'test/secret-scan-gate.test.ts': {
+    roots: ['.github/workflows/secret-scan.yml'],
+    exceptions: [],
+    limitation:
+      'Runs the `git log` the scanner runs, over fixture histories, with the flags read out of the workflow; it pins what gitleaks is handed, not that gitleaks ran or what its rules matched.',
+  },
   'test/vendor-gate.test.ts': {
     rootArrays: ['SEARCHED_ROOTS'],
     exceptions: [

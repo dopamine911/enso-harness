@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { rootDotenvPath, zenSecretsPath } from './paths.ts'
 
 /**
@@ -118,6 +118,53 @@ export function knownSecretValues(
     if (isSecretShapedName(variableName)) values.add(variableValue)
   }
   return [...values]
+}
+
+/**
+ * The same set as `knownSecretValues`, as a THUNK that re-reads `.zen/secrets.env` when the
+ * file changes (#207). The reader is per call — `readSecret` re-reads the file every time, so
+ * a rotated key is live for the next web-search call and the refusal message says so — while
+ * the logger's value alternation was compiled once, at configure. A key added or rotated
+ * while a launcher runs was therefore readable and unredactable for the rest of that
+ * process's life, which is the one window the design invites. Reproduced before this existed:
+ * a `warn` quoting the rotated value landed in the day file verbatim.
+ *
+ * The identity of the returned array is the CHANGE SIGNAL, not just its contents: unchanged
+ * file, same array, and `redactingKnownValues` keeps its compiled regex. Callers may rely on
+ * that — it is why the redactor can ask per record without recompiling per record.
+ *
+ * The stamp is the file's mtime, size and inode, so a rotation is seen whether it was an
+ * in-place write or a write-and-rename. `mtimeMs` is a double carrying the platform's
+ * nanoseconds (≈0.2 µs of resolution here), so two rotations inside the same millisecond are
+ * still two stamps — and the size and inode catch the rest.
+ *
+ * One `stat` per call is what this costs: measured 1.7 µs, against ~8 µs for the record write
+ * it rides on (`.local` benchmark, #207). An event-driven watcher would be cheaper and is
+ * deliberately not used — an inotify handle per process, lost across an atomic replace, is a
+ * failure mode a redactor may not have.
+ */
+export function knownSecretValuesTracking(
+  repoRoot: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): () => readonly string[] {
+  const secretsPath = zenSecretsPath(repoRoot)
+  const ABSENT = -1
+  let seenMtime = ABSENT
+  let seenSize = ABSENT
+  let seenInode = ABSENT
+  let values: readonly string[] | undefined
+  return (): readonly string[] => {
+    const stat = statSync(secretsPath, { throwIfNoEntry: false })
+    const mtime = stat === undefined ? ABSENT : stat.mtimeMs
+    const size = stat === undefined ? ABSENT : stat.size
+    const inode = stat === undefined ? ABSENT : stat.ino
+    if (values !== undefined && mtime === seenMtime && size === seenSize && inode === seenInode) return values
+    seenMtime = mtime
+    seenSize = size
+    seenInode = inode
+    values = knownSecretValues(repoRoot, environment)
+    return values
+  }
 }
 
 export interface QuarantineReport {

@@ -1,0 +1,43 @@
+# The repository's own gitleaks allowlist.
+#
+# ⚠ `[extend] useDefault = true` IS LOAD-BEARING. gitleaks auto-detects this file and it REPLACES
+# the default ruleset; without that line every built-in rule is silently disabled and the scan
+# passes on everything while looking exactly like a clean result. `test/secret-scan-gate.test.ts`
+# asserts the line is here, because a reviewer cannot see its absence.
+#
+# ⚠ THIS FILE REPLACES the baseline `.github/workflows/secret-scan.yml` writes for a repository
+# that has no config. The workflow now takes the `if` branch and passes no `--config`, so the
+# baseline's `else` block no longer runs here — everything it allowed has to be below, and the
+# test asserts that too. Edit this file, not that block.
+#
+# Entries 1–4 are the baseline verbatim. Entry 5 is this repository's own, and it has an expiry.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "The 'notarealsecret' sentinel, the industry-canonical example values, and one dead fixture"
+regexTarget = "line"
+regexes = [
+  # (1) The sentinel. Any fake credential embedding this literal is allowed, for any rule.
+  # Because the sentinel is specific and unusual, a real leaked secret never contains it.
+  '''(?i)notarealsecret''',
+  # (2a) AWS documentation account IDs, reserved by AWS so no real resource can live in them.
+  # Scoped to these two accounts, so an ARN in a REAL account is still scanned.
+  '''arn:aws:[a-z0-9-]*:[a-z0-9-]*:(?:111111111111|123456789012):''',
+  # (2b) AWS's canonical example access-key / secret-key pair from its own documentation.
+  '''AKIAIOSFODNN7EXAMPLE''',
+  '''wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY''',
+  # (2c) The jwt.io canonical sample token. Base64 cannot carry the sentinel.
+  '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ\.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c''',
+  # (5) A DEAD FIXTURE, allowed for one commit's sake (#209). `test/secret-scan-gate.test.ts`
+  # first used an invented AKIA-shaped marker, which tripped this repository's own scan on the
+  # commit that introduced it (`b113644`, PR #318). HEAD uses AWS's canonical example key
+  # instead — (2b) above — so this literal exists nowhere in the tree, only in that commit's
+  # patch, which the PR range keeps re-walking.
+  #
+  # REMOVAL CONDITION: this line leaves when `b113644` is no longer in any range gitleaks walks
+  # — i.e. once #318 has merged and `main` is scanned push-to-push rather than base..head. It is
+  # a value no source file contains; if a scan ever flags it again, something re-introduced it.
+  '''AKIA2E0A8F3B244C9986''',
+]
