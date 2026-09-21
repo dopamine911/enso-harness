@@ -122,7 +122,7 @@ costs O(output × ticks). Measured on the real wire, a 3-second command producin
 `tool-result` case of `observationToAguiEvents` in `packages/web/src/to-agui.ts`, which returns
 `[]` for `complete: false` — discarded all 30 of them. So **a partial `tool-result` does not cross
 the follow at all** (#279): the wire carries the completed result, whole. The elision is in the one
-place every frame crosses (`packages/web/src/server/follow.ts:98-103`):
+place every frame crosses (`packages/web/src/server/follow.ts:107-112`):
 
 <!-- source: packages/web/src/server/follow.ts#writeFrame -->
 ```ts
