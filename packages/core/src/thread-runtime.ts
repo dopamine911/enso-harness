@@ -8,7 +8,7 @@ import type { ZenPermissionModeState } from './permission-mode.ts'
  * The thread runtime: the contract the host implements for one thread, and the shapes that
  * cross it (`docs/glossary.md` → Thread, Control). This is the seam a runtime replacement
  * would re-implement — prompt, abort, answer, subscribe, clear the queue, dispose — with
- * three fakes in the tests as its second implementation today.
+ * one fake in the tests as its second implementation today.
  *
  * ⓘ HISTORY. Until #69 the web server spawned the runtime in its RPC mode and spoke JSONL
  * to it; that transport is deleted, and until #162 workstream 4 (L2) the EVENT SHAPE that
