@@ -51,7 +51,7 @@ export interface HostedThread {
   readonly loadedExtensionPaths: readonly string[]
   /**
    * Read-only view of the session as pi holds it. Deliberately here and NOT on
-   * `ThreadRuntime`: that is the run contract, pinned by three fakes and the refusal-path
+   * `ThreadRuntime`: that is the run contract, pinned by the one fake and the refusal-path
    * tests, and inspection is a host concern.
    */
   inspect(): HostedThreadInspection

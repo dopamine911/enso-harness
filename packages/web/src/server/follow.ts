@@ -89,8 +89,23 @@ function slashCommandName(prompt: string): string | undefined {
 /**
  * Write one frame, recording it into the thread's sent tail (#97) when the thread is live
  * — the one place every frame crosses to a browser, so the record and the wire agree.
+ *
+ * ⚠ One frame does not cross at all (#279): a `tool-result` observation that is not
+ * complete. pi's tools report progress with the ACCUMULATED output, not a delta (see
+ * `docs/seams/tool-result.md`), and `bash` does it every 100 ms, so writing them costs
+ * O(output × ticks) — measured, a 3-second command producing 240 KB of output wrote
+ * 3724 KB of partial frames. The only browser consumer of the kind,
+ * `observationToAguiEvents` (`to-agui.ts`, its `tool-result` case), returns `[]` for
+ * `complete: false`: all 3724 KB were serialised, pushed through the SSE socket and
+ * schema-checked for no rendered pixel. The OBSERVATION is untouched — the feed still
+ * numbers it, `recordObservation` still logs it and the emitted tail still counts it, so
+ * the partial text is still in the `trace` record and in `/api/threads/:id/events`; this
+ * elides the WIRE. Frame `seq` therefore skips the elided numbers, which nothing on the
+ * browser side reads, and the sent tail does not record them either: it claims only what
+ * crossed.
  */
 function writeFrame(threads: ThreadRegistry, threadId: string, response: ServerResponse, frame: ZenFollowFrame): void {
+  if (frame.type === 'observation' && frame.observation.kind === 'tool-result' && !frame.observation.complete) return
   const name = frame.type === 'observation' ? frame.observation.kind : undefined
   threads.peek(threadId)?.sent.record(frame.type, name, 'sent')
   response.write(`data: ${JSON.stringify(frame)}\n\n`)
