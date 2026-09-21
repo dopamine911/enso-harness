@@ -24,9 +24,10 @@ const BARREL = join(CORE_SOURCE, 'index.ts')
 const SUBPATH_MODULES: readonly { readonly file: string; readonly entrypoint: SubpathEntrypoint }[] = [
   { file: 'log-process.ts', entrypoint: '@zen/core/log-process' },
   { file: 'paths.ts', entrypoint: '@zen/core/paths' },
+  { file: 'pi-manifest.ts', entrypoint: '@zen/core/pi-manifest' },
   { file: 'secrets.ts', entrypoint: '@zen/core/secrets' },
 ]
-type SubpathEntrypoint = '@zen/core/log-process' | '@zen/core/paths' | '@zen/core/secrets'
+type SubpathEntrypoint = '@zen/core/log-process' | '@zen/core/paths' | '@zen/core/pi-manifest' | '@zen/core/secrets'
 
 type Classification = 'wire' | 'host contract' | 'config/policy' | 'node-only utility'
 type Region = 'web/host' | 'web/server' | 'web/browser' | 'harness' | 'scripts'
@@ -45,6 +46,7 @@ const CLASSIFICATION_BY_MODULE: Readonly<Record<string, Classification>> = {
   'log-process.ts': 'node-only utility',
   'observation.ts': 'wire',
   'paths.ts': 'node-only utility',
+  'pi-manifest.ts': 'node-only utility',
   'permission-mode.ts': 'config/policy',
   'secrets.ts': 'node-only utility',
   'thread-inspection.ts': 'wire',
@@ -66,6 +68,7 @@ const DOMAIN_BY_MODULE: Readonly<Record<string, string>> = {
   'log-process.ts': 'Record',
   'observation.ts': 'Observation',
   'paths.ts': 'Project vocabulary',
+  'pi-manifest.ts': 'Project vocabulary',
   'permission-mode.ts': 'Permission',
   'secrets.ts': 'Permission',
   'thread-inspection.ts': 'Thread, Observation',

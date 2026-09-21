@@ -177,7 +177,10 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
       {
         constant: 'VENDOR_NAMED_ALLOWED',
         reason:
-          'Pins every first-party code site that still names a vendor extension, tests included — twelve of the thirteen rows are sites #215 revealed rather than sites that were added.',
+          // ⚠ No count here (PR #222 review). The row's own cell carries the number, read off the
+          // constant; a second count written by hand beside it goes stale the first time the list
+          // moves — which it did, twice, in this PR alone.
+          'Pins every first-party code site that still names a vendor extension, tests included. Most rows are sites #215 revealed by widening the walk rather than sites that were added; each carries its reason and the condition that removes it.',
       },
       {
         constant: 'VENDOR_ROOTS',

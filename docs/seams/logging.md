@@ -210,7 +210,7 @@ effective level (376-379), and wraps the file sink — and the console sink when
 (`packages/web/src/server/dev.ts:30-37`, `process: 'server'`), the web launcher (`dev-web.ts:32-39`,
 `'web'`) and the runtime as a child (`packages/harness/extensions/logging/index.ts:40-48`, `'pi'`).
 
-The extension is the interesting one (`logging/index.ts:9-19`): in-process under the web host the
+The extension is the interesting one (`logging/index.ts:11-21`): in-process under the web host the
 server configured before the runtime existed, `isLoggingConfigured()` is true, and it configures
 nothing — the extensions' records land in the server's file through the server's sinks. As a child
 of the terminal launcher nothing has configured, so it does, with no console sink (stderr is the
@@ -236,24 +236,24 @@ code: `extension` is our code inside the runtime's process, and under the web ho
 `server`. Orthogonal on purpose — a browser record is `process: "browser"` because the server
 re-emitted it, and `layer: browser` because the page wrote it.
 
-**The redaction manifest** (`log-bundle.ts:46-63`, `redactionManifest`) reads the markers back: a
+**The redaction manifest** (`log-bundle.ts:47-64`, `redactionManifest`) reads the markers back: a
 property valued `ZEN_REDACTED` counts under its field name; a line containing `ZEN_REDACTED_VALUE`
-counts under `values`. Two counts on purpose (lines 49-52): a field redacted is a record shaped
+counts under `values`. Two counts on purpose (lines 50-53): a field redacted is a record shaped
 right; a `values` row is a leak that was caught. No bookkeeping in the writer.
 
 ## What fences it
 
 - **The logging gate** (`test/logging-gate.test.ts`, #132) holds two lines, both ratchets, over
-  `packages/core/src`, `packages/web/src` and `packages/harness` (header lines 11-19):
+  `packages/core/src`, `packages/web/src` and `packages/harness` (header lines 10-21):
   1. *No production `console.*` in a migrated root* — a `console.error` is a record with no level, no
-     thread, no file, and no test that can hear it. The allowlist is empty (line 70).
+     thread, no file, and no test that can hear it. The allowlist is empty (line 60).
   2. *`@logtape/*` is imported only where the schema lives and where a process configures its sink* —
-     `LOGTAPE_ALLOWED` (lines 35-39) is `core/src/log.ts`, `core/src/log-process.ts` and
+     `LOGTAPE_ALLOWED` (lines 36-40) is `core/src/log.ts`, `core/src/log-process.ts` and
      `web/src/browser-logging.ts`, three files, so the record shape is ours to hold and the substrate
-     is ours to swap. Comment lines are skipped (line 61), so a guard's doc may quote `console.log`.
+     is ours to swap. Comment lines are skipped (line 51), so a guard's doc may quote `console.log`.
 - **`log-process.test.ts`** pins that a redacted value never lands (`log.ts:151`), that a payload
   thunk runs only for a record the tier admits (#284), and that a second configure in one process
-  throws (`logging/index.ts:16-17`).
+  throws (`logging/index.ts:18-19`).
 
 ## What crosses it that should not
 
@@ -262,9 +262,10 @@ what is ours — the layers, the properties, the one way to get a logger — and
 this file and the configurators imports the substrate. The three allowlisted files import it by name
 (LogTape: `@logtape/logtape`, `@logtape/file`, `@logtape/pretty`, `@logtape/redaction`), and
 `ZenLogLine`'s header (`log.ts:163-168`) admits the on-disk shape is the substrate's JSON-lines
-formatter, pinned so a formatter change goes red instead of reshaping the file. Not one of goals §2's
-numbered leaks — L1–L6 are the loop's boundary — but the same kind of thing, stated: one maintainer,
-one seam, one gate, and a `ZenLogger` that never exposes the substrate's `Logger`.
+formatter, pinned so a formatter change goes red instead of reshaping the file. Not one of the
+[numbered leaks](./README.md#leak-numbers) — L1–L6 are the loop's boundary — but the same kind of
+thing, stated: one maintainer, one seam, one gate, and a `ZenLogger` that never exposes the
+substrate's `Logger`.
 
 Nothing else. `ZenLogProperties` is open (`[key: string]: unknown`, line 48) — whatever a caller adds
 is carried, and field-name redaction at write is the only check it passes; that is the design, not a

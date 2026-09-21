@@ -19,6 +19,10 @@ import {
  * `reconcileSnapshotToolCalls`): the `tool-result` part sits in the assistant message that
  * holds the matching `tool-call`, and that call reads `complete` with the result as its
  * `output` — so a resumed transcript's step rows (#93) render exactly like a live one's.
+ *
+ * ⚠ The direction of travel is one-way, and since #220 that is true of the whole module and
+ * not of `transcriptToMessages` alone: every fact here is READ from the entries and WRITTEN
+ * in the vendor's shape. Nothing reads a vendor field to decide something of ours.
  */
 
 /** One part as TanStack renders it. An unmodelled part renders as a marker, never vanishes. */
@@ -97,21 +101,46 @@ export function transcriptToMessages(transcript: readonly ZenTranscriptEntry[]):
 }
 
 /**
- * Whether the transcript ends inside a turn (#109, `ZenInterruptedTail`). Read off the mapped
- * messages, not the entries, so "a call without its result" is the same fact the step rows
- * render: a `tool-call` part `attachToolResult` never completed.
+ * Whether a `tool-result` entry AFTER `messageIndex` answers `toolCallId` — the same
+ * direction `attachToolResult` pairs in, so a result that precedes its call counts for
+ * neither (it is dropped from the messages too).
+ */
+function isAnsweredAfter(transcript: readonly ZenTranscriptEntry[], messageIndex: number, toolCallId: string): boolean {
+  for (let position = messageIndex + 1; position < transcript.length; position += 1) {
+    const entry = transcript[position]
+    if (entry?.kind === 'tool-result' && entry.toolCallId === toolCallId) return true
+  }
+  return false
+}
+
+/**
+ * Whether the transcript ends inside a turn (#109, `ZenInterruptedTail`).
+ *
+ * ⚠ READ OFF THE ENTRIES, NEVER OFF THE MESSAGES (#220). Both vocabularies can express
+ * "a call without its result", and they are not equals: `ZenInterruptedTail` is a zen wire
+ * value — it crosses on the snapshot frame and the history payload and becomes a warning
+ * notice in the browser (`thread-stores.ts`) — while a `ToolCallPart.state` literal is
+ * TanStack's, pinned but not ours. Deriving the wire value from the renderer's spelling made
+ * a vendor rename silently change what the wire MEANS: with `complete` respelled, the
+ * comparison went vacuously true and every resumed thread reported a torn tail (measured
+ * before the fix). The pairing fact is the transcript's anyway — `attachToolResult` reads
+ * entries to establish it.
+ *
+ * The last MESSAGE, not the last entry: a `custom` or `other` entry the runtime appended
+ * after the turn (a model change, a compaction) is not what ended the branch.
  *
  * ⚠ Only the two shapes a next prompt would silently paper over are named. An assistant
  * reply with text and no open call reads as settled even if it was cut short — the transcript
  * carries no fact that says so, and inventing one would be a guess.
  */
-export function interruptedTail(messages: readonly UIMessage[]): ZenInterruptedTail | undefined {
-  const last = messages.at(-1)
-  if (last === undefined) return undefined
-  if (last.role === 'user') return 'unanswered-prompt'
-  if (last.role !== 'assistant') return undefined
-  const unresolved = last.parts.some(
-    (part) => part.type === 'tool-call' && part.state !== 'complete' && part.state !== 'error',
-  )
-  return unresolved ? 'tool-call-without-result' : undefined
+export function interruptedTail(transcript: readonly ZenTranscriptEntry[]): ZenInterruptedTail | undefined {
+  const lastMessageIndex = transcript.findLastIndex((entry) => entry.kind === 'message')
+  const lastMessage = transcript[lastMessageIndex]
+  if (lastMessage === undefined || lastMessage.kind !== 'message') return undefined
+  if (lastMessage.role === 'user') return 'unanswered-prompt'
+  for (const part of lastMessage.parts) {
+    if (part.type !== 'tool-call') continue
+    if (!isAnsweredAfter(transcript, lastMessageIndex, part.toolCallId)) return 'tool-call-without-result'
+  }
+  return undefined
 }
