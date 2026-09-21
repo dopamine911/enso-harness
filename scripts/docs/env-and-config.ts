@@ -45,10 +45,26 @@ interface EnvironmentScan {
 interface EnvironmentMetadata extends EnvironmentOccurrence {
   readonly reader: string
   readonly purposeAndDefault: string
-  readonly phase: 'boot' | 'load' | 'per-call' | 'boot / load' | 'boot / load / per-call'
+  readonly phase: 'boot' | 'load' | 'per-call' | 'build' | 'boot / load' | 'boot / load / per-call'
 }
 
 const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
+  {
+    key: 'ZEN_SITE_URL',
+    source: 'scripts/docs/site-base.ts',
+    reader: '`scripts/docs/site-base.ts#SITE_URL` (module read)',
+    purposeAndDefault:
+      'Optional; the origin the site is served from, which Astro needs to emit a sitemap — without it `@astrojs/sitemap` skips at WARN and the build still succeeds. Defaults to the unresolvable `https://example.invalid` because a local build has no origin; the publish workflow sets the owner\u2019s Pages origin.',
+    phase: 'build',
+  },
+  {
+    key: 'ZEN_SITE_BASE',
+    source: 'scripts/docs/site-base.ts',
+    reader: '`scripts/docs/site-base.ts#SITE_BASE` (module read)',
+    purposeAndDefault:
+      'Optional; the path the documentation site is served under. Defaults to `/zen-harness` for a local build. The publish workflow sets it to `/<repository>` — what a GitHub project site is served from — so the base is derived rather than a literal that rots on a rename.',
+    phase: 'build',
+  },
   {
     key: 'FORCE_COLOR',
     source: 'scripts/gate.ts',

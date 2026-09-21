@@ -42,6 +42,16 @@ at the first failure:
    dead links on the first run, because a page's `./routes.md` and `../../packages/…#L47` are both
    correct on GitHub and both 404 as routes; `scripts/docs/site-links.ts` is what notices.
 
+Publishing is separate and **manual**: `.github/workflows/docs-site.yml` runs on
+`workflow_dispatch`, builds the same two steps, and deploys to GitHub Pages only when the run is
+asked to (`deploy: true`); otherwise it uploads the built site as an artifact. Nothing publishes on
+a push, because gate 7 has already proved the build on every PR and a second one would buy only
+Actions minutes. ⚠ The workflow takes the site's base path from the repository
+(`ZEN_SITE_BASE: /${{ github.event.repository.name }}` → `scripts/docs/site-base.ts`, the one
+reader Astro, the projector and the crawl all share). A project site is served from
+`/<repository>`, and a wrong base builds valid HTML whose every internal link 404s with nothing
+failing — so it is derived rather than written down, and `test/site-gate.test.ts` holds that.
+
 The local pre-commit hook (`.githooks/pre-commit`) and the blocking CI job
 (`.github/workflows/ci.yml`) call that same script. The hook runs it over the snapshot being
 committed, not over the working tree: the unstaged remainder is stashed for the duration and

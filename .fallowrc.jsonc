@@ -125,6 +125,7 @@
       { "name": "host", "patterns": ["packages/web/src/host/**"] },
       { "name": "server", "patterns": ["packages/web/src/server/**"] },
       { "name": "browser", "patterns": ["packages/web/src/**"] },
+      { "name": "site-base", "patterns": ["scripts/docs/site-base.ts"] },
       { "name": "scripts", "patterns": ["scripts/**"] },
       { "name": "test", "patterns": ["test/**", "packages/web/e2e/**"] },
       { "name": "site", "patterns": ["site/**"] }
@@ -136,12 +137,22 @@
       { "from": "host", "allow": ["core"] },
       { "from": "server", "allow": ["core", "host"] },
       { "from": "browser", "allow": ["core"] },
-      { "from": "scripts", "allow": ["core"] },
-      // The site is presentation over generated output: it imports Astro and Starlight and
-      // nothing of this repository's. Its CONTENT arrives as files `scripts/docs/site-content.ts`
-      // writes, never as an import, so an empty allow-list is the shape — a site that reached
-      // into `core` would be a renderer with opinions about contracts.
-      { "from": "site", "allow": [] },
+      { "from": "scripts", "allow": ["core", "site-base"] },
+      // The site is presentation over generated output: it renders Astro and Starlight, and its
+      // CONTENT arrives as files `scripts/docs/site-content.ts` writes, never as an import. It
+      // may read ONE file — the base path the site is served under, which the projector, the
+      // link crawl and Astro must agree on to the character. Three literals would agree until
+      // the day it is published elsewhere and then disagree silently: a wrong base yields
+      // working HTML whose every link 404s, and a crawl carrying the same wrong literal reports
+      // green over it. One import beats a gate comparing two strings.
+      //
+      // ⚠ THAT FILE IS ITS OWN ZONE, so the permission is the sentence (PR #330 review). Naming
+      // `scripts` here would have allowed the site to import any script in the repository while
+      // the comment claimed otherwise — a boundary enforced by convention is not a boundary.
+      // `site-base` is a one-file zone that may itself import nothing, and `site` may reach only
+      // it; `core` stays refused either way — a renderer with opinions about contracts.
+      { "from": "site", "allow": ["site-base"] },
+      { "from": "site-base", "allow": [] },
       {
         "from": "test",
         "allow": ["core", "harness-core", "harness-extensions", "host", "server", "browser", "scripts"]

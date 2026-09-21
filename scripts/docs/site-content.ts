@@ -1,6 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
+import { SITE_BASE } from './site-base.ts'
 
 /**
  * Projects `docs/` into the Starlight site's content collection (#188).
@@ -26,8 +27,6 @@ import { findRepoRoot } from '../../packages/core/src/paths.ts'
 const ROOT = findRepoRoot(import.meta.url)
 const DOCS = 'docs'
 const CONTENT = 'site/src/content/docs'
-/** The site's base path, as `site/astro.config.mjs` sets it. */
-const SITE_BASE = '/zen-harness'
 
 /**
  * Where a page lands in the site. A `README.md` becomes its directory's INDEX rather than being

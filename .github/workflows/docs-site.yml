@@ -1,0 +1,82 @@
+# Docs site — built and published ON REQUEST, never on a push.
+#
+# Manual by design. The site is a build product of `docs/` and TypeDoc, and `bun run check:all`
+# already builds it and crawls its links on every PR (gate 7), so a push-triggered publish would
+# spend Actions minutes re-proving what the gate just proved. What this workflow adds is the one
+# thing the gate does not do: put the built site somewhere a person can read it.
+#
+# ⚠ THE BASE PATH IS DERIVED, NEVER A LITERAL. A GitHub project site is served from
+# `/<repository>`, and a site built with the wrong `base` produces working HTML whose every
+# internal link 404s — the failure looks like broken documentation and is really one wrong
+# string. `ZEN_SITE_BASE` comes from the repository itself (`scripts/docs/site-base.ts` is the
+# single reader; the projector, the link crawl and Astro all take it from there), so a rename or
+# a fork publishes correctly without anyone remembering this file exists.
+#
+# `deploy` is opt-in per run. Pages has to be enabled for the repository with "GitHub Actions"
+# as its source; until it is, the build still runs and uploads an artifact a reviewer can
+# download, rather than failing on a deployment nobody asked for.
+name: Docs site
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Publish to GitHub Pages (requires Pages enabled, source = GitHub Actions)
+        type: boolean
+        default: false
+
+# One publish at a time, and a newer request wins: two concurrent deployments of the same site
+# race for the same Pages deployment slot.
+concurrency:
+  group: docs-site
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4" # matches the `engines.bun` floor in package.json
+
+      # The frozen form, as everywhere else: it fails when the lockfile and package.json
+      # disagree rather than silently resolving a different tree.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # TypeDoc first: it writes `site/public/api/`, which the site serves and the link crawl
+      # then checks. Reversed, the crawl refuses by name (`site-links.ts#missingApiReference`).
+      - name: Build the API reference
+        run: bun run docs:api
+
+      - name: Build the site and crawl its links
+        env:
+          ZEN_SITE_BASE: /${{ github.event.repository.name }}
+          ZEN_SITE_URL: https://${{ github.repository_owner }}.github.io
+        run: bun run docs:site
+
+      - name: Upload the built site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    if: inputs.deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write # the deployment itself
+      id-token: write # the OIDC token `deploy-pages` exchanges for it
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

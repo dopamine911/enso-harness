@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
+import { SITE_BASE as BASE } from './site-base.ts'
 
 /**
  * Every internal link in the BUILT site resolves to something the site serves (#188).
@@ -23,7 +24,7 @@ import { findRepoRoot } from '../../packages/core/src/paths.ts'
 
 const ROOT = findRepoRoot(import.meta.url)
 const DIST = 'site/dist'
-const BASE = '/zen-harness'
+
 /** What the `api-docs` gate step writes, and what the sidebar's `/api/` link serves. */
 const API_OUTPUT = 'site/public/api'
 
