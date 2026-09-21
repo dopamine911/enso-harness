@@ -59,11 +59,24 @@ function globalCeiling(): number {
   return Number(ceiling)
 }
 
-/** Each pinned file → the number its `overrides` entry allows. */
+/**
+ * Each pinned file → the number its `overrides` entry allows.
+ *
+ * ⚠ A text read, not a JSONC parse — and it REFUSES an ambiguous one (PR #313 review). The
+ * scan takes the first `maxAllowedComplexity` after the file's path string, which is the
+ * right number only while that path appears once; a second mention, in a comment or a second
+ * override, would quietly read another entry's pin and the ratchet would hold against a
+ * number nobody set. Counting occurrences costs less than a parser and turns that silent
+ * misread into a red line naming the file.
+ */
 function filePins(): Record<string, number> {
   const config = readFileSync(join(REPOSITORY_ROOT, BIOME_CONFIG), 'utf8')
   const pins: Record<string, number> = {}
   for (const file of PINNED_FILES) {
+    const mentions = config.split(`"${file}"`).length - 1
+    if (mentions !== 1) {
+      throw new Error(`${BIOME_CONFIG}: "${file}" appears ${mentions} times — this reader needs exactly one`)
+    }
     const entry = config.slice(config.indexOf(`"${file}"`))
     const pin = COMPLEXITY_OPTION.exec(entry)?.[1]
     if (pin === undefined) throw new Error(`${BIOME_CONFIG}: ${file} has no maxAllowedComplexity of its own`)
