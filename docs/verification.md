@@ -16,9 +16,15 @@ at the first failure:
    TS6310, so the declarations land in each package's gitignored `dist-types/`.
 3. **Dead code** — `fallow dead-code --baseline fallow-baseline.json` (#163): fails on any unused file,
    export, type or dependency that is *not* in the committed identity baseline. The baseline is the
-   backlog as inventory; growth is the regression. `.fallowrc.jsonc` names every program fallow cannot
-   see a loader for (the harness extensions, the Bun plugin, the direct-run scripts), and
-   `test/fallow-config.test.ts` holds its extension entries equal to the harness manifest.
+   backlog as inventory; growth is the regression. **It is empty since #263**, and the last 17 rows
+   are why it should stay that way: they were the harness barrel's unconsumed exports, carried under
+   a note deferring the question to #173's zone rule, which shipped without taking it. A baseline row
+   does not age — it reads the same whether the leak is still there or long gone — so the barrel's
+   surface is now derived from what the extensions import and held by
+   `test/harness-barrel-gate.test.ts`, which names the lines to delete instead of hiding them.
+   `.fallowrc.jsonc` names every program fallow cannot see a loader for (the harness extensions, the
+   Bun plugin, the direct-run scripts), and `test/fallow-config.test.ts` holds its extension entries
+   equal to the harness manifest.
 4. **Bun test** — the complete test tree, with text and LCOV coverage reporters.
 5. **Aggregate coverage** — `scripts/check-coverage.ts` reads LCOV and enforces the total line and
    function floors. The current values are generated under *Ratchets* in the inventory.
@@ -63,6 +69,7 @@ The important boundary gates for consolidation:
 - `prose-citation-gate.test.ts` — a line cited beside a symbol lands inside that symbol's own declaration;
 - `presentation-gate.test.ts` — ported files name their provenance and import no application state;
 - `logging-gate.test.ts` — records use `zenLogger`; the logging substrate stays behind it;
+- `harness-barrel-gate.test.ts` — the harness barrel exports exactly what the extensions import;
 - `no-duplicate-paths.test.ts` / `no-duplicate-shapes.test.ts` — roots and schemas have one home.
 
 Read the generated table before editing a gate: its limitation column is the edge the gate does not
