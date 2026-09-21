@@ -30,6 +30,10 @@
  *                  writes `coverage/lcov.info` for gate 5.
  *   5. coverage  — `bun scripts/check-coverage.ts`: the TOTAL line and function floors over the
  *                  full denominator, which bun's own per-file `coverageThreshold` cannot express.
+ *   6. api-docs  — `typedoc`: the owned contract surface across both barrels, with warnings
+ *                  FATAL. TypeDoc's warnings are documentation drift — a `{@link}` whose target
+ *                  was renamed, a type a documented signature exposes but nothing exports — and
+ *                  none of them is visible to `tsc`. Writes `.local/api/`, gitignored (#188).
  *
  * ⚠ Each row's name and first backticked command is CHECKED against GATES and package.json by
  * `test/gate-abort.test.ts`, because this list is the documented authority for what "green" means
@@ -142,6 +146,24 @@ export const GATES: readonly Gate[] = [
     name: 'coverage',
     describe: 'total coverage floor over the full denominator',
     script: 'coverage:check',
+  },
+  {
+    // AFTER typecheck for the same reason dead-code is: TypeDoc reads the compiler's view, so a
+    // file tsc refuses would surface here as link noise rather than as the type error it is.
+    //
+    // ⚠ WARNINGS ARE FATAL (`treatWarningsAsErrors`, #188), and that is the whole point of the
+    // step: TypeDoc's warnings ARE the drift. A `{@link}` whose target was renamed, a type
+    // referenced by a documented signature but never exported, an entry point that left the
+    // program — each is a doc that has stopped matching the code, and none of them is visible
+    // to `tsc`. Two were live when the step was added and both are fixed in the same commit.
+    //
+    // It writes `.local/api/` (gitignored) rather than a checked-in artifact: the HTML is a
+    // view, and diffing rendered markup would gate the renderer's version, not this repo's
+    // contracts. What is gated is that the surface still DOCUMENTS — the source comments are
+    // the artifact, and the fences and the docs gate already hold those to the code.
+    name: 'api-docs',
+    describe: 'typedoc: the owned contract surface documents, with warnings fatal',
+    script: 'docs:api',
   },
 ]
 

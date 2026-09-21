@@ -21,7 +21,7 @@ const ALL_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [
 /**
  * The unicode space characters pi collapses to a plain space before resolving a path
  * (NBSP, the U+2000 block, narrow NBSP, medium mathematical space, ideographic space).
- * Same set as pi's `UNICODE_SPACES` — see the attribution on {@link normalizeLikePi}.
+ * Same set as pi's `UNICODE_SPACES` — see the attribution on `normalizeLikePi`.
  */
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g
 
@@ -34,7 +34,7 @@ const WINDOWS_PLATFORM = 'win32'
  * Convert a Git Bash / MSYS / Cygwin / WSL drive path (`/c/x`, `/mnt/c/x`, `/cygdrive/c/x`)
  * to the native Windows form pi would resolve.
  *
- * Only reached on win32 — kept so the agreement with pi (see {@link normalizeLikePi}) holds on
+ * Only reached on win32 — kept so the agreement with pi (see `normalizeLikePi`) holds on
  * every platform, not just the ones this harness is run on today.
  *
  * Exported for the tests ONLY: the function is pure, so its agreement with pi's exported
@@ -99,7 +99,7 @@ function normalizeLikePi(input: string, options: { stripAtPrefix: boolean; norma
  * tool will operate on. Does NOT confine — see {@link isInsideAnyRoot}.
  *
  * Mirrors pi's `resolveToCwd` → `resolvePath`: the candidate is normalised with the tool
- * options (see {@link normalizeLikePi}); the cwd is normalised with pi's DEFAULT options
+ * options (see `normalizeLikePi`); the cwd is normalised with pi's DEFAULT options
  * (tilde and `file://` only — pi neither strips `@` from a base directory nor collapses
  * its unicode spaces).
  */
