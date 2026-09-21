@@ -5,10 +5,10 @@ import { assertExactKeys, runGenerator } from './generator-support.ts'
 
 /**
  * Generates the seams table (#162 workstream 11, #167 item 4) — the block `docs/architecture.md`
- * and `docs/seams/README.md` embed between `<!-- generated-block: … -->` markers. One row per
- * page under `docs/seams/`: the seam's name from its H1, the LEAK COLUMN VERBATIM from the bold
- * lead of its *What crosses it that should not* section, and two columns of checked metadata
- * (domain, gate) keyed by file, so a page added or removed fails here rather than going unlisted.
+ * embeds between `<!-- generated-block: … -->` markers. One row per page under `docs/seams/`: the
+ * seam's name from its H1, the LEAK COLUMN VERBATIM from the bold lead of its *What crosses it
+ * that should not* section, and two columns of checked metadata (domain, gate) keyed by file, so a
+ * page added or removed fails here rather than going unlisted.
  *
  * The leak column is the reason this is generated: the hand-written table said L2, L3 and "the
  * parallel `zen.*` names" for a week after each was closed. A page's own leak section is the

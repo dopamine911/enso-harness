@@ -4,8 +4,8 @@ The provider seam under the harness: five search backends behind one contract an
 selected by the tool that owns the fallback policy, and the fetch tool's injected IO beside it.
 Glossary domains: **Permission** (egress — the two sanctioned network calls the bash guard denies by
 name; a committed allowlist and a committed backend pin decide what may run) and **Control** (a tool
-call inside a run). `.local/refactor/goals.md` §2 names this directory as *where we already did it
-right, as the pattern to copy*: a normalizer in our own code that has held.
+call inside a run). This directory is the pattern the consolidation (#162) copied elsewhere — *where
+we already did it right*: a normalizer in our own code that has held.
 
 Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Refresh with
 `bun scripts/docs/refresh-fences.ts docs/seams/web-providers.md`.
@@ -238,7 +238,8 @@ key when auth comes only from provider env vars, so this code mirrors that fallb
 
 **The composition roots import the runtime's extension API** (`ExtensionAPI`, `AgentToolResult`,
 `ExtensionContext`) — under `packages/harness/extensions/`, a root the vendor gate permits, and the
-shape goals §2 numbers L5 for the guards: the registration is the runtime's, the contract behind it is ours.
+shape [*Leak numbers*](./README.md#leak-numbers) records as L5 for the guards: the registration is
+the runtime's, the contract behind it is ours.
 
 Nothing else. The outcome union, the error, the two request shapes and both dependency interfaces
 name no vendor; `anthropic-wire.ts` names a provider's HTTP wire, which is the thing being adapted.
