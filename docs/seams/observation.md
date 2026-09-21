@@ -21,6 +21,10 @@ an event the mapper has no word for becomes `unmapped`, so dropping is inexpress
 
 <!-- source: packages/core/src/observation.ts#ZenObservation -->
 ```ts
+/**
+ * @group Observations
+ * @category The union
+ */
 export const ZenObservation = Type.Union([
   ZenTextDelta,
   ZenThinkingDelta,
@@ -51,7 +55,12 @@ message end:
 
 <!-- source: packages/core/src/observation.ts#ZenUsage -->
 ```ts
-/** Token and cost accounting, present on `message_update`, assistant and tool messages. */
+/**
+ * Token and cost accounting, present on `message_update`, assistant and tool messages.
+ *
+ * @group Observations
+ * @category Turns and cost
+ */
 export const ZenUsage = Type.Object({
   input: Type.Integer({ minimum: 0 }),
   output: Type.Integer({ minimum: 0 }),
@@ -66,11 +75,27 @@ than the last, and status frames (`follow.ts` header, lines 11–15):
 
 <!-- source: packages/core/src/follow.ts#ZenFollowFrame -->
 ```ts
+/** @group Follow wire */
 export const ZenFollowFrame = Type.Union([ZenFollowSnapshot, ZenFollowObservation, ZenFollowStatus])
 ```
 
 <!-- source: packages/core/src/follow.ts#ZenFollowSnapshot -->
 ```ts
+/**
+ * The server↔browser wire (#112): a thread's feed, as the follow route serves it.
+ *
+ * Every follow opens with exactly one `snapshot` — the thread as of `asOfSeq` — and then
+ * carries only `observation` frames (each `seq` greater than the last) and `status`
+ * frames (the thread's lifecycle as the server sees it). A reconnect is a new follow and
+ * a new snapshot; there is no cursor to resume from, because the snapshot IS the resync
+ * (deepseek-harness: one complete snapshot per generation, then only deltas).
+ *
+ * The payload is `ZenObservation` — the same layer the event tails and the debug pane
+ * reason in. AG-UI is not on this wire; a browser adapter derives it if a renderer wants it
+ * (`docs/architecture.md`, decided constraints).
+ *
+ * @group Follow wire
+ */
 export const ZenFollowSnapshot = Type.Object(
   {
     type: Type.Literal('snapshot'),
@@ -95,6 +120,7 @@ export const ZenFollowSnapshot = Type.Object(
 
 <!-- source: packages/core/src/follow.ts#ZenFollowObservation -->
 ```ts
+/** @group Follow wire */
 export const ZenFollowObservation = Type.Object(
   {
     type: Type.Literal('observation'),
@@ -107,6 +133,7 @@ export const ZenFollowObservation = Type.Object(
 
 <!-- source: packages/core/src/follow.ts#ZenFollowStatus -->
 ```ts
+/** @group Follow wire */
 export const ZenFollowStatus = Type.Object(
   {
     type: Type.Literal('status'),

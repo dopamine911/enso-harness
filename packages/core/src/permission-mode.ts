@@ -17,11 +17,14 @@ import { type Static, Type } from 'typebox'
  * `mode` is the current mode; `available` is what the mode dropdown may offer: the modes the
  * runtime's mode extension registers, intersected with the commands this session actually
  * registers, in the extension's order (the host decides).
+ *
+ * @group Permission mode
  */
 export const ZenPermissionModeState = Type.Object({
   mode: Type.String({ minLength: 1 }),
   available: Type.Array(Type.String({ minLength: 1 })),
 })
+/** @group Permission mode */
 export type ZenPermissionModeState = Static<typeof ZenPermissionModeState>
 
 /**
@@ -30,8 +33,11 @@ export type ZenPermissionModeState = Static<typeof ZenPermissionModeState>
  * A control route, not a prompt — the server refuses a mode the thread does not offer (422) and
  * a busy thread (409); the change itself arrives on the follow as `permission-mode`, never from
  * the click.
+ *
+ * @group Permission mode
  */
 export const ZenPermissionModeChange = Type.Object({
   mode: Type.String({ minLength: 1 }),
 })
+/** @group Permission mode */
 export type ZenPermissionModeChange = Static<typeof ZenPermissionModeChange>

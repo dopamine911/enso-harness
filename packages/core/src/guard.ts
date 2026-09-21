@@ -7,6 +7,8 @@ import { type Static, Type } from 'typebox'
  * the policy — schema in `@zen/core`, patterns beside the extension — would put half of one
  * decision in each of two packages, which is the duplication this package exists to prevent.
  * The policy is one thing; it is declared in one place.
+ *
+ * @group Guards
  */
 export const GuardPolicy = Type.Object({
   /** Absolute roots a mutating tool may write inside. Empty means "the session cwd only". */
@@ -26,6 +28,7 @@ export const GuardPolicy = Type.Object({
   deniedNetworkBinaries: Type.Array(Type.String()),
 })
 
+/** @group Guards */
 export type GuardPolicy = Static<typeof GuardPolicy>
 
 /**
@@ -34,6 +37,8 @@ export type GuardPolicy = Static<typeof GuardPolicy>
  * Deliberately conservative on reads of credential material and on writes outside the workspace
  * — the two cases from `docs/concepts/pi-immediate-needs.md` Tier 0 where pi ships no
  * confinement at all.
+ *
+ * @group Guards
  */
 export const DEFAULT_GUARD_POLICY: GuardPolicy = {
   writeRoots: [],
@@ -107,6 +112,8 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
  * is visible in a diff. ⚠ This layer must stay UNCONDITIONAL: picc reaches at most "ask"
  * for these paths (mode-shaped — an auto-mode classifier may approve one), and print
  * runs load no picc at all (#20), so here is the only always-on denial.
+ *
+ * @group Guards
  */
 export const PERSISTENCE_WRITE_BASENAMES: readonly string[] = [
   '.gitconfig',
@@ -128,6 +135,8 @@ export const PERSISTENCE_WRITE_BASENAMES: readonly string[] = [
  * Same provenance and matching rules as {@link PERSISTENCE_WRITE_BASENAMES}. `.git` overlaps
  * `protectedWriteFragments`' `/.git/` deliberately; the fragment also catches the bare repo
  * case and predates this.
+ *
+ * @group Guards
  */
 export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.git', '.vscode', '.idea', '.claude']
 
@@ -154,10 +163,16 @@ export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.git', '.vscod
  *                into it (`echo x > .cc-safety-net/rules.json`), and pi's write/edit
  *                tools never pass through checkCommand at all — so this guard is the only
  *                layer that can keep the agent from editing the policy that gates it.
+ *
+ * @group Guards
  */
 export const ZEN_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.pi', '.agents', '.zen', '.cc-safety-net']
 
-/** Basenames that deny a read outright, regardless of directory. */
+/**
+ * Basenames that deny a read outright, regardless of directory.
+ *
+ * @group Guards
+ */
 export const SECRET_BASENAME_PATTERNS: readonly RegExp[] = [
   /^\.env(\..+)?$/i,
   /^secrets?\.(env|json|ya?ml|toml|ini)$/i,

@@ -11,6 +11,8 @@
  *   answer first, and a fallback must not start what the deadline already forbade.
  *
  * The deadline's reason is the caller's — it names the tool and the budget in the refusal.
+ *
+ * @group Shell execution
  */
 export async function runUnderDeadline<T>(
   callerSignal: AbortSignal | undefined,

@@ -118,6 +118,8 @@ The wire shapes the server derives from those, in `@zen/core`. The rail's listin
  * `threadId` IS pi's session id — the host creates every session with the browser's thread id
  * (`NewSessionOptions.id`), so the two never need a mapping, and a page-owned thread finds its
  * own file again after the server restarts.
+ *
+ * @group Thread inspection
  */
 export const ZenStoredThread = Type.Object(
   {
@@ -144,7 +146,11 @@ One live thread in full, on `GET /api/threads/:id` and in the bundle:
 
 <!-- source: packages/core/src/thread-inspection.ts#ZenThreadInspection -->
 ```ts
-/** One live thread, in full: the summary plus the session branch and what it may run. */
+/**
+ * One live thread, in full: the summary plus the session branch and what it may run.
+ *
+ * @group Thread inspection
+ */
 export const ZenThreadInspection = Type.Object(
   {
     threadId: Type.String(),
@@ -182,6 +188,8 @@ A thread's history as the browser mounts it, live or cold: `GET …/history` and
  *
  * Carried as `Unknown` because the shape is TanStack's, not zen's; the durable form is the
  * runtime's log, decoded by the host into `ZenTranscriptEntry` (L2).
+ *
+ * @group Thread inspection
  */
 export const ZenThreadHistory = Type.Object(
   {
@@ -205,6 +213,8 @@ export const ZenThreadHistory = Type.Object(
  * Derived on read from the branch, never written to pi's file: deepseek-harness appends a
  * synthetic `turn/end { interrupted }` on resume repair; here the report is the repair, and the
  * next prompt continues from the torn tail as pi would.
+ *
+ * @group Thread inspection
  */
 export const ZenInterruptedTail = Type.Union([
   Type.Literal('unanswered-prompt'),
@@ -249,11 +259,11 @@ converter, so the test reads what the real host would hand out.
 - **The storage-seam test**: `packages/core/src/__tests__/no-duplicate-paths.test.ts` line 99 —
   "`SessionManager` is imported ONLY by the web host's agent-host.ts — the storage seam" — a scan of
   every non-test source root; the `.zen` literal is likewise assembled only in `paths.ts` — plus
-  `guard.ts`, where it is corpus data for `ZEN_PERSISTENCE_WRITE_DIRECTORIES` (line 150).
+  `guard.ts`, where it is corpus data for `ZEN_PERSISTENCE_WRITE_DIRECTORIES` (line 159).
 - **The vendor gate** (`test/vendor-gate.test.ts`, #145): the runtime's package is imported only under
   `packages/web/src/host/` and `packages/harness/extensions/`.
 - **Closed wire schemas**: `ZenThreadInspection`, `ZenStoredThread`, `ZenThreadHistory` are
-  `additionalProperties: false` (thread-inspection.ts lines 75, 200, 233) — no host internal leaks by
+  `additionalProperties: false` (thread-inspection.ts lines 84, 239, 280) — no host internal leaks by
   an accidental spread; `server-handler.test.ts` line 444 checks summaries against `ZenThreadSummary`.
 
 ## What crosses it that should not

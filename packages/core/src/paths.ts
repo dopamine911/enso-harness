@@ -27,7 +27,11 @@ import { ZEN_CONFIG_FILENAME } from './config.ts'
 
 /** No ancestor of the starting path is a workspace root: the walk ran out of parents. */
 
-/** Thrown when no ancestor of the start path is a workspace root. */
+/**
+ * Thrown when no ancestor of the start path is a workspace root.
+ *
+ * @group Workspace paths
+ */
 export class RepoRootNotFoundError extends Error {
   constructor(startPath: string) {
     super(
@@ -38,7 +42,11 @@ export class RepoRootNotFoundError extends Error {
   }
 }
 
-/** `realpathSync`, or the input unchanged when the path (or a segment of it) does not exist. */
+/**
+ * `realpathSync`, or the input unchanged when the path (or a segment of it) does not exist.
+ *
+ * @group Workspace paths
+ */
 export function realpathOrSelf(path: string): string {
   try {
     return realpathSync(path)
@@ -69,7 +77,11 @@ function isWorkspaceRoot(directory: string): boolean {
 
 const FILE_URL_PREFIX = 'file://'
 
-/** True when the string is a `file://` URL rather than a filesystem path. */
+/**
+ * True when the string is a `file://` URL rather than a filesystem path.
+ *
+ * @group Workspace paths
+ */
 export function isFileUrl(candidate: string): boolean {
   return candidate.startsWith(FILE_URL_PREFIX)
 }
@@ -81,6 +93,8 @@ export function isFileUrl(candidate: string): boolean {
  * callers with different reasons share it: {@link findRepoRoot} accepts `import.meta.url`,
  * and the harness guard decodes a `file://` path a tool was handed — pi's own tools decode
  * one before touching the filesystem, so the guard must judge the decoded path (#53).
+ *
+ * @group Workspace paths
  */
 export function fileUrlToPath(fileUrl: string): string {
   return fileURLToPath(fileUrl)
@@ -96,6 +110,8 @@ export function fileUrlToPath(fileUrl: string): string {
  * ⚠ This finds the root of the checkout the given FILE lives in — for a module inside
  * this repo that is always the zen-harness checkout, never the session cwd. That
  * distinction is what `config.ts` relies on; do not "fix" this to consult `process.cwd()`.
+ *
+ * @group Workspace paths
  */
 export function findRepoRoot(startPathOrFileUrl: string): string {
   const startPath = isFileUrl(startPathOrFileUrl) ? fileUrlToPath(startPathOrFileUrl) : startPathOrFileUrl
@@ -111,7 +127,11 @@ export function findRepoRoot(startPathOrFileUrl: string): string {
 /** The `.zen` runtime dir names, assembled here and nowhere else (the anchor enforces it). */
 const ZEN_RUNTIME_DIRECTORY = '.zen'
 
-/** pi's scratch agent dir — settings, extensions, auth. Shared by the TUI launcher and the web server. */
+/**
+ * pi's scratch agent dir — settings, extensions, auth. Shared by the TUI launcher and the web server.
+ *
+ * @group Workspace paths
+ */
 export function zenAgentDir(repoRoot: string): string {
   return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'pi-agent')
 }
@@ -139,17 +159,27 @@ export function zenAgentDir(repoRoot: string): string {
  * source is therefore named, which couples this link to the entry-point layout in
  * `typedoc.json` — and that coupling breaks LOUDLY, because an unresolved link is a fatal
  * warning in the `api-docs` gate.
+ *
+ * @group Workspace paths
  */
 export function zenSecretsPath(repoRoot: string): string {
   return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'secrets.env')
 }
 
-/** The root `.env` — where secrets must NOT live (#89); reported as misplaced when they do. */
+/**
+ * The root `.env` — where secrets must NOT live (#89); reported as misplaced when they do.
+ *
+ * @group Workspace paths
+ */
 export function rootDotenvPath(repoRoot: string): string {
   return join(repoRoot, '.env')
 }
 
-/** Where the print variant of the harness package is materialized (#20). */
+/**
+ * Where the print variant of the harness package is materialized (#20).
+ *
+ * @group Workspace paths
+ */
 export function printHarnessDir(repoRoot: string): string {
   return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'print-harness')
 }
@@ -160,22 +190,36 @@ export function printHarnessDir(repoRoot: string): string {
  * `web/server/logging.ts`).
  *
  * Under `.zen/` so bun never autoloads from it and the write gate already knows it (guard.ts).
+ *
+ * @group Workspace paths
  */
 export function zenLogsDir(repoRoot: string): string {
   return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'logs')
 }
 
-/** The harness package — the directory `zen.ts` hands to pi's `-e`. */
+/**
+ * The harness package — the directory `zen.ts` hands to pi's `-e`.
+ *
+ * @group Workspace paths
+ */
 export function harnessPackageDir(repoRoot: string): string {
   return join(repoRoot, 'packages', 'harness')
 }
 
-/** The web package — the cwd both dev surfaces run in. */
+/**
+ * The web package — the cwd both dev surfaces run in.
+ *
+ * @group Workspace paths
+ */
 export function webPackageDir(repoRoot: string): string {
   return join(repoRoot, 'packages', 'web')
 }
 
-/** The committed config file's path under a repository root (#59): `zen.config.json`, beside `package.json`. */
+/**
+ * The committed config file's path under a repository root (#59): `zen.config.json`, beside `package.json`.
+ *
+ * @group Workspace paths
+ */
 export function zenConfigPath(repoRoot: string): string {
   return join(repoRoot, ZEN_CONFIG_FILENAME)
 }

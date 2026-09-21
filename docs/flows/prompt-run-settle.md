@@ -72,6 +72,8 @@ sequenceDiagram
  * land inside it — so the receipt names the message and the acquisition it took or queued
  * behind, and the follow carries everything after (deepseek-harness: `followup()` returns
  * void).
+ *
+ * @group Follow wire
  */
 export const ZenPromptReceipt = Type.Object(
   {

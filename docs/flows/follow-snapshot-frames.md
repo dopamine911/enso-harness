@@ -58,6 +58,21 @@ sequenceDiagram
 
 <!-- source: packages/core/src/follow.ts#ZenFollowSnapshot -->
 ```ts
+/**
+ * The server↔browser wire (#112): a thread's feed, as the follow route serves it.
+ *
+ * Every follow opens with exactly one `snapshot` — the thread as of `asOfSeq` — and then
+ * carries only `observation` frames (each `seq` greater than the last) and `status`
+ * frames (the thread's lifecycle as the server sees it). A reconnect is a new follow and
+ * a new snapshot; there is no cursor to resume from, because the snapshot IS the resync
+ * (deepseek-harness: one complete snapshot per generation, then only deltas).
+ *
+ * The payload is `ZenObservation` — the same layer the event tails and the debug pane
+ * reason in. AG-UI is not on this wire; a browser adapter derives it if a renderer wants it
+ * (`docs/architecture.md`, decided constraints).
+ *
+ * @group Follow wire
+ */
 export const ZenFollowSnapshot = Type.Object(
   {
     type: Type.Literal('snapshot'),

@@ -40,6 +40,8 @@ const WINDOWS_PLATFORM = 'win32'
  * Exported for the tests ONLY: the function is pure, so its agreement with pi's exported
  * `normalizeWindowsShellPath` is pinned on Linux by a corpus of its own — the CALL above
  * it is the only part that stays unexercised until the suite runs on Windows.
+ *
+ * @group Guard predicates
  */
 export function normalizeWindowsShellPath(filePath: string): string {
   if (!filePath.startsWith('/') || filePath.startsWith('//') || filePath.includes('\\')) return filePath
@@ -102,6 +104,8 @@ function normalizeLikePi(input: string, options: { stripAtPrefix: boolean; norma
  * options (see `normalizeLikePi`); the cwd is normalised with pi's DEFAULT options
  * (tilde and `file://` only — pi neither strips `@` from a base directory nor collapses
  * its unicode spaces).
+ *
+ * @group Guard predicates
  */
 export function resolveAgainstCwd(candidate: string, cwd: string): string {
   const normalizedCandidate = normalizeLikePi(candidate, { stripAtPrefix: true, normalizeUnicodeSpaces: true })
@@ -115,6 +119,8 @@ export function resolveAgainstCwd(candidate: string, cwd: string): string {
  * ⚠ Load-bearing: a string containment check alone is escapable by a symlink that
  * lives inside the workspace and points outside it. New files have no realpath, so
  * the nearest existing ancestor is the thing to resolve.
+ *
+ * @group Guard predicates
  */
 export function realpathOfNearestExisting(absolutePath: string): string {
   let current = absolutePath
@@ -148,7 +154,11 @@ function isInsideRoot(absolutePath: string, root: string): boolean {
   )
 }
 
-/** True when the path is inside at least one root, checking both the literal path and its realpath. */
+/**
+ * True when the path is inside at least one root, checking both the literal path and its realpath.
+ *
+ * @group Guard predicates
+ */
 export function isInsideAnyRoot(absolutePath: string, roots: readonly string[]): boolean {
   if (roots.length === 0) return false
   const viaSymlink = realpathOfNearestExisting(absolutePath)
@@ -186,6 +196,8 @@ const PROC_ENVIRON_PATH = /^\/proc\/[^/]+\/environ$/
  * No filesystem access and no resolution: this is the question to ask about a shell word whose
  * value is not knowable from the text (`"$HOME/.zen/auth.json"` — see `shell-secret-paths.ts`),
  * where {@link looksLikeSecret}'s realpath leg has nothing to resolve.
+ *
+ * @group Guard predicates
  */
 export function textLooksLikeSecretPath(text: string, fragments: readonly string[]): boolean {
   if (containsPathFragment(text, fragments)) return true
@@ -201,6 +213,8 @@ export function textLooksLikeSecretPath(text: string, fragments: readonly string
  * inside the workspace named `notes.txt` pointing at `~/.aws/credentials` has an innocent
  * literal path, and pi follows the link. Reading a secret is the precondition for
  * exfiltrating one, so this gate cannot be the one that judges only the name it was given.
+ *
+ * @group Guard predicates
  */
 export function looksLikeSecret(absolutePath: string, fragments: readonly string[]): boolean {
   for (const candidate of [absolutePath, realpathOfNearestExisting(absolutePath)]) {
@@ -210,7 +224,11 @@ export function looksLikeSecret(absolutePath: string, fragments: readonly string
   return false
 }
 
-/** True when the path contains a fragment that is never writable. */
+/**
+ * True when the path contains a fragment that is never writable.
+ *
+ * @group Guard predicates
+ */
 export function isProtectedForWrite(absolutePath: string, fragments: readonly string[]): boolean {
   return containsPathFragment(absolutePath, fragments)
 }
@@ -228,6 +246,8 @@ export function isProtectedForWrite(absolutePath: string, fragments: readonly st
  *
  * ⚠ Basenames match EXACTLY (case-insensitive, for case-folding filesystems), never as
  * fragments — `.profile-notes/x.ts` and `my.bashrc` must not be caught.
+ *
+ * @group Guard predicates
  */
 export function isPersistenceWriteTarget(absolutePath: string): boolean {
   for (const candidate of [absolutePath, realpathOfNearestExisting(absolutePath)]) {

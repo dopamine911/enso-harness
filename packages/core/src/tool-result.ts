@@ -48,11 +48,18 @@ import { Compile } from 'typebox/compile'
  * the same confusion later, further from the cause.
  *
  * A colon namespaces just as well and is not path syntax anywhere.
+ *
+ * @group Tool results
  */
 export const ZEN_TOOL_RESULT_KEY = 'zen:toolResult' as const
 
-/** Units a truncation can be counted in. Closed, because a surface must render each one. */
+/**
+ * Units a truncation can be counted in. Closed, because a surface must render each one.
+ *
+ * @group Tool results
+ */
 export const ZenTruncationUnit = Type.Union([Type.Literal('lines'), Type.Literal('bytes'), Type.Literal('items')])
+/** @group Tool results */
 export type ZenTruncationUnit = Static<typeof ZenTruncationUnit>
 
 /**
@@ -60,12 +67,15 @@ export type ZenTruncationUnit = Static<typeof ZenTruncationUnit>
  *
  * A terminal and a browser make different decisions about how to show "and 4,000 more
  * lines", and a pre-truncated string forces the terminal's choice onto the browser.
+ *
+ * @group Tool results
  */
 export const ZenTruncation = Type.Object({
   shown: Type.Integer({ minimum: 0 }),
   total: Type.Integer({ minimum: 0 }),
   unit: ZenTruncationUnit,
 })
+/** @group Tool results */
 export type ZenTruncation = Static<typeof ZenTruncation>
 
 /**
@@ -75,6 +85,8 @@ export type ZenTruncation = Static<typeof ZenTruncation>
  * emit a kind we have never seen, and the unknown-kind path must be a visible fallback
  * rather than a validation failure at the boundary. Closing this union would turn an
  * unrecognised renderer into a dropped result.
+ *
+ * @group Tool results
  */
 export const ZenToolResultDescriptor = Type.Object({
   /** Renderer selector. Unknown values MUST fall back to the envelope's `content`. */
@@ -83,6 +95,7 @@ export const ZenToolResultDescriptor = Type.Object({
   props: Type.Record(Type.String(), Type.Unknown()),
   truncated: Type.Optional(ZenTruncation),
 })
+/** @group Tool results */
 export type ZenToolResultDescriptor = Static<typeof ZenToolResultDescriptor>
 
 /**
@@ -93,7 +106,11 @@ export type ZenToolResultDescriptor = Static<typeof ZenToolResultDescriptor>
  */
 const descriptorValidator = Compile(ZenToolResultDescriptor)
 
-/** Runtime shape check, from the schema rather than beside it. */
+/**
+ * Runtime shape check, from the schema rather than beside it.
+ *
+ * @group Tool results
+ */
 export function isZenToolResultDescriptor(value: unknown): value is ZenToolResultDescriptor {
   return descriptorValidator.Check(value)
 }
@@ -103,6 +120,8 @@ export function isZenToolResultDescriptor(value: unknown): value is ZenToolResul
  *
  * Takes the metadata bag rather than the whole part, so this stays usable from the TUI
  * renderer too — which has no TanStack types and must not gain them.
+ *
+ * @group Tool results
  */
 export function readZenToolResultDescriptor(
   metadata: Record<string, unknown> | undefined,

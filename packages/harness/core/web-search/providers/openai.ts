@@ -171,6 +171,7 @@ function buildRequestBody(request: ModelSearchRequest): Record<string, unknown> 
   return requestBody
 }
 
+/** @group Web search */
 export async function runOpenAiProviderSearch(request: ModelSearchRequest): Promise<WebSearchOutcome> {
   const credential = await resolveProviderCredential('openai', request)
 

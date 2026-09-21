@@ -24,11 +24,16 @@ import { WEB_FETCH_MAX_URL_LENGTH } from '@zen/core'
  * the two (rebinding) gets through, and hex-form mapped/NAT64 IPv6 addresses are not
  * decoded. Closing that needs a resolve-once pinned transport (deepseek-harness carries
  * one); recorded here and in the tests rather than half-built.
+ *
+ * @group Web fetch policy
  */
-
 export type WebFetchUrlDecision = { kind: 'ok'; url: URL } | { kind: 'refused'; reason: string }
 
-/** Parse and gate a raw URL string. Refusal reasons are written for the model to read. */
+/**
+ * Parse and gate a raw URL string. Refusal reasons are written for the model to read.
+ *
+ * @group Web fetch policy
+ */
 export function parseWebFetchUrl(rawUrl: string): WebFetchUrlDecision {
   if (rawUrl.length > WEB_FETCH_MAX_URL_LENGTH) {
     return {
@@ -58,6 +63,8 @@ export function parseWebFetchUrl(rawUrl: string): WebFetchUrlDecision {
  * reviewable grant, and `api.example.com` is a different grant from `example.com`. Ports are
  * not part of the match — the protocol gate already confines the scheme, and a host grant is a
  * host grant on any port.
+ *
+ * @group Web fetch policy
  */
 export function isHostAllowed(hostname: string, allowedHosts: readonly string[]): boolean {
   const candidate = hostname.toLowerCase()
@@ -74,6 +81,8 @@ const FETCHABLE_MEDIA_TYPE_SUFFIXES: readonly string[] = ['+json', '+xml']
  *
  * An ABSENT Content-Type header is refused — web_fetch is a docs-reader, and "the server did
  * not say" fails closed.
+ *
+ * @group Web fetch policy
  */
 export function isFetchableContentType(contentTypeHeader: string | null): boolean {
   if (contentTypeHeader === null) return false
@@ -147,6 +156,8 @@ function isPublicIpv4(octets: Ipv4Octets): boolean {
  *
  * Anything not provably public (unparseable included) classifies as non-public: the check gates
  * a refusal, so unknown must fail closed.
+ *
+ * @group Web fetch policy
  */
 export function isPublicIpAddress(address: string): boolean {
   const trimmed = address.trim().toLowerCase()

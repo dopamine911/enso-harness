@@ -76,6 +76,8 @@ sequenceDiagram
  * answered `value` to the extension verbatim, so a value outside the offered options would
  * put a string the extension never offered into its control flow. That is an injection
  * seam, and it is closed HERE rather than trusted to the renderer.
+ *
+ * @group Dialogs
  */
 export function validateDialogAnswer(spec: ZenDialogSpec, payload: unknown): string | undefined {
   if (!dialogAnswerValidator.Check(payload)) {

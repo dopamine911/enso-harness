@@ -10,16 +10,28 @@
  * (declared in its package.json; the repo ships no LICENSE file).
  */
 
-/** Every backend that can answer a web_search call. */
+/**
+ * Every backend that can answer a web_search call.
+ *
+ * @group Web search
+ */
 export type WebSearchProviderId = 'anthropic' | 'google' | 'openai' | 'deepseek' | 'tavily'
 
-/** One cited or returned web source. */
+/**
+ * One cited or returned web source.
+ *
+ * @group Web search
+ */
 export interface WebSource {
   title: string
   url: string
 }
 
-/** One retrieval-style result (the Tavily shape): a source plus its snippet. */
+/**
+ * One retrieval-style result (the Tavily shape): a source plus its snippet.
+ *
+ * @group Web search
+ */
 export interface WebSearchSnippet {
   title: string
   url: string
@@ -35,6 +47,8 @@ export interface WebSearchSnippet {
  * source count: a real search can return zero results, and an ungrounded answer citing a
  * hallucinated URL would read as grounded. Upstream's `grounded = sources.length > 0` had
  * exactly that defect.
+ *
+ * @group Web search
  */
 export type WebSearchOutcome =
   | {
@@ -59,6 +73,8 @@ export type WebSearchOutcome =
  * `requestDispatched` says whether the HTTP request left the process — an honest "may have
  * billed" bit (whether a failed request billed is the provider's accounting, not knowable
  * here), surfaced when the fallback re-searches.
+ *
+ * @group Web search
  */
 export class WebSearchProviderError extends Error {
   readonly providerId: WebSearchProviderId
@@ -78,6 +94,8 @@ export class WebSearchProviderError extends Error {
  *
  * Named (not inline) so a fake in a test and the composition root's real `fetch` wrapper can
  * both annotate the parameter instead of leaning on inference.
+ *
+ * @group Web search
  */
 export interface FetchUrlInit {
   method?: string
@@ -87,12 +105,18 @@ export interface FetchUrlInit {
   signal?: AbortSignal | undefined
 }
 
-/** The injected fetch seam — tests never touch the network. Same shape as web_fetch's. */
+/**
+ * The injected fetch seam — tests never touch the network. Same shape as web_fetch's.
+ *
+ * @group Web search
+ */
 export type FetchUrl = (url: string, init: FetchUrlInit) => Promise<Response>
 
 /**
  * Auth for one model-routed request, as pi's model registry resolves it (plus the
  * provider-env fallback — see `auth.ts`).
+ *
+ * @group Web search
  */
 export type ResolvedProviderAuth =
   | { ok: true; apiKey?: string; headers?: Record<string, string>; baseUrl?: string }
@@ -106,6 +130,8 @@ export type ResolvedProviderAuth =
  * (`extensions/web-search/index.ts#searchModelOf`), and nothing under `harness/core` imports
  * the runtime's type for it any more. A provider that needs an eighth field adds it here, where
  * the seam is, not by reaching for the vendor's.
+ *
+ * @group Web search
  */
 export interface SearchModel {
   id: string
@@ -119,7 +145,11 @@ export interface SearchModel {
   headers?: Record<string, string> | undefined
 }
 
-/** What a MODEL-ROUTED provider run receives (anthropic / google / openai). */
+/**
+ * What a MODEL-ROUTED provider run receives (anthropic / google / openai).
+ *
+ * @group Web search
+ */
 export interface ModelSearchRequest {
   query: string
   model: SearchModel
@@ -136,6 +166,8 @@ export interface ModelSearchRequest {
  * `undefined` means no native search path exists for it — selection falls through to the
  * fallback chain. (pi registers DeepSeek models as `openai-completions`, so they land here as
  * `undefined` too: the DeepSeek backend is config-pinned, never model-routed — #63.)
+ *
+ * @group Web search
  */
 export function routedProviderIdForModel(model: SearchModel): 'anthropic' | 'google' | 'openai' | undefined {
   if (model.provider === 'google-generative-ai' || model.api === 'google-generative-ai') return 'google'

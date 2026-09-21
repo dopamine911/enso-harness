@@ -25,10 +25,18 @@ import { WebSearchConfig } from './web-search.ts'
  * so an in-session edit is inert until a restart has put the diff in front of a human.
  */
 
-/** The committed config file's basename. Lives at the repository root. */
+/**
+ * The committed config file's basename. Lives at the repository root.
+ *
+ * @group Configuration
+ */
 export const ZEN_CONFIG_FILENAME = 'zen.config.json'
 
-/** The example a refusal message shows a human who needs to change the config. */
+/**
+ * The example a refusal message shows a human who needs to change the config.
+ *
+ * @group Configuration
+ */
 export const ZEN_CONFIG_EXAMPLE = `{ "webFetch": { "allowedHosts": ["docs.example.com"] } }`
 
 /**
@@ -37,6 +45,8 @@ export const ZEN_CONFIG_EXAMPLE = `{ "webFetch": { "allowedHosts": ["docs.exampl
  * One section per consumer; every section's schema lives with its owner. ⚠ New sections are
  * added `Type.Optional`, load-bearing (#63): a required section would make every
  * already-committed config unreadable, and unreadable fails CLOSED for every consumer at once.
+ *
+ * @group Configuration
  */
 export const ZenConfig = Type.Object(
   {
@@ -45,10 +55,12 @@ export const ZenConfig = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Configuration */
 export type ZenConfig = Static<typeof ZenConfig>
 
 const zenConfigValidator = Compile(ZenConfig)
 
+/** @group Configuration */
 export type ZenConfigParseResult = { kind: 'ok'; config: ZenConfig } | { kind: 'unreadable'; reason: string }
 
 /**
@@ -56,6 +68,8 @@ export type ZenConfigParseResult = { kind: 'ok'; config: ZenConfig } | { kind: '
  *
  * Any failure comes back as `unreadable`, and the caller must fail CLOSED on it — "could not
  * read the policy" must never render as "no policy".
+ *
+ * @group Configuration
  */
 export function parseZenConfig(fileText: string): ZenConfigParseResult {
   let parsed: unknown

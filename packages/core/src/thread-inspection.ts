@@ -22,7 +22,11 @@ import { ZenTranscriptEntry } from './transcript.ts'
  * acts on; a reader who wants "the truth" reads `entries`, not the file.
  */
 
-/** One live thread, at a glance. */
+/**
+ * One live thread, at a glance.
+ *
+ * @group Thread inspection
+ */
 export const ZenThreadSummary = Type.Object(
   {
     threadId: Type.String(),
@@ -47,9 +51,14 @@ export const ZenThreadSummary = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Thread inspection */
 export type ZenThreadSummary = Static<typeof ZenThreadSummary>
 
-/** One live thread, in full: the summary plus the session branch and what it may run. */
+/**
+ * One live thread, in full: the summary plus the session branch and what it may run.
+ *
+ * @group Thread inspection
+ */
 export const ZenThreadInspection = Type.Object(
   {
     threadId: Type.String(),
@@ -74,6 +83,7 @@ export const ZenThreadInspection = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Thread inspection */
 export type ZenThreadInspection = Static<typeof ZenThreadInspection>
 
 /**
@@ -84,6 +94,8 @@ export type ZenThreadInspection = Static<typeof ZenThreadInspection>
  *   replayed  the buffer delivered it to the first subscriber — a `held` record's second life
  *   dropped   nobody was listening and the first subscriber had already come and gone
  *   sent      an AG-UI chunk the server wrote to the browser — the wire's own order
+ *
+ * @group Thread inspection
  */
 export const ZenEventProvenance = Type.Union([
   Type.Literal('live'),
@@ -92,6 +104,7 @@ export const ZenEventProvenance = Type.Union([
   Type.Literal('dropped'),
   Type.Literal('sent'),
 ])
+/** @group Thread inspection */
 export type ZenEventProvenance = Static<typeof ZenEventProvenance>
 
 /**
@@ -99,6 +112,8 @@ export type ZenEventProvenance = Static<typeof ZenEventProvenance>
  *
  * Consecutive events of the same shape coalesce into one record with a `count` — a model turn
  * is hundreds of text deltas, and the tail exists to be read, not scrolled.
+ *
+ * @group Thread inspection
  */
 export const ZenThreadEvent = Type.Object(
   {
@@ -116,9 +131,14 @@ export const ZenThreadEvent = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Thread inspection */
 export type ZenThreadEvent = Static<typeof ZenThreadEvent>
 
-/** A thread's two tails: what the host emitted (with how), and what the server sent. */
+/**
+ * A thread's two tails: what the host emitted (with how), and what the server sent.
+ *
+ * @group Thread inspection
+ */
 export const ZenThreadEvents = Type.Object(
   {
     threadId: Type.String(),
@@ -127,9 +147,14 @@ export const ZenThreadEvents = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Thread inspection */
 export type ZenThreadEvents = Static<typeof ZenThreadEvents>
 
-/** The three columns of an event row: `12:34:56` · `held ×3` · `entry_appended modes`. */
+/**
+ * The three columns of an event row: `12:34:56` · `held ×3` · `entry_appended modes`.
+ *
+ * @group Thread inspection
+ */
 export interface ThreadEventColumns {
   readonly when: string
   /** Provenance, with the count when coalesced — the column a reader scans for `held`/`dropped`. */
@@ -144,6 +169,8 @@ export interface ThreadEventColumns {
  *
  * How the columns are joined is layout, the surface's own: the drawer joins with a space
  * (`describeThreadEvent`), `zen-thread.ts` pads them into a table.
+ *
+ * @group Thread inspection
  */
 export function threadEventColumns(event: ZenThreadEvent): ThreadEventColumns {
   return {
@@ -153,7 +180,11 @@ export function threadEventColumns(event: ZenThreadEvent): ThreadEventColumns {
   }
 }
 
-/** One event of a tail as a row — `12:34:56 held ×3 entry_appended modes`. */
+/**
+ * One event of a tail as a row — `12:34:56 held ×3 entry_appended modes`.
+ *
+ * @group Thread inspection
+ */
 export function describeThreadEvent(event: ZenThreadEvent): string {
   const columns = threadEventColumns(event)
   return `${columns.when} ${columns.provenance} ${columns.subject}`
@@ -173,6 +204,7 @@ export function describeThreadEvent(event: ZenThreadEvent): string {
  */
 const ZEN_THREAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 
+/** @group Thread inspection */
 export function isZenThreadId(value: unknown): value is string {
   return typeof value === 'string' && ZEN_THREAD_ID_PATTERN.test(value)
 }
@@ -184,6 +216,8 @@ export function isZenThreadId(value: unknown): value is string {
  * `threadId` IS pi's session id — the host creates every session with the browser's thread id
  * (`NewSessionOptions.id`), so the two never need a mapping, and a page-owned thread finds its
  * own file again after the server restarts.
+ *
+ * @group Thread inspection
  */
 export const ZenStoredThread = Type.Object(
   {
@@ -204,6 +238,7 @@ export const ZenStoredThread = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Thread inspection */
 export type ZenStoredThread = Static<typeof ZenStoredThread>
 
 /**
@@ -214,11 +249,14 @@ export type ZenStoredThread = Static<typeof ZenStoredThread>
  * Derived on read from the branch, never written to pi's file: deepseek-harness appends a
  * synthetic `turn/end { interrupted }` on resume repair; here the report is the repair, and the
  * next prompt continues from the torn tail as pi would.
+ *
+ * @group Thread inspection
  */
 export const ZenInterruptedTail = Type.Union([
   Type.Literal('unanswered-prompt'),
   Type.Literal('tool-call-without-result'),
 ])
+/** @group Thread inspection */
 export type ZenInterruptedTail = Static<typeof ZenInterruptedTail>
 
 /**
@@ -228,6 +266,8 @@ export type ZenInterruptedTail = Static<typeof ZenInterruptedTail>
  *
  * Carried as `Unknown` because the shape is TanStack's, not zen's; the durable form is the
  * runtime's log, decoded by the host into `ZenTranscriptEntry` (L2).
+ *
+ * @group Thread inspection
  */
 export const ZenThreadHistory = Type.Object(
   {
@@ -239,4 +279,5 @@ export const ZenThreadHistory = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Thread inspection */
 export type ZenThreadHistory = Static<typeof ZenThreadHistory>

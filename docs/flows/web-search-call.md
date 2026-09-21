@@ -79,6 +79,8 @@ sequenceDiagram
  * source count: a real search can return zero results, and an ungrounded answer citing a
  * hallucinated URL would read as grounded. Upstream's `grounded = sources.length > 0` had
  * exactly that defect.
+ *
+ * @group Web search
  */
 export type WebSearchOutcome =
   | {

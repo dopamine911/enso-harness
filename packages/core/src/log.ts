@@ -31,6 +31,8 @@ import { type Static, Type } from 'typebox'
  * (`process` on every line is that, `log-process.ts`).
  *
  * `extension` is our code inside the runtime's process. `docs/glossary.md` → Record.
+ *
+ * @group Logging
  */
 export type ZenLogLayer = 'server' | 'host' | 'extension' | 'browser'
 
@@ -40,6 +42,8 @@ export type ZenLogLayer = 'server' | 'host' | 'extension' | 'browser'
  * These are the identities the wire already has (`ZenObservation`, #112) — a line that names
  * them can be joined to the transcript, the event tail (#97), and the other layers' lines about
  * the same moment.
+ *
+ * @group Logging
  */
 export interface ZenLogProperties {
   readonly threadId?: string
@@ -62,6 +66,8 @@ export interface ZenLogProperties {
  * ⚠ Pass a thunk wherever the payload is BUILT for the call (#284). An object literal of
  * ids already in hand is cheaper eagerly; a payload that spreads, maps or carries a whole
  * observation is not. The thunk runs at most once, when a sink will read it.
+ *
+ * @group Logging
  */
 export type ZenLogPayload = ZenLogProperties | (() => ZenLogProperties)
 
@@ -71,6 +77,8 @@ export type ZenLogPayload = ZenLogProperties | (() => ZenLogProperties)
  * Five levels; `fatal` is not vocabulary here. The tiers (#132): `info` is the spine — what
  * happened; `debug` is every observation, one compact line; `trace` is the same with the
  * payload. `ZEN_LOG_LEVEL` picks the tier (`log-process.ts`).
+ *
+ * @group Logging
  */
 export interface ZenLogger {
   trace(message: string, properties?: ZenLogPayload): void
@@ -82,7 +90,11 @@ export interface ZenLogger {
   with(properties: ZenLogProperties): ZenLogger
 }
 
-/** The root category. A configurator routes `["zen"]` and every layer inherits. */
+/**
+ * The root category. A configurator routes `["zen"]` and every layer inherits.
+ *
+ * @group Logging
+ */
 export const ZEN_LOG_ROOT = 'zen'
 
 function wrap(logger: Logger): ZenLogger {
@@ -113,6 +125,8 @@ function wrap(logger: Logger): ZenLogger {
  * `["zen", "server", "follow"]`, a child of the layer, a grandchild of the root.
  *
  * Module level, once per file.
+ *
+ * @group Logging
  */
 export function zenLogger(layer: ZenLogLayer, ...subcategory: readonly string[]): ZenLogger {
   return wrap(getLogger([ZEN_LOG_ROOT, layer, ...subcategory]))
@@ -131,6 +145,8 @@ export function zenLogger(layer: ZenLogLayer, ...subcategory: readonly string[])
  * handlers (the guard's `tool_call`) run inside the prompt route's chain and inherit the
  * thread without being told it. That holds only while pi is in-process — see the note on
  * `guards/index.ts`'s logger.
+ *
+ * @group Logging
  */
 export function withZenLogContext<T>(properties: ZenLogProperties, callback: () => T): T {
   return withContext(properties, callback)
@@ -151,6 +167,8 @@ export function withZenLogContext<T>(properties: ZenLogProperties, callback: () 
  * is dropped by design — better a missing count than a leaked key. Not LogTape's
  * `DEFAULT_REDACT_FIELDS`: that list eats `key`, `auth`, and `email` too, which would drop
  * `threadKey`-shaped names and `author` from records that carry nothing secret.
+ *
+ * @group Logging
  */
 export const ZEN_REDACT_FIELDS: readonly RegExp[] = [/api[-_]?key/i, /secret/i, /password/i, /token/i, /credential/i]
 
@@ -161,6 +179,8 @@ export const ZEN_REDACT_FIELDS: readonly RegExp[] = [/api[-_]?key/i, /secret/i, 
  * is missing rather than wondering, and the bundle (#132 item 5) counts markers per field name
  * for its redaction manifest with no bookkeeping in the writer. The value itself never lands —
  * `log-process.test.ts`.
+ *
+ * @group Logging
  */
 export const ZEN_REDACTED = '[REDACTED]'
 
@@ -171,6 +191,8 @@ export const ZEN_REDACTED = '[REDACTED]'
  * A distinct marker from `ZEN_REDACTED` so the bundle's manifest can count the two passes
  * separately: a field name redacted is a record shaped right, a value redacted is a leak that
  * was caught.
+ *
+ * @group Logging
  */
 export const ZEN_REDACTED_VALUE = '[REDACTED:value]'
 
@@ -181,6 +203,8 @@ export const ZEN_REDACTED_VALUE = '[REDACTED:value]'
  *
  * `logger` is the category joined by `.`; `level` is upper-cased on disk and `warning` is
  * written `WARN` (measured, LogTape 2.3.4).
+ *
+ * @group Logging
  */
 export const ZenLogLine = Type.Object(
   {
@@ -199,6 +223,7 @@ export const ZenLogLine = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Logging */
 export type ZenLogLine = Static<typeof ZenLogLine>
 
 const LINE_LEVEL: Readonly<Record<LogLevel, ZenLogLine['level']>> = {
@@ -216,6 +241,8 @@ const LINE_LEVEL: Readonly<Record<LogLevel, ZenLogLine['level']>> = {
  *
  * The message is the TEMPLATE (`rawMessage`), as on disk; `log-process.ts`'s `logRecordOf` is
  * the inverse.
+ *
+ * @group Logging
  */
 export function zenLogLineOf(record: LogRecord): ZenLogLine {
   return {
@@ -237,6 +264,8 @@ export function zenLogLineOf(record: LogRecord): ZenLogLine {
  * is the browser's clock; the file's `@timestamp` is the server's receipt. `page` tells two
  * tabs apart. `logger` must be under `zen.browser`: the server will not be told what the host
  * or the guard said.
+ *
+ * @group Logging
  */
 export const ZenBrowserLogBatch = Type.Object(
   {
@@ -257,4 +286,5 @@ export const ZenBrowserLogBatch = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Logging */
 export type ZenBrowserLogBatch = Static<typeof ZenBrowserLogBatch>

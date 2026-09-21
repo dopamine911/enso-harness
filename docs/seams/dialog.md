@@ -22,6 +22,8 @@ The question, one shape per kind:
  * `timeout` is pi's OWN deadline (milliseconds), when the requesting extension set one:
  * pi resolves the dialog itself when it lapses, so an answer arriving after it is written
  * to an id nobody is waiting on. Carried so a surface can stop offering a dead question.
+ *
+ * @group Dialogs
  */
 export const ZenDialogSpec = Type.Union([
   Type.Object({
@@ -67,6 +69,8 @@ A question while it waits — what the snapshot lists, keyed by the id the answe
  * answer.
  *
  * `id` is the request id the answer is keyed by.
+ *
+ * @group Dialogs
  */
 export const ZenOpenDialog = Type.Object({ id: Type.String({ minLength: 1 }), dialog: ZenDialogSpec })
 ```
@@ -84,6 +88,8 @@ The answer, as it crosses `POST /api/threads/:id/dialog` and reaches the runtime
  * asked exactly that and skipped `validateDialogAnswer` for anything carrying a `cancelled` key,
  * which is the select-injection fence (`dialog.ts`) open for an answer that also carried a value.
  * With the arms disjoint, `answer.cancelled === true` narrows, so every reader tests the VALUE.
+ *
+ * @group Thread runtime
  */
 export type DialogAnswer = { id: string } & (
   | { cancelled: true; value?: never; confirmed?: never }
@@ -96,6 +102,7 @@ The two checks both sides enforce — is this a question, does this payload answ
 
 <!-- source: packages/core/src/dialog.ts#isZenDialogSpec -->
 ```ts
+/** @group Dialogs */
 export function isZenDialogSpec(value: unknown): value is ZenDialogSpec {
   return dialogSpecValidator.Check(value)
 }
@@ -111,6 +118,8 @@ export function isZenDialogSpec(value: unknown): value is ZenDialogSpec {
  * answered `value` to the extension verbatim, so a value outside the offered options would
  * put a string the extension never offered into its control flow. That is an injection
  * seam, and it is closed HERE rather than trusted to the renderer.
+ *
+ * @group Dialogs
  */
 export function validateDialogAnswer(spec: ZenDialogSpec, payload: unknown): string | undefined {
   if (!dialogAnswerValidator.Check(payload)) {
@@ -145,6 +154,9 @@ How the wait ended, and where the question was raised — both tagged at the sou
  * A closed union: `answered` is a human's value, the other three are pi's cancel value
  * delivered for a reason — the browser's cancel or the session's teardown (`cancelled`), the
  * extension's own `timeout`, or the caller's abort signal (`aborted`).
+ *
+ * @group Observations
+ * @category Permission and dialogs
  */
 export const ZenDialogOutcome = Type.Union([
   Type.Literal('answered'),
@@ -169,6 +181,9 @@ export const ZenDialogOutcome = Type.Union([
  *                  have swallowed it.
  *
  * A closed union: a third origin fails at the mapper, loudly, not silently in a consumer.
+ *
+ * @group Observations
+ * @category Extension surface
  */
 export const ZenUiRequestOrigin = Type.Union([Type.Literal('session-start'), Type.Literal('run')])
 ```

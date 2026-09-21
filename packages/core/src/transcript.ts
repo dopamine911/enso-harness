@@ -16,7 +16,11 @@ import { ZenToolResultDescriptor } from './tool-result.ts'
  * new kind in the runtime's log is a row in the drawer rather than a parse failure.
  */
 
-/** One piece of a message's content, as the runtime stored it. */
+/**
+ * One piece of a message's content, as the runtime stored it.
+ *
+ * @group Transcript
+ */
 export const ZenTranscriptPart = Type.Union([
   Type.Object({ type: Type.Literal('text'), text: Type.String() }),
   Type.Object({ type: Type.Literal('thinking'), thinking: Type.String() }),
@@ -30,6 +34,7 @@ export const ZenTranscriptPart = Type.Union([
   /** A content kind the host did not model; `type` says which, for a reader to mark rather than drop. */
   Type.Object({ type: Type.Literal('other'), kind: Type.String() }),
 ])
+/** @group Transcript */
 export type ZenTranscriptPart = Static<typeof ZenTranscriptPart>
 
 const base = {
@@ -38,16 +43,25 @@ const base = {
   at: Type.Optional(Type.String()),
 }
 
-/** A prompt or a reply. */
+/**
+ * A prompt or a reply.
+ *
+ * @group Transcript
+ */
 export const ZenTranscriptMessage = Type.Object({
   kind: Type.Literal('message'),
   ...base,
   role: Type.Union([Type.Literal('user'), Type.Literal('assistant')]),
   parts: Type.Array(ZenTranscriptPart),
 })
+/** @group Transcript */
 export type ZenTranscriptMessage = Static<typeof ZenTranscriptMessage>
 
-/** A tool's answer to a call, with the rendering descriptor the tool attached (#18). */
+/**
+ * A tool's answer to a call, with the rendering descriptor the tool attached (#18).
+ *
+ * @group Transcript
+ */
 export const ZenTranscriptToolResult = Type.Object({
   kind: Type.Literal('tool-result'),
   ...base,
@@ -58,31 +72,44 @@ export const ZenTranscriptToolResult = Type.Object({
   isError: Type.Boolean(),
   descriptor: Type.Optional(ZenToolResultDescriptor),
 })
+/** @group Transcript */
 export type ZenTranscriptToolResult = Static<typeof ZenTranscriptToolResult>
 
-/** State an extension persisted (`pi.appendEntry`): the shape belongs to the extension. */
+/**
+ * State an extension persisted (`pi.appendEntry`): the shape belongs to the extension.
+ *
+ * @group Transcript
+ */
 export const ZenTranscriptCustom = Type.Object({
   kind: Type.Literal('custom'),
   ...base,
   customType: Type.String(),
   data: Type.Unknown(),
 })
+/** @group Transcript */
 export type ZenTranscriptCustom = Static<typeof ZenTranscriptCustom>
 
-/** An entry kind the host does not model — a model change, a compaction, a label. Counted, never invented. */
+/**
+ * An entry kind the host does not model — a model change, a compaction, a label. Counted, never invented.
+ *
+ * @group Transcript
+ */
 export const ZenTranscriptOther = Type.Object({
   kind: Type.Literal('other'),
   ...base,
   type: Type.String(),
 })
+/** @group Transcript */
 export type ZenTranscriptOther = Static<typeof ZenTranscriptOther>
 
+/** @group Transcript */
 export const ZenTranscriptEntry = Type.Union([
   ZenTranscriptMessage,
   ZenTranscriptToolResult,
   ZenTranscriptCustom,
   ZenTranscriptOther,
 ])
+/** @group Transcript */
 export type ZenTranscriptEntry = Static<typeof ZenTranscriptEntry>
 
 /**
@@ -96,6 +123,7 @@ function isPrimitive(value: unknown): value is string | number | boolean {
   return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
 }
 
+/** @group Transcript */
 export function describeTranscriptEntry(entry: ZenTranscriptEntry): string {
   const when = entry.at === undefined ? '' : entry.at.slice(11, 19)
   switch (entry.kind) {

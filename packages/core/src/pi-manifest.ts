@@ -83,6 +83,8 @@ function resourceDeclarations(manifest: unknown): unknown[] {
  *
  * A non-string entry is not a resource path and is dropped rather than coerced — a hand-edited
  * manifest should not turn into a check against `"42"`.
+ *
+ * @group pi manifest
  */
 export function declaredResources(manifest: unknown): string[] {
   const resources: string[] = []
@@ -105,6 +107,8 @@ function vendorResourcePaths(manifest: unknown): string[] {
  * Only the vendor paths are checked: a repo-local resource (`./extensions/…`) is the
  * package's own and is there or the package is broken, whereas the vendor ones are
  * materialized by the installer and npm workspaces used to hoist them away.
+ *
+ * @group pi manifest
  */
 export function missingVendorPaths(manifest: unknown, packageRoot: string): string[] {
   return vendorResourcePaths(manifest).filter((resourcePath) => !existsSync(resolve(packageRoot, resourcePath)))
@@ -116,6 +120,8 @@ export function missingVendorPaths(manifest: unknown, packageRoot: string): stri
  * ⚠ A scoped package carries its scope in the FIRST TWO segments (`@scope/name`), so the
  * name is not simply the first one — `node_modules/@ladbabynpm/picc-permission-modes/index.ts`
  * names `@ladbabynpm/picc-permission-modes`, not `@ladbabynpm`.
+ *
+ * @group pi manifest
  */
 export function vendorPackageNames(manifest: unknown): string[] {
   const names = new Set<string>()

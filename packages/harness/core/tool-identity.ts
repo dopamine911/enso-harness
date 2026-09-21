@@ -12,6 +12,8 @@
  * sides — so a case variant can never skip a guard branch. One function, no mapping
  * table: the only consumer today is our own comparisons, and the picc-name translation
  * table belongs to the allow-store work deferred with the #4 arbiter.
+ *
+ * @group Guard predicates
  */
 export function canonicalToolName(name: string): string {
   return name.toLowerCase()

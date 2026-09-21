@@ -11,6 +11,7 @@ and exact helper exports. Unsupported or stale shapes fail generation instead of
 
 | File | Rule | Searched roots | Allowlist / exception constants | Limitation |
 |---|---|---|---|---|
+| [`test/api-group-gate.test.ts`](../../test/api-group-gate.test.ts) | THE API PAGE IS ORGANISED BY SEAM, AND THAT ORGANISATION IS HELD (#188). | `typedoc.json`<br>`packages/core/src`<br>`packages/harness/core` | none (0) | Holds that every documented export carries `@group`, that the subdivided group carries `@category`, and that both names are declared in the config’s order lists. Which group a symbol belongs in is a judgement it cannot make. |
 | [`test/browser-bundle-gate.test.ts`](../../test/browser-bundle-gate.test.ts) | The browser zone must bundle for the browser (#211). | `packages/web/src/main.tsx` | none (0) | Builds the web entry for the browser target; a node:-only module reachable from it fails by the bundler’s own error. It does not run the bundle. |
 | [`test/check-coverage.test.ts`](../../test/check-coverage.test.ts) | The coverage GATE's own arithmetic (#53 S2). | `scripts/check-coverage.ts` | none (0) | Exercises synthetic LCOV records; it does not run the suite or measure live coverage. |
 | [`test/complexity-ratchet.test.ts`](../../test/complexity-ratchet.test.ts) | Re-measures the cognitive-complexity pins, per FUNCTION (#264). | `biome.jsonc` | none (0) | Re-measures today’s scores and asserts each file pin equals its own worst function; whether the pinned complexity is warranted is not a question it can ask. |

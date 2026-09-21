@@ -75,7 +75,11 @@ import { canonicalToolName } from './tool-identity.ts'
  * (`.local/refactor/goals.md` §5b).
  */
 
-/** How the deny matched — carried into the block reason so a denial is explainable. */
+/**
+ * How the deny matched — carried into the block reason so a denial is explainable.
+ *
+ * @group Guard predicates
+ */
 export interface NetworkEgressMatch {
   /** The denied name (or device path) that matched. */
   matched: string
@@ -166,7 +170,11 @@ type CommandWordResult =
  * the next unlisted one is open too. That residual is the honest statement, and
  * `network-egress.test.ts` pins it as a row rather than leaving it to a reader's optimism.
  */
-/** Shared with `environment-dump.ts`: the same wrappers move a dumping command past word 1. */
+/**
+ * Shared with `environment-dump.ts`: the same wrappers move a dumping command past word 1.
+ *
+ * @group Guard predicates
+ */
 export const TRANSPARENT_COMMAND_WRAPPERS = new Set([
   'env',
   'timeout',
@@ -226,9 +234,12 @@ const WRAPPER_WORD_EXEMPTIONS = new Set(['[', '{}'])
  * shape instead: the words after an exec predicate, up to `;`/`+`, ARE a command line, and
  * nothing else on the line is. ⚠ Terminators are matched by LITERAL value, so `\;`, `';'` and
  * `";"` all count.
+ *
+ * @group Guard predicates
  */
 export const FIND_COMMAND = 'find'
 const FIND_EXEC_PREDICATES = new Set(['-exec', '-execdir', '-ok', '-okdir'])
+/** @group Guard predicates */
 export const EXEC_TERMINATORS = new Set([';', '+'])
 
 /**
@@ -238,6 +249,8 @@ export const EXEC_TERMINATORS = new Set([';', '+'])
  * `find` tool and a shell `find` both reach a program through this one construct, and a deny
  * that knew it for egress but not for the environment dump reported "no regression" for the
  * entire route (#206).
+ *
+ * @group Guard predicates
  */
 export function findExecPayloads(words: readonly string[]): string[][] {
   const payloads: string[][] = []
@@ -791,6 +804,8 @@ function shellFedByStream(commandLines: string): boolean {
 /**
  * Find the first denied network egress in a shell command, or undefined when none match.
  * `coarse` forces the raw word-boundary scan (the PowerShell path).
+ *
+ * @group Guard predicates
  */
 export function findDeniedNetworkEgress(
   command: string,

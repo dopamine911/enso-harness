@@ -37,8 +37,9 @@ import {
  * "console.log(process.env)"`, `python -c "import os; print(os.environ)"`. Chasing the
  * interpreters would read as coverage and not be coverage; the quarantine is what makes
  * them harmless.
+ *
+ * @group Guard predicates
  */
-
 export interface EnvironmentDumpMatch {
   /** The command word, variable name, or path that matched. */
   matched: string
@@ -176,6 +177,8 @@ function rawScan(command: string, coarse: boolean): EnvironmentDumpMatch | undef
  *
  * `coarse` forces the raw scan (the PowerShell path); a POSIX command the segmenter cannot
  * parse takes it too.
+ *
+ * @group Guard predicates
  */
 export function findEnvironmentDump(
   command: string,

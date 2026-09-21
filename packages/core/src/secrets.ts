@@ -45,7 +45,11 @@ import { rootDotenvPath, zenSecretsPath } from './paths.ts'
 
 const SECRET_SHAPED_NAME = /(?:^|_)(?:API_KEY|TOKEN|SECRET|PASSWORD)S?(?:$|_)/
 
-/** Whether an environment variable NAME looks like it carries a secret. Case-sensitive: env names are. */
+/**
+ * Whether an environment variable NAME looks like it carries a secret. Case-sensitive: env names are.
+ *
+ * @group Secrets
+ */
 export function isSecretShapedName(name: string): boolean {
   return SECRET_SHAPED_NAME.test(name)
 }
@@ -57,6 +61,8 @@ export function isSecretShapedName(name: string): boolean {
  *
  * No interpolation, no multi-line values — a secrets file is one key per line, and anything
  * fancier is a smell.
+ *
+ * @group Secrets
  */
 export function parseDotenv(text: string): Map<string, string> {
   const values = new Map<string, string>()
@@ -80,13 +86,21 @@ export function parseDotenv(text: string): Map<string, string> {
   return values
 }
 
-/** Every name/value in a dotenv-shaped file, or an empty map when there is no file. Read fresh each call. */
+/**
+ * Every name/value in a dotenv-shaped file, or an empty map when there is no file. Read fresh each call.
+ *
+ * @group Secrets
+ */
 export function readDotenvFile(path: string): Map<string, string> {
   if (!existsSync(path)) return new Map()
   return parseDotenv(readFileSync(path, 'utf8'))
 }
 
-/** One secret by name from `.zen/secrets.env` — the extensions' read path. Per call, so a rotation needs no restart. */
+/**
+ * One secret by name from `.zen/secrets.env` — the extensions' read path. Per call, so a rotation needs no restart.
+ *
+ * @group Secrets
+ */
 export function readSecret(repoRoot: string, name: string): string | undefined {
   return readDotenvFile(zenSecretsPath(repoRoot)).get(name)
 }
@@ -111,6 +125,8 @@ const SHORTEST_SCANNABLE_SECRET = 8
  *
  * ⚠ Known values only, never a shape heuristic. "Looks like a secret" over model output
  * redacts a user's own text on a guess; an exact value redacts exactly what leaked.
+ *
+ * @group Secrets
  */
 export function knownSecretValues(
   repoRoot: string,
@@ -151,6 +167,8 @@ export function knownSecretValues(
  * it rides on (`.local` benchmark, #207). An event-driven watcher would be cheaper and is
  * deliberately not used — an inotify handle per process, lost across an atomic replace, is a
  * failure mode a redactor may not have.
+ *
+ * @group Secrets
  */
 export function knownSecretValuesTracking(
   repoRoot: string,
@@ -176,6 +194,7 @@ export function knownSecretValuesTracking(
   }
 }
 
+/** @group Secrets */
 export interface QuarantineReport {
   /** Names deleted from the environment, sorted. Never values — this is what a startup log line prints. */
   readonly removed: readonly string[]
@@ -196,6 +215,8 @@ export interface QuarantineReport {
  * ⚠ Call it before the first session and before the first child process; both inherit the
  * environment as it is at that moment, and nothing removes a variable from a child after
  * the fact. Idempotent: a second call finds nothing to remove.
+ *
+ * @group Secrets
  */
 export function quarantineSecrets(environment: Record<string, string | undefined>, repoRoot: string): QuarantineReport {
   const rootDotenv = readDotenvFile(rootDotenvPath(repoRoot))

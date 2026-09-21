@@ -12,14 +12,20 @@ import { asRecord, asString } from '../wire-json.ts'
  * solely by `TAVILY_API_KEY` being present in the environment — no config knob; the key never
  * enters `zen.config.json` and is never logged. Domain include/exclude (the `webSearch.tavily`
  * config section) pass through to the API verbatim.
+ *
+ * @group Web search
  */
-
 export const TAVILY_SEARCH_URL = 'https://api.tavily.com/search'
-/** The env var that ARMS the fallback — read at the composition root only. */
+/**
+ * The env var that ARMS the fallback — read at the composition root only.
+ *
+ * @group Web search
+ */
 export const TAVILY_API_KEY_VARIABLE = 'TAVILY_API_KEY'
 /** Result-count bound sent to the API; Tavily's own default is 5. */
 const TAVILY_MAX_RESULTS = 8
 
+/** @group Web search */
 export interface TavilySearchRequest {
   query: string
   apiKey: string
@@ -29,6 +35,7 @@ export interface TavilySearchRequest {
   signal: AbortSignal | undefined
 }
 
+/** @group Web search */
 export async function runTavilyProviderSearch(request: TavilySearchRequest): Promise<WebSearchOutcome> {
   const requestBody: Record<string, unknown> = {
     query: request.query,

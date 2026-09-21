@@ -74,12 +74,17 @@ import { zenLogsDir } from './paths.ts'
 
 /** One category’s level, overriding the file level for that subsystem alone. */
 
-/** A per-category override: `zen.host.events=trace` turns one subtree up without the rest. */
+/**
+ * A per-category override: `zen.host.events=trace` turns one subtree up without the rest.
+ *
+ * @group Logging
+ */
 export interface ZenLogOverride {
   readonly category: readonly string[]
   readonly level: LogLevel
 }
 
+/** @group Logging */
 export interface ZenLogLevels {
   /** The file's lowest level for everything under `zen` not named by an override. */
   readonly file: LogLevel
@@ -88,10 +93,18 @@ export interface ZenLogLevels {
   readonly overrides: readonly ZenLogOverride[]
 }
 
-/** The tier every process starts in: the spine, and what went wrong. */
+/**
+ * The tier every process starts in: the spine, and what went wrong.
+ *
+ * @group Logging
+ */
 export const DEFAULT_FILE_LEVEL: LogLevel = 'info'
 
-/** A knob value that is not a level. Thrown at startup, naming the value — never a silent default. */
+/**
+ * A knob value that is not a level. Thrown at startup, naming the value — never a silent default.
+ *
+ * @group Logging
+ */
 export class ZenLogLevelError extends Error {
   constructor(variable: string, value: string) {
     super(
@@ -108,6 +121,8 @@ export class ZenLogLevelError extends Error {
  *   ZEN_LOG_LEVEL="info,zen.host.events=trace"        — plus one subtree turned up
  *   ZEN_LOG_CONSOLE="warning"                          — the terminal's (the launcher's default otherwise)
  * `warn` is accepted for `warning`, since that is what `ZenLogger` calls it.
+ *
+ * @group Logging
  */
 export function parseZenLogLevels(
   environment: Readonly<Record<string, string | undefined>>,
@@ -153,6 +168,8 @@ function levelOf(variable: string, raw: string): LogLevel {
  *
  * `["zen","host","events"]` is matched by an override on `zen.host.events`, then `zen.host`,
  * then `zen`.
+ *
+ * @group Logging
  */
 export function effectiveFileLevel(levels: ZenLogLevels, category: readonly string[]): LogLevel {
   let best: ZenLogOverride | undefined
@@ -264,6 +281,7 @@ function redactingKnownValues(values: readonly string[] | (() => readonly string
     }
 }
 
+/** @group Logging */
 export interface ProcessLoggingOptions {
   /** `zenLogsDir(repoRoot)` — created if absent. */
   readonly logsDir: string
@@ -288,6 +306,8 @@ export interface ProcessLoggingOptions {
  * keeping them out of the checkout — else `.zen/logs` under the repo (`zenLogsDir`).
  *
  * One rule for every launcher and for the extension, so they land in the same file.
+ *
+ * @group Logging
  */
 export function logsDirFrom(environment: Readonly<Record<string, string | undefined>>, repoRoot: string): string {
   const configured = environment.ZEN_LOGS_DIR
@@ -301,6 +321,8 @@ export function logsDirFrom(environment: Readonly<Record<string, string | undefi
  * The file is for the person at the machine: at 19:05 local `bun run logs` must not say "no log
  * for today" because it is 00:05 tomorrow in Greenwich (found live). The timestamps inside stay
  * ISO UTC.
+ *
+ * @group Logging
  */
 export function zenLogFilename(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -349,12 +371,20 @@ function owningTheDayFile(logsDir: string): () => void {
   }
 }
 
-/** True once some configurator has run in this process — pi in-process shares the server's. */
+/**
+ * True once some configurator has run in this process — pi in-process shares the server's.
+ *
+ * @group Logging
+ */
 export function isLoggingConfigured(): boolean {
   return getConfig() !== null
 }
 
-/** Configure the process; resolves to the disposer that flushes and closes the file. */
+/**
+ * Configure the process; resolves to the disposer that flushes and closes the file.
+ *
+ * @group Logging
+ */
 export async function configureProcessLogging(options: ProcessLoggingOptions): Promise<() => Promise<void>> {
   const levels: ZenLogLevels = options.levels ?? { file: DEFAULT_FILE_LEVEL, console: undefined, overrides: [] }
   mkdirSync(options.logsDir, { recursive: true })
@@ -447,6 +477,8 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
  * third signal or a changed flush order would have reached one of them.
  *
  * `once`, not `on`: a second signal during the flush must not start a second dispose.
+ *
+ * @group Logging
  */
 export function installLoggingShutdown(dispose: () => Promise<void>): void {
   for (const [signal, code] of [
@@ -476,6 +508,8 @@ const LEVEL_OF_LINE: Readonly<Record<ZenLogLine['level'], LogLevel>> = {
  *
  * THE parser (the reader, the bundle route, and the bundle reader all go through it): a line
  * that is not a record is said, never skipped silently — the file is the honest place.
+ *
+ * @group Logging
  */
 export function parseZenLogLine(raw: string): ZenLogLine | string {
   let parsed: unknown
@@ -495,6 +529,8 @@ export function parseZenLogLine(raw: string): ZenLogLine | string {
  *
  * A placeholder with no property renders as itself, so a template that outgrew its record still
  * reads.
+ *
+ * @group Logging
  */
 export function logRecordOf(line: ZenLogLine): LogRecord {
   const properties = line.properties ?? {}
@@ -522,6 +558,8 @@ export function logRecordOf(line: ZenLogLine): LogRecord {
  *
  * `wordWrap` as the pretty formatter takes it — `true` wraps to the terminal's width, `false`
  * keeps each record's lines whole (for a pipe), a number is a width. `colors` off for a pipe.
+ *
+ * @group Logging
  */
 export function zenLogLineRenderer(
   options: { readonly wordWrap?: boolean | number; readonly colors?: boolean } = {},
