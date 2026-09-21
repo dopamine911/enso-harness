@@ -846,13 +846,16 @@ test('[WARN] a body past the wire cap is a 413 and the read stops — the server
       controller.close()
     },
   })
-  const response = await fetch(`${url}/api/threads/t1/prompt`, {
+  // `duplex` is required for a streaming request body and absent from the DOM lib's
+  // `RequestInit`; widened here rather than suppressed (#249), so every other field in this
+  // init is still type-checked instead of the whole call being exempted.
+  const init: RequestInit & { readonly duplex: 'half' } = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
-    // @ts-expect-error — Bun accepts a streaming body with duplex; the lib types lag.
     duplex: 'half',
-  })
+  }
+  const response = await fetch(`${url}/api/threads/t1/prompt`, init)
   expect(response.status).toBe(413)
   expect(await response.text()).toContain('a prompt body is at most')
   expect(fake.built).toHaveLength(0)

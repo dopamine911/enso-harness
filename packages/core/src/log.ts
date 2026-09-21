@@ -49,16 +49,28 @@ export interface ZenLogProperties {
 }
 
 /**
+ * A record's payload, or a THUNK that builds it. LogTape evaluates the thunk only after the
+ * level gate has admitted the record (`@logtape/logtape/dist/logger.d.ts:164`), so a call
+ * site on a per-token path pays nothing for a record the tier drops — and the default tier
+ * drops `debug` and `trace` (`log-process.ts`'s `DEFAULT_FILE_LEVEL`).
+ *
+ * ⚠ Pass a thunk wherever the payload is BUILT for the call (#284). An object literal of
+ * ids already in hand is cheaper eagerly; a payload that spreads, maps or carries a whole
+ * observation is not. The thunk runs at most once, when a sink will read it.
+ */
+export type ZenLogPayload = ZenLogProperties | (() => ZenLogProperties)
+
+/**
  * The typed surface. Five levels; `fatal` is not vocabulary here. The tiers (#132):
  * `info` is the spine — what happened; `debug` is every observation, one compact line;
  * `trace` is the same with the payload. `ZEN_LOG_LEVEL` picks the tier (`log-process.ts`).
  */
 export interface ZenLogger {
-  trace(message: string, properties?: ZenLogProperties): void
-  debug(message: string, properties?: ZenLogProperties): void
-  info(message: string, properties?: ZenLogProperties): void
-  warn(message: string, properties?: ZenLogProperties): void
-  error(message: string, properties?: ZenLogProperties): void
+  trace(message: string, properties?: ZenLogPayload): void
+  debug(message: string, properties?: ZenLogPayload): void
+  info(message: string, properties?: ZenLogPayload): void
+  warn(message: string, properties?: ZenLogPayload): void
+  error(message: string, properties?: ZenLogPayload): void
   /** A logger whose every record carries `properties` — bind `threadId` once per handler. */
   with(properties: ZenLogProperties): ZenLogger
 }
@@ -68,19 +80,19 @@ export const ZEN_LOG_ROOT = 'zen'
 
 function wrap(logger: Logger): ZenLogger {
   return {
-    trace(message: string, properties?: ZenLogProperties): void {
+    trace(message: string, properties?: ZenLogPayload): void {
       logger.trace(message, properties)
     },
-    debug(message: string, properties?: ZenLogProperties): void {
+    debug(message: string, properties?: ZenLogPayload): void {
       logger.debug(message, properties)
     },
-    info(message: string, properties?: ZenLogProperties): void {
+    info(message: string, properties?: ZenLogPayload): void {
       logger.info(message, properties)
     },
-    warn(message: string, properties?: ZenLogProperties): void {
+    warn(message: string, properties?: ZenLogPayload): void {
       logger.warn(message, properties)
     },
-    error(message: string, properties?: ZenLogProperties): void {
+    error(message: string, properties?: ZenLogPayload): void {
       logger.error(message, properties)
     },
     with(properties: ZenLogProperties): ZenLogger {
