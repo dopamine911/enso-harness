@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { filesUnder } from '../scripts/source-tree.ts'
 
@@ -37,6 +37,22 @@ export function isCommentLine(line: string): boolean {
  */
 export function sourceFiles(directory: string, includeTests = false): string[] {
   return filesUnder(directory, { skipDirectories: includeTests ? [] : ['__tests__'] })
+}
+
+/**
+ * Every markdown page under `directory`, absolute paths — the docs' counterpart to
+ * `sourceFiles`. Here rather than in one gate because two read it: `docs-gate.test.ts` for
+ * fences and generated blocks, `prose-citation-gate.test.ts` for line citations, and a second
+ * copy is how a page ends up scanned by one of them and not the other.
+ */
+export function markdownFiles(directory: string): string[] {
+  const found: string[] = []
+  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, dirent.name)
+    if (dirent.isDirectory()) found.push(...markdownFiles(path))
+    else if (dirent.name.endsWith('.md')) found.push(path)
+  }
+  return found
 }
 
 /** The words a line is made of, lower-cased, with `camelCase` and every separator split. */

@@ -18,8 +18,15 @@ import { join } from 'node:path'
 /** Build outputs and dependencies: never entered, by any caller. */
 const SKIPPED_DIRECTORIES: readonly string[] = ['node_modules', 'dist', 'dist-types', 'coverage']
 
-/** A TypeScript or JavaScript module, any flavour. */
-const SOURCE_FILE = /\.(?:[cm]?[jt]sx?)$/
+/**
+ * A TypeScript or JavaScript module, any flavour. Exported because a reader of source
+ * FILENAMES has the same question as this walker and must not answer it more narrowly:
+ * `test/prose-citation-gate.test.ts` recognises a file mentioned in prose with it, and the
+ * hand-rolled `tsx?|mjs` it replaced would have stopped seeing a `.cjs` or `.mts` page
+ * citation the day one appeared — silently, since an unrecognised mention is simply not a
+ * citation (PR #323 review). One extension set, every caller.
+ */
+export const SOURCE_FILE: RegExp = /\.(?:[cm]?[jt]sx?)$/
 
 export interface WalkOptions {
   /** Directory names not entered, beyond `SKIPPED_DIRECTORIES`. */

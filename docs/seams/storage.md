@@ -244,7 +244,7 @@ converter, so the test reads what the real host would hand out.
 - **The storage-seam test**: `packages/core/src/__tests__/no-duplicate-paths.test.ts` line 99 —
   "`SessionManager` is imported ONLY by the web host's agent-host.ts — the storage seam" — a scan of
   every non-test source root; the `.zen` literal is likewise assembled only in `paths.ts` — plus
-  `guard.ts`, where it is corpus data for `ZEN_PERSISTENCE_WRITE_DIRECTORIES` (line 86).
+  `guard.ts`, where it is corpus data for `ZEN_PERSISTENCE_WRITE_DIRECTORIES` (line 150).
 - **The vendor gate** (`test/vendor-gate.test.ts`, #145): the runtime's package is imported only under
   `packages/web/src/host/` and `packages/harness/extensions/`.
 - **Closed wire schemas**: `ZenThreadInspection`, `ZenStoredThread`, `ZenThreadHistory` are

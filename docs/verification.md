@@ -60,6 +60,7 @@ The important boundary gates for consolidation:
 - `vendor-gate.test.ts` — vendor imports and extension names stay under the host and extension roots;
 - `glossary-gate.test.ts` — retired names and vendor-prefixed first-party shapes do not return;
 - `docs-gate.test.ts` — sourced fences equal declarations and generated pages equal their generator;
+- `prose-citation-gate.test.ts` — a line cited beside a symbol lands inside that symbol's own declaration;
 - `presentation-gate.test.ts` — ported files name their provenance and import no application state;
 - `logging-gate.test.ts` — records use `zenLogger`; the logging substrate stays behind it;
 - `no-duplicate-paths.test.ts` / `no-duplicate-shapes.test.ts` — roots and schemas have one home.

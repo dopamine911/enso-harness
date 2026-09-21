@@ -166,6 +166,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Matches provenance text and static imports; dynamically assembled dependencies are outside the import matcher.',
   },
+  'test/prose-citation-gate.test.ts': {
+    roots: ['docs'],
+    exceptions: [],
+    limitation:
+      'Resolves a line citation written beside a symbol the cited file declares exactly once; a bare range with no symbol beside it, and a symbol the file only uses, are outside it.',
+  },
   'test/secret-scan-gate.test.ts': {
     roots: ['.github/workflows/secret-scan.yml'],
     exceptions: [],
