@@ -25,8 +25,22 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
 const README = readFileSync(join(REPOSITORY_ROOT, 'README.md'), 'utf8')
 const LAYOUT_SECTION = README.split(/^## /m).find((section) => section.startsWith('Repo layout')) ?? ''
 
-const packageJson = JSON.parse(readFileSync(join(REPOSITORY_ROOT, 'package.json'), 'utf8')) as {
-  scripts: Record<string, string>
+/** Every manifest in the workspace, root and packages: a script entry anywhere is an invocation. */
+function scriptEntries(): [string, string][] {
+  const manifests = [
+    'package.json',
+    'packages/core/package.json',
+    'packages/web/package.json',
+    'packages/harness/package.json',
+  ]
+  const entries: [string, string][] = []
+  for (const manifest of manifests) {
+    const parsed = JSON.parse(readFileSync(join(REPOSITORY_ROOT, manifest), 'utf8')) as {
+      scripts?: Record<string, string>
+    }
+    for (const [name, command] of Object.entries(parsed.scripts ?? {})) entries.push([`${manifest} ${name}`, command])
+  }
+  return entries
 }
 
 test('⚠ every non-TypeScript file under scripts/ is one the README names, and every name is still there (#269)', () => {
@@ -45,7 +59,9 @@ test('⚠ every non-TypeScript file under scripts/ is one the README names, and 
  * line that said so rather than a reader noticing.
  */
 test('⚠ every package.json script that runs a file under scripts/ runs it with bun (#269)', () => {
-  const invocations = Object.entries(packageJson.scripts).filter(([, command]) => command.includes('scripts/'))
+  // ⚠ Every workspace manifest, not the root alone (PR #315 review): a `scripts/`-referencing
+  // entry added to a package's own manifest would otherwise expire the rule where nothing looks.
+  const invocations = scriptEntries().filter(([, command]) => command.includes('scripts/'))
   expect(invocations.filter(([, command]) => !command.startsWith('bun scripts/'))).toEqual([])
   // The rule has no reason to exist if nothing is invoked this way.
   expect(invocations.length).toBeGreaterThan(0)
