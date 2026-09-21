@@ -43,10 +43,12 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
  * exactly ```` ```ts ```` and `typescript`, so a `tsx` fence, an `sh` fence, or a `ts`
  * fence carrying an info string was invisible to the WHOLE gate — neither required to carry a
  * marker in a seam page nor checked against source when it had one. Measured 2026-09-18: three
- * such fences planted in a seam page ran green. The docs use four fence languages (`ts`, `mermaid`,
- * `sh`, `bash`); of those only TypeScript and JavaScript can BE a declaration, so those are the
- * sourceable set, `mermaid` is exempt by name because a diagram is not a quote of source, and
- * anything else in a seam or flow page is an offender rather than an oversight.
+ * such fences planted in a seam page ran green. The docs spell two languages today (81 `ts`, 14
+ * `mermaid`, measured by grepping every fence-open line under `docs/`), and the rule is
+ * deliberately not that list: of any language a page could use, only TypeScript and JavaScript
+ * can BE a declaration, so those are the sourceable set, `mermaid` is exempt by name because a
+ * diagram is not a quote of source, and anything else in a seam or flow page is an offender
+ * rather than an oversight.
  *
  * The allowlist is EMPTY and stays so. A page that cannot keep its fences equal to the
  * source is describing a different program.
