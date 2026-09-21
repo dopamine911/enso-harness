@@ -176,6 +176,75 @@ test('a text part renders through the markdown pipeline inside the prose shell',
   expect(rendered).toContain('prose')
 })
 
+/**
+ * The three tripwires the `?fixture` page carries for the human loop
+ * (`fixture-conversation.ts`), as markup this file owns: the fixture is reachable only by
+ * a human typing `?fixture` and nothing renders it in CI (#233).
+ *
+ * ⚠ The `javascript:` link is a RAW anchor, not the fixture's `[text](javascript:…)`. Two
+ * reasons, both load-bearing: a markdown destination containing spaces is not a link at all
+ * (the fixture's reads as literal text in the DOM, so its second tripwire never tests the
+ * sanitiser), and only an element `rehype-raw` BUILT can prove when the sanitiser ran.
+ */
+const SANITIZE_TRIPWIRES = [
+  'SENTINEL-BEFORE',
+  '<img src="x" alt="inert tripwire" onerror="alert(\'img handler fired\')">',
+  '<a href="javascript:alert(\'link fired\')">this link must be inert</a>',
+  "<script>alert('script executed')</script>",
+  'SENTINEL-AFTER',
+].join('\n\n')
+
+/**
+ * ⚠ THE ORDER, NOT MERELY THE SANITISING (#233). The chain the vendor builds is
+ * `[rehypeRaw, rehypeHighlight, …ours…, rehypeSanitize]` — sanitise LAST, as
+ * `chat-screen.tsx` claims — and `rehype-raw` is the plugin that turns raw HTML in model
+ * output from a string into real elements. So the markup below is markup an EARLIER
+ * transform builds: nothing can strip an `onerror` that does not exist yet.
+ *
+ * The image and the anchor are therefore asserted as PAIRS — the element `rehype-raw`
+ * built is present AND what would execute is gone — and the script, which has no safe
+ * residue, is asserted gone tag and body. Measured both ways against the real vendor
+ * chain (2026-09-18):
+ *
+ * - `rehypeSanitize` moved to the FRONT: all three tripwires vanish, because
+ *   `hast-util-sanitize` drops `raw` nodes — sanitising before `rehype-raw` DELETES the
+ *   model's HTML instead of cleaning it. The presence halves go red.
+ * - `rehypeSanitize` dropped from the chain: the `<script>` renders live and the anchor
+ *   keeps an `href` attribute. Those two assertions go red.
+ *
+ * ⚠ REACT IS A SECOND LAYER for two of the three, and this test cannot tell the layers
+ * apart: with no sanitiser at all, React still refuses a string `onerror` and empties a
+ * `javascript:` href to `href=""`. So the sanitiser-specific evidence is the `<script>`
+ * being gone and the anchor arriving with NO href attribute rather than an empty one —
+ * which is why `<a>this link must be inert</a>` is asserted whole.
+ *
+ * A red line here means the sanitize-last claim is false for model output entering the
+ * DOM. The expected cause is a dependency bump that reorders the rehype chain — which the
+ * gate could not see before this test: the `?fixture` page is the visual loop and nothing
+ * runs it in CI.
+ */
+test('⚠ the markdown chain sanitises LAST: raw HTML becomes elements, and what those elements would execute is gone', () => {
+  const rendered = html({ key: 'text', part: { type: 'text', content: SANITIZE_TRIPWIRES } })
+
+  // Sanitising did not eat the message around the tripwires.
+  expect(rendered).toContain('SENTINEL-BEFORE')
+  expect(rendered).toContain('SENTINEL-AFTER')
+
+  // `rehype-raw` parsed the raw <img> into an element (escaped text would not match) —
+  // and the handler it parsed with it is gone.
+  expect(rendered).toContain('<img src="x"')
+  expect(rendered).not.toContain('onerror')
+
+  // Same for the anchor: the element `rehype-raw` built survives, stripped of the href
+  // whose scheme would run.
+  expect(rendered).toContain('<a>this link must be inert</a>')
+  expect(rendered).not.toContain('javascript:')
+
+  // The script element is dropped whole, body and all.
+  expect(rendered).not.toContain('<script')
+  expect(rendered).not.toContain('script executed')
+})
+
 // The user's image (#68): inline bytes render as the image; a URL source stays visible as data, not fetched.
 test('an image part with inline bytes renders as an <img>; a URL-sourced one falls through to the visible block, never an <img>', () => {
   const inline: MessagePart = { type: 'image', source: { type: 'data', value: 'iVBORw0KGgo=', mimeType: 'image/png' } }
