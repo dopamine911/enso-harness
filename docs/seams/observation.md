@@ -139,9 +139,10 @@ through the mapper (lines 284–286); the prompt route's `announce` (line 466) e
 one frame per feed frame — `observation` with its `seq`, `status` with `live`/`busy`/`generation`
 (lines 109–119) — after a snapshot taken in the same tick as the subscription, exact as of `asOfSeq`
 (lines 92–94, 127–141). In the browser `packages/web/src/follow-connection.ts` checks every frame
-against `ZenFollowFrame` (line 424), pushes the snapshot and status frames whole as chunks named by
-their type (lines 366–372), closes runs on `settled` (line 375) and matches `prompt-rejected` to the prompt it
-queued (line 383). `packages/web/src/to-agui.ts` is the adapter proper: observation → state-layer
+against `ZenFollowFrame` with a validator compiled at module load (line 497, compiled at 71), pushes
+the snapshot and status frames whole as chunks named by their type (lines 383–389), closes runs on
+`settled` (line 396) and matches `prompt-rejected` to the prompt it
+queued (line 400). `packages/web/src/to-agui.ts` is the adapter proper: observation → state-layer
 chunk, run in the page, never serialised or stored (header lines 17–28).
 
 **The resync rule.** Nothing is replayed by cursor. A reconnect opens a new follow and gets a new
@@ -161,7 +162,7 @@ leaves, the registry forgets the feed and `seq` restarts with the next follower,
   (`test/docs-gate.test.ts`); a kind with no producer or consumer is printed as a finding, not omitted.
 - **Closed frames**: the three frame schemas are `additionalProperties: false` (`follow.ts` lines
   40, 50, 61); the browser refuses a frame that fails `ZenFollowFrame` with a problem record, not a
-  crash (`follow-connection.ts` lines 424–427).
+  crash (`follow-connection.ts` lines 497–500).
 - **The vendor gate** (`test/vendor-gate.test.ts`, #145): the mapper and the adapter import
   `@zen/core`, not the runtime's package.
 

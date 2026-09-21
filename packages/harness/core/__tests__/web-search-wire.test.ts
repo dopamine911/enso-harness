@@ -259,12 +259,11 @@ test('deepseek with no result blocks is `ungrounded`', async () => {
 
 // --- the SSE reader itself. ---
 
-test('readSseEvents parses event names, multi-line data, and skips [DONE] and non-JSON', async () => {
+test('readSseEvents parses event names, multi-line data, and skips the [DONE] sentinel', async () => {
   const body =
     `event: message_start\ndata: {"alpha":1}\n\n` +
     `data: {"beta":\ndata: 2}\n\n` +
     `data: [DONE]\n\n` +
-    `data: not json\n\n` +
     `data: {"gamma":3}`
   const seen: { eventName: string; data: unknown }[] = []
   await readSseEvents(new Response(body), undefined, (event) => {
@@ -278,6 +277,19 @@ test('readSseEvents parses event names, multi-line data, and skips [DONE] and no
     // The final, unterminated event still flushes at EOF.
     { eventName: '', data: { gamma: 3 } },
   ])
+})
+
+test('⚠ an unparseable data frame FAILS the search instead of vanishing from a grounded answer', async () => {
+  // The defect (#268): `flushEvent` treated an unparseable payload like a `[DONE]` sentinel, so
+  // the answer assembled from the surviving frames came back `searched` and nothing said a
+  // frame had been lost. A red line here means silent data loss inside a grounded answer is back.
+  const body = `${sseBody(SEARCHED_EVENTS)}data: <html>rate limited</html>\n\n`
+  const streamWithBadFrame = new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  const thrown = await expectProviderRejection(runAnthropicWireSearch(wireOptions(fetchReturning(streamWithBadFrame))))
+  expect(thrown.message).toContain('unparseable')
+  // Dispatched: the request reached the API and the stream began, so the extension must NOT
+  // fall through to the next provider as if nothing had been sent.
+  expect(thrown.requestDispatched).toBe(true)
 })
 
 test('readSseEvents stops early when the callback asks — the Codex never-closing stream', async () => {

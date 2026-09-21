@@ -16,7 +16,7 @@
  */
 import { join } from 'node:path'
 import { zenLogger } from '@zen/core'
-import { configureProcessLogging, logsDirFrom, parseZenLogLevels } from '@zen/core/log-process'
+import { configureProcessLogging, installLoggingShutdown, logsDirFrom, parseZenLogLevels } from '@zen/core/log-process'
 import { findRepoRoot, webPackageDir } from '@zen/core/paths'
 import { knownSecretValuesTracking } from '@zen/core/secrets'
 import homepage from '../../index.html'
@@ -38,16 +38,7 @@ const disposeLogging: () => Promise<void> = await configureProcessLogging({
   secretValues: knownSecretValuesTracking(repoRoot),
 })
 const log = zenLogger('server', 'web')
-// A stop from the hub or a terminal: flush the file, then exit the way the signal would
-// have (128 + its number: 130 for SIGINT, 143 for SIGTERM), so a supervisor reads it right.
-for (const [signal, code] of [
-  ['SIGINT', 130],
-  ['SIGTERM', 143],
-] as const) {
-  process.once(signal, () => {
-    void disposeLogging().finally(() => process.exit(code))
-  })
-}
+installLoggingShutdown(disposeLogging)
 
 /**
  * Forward an `/api/*` request to the zen server, streaming both directions.

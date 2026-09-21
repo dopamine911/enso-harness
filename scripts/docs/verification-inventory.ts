@@ -31,6 +31,7 @@ const EXTRA_GATE_FILES = [
   'coverage-manifest.test.ts',
   'check-coverage.test.ts',
   'no-lint-suppressions.test.ts',
+  'complexity-ratchet.test.ts',
 ] as const
 
 interface ExceptionMetadata {
@@ -58,6 +59,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     roots: [COVERAGE_SCRIPT],
     exceptions: [],
     limitation: 'Exercises synthetic LCOV records; it does not run the suite or measure live coverage.',
+  },
+  'test/complexity-ratchet.test.ts': {
+    roots: [BIOME_CONFIG],
+    exceptions: [],
+    limitation:
+      'Re-measures today’s scores and asserts each file pin equals its own worst function; whether the pinned complexity is warranted is not a question it can ask.',
   },
   'test/coverage-manifest.test.ts': {
     rootArrays: ['LIBRARY_SOURCE_ROOTS'],
