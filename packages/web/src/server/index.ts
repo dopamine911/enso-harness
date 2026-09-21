@@ -221,9 +221,10 @@ export interface ZenServerHandle {
  * ⚠ THE MANIFEST IS UNTRUSTED INPUT, not a typed value (#226). `scripts/zen-launch.mjs`
  * narrows it at runtime; this used to assert `Record<string, string | string[]>` and read
  * `.startsWith` off whatever arrived. A bare-string `pi` made `Object.values` iterate
- * CHARACTERS, so `missing` came back empty and the guard passed silently — the very
- * failure mode the paragraph above exists to prevent. A `pi` that is not an object is now
- * a named refusal, and a non-string resource path is dropped, as the launcher drops it.
+ * CHARACTERS, so `missing` came back empty and the guard passed silently — the SAME silent
+ * absence the first warning above records, reintroduced by the type rather than by npm. A
+ * `pi` that is not an object is now a named refusal, and a non-string resource path is
+ * dropped, as the launcher drops it.
  */
 function declaredResourcePaths(manifest: unknown): string[] {
   if (typeof manifest !== 'object' || manifest === null || !('pi' in manifest)) return []

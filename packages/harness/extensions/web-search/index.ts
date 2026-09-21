@@ -189,7 +189,6 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
           auditLine(primary.kind, primary.providerId, query, 'primary')
           return renderOutcome(primary, undefined)
         }
-        const fallbackReason = fallbackReasonFor(primary)
         if (!isTavilyArmed) {
           if ('kind' in primary) {
             auditLine('ungrounded', primary.providerId, query, 'no fallback armed')
@@ -202,6 +201,9 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
               `the root .env, never in the environment — #89). No restart needed; the file is read per call.`,
           )
         }
+        // After the unarmed branch, which builds its refusal from `primary` directly: computed
+        // where it is read, so "why is this string here" needs no answer (PR #311 review).
+        const fallbackReason = fallbackReasonFor(primary)
 
         // A progress update before the fallback: the server counts tool activity as
         // progress (#99), and this is the one moment in the chain that is otherwise silent.
