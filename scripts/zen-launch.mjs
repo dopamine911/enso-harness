@@ -71,7 +71,14 @@ export function piVersionText(version) {
   return `${version.major}.${version.minor}.${version.patch}`
 }
 
-/** `pi 0.84.7`, `pi@0.84.7`, `pi/0.84.7`, `pi v0.84.7` — the version with pi's own name on it. */
+/**
+ * `pi 0.84.7`, `pi@0.84.7`, `pi/0.84.7`, `pi v0.84.7` — the version with pi's own name on it.
+ *
+ * ⚠ The name PRECEDES the version here (PR #294 review). A banner that inverted them
+ * (`0.84.7 (pi)`) is read by `LEADING_VERSION` below while the version leads the line, and
+ * by nothing if something else leads it — a refusal, which is the safe direction and the
+ * only one this gate may take when it cannot tell whose number it is holding.
+ */
 const PI_NAMED_VERSION = /\bpi[@ /]?\s*v?(\d+)\.(\d+)\.(\d+)/i
 /** `0.84.4`, `v0.84.4` — a banner that is only the version, which is what today's pi prints. */
 const LEADING_VERSION = /^\s*v?(\d+)\.(\d+)\.(\d+)/
