@@ -180,12 +180,12 @@ and budgets, and the wire module owns the request body, the stream parse and the
 verdict — keyed on `server_tool_use` blocks having appeared, never on source count (lines 20-24).
 
 **The web_search extension is the one consumer and owns selection** (`packages/harness/extensions/web-search/index.ts`).
-`createWebSearch` (115-223) loads the config once at extension load and fails closed; `runPrimary`
-(245-299) picks the backend: `webSearch.backend: "deepseek"` pins the dedicated backend (248), else the
-current model routes through `routedProviderIdForModel` (264) and its auth through `resolveModelAuth`
-(280-285), and a model with no native search selects nothing (265-272). The composition root (405-422)
+`createWebSearch` (115-232) loads the config once at extension load and fails closed; `runPrimary`
+(254-308) picks the backend: `webSearch.backend: "deepseek"` pins the dedicated backend (257), else the
+current model routes through `routedProviderIdForModel` (273) and its auth through `resolveModelAuth`
+(289-294), and a model with no native search selects nothing (274-281). The composition root (419-436)
 wires the five `run*` functions into `runProviders`, real `fetch` into `fetchUrl`, and
-`readEnvironmentVariable` to `readSecret` over `.zen/secrets.env` — never `process.env` (408-413): the
+`readEnvironmentVariable` to `readSecret` over `.zen/secrets.env` — never `process.env` (422-427): the
 host quarantines secrets out of the environment before a session exists, and providers receive values,
 never names.
 
@@ -214,10 +214,10 @@ drives the three model-routed `run*` functions over scripted SSE, and `web-searc
   budget for *primary AND fallback together, not per attempt*, and its header (19-24) says why: a
   per-attempt 60 s let primary + fallback run 120 s with no chunk crossing, and the server's 90 s
   no-progress cutoff read that as a hung run (#98). `createWebSearch` sets one `CallDeadline` per call
-  (162-163); `underDeadline` (319-335) runs every attempt under what remains of it *and* the caller's
+  (162-163); `underDeadline` (333-349) runs every attempt under what remains of it *and* the caller's
   signal, and a spent budget aborts before the attempt runs (`harness/core/deadline.ts:25`, header
-  8-9) — a 0 ms timer would let a fast provider answer first. All three attempts go through it (203,
-  249, 290), and two tests pin it: a primary that stalls for the whole budget leaves the fallback no
+  8-9) — a 0 ms timer would let a fast provider answer first. All three attempts go through it (212,
+  258, 299), and two tests pin it: a primary that stalls for the whole budget leaves the fallback no
   time (`web-search.test.ts:377`), a primary that fails fast leaves it the rest (413).
 - **The independence rule** (`vocabulary.ts:3-5`): providers do not import each other. Not gated;
   visible in the five files' imports today, and why a later split into provider packages is mechanical.

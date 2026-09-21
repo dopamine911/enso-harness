@@ -11,14 +11,31 @@
  * Ordering is cheap-first: a fast Biome failure surfaces before the slower
  * typecheck and test gates run.
  *
- * The checks are GATES below, each with the package.json script it runs. This header does
- * not restate them: the copy that used to live here had drifted into fiction — it said
- * `tsc --noEmit` for a step that runs `tsc -b` and EMITS declarations, and `vitest run`
- * for a step that runs `bun test`, and it listed three of the five.
+ * The checks, in the order GATES lists them:
+ *   1. biome     — `biome check`: lint + format + import-organize (check-only, no writes). This
+ *                  also enforces the discipline rules Biome can express, e.g.
+ *                  `noTsIgnore` is set to error in biome.jsonc, so a banned
+ *                  suppression directive fails the gate rather than merely warning.
+ *   2. typecheck — `tsc -b --pretty false`: a project-reference BUILD, not `--noEmit`. The
+ *                  blueprint's `--noEmit` is not available here and the difference is not
+ *                  cosmetic: `composite` is required by project references, `composite` requires
+ *                  declaration emit, and `tsc -b --noEmit` is refused outright — measured
+ *                  2026-09-18, `error TS6310: Referenced project '…/packages/core' may not
+ *                  disable emit`. So this gate WRITES: `emitDeclarationOnly` declarations into
+ *                  each package's `dist-types/`, gitignored, and fallow skips them.
+ *   3. dead-code — `fallow dead-code --quiet --baseline fallow-baseline.json`: fails on a finding
+ *                  that is not already in the committed identity baseline. After typecheck,
+ *                  because fallow's graph is syntactic.
+ *   4. test      — `bun test`, not `vitest run`. bunfig keeps coverage always on, so this
+ *                  writes `coverage/lcov.info` for gate 5.
+ *   5. coverage  — `bun scripts/check-coverage.ts`: the TOTAL line and function floors over the
+ *                  full denominator, which bun's own per-file `coverageThreshold` cannot express.
  *
- * What a one-line describe cannot say: biome is check-only, with no writes, and also
- * enforces the discipline rules Biome can express — `noTsIgnore` is set to error in
- * biome.jsonc, so a banned suppression directive fails the gate rather than merely warning.
+ * ⚠ Each row's name and first backticked command is CHECKED against GATES and package.json by
+ * `test/gate-abort.test.ts`, because this list is the documented authority for what "green" means
+ * (`docs/verification.md`) and a header nothing checks is a header that drifts. It did: it named
+ * three checks, `vitest run`, and `tsc --noEmit` (#257), so a reader auditing coverage of the gate
+ * list concluded that fallow and the coverage floor were not part of green.
  *
  * ADDING A GATE. This is the extension point a project adopting the blueprint is
  * expected to use: append an entry to GATES and every caller (the pre-commit hook,
@@ -87,17 +104,19 @@ interface Gate {
   readonly script: string
 }
 
-const GATES: readonly Gate[] = [
+/** Exported for `test/gate-abort.test.ts`, which holds the header above equal to this list (#257). */
+export const GATES: readonly Gate[] = [
   {
     name: 'biome',
     describe: 'lint + format + import-organize (check-only)',
     script: 'lint',
   },
   {
-    // `tsc -b`, never `--noEmit` (#229): project references need `composite`, which needs
-    // declaration emit, so this step WRITES — each project's own `dist-types/`, gitignored.
-    // It is the only gate that leaves build state behind, which is why two checkouts running
-    // it over one tree fight, and why the operator is told it emits.
+    // `tsc -b`, never `--noEmit` (#229, #257): project references need `composite`, `composite`
+    // needs declaration emit, and `tsc -b --noEmit` is refused outright — TS6310. So this step
+    // WRITES: each project's own `dist-types/`, gitignored. It is the only gate that leaves
+    // build state behind, which is why two checkouts running it over one tree fight, and why
+    // the operator is told it emits rather than being sold a no-emit check.
     name: 'typecheck',
     describe: 'tsc -b: typecheck + declaration emit into each project dist-types/',
     script: 'typecheck',
@@ -237,7 +256,14 @@ async function main(): Promise<void> {
 
   if (failedGate) {
     process.stdout.write(`\n${RED}✗ gate "${failedGate}" failed.${RESET}\n`)
-    process.exit(1)
+    // ⚠ `exitCode`, NEVER `process.exit` (#256). When either stream is a pipe — CI, a file,
+    // `$(…)` — a write is queued, not performed, and `process.exit` drops whatever is still
+    // queued. A gate that printed megabytes before dying leaves enough backlog that the
+    // ABORTED line, written microseconds earlier, never reaches the reader: measured 12 of 12
+    // runs of `gate-abort.test.ts`'s 2 MB fixture losing it, and the run reported as a plain
+    // failure instead. Setting the code and returning lets the runtime drain first.
+    process.exitCode = 1
+    return
   }
 
   process.stdout.write(`\n${GREEN}✓ All gates passed.${RESET}\n`)
