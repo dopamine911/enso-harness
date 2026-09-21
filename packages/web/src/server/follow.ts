@@ -98,7 +98,7 @@ function slashCommandName(prompt: string): string | undefined {
 function writeFrame(threads: ThreadRegistry, threadId: string, response: ServerResponse, frame: ZenFollowFrame): void {
   if (frame.type === 'observation' && frame.observation.kind === 'tool-result' && !frame.observation.complete) return
   const name = frame.type === 'observation' ? frame.observation.kind : undefined
-  threads.peek(threadId)?.sent.record(frame.type, name, 'sent')
+  threads.sentTail(threadId)?.record(frame.type, name, 'sent')
   response.write(`data: ${JSON.stringify(frame)}\n\n`)
 }
 

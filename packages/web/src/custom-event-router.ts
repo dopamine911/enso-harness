@@ -5,6 +5,7 @@ import {
   ZenOpenDialog,
   type ZenPermissionModeState,
 } from '@zen/core'
+import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
 import { createStore, type Store } from './store.ts'
 import type { ThreadStores } from './thread-stores.ts'
@@ -16,6 +17,26 @@ import type { ThreadStores } from './thread-stores.ts'
  * Value: `{ threadId }`.
  */
 export const FOLLOW_ENDED_CUSTOM_EVENT = 'follow-ended'
+
+/**
+ * JIT validators, compiled once at module load — the `@zen/core` convention
+ * (`config.ts`, `dialog.ts`, `thread-runtime.ts`, `tool-result.ts`).
+ *
+ * `Compile` rather than `Check` because these run per CHUNK on the browser's main thread,
+ * and `Check` re-walks the schema on every call: measured 6.77 µs interpreted against
+ * 0.042 µs compiled for a `text-delta` against the 19-member `ZenObservation` union (once
+ * per streamed token), 2.93 µs against 0.012 µs for a status, and 44.6 µs against 0.51 µs
+ * for a 50-message snapshot — 138 µs against 1.84 µs at 500 messages (#281).
+ *
+ * `ZenOpenDialog` in `routeUiRequest` stays interpreted on purpose: it is checked once per
+ * BLOCKING QUESTION — once per human decision, against a per-token union here — so its
+ * 5.20 µs buys nothing worth a fourth validator, and compiling it would imply the dialog
+ * path was hot. If that check ever becomes frequent, something is re-asking, which is a bug
+ * and not a validator's cost.
+ */
+const snapshotValidator = Compile(ZenFollowSnapshot)
+const statusValidator = Compile(ZenFollowStatus)
+const observationValidator = Compile(ZenObservation)
 
 /**
  * The browser's ONE path from an AG-UI CUSTOM chunk to a thread's stores (mode lines,
@@ -68,7 +89,7 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
     return
   }
   if (eventType === 'snapshot') {
-    if (!Check(ZenFollowSnapshot, data)) return
+    if (!snapshotValidator.Check(data)) return
     applyPermissionMode(stores, data.permissionMode)
     // The complete list, every snapshot (#114): a reconnect's snapshot is the resync, so an
     // empty list is a fact ("nothing is waiting") this page must apply too — it clears a
@@ -79,10 +100,10 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
     return
   }
   if (eventType === 'status') {
-    if (Check(ZenFollowStatus, data)) applyStatus(stores, data.generation)
+    if (statusValidator.Check(data)) applyStatus(stores, data.generation)
     return
   }
-  if (!Check(ZenObservation, data) || data.kind !== eventType) return
+  if (!observationValidator.Check(data) || data.kind !== eventType) return
   routeObservation(stores, data)
 }
 
@@ -137,13 +158,25 @@ function routeObservation(stores: ThreadStores, observation: ZenObservation): vo
  * `notify` is a message meant for a human. The adapter has already dropped what is
  * addressed to a terminal and turned an unreadable blocking request into a run error, so
  * what reaches here is one of those two.
+ *
+ * ⚠ THE OLDEST QUESTION HOLDS THE SLOT (#271). The host genuinely holds several questions
+ * at once (`host/extension-ui-context.ts`'s `Map`, oldest first) and a snapshot — the only
+ * thing that replaces the slot wholesale — arrives once, when a follow opens. So a second
+ * live ask that overwrote the slot would make the question being read vanish mid-read and,
+ * once the newer one was answered, leave the page blank while pi stayed parked on a
+ * question it no longer rendered. Holding costs the reverse and less: the newer question
+ * waits on the server, unrendered until the next snapshot lists it — which is exactly what
+ * `ThreadStores.dialog` says this page does.
  */
 function routeUiRequest(stores: ThreadStores, observation: ZenObservation & { kind: 'extension-ui-request' }): void {
   if (observation.blocking) {
     const open = { id: observation.id, dialog: observation.dialog }
-    if (Check(ZenOpenDialog, open)) stores.dialog.set(open)
-    else
+    if (!Check(ZenOpenDialog, open)) {
+      // Said even when a card is up: the unreadable question is parked on the server either way.
       stores.notifications.push('pi asked a question this page could not read; it was left unanswered', 'error', 'run')
+      return
+    }
+    if (stores.dialog.get() === undefined) stores.dialog.set(open)
     return
   }
   // A notify without a message has nothing for a human; the schema already validated the

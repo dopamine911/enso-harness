@@ -3,9 +3,10 @@ import { resolve } from 'node:path'
 
 /**
  * The terminal launcher's decisions, apart from the launch (`zen.mjs` spawns; this decides):
- * the isolation triple as pi's arguments, the print-run trigger, and the vendor paths a
- * manifest declares that are not there. Pure so `scripts/__tests__/zen-launch.test.ts` can
- * pin them — the launcher itself has no test, because it spawns pi (docs/flows/boot-and-launchers.md).
+ * the isolation triple as pi's arguments, the print-run trigger, the vendor paths a manifest
+ * declares that are not there, and whether the pi it is about to spawn is one the guard was
+ * pinned against. Pure so `scripts/__tests__/zen-launch.test.ts` can pin them — the launcher
+ * itself has no test, because it spawns pi (docs/flows/boot-and-launchers.md).
  */
 
 const VENDOR_PATH_PREFIX = 'node_modules/'
@@ -36,6 +37,97 @@ export function missingVendorPaths(manifest, packageRoot) {
   return declaredResources(manifest)
     .filter((resourcePath) => resourcePath.startsWith(VENDOR_PATH_PREFIX))
     .filter((resourcePath) => !existsSync(resolve(packageRoot, resourcePath)))
+}
+
+/**
+ * ⚠ THE PI THE GUARD'S REPLICA IS PINNED AGAINST (#217). `packages/harness/core/paths.ts`
+ * REPLICATES pi's path normaliser — it is not on pi's export map, so it is copied, and
+ * `packages/harness/core/__tests__/paths.test.ts` keeps the copy honest against the pi in the
+ * WORKSPACE tree (`import.meta.resolve`). `zen.mjs` spawns a bare `pi` from `PATH`, which is a
+ * different resolution bounded by nothing: measured 2026-09-18, a shim reporting 0.85.0 earlier
+ * on `PATH` launched with the whole suite green — so the guard could resolve a path differently
+ * from the tool it gates, and a deny would be computed against the wrong target.
+ *
+ * So the tested range is stated ONCE, here, and both ends read it: `zen.mjs` refuses a `pi`
+ * outside it before the spawn, and `scripts/__tests__/pi-version-parity.test.ts` asserts the workspace pi the
+ * corpus pins against is inside it. Widening it means running the corpus against the new pi
+ * FIRST. It is `^0.84.4` — the harness's peer range and the workspace devDependency.
+ */
+export const SUPPORTED_PI_VERSIONS = {
+  /** The oldest pi the corpus has been run against. */
+  minimum: { major: 0, minor: 84, patch: 4 },
+  /** The first pi it has NOT been run against. */
+  below: { major: 0, minor: 85, patch: 0 },
+}
+
+/** @typedef {{ major: number, minor: number, patch: number }} PiVersion */
+
+/**
+ * The three numbers, as a version is written.
+ * @param {PiVersion} version
+ * @returns {string}
+ */
+export function piVersionText(version) {
+  return `${version.major}.${version.minor}.${version.patch}`
+}
+
+/**
+ * `pi 0.84.7`, `pi@0.84.7`, `pi/0.84.7`, `pi v0.84.7` — the version with pi's own name on it.
+ *
+ * ⚠ The name PRECEDES the version here (PR #294 review). A banner that inverted them
+ * (`0.84.7 (pi)`) is read by `LEADING_VERSION` below while the version leads the line, and
+ * by nothing if something else leads it — a refusal, which is the safe direction and the
+ * only one this gate may take when it cannot tell whose number it is holding.
+ */
+const PI_NAMED_VERSION = /\bpi[@ /]?\s*v?(\d+)\.(\d+)\.(\d+)/i
+/** `0.84.4`, `v0.84.4` — a banner that is only the version, which is what today's pi prints. */
+const LEADING_VERSION = /^\s*v?(\d+)\.(\d+)\.(\d+)/
+
+/**
+ * The version `pi --version` reported, or null when its output carries none.
+ *
+ * ⚠ Not "the first triple anywhere" (PR #294 review). This gate stands between the guard and
+ * computing a deny against the wrong target, and a banner naming another component first —
+ * `bun 1.4.0 / pi 0.84.7` — would have matched bun's number: a wrong refusal at best, and a
+ * wrong ACCEPTANCE whenever the other component's number happens to fall inside the range.
+ * So pi's own name is looked for first, and a bare leading triple (today's output) second. A
+ * banner that names neither reads as no version, which is refused.
+ * @param {string} text
+ * @returns {PiVersion | null}
+ */
+function versionIn(text) {
+  const match = PI_NAMED_VERSION.exec(text) ?? LEADING_VERSION.exec(text)
+  if (match === null) return null
+  const [, major, minor, patch] = match
+  return { major: Number(major), minor: Number(minor), patch: Number(patch) }
+}
+
+/**
+ * Negative when `left` is the older version, zero when they are the same, positive when newer.
+ * @param {PiVersion} left
+ * @param {PiVersion} right
+ * @returns {number}
+ */
+function compareVersions(left, right) {
+  return left.major - right.major || left.minor - right.minor || left.patch - right.patch
+}
+
+/**
+ * Whether the version `pi --version` reported is inside {@link SUPPORTED_PI_VERSIONS}.
+ *
+ * ⚠ Reads the NUMERIC core only: a prerelease of the excluded version (`0.85.0-rc.1`) reads as
+ * `0.85.0` and is refused, and output carrying no version at all is refused. Both are the safe
+ * direction — an unknown pi is exactly the case the corpus says nothing about.
+ * @param {string} reportedVersion whatever `pi --version` printed
+ * @returns {boolean}
+ */
+export function piVersionSupported(reportedVersion) {
+  const reported = versionIn(reportedVersion)
+  if (reported === null) return false
+  return (
+    compareVersions(reported, SUPPORTED_PI_VERSIONS.minimum) >= 0 &&
+    compareVersions(reported, SUPPORTED_PI_VERSIONS.below) < 0
+  )
 }
 
 /**
