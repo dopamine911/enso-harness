@@ -647,10 +647,17 @@ test('⚠ a cancellation is a value, not a key: `cancelled: false` carrying an u
   expect(answerThreadDialog(deps, 't1', smuggled)).toMatchObject({ status: 422 })
   expect(answers).toEqual([])
 
-  // …and the compile-level half of the same claim. If the union goes untagged again this
-  // directive is unused and `bun run check` fails at tsc, before any of the above runs.
-  // @ts-expect-error — a cancellation cannot also carry a confirm payload (#225)
-  const mixed: DialogAnswer = { id: 'd1', cancelled: true, confirmed: true }
+  // …and the compile-level half of the same claim, asserted as a TYPE rather than with the
+  // type checker's expect-error directive, which the no-suppressions gate bans (#82). The
+  // arms' `?: never` members are what makes the mixed shape assignable to none of them, so
+  // this alias is `true`. Untag the union and it becomes `never`, and `bun run check` fails
+  // at tsc before any of the above runs.
+  type CancellationCannotConfirm = { id: 'd1'; cancelled: true; confirmed: true } extends DialogAnswer ? never : true
+  const cancellationCannotConfirm: CancellationCannotConfirm = true
+  expect(cancellationCannotConfirm).toBe(true)
+  // The value still has to exist to reach the runtime half, and only a producer outside the
+  // contract can present it — the same cast, for the same reason, as `smuggled` above.
+  const mixed = { id: 'd1', cancelled: true, confirmed: true } as unknown as DialogAnswer
   expect(answerThreadDialog(deps, 't1', mixed)).toEqual({ status: 204 })
   expect(answers).toEqual([mixed])
 })

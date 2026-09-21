@@ -463,8 +463,14 @@ test('a primary that fails FAST leaves the fallback the rest of the budget, and 
  * `undefined` became expressible as a reason again.
  */
 test('⚠ a searched primary cannot be handed to the fallback reason builder, and a reason is never undefined', () => {
-  // @ts-expect-error — the `searched` arm never reaches here; the call site branched on it.
-  fallbackReasonFor({ kind: 'searched', providerId: 'anthropic', sources: [] })
+  // Asserted as a TYPE, not with the type checker's expect-error directive: that directive is
+  // a suppression and the gate bans the whole family (#82). It is not needed here — a
+  // `searched` outcome is simply not assignable to the parameter, so this alias is `true` and
+  // the annotation compiles. Widen the parameter back and the alias is `never`, which tsc refuses.
+  type SearchedIsNotAFallbackPrimary =
+    Extract<WebSearchOutcome, { kind: 'searched' }> extends Parameters<typeof fallbackReasonFor>[0] ? never : true
+  const searchedIsNotAFallbackPrimary: SearchedIsNotAFallbackPrimary = true
+  expect(searchedIsNotAFallbackPrimary).toBe(true)
 
   const billed: string = fallbackReasonFor({ providerId: 'openai', reason: 'boom', requestDispatched: true })
   expect(billed).toContain('it may have billed')
