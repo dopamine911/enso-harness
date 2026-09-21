@@ -1,5 +1,5 @@
 import type { UIMessage } from '@tanstack/ai-client'
-import type { ZenDialogSpec, ZenInterruptedTail, ZenThreadHistory } from '@zen/core'
+import { type ZenDialogSpec, type ZenInterruptedTail, type ZenThreadHistory, zenLogger } from '@zen/core'
 import type { BrowserLogging } from './browser-logging.ts'
 import { createRecentChunksStore, type RecentChunksStore } from './custom-event-router.ts'
 import { createFollowConnection, type FollowConnection } from './follow-connection.ts'
@@ -23,6 +23,18 @@ import { createThreadStatsStore, type ThreadStatsStore } from './thread-stats.ts
  * or resumed — only those chat instances can be switched to. Stored sessions appear in the
  * second section and become page-owned only after `/history` succeeds. A session another tab
  * is running is refused by both the rail and the server; two pages never drive one pi session.
+ *
+ * ⚠ AND IT IS BOUNDED (#272). A live thread holds a follow — one SSE connection — for as
+ * long as its pane is mounted, and a browser gives an origin six HTTP/1.1 connections; the
+ * server is plain `Bun.serve` over loopback, so there is no h2 multiplexing to hide behind.
+ * Past the budget the newest follow AND every unary `/api` call the page makes (`prompt`,
+ * `/history`, `/api/mode`) queue behind the open streams, silently. So the page holds at
+ * most `MAX_LIVE_THREADS`: minting or adopting past it drops the least recently active idle
+ * thread, which closes its follow. Neither a thread with a run in flight nor the one ON
+ * SCREEN is ever the victim — a follow the page is showing or streaming is not spare
+ * capacity — so a page made only of those goes over budget and records it. The session is
+ * the server's, not the page's, so a dropped thread comes back through Previous Threads —
+ * the rail and `popstate` already resume a thread this page does not hold.
  */
 export interface ThreadStores {
   readonly threadId: string
@@ -141,6 +153,9 @@ export const browserLogging: WritableStore<BrowserLogging | undefined> = createS
   undefined,
 )
 
+/** The page's live list, as the record reads it: a thread minted, adopted or dropped (#272). */
+const threadLog = zenLogger('browser', 'threads')
+
 const threads = new Map<string, ThreadStores>()
 const summaries = new Map<string, ThreadSummary>()
 /** Newest first — the order the rail lists them in. Rebuilt on every change so the snapshot is stable between changes. */
@@ -150,8 +165,106 @@ function publishThreadList(): void {
   threadList.set([...summaries.values()].reverse())
 }
 
-/** Mint a new thread on this page and return its stores. The rail lists it at once, untitled. `fetch` is the #118 test seam. */
+/**
+ * The most threads this page keeps live at once (#272) — the header's budget. Four follows
+ * leave two of the browser's six connections for the unary routes a pane needs (`prompt`,
+ * `/history`, `/api/mode`), which is what wedges first when the streams take the lot.
+ */
+export const MAX_LIVE_THREADS = 4
+
+/**
+ * The pane the user is looking at. Undefined only while a URL-named thread is being adopted
+ * and nothing is on screen (`chat-screen.tsx`).
+ */
+let activeThreadId: string | undefined
+
+/**
+ * The active pane changed. Two effects, and the first is the load-bearing one (PR #301
+ * review): the visible thread stops being a drop candidate, and its clock restarts so it is
+ * not the first to go the moment the user switches away.
+ *
+ * ⚠ Reading a thread is activity. `updateThreadSummary` only fires on a title or a busy
+ * transition, so without this a thread the user is READING — finished reply, idle, not busy —
+ * ages like an abandoned one.
+ */
+export function markThreadActive(threadId: string | undefined): void {
+  activeThreadId = threadId
+  if (threadId === undefined) return
+  const current = summaries.get(threadId)
+  if (current === undefined) return
+  summaries.set(threadId, { ...current, lastActivityAt: new Date() })
+  publishThreadList()
+}
+
+/**
+ * The drop candidate: the least recently active thread that is neither running nor on screen.
+ *
+ * ⚠ THE ACTIVE PANE IS NEVER A CANDIDATE (PR #301 review). Recency alone does not protect it:
+ * open a thread, read its finished reply, then open four more, and the one being read was the
+ * least recently active of them. Dropping it unmounts the pane under the user — `active`
+ * resolves to undefined, the header falls back to the untitled label, the content area goes
+ * blank, and nothing says why. The page exceeds its budget instead, exactly as it does for a
+ * run in flight, and for the same reason: a follow this page is showing is not spare capacity.
+ */
+function leastRecentlyActiveIdle(): ThreadSummary | undefined {
+  let oldest: ThreadSummary | undefined
+  for (const summary of summaries.values()) {
+    if (summary.busy || summary.threadId === activeThreadId) continue
+    if (oldest === undefined || summary.lastActivityAt < oldest.lastActivityAt) oldest = summary
+  }
+  return oldest
+}
+
+/**
+ * The thread leaves this page (#272): its follow closes, its stores are forgotten, and the
+ * rail stops listing it — so its pane unmounts and the connection is released twice over
+ * (here, and again by TanStack's dispose). The pi session is the SERVER's: a dropped thread
+ * that ran reappears under Previous Threads and `/history` rebuilds its transcript.
+ * Idempotent — dropping a thread this page does not hold does nothing.
+ */
+function dropThread(threadId: string): void {
+  const stores = threads.get(threadId)
+  if (stores === undefined) return
+  stores.connection.close()
+  threads.delete(threadId)
+  summaries.delete(threadId)
+  publishThreadList()
+}
+
+/**
+ * Make room for one more live thread, so the page never holds more follows than the
+ * budget.
+ *
+ * ⚠ Two kinds of thread are never dropped: one with a run in flight, because cutting its
+ * follow would leave a run nobody on this page can see or stop, and the one on screen,
+ * because its pane would vanish mid-read. A page made entirely of those exceeds the budget
+ * deliberately, and says so in the record rather than in silence.
+ */
+function makeRoomForOneMore(): void {
+  while (threads.size >= MAX_LIVE_THREADS) {
+    const victim = leastRecentlyActiveIdle()
+    if (victim === undefined) {
+      threadLog.warn('every live thread is running or on screen: {live} follows open, over the budget of {budget}', {
+        live: threads.size,
+        budget: MAX_LIVE_THREADS,
+      })
+      return
+    }
+    threadLog.info('thread {threadId} dropped to stay inside the follow budget of {budget}', {
+      threadId: victim.threadId,
+      budget: MAX_LIVE_THREADS,
+    })
+    dropThread(victim.threadId)
+  }
+}
+
+/**
+ * Mint a new thread on this page and return its stores. The rail lists it at once,
+ * untitled. Inside the page's follow budget: minting past it drops an idle thread (#272).
+ * `fetch` is the #118 test seam.
+ */
 export function mintThread(fetchImpl?: typeof fetch): ThreadStores {
+  makeRoomForOneMore()
   const stores = createThreadStores(crypto.randomUUID(), [], fetchImpl)
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {
@@ -197,11 +310,13 @@ export function reviveHistoryMessages(messages: readonly unknown[]): UIMessage[]
  * thread id is pi's session id, so the next prompt reopens the same file), its branch as
  * the history the chat mounts with, and its persisted mode as the control's first state —
  * a plan-mode session must not read `default` until its first run (#84's lesson).
- * Adopting a thread already on this page returns it — the rail cannot hold one twice.
+ * Adopting a thread already on this page returns it — the rail cannot hold one twice — and
+ * adopting one past the page's follow budget drops an idle thread to make room (#272).
  */
 export function adoptThread(history: ZenThreadHistory): ThreadStores {
   const existing = threads.get(history.threadId)
   if (existing !== undefined) return existing
+  makeRoomForOneMore()
   const messages = reviveHistoryMessages(history.messages)
   const stores = createThreadStores(history.threadId, messages)
   stores.permissionMode.applyReceipt(history.permissionMode)
@@ -282,9 +397,11 @@ export function titleFromMessages(messages: ReadonlyArray<UIMessage>): string | 
   return first === undefined ? undefined : titleFromMessage(first)
 }
 
-/** Test seam: forget every thread. Never called from production code. */
+/** Test seam: forget every thread, closing the follow each one holds. Never called from production code. */
 export function clearThreadsForTest(): void {
+  for (const stores of threads.values()) stores.connection.close()
   threads.clear()
   summaries.clear()
+  activeThreadId = undefined
   publishThreadList()
 }
