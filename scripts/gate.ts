@@ -256,7 +256,14 @@ async function main(): Promise<void> {
 
   if (failedGate) {
     process.stdout.write(`\n${RED}✗ gate "${failedGate}" failed.${RESET}\n`)
-    process.exit(1)
+    // ⚠ `exitCode`, NEVER `process.exit` (#256). When either stream is a pipe — CI, a file,
+    // `$(…)` — a write is queued, not performed, and `process.exit` drops whatever is still
+    // queued. A gate that printed megabytes before dying leaves enough backlog that the
+    // ABORTED line, written microseconds earlier, never reaches the reader: measured 12 of 12
+    // runs of `gate-abort.test.ts`'s 2 MB fixture losing it, and the run reported as a plain
+    // failure instead. Setting the code and returning lets the runtime drain first.
+    process.exitCode = 1
+    return
   }
 
   process.stdout.write(`\n${GREEN}✓ All gates passed.${RESET}\n`)

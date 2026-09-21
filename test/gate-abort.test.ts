@@ -111,6 +111,15 @@ test('⚠ end to end: a gate script that prints the banner and exits 0 still fai
  * scanned as it passes, never accumulated, so there is no size at which the gate stops
  * reading — a buffered read would have hit its 1 MB ceiling here and reported the crash as
  * something else entirely.
+ *
+ * ⚠ AND THE VERDICT HAS TO SURVIVE THE EXIT. This test was intermittent — roughly one run in
+ * three here, and a CI failure on an unrelated PR — because `gate.ts` ended with
+ * `process.exit(1)`. Both of the gate's own streams are pipes under `spawnSync`, so its
+ * writes were queued rather than performed, and exiting threw the queue away: 2 MB of
+ * backlog ahead of them meant the ABORTED line and the failure line, written microseconds
+ * before, never reached the reader. Measured 12 of 12 runs losing both, 12 of 12 keeping
+ * them once the gate set `exitCode` and returned instead. The last assertion is the one that
+ * fails if that regresses — detecting the abort is worth nothing if saying so is dropped.
  */
 test('⚠ megabytes of stderr before the banner does not hide the abort', () => {
   const run = runGateOver(
@@ -119,6 +128,7 @@ test('⚠ megabytes of stderr before the banner does not hide the abort', () => 
   expect(run.status).toBe(1)
   expect(run.output).toContain('ABORTED')
   expect(run.output).not.toContain('failed to spawn')
+  expect(run.output).toContain('✗ gate "biome" failed.')
 })
 
 /**
