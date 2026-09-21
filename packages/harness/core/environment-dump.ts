@@ -1,6 +1,6 @@
 import { basename } from 'node:path'
 import { isSecretShapedName } from '@zen/core/secrets'
-import { TRANSPARENT_COMMAND_WRAPPERS } from './network-egress.ts'
+import { EXEC_TERMINATORS, FIND_COMMAND, findExecPayloads, TRANSPARENT_COMMAND_WRAPPERS } from './network-egress.ts'
 import {
   extractFlatShellCommandSegments,
   literalShellWord,
@@ -23,7 +23,8 @@ import {
  *   `printenv PATH` passes; `printenv <secret-shaped name>` does not.
  * - `export` / `declare` / `typeset` in their listing forms (bare, `-p`, `-x`), and bare
  *   `set`. `export FOO=1`, `set -e`, `set -o pipefail` pass — they set, they do not list.
- * - the same command past a transparent wrapper (`timeout 5 env`, `sudo printenv`).
+ * - the same command past a transparent wrapper (`timeout 5 env`, `sudo printenv`), and the
+ *   payload of a `find -exec` (#206) — a payload is a command line, so it is gated as one.
  * And anywhere in the raw string, regardless of parse:
  * - `/proc/<pid>/environ` — the kernel's copy of the same list.
  * - a `$NAME` / `${NAME…}` expansion of a secret-shaped name (`echo $TAVILY_API_KEY`).
@@ -68,7 +69,12 @@ function listsEnvironment(command: string, argumentWords: readonly string[]): En
   switch (command) {
     case 'env': {
       // Options and assignments do not run anything; a remaining word is a command to run.
-      const operands = argumentWords.filter((word) => !(word.startsWith('-') || isAssignment(word)))
+      // ⚠ `find -exec env ;` — the terminator is find's operand, not a command for env to
+      // run, and counting it as one made the dump tripwire report "nothing" for the whole
+      // `-exec` route (#206). Matched by LITERAL value, so `\;`, `';'` and `";"` all count.
+      const operands = argumentWords.filter(
+        (word) => !(word.startsWith('-') || isAssignment(word) || EXEC_TERMINATORS.has(literal(word) ?? word)),
+      )
       return operands.length === 0 ? { matched: 'env', via: 'command-position' } : undefined
     }
     case 'printenv': {
@@ -100,13 +106,44 @@ function gateSegment(segmentText: string): EnvironmentDumpMatch | undefined {
   const stripped = (withoutLeadingEnvironmentAssignments(segmentText) ?? segmentText).trim()
   const words = shellWordsOf(stripped)
   if (words === null || words.length === 0) return undefined
+  return gateWords(words)
+}
+
+/**
+ * One command line, as words: a listing command, a `find` whose exec payload IS one, or a
+ * wrapper with one behind it.
+ *
+ * ⚠ A payload is a command line, so it goes back through THIS function rather than having
+ * its first word looked up (PR #290 review). Checking `payload[0]` alone let the sensor miss
+ * what it catches everywhere else — `find . -exec sh -c 'env' ;` and `find . -exec sudo env ;`
+ * read as "sh" and "sudo", neither a listing command, while the same two lines without the
+ * `find` are caught by the wrapper scan below. The egress deny already recursed its payload
+ * through `gateCommandLine`; this is the same shape, so both denies know the construct
+ * equally instead of only claiming to. Recursion terminates: a payload is strictly shorter
+ * than the words it came from.
+ */
+function gateWords(words: readonly string[]): EnvironmentDumpMatch | undefined {
   const command = commandNameOf(words[0] ?? '')
   if (command === undefined) return undefined
   if (LISTING_COMMANDS.has(command)) return listsEnvironment(command, words.slice(1))
+  // `find … -exec env ;` reaches a listing command at a KNOWN offset, and the tripwire has
+  // to know the one construct pi's own `find` tool and a shell `find` share (#206). Not
+  // wrapper mode: find's predicates carry globs that are ordinary arguments.
+  if (command === FIND_COMMAND) {
+    for (const payload of findExecPayloads(words.slice(1))) {
+      const verdict = gateWords(payload)
+      if (verdict !== undefined) return { matched: verdict.matched, via: 'wrapped-command' }
+    }
+    return undefined
+  }
   if (!TRANSPARENT_COMMAND_WRAPPERS.has(command)) return undefined
   // Past a wrapper the effective command sits at an unknown offset (each wrapper has its
   // own options), so any later word that IS a listing command is treated as one — the
   // accepted false positive the egress deny also takes.
+  // ⚠ STATED RESIDUAL (#206): the reverse shape, a wrapper whose OWN operand follows the
+  // wrapped command (`script -qc env /dev/null`), reads as "env runs /dev/null" and passes.
+  // Counting those words as find's would deny `sudo env FOO=1 make build`, which lists
+  // nothing — so the tripwire takes the miss rather than the false positive, and says so.
   for (const [position, word] of words.slice(1).entries()) {
     const wrapped = commandNameOf(word)
     if (wrapped === undefined || !LISTING_COMMANDS.has(wrapped)) continue
