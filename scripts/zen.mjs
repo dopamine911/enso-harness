@@ -161,7 +161,17 @@ if (quarantine.misplaced.length > 0) {
 const PI_PROBE_TIMEOUT_MS = 5000
 let reportedPiVersion = ''
 try {
-  const probe = Bun.spawn(['pi', '--version'], { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' })
+  // ⚠ `env` EXPLICITLY, or the quarantine above does not reach this child (PR #294 review,
+  // measured): a `Bun.spawn` with no `env` hands the child the environment this process
+  // STARTED with, not its live `process.env` — deletions and additions made since are both
+  // invisible. So ordering the quarantine first is necessary and not sufficient; the probe
+  // has to be given the scrubbed object, the way the pi spawn below is.
+  const probe = Bun.spawn(['pi', '--version'], {
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'ignore',
+    env: process.env,
+  })
   const reported = (async () => ({
     text: (await new Response(probe.stdout).text()).trim(),
     status: await probe.exited,
