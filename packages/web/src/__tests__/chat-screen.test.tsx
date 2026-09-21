@@ -36,7 +36,7 @@ function neverCalled(): void {
 }
 
 const answerControls = (dialog: ZenDialogSpec): string =>
-  renderToStaticMarkup(<DialogAnswerControls dialog={dialog} answer={neverCalled} />)
+  renderToStaticMarkup(<DialogAnswerControls dialog={dialog} answer={neverCalled} disabled={false} />)
 
 // --- one render per dialog method
 test('confirm renders the message with Yes and No', () => {
@@ -88,7 +88,7 @@ test('editor renders a multi-line field prefilled with the draft', () => {
 // --- the card, and the slot that shows the thread's open question
 test('the dialog card renders pi-is-asking with the title, the controls and a cancel', () => {
   const rendered = renderToStaticMarkup(
-    <ZenDialogCard dialog={SELECT_DIALOG} answer={neverCalled} cancel={neverCalled} />,
+    <ZenDialogCard dialogId="d1" dialog={SELECT_DIALOG} answer={neverCalled} cancel={neverCalled} disabled={false} />,
   )
   expect(rendered).toContain('pi is asking')
   expect(rendered).toContain('Select permission mode')

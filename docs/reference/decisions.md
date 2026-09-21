@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 175.**
+**Decision headers: 177.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -174,6 +174,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/complexity-ratchet.test.ts` | `#264` | Re-measures the cognitive-complexity pins, per FUNCTION (#264). |
 | `test/dependency-gate.test.ts` | `#218`, `#223` | What the dependency manifests claim, held against what the code actually imports (#218, #223). |
 | `test/docs-gate.test.ts` | `#162`, `#167`, `#168`, `#258` | The docs cannot drift (#168, goals §3.3): a page either quotes source and is checked against it, or is generated from source and is diffed against it. |
+| `test/e2e-selectors.test.ts` | `#116`, `#277` | THE E2E SELECTOR CONTRACT (#277). |
 | `test/fallow-config.test.ts` | `#163` | fallow's entry list cannot drift from the harness manifest (#163). |
 | `test/gate-abort.test.ts` | `#157` | The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0. |
 | `test/gate-support.ts` | `#150`, `#162`, `#165`, `#174` | What the source-tree gates share (#165, #162 workstream 6): the word-splitter, the sequence matcher, the comment skip, over the one walker (`scripts/source-tree.ts`, #174). |
