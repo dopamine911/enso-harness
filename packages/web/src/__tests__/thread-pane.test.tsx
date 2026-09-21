@@ -432,6 +432,51 @@ test('a refused answer re-opens the card: the question is still open, so it must
   await pane.unmount()
 })
 
+// ⚠ The SAME re-open, reached the other way (PR #317 review). `settle` re-opens on two
+// outcomes and the reviewer's note is that only one of them was proven through the component:
+// `refused` is an answer, `unreachable` is the absence of one, and they arrive on different
+// code paths — a 422 response against a REJECTED fetch. The store layer pins the mapping; what
+// this pins is that `OpenQuestion` treats the two alike, so a dropped connection cannot leave
+// the thread parked on a human holding an inert card.
+test('an unreachable answer re-opens the card too: nothing reached the server, so the question stands (#275)', async () => {
+  const pane = await mountPane({ server: { dialogUnreachable: true } })
+  await pane.settle(SNAPSHOT_IDLE, {
+    type: 'observation',
+    seq: 1,
+    observation: {
+      kind: 'extension-ui-request',
+      id: 'd7',
+      method: 'confirm',
+      blocking: true,
+      origin: 'run',
+      dialog: { method: 'confirm', title: 'Apply the edit? (d7)', message: 'It is reversible' },
+    },
+  })
+  const answerable = async (): Promise<HTMLButtonElement> =>
+    await eventually(() => {
+      const found = [...pane.container.querySelectorAll('button')].find((button) => button.textContent === 'Yes')
+      if (found === undefined) throw new Error('the unreachable question lost its card')
+      if (found.disabled) throw new Error('the unreachable question stayed disabled: it can never be answered')
+      return found
+    })
+  await flush(async () => {
+    ;(await answerable()).click()
+    await tick()
+  })
+  // The retry is the assertion: a card that stayed disabled could not produce a second POST.
+  await flush(async () => {
+    ;(await answerable()).click()
+    await tick()
+  })
+  await eventually(() => {
+    expect(pane.server.dialogs).toEqual([
+      { id: 'd7', confirmed: true },
+      { id: 'd7', confirmed: true },
+    ])
+  })
+  await pane.unmount()
+})
+
 // #276: the one surface that parks pi on a human used to carry no role, no accessible name and
 // no focus — a screen-reader user could not tell a parked thread from a slow one, and a
 // keyboard user had to tab the whole transcript to find the question. The name and the focus

@@ -35,20 +35,34 @@ const SELECTOR_CONSTANTS = ['COMPOSER_PLACEHOLDER', 'SEND_BUTTON_NAME', 'STOP_BU
 /**
  * Comments and string lexemes in one alternation, so a `//` inside a quoted string is not a
  * comment — the shape `gate-support.ts` uses for the same reason.
+ *
+ * ⚠ TEMPLATE LITERALS ARE LEXEMES TOO (PR #317 review). Leaving backticks out looks like a
+ * false-negative — a name spelled `` `stop the run` `` simply not found — but the cost is on
+ * the scanner, not the search: an unconsumed template literal hands its contents to the
+ * alternation, so an apostrophe in one (`` `pi's answer` ``) opens a quote that closes on the
+ * next unrelated one, and a `//` in one eats the rest of its line. Both invent literals, or
+ * lose real ones, some distance away. Multi-line by design: a template literal is the one
+ * string lexeme that spans lines.
  */
-const COMMENT_OR_STRING = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"/g
+const COMMENT_OR_STRING = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g
 
 /**
- * Every single- or double-quoted one-line string literal a file DECLARES, comments removed.
+ * Every string literal a file DECLARES with a STATIC value, comments removed.
  *
  * ⚠ Comments first (PR #317 review). This side answers "does the composer render this name",
  * and a comment string is not markup: with prose in scope, renaming a rendered `aria-label`
  * while a comment still mentioned the old one kept the gate green — the exact drift the file
  * claims to catch, one side of it unheld.
+ *
+ * A template literal counts only when it interpolates nothing. One that does is not a name
+ * this gate can compare: its rendered value is not in the source. That is a true negative —
+ * the constant it would have to match is a plain literal in the spec, by the test below.
  */
 function quotedLiterals(source: string): string[] {
   const code = source.replace(COMMENT_OR_STRING, (lexeme) => (lexeme.startsWith('/') ? '' : lexeme))
-  return [...code.matchAll(/'([^'\n]*)'|"([^"\n]*)"/g)].map((match) => match[1] ?? match[2] ?? '')
+  return [...code.matchAll(/'([^'\n]*)'|"([^"\n]*)"|`([^`]*)`/g)]
+    .map((match) => match[1] ?? match[2] ?? match[3] ?? '')
+    .filter((literal) => !literal.includes('${'))
 }
 
 test('⚠ every e2e selector constant is a name the composer actually renders (#277)', () => {
@@ -61,6 +75,25 @@ test('⚠ every e2e selector constant is a name the composer actually renders (#
   })
   const missing = declared.filter((constant) => !rendered.includes(constant.selector))
   expect(missing).toEqual([])
+})
+
+// The scanner's own contract, because both halves of this file rest on it and both failures
+// are silent: a name it cannot see is a retired constant left green, and a lexeme it fails to
+// consume invents literals out of unrelated code.
+test('the literal scan reads static templates, skips interpolated ones, and consumes every lexeme (#277)', () => {
+  expect(quotedLiterals('const name = `stop the run`')).toEqual(['stop the run'])
+  // Interpolated: its rendered value is not in the source, so it is not a name to compare.
+  expect(quotedLiterals('const name = `stop ${what}`')).toEqual([])
+  // A template is consumed whole, so its punctuation is not code: neither the `//` nor the
+  // apostrophe below may reach the alternation, and the real literal after them survives.
+  expect(quotedLiterals("const note = `https://pi's docs`\nconst name = 'stop the run'")).toEqual([
+    "https://pi's docs",
+    'stop the run',
+  ])
+  // …and prose still cannot keep a name alive, which is the older half of the same contract.
+  expect(quotedLiterals("// renamed from 'stop the current response'\nconst name = 'stop the run'")).toEqual([
+    'stop the run',
+  ])
 })
 
 /**

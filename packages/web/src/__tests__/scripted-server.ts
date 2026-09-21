@@ -42,6 +42,13 @@ export interface ScriptedFetchOptions {
    * refused or unreachable answer can be repeated the way the page allows it to be.
    */
   readonly dialogStatus?: number
+  /**
+   * The dialog request never reaches a server: the `fetch` REJECTS, as a dropped connection
+   * does, which is the page's `unreachable` (`follow-connection.ts#answerDialog`). Distinct
+   * from `dialogStatus`, which is an answer — this is the absence of one, and the question is
+   * as open afterwards as it was before.
+   */
+  readonly dialogUnreachable?: boolean
   readonly abortStatus?: number
   /** What `POST …/mode` answers; 204 by default. */
   readonly modeStatus?: number
@@ -129,6 +136,8 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
       const answer = JSON.parse(String(init?.body)) as { id?: string }
       const questionId = answer.id ?? ''
       dialogs.push(answer)
+      // Recorded first, then refused a response: an unreachable answer IS one the page sent.
+      if (options.dialogUnreachable === true) return Promise.reject(new TypeError('Failed to fetch'))
       if (spentQuestions.has(questionId)) {
         const reason = `no open question ${questionId} on thread t1 — answered, expired, or never asked`
         return Promise.resolve(new Response(reason, { status: 404 }))
