@@ -16,6 +16,10 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Required so `gate` still runs — and can satisfy the required-status-check on `main` —
+  # when a PR merges through a merge queue instead of a direct merge. Without this, enabling
+  # a merge queue would deadlock every merge: the required check would never fire.
+  merge_group:
 
 # A newer push to the same branch cancels an in-flight run — no point finishing stale CI.
 concurrency:
@@ -50,11 +54,16 @@ jobs:
   # job adds what the baseline cannot see on a PR — a changed function over the complexity
   # ceiling, a semantic clone the diff introduces — and reports without blocking. Promote
   # by dropping continue-on-error once a week of PRs shows its verdicts are worth a block.
+  #
+  # Runs once per PR (open/reopen/ready-for-review), not on every push: this is advisory only
+  # (never blocks a merge, unlike `gate`), so re-running it on each `synchronize` bought no
+  # additional safety for real Actions-minutes cost. `gate` keeps running on every push — it
+  # is the required check and its status must track the exact head SHA.
   fallow-audit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     continue-on-error: true
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.action != 'synchronize'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,11 +94,13 @@ jobs:
   # are guidance, not a contract — so the job reports without ever blocking a merge.
   # Promote it to a required check only after its signal has earned that (drop the
   # continue-on-error and mark it required in branch protection).
+  #
+  # Runs once per PR, not on every push — same reasoning as `fallow-audit` above.
   react-doctor:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     continue-on-error: true
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.action != 'synchronize'
     steps:
       - uses: actions/checkout@v4
 
