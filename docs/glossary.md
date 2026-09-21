@@ -160,7 +160,7 @@ answer before a tool runs; nothing after it does.
   tracks it, and `surface` — the candidate — already means TUI-or-web. It stays under the host and in
   the vendor map.
 - **guard** — the extension that answers the tool-call hook before a tool runs. What startup asserts is
-  that the policy's gated names are REGISTERED (`verifyPolicyToolNames`, presence), never that they
+  that the policy's gated names are **registered** (`verifyPolicyToolNames`, presence), never that they
   resolve to our implementation: identity is unasserted, and the veto does not depend on it. A guard
   *decides*; nothing else on the path does.
 - **verdict** — a guard's answer: a **denial with its reason**, or nothing — the call passes. There is
@@ -436,7 +436,7 @@ cc-safety-net, the command analyzer the bash guard wires as a library. *log subs
 | permission mode | — | `permission/preset` + knobs; `custom` derived | — | mode extension's modes (`default`, `acceptEdits`, `plan`, `bypassPermissions`), persisted as `customType: "modes"` |
 | (no word) — the runtime's interface setting | `ctx.mode`: `interactive` / `rpc` / `print` | — | — | — |
 | verdict | `ToolCallEventResult`: `{ block, reason }` or `undefined` | — | — | analyzer `checkCommand` → `kind` `allow` or `deny`, with `ruleId`; a throw is a deny |
-| participant / arbiter | `pi.on("tool_call")`, first-wins | — | — | — |
+| participant / arbiter | `pi.on("tool_call")`, additive: every handler runs, the first block ends the call | — | — | — |
 | tool identity | tool names `bash`, `write`, `edit`, `read` | — | — | the `picc-*` packages register `Bash` / `Edit` |
 | record / level / sink | — | — | — | log substrate's `LogRecord`, categories, sinks |
 | layer | — | — | — | log substrate category segment two |

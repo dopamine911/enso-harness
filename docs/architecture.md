@@ -362,7 +362,7 @@ zen-harness/
   packages/
     core/                   # @zen/core — every TypeBox schema and shared type, one place
     harness/                # the pi package
-      package.json          #   pi manifest: extensions declared EXPLICITLY, guards first
+      package.json          #   pi manifest: extensions declared EXPLICITLY, logging first
       core/                 #   guard logic, shell segmentation, egress, web-search
       extensions/           #   guards · web-fetch · web-search
       skills/ prompts/ themes/
