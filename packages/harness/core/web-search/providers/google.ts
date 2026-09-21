@@ -1,5 +1,5 @@
 import { applyByteIndexCitations, type ByteIndexInsertion } from '../citations.ts'
-import { dispatchProviderPost } from '../dispatch.ts'
+import { dispatchProviderPost, resolveProviderCredential } from '../dispatch.ts'
 import { titleFromUrl } from '../sources.ts'
 import { readSseEvents } from '../sse.ts'
 import type { ModelSearchRequest, WebSearchOutcome, WebSource } from '../vocabulary.ts'
@@ -96,16 +96,7 @@ async function resolveGroundingRedirects(
 }
 
 export async function runGoogleProviderSearch(request: ModelSearchRequest): Promise<WebSearchOutcome> {
-  const credential = await request.resolveAuth(request.model)
-  if (!credential.ok) {
-    throw new WebSearchProviderError(
-      'google',
-      credential.error.length > 0 ? credential.error : 'no credential resolved',
-      {
-        requestDispatched: false,
-      },
-    )
-  }
+  const credential = await resolveProviderCredential('google', request)
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',

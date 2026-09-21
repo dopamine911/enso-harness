@@ -24,8 +24,9 @@
  * ⚠ What a print run then has: OUR guards only. `bash` is unconfined (#9) — that is the
  * pre-picc posture restored, usability without unattended safety. Stated in #20.
  */
-import { lstatSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { relinkDirectory } from './link-vendor-packages.mjs'
 
 /** The manifest entry to remove — matching by package name, not exact path. */
 const PICC_EXTENSION_FRAGMENT = 'picc-permission-modes'
@@ -103,16 +104,7 @@ export function materializePrintHarness(printHarnessDir, harnessPackageRoot, pri
     if (!wantedEntries.has(stale)) rmSync(join(printHarnessDir, stale), { recursive: true, force: true })
   }
   for (const packageEntry of packageEntries) {
-    const linkPath = join(printHarnessDir, packageEntry)
-    const targetPath = join(harnessPackageRoot, packageEntry)
-    // lstat, not exists: a broken symlink must be replaced, and exists() follows links.
-    try {
-      lstatSync(linkPath)
-      rmSync(linkPath, { recursive: true, force: true })
-    } catch {
-      // nothing there yet
-    }
-    symlinkSync(relative(printHarnessDir, targetPath), linkPath, 'dir')
+    relinkDirectory(join(printHarnessDir, packageEntry), join(harnessPackageRoot, packageEntry))
   }
   writeFileSync(join(printHarnessDir, MANIFEST_FILENAME), `${JSON.stringify(printManifest, null, '\t')}\n`)
   return printHarnessDir
