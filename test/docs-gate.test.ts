@@ -354,6 +354,63 @@ test('⚠ every relative link under docs/ and in README resolves to a file (#162
   expect(offenders).toEqual([])
 })
 
+/** A `[text](target.ts)` link, and the prose since the previous link on that line. */
+function sourceCitations(text: string): { file: string; claimed: string[]; line: number }[] {
+  const citations: { file: string; claimed: string[]; line: number }[] = []
+  text.split('\n').forEach((line, index) => {
+    let cursor = 0
+    for (const match of line.matchAll(/\[[^\]]*\]\(([^)#\s]+\.tsx?)(?:#[^)]*)?\)/g)) {
+      const before = line.slice(cursor, match.index)
+      cursor = (match.index ?? 0) + match[0].length
+      // The identifiers this stretch of prose says are in the file it then links.
+      const claimed = [...before.matchAll(/`([A-Z][A-Za-z0-9_]*)`/g)].map((name) => name[1] ?? '')
+      if (claimed.length > 0) citations.push({ file: match[1] ?? '', claimed, line: index + 1 })
+    }
+  })
+  return citations
+}
+
+/** The Retired table's left column: names that deliberately exist nowhere in the tree. */
+function retiredNames(): Set<string> {
+  const glossary = readFileSync(join(DOCS_ROOT, 'glossary.md'), 'utf8')
+  const retired = glossary.slice(glossary.indexOf('## Retired'))
+  return new Set([...retired.matchAll(/^\|\s*`([A-Za-z][A-Za-z0-9_]*)`/gm)].map((row) => row[1] ?? ''))
+}
+
+/**
+ * ⚠ A LINK THAT RESOLVES IS NOT A CITATION THAT HOLDS (PR #307 review). The gate above
+ * proves the file exists, which is what let the leak inventory say `RuntimeEvent` was
+ * renamed "in `thread-runtime.ts`" — a real file, which has never declared it; L2 moved the
+ * event below the seam to `host/runtime-event.ts`, as the glossary said all along. The row
+ * contradicted the page it cites, in the one table whose whole job is to say where each leak
+ * went, and nothing failed.
+ *
+ * So: a name in backticks, in the prose leading to a source link, has to be declared in that
+ * file. Three exemptions, each because the claim is held elsewhere or is not a location claim:
+ *   • the SEAM pages only — a generated page's citations are its generator's, diffed above,
+ *     and those rows legitimately name a schema a route USES rather than declares;
+ *   • a retired name, whose whole claim is that it exists nowhere (`glossary-gate.test.ts`);
+ *   • the `Pi*` class, which is L1's subject and retired as a class, not row by row.
+ */
+test('⚠ a symbol named beside a source link is declared in the file it links (#245)', () => {
+  const retired = retiredNames()
+  const offenders: string[] = []
+  for (const path of markdownFiles(join(DOCS_ROOT, 'seams'))) {
+    const page = path.slice(REPOSITORY_ROOT.length + 1)
+    for (const citation of sourceCitations(readFileSync(path, 'utf8'))) {
+      const target = join(path, '..', citation.file)
+      if (!existsSync(target)) continue // the link gate above names this one
+      const source = readFileSync(target, 'utf8')
+      for (const name of citation.claimed) {
+        if (retired.has(name) || /^Pi[A-Z]/.test(name)) continue
+        if (new RegExp(`\\b(?:type|interface|class|function|const|enum)\\s+${name}\\b`).test(source)) continue
+        offenders.push(`${page}:${citation.line}: ${citation.file} declares no ${name}`)
+      }
+    }
+  }
+  expect(offenders).toEqual([])
+})
+
 test('the extractor takes the doc comment, the whole statement, and nothing after it', () => {
   const source = [
     '/** Above. */',
