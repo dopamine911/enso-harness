@@ -202,7 +202,7 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
           )
         }
         // After the unarmed branch, which builds its refusal from `primary` directly: computed
-        // where it is read, so "why is this string here" needs no answer (PR #311 review).
+        // where it is read, so "why is this string here" needs no answer (#227).
         const fallbackReason = fallbackReasonFor(primary)
 
         // A progress update before the fallback: the server counts tool activity as
