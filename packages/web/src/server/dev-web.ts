@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { zenLogger } from '@zen/core'
 import { configureProcessLogging, installLoggingShutdown, logsDirFrom, parseZenLogLevels } from '@zen/core/log-process'
 import { findRepoRoot, webPackageDir } from '@zen/core/paths'
-import { knownSecretValues } from '@zen/core/secrets'
+import { knownSecretValuesTracking } from '@zen/core/secrets'
 import homepage from '../../index.html'
 
 const WEB_PORT = 5178
@@ -33,8 +33,9 @@ const disposeLogging: () => Promise<void> = await configureProcessLogging({
   logsDir: logsDirFrom(process.env, repoRoot),
   process: 'web',
   levels: parseZenLogLevels(process.env, { console: 'info' }),
-  // The value pass (#139): what a token quoted in a message or a trace payload is scrubbed against.
-  secretValues: knownSecretValues(repoRoot),
+  // The value pass (#139): what a token quoted in a message or a trace payload is scrubbed
+  // against — asked per record, so a key rotated while this proxy runs is redacted too (#207).
+  secretValues: knownSecretValuesTracking(repoRoot),
 })
 const log = zenLogger('server', 'web')
 installLoggingShutdown(disposeLogging)

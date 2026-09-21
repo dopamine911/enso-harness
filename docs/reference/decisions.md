@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 181.**
+**Decision headers: 182.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -189,6 +189,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/no-lint-suppressions.test.ts` | `#82` | The gate may not be talked out of, one line at a time. |
 | `test/presentation-gate.test.ts` | `#31`, `#121`, `#174`, `#253` | Presentation stays presentation (#121 item 4, #31). |
 | `test/scripts-extensions.test.ts` | `#269`, `#308` | `scripts/` is TypeScript, and the exceptions are named (#269). |
+| `test/secret-scan-gate.test.ts` | `#209` | The range `.github/workflows/secret-scan.yml` hands gitleaks is the coverage of the only gate that stops a committed secret, so it is asserted here rather than read (#209). |
 | `test/vendor-gate.test.ts` | `#69`, `#145`, `#150`, `#165`, `#173`, `#215` | The seam has an owner: only the host and the pi extensions may name the vendor (#145). |
 
 **Parser limit.** The parser considers the first block or contiguous line comment beginning within the

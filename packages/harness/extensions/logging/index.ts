@@ -2,7 +2,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { zenLogger } from '@zen/core'
 import { configureProcessLogging, isLoggingConfigured, logsDirFrom, parseZenLogLevels } from '@zen/core/log-process'
 import { findRepoRoot } from '@zen/core/paths'
-import { knownSecretValues } from '@zen/core/secrets'
+import { knownSecretValuesTracking } from '@zen/core/secrets'
 
 /**
  * The extension process's logging (#132), and the one record only an extension can write:
@@ -42,8 +42,9 @@ export function createLoggingExtension(
       process: 'pi',
       levels: parseZenLogLevels(environment, { console: undefined }),
       // The value pass (#139): pi as a child writes tool output and model text, which is
-      // exactly where a known secret is quoted rather than named.
-      secretValues: knownSecretValues(repoRoot, environment),
+      // exactly where a known secret is quoted rather than named — and asked per record, so
+      // a key rotated mid-session is redacted from the next record on (#207).
+      secretValues: knownSecretValuesTracking(repoRoot, environment),
     })
     zenLogger('extension', 'logging').debug('configured by the extension: pi is a child process')
     pi.on('session_shutdown', async (): Promise<void> => {

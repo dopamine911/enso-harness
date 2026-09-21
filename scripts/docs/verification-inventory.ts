@@ -166,6 +166,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Matches provenance text and static imports; dynamically assembled dependencies are outside the import matcher.',
   },
+  'test/secret-scan-gate.test.ts': {
+    roots: ['.github/workflows/secret-scan.yml'],
+    exceptions: [],
+    limitation:
+      'Runs the `git log` the scanner runs, over fixture histories, with the flags read out of the workflow; it pins what gitleaks is handed, not that gitleaks ran or what its rules matched.',
+  },
   'test/vendor-gate.test.ts': {
     rootArrays: ['SEARCHED_ROOTS'],
     exceptions: [
