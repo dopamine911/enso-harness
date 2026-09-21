@@ -50,10 +50,14 @@ import { canonicalToolName } from './tool-identity.ts'
  *
  * ⚠ Fourth stated non-coverage: BINARY RELOCATION (`cp /usr/bin/curl /tmp/f && /tmp/f …`)
  * — no name check can see it, and chasing it is full path confinement, #9's explicit
- * option-4 non-goal. Wrapper indirection, by contrast, IS covered (round 3): a segment
- * led by a transparent process wrapper (`timeout`, `env`, `nohup`, `xargs`, `sudo`,
- * `sh -c`, …) gets every word checked, since the wrapped command sits verbatim past
- * word 1 at an offset no wrapper-agnostic scan can know.
+ * option-4 non-goal. Wrapper indirection is covered for every wrapper ON THE LIST
+ * (round 3): a segment led by one (`timeout`, `env`, `nohup`, `xargs`, `sudo`, `sh -c`,
+ * `find -exec`, …) gets every word checked, since the wrapped command sits verbatim past
+ * word 1 at an offset no wrapper-agnostic scan can know. ⚠ FIFTH non-coverage, and the
+ * correction #206 bought: that is a LIST, not a class. "A program that execs its operands"
+ * is not recognisable from the text, so an unlisted wrapper is an open route — nine were,
+ * measured on 2026-09-17, until they were added. Read the list as the current inventory of
+ * a bar, never as the closure of a class.
  *
  * NESTED SHELLS (#57, the spike of 2026-09-10): a `-c`/`eval` payload is RE-PARSED by the
  * child shell, so quoting one level down (`bash -c "cu'r'l …"`) is `curl` to the child and
@@ -150,6 +154,16 @@ type CommandWordResult =
  * modelling any wrapper's own options). `sh -c "curl …"` rides the same list: unlike
  * python/node, its payload is THIS grammar, and the quoted payload's first token is
  * checkable — assembled eval payloads remain interpreter non-coverage.
+ *
+ * ⚠ IT IS A LIST, and a list is escapable by the name that is not on it. The second block
+ * below is the set #206 measured open on 2026-09-17: `script -qc 'curl …' /dev/null`,
+ * `unshare -r curl …`, `setarch x86_64 curl …`, `runuser -u x -- curl …`,
+ * `systemd-run --user curl …`, `parallel curl ::: …`, `busybox wget …`, `su`, `setpriv`
+ * and `chroot` all reached the network with word 1 resolving to a benign name; `find`'s
+ * `-exec` payload did too, and gets its own precise handling below. They are covered now;
+ * the CLASS — "a program that execs its operands" — cannot be recognised from the text, so
+ * the next unlisted one is open too. That residual is the honest statement, and
+ * `network-egress.test.ts` pins it as a row rather than leaving it to a reader's optimism.
  */
 /** Shared with `environment-dump.ts`: the same wrappers move a dumping command past word 1. */
 export const TRANSPARENT_COMMAND_WRAPPERS = new Set([
@@ -179,6 +193,20 @@ export const TRANSPARENT_COMMAND_WRAPPERS = new Set([
   'zsh',
   'dash',
   'ksh',
+  // #206, measured open on 2026-09-17: these exec their operands too, and each one
+  // carried `curl`/`wget` to the network with word 1 resolving to a benign name.
+  // (`find` is NOT here — see FIND_EXEC_PREDICATES below for why it needs the precise
+  // shape instead of every-word scanning.)
+  'script',
+  'unshare',
+  'setarch',
+  'runuser',
+  'su',
+  'setpriv',
+  'chroot',
+  'systemd-run',
+  'parallel',
+  'busybox',
 ])
 
 /**
@@ -187,6 +215,48 @@ export const TRANSPARENT_COMMAND_WRAPPERS = new Set([
  * synthesize a name.
  */
 const WRAPPER_WORD_EXEMPTIONS = new Set(['[', '{}'])
+
+/**
+ * `find`'s exec predicates and their terminators. `find` is NOT a transparent wrapper: its
+ * predicate list carries GLOBS as ordinary arguments (`find . -name "*.ts"`), and giving
+ * every word the command-word treatment denied that as synthesis — a false positive on one
+ * of the most common commands in this repo. The precise shape instead: the words after an
+ * exec predicate, up to `;`/`+`, ARE a command line, and nothing else on the line is.
+ * ⚠ Terminators are matched by LITERAL value, so `\;`, `';'` and `";"` all count.
+ */
+export const FIND_COMMAND = 'find'
+const FIND_EXEC_PREDICATES = new Set(['-exec', '-execdir', '-ok', '-okdir'])
+export const EXEC_TERMINATORS = new Set([';', '+'])
+
+/**
+ * Every `find … -exec`/`-execdir`/`-ok` payload of a word list, as raw-word groups in order.
+ * Shared with `environment-dump.ts`, which asks the same question of the same words: pi's
+ * `find` tool and a shell `find` both reach a program through this one construct, and a
+ * deny that knew it for egress but not for the environment dump reported "no regression"
+ * for the entire route (#206).
+ */
+export function findExecPayloads(words: readonly string[]): string[][] {
+  const payloads: string[][] = []
+  let current: string[] | undefined
+  for (const word of words) {
+    const resolved = literalShellWord(word)
+    const value = resolved.kind === 'literal' ? resolved.value : word
+    if (FIND_EXEC_PREDICATES.has(value)) {
+      if (current !== undefined && current.length > 0) payloads.push(current)
+      current = []
+      continue
+    }
+    if (current === undefined) continue
+    if (EXEC_TERMINATORS.has(value)) {
+      if (current.length > 0) payloads.push(current)
+      current = undefined
+      continue
+    }
+    current.push(word)
+  }
+  if (current !== undefined && current.length > 0) payloads.push(current)
+  return payloads
+}
 
 /**
  * A segment's leading compound keywords are not its command: `then cur[l] …` runs `cur[l]`.
@@ -257,6 +327,7 @@ function deniedWordInWrappedSegment(
       sawUnresolvable = true
       continue
     }
+    if (EXEC_TERMINATORS.has(resolved.value)) continue
     // ⚠ The resolved literal IS the command line the child shell will parse (#57): a
     // `-c` payload's outer quoting is gone, and whatever quoting it still carries is
     // the child's to resolve — `cu'r'l` inside `"…"` is `curl` to that child. So the
@@ -282,6 +353,36 @@ function rawScanFor(command: string, deniedBinaries: readonly string[]): string 
     if (new RegExp(`\\b${escaped}\\b`, 'i').test(command)) return deniedBinary
   }
   return undefined
+}
+
+/**
+ * `find`'s exec payloads, each gated as the command line it is. Not wrapper mode: the
+ * predicate list is full of globs that are ordinary arguments (`-name "*.ts"`), and the
+ * payload's own first word is the program — so this is command-position gating at a known
+ * offset instead of every-word gating at an unknown one. The payload is handed over as a
+ * command LINE so a shell inside it (`-exec sh -c 'curl …' ;`) takes the same recursion a
+ * shell anywhere else takes.
+ */
+function findExecFinding(
+  segmentText: string,
+  denied: Set<string>,
+  deniedBinaries: readonly string[],
+  depth: number,
+): NetworkEgressMatch | 'escalate' | undefined {
+  const words = shellWordsOf(segmentText)
+  if (words === null) return 'escalate'
+  let sawUnresolvable = false
+  for (const payload of findExecPayloads(words.slice(1))) {
+    const verdict = gateCommandLine(payload.join(' '), denied, deniedBinaries, depth + 1)
+    if (verdict === 'escalate' || verdict === 'escalate-unparseable') {
+      sawUnresolvable = true
+      continue
+    }
+    if (verdict !== undefined) {
+      return { matched: verdict.matched, via: verdict.via === 'command-position' ? 'wrapped-command' : verdict.via }
+    }
+  }
+  return sawUnresolvable ? 'escalate' : undefined
 }
 
 /**
@@ -319,6 +420,9 @@ function gateSegment(
     shellProgramIsStdin((shellWordsOf(segment.text) ?? []).slice(1))
   ) {
     return { matched: `${commandWord.canonical} reading its program from a pipe`, via: 'unresolvable' }
+  }
+  if (commandWord.canonical === FIND_COMMAND) {
+    return findExecFinding(segment.text, denied, deniedBinaries, depth)
   }
   if (!TRANSPARENT_COMMAND_WRAPPERS.has(commandWord.canonical)) return undefined
   const wrapped = deniedWordInWrappedSegment(segment.text, denied, deniedBinaries, depth)

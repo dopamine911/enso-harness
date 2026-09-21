@@ -64,6 +64,20 @@ if [ -n "${index_name}" ] && [ "${index_name}" != 'index' ]; then
   exit 0
 fi
 
+# ⚠ …and never during a MERGE, cherry-pick or revert. Measured on this branch: the isolation
+# below ends in `git reset --hard`, which deletes `.git/MERGE_HEAD`, and the commit then dies
+# with `could not open …/MERGE_HEAD` — leaving a resolved merge staged and unrecorded, which
+# is the one state where a developer's work is hardest to reconstruct. Nothing is given up by
+# skipping: in these states the working tree IS the resolution being committed, so gating it
+# is exact rather than a compromise.
+for in_progress in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+  if git rev-parse -q --verify "${in_progress}" >/dev/null 2>&1; then
+    echo "pre-commit: gating the working tree — ${in_progress} is in progress, and isolating would discard it."
+    run_gate
+    exit 0
+  fi
+done
+
 stash_message="pre-commit gate: unstaged remainder, restored automatically"
 stash_before=$(git rev-parse -q --verify refs/stash || true)
 git stash push --keep-index --include-untracked --quiet --message "${stash_message}"

@@ -116,8 +116,14 @@ export function zenAgentDir(repoRoot: string): string {
  * The harness's secrets file (#89): `.zen/secrets.env`, NOT `.env` at the root. bun
  * auto-loads `.env*` from the cwd into EVERY bun process — including a `bun -e` the model
  * runs from the repo root — so a root `.env` reaches a tool child no matter what the
- * parent scrubbed (verified with `env -i`). `.zen/` is git-ignored, write-protected
- * (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`), and read-gated by basename (`secrets.env`).
+ * parent scrubbed (verified with `env -i`).
+ *
+ * `.zen/` is git-ignored, write-protected (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`) and
+ * read-denied on BOTH tool routes by the `/.zen/` fragment in
+ * {@link DEFAULT_GUARD_POLICY}: the reader gate for every tool carrying a path, and the
+ * shell deny (#204) for a literal path word in `bash`/`powershell`. ⚠ The shell leg is a
+ * bar, not a boundary — `shell-secret-paths.ts` states what a runtime-assembled name
+ * still gets past.
  */
 export function zenSecretsPath(repoRoot: string): string {
   return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'secrets.env')
