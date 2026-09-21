@@ -8,27 +8,8 @@
     "completeness": "complete"
   },
   "unused_files": [],
-  "unused_exports": [
-    "packages/harness/core/index.ts:realpathOfNearestExisting",
-    "packages/harness/core/index.ts:extractFlatShellCommandSegments",
-    "packages/harness/core/index.ts:withoutLeadingEnvironmentAssignments",
-    "packages/harness/core/index.ts:ANTHROPIC_WEB_SEARCH_TOOL_TYPE",
-    "packages/harness/core/index.ts:runAnthropicWireSearch",
-    "packages/harness/core/index.ts:DEEPSEEK_SEARCH_BASE_URL",
-    "packages/harness/core/index.ts:DEEPSEEK_SEARCH_MODEL_ID"
-  ],
-  "unused_types": [
-    "packages/harness/core/index.ts:EnvironmentDumpMatch",
-    "packages/harness/core/index.ts:NetworkEgressMatch",
-    "packages/harness/core/index.ts:KnownPathState",
-    "packages/harness/core/index.ts:SessionReadTracker",
-    "packages/harness/core/index.ts:FlatShellCommandSegment",
-    "packages/harness/core/index.ts:WebFetchUrlDecision",
-    "packages/harness/core/index.ts:ModelAuthSource",
-    "packages/harness/core/index.ts:FetchUrl",
-    "packages/harness/core/index.ts:WebSearchSnippet",
-    "packages/harness/core/index.ts:WebSource"
-  ],
+  "unused_exports": [],
+  "unused_types": [],
   "private_type_leaks": [],
   "unused_dependencies": [],
   "unused_dev_dependencies": [],

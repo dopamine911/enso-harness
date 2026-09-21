@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 183.**
+**Decision headers: 185.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -46,6 +46,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/core/__tests__/web-search-wire.test.ts` | `#63` | The Anthropic WIRE (#63) against synthetic SSE fixtures — the wire serves both the `anthropic` and `deepseek` providers, so these fixtures are the shared spine. |
 | `packages/harness/core/deadline.ts` | `#58`, `#174` | Run work under a deadline AND the caller's abort signal, as one signal (#174; the shape `web_fetch` and `web_search` each carried). |
 | `packages/harness/core/environment-dump.ts` | `#89`, `#206` | The bash environment-dump deny (#89) — DEPTH, not the fix. |
+| `packages/harness/core/index.ts` | `#173`, `#263` | The harness's own core — path resolution, guard state, and the web-search seam's vocabulary. |
 | `packages/harness/core/network-egress.ts` | `#9`, `#54`, `#55`, `#57`, `#206` | The bash network deny (#9) — a BAR, deliberately not a boundary. |
 | `packages/harness/core/read-tracker.ts` | `#10`, `#11` | Session-scoped record of files whose content this session has seen (#10), and of the on-disk state they had when it saw them (#11). |
 | `packages/harness/core/shell-secret-paths.ts` | `#9`, `#89`, `#204` | The bash/powershell secret-path deny (#204) — the read gate's own policy, on the shell route. |
@@ -184,6 +185,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/gate-support.ts` | `#150`, `#162`, `#165`, `#174` | What the source-tree gates share (#165, #162 workstream 6): the word-splitter, the sequence matcher, the comment skip, over the one walker (`scripts/source-tree.ts`, #174). |
 | `test/glossary-doc.test.ts` | `#161`, `#164`, `#165`, `#245` | The glossary keeps its own three rules (#161, PR #164 review; #245). |
 | `test/glossary-gate.test.ts` | `#165`, `#241`, `#257`, `#287` | The glossary's Retired table, applied to the source tree (#165, `docs/glossary.md` → Retired). |
+| `test/harness-barrel-gate.test.ts` | `#173`, `#251`, `#263` | THE HARNESS BARREL IS ITS CONSUMPTION, AND THAT IS CHECKED (#263). |
 | `test/logging-gate.test.ts` | `#132`, `#162`, `#254` | Every record goes through the one logger (#132), and the substrate stays behind it. |
 | `test/naming-gate.test.ts` | `#82`, `#83`, `#250` | The naming gate's exemption for externally-fixed KEYS (#82, PR #83 review), and the severity that decides whether a tier blocks (#250) or merely mentions. |
 | `test/no-lint-suppressions.test.ts` | `#82` | The gate may not be talked out of, one line at a time. |

@@ -123,6 +123,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     ],
     limitation: 'Matches retired words and paths, not a retired meaning expressed under a new word.',
   },
+  'test/harness-barrel-gate.test.ts': {
+    roots: ['packages/harness/core/index.ts', 'packages/harness/extensions'],
+    exceptions: [],
+    limitation:
+      'Compares the barrel’s re-exported names with the names imported through it by the extensions; a name imported directly from a module rather than through the barrel is outside it, and so is module reachability.',
+  },
   'test/logging-gate.test.ts': {
     rootArrays: ['MIGRATED_ROOTS'],
     exceptions: [

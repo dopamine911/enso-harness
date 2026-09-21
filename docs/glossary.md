@@ -339,7 +339,7 @@ issues, so they are defined once, here, and kept apart from the product nouns ab
 
 - **gate** — a test that enforces a boundary over the source tree rather than a behaviour: walk the
   roots, match, compare offenders to an allowlist, expect none. One row each in the generated
-  [*Enforcement gates*](./reference/verification-inventory.md#enforcement-gates) table — sixteen
+  [*Enforcement gates*](./reference/verification-inventory.md#enforcement-gates) table — seventeen
   today, a count `test/glossary-doc.test.ts` reads off that table. Removing a root is a design
   conversation.
 - **allowlist** — a gate's named exceptions, each with its reason and the leak it maps to. The list *is*
