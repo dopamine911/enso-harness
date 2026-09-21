@@ -1,6 +1,6 @@
 import { ANTHROPIC_WEB_SEARCH_TOOL_TYPE, runAnthropicWireSearch } from '../anthropic-wire.ts'
+import { resolveProviderCredential } from '../dispatch.ts'
 import type { ModelSearchRequest, WebSearchOutcome } from '../vocabulary.ts'
-import { WebSearchProviderError } from '../vocabulary.ts'
 import { trimTrailingSlash } from '../wire-json.ts'
 
 /**
@@ -45,16 +45,7 @@ function resolveMessagesUrl(baseUrl: string): string {
 }
 
 export async function runAnthropicProviderSearch(request: ModelSearchRequest): Promise<WebSearchOutcome> {
-  const credential = await request.resolveAuth(request.model)
-  if (!credential.ok) {
-    throw new WebSearchProviderError(
-      'anthropic',
-      credential.error.length > 0 ? credential.error : 'no credential resolved',
-      {
-        requestDispatched: false,
-      },
-    )
-  }
+  const credential = await resolveProviderCredential('anthropic', request)
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
