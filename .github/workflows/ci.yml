@@ -96,8 +96,17 @@ jobs:
         with:
           bun-version: "1.4"
 
+      # The pinned dev dependency, never `bunx react-doctor@latest` (#208): this job has the
+      # PR head checked out, so `latest` meant every pull request executed whatever that tag
+      # resolved to at that moment — unreviewable in a diff, absent from bun.lock, and with
+      # `continue-on-error` a hostile or broken release produced no red check at all. Same
+      # rule the fallow steps state thirty lines up. `bun run doctor` takes the same pin,
+      # where it runs with a developer's ambient credentials rather than CI's contents: read.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       # Full scan for now — once the baseline is stable, narrow to `--scope changed`
       # (new findings only; needs fetch-depth: 0 for the base diff).
       - name: React Doctor (advisory — never blocks)
         working-directory: packages/web
-        run: bunx react-doctor@latest --verbose
+        run: bunx react-doctor --verbose

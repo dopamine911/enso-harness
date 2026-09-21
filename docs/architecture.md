@@ -93,14 +93,34 @@ graph TB
 
   EV --> G
   EV --> T
-  BT -.->|"first-wins override"| G
+  BT -.->|"tool_call · first block final"| G
   T --> ST
   T --> R
 ```
 
-**Guards override built-ins by name.** pi resolves tools **first-wins** (`runner.ts`,
-`getAllRegisteredTools`), so a guarded `write` declared before any vendor extension cannot be silently
-replaced. Load order is therefore a security property — see *Decided constraints*.
+**Guards veto calls to built-ins; they never replace them.** The guard registers no tool at all — in
+this repository `registerTool` is called only under `extensions/web-fetch/` and `extensions/web-search/`,
+and each of those adds a *new* tool. The guard is one additive `tool_call` handler
+(`extensions/guards/index.ts`, decision header *WHY A `tool_call` HANDLER RATHER THAN A TOOL OVERRIDE*):
+every extension's handlers run and pi returns on the first `block`, so a denial here is final **whatever
+the load order**. An override of `write` would be the opposite — safe only while this package loads first.
+What load order therefore decides is the logging configurator
+([boot and launchers](./flows/boot-and-launchers.md) invariant 2, `extensions/logging/index.ts`), not the
+guard's verdict. ⚠ Tool *identity* is asserted nowhere: a vendor extension registering `write` would
+shadow pi's built-in (registered tools are merged over the built-in definitions, first registration per
+name winning) and no check in this repository would report it. What survives that case is the veto — the
+guard sees the call under that name and gates it exactly as before — which is why the guard, and not the
+manifest's order, is the property this boundary rests on.
+
+**What the guard asserts at startup, and what it does not.** On `session_start` it checks that the five
+tool names its policy gates (`read`, `write`, `edit`, `bash`, `powershell`) are present in pi's live
+`getAllTools()` — `verifyPolicyToolNames` in `extensions/guards/index.ts`. Presence, not identity: it
+catches an upstream rename that would otherwise turn the guard into a silent no-op, and says nothing about
+whose implementation answers the name. It never throws — a throwing `session_start` handler wedges print
+mode — and a mismatch fails closed by denying every subsequent tool call instead.
+
+<!-- test: packages/harness/extensions/guards/__tests__/guards.test.ts#⚠ the guard registers no tool: it participates through tool_call only, so no load order can un-guard it -->
+<!-- test: packages/harness/extensions/guards/__tests__/guards.test.ts#a policy tool missing from pi's registry denies every subsequent call, naming it -->
 
 **The boundary is enforced twice, by two sensors.** The vendor gate (`test/vendor-gate.test.ts`, #145)
 reads *text*: `@earendil-works/*` is imported, and a vendor extension is named, only under `web/src/host/`
@@ -359,7 +379,7 @@ zen-harness/
   packages/
     core/                   # @zen/core — every TypeBox schema and shared type, one place
     harness/                # the pi package
-      package.json          #   pi manifest: extensions declared EXPLICITLY, guards first
+      package.json          #   pi manifest: extensions declared EXPLICITLY, logging first
       core/                 #   guard logic, shell segmentation, egress, web-search
       extensions/           #   guards · web-fetch · web-search
       skills/ prompts/ themes/
@@ -519,8 +539,8 @@ Settled. Each carries its reason so a later session can tell when the reason has
 | pi owns the loop; both surfaces are clients | One brain. Features written once work in both. |
 | Start as a **package**, never a fork | A package cannot entangle. omp forked and its features are now hard to lift. |
 | **One package, multiple extensions** | Vendored and custom side by side, one install, one version. |
-| Extensions **enumerated explicitly**, guards first | Load order is first-wins, so it is a security property. A directory glob orders by filename, which is incidental. |
-| Assert guard integrity at startup | `write`/`bash`/`read` must resolve to our implementations, failing loudly otherwise. |
+| Extensions **enumerated explicitly**, logging first | A directory glob orders by filename, which is incidental; a hand-written manifest is reviewable. What the order decides is the logging configurator — first, so that stays true when an extension logs before `session_start`. It does not decide the guard: that is a `tool_call` block and is final at any position (*Ownership boundary*). |
+| On `session_start` assert that the guard policy's tool names are registered | `verifyPolicyToolNames` checks the gated names against pi's live `getAllTools()`: presence, not identity — a tool pi renames would otherwise make the guard a silent no-op. A mismatch fails closed by denying every call, never by throwing (a throwing `session_start` wedges print mode). Tool identity is deliberately not asserted; the veto does not depend on it. |
 | **All schemas TypeBox in `@zen/core`** | One library, no bridge. TypeBox is mandatory at pi's tool API and *is* JSON Schema at the HTTP boundary — two of three destinations, zero conversion. |
 | Adapter boundaries map explicitly, never via schema transforms | Keeps validation separate from translation, which is what makes a provider swappable. |
 | **Durable state is pi's session log plus `.zen/` files, never process memory only** | Both surfaces read the same files; a service later is optional. The one cost: one live writer per session id (control plane, invariant 4). |
