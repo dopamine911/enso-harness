@@ -142,7 +142,10 @@ test('⚠ the docs-site workflow derives its base and builds the API first (#188
   expect(workflow).not.toMatch(/^\s{2}(?:push|pull_request):/m)
   // Derived from the repository, never a literal — the failure this test exists for.
   expect(workflow).toContain('ZEN_SITE_BASE: /${{ github.event.repository.name }}')
-  expect(workflow).not.toMatch(/ZEN_SITE_BASE:\s*\/[a-z]/)
+  // ⚠ Anything that is not the expression, rather than a lowercase literal (PR #330 review): a
+  // repository whose name starts with a capital — `Zen-Harness` is a valid GitHub name — would
+  // have walked straight past a `/[a-z]/` check, hardcoded and undetected.
+  expect(workflow).not.toMatch(/ZEN_SITE_BASE:\s*\/(?!\$\{\{)/)
   // `docs:api` writes what `docs:site` serves and crawls; reversed, the crawl refuses by name.
   const apiAt = workflow.indexOf('bun run docs:api')
   const siteAt = workflow.indexOf('bun run docs:site')
