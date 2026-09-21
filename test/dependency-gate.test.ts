@@ -44,8 +44,15 @@ const SOURCE_ROOTS = ['packages', 'scripts', 'test'] as const
 /**
  * A module specifier in an import position: `from '…'`, `import('…')`, `require('…')`.
  * Comment-only lines never reach here (`gate-support.ts`), so prose naming a package is free.
+ *
+ * ⚠ The keyword is anchored, and `\b` is NOT the anchor that works (PR #302 review). The
+ * risk is real — unanchored, `Array.from('@tanstack/ai-react')` reads as an import of that
+ * package and would satisfy the `overrides` equality below by accident — but a word boundary
+ * sits between `.` and `from`, so `\b` still matches `Array.from(`. It only stops
+ * `myimport('x')`. The lookbehind refuses a preceding word character, `.` or `$`, which
+ * covers both: a member call and a longer identifier are neither of them an import.
  */
-const IMPORT_SPECIFIER = /(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/g
+const IMPORT_SPECIFIER = /(?<![\w.$])(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/g
 
 interface Manifest {
   readonly dependencies?: Record<string, string>
@@ -112,6 +119,26 @@ test('an import-shaped string that names no installed package is not an import (
   // …and the near neighbour it is one transposition from IS in the graph, so the skip is a
   // resolution test and not a spelling rule.
   expect(imports.get('@tanstack/ai-react')).toEqual(expect.arrayContaining(['packages/web/src/chat-screen.tsx']))
+})
+
+// The keyword anchor, asserted against the shape that was live when it was added (PR #302
+// review). Unanchored — or anchored with `\b`, which does not help, because a word boundary
+// sits between `.` and `from` — `Buffer.from('🚀', 'utf8')` in `scripts/__tests__/zen-logs.test.ts`
+// entered the graph as an import of a package named `🚀`. Harmless there; the same shape
+// spelled `Array.from('@tanstack/ai-react')` would satisfy the `overrides` equality above
+// without anyone importing the package.
+test('a member call is not an import position, however it is spelled (#223)', () => {
+  const memberCalls = [...imports.keys()].filter((name) => name === '🚀' || name.includes(' '))
+  expect(memberCalls).toEqual([])
+  expect([...`const rocket = Buffer.from('🚀', 'utf8')`.matchAll(IMPORT_SPECIFIER)].map((match) => match[1])).toEqual(
+    [],
+  )
+  // …and the import positions it must still see, on one line each.
+  expect(
+    [`} from '@tanstack/ai-react/ui'`, `await import('@zen/core')`, `require('node:fs')`].map((line) =>
+      [...line.matchAll(IMPORT_SPECIFIER)].map((match) => match[1]),
+    ),
+  ).toEqual([['@tanstack/ai-react/ui'], ['@zen/core'], ['node:fs']])
 })
 
 /**
