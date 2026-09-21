@@ -290,9 +290,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
       }
       pendingDialogs.set(id, {
         resolve: (response: DialogAnswer) =>
-          'cancelled' in response && response.cancelled
-            ? finish(cancelValue, 'cancelled')
-            : finish(mapResponse(response), 'answered'),
+          response.cancelled === true ? finish(cancelValue, 'cancelled') : finish(mapResponse(response), 'answered'),
         abort: () => finish(cancelValue, 'aborted'),
         request,
       })
@@ -311,7 +309,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         },
         dialogOptions,
         undefined,
-        (response: DialogAnswer) => ('value' in response ? response.value : undefined),
+        (response: DialogAnswer) => response.value,
       )
     },
     confirm(title: string, message: string, dialogOptions?: ExtensionUIDialogOptions): Promise<boolean> {
@@ -324,7 +322,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         },
         dialogOptions,
         CONFIRM_DISMISSED,
-        (response: DialogAnswer) => ('confirmed' in response ? response.confirmed : false),
+        (response: DialogAnswer) => response.confirmed ?? false,
       )
     },
     input(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined> {
@@ -337,7 +335,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         },
         dialogOptions,
         undefined,
-        (response: DialogAnswer) => ('value' in response ? response.value : undefined),
+        (response: DialogAnswer) => response.value,
       )
     },
     editor(title: string, prefill?: string): Promise<string | undefined> {
@@ -345,7 +343,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
         { method: 'editor', title, ...(prefill === undefined ? {} : { prefill }) },
         undefined,
         undefined,
-        (response: DialogAnswer) => ('value' in response ? response.value : undefined),
+        (response: DialogAnswer) => response.value,
       )
     },
     notify(message: string, type?: 'info' | 'warning' | 'error'): void {
