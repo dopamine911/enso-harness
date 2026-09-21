@@ -69,7 +69,12 @@ sequenceDiagram
    `0.85.0` earlier on `PATH`). So `zen.mjs` reads `pi --version` before the spawn and refuses outside
    `zen-launch.mjs#SUPPORTED_PI_VERSIONS` — no override flag, because the range means "the corpus has
    been run against this", and `packages/harness/package.json` → `peerDependencies` states the same
-   bound. What it does NOT cover: the versions of the libraries inside the pi binary's own tree.
+   bound. The probe fails closed three ways beside the range: it is bounded at 5s (a wedged
+   `pi --version` used to park the launcher silently — worse than the refusal it exists to print,
+   and arming a kill is not enough, since a shell shim's own child holds the pipe open, so the
+   deadline races the READ), a non-zero exit is refused rather than parsed, and a banner carrying
+   no pi version is no version claim. What it does NOT cover: the versions of the libraries inside
+   the pi binary's own tree.
 
 ## The print-variant contract
 
