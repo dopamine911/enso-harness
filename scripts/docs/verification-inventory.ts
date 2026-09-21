@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { filesUnder } from '../source-tree.ts'
+import { detectedExceptionConstants, numericConstant, stringArray, stringConstant } from './gate-source.ts'
 import { assertExactKeys, runGenerator } from './generator-support.ts'
 
 /**
@@ -9,18 +10,17 @@ import { assertExactKeys, runGenerator } from './generator-support.ts'
  * numeric and count ratchets they carry, and the deliberately reusable test doubles.
  * `test/docs-gate.test.ts` keeps the checked-in page equal to this output.
  *
- * This is intentionally a source reader, not a TypeScript/JSONC parser. It understands the
- * repository's current shapes: top-level string arrays (optionally wrapped in `new Set`),
- * numeric exported constants, Biome's `noExcessiveCognitiveComplexity` objects, and exact
- * test-helper exports. A shape it cannot classify throws instead of disappearing.
+ * The constants the page publishes are read back out of the gates' source by
+ * `./gate-source.ts`, which owns every shape this understands and every refusal it makes.
  *
  * Blind spots, named (the wrong-and-self-consistent class this must not have):
  * - a gate header whose backticks do not pair is REFUSED, not split into sentences;
- * - string lexemes are masked before comment stripping, so a `//` inside `'https://…'` is not
- *   a comment; a string that spans lines is outside the mask and would mis-strip — no gate
- *   allowlist has one;
  * - a test double is a consumer only through a static relative import naming the exact symbol;
- *   a re-export or a namespace import does not count and the double shows fewer consumers.
+ *   a re-export or a namespace import does not count and the double shows fewer consumers;
+ * - an allowlist-shaped constant with no array declaration under its name (`const MAX_ALLOWED
+ *   = 5`) is SKIPPED by `gate-source.ts`; one whose array is found and cannot be read flat is
+ *   REFUSED (#262). The two used to be one swallowed exception, which made this page's
+ *   completeness claim silently untrue at exactly the constants hardest to parse.
  */
 
 const ROOT = findRepoRoot(import.meta.url)
@@ -139,7 +139,7 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
       reason: 'Lint suppressions have no per-file or per-line allowance.',
     },
     limitation:
-      'Matches line-comment Biome suppressions in known source extensions; vendored code is outside the scan.',
+      'Matches the linter, dead-code and type-checker suppression pragmas by family prefix, anywhere in a line and in any comment form, across known source extensions; vendored code is outside the scan, and a suppression written in a file extension the walker does not read is not seen.',
   },
   'test/presentation-gate.test.ts': {
     rootStrings: ['PORTED_DIRECTORY'],
@@ -324,56 +324,6 @@ function firstHeaderSentence(source: string, file: string): string {
   throw new Error(`${file}: no non-warning sentence in header`)
 }
 
-/** Comments and string lexemes in one alternation, so a `//` inside a string is never a comment. */
-const COMMENT_OR_STRING = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g
-
-function withoutComments(source: string): string {
-  return source.replace(COMMENT_OR_STRING, (lexeme) => (lexeme.startsWith('/') ? '' : lexeme))
-}
-
-function stringArray(source: string, name: string, file: string): string[] {
-  const pattern = new RegExp(
-    `\\bconst\\s+${name}\\b(?:\\s*:[^=]+)?\\s*=\\s*(?:new\\s+Set\\s*\\()?\\s*\\[([\\s\\S]*?)\\]`,
-  )
-  const body = pattern.exec(source)?.[1]
-  if (body === undefined) throw new Error(`${file}: cannot parse string array ${name}`)
-  const clean = withoutComments(body)
-  const values = [...clean.matchAll(/(['"])(.*?)\1/g)].map((match) => match[2] ?? '')
-  const residue = clean.replace(/(['"])(.*?)\1/g, '').replace(/[\s,]/g, '')
-  // An EMPTY allowlist is a state the gates aim for (the vendor gate's import list since L6), not a parse failure.
-  if (residue.length > 0) throw new Error(`${file}: ${name} is not a flat string array`)
-  return values
-}
-
-function stringConstant(source: string, name: string, file: string): string {
-  const value = new RegExp(`\\bconst\\s+${name}\\b(?:\\s*:[^=]+)?\\s*=\\s*(['"])(.*?)\\1`).exec(source)?.[2]
-  if (value === undefined) throw new Error(`${file}: cannot parse string constant ${name}`)
-  return value
-}
-
-function numericConstant(source: string, name: string, file: string): number {
-  const value = new RegExp(`\\b(?:export\\s+)?const\\s+${name}\\b[^=]*=\\s*(\\d+(?:\\.\\d+)?)`).exec(source)?.[1]
-  if (value === undefined) throw new Error(`${file}: cannot parse numeric constant ${name}`)
-  return Number(value)
-}
-
-function detectedExceptionConstants(source: string): string[] {
-  const candidates = [...source.matchAll(/^const\s+([A-Z][A-Z0-9_]*)\b/gm)]
-    .map((match) => match[1] ?? '')
-    .filter(
-      (constantName) =>
-        /(?:ALLOWED|ALLOWLIST|EXCEPTION|EXEMPT|SKIPPED|VENDORED)/.test(constantName) || constantName === 'VENDOR_ROOTS',
-    )
-  return candidates.filter((constantName) => {
-    try {
-      stringArray(source, constantName, 'gate source')
-      return true
-    } catch {
-      return false
-    }
-  })
-}
-
 function rootsOf(source: string, file: string, metadata: GateMetadata): string[] {
   return [
     ...(metadata.roots ?? []),
@@ -528,7 +478,7 @@ function generate(): string {
     const source = repositoryFile(file)
     const metadata = GATE_METADATA[file]
     if (metadata === undefined) throw new Error(`${file}: missing gate metadata`)
-    const detectedExceptions = detectedExceptionConstants(source).sort()
+    const detectedExceptions = detectedExceptionConstants(source, file).sort()
     const recordedExceptions = metadata.exceptions.map((exception) => exception.constant).sort()
     assertExactKeys(`${file} exception`, detectedExceptions, recordedExceptions)
     const exceptionCounts = metadata.exceptions.map((exception) => {
