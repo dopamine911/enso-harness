@@ -37,7 +37,7 @@
   // unused core export must still show. A schema whose type gains a consumer leaves this list.
   "ignoreExports": [
     { "file": "packages/core/src/dialog.ts", "exports": ["ZenDialogAnswer"] },
-    { "file": "packages/core/src/follow.ts", "exports": ["ZenFollowObservation", "ZenFollowStatus"] },
+    { "file": "packages/core/src/follow.ts", "exports": ["ZenFollowObservation"] },
     {
       "file": "packages/core/src/observation.ts",
       "exports": [

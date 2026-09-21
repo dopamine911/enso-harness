@@ -1,43 +1,14 @@
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
-
 /**
  * The terminal launcher's decisions, apart from the launch (`zen.mjs` spawns; this decides):
- * the isolation triple as pi's arguments, the print-run trigger, the vendor paths a manifest
- * declares that are not there, and whether the pi it is about to spawn is one the guard was
- * pinned against. Pure so `scripts/__tests__/zen-launch.test.ts` can pin them — the launcher
- * itself has no test, because it spawns pi (docs/flows/boot-and-launchers.md).
+ * the isolation triple as pi's arguments, the print-run trigger, and whether the pi it is
+ * about to spawn is one the guard was pinned against. Pure so
+ * `scripts/__tests__/zen-launch.test.ts` can pin them — the launcher itself has no test,
+ * because it spawns pi (docs/flows/boot-and-launchers.md).
+ *
+ * ⚠ The vendor-path precondition is NOT here. It was, in a copy of its own, until #221 gave
+ * pi's manifest-resource layout one owner: `@zen/core/pi-manifest`. `zen.mjs` calls that
+ * directly, as the server and the linker do.
  */
-
-const VENDOR_PATH_PREFIX = 'node_modules/'
-
-/**
- * Every resource path the manifest declares under `pi.*`, flattened.
- * @param {{ pi?: Record<string, unknown> }} manifest
- * @returns {string[]}
- */
-export function declaredResources(manifest) {
-  return Object.values(manifest.pi ?? {})
-    .flatMap((paths) => (Array.isArray(paths) ? paths : [paths]))
-    .filter((resourcePath) => typeof resourcePath === 'string')
-}
-
-/**
- * ⚠ pi does NOT error on a manifest resource path that does not exist — it skips it
- * silently (verified 2026-09-03: the vendor extension did not load and nothing was
- * reported). npm workspaces hoist our vendor packages to the repo root, so those paths
- * are missing until `bun run link:vendor` materializes them. The launcher checks and
- * refuses, because the alternative is a session that looks correct and is missing
- * whatever the vendor package was supposed to provide.
- * @param {{ pi?: Record<string, unknown> }} manifest
- * @param {string} packageRoot
- * @returns {string[]} the declared `node_modules/…` paths that do not exist under `packageRoot`
- */
-export function missingVendorPaths(manifest, packageRoot) {
-  return declaredResources(manifest)
-    .filter((resourcePath) => resourcePath.startsWith(VENDOR_PATH_PREFIX))
-    .filter((resourcePath) => !existsSync(resolve(packageRoot, resourcePath)))
-}
 
 /**
  * ⚠ THE PI THE GUARD'S REPLICA IS PINNED AGAINST (#217). `packages/harness/core/paths.ts`

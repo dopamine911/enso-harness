@@ -10,12 +10,10 @@
     ".": "./src/index.ts",
     "./log-process": "./src/log-process.ts",
     "./paths": "./src/paths.ts",
+    "./pi-manifest": "./src/pi-manifest.ts",
     "./secrets": "./src/secrets.ts",
     "./log-recorder": "./src/__tests__/log-recorder.ts",
     "./observation-kinds": "./src/__tests__/observation-kinds.ts"
-  },
-  "scripts": {
-    "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
     "@logtape/file": "2.3.4",
@@ -25,7 +23,6 @@
     "typebox": "^1.3.25"
   },
   "devDependencies": {
-    "@logtape/testing": "2.3.4",
-    "typescript": "^5.7.0"
+    "@logtape/testing": "2.3.4"
   }
 }

@@ -52,29 +52,30 @@
 import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { findRepoRoot, harnessPackageDir, printHarnessDir, zenAgentDir } from '../packages/core/src/paths.ts'
+import { declaredResources, missingVendorPaths } from '../packages/core/src/pi-manifest.ts'
 import { quarantineSecrets } from '../packages/core/src/secrets.ts'
 import { buildPrintManifest, materializePrintHarness } from './print-harness.mjs'
-import {
-  declaredResources,
-  isPrintRun,
-  missingVendorPaths,
-  piArguments,
-  piVersionSupported,
-  piVersionText,
-  SUPPORTED_PI_VERSIONS,
-} from './zen-launch.mjs'
+import { isPrintRun, piArguments, piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from './zen-launch.mjs'
 
 const repoRoot = findRepoRoot(import.meta.url)
 const packageRoot = harnessPackageDir(repoRoot)
 const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
 
-const resources = declaredResources(manifest)
+// A malformed `pi` is a refusal, not an empty list (#226) — reported as a line, not a stack:
+// every other precondition here reads as one, and a stack trace from a launcher reads as a bug.
+let resources
+try {
+  resources = declaredResources(manifest)
+} catch (error) {
+  process.stderr.write(`zen: ${error instanceof Error ? error.message : String(error)}\n`)
+  process.exit(1)
+}
 if (resources.length === 0) {
   process.stderr.write('zen: packages/harness/package.json declares no pi resources\n')
   process.exit(1)
 }
 
-// The check and its reason: `zen-launch.mjs#missingVendorPaths`. Refuse to launch on a gap.
+// The check and its reason: `@zen/core/pi-manifest#missingVendorPaths`. Refuse to launch on a gap.
 const missing = missingVendorPaths(manifest, packageRoot)
 if (missing.length > 0) {
   process.stderr.write('zen: vendor package paths are missing from the harness package:\n')

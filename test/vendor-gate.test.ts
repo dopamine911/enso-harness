@@ -104,8 +104,11 @@ const VENDOR_IMPORT_ALLOWED: readonly string[] = [
 ]
 
 /**
- * The leak inventory. Twelve of these thirteen rows arrived with #215's widening — the sites
- * were live and unlisted, not new. Grouped by what a pi replacement would have to do with each.
+ * The leak inventory. Most rows arrived with #215's widening — the sites were live and
+ * unlisted, not new — and #221's move brought the two under `packages/core/src/__tests__/`.
+ * Grouped by what a pi replacement would have to do with each. No count in this sentence: the
+ * generated inventory reads one off the constant, and a second one written here went stale
+ * inside a single PR (#222 review).
  */
 const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // ── Production code ──
@@ -128,13 +131,24 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // `## Retired`. Never leaves, for the same reason.
   'test/glossary-doc.test.ts',
   // ── Tests that pin a vendor-shaped input ──
-  // The three launcher tests carry `pi.extensions` manifests verbatim —
+  // The launcher tests carry `pi.extensions` manifests verbatim —
   // `node_modules/@ladbabynpm/picc-permission-modes/index.ts` and `node_modules/pi-multi-account/index.ts`
   // are the resources whose linking, filtering and missing-path refusal is under test. A fake
   // manifest that did not name the real vendors would not be testing the real manifest.
   'scripts/__tests__/link-vendor-packages.test.ts',
   'scripts/__tests__/print-harness.test.ts',
-  'scripts/__tests__/zen-launch.test.ts',
+  // ⚠ `scripts/__tests__/zen-launch.test.ts` is NOT here any more: `declaredResources` and
+  // `missingVendorPaths` moved to `@zen/core` with #221, the manifests moved with them, and
+  // the gate reported the leftover row as `allowlisted, matches nothing` rather than letting
+  // it sit. The inventory shrinks when the leak does; that is the half of a ratchet that is
+  // easy to omit.
+  // Same manifests, same reason, new home.
+  'packages/core/src/__tests__/pi-manifest.test.ts',
+  // The corpus contract reads picc's own `permissionContext.ts` and its `package.json`
+  // version out of `node_modules`, and asserts our replica still agrees with it. Naming the
+  // package IS the contract — a corpus taken against a fake would pin nothing. Leaves when
+  // the replica does.
+  'packages/core/src/__tests__/picc-corpus-contract.test.ts',
   // The server's refusal names the missing vendor path, so the test that pins the message
   // names it too. Leaves with `scripts/__tests__/link-vendor-packages.test.ts`.
   'packages/web/src/server/__tests__/vendor-links.test.ts',

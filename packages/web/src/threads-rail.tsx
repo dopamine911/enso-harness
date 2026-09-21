@@ -1,6 +1,8 @@
 import type { ZenStoredThread } from '@zen/core'
 import { Button } from './components/ui/button.tsx'
 import { cn } from './lib/utils.ts'
+import { pageClock } from './page-clock.ts'
+import { useStore } from './store.ts'
 import type { ThreadSummary } from './thread-stores.ts'
 
 /**
@@ -17,7 +19,10 @@ import type { ThreadSummary } from './thread-stores.ts'
  * server still holds it — a reload must get its own thread back (PR #104 review).
  *
  * Presentational: the lists, the active id, and the callbacks arrive as props, so a static
- * render pins the wording and the active marker without any chat.
+ * render pins the wording and the active marker without any chat. The clock is the one
+ * input that is NOT a prop (#278): an age that only moves when the page happens to
+ * re-render is a stale reading that looks live, so each age subscribes to `pageClock` —
+ * which a static render does not, leaving the markup as fixed as the props are.
  */
 
 /** `now`, `12s`, `3m`, `2h`, `6d` — deepseek's form, one unit, no "ago". */
@@ -32,6 +37,17 @@ export function relativeAge(from: Date, now: Date): string {
   return `${Math.floor(hours / 24)}d`
 }
 
+/**
+ * One row's age, live (#278). Its own component because the clock's tick re-renders
+ * whatever read the clock: this label moves every five seconds and the rail, the panes and
+ * the transcript above it do not re-render at all. Under a static render nothing subscribes
+ * and the age is computed once, against the clock's load time.
+ */
+function Age({ from }: { from: Date }): React.ReactNode {
+  const now = useStore(pageClock)
+  return <>{relativeAge(from, now)}</>
+}
+
 /** What an untitled thread reads as — a thread that has not been asked anything yet. */
 export const UNTITLED_THREAD = 'new thread'
 
@@ -43,8 +59,6 @@ export interface ThreadsRailProps {
   readonly earlier: readonly ZenStoredThread[]
   /** Why the earlier list could not be fetched, or undefined. Shown where the rows would be. */
   readonly earlierError: string | undefined
-  /** For the relative ages; injected so a static render is deterministic. */
-  readonly now: Date
   readonly onSelect: (threadId: string) => void
   readonly onResume: (threadId: string) => void
   readonly onNew: () => void
@@ -59,11 +73,9 @@ export interface ThreadsRailProps {
  */
 function EarlierThreadRow({
   thread,
-  now,
   onResume,
 }: {
   thread: ZenStoredThread
-  now: Date
   onResume: (threadId: string) => void
 }): React.ReactNode {
   const at = new Date(thread.lastActivityAt)
@@ -83,7 +95,9 @@ function EarlierThreadRow({
         <span className={cn('min-w-0 flex-1 truncate', thread.title === undefined ? 'italic' : '')}>
           {thread.title ?? UNTITLED_THREAD}
         </span>
-        <span className="shrink-0 tabular-nums">{relativeAge(at, now)}</span>
+        <span className="shrink-0 tabular-nums">
+          <Age from={at} />
+        </span>
       </button>
     </li>
   )
@@ -94,7 +108,6 @@ export function ThreadsRail({
   activeThreadId,
   earlier,
   earlierError,
-  now,
   onSelect,
   onResume,
   onNew,
@@ -129,7 +142,7 @@ export function ThreadsRail({
                   {thread.title ?? UNTITLED_THREAD}
                 </span>
                 <span className="shrink-0 tabular-nums" title={thread.lastActivityAt.toLocaleString()}>
-                  {relativeAge(thread.lastActivityAt, now)}
+                  <Age from={thread.lastActivityAt} />
                 </span>
               </button>
             </li>
@@ -147,7 +160,7 @@ export function ThreadsRail({
           <li className="px-2 py-1.5 text-muted-foreground text-xs italic">none yet</li>
         ) : null}
         {earlier.map((thread) => (
-          <EarlierThreadRow key={thread.threadId} thread={thread} now={now} onResume={onResume} />
+          <EarlierThreadRow key={thread.threadId} thread={thread} onResume={onResume} />
         ))}
       </ol>
     </nav>
