@@ -175,7 +175,7 @@ from our words to the vendors' is its vendor map, the one place it names them.
 | **project** | the cwd pi reads and writes | path | server startup (`ZenServerOptions.cwd`), never a request | the server process; one project, many threads |
 | **thread** | one conversation | `threadId`, UUID-shaped (`isZenThreadId`) | the browser (`crypto.randomUUID()`), or reused from a stored log on resume | the registry's `ThreadEntry` while live; the id outlives it |
 | **pi session** | pi's append-only log, and the live `AgentSession` over it | **the same string as `threadId`** (#95) | pi, under the browser's id | 1:1 with the thread; the log outlives everything |
-| **run** | one acquisition of a thread: prompt admission → `agent_settled`. Not one prompt — prompts during a run queue into it (#75) | `generation`, per thread, monotonic for the server's lifetime | `acquire()` | the lease; released by the settle observer, never by a route |
+| **run** | one acquisition of a thread: prompt admission → `agent_settled`. Not one prompt — prompts during a run queue into it (#75) | `generation`, per thread, monotonic for the server's lifetime | `acquire()` | the lease; released by the settle observer, or on acceptance where acceptance IS completion (an extension command, a mode change); never by a returning prompt |
 | **generation** | the run's number: the stale-lease fence, and the receipt the browser compares against | integer, memory only — **resets when the server restarts**, which is what "lost session" means | server | — |
 | **follow** | one browser subscription to a thread: snapshot, then observations with `seq`, then status | none; per page, per thread | `createFollowConnection` | the page |
 | **messageId** | one prompt admission; how a `prompt-rejected` names its prompt | UUID | the prompt route | one receipt |
@@ -193,17 +193,20 @@ The comparison with deepseek-harness's vocabulary (#102, #109) lives in the glos
 ```mermaid
 stateDiagram-v2
   [*] --> idle: acquire() builds the pi session
-  idle --> busy: acquire() · generation++ · awaits any abort in flight
+  idle --> busy: acquire() · generation++ · awaits any abort in flight — POST …/prompt, and POST …/mode, the other acquiring route
   busy --> idle: agent_settled → release() · idle timer armed (30 min)
+  busy --> idle: acceptance IS completion → release() with no settle — an extension command, and the mode route
   busy --> busy: POST …/prompt → queued behind the run, listed for every follower (#75)
   busy --> busy: POST …/abort → pi's queue cleared, texts back to the stopping tab (#75) · pi.abort() · settle still ends it
+  busy --> busy: POST …/mode → 409, never queued behind a run (#75) · the composer's select is disabled for the same reason
   idle --> [*]: idle timer → dispose · generation counter kept
 ```
 
 **A run in the browser** (`follow-connection.ts`). Opened by a receipt (own prompt) or by a status
 frame that says busy with no run to match (another tab's — `external-<generation>`). Closed by the
-feed's `settled` + `status`, never by a click or a returning POST. A dropped follow is said as a chunk
-(`follow-ended`) so the page can say so; the next follow's snapshot is the resync (#103, #114).
+feed's `settled` + `status` for every run the server took, and by the returning POST only where no
+frame ever will — see invariant 1. A dropped follow is said as a chunk (`follow-ended`) so the page
+can say so; the next follow's snapshot is the resync (#103, #114).
 
 **A dialog.** pi blocks; the follow carries a blocking `extension-ui-request`; an answer is `POST …/dialog`, validated
 against the question (#112); every settle path — answered, cancelled, timeout, abort — emits
@@ -212,12 +215,26 @@ question so a reconnect renders the card at once.
 
 ### Invariants — the sentences every receipt was checked against
 
-1. **The feed is the only writer of run state in the browser.** No click, no returning POST, no timer
-   closes a run. This is why abort (#116), dialogs (#113, #114) and resume (#95) landed without
-   regressions: each added a unary route and changed nothing about how a run ends.
-2. **A route tells pi; the feed ends the run.** `prompt` answers at admission (202 + receipt), `abort`
-   answers 200 with the queue it handed back (`ZenAbortReceipt`, #116 / #75) once pi was told, `dialog`
-   answers 204 when the question was spent. Their effects arrive on the follow for every follower alike.
+1. **The feed is the only source of run state in the browser.** No click and no timer closes a run,
+   and nothing the server took as a run ends on a returning POST — with one designed exception: a
+   run so quick that the status which ended it arrived before its receipt did is closed by that
+   receipt, off feed state already seen (`follow-connection.ts#send`, the fast slash-command case;
+   `docs/flows/prompt-run-settle.md` pins it). A prompt that never became a run — a refused image,
+   an unreachable or refusing POST, an unreadable receipt, a rejection that beat its own receipt —
+   is opened and closed on this side, because no frame will ever name it; and a follow that drops
+   closes what is still open as an error rather than leaving it hanging (`#subscribe`'s `finally`).
+   This is why abort (#116), dialogs (#113, #114) and resume (#95) landed without regressions: each
+   added a unary route and changed nothing about how a run ends.
+2. **A route tells pi; the feed ends the run.** Four control routes, each answering before its effect
+   is visible: `prompt` at admission (202 + receipt), `abort` 200 with the queue it handed back
+   (`ZenAbortReceipt`, #116 / #75) once pi was told, `dialog` 204 when the question was spent, and
+   `mode` 204 once the runtime was told — refused 409 while a run is in flight, since a mode change
+   is not queued behind one, and 422 for a mode the thread does not offer (`follow.ts#changeThreadMode`).
+   Their effects arrive on the follow for every follower alike. `mode` is also the second route that
+   ACQUIRES ([`routes.md`](./reference/routes.md): *Builds / acquires? yes*), which is why the rule is
+   not "a route never releases": the settle observer ends a *run*, and a route releases where
+   acceptance IS completion — an extension command (`follow.ts#promptThread`, on `onAccepted`) and a
+   mode change (`#changeThreadMode`, likewise) — or where the prompt was refused before it became one.
 3. **The snapshot is the resync.** Nothing is replayed by cursor; a follow opens with the thread as of
    `asOfSeq` and continues from there.
 4. **One live writer per pi session id.** pi appends with no lock. Within the web server the registry
@@ -537,7 +554,7 @@ Settled. Each carries its reason so a later session can tell when the reason has
 | Ingested logs **do not persist in the transcript** by default | The exposure is not the agent seeing a line, it is the line landing in the transcript, the cache, and any session store. |
 | Re-anchoring uses a **turn-scoped system message**, never a system-prompt rewrite | Rewriting the prompt per turn invalidates the entire cache. |
 | **Prompt/follow split** (#112): every route is unary, the follow is the one stream | The run is not an HTTP response, so nothing parks (#27) and no cutoff kills a slow tool (#99). Snapshot then observations; the snapshot is the resync. |
-| **The feed is the only writer of run state in the browser** | Abort (#116), dialogs (#114) and resume (#95) each added a route and changed nothing about how a run ends. |
+| **The feed is the only source of run state in the browser** | Abort (#116), dialogs (#114) and resume (#95) each added a route and changed nothing about how a run ends. |
 | **The URL names the thread; the page follows it** (#142) | `?thread=<id>` is the active pane's source of truth — the id IS pi's session id (#95), checked with the same `isZenThreadId` as the server. Boot adopts a named thread from `/history` before showing a pane and mints (and `replaceState`s) otherwise; the rail pushes; `popstate` walks the same adopt path. Plain `history`, no router: a router is deferred until the query surface grows. |
 | **Images cross as bytes, never as a URL** (#68) | `ZenPromptBody.images` is `{mimeType, data}`; the schema has no `url` field, so a server-side fetch cannot be asked for — `web_fetch`'s allowlist stays the only sanctioned fetch (#54). The browser refuses a URL-sourced part by name before posting. Redaction and caps live where the bytes are counted: 5 MB decoded per image, 20 per prompt, the body read stops at the derived wire cap. pi stores the images in the session's user entry, so the snapshot is where the transcript gets them back — the file is the record, and a snapshot with the user's images is a truthful one (measured 1.7 MB for a 1.2 MB PNG; accepted). |
 | **Abort is by thread, not by lease** (#116) | The lease that took the run lives in the prompt route's closure; an operator's stop is "whatever runs now". The stale-lease fence stays on `release`. |

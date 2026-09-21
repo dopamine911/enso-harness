@@ -31,8 +31,8 @@ import {
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
 import { noteRunAdmitted } from './run-timing.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
+import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
-import { interruptedTail, transcriptToMessages } from './transcript-to-messages.ts'
 
 /** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
 const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/
@@ -319,6 +319,8 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
   const threads = createThreadRegistry({
     createSession: (threadId: string) => host.createSession(threadId),
   })
+  /** The one live-or-cold read (#214), shared with the follow route's snapshot. */
+  const threadRead: ThreadReadDeps = { threads, host }
 
   // The permission mode a FRESH thread starts in (#84). The browser asks once on mount,
   // before any run exists, so the header can read the starting mode instead of `unknown`
@@ -401,24 +403,26 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
    *     transport (#112) a resumed pane follows the run in flight, and a prompt to a busy
    *     thread queues through pi (#75) — the 409 that guarded the old per-response run
    *     path guarded nothing here and locked the operator out of their own question.
-   *   • NOT here: the file, with the mode its branch persists. Neither: 404.
+   *   • NOT here: the file, with the mode its branch persists. Neither: 404 — the one thing
+   *     this route decides that the follow decides differently (`present`).
+   *
+   * The read itself is `thread-read.ts#readThreadMount` (#214), shared with the follow's
+   * snapshot: HERE is settled AFTER the file read, so a thread built during it is served
+   * pi's memory rather than the file both routes were racing.
    */
   async function respondWithThreadHistory(threadId: string, response: ServerResponse): Promise<void> {
-    const live = threads.peek(threadId)
-    const transcript = live === undefined ? await host.readTranscript(threadId) : live.hosted.inspect().entries
-    if (transcript === undefined) {
+    const mount = await readThreadMount(threadRead, threadId)
+    if (!mount.present) {
       response.writeHead(404, { 'Content-Type': 'text/plain' })
       response.end(`no session for thread ${threadId}`)
       return
     }
-    const messages = transcriptToMessages(transcript)
-    const interrupted = interruptedTail(transcript)
+
     const payload: ZenThreadHistory = {
       threadId,
-      messages,
-      permissionMode:
-        live === undefined ? host.storedPermissionMode(transcript) : live.hosted.runtime.permissionModeState(),
-      ...(interrupted === undefined ? {} : { interrupted }),
+      messages: mount.messages,
+      permissionMode: mount.permissionMode,
+      ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify(payload))
