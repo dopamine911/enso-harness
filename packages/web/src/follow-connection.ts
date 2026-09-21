@@ -26,6 +26,8 @@ import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
  *                chunks for as long as the view is attached.
  *   send()       POSTs `/api/threads/:id/prompt` and answers at admission; the run's events
  *                arrive on the subscription, not on the POST.
+ *   close()      releases that subscription's socket when the page lets the thread go (#272);
+ *                the page's live threads are bounded, so a follow has to be able to end.
  *
  * ⚠ AG-UI IS MADE HERE AND ONLY HERE. The wire carries `ZenObservation` (`docs/architecture.md`,
  * decided constraints); this adapter derives the chunk vocabulary TanStack's client consumes,
@@ -221,6 +223,17 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * server's reason and moves nothing.
    */
   readonly changeMode: (mode: string) => Promise<ModeChangeOutcome>
+  /**
+   * Release the thread's follow (#272): the socket closes and nothing else opens one on
+   * this connection. The page calls it when a thread leaves its live list — a thread whose
+   * pane is gone must not keep a stream the browser counts against its six-per-origin
+   * budget. Idempotent, and LATCHING: a later `subscribe` ends at once rather than
+   * reconnecting a thread the page has let go.
+   *
+   * ⚠ Not the server going away: a close from this side emits no `follow-ended` and no
+   * problem. `disconnected` states a server that dropped the page, which this is not.
+   */
+  readonly close: () => void
 }
 
 export type ModeChangeOutcome = 'told' | 'busy' | 'refused' | 'unreachable'
@@ -233,6 +246,8 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     options.fetch ?? ((input: string, init?: RequestInit): Promise<Response> => fetch(input, init))
   const base = `/api/threads/${encodeURIComponent(threadId)}`
   const log = followLog.with({ threadId })
+  /** This connection's own end (#272), aborted by `close()` — see the interface for what it is not. */
+  const released = new AbortController()
   /**
    * A problem is a RECORD (#132) — the event with its properties, to the ring and the
    * server — and, through `onProblem`, a NOTICE the page shows: the same template rendered
@@ -391,8 +406,23 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   }
 
   async function* subscribe(signal?: AbortSignal): AsyncIterable<StreamChunk> {
-    const abort = signal ?? new AbortController().signal
-    const response = await fetchImpl(`${base}/follow`, { signal: abort })
+    // The page's own end (#272) rides with TanStack's: either one closes the socket, and a
+    // connection already released never opens one.
+    if (released.signal.aborted) return
+    const abort = signal === undefined ? released.signal : AbortSignal.any([signal, released.signal])
+    let response: Response
+    try {
+      response = await fetchImpl(`${base}/follow`, { signal: abort })
+    } catch (error) {
+      // ⚠ Released while the socket was still OPENING (PR #301 review). `close()` is silent by
+      // contract — the page letting a thread go is not an error the page should be shown — but
+      // the abort lands on this fetch, whose rejection had nowhere to go but out of the
+      // generator, at whoever is iterating it. Our own release ends the iteration instead.
+      // An abort from the CALLER's signal still throws: that is the consumer's own cancel, and
+      // a transport failure is theirs to see either way.
+      if (released.signal.aborted) return
+      throw error
+    }
     if (!response.ok || response.body === null) {
       throw new Error(`follow ${threadId}: ${response.status} ${await response.text()}`)
     }
@@ -613,5 +643,11 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     return 'queued'
   }
 
-  return { subscribe, send, answerDialog, abort, prompt, changeMode }
+  function close(): void {
+    if (released.signal.aborted) return
+    log.info('follow released')
+    released.abort()
+  }
+
+  return { subscribe, send, answerDialog, abort, prompt, changeMode, close }
 }
