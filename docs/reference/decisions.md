@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 157.**
+**Decision headers: 159.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -33,7 +33,9 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/web-search.ts` | `#63` | The web_search tool's shapes and config section (#63). |
 | `packages/harness/core/__tests__/environment-dump.test.ts` | `#89` | #89's depth layer: the bash environment-dump deny. |
 | `packages/harness/core/__tests__/paths.test.ts` | `#53` | ⚠ FAIL CLOSED (#53 S3): no roots means nothing is inside — a misconfigured policy with an empty root list must deny, not allow, every write. |
+| `packages/harness/core/__tests__/shell-fixtures.ts` | `#261`, `#289` | Shell-shaped literals the scanner tests write, in one place (#261, PR #289 review). |
 | `packages/harness/core/__tests__/shell-secret-paths.test.ts` | `#204` | The bash/powershell secret-path deny (#204). |
+| `packages/harness/core/__tests__/shell-segments.test.ts` | `#9`, `#89`, `#261` | The tokenizer's own contract (#261) — the parsing floor under the network deny (#9) and the environment-dump deny (#89), pinned directly instead of transitively. |
 | `packages/harness/core/__tests__/web-fetch-policy.test.ts` | `#54`, `#55` | web_fetch's pure policy (#54). |
 | `packages/harness/core/__tests__/web-search-model-providers.test.ts` | `#63` | The google and openai providers (#63) against synthetic wire fixtures. |
 | `packages/harness/core/__tests__/web-search-support.test.ts` | `#63` | The web_search support layer (#63): source hygiene, citation appliers, auth, Tavily. |
