@@ -1,27 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks'
-import { closeSync, fchmodSync, fstatSync, mkdirSync, openSync } from 'node:fs'
-import { join } from 'node:path'
-import { getTimeRotatingFileSink } from '@logtape/file'
-import {
-  compareLogLevel,
-  configure,
-  dispose,
-  getConfig,
-  getConsoleSink,
-  getJsonLinesFormatter,
-  getLogger,
-  isLogLevel,
-  type LogLevel,
-  type LogRecord,
-  type Sink,
-  withFilter,
-} from '@logtape/logtape'
-import { getPrettyFormatter } from '@logtape/pretty'
-import { redactByField } from '@logtape/redaction'
-import { Check } from 'typebox/value'
-import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS, ZEN_REDACTED, ZEN_REDACTED_VALUE, ZenLogLine } from './log.ts'
-import { zenLogsDir } from './paths.ts'
-
 /**
  * A process's sink (#132 item 2): ONE log for the harness — `.zen/logs/zen-YYYY-MM-DD.jsonl`,
  * every process appending to the same day's file, every record redacted by field name
@@ -68,7 +44,35 @@ import { zenLogsDir } from './paths.ts'
  * `writeSync` that throws is caught by LogTape and reported on `["logtape", "meta"]` at
  * `fatal`, bypassing the sink that failed — routed to the console here, so a full disk is
  * seen, not silent.
+ *
+ * @module
  */
+
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { closeSync, fchmodSync, fstatSync, mkdirSync, openSync } from 'node:fs'
+import { join } from 'node:path'
+import { getTimeRotatingFileSink } from '@logtape/file'
+import {
+  compareLogLevel,
+  configure,
+  dispose,
+  getConfig,
+  getConsoleSink,
+  getJsonLinesFormatter,
+  getLogger,
+  isLogLevel,
+  type LogLevel,
+  type LogRecord,
+  type Sink,
+  withFilter,
+} from '@logtape/logtape'
+import { getPrettyFormatter } from '@logtape/pretty'
+import { redactByField } from '@logtape/redaction'
+import { Check } from 'typebox/value'
+import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS, ZEN_REDACTED, ZEN_REDACTED_VALUE, ZenLogLine } from './log.ts'
+import { zenLogsDir } from './paths.ts'
+
+/** One category’s level, overriding the file level for that subsystem alone. */
 
 /** A per-category override: `zen.host.events=trace` turns one subtree up without the rest. */
 export interface ZenLogOverride {

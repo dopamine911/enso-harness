@@ -4,6 +4,8 @@
  * ⚠ Import from `@zen/core`, never from a module path inside it. The barrel is what makes
  * "is this shape already declared?" answerable with one search — which is the whole reason
  * this package exists, and it stops working the moment consumers reach past it.
+ *
+ * @module
  */
 // ⚠ NAMED re-exports, not `export *` (noReExportAll): the barrel doubles as the public
 // inventory — every shape this package declares is literally listed here. Adding an export

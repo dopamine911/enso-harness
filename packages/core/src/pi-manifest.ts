@@ -1,6 +1,3 @@
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
-
 /**
  * What a pi package's manifest declares, and where pi will look for it (#221) — THE one
  * place that knows pi's manifest-resource layout.
@@ -30,7 +27,14 @@ import { resolve } from 'node:path'
  * failure `packages/web/src/server/index.ts` records having already cost a debugging detour.
  *
  * ⚠ `node:` — a subpath (`@zen/core/pi-manifest`), never the barrel (#211).
+ *
+ * @module
  */
+
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+/** Every resource path the manifest declares, flattened — a string entry and a string list read alike. */
 
 /** The prefix that makes a declared resource path a vendor path: assumption 2 above. */
 const VENDOR_PATH_PREFIX = 'node_modules/'

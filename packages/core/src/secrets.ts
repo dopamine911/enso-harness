@@ -1,6 +1,3 @@
-import { existsSync, readFileSync, statSync } from 'node:fs'
-import { rootDotenvPath, zenSecretsPath } from './paths.ts'
-
 /**
  * Secrets stay OUT of the environment the model's tools inherit (#89).
  *
@@ -37,7 +34,14 @@ import { rootDotenvPath, zenSecretsPath } from './paths.ts'
  * is untouched).
  * A tool that needs a token in a `bash` child must get it another way — `gh` has its
  * keyring — because the environment is exactly the channel this closes.
+ *
+ * @module
  */
+
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { rootDotenvPath, zenSecretsPath } from './paths.ts'
+
+/** Whether a variable name is secret-SHAPED by the #89 name rule — the boundary, not a value check. */
 
 const SECRET_SHAPED_NAME = /(?:^|_)(?:API_KEY|TOKEN|SECRET|PASSWORD)S?(?:$|_)/
 
