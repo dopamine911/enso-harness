@@ -96,8 +96,13 @@ test("⚠ fileURLToPath lives ONLY in core's paths module — pass import.meta.u
  * `import.meta.url` inside the same call. The `import.meta` accessors are bounded by the exact
  * property name, so `import.meta.main` (check-coverage's entry idiom) does not match, and neither
  * does `import.meta.url` handed straight to `findRepoRoot`, which is the sanctioned call.
+ *
+ * ⚠ The gap between the call and the argument is bounded by the LINE, not by the first `)`
+ * (PR #319 review). `[^)]*` stopped at the first closing bracket, so `new URL(join('..', '..'),
+ * import.meta.url)` — a helper call before the base — matched nothing: the spelling-not-shape
+ * blind spot this gate was rewritten to close, reproduced one nesting level down.
  */
-const RESOLVES_FROM_OWN_LOCATION = /new URL\s*\([^)]*import\.meta\.url|import\.meta\.(?:dirname|filename|dir)\b/
+const RESOLVES_FROM_OWN_LOCATION = /new URL\s*\([^;\n]*import\.meta\.url|import\.meta\.(?:dirname|filename|dir)\b/
 
 test('⚠ no source resolves a path from its own location — that is the seven-copies shape returning', () => {
   // The allowlist is EMPTY and paths.ts needs no entry: the one sanctioned walk takes its start
