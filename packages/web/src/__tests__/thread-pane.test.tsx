@@ -143,6 +143,38 @@ const pressEnter = (field: HTMLTextAreaElement): boolean =>
 const railBusy = (threadId: string): boolean | undefined =>
   threadListStore.get().find((thread) => thread.threadId === threadId)?.busy
 
+/** The rail's own reading of a thread's title — what the summary effect writes (#283). */
+const railTitle = (threadId: string): string | undefined =>
+  threadListStore.get().find((thread) => thread.threadId === threadId)?.title
+
+// ⚠ The LIVE title path, end to end (PR #310 review): a thread the page mints, a first user
+// message typed into the composer, and the rail row that must carry its title. Every other
+// title test drives the pure functions or a STORED thread whose title the server supplied —
+// so the wiring #283 rewrote (first-user-message → memo → effect → `updateThreadSummary`)
+// was covered nowhere. Depending on the message instead of the list is what stopped the
+// effect firing per token; a memo keyed on the wrong thing would still title, so this test
+// asserts the title ARRIVES, and the ones beside it assert what it is.
+test('a live thread titles its rail row from the first user message (#283)', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  expect(railTitle(pane.stores.threadId)).toBeUndefined()
+  await flush(async () => {
+    typeInto(pane.composer(), 'fix the login bug before the release')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await eventually(() => expect(railTitle(pane.stores.threadId)).toBe('fix the login bug before the release'))
+  // …and a second prompt does not retitle: the FIRST user message is the title.
+  await flush(async () => {
+    typeInto(pane.composer(), 'and the logout one too')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await eventually(() => expect(pane.server.prompts.length).toBe(2))
+  expect(railTitle(pane.stores.threadId)).toBe('fix the login bug before the release')
+  await pane.unmount()
+})
+
 // ── #125 item 1: the in-flight readings flip with the wire's status frames ───────────────
 
 test('⚠ busy on the wire → working, stop offered, mode select disabled, rail busy; settled → idle, all back', async () => {
