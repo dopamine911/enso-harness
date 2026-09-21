@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { readdirSync, readFileSync } from 'node:fs'
-import { join, relative, sep } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { filesUnder } from '../scripts/source-tree.ts'
 
 /**
@@ -57,19 +57,56 @@ const PROVENANCE_RECEIPTS: Record<string, string> = {
 }
 
 /**
- * The state layer, by import. `@zen/core` is the wire: a presentation component taking a
- * `ZenObservation` is reading the protocol, which is the renderer's job (README rule 4 —
- * types are retyped as they cross, not imported).
+ * The state layer, DERIVED (#273). `packages/web/tsconfig.json` maps `@/*` to `./src/*`, so
+ * every import a ported file writes is RESOLVED here — the alias, the relative path, the bare
+ * specifier alike — and refused when it lands anywhere under `packages/web/src` outside the two
+ * presentation neighbourhoods below. No module is spelled by name, because a hand-written list
+ * goes stale in silence: the old one still named `session-stats`, renamed to `thread-stats.tsx`
+ * long before, and its hard-coded `\.ts` suffix could not have caught a `.tsx` module even if
+ * listed — so `import { usePermissionMode } from "@/permission-mode.tsx"`, a hook over the
+ * thread's stores, passed this gate (#273). A module added beside `chat-screen.tsx` tomorrow is
+ * refused the day it lands.
  *
- * ⚠ Both spellings of the same module (PR #152 review). `packages/web/tsconfig.json` maps
- * `@/*` to `./src/*`, and these files already reach for that alias for their ui primitives —
- * so `@/store.ts` is the MORE natural way to write the import this gate exists to refuse,
- * and a relative-only pattern would have waved it through.
+ * ⚠ Both spellings of the same module (PR #152 review). These files already reach for the `@/`
+ * alias for their ui primitives, so `@/store.ts` is the MORE natural way to write the import
+ * this gate exists to refuse, and a relative-only pattern would have waved it through.
+ *
+ * `@zen/core` is the wire: a presentation component taking a `ZenObservation` is reading the
+ * protocol, which is the renderer's job (README rule 4 — types are retyped as they cross, not
+ * imported); `@tanstack/*` is the vendored state layer itself. Neither is ours to resolve, so
+ * both are named — subpaths included, since `@zen/core/log-process` is the same package
+ * (PR #153 review).
  */
-const STATE_LAYER_MODULES = 'store|thread-stores|stored-threads|follow-connection|session-stats|custom-event-router'
-const STATE_LAYER_IMPORT = new RegExp(
-  `from\\s+["'](?:@zen/core(?:/[^"']+)?|@tanstack/[^"']+|(?:(?:\\.\\./)+|@/)(?:${STATE_LAYER_MODULES})\\.ts)["']`,
-)
+const WEB_SOURCE_ROOT = 'packages/web/src'
+/** All a ported file may reach inside our sources: the ui primitives, the class-name helper, each other. */
+const PRESENTATION_DIRECTORIES = ['components', 'lib']
+const FORBIDDEN_PACKAGE = /^(?:@zen\/core(?:\/.+)?|@tanstack\/.+)$/
+/** `from "x"`, a bare `import "x"` and a dynamic `import("x")` — every spelling that pulls a module in. */
+const IMPORT_SPECIFIER = /(?:from|import)\s*\(?\s*["']([^"']+)["']/g
+
+/**
+ * What `specifier`, written in `fromFile`, actually reaches: the repository-relative path of one
+ * of our modules, or the package name of a vendored state layer — undefined when presentation
+ * may import it.
+ */
+function stateLayerTarget(fromFile: string, specifier: string): string | undefined {
+  if (FORBIDDEN_PACKAGE.test(specifier)) return specifier
+  const webRoot = join(repositoryRoot, WEB_SOURCE_ROOT)
+  const aliased = specifier.startsWith('@/')
+  // A bare specifier that is not a forbidden package is a dependency, which rule 3 allows.
+  if (!(aliased || specifier.startsWith('.'))) return undefined
+  const resolved = aliased ? join(webRoot, specifier.slice(2)) : resolve(dirname(fromFile), specifier)
+  const inside = relative(webRoot, resolved)
+  // ⚠ An escape is not an allowance (PR #293 review). `@/../thread-stores.ts` and
+  // `../../../core/src/observation.ts` land ABOVE `src`, where nothing a ported file may
+  // import lives — reading that as "allowed" would reopen by spelling exactly what resolving
+  // closed by shape. Refused, named by the path it really reaches.
+  if (inside === '' || inside === '..' || inside.startsWith(`..${sep}`)) return relative(repositoryRoot, resolved)
+  return PRESENTATION_DIRECTORIES.includes(inside.split(sep)[0] ?? '') ? undefined : `${WEB_SOURCE_ROOT}/${inside}`
+}
+
+/** A module beside the app, whatever its extension — the class the old `\.ts` pattern could not see. */
+const SOURCE_EXTENSION = /\.(?:ts|tsx|mjs)$/
 
 /** Every vendored file, at any depth under the boundary. */
 function portedFiles(): string[] {
@@ -110,34 +147,75 @@ test('⚠ nothing under components/ reaches the state layer — component-local 
   const offenders: string[] = []
   for (const path of portedFiles()) {
     for (const [lineIndex, line] of readFileSync(path, 'utf8').split('\n').entries()) {
-      if (STATE_LAYER_IMPORT.test(line)) offenders.push(`${path.slice(repositoryRoot.length + 1)}:${lineIndex + 1}`)
+      for (const [, specifier] of line.matchAll(IMPORT_SPECIFIER)) {
+        const target = stateLayerTarget(path, specifier ?? '')
+        const site = `${path.slice(repositoryRoot.length + 1)}:${lineIndex + 1}`
+        if (target !== undefined) offenders.push(`${site} → ${target}`)
+      }
     }
   }
   expect(offenders).toEqual([])
 })
 
-// The gate can only gate what its pattern sees. Every spelling of the same forbidden module
-// belongs here, and the `@/` alias row is the one PR #152's review found missing.
-test('the state-layer matcher catches both spellings — the alias and the relative path (PR #152 review)', () => {
-  for (const line of [
-    'import { useStore } from "@/store.ts";',
-    'import { useThreadStores } from "../../thread-stores.ts";',
-    'import type { ZenObservation } from "@zen/core";',
-    'import { useChat } from "@tanstack/react-ai";',
-    'import { createFollowConnection } from "@/follow-connection.ts";',
-    // A subpath is the same package: `@zen/core/log-process` is imported elsewhere in the
-    // repo, and the bare-specifier branch would have missed it (PR #153 review).
-    'import { parseZenLogLine } from "@zen/core/log-process";',
+// The gate can only gate what its resolver sees. Every spelling of a forbidden module belongs
+// here: the `@/` alias row is the one PR #152's review found missing, and the four `.tsx`
+// modules are the ones #273's probe found the hand-written list waving through.
+test('the state-layer resolver catches every spelling — the alias, the relative path, a `.tsx` module, a package subpath (#273, PR #152 review)', () => {
+  const ported = join(repositoryRoot, PORTED_DIRECTORY, 'message.tsx')
+  const wavedThrough: string[] = []
+  for (const specifier of [
+    '@/store.ts',
+    '../../thread-stores.ts',
+    '@/follow-connection.ts',
+    // ⚠ A `.tsx` module carries thread state too: these four read `useThreadStores()` and
+    // export the hooks and components that carry it. A red line here is the #273 regression —
+    // the extension, not the module list, is what the old pattern could not see.
+    '@/permission-mode.tsx',
+    '@/thread-stats.tsx',
+    '../../notifications.tsx',
+    '@/thread-status.tsx',
+    '@/to-agui.ts',
+    '../../host/extension-ui-context.ts',
+    // An escape is a spelling too (PR #293 review): a path that climbs OUT of `src` reaches
+    // nothing presentation may import, so "outside the tree" may not read as "allowed".
+    '@/../../core/src/observation.ts',
+    '../../../../core/src/guard.ts',
+    '@zen/core',
+    '@zen/core/log-process',
+    '@tanstack/react-ai',
   ]) {
-    expect(STATE_LAYER_IMPORT.test(line)).toBe(true)
+    if (stateLayerTarget(ported, specifier) === undefined) wavedThrough.push(specifier)
   }
+  expect(wavedThrough).toEqual([])
   // What presentation legitimately imports, and must keep importing.
-  for (const line of [
-    'import { cn } from "@/lib/utils.ts";',
-    'import { Button } from "@/components/ui/button.tsx";',
-    'import { useState } from "react";',
-    'import { PromptAttachment } from "./prompt-input.tsx";',
+  for (const specifier of [
+    '@/lib/utils.ts',
+    '@/components/ui/button.tsx',
+    './prompt-input.tsx',
+    'react',
+    'lucide-react',
+    'use-stick-to-bottom',
   ]) {
-    expect(STATE_LAYER_IMPORT.test(line)).toBe(false)
+    expect({ specifier, target: stateLayerTarget(ported, specifier) }).toEqual({ specifier, target: undefined })
   }
+})
+
+// ⚠ THE LIST IS DERIVED, AND THIS IS THE PROOF (#273). Every module that sits beside
+// `chat-screen.tsx` — the thread's stores and everything carrying them — is refused under both
+// spellings, whatever its extension, without being named above. A red line here means the
+// resolver has a hole a new state module can walk through; the old gate spelled six names, one
+// of which had not existed for months.
+test('⚠ every module beside the app is refused, in both spellings, whatever its extension (#273)', () => {
+  const stateModules = readdirSync(join(repositoryRoot, WEB_SOURCE_ROOT), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && SOURCE_EXTENSION.test(entry.name))
+    .map((entry) => entry.name)
+  // Not vacuous, and not vacuous in the direction that matters: the directory really does hold
+  // `.tsx` state modules, the class the old pattern's `\.ts` suffix could not match.
+  expect(stateModules.some((name) => name.endsWith('.tsx'))).toBe(true)
+  const ported = join(repositoryRoot, PORTED_DIRECTORY, 'message.tsx')
+  const wavedThrough = stateModules.filter(
+    (name) =>
+      stateLayerTarget(ported, `@/${name}`) === undefined || stateLayerTarget(ported, `../../${name}`) === undefined,
+  )
+  expect(wavedThrough).toEqual([])
 })
