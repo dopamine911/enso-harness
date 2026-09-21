@@ -66,6 +66,31 @@ export function requiredPackageNames(manifest) {
 }
 
 /**
+ * Point `linkPath` at `targetPath` as a RELATIVE directory symlink, replacing whatever is
+ * there (#267). Two scripts enforce the boot invariants that rest on this idiom — this one
+ * (invariant 5, the vendor layout pi resolves through) and `print-harness.mjs` (invariant 4,
+ * the variant package's mirror) — and both had it written out, so a correction reached one.
+ *
+ * ⚠ `lstat`, not `exists`: a BROKEN symlink must be replaced, and `existsSync` follows links,
+ * so it reports a dangling one as absent and the `symlinkSync` below then fails EEXIST.
+ * Relative, so the link survives a move of the tree that holds both ends.
+ *
+ * @param {string} linkPath
+ * @param {string} targetPath
+ * @returns {void}
+ */
+export function relinkDirectory(linkPath, targetPath) {
+  mkdirSync(dirname(linkPath), { recursive: true })
+  try {
+    lstatSync(linkPath)
+    rmSync(linkPath, { recursive: true, force: true })
+  } catch {
+    // nothing there yet
+  }
+  symlinkSync(relative(dirname(linkPath), targetPath), linkPath, 'dir')
+}
+
+/**
  * Verify-or-fix: every required package is reachable at `<packageRoot>/node_modules/<name>`,
  * linked from the repo root's hoisted copy when it is not. A package at neither is an
  * error naming it — the caller decides whether that ends the process.
@@ -92,15 +117,7 @@ export function linkVendorPackages(repoRoot, packageRoot, manifest) {
         `link-vendor-packages: ${packageName} is at neither ${target} nor the repo root — run bun install`,
       )
     }
-    mkdirSync(dirname(target), { recursive: true })
-    // lstat, not exists: a broken symlink must be replaced, and exists() follows links.
-    try {
-      lstatSync(target)
-      rmSync(target, { recursive: true, force: true })
-    } catch {
-      // nothing there yet
-    }
-    symlinkSync(relative(dirname(target), hoisted), target, 'dir')
+    relinkDirectory(target, hoisted)
     linked.push(packageName)
   }
   return { verified, linked }
