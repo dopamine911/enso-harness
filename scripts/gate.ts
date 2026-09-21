@@ -112,11 +112,13 @@ export const GATES: readonly Gate[] = [
     script: 'lint',
   },
   {
-    // `tsc -b`, not `tsc --noEmit`: project references require `composite`, `composite` requires
-    // declaration emit, and `tsc -b --noEmit` is refused with TS6310. The gate emits into
-    // `dist-types/` by design, so calling it a no-emit check was wrong in both words (#257).
+    // `tsc -b`, never `--noEmit` (#229, #257): project references need `composite`, `composite`
+    // needs declaration emit, and `tsc -b --noEmit` is refused outright — TS6310. So this step
+    // WRITES: each project's own `dist-types/`, gitignored. It is the only gate that leaves
+    // build state behind, which is why two checkouts running it over one tree fight, and why
+    // the operator is told it emits rather than being sold a no-emit check.
     name: 'typecheck',
-    describe: 'tsc -b (project-reference build; emits declarations)',
+    describe: 'tsc -b: typecheck + declaration emit into each project dist-types/',
     script: 'typecheck',
   },
   {

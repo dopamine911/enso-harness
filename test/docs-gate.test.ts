@@ -2,6 +2,12 @@ import { expect, test } from 'bun:test'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { extractDeclaration } from '../scripts/docs/extract-declaration.ts'
+import {
+  detectedExceptionConstants,
+  numericConstant,
+  stringArray,
+  stringConstant,
+} from '../scripts/docs/gate-source.ts'
 import { FENCE_OPEN, SOURCEABLE_FENCE_LANGUAGE } from '../scripts/docs/refresh-fences.ts'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
@@ -382,4 +388,76 @@ test('the extractor takes the doc comment, the whole statement, and nothing afte
     '\n',
   )
   expect(() => extractDeclaration(nested, 'Nested')).toThrow(/nested in another/)
+})
+
+/**
+ * The inventory's completeness claim, which used to have a silent escape hatch (#262).
+ *
+ * The exception detector name-matches every allowlist-shaped constant in a gate file and then
+ * decides whether it can read it. A `try/catch` decided that, so "no array under this name" and
+ * "an array I cannot read flat" were the same answer: an allowlist written as a spread, a regex
+ * literal or a nested array simply left `detectedExceptions`, the exactness check passed because
+ * the author never had to record it, and `docs/reference/verification-inventory.md` published as
+ * the exception inventory with that allowlist absent. This gate could not see it either — it
+ * diffs the page against the same generator, so both sides omitted the row.
+ *
+ * ⚠ A red line here means an unreadable allowlist can go missing from the published inventory
+ * again. The two answers must stay different: one skips, the other refuses by name.
+ */
+test('⚠ an allowlist the reader cannot parse is REFUSED, not skipped (#262)', () => {
+  // The shapes the reader knows — bare array, `new Set` wrapper, and the per-entry comments the
+  // gates actually carry: detected, so the author has to record each one.
+  expect(detectedExceptionConstants("const VENDORED_PATHS = ['a/b.ts']", 'probe.ts')).toEqual(['VENDORED_PATHS'])
+  expect(detectedExceptionConstants("const SKIPPED_NAMES = new Set(['a'])", 'probe.ts')).toEqual(['SKIPPED_NAMES'])
+  expect(detectedExceptionConstants("const EXEMPT_PATHS = ['a', /* upstream's */ 'b']", 'probe.ts')).toEqual([
+    'EXEMPT_PATHS',
+  ])
+  // A name match that declares no array is a legitimate miss, not an allowlist.
+  expect(detectedExceptionConstants('const MAX_ALLOWED_DEPTH = 5', 'probe.ts')).toEqual([])
+  // Found, and unreadable: each must name the file and the constant rather than disappear.
+  for (const unreadable of [
+    'const EXEMPT_PATHS = [...BASE, 1]',
+    'const EXEMPT_PATHS = [/^a/]',
+    "const EXEMPT_PATHS = [['a']]",
+  ]) {
+    expect(() => detectedExceptionConstants(unreadable, 'probe.ts')).toThrow(
+      /probe\.ts: EXEMPT_PATHS is not a flat string array/,
+    )
+  }
+})
+
+// The other three readers, answered directly (PR #300 review). The split's stated reason was
+// that a reader is a question about a string and needs no generator to ask — which applies to
+// all of them, not only the detector. Each publishes a row of the inventory, so a reader that
+// silently returns the wrong value publishes a wrong claim about what a gate enforces.
+test('each gate-source reader answers its shape, and refuses rather than guessing', () => {
+  // The comment mask is the subtle one: a `//` inside a quoted entry is an entry, not a comment.
+  expect(stringArray("const A = ['packages/a.ts', 'https://x/y'] // trailing", 'A', 'probe.ts')).toEqual([
+    'packages/a.ts',
+    'https://x/y',
+  ])
+  // ⚠ A `]` inside an ENTRY is content, not the end of the array (PR #302 review). The
+  // non-greedy capture this replaced stopped there: the comment case published a short count
+  // (13 read as 9) and the entry case made the whole declaration unreadable, which the
+  // generator then reported as "absent from source" — the wrong cause, naming the author.
+  expect(stringArray("const A = ['packages/a[1].tsx', 'packages/b.ts']", 'A', 'probe.ts')).toEqual([
+    'packages/a[1].tsx',
+    'packages/b.ts',
+  ])
+  // …and a bracket in a REASON comment is not the array's end either.
+  expect(stringArray("const A = [\n  // see index[0]\n  'packages/b.ts',\n]", 'A', 'probe.ts')).toEqual([
+    'packages/b.ts',
+  ])
+  // An EMPTY allowlist is the state the gates aim for, not a parse failure.
+  expect(stringArray('const A: readonly string[] = []', 'A', 'probe.ts')).toEqual([])
+  expect(() => stringArray('const B = []', 'A', 'probe.ts')).toThrow(/probe\.ts: cannot parse string array A/)
+  expect(stringConstant("const ROOT = 'packages/web'", 'ROOT', 'probe.ts')).toBe('packages/web')
+  expect(() => stringConstant('const ROOT = someCall()', 'ROOT', 'probe.ts')).toThrow(
+    /probe\.ts: cannot parse string constant ROOT/,
+  )
+  // Exported and fractional, because a threshold is both (`.fallowrc` pins 4.52).
+  expect(numericConstant('export const FLOOR = 91.5', 'FLOOR', 'probe.ts')).toBe(91.5)
+  expect(() => numericConstant('const FLOOR = computed', 'FLOOR', 'probe.ts')).toThrow(
+    /probe\.ts: cannot parse numeric constant FLOOR/,
+  )
 })
