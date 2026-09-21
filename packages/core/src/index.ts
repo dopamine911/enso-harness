@@ -127,8 +127,8 @@ export {
   type PromptOutcome,
   type PromptRequest,
   RuntimeCommand,
-  StreamingBehavior,
   ThreadRuntime,
+  ZenPromptAdmission,
 } from './thread-runtime.ts'
 export {
   isZenToolResultDescriptor,

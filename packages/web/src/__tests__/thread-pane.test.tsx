@@ -662,7 +662,7 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
     expect(pane.composer().value).toBe('')
     expect(pane.server.prompts).toEqual([
       { message: 'hello pi' },
-      { message: 'by the button, mid-run', streamingBehavior: 'followUp' },
+      { message: 'by the button, mid-run', admission: 'enqueue' },
     ])
     expect(pane.container.textContent).toContain('by the button, mid-run')
   })
@@ -670,7 +670,7 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
   await pane.settle({
     type: 'observation',
     seq: 1,
-    observation: { kind: 'queue', steering: [], followUp: ['by the button, mid-run'] },
+    observation: { kind: 'queue', interrupting: [], enqueued: ['by the button, mid-run'] },
   })
   await eventually(() => {
     const queueList = pane.container.querySelector('[aria-label="queued prompts"]')
@@ -690,7 +690,7 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
     expect(pane.server.abortCount()).toBe(1)
     expect(pane.composer().value).toBe('by the button, mid-run')
   })
-  await pane.settle({ type: 'observation', seq: 2, observation: { kind: 'queue', steering: [], followUp: [] } })
+  await pane.settle({ type: 'observation', seq: 2, observation: { kind: 'queue', interrupting: [], enqueued: [] } })
   await eventually(() => {
     expect(pane.container.querySelector('[aria-label="queued prompts"]')).toBeNull()
     // The bubble that was never asked leaves with its text (pi's TUI does the same): with the

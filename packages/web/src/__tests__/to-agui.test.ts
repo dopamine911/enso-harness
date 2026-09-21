@@ -164,7 +164,7 @@ test('every CUSTOM chunk is named by its kind and carries the observation whole 
       role: 'assistant',
       usage: { input: 1200, output: 40, cacheRead: 300, cacheWrite: 50, totalCost: 0.0132 },
     },
-    { kind: 'queue', steering: ['stop'], followUp: ['then'] },
+    { kind: 'queue', interrupting: ['stop'], enqueued: ['then'] },
     // ⚠ CUSTOM, not RAW. @ag-ui/core defines RAW and it looks made for this, but TanStack
     // NARROWS AGUIEvent and RAW is not in the narrowed union — found only by removing a cast.
     { kind: 'unmapped', event: { type: 'some_future_event', detail: 1 } },
@@ -201,7 +201,7 @@ test('nothing is silently dropped: every kind except an in-flight result and a b
     },
     { kind: 'turn-start' },
     { kind: 'turn-end', toolResults: 1 },
-    { kind: 'queue', steering: [], followUp: ['later'] },
+    { kind: 'queue', interrupting: [], enqueued: ['later'] },
     { kind: 'prompt-rejected', messageId: 'm', reason: 'Agent is already processing' },
     { kind: 'dialog-settled', id: 'd1', outcome: 'answered' },
     { kind: 'run-ended', willRetry: false },

@@ -195,21 +195,21 @@ test('abort on an idle thread or an unknown one touches nothing, and says which 
   expect(built[0]?.record.queueClears).toBe(0)
 })
 
-// #75, clear-and-restore: what waited behind the stopped run comes back, steering first, and
+// #75, clear-and-restore: what waited behind the stopped run comes back, interrupting first, and
 // pi's queue is emptied BEFORE pi is told — so nothing rides into the next prompt unasked.
 test("⚠ abort hands back the queued prompts in order and clears pi's queue; a repeat restores nothing", async () => {
   const { threads, built } = fakeHost()
   await threads.acquire('t1')
   const hosted = built[0]
   if (hosted === undefined) throw new Error('no session built')
-  hosted.record.queue.followUp.push('and then this', 'and this last')
-  hosted.record.queue.steering.push('actually, stop at the tests')
+  hosted.record.queue.enqueued.push('and then this', 'and this last')
+  hosted.record.queue.interrupting.push('actually, stop at the tests')
   expect(threads.abort('t1')).toEqual({
     outcome: 'aborted',
     restored: ['actually, stop at the tests', 'and then this', 'and this last'],
   })
   expect(hosted.record.queueClears).toBe(1)
-  expect(hosted.record.queue).toEqual({ steering: [], followUp: [] })
+  expect(hosted.record.queue).toEqual({ interrupting: [], enqueued: [] })
   // The stop is a record with the COUNT it handed back (#132) — never the texts.
   logs.assertLogged({
     level: 'info',
@@ -227,7 +227,7 @@ test('⚠ a stop must stop: if clearing the queue throws, pi is still told to ab
   await threads.acquire('t1')
   const hosted = built[0]
   if (hosted === undefined) throw new Error('no session built')
-  hosted.record.queue.followUp.push('would have been restored')
+  hosted.record.queue.enqueued.push('would have been restored')
   hosted.failClear.with = new Error('a queue listener threw')
   expect(threads.abort('t1')).toEqual({ outcome: 'aborted', restored: [] })
   expect(hosted.record.aborts).toBe(1)

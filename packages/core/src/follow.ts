@@ -3,7 +3,7 @@ import { ZenOpenDialog } from './dialog.ts'
 import { ZenObservation } from './observation.ts'
 import { ZenPermissionModeState } from './permission-mode.ts'
 import { ZenInterruptedTail } from './thread-inspection.ts'
-import { StreamingBehavior } from './thread-runtime.ts'
+import { ZenPromptAdmission } from './thread-runtime.ts'
 
 /**
  * The server↔browser wire (#112): a thread's feed, as the follow route serves it.
@@ -134,7 +134,7 @@ export type ZenPromptImage = Static<typeof ZenPromptImage>
 export const ZenPromptBody = Type.Object(
   {
     message: Type.String(),
-    streamingBehavior: Type.Optional(StreamingBehavior),
+    admission: Type.Optional(ZenPromptAdmission),
     images: Type.Optional(Type.Array(ZenPromptImage, { minItems: 1, maxItems: ZEN_PROMPT_MAX_IMAGES })),
   },
   { additionalProperties: false },
@@ -151,7 +151,7 @@ export function base64DecodedBytes(data: string): number {
 
 /**
  * What `POST /api/threads/:id/prompt` answers with: ADMISSION, not a result. A run is not
- * one prompt's reply — steering, follow-ups and retries can all land inside it — so the
+ * one prompt's reply — interrupting prompts, enqueued ones and retries can all land inside it — so the
  * receipt names the message and the acquisition it took or queued behind, and the follow
  * carries everything after (deepseek-harness: `followup()` returns void).
  */
@@ -171,7 +171,7 @@ export type ZenPromptReceipt = Static<typeof ZenPromptReceipt>
 
 /**
  * What `POST /api/threads/:id/abort` answers with when pi was told (#116, #75): the prompts
- * that were WAITING behind the stopped run, in order, steering first — cleared from pi's
+ * that were WAITING behind the stopped run, in order, the interrupting ones first — cleared from the
  * queue and handed back so the stopping tab can put them in its composer (pi's TUI does the
  * same). Never delivered silently on the next turn, never dropped. Empty when nothing waited.
  * The run's own end still arrives on the follow.

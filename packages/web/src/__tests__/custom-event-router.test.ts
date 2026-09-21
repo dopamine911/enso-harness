@@ -182,13 +182,13 @@ test("the snapshot's openDialogs is the complete list: it replaces the card, an 
   expect(noticesBesideModeLines()).toEqual([])
 })
 
-test("a queue observation is pi's whole queue, steering first; a malformed one leaves the last list standing (#75)", () => {
+test('a queue observation is the whole queue, interrupting first; a malformed one leaves the last list standing (#75)', () => {
   expect(stores.queue.get()).toEqual([])
-  observe({ kind: 'queue', steering: ['stop at the tests'], followUp: ['then this', 'and this'] })
+  observe({ kind: 'queue', interrupting: ['stop at the tests'], enqueued: ['then this', 'and this'] })
   expect(stores.queue.get()).toEqual(['stop at the tests', 'then this', 'and this'])
-  route('queue', { kind: 'queue', steering: 'not a list' })
+  route('queue', { kind: 'queue', interrupting: 'not a list' })
   expect(stores.queue.get()).toEqual(['stop at the tests', 'then this', 'and this'])
-  observe({ kind: 'queue', steering: [], followUp: [] })
+  observe({ kind: 'queue', interrupting: [], enqueued: [] })
   expect(stores.queue.get()).toEqual([])
 })
 
@@ -263,7 +263,7 @@ test('a permission-mode-rejected is a WARNING notice — the click did nothing a
 // wire already refused it (`follow-connection.ts`'s frame check); this is the second lock.
 test('a value that is not the observation its name claims moves no store', () => {
   route('extension-ui-request', { message: 'no kind, no method' })
-  route('message-end', { kind: 'queue', steering: [], followUp: [] })
+  route('message-end', { kind: 'queue', interrupting: [], enqueued: [] })
   route('extension-ui-request', {
     kind: 'extension-ui-request',
     id: '',

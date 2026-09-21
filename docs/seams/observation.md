@@ -168,13 +168,15 @@ leaves, the registry forgets the feed and `seq` restarts with the next follower,
 
 ## What crosses it that should not
 
-**`ZenQueue` is the runtime's model in our schema.** pi's `queue_update` holds two lists — steering
-messages, which enter at the next step boundary, and follow-ups, which enter after the run settles —
-and `observation.ts#ZenQueue` has the same two, under pi's own names, on this wire. It is the same
-dichotomy `StreamingBehavior` puts on the prompt body inbound (`thread-runtime.md` → *What crosses it
-that should not*, and #216). No consumer uses the split: the router concatenates the two lists into
-one `ThreadStores.queue`, and the abort receipt concatenates them too, so the distinction crosses the
-wire and is discarded on arrival. A runtime with one queue class, or three, changes this shape.
+**`ZenQueue` keeps the runtime's SHAPE, under our words (#216).** pi's `queue_update` holds two
+lists — steering messages, which enter at the next step boundary, and follow-ups, which enter after
+the run settles — and `observation.ts#ZenQueue` has the same two as `interrupting` / `enqueued`,
+mapped in `host/map-events.ts` where pi's field names are read and nowhere else. The inbound half is
+`ZenPromptAdmission` on the prompt body (`thread-runtime.md` → *What crosses it that should not*).
+What still crosses is the SPLIT, and no consumer uses it: the router concatenates the two lists into
+one `ThreadStores.queue`, and the abort receipt concatenates them too. It survives because a follower
+renders what is waiting and "this one cuts in" is a different sentence from "this one waits its
+turn"; a runtime with one queue class, or three, changes this shape and nothing above it.
 
 **`messages` on the snapshot is the state layer's shape.** `ZenFollowSnapshot.messages`
 (`follow.ts` line 35), carried as `Type.Array(Type.Unknown())`: not an observation but the storage

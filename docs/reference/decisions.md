@@ -109,7 +109,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/permission-dialog.test.ts` | `#73` | The coupling to picc's `FilePermissionDialog` (#73), pinned against the REAL class: the lift reads TypeScript-private fields by name, so this is what fails — loudly — when a picc refactor renames one. |
 | `packages/web/src/host/__tests__/permission-mode-adapter.test.ts` | `#95` | picc's own restore rule, applied to the raw branch, below the seam (L3 step A). |
 | `packages/web/src/host/__tests__/session-events.test.ts` | `#69` | The replica of pi's unexported `toJsonEvent` (#69): what `map-events.ts` consumes must be byte-for-byte the rpc wire shape. |
-| `packages/web/src/host/agent-host.ts` | `#27`, `#69`, `#89` | pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning `pi --mode rpc` per prompt. |
+| `packages/web/src/host/agent-host.ts` | `#27`, `#69` | pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning `pi --mode rpc` per prompt. |
 | `packages/web/src/host/event-tail.ts` | `#69`, `#84`, `#86`, `#88`, `#97` | A thread's event tail (#97): the last N events through one funnel, with provenance. |
 | `packages/web/src/host/map-events.ts` | `#24` | pi rpc events → the observations a surface renders (#24). |
 | `packages/web/src/host/permission-dialog.ts` | `#27`, `#69`, `#73` | picc's permission prompt, lifted to a question the web surface can ask (#73). |

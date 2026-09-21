@@ -213,7 +213,7 @@ test('[WARN] a kind the wire does not take is refused on this side by name, not 
   server.abort()
 })
 
-test('prompt() during a run carries the images beside the text, as a followUp (#68, #75)', async () => {
+test('prompt() during a run carries the images beside the text, enqueued (#68, #75)', async () => {
   const server = scripted(QUEUED_RECEIPT)
   server.frame({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 2 })
   await server.untilChunks(3)
@@ -221,7 +221,7 @@ test('prompt() during a run carries the images beside the text, as a followUp (#
     'queued',
   )
   expect(server.prompts).toEqual([
-    { message: 'and this', streamingBehavior: 'followUp', images: [{ mimeType: 'image/png', data: PNG_BYTES }] },
+    { message: 'and this', admission: 'enqueue', images: [{ mimeType: 'image/png', data: PNG_BYTES }] },
   ])
   server.abort()
 })
@@ -416,13 +416,13 @@ test('abort is one POST to …/abort and names what the server did; it closes no
 
 const QUEUED_RECEIPT = { status: 202, body: { threadId: 't1', messageId: 'pm1', generation: 2, queued: true } }
 
-test('⚠ prompt() during a run is one POST with streamingBehavior followUp, and opens no run of its own', async () => {
+test('⚠ prompt() during a run is one POST with admission enqueue, and opens no run of its own', async () => {
   const server = scripted(QUEUED_RECEIPT)
   server.frame({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 2 })
   await server.untilChunks(3) // the snapshot, then RUN_STARTED + TEXT_MESSAGE_START (another tab's run)
   const before = server.chunks.length
   expect(await server.connection.prompt('and then this')).toBe('queued')
-  expect(server.prompts).toEqual([{ message: 'and then this', streamingBehavior: 'followUp' }])
+  expect(server.prompts).toEqual([{ message: 'and then this', admission: 'enqueue' }])
   // No RUN_STARTED, no TEXT_MESSAGE_START: the run in flight is the one it queued behind.
   expect(server.chunks.length).toBe(before)
   server.abort()

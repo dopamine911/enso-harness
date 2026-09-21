@@ -579,7 +579,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
       messageId,
       generation,
       admission: queued ? 'queued' : 'opened',
-      ...(body.streamingBehavior === undefined ? {} : { streamingBehavior: body.streamingBehavior }),
+      ...(body.admission === undefined ? {} : { admission: body.admission }),
     })
     response.writeHead(202, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify(outcome.receipt))

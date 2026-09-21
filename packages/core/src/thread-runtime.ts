@@ -34,9 +34,23 @@ export const PromptImageContent = Type.Object({
 })
 export type PromptImageContent = Static<typeof PromptImageContent>
 
-/** What to do when a prompt arrives while the agent is already streaming. */
-export const StreamingBehavior = Type.Union([Type.Literal('steer'), Type.Literal('followUp')])
-export type StreamingBehavior = Static<typeof StreamingBehavior>
+/**
+ * What to do when a prompt arrives while the agent is already streaming — ZEN's two words,
+ * not the runtime's (#216).
+ *
+ * ⚠ IT WAS `StreamingBehavior = 'steer' | 'followUp'`: pi's own option name and pi's own
+ * literals, declared as a Zen schema and published on `ZenPromptBody`, so the vendor's model
+ * was the only vocabulary the wire accepted — and `docs/seams/thread-runtime.md` said the
+ * opposite in the same breath. The vendor gate cannot see that class of leak: no import, no
+ * vendor word. pi's spelling is produced in ONE place now, `host/agent-host.ts`, which is
+ * where a vendor word belongs; a runtime that admits prompts differently becomes a host
+ * change, which is this seam's whole promise.
+ *
+ * `interrupt` — take the prompt at the next step boundary. `enqueue` — after the run settles.
+ * Two because the runtime has two; a third is a literal here and a mapping there.
+ */
+export const ZenPromptAdmission = Type.Union([Type.Literal('interrupt'), Type.Literal('enqueue')])
+export type ZenPromptAdmission = Static<typeof ZenPromptAdmission>
 
 /**
  * One entry from pi's `get_commands`.
@@ -98,8 +112,8 @@ export type DialogAnswer = { id: string } & (
 export interface PromptRequest {
   message: string
   images?: readonly PromptImageContent[]
-  /** Required by pi when the session is already streaming — otherwise `prompt` rejects. */
-  streamingBehavior?: StreamingBehavior
+  /** How the runtime should take it when a run is already streaming; the host maps it. */
+  admission?: ZenPromptAdmission
 }
 
 export interface PromptOutcome {
@@ -172,12 +186,12 @@ export const ThreadRuntime = Type.Object({
   /** Abort the in-flight run and wait until the agent is idle. The session survives. */
   abort: Type.Unsafe<() => Promise<void>>(Type.Function([], Type.Unknown())),
   /**
-   * Drop every prompt waiting behind the run and return the texts, steering first (#75,
-   * clear-and-restore): pi's `AgentSession.clearQueue()`, which also emits the
-   * `queue_update` every follower reads. The stop route hands the texts back to the tab
-   * that stopped, so nothing typed is lost and nothing runs unasked on the next turn.
+   * Drop every prompt waiting behind the run and return the texts, interrupting first (#75,
+   * clear-and-restore): the runtime also emits the queue observation every follower reads.
+   * The stop route hands the texts back to the tab that stopped, so nothing typed is lost and
+   * nothing runs unasked on the next turn. ZEN's two words (#216) — the host maps them.
    */
-  clearQueue: Type.Unsafe<() => { steering: string[]; followUp: string[] }>(Type.Function([], Type.Unknown())),
+  clearQueue: Type.Unsafe<() => { interrupting: string[]; enqueued: string[] }>(Type.Function([], Type.Unknown())),
   /** Cancel pending dialogs, tell extensions the session is shutting down, release the session. Idempotent. */
   dispose: Type.Unsafe<() => void>(Type.Function([], Type.Void())),
 })

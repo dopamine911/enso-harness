@@ -77,7 +77,7 @@ export interface ThreadStores {
    */
   readonly disconnected: WritableStore<boolean>
   /**
-   * What waits behind the run in flight, as pi holds it (#75): the texts, steering first,
+   * What waits behind the run in flight (#75): the texts, the interrupting ones first,
    * from every `queue` frame — one list for every follower, so a second tab sees what
    * the first queued. Empty when nothing waits. Rendered above the composer; a stop hands
    * these back to the composer through the abort receipt, not from here (the frame that

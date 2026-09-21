@@ -230,7 +230,7 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * Send a prompt while a run is in flight (#75). ⚠ Not `chat.sendMessage`: TanStack holds a
    * send in its own queue while the run it started is open, and delivers it at settle — the
    * browser's queue, invisible to other tabs and lost on reload. This POSTs now with
-   * `streamingBehavior: followUp`, so pi queues it and every follower sees it.
+   * `admission: enqueue`, so the runtime queues it and every follower sees it.
    */
   readonly prompt: (text: string, images?: readonly ZenPromptImage[]) => Promise<PromptOutcome>
   /**
@@ -675,7 +675,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   async function prompt(text: string, images: readonly ZenPromptImage[] = []): Promise<PromptOutcome> {
     const body: ZenPromptBody = {
       message: text,
-      streamingBehavior: 'followUp',
+      admission: 'enqueue',
       ...(images.length === 0 ? {} : { images: [...images] }),
     }
     const response = await post('prompt', 'queued prompt', {

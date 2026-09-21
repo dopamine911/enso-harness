@@ -17,14 +17,14 @@ sequenceDiagram
   participant F as followers (the feed)
 
   B->>B: send(): RUN_STARTED for TanStack's runId — admission, before any answer
-  B->>R: POST …/prompt { message, images?, streamingBehavior? }
+  B->>R: POST …/prompt { message, images?, admission? }
   R->>R: readPromptBody ⇒ 400 before any lease (schema, whitespace-only, decoded image bytes)
   R->>T: acquire(threadId) — build if needed, await an abort in flight, generation += 1, busy
   T-->>F: status { live, busy: true, generation }
   R->>T: observe(threadId): the settle observer
   R->>P: prompt(request, { onAccepted, onRejected })
   R-->>B: 202 { threadId, messageId, generation, queued: false }
-  Note over R,P: BUSY thread: peek, never acquire · prompt with the body's streamingBehavior, else 'followUp' · 202 with the in-flight run's generation, queued: true
+  Note over R,P: BUSY thread: peek, never acquire · prompt with the body's admission, else 'enqueue' · 202 with the in-flight run's generation, queued: true
   P-->>F: observations { seq } — text-delta, tool-call, queue, message-start …
   P-->>F: observation { kind: 'settled' }
   F->>R: the settle observer: unsubscribe, lease.release()
@@ -67,7 +67,7 @@ sequenceDiagram
 ```ts
 /**
  * What `POST /api/threads/:id/prompt` answers with: ADMISSION, not a result. A run is not
- * one prompt's reply — steering, follow-ups and retries can all land inside it — so the
+ * one prompt's reply — interrupting prompts, enqueued ones and retries can all land inside it — so the
  * receipt names the message and the acquisition it took or queued behind, and the follow
  * carries everything after (deepseek-harness: `followup()` returns void).
  */
@@ -94,7 +94,7 @@ that title, so a renamed or deleted pin fails this page.
 - **Invariants 1 and 3, server side** — [`follow.test.ts`](../../packages/web/src/server/__tests__/follow.test.ts):
   the receipt, the two status frames of acquisition, then delta, `settled`, released — and the
   `info` spine that records each step.
-<!-- test: packages/web/src/server/__tests__/follow.test.ts#a prompt on a busy thread is queued through pi as a followUp, not refused and not re-acquired -->
+<!-- test: packages/web/src/server/__tests__/follow.test.ts#a prompt on a busy thread is enqueued through the runtime, not refused and not re-acquired -->
 - **Invariant 4, server side** — the second prompt's receipt and what the runtime was handed.
 <!-- test: packages/web/src/server/__tests__/follow.test.ts#an unknown slash command is a 400 at admission and releases the thread -->
 - **Invariant 5, the lease-then-400 half** — the runtime is handed nothing and the thread is idle.

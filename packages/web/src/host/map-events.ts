@@ -257,7 +257,8 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
       return { kind: 'turn-end', toolResults: countOf(event.toolResults) }
 
     case 'queue_update':
-      return { kind: 'queue', steering: textsOf(event.steering), followUp: textsOf(event.followUp) }
+      // pi's two field names, read here and nowhere else (#216): the wire carries Zen's.
+      return { kind: 'queue', interrupting: textsOf(event.steering), enqueued: textsOf(event.followUp) }
 
     case 'tool_execution_start':
       return {

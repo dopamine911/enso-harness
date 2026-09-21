@@ -7,6 +7,7 @@ import {
   type InlineExtension,
   initTheme,
   VERSION as PI_VERSION,
+  type PromptOptions,
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
 import {
@@ -18,6 +19,7 @@ import {
   type ZenObservation,
   type ZenOpenDialog,
   type ZenPermissionModeState,
+  type ZenPromptAdmission,
   type ZenThreadEvent,
   type ZenTranscriptEntry,
   zenLogger,
@@ -91,6 +93,21 @@ const MULTI_ACCOUNT_CHILD_PROXY_KEY = 'childProxy'
 
 /** pi's `InputSource` for prompts that arrive over a wire rather than a keyboard. */
 const PROMPT_SOURCE_RPC = 'rpc'
+
+/**
+ * Zen's admission word → pi's `streamingBehavior` literal (#216). THE ONLY PLACE the vendor's
+ * spelling is produced on the prompt path: the wire, the route, the registry and the browser
+ * all speak `interrupt`/`enqueue`, and a runtime that names its two differently is this table
+ * and nothing else. A third admission is a literal in `@zen/core` and a row here.
+ *
+ * ⚠ The value type is pi's own (`PromptOptions['streamingBehavior']`), never restated: pi
+ * renaming or widening its literals is then a compile error in this table, which is the one
+ * place that should care.
+ */
+const STREAMING_BEHAVIOR_OF: Record<ZenPromptAdmission, NonNullable<PromptOptions['streamingBehavior']>> = {
+  interrupt: 'steer',
+  enqueue: 'followUp',
+}
 
 /** The `ExtensionMode` we bind — `ctx.mode` as extensions see it. rpc is the truthful one: no terminal, a remote surface. */
 const EXTENSION_MODE_RPC = 'rpc'
@@ -468,7 +485,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         void session
           .prompt(request.message, {
             ...(request.images === undefined ? {} : { images: [...request.images] }),
-            ...(request.streamingBehavior === undefined ? {} : { streamingBehavior: request.streamingBehavior }),
+            ...(request.admission === undefined ? {} : { streamingBehavior: STREAMING_BEHAVIOR_OF[request.admission] }),
             source: PROMPT_SOURCE_RPC,
             preflightResult: (didSucceed: boolean) => {
               if (didSucceed) {
@@ -539,8 +556,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           () => ui.abortAllDialogs(),
         )
       },
-      clearQueue(): { steering: string[]; followUp: string[] } {
-        return session.clearQueue()
+      clearQueue(): { interrupting: string[]; enqueued: string[] } {
+        // The runtime's two lists under Zen's words (#216) — the only place either spelling is
+        // translated on this side, as `map-events.ts` is on the observation side.
+        const cleared = session.clearQueue()
+        return { interrupting: cleared.steering, enqueued: cleared.followUp }
       },
       dispose(): void {
         if (disposed) return

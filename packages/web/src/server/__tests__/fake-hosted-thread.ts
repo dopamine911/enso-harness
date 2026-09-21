@@ -33,7 +33,7 @@ export interface FakeThreadRecord {
   queueClears: number
   disposed: number
   /** What pi holds behind the run — a test fills it to see a stop hand it back (#75). */
-  queue: { steering: string[]; followUp: string[] }
+  queue: { interrupting: string[]; enqueued: string[] }
 }
 
 /** The fake's own state, handed to an override so a scripted method can record and emit through it. */
@@ -56,9 +56,9 @@ export interface FakeHostedThreadOptions {
 }
 
 /** Hand the queue back the way pi does — a copy out, the queue emptied. */
-export function takeQueue(record: FakeThreadRecord): { steering: string[]; followUp: string[] } {
-  const cleared = { steering: [...record.queue.steering], followUp: [...record.queue.followUp] }
-  record.queue = { steering: [], followUp: [] }
+export function takeQueue(record: FakeThreadRecord): { interrupting: string[]; enqueued: string[] } {
+  const cleared = { interrupting: [...record.queue.interrupting], enqueued: [...record.queue.enqueued] }
+  record.queue = { interrupting: [], enqueued: [] }
   return cleared
 }
 
@@ -71,7 +71,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     aborts: 0,
     queueClears: 0,
     disposed: 0,
-    queue: { steering: [], followUp: [] },
+    queue: { interrupting: [], enqueued: [] },
   }
   const open = new Map<string, ZenDialogSpec>()
   // Records into the same tail the real host does, so the events route sees the real shape
@@ -126,7 +126,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       record.queueClears += 1
       const cleared = takeQueue(record)
       // pi emits the emptied queue to every follower.
-      emit({ kind: 'queue', steering: [], followUp: [] })
+      emit({ kind: 'queue', interrupting: [], enqueued: [] })
       return cleared
     },
     dispose: () => {

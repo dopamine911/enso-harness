@@ -246,17 +246,23 @@ export const ZenTurnEnd = Type.Object({
 export type ZenTurnEnd = Static<typeof ZenTurnEnd>
 
 /**
- * pi's `queue_update` (#75, #112): what is waiting behind the run in flight — steering
- * messages enter at the next step boundary, follow-ups after the run settles (dsh's
- * `next-step` / `next-turn`). The TEXTS, in order, as pi holds them: the page shows what is
- * waiting (the queue list above the composer), every follower sees the same list, and a
- * stop hands them back to the composer (#75, clear-and-restore). Empty lists when nothing
- * waits — the frame pi emits after it claims or clears.
+ * What is waiting behind the run in flight (#75, #112, #216): prompts that will INTERRUPT at
+ * the next step boundary, and prompts ENQUEUED until the run settles. The TEXTS, in order, as
+ * the runtime holds them: the page shows what is waiting (the queue list above the composer),
+ * every follower sees the same list, and a stop hands them back to the composer (#75,
+ * clear-and-restore). Empty lists when nothing waits — the frame emitted after a claim or a
+ * clear.
+ *
+ * ⚠ ZEN's words, not the runtime's. The fields were `steering`/`followUp` — pi's own, on the
+ * SSE wire, with `host/map-events.ts` passing them through rather than mapping them. Every
+ * consumer concatenates the two lists (`custom-event-router.ts`, the abort receipt), so the
+ * split survives on the wire for one reason: a follower renders what is waiting, and "this one
+ * cuts in" is a different sentence from "this one waits its turn".
  */
 export const ZenQueue = Type.Object({
   kind: Type.Literal('queue'),
-  steering: Type.Array(Type.String()),
-  followUp: Type.Array(Type.String()),
+  interrupting: Type.Array(Type.String()),
+  enqueued: Type.Array(Type.String()),
 })
 export type ZenQueue = Static<typeof ZenQueue>
 

@@ -73,7 +73,7 @@ function compactOf(observation: ZenObservation): ZenLogProperties {
     case 'dialog-settled':
       return { dialogId: observation.id, outcome: observation.outcome }
     case 'queue':
-      return { steering: observation.steering.length, followUp: observation.followUp.length }
+      return { interrupting: observation.interrupting.length, enqueued: observation.enqueued.length }
     case 'prompt-rejected':
       return { messageId: observation.messageId, reason: observation.reason }
     case 'custom-entry':
