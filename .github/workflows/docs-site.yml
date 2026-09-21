@@ -58,6 +58,7 @@ jobs:
       - name: Build the site and crawl its links
         env:
           ZEN_SITE_BASE: /${{ github.event.repository.name }}
+          ZEN_SITE_URL: https://${{ github.repository_owner }}.github.io
         run: bun run docs:site
 
       - name: Upload the built site

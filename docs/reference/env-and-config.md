@@ -23,6 +23,7 @@ grounded `environment.KEY` seams, and keys explicitly written beside a process-e
 | `ZEN_SERVER_URL` | `scripts/zen-logs.ts#bundle` | Optional live-server URL for bundle retrieval; defaults to `http://127.0.0.1:5179`. | per-call |
 | `ZEN_SERVER_URL` | `scripts/zen-thread.ts` | Optional live-server URL for thread inspection; defaults to `http://127.0.0.1:5179`. | boot |
 | `ZEN_SITE_BASE` | `scripts/docs/site-base.ts#SITE_BASE` (module read) | Optional; the path the documentation site is served under. Defaults to `/zen-harness` for a local build. The publish workflow sets it to `/<repository>` — what a GitHub project site is served from — so the base is derived rather than a literal that rots on a rename. | build |
+| `ZEN_SITE_URL` | `scripts/docs/site-base.ts#SITE_URL` (module read) | Optional; the origin the site is served from, which Astro needs to emit a sitemap — without it `@astrojs/sitemap` skips at WARN and the build still succeeds. Defaults to the unresolvable `https://example.invalid` because a local build has no origin; the publish workflow sets the owner’s Pages origin. | build |
 | `npm_config_user_agent` | `scripts/gate.ts#detectPackageManager` | Optional package-manager identity; falls back to Bun detection, then `npm`. | boot |
 
 **Parser limit.** Only literal keys in the source shapes named above become rows. Computed names and

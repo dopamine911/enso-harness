@@ -50,6 +50,14 @@ interface EnvironmentMetadata extends EnvironmentOccurrence {
 
 const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
   {
+    key: 'ZEN_SITE_URL',
+    source: 'scripts/docs/site-base.ts',
+    reader: '`scripts/docs/site-base.ts#SITE_URL` (module read)',
+    purposeAndDefault:
+      'Optional; the origin the site is served from, which Astro needs to emit a sitemap — without it `@astrojs/sitemap` skips at WARN and the build still succeeds. Defaults to the unresolvable `https://example.invalid` because a local build has no origin; the publish workflow sets the owner\u2019s Pages origin.',
+    phase: 'build',
+  },
+  {
     key: 'ZEN_SITE_BASE',
     source: 'scripts/docs/site-base.ts',
     reader: '`scripts/docs/site-base.ts#SITE_BASE` (module read)',

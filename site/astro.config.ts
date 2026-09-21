@@ -1,7 +1,7 @@
 import starlight from '@astrojs/starlight'
 import { defineConfig } from 'astro/config'
 import mermaid from 'astro-mermaid'
-import { SITE_BASE } from '../scripts/docs/site-base.ts'
+import { SITE_BASE, SITE_URL } from '../scripts/docs/site-base.ts'
 
 /**
  * The documentation site (#188): a PRESENTATION layer over `docs/`, never a second source.
@@ -18,6 +18,7 @@ import { SITE_BASE } from '../scripts/docs/site-base.ts'
  * `srcDir`/`outDir` stay inside `site/`; nothing this build writes leaves it.
  */
 export default defineConfig({
+  site: SITE_URL,
   base: SITE_BASE,
   outDir: './dist',
   // ⚠ `mermaid()` must precede `starlight()`: it rewrites the ```mermaid fences before
