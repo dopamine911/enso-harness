@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { extractDeclaration } from '../scripts/docs/extract-declaration.ts'
 import {
@@ -398,6 +399,77 @@ test('the extractor takes the doc comment, the whole statement, and nothing afte
     '\n',
   )
   expect(() => extractDeclaration(nested, 'Nested')).toThrow(/nested in another/)
+})
+
+// ── the seam inventory (#213) ────────────────────────────────────────────────────────
+
+/**
+ * The real generator over a COPY of `docs/seams/` — its one argument is the pages
+ * directory, and the metadata keys it checks are still the real ones, so a fixture can add
+ * or retitle a page without touching the pages this repo ships. `edit` is what the
+ * thirteenth author does.
+ */
+function seamsTableOver(edit: (directory: string) => void): { exitCode: number; stdout: string; stderr: string } {
+  const directory = mkdtempSync(join(tmpdir(), 'zen-seams-'))
+  cpSync(join(DOCS_ROOT, 'seams'), directory, { recursive: true })
+  edit(directory)
+  const run = Bun.spawnSync(['bun', 'scripts/docs/seams-table.ts', directory], { cwd: REPOSITORY_ROOT })
+  return { exitCode: run.exitCode, stdout: run.stdout.toString(), stderr: run.stderr.toString() }
+}
+
+test('the seams table has one row per page under docs/seams, the named non-seams aside (#213)', () => {
+  const generated = seamsTableOver(() => undefined)
+  expect(generated.stderr).toBe('')
+  expect(generated.exitCode).toBe(0)
+  const listed = [...generated.stdout.matchAll(/]\(\.\/seams\/([^)]+)\)/g)].map((row) => row[1]).sort()
+  const onDisk = readdirSync(join(DOCS_ROOT, 'seams'))
+    .filter((file) => file.endsWith('.md') && file !== 'README.md' && file !== 'ported-provenance.md')
+    .sort()
+  expect(listed).toEqual(onDisk)
+})
+
+// ⚠ AN INVENTORY THAT CAN OMIT IS NOT AN INVENTORY (#213). The generator's header promises
+// "a page added or removed fails here rather than going unlisted", and for one case it did
+// not: the page list was filtered by the `# Seam: …` title BEFORE the exhaustiveness check,
+// so a page whose H1 read anything else was dropped before anything could miss it — absent
+// from the table in `architecture.md`, absent from the metadata, generator exit 0, the gate
+// green. That is the growth case: a thirteenth seam page titled `# The context seam`. A red
+// line here means the seams table can again understate the inventory, and a contract nobody
+// is handed on review is a contract nobody reviews.
+test('⚠ a page under docs/seams the generator cannot classify is REFUSED, never omitted (#213)', () => {
+  const added = seamsTableOver((directory: string) => {
+    writeFileSync(
+      join(directory, 'context.md'),
+      '# The context seam\n\n## What crosses it that should not\n\n**Nothing yet.**\n',
+    )
+  })
+  expect(added.exitCode).not.toBe(0)
+  expect(added.stderr).toContain('context.md')
+  expect(added.stdout).toBe('')
+
+  // A page the table already lists, retitled: refused by name and by the title it needs,
+  // not by an exhaustiveness message that says only that a key went missing.
+  const retitled = seamsTableOver((directory: string) => {
+    const page = join(directory, 'storage.md')
+    writeFileSync(page, readFileSync(page, 'utf8').replace(/^# Seam: .+$/m, '# Storage'))
+  })
+  expect(retitled.exitCode).not.toBe(0)
+  expect(retitled.stderr).toContain('storage.md has no "# Seam: …" title')
+
+  // The leak column is each page's own claim, not prose: a leak section whose first
+  // paragraph is not the bold lead cannot become a cell, and says so.
+  const unbolded = seamsTableOver((directory: string) => {
+    const page = join(directory, 'dialog.md')
+    writeFileSync(
+      page,
+      readFileSync(page, 'utf8').replace(
+        '## What crosses it that should not\n',
+        '## What crosses it that should not\n\nA note before the lead.\n',
+      ),
+    )
+  })
+  expect(unbolded.exitCode).not.toBe(0)
+  expect(unbolded.stderr).toContain("dialog.md's leak section does not open with a bold lead sentence")
 })
 
 /**

@@ -17,13 +17,13 @@ import {
 import { Check, Errors } from 'typebox/value'
 import type { AgentHost } from '../host/agent-host.ts'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
+import { readThreadMount } from './thread-read.ts'
 import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
-import { interruptedTail, transcriptToMessages } from './transcript-to-messages.ts'
 
 /**
  * The prompt/follow split (#112) — the server↔browser wire.
  *
- * Four routes, none of which is a run:
+ * Five routes, none of which is a run:
  *
  *   POST /api/threads/:id/prompt   unary. Takes the thread, fires the prompt, answers at
  *                                  once with a message id. The thread's own `settled`
@@ -36,6 +36,15 @@ import { interruptedTail, transcriptToMessages } from './transcript-to-messages.
  *                                  against the question and delivered to the live session.
  *                                  Nothing parks: the extension's promise is still pending
  *                                  inside pi, the run keeps going on the follow.
+ *   POST /api/threads/:id/mode     unary (L3 step C, #162 workstream 4). Switch the thread's
+ *                                  permission mode as a control route, not a prompt: 204 once the
+ *                                  runtime was told, 409 while a run is in flight (a mode change is
+ *                                  never queued behind one), 422 for a mode this thread does not
+ *                                  offer. The second route that ACQUIRES, and it releases on
+ *                                  acceptance — an extension command's acceptance IS its
+ *                                  completion. The change arrives on the follow as
+ *                                  `permission-mode`; a rejection after the 204, as
+ *                                  `permission-mode-rejected`.
  *   POST /api/threads/:id/abort    unary (#116). Stop the run in flight: pi is told, and the
  *                                  prompts waiting behind the run come back in the answer
  *                                  (#75, clear-and-restore — pi's queue is cleared, every
@@ -103,20 +112,20 @@ function writeFrame(threads: ThreadRegistry, threadId: string, response: ServerR
 }
 
 /**
- * Serve one follow. The snapshot is taken in the same tick as the subscription, so it is
- * exact as of `asOfSeq` and no observation can fall between the two (dsh: one complete
- * snapshot per generation, then only deltas; reconnect = a new follow = a new snapshot).
+ * Serve one follow. The snapshot is read through the one live-or-cold reader
+ * (`thread-read.ts#readThreadMount`, #214) — the same read `/history` serves, so the two
+ * routes cannot disagree about a thread that goes live mid-read — and it is taken in the
+ * same tick as the subscription, so it is exact as of `asOfSeq` and no observation can
+ * fall between the two (dsh: one complete snapshot per generation, then only deltas;
+ * reconnect = a new follow = a new snapshot).
+ *
+ * A thread with neither a session nor a file is an EMPTY snapshot, not a 404 (`present` is
+ * ignored here): observation may precede the first prompt, and must, or the prompt's
+ * opening events have no follower.
  */
 export async function followThread(deps: FollowRouteDeps, threadId: string, response: ServerResponse): Promise<void> {
-  const { threads, host } = deps
-  const live = threads.peek(threadId)
-  // Cold read for a thread that is not live — the file, as `/history` reads it. Awaited
-  // BEFORE subscribing: a thread built during the read is then seen live below. A thread
-  // with neither a session nor a file is an EMPTY snapshot, not a 404: observation may
-  // precede the first prompt, and must, or the prompt's opening events have no follower.
-  const storedTranscript = live === undefined ? await host.readTranscript(threadId) : undefined
-  const nowLive = threads.peek(threadId)
-  const transcript = nowLive === undefined ? (storedTranscript ?? []) : nowLive.hosted.inspect().entries
+  const { threads } = deps
+  const mount = await readThreadMount(deps, threadId)
 
   response.writeHead(200, SSE_HEADERS)
   const stopKeepalive = startSseKeepalive(response, deps.sseKeepaliveMs)
@@ -136,20 +145,17 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     follow.unsubscribe()
   })
 
-  const messages = transcriptToMessages(transcript)
-  const interrupted = interruptedTail(transcript)
   writeFrame(threads, threadId, response, {
     type: 'snapshot',
     threadId,
     asOfSeq: follow.asOfSeq,
-    live: nowLive !== undefined,
-    busy: nowLive?.busy ?? false,
-    generation: nowLive?.generation ?? 0,
-    permissionMode:
-      nowLive === undefined ? deps.host.storedPermissionMode(transcript) : nowLive.hosted.runtime.permissionModeState(),
-    messages,
-    openDialogs: nowLive === undefined ? [] : nowLive.hosted.runtime.openDialogs(),
-    ...(interrupted === undefined ? {} : { interrupted }),
+    live: mount.live,
+    busy: mount.busy,
+    generation: mount.generation,
+    permissionMode: mount.permissionMode,
+    messages: mount.messages,
+    openDialogs: mount.openDialogs,
+    ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),
   })
 }
 
