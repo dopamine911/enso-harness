@@ -57,6 +57,10 @@ sequenceDiagram
    several layers away). Only `node_modules/` paths are checked; `./extensions/…` is our own source.
    Upstream, `link-vendor-packages.mjs` runs from the root `postinstall` as verify-or-fix over every
    `dependencies` entry plus the `node_modules/` paths — `@zen/core` is only an import, and was unlinked.
+   One precondition, and since #221 one IMPLEMENTATION: `@zen/core/pi-manifest` owns both pi assumptions
+   (a `pi.*` value is a path or an array of them; a `node_modules/` path is literal, not a specifier),
+   and all three readers call it. It was written three times before, with the prefix spelled as a
+   constant twice and a bare literal once — which is why the duplicate-shape gate never named them.
 6. **A print run loads a generated mirror, not a flag.** The trigger is "this run cannot prompt". The
    mode extension fails closed when it cannot prompt, the runtime has no per-extension exclusion, and
    invariant 4 forbids passing files — so the variant is a package under `.zen/print-harness`: the
@@ -139,11 +143,15 @@ that title, so a renamed or deleted pin fails this page.
 
 <!-- test: scripts/__tests__/zen-launch.test.ts#pi is launched with --no-extensions, --no-skills and -e <package>, ahead of the user’s arguments -->
 - **Invariants 3 and 4, the launcher's own decisions** — [`zen-launch.test.ts`](../../scripts/__tests__/zen-launch.test.ts):
-  the isolation triple's two argument legs, in order, ahead of the user's; the print-run trigger; the
-  vendor paths the launcher refuses on. (`zen.mjs` spawns; `zen-launch.mjs` decides, and is what is pinned.)
+  the isolation triple's two argument legs, in order, ahead of the user's; the print-run trigger.
+  (`zen.mjs` spawns; `zen-launch.mjs` decides, and is what is pinned.)
 <!-- test: scripts/__tests__/link-vendor-packages.test.ts#verify-or-fix: a present package is verified, an absent one is linked from the hoisted copy, and the link resolves -->
 - **Invariant 5, the linker** — [`link-vendor-packages.test.ts`](../../scripts/__tests__/link-vendor-packages.test.ts):
   both sources of required packages; verify-or-fix; a broken link replaced; a missing package named.
+<!-- test: packages/core/src/__tests__/pi-manifest.test.ts#the vendor paths a manifest declares that are not under the package root are named, and only those -->
+- **Invariant 5, the precondition itself** — [`pi-manifest.test.ts`](../../packages/core/src/__tests__/pi-manifest.test.ts):
+  the flatten (arrays, singles, a non-string dropped) and the vendor-path check, at the one owner the
+  launcher, the linker and the server all read.
 <!-- test: scripts/__tests__/pi-version-parity.test.ts#⚠ the pi the guard corpus pins against is a pi the terminal launcher will run (#217) -->
 - **Invariant 7, the two resolutions** — [`pi-version-parity.test.ts`](../../scripts/__tests__/pi-version-parity.test.ts):
   the workspace pi the guard corpus resolves is inside the range the launcher enforces, and the
@@ -157,6 +165,7 @@ that title, so a renamed or deleted pin fails this page.
 The terminal launcher: [`scripts/zen.mjs`](../../scripts/zen.mjs) (header). The mirror:
 [`scripts/print-harness.mjs`](../../scripts/print-harness.mjs) (header, `materializePrintHarness`). The
 linker: [`scripts/link-vendor-packages.mjs`](../../scripts/link-vendor-packages.mjs) (`requiredPackageNames`).
+pi's manifest-resource layout, for all three readers: `packages/core/src/pi-manifest.ts` (header).
 In-process: `packages/web/src/host/agent-host.ts` (header ⚠⚠ items, `createSession`), `server/index.ts#assertVendorLinks`.
 Why the guards precede every vendor extension, and why a denial does not depend on that: `packages/harness/extensions/guards/index.ts` (header), [`seams/guards.md`](../seams/guards.md);
 the configurators: [`seams/logging.md`](../seams/logging.md); why logging is first:
