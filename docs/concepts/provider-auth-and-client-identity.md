@@ -168,17 +168,34 @@ it is a special case that leaks its shape into everything above it. The design g
 model that holds for Anthropic, OpenAI-compatible endpoints, a local llama.cpp server, and whatever
 comes next. Forgery does not generalize.
 
-## What zen-harness does instead
+## What zen-harness does instead, and what it intends to
 
-**Auth is provider-neutral and honest about identity.** One credential model, one storage layer, no
-per-provider identity forgery. zen-harness identifies as zen-harness.
+**Auth is provider-neutral and honest about identity.** No per-provider identity forgery; zen-harness
+identifies as zen-harness. That part is built, in the sense that nothing here forges anything.
 
-**Credential storage follows omp's shape, not pi's.** The record carries the account identity, the grant
-anchor, and the reason a credential was retired — see [Observability](#observability-what-pi-cannot-tell-you).
+**What exists today, in two places.** Provider auth is *pi's*, not ours: it lives in pi's own
+`auth.json` under the scratch agent dir, written by `/login` and by `pi-multi-account` (#7) — stated
+at `packages/core/src/secrets.ts:30-33`. The harness extensions' own keys are a separate channel:
+`.zen/secrets.env`, read per call by `readSecret` (`secrets.ts:83-86`) so a rotation needs no restart,
+and gated against the model's `read` tool. Both are listed in
+[`reference/env-and-config.md`](../reference/env-and-config.md).
 
-**Secrets do not live in config files.** `~/.pi/agent/models.json` stores provider API keys in plaintext
-beside non-secret model configuration, which is how one got printed into a transcript on 2026-09-03. Keys
-come from the OS keyring or the environment; config files hold references, never values.
+**Secrets do not live in config files, and they do not live in the environment either.**
+`~/.pi/agent/models.json` stores provider API keys in plaintext beside non-secret model configuration,
+which is how one got printed into a transcript on 2026-09-03 — so the harness reads values from the
+gated file instead, and `quarantineSecrets` (`secrets.ts:144-155`) deletes every secret-shaped
+variable from the environment before the first session and the first child process (#89). The
+environment is the channel this design closes, not a key source: a bullet that says "keys come from
+the OS keyring or the environment" would describe the opposite of what is built.
+
+**Designed, not built: the credential record.** A record carrying the account identity, the grant
+anchor, and the reason a credential was retired — the shape omp has and pi does not, see
+[Observability](#observability-what-pi-cannot-tell-you) — is a *requirement* here, not a thing that
+exists. There is no credential store in `packages/**`, and no keyring integration anywhere in the
+repository: `keyring`/`keychain`/`libsecret` appear only in `secrets.ts`'s header, naming `gh`'s
+keyring as the way a `bash` child should get a token. The built half was #89 (closed); the record
+itself has no issue of its own, and until it has one this paragraph is the only place it is tracked
+— recorded as such by #248, which is what made this section say *designed* instead of *does*.
 
 **The provider set is the answer to cost, not the billing path.** For Anthropic specifically that means
 API billing when Anthropic is required. For everything else it means the harness is genuinely

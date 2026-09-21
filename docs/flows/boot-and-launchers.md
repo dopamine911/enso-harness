@@ -29,11 +29,14 @@ sequenceDiagram
 
 ## The invariants it shows
 
-1. **Load order is the manifest, enumerated by hand, and it is a security property.** `pi.extensions`
-   is declaration order, never sorted: the four repository extensions, then the two vendor ones. The
-   runtime resolves tools first-wins, so an override of a tool would be safe only while this package
-   loads first; the guard is a `tool_call` handler instead — additive, first `block` final whatever the
+1. **Load order is the manifest, enumerated by hand, never a glob.** `pi.extensions` is declaration
+   order, never sorted: the four repository extensions, then the two vendor ones. The runtime resolves
+   *tools* first-wins, so a registered tool name shadows every later registration of that name — which
+   is why the guards are declared ahead of both vendor extensions, and why a directory glob (ordering
+   by filename) is not acceptable. It is *not* what makes the guard hold: the guard registers no tool
+   and participates through a `tool_call` handler instead — additive, first `block` final whatever the
    order — and that hook's two handlers are guards, then the mode extension. A third is #4's trigger.
+   What the order does decide is the configurator in invariant 2.
 2. **Logging is first, and configures only when nothing has.** As a child of the terminal launcher
    nothing has configured, so the extension does — the same day's file, `process: "pi"`, no console
    sink. In-process the server's launcher configured first and it configures nothing; a second
@@ -155,6 +158,6 @@ The terminal launcher: [`scripts/zen.mjs`](../../scripts/zen.mjs) (header). The 
 [`scripts/print-harness.mjs`](../../scripts/print-harness.mjs) (header, `materializePrintHarness`). The
 linker: [`scripts/link-vendor-packages.mjs`](../../scripts/link-vendor-packages.mjs) (`requiredPackageNames`).
 In-process: `packages/web/src/host/agent-host.ts` (header ⚠⚠ items, `createSession`), `server/index.ts#assertVendorLinks`.
-Load order as a security property: `packages/harness/extensions/guards/index.ts` (header), [`seams/guards.md`](../seams/guards.md);
+Why the guards precede every vendor extension, and why a denial does not depend on that: `packages/harness/extensions/guards/index.ts` (header), [`seams/guards.md`](../seams/guards.md);
 the configurators: [`seams/logging.md`](../seams/logging.md); why logging is first:
 [`extensions/logging/index.ts`](../../packages/harness/extensions/logging/index.ts) (header, *Why first in the manifest*); the manifest as a table: [`reference/env-and-config.md`](../reference/env-and-config.md).

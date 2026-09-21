@@ -215,6 +215,13 @@ function generate(): string {
   const elided = elidedKinds(followSource)
 
   const noProducer: string[] = []
+  // An unclassified cell is a FINDING here, not a generation failure (`docs/reference/README.md`,
+  // and the observation seam's fence). `decisions.ts` and `env-and-config.ts` throw because an
+  // unclassified row there means their metadata and their detector disagree, and the page would be
+  // wrong. Here it means the repository grew a kind the adapter does not handle: the page saying so,
+  // in a line the docs gate compares byte-for-byte, is the report. Collected so the finding is at the
+  // bottom of the page and not only buried in one cell of one row.
+  const unclassified: string[] = []
   const rows = schemas
     .map((member) => {
       let producer = '**nothing produces it**'
@@ -232,6 +239,10 @@ function generate(): string {
         ...(adapter.dropped ? ['nothing consumes the dropped branch'] : []),
         ...(!adapter.classified ? ['UNCLASSIFIED'] : []),
       ])
+      // The cell is the finding, so the cell is the test: an unclassified adapter has already
+      // put `UNCLASSIFIED` in `consumers` above, and a `!adapter.classified` disjunct here only
+      // restated that (PR #240 review).
+      if (consumers.some((consumer) => consumer.startsWith('UNCLASSIFIED'))) unclassified.push(member.kind)
       return {
         ...member,
         producer,
@@ -292,6 +303,14 @@ function generate(): string {
             .join(', ')
     }`,
     `- CUSTOM kinds the router records but does not route: ${recordedOnly.length === 0 ? 'none' : recordedOnly.map((kind) => `\`${kind}\``).join(', ')}`,
+    `- Kinds with an unclassified cell: ${
+      unclassified.length === 0
+        ? 'none'
+        : `${unclassified
+            .sort()
+            .map((kind) => `\`${kind}\``)
+            .join(', ')} — a finding, not a generation failure: the kind is printed, never omitted`
+    }`,
     '',
     `Inventory: ${schemas.length} union members; ${customKinds.length} ride CUSTOM by kind; ${Object.keys(FRAME_METADATA).length} chunks that are not observations; every chunk name has a checked browser classification.`,
     '',
