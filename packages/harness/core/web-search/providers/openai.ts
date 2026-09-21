@@ -1,5 +1,5 @@
 import { applyIndexCitations, type IndexCitation } from '../citations.ts'
-import { dispatchProviderPost } from '../dispatch.ts'
+import { dispatchProviderPost, resolveProviderCredential } from '../dispatch.ts'
 import { cleanSources, normalizeSearchUrl, titleFromUrl } from '../sources.ts'
 import { readSseEvents } from '../sse.ts'
 import type { ModelSearchRequest, WebSearchOutcome } from '../vocabulary.ts'
@@ -172,14 +172,7 @@ function buildRequestBody(request: ModelSearchRequest): Record<string, unknown> 
 }
 
 export async function runOpenAiProviderSearch(request: ModelSearchRequest): Promise<WebSearchOutcome> {
-  const credential = await request.resolveAuth(request.model)
-  if (!credential.ok) {
-    throw new WebSearchProviderError(
-      'openai',
-      credential.error.length > 0 ? credential.error : 'no credential resolved',
-      { requestDispatched: false },
-    )
-  }
+  const credential = await resolveProviderCredential('openai', request)
 
   const isCodex = isCodexModel(request.model)
   const headers = buildRequestHeaders(request, credential)

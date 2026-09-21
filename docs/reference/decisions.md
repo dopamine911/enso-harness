@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 167.**
+**Decision headers: 173.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -14,6 +14,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/__tests__/log-recorder.ts` | `#132`, `#178` | The tests' sink (#132), one for every package (#178): every `zen` record, at every level, into memory — a guard's verdict, an audit line or a route's problem is asserted as the record it is, the way a bundle reader would read it, not as a line on stderr. |
 | `packages/core/src/__tests__/no-duplicate-paths.test.ts` | `#59` | The anti-duplication anchor for path resolution (#59) — Daniel: "this should live in core and prevent duplicate code again." |
 | `packages/core/src/__tests__/observation-kinds.ts` | `#53` | The oracle both "every observation" sweeps compare against (#53 S1.4): every `kind` literal the ZenObservation union declares, sorted. |
+| `packages/core/src/__tests__/pi-manifest.test.ts` | `#221` | pi's manifest-resource layout, now owned in one place (#221 — it was implemented three times: the terminal launcher, the postinstall linker, and the server's `assertVendorLinks`). |
+| `packages/core/src/__tests__/picc-corpus-contract.test.ts` | `#7`, `#20`, `#222` | The picc CORPUS CONTRACT TEST (#222), the shape of `cc-safety-net-contract.test.ts` and `agent-loop-contract.test.ts`: read the installed vendor, assert the shape we copied. |
 | `packages/core/src/__tests__/secrets.test.ts` | `#89` | #89: secrets stay out of the environment the model's tools inherit. |
 | `packages/core/src/__tests__/thread-inspection.test.ts` | `#86`, `#100` | The row formats are shared by the `?debug` drawer and `zen-thread.mjs` (PR #100 review: one definition, after the #86 pair had drifted). |
 | `packages/core/src/config.ts` | `#59` | zen-harness's ONE committed config file (#59): `zen.config.json` at the repository root. |
@@ -24,6 +26,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/log.ts` | `#132` | The harness's log record (#132): one shape for every process, so a bundle a user hands us reads the same whichever layer wrote the line. |
 | `packages/core/src/paths.ts` | `#58`, `#59` | The workspace path helpers (#59) — THE one place that walks the filesystem for roots. |
 | `packages/core/src/permission-mode.ts` | `#84`, `#162` | The permission mode's shape on the wire (#84; #162 workstream 4, L3): what a run starts in and what it may switch to. |
+| `packages/core/src/pi-manifest.ts` | `#211`, `#221` | What a pi package's manifest declares, and where pi will look for it (#221) — THE one place that knows pi's manifest-resource layout. |
 | `packages/core/src/secrets.ts` | `#7`, `#89`, `#98` | Secrets stay OUT of the environment the model's tools inherit (#89). |
 | `packages/core/src/thread-inspection.ts` | `#86` | What a live thread's session ACTUALLY contains, as the server reports it (#86). |
 | `packages/core/src/thread-runtime.ts` | `#69`, `#162`, `#165` | The thread runtime: the contract the host implements for one thread, and the shapes that cross it (`docs/glossary.md` → Thread, Control). |
@@ -58,7 +61,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/core/web-search/providers/openai.ts` | `#63` | The `openai` provider (#63): the Responses API `web_search` tool, serving three model APIs — `openai-responses`, `azure-openai-responses`, and `openai-codex-responses` (including GitHub Copilot credentials, whose resolved endpoint rides the credential object). |
 | `packages/harness/core/web-search/providers/tavily.ts` | `#63` | The `tavily` provider (#63): the FALLBACK — a dedicated retrieval API, not a model. |
 | `packages/harness/core/web-search/sources.ts` | `#63` | Source hygiene for provider results (#63): URL normalization, junk filtering, and order-preserving dedupe. |
-| `packages/harness/core/web-search/sse.ts` | `#63` | A minimal SSE reader for the provider streams (#63). |
+| `packages/harness/core/web-search/sse.ts` | `#63`, `#268` | A minimal SSE reader for the provider streams (#63). |
 | `packages/harness/core/web-search/vocabulary.ts` | `#56`, `#63` | The web_search vocabulary (#63): provider ids, the outcome union, and the request shapes every provider module accepts. |
 | `packages/harness/core/web-search/wire-json.ts` | `#63`, `#64` | Tiny helpers every provider wire shares (#63, PR #64 review): narrowing for unknown JSON wire payloads, and base-URL hygiene. |
 | `packages/harness/extensions/__tests__/tool-call-participants.test.ts` | `#4`, `#20`, `#62` | THE #4 TRIPWIRE — the arbiter trigger, made structural. |
@@ -95,7 +98,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/browser-logging.ts` | `#86`, `#132` | The browser's logging (#132 slice 3). |
 | `packages/web/src/custom-event-router.ts` | `#103` | The one chunk that is neither an observation nor a frame: the follow ended without this page leaving it (#103 receipt) — the server closed, restarted, or dropped the connection. |
 | `packages/web/src/fixture-conversation.ts` | `#27`, `#31` | The styling dev loop (#31): a scripted conversation streamed through the REAL `useChat` pipeline as local AG-UI events — no server, no pi. |
-| `packages/web/src/follow-connection.ts` | `#112`, `#272` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |
+| `packages/web/src/follow-connection.ts` | `#112`, `#272`, `#274` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |
 | `packages/web/src/host/__tests__/agent-host.test.ts` | `#27`, `#69` | The in-process host against the REAL harness package (#69) — every extension the manifest names loads, and inline probe extensions observe what the host does. |
 | `packages/web/src/host/__tests__/agent-loop-contract.test.ts` | `#130` | A CONTRACT TEST on the runtime's loop, the shape of `cc-safety-net-contract.test.ts`: the wire shape of a refused tool call is the vendor's doing — a guard's `{ block, reason }` becomes an error result with the reason as its content, `isError: true` — and `map-events.ts` relies on it (the `tool_execution_end` case, "isError is the only signal a refused call has"). |
 | `packages/web/src/host/__tests__/event-tail.test.ts` | `#97` | #97's tail is a debugging surface: what it must not do is lie by omission. |
@@ -132,7 +135,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/run-timing.ts` | `#144` | When a run was admitted, so its FIRST delta can be recorded as a latency (#144 slice 1). |
 | `packages/web/src/server/sse.ts` | `#109` | The SSE plumbing every streaming route shares: the response headers and the keepalive. |
 | `packages/web/src/server/thread-registry.ts` | `#43`, `#69`, `#113`, `#116` | One pi session per chat THREAD, held across runs (#69 PR 2 — closes #43). |
-| `packages/web/src/server/transcript-to-messages.ts` | `#93`, `#95`, `#162` | The transcript → TanStack `UIMessage`s (#95): the history a resumed thread mounts with. |
+| `packages/web/src/server/transcript-to-messages.ts` | `#93`, `#95`, `#162`, `#220` | The transcript → TanStack `UIMessage`s (#95): the history a resumed thread mounts with. |
 | `packages/web/src/store.ts` | `#90` | The smallest external store React can subscribe to: one value, replaced whole, and a listener set. |
 | `packages/web/src/stored-threads.ts` | `#29`, `#86`, `#95` | The sessions a user can come back to (#95): pi's session files for this workspace, as the server lists them. |
 | `packages/web/src/thread-stats.tsx` | `#44`, `#45`, `#90` | The thread-stats STORE (#45, phase 1): cost so far + the last request's prompt size. |
@@ -142,6 +145,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/threads-rail.tsx` | `#90`, `#95`, `#104` | The threads rail (#90 PR 3): which conversation am I in, what else is live on this page, how do I start over. |
 | `packages/web/src/to-agui.ts` | `#18`, `#24`, `#112` | `ZenObservation` → AG-UI `StreamChunk` (#24, #112). |
 | `scripts/__tests__/pi-version-parity.test.ts` | `#69`, `#217` | THE TWO PI RESOLUTIONS, HELD TOGETHER (#217). |
+| `scripts/__tests__/zen-launch.test.ts` | `#221` | The terminal launcher's decisions (docs/flows/boot-and-launchers.md, stated gap: `zen.mjs` had no test of its own). |
 | `scripts/__tests__/zen-logs.test.ts` | `#132` | The reader's own logic (#132, `bun run logs`): the flags, and what a line must be to print. |
 | `scripts/check-coverage.ts` | `#49`, `#118` | The TOTAL coverage floor — the gate that bunfig.toml cannot express. |
 | `scripts/docs/core-exports.ts` | `#170` | Generates `docs/reference/core-exports.md` (#170): the public core barrel and the node-only logging subpath, with their defining declarations and production importers. |
@@ -152,24 +156,26 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/docs/generator-support.ts` | `#174` | What every generator under `scripts/docs/` shares (#174): the exhaustiveness check that makes a metadata table refuse to be stale, and the one way a generator runs — its page to stdout, or one `name: reason` line to stderr and a non-zero exit, never a partial page. |
 | `scripts/docs/ported-provenance.ts` | `#168` | Generates `docs/seams/ported-provenance.md` (#168): one row per file under `components/ai-elements/` — the upstream path and commit its header names, and the `Modified —` line that follows. |
 | `scripts/docs/refresh-fences.ts` | `#162`, `#168` | Refreshes every sourced fence in a page from the source it names (#168): the authoring and repair tool for `test/docs-gate.test.ts`. |
-| `scripts/docs/seams-table.ts` | `#162`, `#167` | Generates the seams table (#162 workstream 11, #167 item 4) — the block `docs/architecture.md` and `docs/seams/README.md` embed between `<!-- generated-block: … -->` markers. |
+| `scripts/docs/seams-table.ts` | `#162`, `#167` | Generates the seams table (#162 workstream 11, #167 item 4) — the block `docs/architecture.md` embeds between `<!-- generated-block: … -->` markers. |
 | `scripts/docs/verification-inventory.ts` | `#170`, `#262` | Generates `docs/reference/verification-inventory.md` (#170): enforcement gates, the numeric and count ratchets they carry, and the deliberately reusable test doubles. |
 | `scripts/link-vendor-packages.mjs` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
 | `scripts/print-harness.mjs` | `#9`, `#13`, `#20` | The PRINT-MODE harness variant (#20): the zen-harness package minus picc-permission-modes. |
 | `scripts/source-tree.ts` | `#162`, `#174` | The one walk over the source tree (#174, #162 workstream 6: one walker per gate family). |
+| `scripts/zen-launch.mjs` | `#221` | The terminal launcher's decisions, apart from the launch (`zen.mjs` spawns; this decides): the isolation triple as pi's arguments, the print-run trigger, and whether the pi it is about to spawn is one the guard was pinned against. |
 | `scripts/zen-logs.ts` | `#132` | See the log (#132): the day's file, rendered the way the terminal renders it live. |
 | `scripts/zen-thread.mjs` | `#86`, `#97` | Inspect the live web server's threads from a shell — the agent's half of #86. |
 | `scripts/zen.mjs` | `#20`, `#217` | Launch a VANILLA pi with only zen-harness loaded. |
 | `test/browser-bundle-gate.test.ts` | `#211` | The browser zone must bundle for the browser (#211). |
 | `test/check-coverage.test.ts` | `#53` | The coverage GATE's own arithmetic (#53 S2). |
 | `test/code-offenders.test.ts` | `#162` | The allowlist is the leak inventory (#162 workstream 4): a row hides a file's matches, and a row for a file with no matches is drift and is reported. |
+| `test/complexity-ratchet.test.ts` | `#264` | Re-measures the cognitive-complexity pins, per FUNCTION (#264). |
 | `test/dependency-gate.test.ts` | `#218`, `#223` | What the dependency manifests claim, held against what the code actually imports (#218, #223). |
 | `test/docs-gate.test.ts` | `#162`, `#167`, `#168` | The docs cannot drift (#168, goals §3.3): a page either quotes source and is checked against it, or is generated from source and is diffed against it. |
 | `test/e2e-selectors.test.ts` | `#116`, `#277` | THE E2E SELECTOR CONTRACT (#277). |
 | `test/fallow-config.test.ts` | `#163` | fallow's entry list cannot drift from the harness manifest (#163). |
 | `test/gate-abort.test.ts` | `#157` | The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0. |
 | `test/gate-support.ts` | `#150`, `#162`, `#165`, `#174` | What the source-tree gates share (#165, #162 workstream 6): the word-splitter, the sequence matcher, the comment skip, over the one walker (`scripts/source-tree.ts`, #174). |
-| `test/glossary-doc.test.ts` | `#161`, `#164`, `#165` | The glossary keeps its own two rules (#161, PR #164 review). |
+| `test/glossary-doc.test.ts` | `#161`, `#164`, `#165`, `#245` | The glossary keeps its own three rules (#161, PR #164 review; #245). |
 | `test/glossary-gate.test.ts` | `#165`, `#241`, `#287` | The glossary's Retired table, applied to the source tree (#165, `docs/glossary.md` → Retired). |
 | `test/logging-gate.test.ts` | `#132` | Every record goes through the one logger (#132), and the substrate stays behind it. |
 | `test/naming-gate.test.ts` | `#82`, `#83` | The naming gate's exemption for externally-fixed KEYS (#82, PR #83 review). |

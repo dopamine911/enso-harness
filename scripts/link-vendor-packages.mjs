@@ -30,16 +30,17 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { findRepoRoot, harnessPackageDir } from '../packages/core/src/paths.ts'
-
-const VENDOR_PATH_PREFIX = 'node_modules/'
+import { vendorPackageNames } from '../packages/core/src/pi-manifest.ts'
 
 /**
  * Every package that must exist inside the harness package's own node_modules.
  *
  * Two sources, and both are needed:
  *
- *  1. Manifest resource paths beginning `node_modules/` — pi reads those as literal paths
- *     relative to the package root, so a missing one is a silently skipped resource.
+ *  1. the packages the manifest's `node_modules/…` resource paths reach into — pi reads
+ *     those as literal paths relative to the package root, so a missing one is a silently
+ *     skipped resource. That reading is `@zen/core/pi-manifest`'s since #221, prefix and
+ *     scope-splitting included; this script no longer spells either.
  *  2. EVERY entry in `dependencies` — because pi loads packages with separate module roots,
  *     so a bare `import "@zen/core"` from an extension is not guaranteed to resolve by
  *     walking up to the repo root the way plain Node would. ⚠ This is the case that made
@@ -51,18 +52,32 @@ const VENDOR_PATH_PREFIX = 'node_modules/'
  * @returns {string[]}
  */
 export function requiredPackageNames(manifest) {
-  const names = new Set(Object.keys(manifest.dependencies ?? {}))
-  for (const paths of Object.values(manifest.pi ?? {})) {
-    for (const resourcePath of Array.isArray(paths) ? paths : [paths]) {
-      if (typeof resourcePath !== 'string' || !resourcePath.startsWith(VENDOR_PATH_PREFIX)) continue
-      const withoutPrefix = resourcePath.slice(VENDOR_PATH_PREFIX.length)
-      const [scopeOrName, scopedName] = withoutPrefix.split('/')
-      if (scopeOrName === undefined || scopeOrName.length === 0) continue
-      // Scoped packages carry their scope in the first segment.
-      names.add(scopeOrName.startsWith('@') && scopedName !== undefined ? `${scopeOrName}/${scopedName}` : scopeOrName)
-    }
+  return [...new Set([...Object.keys(manifest.dependencies ?? {}), ...vendorPackageNames(manifest)])]
+}
+
+/**
+ * Point `linkPath` at `targetPath` as a RELATIVE directory symlink, replacing whatever is
+ * there (#267). Two scripts enforce the boot invariants that rest on this idiom — this one
+ * (invariant 5, the vendor layout pi resolves through) and `print-harness.mjs` (invariant 4,
+ * the variant package's mirror) — and both had it written out, so a correction reached one.
+ *
+ * ⚠ `lstat`, not `exists`: a BROKEN symlink must be replaced, and `existsSync` follows links,
+ * so it reports a dangling one as absent and the `symlinkSync` below then fails EEXIST.
+ * Relative, so the link survives a move of the tree that holds both ends.
+ *
+ * @param {string} linkPath
+ * @param {string} targetPath
+ * @returns {void}
+ */
+export function relinkDirectory(linkPath, targetPath) {
+  mkdirSync(dirname(linkPath), { recursive: true })
+  try {
+    lstatSync(linkPath)
+    rmSync(linkPath, { recursive: true, force: true })
+  } catch {
+    // nothing there yet
   }
-  return [...names]
+  symlinkSync(relative(dirname(linkPath), targetPath), linkPath, 'dir')
 }
 
 /**
@@ -92,15 +107,7 @@ export function linkVendorPackages(repoRoot, packageRoot, manifest) {
         `link-vendor-packages: ${packageName} is at neither ${target} nor the repo root — run bun install`,
       )
     }
-    mkdirSync(dirname(target), { recursive: true })
-    // lstat, not exists: a broken symlink must be replaced, and exists() follows links.
-    try {
-      lstatSync(target)
-      rmSync(target, { recursive: true, force: true })
-    } catch {
-      // nothing there yet
-    }
-    symlinkSync(relative(dirname(target), hoisted), target, 'dir')
+    relinkDirectory(target, hoisted)
     linked.push(packageName)
   }
   return { verified, linked }

@@ -13,7 +13,7 @@
 
 import { mkdirSync } from 'node:fs'
 import { zenLogger } from '@zen/core'
-import { configureProcessLogging, logsDirFrom, parseZenLogLevels } from '@zen/core/log-process'
+import { configureProcessLogging, installLoggingShutdown, logsDirFrom, parseZenLogLevels } from '@zen/core/log-process'
 import { findRepoRoot, harnessPackageDir, zenAgentDir } from '@zen/core/paths'
 import { knownSecretValues } from '@zen/core/secrets'
 import { startZenServer } from './index.ts'
@@ -36,16 +36,7 @@ const disposeLogging: () => Promise<void> = await configureProcessLogging({
 })
 const log = zenLogger('server', 'dev')
 
-// A stop from the hub or a terminal: flush the file, then exit the way the signal would
-// have (128 + its number: 130 for SIGINT, 143 for SIGTERM), so a supervisor reads it right.
-for (const [signal, code] of [
-  ['SIGINT', 130],
-  ['SIGTERM', 143],
-] as const) {
-  process.once(signal, () => {
-    void disposeLogging().finally(() => process.exit(code))
-  })
-}
+installLoggingShutdown(disposeLogging)
 
 const { listening } = startZenServer({
   cwd,

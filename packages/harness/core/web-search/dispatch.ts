@@ -1,4 +1,10 @@
-import { type FetchUrl, WebSearchProviderError, type WebSearchProviderId } from './vocabulary.ts'
+import {
+  type FetchUrl,
+  type ModelSearchRequest,
+  type ResolvedProviderAuth,
+  WebSearchProviderError,
+  type WebSearchProviderId,
+} from './vocabulary.ts'
 
 /**
  * How every provider sends its request (#174): a JSON POST, and the two ways it fails —
@@ -41,4 +47,26 @@ export async function dispatchProviderPost(
     })
   }
   return response
+}
+
+/**
+ * The credential, or the refusal — the other half of the same rule (#266). Three providers
+ * held a verbatim copy of this block, so the fallback wording and `requestDispatched: false`
+ * were duplicated per provider; a fourth that forgot the flag would turn a fall-through into
+ * a hard failure. `deepseek` and `openai`'s key-specific refusals stay where they are: those
+ * name the missing variable, which is the point of them.
+ */
+export async function resolveProviderCredential(
+  providerId: WebSearchProviderId,
+  request: Pick<ModelSearchRequest, 'model' | 'resolveAuth'>,
+): Promise<Extract<ResolvedProviderAuth, { ok: true }>> {
+  const credential = await request.resolveAuth(request.model)
+  if (!credential.ok) {
+    throw new WebSearchProviderError(
+      providerId,
+      credential.error.length > 0 ? credential.error : 'no credential resolved',
+      { requestDispatched: false },
+    )
+  }
+  return credential
 }

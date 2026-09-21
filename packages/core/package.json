@@ -10,6 +10,7 @@
     ".": "./src/index.ts",
     "./log-process": "./src/log-process.ts",
     "./paths": "./src/paths.ts",
+    "./pi-manifest": "./src/pi-manifest.ts",
     "./secrets": "./src/secrets.ts",
     "./log-recorder": "./src/__tests__/log-recorder.ts",
     "./observation-kinds": "./src/__tests__/observation-kinds.ts"
