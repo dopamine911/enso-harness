@@ -218,6 +218,12 @@ test("⚠ a unicode space in the cwd is NOT collapsed — pi's base-directory op
  * `core/tools/path-utils.js` imports. If pi grows a new normaliser rule, this goes red
  * BEFORE the guard silently disagrees with the tool it gates.
  *
+ * ⚠ WHICH pi, exactly: the one in the WORKSPACE tree, which is the one the in-process host
+ * imports (#69) and NOT, by construction, the `pi` the terminal launcher finds on `PATH`.
+ * That second resolution is bounded by `scripts/zen-launch.mjs#SUPPORTED_PI_VERSIONS` — the
+ * launcher refuses a pi outside the range this corpus has been run against, and
+ * `scripts/__tests__/pi-version-parity.test.ts` asserts the range still covers the pi resolved here (#217).
+ *
  * Two failure shapes, read differently: an ASSERTION diff means pi changed how it
  * normalises — update the replica in `paths.ts`; a `Cannot find module` means pi moved or
  * renamed its internal `utils/paths.js` (no export-map contract covers it) — re-point the

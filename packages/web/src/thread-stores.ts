@@ -46,12 +46,14 @@ export interface ThreadStores {
   readonly generation: WritableStore<number | undefined>
   /**
    * The question this page shows pi blocked on; undefined when none. Fed by three chunks
-   * (#112, #114): `extension-ui-request` opens it, `dialog-settled` clears it by id, and a
-   * snapshot's `openDialogs` replaces it wholesale. ONE slot is the browser's choice,
-   * not pi's — extensions can hold several questions at once (`openDialogs()` lists them);
-   * this page shows the oldest, and a second only once a snapshot lists it (the router's
-   * `snapshot` branch and `routeUiRequest`). Also cleared by an answer this page sends that the server takes
-   * or reports gone.
+   * (#112, #114): `extension-ui-request` opens it when the slot is free, `dialog-settled`
+   * clears it by id, and a snapshot's `openDialogs` replaces it wholesale. ONE slot is the
+   * browser's choice, not pi's — extensions can hold several questions at once
+   * (`openDialogs()` lists them); this page shows the OLDEST, so no later ask displaces the
+   * question being read (#271, the router's `routeUiRequest`), and a second becomes visible
+   * only once a snapshot lists it first (the router's `snapshot` branch) — until then it
+   * waits on the server, answerable from this thread after a reload. Also cleared by an
+   * answer this page sends that the server takes or reports gone.
    */
   readonly dialog: WritableStore<ZenPendingDialog | undefined>
   /**
