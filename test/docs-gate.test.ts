@@ -10,7 +10,7 @@ import {
   stringConstant,
 } from '../scripts/docs/gate-source.ts'
 import { FENCE_OPEN, SOURCEABLE_FENCE_LANGUAGE } from '../scripts/docs/refresh-fences.ts'
-import { REPOSITORY_ROOT } from './gate-support.ts'
+import { markdownFiles, REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
  * The docs cannot drift (#168, goals §3.3): a page either quotes source and is checked
@@ -74,16 +74,6 @@ const BLOCK_CLOSE = /^<!--\s*\/generated-block\s*-->$/
  */
 const DIAGRAM_FENCE_LANGUAGE = 'mermaid'
 const FENCE_CLOSE = /^```\s*$/
-
-function markdownFiles(directory: string): string[] {
-  const found: string[] = []
-  for (const dirent of readdirSync(directory, { withFileTypes: true })) {
-    const path = join(directory, dirent.name)
-    if (dirent.isDirectory()) found.push(...markdownFiles(path))
-    else if (dirent.name.endsWith('.md')) found.push(path)
-  }
-  return found
-}
 
 interface Fence {
   readonly openLine: number
