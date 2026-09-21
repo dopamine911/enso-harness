@@ -44,6 +44,16 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
     '/.netrc',
     '/.pgpass',
     '/.kube/config',
+    // The harness's OWN credential dir (#204): `.zen/secrets.env` (#89) and, under
+    // `.zen/pi-agent/`, pi's `auth.json`, the provider-failover files and every session
+    // transcript — all `0600` on disk, i.e. the operator's own umask calls them secret.
+    // The basename gate below covered `secrets.env` alone, so `auth.json` was readable
+    // and `grep path=.zen` recursed the lot; `containsPathFragment` appends a separator,
+    // so this one entry denies the directory itself and everything under it.
+    // ⚠ THE COST, stated: the agent can no longer read `.zen/logs/*.jsonl` with a tool.
+    // Reading the log is a human command — `bun run logs` — which uses node fs and never
+    // passes this guard. Writes were already denied (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`).
+    '/.zen/',
   ],
   // `zen.config.json` is zen-harness's committed config (#59) and carries web_fetch's
   // host allowlist (#54): a write there widens the harness's egress for every FUTURE

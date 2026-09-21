@@ -27,6 +27,7 @@ export {
   type KnownPathState,
   type SessionReadTracker,
 } from './read-tracker.ts'
+export { findSecretPathWord } from './shell-secret-paths.ts'
 export {
   extractFlatShellCommandSegments,
   type FlatShellCommandSegment,
