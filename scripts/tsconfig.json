@@ -3,10 +3,8 @@
   "compilerOptions": {
     "outDir": "./dist-types",
     "rootDir": ".",
-    "types": ["bun"],
-    "allowJs": true,
-    "checkJs": true
+    "types": ["bun"]
   },
-  "include": ["*.ts", "*.mjs", "docs/*.ts", "__tests__/*.ts"],
+  "include": ["*.ts", "docs/*.ts", "__tests__/*.ts"],
   "references": [{ "path": "../packages/core" }]
 }

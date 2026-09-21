@@ -25,7 +25,7 @@ import { defineConfig } from '@playwright/test'
 import { findRepoRoot } from '@zen/core/paths'
 
 const e2eDirectory = dirname(fileURLToPath(import.meta.url))
-// `bun run dev` must run from the repo root: scripts/dev.mjs resolves the web package
+// `bun run dev` must run from the repo root: scripts/dev.ts resolves the web package
 // directory from there. Same helper every other launcher uses, so the answer cannot drift.
 const repoRoot = findRepoRoot(import.meta.url)
 

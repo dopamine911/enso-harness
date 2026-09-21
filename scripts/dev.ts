@@ -1,4 +1,9 @@
 #!/usr/bin/env bun
+import type { Subprocess } from 'bun'
+
+/** What `run` spawns: stdin ignored, both output streams piped so they can be prefixed. */
+type PrefixedChild = Subprocess<'ignore', 'pipe', 'pipe'>
+
 /**
  * Run both dev surfaces with one command.
  *
@@ -21,19 +26,17 @@ const SERVER_HEAD_START_MS = 1200
 
 const repoRoot = findRepoRoot(import.meta.url)
 const webPackageRunDir = webPackageDir(repoRoot)
-const piCwd = process.argv[2] ?? repoRoot
+const piCwd: string = process.argv[2] ?? repoRoot
 
-/** @type {import("bun").Subprocess[]} */
-const children = []
+const children: PrefixedChild[] = []
 let shuttingDown = false
 
-/**
- * Prefix every line a stdio stream produces; resolves when the stream ends.
- * @param {ReadableStream<Uint8Array>} stream
- * @param {string} label
- * @param {(lines: string) => void} emit
- */
-async function prefixStream(stream, label, emit) {
+/** Prefix every line a stdio stream produces; resolves when the stream ends. */
+async function prefixStream(
+  stream: ReadableStream<Uint8Array>,
+  label: string,
+  emit: (lines: string) => void,
+): Promise<void> {
   const decoder = new TextDecoder()
   for await (const chunk of stream) {
     const lines = decoder
@@ -46,12 +49,7 @@ async function prefixStream(stream, label, emit) {
   }
 }
 
-/**
- * @param {string} label
- * @param {string} command
- * @param {string[]} args
- */
-function run(label, command, args) {
+function run(label: string, command: string, args: string[]): PrefixedChild {
   const child = Bun.spawn([command, ...args], {
     cwd: webPackageRunDir,
     stdin: 'ignore',
@@ -59,7 +57,7 @@ function run(label, command, args) {
     stderr: 'pipe',
     // ⚠ If either surface dies, take the other down. A half-running dev environment is
     // worse than none: the web surface serving a page whose API is gone looks like an app bug.
-    onExit(_child, code, signalCode) {
+    onExit(_child: PrefixedChild, code: number | null, signalCode: number | null): void {
       if (shuttingDown) return
       process.stderr.write(`[dev] ${label} exited (${code ?? signalCode ?? 'signal'}) — stopping the other surface\n`)
       shutdown()
@@ -71,7 +69,7 @@ function run(label, command, args) {
   return child
 }
 
-function shutdown() {
+function shutdown(): void {
   if (shuttingDown) return
   shuttingDown = true
   for (const child of children) child.kill('SIGTERM')

@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSyn
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildPrintManifest, materializePrintHarness, PrintHarnessShapeError } from '../print-harness.mjs'
+import { buildPrintManifest, materializePrintHarness, PrintHarnessShapeError } from '../print-harness.ts'
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const harnessPackageRoot = join(repoRoot, 'packages', 'harness')

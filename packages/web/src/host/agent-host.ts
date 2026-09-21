@@ -318,7 +318,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       cwd,
       agentDir,
       resourceLoaderOptions: {
-        // The isolation triple `scripts/zen.mjs` documents, expressed as loader options:
+        // The isolation triple `scripts/zen.ts` documents, expressed as loader options:
         // no discovery (`--no-extensions`), no ~/.agents skills (`--no-skills`), and the
         // harness package as the one extension source (`-e <dir>` — pi resolves a
         // directory's `pi` manifest for extensions, skills, prompts AND themes).

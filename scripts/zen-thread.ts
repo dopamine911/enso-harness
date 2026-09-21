@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * Inspect the live web server's threads from a shell — the agent's half of #86.
  *
@@ -11,33 +12,33 @@
  *
  * Read-only. Talks to the loopback dev server only.
  *
- * Usage:  bun scripts/zen-thread.mjs                 # every live thread, one line each
- *         bun scripts/zen-thread.mjs <threadId>      # one thread: summary, then the branch
- *         bun scripts/zen-thread.mjs <threadId> --events  # the event tails (#97): what the
+ * Usage:  bun scripts/zen-thread.ts                 # every live thread, one line each
+ *         bun scripts/zen-thread.ts <threadId>      # one thread: summary, then the branch
+ *         bun scripts/zen-thread.ts <threadId> --events  # the event tails (#97): what the
  *                                                          # host emitted, with provenance,
  *                                                          # then what the server sent
- *         bun scripts/zen-thread.mjs <threadId> --json   # the raw payload, for piping
+ *         bun scripts/zen-thread.ts <threadId> --json   # the raw payload, for piping
  *
  * The server address defaults to the dev server's; override with ZEN_SERVER_URL.
  */
 
+import type {
+  ZenThreadEvent,
+  ZenThreadEvents,
+  ZenThreadInspection,
+  ZenThreadSummary,
+} from '../packages/core/src/index.ts'
 // The row formats are core's, shared with the drawer: one definition, so the two views cannot drift.
 import { describeTranscriptEntry, threadEventColumns } from '../packages/core/src/index.ts'
 
-/** @import { ZenThreadEvent, ZenThreadEvents, ZenThreadInspection, ZenThreadSummary } from "../packages/core/src/index.ts" */
-
-const serverUrl = process.env.ZEN_SERVER_URL ?? 'http://127.0.0.1:5179'
+const serverUrl: string = process.env.ZEN_SERVER_URL ?? 'http://127.0.0.1:5179'
 const [threadId, ...flags] = process.argv.slice(2)
 const wantsJson = flags.includes('--json')
 const wantsEvents = flags.includes('--events')
 
-/**
- * @template T
- * @param {string} path
- * @returns {Promise<T>}
- */
-async function fetchJson(path) {
-  let response
+/** One GET against the running server, or an exit naming what went wrong. */
+async function fetchJson<T>(path: string): Promise<T> {
+  let response: Response
   try {
     response = await fetch(`${serverUrl}${path}`)
   } catch (error) {
@@ -48,12 +49,11 @@ async function fetchJson(path) {
     process.stderr.write(`zen-thread: ${response.status} ${await response.text()}\n`)
     process.exit(1)
   }
-  return /** @type {Promise<T>} */ (response.json())
+  return (await response.json()) as T
 }
 
 if (threadId === undefined) {
-  /** @type {ZenThreadSummary[]} */
-  const threads = await fetchJson('/api/threads')
+  const threads = await fetchJson<ZenThreadSummary[]>('/api/threads')
   if (threads.length === 0) {
     process.stdout.write('no live threads — nothing has run since the server started, or every session idled out\n')
   }
@@ -67,18 +67,14 @@ if (threadId === undefined) {
   process.exit(0)
 }
 
-/**
- * The drawer's row, as a table: the provenance column padded so `held`/`dropped` line up down the page.
- * @param {ZenThreadEvent} event
- */
-function describeThreadEvent(event) {
+/** The drawer's row, as a table: the provenance column padded so `held`/`dropped` line up down the page. */
+function describeThreadEvent(event: ZenThreadEvent): string {
   const columns = threadEventColumns(event)
   return `${columns.when}  ${columns.provenance.padEnd(12)} ${columns.subject}`
 }
 
 if (wantsEvents) {
-  /** @type {ZenThreadEvents} */
-  const events = await fetchJson(`/api/threads/${encodeURIComponent(threadId)}/events`)
+  const events = await fetchJson<ZenThreadEvents>(`/api/threads/${encodeURIComponent(threadId)}/events`)
   if (wantsJson) {
     process.stdout.write(`${JSON.stringify(events, null, 2)}\n`)
     process.exit(0)
@@ -91,8 +87,9 @@ if (wantsEvents) {
   process.exit(0)
 }
 
-/** @type {ZenThreadInspection} */
-const inspection = await fetchJson(`/api/threads/${encodeURIComponent(threadId)}`)
+const inspection: ZenThreadInspection = await fetchJson<ZenThreadInspection>(
+  `/api/threads/${encodeURIComponent(threadId)}`,
+)
 if (wantsJson) {
   process.stdout.write(`${JSON.stringify(inspection, null, 2)}\n`)
   process.exit(0)

@@ -15,13 +15,13 @@ grounded `environment.KEY` seams, and keys explicitly written beside a process-e
 |---|---|---|---|
 | `FORCE_COLOR` | `scripts/gate.ts#runGate` (child environment write) | Optional; set to `1` only when both gate output streams are TTYs, otherwise not overridden. | per-call |
 | `PI_CODING_AGENT_DIR` | `packages/web/src/host/agent-host.ts#createAgentHost` (process write) | Required pin to the supplied scratch agent directory before pi loads; no fallback at this boundary. | boot |
-| `PI_CODING_AGENT_DIR` | `scripts/zen.mjs` (pi child environment write) | Required pin to the selected agent directory in the spawned pi process. | boot |
-| `ZEN_AGENT_DIR` | `scripts/zen.mjs` | Optional agent-directory override; defaults to `.zen/pi-agent`. | boot |
+| `PI_CODING_AGENT_DIR` | `scripts/zen.ts` (pi child environment write) | Required pin to the selected agent directory in the spawned pi process. | boot |
+| `ZEN_AGENT_DIR` | `scripts/zen.ts` | Optional agent-directory override; defaults to `.zen/pi-agent`. | boot |
 | `ZEN_LOGS_DIR` | `packages/core/src/log-process.ts#logsDirFrom` | Optional log-directory override; an absent or empty value defaults to `.zen/logs`. | boot / load / per-call |
 | `ZEN_LOG_CONSOLE` | `packages/core/src/log-process.ts#parseZenLogLevels` | Optional terminal log level; launcher default is `info`, while child-pi logging defaults to no console sink. | boot / load |
 | `ZEN_LOG_LEVEL` | `packages/core/src/log-process.ts#parseZenLogLevels` | Optional file log level and per-category overrides; defaults to `info`. | boot / load |
 | `ZEN_SERVER_URL` | `scripts/zen-logs.ts#bundle` | Optional live-server URL for bundle retrieval; defaults to `http://127.0.0.1:5179`. | per-call |
-| `ZEN_SERVER_URL` | `scripts/zen-thread.mjs` | Optional live-server URL for thread inspection; defaults to `http://127.0.0.1:5179`. | boot |
+| `ZEN_SERVER_URL` | `scripts/zen-thread.ts` | Optional live-server URL for thread inspection; defaults to `http://127.0.0.1:5179`. | boot |
 | `npm_config_user_agent` | `scripts/gate.ts#detectPackageManager` | Optional package-manager identity; falls back to Bun detection, then `npm`. | boot |
 
 **Parser limit.** Only literal keys in the source shapes named above become rows. Computed names and
@@ -57,7 +57,7 @@ These are every exported path assembled with `ZEN_RUNTIME_DIRECTORY` in `package
 |---|---|---|---|
 | `.zen/logs` | `zenLogsDir` | `configureProcessLogging` creates it and every harness process appends to the day file. | One file per local day; logging retains 14 days. |
 | `.zen/pi-agent` | `zenAgentDir` | The TUI/server launchers create it; pi and `createAgentHost` write settings, auth, sessions, and the multi-account pin. | Machine-local state shared across launches; retained until the operator removes it. |
-| `.zen/print-harness` | `printHarnessDir` | `scripts/print-harness.mjs#materializePrintHarness` rebuilds the package mirror for non-interactive launches. | Machine-local scratch; reconciled on every print launch. |
+| `.zen/print-harness` | `printHarnessDir` | `scripts/print-harness.ts#materializePrintHarness` rebuilds the package mirror for non-interactive launches. | Machine-local scratch; reconciled on every print launch. |
 | `.zen/secrets.env` | `zenSecretsPath` | Operator only; harness code reads and quarantines but never writes it. | Machine-local until the operator edits or removes it; secret reads are per call. |
 
 ## Harness manifest resources

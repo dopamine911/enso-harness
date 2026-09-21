@@ -274,7 +274,7 @@ export interface ZenServerHandle {
  * 400 took a detour through expiry checks and rpc-mode hypotheses, none of which were the
  * cause.
  *
- * `scripts/zen.mjs` already refuses to launch on the same condition. The server had no
+ * `scripts/zen.ts` already refuses to launch on the same condition. The server had no
  * equivalent, which is the asymmetry this closes: two launch points, one precondition, and
  * it must be enforced at both or the unenforced one becomes the confusing path. Since #221
  * the precondition is also one IMPLEMENTATION — `@zen/core/pi-manifest` — so "what pi will
@@ -333,7 +333,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
   }
 
   // ── Session inspection (#86): what a live thread's session ACTUALLY contains, for a
-  // human (the debug drawer) or an agent (`scripts/zen-thread.mjs`) to cross-check the
+  // human (the debug drawer) or an agent (`scripts/zen-thread.ts`) to cross-check the
   // derived views against. Read-only. Never creates a session — `threads.peek`, never
   // `acquire`: looking must not be the thing that spins pi up. Loopback-only by the
   // server's bind; the branch is conversation and tool output, which is the point.

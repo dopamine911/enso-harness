@@ -14,7 +14,7 @@ import { rootDotenvPath, zenSecretsPath } from './paths.ts'
  *   1. `quarantineSecrets` — at startup, before any session or child process exists,
  *      DELETE every secret-shaped variable and every name the secrets files define from
  *      `process.env`. bun's autoload into THIS process is thereby undone; the spawn spread
- *      in `zen.mjs` and the in-process host both start from an environment that carries
+ *      in `zen.ts` and the in-process host both start from an environment that carries
  *      none.
  *   2. The secrets file is `.zen/secrets.env`, NOT the root `.env` (`zenSecretsPath`).
  *      Scrubbing the parent is not enough: bun auto-loads `.env*` from the cwd into EVERY

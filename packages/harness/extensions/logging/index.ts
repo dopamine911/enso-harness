@@ -12,7 +12,7 @@ import { knownSecretValuesTracking } from '@zen/core/secrets'
  *   - in-process (the web host): the server's launcher configured logging before pi
  *     existed, and `isLoggingConfigured()` says so — this configures nothing, and the
  *     extensions' records land in the server's file through the server's configure;
- *   - as a child (`zen.mjs` → pi): nothing has configured, so this configures — the same
+ *   - as a child (`zen.ts` → pi): nothing has configured, so this configures — the same
  *     day's file as everyone else, `process: "pi"`, NO console sink (stderr is the TUI's).
  *
  * ⚠ Never configure when something already has: LogTape's `configure` throws on a second

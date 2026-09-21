@@ -1,6 +1,6 @@
 # Flow: boot and launchers — the manifest, the isolation triple, the print mirror, the vendor links
 
-Two launchers start the runtime with only this harness loaded: the terminal launcher (`scripts/zen.mjs`)
+Two launchers start the runtime with only this harness loaded: the terminal launcher (`scripts/zen.ts`)
 spawns it as a child; the server (`startZenServer` → `createAgentHost`) runs it in-process (#69). Both
 read one manifest, `packages/harness/package.json` → `pi`, and enforce the same preconditions before any
 of the runtime is imported — vendor links present, the isolation triple applied, secrets out of the
@@ -10,8 +10,8 @@ environment (#89). What differs is flags on a spawn versus loader options, and t
 
 ```mermaid
 sequenceDiagram
-  participant I as bun install (postinstall → link-vendor-packages.mjs)
-  participant Z as terminal launcher (zen.mjs)
+  participant I as bun install (postinstall → link-vendor-packages.ts)
+  participant Z as terminal launcher (zen.ts)
   participant S as server (server/index.ts → host/agent-host.ts)
   participant M as manifest (packages/harness/package.json → pi)
   participant R as runtime
@@ -55,7 +55,7 @@ sequenceDiagram
 5. **A missing vendor path is a refusal at both launch points, naming the path and the fix.** The
    runtime skips a missing manifest resource path without a word (the symptom, once, was an HTTP 400
    several layers away). Only `node_modules/` paths are checked; `./extensions/…` is our own source.
-   Upstream, `link-vendor-packages.mjs` runs from the root `postinstall` as verify-or-fix over every
+   Upstream, `link-vendor-packages.ts` runs from the root `postinstall` as verify-or-fix over every
    `dependencies` entry plus the `node_modules/` paths — `@zen/core` is only an import, and was unlinked.
    One precondition, and since #221 one IMPLEMENTATION: `@zen/core/pi-manifest` owns both pi assumptions
    (a `pi.*` value is a path or an array of them; a `node_modules/` path is literal, not a specifier),
@@ -73,8 +73,8 @@ sequenceDiagram
    not on pi's export map) and the corpus that keeps the copy honest reads the workspace copy — so on
    the terminal surface the guard could resolve a path differently from the tool it gates, and compute
    a deny against the wrong target, with the whole suite green (reproduced with a shim printing
-   `0.85.0` earlier on `PATH`). So `zen.mjs` reads `pi --version` before the spawn and refuses outside
-   `zen-launch.mjs#SUPPORTED_PI_VERSIONS` — no override flag, because the range means "the corpus has
+   `0.85.0` earlier on `PATH`). So `zen.ts` reads `pi --version` before the spawn and refuses outside
+   `zen-launch.ts#SUPPORTED_PI_VERSIONS` — no override flag, because the range means "the corpus has
    been run against this", and `packages/harness/package.json` → `peerDependencies` states the same
    bound. The probe fails closed three ways beside the range: it is bounded at 5s (a wedged
    `pi --version` used to park the launcher silently — worse than the refusal it exists to print,
@@ -85,15 +85,13 @@ sequenceDiagram
 
 ## The print-variant contract
 
-<!-- source: scripts/print-harness.mjs#buildPrintManifest -->
+<!-- source: scripts/print-harness.ts#buildPrintManifest -->
 ```ts
 /**
  * The harness manifest with picc-permission-modes removed from `pi.extensions`.
  * Everything else — skills, prompts, themes, dependencies — is carried verbatim.
- * @param {HarnessManifest} manifest
- * @returns {HarnessManifest & { pi: NonNullable<HarnessManifest["pi"]> & { extensions: string[] } }}
  */
-export function buildPrintManifest(manifest) {
+export function buildPrintManifest(manifest: HarnessManifest): PrintManifest {
   const extensions = manifest?.pi?.extensions
   if (!Array.isArray(extensions)) {
     throw new PrintHarnessShapeError('pi.extensions is not an array')
@@ -144,7 +142,7 @@ that title, so a renamed or deleted pin fails this page.
 <!-- test: scripts/__tests__/zen-launch.test.ts#pi is launched with --no-extensions, --no-skills and -e <package>, ahead of the user’s arguments -->
 - **Invariants 3 and 4, the launcher's own decisions** — [`zen-launch.test.ts`](../../scripts/__tests__/zen-launch.test.ts):
   the isolation triple's two argument legs, in order, ahead of the user's; the print-run trigger.
-  (`zen.mjs` spawns; `zen-launch.mjs` decides, and is what is pinned.)
+  (`zen.ts` spawns; `zen-launch.ts` decides, and is what is pinned.)
 <!-- test: scripts/__tests__/link-vendor-packages.test.ts#verify-or-fix: a present package is verified, an absent one is linked from the hoisted copy, and the link resolves -->
 - **Invariant 5, the linker** — [`link-vendor-packages.test.ts`](../../scripts/__tests__/link-vendor-packages.test.ts):
   both sources of required packages; verify-or-fix; a broken link replaced; a missing package named.
@@ -162,9 +160,9 @@ that title, so a renamed or deleted pin fails this page.
 
 ## Where it is stated
 
-The terminal launcher: [`scripts/zen.mjs`](../../scripts/zen.mjs) (header). The mirror:
-[`scripts/print-harness.mjs`](../../scripts/print-harness.mjs) (header, `materializePrintHarness`). The
-linker: [`scripts/link-vendor-packages.mjs`](../../scripts/link-vendor-packages.mjs) (`requiredPackageNames`).
+The terminal launcher: [`scripts/zen.ts`](../../scripts/zen.ts) (header). The mirror:
+[`scripts/print-harness.ts`](../../scripts/print-harness.ts) (header, `materializePrintHarness`). The
+linker: [`scripts/link-vendor-packages.ts`](../../scripts/link-vendor-packages.ts) (`requiredPackageNames`).
 pi's manifest-resource layout, for all three readers: `packages/core/src/pi-manifest.ts` (header).
 In-process: `packages/web/src/host/agent-host.ts` (header ⚠⚠ items, `createSession`), `server/index.ts#assertVendorLinks`.
 Why the guards precede every vendor extension, and why a denial does not depend on that: `packages/harness/extensions/guards/index.ts` (header), [`seams/guards.md`](../seams/guards.md);

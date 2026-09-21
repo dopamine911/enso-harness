@@ -12,7 +12,7 @@ import strictBindingWorkaround from '../bun-plugin-strict-binding-workaround.ts'
  * of them top-level constants, and both functions unhit — so its header's claim ("the rewrite
  * VERIFIES both file shapes first and throws a named error on any mismatch") was a claim about
  * code that had never run. It is on the only path to a running web UI (`bun run dev` →
- * `scripts/dev.mjs` → `dev-web.ts`, registered in `packages/web/bunfig.toml`), and `bun run
+ * `scripts/dev.ts` → `dev-web.ts`, registered in `packages/web/bunfig.toml`), and `bun run
  * check` never builds that bundle, so a typebox reshape would be green here and an unmountable
  * page there. The Playwright suite that would notice does not run in CI.
  *

@@ -19,7 +19,7 @@ import {
  * run on their own inputs — no test touches `process.env`.
  */
 
-/** A scratch repo root with `.zen/` present, the way `zen.mjs` and the host find it. */
+/** A scratch repo root with `.zen/` present, the way `zen.ts` and the host find it. */
 function scratchRepoRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'zen-secrets-'))
   mkdirSync(join(root, '.zen'))

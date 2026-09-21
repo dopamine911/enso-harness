@@ -37,7 +37,7 @@ jobs:
 
       # The frozen form, not a plain install: it fails when the lockfile and package.json
       # disagree instead of silently resolving a different tree. `postinstall` runs
-      # scripts/link-vendor-packages.mjs, which materializes the vendor symlinks the
+      # scripts/link-vendor-packages.ts, which materializes the vendor symlinks the
       # harness manifest points at — the same step every local install runs.
       - name: Install dependencies
         run: bun install --frozen-lockfile

@@ -32,6 +32,12 @@ import { dirname, join, relative } from 'node:path'
 import { findRepoRoot, harnessPackageDir } from '../packages/core/src/paths.ts'
 import { vendorPackageNames } from '../packages/core/src/pi-manifest.ts'
 
+/** A package manifest, as much of one as this script reads. */
+interface PackageManifest {
+  readonly dependencies?: Record<string, string>
+  readonly pi?: Record<string, unknown>
+}
+
 /**
  * Every package that must exist inside the harness package's own node_modules.
  *
@@ -47,29 +53,22 @@ import { vendorPackageNames } from '../packages/core/src/pi-manifest.ts'
  *     the list insufficient: `@zen/core` appears nowhere in the manifest paths, only as an
  *     import in the source, so a manifest-only sweep left it unlinked and the extension
  *     failed at load rather than at typecheck.
- *
- * @param {{ dependencies?: Record<string, string>, pi?: Record<string, unknown> }} manifest
- * @returns {string[]}
  */
-export function requiredPackageNames(manifest) {
+export function requiredPackageNames(manifest: PackageManifest): string[] {
   return [...new Set([...Object.keys(manifest.dependencies ?? {}), ...vendorPackageNames(manifest)])]
 }
 
 /**
  * Point `linkPath` at `targetPath` as a RELATIVE directory symlink, replacing whatever is
  * there (#267). Two scripts enforce the boot invariants that rest on this idiom — this one
- * (invariant 5, the vendor layout pi resolves through) and `print-harness.mjs` (invariant 4,
+ * (invariant 5, the vendor layout pi resolves through) and `print-harness.ts` (invariant 4,
  * the variant package's mirror) — and both had it written out, so a correction reached one.
  *
  * ⚠ `lstat`, not `exists`: a BROKEN symlink must be replaced, and `existsSync` follows links,
  * so it reports a dangling one as absent and the `symlinkSync` below then fails EEXIST.
  * Relative, so the link survives a move of the tree that holds both ends.
- *
- * @param {string} linkPath
- * @param {string} targetPath
- * @returns {void}
  */
-export function relinkDirectory(linkPath, targetPath) {
+export function relinkDirectory(linkPath: string, targetPath: string): void {
   mkdirSync(dirname(linkPath), { recursive: true })
   try {
     lstatSync(linkPath)
@@ -84,15 +83,14 @@ export function relinkDirectory(linkPath, targetPath) {
  * Verify-or-fix: every required package is reachable at `<packageRoot>/node_modules/<name>`,
  * linked from the repo root's hoisted copy when it is not. A package at neither is an
  * error naming it — the caller decides whether that ends the process.
- *
- * @param {string} repoRoot
- * @param {string} packageRoot
- * @param {{ dependencies?: Record<string, string>, pi?: Record<string, unknown> }} manifest
- * @returns {{ verified: string[], linked: string[] }}
  */
-export function linkVendorPackages(repoRoot, packageRoot, manifest) {
-  const verified = []
-  const linked = []
+export function linkVendorPackages(
+  repoRoot: string,
+  packageRoot: string,
+  manifest: PackageManifest,
+): { verified: string[]; linked: string[] } {
+  const verified: string[] = []
+  const linked: string[] = []
   for (const packageName of requiredPackageNames(manifest)) {
     const target = join(packageRoot, 'node_modules', packageName)
     // existsSync FOLLOWS symlinks, so a bun-made link into the `.bun` store passes here
@@ -117,7 +115,7 @@ if (import.meta.main) {
   const repoRoot = findRepoRoot(import.meta.url)
   const packageRoot = harnessPackageDir(repoRoot)
   const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
-  let outcome
+  let outcome: { verified: string[]; linked: string[] }
   try {
     outcome = linkVendorPackages(repoRoot, packageRoot, manifest)
   } catch (error) {

@@ -1,7 +1,7 @@
 # Bundler plugins for the fullstack dev server (src/server/dev-web.ts, #36).
 #
 # ⚠ bunfig.toml is read from the PROCESS CWD, and every launcher of the web surface runs
-# with cwd = packages/web (scripts/dev.mjs spawns it there; the root `dev:web` script uses
+# with cwd = packages/web (scripts/dev.ts spawns it there; the root `dev:web` script uses
 # `--cwd packages/web`). A root-level bunfig would NOT be seen by this server — this file
 # must live here. The repo root's bunfig.toml stays authoritative for `bun install`
 # (its [install] linker pin), which always runs from the root.

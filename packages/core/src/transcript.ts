@@ -5,7 +5,7 @@ import { ZenToolResultDescriptor } from './tool-result.ts'
  * The transcript (#162 workstream 4, leak L2's persistence side): a thread's branch, root to
  * leaf, as entries of OURS. The host reads the runtime's session log and produces these
  * below the `AgentHost` seam; nothing above it — the history route, the cold snapshot, the
- * `?debug` drawer, `zen-thread.mjs`, the mode walk — sees the runtime's stored shapes.
+ * `?debug` drawer, `zen-thread.ts`, the mode walk — sees the runtime's stored shapes.
  *
  * The same discipline as `ZenObservation`: decoded, not carried. A message's content is
  * already parts of ours (text, thinking, an image, a tool call), a tool result is already a
@@ -85,7 +85,7 @@ export type ZenTranscriptEntry = Static<typeof ZenTranscriptEntry>
 
 /**
  * One entry as a row — `12:34:56 message user`, `12:34:56 custom:modes mode=plan` — THE
- * definition (PR #100 review): the drawer and `zen-thread.mjs` had one each and had drifted.
+ * definition (PR #100 review): the drawer and `zen-thread.ts` had one each and had drifted.
  * A custom entry's `data.mode` is shown when present because the drawer's one use of this
  * row is checking which mode the branch ended in; the entry's own shape is otherwise not
  * this function's to know.

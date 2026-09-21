@@ -8,7 +8,7 @@
  * lives in the session tree, set only via `/mode` interactively (upstream launch-time mode
  * selection is #13, the durable fix). pi offers no per-extension CLI exclusion either: `-e`
  * loads a whole package by its manifest, and passing extension FILES individually silently
- * drops every other resource kind (skills, prompts, themes — see scripts/zen.mjs's header).
+ * drops every other resource kind (skills, prompts, themes — see scripts/zen.ts's header).
  *
  * So print mode loads a GENERATED package: a scratch dir whose manifest is the harness
  * manifest with the picc extension filtered out, and whose resource directories are
@@ -26,7 +26,7 @@
  */
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { relinkDirectory } from './link-vendor-packages.mjs'
+import { relinkDirectory } from './link-vendor-packages.ts'
 
 /** The manifest entry to remove — matching by package name, not exact path. */
 const PICC_EXTENSION_FRAGMENT = 'picc-permission-modes'
@@ -37,12 +37,25 @@ const MANIFEST_FILENAME = 'package.json'
 /**
  * The harness `package.json` as this filter reads it: the pi manifest block, and everything
  * else carried verbatim. Only `pi.extensions` is examined.
- * @typedef {{ name?: string, pi?: { extensions?: unknown, skills?: unknown, prompts?: unknown, themes?: unknown }, [key: string]: unknown }} HarnessManifest
  */
+export interface HarnessManifest {
+  readonly name?: string
+  readonly pi?: {
+    readonly extensions?: unknown
+    readonly skills?: unknown
+    readonly prompts?: unknown
+    readonly themes?: unknown
+  }
+  readonly [key: string]: unknown
+}
+
+/** The filtered manifest: `pi.extensions` is a string list by construction. */
+export type PrintManifest = HarnessManifest & {
+  readonly pi: NonNullable<HarnessManifest['pi']> & { readonly extensions: string[] }
+}
 
 export class PrintHarnessShapeError extends Error {
-  /** @param {string} detail */
-  constructor(detail) {
+  constructor(detail: string) {
     super(
       `print-harness: the harness manifest no longer matches the shape this filter ` +
         `expects (${detail}). Re-derive the print variant (#20) before launching ` +
@@ -55,10 +68,8 @@ export class PrintHarnessShapeError extends Error {
 /**
  * The harness manifest with picc-permission-modes removed from `pi.extensions`.
  * Everything else — skills, prompts, themes, dependencies — is carried verbatim.
- * @param {HarnessManifest} manifest
- * @returns {HarnessManifest & { pi: NonNullable<HarnessManifest["pi"]> & { extensions: string[] } }}
  */
-export function buildPrintManifest(manifest) {
+export function buildPrintManifest(manifest: HarnessManifest): PrintManifest {
   const extensions = manifest?.pi?.extensions
   if (!Array.isArray(extensions)) {
     throw new PrintHarnessShapeError('pi.extensions is not an array')
@@ -85,11 +96,12 @@ export function buildPrintManifest(manifest) {
  * — links are recreated every launch (a moved repo heals), and entries the harness no
  * longer has are REMOVED (a renamed or deleted sibling does not leave a dead link that pi
  * would skip in silence). Returns the directory to pass to `-e`.
- * @param {string} printHarnessDir
- * @param {string} harnessPackageRoot
- * @param {HarnessManifest} printManifest
  */
-export function materializePrintHarness(printHarnessDir, harnessPackageRoot, printManifest) {
+export function materializePrintHarness(
+  printHarnessDir: string,
+  harnessPackageRoot: string,
+  printManifest: PrintManifest,
+): string {
   mkdirSync(printHarnessDir, { recursive: true })
   // ⚠ EVERY package-root entry is mirrored, not a curated list: extensions import their
   // siblings by relative path (guards reaches `../../core/index.ts`), and pi resolves
