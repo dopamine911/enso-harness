@@ -220,9 +220,13 @@ function valueScrubber(values: readonly string[]): ((value: unknown) => unknown)
  * every rotated key readable and unredactable for the rest of the process's life. The
  * alternation is rebuilt only when the thunk hands back a DIFFERENT array
  * (`knownSecretValuesTracking` changes identity exactly when the file does), so the steady
- * state costs one `stat` and one reference compare per record: measured over 20k records,
- * 9.4 µs per record tracking against 7.5 µs snapshot and 7.3 µs with no value pass at all
- * (`.local` benchmark, #207). A 50k-record `trace` day pays ~0.1 s for it.
+ * state costs one `stat` and one reference compare per record PER WRAPPED SINK: measured over
+ * 20k records, 9.4 µs per record tracking against 7.5 µs snapshot and 7.3 µs with no value
+ * pass at all (`.local` benchmark, #207). ⚠ The wrapper is applied to each sink separately
+ * (file, and console when it is configured), and each closure asks the thunk itself — so a
+ * process logging to both pays the `stat` twice per record, not once (PR #318 review). They
+ * converge on the same cached alternation, so only the cost doubles, never the answer. A
+ * 50k-record `trace` day pays ~0.1 s for it, ~0.2 s with the console sink on.
  */
 function redactingKnownValues(values: readonly string[] | (() => readonly string[])): (sink: Sink) => Sink {
   const rotating = typeof values === 'function' ? values : undefined

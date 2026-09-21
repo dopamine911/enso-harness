@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { afterAll, expect, test } from 'bun:test'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { REPOSITORY_ROOT } from './gate-support.ts'
@@ -79,7 +79,7 @@ function git(root: string, ...args: string[]): string {
  */
 function fixtureRange(resolution: 'writes-the-marker' | 'drops-the-marker'): { root: string; range: string } {
   const root = mkdtempSync(join(tmpdir(), 'zen-secret-scan-'))
-  const marker = 'AKIA2E0A8F3B244C9986' // gitleaks' aws-access-token shape, and not a real key
+  const marker = MARKER
   git(root, 'init', '-q', '-b', 'main', '.')
   writeFileSync(join(root, 'config.txt'), 'shared = 1\n')
   git(root, 'add', '.')
@@ -97,10 +97,23 @@ function fixtureRange(resolution: 'writes-the-marker' | 'drops-the-marker'): { r
   writeFileSync(join(root, 'config.txt'), resolution === 'writes-the-marker' ? `key = ${marker}\n` : 'shared = 4\n')
   git(root, 'add', 'config.txt')
   git(root, 'commit', '-qm', "Merge branch 'side' into feature")
+  fixtureRoots.push(root)
   return { root, range: `${base}..${git(root, 'rev-parse', 'HEAD').trim()}` }
 }
 
-const MARKER = 'AKIA2E0A8F3B244C9986'
+/** Every fixture repository this file made, removed together: each one is a real `git init`. */
+const fixtureRoots: string[] = []
+afterAll(() => {
+  for (const root of fixtureRoots) rmSync(root, { recursive: true, force: true })
+})
+
+/**
+ * gitleaks' `aws-access-token` shape, and not a real key — the fixture history has to carry
+ * something the scanner really detects, so the allow marker keeps THIS line (and only this
+ * line) out of the repository's own scan. The copy written into the fixture's `config.txt`
+ * carries no marker, which is what the two tests below measure.
+ */
+const MARKER = 'AKIA2E0A8F3B244C9986' // gitleaks:allow
 
 test('⚠ the secret gate walks a secret written while RESOLVING a merge (#209)', () => {
   const { root, range } = fixtureRange('writes-the-marker')
