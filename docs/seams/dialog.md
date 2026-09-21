@@ -211,10 +211,10 @@ request with `isZenDialogSpec` rather than casting, line 464).
 observation whole on a CUSTOM chunk named by its kind (`to-agui.ts#custom`) and the router checks
 `{ id, dialog }` again against `ZenOpenDialog` before it reaches the store (`custom-event-router.ts#routeUiRequest`). `ZenDialogCard` in
 `packages/web/src/chat-screen.tsx` (`#ZenDialogCard`) renders one card and hands `answerDialog` in
-`packages/web/src/follow-connection.ts` (line 542) exactly the answer shapes — `{ value }`,
+`packages/web/src/follow-connection.ts` (line 571) exactly the answer shapes — `{ value }`,
 `{ confirmed }`, `{ cancelled: true }` — because the server forwards them verbatim (chat-screen.tsx
-lines 330–333). The card drops on `dialog-settled` for its id, whoever answered (router lines 115–119), and
-the snapshot's complete list replaces what is shown (`follow-connection.ts` lines 350–352).
+lines 457–461). The card drops on `dialog-settled` for its id, whoever answered (router lines 136–141), and
+the snapshot's complete list replaces what is shown (`follow-connection.ts` lines 366–370).
 
 **Fakes.** `follow.test.ts` drives the answer route over an inline runtime whose `openDialogs` the test
 controls; `extension-ui-context.test.ts` exercises the context against scripted extension calls,

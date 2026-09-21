@@ -137,12 +137,12 @@ through the mapper (lines 284–286); the prompt route's `announce` (line 466) e
 
 **Consumed by the follow route and the browser.** `followThread` (`server/follow.ts` line 95) writes
 one frame per feed frame — `observation` with its `seq`, `status` with `live`/`busy`/`generation`
-(lines 110–117) — after a snapshot taken in the same tick as the subscription, exact as of `asOfSeq`
-(lines 91–93, 126–138). In the browser `packages/web/src/follow-connection.ts` checks every frame
-against `ZenFollowFrame` (line 407), pushes the snapshot and status frames whole as chunks named by
-their type (lines 348–354), closes runs on `settled` (line 361) and matches `prompt-rejected` to the prompt it
-queued (line 369). `packages/web/src/to-agui.ts` is the adapter proper: observation → state-layer
-chunk, run in the page, never serialised or stored (header lines 14–19).
+(lines 125–133) — after a snapshot taken in the same tick as the subscription, exact as of `asOfSeq`
+(lines 106–108, 141–153). In the browser `packages/web/src/follow-connection.ts` checks every frame
+against `ZenFollowFrame` (line 436), pushes the snapshot and status frames whole as chunks named by
+their type (lines 366–372), closes runs on `settled` (line 375) and matches `prompt-rejected` to the prompt it
+queued (line 383). `packages/web/src/to-agui.ts` is the adapter proper: observation → state-layer
+chunk, run in the page, never serialised or stored (header lines 5–34).
 
 **The resync rule.** Nothing is replayed by cursor. A reconnect opens a new follow and gets a new
 snapshot (`follow.ts` header lines 13–15; `server/follow.ts` lines 91–93); when the last follower
@@ -161,7 +161,7 @@ leaves, the registry forgets the feed and `seq` restarts with the next follower,
   (`test/docs-gate.test.ts`); a kind with no producer or consumer is printed as a finding, not omitted.
 - **Closed frames**: the three frame schemas are `additionalProperties: false` (`follow.ts` lines
   40, 50, 61); the browser refuses a frame that fails `ZenFollowFrame` with a problem record, not a
-  crash (`follow-connection.ts` lines 407–410).
+  crash (`follow-connection.ts` lines 424–427).
 - **The vendor gate** (`test/vendor-gate.test.ts`, #145): the mapper and the adapter import
   `@zen/core`, not the runtime's package.
 
