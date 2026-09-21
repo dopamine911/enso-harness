@@ -7,6 +7,7 @@ import {
   createSessionReadTracker,
   findDeniedNetworkEgress,
   findEnvironmentDump,
+  findSecretPathWord,
   isInsideAnyRoot,
   isPersistenceWriteTarget,
   isProtectedForWrite,
@@ -202,6 +203,13 @@ export default createGuards({ analyzeBashCommand: checkCommand })
  *    regression there LOUD: the listing is refused with a reason, instead of quietly
  *    printing a key into the transcript again. `environment-dump.ts` states its
  *    non-coverage (the interpreters), the same as the egress deny.
+ * 4. The secret-path deny (#204) — the READER GATE'S OWN POLICY on this route. Measured
+ *    before it existed: `read .zen/secrets.env` was refused and `cat .zen/secrets.env`
+ *    was allowed, because nothing on the bash route resolved a path and cc-safety-net's
+ *    corpus is `~/.aws`, `~/.ssh`, `.env`-basename — its "secret access THROUGH bash"
+ *    half does not know this harness's own credential dir. LAST of the four: a command
+ *    that is destructive, exfiltrating or dumping is refused for that first, which keeps
+ *    the older reasons' wording stable. `shell-secret-paths.ts` states its non-coverage.
  */
 function shellCommandDenial(
   call: { toolName: string; command: string; cwd: string },
@@ -263,6 +271,22 @@ function shellCommandDenial(
         `secret-shaped variable expansion is refused rather than trusted to be empty. ` +
         `If a command needs a value from the environment, name a non-secret variable; ` +
         `API keys are read by the harness's own tools from .zen/secrets.env, never the root .env.`,
+    }
+  }
+
+  const secret = findSecretPathWord(command, policy.secretPathFragments, cwd, { coarse })
+  if (secret !== undefined) {
+    return {
+      block: true,
+      reason:
+        `${toolName} command refused: "${secret.matched}" names credential material ` +
+        `(matched by ${secret.via}). The read gate refuses that path for read/grep/find/ls, ` +
+        `so this route refuses it too (#204) — one policy, both routes, because a secret ` +
+        `read is the precondition for exfiltration. This gates the WORD, not the read, so a ` +
+        `mention counts: if the word is prose or a search pattern rather than a path, spell ` +
+        `it so it is not one (an escaped dot, '/\\.zen/', passes). The harness's own ` +
+        `credential dir (.zen/) is off limits for inspection either way; the log-reading ` +
+        `path is "bun run logs", a human command and not a tool call.`,
     }
   }
   return undefined
@@ -369,7 +393,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     }
 
     // --- bash/powershell (#9): deny first, patch last — a denied command must never
-    // have had its input mutated. The three denies live in `shellCommandDenial` so this
+    // have had its input mutated. The four denies live in `shellCommandDenial` so this
     // handler stays under the complexity ceiling biome.jsonc pins.
     if (toolName === TOOL_BASH || toolName === TOOL_POWERSHELL) {
       const input = inputRecordOf(event)
