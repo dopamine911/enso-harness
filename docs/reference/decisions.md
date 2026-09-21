@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 168.**
+**Decision headers: 169.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -58,7 +58,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/core/web-search/providers/openai.ts` | `#63` | The `openai` provider (#63): the Responses API `web_search` tool, serving three model APIs — `openai-responses`, `azure-openai-responses`, and `openai-codex-responses` (including GitHub Copilot credentials, whose resolved endpoint rides the credential object). |
 | `packages/harness/core/web-search/providers/tavily.ts` | `#63` | The `tavily` provider (#63): the FALLBACK — a dedicated retrieval API, not a model. |
 | `packages/harness/core/web-search/sources.ts` | `#63` | Source hygiene for provider results (#63): URL normalization, junk filtering, and order-preserving dedupe. |
-| `packages/harness/core/web-search/sse.ts` | `#63` | A minimal SSE reader for the provider streams (#63). |
+| `packages/harness/core/web-search/sse.ts` | `#63`, `#268` | A minimal SSE reader for the provider streams (#63). |
 | `packages/harness/core/web-search/vocabulary.ts` | `#56`, `#63` | The web_search vocabulary (#63): provider ids, the outcome union, and the request shapes every provider module accepts. |
 | `packages/harness/core/web-search/wire-json.ts` | `#63`, `#64` | Tiny helpers every provider wire shares (#63, PR #64 review): narrowing for unknown JSON wire payloads, and base-URL hygiene. |
 | `packages/harness/extensions/__tests__/tool-call-participants.test.ts` | `#4`, `#20`, `#62` | THE #4 TRIPWIRE — the arbiter trigger, made structural. |
@@ -95,7 +95,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/browser-logging.ts` | `#86`, `#132` | The browser's logging (#132 slice 3). |
 | `packages/web/src/custom-event-router.ts` | `#103` | The one chunk that is neither an observation nor a frame: the follow ended without this page leaving it (#103 receipt) — the server closed, restarted, or dropped the connection. |
 | `packages/web/src/fixture-conversation.ts` | `#27`, `#31` | The styling dev loop (#31): a scripted conversation streamed through the REAL `useChat` pipeline as local AG-UI events — no server, no pi. |
-| `packages/web/src/follow-connection.ts` | `#112`, `#272` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |
+| `packages/web/src/follow-connection.ts` | `#112`, `#272`, `#274` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |
 | `packages/web/src/host/__tests__/agent-host.test.ts` | `#27`, `#69` | The in-process host against the REAL harness package (#69) — every extension the manifest names loads, and inline probe extensions observe what the host does. |
 | `packages/web/src/host/__tests__/agent-loop-contract.test.ts` | `#130` | A CONTRACT TEST on the runtime's loop, the shape of `cc-safety-net-contract.test.ts`: the wire shape of a refused tool call is the vendor's doing — a guard's `{ block, reason }` becomes an error result with the reason as its content, `isError: true` — and `map-events.ts` relies on it (the `tool_execution_end` case, "isError is the only signal a refused call has"). |
 | `packages/web/src/host/__tests__/event-tail.test.ts` | `#97` | #97's tail is a debugging surface: what it must not do is lie by omission. |
@@ -164,6 +164,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/browser-bundle-gate.test.ts` | `#211` | The browser zone must bundle for the browser (#211). |
 | `test/check-coverage.test.ts` | `#53` | The coverage GATE's own arithmetic (#53 S2). |
 | `test/code-offenders.test.ts` | `#162` | The allowlist is the leak inventory (#162 workstream 4): a row hides a file's matches, and a row for a file with no matches is drift and is reported. |
+| `test/complexity-ratchet.test.ts` | `#264` | Re-measures the cognitive-complexity pins, per FUNCTION (#264). |
 | `test/dependency-gate.test.ts` | `#218`, `#223` | What the dependency manifests claim, held against what the code actually imports (#218, #223). |
 | `test/docs-gate.test.ts` | `#162`, `#167`, `#168` | The docs cannot drift (#168, goals §3.3): a page either quotes source and is checked against it, or is generated from source and is diffed against it. |
 | `test/fallow-config.test.ts` | `#163` | fallow's entry list cannot drift from the harness manifest (#163). |

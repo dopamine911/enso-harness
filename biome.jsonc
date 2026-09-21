@@ -145,29 +145,36 @@
       "plugins": ["./.biome/naming.grit"]
     },
 
-    // ── Cognitive-complexity exceptions (#82) ─────────────────────────────────
+    // ── Cognitive-complexity exceptions (#82, #264) ───────────────────────────
     // The global ceiling above stays 25 ON PURPOSE: it is what keeps us from
     // writing functions a human cannot read. These entries do NOT relax it
     // globally and do NOT switch the rule off — each pins one file to the
-    // EXACT score it measures today, so the rule still fails the moment that
-    // function grows. Treat every number as a ratchet: it may go down, never up.
+    // EXACT score its worst function measures today, so the rule still fails
+    // the moment that function grows. A number may go down, never up.
     //
     // Each exists because the complexity belongs to an EXTERNAL grammar or
     // protocol that must be read top-to-bottom, where extracting helpers would
     // scatter a state machine rather than simplify it. Replaces 7 per-line
     // `// biome-ignore` comments, which hid both the score and the count.
-    // To retire one: reduce the function, then lower the number here.
+    // To retire one: reduce the function, then lower the number here AND its
+    // row in `test/complexity-ratchet.test.ts`.
     //
-    // ⚠ A ratchet nobody re-measures is not a ratchet. Measured 2026-09-10 by
-    // pinning every entry to 5 and reading the reported scores: guards had
-    // drifted to 18 points of unclaimed slack (62 pinned, 44 measured) and
-    // map-events to 3, so a function could have grown that far unreviewed.
-    // Every number below is today's measurement. Re-measure the same way.
+    // ⚠ A ratchet nobody re-measures is not a ratchet — and an `overrides`
+    // entry pins a FILE, so this file's number is also the ceiling for every
+    // OTHER function in it. Hand-measuring caught the pins drifting (#82) but
+    // not that slack: at #264 the three files below held 683 points of it, with
+    // `literalShellWord` (50) free to reach 68 inside the tokenizer. The
+    // re-measurement is therefore no longer a manual habit:
+    // `test/complexity-ratchet.test.ts` runs Biome with this rule at 1 over
+    // these three files on every `bun run check`, pins EVERY function above the
+    // global ceiling by NAME at its measured score, and refuses a number here
+    // that is higher than its own file's worst function.
     {
       // A shell character-scanner: `extractFlatShellCommandSegments` (68),
       // `literalShellWord` (50), `skipShellWord` (32). One linear read of the
       // quote/escape state machine, kept close to upstream oh-my-pi so a diff
-      // stays reviewable.
+      // stays reviewable — which is why it is not split into three files to
+      // give each its own entry; the ratchet test holds the other two numbers.
       "includes": ["packages/harness/core/shell-segments.ts"],
       "linter": {
         "rules": {

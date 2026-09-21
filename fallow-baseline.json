@@ -9,15 +9,13 @@
   },
   "unused_files": [],
   "unused_exports": [
-    "packages/harness/core/index.ts:isInsideRoot",
     "packages/harness/core/index.ts:realpathOfNearestExisting",
     "packages/harness/core/index.ts:extractFlatShellCommandSegments",
     "packages/harness/core/index.ts:withoutLeadingEnvironmentAssignments",
     "packages/harness/core/index.ts:ANTHROPIC_WEB_SEARCH_TOOL_TYPE",
     "packages/harness/core/index.ts:runAnthropicWireSearch",
     "packages/harness/core/index.ts:DEEPSEEK_SEARCH_BASE_URL",
-    "packages/harness/core/index.ts:DEEPSEEK_SEARCH_MODEL_ID",
-    "packages/harness/core/paths.ts:isInsideRoot"
+    "packages/harness/core/index.ts:DEEPSEEK_SEARCH_MODEL_ID"
   ],
   "unused_types": [
     "packages/harness/core/index.ts:EnvironmentDumpMatch",
