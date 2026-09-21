@@ -70,6 +70,7 @@ import { ThreadStatusBar } from './thread-status.tsx'
 import {
   adoptThread,
   getThreadStores,
+  markThreadActive,
   mintThread,
   type ThreadStores,
   threadListStore,
@@ -1018,6 +1019,9 @@ export function ThreadPane({
  */
 const BOOT: ThreadUrl = typeof window === 'undefined' ? { kind: 'fresh' } : readThreadUrl(window.location.search)
 const FIRST_THREAD_ID: string | undefined = BOOT.kind === 'fresh' ? mintThread().threadId : undefined
+// The boot thread is on screen before any navigation happens, so the store has to be told
+// here too — otherwise the first pane is evictable until the user clicks something.
+markThreadActive(FIRST_THREAD_ID)
 if (FIRST_THREAD_ID !== undefined && typeof window !== 'undefined') {
   window.history.replaceState(null, '', urlForThread(window.location.search, FIRST_THREAD_ID))
 }
@@ -1065,6 +1069,9 @@ export function ChatScreen(): React.ReactNode {
   const navigate = useCallback((threadId: string, how: ThreadNavigation): void => {
     epoch.current += 1
     activePane.current = threadId
+    // The follow budget needs this too: the visible thread is not a drop candidate, and
+    // being looked at is what counts as activity for the one being left behind (#272).
+    markThreadActive(threadId)
     setActiveThreadId(threadId)
     if (how === 'pop' || typeof window === 'undefined') return
     const url = urlForThread(window.location.search, threadId)
