@@ -106,6 +106,26 @@ test('dialog-settled drops the card for ITS id and no other (#114)', () => {
   expect(notificationMessages()).toEqual([])
 })
 
+// ⚠ THE OLDEST QUESTION HOLDS THE SLOT (#271). Two LIVE asks — what the host actually does
+// (`host/extension-ui-context.ts` holds several at once, oldest first) and the case the
+// snapshot test below cannot observe, since a snapshot arrives once, when the follow opens.
+// Newest-wins made the question being read vanish mid-read and left the page blank once the
+// newer one was answered, with pi still parked on the older one.
+test('a second live question never displaces the one on screen — the oldest holds the slot (#271)', () => {
+  const ask = (id: string, dialog: ZenDialogSpec): void =>
+    observe({ kind: 'extension-ui-request', id, method: dialog.method, blocking: true, origin: 'run', dialog })
+  ask('first', CONFIRM)
+  ask('second', SELECT)
+  expect(stores.dialog.get()).toEqual({ id: 'first', dialog: CONFIRM })
+  // The held question is still the server's: settling the shown one empties the slot, and the
+  // next snapshot — the only wholesale write — is what surfaces `second`.
+  observe({ kind: 'dialog-settled', id: 'first', outcome: 'answered' })
+  expect(stores.dialog.get()).toBeUndefined()
+  route('snapshot', snapshot({ openDialogs: [{ id: 'second', dialog: SELECT }] }))
+  expect(stores.dialog.get()).toEqual({ id: 'second', dialog: SELECT })
+  expect(noticesBesideModeLines()).toEqual([])
+})
+
 test('two questions open: a settle for the one NOT shown leaves the card; the snapshot then lists the survivor first (#114, PR #115 review)', () => {
   route(
     'snapshot',
