@@ -83,17 +83,21 @@ ones, the seam each replaces and every consumer test.
 
 Use the narrowest real surface:
 
-- **Thread runtime / host** — the three `ThreadRuntime` fakes drive the real registry, follow handlers
+- **Thread runtime / host** — the one `ThreadRuntime` fake (`createFakeHostedThread`) and the one
+  `AgentHost` fake (`createFakeAgentHost`), both in
+  `packages/web/src/server/__tests__/fake-hosted-thread.ts`, drive the real registry, follow handlers
   and HTTP dispatcher; see [the thread-runtime seam](./seams/thread-runtime.md).
 - **Browser transport** — `createScriptedFetch` drives the real prompt/follow adapter with a streamed
   body and controlled routes; it is not a mock echo.
 - **Follow HTTP** — `openFollow` reads the real SSE endpoint and records frames.
-- **Logging** — the two `recordZenLogs` helpers replace the sink while calls still go through
-  `zenLogger` and its structured properties.
+- **Logging** — the single `recordZenLogs` (`packages/core/src/__tests__/log-recorder.ts`, one for
+  every package) replaces the sink while calls still go through `zenLogger` and its structured
+  properties.
 - **DOM** — the shared environment owns process-wide browser globals for mounted component tests.
 
-Do not create a fourth inline runtime fake. Extend or consolidate the three already listed under the
-seam; #162 workstream 6 owns that consolidation. A double earns its place by driving consumer-visible
+Do not add a per-file runtime fake. Extend the one builder over its own parts — a consumer replaces
+the method it needs and keeps the rest (`FakeHostedThreadOptions.runtime`); #178 closed the
+consolidation that made that possible. A double earns its place by driving consumer-visible
 behavior — state transitions, frames, rendered output, real errors — not by returning whatever the
 test asserts.
 
