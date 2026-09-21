@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 161.**
+**Decision headers: 164.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -62,7 +62,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/core/web-search/vocabulary.ts` | `#56`, `#63` | The web_search vocabulary (#63): provider ids, the outcome union, and the request shapes every provider module accepts. |
 | `packages/harness/core/web-search/wire-json.ts` | `#63`, `#64` | Tiny helpers every provider wire shares (#63, PR #64 review): narrowing for unknown JSON wire payloads, and base-URL hygiene. |
 | `packages/harness/extensions/__tests__/tool-call-participants.test.ts` | `#4`, `#20`, `#62` | THE #4 TRIPWIRE — the arbiter trigger, made structural. |
-| `packages/harness/extensions/guards/__tests__/cc-safety-net-contract.test.ts` | `#4`, `#9` | The cc-safety-net CONTRACT TEST (#9) — the condition #4's comments set for adopting a vendor as a library: exact pin + a fixed command set asserted verdict-by-verdict, so a vendor bump that shifts the boundary goes red here instead of silently moving it. |
+| `packages/harness/extensions/guards/__tests__/cc-safety-net-contract.test.ts` | `#4`, `#9`, `#238` | The cc-safety-net CONTRACT TEST (#9) — the condition #4's comments set for adopting a vendor as a library: exact pin + a fixed command set asserted verdict-by-verdict, so a vendor bump that shifts the boundary goes red here instead of silently moving it. |
 | `packages/harness/extensions/guards/index.ts` | `#4`, `#9`, `#10`, `#20`, `#21`, `#69` | Tier 0 guards — see `docs/concepts/pi-immediate-needs.md`. |
 | `packages/harness/extensions/logging/__tests__/logging.test.ts` | `#132` | The extension's two branches (#132): pi as a CHILD configures its own sink; pi IN-PROCESS leaves the server's alone. |
 | `packages/harness/extensions/logging/index.ts` | `#132`, `#144`, `#167` | The extension process's logging (#132), and the one record only an extension can write: the provider's own request id (#144). |
@@ -77,6 +77,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/chat-screen.test.tsx` | `#27`, `#49` | #49, first pass: the dialog components had live receipts (#27, the e2e smoke) and no unit render, so chat-screen.tsx sat at ~14% lines. |
 | `packages/web/src/__tests__/custom-event-router.test.ts` | `#53`, `#90`, `#162` | #53 S1.3: the CUSTOM-chunk router was an inline closure no test reached — renaming a chunk, dropping the notify-type allowlist, or swapping the two `apply*` calls all left the suite green. |
 | `packages/web/src/__tests__/dom-environment.ts` | `#118` | A browser DOM for the tests that MOUNT React (#118) — the mounted-pane tests, which need effects, `useSyncExternalStore` subscriptions and TanStack's `useChat` to actually run. |
+| `packages/web/src/__tests__/fixture-conversation.test.ts` | `#27`, `#218` | The compatibility probe that used to live in a PR body (#218). |
 | `packages/web/src/__tests__/follow-connection.test.ts` | `#112` | The adapter is the ONLY place AG-UI is made (#112). |
 | `packages/web/src/__tests__/mode-lines.test.ts` | `#29`, `#90` | #29's remaining half: a mode change becomes a visible transcript line. |
 | `packages/web/src/__tests__/notifications.test.tsx` | `#29`, `#90` | #29's browser half: notify messages become visible transcript lines. |
@@ -144,11 +145,12 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/docs/decisions.ts` | `#170` | Generates `docs/reference/decisions.md` (#170): one row for each owned source file whose first comment/header block cites an issue. |
 | `scripts/docs/env-and-config.ts` | `#170` | Generates `docs/reference/env-and-config.md` (#170): the explicit environment boundary, the composed `ZenConfig` shape, every `.zen/` path assembled by core, and the harness manifest resources. |
 | `scripts/docs/extract-declaration.ts` | `#168` | The docs gate's one primitive (#168): a top-level declaration, verbatim, by name. |
+| `scripts/docs/gate-source.ts` | `#170`, `#262` | Reading a declared constant back out of a gate's source (#170, split out on #262). |
 | `scripts/docs/generator-support.ts` | `#174` | What every generator under `scripts/docs/` shares (#174): the exhaustiveness check that makes a metadata table refuse to be stale, and the one way a generator runs — its page to stdout, or one `name: reason` line to stderr and a non-zero exit, never a partial page. |
 | `scripts/docs/ported-provenance.ts` | `#168` | Generates `docs/seams/ported-provenance.md` (#168): one row per file under `components/ai-elements/` — the upstream path and commit its header names, and the `Modified —` line that follows. |
 | `scripts/docs/refresh-fences.ts` | `#162`, `#168` | Refreshes every sourced fence in a page from the source it names (#168): the authoring and repair tool for `test/docs-gate.test.ts`. |
 | `scripts/docs/seams-table.ts` | `#162`, `#167` | Generates the seams table (#162 workstream 11, #167 item 4) — the block `docs/architecture.md` and `docs/seams/README.md` embed between `<!-- generated-block: … -->` markers. |
-| `scripts/docs/verification-inventory.ts` | `#170` | Generates `docs/reference/verification-inventory.md` (#170): enforcement gates, the numeric and count ratchets they carry, and the deliberately reusable test doubles. |
+| `scripts/docs/verification-inventory.ts` | `#170`, `#262` | Generates `docs/reference/verification-inventory.md` (#170): enforcement gates, the numeric and count ratchets they carry, and the deliberately reusable test doubles. |
 | `scripts/link-vendor-packages.mjs` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
 | `scripts/print-harness.mjs` | `#9`, `#13`, `#20` | The PRINT-MODE harness variant (#20): the zen-harness package minus picc-permission-modes. |
 | `scripts/source-tree.ts` | `#162`, `#174` | The one walk over the source tree (#174, #162 workstream 6: one walker per gate family). |
@@ -158,6 +160,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/browser-bundle-gate.test.ts` | `#211` | The browser zone must bundle for the browser (#211). |
 | `test/check-coverage.test.ts` | `#53` | The coverage GATE's own arithmetic (#53 S2). |
 | `test/code-offenders.test.ts` | `#162` | The allowlist is the leak inventory (#162 workstream 4): a row hides a file's matches, and a row for a file with no matches is drift and is reported. |
+| `test/dependency-gate.test.ts` | `#218`, `#223` | What the dependency manifests claim, held against what the code actually imports (#218, #223). |
 | `test/docs-gate.test.ts` | `#162`, `#167`, `#168` | The docs cannot drift (#168, goals §3.3): a page either quotes source and is checked against it, or is generated from source and is diffed against it. |
 | `test/e2e-selectors.test.ts` | `#116`, `#277` | THE E2E SELECTOR CONTRACT (#277). |
 | `test/fallow-config.test.ts` | `#163` | fallow's entry list cannot drift from the harness manifest (#163). |
@@ -169,7 +172,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/naming-gate.test.ts` | `#82`, `#83` | The naming gate's exemption for externally-fixed KEYS (#82, PR #83 review). |
 | `test/no-lint-suppressions.test.ts` | `#82` | The gate may not be talked out of, one line at a time. |
 | `test/presentation-gate.test.ts` | `#31`, `#121` | Presentation stays presentation (#121 item 4, #31). |
-| `test/vendor-gate.test.ts` | `#69`, `#145`, `#150`, `#165`, `#173` | The seam has an owner: only the host and the pi extensions may name the vendor (#145). |
+| `test/vendor-gate.test.ts` | `#69`, `#145`, `#150`, `#165`, `#173`, `#215` | The seam has an owner: only the host and the pi extensions may name the vendor (#145). |
 
 **Parser limit.** The parser considers the first block or contiguous line comment beginning within the
 first 80 lines of TypeScript/JavaScript source under `packages/`, `scripts/`,
