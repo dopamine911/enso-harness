@@ -23,7 +23,14 @@ const SCREENSHOT_DIRECTORY = join(OUTPUT_DIRECTORY, 'screenshots')
 /** Composer markup from src/chat-screen.tsx — the accessible names ARE the contract. */
 const COMPOSER_PLACEHOLDER = 'ask pi something'
 const SEND_BUTTON_NAME = 'send message'
-const STOP_BUTTON_NAME = 'stop the current response'
+/**
+ * ⚠ `src/chat-screen.tsx`'s own `aria-label` for the stop control. This read
+ * `stop the current response` from before #116 renamed it, so the `@model` test's proof that a
+ * run started matched nothing at all. `src/__tests__/thread-pane.test.tsx` reads these three
+ * constants out of this file and looks for them in the rendered markup, so drift on either
+ * side now fails `bun run check` rather than a manual run of this spec.
+ */
+const STOP_BUTTON_NAME = 'stop the run'
 
 /**
  * `/mode` is picc's select dialog; this label is one of its options.
@@ -46,12 +53,14 @@ const ONE_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42
 const MODEL_PROMPT = 'Reply with exactly three words.'
 
 /**
- * A run is "settled" when the composer offers send again. While a run is in flight the
- * same slot shows the stop button, so waiting on send-visible is the completion signal for
- * both a model turn and an extension-command quick-close.
+ * A run is "settled" when the composer no longer offers to stop it — the stop button is
+ * rendered ONLY while a run is in flight, so its absence is the one reading here that
+ * actually flips. ⚠ NOT "send is visible": send is rendered unconditionally (disabled when
+ * there is nothing to send), so that reading held at every moment including mid-run, and the
+ * step named "wait for the run to settle" gated nothing.
  */
 async function waitForRunToSettle(page: Page): Promise<void> {
-  await expect(page.getByRole('button', { name: SEND_BUTTON_NAME })).toBeVisible()
+  await expect(page.getByRole('button', { name: STOP_BUTTON_NAME })).toHaveCount(0)
 }
 
 /** The permission-mode select in the composer — what a resumed thread's persisted mode shows on (#142). */

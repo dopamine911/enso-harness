@@ -23,6 +23,7 @@ export interface ScriptedFetch {
   /** End the follow body — the server went away. */
   readonly closeFollow: () => void
   readonly prompts: Array<{ message: string; streamingBehavior?: string; images?: unknown[] }>
+  /** Every body `POST …/dialog` received — a second answer for the same id included (#275). */
   readonly dialogs: unknown[]
   /** Every body `POST …/mode` received (L3 step C). */
   readonly modeChanges: unknown[]
@@ -34,7 +35,20 @@ export interface ScriptedFetch {
 
 export interface ScriptedFetchOptions {
   readonly promptStatus?: { status: number; body: unknown }
+  /**
+   * What the FIRST answer to a question gets; 204 by default. A 204 SPENDS the question, as
+   * the real route does — a later answer for that id is then 404 with the server's own reason
+   * (`follow.ts` `answerThreadDialog`). A non-204 script leaves the question open, so a
+   * refused or unreachable answer can be repeated the way the page allows it to be.
+   */
   readonly dialogStatus?: number
+  /**
+   * The dialog request never reaches a server: the `fetch` REJECTS, as a dropped connection
+   * does, which is the page's `unreachable` (`follow-connection.ts#answerDialog`). Distinct
+   * from `dialogStatus`, which is an answer — this is the absence of one, and the question is
+   * as open afterwards as it was before.
+   */
+  readonly dialogUnreachable?: boolean
   readonly abortStatus?: number
   /** What `POST …/mode` answers; 204 by default. */
   readonly modeStatus?: number
@@ -71,6 +85,8 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   const prompts: Array<{ message: string; streamingBehavior?: string; images?: unknown[] }> = []
   const dialogs: unknown[] = []
   const modeChanges: unknown[] = []
+  /** Question ids the server has TAKEN an answer for — the shape of the real route's 404. */
+  const spentQuestions = new Set<string>()
   /** The follow: one SSE body per subscription; the latest one is where `frame` writes. */
   const openFollow = (): Response => {
     const body = new ReadableStream<Uint8Array>({
@@ -117,8 +133,18 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
       return promptGate.promise.then(() => new Response(body, { status: promptStatus.status }))
     },
     dialog: (init: RequestInit | undefined): Promise<Response> => {
-      dialogs.push(JSON.parse(String(init?.body)))
-      return Promise.resolve(new Response(dialogStatus === 204 ? null : 'no', { status: dialogStatus }))
+      const answer = JSON.parse(String(init?.body)) as { id?: string }
+      const questionId = answer.id ?? ''
+      dialogs.push(answer)
+      // Recorded first, then refused a response: an unreachable answer IS one the page sent.
+      if (options.dialogUnreachable === true) return Promise.reject(new TypeError('Failed to fetch'))
+      if (spentQuestions.has(questionId)) {
+        const reason = `no open question ${questionId} on thread t1 — answered, expired, or never asked`
+        return Promise.resolve(new Response(reason, { status: 404 }))
+      }
+      if (dialogStatus !== 204) return Promise.resolve(new Response('no', { status: dialogStatus }))
+      spentQuestions.add(questionId)
+      return Promise.resolve(new Response(null, { status: 204 }))
     },
     mode: (init: RequestInit | undefined): Promise<Response> => {
       modeChanges.push(JSON.parse(String(init?.body)))

@@ -14,11 +14,15 @@ import { codeOffenders, hasWordSequence, isCommentLine, REPOSITORY_ROOT, sourceF
  * three log-locating fields are the glossary's stated exception, and `session` alone is the
  * runtime's log, which the glossary reserves rather than retires.
  *
- * The allowlist has four entries: this file, which has to spell the words it refuses; the two
- * files holding the one leak the glossary left in place on purpose (L2); and one contract test
- * that reads the vendor's module by design (all below). The renames landed in the same PR as
- * this file, so a fifth entry would be the first regression; an entry needs the reason it is
- * not one, the way the vendor gate's entries do.
+ * The allowlist has TWO entries: this file, which has to spell the words it refuses, and one
+ * contract test that reads the vendor's module by design (both below). It had four. The other two
+ * held leak L2 — the runtime's event and persistence shapes carried above the host in
+ * `packages/web/src/rpc/map-events.ts` and `branch-to-messages.ts` — and they left WITH the leak,
+ * not instead of it: `184641d` closed the event side ("the thread-runtime seam delivers
+ * observations; the runtime's event shape never leaves the host") and `c75f567` the persistence
+ * side ("the host produces a transcript of ours"), each deleting its own row. Reading the stale
+ * header, you could not tell a fixed leak from a lost one (#257). A third entry now would be the
+ * first regression; an entry needs the reason it is not one, the way the vendor gate's entries do.
  *
  * What it cannot catch: a retired MEANING under a fresh word (`conversation` for a thread).
  * That is a review question; this file holds the words that were decided.
