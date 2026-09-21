@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 import {
   clearThreadsForTest,
   MAX_LIVE_THREADS,
+  markThreadActive,
   mintThread,
   type ThreadStores,
   threadListStore,
@@ -107,6 +108,34 @@ test('⚠ a thread with a run in flight keeps its follow: the page goes over bud
   // the deliberate choice — see `makeRoomForOneMore`.
   expect(probe.releasedThreads()).toEqual([])
   expect(probe.live()).toBe(MAX_LIVE_THREADS + 1)
+})
+
+// ⚠ THE PANE THE USER IS READING IS NOT SPARE CAPACITY (PR #301 review). `lastActivityAt`
+// moves on a title or a busy transition, so a thread whose reply has finished ages exactly
+// like an abandoned one — and is then the OLDEST idle thread, i.e. the first victim. Before
+// the exemption this dropped the visible thread: its pane unmounted, `active` resolved to
+// undefined, the header fell back to the untitled label and the content area went blank,
+// with nothing said. A red line here means that is back.
+test('⚠ the thread on screen is never evicted, even when it is the least recently active', async () => {
+  const probe = followProbe()
+  const read = mintThread(probe.fetch)
+  mount(read)
+  await probe.untilOpened(1)
+  markThreadActive(read.threadId)
+  // Every other thread is minted AFTER it and is therefore more recently active, which is
+  // what makes the thread being read the candidate recency alone would pick.
+  for (let index = 0; index < MAX_LIVE_THREADS; index += 1) {
+    mount(mintThread(probe.fetch))
+    await probe.untilOpened(index + 2)
+  }
+  expect(probe.releasedThreads()).not.toContain(read.threadId)
+  expect(threadListStore.get().map((summary) => summary.threadId)).toContain(read.threadId)
+  // …and switching away makes it evictable again: it is protected while visible, not pinned.
+  const next = threadListStore.get()[0]?.threadId ?? ''
+  markThreadActive(next)
+  mount(mintThread(probe.fetch))
+  await probe.untilOpened(MAX_LIVE_THREADS + 2)
+  expect(probe.releasedThreads()).toContain(read.threadId)
 })
 
 test('a thread the page stops holding releases its follow', async () => {

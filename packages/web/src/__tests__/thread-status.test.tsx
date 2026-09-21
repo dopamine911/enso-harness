@@ -79,6 +79,37 @@ test('a tail the summary has no word for — an image, an unmatched result — i
   expect(describeActivity([user('u1', 'hi'), orphanResult], true)).toEqual({ kind: 'working' })
 })
 
+// ⚠ THE TAIL READ IS PER-MESSAGE (#282). This function selects the LAST message ALONE
+// (`selectMessageUI`), so it cannot see a tool call in an earlier message — the opposite of
+// the transcript renderer, which must (`chat-screen.tsx`'s `message` component). This is the
+// reachable shape where the two selections could disagree and do not: a result at the tail
+// whose call sits in an EARLIER message is `matched` under the whole-transcript selection
+// and unmatched under this one, so it is filtered in the first case and hits the catch-all
+// in the second — `working` both ways. A red line here means the tail read began depending
+// on cross-message pairing, and the per-message selection is no longer sound.
+test('a result at the tail whose call sits in an earlier message is working (#282)', () => {
+  const split = [assistant('a1', [call('c1', 'read')]), assistant('a2', [result('c1')])]
+  expect(describeActivity(split, true)).toEqual({ kind: 'working' })
+})
+
+// ⚠ THE ONE ACCEPTED DIVERGENCE (#282). A result that follows another part INSIDE a message
+// that does not hold its call is the single shape where the per-message read answers
+// differently from the whole-transcript read it replaced: matched-and-filtered there, so the
+// text behind it was the tail (`responding`); unmatched here, so the result is the tail
+// (`working`). It is recorded rather than fixed because TanStack cannot produce it — the
+// stream processor anchors a `tool-result` into the message holding its `tool-call`, and
+// carries the call forward into the result's message when the snapshot lacks it
+// (`@tanstack/ai` `reconcileSnapshotToolCalls`, post-passes (a) and (b)), so a result and
+// its call are never in different messages with something between. A red line here means
+// that normalisation changed and the tail read needs the transcript-wide pairing back.
+test('⚠ a result behind a text part, call in an earlier message: working, not responding (#282)', () => {
+  const wedged = [
+    assistant('a1', [call('c1', 'read')]),
+    assistant('a2', [{ type: 'text', content: 'done' }, result('c1')]),
+  ]
+  expect(describeActivity(wedged, true)).toEqual({ kind: 'working' })
+})
+
 // ── counts ───────────────────────────────────────────────────────────────────
 
 test('prompts count user messages; tool calls count every call, paired or not', () => {

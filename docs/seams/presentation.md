@@ -121,9 +121,11 @@ thread on the page gets its own:
  * Past the budget the newest follow AND every unary `/api` call the page makes (`prompt`,
  * `/history`, `/api/mode`) queue behind the open streams, silently. So the page holds at
  * most `MAX_LIVE_THREADS`: minting or adopting past it drops the least recently active idle
- * thread, which closes its follow. The session is the server's, not the page's, so a dropped
- * thread comes back through Previous Threads — the rail and `popstate` already resume a
- * thread this page does not hold.
+ * thread, which closes its follow. Neither a thread with a run in flight nor the one ON
+ * SCREEN is ever the victim — a follow the page is showing or streaming is not spare
+ * capacity — so a page made only of those goes over budget and records it. The session is
+ * the server's, not the page's, so a dropped thread comes back through Previous Threads —
+ * the rail and `popstate` already resume a thread this page does not hold.
  */
 export interface ThreadStores {
   readonly threadId: string
@@ -178,7 +180,7 @@ export interface ThreadStores {
 }
 ```
 
-The one path from a custom event to those stores is `routeZenCustomEvent` (`custom-event-router.ts:40-101`,
+The one path from a custom event to those stores is `routeZenCustomEvent` (`custom-event-router.ts:77-108`,
 in prose): it records every event in `recentChunks`, then dispatches on the name, which is the
 observation's `kind` or the frame's `type` (#162 workstream 5) — a `snapshot` to the mode stores, the
 dialog slot and `generation`; a `status` to `generation` (and clears `disconnected`);
