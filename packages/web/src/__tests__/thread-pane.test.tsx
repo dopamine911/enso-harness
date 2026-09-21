@@ -1,17 +1,18 @@
-import './dom-environment.ts'
 import { afterAll, afterEach, expect, test } from 'bun:test'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import { ChatScreen, ThreadPane } from '../chat-screen.tsx'
 import { clearThreadsForTest, mintThread, type ThreadStores, threadListStore } from '../thread-stores.ts'
-import { releaseDom } from './dom-environment.ts'
+import { ensureDom, releaseDom } from './dom-environment.ts'
 import { createScriptedFetch, type ScriptedFetch, type ScriptedFetchOptions, SNAPSHOT_IDLE } from './scripted-server.ts'
 
 // ⚠ Loaded HERE, not statically: react-dom/client probes the DOM when its module evaluates
 // (`"oninput" in document` decides whether `onChange` uses the input event or an IE-era
-// focus-tracking polyfill), and bun evaluates node_modules imports before the side-effect
-// import above has registered the DOM. Statically imported, React sat in polyfill mode:
-// `onChange` and `onKeyDown` never fired and its change plugin threw on every keystroke.
+// focus-tracking polyfill), and bun evaluates node_modules imports before a side-effect
+// import can register the DOM. Statically imported, React sat in polyfill mode: `onChange`
+// and `onKeyDown` never fired and its change plugin threw on every keystroke. `ensureDom`
+// also re-registers when another mounting file ran first and released it.
+ensureDom()
 const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-dom/client')
 
 /**

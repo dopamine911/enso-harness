@@ -176,25 +176,34 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
 
         // --- the fallback decision. `searched` never falls back; everything else does
         // when Tavily is armed.
-        const fallbackReason = fallbackReasonFor(primary)
-        if (fallbackReason === undefined) {
-          const outcome = primary as WebSearchOutcome
-          auditLine(outcome.kind, outcome.providerId, query, 'primary')
-          return renderOutcome(outcome, undefined)
+        //
+        // ⚠ THE DISCRIMINANT IS THE BRANCH, not a string the call site re-reads (#227).
+        // `fallbackReasonFor` used to return `string | undefined` and `undefined` meant
+        // "the primary stands", so two `as` casts stood in for a narrowing the compiler
+        // could not carry. The one edit anyone would plausibly make — "do not fall back
+        // when the request already billed", i.e. return `undefined` for some
+        // `PrimaryFailure` — then compiled unchanged and sent a `PrimaryFailure` down the
+        // `searched` path, where `renderOutcome` reads `.sources` off an object that has
+        // none and throws out of `execute`. Now that edit cannot be written.
+        if ('kind' in primary && primary.kind === 'searched') {
+          auditLine(primary.kind, primary.providerId, query, 'primary')
+          return renderOutcome(primary, undefined)
         }
         if (!isTavilyArmed) {
-          if ('kind' in primary && primary.kind === 'ungrounded') {
+          if ('kind' in primary) {
             auditLine('ungrounded', primary.providerId, query, 'no fallback armed')
             return renderUngrounded(primary)
           }
-          const failure = primary as PrimaryFailure
-          auditLine('refused', failure.providerId, query, failure.reason)
+          auditLine('refused', primary.providerId, query, primary.reason)
           return refusal(
-            `${failure.reason}. The Tavily fallback is not armed — a human can set ` +
+            `${primary.reason}. The Tavily fallback is not armed — a human can set ` +
               `${TAVILY_API_KEY_VARIABLE} in .zen/secrets.env (never in ${ZEN_CONFIG_FILENAME}, never in ` +
               `the root .env, never in the environment — #89). No restart needed; the file is read per call.`,
           )
         }
+        // After the unarmed branch, which builds its refusal from `primary` directly: computed
+        // where it is read, so "why is this string here" needs no answer (#227).
+        const fallbackReason = fallbackReasonFor(primary)
 
         // A progress update before the fallback: the server counts tool activity as
         // progress (#99), and this is the one moment in the chain that is otherwise silent.
@@ -298,10 +307,15 @@ async function runPrimary(options: RunPrimaryOptions): Promise<WebSearchOutcome 
   }
 }
 
-/** Why the fallback should run, or undefined when the primary outcome stands. */
-function fallbackReasonFor(primary: WebSearchOutcome | PrimaryFailure): string | undefined {
+/**
+ * Why the fallback runs. It ALWAYS runs from here: the `searched` arm never reaches this
+ * function, because the call site branched on the discriminant instead of on this string
+ * being `undefined` (#227). The type says so, so "the primary stands" can no longer be
+ * expressed as a return value at all. ⓘ Exported for `__tests__/web-search.test.ts`, which
+ * pins both halves of that signature at compile time.
+ */
+export function fallbackReasonFor(primary: Extract<WebSearchOutcome, { kind: 'ungrounded' }> | PrimaryFailure): string {
   if ('kind' in primary) {
-    if (primary.kind === 'searched') return undefined
     return `the ${primary.providerId} backend answered WITHOUT searching (the model used its own knowledge)`
   }
   const providerName = primary.providerId ?? 'primary'
