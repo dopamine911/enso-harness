@@ -4,7 +4,7 @@ import { EXTERNAL_WEB_CONTENT_NOTICE, WEB_SEARCH_TOOL_NAME } from '@zen/core'
 import { auditRecords, recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import type { DeepseekSearchRequest, TavilySearchRequest, WebSearchOutcome } from '../../../core/index.ts'
 import { WebSearchProviderError } from '../../../core/index.ts'
-import { createWebSearch, type WebSearchDependencies } from '../index.ts'
+import { createWebSearch, fallbackReasonFor, type WebSearchDependencies } from '../index.ts'
 
 /**
  * The web_search extension (#63) against injected seams — the SELECTION and FALLBACK
@@ -447,4 +447,33 @@ test('a primary that fails FAST leaves the fallback the rest of the budget, and 
   // The one otherwise-silent moment in the chain now reports itself — the server's no-progress
   // guard counts a tool update as progress (#99).
   expect(progress.some((text) => text.includes('trying the Tavily fallback'))).toBe(true)
+})
+
+/**
+ * ⚠ THE FALLBACK DECISION IS A DISCRIMINANT, NOT A STRING THE CALL SITE RE-READS (#227).
+ * `fallbackReasonFor` used to take the whole `WebSearchOutcome | PrimaryFailure` union and
+ * return `string | undefined`, with `undefined` meaning "the primary stands" — so the call
+ * site needed two `as` casts, and the plausible edit "do not fall back when the request
+ * already billed" (return `undefined` for a `PrimaryFailure`) compiled and sent a failure
+ * record down the `searched` path: `Searched the web via undefined.` and then a `TypeError`
+ * reading `.sources` off an object that has none, thrown out of the tool's `execute`.
+ *
+ * Both claims below are compile-time; a red line here is tsc, not bun. The directive going
+ * UNUSED means the parameter was widened back; the `: string` annotations failing means
+ * `undefined` became expressible as a reason again.
+ */
+test('⚠ a searched primary cannot be handed to the fallback reason builder, and a reason is never undefined', () => {
+  // Asserted as a TYPE, not with the type checker's expect-error directive: that directive is
+  // a suppression and the gate bans the whole family (#82). It is not needed here — a
+  // `searched` outcome is simply not assignable to the parameter, so this alias is `true` and
+  // the annotation compiles. Widen the parameter back and the alias is `never`, which tsc refuses.
+  type SearchedIsNotAFallbackPrimary =
+    Extract<WebSearchOutcome, { kind: 'searched' }> extends Parameters<typeof fallbackReasonFor>[0] ? never : true
+  const searchedIsNotAFallbackPrimary: SearchedIsNotAFallbackPrimary = true
+  expect(searchedIsNotAFallbackPrimary).toBe(true)
+
+  const billed: string = fallbackReasonFor({ providerId: 'openai', reason: 'boom', requestDispatched: true })
+  expect(billed).toContain('it may have billed')
+  const ungrounded: string = fallbackReasonFor({ kind: 'ungrounded', providerId: 'anthropic', answerText: 'guess' })
+  expect(ungrounded).toContain('WITHOUT searching')
 })

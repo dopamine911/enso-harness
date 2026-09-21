@@ -28,6 +28,12 @@ function fakeHarness(manifestPi: Record<string, string[]>, createLinks: boolean)
   }
   return directory
 }
+/** A harness whose `pi` is whatever a future edit — or a typo — put there. */
+function fakeHarnessWithPi(pi: unknown): string {
+  const directory = mkdtempSync(join(tmpdir(), 'zen-harness-malformed-'))
+  writeFileSync(join(directory, 'package.json'), JSON.stringify({ name: 'zen-harness', pi }))
+  return directory
+}
 
 const cwd = tmpdir()
 
@@ -105,4 +111,42 @@ test('refuses an empty cwd before touching the filesystem', () => {
       logsDir: tmpdir(),
     }),
   ).toThrow(/cwd must not be empty/)
+})
+
+/**
+ * ⚠ A MALFORMED MANIFEST MUST NOT MAKE THE GUARD PASS (#226). `assertVendorLinks` used to
+ * assert `Record<string, string | string[]>` off `JSON.parse` and read `.startsWith` from
+ * whatever arrived: a bare-string `pi` sent `Object.values` over its CHARACTERS, none of
+ * which start with `node_modules/`, so nothing was missing and the server booted with the
+ * vendor precondition unchecked — the exact silent absence this module exists to catch.
+ * A red line here is that silence back.
+ */
+test('a `pi` that is not an object is refused by name, not walked character by character', () => {
+  expect(() =>
+    startZenServer({
+      cwd,
+      harnessPackageDir: fakeHarnessWithPi('node_modules/pi-multi-account/index.ts'),
+      agentDir: tmpdir(),
+      logsDir: tmpdir(),
+    }),
+  ).toThrow(/`pi` that is not an object/)
+})
+
+/**
+ * The other half: a resource path that is neither a string nor a string array — the obvious
+ * future edit is a nested object for a new resource kind — is DROPPED, as
+ * `scripts/zen-launch.mjs` drops it. It used to reach `.startsWith` and throw a `TypeError`
+ * out of the boot path, so `bun run dev` died with an unrelated message while `bun run zen`
+ * launched fine.
+ */
+test('a non-string resource path is skipped, not handed to `.startsWith`', async () => {
+  const started = startZenServer({
+    cwd,
+    harnessPackageDir: fakeHarnessWithPi({ extensions: [{ path: 'node_modules/whatever' }], skills: 42 }),
+    agentDir: tmpdir(),
+    logsDir: mkdtempSync(join(tmpdir(), 'zen-logs-')),
+    port: 0,
+  })
+  expect(started.url).toContain('127.0.0.1')
+  await started.close()
 })

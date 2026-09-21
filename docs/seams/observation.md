@@ -16,7 +16,7 @@ Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Ref
 
 ## The contract
 
-The union. Closed, and with no "skip" member by design (module header, `observation.ts` lines 8–12):
+The union. Closed, and with no "skip" member by design (module header, `observation.ts` lines 9–13):
 an event the mapper has no word for becomes `unmapped`, so dropping is inexpressible.
 
 <!-- source: packages/core/src/observation.ts#ZenObservation -->
@@ -122,11 +122,11 @@ export const ZenFollowStatus = Type.Object(
 
 **Produced in two places.** The mapper, `mapPiEvent` in `packages/web/src/host/map-events.ts` (below
 the thread-runtime seam since L2, #162 workstream 4)
-(line 217, top-level; not fenced here because the declaration is the whole 120-line switch): one
+(line 229, top-level; not fenced here because the declaration is the whole 120-line switch): one
 runtime event in, one observation out, never `undefined` (header lines 25–28). Its second parameter is
 the delivery the host tagged (#96): `replayed` becomes `origin: "session-start"` on a ui request, `live`
-becomes `"run"` (lines 213–215). The one kind the server synthesises itself is `prompt-rejected`: the
-prompt route in `packages/web/src/server/follow.ts` announces it (line 207) when the runtime refuses
+becomes `"run"` (lines 225–227). The one kind the server synthesises itself is `prompt-rejected`: the
+prompt route in `packages/web/src/server/follow.ts` announces it (line 219) when the runtime refuses
 a prompt after its receipt went out. Both are grounded in the kinds table's "Produced by" column.
 
 **Minted once.** The registry, `packages/web/src/server/thread-registry.ts`, is the only place a `seq`

@@ -14,9 +14,15 @@ fails when the checked-in page differs. Regenerate with `bun <generator> > <page
 | [Verification inventory](./verification-inventory.md) | What every gate enforces; what ratchets; which reusable test double drives which seam? | `scripts/docs/verification-inventory.ts` |
 
 Generated does not mean inferred. Where behavior cannot be derived safely, a generator carries an
-explicit checked metadata record and fails when detection and metadata stop agreeing. `UNCLASSIFIED`
-is a failure, never an omitted row. Generators are deterministic: sorted rows, no timestamp, machine
-path, Git state, network or GitHub call.
+explicit checked metadata record. Two contracts, and the difference is deliberate. In `decisions`,
+`env-and-config`, `routes`, `core-exports` and `verification-inventory`, an `UNCLASSIFIED` row means
+the detector and the metadata have stopped agreeing, so the page would be wrong: generation
+**fails**, and there is no page to check in. In `observations`, an unmapped kind means the repository
+grew an observation the adapter does not handle: the generator **prints it** as an `UNCLASSIFIED`
+cell and names it under *Diagnostics*, because the inventory's job is to survey what exists — see
+[the observation seam](../seams/observation.md). Either way `UNCLASSIFIED` is never an omitted row.
+Generators are deterministic: sorted rows, no timestamp, machine path, Git state, network or GitHub
+call.
 
 Read the reference after the relevant [seam page](../seams/README.md): a seam explains the boundary
 and pivot cost; the reference lists the current facts at that boundary.
