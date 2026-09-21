@@ -4,6 +4,12 @@ import type { Subprocess } from 'bun'
 /** What `run` spawns: stdin ignored, both output streams piped so they can be prefixed. */
 type PrefixedChild = Subprocess<'ignore', 'pipe', 'pipe'>
 
+/** Bun's own exit callback for the options below — the source of the two types under it. */
+type ExitCallback = NonNullable<Bun.Spawn.OptionsObject<'ignore', 'pipe', 'pipe'>['onExit']>
+/** The exit code and signal as BUN declares them — widen there, and every narrow use here goes red. */
+type ExitCode = Parameters<ExitCallback>[1]
+type ExitSignal = Parameters<ExitCallback>[2]
+
 /**
  * Run both dev surfaces with one command.
  *
@@ -57,7 +63,18 @@ function run(label: string, command: string, args: string[]): PrefixedChild {
     stderr: 'pipe',
     // ⚠ If either surface dies, take the other down. A half-running dev environment is
     // worse than none: the web surface serving a page whose API is gone looks like an app bug.
-    onExit(_child: PrefixedChild, code: number | null, signalCode: number | null): void {
+    //
+    // ⚠ The parameter types are DERIVED from Bun's own callback, never restated (PR #325
+    // review). A method parameter is bivariant, so spelling `signalCode: number | null` by
+    // hand keeps compiling after a bun-types bump that widened it — and every use of the
+    // value then reads a string as a number, with nothing red anywhere. Measured: widening
+    // the installed declaration to `NodeJS.Signals | number | null` and assigning the
+    // parameter to a `number | null` is TS2322 with the types below and SILENT with the
+    // hand-written ones. Deriving does not make the bump itself an error — it makes it an
+    // error wherever the value is used as the narrower thing, which is the honest place for
+    // it. The lint wants every parameter typed; this types them without copying a vendor
+    // signature into our file.
+    onExit: (_child: PrefixedChild, code: ExitCode, signalCode: ExitSignal): void => {
       if (shuttingDown) return
       process.stderr.write(`[dev] ${label} exited (${code ?? signalCode ?? 'signal'}) — stopping the other surface\n`)
       shutdown()
