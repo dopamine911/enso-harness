@@ -27,8 +27,6 @@ the receipt, and on every change as the observation, one shape for both.
  * `mode` is the current mode; `available` is what the mode dropdown may offer: the modes the
  * runtime's mode extension registers, intersected with the commands this session actually
  * registers, in the extension's order (the host decides).
- *
- * @group Permission mode
  */
 export const ZenPermissionModeState = Type.Object({
   mode: Type.String({ minLength: 1 }),
@@ -45,9 +43,6 @@ export const ZenPermissionModeState = Type.Object({
  * browser reads the mode from mid-run, so no surface knows which extension's entry it was or
  * what that entry looks like. The same `{ mode, available }` a run starts with
  * (`ZenPermissionModeState`): one shape for the receipt and for the change.
- *
- * @group Observations
- * @category Permission and dialogs
  */
 export const ZenPermissionMode = Type.Object({
   kind: Type.Literal('permission-mode'),
@@ -65,8 +60,6 @@ And what crosses the other way — the one thing the browser may say about the m
  * A control route, not a prompt — the server refuses a mode the thread does not offer (422) and
  * a busy thread (409); the change itself arrives on the follow as `permission-mode`, never from
  * the click.
- *
- * @group Permission mode
  */
 export const ZenPermissionModeChange = Type.Object({
   mode: Type.String({ minLength: 1 }),

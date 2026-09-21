@@ -34,8 +34,6 @@
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-/** Every resource path the manifest declares, flattened — a string entry and a string list read alike. */
-
 /** The prefix that makes a declared resource path a vendor path: assumption 2 above. */
 const VENDOR_PATH_PREFIX = 'node_modules/'
 

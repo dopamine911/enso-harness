@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 
 /**
- * The docs gate's one primitive (#168): a top-level declaration, verbatim, by name.
+ * The docs gate's one primitive (#168): a top-level declaration, by name, whole.
  *
  * `docs/seams/*.md` quote the contract they describe; the quote must equal the source or
  * the page is wrong. This finds `export const X = …`, `export type X = …`,
@@ -11,13 +11,18 @@ import { readFileSync } from 'node:fs'
  * line does not continue an expression (`=`, `|`, `&`, `,`, `(` at its end; `|`, `&`, `.`
  * or `)` opening the next).
  *
- * ⚠ Text, not the TypeScript AST, on purpose. The pages fence declarations character for
- * character, so a text extractor has nothing to lose to a printer's whitespace choices,
- * and no compiler dependency to drift under. It reads WHOLE LINES and counts brackets
+ * ⚠ Text, not the TypeScript AST, on purpose. The pages fence declarations line for line,
+ * so a text extractor has nothing to lose to a printer's whitespace choices, and no
+ * compiler dependency to drift under. It reads WHOLE LINES and counts brackets
  * outside string and comment lexemes — a `{` in a doc comment or a template literal does
  * not open a scope. Declarations that nest a top-level-looking line (a `function` inside a
  * template) are not in this repo's shapes and would be found by the gate going red, not
  * by silently matching the wrong span.
+ *
+ * ⚠ ONE class of line is dropped rather than quoted: `@group`/`@category`, which file a
+ * symbol in the generated API index and say nothing about the contract a seam page is
+ * quoting (`withoutOrganisingTags`). The gate and the fence writer share this function, so
+ * neither can see a line the other keeps.
  */
 
 const DECLARATION_KEYWORDS = ['const', 'let', 'type', 'interface', 'function', 'class', 'enum'] as const
@@ -45,8 +50,37 @@ export function extractDeclaration(source: string, symbol: string): Declaration 
     symbol,
     startLine: startLine + 1,
     endLine: endLine + 1,
-    text: lines.slice(startLine, endLine + 1).join('\n'),
+    text: withoutOrganisingTags(lines.slice(startLine, endLine + 1)).join('\n'),
   }
+}
+
+/** `@group`/`@category`, and a one-line comment that carries nothing else. */
+const ORGANISING_TAG = /^\s*(?:\/\*\*\s*)?\*?\s*@(?:group|category)\b/
+const TAG_ONLY_COMMENT = /^\s*\/\*\*\s*@(?:group|category)\b[^*]*\*\/\s*$/
+const COMMENT_SEPARATOR = /^\s*\*\s*$/
+const COMMENT_CLOSE = /^\s*\*\/\s*$/
+
+/**
+ * The declaration without the tags that organise TypeDoc's index (#188).
+ *
+ * `@group Follow wire` tells the generated API page which section a symbol belongs in. It
+ * says nothing to a reader of `docs/seams/observation.md`, which quotes the declaration to
+ * show a CONTRACT — so the quote carries the contract and not the filing instruction.
+ *
+ * ⚠ The gate and the fence writer both read `text`, so removing a tag here removes it from
+ * both at once; a fence and its source cannot disagree about a line that neither can see.
+ * Nothing else is filtered: this is the one class of comment that documents the docs rather
+ * than the code.
+ */
+function withoutOrganisingTags(lines: readonly string[]): string[] {
+  const kept: string[] = []
+  for (const line of lines) {
+    if (TAG_ONLY_COMMENT.test(line) || ORGANISING_TAG.test(line)) continue
+    // The blank `*` that separated prose from the tags now sits against the closer.
+    if (COMMENT_CLOSE.test(line) && COMMENT_SEPARATOR.test(kept.at(-1) ?? '')) kept.pop()
+    kept.push(line)
+  }
+  return kept
 }
 
 /** The first line of the `/** … *\/` block ending on the line above `declaredAt`, else `declaredAt`. */

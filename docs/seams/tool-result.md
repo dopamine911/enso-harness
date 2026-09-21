@@ -21,8 +21,6 @@ The descriptor. `kind` is open on purpose — the doc comment says what closing 
  * emit a kind we have never seen, and the unknown-kind path must be a visible fallback
  * rather than a validation failure at the boundary. Closing this union would turn an
  * unrecognised renderer into a dropped result.
- *
- * @group Tool results
  */
 export const ZenToolResultDescriptor = Type.Object({
   /** Renderer selector. Unknown values MUST fall back to the envelope's `content`. */
@@ -40,8 +38,6 @@ export const ZenToolResultDescriptor = Type.Object({
  *
  * A terminal and a browser make different decisions about how to show "and 4,000 more
  * lines", and a pre-truncated string forces the terminal's choice onto the browser.
- *
- * @group Tool results
  */
 export const ZenTruncation = Type.Object({
   shown: Type.Integer({ minimum: 0 }),
@@ -54,8 +50,6 @@ export const ZenTruncation = Type.Object({
 ```ts
 /**
  * Units a truncation can be counted in. Closed, because a surface must render each one.
- *
- * @group Tool results
  */
 export const ZenTruncationUnit = Type.Union([Type.Literal('lines'), Type.Literal('bytes'), Type.Literal('items')])
 ```
@@ -74,8 +68,6 @@ Where it sits in a result part's metadata bag, and why the key has no dot:
  * the same confusion later, further from the cause.
  *
  * A colon namespaces just as well and is not path syntax anywhere.
- *
- * @group Tool results
  */
 export const ZEN_TOOL_RESULT_KEY = 'zen:toolResult' as const
 ```
@@ -90,8 +82,6 @@ types can call it:
  *
  * Takes the metadata bag rather than the whole part, so this stays usable from the TUI
  * renderer too — which has no TanStack types and must not gain them.
- *
- * @group Tool results
  */
 export function readZenToolResultDescriptor(
   metadata: Record<string, unknown> | undefined,
@@ -115,9 +105,6 @@ exports. The descriptor is also a field of the observation that carries a result
  * accumulated output so far (not just the delta), allowing clients to simply replace their
  * display on each update." A client that appends will duplicate every chunk, and the bug
  * grows with output length. The field is named `text` rather than `delta` for that reason.
- *
- * @group Observations
- * @category Tool calls
  */
 export const ZenToolResultObservation = Type.Object({
   kind: Type.Literal('tool-result'),

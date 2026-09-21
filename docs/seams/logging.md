@@ -19,8 +19,6 @@ The region of our code a record came from — a logger category, not the operati
  * (`process` on every line is that, `log-process.ts`).
  *
  * `extension` is our code inside the runtime's process. `docs/glossary.md` → Record.
- *
- * @group Logging
  */
 export type ZenLogLayer = 'server' | 'host' | 'extension' | 'browser'
 ```
@@ -33,8 +31,6 @@ export type ZenLogLayer = 'server' | 'host' | 'extension' | 'browser'
  * These are the identities the wire already has (`ZenObservation`, #112) — a line that names
  * them can be joined to the transcript, the event tail (#97), and the other layers' lines about
  * the same moment.
- *
- * @group Logging
  */
 export interface ZenLogProperties {
   readonly threadId?: string
@@ -55,8 +51,6 @@ export interface ZenLogProperties {
  * Five levels; `fatal` is not vocabulary here. The tiers (#132): `info` is the spine — what
  * happened; `debug` is every observation, one compact line; `trace` is the same with the
  * payload. `ZEN_LOG_LEVEL` picks the tier (`log-process.ts`).
- *
- * @group Logging
  */
 export interface ZenLogger {
   trace(message: string, properties?: ZenLogPayload): void
@@ -86,8 +80,6 @@ path that logs and one that cannot afford to. `with` stays eager: a bound contex
  * ⚠ Pass a thunk wherever the payload is BUILT for the call (#284). An object literal of
  * ids already in hand is cheaper eagerly; a payload that spreads, maps or carries a whole
  * observation is not. The thunk runs at most once, when a sink will read it.
- *
- * @group Logging
  */
 export type ZenLogPayload = ZenLogProperties | (() => ZenLogProperties)
 ```
@@ -99,8 +91,6 @@ export type ZenLogPayload = ZenLogProperties | (() => ZenLogProperties)
  * `["zen", "server", "follow"]`, a child of the layer, a grandchild of the root.
  *
  * Module level, once per file.
- *
- * @group Logging
  */
 export function zenLogger(layer: ZenLogLayer, ...subcategory: readonly string[]): ZenLogger {
   return wrap(getLogger([ZEN_LOG_ROOT, layer, ...subcategory]))
@@ -124,8 +114,6 @@ line 197, #139) — a distinct marker so the manifest counts the two passes sepa
  * is missing rather than wondering, and the bundle (#132 item 5) counts markers per field name
  * for its redaction manifest with no bookkeeping in the writer. The value itself never lands —
  * `log-process.test.ts`.
- *
- * @group Logging
  */
 export const ZEN_REDACTED = '[REDACTED]'
 ```
@@ -141,8 +129,6 @@ One line of the file, pinned so the bundle reader validates what it reads:
  *
  * `logger` is the category joined by `.`; `level` is upper-cased on disk and `warning` is
  * written `WARN` (measured, LogTape 2.3.4).
- *
- * @group Logging
  */
 export const ZenLogLine = Type.Object(
   {
@@ -176,8 +162,6 @@ What the browser ships to `POST /api/logs`:
  * is the browser's clock; the file's `@timestamp` is the server's receipt. `page` tells two
  * tabs apart. `logger` must be under `zen.browser`: the server will not be told what the host
  * or the guard said.
- *
- * @group Logging
  */
 export const ZenBrowserLogBatch = Type.Object(
   {
@@ -206,7 +190,6 @@ when it was exported from `index.ts`). The configurator's options:
 
 <!-- source: packages/core/src/log-process.ts#ProcessLoggingOptions -->
 ```ts
-/** @group Logging */
 export interface ProcessLoggingOptions {
   /** `zenLogsDir(repoRoot)` — created if absent. */
   readonly logsDir: string

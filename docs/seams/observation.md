@@ -22,8 +22,6 @@ an event the mapper has no word for becomes `unmapped`, so dropping is inexpress
 <!-- source: packages/core/src/observation.ts#ZenObservation -->
 ```ts
 /**
- * @group Observations
- * @category The union
  */
 export const ZenObservation = Type.Union([
   ZenTextDelta,
@@ -57,9 +55,6 @@ message end:
 ```ts
 /**
  * Token and cost accounting, present on `message_update`, assistant and tool messages.
- *
- * @group Observations
- * @category Turns and cost
  */
 export const ZenUsage = Type.Object({
   input: Type.Integer({ minimum: 0 }),
@@ -75,7 +70,6 @@ than the last, and status frames (`follow.ts` header, lines 11–15):
 
 <!-- source: packages/core/src/follow.ts#ZenFollowFrame -->
 ```ts
-/** @group Follow wire */
 export const ZenFollowFrame = Type.Union([ZenFollowSnapshot, ZenFollowObservation, ZenFollowStatus])
 ```
 
@@ -93,8 +87,6 @@ export const ZenFollowFrame = Type.Union([ZenFollowSnapshot, ZenFollowObservatio
  * The payload is `ZenObservation` — the same layer the event tails and the debug pane
  * reason in. AG-UI is not on this wire; a browser adapter derives it if a renderer wants it
  * (`docs/architecture.md`, decided constraints).
- *
- * @group Follow wire
  */
 export const ZenFollowSnapshot = Type.Object(
   {
@@ -120,7 +112,6 @@ export const ZenFollowSnapshot = Type.Object(
 
 <!-- source: packages/core/src/follow.ts#ZenFollowObservation -->
 ```ts
-/** @group Follow wire */
 export const ZenFollowObservation = Type.Object(
   {
     type: Type.Literal('observation'),
@@ -133,7 +124,6 @@ export const ZenFollowObservation = Type.Object(
 
 <!-- source: packages/core/src/follow.ts#ZenFollowStatus -->
 ```ts
-/** @group Follow wire */
 export const ZenFollowStatus = Type.Object(
   {
     type: Type.Literal('status'),

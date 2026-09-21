@@ -41,8 +41,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { rootDotenvPath, zenSecretsPath } from './paths.ts'
 
-/** Whether a variable name is secret-SHAPED by the #89 name rule — the boundary, not a value check. */
-
 const SECRET_SHAPED_NAME = /(?:^|_)(?:API_KEY|TOKEN|SECRET|PASSWORD)S?(?:$|_)/
 
 /**

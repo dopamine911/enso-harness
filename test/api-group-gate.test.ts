@@ -54,40 +54,38 @@ function declaredOrder(key: 'groupOrder' | 'categoryOrder'): string[] {
   return (config[key] ?? []).filter((entry) => entry !== '*')
 }
 
+/** A declaration this gate organises — the `export` forms the documented surface actually uses. */
+const DECLARATION =
+  /^export (?:declare )?(?:abstract )?(?:async )?(?:const|let|function|class|interface|type|enum)\s+(\w+)/
+
 /**
- * Every top-level exported declaration in a file, paired with the organising tag on its own
- * doc comment — `undefined` when it has none.
+ * The organising tag on the doc comment IMMEDIATELY above `index`, or `undefined`.
  *
- * ⚠ The comment must be the one IMMEDIATELY above the declaration. A file-wide scan for
- * `@group` would pass every export in `observation.ts` on the strength of the first tagged
- * schema in it, which is the failure this gate exists to catch.
+ * ⚠ Immediately: a file-wide scan for `@group` would pass every export in `observation.ts` on
+ * the strength of the first tagged schema in it, which is the failure this gate exists to
+ * catch. The walk stops at the first line that is neither comment nor decorator — a blank line
+ * between a comment and a declaration means the comment belongs to nothing.
  */
+function tagAbove(lines: readonly string[], index: number, tag: '@group' | '@category'): string | undefined {
+  const pattern = new RegExp(String.raw`^(?:/\*\*)?\s*\*?\s*${tag}\s+(.+?)(?:\s*\*/)?$`)
+  for (let above = index - 1; above >= 0; above -= 1) {
+    const text = (lines[above] ?? '').trim()
+    if (text.startsWith('@')) continue
+    const found = pattern.exec(text)
+    if (found?.[1] !== undefined) return found[1].trim()
+    if (text.endsWith('*/') || text.startsWith('*') || text.startsWith('/**')) continue
+    return undefined
+  }
+  return undefined
+}
+
+/** Every top-level exported declaration in a file, paired with its organising tag. */
 function exportedTags(source: string, tag: '@group' | '@category'): { name: string; value: string | undefined }[] {
   const lines = source.split('\n')
-  const exported: { name: string; value: string | undefined }[] = []
-  for (const [index, line] of lines.entries()) {
-    const declaration =
-      /^export (?:declare )?(?:abstract )?(?:async )?(?:const|let|function|class|interface|type|enum)\s+(\w+)/.exec(
-        line,
-      )
-    if (declaration?.[1] === undefined) continue
-    let value: string | undefined
-    // Walk up through the comment block directly above, and stop at the first line that is
-    // neither part of it nor a decorator — a blank line means the comment belongs to nothing.
-    for (let above = index - 1; above >= 0; above -= 1) {
-      const text = (lines[above] ?? '').trim()
-      if (text.startsWith('@')) continue
-      const found = new RegExp(String.raw`^(?:/\*\*)?\s*\*?\s*${tag}\s+(.+?)(?:\s*\*/)?$`).exec(text)
-      if (found?.[1] !== undefined) {
-        value = found[1].trim()
-        break
-      }
-      if (text.endsWith('*/') || text.startsWith('*') || text.startsWith('/**')) continue
-      break
-    }
-    exported.push({ name: declaration[1], value })
-  }
-  return exported
+  return lines.flatMap((line, index) => {
+    const name = DECLARATION.exec(line)?.[1]
+    return name === undefined ? [] : [{ name, value: tagAbove(lines, index, tag) }]
+  })
 }
 
 test('⚠ every exported declaration on the documented surface carries @group (#188)', () => {

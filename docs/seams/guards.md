@@ -23,8 +23,6 @@ why the policy is not split across two packages.
  * the policy — schema in `@zen/core`, patterns beside the extension — would put half of one
  * decision in each of two packages, which is the duplication this package exists to prevent.
  * The policy is one thing; it is declared in one place.
- *
- * @group Guards
  */
 export const GuardPolicy = Type.Object({
   /** Absolute roots a mutating tool may write inside. Empty means "the session cwd only". */
@@ -53,8 +51,6 @@ export const GuardPolicy = Type.Object({
  * Deliberately conservative on reads of credential material and on writes outside the workspace
  * — the two cases from `docs/concepts/pi-immediate-needs.md` Tier 0 where pi ships no
  * confinement at all.
- *
- * @group Guards
  */
 export const DEFAULT_GUARD_POLICY: GuardPolicy = {
   writeRoots: [],

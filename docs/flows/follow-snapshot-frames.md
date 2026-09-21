@@ -70,8 +70,6 @@ sequenceDiagram
  * The payload is `ZenObservation` — the same layer the event tails and the debug pane
  * reason in. AG-UI is not on this wire; a browser adapter derives it if a renderer wants it
  * (`docs/architecture.md`, decided constraints).
- *
- * @group Follow wire
  */
 export const ZenFollowSnapshot = Type.Object(
   {

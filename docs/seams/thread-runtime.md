@@ -19,8 +19,6 @@ a schema in `@zen/core`") beats a finer rule that needs explaining; the module h
 ```ts
 /**
  * ⚠ Function-bearing — the one schema the module header's rule is written for.
- *
- * @group Thread runtime
  */
 export const ThreadRuntime = Type.Object({
   /** Fire a prompt. Never awaits the run — see the section header. */
@@ -99,7 +97,6 @@ What crosses it inward — a prompt and what admission reports back:
 
 <!-- source: packages/core/src/thread-runtime.ts#PromptRequest -->
 ```ts
-/** @group Thread runtime */
 export interface PromptRequest {
   message: string
   images?: readonly PromptImageContent[]
@@ -110,7 +107,6 @@ export interface PromptRequest {
 
 <!-- source: packages/core/src/thread-runtime.ts#PromptOutcome -->
 ```ts
-/** @group Thread runtime */
 export interface PromptOutcome {
   /** Preflight accepted the prompt (or an extension command finished). NOT run completion. */
   onAccepted: () => void
@@ -135,8 +131,6 @@ export interface PromptOutcome {
  *
  * `interrupt` — take the prompt at the next step boundary. `enqueue` — after the run settles.
  * Two because the runtime has two; a third is a literal here and a mapping there.
- *
- * @group Thread runtime
  */
 export const ZenPromptAdmission = Type.Union([Type.Literal('interrupt'), Type.Literal('enqueue')])
 ```
@@ -145,8 +139,6 @@ export const ZenPromptAdmission = Type.Union([Type.Literal('interrupt'), Type.Li
 ```ts
 /**
  * Base64 image content, accepted by `prompt`, `steer` and `follow_up`.
- *
- * @group Thread runtime
  */
 export const PromptImageContent = Type.Object({
   type: Type.Literal('image'),
@@ -168,8 +160,6 @@ A human's answer to a question the runtime is blocked on:
  * asked exactly that and skipped `validateDialogAnswer` for anything carrying a `cancelled` key,
  * which is the select-injection fence (`dialog.ts`) open for an answer that also carried a value.
  * With the arms disjoint, `answer.cancelled === true` narrows, so every reader tests the VALUE.
- *
- * @group Thread runtime
  */
 export type DialogAnswer = { id: string } & (
   | { cancelled: true; value?: never; confirmed?: never }
@@ -197,8 +187,6 @@ What the runtime says it can run — one entry per slash command:
  * so a `/`-prefixed message absent from this list is not a command at all, it is prose the
  * model will try to answer. See `session.ts` for why that has to be refused rather than
  * forwarded.
- *
- * @group Thread runtime
  */
 export const RuntimeCommand = Type.Object({
   name: Type.String(),

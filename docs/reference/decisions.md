@@ -157,7 +157,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/docs/core-exports.ts` | `#170` | Generates `docs/reference/core-exports.md` (#170): the public core barrel and the node-only logging subpath, with their defining declarations and production importers. |
 | `scripts/docs/decisions.ts` | `#170` | Generates `docs/reference/decisions.md` (#170): one row for each owned source file whose first comment/header block cites an issue. |
 | `scripts/docs/env-and-config.ts` | `#170` | Generates `docs/reference/env-and-config.md` (#170): the explicit environment boundary, the composed `ZenConfig` shape, every `.zen/` path assembled by core, and the harness manifest resources. |
-| `scripts/docs/extract-declaration.ts` | `#168` | The docs gate's one primitive (#168): a top-level declaration, verbatim, by name. |
+| `scripts/docs/extract-declaration.ts` | `#168` | The docs gate's one primitive (#168): a top-level declaration, by name, whole. |
 | `scripts/docs/gate-source.ts` | `#170`, `#262` | Reading a declared constant back out of a gate's source (#170, split out on #262). |
 | `scripts/docs/generator-support.ts` | `#174` | What every generator under `scripts/docs/` shares (#174): the exhaustiveness check that makes a metadata table refuse to be stale, and the one way a generator runs — its page to stdout, or one `name: reason` line to stderr and a non-zero exit, never a partial page. |
 | `scripts/docs/ported-provenance.ts` | `#168` | Generates `docs/seams/ported-provenance.md` (#168): one row per file under `components/ai-elements/` — the upstream path and commit its header names, and the `Modified —` line that follows. |

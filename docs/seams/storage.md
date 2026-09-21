@@ -118,8 +118,6 @@ The wire shapes the server derives from those, in `@zen/core`. The rail's listin
  * `threadId` IS pi's session id — the host creates every session with the browser's thread id
  * (`NewSessionOptions.id`), so the two never need a mapping, and a page-owned thread finds its
  * own file again after the server restarts.
- *
- * @group Thread inspection
  */
 export const ZenStoredThread = Type.Object(
   {
@@ -148,8 +146,6 @@ One live thread in full, on `GET /api/threads/:id` and in the bundle:
 ```ts
 /**
  * One live thread, in full: the summary plus the session branch and what it may run.
- *
- * @group Thread inspection
  */
 export const ZenThreadInspection = Type.Object(
   {
@@ -188,8 +184,6 @@ A thread's history as the browser mounts it, live or cold: `GET …/history` and
  *
  * Carried as `Unknown` because the shape is TanStack's, not zen's; the durable form is the
  * runtime's log, decoded by the host into `ZenTranscriptEntry` (L2).
- *
- * @group Thread inspection
  */
 export const ZenThreadHistory = Type.Object(
   {
@@ -213,8 +207,6 @@ export const ZenThreadHistory = Type.Object(
  * Derived on read from the branch, never written to pi's file: deepseek-harness appends a
  * synthetic `turn/end { interrupted }` on resume repair; here the report is the repair, and the
  * next prompt continues from the torn tail as pi would.
- *
- * @group Thread inspection
  */
 export const ZenInterruptedTail = Type.Union([
   Type.Literal('unanswered-prompt'),

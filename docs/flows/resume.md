@@ -72,7 +72,6 @@ What crosses the storage seam on every cold read, and what `inspect().entries` h
 
 <!-- source: packages/core/src/transcript.ts#ZenTranscriptEntry -->
 ```ts
-/** @group Transcript */
 export const ZenTranscriptEntry = Type.Union([
   ZenTranscriptMessage,
   ZenTranscriptToolResult,

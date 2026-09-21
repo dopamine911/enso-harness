@@ -22,8 +22,6 @@ each, and MUST NOT import each other. The four that are the contract:
 ```ts
 /**
  * Every backend that can answer a web_search call.
- *
- * @group Web search
  */
 export type WebSearchProviderId = 'anthropic' | 'google' | 'openai' | 'deepseek' | 'tavily'
 ```
@@ -39,8 +37,6 @@ export type WebSearchProviderId = 'anthropic' | 'google' | 'openai' | 'deepseek'
  * source count: a real search can return zero results, and an ungrounded answer citing a
  * hallucinated URL would read as grounded. Upstream's `grounded = sources.length > 0` had
  * exactly that defect.
- *
- * @group Web search
  */
 export type WebSearchOutcome =
   | {
@@ -68,8 +64,6 @@ export type WebSearchOutcome =
  * `requestDispatched` says whether the HTTP request left the process — an honest "may have
  * billed" bit (whether a failed request billed is the provider's accounting, not knowable
  * here), surfaced when the fallback re-searches.
- *
- * @group Web search
  */
 export class WebSearchProviderError extends Error {
   readonly providerId: WebSearchProviderId
@@ -88,8 +82,6 @@ export class WebSearchProviderError extends Error {
 ```ts
 /**
  * What a MODEL-ROUTED provider run receives (anthropic / google / openai).
- *
- * @group Web search
  */
 export interface ModelSearchRequest {
   query: string
@@ -167,8 +159,6 @@ unreadable config refuses all web_fetch calls too.
  * `allowedHosts` are exact hostnames (case-insensitive, no wildcards, no ports) — each entry is
  * one reviewable grant. Strict on unknown keys for the same reason the whole config is — see
  * `config.ts`.
- *
- * @group Web tools
  */
 export const WebFetchConfig = Type.Object(
   {

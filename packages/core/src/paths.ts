@@ -25,8 +25,6 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ZEN_CONFIG_FILENAME } from './config.ts'
 
-/** No ancestor of the starting path is a workspace root: the walk ran out of parents. */
-
 /**
  * Thrown when no ancestor of the start path is a workspace root.
  *

@@ -12,7 +12,7 @@
  *
  * The deadline's reason is the caller's — it names the tool and the budget in the refusal.
  *
- * @group Shell execution
+ * @group Deadlines
  */
 export async function runUnderDeadline<T>(
   callerSignal: AbortSignal | undefined,

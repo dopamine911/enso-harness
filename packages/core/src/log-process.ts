@@ -72,8 +72,6 @@ import { Check } from 'typebox/value'
 import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS, ZEN_REDACTED, ZEN_REDACTED_VALUE, ZenLogLine } from './log.ts'
 import { zenLogsDir } from './paths.ts'
 
-/** One category’s level, overriding the file level for that subsystem alone. */
-
 /**
  * A per-category override: `zen.host.events=trace` turns one subtree up without the rest.
  *
