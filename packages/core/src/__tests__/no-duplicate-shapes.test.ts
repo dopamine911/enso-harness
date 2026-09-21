@@ -46,6 +46,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   //
   //   `log-process.ts`  `@logtape/file` builds its sinks on `node:fs` at import
   //   `paths.ts`        `node:fs`/`node:url` — the repo-root walker and the harness's paths (#211)
+  //   `pi-manifest.ts`  `node:fs` — is a declared pi resource path actually there (#221)
   //   `secrets.ts`      `node:fs` — the secrets file's reader (#211)
   //
   // ⚠ Tree-shaking does not save a bundle from a bare `node:*` specifier: it is resolved at
@@ -68,6 +69,7 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   expect(subpathModules).toEqual([
     'log-process.ts',
     'paths.ts',
+    'pi-manifest.ts',
     'secrets.ts',
     '__tests__/log-recorder.ts',
     '__tests__/observation-kinds.ts',

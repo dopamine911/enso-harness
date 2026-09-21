@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import {
   base64DecodedBytes,
   isZenThreadId,
@@ -14,6 +14,7 @@ import {
   type ZenThreadSummary,
   zenLogger,
 } from '@zen/core'
+import { missingVendorPaths } from '@zen/core/pi-manifest'
 import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost } from '../host/agent-host.ts'
 import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
@@ -275,40 +276,18 @@ export interface ZenServerHandle {
  *
  * `scripts/zen.mjs` already refuses to launch on the same condition. The server had no
  * equivalent, which is the asymmetry this closes: two launch points, one precondition, and
- * it must be enforced at both or the unenforced one becomes the confusing path.
- *
- * ⚠ THE MANIFEST IS UNTRUSTED INPUT, not a typed value (#226). `scripts/zen-launch.mjs`
- * narrows it at runtime; this used to assert `Record<string, string | string[]>` and read
- * `.startsWith` off whatever arrived. A bare-string `pi` made `Object.values` iterate
- * CHARACTERS, so `missing` came back empty and the guard passed silently — the SAME silent
- * absence the first warning above records, reintroduced by the type rather than by npm. A
- * `pi` that is not an object is now a named refusal, and a non-string resource path is
- * dropped, as the launcher drops it.
- */
-function declaredResourcePaths(manifest: unknown): string[] {
-  if (typeof manifest !== 'object' || manifest === null || !('pi' in manifest)) return []
-  const pi: unknown = manifest.pi
-  if (pi === undefined) return []
-  if (typeof pi !== 'object' || pi === null || Array.isArray(pi)) {
-    throw new Error('zen-server: the harness package.json declares a `pi` that is not an object')
-  }
-  return Object.values(pi)
-    .flatMap((paths: unknown) => (Array.isArray(paths) ? paths : [paths]))
-    .filter((resourcePath: unknown): resourcePath is string => typeof resourcePath === 'string')
-}
-
-/**
- * Refuse to start if the harness package's vendor links are missing — see above.
+ * it must be enforced at both or the unenforced one becomes the confusing path. Since #221
+ * the precondition is also one IMPLEMENTATION — `@zen/core/pi-manifest` — so "what pi will
+ * read as a literal vendor path" is decided in one file rather than at each launch point.
  */
 function assertVendorLinks(harnessPackageDir: string): void {
   const manifestPath = join(harnessPackageDir, 'package.json')
   if (!existsSync(manifestPath)) {
     throw new Error(`zen-server: no package.json at ${harnessPackageDir}`)
   }
-  const declared = declaredResourcePaths(JSON.parse(readFileSync(manifestPath, 'utf8')))
-  const missing = declared
-    .filter((vendorPath) => vendorPath.startsWith('node_modules/'))
-    .filter((vendorPath) => !existsSync(resolve(harnessPackageDir, vendorPath)))
+  // The manifest is parsed JSON and stays `unknown` here: the narrowing belongs to the one
+  // module that knows what pi reads out of it (#221).
+  const missing = missingVendorPaths(JSON.parse(readFileSync(manifestPath, 'utf8')), harnessPackageDir)
   if (missing.length > 0) {
     throw new Error(
       `zen-server: vendor package paths are missing from the harness package:\n` +
@@ -433,7 +412,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
       return
     }
     const messages = transcriptToMessages(transcript)
-    const interrupted = interruptedTail(messages)
+    const interrupted = interruptedTail(transcript)
     const payload: ZenThreadHistory = {
       threadId,
       messages,

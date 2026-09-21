@@ -62,7 +62,7 @@ each: `thread` is the noun everywhere the id crosses; `session` is reserved for 
 | **thread** | one conversation, the user-facing unit: what the rail lists, what the URL names, what a run acquires. `thread` is the noun for the id everywhere it crosses — routes, wire types, the browser | `threadId`, UUID-shaped (`isZenThreadId`), validated as a filename component at every entry point | the browser, or reused from a stored thread on resume | the registry's entry while live; the id outlives it |
 | **session** | **reserved**: the runtime's durable, append-only log and the runtime's own live object over it. Nothing of ours that means *thread* may say session. *Decision (1):* the one legitimate zen-owned use is the three fields that locate that log — `sessionId`, `sessionDir`, `sessionFile` on an inspection — because they name the log, not the conversation | the same string as `threadId` (#95) | the runtime, under the browser's id | 1:1 with the thread; the log outlives everything |
 | **stored thread** | a thread whose log is on disk and can be resumed: what the rail lists after a restart. Wire: `ZenStoredThread` | `threadId` | the runtime's first flush — the file does not exist until the first assistant message | the storage seam lists it; the file is the record |
-| **entry** | one line of the runtime's log: a message, a tool call, a tool result, a model change, or a custom entry an extension persisted | the runtime's entry id and parent id | the runtime | carried verbatim, read defensively, never modelled above the host (goals L2 — a transcript type of ours is owed) |
+| **entry** | one line of the runtime's log: a message, a tool call, a tool result, a model change, or a custom entry an extension persisted | the runtime's entry id and parent id | the runtime | carried verbatim, read defensively, never modelled above the host — since [leak L2](./seams/README.md#leak-numbers) the branch is read as `ZenTranscriptEntry`, a type of ours |
 | **branch** | the root-to-leaf chain of entries the runtime currently considers the conversation; a stored thread's history is its branch rebuilt as messages on every cold read | entry ids | the runtime | the runtime; moved by tree navigation and by a fork |
 | **custom entry** | an entry an extension appended to persist its own state — the permission mode is one; run provenance will be more. The pattern for anything durable that must travel with a fork | `customType` | the appending extension | the log; a fork inherits it by construction |
 | **fork** | a new log whose header names its parent; the branch is copied to the fork point | a new thread id; `parentSession` in its header | the runtime | the runtime |
@@ -154,7 +154,7 @@ answer before a tool runs; nothing after it does.
   on the branch wins, uncached because tree navigation moves the leaf (#84). Named in the run receipt;
   shown as **mode lines** in the transcript and a select in the status bar that says `unknown` when it
   is unsure (invariant 5). The mode *concept* is ours; today's implementation is a vendor extension
-  read three layers away from it (goals L3) — the seam to own.
+  read below the seam since [leak L3](./seams/README.md#leak-numbers) closed it (#162 workstream 4).
 - **mode** — the permission mode, and nothing else. *Decision (3):* the runtime's own interface setting
   (interactive, non-interactive, driven in-process) is **not given a word of ours**: no zen code
   tracks it, and `surface` — the candidate — already means TUI-or-web. It stays under the host and in
@@ -338,8 +338,10 @@ Not a domain of the system: words about how the repository is built. They appear
 issues, so they are defined once, here, and kept apart from the product nouns above.
 
 - **gate** — a test that enforces a boundary over the source tree rather than a behaviour: walk the
-  roots, match, compare offenders to an allowlist, expect none. Five today: lint suppressions, logging,
-  naming, vendor, presentation. Removing a root is a design conversation.
+  roots, match, compare offenders to an allowlist, expect none. One row each in the generated
+  [*Enforcement gates*](./reference/verification-inventory.md#enforcement-gates) table — thirteen
+  today, a count `test/glossary-doc.test.ts` reads off that table. Removing a root is a design
+  conversation.
 - **allowlist** — a gate's named exceptions, each with its reason and the leak it maps to. The list *is*
   the inventory; fixing a leak deletes a line, adding a dependency adds one and must say why.
 - **ratchet** — a number or a list that may only move one way: a complexity ceiling that may go down,
@@ -349,13 +351,15 @@ issues, so they are defined once, here, and kept apart from the product nouns ab
   *receipt* under Control.
 - **freeze** — the state since 2026-09-10 (#103): correctness and security blockers and enforcement
   only; no feature work until the consolidation (#162) and hardening receipts are taken.
-- **seam** — a contract with one implementation on each side and a fake for tests, named and fenced:
-  the thread runtime, the storage seam, the observation vocabulary, the dialog vocabulary, the mode.
-  A seam is proven by the second implementation, not designed against the first.
-- **leak** — a place where a vendor's name or shape crosses a seam it should not. Numbered in
-  `.local/refactor/goals.md` §2 (L1–L6); each is one allowlist line until fixed. All six are fixed or
-  decided (#162): the vendor gate's import allowlist is empty, and the seams table on the
-  architecture page reads each seam's own statement of what crosses it.
+- **seam** — a contract with one implementation on each side and a fake for tests, named and fenced.
+  One page each under [`seams/`](./seams/README.md) and one row each in the generated
+  [*Seams*](./architecture.md#seams) table — ten today, a count `test/glossary-doc.test.ts` reads
+  off that table. A seam is proven by the second implementation, not designed against the first.
+- **leak** — a place where a vendor's name or shape crosses a seam it should not; each is one
+  allowlist line until fixed. The six are numbered `L1`–`L6` and defined in
+  [`seams/README.md` → *Leak numbers*](./seams/README.md#leak-numbers), with the page that states
+  and checks each. All six are fixed or decided (#162): the vendor gate's import allowlist is empty,
+  and the seams table on the architecture page reads each seam's own statement of what crosses it.
 
 ---
 
