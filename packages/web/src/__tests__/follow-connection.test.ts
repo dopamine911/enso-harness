@@ -688,6 +688,24 @@ test('⚠ a follow the server refuses arms the disconnected contract, like one t
   expect(String(failure)).toContain('500')
 })
 
+// ⚠ The status is the fact, the body is colour (PR #305 review): a refused response whose
+// BODY read rejects — truncated, or aborted mid-read — must still arm the contract. Before
+// the `.catch`, that rejection threw past the arming and left the page reading "live" for a
+// follow the server had just refused, which is the state #274 exists to end.
+test('a refusal whose body cannot be read still arms the contract (#274)', async () => {
+  const unreadable = new ReadableStream<Uint8Array>({
+    start: (controller: ReadableStreamDefaultController<Uint8Array>): void =>
+      controller.error(new Error('the body died mid-read')),
+  })
+  const { chunks, problems, failure } = await subscribeOverFailingFetch(() =>
+    Promise.resolve(new Response(unreadable, { status: 503 })),
+  )
+  expect(chunks).toEqual([{ type: EventType.CUSTOM, name: FOLLOW_ENDED_CUSTOM_EVENT, value: { threadId: 't1' } }])
+  expect(problems).toEqual([expect.stringContaining('body unreadable')])
+  // …and the caller still learns the status, which is the part that was never in doubt.
+  expect(String(failure)).toContain('503')
+})
+
 test('a fetch that throws is the same fact, and this page leaving is not (#274)', async () => {
   const thrown = await subscribeOverFailingFetch(() => Promise.reject(new Error('network down')))
   expect(thrown.chunks).toEqual([
