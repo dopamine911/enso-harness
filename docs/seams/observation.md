@@ -167,23 +167,41 @@ leaves, the registry forgets the feed and `seq` restarts with the next follower,
 
 ## What crosses it that should not
 
-**Nothing, since #162 workstream 5.** The browser used to route observations to its stores by a
-parallel vocabulary — eleven `zen.*` custom-event names, `zen.mode` for a `permission-mode`,
-`zen.notify` for an `extension-ui-request`, a forged notify for a `permission-mode-rejected` — and a
-rename had two sides to land on. A CUSTOM chunk is now named by `ZenObservation.kind` and carries the
-observation whole (`to-agui.ts#custom`); the snapshot and status frames cross whole, named by
-`ZenFollowFrame.type`; the one chunk that is neither — the follow ending under the page — is
-`FOLLOW_ENDED_CUSTOM_EVENT`, declared by its only reader, the router. `custom-event-names.ts` is gone.
+**`ZenQueue` is the runtime's model in our schema.** pi's `queue_update` holds two lists — steering
+messages, which enter at the next step boundary, and follow-ups, which enter after the run settles —
+and `observation.ts#ZenQueue` has the same two, under pi's own names, on this wire. It is the same
+dichotomy `StreamingBehavior` puts on the prompt body inbound (`thread-runtime.md` → *What crosses it
+that should not*, and #216). No consumer uses the split: the router concatenates the two lists into
+one `ThreadStores.queue`, and the abort receipt concatenates them too, so the distinction crosses the
+wire and is discarded on arrival. A runtime with one queue class, or three, changes this shape.
+
+**`messages` on the snapshot is the state layer's shape.** `ZenFollowSnapshot.messages`
+(`follow.ts` line 35), carried as `Type.Array(Type.Unknown())`: not an observation but the storage
+seam's rebuild, built by `server/transcript-to-messages.ts` and put on the opening snapshot by the
+follow route — see `storage.md`, and `presentation.md` → *What crosses it that should not*, which
+prices it. It is on THIS wire, with `Unknown` in place of a shape, and no client reads it off the
+snapshot today.
+
+**`ZenUnmapped.event` is `Type.Unknown()`** by decision, and is the one place a raw event crosses to
+the browser whole.
 
 **The mapper reads the runtime's field names — below the seam.** `map-events.ts` declares
 `PiContentPart` and `PiToolDetails` and reads `event.assistantMessageEvent`; since L2 (#162 workstream
 4) it lives under `host/`, where the vendor's names are allowed, and the host calls it at delivery so
-`ThreadRuntime.subscribe` hands out observations. Nothing above the host reads an event. The
-observation shapes themselves are ours; `ZenUnmapped.event` is `Type.Unknown()` on purpose and is the
-one place a raw event crosses to the browser.
+`ThreadRuntime.subscribe` hands out observations. Nothing above the host reads an event.
 
-**`messages` on the snapshot is the state layer's shape**, carried as `Unknown` (`follow.ts` line 34)
-— the storage seam's rebuild, not an observation; see `storage.md`.
+**Nothing of the browser's old parallel vocabulary, since #162 workstream 5.** The browser used to
+route observations to its stores by a second set of names — eleven `zen.*` custom events, `zen.mode`
+for a `permission-mode`, `zen.notify` for an `extension-ui-request`, a forged notify for a
+`permission-mode-rejected` — and a rename had two sides to land on. A CUSTOM chunk is now named by
+`ZenObservation.kind` and carries the observation whole (`to-agui.ts#custom`); the snapshot and status
+frames cross whole, named by `ZenFollowFrame.type`; the one chunk that is neither — the follow ending
+under the page — is `FOLLOW_ENDED_CUSTOM_EVENT`, declared by its only reader, the router.
+`custom-event-names.ts` is gone.
+
+Ordered live crossings, then the deliberate holes, then the closed receipts: the bold lead of this
+section is the architecture table's leak column (`scripts/docs/seams-table.ts`), so a paragraph
+saying "nothing" must not stand in front of one saying "something" (#216, #219).
 
 ## Pivot cost
 
@@ -196,4 +214,8 @@ today without a runtime at all.
 
 Replace the state layer instead and the adapter goes: `to-agui.ts` and the
 router — "a renderer that stops speaking AG-UI deletes it and the adapter" (`to-agui.ts` line 28).
-The wire is untouched, because the state layer's vocabulary is derived in memory and never on it.
+The observation vocabulary survives whole, and so does every frame that carries one. The wire does
+NOT: `ZenFollowSnapshot.messages` is the state layer's shape on this wire and
+`ZenThreadHistory.messages` is the same shape on the history route, both as `Unknown` — so both
+change format with no schema diff to show it, which is why `presentation.md` → *Pivot cost* names
+seven sites and not three.
