@@ -59,6 +59,33 @@ test('the title is the FIRST user message, one line, clipped', () => {
   ).toBeUndefined()
 })
 
+// #283: the title is derived over a 120-character window instead of the whole prompt, which
+// re-derived per streamed token (14.9 µs for a 20 KB paste). The window is an optimisation
+// only while it cannot change the answer — these are the three shapes that could.
+test('⚠ a title bounded to a window reads the same as one derived from the whole prompt', () => {
+  const paste = 'fix the login bug in auth.ts — here is the whole file:\n'.repeat(400)
+  const unbounded = paste.replace(/\s+/g, ' ').trim()
+  expect(titleFromMessages([user(paste)])).toBe(`${unbounded.slice(0, TITLE_MAX_CHARS)}…`)
+  // The window collapses to LESS than the cap — a prompt that opens with more whitespace
+  // than text. Slicing to the window and stopping there would title it `fix the login`.
+  const indented = `${'\n   '.repeat(60)}fix the login bug in the auth module, please`
+  expect(titleFromMessages([user(indented)])).toBe('fix the login bug in the auth module, please')
+  // Several text parts are one line, joined by a single space.
+  expect(
+    titleFromMessages([
+      {
+        id: 'u',
+        role: 'user',
+        parts: [
+          { type: 'text', content: 'fix the login bug  ' },
+          { type: 'image', source: { type: 'url', value: 'x.png' } },
+          { type: 'text', content: '\nin auth.ts' },
+        ],
+      },
+    ]),
+  ).toBe('fix the login bug in auth.ts')
+})
+
 // ── the page's list ──────────────────────────────────────────────────────────
 
 test('minting lists the thread at once, newest first, untitled and idle', () => {

@@ -282,6 +282,32 @@ test("⚠ the file holds the tier the knob picked: at info a debug line is not w
   expect(messages.slice(1)).toEqual(['written', 'written too, the subtree is up'])
 })
 
+// #284: the per-observation path built two payloads per token and the default tier threw
+// both away. A thunk is the whole point only if the gate runs FIRST — a `wrap` that called
+// it and forwarded the object would type-check, pass every other test here, and buy nothing.
+test('⚠ a payload thunk is called only for a record the tier admits — and its object is the line', async () => {
+  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-thunk-'))
+  const dispose = await configureProcessLogging({ logsDir, process: 'server' })
+  const log = zenLogger('server', 'probe')
+  let built = 0
+  const payload = (): { chars: number } => {
+    built += 1
+    return { chars: 7 }
+  }
+  log.debug('dropped at the default tier', payload)
+  log.trace('dropped too', payload)
+  expect(built).toBe(0)
+  log.info('admitted, {chars} of them', payload)
+  expect(built).toBe(1)
+  await dispose()
+  const written = linesOf(join(logsDir, zenLogFilename(new Date()))).map((line) => JSON.parse(line) as ZenLogLine)
+  // One line beyond the configuration record: the dropped pair never reached the file, and
+  // the admitted one carries what the thunk returned.
+  expect(written.slice(1).map((line) => [line.message, line.properties?.chars])).toEqual([
+    ['admitted, {chars} of them', 7],
+  ])
+})
+
 // #139: the gap #132 accepted. Redaction by field NAME cannot see a secret quoted inside a
 // message, inside an innocently-named property, or inside a `trace` payload — and those are
 // exactly the shapes a guard's `reason` and a tool's output take.
