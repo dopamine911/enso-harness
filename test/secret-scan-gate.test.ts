@@ -108,12 +108,15 @@ afterAll(() => {
 })
 
 /**
- * gitleaks' `aws-access-token` shape, and not a real key — the fixture history has to carry
- * something the scanner really detects, so the allow marker keeps THIS line (and only this
- * line) out of the repository's own scan. The copy written into the fixture's `config.txt`
- * carries no marker, which is what the two tests below measure.
+ * AWS's own canonical example access key: `aws-access-token` in shape, allowlisted by name in
+ * `.github/workflows/secret-scan.yml`'s baseline, and reserved by AWS so it can never be real.
+ *
+ * ⚠ These tests do not run gitleaks — they assert that `git log -p` HANDS it this line — so the
+ * marker only has to be distinctive, not detectable. An invented AKIA literal was both, and it
+ * tripped this repository's own scan on the commit that introduced it (PR #318). A value the
+ * baseline already allows is the same shape without the self-inflicted finding.
  */
-const MARKER = 'AKIA2E0A8F3B244C9986' // gitleaks:allow
+const MARKER = 'AKIAIOSFODNN7EXAMPLE'
 
 test('⚠ the secret gate walks a secret written while RESOLVING a merge (#209)', () => {
   const { root, range } = fixtureRange('writes-the-marker')
