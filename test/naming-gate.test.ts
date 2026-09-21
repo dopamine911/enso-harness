@@ -74,6 +74,17 @@ function namingGateDiagnostics(source: string): NamingDiagnostic[] {
     for (const match of report.matchAll(/^::(\w+) title=plugin,file=[^,]*fixture\.ts,line=(\d+)\b/gm)) {
       found.push({ line: Number(match[2]), severity: match[1] ?? '' })
     }
+    // ⚠ A parse that finds nothing where biome reported something is a HOLE, not a pass (PR
+    // #321 review). This reads `--reporter=github`'s annotation shape, which is a third
+    // party's output format and not an API: a biome upgrade that reformats that line would
+    // otherwise turn every severity assertion below into a vacuous `[]`, and the gate would
+    // go quiet exactly when it stopped working. A non-zero exit with no parsed diagnostic is
+    // that reformatting, and it is refused here rather than read as "clean".
+    if (found.length === 0 && linted.exitCode !== 0) {
+      throw new Error(
+        `naming gate: biome exited ${linted.exitCode} and this parser read no diagnostic from:\n${report}`,
+      )
+    }
     return found.sort((left, right) => left.line - right.line)
   } finally {
     rmSync(directory, { recursive: true, force: true })
