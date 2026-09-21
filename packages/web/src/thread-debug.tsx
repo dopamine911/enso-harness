@@ -329,18 +329,22 @@ async function fetchThreadDebug(threadId: string): Promise<{ session: ZenThreadI
 
 /**
  * What a 404 means here: the server holds no session for the thread — nothing has run on
- * it on this server, or the server no longer holds it (restarted, evicted). Which of the
- * two is the page's to say, against its own run count — see {@link describeLostSession}.
+ * it on this server, or the server no longer holds it (restarted, evicted).
+ *
+ * Which of the two is the page's to say, against its own run count — see {@link
+ * describeLostSession}.
  */
 export const NO_SESSION_YET =
   'no live session on this server — nothing has run on this thread here, or the server no longer holds it'
 
 /**
- * Only the LATEST request's outcome may be applied (PR #87 review). The drawer refetches
- * on open and on every run settle, so two fetches can be in flight at once — the mount-time
- * 404 for a thread that has not run yet, and the post-run fetch once a fast prompt settles.
- * Without this, whichever resolves LAST wins regardless of which was ISSUED last, and a
- * drawer built to catch inconsistency would briefly show "nothing has run" after a run.
+ * Only the LATEST request's outcome may be applied (PR #87 review).
+ *
+ * The drawer refetches on open and on every run settle, so two fetches can be in flight at once
+ * — the mount-time 404 for a thread that has not run yet, and the post-run fetch once a fast
+ * prompt settles. Without this, whichever resolves LAST wins regardless of which was ISSUED
+ * last, and a drawer built to catch inconsistency would briefly show "nothing has run" after a
+ * run.
  *
  * Returns a wrapper: each call issues a fresh request and resolves only if no later call has
  * been made by the time it settles; a superseded result resolves `undefined` and is dropped.
@@ -395,6 +399,7 @@ export type BundleState = 'idle' | 'building' | 'saved' | { readonly failed: str
 /**
  * The bundle (#132 item 5): the server's file for this thread — its records, the live
  * inspection, the versions — with the page's own ring appended, since only the page has it.
+ *
  * Downloaded, never uploaded: the user opens it and attaches it themselves.
  */
 export async function fetchThreadBundle(

@@ -2,8 +2,9 @@ import { createChat, type TanStackChat } from '@shadcn/helpers/tanstack-ai'
 
 /**
  * The styling dev loop (#31): a scripted conversation streamed through the REAL
- * `useChat` pipeline as local AG-UI events — no server, no pi. Open the app with
- * `?fixture` and every send replays the next turn below.
+ * `useChat` pipeline as local AG-UI events — no server, no pi.
+ *
+ * Open the app with `?fixture` and every send replays the next turn below.
  *
  * ⚠ Verified against THIS repo's TanStack versions by probe before adoption: the helper's
  * peer range names @tanstack/ai 0.40 and we run 0.53, so its compatibility is an observed

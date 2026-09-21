@@ -7,8 +7,9 @@ import { toolResultState } from './ZenToolResult.tsx'
 /**
  * The status bar (#90 PR 1): the always-on line that says what this session is doing and
  * what it has cost, so the answer to "is anything happening?" is a glance, not a prompt.
- * deepseek-harness's footer is the reference: `97 turns · 111 steps · LLM 23m5s · …` — the
- * bar is WHERE YOU LOOK, so it is always there.
+ *
+ * deepseek-harness's footer is the reference: `97 turns · 111 steps · LLM 23m5s · …` — the bar
+ * is WHERE YOU LOOK, so it is always there.
  *
  * ⚠ ALWAYS VISIBLE, ZEROS INCLUDED. The original bar (#45, `SessionStatsBar`, since removed) hid until the first counted
  * request so an all-zero line would not read as a broken meter. That was the wrong call for
@@ -46,12 +47,14 @@ export type Activity =
   | { readonly kind: 'disconnected' }
 
 /**
- * Read the activity off the transcript's tail. The last AUTOMATIC part of the last message
- * (TanStack's own selection, matched results folded into their calls) is the step in
- * progress: a call with no result yet is a tool running; a call WITH its result means the
- * model has the output and is composing — `working`, not `running`, because the tool is
- * done. Thinking and text are what they say. Anything else — no assistant message yet, a
- * user message as the tail, an image — is `working`: in flight, nothing more specific known.
+ * Read the activity off the transcript's tail.
+ *
+ * The last AUTOMATIC part of the last message (TanStack's own selection, matched results folded
+ * into their calls) is the step in progress: a call with no result yet is a tool running; a
+ * call WITH its result means the model has the output and is composing — `working`, not
+ * `running`, because the tool is done. Thinking and text are what they say. Anything else — no
+ * assistant message yet, a user message as the tail, an image — is `working`: in flight,
+ * nothing more specific known.
  *
  * ⓘ The catch-all DIVERGES from `selected-message-part.tsx` on purpose (PR #92 review).
  * The transcript renders every part kind it has no handler for visibly, because there a

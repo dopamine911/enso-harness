@@ -60,6 +60,7 @@ export function createEventTail(capacity = EVENT_TAIL_CAPACITY): EventTail {
 /**
  * The tail's row for one observation (L2, #162 workstream 4): its kind, and the inner name
  * when the kind alone reads as nothing — which custom entry, which ui method, which tool.
+ *
  * Since the host maps below the seam, what it emits IS observations, and the tail says so in
  * the same vocabulary the follow carries; the runtime's event types stay inside the mapper.
  */

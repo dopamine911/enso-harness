@@ -19,15 +19,16 @@ export type ZenRendererMap = Record<string, (props: Record<string, unknown>) => 
 
 /**
  * What one tool call is in, read off its result — the ONE definition (PR #93 review).
+ *
  * Pending is "no result has paired yet" — TanStack's own selection pairs results to calls
- * across the whole message list — WHILE the message's run is still open. The same absence
- * once the run has ended is `aborted` (#130): pi emits no result for a call its abort
- * interrupted (and a torn tail on resume has none either), so without the run's state a
- * stopped call read `running…` forever — a state presented as live when it is not
- * (`architecture.md`, invariant 5). Error is the envelope's `error`, not the descriptor's.
- * The step row, the status bar's `running <tool>`, and this renderer all read this; a
- * fifth state is added here and nowhere else. The narrowed result rides along so a
- * consumer that branches on `status` has it typed for that branch.
+ * across the whole message list — WHILE the message's run is still open. The same absence once
+ * the run has ended is `aborted` (#130): pi emits no result for a call its abort interrupted
+ * (and a torn tail on resume has none either), so without the run's state a stopped call read
+ * `running…` forever — a state presented as live when it is not (`architecture.md`, invariant
+ * 5). Error is the envelope's `error`, not the descriptor's. The step row, the status bar's
+ * `running <tool>`, and this renderer all read this; a fifth state is added here and nowhere
+ * else. The narrowed result rides along so a consumer that branches on `status` has it typed
+ * for that branch.
  */
 export type ToolResultState =
   | { readonly status: 'pending' }

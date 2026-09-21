@@ -6,9 +6,10 @@ import type { ZenPermissionModeState } from './permission-mode.ts'
 
 /**
  * The thread runtime: the contract the host implements for one thread, and the shapes that
- * cross it (`docs/glossary.md` → Thread, Control). This is the seam a runtime replacement
- * would re-implement — prompt, abort, answer, subscribe, clear the queue, dispose — with
- * one fake in the tests as its second implementation today.
+ * cross it (`docs/glossary.md` → Thread, Control).
+ *
+ * This is the seam a runtime replacement would re-implement — prompt, abort, answer, subscribe,
+ * clear the queue, dispose — with one fake in the tests as its second implementation today.
  *
  * ⓘ HISTORY. Until #69 the web server spawned the runtime in its RPC mode and spoke JSONL
  * to it; that transport is deleted, and until #162 workstream 4 (L2) the EVENT SHAPE that
@@ -26,12 +27,17 @@ import type { ZenPermissionModeState } from './permission-mode.ts'
  * beats a finer rule that is correct and needs explaining.
  */
 
-/** Base64 image content, accepted by `prompt`, `steer` and `follow_up`. */
+/**
+ * Base64 image content, accepted by `prompt`, `steer` and `follow_up`.
+ *
+ * @group Thread runtime
+ */
 export const PromptImageContent = Type.Object({
   type: Type.Literal('image'),
   data: Type.String(),
   mimeType: Type.String(),
 })
+/** @group Thread runtime */
 export type PromptImageContent = Static<typeof PromptImageContent>
 
 /**
@@ -48,8 +54,11 @@ export type PromptImageContent = Static<typeof PromptImageContent>
  *
  * `interrupt` — take the prompt at the next step boundary. `enqueue` — after the run settles.
  * Two because the runtime has two; a third is a literal here and a mapping there.
+ *
+ * @group Thread runtime
  */
 export const ZenPromptAdmission = Type.Union([Type.Literal('interrupt'), Type.Literal('enqueue')])
+/** @group Thread runtime */
 export type ZenPromptAdmission = Static<typeof ZenPromptAdmission>
 
 /**
@@ -61,6 +70,8 @@ export type ZenPromptAdmission = Static<typeof ZenPromptAdmission>
  * so a `/`-prefixed message absent from this list is not a command at all, it is prose the
  * model will try to answer. See `session.ts` for why that has to be refused rather than
  * forwarded.
+ *
+ * @group Thread runtime
  */
 export const RuntimeCommand = Type.Object({
   name: Type.String(),
@@ -69,10 +80,12 @@ export const RuntimeCommand = Type.Object({
   location: Type.Optional(Type.String()),
   path: Type.Optional(Type.String()),
 })
+/** @group Thread runtime */
 export type RuntimeCommand = Static<typeof RuntimeCommand>
 
 const commandValidator = Compile(RuntimeCommand)
 
+/** @group Thread runtime */
 export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
   return commandValidator.Check(value)
 }
@@ -102,6 +115,8 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
  * asked exactly that and skipped `validateDialogAnswer` for anything carrying a `cancelled` key,
  * which is the select-injection fence (`dialog.ts`) open for an answer that also carried a value.
  * With the arms disjoint, `answer.cancelled === true` narrows, so every reader tests the VALUE.
+ *
+ * @group Thread runtime
  */
 export type DialogAnswer = { id: string } & (
   | { cancelled: true; value?: never; confirmed?: never }
@@ -109,6 +124,7 @@ export type DialogAnswer = { id: string } & (
   | { confirmed: boolean; cancelled?: never; value?: never }
 )
 
+/** @group Thread runtime */
 export interface PromptRequest {
   message: string
   images?: readonly PromptImageContent[]
@@ -116,6 +132,7 @@ export interface PromptRequest {
   admission?: ZenPromptAdmission
 }
 
+/** @group Thread runtime */
 export interface PromptOutcome {
   /** Preflight accepted the prompt (or an extension command finished). NOT run completion. */
   onAccepted: () => void
@@ -123,7 +140,11 @@ export interface PromptOutcome {
   onRejected: (reason: string) => void
 }
 
-/** ⚠ Function-bearing — the one schema the module header's rule is written for. */
+/**
+ * ⚠ Function-bearing — the one schema the module header's rule is written for.
+ *
+ * @group Thread runtime
+ */
 export const ThreadRuntime = Type.Object({
   /** Fire a prompt. Never awaits the run — see the section header. */
   prompt: Type.Unsafe<(request: PromptRequest, outcome: PromptOutcome) => void>(
@@ -195,4 +216,5 @@ export const ThreadRuntime = Type.Object({
   /** Cancel pending dialogs, tell extensions the session is shutting down, release the session. Idempotent. */
   dispose: Type.Unsafe<() => void>(Type.Function([], Type.Void())),
 })
+/** @group Thread runtime */
 export type ThreadRuntime = Static<typeof ThreadRuntime>

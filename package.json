@@ -31,14 +31,16 @@
     "e2e": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep-invert @model",
     "e2e:model": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep @model",
     "coverage:check": "bun scripts/check-coverage.ts",
-    "doctor": "bunx react-doctor --verbose"
+    "doctor": "bunx react-doctor --verbose",
+    "docs:api": "typedoc"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.12",
     "@types/bun": "^1.4.0",
     "fallow": "3.25.0",
     "react-doctor": "0.9.14",
-    "typescript": "~7.0.2"
+    "typedoc": "0.28.20",
+    "typescript": "~6.0.3"
   },
   "overrides": {
     "@tanstack/ai": "0.53.0",

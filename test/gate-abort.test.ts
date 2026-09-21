@@ -67,19 +67,17 @@ test('⚠ the header of scripts/gate.ts names the gates the file actually runs, 
 function runGateOver(body: string): { status: number | null; stdout: string; stderr: string; output: string } {
   const scratch = mkdtempSync(join(tmpdir(), 'zen-gate-abort-'))
   writeFileSync(join(scratch, 'crash.sh'), `#!/bin/sh\n${body}`, { mode: 0o755 })
+  // ⚠ DERIVED FROM `GATES`, never listed (#188): a hand-written set of five stopped matching
+  // the day a sixth gate was added, and the fixture then failed on the missing script rather
+  // than on the crash it exists to reproduce — a red test that says nothing about its subject.
+  // Every gate is a no-op here except `lint`, which is the one under test.
   writeFileSync(
     join(scratch, 'package.json'),
     JSON.stringify({
       name: 'gate-abort-fixture',
       private: true,
       packageManager: 'bun@1.4.0',
-      scripts: {
-        lint: './crash.sh',
-        typecheck: 'true',
-        'deadcode:check': 'true',
-        test: 'true',
-        'coverage:check': 'true',
-      },
+      scripts: { ...Object.fromEntries(GATES.map((gate) => [gate.script, 'true'])), lint: './crash.sh' },
     }),
   )
 

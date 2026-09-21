@@ -109,10 +109,11 @@ const TOOL_POWERSHELL = 'powershell'
 
 /**
  * Every tool name the guard's policy references — the policy/tool-list check's input.
+ *
  * ⚠ Deliberately NOT the full tool surface: the reader gate (`grep`, `find`, `ls`, and any
  * future path-bearing tool) works by EXCLUSION, so a renamed or newly registered reader is
- * still gated without being named here — only the tools matched BY NAME can silently
- * un-gate on a rename, and those are exactly the names this list carries.
+ * still gated without being named here — only the tools matched BY NAME can silently un-gate on
+ * a rename, and those are exactly the names this list carries.
  */
 export const GUARD_POLICY_TOOL_NAMES: readonly string[] = [TOOL_READ, TOOL_WRITE, TOOL_EDIT, TOOL_BASH, TOOL_POWERSHELL]
 
@@ -167,10 +168,12 @@ function pathArgumentOf(event: ToolCallEvent | ToolResultEvent): string | undefi
 }
 
 /**
- * The bash analyzer seam (#9). Production wires cc-safety-net's `checkCommand`; tests
- * inject known verdicts — `checkCommand` reads LOCAL policy per call, so a guard test
- * that touched the real library would vary with the machine's cc-safety-net config
- * (the contract test alone exercises the real one, and pins defaults explicitly).
+ * The bash analyzer seam (#9).
+ *
+ * Production wires cc-safety-net's `checkCommand`; tests inject known verdicts — `checkCommand`
+ * reads LOCAL policy per call, so a guard test that touched the real library would vary with
+ * the machine's cc-safety-net config (the contract test alone exercises the real one, and pins
+ * defaults explicitly).
  */
 export interface GuardDependencies {
   analyzeBashCommand: (input: { command: string; cwd: string }) => CheckCommandResult

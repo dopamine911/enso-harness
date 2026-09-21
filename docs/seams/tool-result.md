@@ -48,7 +48,9 @@ export const ZenTruncation = Type.Object({
 
 <!-- source: packages/core/src/tool-result.ts#ZenTruncationUnit -->
 ```ts
-/** Units a truncation can be counted in. Closed, because a surface must render each one. */
+/**
+ * Units a truncation can be counted in. Closed, because a surface must render each one.
+ */
 export const ZenTruncationUnit = Type.Union([Type.Literal('lines'), Type.Literal('bytes'), Type.Literal('items')])
 ```
 

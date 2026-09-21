@@ -19,8 +19,11 @@ import { describeTranscriptEntry } from './transcript.ts'
 
 /**
  * What the bundle says about the machine and the run — the header a triage reads first.
- * The log levels are NOT here: the first record of every process says which levels it ran
- * at (`log-process.ts`), and that record is in the records section — one home per fact.
+ *
+ * The log levels are NOT here: the first record of every process says which levels it ran at
+ * (`log-process.ts`), and that record is in the records section — one home per fact.
+ *
+ * @group Logging
  */
 export interface ZenBundleAbout {
   /** When the bundle was made, ISO UTC. */
@@ -34,6 +37,7 @@ export interface ZenBundleAbout {
   readonly selection: string
 }
 
+/** @group Logging */
 export interface ZenBundleInputs {
   readonly about: ZenBundleAbout
   /** The live threads' inspections — the ones the selection covers. */
@@ -51,6 +55,8 @@ export interface ZenBundleInputs {
  * `tavilyApiKey` was never going to be written. A `values` row is a leak that was CAUGHT —
  * a known secret quoted inside a message, a `reason`, or a `trace` payload — and its count
  * is how many records that happened in, which is a different thing for a reader to know.
+ *
+ * @group Logging
  */
 export function redactionManifest(lines: readonly ZenLogLine[]): Readonly<Record<string, number>> {
   const counts: Record<string, number> = {}
@@ -67,7 +73,11 @@ const FENCE = '```'
 const BUNDLE_HEADING = '# zen-harness log bundle'
 const RECORDS_FENCE = new RegExp(`^${FENCE}jsonl\\n([\\s\\S]*?)\\n${FENCE}$`, 'gm')
 
-/** True for the text of a file `buildLogBundle` made — `bun run logs --file` asks before reading it as one. */
+/**
+ * True for the text of a file `buildLogBundle` made — `bun run logs --file` asks before reading it as one.
+ *
+ * @group Logging
+ */
 export function isLogBundle(text: string): boolean {
   return text.startsWith(BUNDLE_HEADING)
 }
@@ -75,6 +85,8 @@ export function isLogBundle(text: string): boolean {
 /**
  * The records back out of a bundle: every fenced JSONL block, in order — the server's
  * records, then the browser's ring — as one JSONL text the reader prints like a file.
+ *
+ * @group Logging
  */
 export function bundleRecordsText(bundle: string): string {
   const blocks: string[] = []
@@ -108,7 +120,11 @@ function threadSection(inspection: ZenThreadInspection): string {
   return `### thread ${inspection.threadId}\n\n${rows.join('\n')}\n`
 }
 
-/** The browser's own records — appended by the drawer, which is the only place that has them. */
+/**
+ * The browser's own records — appended by the drawer, which is the only place that has them.
+ *
+ * @group Logging
+ */
 export function browserSection(lines: readonly ZenLogLine[], pageUrl?: string): string {
   // The page's URL names the thread (#142): the line a reader opens to see it live.
   const page = pageUrl === undefined ? '' : `\nPage: ${pageUrl}\n`
@@ -118,6 +134,7 @@ export function browserSection(lines: readonly ZenLogLine[], pageUrl?: string): 
     .join('\n')}\n${FENCE}\n`
 }
 
+/** @group Logging */
 export function buildLogBundle(inputs: ZenBundleInputs): string {
   const { about } = inputs
   const manifest = redactionManifest(inputs.lines)

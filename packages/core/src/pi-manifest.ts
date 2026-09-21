@@ -1,6 +1,3 @@
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
-
 /**
  * What a pi package's manifest declares, and where pi will look for it (#221) — THE one
  * place that knows pi's manifest-resource layout.
@@ -30,7 +27,12 @@ import { resolve } from 'node:path'
  * failure `packages/web/src/server/index.ts` records having already cost a debugging detour.
  *
  * ⚠ `node:` — a subpath (`@zen/core/pi-manifest`), never the barrel (#211).
+ *
+ * @module
  */
+
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 /** The prefix that makes a declared resource path a vendor path: assumption 2 above. */
 const VENDOR_PATH_PREFIX = 'node_modules/'
@@ -76,8 +78,11 @@ function resourceDeclarations(manifest: unknown): unknown[] {
 
 /**
  * Every resource path the manifest declares under `pi.*`, flattened, in declaration order.
- * A non-string entry is not a resource path and is dropped rather than coerced — a
- * hand-edited manifest should not turn into a check against `"42"`.
+ *
+ * A non-string entry is not a resource path and is dropped rather than coerced — a hand-edited
+ * manifest should not turn into a check against `"42"`.
+ *
+ * @group pi manifest
  */
 export function declaredResources(manifest: unknown): string[] {
   const resources: string[] = []
@@ -100,6 +105,8 @@ function vendorResourcePaths(manifest: unknown): string[] {
  * Only the vendor paths are checked: a repo-local resource (`./extensions/…`) is the
  * package's own and is there or the package is broken, whereas the vendor ones are
  * materialized by the installer and npm workspaces used to hoist them away.
+ *
+ * @group pi manifest
  */
 export function missingVendorPaths(manifest: unknown, packageRoot: string): string[] {
   return vendorResourcePaths(manifest).filter((resourcePath) => !existsSync(resolve(packageRoot, resourcePath)))
@@ -111,6 +118,8 @@ export function missingVendorPaths(manifest: unknown, packageRoot: string): stri
  * ⚠ A scoped package carries its scope in the FIRST TWO segments (`@scope/name`), so the
  * name is not simply the first one — `node_modules/@ladbabynpm/picc-permission-modes/index.ts`
  * names `@ladbabynpm/picc-permission-modes`, not `@ladbabynpm`.
+ *
+ * @group pi manifest
  */
 export function vendorPackageNames(manifest: unknown): string[] {
   const names = new Set<string>()

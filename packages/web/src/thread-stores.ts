@@ -147,7 +147,9 @@ export interface ThreadSummary {
 /**
  * The page's logging (#132): the ring the drawer reads and the shipper the page flushes on
  * hide — set once by `main.tsx` after `configureBrowserLogging`; undefined in tests that
- * mount without it. One per page, like the rail.
+ * mount without it.
+ *
+ * One per page, like the rail.
  */
 export const browserLogging: WritableStore<BrowserLogging | undefined> = createStore<BrowserLogging | undefined>(
   undefined,
@@ -166,9 +168,11 @@ function publishThreadList(): void {
 }
 
 /**
- * The most threads this page keeps live at once (#272) — the header's budget. Four follows
- * leave two of the browser's six connections for the unary routes a pane needs (`prompt`,
- * `/history`, `/api/mode`), which is what wedges first when the streams take the lot.
+ * The most threads this page keeps live at once (#272) — the header's budget.
+ *
+ * Four follows leave two of the browser's six connections for the unary routes a pane needs
+ * (`prompt`, `/history`, `/api/mode`), which is what wedges first when the streams take the
+ * lot.
  */
 export const MAX_LIVE_THREADS = 4
 
@@ -179,9 +183,11 @@ export const MAX_LIVE_THREADS = 4
 let activeThreadId: string | undefined
 
 /**
- * The active pane changed. Two effects, and the first is the load-bearing one (PR #301
- * review): the visible thread stops being a drop candidate, and its clock restarts so it is
- * not the first to go the moment the user switches away.
+ * The active pane changed.
+ *
+ * Two effects, and the first is the load-bearing one (PR #301 review): the visible thread stops
+ * being a drop candidate, and its clock restarts so it is not the first to go the moment the
+ * user switches away.
  *
  * ⚠ Reading a thread is activity. `updateThreadSummary` only fires on a title or a busy
  * transition, so without this a thread the user is READING — finished reply, idle, not busy —
@@ -259,9 +265,10 @@ function makeRoomForOneMore(): void {
 }
 
 /**
- * Mint a new thread on this page and return its stores. The rail lists it at once,
- * untitled. Inside the page's follow budget: minting past it drops an idle thread (#272).
- * `fetch` is the #118 test seam.
+ * Mint a new thread on this page and return its stores.
+ *
+ * The rail lists it at once, untitled. Inside the page's follow budget: minting past it drops
+ * an idle thread (#272). `fetch` is the #118 test seam.
  */
 export function mintThread(fetchImpl?: typeof fetch): ThreadStores {
   makeRoomForOneMore()
@@ -278,9 +285,11 @@ export function mintThread(fetchImpl?: typeof fetch): ThreadStores {
 }
 
 /**
- * JSON turns TanStack's `Date` into a string on the history route. Restore it at the browser
- * boundary and reject rows that cannot be UI messages; `ZenThreadHistory.messages` is
- * intentionally unknown because core must not own TanStack's transport shape.
+ * JSON turns TanStack's `Date` into a string on the history route.
+ *
+ * Restore it at the browser boundary and reject rows that cannot be UI messages;
+ * `ZenThreadHistory.messages` is intentionally unknown because core must not own TanStack's
+ * transport shape.
  */
 export function reviveHistoryMessages(messages: readonly unknown[]): UIMessage[] {
   const revived: UIMessage[] = []
@@ -310,6 +319,7 @@ export function reviveHistoryMessages(messages: readonly unknown[]): UIMessage[]
  * thread id is pi's session id, so the next prompt reopens the same file), its branch as
  * the history the chat mounts with, and its persisted mode as the control's first state —
  * a plan-mode session must not read `default` until its first run (#84's lesson).
+ *
  * Adopting a thread already on this page returns it — the rail cannot hold one twice — and
  * adopting one past the page's follow budget drops an idle thread to make room (#272).
  */
@@ -382,9 +392,10 @@ function titleTextOf(message: UIMessage): string {
 }
 
 /**
- * One thread's title, from ONE message — the first user one. Exported so a caller can
- * depend on that message's identity rather than on the list's: the list gets a new identity
- * per streamed chunk, and the title cannot have changed (#283).
+ * One thread's title, from ONE message — the first user one.
+ *
+ * Exported so a caller can depend on that message's identity rather than on the list's: the
+ * list gets a new identity per streamed chunk, and the title cannot have changed (#283).
  */
 export function titleFromMessage(message: UIMessage): string | undefined {
   const text = titleTextOf(message)

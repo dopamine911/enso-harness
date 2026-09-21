@@ -47,7 +47,11 @@ import { extractFlatShellCommandSegments, literalShellWord, shellWordsOf } from 
  *     session that has the bytes then does with them.
  */
 
-/** How the deny matched — carried into the block reason so a denial is explainable. */
+/**
+ * How the deny matched — carried into the block reason so a denial is explainable.
+ *
+ * @group Guard predicates
+ */
 export interface SecretPathMatch {
   /** The offending word, as written in the command. */
   matched: string
@@ -145,6 +149,8 @@ function coarseFinding(command: string, fragments: readonly string[]): SecretPat
 /**
  * Find the first word of a shell command that names credential material, or undefined when
  * none does. `coarse` forces the text pass (the PowerShell path).
+ *
+ * @group Guard predicates
  */
 export function findSecretPathWord(
   command: string,

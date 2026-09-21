@@ -72,11 +72,13 @@ sequenceDiagram
 ```ts
 /**
  * What one provider run produced — the ACCURATE outcome union (#63, Daniel's
- * requirement). ⚠ `searched` vs `ungrounded` is keyed on evidence that a native search
- * actually ran (a `server_tool_use` block on the Anthropic wire; each provider names its
- * own signal), NEVER on source count: a real search can return zero results, and an
- * ungrounded answer citing a hallucinated URL would read as grounded. Upstream's
- * `grounded = sources.length > 0` had exactly that defect.
+ * requirement).
+ *
+ * ⚠ `searched` vs `ungrounded` is keyed on evidence that a native search actually ran (a
+ * `server_tool_use` block on the Anthropic wire; each provider names its own signal), NEVER on
+ * source count: a real search can return zero results, and an ungrounded answer citing a
+ * hallucinated URL would read as grounded. Upstream's `grounded = sources.length > 0` had
+ * exactly that defect.
  */
 export type WebSearchOutcome =
   | {

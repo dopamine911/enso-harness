@@ -28,7 +28,9 @@ export type RuntimeEvent = Static<typeof RuntimeEventSchema> & OpenRecord
 
 /**
  * How an event reached the mapper (#96): `replayed` from the host's until-first-subscriber
- * buffer (the session's own start), or `live`. The mapper turns it into an observation's
- * `origin`. The event tail's `held`/`dropped` provenances (#97) never reach the mapper.
+ * buffer (the session's own start), or `live`.
+ *
+ * The mapper turns it into an observation's `origin`. The event tail's `held`/`dropped`
+ * provenances (#97) never reach the mapper.
  */
 export type EventDelivery = 'live' | 'replayed'

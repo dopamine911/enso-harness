@@ -24,7 +24,9 @@ import {
 
 /**
  * The web_fetch tool (#54) — the sanctioned web access that replaces the ad-hoc network
- * clients #9 denies in bash. Three properties the shell path could never have:
+ * clients #9 denies in bash.
+ *
+ * Three properties the shell path could never have:
  *
  * 1. **A committed, empty-by-default host allowlist.** The `webFetch.allowedHosts`
  *    section of `zen.config.json` at the REPOSITORY root (#59) names every fetchable
@@ -53,6 +55,7 @@ import {
 /**
  * The init the tool hands `fetchUrl`, every field load-bearing: `manual` so a redirect is
  * reported instead of followed (#54), the call's abort signal, and our own user agent.
+ *
  * Named so the composition root and the tests' fakes annotate the parameter by type.
  */
 export interface WebFetchRequestInit {

@@ -60,6 +60,8 @@ interface Manifest {
   readonly peerDependencies?: Record<string, string>
   readonly peerDependenciesMeta?: Record<string, { optional?: boolean }>
   readonly overrides?: Record<string, string>
+  /** Only read off an INSTALLED manifest, never a workspace one. */
+  readonly version?: string
 }
 
 function manifest(repositoryRelative: string): Manifest {
@@ -191,4 +193,53 @@ test('⚠ @shadcn/helpers’ peer ranges are knowingly violated — re-probe whe
     optionalPeers: ['@tanstack/ai', '@tanstack/ai-client', 'ai'],
     weRun: { '@tanstack/ai': '0.53.0', '@tanstack/ai-client': '0.31.0', ai: undefined },
   })
+})
+
+/**
+ * ⚠ THE TYPESCRIPT MAJOR IS PINNED BY TYPEDOC, NOT BY TASTE (#188). 7.0.2 was installed here
+ * and the build is SIX TIMES faster on it — measured cold, `tsc -b` over this tree: 1.0 s
+ * against 6.4 s. It was given up on purpose: 7.x is the native port and ships no compiler
+ * API — `node_modules/typescript/lib/` holds `tsc.js` and `getExePath.js` and no
+ * `typescript.js` — so every tool that READS types rather than checking them stops working.
+ * TypeDoc is the one this repo needs (#188's reference surface), and its own peer range is
+ * the authority, read here rather than restated.
+ *
+ * A bump back to 7 is not wrong, it is a TRADE: it buys the compile time back and costs the
+ * generated API reference. This line is what makes that trade a decision instead of a
+ * surprise on the next docs build — and the failure names TypeDoc, which a version pin in a
+ * manifest cannot.
+ */
+test('⚠ the installed TypeScript is one TypeDoc supports — the reason the major is pinned (#188)', () => {
+  const installedMajorMinor = /^(\d+\.\d+)\./.exec(manifest('node_modules/typescript/package.json').version ?? '')?.[1]
+  const supported = manifest('node_modules/typedoc/package.json').peerDependencies?.typescript ?? ''
+  expect(supported).not.toBe('')
+  expect(supported.split('||').map((range) => range.trim())).toContain(`${installedMajorMinor}.x`)
+  // …and the compiler API TypeDoc reads is actually on disk, which is the thing 7.x drops.
+  expect(existsSync(join(REPOSITORY_ROOT, 'node_modules/typescript/lib/typescript.js'))).toBe(true)
+})
+
+/**
+ * ⚠ THE DOWNGRADE INSTALLED A SECOND TYPESCRIPT, and #228 spent a PR removing one (PR #327
+ * review).
+ *
+ * `fallow-type-aware` declares its own `typescript` and shared the root's copy while that was
+ * 7.0.2; the root moving to 6.0.3 split them, so `bun.lock` now carries a nested
+ * `fallow-type-aware/typescript@7.0.2`. That is the installer doing its job, not lock drift —
+ * but it is exactly the shape #228 refused, and the difference has to be checkable rather than
+ * explained in a pull-request body nobody reads twice.
+ *
+ * The difference: #228's rule is that no WORKSPACE package pins a TypeScript of its own, so
+ * `tsc -b` compiles this tree with one compiler. A vendor's private copy is that vendor's
+ * business — it never reaches `tsc -b`, the barrels, or the build. This holds the rule where
+ * #228 drew it and states the exception where the installer put it.
+ */
+test('⚠ only the root declares TypeScript — a second copy is a vendor’s, never a workspace’s (#228, #188)', () => {
+  const workspaces = ['packages/core', 'packages/harness', 'packages/web'].map((workspace) => ({
+    workspace,
+    declares: manifest(`${workspace}/package.json`).devDependencies?.typescript,
+  }))
+  expect(workspaces.filter((entry) => entry.declares !== undefined)).toEqual([])
+  expect(manifest('package.json').devDependencies?.typescript).toBe('~6.0.3')
+  // The vendor's private copy, named so the next reader does not take it for drift.
+  expect(existsSync(join(REPOSITORY_ROOT, 'node_modules/fallow-type-aware/node_modules/typescript'))).toBe(true)
 })

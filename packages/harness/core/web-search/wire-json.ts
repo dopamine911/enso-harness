@@ -1,8 +1,9 @@
 /**
  * Tiny helpers every provider wire shares (#63, PR #64 review): narrowing for unknown
- * JSON wire payloads, and base-URL hygiene. ⚠ Providers import THIS module (like
- * `sources.ts` and `sse.ts`), never each other — the shared-util relationship is what
- * keeps the later provider-package split mechanical.
+ * JSON wire payloads, and base-URL hygiene.
+ *
+ * ⚠ Providers import THIS module (like `sources.ts` and `sse.ts`), never each other — the
+ * shared-util relationship is what keeps the later provider-package split mechanical.
  */
 
 /** Narrow an unknown wire value to a plain object, or undefined. */

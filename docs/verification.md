@@ -13,7 +13,12 @@ at the first failure:
 1. **Biome** — formatting, lint, import organisation and the repository naming plugin, check-only.
 2. **TypeScript** — `tsc -b`, a project-reference build. It emits: project references require
    `composite`, `composite` requires declaration output, and `tsc -b --noEmit` is refused with
-   TS6310, so the declarations land in each package's gitignored `dist-types/`.
+   TS6310, so the declarations land in each package's gitignored `dist-types/`. **The major is 6, and
+   TypeDoc is why** (#188): 7.x is the native port and ships no compiler API, so every tool that
+   *reads* types rather than checking them stops working — measured, the 7.x build is six times
+   faster (1.0 s against 6.4 s cold over this tree), and that speed was given up for the generated
+   API reference. `test/dependency-gate.test.ts` holds the pin against TypeDoc's own peer range, so
+   a bump back to 7 fails naming TypeDoc rather than surfacing as a broken docs build later.
 3. **Dead code** — `fallow dead-code --baseline fallow-baseline.json` (#163): fails on any unused file,
    export, type or dependency that is *not* in the committed identity baseline. The baseline is the
    backlog as inventory; growth is the regression. **It is empty since #263**, and the last 17 rows

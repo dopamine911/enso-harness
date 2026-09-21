@@ -9,9 +9,10 @@ import { inspectThread, type ThreadView } from './thread-registry.ts'
 /**
  * `GET /api/logs/bundle[?thread=<id or prefix>]` (#132 item 5): the day's records, the live
  * threads' inspections, and the versions, as ONE markdown file with the records fenced as
- * JSONL — `bun run logs --file` reads it back. The browser appends its own ring before the
- * download (`thread-debug.tsx`); the server never sees the page's records except the ones
- * it already shipped (#137).
+ * JSONL — `bun run logs --file` reads it back.
+ *
+ * The browser appends its own ring before the download (`thread-debug.tsx`); the server never
+ * sees the page's records except the ones it already shipped (#137).
  *
  * The selection is today's file: the one the rotation names by the local day, the one
  * `bun run logs` reads. A thread that spans midnight has yesterday's half in yesterday's
@@ -19,9 +20,10 @@ import { inspectThread, type ThreadView } from './thread-registry.ts'
  */
 
 /**
- * The most records a bundle carries — the newest. A day at `trace` is tens of thousands of
- * lines; a bundle a user attaches to an issue should open in a browser tab. The heading says
- * "the last N of M" so the cut is visible.
+ * The most records a bundle carries — the newest.
+ *
+ * A day at `trace` is tens of thousands of lines; a bundle a user attaches to an issue should
+ * open in a browser tab. The heading says "the last N of M" so the cut is visible.
  */
 export const BUNDLE_MAX_RECORDS = 5000
 
@@ -156,9 +158,10 @@ function describeAbout(input: {
 
 /**
  * `GET /api/about` — versions and checkout, as JSON, for a debugging surface that wants the
- * header without downloading the day (#144). Reads nothing but this process's own facts,
- * builds nothing, and — like `POST /api/logs` — writes no record: an observation surface
- * must not appear in the trace it is reading (#97).
+ * header without downloading the day (#144).
+ *
+ * Reads nothing but this process's own facts, builds nothing, and — like `POST /api/logs` —
+ * writes no record: an observation surface must not appear in the trace it is reading (#97).
  */
 export function createAboutRoute(deps: {
   readonly runtimeVersion: string

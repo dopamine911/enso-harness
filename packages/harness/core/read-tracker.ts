@@ -67,8 +67,10 @@ function stampsMatch(current: ObservedFileStamp, recorded: ObservedFileStamp): b
   )
 }
 
+/** @group Guard predicates */
 export type KnownPathState = 'unknown' | 'fresh' | 'stale'
 
+/** @group Guard predicates */
 export interface SessionReadTracker {
   /**
    * Record that the session has seen this file's content (a successful read or write),
@@ -90,6 +92,7 @@ export interface SessionReadTracker {
   reset(): void
 }
 
+/** @group Guard predicates */
 export function createSessionReadTracker(): SessionReadTracker {
   const stampsByRealpath = new Map<string, ObservedFileStamp>()
 

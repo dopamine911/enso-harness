@@ -13,7 +13,12 @@ import { ZenToolResultDescriptor } from './tool-result.ts'
  * inexpressible rather than merely discouraged.
  */
 
-/** Token and cost accounting, present on `message_update`, assistant and tool messages. */
+/**
+ * Token and cost accounting, present on `message_update`, assistant and tool messages.
+ *
+ * @group Observations
+ * @category Turns and cost
+ */
 export const ZenUsage = Type.Object({
   input: Type.Integer({ minimum: 0 }),
   output: Type.Integer({ minimum: 0 }),
@@ -21,9 +26,18 @@ export const ZenUsage = Type.Object({
   cacheWrite: Type.Integer({ minimum: 0 }),
   totalCost: Type.Optional(Type.Number({ minimum: 0 })),
 })
+/**
+ * @group Observations
+ * @category Turns and cost
+ */
 export type ZenUsage = Static<typeof ZenUsage>
 
-/** A streaming text delta. ⚠ `usage` rides along on EVERY one — see `message_update`. */
+/**
+ * A streaming text delta. ⚠ `usage` rides along on EVERY one — see `message_update`.
+ *
+ * @group Observations
+ * @category Message stream
+ */
 export const ZenTextDelta = Type.Object({
   kind: Type.Literal('text-delta'),
   contentIndex: Type.Integer({ minimum: 0 }),
@@ -31,6 +45,10 @@ export const ZenTextDelta = Type.Object({
   usage: Type.Optional(ZenUsage),
 })
 
+/**
+ * @group Observations
+ * @category Message stream
+ */
 export const ZenThinkingDelta = Type.Object({
   kind: Type.Literal('thinking-delta'),
   contentIndex: Type.Integer({ minimum: 0 }),
@@ -38,7 +56,12 @@ export const ZenThinkingDelta = Type.Object({
   usage: Type.Optional(ZenUsage),
 })
 
-/** A tool call has started. Mirrors TanStack's `ToolCallPart` fields. */
+/**
+ * A tool call has started. Mirrors TanStack's `ToolCallPart` fields.
+ *
+ * @group Observations
+ * @category Tool calls
+ */
 export const ZenToolCall = Type.Object({
   kind: Type.Literal('tool-call'),
   toolCallId: Type.String(),
@@ -53,6 +76,9 @@ export const ZenToolCall = Type.Object({
  * accumulated output so far (not just the delta), allowing clients to simply replace their
  * display on each update." A client that appends will duplicate every chunk, and the bug
  * grows with output length. The field is named `text` rather than `delta` for that reason.
+ *
+ * @group Observations
+ * @category Tool calls
  */
 export const ZenToolResultObservation = Type.Object({
   kind: Type.Literal('tool-result'),
@@ -85,8 +111,15 @@ export const ZenToolResultObservation = Type.Object({
  * completed with nothing visible. Optional because only `notify` carries them; the mapper
  * copies `notifyType` only when it is one of pi's three declared values, so an unknown
  * value degrades to an untyped notification rather than failing validation.
+ *
+ * @group Observations
+ * @category Extension surface
  */
 export const ZenNotifyType = Type.Union([Type.Literal('info'), Type.Literal('warning'), Type.Literal('error')])
+/**
+ * @group Observations
+ * @category Extension surface
+ */
 export type ZenNotifyType = Static<typeof ZenNotifyType>
 
 /**
@@ -102,10 +135,21 @@ export type ZenNotifyType = Static<typeof ZenNotifyType>
  *                  have swallowed it.
  *
  * A closed union: a third origin fails at the mapper, loudly, not silently in a consumer.
+ *
+ * @group Observations
+ * @category Extension surface
  */
 export const ZenUiRequestOrigin = Type.Union([Type.Literal('session-start'), Type.Literal('run')])
+/**
+ * @group Observations
+ * @category Extension surface
+ */
 export type ZenUiRequestOrigin = Static<typeof ZenUiRequestOrigin>
 
+/**
+ * @group Observations
+ * @category Extension surface
+ */
 export const ZenExtensionUiRequest = Type.Object({
   kind: Type.Literal('extension-ui-request'),
   id: Type.String(),
@@ -118,10 +162,14 @@ export const ZenExtensionUiRequest = Type.Object({
 })
 
 /**
- * How a blocking question stopped waiting (#114). A closed union: `answered` is a human's
- * value, the other three are pi's cancel value delivered for a reason — the browser's
- * cancel or the session's teardown (`cancelled`), the extension's own `timeout`, or the
- * caller's abort signal (`aborted`).
+ * How a blocking question stopped waiting (#114).
+ *
+ * A closed union: `answered` is a human's value, the other three are pi's cancel value
+ * delivered for a reason — the browser's cancel or the session's teardown (`cancelled`), the
+ * extension's own `timeout`, or the caller's abort signal (`aborted`).
+ *
+ * @group Observations
+ * @category Permission and dialogs
  */
 export const ZenDialogOutcome = Type.Union([
   Type.Literal('answered'),
@@ -129,13 +177,22 @@ export const ZenDialogOutcome = Type.Union([
   Type.Literal('timeout'),
   Type.Literal('aborted'),
 ])
+/**
+ * @group Observations
+ * @category Permission and dialogs
+ */
 export type ZenDialogOutcome = Static<typeof ZenDialogOutcome>
 
 /**
- * A blocking question is no longer waiting (#114). The HOST synthesises this at the one
- * point every settle path crosses — pi has no event for it, because in rpc mode the client
- * that answered already knows. Here a second follower does not: without this, a question
- * answered in one tab lingered in every other until that tab tried and got `gone`.
+ * A blocking question is no longer waiting (#114).
+ *
+ * The HOST synthesises this at the one point every settle path crosses — pi has no event for
+ * it, because in rpc mode the client that answered already knows. Here a second follower does
+ * not: without this, a question answered in one tab lingered in every other until that tab
+ * tried and got `gone`.
+ *
+ * @group Observations
+ * @category Permission and dialogs
  */
 export const ZenDialogSettled = Type.Object({
   kind: Type.Literal('dialog-settled'),
@@ -143,6 +200,10 @@ export const ZenDialogSettled = Type.Object({
   id: Type.String({ minLength: 1 }),
   outcome: ZenDialogOutcome,
 })
+/**
+ * @group Observations
+ * @category Permission and dialogs
+ */
 export type ZenDialogSettled = Static<typeof ZenDialogSettled>
 
 /**
@@ -160,45 +221,73 @@ export type ZenDialogSettled = Static<typeof ZenDialogSettled>
  * ⚠ Only `type: "custom"` entries map here. Other session entries (messages, compaction,
  * labels) duplicate information that already flows as first-class observations, so they
  * stay `unmapped`.
+ *
+ * @group Observations
+ * @category The union
  */
 export const ZenCustomEntry = Type.Object({
   kind: Type.Literal('custom-entry'),
   customType: Type.String(),
   data: Type.Unknown(),
 })
+/**
+ * @group Observations
+ * @category The union
+ */
 export type ZenCustomEntry = Static<typeof ZenCustomEntry>
 
 /**
  * The permission mode changed, and what a run may switch to now (#162 workstream 4, L3).
+ *
  * The HOST emits this when its mode extension persists a change — the one observation the
- * browser reads the mode from mid-run, so no surface knows which extension's entry it was
- * or what that entry looks like. The same `{ mode, available }` a run starts with
+ * browser reads the mode from mid-run, so no surface knows which extension's entry it was or
+ * what that entry looks like. The same `{ mode, available }` a run starts with
  * (`ZenPermissionModeState`): one shape for the receipt and for the change.
+ *
+ * @group Observations
+ * @category Permission and dialogs
  */
 export const ZenPermissionMode = Type.Object({
   kind: Type.Literal('permission-mode'),
   ...ZenPermissionModeState.properties,
 })
+/**
+ * @group Observations
+ * @category Permission and dialogs
+ */
 export type ZenPermissionMode = Static<typeof ZenPermissionMode>
 
 /**
  * A mode change the route told the runtime about was REJECTED after the 204 went out (L3
- * step C): the vendor's command refused, or failed before acceptance. The SERVER announces
- * it, as it announces `prompt-rejected` — the feed is the browser's only way to hear that a
- * click did nothing, and every follower hears it alike. The mode is unchanged.
+ * step C): the vendor's command refused, or failed before acceptance.
+ *
+ * The SERVER announces it, as it announces `prompt-rejected` — the feed is the browser's only
+ * way to hear that a click did nothing, and every follower hears it alike. The mode is
+ * unchanged.
+ *
+ * @group Observations
+ * @category Permission and dialogs
  */
 export const ZenPermissionModeRejected = Type.Object({
   kind: Type.Literal('permission-mode-rejected'),
   mode: Type.String({ minLength: 1 }),
   reason: Type.String(),
 })
+/**
+ * @group Observations
+ * @category Permission and dialogs
+ */
 export type ZenPermissionModeRejected = Static<typeof ZenPermissionModeRejected>
 
 /**
- * A message began — pi's `message_start` (#112). The boundary AG-UI's `TEXT_MESSAGE_START`
- * supplied and the observation vocabulary lacked. `text` rides only on a USER message: a
- * second follower of the same thread sees the prompt another tab sent (dsh's
- * `user/message`); assistant text arrives as deltas.
+ * A message began — pi's `message_start` (#112).
+ *
+ * The boundary AG-UI's `TEXT_MESSAGE_START` supplied and the observation vocabulary lacked.
+ * `text` rides only on a USER message: a second follower of the same thread sees the prompt
+ * another tab sent (dsh's `user/message`); assistant text arrives as deltas.
+ *
+ * @group Observations
+ * @category Message stream
  */
 export const ZenMessageStart = Type.Object({
   kind: Type.Literal('message-start'),
@@ -206,6 +295,10 @@ export const ZenMessageStart = Type.Object({
   role: Type.String(),
   text: Type.Optional(Type.String()),
 })
+/**
+ * @group Observations
+ * @category Message stream
+ */
 export type ZenMessageStart = Static<typeof ZenMessageStart>
 
 /**
@@ -222,64 +315,109 @@ export type ZenMessageStart = Static<typeof ZenMessageStart>
  * branch-summary entries; those cross as session entries, not `message_end`, and are not
  * counted here — a stated undercount, not a bug.) One event per durable fact: the
  * accounting travels with the message it belongs to, never as a side record.
+ *
+ * @group Observations
+ * @category Message stream
  */
 export const ZenMessageEnd = Type.Object({
   kind: Type.Literal('message-end'),
   role: Type.String(),
   usage: Type.Optional(ZenUsage),
 })
+/**
+ * @group Observations
+ * @category Message stream
+ */
 export type ZenMessageEnd = Static<typeof ZenMessageEnd>
 
 /**
- * pi's `turn_start` / `turn_end` (#112). ⚠ pi's "turn" is ONE model request plus the tool
- * results it produced — what deepseek-harness calls a *step*; dsh's *turn* (input claimed
- * through nothing owed) is pi's whole run, `settled`. Carried under pi's name so a reader
- * of pi's docs and a reader of this stream agree; the dsh mapping is this comment.
+ * pi's `turn_start` / `turn_end` (#112).
+ *
+ * ⚠ pi's "turn" is ONE model request plus the tool results it produced — what deepseek-harness
+ * calls a *step*; dsh's *turn* (input claimed through nothing owed) is pi's whole run,
+ * `settled`. Carried under pi's name so a reader of pi's docs and a reader of this stream
+ * agree; the dsh mapping is this comment.
+ *
+ * @group Observations
+ * @category Turns and cost
  */
 export const ZenTurnStart = Type.Object({ kind: Type.Literal('turn-start') })
+/**
+ * @group Observations
+ * @category Turns and cost
+ */
 export type ZenTurnStart = Static<typeof ZenTurnStart>
+/**
+ * @group Observations
+ * @category Turns and cost
+ */
 export const ZenTurnEnd = Type.Object({
   kind: Type.Literal('turn-end'),
   /** How many tool results the request produced — the step row's count, without the results themselves (they crossed as `tool-result`). */
   toolResults: Type.Integer({ minimum: 0 }),
 })
+/**
+ * @group Observations
+ * @category Turns and cost
+ */
 export type ZenTurnEnd = Static<typeof ZenTurnEnd>
 
 /**
  * What is waiting behind the run in flight (#75, #112, #216): prompts that will INTERRUPT at
- * the next step boundary, and prompts ENQUEUED until the run settles. The TEXTS, in order, as
- * the runtime holds them: the page shows what is waiting (the queue list above the composer),
- * every follower sees the same list, and a stop hands them back to the composer (#75,
- * clear-and-restore). Empty lists when nothing waits — the frame emitted after a claim or a
- * clear.
+ * the next step boundary, and prompts ENQUEUED until the run settles.
+ *
+ * The TEXTS, in order, as the runtime holds them: the page shows what is waiting (the queue
+ * list above the composer), every follower sees the same list, and a stop hands them back to
+ * the composer (#75, clear-and-restore). Empty lists when nothing waits — the frame emitted
+ * after a claim or a clear.
  *
  * ⚠ ZEN's words, not the runtime's. The fields were `steering`/`followUp` — pi's own, on the
  * SSE wire, with `host/map-events.ts` passing them through rather than mapping them. Every
  * consumer concatenates the two lists (`custom-event-router.ts`, the abort receipt), so the
  * split survives on the wire for one reason: a follower renders what is waiting, and "this one
  * cuts in" is a different sentence from "this one waits its turn".
+ *
+ * @group Observations
+ * @category Prompt admission
  */
 export const ZenQueue = Type.Object({
   kind: Type.Literal('queue'),
   interrupting: Type.Array(Type.String()),
   enqueued: Type.Array(Type.String()),
 })
+/**
+ * @group Observations
+ * @category Prompt admission
+ */
 export type ZenQueue = Static<typeof ZenQueue>
 
 /**
  * pi refused a prompt at preflight (#112) — the one observation the SERVER synthesises,
  * because the refusal arrives on the prompt's callback, after `POST …/prompt` has already
- * answered 202: the follow is the only place a client can learn of it. `messageId` is the
- * receipt's, so the client can name which prompt.
+ * answered 202: the follow is the only place a client can learn of it.
+ *
+ * `messageId` is the receipt's, so the client can name which prompt.
+ *
+ * @group Observations
+ * @category Prompt admission
  */
 export const ZenPromptRejected = Type.Object({
   kind: Type.Literal('prompt-rejected'),
   messageId: Type.String(),
   reason: Type.String(),
 })
+/**
+ * @group Observations
+ * @category Prompt admission
+ */
 export type ZenPromptRejected = Static<typeof ZenPromptRejected>
 
-/** An extension threw. Surfaced, never swallowed. */
+/**
+ * An extension threw. Surfaced, never swallowed.
+ *
+ * @group Observations
+ * @category Extension surface
+ */
 export const ZenExtensionError = Type.Object({
   kind: Type.Literal('extension-error'),
   extensionPath: Type.String(),
@@ -287,13 +425,23 @@ export const ZenExtensionError = Type.Object({
   error: Type.String(),
 })
 
-/** One low-level run ended. ⚠ NOT completion — `willRetry` may be true. */
+/**
+ * One low-level run ended. ⚠ NOT completion — `willRetry` may be true.
+ *
+ * @group Observations
+ * @category Turns and cost
+ */
 export const ZenRunEnded = Type.Object({
   kind: Type.Literal('run-ended'),
   willRetry: Type.Boolean(),
 })
 
-/** The session-level settle. This is completion. */
+/**
+ * The session-level settle. This is completion.
+ *
+ * @group Observations
+ * @category Turns and cost
+ */
 export const ZenSettled = Type.Object({ kind: Type.Literal('settled') })
 
 /**
@@ -302,12 +450,19 @@ export const ZenSettled = Type.Object({ kind: Type.Literal('settled') })
  * ⚠ `event` is `Type.Unknown()`, not a closed event schema. Constraining it would make a
  * new pi event type fail validation here — turning "we do not render this yet" into "the
  * transport is broken", which is the opposite of what this member exists for.
+ *
+ * @group Observations
+ * @category The union
  */
 export const ZenUnmapped = Type.Object({
   kind: Type.Literal('unmapped'),
   event: Type.Unknown(),
 })
 
+/**
+ * @group Observations
+ * @category The union
+ */
 export const ZenObservation = Type.Union([
   ZenTextDelta,
   ZenThinkingDelta,
@@ -329,4 +484,8 @@ export const ZenObservation = Type.Union([
   ZenSettled,
   ZenUnmapped,
 ])
+/**
+ * @group Observations
+ * @category The union
+ */
 export type ZenObservation = Static<typeof ZenObservation>

@@ -2,16 +2,20 @@ import type { WebSource } from './vocabulary.ts'
 
 /**
  * Source hygiene for provider results (#63): URL normalization, junk filtering, and
- * order-preserving dedupe. Providers surface raw URLs from wire payloads; this module is
- * what keeps the rendered `Sources` list clean and stable.
+ * order-preserving dedupe.
+ *
+ * Providers surface raw URLs from wire payloads; this module is what keeps the rendered
+ * `Sources` list clean and stable.
  *
  * Adapted from pi-web-search 1.4.0 (github.com/ttttmr/pi-web-search), © ttttmr, MIT
  * (declared in its package.json; the repo ships no LICENSE file).
  */
 
 /**
- * Append a source unless an identical (url, title) pair is already present. Returns the
- * source's index either way — the citation appliers use it as the `[n]` marker number.
+ * Append a source unless an identical (url, title) pair is already present.
+ *
+ * Returns the source's index either way — the citation appliers use it as the `[n]` marker
+ * number.
  */
 export function pushUniqueSource(sources: WebSource[], candidate: { title?: string | undefined; url: string }): number {
   const title = candidate.title !== undefined && candidate.title.length > 0 ? candidate.title : 'Unknown'

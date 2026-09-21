@@ -21,6 +21,8 @@ an event the mapper has no word for becomes `unmapped`, so dropping is inexpress
 
 <!-- source: packages/core/src/observation.ts#ZenObservation -->
 ```ts
+/**
+ */
 export const ZenObservation = Type.Union([
   ZenTextDelta,
   ZenThinkingDelta,
@@ -51,7 +53,9 @@ message end:
 
 <!-- source: packages/core/src/observation.ts#ZenUsage -->
 ```ts
-/** Token and cost accounting, present on `message_update`, assistant and tool messages. */
+/**
+ * Token and cost accounting, present on `message_update`, assistant and tool messages.
+ */
 export const ZenUsage = Type.Object({
   input: Type.Integer({ minimum: 0 }),
   output: Type.Integer({ minimum: 0 }),
@@ -71,6 +75,19 @@ export const ZenFollowFrame = Type.Union([ZenFollowSnapshot, ZenFollowObservatio
 
 <!-- source: packages/core/src/follow.ts#ZenFollowSnapshot -->
 ```ts
+/**
+ * The server↔browser wire (#112): a thread's feed, as the follow route serves it.
+ *
+ * Every follow opens with exactly one `snapshot` — the thread as of `asOfSeq` — and then
+ * carries only `observation` frames (each `seq` greater than the last) and `status`
+ * frames (the thread's lifecycle as the server sees it). A reconnect is a new follow and
+ * a new snapshot; there is no cursor to resume from, because the snapshot IS the resync
+ * (deepseek-harness: one complete snapshot per generation, then only deltas).
+ *
+ * The payload is `ZenObservation` — the same layer the event tails and the debug pane
+ * reason in. AG-UI is not on this wire; a browser adapter derives it if a renderer wants it
+ * (`docs/architecture.md`, decided constraints).
+ */
 export const ZenFollowSnapshot = Type.Object(
   {
     type: Type.Literal('snapshot'),
@@ -130,7 +147,7 @@ prompt route in `packages/web/src/server/follow.ts` announces it (line 219) when
 a prompt after its receipt went out. Both are grounded in the kinds table's "Produced by" column.
 
 **Minted once.** The registry, `packages/web/src/server/thread-registry.ts`, is the only place a `seq`
-is assigned: `publishObservation` (line 322) increments the feed's counter, records the observation
+is assigned: `publishObservation` (line 324) increments the feed's counter, records the observation
 (`observation-log.ts` — `info` for the spine kinds, `debug` for every observation, `trace` with the
 payload), then publishes. The feed subscribes the runtime once per live thread and routes every event
 through the mapper (lines 317–319); the prompt route's `announce` (line 496) enters the same counter.

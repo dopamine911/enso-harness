@@ -335,8 +335,9 @@ function PermissionModeControl(): React.ReactNode {
  */
 /**
  * The per-method answer controls, one early return per dialog method — extracted from a
- * ternary chain so each shape reads on its own. `input` and `editor` share the form; the
- * only difference is the field element.
+ * ternary chain so each shape reads on its own.
+ *
+ * `input` and `editor` share the form; the only difference is the field element.
  */
 export function DialogAnswerControls({
   dialog,
@@ -421,11 +422,13 @@ export function DialogAnswerControls({
 /**
  * The question as a card — the one surface that parks pi on a human, so it is a NAMED GROUP
  * (#276): `role="group"` whose accessible name is the question, with the title carrying a
- * heading role so a screen reader can jump straight to it. NOT `role="dialog"`/`aria-modal`:
- * the run keeps going behind it and the rest of the page stays usable, so claiming modality
- * would be a lie a screen reader acts on. {@link OpenQuestion} moves focus into the group on
- * arrival, and that focus move is what announces it — which is why there is no live region
- * here: a polite region wrapping the card would read the whole question a second time.
+ * heading role so a screen reader can jump straight to it.
+ *
+ * NOT `role="dialog"`/`aria-modal`: the run keeps going behind it and the rest of the page
+ * stays usable, so claiming modality would be a lie a screen reader acts on. {@link
+ * OpenQuestion} moves focus into the group on arrival, and that focus move is what announces it
+ * — which is why there is no live region here: a polite region wrapping the card would read the
+ * whole question a second time.
  */
 export function ZenDialogCard({
   dialogId,
@@ -465,14 +468,15 @@ export function ZenDialogCard({
 }
 
 /**
- * Answer the thread's open question through its connection. The slot clears once the
- * question is SPENT — taken by the server (`answered`), or already settled from another
- * tab or expired (`gone`). A `refused` answer (an unoffered value, 422) leaves the question
- * open on the server, so it stays on screen with the reason as a notice: nothing would
- * re-show it otherwise, and the thread would sit busy behind a card that vanished (PR #113
- * review). `unreachable` (the request never arrived) leaves it open the same way. The outcome
- * is handed back so the caller can tell a spent question from one still standing (#275).
- * ⓘ Exported for `__tests__/chat-screen.test.tsx`.
+ * Answer the thread's open question through its connection.
+ *
+ * The slot clears once the question is SPENT — taken by the server (`answered`), or already
+ * settled from another tab or expired (`gone`). A `refused` answer (an unoffered value, 422)
+ * leaves the question open on the server, so it stays on screen with the reason as a notice:
+ * nothing would re-show it otherwise, and the thread would sit busy behind a card that vanished
+ * (PR #113 review). `unreachable` (the request never arrived) leaves it open the same way. The
+ * outcome is handed back so the caller can tell a spent question from one still standing
+ * (#275). ⓘ Exported for `__tests__/chat-screen.test.tsx`.
  */
 export async function settleDialog(
   stores: Pick<ThreadStores, 'connection' | 'dialog'>,
@@ -1045,8 +1049,10 @@ const chatComponents = {
 
 /**
  * One thread's pane: its chat factory, its stores in context, its summary kept current for
- * the rail. Stays mounted while another thread is on screen — see `createThreadChatHook`
- * for why hiding, not unmounting, is load-bearing.
+ * the rail.
+ *
+ * Stays mounted while another thread is on screen — see `createThreadChatHook` for why hiding,
+ * not unmounting, is load-bearing.
  *
  * ⓘ Exported for `__tests__/chat-screen.test.tsx` only, which mounts two of them to pin
  * that a hidden pane renders no debug column. Nothing else imports it.

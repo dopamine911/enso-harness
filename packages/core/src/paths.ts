@@ -1,8 +1,3 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { ZEN_CONFIG_FILENAME } from './config.ts'
-
 /**
  * The workspace path helpers (#59) — THE one place that walks the filesystem for roots.
  *
@@ -21,9 +16,20 @@ import { ZEN_CONFIG_FILENAME } from './config.ts'
  * ⚠ These helpers run under node/bun only (node:fs). They are barrel-exported and the
  * browser bundle tolerates that because nothing browser-side imports them — probed
  * 2026-09-04: `bun build index.html --target=browser` tree-shakes the module out.
+ *
+ * @module
  */
 
-/** Thrown when no ancestor of the start path is a workspace root. */
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { ZEN_CONFIG_FILENAME } from './config.ts'
+
+/**
+ * Thrown when no ancestor of the start path is a workspace root.
+ *
+ * @group Workspace paths
+ */
 export class RepoRootNotFoundError extends Error {
   constructor(startPath: string) {
     super(
@@ -34,7 +40,11 @@ export class RepoRootNotFoundError extends Error {
   }
 }
 
-/** `realpathSync`, or the input unchanged when the path (or a segment of it) does not exist. */
+/**
+ * `realpathSync`, or the input unchanged when the path (or a segment of it) does not exist.
+ *
+ * @group Workspace paths
+ */
 export function realpathOrSelf(path: string): string {
   try {
     return realpathSync(path)
@@ -65,7 +75,11 @@ function isWorkspaceRoot(directory: string): boolean {
 
 const FILE_URL_PREFIX = 'file://'
 
-/** True when the string is a `file://` URL rather than a filesystem path. */
+/**
+ * True when the string is a `file://` URL rather than a filesystem path.
+ *
+ * @group Workspace paths
+ */
 export function isFileUrl(candidate: string): boolean {
   return candidate.startsWith(FILE_URL_PREFIX)
 }
@@ -77,6 +91,8 @@ export function isFileUrl(candidate: string): boolean {
  * callers with different reasons share it: {@link findRepoRoot} accepts `import.meta.url`,
  * and the harness guard decodes a `file://` path a tool was handed — pi's own tools decode
  * one before touching the filesystem, so the guard must judge the decoded path (#53).
+ *
+ * @group Workspace paths
  */
 export function fileUrlToPath(fileUrl: string): string {
   return fileURLToPath(fileUrl)
@@ -92,6 +108,8 @@ export function fileUrlToPath(fileUrl: string): string {
  * ⚠ This finds the root of the checkout the given FILE lives in — for a module inside
  * this repo that is always the zen-harness checkout, never the session cwd. That
  * distinction is what `config.ts` relies on; do not "fix" this to consult `process.cwd()`.
+ *
+ * @group Workspace paths
  */
 export function findRepoRoot(startPathOrFileUrl: string): string {
   const startPath = isFileUrl(startPathOrFileUrl) ? fileUrlToPath(startPathOrFileUrl) : startPathOrFileUrl
@@ -107,34 +125,59 @@ export function findRepoRoot(startPathOrFileUrl: string): string {
 /** The `.zen` runtime dir names, assembled here and nowhere else (the anchor enforces it). */
 const ZEN_RUNTIME_DIRECTORY = '.zen'
 
-/** pi's scratch agent dir — settings, extensions, auth. Shared by the TUI launcher and the web server. */
+/**
+ * pi's scratch agent dir — settings, extensions, auth. Shared by the TUI launcher and the web server.
+ *
+ * @group Workspace paths
+ */
 export function zenAgentDir(repoRoot: string): string {
   return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'pi-agent')
 }
 
 /**
- * The harness's secrets file (#89): `.zen/secrets.env`, NOT `.env` at the root. bun
- * auto-loads `.env*` from the cwd into EVERY bun process — including a `bun -e` the model
- * runs from the repo root — so a root `.env` reaches a tool child no matter what the
- * parent scrubbed (verified with `env -i`).
+ * The harness's secrets file (#89): `.zen/secrets.env`, NOT `.env` at the root.
  *
- * `.zen/` is git-ignored, write-protected (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`) and
- * read-denied on BOTH tool routes by the `/.zen/` fragment in
- * {@link DEFAULT_GUARD_POLICY}: the reader gate for every tool carrying a path, and the
- * shell deny (#204) for a literal path word in `bash`/`powershell`. ⚠ The shell leg is a
- * bar, not a boundary — `shell-secret-paths.ts` states what a runtime-assembled name
- * still gets past.
+ * bun auto-loads `.env*` from the cwd into EVERY bun process — including a `bun -e` the model
+ * runs from the repo root — so a root `.env` reaches a tool child no matter what the parent
+ * scrubbed (verified with `env -i`).
+ *
+ * `.zen/` is git-ignored, write-protected (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`) and read-denied
+ * on BOTH tool routes by the `/.zen/` fragment in
+ * {@link core/src!DEFAULT_GUARD_POLICY | DEFAULT_GUARD_POLICY}: the reader gate for every tool
+ * carrying a path, and the shell deny (#204) for a literal path word in `bash`/`powershell`.
+ * ⚠ The shell leg is a bar, not a boundary — `shell-secret-paths.ts` states what a
+ * runtime-assembled name still gets past.
+ *
+ * ⚠ THE `core/src!` QUALIFIER IS LOAD-BEARING, and the obvious simplification does not work
+ * (#188). `guard.ts` is not imported here, so TypeScript's own link resolution — which TypeDoc
+ * prefers by default — has nothing in scope, and a bare `{@link DEFAULT_GUARD_POLICY}` is an
+ * unresolved link. The documented root-scoped form `{@link !DEFAULT_GUARD_POLICY}` does not
+ * help either: with several entry points, the PROJECT's children are the modules, not their
+ * symbols, so resolution from the root finds nothing. Tested, all three spellings. The module
+ * source is therefore named, which couples this link to the entry-point layout in
+ * `typedoc.json` — and that coupling breaks LOUDLY, because an unresolved link is a fatal
+ * warning in the `api-docs` gate.
+ *
+ * @group Workspace paths
  */
 export function zenSecretsPath(repoRoot: string): string {
   return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'secrets.env')
 }
 
-/** The root `.env` — where secrets must NOT live (#89); reported as misplaced when they do. */
+/**
+ * The root `.env` — where secrets must NOT live (#89); reported as misplaced when they do.
+ *
+ * @group Workspace paths
+ */
 export function rootDotenvPath(repoRoot: string): string {
   return join(repoRoot, '.env')
 }
 
-/** Where the print variant of the harness package is materialized (#20). */
+/**
+ * Where the print variant of the harness package is materialized (#20).
+ *
+ * @group Workspace paths
+ */
 export function printHarnessDir(repoRoot: string): string {
   return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'print-harness')
 }
@@ -142,24 +185,39 @@ export function printHarnessDir(repoRoot: string): string {
 /**
  * Where the harness's log lives (#132): `.zen/logs/zen-YYYY-MM-DD.jsonl`, ONE file per day
  * that every process appends to (dated, never renamed, so a second writer is safe — see
- * `web/server/logging.ts`). Under `.zen/` so bun never autoloads from it and the write gate
- * already knows it (guard.ts).
+ * `web/server/logging.ts`).
+ *
+ * Under `.zen/` so bun never autoloads from it and the write gate already knows it (guard.ts).
+ *
+ * @group Workspace paths
  */
 export function zenLogsDir(repoRoot: string): string {
   return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'logs')
 }
 
-/** The harness package — the directory `zen.ts` hands to pi's `-e`. */
+/**
+ * The harness package — the directory `zen.ts` hands to pi's `-e`.
+ *
+ * @group Workspace paths
+ */
 export function harnessPackageDir(repoRoot: string): string {
   return join(repoRoot, 'packages', 'harness')
 }
 
-/** The web package — the cwd both dev surfaces run in. */
+/**
+ * The web package — the cwd both dev surfaces run in.
+ *
+ * @group Workspace paths
+ */
 export function webPackageDir(repoRoot: string): string {
   return join(repoRoot, 'packages', 'web')
 }
 
-/** The committed config file's path under a repository root (#59): `zen.config.json`, beside `package.json`. */
+/**
+ * The committed config file's path under a repository root (#59): `zen.config.json`, beside `package.json`.
+ *
+ * @group Workspace paths
+ */
 export function zenConfigPath(repoRoot: string): string {
   return join(repoRoot, ZEN_CONFIG_FILENAME)
 }

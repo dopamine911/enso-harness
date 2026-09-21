@@ -49,6 +49,12 @@ interface GateMetadata {
 }
 
 const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
+  'test/api-group-gate.test.ts': {
+    roots: ['typedoc.json', 'packages/core/src', 'packages/harness/core'],
+    exceptions: [],
+    limitation:
+      'Holds that every documented export carries `@group`, that the subdivided group carries `@category`, and that both names are declared in the config’s order lists. Which group a symbol belongs in is a judgement it cannot make.',
+  },
   'test/browser-bundle-gate.test.ts': {
     roots: ['packages/web/src/main.tsx'],
     exceptions: [],

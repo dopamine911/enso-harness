@@ -1,0 +1,19 @@
+{
+  // The compilation TypeDoc reads, and ONLY TypeDoc: the owned contract surface across both
+  // barrels in one program, because a doc tool cannot follow project references the way
+  // `tsc -b` does and each package's own tsconfig sees only its own files (#188).
+  //
+  // ⚠ It emits nothing and is not in the root solution's `references`, so it never runs in the
+  // typecheck gate — `tsc -b` remains the authority on whether this tree compiles. Keeping the
+  // two apart is deliberate: a doc program that widened `include` would otherwise quietly widen
+  // what the build checks.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "types": ["bun"]
+  },
+  "include": ["packages/core/src/**/*.ts", "packages/harness/core/**/*.ts"],
+  "exclude": ["**/__tests__/**", "**/dist-types/**"]
+}

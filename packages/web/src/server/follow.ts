@@ -112,12 +112,13 @@ function writeFrame(threads: ThreadRegistry, threadId: string, response: ServerR
 }
 
 /**
- * Serve one follow. The snapshot is read through the one live-or-cold reader
- * (`thread-read.ts#readThreadMount`, #214) — the same read `/history` serves, so the two
- * routes cannot disagree about a thread that goes live mid-read — and it is taken in the
- * same tick as the subscription, so it is exact as of `asOfSeq` and no observation can
- * fall between the two (dsh: one complete snapshot per generation, then only deltas;
- * reconnect = a new follow = a new snapshot).
+ * Serve one follow.
+ *
+ * The snapshot is read through the one live-or-cold reader (`thread-read.ts#readThreadMount`,
+ * #214) — the same read `/history` serves, so the two routes cannot disagree about a thread
+ * that goes live mid-read — and it is taken in the same tick as the subscription, so it is
+ * exact as of `asOfSeq` and no observation can fall between the two (dsh: one complete snapshot
+ * per generation, then only deltas; reconnect = a new follow = a new snapshot).
  *
  * A thread with neither a session nor a file is an EMPTY snapshot, not a 404 (`present` is
  * ignored here): observation may precede the first prompt, and must, or the prompt's
@@ -164,9 +165,10 @@ const megabytes = (bytes: number): string => `${(bytes / MEGABYTE).toFixed(1)} M
 
 /**
  * The prompt body, shape-checked against `ZenPromptBody` (#112: closed schemas on the wire).
- * Throws `Error`s whose message is the 400 text — the first thing wrong, by path, so a
- * refused image says which one and why rather than "did not match" (#68: never silently
- * dropped). The byte cap is on the DECODED size: what the provider counts.
+ *
+ * Throws `Error`s whose message is the 400 text — the first thing wrong, by path, so a refused
+ * image says which one and why rather than "did not match" (#68: never silently dropped). The
+ * byte cap is on the DECODED size: what the provider counts.
  */
 export function readPromptBody(raw: string): PromptBody {
   let parsed: unknown
@@ -304,10 +306,12 @@ export type DialogOutcome =
   | { readonly status: 422; readonly reason: string }
 
 /**
- * Deliver the answer to the LIVE session's OPEN question. Validated against what was
- * asked (#112): pi hands a select's value to the extension VERBATIM, so an unoffered value
- * is an injection seam the server closes — the same check the run path's resume made. A
- * refused answer leaves the question open; only a real `cancelled: true` skips the check (#225).
+ * Deliver the answer to the LIVE session's OPEN question.
+ *
+ * Validated against what was asked (#112): pi hands a select's value to the extension VERBATIM,
+ * so an unoffered value is an injection seam the server closes — the same check the run path's
+ * resume made. A refused answer leaves the question open; only a real `cancelled: true` skips
+ * the check (#225).
  */
 export function answerThreadDialog(deps: FollowRouteDeps, threadId: string, answer: DialogAnswer): DialogOutcome {
   const live = deps.threads.peek(threadId)
@@ -334,14 +338,16 @@ export type ModeChangeOutcome =
 
 /**
  * Switch a thread's permission mode (L3 step C, #162 workstream 4): a control route, not a
- * prompt. The thread is acquired like a prompt would acquire it — a fresh page changes mode
- * before its first prompt — and refused while busy (409): a mode change is not queued
- * behind a run (#75's rule), and the composer's select is disabled then for the same
- * reason. The mode must be one the thread offers now (422). The change itself arrives on
- * the follow as `permission-mode`, said by the host when its extension has persisted it;
- * an extension command's acceptance is its completion, so the lease is released on
- * acceptance as `promptThread` releases a slash command's. A rejection after the 204 is
- * announced on the feed as `permission-mode-rejected`, as `promptThread` announces its own.
+ * prompt.
+ *
+ * The thread is acquired like a prompt would acquire it — a fresh page changes mode before its
+ * first prompt — and refused while busy (409): a mode change is not queued behind a run (#75's
+ * rule), and the composer's select is disabled then for the same reason. The mode must be one
+ * the thread offers now (422). The change itself arrives on the follow as `permission-mode`,
+ * said by the host when its extension has persisted it; an extension command's acceptance is
+ * its completion, so the lease is released on acceptance as `promptThread` releases a slash
+ * command's. A rejection after the 204 is announced on the feed as `permission-mode-rejected`,
+ * as `promptThread` announces its own.
  */
 export async function changeThreadMode(
   deps: FollowRouteDeps,
@@ -391,9 +397,10 @@ export type AbortRouteOutcome =
   | { readonly status: 409; readonly reason: string }
 
 /**
- * Stop the run in flight on a live thread (#116). The run's end arrives on the follow; the
- * answer carries the prompts that were waiting behind it (#75, clear-and-restore), so the
- * stopping tab can hand them back to its composer.
+ * Stop the run in flight on a live thread (#116).
+ *
+ * The run's end arrives on the follow; the answer carries the prompts that were waiting behind
+ * it (#75, clear-and-restore), so the stopping tab can hand them back to its composer.
  */
 export function abortThread(deps: FollowRouteDeps, threadId: string): AbortRouteOutcome {
   const { outcome, restored } = deps.threads.abort(threadId)

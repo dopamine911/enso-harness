@@ -75,8 +75,10 @@ sequenceDiagram
  * What `POST /api/threads/:id/abort` answers with when pi was told (#116, #75): the prompts
  * that were WAITING behind the stopped run, in order, the interrupting ones first — cleared from the
  * queue and handed back so the stopping tab can put them in its composer (pi's TUI does the
- * same). Never delivered silently on the next turn, never dropped. Empty when nothing waited.
- * The run's own end still arrives on the follow.
+ * same).
+ *
+ * Never delivered silently on the next turn, never dropped. Empty when nothing waited. The
+ * run's own end still arrives on the follow.
  */
 export const ZenAbortReceipt = Type.Object(
   {

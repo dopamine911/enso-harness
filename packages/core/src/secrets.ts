@@ -1,6 +1,3 @@
-import { existsSync, readFileSync, statSync } from 'node:fs'
-import { rootDotenvPath, zenSecretsPath } from './paths.ts'
-
 /**
  * Secrets stay OUT of the environment the model's tools inherit (#89).
  *
@@ -37,11 +34,20 @@ import { rootDotenvPath, zenSecretsPath } from './paths.ts'
  * is untouched).
  * A tool that needs a token in a `bash` child must get it another way — `gh` has its
  * keyring — because the environment is exactly the channel this closes.
+ *
+ * @module
  */
+
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { rootDotenvPath, zenSecretsPath } from './paths.ts'
 
 const SECRET_SHAPED_NAME = /(?:^|_)(?:API_KEY|TOKEN|SECRET|PASSWORD)S?(?:$|_)/
 
-/** Whether an environment variable NAME looks like it carries a secret. Case-sensitive: env names are. */
+/**
+ * Whether an environment variable NAME looks like it carries a secret. Case-sensitive: env names are.
+ *
+ * @group Secrets
+ */
 export function isSecretShapedName(name: string): boolean {
   return SECRET_SHAPED_NAME.test(name)
 }
@@ -49,8 +55,12 @@ export function isSecretShapedName(name: string): boolean {
 /**
  * The subset of dotenv this harness needs: `NAME=value` and `export NAME=value` lines,
  * `#` comments, blank lines, single- or double-quoted values (quotes stripped, `\n` in
- * double quotes expanded), unquoted values trimmed. No interpolation, no multi-line
- * values — a secrets file is one key per line, and anything fancier is a smell.
+ * double quotes expanded), unquoted values trimmed.
+ *
+ * No interpolation, no multi-line values — a secrets file is one key per line, and anything
+ * fancier is a smell.
+ *
+ * @group Secrets
  */
 export function parseDotenv(text: string): Map<string, string> {
   const values = new Map<string, string>()
@@ -74,13 +84,21 @@ export function parseDotenv(text: string): Map<string, string> {
   return values
 }
 
-/** Every name/value in a dotenv-shaped file, or an empty map when there is no file. Read fresh each call. */
+/**
+ * Every name/value in a dotenv-shaped file, or an empty map when there is no file. Read fresh each call.
+ *
+ * @group Secrets
+ */
 export function readDotenvFile(path: string): Map<string, string> {
   if (!existsSync(path)) return new Map()
   return parseDotenv(readFileSync(path, 'utf8'))
 }
 
-/** One secret by name from `.zen/secrets.env` — the extensions' read path. Per call, so a rotation needs no restart. */
+/**
+ * One secret by name from `.zen/secrets.env` — the extensions' read path. Per call, so a rotation needs no restart.
+ *
+ * @group Secrets
+ */
 export function readSecret(repoRoot: string, name: string): string | undefined {
   return readDotenvFile(zenSecretsPath(repoRoot)).get(name)
 }
@@ -92,9 +110,10 @@ export function readSecret(repoRoot: string, name: string): string | undefined {
 const SHORTEST_SCANNABLE_SECRET = 8
 
 /**
- * The secret VALUES this harness knows, for the logger's value pass (#139). Redaction by
- * field name cannot see a token quoted inside a message, a guard's `reason`, or a `trace`
- * payload; this is the set those passes scan for.
+ * The secret VALUES this harness knows, for the logger's value pass (#139).
+ *
+ * Redaction by field name cannot see a token quoted inside a message, a guard's `reason`, or a
+ * `trace` payload; this is the set those passes scan for.
  *
  * Two sources, both ours: `.zen/secrets.env` — everything in it is a secret by definition —
  * and the environment's own secret-shaped names, for a process configured before
@@ -104,6 +123,8 @@ const SHORTEST_SCANNABLE_SECRET = 8
  *
  * ⚠ Known values only, never a shape heuristic. "Looks like a secret" over model output
  * redacts a user's own text on a guess; an exact value redacts exactly what leaked.
+ *
+ * @group Secrets
  */
 export function knownSecretValues(
   repoRoot: string,
@@ -122,12 +143,14 @@ export function knownSecretValues(
 
 /**
  * The same set as `knownSecretValues`, as a THUNK that re-reads `.zen/secrets.env` when the
- * file changes (#207). The reader is per call — `readSecret` re-reads the file every time, so
- * a rotated key is live for the next web-search call and the refusal message says so — while
- * the logger's value alternation was compiled once, at configure. A key added or rotated
- * while a launcher runs was therefore readable and unredactable for the rest of that
- * process's life, which is the one window the design invites. Reproduced before this existed:
- * a `warn` quoting the rotated value landed in the day file verbatim.
+ * file changes (#207).
+ *
+ * The reader is per call — `readSecret` re-reads the file every time, so a rotated key is live
+ * for the next web-search call and the refusal message says so — while the logger's value
+ * alternation was compiled once, at configure. A key added or rotated while a launcher runs was
+ * therefore readable and unredactable for the rest of that process's life, which is the one
+ * window the design invites. Reproduced before this existed: a `warn` quoting the rotated value
+ * landed in the day file verbatim.
  *
  * The identity of the returned array is the CHANGE SIGNAL, not just its contents: unchanged
  * file, same array, and `redactingKnownValues` keeps its compiled regex. Callers may rely on
@@ -142,6 +165,8 @@ export function knownSecretValues(
  * it rides on (`.local` benchmark, #207). An event-driven watcher would be cheaper and is
  * deliberately not used — an inotify handle per process, lost across an atomic replace, is a
  * failure mode a redactor may not have.
+ *
+ * @group Secrets
  */
 export function knownSecretValuesTracking(
   repoRoot: string,
@@ -167,6 +192,7 @@ export function knownSecretValuesTracking(
   }
 }
 
+/** @group Secrets */
 export interface QuarantineReport {
   /** Names deleted from the environment, sorted. Never values — this is what a startup log line prints. */
   readonly removed: readonly string[]
@@ -187,6 +213,8 @@ export interface QuarantineReport {
  * ⚠ Call it before the first session and before the first child process; both inherit the
  * environment as it is at that moment, and nothing removes a variable from a child after
  * the fact. Idempotent: a second call finds nothing to remove.
+ *
+ * @group Secrets
  */
 export function quarantineSecrets(environment: Record<string, string | undefined>, repoRoot: string): QuarantineReport {
   const rootDotenv = readDotenvFile(rootDotenvPath(repoRoot))

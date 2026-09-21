@@ -17,7 +17,9 @@ a schema in `@zen/core`") beats a finer rule that needs explaining; the module h
 
 <!-- source: packages/core/src/thread-runtime.ts#ThreadRuntime -->
 ```ts
-/** ⚠ Function-bearing — the one schema the module header's rule is written for. */
+/**
+ * ⚠ Function-bearing — the one schema the module header's rule is written for.
+ */
 export const ThreadRuntime = Type.Object({
   /** Fire a prompt. Never awaits the run — see the section header. */
   prompt: Type.Unsafe<(request: PromptRequest, outcome: PromptOutcome) => void>(
@@ -135,7 +137,9 @@ export const ZenPromptAdmission = Type.Union([Type.Literal('interrupt'), Type.Li
 
 <!-- source: packages/core/src/thread-runtime.ts#PromptImageContent -->
 ```ts
-/** Base64 image content, accepted by `prompt`, `steer` and `follow_up`. */
+/**
+ * Base64 image content, accepted by `prompt`, `steer` and `follow_up`.
+ */
 export const PromptImageContent = Type.Object({
   type: Type.Literal('image'),
   data: Type.String(),

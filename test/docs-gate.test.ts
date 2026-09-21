@@ -440,6 +440,32 @@ test('the extractor takes the doc comment, the whole statement, and nothing afte
   expect(() => extractDeclaration(nested, 'Nested')).toThrow(/nested in another/)
 })
 
+test('the extractor drops the tags that file a symbol in the API index, and nothing else (#188)', () => {
+  const source = [
+    '/**',
+    ' * What the contract is.',
+    ' *',
+    ' * @group Follow wire',
+    ' * @category Message stream',
+    ' */',
+    'export const Tagged = 1',
+    '/** @group Logging */',
+    'export type TagOnly = string',
+    '/** @remarks a tag the pages DO quote. */',
+    'export const Other = 2',
+  ].join('\n')
+  // The prose survives; the filing instruction and the `*` that separated it do not.
+  expect(extractDeclaration(source, 'Tagged')?.text).toBe(
+    ['/**', ' * What the contract is.', ' */', 'export const Tagged = 1'].join('\n'),
+  )
+  // A comment that carried only the tag goes whole — an empty `/** */` above a declaration is worse.
+  expect(extractDeclaration(source, 'TagOnly')?.text).toBe('export type TagOnly = string')
+  // ⚠ Only these two tags: anything else a comment says is the page's to quote.
+  expect(extractDeclaration(source, 'Other')?.text).toBe(
+    ['/** @remarks a tag the pages DO quote. */', 'export const Other = 2'].join('\n'),
+  )
+})
+
 // ── the seam inventory (#213) ────────────────────────────────────────────────────────
 
 /**

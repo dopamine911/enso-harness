@@ -30,6 +30,8 @@ import { Compile } from 'typebox/compile'
  * `timeout` is pi's OWN deadline (milliseconds), when the requesting extension set one:
  * pi resolves the dialog itself when it lapses, so an answer arriving after it is written
  * to an id nobody is waiting on. Carried so a surface can stop offering a dead question.
+ *
+ * @group Dialogs
  */
 export const ZenDialogSpec = Type.Union([
   Type.Object({
@@ -63,26 +65,38 @@ export const ZenDialogSpec = Type.Union([
     prefill: Type.Optional(Type.String()),
   }),
 ])
+/** @group Dialogs */
 export type ZenDialogSpec = Static<typeof ZenDialogSpec>
 
-/** A resolved answer. Cancellation is NOT an answer — see the module header. */
+/**
+ * A resolved answer. Cancellation is NOT an answer — see the module header.
+ *
+ * @group Dialogs
+ */
 export const ZenDialogAnswer = Type.Union([
   Type.Object({ value: Type.String() }),
   Type.Object({ confirmed: Type.Boolean() }),
 ])
+/** @group Dialogs */
 export type ZenDialogAnswer = Static<typeof ZenDialogAnswer>
 
 /**
  * One question pi is blocked on, as the follow's snapshot lists it (#114) — so a follow
  * opened while pi waits renders the card at once, instead of a busy thread with nothing to
- * answer. `id` is the request id the answer is keyed by.
+ * answer.
+ *
+ * `id` is the request id the answer is keyed by.
+ *
+ * @group Dialogs
  */
 export const ZenOpenDialog = Type.Object({ id: Type.String({ minLength: 1 }), dialog: ZenDialogSpec })
+/** @group Dialogs */
 export type ZenOpenDialog = Static<typeof ZenOpenDialog>
 
 const dialogSpecValidator = Compile(ZenDialogSpec)
 const dialogAnswerValidator = Compile(ZenDialogAnswer)
 
+/** @group Dialogs */
 export function isZenDialogSpec(value: unknown): value is ZenDialogSpec {
   return dialogSpecValidator.Check(value)
 }
@@ -95,6 +109,8 @@ export function isZenDialogSpec(value: unknown): value is ZenDialogSpec {
  * answered `value` to the extension verbatim, so a value outside the offered options would
  * put a string the extension never offered into its control flow. That is an injection
  * seam, and it is closed HERE rather than trusted to the renderer.
+ *
+ * @group Dialogs
  */
 export function validateDialogAnswer(spec: ZenDialogSpec, payload: unknown): string | undefined {
   if (!dialogAnswerValidator.Check(payload)) {

@@ -21,6 +21,8 @@
  * modules — `shell-segments.ts` and `web-search/anthropic-wire.ts` are imported by their
  * siblings and by their own tests, which is what "internal" means. Adding one back here is
  * adding a consumer, and the gate asks for it.
+ *
+ * @module
  */
 
 export { runUnderDeadline } from './deadline.ts'

@@ -7,8 +7,9 @@ import type { ThreadSummary } from './thread-stores.ts'
 
 /**
  * The threads rail (#90 PR 3): which conversation am I in, what else is live on this
- * page, how do I start over. deepseek-harness's left rail is the reference — a title, a
- * relative age, a New Thread button.
+ * page, how do I start over.
+ *
+ * deepseek-harness's left rail is the reference — a title, a relative age, a New Thread button.
  *
  * Two lists, each labelled for what it is. "Active Threads": the threads this page has open
  * — they die with the page. "Previous Threads" (#95): pi's session files for this

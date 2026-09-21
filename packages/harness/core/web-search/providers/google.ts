@@ -95,6 +95,7 @@ async function resolveGroundingRedirects(
   }
 }
 
+/** @group Web search */
 export async function runGoogleProviderSearch(request: ModelSearchRequest): Promise<WebSearchOutcome> {
   const credential = await resolveProviderCredential('google', request)
 

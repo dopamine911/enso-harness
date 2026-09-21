@@ -16,8 +16,9 @@ The region of our code a record came from — a logger category, not the operati
 ```ts
 /**
  * The region of our code a record came from — the logger category, not the OS process
- * (`process` on every line is that, `log-process.ts`). `extension` is our code inside the
- * runtime's process. `docs/glossary.md` → Record.
+ * (`process` on every line is that, `log-process.ts`).
+ *
+ * `extension` is our code inside the runtime's process. `docs/glossary.md` → Record.
  */
 export type ZenLogLayer = 'server' | 'host' | 'extension' | 'browser'
 ```
@@ -25,9 +26,11 @@ export type ZenLogLayer = 'server' | 'host' | 'extension' | 'browser'
 <!-- source: packages/core/src/log.ts#ZenLogProperties -->
 ```ts
 /**
- * What every record carries when it knows it. These are the identities the wire already
- * has (`ZenObservation`, #112) — a line that names them can be joined to the transcript,
- * the event tail (#97), and the other layers' lines about the same moment.
+ * What every record carries when it knows it.
+ *
+ * These are the identities the wire already has (`ZenObservation`, #112) — a line that names
+ * them can be joined to the transcript, the event tail (#97), and the other layers' lines about
+ * the same moment.
  */
 export interface ZenLogProperties {
   readonly threadId?: string
@@ -43,9 +46,11 @@ export interface ZenLogProperties {
 <!-- source: packages/core/src/log.ts#ZenLogger -->
 ```ts
 /**
- * The typed surface. Five levels; `fatal` is not vocabulary here. The tiers (#132):
- * `info` is the spine — what happened; `debug` is every observation, one compact line;
- * `trace` is the same with the payload. `ZEN_LOG_LEVEL` picks the tier (`log-process.ts`).
+ * The typed surface.
+ *
+ * Five levels; `fatal` is not vocabulary here. The tiers (#132): `info` is the spine — what
+ * happened; `debug` is every observation, one compact line; `trace` is the same with the
+ * payload. `ZEN_LOG_LEVEL` picks the tier (`log-process.ts`).
  */
 export interface ZenLogger {
   trace(message: string, properties?: ZenLogPayload): void
@@ -65,10 +70,12 @@ path that logs and one that cannot afford to. `with` stays eager: a bound contex
 <!-- source: packages/core/src/log.ts#ZenLogPayload -->
 ```ts
 /**
- * A record's payload, or a THUNK that builds it. LogTape evaluates the thunk only after the
- * level gate has admitted the record (`@logtape/logtape/dist/logger.d.ts:164`), so a call
- * site on a per-token path pays nothing for a record the tier drops — and the default tier
- * drops `debug` and `trace` (`log-process.ts`'s `DEFAULT_FILE_LEVEL`).
+ * A record's payload, or a THUNK that builds it.
+ *
+ * LogTape evaluates the thunk only after the level gate has admitted the record
+ * (`@logtape/logtape/dist/logger.d.ts:164`), so a call site on a per-token path pays nothing
+ * for a record the tier drops — and the default tier drops `debug` and `trace`
+ * (`log-process.ts`'s `DEFAULT_FILE_LEVEL`).
  *
  * ⚠ Pass a thunk wherever the payload is BUILT for the call (#284). An object literal of
  * ids already in hand is cheaper eagerly; a payload that spreads, maps or carries a whole
@@ -81,8 +88,9 @@ export type ZenLogPayload = ZenLogProperties | (() => ZenLogProperties)
 ```ts
 /**
  * The one way to get a logger: `zenLogger("server", "follow")` is the category
- * `["zen", "server", "follow"]`, a child of the layer, a grandchild of the root. Module
- * level, once per file.
+ * `["zen", "server", "follow"]`, a child of the layer, a grandchild of the root.
+ *
+ * Module level, once per file.
  */
 export function zenLogger(layer: ZenLogLayer, ...subcategory: readonly string[]): ZenLogger {
   return wrap(getLogger([ZEN_LOG_ROOT, layer, ...subcategory]))
@@ -92,18 +100,20 @@ export function zenLogger(layer: ZenLogLayer, ...subcategory: readonly string[])
 Redaction is by field NAME, at write, before anything reaches a sink. `ZEN_REDACT_FIELDS`
 (`log.ts:145`) is five case-insensitive patterns — `api[-_]?key`, `secret`, `password`, `token`,
 `credential` — mirroring the secret store's boundary; `token` is deliberate, so a property literally
-called `tokens` is dropped by design (lines 139-141: better a missing count than a leaked key). A
+called `tokens` is dropped by design (lines 165-167: better a missing count than a leaked key). A
 redacted field's value becomes the marker below, not a deletion, so the record still says the field
 was there; a known secret VALUE found anywhere becomes `ZEN_REDACTED_VALUE` (`'[REDACTED:value]'`,
-line 161, #139) — a distinct marker so the manifest counts the two passes separately.
+line 197, #139) — a distinct marker so the manifest counts the two passes separately.
 
 <!-- source: packages/core/src/log.ts#ZEN_REDACTED -->
 ```ts
 /**
- * What a redacted field's value becomes on disk. A MARKER, not a deletion: the record still
- * says the field was there, so a reader knows what is missing rather than wondering, and the
- * bundle (#132 item 5) counts markers per field name for its redaction manifest with no
- * bookkeeping in the writer. The value itself never lands — `log-process.test.ts`.
+ * What a redacted field's value becomes on disk.
+ *
+ * A MARKER, not a deletion: the record still says the field was there, so a reader knows what
+ * is missing rather than wondering, and the bundle (#132 item 5) counts markers per field name
+ * for its redaction manifest with no bookkeeping in the writer. The value itself never lands —
+ * `log-process.test.ts`.
  */
 export const ZEN_REDACTED = '[REDACTED]'
 ```
@@ -115,8 +125,10 @@ One line of the file, pinned so the bundle reader validates what it reads:
 /**
  * One line of the JSONL file, as LogTape's `jsonLinesFormatter` writes it — pinned here
  * so the bundle reader (#132 item 5) validates what it reads and a formatter change goes
- * red instead of silently reshaping the file. `logger` is the category joined by `.`;
- * `level` is upper-cased on disk and `warning` is written `WARN` (measured, LogTape 2.3.4).
+ * red instead of silently reshaping the file.
+ *
+ * `logger` is the category joined by `.`; `level` is upper-cased on disk and `warning` is
+ * written `WARN` (measured, LogTape 2.3.4).
  */
 export const ZenLogLine = Type.Object(
   {
@@ -143,11 +155,13 @@ What the browser ships to `POST /api/logs`:
 ```ts
 /**
  * What the browser ships to `POST /api/logs` (#132 slice 3): its records at `info` and up,
- * batched. The server re-emits each through its own logger as `process: "browser"`, so they
- * land in the same file, redacted by the same sink, and `bun run logs --process browser`
- * finds them. `at` is the browser's clock; the file's `@timestamp` is the server's receipt.
- * `page` tells two tabs apart. `logger` must be under `zen.browser`: the server will not be
- * told what the host or the guard said.
+ * batched.
+ *
+ * The server re-emits each through its own logger as `process: "browser"`, so they land in the
+ * same file, redacted by the same sink, and `bun run logs --process browser` finds them. `at`
+ * is the browser's clock; the file's `@timestamp` is the server's receipt. `page` tells two
+ * tabs apart. `logger` must be under `zen.browser`: the server will not be told what the host
+ * or the guard said.
  */
 export const ZenBrowserLogBatch = Type.Object(
   {
@@ -196,8 +210,8 @@ export interface ProcessLoggingOptions {
 }
 ```
 
-`configureProcessLogging` (`log-process.ts:347-427`, in prose) builds a date-named file sink with
-`bufferSize: 0` (line 365; measured, header lines 53-62: the buffered sink held the last record until
+`configureProcessLogging` (`log-process.ts:388-468`, in prose) builds a date-named file sink with
+`bufferSize: 0` (line 395; measured, header lines 53-62: the buffered sink held the last record until
 the next one), creates today's file `0600` before the sink opens it and again on each record, so a
 rollover at local midnight does not leave a `0664` file behind (323-339, 349-352, 370-375, #207),
 stamps `process` and a per-process `sequence` on every record (370-375), filters by the category's

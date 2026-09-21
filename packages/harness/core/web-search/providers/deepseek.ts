@@ -4,10 +4,11 @@ import { WebSearchProviderError } from '../vocabulary.ts'
 
 /**
  * The `deepseek` provider (#63): the DEDICATED search backend, dsh's shape
- * (`dsh-web-search-deepseek`, MIT — the spec this follows). One full Messages call
- * against DeepSeek's Anthropic-compatible endpoint with the native `web_search` server
- * tool; the shared wire module parses the structured `web_search_tool_result` blocks and
- * never scrapes URLs out of model prose.
+ * (`dsh-web-search-deepseek`, MIT — the spec this follows).
+ *
+ * One full Messages call against DeepSeek's Anthropic-compatible endpoint with the native
+ * `web_search` server tool; the shared wire module parses the structured
+ * `web_search_tool_result` blocks and never scrapes URLs out of model prose.
  *
  * ⚠ NEVER model-routed: pi's catalog registers every DeepSeek model as
  * `openai-completions` at `https://api.deepseek.com` (verified 2026-09-04), and the
@@ -15,17 +16,24 @@ import { WebSearchProviderError } from '../vocabulary.ts'
  * `https://api.deepseek.com/anthropic/v1`. Do not derive one base from the other.
  * Selection is by explicit `webSearch.backend: "deepseek"` in `zen.config.json` only, so
  * no provider is ever billed that the committed config never named.
+ *
+ * @group Web search
  */
-
 export const DEEPSEEK_SEARCH_BASE_URL = 'https://api.deepseek.com/anthropic/v1'
+/** @group Web search */
 export const DEEPSEEK_SEARCH_MODEL_ID = 'deepseek-v4-flash'
-/** The env var holding the key — the SAME name pi-ai's own provider-env map uses. */
+/**
+ * The env var holding the key — the SAME name pi-ai's own provider-env map uses.
+ *
+ * @group Web search
+ */
 export const DEEPSEEK_API_KEY_VARIABLE = 'DEEPSEEK_API_KEY'
 const DEEPSEEK_ANTHROPIC_API_VERSION = '2023-06-01'
 const DEEPSEEK_ANSWER_TOKENS = 4096
 /** dsh's default server-tool budget for one search request. */
 const DEEPSEEK_MAX_SERVER_TOOL_USES = 5
 
+/** @group Web search */
 export interface DeepseekSearchRequest {
   query: string
   /** The key read at the composition root — never from config, never logged. */
@@ -35,6 +43,7 @@ export interface DeepseekSearchRequest {
   onProgress?: ((text: string) => void) | undefined
 }
 
+/** @group Web search */
 export async function runDeepseekProviderSearch(request: DeepseekSearchRequest): Promise<WebSearchOutcome> {
   if (request.apiKey === undefined || request.apiKey.length === 0) {
     throw new WebSearchProviderError(

@@ -75,7 +75,11 @@ import { canonicalToolName } from './tool-identity.ts'
  * (`.local/refactor/goals.md` §5b).
  */
 
-/** How the deny matched — carried into the block reason so a denial is explainable. */
+/**
+ * How the deny matched — carried into the block reason so a denial is explainable.
+ *
+ * @group Guard predicates
+ */
 export interface NetworkEgressMatch {
   /** The denied name (or device path) that matched. */
   matched: string
@@ -148,12 +152,13 @@ type CommandWordResult =
 /**
  * Commands that transparently exec their argument vector as the next command — no code
  * interpretation, the wrapped command sits VERBATIM in later words (PR #55 review,
- * round 3: `timeout 30 curl …`, `env curl …`). A segment led by one of these gets
- * WRAPPER MODE: every subsequent word receives the command-word treatment, which also
- * makes wrapper STACKING free (`nohup timeout 30 curl …` — the scan reaches curl without
- * modelling any wrapper's own options). `sh -c "curl …"` rides the same list: unlike
- * python/node, its payload is THIS grammar, and the quoted payload's first token is
- * checkable — assembled eval payloads remain interpreter non-coverage.
+ * round 3: `timeout 30 curl …`, `env curl …`).
+ *
+ * A segment led by one of these gets WRAPPER MODE: every subsequent word receives the
+ * command-word treatment, which also makes wrapper STACKING free (`nohup timeout 30 curl …` —
+ * the scan reaches curl without modelling any wrapper's own options). `sh -c "curl …"` rides
+ * the same list: unlike python/node, its payload is THIS grammar, and the quoted payload's
+ * first token is checkable — assembled eval payloads remain interpreter non-coverage.
  *
  * ⚠ IT IS A LIST, and a list is escapable by the name that is not on it. The second block
  * below is the set #206 measured open on 2026-09-17: `script -qc 'curl …' /dev/null`,
@@ -165,7 +170,11 @@ type CommandWordResult =
  * the next unlisted one is open too. That residual is the honest statement, and
  * `network-egress.test.ts` pins it as a row rather than leaving it to a reader's optimism.
  */
-/** Shared with `environment-dump.ts`: the same wrappers move a dumping command past word 1. */
+/**
+ * Shared with `environment-dump.ts`: the same wrappers move a dumping command past word 1.
+ *
+ * @group Guard predicates
+ */
 export const TRANSPARENT_COMMAND_WRAPPERS = new Set([
   'env',
   'timeout',
@@ -217,23 +226,31 @@ export const TRANSPARENT_COMMAND_WRAPPERS = new Set([
 const WRAPPER_WORD_EXEMPTIONS = new Set(['[', '{}'])
 
 /**
- * `find`'s exec predicates and their terminators. `find` is NOT a transparent wrapper: its
- * predicate list carries GLOBS as ordinary arguments (`find . -name "*.ts"`), and giving
- * every word the command-word treatment denied that as synthesis — a false positive on one
- * of the most common commands in this repo. The precise shape instead: the words after an
- * exec predicate, up to `;`/`+`, ARE a command line, and nothing else on the line is.
- * ⚠ Terminators are matched by LITERAL value, so `\;`, `';'` and `";"` all count.
+ * `find`'s exec predicates and their terminators.
+ *
+ * `find` is NOT a transparent wrapper: its predicate list carries GLOBS as ordinary arguments
+ * (`find . -name "*.ts"`), and giving every word the command-word treatment denied that as
+ * synthesis — a false positive on one of the most common commands in this repo. The precise
+ * shape instead: the words after an exec predicate, up to `;`/`+`, ARE a command line, and
+ * nothing else on the line is. ⚠ Terminators are matched by LITERAL value, so `\;`, `';'` and
+ * `";"` all count.
+ *
+ * @group Guard predicates
  */
 export const FIND_COMMAND = 'find'
 const FIND_EXEC_PREDICATES = new Set(['-exec', '-execdir', '-ok', '-okdir'])
+/** @group Guard predicates */
 export const EXEC_TERMINATORS = new Set([';', '+'])
 
 /**
  * Every `find … -exec`/`-execdir`/`-ok` payload of a word list, as raw-word groups in order.
+ *
  * Shared with `environment-dump.ts`, which asks the same question of the same words: pi's
- * `find` tool and a shell `find` both reach a program through this one construct, and a
- * deny that knew it for egress but not for the environment dump reported "no regression"
- * for the entire route (#206).
+ * `find` tool and a shell `find` both reach a program through this one construct, and a deny
+ * that knew it for egress but not for the environment dump reported "no regression" for the
+ * entire route (#206).
+ *
+ * @group Guard predicates
  */
 export function findExecPayloads(words: readonly string[]): string[][] {
   const payloads: string[][] = []
@@ -787,6 +804,8 @@ function shellFedByStream(commandLines: string): boolean {
 /**
  * Find the first denied network egress in a shell command, or undefined when none match.
  * `coarse` forces the raw word-boundary scan (the PowerShell path).
+ *
+ * @group Guard predicates
  */
 export function findDeniedNetworkEgress(
   command: string,

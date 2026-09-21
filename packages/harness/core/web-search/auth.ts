@@ -16,9 +16,12 @@ import type { ResolvedProviderAuth, SearchModel } from './vocabulary.ts'
  */
 
 /**
- * The slice of pi's ModelRegistry this module needs — injectable in tests. The result
- * shape mirrors pi's `ResolvedRequestAuth` (its headers admit `null` values, which
+ * The slice of pi's ModelRegistry this module needs — injectable in tests.
+ *
+ * The result shape mirrors pi's `ResolvedRequestAuth` (its headers admit `null` values, which
  * {@link resolveModelAuth} strips into the clean {@link ResolvedProviderAuth}).
+ *
+ * @group Web search
  */
 export interface ModelAuthSource {
   getApiKeyAndHeaders(model: SearchModel): Promise<
@@ -55,6 +58,8 @@ function hasAuthHeader(headers: Record<string, string> | undefined): boolean {
  * `readProviderEnvironmentKey` is a SEAM (PR #64 review): it defaults to pi-ai's
  * `getEnvApiKey`, which reads the launching process environment — injectable so the
  * fallback's POSITIVE path is testable without a test ever touching `process.env`.
+ *
+ * @group Web search
  */
 export async function resolveModelAuth(
   authSource: ModelAuthSource,

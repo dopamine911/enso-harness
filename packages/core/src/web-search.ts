@@ -12,28 +12,40 @@ import { type Static, Type } from 'typebox'
  * shapes: the tool's parameter schema and its `zen.config.json` section.
  */
 
-/** The tool's registered name. */
+/**
+ * The tool's registered name.
+ *
+ * @group Web tools
+ */
 export const WEB_SEARCH_TOOL_NAME = 'web_search'
 
 /**
  * The deadline for ONE web_search call — primary AND fallback together, not per attempt
- * (#99). A native search is a full model turn, so this is generous where web_fetch's 30s
- * is tight; dsh ships the same 60s for the same reason. ⚠ It must stay under the server's
- * no-progress cutoff (`NO_PROGRESS_TIMEOUT_MS`, 90s): a per-attempt 60s let primary +
- * fallback run 120s with no chunk crossing, and the server read that as a hung run and cut
- * it mid-search (#98). The fallback gets whatever the primary left of this budget.
+ * (#99).
+ *
+ * A native search is a full model turn, so this is generous where web_fetch's 30s is tight; dsh
+ * ships the same 60s for the same reason. ⚠ It must stay under the server's no-progress cutoff
+ * (`NO_PROGRESS_TIMEOUT_MS`, 90s): a per-attempt 60s let primary + fallback run 120s with no
+ * chunk crossing, and the server read that as a hung run and cut it mid-search (#98). The
+ * fallback gets whatever the primary left of this budget.
+ *
+ * @group Web tools
  */
 export const WEB_SEARCH_TIMEOUT_MS = 60_000
 
 /**
- * The tool's parameters: the query and nothing else. Upstream pi-web-search also took
- * `urls`, dropped here deliberately (#63): on the Anthropic wire it is just
- * prompt-appended text, and the Tavily fallback cannot honor it — a parameter one
- * backend silently ignores is a capability drop, not a feature.
+ * The tool's parameters: the query and nothing else.
+ *
+ * Upstream pi-web-search also took `urls`, dropped here deliberately (#63): on the Anthropic
+ * wire it is just prompt-appended text, and the Tavily fallback cannot honor it — a parameter
+ * one backend silently ignores is a capability drop, not a feature.
+ *
+ * @group Web tools
  */
 export const WebSearchToolParameters = Type.Object({
   query: Type.String({ description: 'The search query or question to answer from the live web.' }),
 })
+/** @group Web tools */
 export type WebSearchToolParameters = Static<typeof WebSearchToolParameters>
 
 /**
@@ -51,6 +63,8 @@ export type WebSearchToolParameters = Static<typeof WebSearchToolParameters>
  *   verbatim to Tavily's search API. The fallback itself is armed by the presence of
  *   `TAVILY_API_KEY` in the environment, deliberately not by config: a key is a secret
  *   and secrets never enter this committed file.
+ *
+ * @group Web tools
  */
 export const WebSearchConfig = Type.Object(
   {
@@ -67,4 +81,5 @@ export const WebSearchConfig = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Web tools */
 export type WebSearchConfig = Static<typeof WebSearchConfig>

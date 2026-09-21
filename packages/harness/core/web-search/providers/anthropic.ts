@@ -44,6 +44,7 @@ function resolveMessagesUrl(baseUrl: string): string {
   return base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
 }
 
+/** @group Web search */
 export async function runAnthropicProviderSearch(request: ModelSearchRequest): Promise<WebSearchOutcome> {
   const credential = await resolveProviderCredential('anthropic', request)
 

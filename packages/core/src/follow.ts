@@ -17,8 +17,9 @@ import { ZenPromptAdmission } from './thread-runtime.ts'
  * The payload is `ZenObservation` — the same layer the event tails and the debug pane
  * reason in. AG-UI is not on this wire; a browser adapter derives it if a renderer wants it
  * (`docs/architecture.md`, decided constraints).
+ *
+ * @group Follow wire
  */
-
 export const ZenFollowSnapshot = Type.Object(
   {
     type: Type.Literal('snapshot'),
@@ -39,8 +40,10 @@ export const ZenFollowSnapshot = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Follow wire */
 export type ZenFollowSnapshot = Static<typeof ZenFollowSnapshot>
 
+/** @group Follow wire */
 export const ZenFollowObservation = Type.Object(
   {
     type: Type.Literal('observation'),
@@ -49,8 +52,10 @@ export const ZenFollowObservation = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Follow wire */
 export type ZenFollowObservation = Static<typeof ZenFollowObservation>
 
+/** @group Follow wire */
 export const ZenFollowStatus = Type.Object(
   {
     type: Type.Literal('status'),
@@ -60,15 +65,21 @@ export const ZenFollowStatus = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Follow wire */
 export type ZenFollowStatus = Static<typeof ZenFollowStatus>
 
+/** @group Follow wire */
 export const ZenFollowFrame = Type.Union([ZenFollowSnapshot, ZenFollowObservation, ZenFollowStatus])
+/** @group Follow wire */
 export type ZenFollowFrame = Static<typeof ZenFollowFrame>
 
 /**
- * The image types the Anthropic wire accepts (#68). pi documents no limit of its own and
- * passes the bytes through; anything outside this set would be refused by the provider
- * after the upload, with a worse message than ours.
+ * The image types the Anthropic wire accepts (#68).
+ *
+ * pi documents no limit of its own and passes the bytes through; anything outside this set
+ * would be refused by the provider after the upload, with a worse message than ours.
+ *
+ * @group Follow wire
  */
 export const ZenImageMimeType = Type.Union([
   Type.Literal('image/png'),
@@ -76,21 +87,41 @@ export const ZenImageMimeType = Type.Union([
   Type.Literal('image/gif'),
   Type.Literal('image/webp'),
 ])
+/** @group Follow wire */
 export type ZenImageMimeType = Static<typeof ZenImageMimeType>
-/** The same set as a list — the form's `accept`, the notice's wording. ⚠ Derived from the schema, not written twice. */
+/**
+ * The same set as a list — the form's `accept`, the notice's wording. ⚠ Derived from the schema, not written twice.
+ *
+ * @group Follow wire
+ */
 export const ZEN_IMAGE_MIME_TYPES: readonly ZenImageMimeType[] = ZenImageMimeType.anyOf.map((literal) => literal.const)
-/** Narrows a mime string the browser reported (`File.type`, a `data:` URL's head) to the kinds the wire takes — no cast. */
+/**
+ * Narrows a mime string the browser reported (`File.type`, a `data:` URL's head) to the kinds the wire takes — no cast.
+ *
+ * @group Follow wire
+ */
 export function isZenImageMimeType(value: string): value is ZenImageMimeType {
   return (ZEN_IMAGE_MIME_TYPES as readonly string[]).includes(value)
 }
-/** Anthropic's per-image cap, decoded bytes. Checked on the decoded size, not the base64 length. */
+/**
+ * Anthropic's per-image cap, decoded bytes. Checked on the decoded size, not the base64 length.
+ *
+ * @group Follow wire
+ */
 export const ZEN_IMAGE_MAX_BYTES = 5 * 1024 * 1024
-/** Images on one prompt. Claude.ai's own composer stops at 20; a pasted batch rarely nears this. */
+/**
+ * Images on one prompt. Claude.ai's own composer stops at 20; a pasted batch rarely nears this.
+ *
+ * @group Follow wire
+ */
 export const ZEN_PROMPT_MAX_IMAGES = 20
 /**
  * The most a prompt body may be on the wire: every image at its cap in base64 (4/3 of the
- * bytes, rounded up to a 4-byte group), plus room for the text. The route stops READING at
- * this size rather than buffering first and refusing after.
+ * bytes, rounded up to a 4-byte group), plus room for the text.
+ *
+ * The route stops READING at this size rather than buffering first and refusing after.
+ *
+ * @group Follow wire
  */
 export const ZEN_PROMPT_BODY_MAX_BYTES: number =
   ZEN_PROMPT_MAX_IMAGES * Math.ceil(ZEN_IMAGE_MAX_BYTES / 3) * 4 + 1024 * 1024
@@ -107,17 +138,24 @@ const BASE64 = '^[A-Za-z0-9+/]*={0,2}$'
 
 /**
  * With `BASE64`, strict standard base64: whole 4-character groups, the last padded to four.
+ *
  * Refused as "not base64" rather than decoded leniently into a truncated image.
+ *
+ * @group Follow wire
  */
 export function isWholeBase64(data: string): boolean {
   return data.length % 4 === 0
 }
 
 /**
- * One image on a prompt (#68): the bytes, base64, and what they are. Not TanStack's
- * `ImagePart` — that union admits a `url` source, and a server-side fetch is egress the
- * guards do not cover (`web_fetch`'s allowlist is the only sanctioned fetch path, #54), so
- * the browser resolves every attachment to bytes before it crosses and a URL cannot arrive.
+ * One image on a prompt (#68): the bytes, base64, and what they are.
+ *
+ * Not TanStack's `ImagePart` — that union admits a `url` source, and a server-side fetch is
+ * egress the guards do not cover (`web_fetch`'s allowlist is the only sanctioned fetch path,
+ * #54), so the browser resolves every attachment to bytes before it crosses and a URL cannot
+ * arrive.
+ *
+ * @group Follow wire
  */
 export const ZenPromptImage = Type.Object(
   {
@@ -128,9 +166,14 @@ export const ZenPromptImage = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Follow wire */
 export type ZenPromptImage = Static<typeof ZenPromptImage>
 
-/** What `POST /api/threads/:id/prompt` takes. The shape is checked here; the byte cap is checked on the decoded size by the route. */
+/**
+ * What `POST /api/threads/:id/prompt` takes. The shape is checked here; the byte cap is checked on the decoded size by the route.
+ *
+ * @group Follow wire
+ */
 export const ZenPromptBody = Type.Object(
   {
     message: Type.String(),
@@ -139,9 +182,14 @@ export const ZenPromptBody = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Follow wire */
 export type ZenPromptBody = Static<typeof ZenPromptBody>
 
-/** Decoded size of a base64 string, without decoding it: three bytes per four characters, less the padding. */
+/**
+ * Decoded size of a base64 string, without decoding it: three bytes per four characters, less the padding.
+ *
+ * @group Follow wire
+ */
 export function base64DecodedBytes(data: string): number {
   let padding = 0
   if (data.endsWith('==')) padding = 2
@@ -150,10 +198,14 @@ export function base64DecodedBytes(data: string): number {
 }
 
 /**
- * What `POST /api/threads/:id/prompt` answers with: ADMISSION, not a result. A run is not
- * one prompt's reply — interrupting prompts, enqueued ones and retries can all land inside it — so the
- * receipt names the message and the acquisition it took or queued behind, and the follow
- * carries everything after (deepseek-harness: `followup()` returns void).
+ * What `POST /api/threads/:id/prompt` answers with: ADMISSION, not a result.
+ *
+ * A run is not one prompt's reply — interrupting prompts, enqueued ones and retries can all
+ * land inside it — so the receipt names the message and the acquisition it took or queued
+ * behind, and the follow carries everything after (deepseek-harness: `followup()` returns
+ * void).
+ *
+ * @group Follow wire
  */
 export const ZenPromptReceipt = Type.Object(
   {
@@ -167,14 +219,19 @@ export const ZenPromptReceipt = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Follow wire */
 export type ZenPromptReceipt = Static<typeof ZenPromptReceipt>
 
 /**
  * What `POST /api/threads/:id/abort` answers with when pi was told (#116, #75): the prompts
  * that were WAITING behind the stopped run, in order, the interrupting ones first — cleared from the
  * queue and handed back so the stopping tab can put them in its composer (pi's TUI does the
- * same). Never delivered silently on the next turn, never dropped. Empty when nothing waited.
- * The run's own end still arrives on the follow.
+ * same).
+ *
+ * Never delivered silently on the next turn, never dropped. Empty when nothing waited. The
+ * run's own end still arrives on the follow.
+ *
+ * @group Follow wire
  */
 export const ZenAbortReceipt = Type.Object(
   {
@@ -183,4 +240,5 @@ export const ZenAbortReceipt = Type.Object(
   },
   { additionalProperties: false },
 )
+/** @group Follow wire */
 export type ZenAbortReceipt = Static<typeof ZenAbortReceipt>

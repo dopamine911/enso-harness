@@ -1,33 +1,11 @@
-import { AsyncLocalStorage } from 'node:async_hooks'
-import { closeSync, fchmodSync, fstatSync, mkdirSync, openSync } from 'node:fs'
-import { join } from 'node:path'
-import { getTimeRotatingFileSink } from '@logtape/file'
-import {
-  compareLogLevel,
-  configure,
-  dispose,
-  getConfig,
-  getConsoleSink,
-  getJsonLinesFormatter,
-  getLogger,
-  isLogLevel,
-  type LogLevel,
-  type LogRecord,
-  type Sink,
-  withFilter,
-} from '@logtape/logtape'
-import { getPrettyFormatter } from '@logtape/pretty'
-import { redactByField } from '@logtape/redaction'
-import { Check } from 'typebox/value'
-import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS, ZEN_REDACTED, ZEN_REDACTED_VALUE, ZenLogLine } from './log.ts'
-import { zenLogsDir } from './paths.ts'
-
 /**
  * A process's sink (#132 item 2): ONE log for the harness — `.zen/logs/zen-YYYY-MM-DD.jsonl`,
  * every process appending to the same day's file, every record redacted by field name
  * before it is written, and — for a terminal — a pretty console sink beside it at its own
- * level. And THE KNOB: `ZEN_LOG_LEVEL` picks the tier the file holds, per subsystem if
- * wanted; `ZEN_LOG_CONSOLE` the terminal's.
+ * level.
+ *
+ * And THE KNOB: `ZEN_LOG_LEVEL` picks the tier the file holds, per subsystem if wanted;
+ * `ZEN_LOG_CONSOLE` the terminal's.
  *
  * Called by a LAUNCHER (`dev.ts`, `dev-web.ts`, the harness extension when pi is a child),
  * never by `startZenServer`: a library configures nothing, so a test that starts the server
@@ -66,14 +44,45 @@ import { zenLogsDir } from './paths.ts'
  * `writeSync` that throws is caught by LogTape and reported on `["logtape", "meta"]` at
  * `fatal`, bypassing the sink that failed — routed to the console here, so a full disk is
  * seen, not silent.
+ *
+ * @module
  */
 
-/** A per-category override: `zen.host.events=trace` turns one subtree up without the rest. */
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { closeSync, fchmodSync, fstatSync, mkdirSync, openSync } from 'node:fs'
+import { join } from 'node:path'
+import { getTimeRotatingFileSink } from '@logtape/file'
+import {
+  compareLogLevel,
+  configure,
+  dispose,
+  getConfig,
+  getConsoleSink,
+  getJsonLinesFormatter,
+  getLogger,
+  isLogLevel,
+  type LogLevel,
+  type LogRecord,
+  type Sink,
+  withFilter,
+} from '@logtape/logtape'
+import { getPrettyFormatter } from '@logtape/pretty'
+import { redactByField } from '@logtape/redaction'
+import { Check } from 'typebox/value'
+import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS, ZEN_REDACTED, ZEN_REDACTED_VALUE, ZenLogLine } from './log.ts'
+import { zenLogsDir } from './paths.ts'
+
+/**
+ * A per-category override: `zen.host.events=trace` turns one subtree up without the rest.
+ *
+ * @group Logging
+ */
 export interface ZenLogOverride {
   readonly category: readonly string[]
   readonly level: LogLevel
 }
 
+/** @group Logging */
 export interface ZenLogLevels {
   /** The file's lowest level for everything under `zen` not named by an override. */
   readonly file: LogLevel
@@ -82,10 +91,18 @@ export interface ZenLogLevels {
   readonly overrides: readonly ZenLogOverride[]
 }
 
-/** The tier every process starts in: the spine, and what went wrong. */
+/**
+ * The tier every process starts in: the spine, and what went wrong.
+ *
+ * @group Logging
+ */
 export const DEFAULT_FILE_LEVEL: LogLevel = 'info'
 
-/** A knob value that is not a level. Thrown at startup, naming the value — never a silent default. */
+/**
+ * A knob value that is not a level. Thrown at startup, naming the value — never a silent default.
+ *
+ * @group Logging
+ */
 export class ZenLogLevelError extends Error {
   constructor(variable: string, value: string) {
     super(
@@ -102,6 +119,8 @@ export class ZenLogLevelError extends Error {
  *   ZEN_LOG_LEVEL="info,zen.host.events=trace"        — plus one subtree turned up
  *   ZEN_LOG_CONSOLE="warning"                          — the terminal's (the launcher's default otherwise)
  * `warn` is accepted for `warning`, since that is what `ZenLogger` calls it.
+ *
+ * @group Logging
  */
 export function parseZenLogLevels(
   environment: Readonly<Record<string, string | undefined>>,
@@ -143,8 +162,12 @@ function levelOf(variable: string, raw: string): LogLevel {
 
 /**
  * The level a record's category must reach to be written: the longest override prefix that
- * matches, else the file's level. `["zen","host","events"]` is matched by an override on
- * `zen.host.events`, then `zen.host`, then `zen`.
+ * matches, else the file's level.
+ *
+ * `["zen","host","events"]` is matched by an override on `zen.host.events`, then `zen.host`,
+ * then `zen`.
+ *
+ * @group Logging
  */
 export function effectiveFileLevel(levels: ZenLogLevels, category: readonly string[]): LogLevel {
   let best: ZenLogOverride | undefined
@@ -256,6 +279,7 @@ function redactingKnownValues(values: readonly string[] | (() => readonly string
     }
 }
 
+/** @group Logging */
 export interface ProcessLoggingOptions {
   /** `zenLogsDir(repoRoot)` — created if absent. */
   readonly logsDir: string
@@ -277,8 +301,11 @@ export interface ProcessLoggingOptions {
 
 /**
  * Where this process writes: `ZEN_LOGS_DIR` when set — a user keeping logs elsewhere, a test
- * keeping them out of the checkout — else `.zen/logs` under the repo (`zenLogsDir`). One
- * rule for every launcher and for the extension, so they land in the same file.
+ * keeping them out of the checkout — else `.zen/logs` under the repo (`zenLogsDir`).
+ *
+ * One rule for every launcher and for the extension, so they land in the same file.
+ *
+ * @group Logging
  */
 export function logsDirFrom(environment: Readonly<Record<string, string | undefined>>, repoRoot: string): string {
   const configured = environment.ZEN_LOGS_DIR
@@ -287,9 +314,13 @@ export function logsDirFrom(environment: Readonly<Record<string, string | undefi
 
 /**
  * `zen-2026-09-09.jsonl`: the harness's one log for that day — the machine's LOCAL day, not
- * UTC. The file is for the person at the machine: at 19:05 local `bun run logs` must not say
- * "no log for today" because it is 00:05 tomorrow in Greenwich (found live). The timestamps
- * inside stay ISO UTC.
+ * UTC.
+ *
+ * The file is for the person at the machine: at 19:05 local `bun run logs` must not say "no log
+ * for today" because it is 00:05 tomorrow in Greenwich (found live). The timestamps inside stay
+ * ISO UTC.
+ *
+ * @group Logging
  */
 export function zenLogFilename(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -338,12 +369,20 @@ function owningTheDayFile(logsDir: string): () => void {
   }
 }
 
-/** True once some configurator has run in this process — pi in-process shares the server's. */
+/**
+ * True once some configurator has run in this process — pi in-process shares the server's.
+ *
+ * @group Logging
+ */
 export function isLoggingConfigured(): boolean {
   return getConfig() !== null
 }
 
-/** Configure the process; resolves to the disposer that flushes and closes the file. */
+/**
+ * Configure the process; resolves to the disposer that flushes and closes the file.
+ *
+ * @group Logging
+ */
 export async function configureProcessLogging(options: ProcessLoggingOptions): Promise<() => Promise<void>> {
   const levels: ZenLogLevels = options.levels ?? { file: DEFAULT_FILE_LEVEL, console: undefined, overrides: [] }
   mkdirSync(options.logsDir, { recursive: true })
@@ -429,11 +468,15 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
 /**
  * The stop contract every launcher owes a supervisor (#267): flush the file, then exit the
  * way the signal would have — `128 + the signal's number`, so 130 for `SIGINT` and 143 for
- * `SIGTERM`. `128 + n` is read by a hub, a shell and systemd alike, which makes the table a
- * CONTRACT and not an implementation detail; it lived twice, verbatim, in the two dev
- * launchers, where a third signal or a changed flush order would have reached one of them.
+ * `SIGTERM`.
+ *
+ * `128 + n` is read by a hub, a shell and systemd alike, which makes the table a CONTRACT and
+ * not an implementation detail; it lived twice, verbatim, in the two dev launchers, where a
+ * third signal or a changed flush order would have reached one of them.
  *
  * `once`, not `on`: a second signal during the flush must not start a second dispose.
+ *
+ * @group Logging
  */
 export function installLoggingShutdown(dispose: () => Promise<void>): void {
   for (const [signal, code] of [
@@ -459,9 +502,12 @@ const LEVEL_OF_LINE: Readonly<Record<ZenLogLine['level'], LogLevel>> = {
 }
 
 /**
- * One raw line of the file → the record, or the reason it is not one. THE parser (the
- * reader, the bundle route, and the bundle reader all go through it): a line that is not
- * a record is said, never skipped silently — the file is the honest place.
+ * One raw line of the file → the record, or the reason it is not one.
+ *
+ * THE parser (the reader, the bundle route, and the bundle reader all go through it): a line
+ * that is not a record is said, never skipped silently — the file is the honest place.
+ *
+ * @group Logging
  */
 export function parseZenLogLine(raw: string): ZenLogLine | string {
   let parsed: unknown
@@ -477,8 +523,12 @@ export function parseZenLogLine(raw: string): ZenLogLine | string {
  * A line of the file, back into the record it was — the message re-joined from its
  * template and properties (`"run {generation} acquired"` + `{ generation: 1 }` →
  * `["run ", 1, " acquired"]`, LogTape's alternating text/value shape), so any LogTape
- * formatter renders it exactly as the console did when it was written. A placeholder with
- * no property renders as itself, so a template that outgrew its record still reads.
+ * formatter renders it exactly as the console did when it was written.
+ *
+ * A placeholder with no property renders as itself, so a template that outgrew its record still
+ * reads.
+ *
+ * @group Logging
  */
 export function logRecordOf(line: ZenLogLine): LogRecord {
   const properties = line.properties ?? {}
@@ -502,9 +552,12 @@ export function logRecordOf(line: ZenLogLine): LogRecord {
 }
 
 /**
- * The terminal's formatter, for the file's records: what `bun run logs` prints. `wordWrap`
- * as the pretty formatter takes it — `true` wraps to the terminal's width, `false` keeps
- * each record's lines whole (for a pipe), a number is a width. `colors` off for a pipe.
+ * The terminal's formatter, for the file's records: what `bun run logs` prints.
+ *
+ * `wordWrap` as the pretty formatter takes it — `true` wraps to the terminal's width, `false`
+ * keeps each record's lines whole (for a pipe), a number is a width. `colors` off for a pipe.
+ *
+ * @group Logging
  */
 export function zenLogLineRenderer(
   options: { readonly wordWrap?: boolean | number; readonly colors?: boolean } = {},

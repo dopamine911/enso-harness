@@ -45,8 +45,10 @@ function isRedirectionOperator(command: string, characterIndex: number, characte
 
 /**
  * Split a bash command into flat command segments on `;`, `&&`, `||`, `|`, `&` and
- * newlines, preserving each segment's original text. Returns `[]` for syntax it cannot
- * scope — see the module header for why that emptiness is a feature.
+ * newlines, preserving each segment's original text.
+ *
+ * Returns `[]` for syntax it cannot scope — see the module header for why that emptiness is a
+ * feature.
  */
 export function extractFlatShellCommandSegments(command: string): FlatShellCommandSegment[] {
   const segments: FlatShellCommandSegment[] = []
@@ -184,7 +186,9 @@ function skipShellWord(command: string, start: number): number | null {
 /**
  * Resolve the FIRST shell word of `text` to the literal value the shell would execute —
  * quote removal and backslash-escape resolution, exactly the transformations bash applies
- * before command lookup. `"curl"`, `\curl`, `cu"rl"` and `'cu'r'l'` all resolve to `curl`.
+ * before command lookup.
+ *
+ * `"curl"`, `\curl`, `cu"rl"` and `'cu'r'l'` all resolve to `curl`.
  *
  * Three ways the value can be unknowable, and they are NOT interchangeable for a caller
  * gating on the result (both found on PR #55 review, one round each):
@@ -283,10 +287,11 @@ export function literalShellWord(text: string): LiteralShellWordResult {
 
 /**
  * Split `text` into its RAW shell words — quote-aware slices with quoting preserved —
- * or null when the syntax is incomplete. The wrapper-mode scan (network-egress.ts) maps
- * `literalShellWord` over these: a transparent process wrapper (`timeout 30 curl …`)
- * moves the effective command PAST word 1, so every word needs the command-word
- * treatment there (PR #55 review, round 3).
+ * or null when the syntax is incomplete.
+ *
+ * The wrapper-mode scan (network-egress.ts) maps `literalShellWord` over these: a transparent
+ * process wrapper (`timeout 30 curl …`) moves the effective command PAST word 1, so every word
+ * needs the command-word treatment there (PR #55 review, round 3).
  */
 export function shellWordsOf(text: string): string[] | null {
   const words: string[] = []
@@ -304,8 +309,10 @@ export function shellWordsOf(text: string): string[] | null {
 
 /**
  * Remove leading `NAME=value` assignments without interpreting shell syntax, so
- * `FOO=1 curl …` exposes `curl` at command position. Returns null when the input has no
- * leading assignment (caller keeps the original) or when the syntax is incomplete.
+ * `FOO=1 curl …` exposes `curl` at command position.
+ *
+ * Returns null when the input has no leading assignment (caller keeps the original) or when the
+ * syntax is incomplete.
  */
 export function withoutLeadingEnvironmentAssignments(command: string): string | null {
   let index = 0

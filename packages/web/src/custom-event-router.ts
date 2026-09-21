@@ -13,8 +13,9 @@ import type { ThreadStores } from './thread-stores.ts'
 /**
  * The one chunk that is neither an observation nor a frame: the follow ended without this
  * page leaving it (#103 receipt) — the server closed, restarted, or dropped the connection.
- * The adapter (`follow-connection.ts`) says it; this router, its only reader, names it.
- * Value: `{ threadId }`.
+ *
+ * The adapter (`follow-connection.ts`) says it; this router, its only reader, names it. Value:
+ * `{ threadId }`.
  */
 export const FOLLOW_ENDED_CUSTOM_EVENT = 'follow-ended'
 
@@ -40,9 +41,10 @@ const observationValidator = Compile(ZenObservation)
 
 /**
  * The browser's ONE path from an AG-UI CUSTOM chunk to a thread's stores (mode lines,
- * current mode, session stats, notifications, the debug record). TanStack's
- * `onCustomEvent` fires this with `(chunk.name, chunk.value)` for every CUSTOM chunk —
- * verified against its stream processor (#29).
+ * current mode, session stats, notifications, the debug record).
+ *
+ * TanStack's `onCustomEvent` fires this with `(chunk.name, chunk.value)` for every CUSTOM chunk
+ * — verified against its stream processor (#29).
  *
  * ONE VOCABULARY (#162 workstream 5). A chunk's name is a discriminator a type of ours
  * already declares, and its value is that whole thing:

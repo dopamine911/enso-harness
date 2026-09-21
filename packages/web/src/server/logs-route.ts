@@ -2,12 +2,12 @@ import { type ZenBrowserLogBatch, ZenBrowserLogBatch as ZenBrowserLogBatchSchema
 import { Check, Errors } from 'typebox/value'
 
 /**
- * `POST /api/logs` (#132 slice 3): the browser's records, into the one file. Each record is
- * re-emitted through this process's logger under the browser's own category
- * (`zen.browser.follow`), at its level, with `process: "browser"`, the tab's `page`, and
- * `at` — the browser's clock; the line's `@timestamp` is this server's receipt. So the file
- * has every layer, the same sink redacts every layer, and `bun run logs --process browser`
- * finds them.
+ * `POST /api/logs` (#132 slice 3): the browser's records, into the one file.
+ *
+ * Each record is re-emitted through this process's logger under the browser's own category
+ * (`zen.browser.follow`), at its level, with `process: "browser"`, the tab's `page`, and `at` —
+ * the browser's clock; the line's `@timestamp` is this server's receipt. So the file has every
+ * layer, the same sink redacts every layer, and `bun run logs --process browser` finds them.
  *
  * ⚠ Bounded, and never a source of its own records. The body is capped and the batch is a
  * closed schema (200 records, `zen.browser.*` only, a message length); a bad batch is a 400
