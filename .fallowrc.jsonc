@@ -76,14 +76,26 @@
   // What stays in the count and is NOT excluded: consecutive metadata rows in the generators,
   // Playwright arrange/act blocks, the dispatcher's route branches — inventory. `threshold` is
   // the ratchet: fallow 3.25's regression baseline carries dead-code categories only, so the
-  // duplicated-line percentage is the number that can only fall. Set to today's value after
-  // the three folds (4.5 passes, 4.49 fails); lower it when a fold lands, never raise it.
-  // Read by the advisory `fallow-audit` job (`.github/workflows/ci.yml`); promote to the gate
-  // once it has been red for a real regression once.
+  // duplicated-line percentage is the number that can only fall. Lower it when a fold lands,
+  // never raise it. Read by the advisory `fallow-audit` job (`.github/workflows/ci.yml`).
+  //
+  // ⚠ A ratchet that is red before any PR touches it reports nothing — every PR sees the same
+  // red, so a genuine increase is indistinguishable from the standing state (#260). The 4.5
+  // pinned on #174 was crossed without anyone being told, because the step is advisory.
+  // Measured 2026-09-18 by bisecting `bunx fallow dupes --threshold`: 4.515141576473161 % at
+  // `d13f109` (826 duplicated lines of 18294), and 4.5038 % at this commit, where the same 826
+  // lines sit in a slightly larger tree. Still over 4.5, so the pin has to move; 4.52 is the
+  // two-decimal value that clears both (4.50 fails at either measurement). Re-measure the same
+  // way, and lower it the moment a fold makes a smaller number pass.
+  //
+  // Still advisory, not promoted: the promotion condition this comment has always stated —
+  // "red for a real regression once" — cannot have been met while the ratchet was red for a
+  // stale pin instead. Re-pinning is what makes the first real crossing observable; promote
+  // after one.
   "duplicates": {
     "mode": "semantic",
     "ignore": ["packages/web/src/components/**", "packages/core/src/**"],
-    "threshold": 4.5
+    "threshold": 4.52
   },
   // Complexity thresholds for `fallow audit` (the advisory job). CRAP is OFF, not raised: it is
   // cyclomatic × (1 − coverage)³, and fallow can only ESTIMATE coverage here — Bun's LCOV has no

@@ -9,12 +9,21 @@
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
     "verbatimModuleSyntax": true,
+    // Biome's `useExhaustiveSwitchCases` proves every arm EXISTS; only this proves no arm
+    // runs into the next one (#230). The repo's central pattern is a switch over a
+    // discriminated union, and `scripts/zen-logs.ts` parses argv with a `break`-based one.
+    "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "declaration": true,
     "composite": true,
     "noEmit": false,
     "emitDeclarationOnly": true,
-    "outDir": "dist-types",
+    // NO `outDir` here, on purpose (#229). `tsc -b` emits declarations because `composite`
+    // requires them, and a relative `outDir` in THIS file resolves against THIS directory —
+    // so every project inheriting it wrote into one shared repository-root `dist-types/`,
+    // where two projects with the same `rootDir`-relative layout overlap silently. Each
+    // project declares its own `"outDir": "./dist-types"` instead; a project that forgets
+    // now emits beside its own sources, which `git status` shows, rather than into the root.
     "allowImportingTsExtensions": true
   }
 }

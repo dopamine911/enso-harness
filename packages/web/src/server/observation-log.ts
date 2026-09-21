@@ -114,10 +114,21 @@ export function recordObservation(
   seq: number,
   observation: ZenObservation,
 ): void {
-  const properties: ZenLogProperties = { threadId, generation, seq, kind: observation.kind, ...compactOf(observation) }
-  if (isSpine(observation)) events.info('{kind}', properties)
-  else events.debug('{kind}', properties)
-  events.trace('{kind} payload', { threadId, generation, seq, kind: observation.kind, observation })
+  // ⚠ THUNKS, not objects (#284). At the default tier both of these are dropped, and the
+  // eager payload — `compactOf`'s switch, a spread, a second object holding the whole
+  // observation — was built per observation anyway: 1.04 µs of the 1.62 µs `recordObservation`
+  // cost, against 0.15 µs to serialise the frame that actually reaches the browser. LogTape
+  // calls the thunk only once a sink will read it.
+  const compact = (): ZenLogProperties => ({
+    threadId,
+    generation,
+    seq,
+    kind: observation.kind,
+    ...compactOf(observation),
+  })
+  if (isSpine(observation)) events.info('{kind}', compact)
+  else events.debug('{kind}', compact)
+  events.trace('{kind} payload', () => ({ threadId, generation, seq, kind: observation.kind, observation }))
   // Time to first token, at `info` (#144): the deltas themselves are `debug`, so without this
   // one line the latency a person actually asks about is only visible to whoever was already
   // turned up. One record per run — the second delta finds nothing to take.
