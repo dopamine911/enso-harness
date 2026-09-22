@@ -24,6 +24,23 @@
  *   `nanoid()` → `crypto.randomUUID()`; `InputGroup*` shells → plain `div`s and this repo's
  *   `Textarea`; `@repo/shadcn-ui/...` → `@/`; removed `"use client"` (Vite SPA)
  * - `Promise.withResolvers` in `convertBlobUrlToDataUrl` (project rule)
+ * - TAKEN BACK for the `/` command palette (#338): `PromptInputActionMenu`,
+ *   `PromptInputActionMenuTrigger`, `PromptInputActionMenuContent`, `PromptInputActionMenuItem`
+ *   (the `/` button and its dropdown, on shadcn `dropdown-menu`) and `PromptInputCommand`,
+ *   `PromptInputCommandInput`, `PromptInputCommandList`, `PromptInputCommandEmpty`,
+ *   `PromptInputCommandGroup`, `PromptInputCommandItem`, `PromptInputCommandSeparator` (the
+ *   palette: filter box, groups, rows, empty state, on cmdk). The #68/#121 subset dropped them
+ *   because that composer had no menu and no palette; #338's does, and port-before-build (#31)
+ *   means they come from here, not from a hand-rolled popover. Verbatim apart from the port's
+ *   own rules: `@repo/shadcn-ui/...` → `@/components/ui/<name>.tsx`, explicit `React.ReactNode`
+ *   return types (biome's `useExplicitType` on the files that USE them made the shape uniform).
+ *   `PromptInputActionMenuTrigger`'s default child is upstream's `PlusIcon`; the palette passes
+ *   its own `SlashIcon`. The `tooltip` prop upstream's `PromptInputButton` grew is NOT taken:
+ *   this port's button is `ComponentProps<typeof Button>`, so the trigger's props are the same.
+ *   ⚠ `PromptInputActionMenuItem` is taken back with its group and used by nothing: the menu's
+ *   content feeds every printable key inside it to Radix's typeahead, which is inert only while
+ *   the content holds zero menu items. Do not put one beside a `PromptInputCommand` — see
+ *   `command-palette.tsx`'s header (PR #343 review).
  */
 import type {
 	ChangeEventHandler,
@@ -36,7 +53,23 @@ import type {
 	RefObject,
 } from "react";
 import { Children, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button.tsx";
+import {
+	Command,
+	CommandEmpty,
+	CommandGroup,
+	CommandInput,
+	CommandItem,
+	CommandList,
+	CommandSeparator,
+} from "@/components/ui/command.tsx";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
 import { cn } from "@/lib/utils.ts";
 
@@ -457,3 +490,76 @@ export const PromptInputButton = ({
 	const newSize = size ?? (Children.count(props.children) > 1 ? "default" : "icon");
 	return <Button className={cn("shrink-0 gap-1.5", className)} size={newSize} type="button" variant={variant} {...props} />;
 };
+
+export type PromptInputActionMenuProps = ComponentProps<typeof DropdownMenu>;
+export const PromptInputActionMenu = (props: PromptInputActionMenuProps): React.ReactNode => <DropdownMenu {...props} />;
+
+export type PromptInputActionMenuTriggerProps = PromptInputButtonProps;
+
+export const PromptInputActionMenuTrigger = ({
+	className,
+	children,
+	...props
+}: PromptInputActionMenuTriggerProps): React.ReactNode => (
+	<DropdownMenuTrigger asChild>
+		<PromptInputButton className={className} {...props}>
+			{children ?? <PlusIcon className="size-4" />}
+		</PromptInputButton>
+	</DropdownMenuTrigger>
+);
+
+export type PromptInputActionMenuContentProps = ComponentProps<typeof DropdownMenuContent>;
+export const PromptInputActionMenuContent = ({
+	className,
+	...props
+}: PromptInputActionMenuContentProps): React.ReactNode => (
+	<DropdownMenuContent align="start" className={cn(className)} {...props} />
+);
+
+export type PromptInputActionMenuItemProps = ComponentProps<typeof DropdownMenuItem>;
+export const PromptInputActionMenuItem = ({ className, ...props }: PromptInputActionMenuItemProps): React.ReactNode => (
+	<DropdownMenuItem className={cn(className)} {...props} />
+);
+
+export type PromptInputCommandProps = ComponentProps<typeof Command>;
+
+export const PromptInputCommand = ({ className, ...props }: PromptInputCommandProps): React.ReactNode => (
+	<Command className={cn(className)} {...props} />
+);
+
+export type PromptInputCommandInputProps = ComponentProps<typeof CommandInput>;
+
+export const PromptInputCommandInput = ({ className, ...props }: PromptInputCommandInputProps): React.ReactNode => (
+	<CommandInput className={cn(className)} {...props} />
+);
+
+export type PromptInputCommandListProps = ComponentProps<typeof CommandList>;
+
+export const PromptInputCommandList = ({ className, ...props }: PromptInputCommandListProps): React.ReactNode => (
+	<CommandList className={cn(className)} {...props} />
+);
+
+export type PromptInputCommandEmptyProps = ComponentProps<typeof CommandEmpty>;
+
+export const PromptInputCommandEmpty = ({ className, ...props }: PromptInputCommandEmptyProps): React.ReactNode => (
+	<CommandEmpty className={cn(className)} {...props} />
+);
+
+export type PromptInputCommandGroupProps = ComponentProps<typeof CommandGroup>;
+
+export const PromptInputCommandGroup = ({ className, ...props }: PromptInputCommandGroupProps): React.ReactNode => (
+	<CommandGroup className={cn(className)} {...props} />
+);
+
+export type PromptInputCommandItemProps = ComponentProps<typeof CommandItem>;
+
+export const PromptInputCommandItem = ({ className, ...props }: PromptInputCommandItemProps): React.ReactNode => (
+	<CommandItem className={cn(className)} {...props} />
+);
+
+export type PromptInputCommandSeparatorProps = ComponentProps<typeof CommandSeparator>;
+
+export const PromptInputCommandSeparator = ({
+	className,
+	...props
+}: PromptInputCommandSeparatorProps): React.ReactNode => <CommandSeparator className={cn(className)} {...props} />;

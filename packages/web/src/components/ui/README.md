@@ -30,6 +30,13 @@ that reproduces the fetch — style plus CLI version — and the diff procedure 
   resolve here.
 - **`collapsible.tsx` keeps its `"use client"` directive.** It is inert under `rsc: false` and
   removing it is churn against the next re-fetch.
+- **`dropdown-menu.tsx` spreads `checked` conditionally** in `DropdownMenuCheckboxItem`
+  (`{...(checked === undefined ? {} : { checked })}`). The registry writes `checked={checked}`,
+  which under this repo's `exactOptionalPropertyTypes` hands `undefined` to a prop typed
+  `CheckedState`; the spread is the same behaviour and type-checks.
+- **Intra-`ui` imports carry `.tsx`** (`@/components/ui/dialog.tsx`), for the reason `cn`'s does.
+- **`cn` comes from `@/lib/utils.ts`, not the `cn` package.** The registry at `shadcn@4.20.1`
+  emits `import { cn } from "cn"` and adds that package; this repo has one `cn` and it is ours.
 
 Nothing else. These files are otherwise the registry's output, which is the point: an
 unportable primitive is one nobody can re-fetch.

@@ -8,6 +8,7 @@ import {
   ENSO_PROMPT_BODY_MAX_BYTES,
   ENSO_PROMPT_MAX_IMAGES,
   type EnsoStoredThread,
+  type EnsoThreadCommands,
   type EnsoThreadEvents,
   type EnsoThreadHistory,
   type EnsoThreadSummary,
@@ -43,6 +44,8 @@ const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/
 const THREAD_EVENTS_ROUTE = /^\/api\/threads\/([^/?#]+)\/events$/
 /** `GET /api/threads/<threadId>/history` — the branch as messages, live or stored (#95). */
 const THREAD_HISTORY_ROUTE = /^\/api\/threads\/([^/?#]+)\/history$/
+/** `GET /api/threads/<threadId>/commands` — the slash commands the thread can run, for the palette (#338). */
+const THREAD_COMMANDS_ROUTE = /^\/api\/threads\/([^/?#]+)\/commands$/
 /** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
 const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/
 const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/
@@ -444,6 +447,22 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     })
   }
 
+  /**
+   * The slash commands a thread can run (#338). Live: its runtime's own list. Not live: the
+   * list the last built session registered, or none — said as `source`, because looking must
+   * not build (#86) and a palette that quietly showed a stale list would be a palette that lies.
+   * No record: this is the palette OPENING, and a reader opening a menu is not an event.
+   */
+  function respondWithThreadCommands(threadId: string, response: ServerResponse): void {
+    const live = threads.peek(threadId)
+    const remembered = threads.rememberedCommands()
+    let payload: EnsoThreadCommands = { threadId, commands: [], source: 'none' }
+    if (live !== undefined) payload = { threadId, commands: live.hosted.runtime.listCommands(), source: 'live' }
+    else if (remembered !== undefined) payload = { threadId, commands: [...remembered], source: 'remembered' }
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(payload))
+  }
+
   function respondWithThread(threadId: string, response: ServerResponse): void {
     const thread = threads.peek(threadId)
     if (thread === undefined) {
@@ -537,6 +556,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       method: 'GET',
       route: THREAD_HISTORY_ROUTE,
       respond: idOnly(respondWithThreadHistory),
+    },
+    {
+      method: 'GET',
+      route: THREAD_COMMANDS_ROUTE,
+      respond: idOnly(respondWithThreadCommands),
     },
     {
       method: 'GET',

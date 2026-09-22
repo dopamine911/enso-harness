@@ -91,6 +91,10 @@ test.describe('chat surface', () => {
     await page.goto('/')
     await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toBeVisible()
     await captureScreenshot(page, '01-empty-state')
+    // The `/` palette (#338) is in the composer and opens to its filter box; Escape puts it away.
+    await page.getByRole('button', { name: 'commands' }).click()
+    await expect(page.getByPlaceholder('filter commands…')).toBeVisible()
+    await page.keyboard.press('Escape')
 
     await typeAndSend(page, MODE_COMMAND)
     // The dialog parks the run (#27): the composer flips to stop, then the select options

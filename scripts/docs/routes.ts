@@ -53,6 +53,17 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     builds: 'no',
     logs: 'no',
   },
+  THREAD_COMMANDS_ROUTE: {
+    method: 'GET',
+    path: '/api/threads/:threadId/commands',
+    handler: 'respondWithThreadCommands',
+    input: 'path: `threadId`',
+    success: '200 `EnsoThreadCommands` JSON — `source` says live, remembered or none',
+    errors: '400 malformed thread id; 403 untrusted origin',
+    routeClass: 'observation',
+    builds: 'no',
+    logs: 'no',
+  },
   THREAD_HISTORY_ROUTE: {
     method: 'GET',
     path: '/api/threads/:threadId/history',

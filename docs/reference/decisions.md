@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 210.**
+**Decision headers: 215.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -86,6 +86,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/EnsoToolResult.tsx` | `#18` | The web renderer for a enso tool result — the React half of #18's contract. |
 | `packages/web/src/__tests__/browser-logging.test.ts` | `#132` | The page's logging (#132 slice 3): the ring the drawer reads, the shipper to the server, and the `?log=` knob — driven through a real `configure`, asserted at the sinks. |
 | `packages/web/src/__tests__/chat-screen.test.tsx` | `#27`, `#49` | #49, first pass: the dialog components had live receipts (#27, the e2e smoke) and no unit render, so chat-screen.tsx sat at ~14% lines. |
+| `packages/web/src/__tests__/command-palette.test.tsx` | `#338` | ⚠ A DOM before react-dom/client evaluates, and again if another mounting file has already released the one this module registered; `dom-environment.ts` has the measurement. |
+| `packages/web/src/__tests__/commands-connection.test.ts` | `#338` | The palette's read (#338): the route's answer validated, a non-2xx said with its status and body, a payload the schema refuses said as such. |
 | `packages/web/src/__tests__/custom-event-router.test.ts` | `#53`, `#90`, `#162` | #53 S1.3: the CUSTOM-chunk router was an inline closure no test reached — renaming a chunk, dropping the notify-type allowlist, or swapping the two `apply*` calls all left the suite green. |
 | `packages/web/src/__tests__/dom-environment.ts` | `#118` | A browser DOM for the tests that MOUNT React (#118) — the mounted-pane tests, which need effects, `useSyncExternalStore` subscriptions and TanStack's `useChat` to actually run. |
 | `packages/web/src/__tests__/fixture-conversation.test.ts` | `#27`, `#218` | The compatibility probe that used to live in a PR body (#218). |
@@ -96,6 +98,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/page-scoped-stores.test.ts` | `#103`, `#125` | The anchor for #125 item 3 / #103 invariant 2 (switching threads leaks no state): every store that holds a THREAD's state is created inside `createThreadStores` (thread-stores.ts), so a second thread on the page gets its own. |
 | `packages/web/src/__tests__/permission-mode.test.tsx` | `#84`, `#90` | #84's browser half: the CURRENT permission mode as state, and the control that changes it. |
 | `packages/web/src/__tests__/prompt-input.test.ts` | `#141` | ⚠ Upstream reported a refusal only when the WHOLE batch failed; a mixed drop lost files silently (PR #141 review). |
+| `packages/web/src/__tests__/radix-preload.ts` | `#338` | `bun test` preload (bunfig.toml): evaluate the modules that DECIDE BY `document` AT MODULE EVALUATION while a document exists, then take the document away again (#338). |
 | `packages/web/src/__tests__/scripted-server.ts` | `#112`, `#118` | A scripted server behind `fetch` (#112, #118): one follow body the test writes SSE frames into, and unary routes the test scripts the answers of. |
 | `packages/web/src/__tests__/static-markup.ts` | `#236` | What a `<select>` in a `renderToStaticMarkup` string offers, read through a DOM (#236). |
 | `packages/web/src/__tests__/stored-threads.test.ts` | `#103` | #103 receipt, step 8: the dev proxy answered a dead API with Bun's whole HTML error page, and quoting it filled the rail. |
@@ -105,6 +108,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/thread-url.test.ts` | `#142` | The URL is the source of truth for the active thread (#142): what it names, and what it cannot. |
 | `packages/web/src/__tests__/threads-rail.test.tsx` | `#90` | #90 PR 3: the sessions rail and the page's thread list behind it. |
 | `packages/web/src/browser-logging.ts` | `#86`, `#132` | The browser's logging (#132 slice 3). |
+| `packages/web/src/command-palette.tsx` | `#31`, `#338`, `#343` | The `/` command palette (#338, slice 1): Claude Code's `/` button in VS Code, as a popup over the composer — a filter box, rows grouped by where the command came from, a description on each row. |
+| `packages/web/src/commands-connection.ts` | `#144`, `#338` | The `/` palette's one read (#338, slice 1): `GET /api/threads/:id/commands` — the slash commands the thread's session registers, grouped by the server into extension commands, prompt templates and skills, with a `source` that says whose list it is (`live`: this thread's session; `remembered`: the last built session's, because every session builds it from the same sources under the same configuration and this thread has no live session — never ran, or ran and idled out; the server cannot tell; `none`: no session has been built in this process). |
 | `packages/web/src/custom-event-router.ts` | `#103` | The one chunk that is neither an observation nor a frame: the follow ended without this page leaving it (#103 receipt) — the server closed, restarted, or dropped the connection. |
 | `packages/web/src/debug/__tests__/log-tail-connection.test.ts` | `#144` | The log tail client (#144 slice 2), driven over a scripted body: SSE text the test writes, read as the page reads it. |
 | `packages/web/src/debug/__tests__/log-tail-screen.test.tsx` | `#118` | ⚠ Loaded by a DYNAMIC import, and that is the one place this repo needs one: react-dom/client probes the DOM when its module evaluates (`"oninput" in document`), and bun evaluates node_modules imports before a local side-effect import can register happy-dom — statically imported it sits in an IE-era polyfill mode where `onChange` never fires. |
