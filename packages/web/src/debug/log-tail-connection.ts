@@ -19,7 +19,11 @@ import type { FetchLike } from '../browser-logging.ts'
  * RECONNECTING DOES NOT RE-READ THE DAY. Every frame carries the byte the next one continues
  * from, so a stream that ends — the dev proxy's idle timeout, a server restart, a sleeping
  * laptop — is resumed with `?from=<that byte>`, which the route answers with `records` rather
- * than a fresh `backlog`. A reader who was halfway down a trace keeps their place.
+ * than a fresh `backlog`. A reader who was halfway down a trace keeps their place. ⚠ WITHIN A
+ * DAY: the byte is a position in one file, so the resume token carries the frame's `day` and
+ * the route drops a `from` whose day is not the file's (PR #336 review) — a page left open
+ * across local midnight reconnects to a fresh `backlog` of the new day, never to a silent
+ * skip of its head.
  *
  * A REFUSAL IS NOT RETRIED. 400 (a parameter the route would not guess at) and 403 (an
  * untrusted origin) are answers about the QUESTION: asking again changes nothing, and a page
@@ -69,25 +73,37 @@ export interface LogTailFilter {
 export const DEFAULT_LOG_TAIL_FILTER: LogTailFilter = { level: 'info', thread: '', process: '', since: '' }
 
 /**
+ * Where a tail left off: the byte after the last complete record, and the day whose file that
+ * byte is a position in. Both travel to the route, which honours the byte only for that day.
+ */
+export interface LogTailResume {
+  readonly day: string
+  readonly offset: number
+}
+
+/**
  * The route's address for this question. A parameter at its default is LEFT OUT, so
  * `/api/logs/tail` is the unasked question and `/api/logs/tail?level=trace&thread=abc` is the
  * whole of what a reader changed.
  */
-export function logTailUrl(filter: LogTailFilter, from?: number): string {
+export function logTailUrl(filter: LogTailFilter, resume?: LogTailResume): string {
   const parameters = new URLSearchParams()
   if (filter.level !== DEFAULT_LOG_TAIL_FILTER.level) parameters.set('level', filter.level)
   if (filter.thread !== '') parameters.set('thread', filter.thread)
   if (filter.process !== '') parameters.set('process', filter.process)
   if (filter.since !== '') parameters.set('since', filter.since)
-  if (from !== undefined) parameters.set('from', String(from))
+  if (resume !== undefined) {
+    parameters.set('from', String(resume.offset))
+    parameters.set('day', resume.day)
+  }
   const query = parameters.toString()
   return query === '' ? LOG_TAIL_ROUTE : `${LOG_TAIL_ROUTE}?${query}`
 }
 
 export interface LogTailStreamOptions {
   readonly filter: LogTailFilter
-  /** The byte to continue from — a resumed view. Undefined asks for the day's head. */
-  readonly from?: number | undefined
+  /** Where to continue from — a resumed view. Undefined asks for the day's head. */
+  readonly from?: LogTailResume | undefined
   /** Test seam: the page's `fetch`. */
   readonly fetch?: FetchLike | undefined
   /** The page's own leaving: aborting it closes the socket and ends the loop. */
@@ -108,8 +124,8 @@ type TailOutcome =
 
 interface TailAttempt {
   readonly outcome: TailOutcome
-  /** The byte the next connection continues from, when a frame said so. */
-  readonly offset: number | undefined
+  /** Where the next connection continues from, when a frame said so. */
+  readonly resume: LogTailResume | undefined
   /** Whether any frame arrived: a connection that worked resets the backoff. */
   readonly delivered: boolean
 }
@@ -123,12 +139,12 @@ const pageFetch: FetchLike = (input: string, init?: RequestInit) => fetch(input,
  * which there is nothing left for this page to read.
  */
 export async function openLogTailStream(options: LogTailStreamOptions): Promise<void> {
-  let from = options.from
+  let resume = options.from
   let failures = 0
   while (!options.signal.aborted) {
-    const attempt = await readOneTail(options, logTailUrl(options.filter, from))
+    const attempt = await readOneTail(options, logTailUrl(options.filter, resume))
     if (attempt.outcome !== 'ended') return
-    if (attempt.offset !== undefined) from = attempt.offset
+    if (attempt.resume !== undefined) resume = attempt.resume
     failures = attempt.delivered ? 0 : failures + 1
     const step = Math.min(failures, RECONNECT_DELAYS_MS.length - 1)
     await sleep(
@@ -141,7 +157,7 @@ export async function openLogTailStream(options: LogTailStreamOptions): Promise<
 /** One connection: open it, deliver every frame it carries, and say how it ended. */
 async function readOneTail(options: LogTailStreamOptions, url: string): Promise<TailAttempt> {
   const request = options.fetch ?? pageFetch
-  let offset: number | undefined
+  let resume: LogTailResume | undefined
   let delivered = false
   try {
     const response = await request(url, { signal: options.signal, headers: { accept: 'text/event-stream' } })
@@ -150,25 +166,25 @@ async function readOneTail(options: LogTailStreamOptions, url: string): Promise<
       // named parameter for a 400, an origin for a 403 — and a reader needs the words.
       const reason = await response.text().catch(() => '')
       options.onError(`the log tail refused: ${response.status} ${reason}`.trimEnd())
-      return { outcome: response.status >= 500 ? 'ended' : 'refused', offset, delivered }
+      return { outcome: response.status >= 500 ? 'ended' : 'refused', resume, delivered }
     }
     if (response.body === null) {
       options.onError('the log tail answered with no body')
-      return { outcome: 'ended', offset, delivered }
+      return { outcome: 'ended', resume, delivered }
     }
     for await (const payload of readSseData(response.body, options.signal)) {
       const frame = parseFrame(payload, options.onError)
       if (frame === undefined) continue
-      offset = frame.offset
+      resume = { day: frame.day, offset: frame.offset }
       delivered = true
       options.onFrame(frame)
     }
   } catch (error) {
     // The caller's own abort rejects the read; that is this page leaving, not a failure.
-    if (options.signal.aborted) return { outcome: 'aborted', offset, delivered }
+    if (options.signal.aborted) return { outcome: 'aborted', resume, delivered }
     options.onError(`the log tail stopped: ${String(error)}`)
   }
-  return { outcome: options.signal.aborted ? 'aborted' : 'ended', offset, delivered }
+  return { outcome: options.signal.aborted ? 'aborted' : 'ended', resume, delivered }
 }
 
 /**

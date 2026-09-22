@@ -478,6 +478,27 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   // The day, derived (#144 slice 4): the whole file folded per request, never the tail's cap.
   const stats = createLogStatsRoute({ logsDir: options.logsDir })
 
+  /**
+   * The payload before the head (PR #336 review): the fold reads the file synchronously and
+   * can throw — EACCES on the directory, the file removed mid-read — and a `writeHead(200)`
+   * already committed would have made that throw an uncaught exception in the request
+   * listener with no way to say 500. A failed read IS a record's business, the one kind this
+   * surface does write: the failure, never the reader's presence.
+   */
+  function respondWithStats(response: ServerResponse): void {
+    let payload: string
+    try {
+      payload = JSON.stringify(stats())
+    } catch (error) {
+      log.error('the day could not be folded: {error}', { error })
+      response.writeHead(500, { 'Content-Type': 'text/plain' })
+      response.end('the day could not be read — see the server log')
+      return
+    }
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(payload)
+  }
+
   // ── The wire (#112): prompt / follow / dialog ────────────────────────────────────
   const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs }
 
@@ -774,10 +795,9 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       return true
     }
     if (request.method === 'GET' && url === '/api/logs/stats') {
-      // No log line here either (#144): the fold is a read, and a record per refresh would be
-      // the reader's own presence in the day it is summing.
-      response.writeHead(200, { 'Content-Type': 'application/json' })
-      response.end(JSON.stringify(stats()))
+      // No log line for the read itself (#144): a record per refresh would be the reader's
+      // own presence in the day it is summing. A read that FAILS is recorded.
+      respondWithStats(response)
       return true
     }
     if (request.method === 'POST' && url === '/api/logs') {

@@ -27,7 +27,7 @@ import { Button } from '../components/ui/button.tsx'
 import { Spinner } from '../components/ui/spinner.tsx'
 import { urlForThread } from '../thread-url.ts'
 import { LogRow, ROW_HEIGHT_PX, timeOfDay } from './log-row.tsx'
-import { DEFAULT_LOG_TAIL_FILTER, openLogTailStream } from './log-tail-connection.ts'
+import { DEFAULT_LOG_TAIL_FILTER, type LogTailResume, openLogTailStream } from './log-tail-connection.ts'
 import {
   applyLogTailFrame,
   describeRecordCount,
@@ -91,6 +91,8 @@ type TailsState =
   | { readonly kind: 'live'; readonly events: EnsoThreadEvents }
   /** 404: no live session. The timeline is the log alone. */
   | { readonly kind: 'none' }
+  /** The route could not be read — the alert says why. Not pending: nothing is being waited for. */
+  | { readonly kind: 'unread' }
 
 /** One answer of the events route, in the three ways it can go — a failure is words, never a throw. */
 type EventsOutcome = Exclude<TailsState, { kind: 'pending' }> | { readonly kind: 'failed'; readonly problem: string }
@@ -247,7 +249,13 @@ export function ThreadTimelineScreen({ threadId, fetch: pageFetch }: ThreadTimel
    * The byte the next connection continues from. A REF, not state: it changes on every frame
    * and nothing renders it, and as state it would re-open the connection it came from.
    */
-  const resumeFrom = useRef<number | undefined>(undefined)
+  const resumeFrom = useRef<LogTailResume | undefined>(undefined)
+  /**
+   * Whether the log connection has said its last word — a refusal it will not retry. Until
+   * then a page with no frame yet is waiting; after it, it is not (PR #336 review: a refused
+   * question used to spin forever beside the alert that refused it).
+   */
+  const [logSettled, setLogSettled] = useState(false)
   /**
    * Only the LATEST request's outcome may be applied: a refresh fired by a frame can overtake
    * the one the button fired, and the older answer must not land on top of the newer one.
@@ -262,6 +270,8 @@ export function ThreadTimelineScreen({ threadId, fetch: pageFetch }: ThreadTimel
     if (ticket !== latestRequest.current) return
     if (outcome.kind === 'failed') {
       setTailsProblem(outcome.problem)
+      // A failed read is an answer too: the tails are not pending, they are absent for now.
+      setTails((current: TailsState) => (current.kind === 'pending' ? { kind: 'unread' } : current))
       return
     }
     setTailsProblem(undefined)
@@ -277,17 +287,22 @@ export function ThreadTimelineScreen({ threadId, fetch: pageFetch }: ThreadTimel
 
   useEffect(() => {
     const controller = new AbortController()
+    setLogSettled(false)
     void openLogTailStream({
       filter: { level, thread: threadId, process: '', since: '' },
       from: resumeFrom.current,
       fetch: fetchImpl,
       signal: controller.signal,
       onFrame: (frame: EnsoLogTailFrame) => {
-        resumeFrom.current = frame.offset
+        resumeFrom.current = { day: frame.day, offset: frame.offset }
+        // A frame is the connection working: whatever the last alert said is over.
+        setLogProblem(undefined)
         setView((current: LogTailView) => applyLogTailFrame(current, frame))
         if (frame.lines.length > 0) void refreshEvents()
       },
       onError: setLogProblem,
+    }).then(() => {
+      if (!controller.signal.aborted) setLogSettled(true)
     })
     return () => controller.abort()
   }, [level, threadId, fetchImpl, refreshEvents])
@@ -334,7 +349,7 @@ export function ThreadTimelineScreen({ threadId, fetch: pageFetch }: ThreadTimel
   )
 
   return (
-    <Terminal className="h-dvh" isStreaming={!view.opened || tails.kind === 'pending'}>
+    <Terminal className="h-dvh" isStreaming={!(view.opened || logSettled) || tails.kind === 'pending'}>
       <TerminalHeader>
         <TerminalTitle>enso · thread</TerminalTitle>
         <div className="flex flex-wrap items-center gap-2">

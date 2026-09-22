@@ -170,14 +170,14 @@ function follow(query: Query, render: (line: EnsoLogLine) => string, file: strin
   // Poll from where the first read ended; one descriptor for the life of the process.
   let offset = statSync(file).size
   const descriptor = openSync(file, 'r')
-  const read = logChunkDecoder()
+  const decoder = logChunkDecoder()
   setInterval(() => {
     const size = statSync(file).size
     if (size <= offset) return
     const chunk = Buffer.alloc(size - offset)
     readSync(descriptor, chunk, 0, chunk.length, offset)
     offset = size
-    const lines = read(chunk)
+    const lines = decoder.decode(chunk)
     if (lines.length > 0) print(query, render, lines, 0)
   }, FOLLOW_POLL_MS)
 }

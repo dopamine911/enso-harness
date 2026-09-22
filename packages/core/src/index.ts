@@ -95,6 +95,7 @@ export {
   type EnsoLogFilter,
   type EnsoLogLevelName,
   EnsoLogTailFrame,
+  LOG_TAIL_MAX_RECORDS,
   logLineMatches,
   logLineMessageParts,
   logLineText,

@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from 'bun:test'
+import { afterAll, expect, spyOn, test } from 'bun:test'
 import type { EnsoLogLine, EnsoLogTailFrame, EnsoThreadEvent, EnsoThreadEvents } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
@@ -83,6 +83,8 @@ interface MountedTimeline {
   readonly eventsRequests: () => number
   readonly answer: EventsAnswer
   readonly send: (frame: EnsoLogTailFrame) => Promise<void>
+  /** Write anything at all into the open log connection — what the server would never send. */
+  readonly sendRaw: (text: string) => Promise<void>
   readonly unmount: () => Promise<void>
 }
 
@@ -121,6 +123,12 @@ async function mountTimeline(answer: EventsAnswer): Promise<MountedTimeline> {
         await tick()
       })
     },
+    sendRaw: async (text: string) => {
+      await flush(async () => {
+        open?.enqueue(encoder.encode(text))
+        await tick()
+      })
+    },
     unmount: async () => {
       await flush(async () => root.unmount())
       container.remove()
@@ -139,6 +147,18 @@ const backlogOf = (lines: EnsoLogLine[], matched = lines.length): EnsoLogTailFra
 
 const rowTexts = (container: HTMLElement): string[] =>
   [...container.querySelectorAll('[aria-label="thread timeline"] li')].map((row) => row.textContent ?? '')
+
+/** The header's spinner — on while either the tails or the log is still being waited for. */
+const spinner = (container: HTMLElement): Element | null => container.querySelector('[data-slot="spinner"]')
+
+/** The alerts on the page, by title: `the tails` for the events route, `the tail` for the log. */
+const alertTexts = (container: HTMLElement): Record<string, string> =>
+  Object.fromEntries(
+    [...container.querySelectorAll('[role="alert"]')].map((alert) => [
+      alert.querySelector('[data-slot="alert-title"]')?.textContent ?? '',
+      alert.querySelector('[data-slot="alert-description"]')?.textContent ?? '',
+    ]),
+  )
 
 const TAILS: EnsoThreadEvents = {
   threadId: THREAD_ID,
@@ -265,7 +285,42 @@ test('⚠ a failing events route is named in an alert, and so is a payload off i
   await page.unmount()
 })
 
+// ⚠ A FAILED READ IS AN ANSWER. The events route said something went wrong; the tails are not
+// pending any more, they are absent for now — so once the log has opened nothing is being
+// waited for and the spinner stops (PR #336 review: it spun forever over the alert). And it is
+// NOT "no live session": that sentence is the 404's, and the alert says what this was.
+test('⚠ a failed events read stops the spinner once the log has opened, and is not called "no live session"', async () => {
+  const page = await mountTimeline({ status: 500, body: 'the host is gone' })
+  await page.send(backlogOf([line('2026-09-22T10:00:00.200Z', 'a record')]))
+  await eventually(() => {
+    expect(rowTexts(page.container)).toHaveLength(1)
+    expect(alertTexts(page.container)).toEqual({ 'the tails': '500 the host is gone' })
+    expect(spinner(page.container)).toBeNull()
+  })
+  expect(page.container.textContent).not.toContain(NO_LIVE_SESSION)
+  expect(page.container.textContent).toContain(`thread ${THREAD_ID} · 1 rows · host 0 · wire 0 · log 1 records`)
+  await page.unmount()
+})
+
+// ⚠ AN ALERT THAT OUTLIVES ITS CAUSE IS A LIE: the frame that arrives after a log failure is
+// the connection working again, and the alert that named the failure comes down with it
+// (PR #336 review). The tails' own alert is a different question and is not touched.
+test('⚠ the alert a bad log frame raised comes down when the next frame lands', async () => {
+  const page = await mountTimeline({ status: 200, body: TAILS })
+  await page.sendRaw('data: {"type":"nope"}\n\n')
+  await eventually(() => expect(alertTexts(page.container)['the tail']).toContain('fails EnsoLogTailFrame'))
+  await page.send(backlogOf([line('2026-09-22T10:00:00.200Z', 'a record')]))
+  await eventually(() => {
+    expect(page.container.textContent).toContain('a record')
+    expect(alertTexts(page.container)).toEqual({})
+  })
+  await page.unmount()
+})
+
 // ⚠ THE RULE A LOG VIEWER LIVES OR DIES BY, kept here: a reader who has scrolled up is reading.
+// (PR #336 review: the test before this one read the header's words and never checked whether
+// the list moved. The view follows through `scrollTo` on the scroll element —
+// `@tanstack/virtual-core`'s `elementScroll` — so that call is what "moved" means here.)
 test('⚠ scrolling up stops the view following the newest row, and returning resumes it', async () => {
   const page = await mountTimeline({ status: 200, body: TAILS })
   await page.send(backlogOf([line('2026-09-22T10:00:00.200Z', 'an older record')]))
@@ -281,16 +336,37 @@ test('⚠ scrolling up stops the view following the newest row, and returning re
       scrollTop = next
     },
   })
+  const follow = spyOn(scroller, 'scrollTo')
   await flush(async () => {
     scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
     await tick()
   })
   await eventually(() => expect(page.container.textContent).toContain('scroll to the bottom to follow again'))
+
+  // A record lands under a reader who has scrolled up: the list does NOT move.
+  await page.send({
+    type: 'records',
+    day: '2026-09-22',
+    offset: 8192,
+    lines: [line('2026-09-22T10:00:00.900Z', 'landed while reading')],
+    matched: 1,
+    malformed: 0,
+  })
+  await eventually(() => expect(page.container.textContent).toContain('landed while reading'))
+  await flush(tick)
+  expect(follow).not.toHaveBeenCalled()
+  expect(scrollTop).toBe(0)
+  expect(page.container.textContent).toContain('scroll to the bottom to follow again')
+
+  // Back at the bottom: the view follows the newest row again, and says so.
   scrollTop = 2000
   await flush(async () => {
     scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
     await tick()
   })
-  await eventually(() => expect(page.container.textContent).not.toContain('scroll to the bottom to follow again'))
+  await eventually(() => {
+    expect(page.container.textContent).not.toContain('scroll to the bottom to follow again')
+    expect(follow).toHaveBeenCalled()
+  })
   await page.unmount()
 })

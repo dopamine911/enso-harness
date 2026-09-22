@@ -304,10 +304,18 @@ function foldUsage(fold: Fold, properties: Properties): void {
   fold.models.set(model, spend)
 }
 
-/** A tool's call or result, joined by `toolCallId`. */
+/**
+ * A tool's call or result, joined by `toolCallId`.
+ *
+ * The CALL names the bucket. A result is joined to its call by id and counted under the name
+ * the call carried; only a result with no call in sight falls back to its own name, and to
+ * `(unnamed)` when it has none — never a results row beside a calls row for the same tool
+ * because the two records spelled the name differently (PR #336 review).
+ */
 function foldTool(fold: Fold, kind: 'tool-call' | 'tool-result', properties: Properties, instant: number): void {
-  const toolName = stringOf(properties.toolName) ?? '(unnamed)'
   const toolCallId = stringOf(properties.toolCallId)
+  const call = kind === 'tool-result' && toolCallId !== undefined ? fold.openCalls.get(toolCallId) : undefined
+  const toolName = call?.toolName ?? stringOf(properties.toolName) ?? '(unnamed)'
   let tool = fold.tools.get(toolName)
   if (tool === undefined) {
     tool = { calls: 0, results: 0, errors: 0, durations: [] }
@@ -323,9 +331,7 @@ function foldTool(fold: Fold, kind: 'tool-call' | 'tool-result', properties: Pro
   if (properties.complete === false) return
   tool.results += 1
   if (properties.isError === true) tool.errors += 1
-  if (toolCallId === undefined) return
-  const call = fold.openCalls.get(toolCallId)
-  if (call === undefined) return
+  if (call === undefined || toolCallId === undefined) return
   fold.openCalls.delete(toolCallId)
   const duration = instant - call.at
   if (!Number.isNaN(duration) && duration >= 0) tool.durations.push(duration)

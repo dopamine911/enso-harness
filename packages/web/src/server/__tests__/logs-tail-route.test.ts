@@ -249,6 +249,41 @@ test('a request from an untrusted origin is refused before the tail opens', asyn
   expect(rebound.status).toBe(403)
 })
 
+// ⚠ A resume offset is a byte of ONE file (PR #336 review). Across local midnight the page
+// still holds yesterday's byte; handed to today's file it skipped the head silently once today
+// outgrew it. `day` says which file the byte belongs to, and a mismatch drops it.
+test('⚠ a from that belongs to another day is dropped; one that names today, or no day, is kept', () => {
+  expect(parse('from=512&day=2026-09-22')).toMatchObject({ from: 512 })
+  expect(parse('from=512&day=2026-09-21')).toMatchObject({ from: undefined })
+  expect(parse('from=512')).toMatchObject({ from: 512 })
+})
+
+// ⚠ `constructor` and `__proto__` are not levels, and a plain object literal said otherwise
+// (PR #336 review): the lookup answered `Object` and `Object.prototype`, the rank became a
+// non-number, every comparison was false, and the whole `trace` day streamed. Refused now.
+test('⚠ a level that is a prototype property is refused like any other non-level', () => {
+  expect(parse('level=constructor')).toMatchObject({ reason: expect.stringContaining('level must be one of') })
+  expect(parse('level=__proto__')).toMatchObject({ reason: expect.stringContaining('level must be one of') })
+  expect(parse('level=toString')).toMatchObject({ reason: expect.stringContaining('level must be one of') })
+})
+
+// ⚠ A step that throws — EACCES on the directory, EISDIR under the name — used to escape the
+// timer with nothing above it (PR #336 review). It ends THIS stream, the failure is a record,
+// and the server answers the next request.
+test('⚠ a read that fails ends the stream and is recorded; the server stays up', async () => {
+  const { url, logsDir } = await startOverLogs()
+  // A directory under the day's name: `stat` succeeds, `read` throws EISDIR.
+  mkdirSync(join(logsDir, ensoLogFilename(new Date())))
+  const controller = new AbortController()
+  openTails.push(controller)
+  const response = await fetch(`${url}/api/logs/tail`, { signal: controller.signal })
+  expect(response.status).toBe(200)
+  // The stream ends on its own: the body reads to completion without the test closing it.
+  await response.text()
+  expect(logs.records.some((record) => String(record.rawMessage).includes('could not read the file'))).toBe(true)
+  expect((await fetch(`${url}/api/about`)).status).toBe(200)
+})
+
 // ── the day's stats ───────────────────────────────────────────────────────────────────────
 
 // ⚠ THE WHOLE DAY, and nothing of the reader's in it (#144 slice 4). The tail says "the last

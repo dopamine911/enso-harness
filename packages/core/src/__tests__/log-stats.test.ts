@@ -253,3 +253,22 @@ test('⚠ a half-seen run has no span rather than a negative or NaN one', () => 
   ])
   expect(Check(EnsoDayStats, stats)).toBe(true)
 })
+
+// The call names the bucket (PR #336 review): a result that omits `toolName` — or spells it
+// differently — joins its call by id and lands under the call's name, never in an `(unnamed)`
+// row of results beside a named row of calls.
+test('a result without a tool name is counted under the name its call carried', () => {
+  const lines = [
+    observation(at(1), { threadId: THREAD, generation: 1, kind: 'tool-call', toolCallId: 'c', toolName: 'read' }),
+    observation(at(1, 300), { threadId: THREAD, generation: 1, kind: 'tool-result', toolCallId: 'c', complete: true }),
+  ]
+  expect(dayStats('2026-09-22', lines, 0).tools).toEqual([
+    {
+      toolName: 'read',
+      calls: 1,
+      results: 1,
+      errors: 0,
+      durations: { count: 1, minMs: 300, maxMs: 300, meanMs: 300, totalMs: 300 },
+    },
+  ])
+})

@@ -76,16 +76,91 @@ test('the message is the template with its values in place; a placeholder with n
  * line would print a fragment as an unparseable record.
  */
 test('⚠ a character and a line split across polls each survive the boundary', () => {
-  const read = logChunkDecoder()
+  const decoder = logChunkDecoder()
   const rocket = Buffer.from('🚀', 'utf8')
   expect(rocket.length).toBe(4)
 
   // A character cut in half: nothing is printable yet, and no replacement char is invented.
-  expect(read(Buffer.concat([Buffer.from('launch '), rocket.subarray(0, 2)]))).toBe('')
+  expect(decoder.decode(Buffer.concat([Buffer.from('launch '), rocket.subarray(0, 2)]))).toBe('')
   // The rest of the character arrives with the rest of the line.
-  expect(read(Buffer.concat([rocket.subarray(2), Buffer.from(' done\ntail')]))).toBe('launch 🚀 done')
+  expect(decoder.decode(Buffer.concat([rocket.subarray(2), Buffer.from(' done\ntail')]))).toBe('launch 🚀 done')
   // …and the fragment after the last newline waits rather than printing half a record.
-  expect(read(Buffer.from(' end\n'))).toBe('tail end')
+  expect(decoder.decode(Buffer.from(' end\n'))).toBe('tail end')
+  // …and the decoder says how many bytes it is holding, so a reader can name the resume point.
+  expect(decoder.carried()).toBe(0)
+  decoder.decode(Buffer.from('half a rec'))
+  expect(decoder.carried()).toBe('half a rec'.length)
+})
+
+// ⚠ THE RESUME TOKEN (PR #336 review). A poll can end mid-record; the tail keeps the fragment
+// and the next poll completes it. But the OFFSET it publishes is what a reconnecting page hands
+// back as `?from=`, and a new tail has no fragment: an offset past the last newline puts it
+// mid-record, the record's tail parses as malformed, and the record is gone.
+test('⚠ a step that ended mid-record publishes the offset of the last complete line, so a resume loses nothing', () => {
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-tail-resume-'))
+  const file = join(logsDir, ensoLogFilename(DAY))
+  const whole = JSON.stringify(line({ message: 'complete' }))
+  const split = JSON.stringify(line({ message: 'split across polls' }))
+  writeFileSync(file, `${whole}\n${split.slice(0, 20)}`)
+  const { step, close } = openLogTail({ logsDir, filter: EVERYTHING, now: () => DAY })
+  const first = step()
+  expect(first.lines.map((record) => record.message)).toEqual(['complete'])
+  expect(first.malformed).toBe(0)
+  expect(first.offset).toBe(Buffer.byteLength(`${whole}\n`))
+
+  writeFileSync(file, `${split.slice(20)}\n`, { flag: 'a' })
+  // The same tail completes the record from its carry…
+  expect(step().lines.map((record) => record.message)).toEqual(['split across polls'])
+  close()
+  // …and a NEW tail resumed at the published offset reads the whole record, not its tail.
+  const resumed = openLogTail({ logsDir, filter: EVERYTHING, from: first.offset, now: () => DAY }).step()
+  expect(resumed.malformed).toBe(0)
+  expect(resumed.lines.map((record) => record.message)).toEqual(['split across polls'])
+  rmSync(logsDir, { recursive: true })
+})
+
+// ⚠ `stat` is by path and `read` is by descriptor (PR #336 review). Unlink-and-recreate under
+// the same name — a rotation, an editor's save-by-rename — gives a new inode; once the new file
+// grew past the old offset, `size < offset` never fired and the old inode answered zero bytes
+// forever. The inode is the tell.
+test('⚠ a file replaced under the same name by a LONGER one restarts the tail instead of wedging it', () => {
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-tail-replaced-'))
+  const file = join(logsDir, ensoLogFilename(DAY))
+  writeFileSync(file, `${JSON.stringify(line({ message: 'old' }))}\n`)
+  const { step, close } = openLogTail({ logsDir, filter: EVERYTHING, now: () => DAY })
+  expect(step().lines.map((record) => record.message)).toEqual(['old'])
+
+  rmSync(file)
+  writeFileSync(
+    file,
+    [1, 2, 3]
+      .map((ordinal) => JSON.stringify(line({ message: `new ${ordinal}, and longer than before` })))
+      .join('\n')
+      .concat('\n'),
+  )
+  const replaced = step()
+  expect(replaced.type).toBe('backlog')
+  expect(replaced.lines.map((record) => record.message)).toHaveLength(3)
+  close()
+  rmSync(logsDir, { recursive: true })
+})
+
+// The removal branch dropped the offset but kept the carry: a partial line read just before
+// the file vanished was prepended to the next file's first record (PR #336 review).
+test('a file removed with a partial line in hand does not prepend that fragment to the next file', () => {
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-tail-removed-'))
+  const file = join(logsDir, ensoLogFilename(DAY))
+  writeFileSync(file, `${JSON.stringify(line({ message: 'gone' }))}\n{"half":`)
+  const { step, close } = openLogTail({ logsDir, filter: EVERYTHING, now: () => DAY })
+  step()
+  rmSync(file)
+  expect(step()).toMatchObject({ type: 'backlog', lines: [], offset: 0 })
+  writeFileSync(file, `${JSON.stringify(line({ message: 'fresh' }))}\n`)
+  const fresh = step()
+  expect(fresh.malformed).toBe(0)
+  expect(fresh.lines.map((record) => record.message)).toEqual(['fresh'])
+  close()
+  rmSync(logsDir, { recursive: true })
 })
 
 // ── the tail over the day's file ──────────────────────────────────────────────────────────

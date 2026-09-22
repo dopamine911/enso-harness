@@ -179,7 +179,8 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
   },
   'GET /api/logs/tail*': {
     handler: 'followLogTail',
-    input: 'query: optional `level`, `thread` id/prefix, `process`, `since` duration, `from` byte offset',
+    input:
+      'query: optional `level`, `thread` id/prefix, `process`, `since` duration, `from` byte offset with the `day` it belongs to',
     success: '200 SSE stream of `EnsoLogTailFrame`',
     errors: '400 unknown level, malformed thread filter, malformed since or from; 403 untrusted origin',
     routeClass: 'observation',

@@ -3,10 +3,12 @@ import {
   ENSO_LOG_LEVEL_RANK,
   type EnsoLogFilter,
   type EnsoLogTailFrame,
+  ensoLogger,
   isEnsoThreadId,
+  LOG_TAIL_MAX_RECORDS,
   parseLogSince,
 } from '@enso/core'
-import { LOG_TAIL_MAX_RECORDS, openLogTail } from '@enso/core/log-process'
+import { type EnsoLogTailStep, ensoLogFilename, openLogTail } from '@enso/core/log-process'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
 
 /**
@@ -30,6 +32,8 @@ import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
  * since #132 without anyone noticing latency. One `statSync` per tick per connection, on a
  * loopback server with a handful of tabs, is not the cost worth a platform matrix.
  */
+
+const log = ensoLogger('server', 'logs')
 
 /** How often an open tail looks for new bytes. The CLI's `--follow` interval, for the same reason. */
 const LOG_TAIL_POLL_MS = 250
@@ -91,11 +95,20 @@ function readNotBefore(query: URLSearchParams, now: () => Date): number | Refuse
   return now().getTime() - window
 }
 
-function readFrom(query: URLSearchParams): number | undefined | Refused {
+/**
+ * `from` is a byte of ONE file, and `day` says which (PR #336 review). A page left open across
+ * local midnight that then reconnected handed today's file yesterday's final offset, and
+ * unless today's file was still shorter than that, its head was skipped silently as
+ * `records`. A `day` that is not the file's day makes `from` mean nothing; a `from` with no
+ * `day` is honoured as given, for a caller that knows what it is doing.
+ */
+function readFrom(query: URLSearchParams, today: string): number | undefined | Refused {
   const from = given(query, 'from')
   if (from === undefined) return undefined
   const offset = Number(from)
-  return Number.isSafeInteger(offset) && offset >= 0 ? offset : { reason: 'from wants a byte offset' }
+  if (!Number.isSafeInteger(offset) || offset < 0) return { reason: 'from wants a byte offset' }
+  const day = given(query, 'day')
+  return day === undefined || day === today ? offset : undefined
 }
 
 function isRefused(value: unknown): value is Refused {
@@ -118,7 +131,7 @@ export function parseLogTailQuery(query: URLSearchParams, now: () => Date): LogT
   if (isRefused(thread)) return thread
   const notBefore = readNotBefore(query, now)
   if (isRefused(notBefore)) return notBefore
-  const from = readFrom(query)
+  const from = readFrom(query, ensoLogFilename(now()).slice('enso-'.length, -'.jsonl'.length))
   if (isRefused(from)) return from
   return { filter: { levelRank, thread, process: given(query, 'process'), notBefore }, from }
 }
@@ -147,10 +160,31 @@ export function followLogTail(deps: LogTailRouteDeps, url: string, response: Ser
   })
   response.writeHead(200, SSE_HEADERS)
   const stopKeepalive = startSseKeepalive(response, deps.sseKeepaliveMs)
+  // ⚠ The close hook is attached BEFORE the first pump (PR #336 review): a step can throw
+  // (EACCES on the directory, EISDIR under the name), and a throw from the priming pump
+  // escaped past `writeHead(200)` with the keepalive timer and the descriptor leaked for the
+  // life of the process — the hook that would have released them was registered two lines later.
+  let timer: ReturnType<typeof setInterval> | undefined
+  response.once('close', () => {
+    clearInterval(timer)
+    stopKeepalive()
+    tail.close()
+  })
   let announcedDay = ''
   const pump = (): void => {
     if (response.destroyed || response.writableEnded) return
-    const found = tail.step()
+    let found: EnsoLogTailStep
+    try {
+      found = tail.step()
+    } catch (error) {
+      // A read that failed ends THIS stream, not the server: the page says the tail stopped
+      // and reconnects with backoff. The failure IS recorded — the one record this route
+      // writes, because a broken log directory is the file's own business and never the
+      // reader's presence. `end` fires `close`, which releases the rest.
+      log.error('the tail could not read the file: {error}', { error })
+      response.end()
+      return
+    }
     const worthSending = found.lines.length > 0 || found.malformed > 0 || found.day !== announcedDay
     if (!worthSending) return
     announcedDay = found.day
@@ -167,11 +201,7 @@ export function followLogTail(deps: LogTailRouteDeps, url: string, response: Ser
   // The day so far, before the first tick: a page that opens with nothing on it while a
   // quarter second passes reads as a broken stream.
   pump()
-  const timer = setInterval(pump, deps.pollMs ?? LOG_TAIL_POLL_MS)
+  if (response.writableEnded) return
+  timer = setInterval(pump, deps.pollMs ?? LOG_TAIL_POLL_MS)
   timer.unref?.()
-  response.once('close', () => {
-    clearInterval(timer)
-    stopKeepalive()
-    tail.close()
-  })
 }

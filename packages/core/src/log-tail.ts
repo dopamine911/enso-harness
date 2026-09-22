@@ -34,17 +34,26 @@ export type EnsoLogLevelName = (typeof ENSO_LOG_LEVEL_NAMES)[number]
  * A tier by NAME → its rank. `warn` is here as well as `warning` because that is the
  * spelling on disk (LogTape writes `WARN`), and a person who types it means the tier.
  *
+ * ⚠ NO PROTOTYPE, deliberately (PR #336 review). This table is indexed by a string a URL
+ * supplied — `?level=` — and a plain object literal answers `constructor` with `Object` and
+ * `__proto__` with `Object.prototype`. Neither is nullish, so a `??` refusal never fired, the
+ * rank became a non-number, every comparison against it was `false`, and the whole `trace` day
+ * streamed to whoever asked for `level=constructor`. With no prototype, a name that is not a
+ * tier is `undefined` and nothing else, here and at the CLI's `--level`.
+ *
  * @group Logging
  */
-export const ENSO_LOG_LEVEL_RANK: Readonly<Record<string, number>> = {
-  trace: 0,
-  debug: 1,
-  info: 2,
-  warning: 3,
-  warn: 3,
-  error: 4,
-  fatal: 5,
-}
+export const ENSO_LOG_LEVEL_RANK: Readonly<Record<string, number>> = Object.freeze(
+  Object.assign(Object.create(null) as Record<string, number>, {
+    trace: 0,
+    debug: 1,
+    info: 2,
+    warning: 3,
+    warn: 3,
+    error: 4,
+    fatal: 5,
+  }),
+)
 
 /** The same ranks against the upper-cased level a line carries — no round trip through a record. */
 const RANK_OF_LINE: Readonly<Record<EnsoLogLine['level'], number>> = {
@@ -112,6 +121,20 @@ export function logLineMatches(filter: EnsoLogFilter, line: EnsoLogLine): boolea
   return true
 }
 
+/**
+ * The most records one tail step hands back — the newest.
+ *
+ * A `trace` day is tens of thousands of lines and a browser tab does not want them; the cap
+ * is the bundle's honesty in a different place, with `matched` beside it so "the last 2000
+ * of 31417" never reads as the whole day. Lower than `BUNDLE_MAX_RECORDS` (5000) because a
+ * bundle is read once in an editor and this is re-rendered on every frame. Here, node-free,
+ * because the BROWSER keeps the same bound (PR #336 review): the server caps each frame, and
+ * a page that appended every `records` frame forever grew without limit on a `trace` day.
+ *
+ * @group Logging
+ */
+export const LOG_TAIL_MAX_RECORDS = 2000
+
 const PLACEHOLDER = /\{([^{}]+)\}/g
 
 /**
@@ -167,8 +190,10 @@ export function logLineText(line: EnsoLogLine): string {
  * the lines that were not records at all — the file is the honest place, and a count is
  * enough to send a reader to it.
  *
- * `offset` is the byte the next frame continues from: a client that reconnects passes it as
- * `?from=` and is not re-sent the day.
+ * `offset` is the byte after the last COMPLETE record this tail has read — never the byte
+ * after the last read, which may sit mid-record in a carry only this tail holds. A client
+ * that reconnects passes it as `?from=` with the frame's `day` beside it, and is not re-sent
+ * the day; a `from` handed to another day's file is dropped by the route.
  *
  * @group Logging
  */

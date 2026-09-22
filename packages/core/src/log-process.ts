@@ -49,9 +49,9 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { closeSync, existsSync, fchmodSync, fstatSync, mkdirSync, openSync, readSync, statSync } from 'node:fs'
+import { closeSync, fchmodSync, fstatSync, mkdirSync, openSync, readSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { StringDecoder } from 'node:string_decoder'
+
 import { getTimeRotatingFileSink } from '@logtape/file'
 import {
   compareLogLevel,
@@ -72,7 +72,7 @@ import { redactByField } from '@logtape/redaction'
 import { Check } from 'typebox/value'
 import { ENSO_LOG_ROOT, ENSO_REDACT_FIELDS, ENSO_REDACTED, ENSO_REDACTED_VALUE, EnsoLogLine } from './log.ts'
 import { ENSO_LOG_EVENTS } from './log-stats.ts'
-import { type EnsoLogFilter, logLineMatches, logLineMessageParts } from './log-tail.ts'
+import { type EnsoLogFilter, LOG_TAIL_MAX_RECORDS, logLineMatches, logLineMessageParts } from './log-tail.ts'
 import { ensoLogsDir } from './paths.ts'
 
 /**
@@ -601,41 +601,45 @@ export function ensoLogLineRenderer(
 // ── Following the file (#144 slice 2: `--follow`, and the tail route) ─────────────────────
 
 /**
- * The most records one tail step hands back — the newest.
- *
- * A `trace` day is tens of thousands of lines and a browser tab does not want them; the cap
- * is the bundle's honesty in a different place, with `matched` beside it so "the last 2000
- * of 31417" never reads as the whole day. Lower than `BUNDLE_MAX_RECORDS` (5000) because a
- * bundle is read once in an editor and this is re-rendered on every frame.
- *
- * @group Logging
- */
-export const LOG_TAIL_MAX_RECORDS = 2000
-
-/**
  * The decoder a poll-based reader needs. Two different things straddle a poll boundary and
- * each needs its own carry, which is why this is one function and not two lines inside the
- * timer: BYTES — a multibyte character cut in half by the byte range decodes to U+FFFD unless
- * the decoder holds the incomplete sequence for the next chunk (a 🚀 split across a poll
- * printed `launch ??? done`) — and LINES, where a partial last record waits for its newline.
+ * both are the same carry: BYTES — a multibyte character cut in half by the byte range
+ * decodes to U+FFFD unless the incomplete sequence waits for the next chunk (a 🚀 split
+ * across a poll printed `launch ??? done`) — and LINES, where a partial last record waits for
+ * its newline.
  *
- * Returns the complete lines in this chunk, newline-separated and without a trailing one, or
- * the empty string when the chunk ended mid-line.
+ * ⚠ The carry is BYTES, not text, and the split is at the last `0x0A` (PR #336 review). A
+ * newline never occurs inside a multibyte UTF-8 sequence, so cutting at one never cuts a
+ * character — which is why one carry serves both cases — and, more to the point, the carry's
+ * LENGTH is then a byte count a reader can subtract from its file offset. The tail publishes
+ * `offset − carried()` as the byte a reconnect resumes from; publishing the raw read offset
+ * put a reconnecting page mid-record, and the record's tail parsed as malformed and was lost.
+ *
+ * `decode` returns the complete lines in this chunk, newline-separated and without a trailing
+ * one, or the empty string when nothing completed.
  *
  * @group Logging
  */
-export function logChunkDecoder(): (chunk: Buffer) => string {
-  const decoder = new StringDecoder('utf8')
-  let carry = ''
-  return (chunk: Buffer): string => {
-    const text = carry + decoder.write(chunk)
-    const lastNewline = text.lastIndexOf('\n')
-    if (lastNewline === -1) {
-      carry = text
-      return ''
-    }
-    carry = text.slice(lastNewline + 1)
-    return text.slice(0, lastNewline)
+export interface LogChunkDecoder {
+  readonly decode: (chunk: Buffer) => string
+  /** Bytes held back — the partial line after the last newline seen. */
+  readonly carried: () => number
+}
+
+/** @group Logging */
+export function logChunkDecoder(): LogChunkDecoder {
+  let carry: Buffer = Buffer.alloc(0)
+  return {
+    decode: (chunk: Buffer): string => {
+      const pending = carry.length === 0 ? chunk : Buffer.concat([carry, chunk])
+      const lastNewline = pending.lastIndexOf(0x0a)
+      if (lastNewline === -1) {
+        carry = pending
+        return ''
+      }
+      carry = pending.subarray(lastNewline + 1)
+      return pending.subarray(0, lastNewline).toString('utf8')
+    },
+    carried: (): number => carry.length,
   }
 }
 
@@ -679,9 +683,16 @@ export interface EnsoLogTail {
  * last call, filters it, and caps it.
  *
  * ⚠ `type` is not a flag anyone sets: A STEP THAT BEGAN AT BYTE 0 IS THE FILE'S WHOLE VIEW,
- * and any other step is an append. That one rule covers the three cases a long-lived tail
- * has — the first step with no `from`, the local-midnight rotation onto a new filename, and
- * a file truncated or replaced under the descriptor — without a second concept.
+ * and any other step is an append. That one rule covers every case a long-lived tail has —
+ * the first step with no `from`, the local-midnight rotation onto a new filename, a file
+ * truncated in place, and a file REPLACED under the same name — without a second concept.
+ * The last of those needs one check the rule alone did not give (PR #336 review): `stat` is
+ * by path and `read` is by descriptor, so an unlink-and-recreate that grew past the old offset
+ * read zero bytes from the old inode forever. The inode is compared on every step, and a
+ * change is a restart from the head.
+ *
+ * ⚠ ONE `stat`, never `exists` then `stat`: two calls are a window, and a file removed inside
+ * it (the 14-day prune, an `rm`) made the second throw from a timer with nothing above it.
  *
  * ⚠ The CLI's `--follow` starts at the END of the file (it has already printed the day) and
  * this starts at its HEAD, because a page that opens with nothing on it is not a log viewer.
@@ -707,49 +718,55 @@ export function openLogTail(options: {
   const now = options.now ?? ((): Date => new Date())
   let filename = ''
   let descriptor: number | undefined
+  let inode: number | undefined
   let offset = options.from ?? 0
-  let decode = logChunkDecoder()
+  let decoder = logChunkDecoder()
   const close = (): void => {
     if (descriptor !== undefined) closeSync(descriptor)
     descriptor = undefined
+    inode = undefined
+  }
+  /** Back to the head of whatever file is there next: descriptor, offset and carry all dropped. */
+  const restart = (): void => {
+    close()
+    offset = 0
+    decoder = logChunkDecoder()
   }
   const step = (): EnsoLogTailStep => {
     const today = ensoLogFilename(now())
     if (today !== filename) {
-      close()
       // The first call keeps the caller's `from`; a rotation starts the new day at its head.
-      if (filename !== '') offset = 0
+      if (filename === '') close()
+      else restart()
       filename = today
-      decode = logChunkDecoder()
     }
     const day = filename.slice('enso-'.length, -'.jsonl'.length)
     const file = join(options.logsDir, filename)
-    if (!existsSync(file)) {
+    const stat = statSync(file, { throwIfNoEntry: false })
+    if (stat === undefined) {
       // No process has written today yet, or the file was removed under us. Either way the
-      // next step re-opens from the head.
-      close()
-      offset = 0
+      // next step re-opens from the head — with an empty carry, so a partial line read just
+      // before the removal is not prepended to the new file's first record.
+      restart()
       return { type: 'backlog', day, offset: 0, lines: [], matched: 0, malformed: 0 }
     }
-    const size = statSync(file).size
-    if (size < offset) {
-      // Truncated or replaced: the offset names a byte that no longer exists.
-      close()
-      offset = 0
-      decode = logChunkDecoder()
-    }
+    // Truncated in place, or replaced by a different file under the same name: the offset
+    // names a byte the descriptor cannot read, or the descriptor is the old inode.
+    if (stat.size < offset || (inode !== undefined && inode !== stat.ino)) restart()
     const startedAt = offset
     let text = ''
-    if (size > offset) {
-      descriptor ??= openSync(file, 'r')
-      const chunk = Buffer.alloc(size - offset)
+    if (stat.size > offset) {
+      if (descriptor === undefined) {
+        descriptor = openSync(file, 'r')
+        inode = fstatSync(descriptor).ino
+      }
+      const chunk = Buffer.alloc(stat.size - offset)
       // `stat` then `read` are two calls: a file truncated between them answers fewer bytes
       // than the size said, without an error. Advance by what was READ, never by what was
-      // promised, and decode only that — the next step's `size < offset` check then re-opens
-      // from the head rather than this one decoding a tail of zeros as a record (PR #336 review).
+      // promised, and decode only that.
       const read = readSync(descriptor, chunk, 0, chunk.length, offset)
       offset += read
-      text = decode(chunk.subarray(0, read))
+      text = decoder.decode(chunk.subarray(0, read))
     }
     const lines: EnsoLogLine[] = []
     let matched = 0
@@ -768,7 +785,9 @@ export function openLogTail(options: {
     return {
       type: startedAt === 0 ? 'backlog' : 'records',
       day,
-      offset,
+      // The byte a reconnect resumes from: after the last COMPLETE line, not after the last
+      // read. The carry is this tail's own state and a new tail does not have it.
+      offset: offset - decoder.carried(),
       lines: lines.slice(-maxRecords),
       matched,
       malformed,

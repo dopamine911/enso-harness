@@ -19,13 +19,19 @@ export type ThreadUrl =
   /** No thread named — a fresh page — or one that cannot be a thread id, with why. */
   | { readonly kind: 'fresh'; readonly notice?: string }
 
-export function readThreadUrl(search: string): ThreadUrl {
+/**
+ * What the page did INSTEAD when the id was not one — the notice's second half. The chat page
+ * opens a new thread; the debug page falls back to the day's tail, and a notice that said it
+ * "opened a new thread" there told the reader the page did something it cannot do (PR #336
+ * review). The page that knows what it fell back to says so.
+ */
+export function readThreadUrl(search: string, fellBackTo = 'opened a new thread instead'): ThreadUrl {
   const named: unknown = new URLSearchParams(search).get(THREAD_QUERY_PARAMETER)
   if (named === null || named === '') return { kind: 'fresh' }
   if (isEnsoThreadId(named)) return { kind: 'resume', threadId: named }
   return {
     kind: 'fresh',
-    notice: `?thread=${String(named).slice(0, 40)} is not a thread id — opened a new thread instead`,
+    notice: `?thread=${String(named).slice(0, 40)} is not a thread id — ${fellBackTo}`,
   }
 }
 

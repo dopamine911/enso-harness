@@ -208,6 +208,26 @@ const rowTexts = (container: HTMLElement, caption: string): string[] =>
     .filter((table) => table.querySelector('caption')?.textContent === caption)
     .flatMap((table) => [...table.querySelectorAll('tbody tr')].map((row) => row.textContent ?? ''))
 
+/** One table's body, cell by cell — for a claim about WHICH column says what. */
+const rowCells = (container: HTMLElement, caption: string): string[][] =>
+  [...container.querySelectorAll('table')]
+    .filter((table) => table.querySelector('caption')?.textContent === caption)
+    .flatMap((table) =>
+      [...table.querySelectorAll('tbody tr')].map((row) =>
+        [...row.querySelectorAll('td')].map((cell) => cell.textContent ?? ''),
+      ),
+    )
+
+/** The one destructive alert this page raises, as its title and its words. */
+const alertShown = (container: HTMLElement): { title: string; description: string } | undefined => {
+  const alert = container.querySelector('[role="alert"]')
+  if (alert === null) return undefined
+  return {
+    title: alert.querySelector('[data-slot="alert-title"]')?.textContent ?? '',
+    description: alert.querySelector('[data-slot="alert-description"]')?.textContent ?? '',
+  }
+}
+
 test('the totals line says the day, its counts and its cost, and the summaries read in words', async () => {
   const page = await mountStats(healthy())
   await eventually(() => {
@@ -286,15 +306,15 @@ test('a run without a released instant shows — for the spans it does not have'
   await page.unmount()
 })
 
-test('a tool never answered shows — for its durations, not 0', async () => {
+// A summary of nothing is said as nothing: `0` in a min/mean/max/total column would be a claim
+// about durations that were never measured, and a tool that WAS timed shows its numbers.
+test('a tool never answered shows — for its durations, not 0; a timed tool shows its numbers', async () => {
   const page = await mountStats(healthy())
   await eventually(() => {
-    const rows = rowTexts(page.container, 'tools')
-    expect(rows[0]).toContain('read')
-    expect(rows[0]).toContain('1,515')
-    expect(rows[1]).toContain('bash')
-    expect(rows[1]).toContain('—')
-    expect(rows[1]).not.toContain('0 ms')
+    const [read, bash] = rowCells(page.container, 'tools')
+    // tool, calls, results, errors, then min / mean / max / total ms.
+    expect(read).toEqual(['read', '3', '3', '0', '5', '505', '1,500', '1,515'])
+    expect(bash).toEqual(['bash', '1', '0', '0', '—', '—', '—', '—'])
   })
   await page.unmount()
 })
@@ -331,9 +351,10 @@ test('⚠ a failing stats route is named in an alert with the server’s own wor
   answers['/api/logs/stats'] = { status: 500, body: 'the fold fell over' }
   const page = await mountStats(answers)
   await eventually(() => {
-    const shown = page.container.textContent ?? ''
-    expect(shown).toContain('the day')
-    expect(shown).toContain('/api/logs/stats: 500 the fold fell over')
+    expect(alertShown(page.container)).toEqual({
+      title: 'the day',
+      description: '/api/logs/stats: 500 the fold fell over',
+    })
   })
   await page.unmount()
 })

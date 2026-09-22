@@ -1,4 +1,10 @@
-import { ENSO_LOG_LEVEL_NAMES, type EnsoLogLevelName, type EnsoLogLine, type EnsoLogTailFrame } from '@enso/core'
+import {
+  ENSO_LOG_LEVEL_NAMES,
+  type EnsoLogLevelName,
+  type EnsoLogLine,
+  type EnsoLogTailFrame,
+  LOG_TAIL_MAX_RECORDS,
+} from '@enso/core'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FetchLike } from '../browser-logging.ts'
@@ -16,7 +22,12 @@ import { Input } from '../components/ui/input.tsx'
 import { Spinner } from '../components/ui/spinner.tsx'
 import { urlForThread } from '../thread-url.ts'
 import { LogRow, ROW_HEIGHT_PX } from './log-row.tsx'
-import { DEFAULT_LOG_TAIL_FILTER, type LogTailFilter, openLogTailStream } from './log-tail-connection.ts'
+import {
+  DEFAULT_LOG_TAIL_FILTER,
+  type LogTailFilter,
+  type LogTailResume,
+  openLogTailStream,
+} from './log-tail-connection.ts'
 
 /**
  * The debug log page (#144 slice 2): the day's records, as the file has them, in a browser.
@@ -32,9 +43,11 @@ import { DEFAULT_LOG_TAIL_FILTER, type LogTailFilter, openLogTailStream } from '
  * at the day's head and the first frame REPLACES the list. Appending one question's records to
  * another's would produce a list that answers neither.
  *
- * THE LIST IS VIRTUALIZED (`@tanstack/react-virtual`). A `trace` day is tens of thousands of
- * records; the server caps what it sends and this draws only the rows on screen, so the page
- * that exists to diagnose a slow system is not the slow thing in it.
+ * THE LIST IS VIRTUALIZED (`@tanstack/react-virtual`) AND BOUNDED. A `trace` day is tens of
+ * thousands of records; the server caps each frame it sends, this page keeps no more than
+ * that same cap across every frame (`applyLogTailFrame`), and the virtualizer draws only the
+ * rows on screen — so the page that exists to diagnose a slow system is not the slow thing in
+ * it, however long it is left open.
  *
  * ⚠ AUTO-SCROLL STOPS WHEN THE READER SCROLLS UP, and that is the rule rather than a nicety: a
  * log viewer that yanks you back to the newest row while you are reading an older one is
@@ -86,9 +99,14 @@ export function applyLogTailFrame(view: LogTailView, frame: EnsoLogTailFrame): L
   if (frame.type === 'backlog') {
     return { day: frame.day, lines: frame.lines, matched: frame.matched, malformed: frame.malformed, opened: true }
   }
+  // ⚠ BOUNDED, at the same cap the server applies to a frame (PR #336 review): the server caps
+  // what it SENDS per frame, and a page that appended every `records` frame forever grew
+  // without limit on a `trace` day left open. The oldest rows leave as new ones land, and
+  // `matched` keeps counting so the heading reads "the last 2000 of N" honestly.
+  const lines = [...view.lines, ...frame.lines]
   return {
     day: frame.day,
-    lines: [...view.lines, ...frame.lines],
+    lines: lines.length > LOG_TAIL_MAX_RECORDS ? lines.slice(-LOG_TAIL_MAX_RECORDS) : lines,
     matched: view.matched + frame.matched,
     malformed: view.malformed + frame.malformed,
     opened: true,
@@ -108,9 +126,9 @@ export function describeRecordCount(view: LogTailView): string {
   return `${counted}${malformed}`
 }
 
-/** What is on screen, in words: the day, then the count. */
-function describeView(view: LogTailView): string {
-  if (!view.opened) return 'waiting for the first frame'
+/** What is on screen, in words: the day, then the count — or that nothing is, and why that is not a wait. */
+function describeView(view: LogTailView, settled: boolean): string {
+  if (!view.opened) return settled ? 'nothing is being read — the question was refused' : 'waiting for the first frame'
   return `${view.day} · ${describeRecordCount(view)}`
 }
 
@@ -231,24 +249,35 @@ export function LogTailScreen({ fetch: pageFetch }: { fetch?: FetchLike } = {}):
   const [pinnedToNewest, setPinnedToNewest] = useState(true)
   const scrollElement = useRef<HTMLDivElement>(null)
   /**
-   * The byte the next connection continues from. A REF, not state: it changes on every frame
+   * Where the next connection continues from. A REF, not state: it changes on every frame
    * and nothing renders it, and as state it would re-open the connection it came from.
    */
-  const resumeFrom = useRef<number | undefined>(undefined)
+  const resumeFrom = useRef<LogTailResume | undefined>(undefined)
+  /**
+   * Whether the connection has said its last word — a refusal it will not retry, or the page
+   * leaving. Until then a page with no frame yet is WAITING; after it, it is not (PR #336
+   * review: a refused question used to spin forever beside the alert that refused it).
+   */
+  const [settled, setSettled] = useState(false)
 
   useEffect(() => {
     if (!following) return undefined
     const controller = new AbortController()
+    setSettled(false)
     void openLogTailStream({
       filter,
       from: resumeFrom.current,
       fetch: pageFetch,
       signal: controller.signal,
       onFrame: (frame: EnsoLogTailFrame) => {
-        resumeFrom.current = frame.offset
+        resumeFrom.current = { day: frame.day, offset: frame.offset }
+        // A frame is the connection working: whatever the last alert said is over.
+        setProblem(undefined)
         setView((current: LogTailView) => applyLogTailFrame(current, frame))
       },
       onError: setProblem,
+    }).then(() => {
+      if (!controller.signal.aborted) setSettled(true)
     })
     return () => controller.abort()
   }, [filter, following, pageFetch])
@@ -284,10 +313,10 @@ export function LogTailScreen({ fetch: pageFetch }: { fetch?: FetchLike } = {}):
   }, [pinnedToNewest, newestRow, virtualizer])
 
   const rows = virtualizer.getVirtualItems()
-  const heading = useMemo(() => describeView(view), [view])
+  const heading = useMemo(() => describeView(view, settled), [view, settled])
 
   return (
-    <Terminal className="h-dvh" isStreaming={following && !view.opened}>
+    <Terminal className="h-dvh" isStreaming={following && !view.opened && !settled}>
       <TerminalHeader>
         <TerminalTitle>enso · logs</TerminalTitle>
         <LogTailControls filter={filter} following={following} onFilter={changeFilter} onFollowing={setFollowing} />

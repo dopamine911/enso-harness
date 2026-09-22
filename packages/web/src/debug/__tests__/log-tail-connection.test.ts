@@ -87,7 +87,18 @@ test('the unasked question is the bare route; every parameter away from its defa
   expect(logTailUrl({ level: 'trace', thread: 'abc', process: 'pi', since: '10m' })).toBe(
     '/api/logs/tail?level=trace&thread=abc&process=pi&since=10m',
   )
-  expect(logTailUrl(DEFAULT_LOG_TAIL_FILTER, 4096)).toBe('/api/logs/tail?from=4096')
+})
+
+// A resume is a byte IN A FILE, and the file is the day's: `from` without `day` is a position
+// in whichever file the route happens to hold, so a tail that resumed across local midnight
+// skipped the head of the new day (PR #336 review). Both travel, or neither.
+test('⚠ a resume carries the byte AND the day it is a position in; no resume carries neither', () => {
+  expect(logTailUrl(DEFAULT_LOG_TAIL_FILTER, { day: '2026-09-22', offset: 512 })).toBe(
+    '/api/logs/tail?from=512&day=2026-09-22',
+  )
+  const bare = new URL(logTailUrl(DEFAULT_LOG_TAIL_FILTER), 'http://enso.test')
+  expect(bare.searchParams.has('from')).toBe(false)
+  expect(bare.searchParams.has('day')).toBe(false)
 })
 
 test('a backlog frame and a records frame both arrive; a keepalive comment is not a frame', async () => {
@@ -119,11 +130,12 @@ test('⚠ an unreadable frame is reported, not delivered', async () => {
 })
 
 // The reconnect is what keeps a dropped connection from re-rendering the day underneath a
-// reader who was halfway down it.
-test('⚠ after the stream ends the client resumes from the last byte it was given', async () => {
-  const { urls } = await run([[frameText(backlog), frameText(records)]])
+// reader who was halfway down it — and the byte it resumes from is only meaningful in the
+// day's file it came from, so the retry names that day too (PR #336 review).
+test('⚠ after the stream ends the client resumes from the last byte it was given, in the day it was given for', async () => {
+  const { urls } = await run([[frameText(backlog), frameText({ ...records, day: '2026-09-23', offset: 64 })]])
   expect(urls[0]).toBe('/api/logs/tail')
-  expect(urls[1]).toBe('/api/logs/tail?from=8192')
+  expect(urls[1]).toBe('/api/logs/tail?from=64&day=2026-09-23')
 })
 
 test('a refused question is reported and NOT asked again; a server error is', async () => {
