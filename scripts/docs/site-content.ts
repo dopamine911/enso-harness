@@ -160,7 +160,11 @@ function project(): { written: number; indexes: number } {
       return `- [${title}](${SITE_BASE}/${page.replace(/\.md$/, '')}/)`
     })
     mkdirSync(join(target, directory), { recursive: true })
-    writeFileSync(join(target, directory, 'index.md'), `---\ntitle: "${directory}"\n---\n\n${entries.join('\n')}\n`)
+    // ⚠ Titled, not path-named. `title: "concepts/archive"` put a lowercase path in the sidebar
+    // beside pages with real titles — visible on the published site and read as a broken entry.
+    const segment = directory.split('/').at(-1) ?? directory
+    const title = `${segment.charAt(0).toUpperCase()}${segment.slice(1)} overview`
+    writeFileSync(join(target, directory, 'index.md'), `---\ntitle: "${title}"\n---\n\n${entries.join('\n')}\n`)
     indexes += 1
   }
 
