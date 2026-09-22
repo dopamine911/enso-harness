@@ -64,6 +64,18 @@ test("the ring keeps the last N as lines, newest last, at the page's level; the 
   expect(posts).toHaveLength(0)
 })
 
+// ⚠ THE DEBUG PAGE'S CONTRACT (#144). A surface that exists to read the trace must not enter
+// it: shipped records come back through `POST /api/logs` into the very file that page is
+// tailing. The page expresses that by configuring no `fetch` at all, so the claim worth
+// pinning is that no shipper is built — not that some stub transport was handed a batch.
+test('⚠ a page configured without a fetch builds no shipper and posts nothing, while the ring still sees everything', async () => {
+  const logging = await configureBrowserLogging({ level: 'debug', page: 'observer' })
+  expect(logging.shipper).toBeUndefined()
+  const log = ensoLogger('browser', 'probe')
+  log.error('an error the reader should still see in devtools', { threadId: 't1' })
+  expect(logging.ring.get().map((line) => line.message)).toEqual(['an error the reader should still see in devtools'])
+})
+
 test('⚠ the shipper batches by count or by time, ships only info and up, sends a valid EnsoBrowserLogBatch, and never logs a failure', async () => {
   const { fetch, posts, nextPost } = recordingFetch(() => Promise.reject(new Error('server down')))
   const shipper = createLogShipper({ fetch, page: 'p2', flushMs: 1 })

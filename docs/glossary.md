@@ -281,6 +281,11 @@ harness did). The first is canonical and never rewritten by us; the second is th
   day's records fenced as JSONL, the redaction manifest, and the browser's ring. What a user hands over.
 - **about** — the process's own facts: versions, checkout, knobs, pid. The same block heads the bundle
   and answers `GET /api/about`.
+- **tail** — the day's file read forward as it grows, filtered by the reader's question: what
+  `bun run logs --follow` prints and what `GET /api/logs/tail` streams to the debug page, over one
+  filter (`logLineMatches`) and one decoder. A **backlog** frame is the file as it stands and
+  replaces the reader's view; a **records** frame is what has landed since. Never a second store:
+  the tail reads the same file the bundle exports (#144).
 - **config** — `enso.config.json` at the repo root, committed, read once at extension load, failing
   closed (#59). Secrets are not config: `.enso/secrets.env`, read per call, quarantined.
 - **run provenance** — what a fork point will additionally record — project revision, context

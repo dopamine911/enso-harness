@@ -82,6 +82,17 @@ export {
   redactionManifest,
 } from './log-bundle.ts'
 export {
+  ENSO_LOG_LEVEL_NAMES,
+  ENSO_LOG_LEVEL_RANK,
+  type EnsoLogFilter,
+  type EnsoLogLevelName,
+  EnsoLogTailFrame,
+  logLineMatches,
+  logLineMessageParts,
+  logLineText,
+  parseLogSince,
+} from './log-tail.ts'
+export {
   EnsoCustomEntry,
   EnsoDialogOutcome,
   EnsoDialogSettled,

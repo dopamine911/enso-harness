@@ -29,6 +29,7 @@ import {
   readPromptBody,
 } from './follow.ts'
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
+import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
 import { noteRunAdmitted } from './run-timing.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
@@ -469,6 +470,9 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     response.end(outcome.body)
   }
   const about = createAboutRoute({ runtimeVersion: AGENT_RUNTIME_VERSION })
+  // The tail (#144 slice 2): the same day's file, filtered server-side and streamed, for the
+  // debug page. Like the bundle it only reads; unlike the bundle it stays open.
+  const logTailDeps: LogTailRouteDeps = { logsDir: options.logsDir, sseKeepaliveMs }
 
   // ── The wire (#112): prompt / follow / dialog ────────────────────────────────────
   const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs }
@@ -724,16 +728,62 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     return isLoopbackAuthority(originHost)
   }
 
-  // ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler's top-to-bottom
-  // shape is the #27/#34 teardown ordering (#82). A literal route is one arm that calls its
-  // handler; a thread route is a row of THREAD_ROUTES. This file needed its own complexity
-  // pin (49) until the thread routes became the table (#174); it now clears the global ceiling.
-  const server = createServer((request, response) => {
+  /**
+   * The literal routes — the ones whose path is a constant rather than a thread's id — in
+   * precedence order. True when the request was one of them.
+   *
+   * ⚠ Its own function, beside `dispatchThreadRoute`, for the reason #174 gave when the thread
+   * routes became a table: the request callback is where every arm's cost lands, and it had
+   * reached the complexity ceiling as written (26 against a 25 max, the frame `#144`'s tail
+   * route pushed it over). The ladder stays a ladder here rather than becoming a second table
+   * because each of these answers differently — a JSON body, a stream, a 204, an
+   * answered-or-failed promise — and a table of six shapes is a `switch` wearing a hat.
+   */
+  function dispatchLiteralRoute(request: IncomingMessage, response: ServerResponse): boolean {
     const url = request.url ?? ''
+    if (request.method === 'GET' && url === '/api/mode') {
+      respondWithFreshThreadMode(response)
+      return true
+    }
+    if (request.method === 'GET' && url === '/api/threads') {
+      respondWithThreads(response)
+      return true
+    }
+    if (request.method === 'GET' && url === '/api/stored-threads') {
+      answerOrFail(respondWithStoredThreads(response), response)
+      return true
+    }
+    if (request.method === 'GET' && url === '/api/about') {
+      // No log line here, by rule (#144): a surface that exists to read the trace must not
+      // write to it.
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify(about()))
+      return true
+    }
+    if (request.method === 'GET' && url.startsWith('/api/logs/bundle')) {
+      respondWithBundle(url, response)
+      return true
+    }
+    if (request.method === 'GET' && url.startsWith('/api/logs/tail')) {
+      // No log line here either, by the same rule (#144): the tail must not appear in the tail.
+      followLogTail(logTailDeps, url, response)
+      return true
+    }
+    if (request.method === 'POST' && url === '/api/logs') {
+      answerOrFail(respondToBrowserLogs(request, response), response)
+      return true
+    }
+    return false
+  }
+
+  // ⚠ Routes dispatch HERE, outside the chat handler, on purpose: that handler's top-to-bottom
+  // shape is the #27/#34 teardown ordering (#82). What is left in the callback is the one check
+  // every request is admitted by, then the two dispatchers and the miss.
+  const server = createServer((request, response) => {
     if (!fromTrustedOrigin(request)) {
       log.warn('request refused: {method} {url} from host {host} origin {origin}', {
         method: request.method,
-        url,
+        url: request.url ?? '',
         host: request.headers.host,
         origin: request.headers.origin,
       })
@@ -741,33 +791,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       response.end('this server answers the machine it runs on, and only to a loopback origin')
       return
     }
-    if (request.method === 'GET' && url === '/api/mode') {
-      respondWithFreshThreadMode(response)
-      return
-    }
-    if (request.method === 'GET' && url === '/api/threads') {
-      respondWithThreads(response)
-      return
-    }
-    if (request.method === 'GET' && url === '/api/stored-threads') {
-      answerOrFail(respondWithStoredThreads(response), response)
-      return
-    }
-    if (request.method === 'GET' && url === '/api/about') {
-      // No log line here, by rule (#144): a surface that exists to read the trace must not
-      // write to it.
-      response.writeHead(200, { 'Content-Type': 'application/json' })
-      response.end(JSON.stringify(about()))
-      return
-    }
-    if (request.method === 'GET' && url.startsWith('/api/logs/bundle')) {
-      respondWithBundle(url, response)
-      return
-    }
-    if (request.method === 'POST' && url === '/api/logs') {
-      answerOrFail(respondToBrowserLogs(request, response), response)
-      return
-    }
+    if (dispatchLiteralRoute(request, response)) return
     if (dispatchThreadRoute(request, response)) return
     response.writeHead(404, { 'Content-Type': 'text/plain' })
     response.end('not found')

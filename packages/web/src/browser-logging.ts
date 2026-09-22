@@ -141,7 +141,16 @@ export function pageLogLevel(search: string): LogLevel {
 }
 
 export interface BrowserLoggingOptions {
-  readonly fetch: FetchLike
+  /**
+   * ⚠ OMITTED MEANS THE PAGE SHIPS NOTHING, and that is a decision rather than a missing
+   * transport (#144). A debugging surface must not enter the trace it is reading: the debug
+   * page's own records would go to `POST /api/logs`, be re-emitted by the server into the
+   * very file that page is tailing, and arrive back on screen as the reader's own presence on
+   * top of whatever they opened the page to find. Without a `fetch` no shipper is built at
+   * all — the ring and the console still see every record, so a problem on that page is still
+   * visible in devtools; it just never becomes a record on disk.
+   */
+  readonly fetch?: FetchLike
   readonly level: LogLevel
   readonly page: string
   /** Devtools too; off in tests. */
@@ -150,14 +159,17 @@ export interface BrowserLoggingOptions {
 
 export interface BrowserLogging {
   readonly ring: LogRing
-  readonly shipper: LogShipper
+  /** `undefined` on a page configured without a `fetch`: it ships nothing (#144). */
+  readonly shipper: LogShipper | undefined
 }
 
 /** Configure the page; returns the ring the drawer reads and the shipper the page flushes on hide. */
 export async function configureBrowserLogging(options: BrowserLoggingOptions): Promise<BrowserLogging> {
   const ring = createLogRing()
-  const shipper = createLogShipper({ fetch: options.fetch, page: options.page })
-  const outputs: Sink[] = [withFilter(ring.sink, options.level), shipper.sink]
+  const shipper =
+    options.fetch === undefined ? undefined : createLogShipper({ fetch: options.fetch, page: options.page })
+  const outputs: Sink[] = [withFilter(ring.sink, options.level)]
+  if (shipper !== undefined) outputs.push(shipper.sink)
   if (options.console === true) outputs.push(withFilter(getConsoleSink(), options.level))
   // One sink, stamping once and fanning out: a per-page count on every record — the
   // drawer's key, and the order inside one millisecond when the file has two of this

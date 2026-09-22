@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 192.**
+**Decision headers: 200.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -12,6 +12,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/__tests__/config.test.ts` | `#59` | The enso.config.json loading contract (#59): parse fails CLOSED — every non-conforming input comes back `unreadable`, never as a silently-empty config. |
 | `packages/core/src/__tests__/log-process.test.ts` | `#132` | The file a user hands us (#132), end to end through the real configurator: what a line looks like, what never reaches it, what every line under a route carries — and the knob. |
 | `packages/core/src/__tests__/log-recorder.ts` | `#132`, `#178` | The tests' sink (#132), one for every package (#178): every `enso` record, at every level, into memory — a guard's verdict, an audit line or a route's problem is asserted as the record it is, the way a bundle reader would read it, not as a line on stderr. |
+| `packages/core/src/__tests__/log-tail.test.ts` | `#144` | The reader's question and the tail's answer (#144 slice 2): what a filter admits, and what a poll over a growing, rotating file hands back. |
 | `packages/core/src/__tests__/no-duplicate-paths.test.ts` | `#59`, `#256` | The anti-duplication anchor for path resolution (#59) — Daniel: "this should live in core and prevent duplicate code again." |
 | `packages/core/src/__tests__/no-duplicate-shapes.test.ts` | `#255` | Anchors for the reason this package exists: one place for every shape, reachable by one search. |
 | `packages/core/src/__tests__/observation-kinds.ts` | `#53` | The oracle both "every observation" sweeps compare against (#53 S1.4): every `kind` literal the EnsoObservation union declares, sorted. |
@@ -24,6 +25,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/follow.ts` | `#112` | The server↔browser wire (#112): a thread's feed, as the follow route serves it. |
 | `packages/core/src/log-bundle.ts` | `#132` | The bundle (#132 item 5): ONE plaintext file a user attaches to an issue, built from things that already exist — the day's records, the live threads' inspections, the versions, and what the browser logged — with a manifest of what was redacted so the reader knows what is missing rather than wondering. |
 | `packages/core/src/log-process.ts` | `#132` | A process's sink (#132 item 2): ONE log for the harness — `.enso/logs/enso-YYYY-MM-DD.jsonl`, every process appending to the same day's file, every record redacted by field name before it is written, and — for a terminal — a pretty console sink beside it at its own level. |
+| `packages/core/src/log-tail.ts` | `#144` | The reader's question, and the tail's answer (#144 slice 2). |
 | `packages/core/src/log.ts` | `#132` | The harness's log record (#132): one shape for every process, so a bundle a user hands us reads the same whichever layer wrote the line. |
 | `packages/core/src/paths.ts` | `#58`, `#59` | The workspace path helpers (#59) — THE one place that walks the filesystem for roots. |
 | `packages/core/src/permission-mode.ts` | `#84`, `#162` | The permission mode's shape on the wire (#84; #162 workstream 4, L3): what a run starts in and what it may switch to. |
@@ -100,6 +102,10 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/threads-rail.test.tsx` | `#90` | #90 PR 3: the sessions rail and the page's thread list behind it. |
 | `packages/web/src/browser-logging.ts` | `#86`, `#132` | The browser's logging (#132 slice 3). |
 | `packages/web/src/custom-event-router.ts` | `#103` | The one chunk that is neither an observation nor a frame: the follow ended without this page leaving it (#103 receipt) — the server closed, restarted, or dropped the connection. |
+| `packages/web/src/debug/__tests__/log-tail-connection.test.ts` | `#144` | The log tail client (#144 slice 2), driven over a scripted body: SSE text the test writes, read as the page reads it. |
+| `packages/web/src/debug/__tests__/log-tail-screen.test.tsx` | `#118` | ⚠ Loaded by a DYNAMIC import, and that is the one place this repo needs one: react-dom/client probes the DOM when its module evaluates (`"oninput" in document`), and bun evaluates node_modules imports before a local side-effect import can register happy-dom — statically imported it sits in an IE-era polyfill mode where `onChange` never fires. |
+| `packages/web/src/debug/log-tail-connection.ts` | `#144` | The browser's connection to `GET /api/logs/tail` (#144 slice 2): the day's file, filtered by the server, arriving as SSE frames. |
+| `packages/web/src/debug/log-tail-screen.tsx` | `#144` | The debug log page (#144 slice 2): the day's records, as the file has them, in a browser. |
 | `packages/web/src/fixture-conversation.ts` | `#27`, `#31` | The styling dev loop (#31): a scripted conversation streamed through the REAL `useChat` pipeline as local AG-UI events — no server, no pi. |
 | `packages/web/src/follow-connection.ts` | `#112`, `#272`, `#274` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |
 | `packages/web/src/host/__tests__/agent-host.test.ts` | `#27`, `#69` | The in-process host against the REAL harness package (#69) — every extension the manifest names loads, and inline probe extensions observe what the host does. |
@@ -127,6 +133,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/__tests__/follow-reader.ts` | `#231` | A follow as a test reads it: frames and keepalive comments as they arrive, awaited by count — never by a guessed delay. |
 | `packages/web/src/server/__tests__/follow.test.ts` | `#109`, `#112` | The wire, measured (#109's receipt, kept as the contract — #112). |
 | `packages/web/src/server/__tests__/logs-route.test.ts` | `#132` | `POST /api/logs` (#132 slice 3): the browser's batch into this process's logger, under the browser's own category, at its level, marked as the browser's — or a 4xx that is never a record of its own. |
+| `packages/web/src/server/__tests__/logs-tail-route.test.ts` | `#97`, `#144` | `GET /api/logs/tail` (#144 slice 2), over real HTTP: the day's file, filtered server-side, as frames the browser's schema takes — and NO record of its own, which is the rule the whole debug surface rests on (#144, #97). |
 | `packages/web/src/server/__tests__/observation-log.test.ts` | `#144` | The tier an observation lands at, and the one record that is not an observation at all: the run's time to first token (#144). |
 | `packages/web/src/server/__tests__/run-timing.test.ts` | `#144` | Time to first token, once per run (#144). |
 | `packages/web/src/server/__tests__/server-handler.test.ts` | `#76`, `#86`, `#95`, `#97` | The server's routes beside the wire, over real HTTP (#76, #86, #95, #97): what the inspection, history and session-listing routes report about threads the prompt route built. |
@@ -136,6 +143,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/dev.ts` | `#9`, `#132` | Dev entry point for the enso server. |
 | `packages/web/src/server/follow.ts` | `#75`, `#109`, `#112`, `#116`, `#162` | The prompt/follow split (#112) — the server↔browser wire. |
 | `packages/web/src/server/logs-route.ts` | `#132` | `POST /api/logs` (#132 slice 3): the browser's records, into the one file. |
+| `packages/web/src/server/logs-tail-route.ts` | `#97`, `#132`, `#144` | `GET /api/logs/tail` (#144 slice 2): the day's file, filtered server-side, as SSE — what the debug page reads instead of a terminal. |
 | `packages/web/src/server/observation-log.ts` | `#97`, `#132` | Every observation the server publishes becomes a record (#132, "trace everything") — at the tier it belongs to, with the ids that join it to the transcript, the event tail (#97) and the other layers' lines about the same moment. |
 | `packages/web/src/server/run-timing.ts` | `#144` | When a run was admitted, so its FIRST delta can be recorded as a latency (#144 slice 1). |
 | `packages/web/src/server/sse.ts` | `#109` | The SSE plumbing every streaming route shares: the response headers and the keepalive. |
