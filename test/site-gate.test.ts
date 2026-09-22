@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { contentPath, documentationPages, pageTitle, rewriteLinks } from '../scripts/docs/site-content.ts'
+import { contentPath, documentationPages, pageTitle, rewriteLinks, sectionTitle } from '../scripts/docs/site-content.ts'
 import { internalHrefs, resolveHref, unservedSections } from '../scripts/docs/site-links.ts'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
@@ -173,4 +173,15 @@ test('the crawl reads the hrefs a site serves, and skips the ones it cannot answ
   expect(resolveHref('/zen-harness/reference/routes/', 'site/dist/index.html')).toBe('site/dist/reference/routes')
   expect(resolveHref('../seams/guards/', 'site/dist/flows/resume/index.html')).toBe('site/dist/flows/seams/guards')
   expect(resolveHref('#anchor', 'site/dist/index.html')).toBe('site/dist/index.html')
+})
+
+test('a derived section index is titled, and every word of it (#188)', () => {
+  // The two this repository has today: reported from the published site as `concepts` and
+  // `concepts/archive`, lowercase paths sitting beside pages with real titles.
+  expect(sectionTitle('concepts')).toBe('Concepts overview')
+  expect(sectionTitle('concepts/archive')).toBe('Archive overview')
+  // ⚠ The first hyphenated section would have arrived as `Getting-started overview` (PR #333
+  // review). No directory here is hyphenated yet, which is exactly why nothing would have caught
+  // it — and why the case is pinned before one exists.
+  expect(sectionTitle('docs/getting-started')).toBe('Getting Started overview')
 })
