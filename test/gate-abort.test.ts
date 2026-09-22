@@ -71,6 +71,11 @@ test('⚠ the header of scripts/gate.ts names the gates the file actually runs, 
  * free to be rewritten, and the word is checked in the two places the page states it.
  */
 const NUMBERED_STEP = /^(\d+)\.\s+\*\*(.+?)\*\*/gm
+const COUNT_WORDS_TWENTY: readonly string[] = [
+  ...['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'],
+  ...['eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'],
+  ...['twenty-one', 'twenty-two', 'twenty-three', 'twenty-four', 'twenty-five'],
+]
 const COUNT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'] as const
 
 test('⚠ docs/verification.md counts and numbers the gates the file actually runs (#188)', async () => {
@@ -177,4 +182,34 @@ test('⚠ a banner quoted on stdout is a tool reporting, not a tool dying', () =
   expect(run.status).toBe(0)
   expect(run.output).toContain('All gates passed')
   expect(run.output).not.toContain('ABORTED')
+})
+
+/**
+ * The README states two censuses, and a hand-copied number is a fact with a half-life (PR #335
+ * review). One of them — "1016 tests" — was deleted rather than checked, because a count that
+ * changes every time a test is added is stale by construction and cannot be asserted without the
+ * assertion changing it. The other two are stable enough to hold, so they are held:
+ *
+ *   • the numbered step table, against `GATES` — the same drift `docs/verification.md` carried for
+ *     the whole life of the sixth gate;
+ *   • "<word> of those tests are gates", against the rows of the generated inventory the sentence
+ *     is about.
+ */
+const GATE_STEP_ROW = /^\| (\d+) \| `([a-z-]+)` \|/gm
+const STATED_GATE_COUNT = /^([A-Z][a-z]+) of those tests are \*\*gates\*\*/m
+
+test('⚠ the README names the gate steps the file runs, and counts the gates the inventory lists (#335)', async () => {
+  const readme = await Bun.file(join(import.meta.dir, '..', 'README.md')).text()
+  const rows = [...readme.matchAll(GATE_STEP_ROW)].map((match) => ({
+    position: Number(match[1]),
+    name: match[2] ?? '',
+  }))
+  expect(rows).toEqual(GATES.map((gate, index) => ({ position: index + 1, name: gate.name })))
+
+  const inventory = await Bun.file(join(import.meta.dir, '..', 'docs', 'reference', 'verification-inventory.md')).text()
+  const section = inventory.slice(inventory.indexOf('## Enforcement gates'))
+  const listed = [...section.slice(0, section.indexOf('\n## ', 1)).matchAll(/^\| \[/gm)].length
+  const stated = STATED_GATE_COUNT.exec(readme)?.[1]?.toLowerCase()
+  if (stated === undefined) throw new Error('README states no "<word> of those tests are gates" count')
+  expect(COUNT_WORDS_TWENTY.indexOf(stated)).toBe(listed)
 })
