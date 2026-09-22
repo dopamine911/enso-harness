@@ -12,6 +12,7 @@ import {
   ensoLogger,
   isWholeBase64,
   type PromptImageContent,
+  type ThreadRuntime,
   validateDialogAnswer,
 } from '@enso/core'
 import { Check, Errors } from 'typebox/value'
@@ -85,6 +86,25 @@ function slashCommandName(prompt: string): string | undefined {
   if (!prompt.startsWith('/')) return undefined
   const name = prompt.slice(1).trimEnd().split(/\s/)[0]
   return name === undefined || name.length === 0 ? undefined : name
+}
+
+/**
+ * Why a slash command cannot run here, or `undefined` when it can (or the message is not one).
+ *
+ * ⚠ ASKED ON BOTH ADMISSION PATHS. The runtime treats a slash command it does not know as
+ * ORDINARY TEXT for the model, so the refusal is what stands between `/login` and a chat
+ * message that says "/login". It was asked only of an idle thread: a command sent while a run
+ * held the thread was queued straight into the runtime, and vanished — pi's TUI built-ins
+ * (`/login`, `/model`, `/compact`, …) are not extension commands and have no handler here.
+ */
+function unavailableCommand(runtime: ThreadRuntime, message: string): string | undefined {
+  const command = slashCommandName(message)
+  if (command === undefined) return undefined
+  const available = runtime.listCommands()
+  if (available.some((known) => known.name === command)) return undefined
+  return `/${command} is not available on this surface. Available here: ${
+    available.length === 0 ? 'none' : available.map((known) => `/${known.name}`).join(', ')
+  }`
 }
 /**
  * Write one frame, recording it into the thread's sent tail (#97) when the thread is live
@@ -229,6 +249,8 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
 
   const live = threads.peek(threadId)
   if (live?.busy === true) {
+    const unavailable = unavailableCommand(live.hosted.runtime, body.message)
+    if (unavailable !== undefined) return { status: 400, reason: unavailable }
     live.hosted.runtime.prompt(
       {
         message: body.message,
@@ -241,19 +263,12 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
   }
 
   const lease = await threads.acquire(threadId)
-  const command = slashCommandName(body.message)
-  if (command !== undefined) {
-    const available = lease.runtime.listCommands()
-    if (!available.some((known) => known.name === command)) {
-      lease.release()
-      return {
-        status: 400,
-        reason: `/${command} is not available on this surface. Available here: ${
-          available.length === 0 ? 'none' : available.map((known) => `/${known.name}`).join(', ')
-        }`,
-      }
-    }
+  const unavailable = unavailableCommand(lease.runtime, body.message)
+  if (unavailable !== undefined) {
+    lease.release()
+    return { status: 400, reason: unavailable }
   }
+  const command = slashCommandName(body.message)
 
   // The run's end, observed the way a follower would: the thread's own `settled`.
   const settle = threads.observe(threadId, (frame: ThreadFeedFrame) => {
