@@ -155,8 +155,9 @@ export interface ThreadRegistry {
   list(): ThreadView[]
   /**
    * The slash commands the most recently built session registered (#338), for a thread that
-   * has none yet. Every session registers the same set — the manifest is fixed — so the last
-   * one's answer is the next one's, and asking it builds nothing (#86). `undefined` before
+   * has no live one. Every session builds the set from the same sources under the same
+   * configuration, so the last one's answer is the next one's — until a template or skill file
+   * changes on disk between builds, which the next build picks up — and asking builds nothing (#86). `undefined` before
    * any session has been built in this process.
    */
   rememberedCommands(): readonly RuntimeCommand[] | undefined

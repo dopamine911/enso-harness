@@ -75,6 +75,8 @@ interface MountedPalette {
   readonly palette: () => HTMLElement
   readonly filter: () => HTMLInputElement
   readonly rows: () => string[]
+  /** The row cmdk marks selected — the one Enter would pick. */
+  readonly selectedRow: () => string | undefined
   readonly row: (label: string) => HTMLElement
   readonly unmount: () => Promise<void>
 }
@@ -139,6 +141,8 @@ async function mountPalette(respond: () => Response): Promise<MountedPalette> {
       if (found === null) throw new Error('expected the filter box')
       return found
     },
+    selectedRow: (): string | undefined =>
+      document.querySelector<HTMLElement>('[cmdk-item][aria-selected="true"]')?.getAttribute('data-value') ?? undefined,
     rows: (): string[] =>
       [...palette().querySelectorAll<HTMLElement>('[cmdk-item]')].map((row) => row.getAttribute('data-value') ?? ''),
     row: (label: string): HTMLElement => {
@@ -223,6 +227,11 @@ test('typing in the filter narrows the rows; a miss says so', async () => {
   expect(rankCommand('/deploy', 'pla', ['ship it'])).toBe(0)
   // Among names, the earlier match ranks higher: `/plan` for `p` over `/deploy` for `p`.
   expect(rankCommand('/plan', 'p')).toBeGreaterThan(rankCommand('/deploy', 'p'))
+  // A search typed with its own `/` is the start of the name, not a score above 1 that would order
+  // rows by name length (PR #343 review): `1` is the ceiling, and `/pl` ranks as `pl` does.
+  expect(rankCommand('/plan', '/')).toBe(1)
+  expect(rankCommand('/deploy', '/')).toBe(1)
+  expect(rankCommand('/plan', '/pl')).toBe(rankCommand('/plan', 'pl'))
   await flush(async () => {
     typeInto(mounted.filter(), 'zzz')
     await tick()
@@ -230,6 +239,29 @@ test('typing in the filter narrows the rows; a miss says so', async () => {
   await eventually(() => {
     expect(mounted.rows()).toEqual([])
     expect(mounted.palette().textContent).toContain('no command matches')
+  })
+  await mounted.unmount()
+})
+
+// ⚠ TWO LIBRARIES' KEYBOARD MODELS MEET HERE (PR #343 review): Radix's menu owns the popup and
+// cmdk owns the rows. Radix hands arrow keys on unless the content itself is focused, so with focus
+// in the filter they reach cmdk — the header's claim, pinned, because it is Radix-version-sensitive.
+test("ArrowDown then Enter, with focus in the filter, selects the SECOND row — the keys are cmdk's", async () => {
+  const mounted = await mountPalette(() => Response.json(LIVE))
+  await mounted.open()
+  await eventually(() => expect(mounted.rows()).toHaveLength(4))
+  await flush(async () => {
+    mounted.filter().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    await tick()
+  })
+  await eventually(() => expect(mounted.selectedRow()).toBe('/plan'))
+  await flush(async () => {
+    mounted.filter().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await tick()
+  })
+  await eventually(() => {
+    expect(mounted.runs).toEqual(['plan'])
+    expect(mounted.inserts).toEqual([])
   })
   await mounted.unmount()
 })
@@ -280,12 +312,12 @@ test('a live list with no rows says the session registers no commands', async ()
   await mounted.unmount()
 })
 
-test("`source: 'remembered'` shows the rows and a footer note that the thread has not run", async () => {
+test("`source: 'remembered'` shows the rows and a footer note that the thread has no live session", async () => {
   const mounted = await mountPalette(() => Response.json({ ...LIVE, source: 'remembered' }))
   await mounted.open()
   await eventually(() => {
     expect(mounted.rows()).toHaveLength(4)
-    expect(mounted.palette().textContent).toContain('from the last session — this thread has not run yet')
+    expect(mounted.palette().textContent).toContain('from the last session — this thread has no live session')
   })
   await mounted.unmount()
 })

@@ -6,9 +6,10 @@ import type { FetchLike } from './browser-logging.ts'
  * The `/` palette's one read (#338, slice 1): `GET /api/threads/:id/commands` — the slash
  * commands the thread's session registers, grouped by the server into extension commands,
  * prompt templates and skills, with a `source` that says whose list it is (`live`: this
- * thread's session; `remembered`: the last built session's, because every session registers
- * the same set and this thread has not run yet; `none`: no session has been built in this
- * process). The route writes no record, so the palette calls this on EVERY open rather than
+ * thread's session; `remembered`: the last built session's, because every session builds it
+ * from the same sources under the same configuration and this thread has no live session —
+ * never ran, or ran and idled out; the server cannot tell; `none`: no session has been built in
+ * this process). The route writes no record, so the palette calls this on EVERY open rather than
  * caching: the list changes when a session is built, and a stale palette would offer commands
  * a thread cannot run.
  *

@@ -96,10 +96,12 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
  *
  * ⚠ `source` is HONEST ABOUT WHERE THE LIST CAME FROM, because looking must not build (#86).
  * A thread has no session until its first prompt, and a session is the only thing that can be
- * asked what it registers. So a live thread answers `live`; a thread without a session answers
- * `remembered` — the list the most recently built session in this process registered, which is
- * the same list for every session because the manifest is fixed — or `none` before any session
- * has been built. The palette shows the list either way and says which it is.
+ * asked what it registers. So a live thread answers `live`; a thread without a live session
+ * (never built, or idled out — the server cannot tell) answers `remembered` — the list the most
+ * recently built session in this process registered, which every session builds from the same
+ * sources under the same configuration (the harness package's extensions; the prompt templates
+ * and skills under the agent directory as they stood at that build) — or `none` before any
+ * session has been built. The palette shows the list either way and says which it is.
  *
  * @group Thread runtime
  */

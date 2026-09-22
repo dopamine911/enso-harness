@@ -854,7 +854,6 @@ const chatComponents = {
       const send = (text: string, images: readonly EnsoPromptImage[]): void => {
         if (disconnected) return
         if (text.trim().length === 0 && images.length === 0) return
-        setDraft('')
         const parts: ContentPart[] = [
           ...(text.length === 0 ? [] : [{ type: 'text' as const, content: text }]),
           ...images.map((image) => ({
@@ -901,16 +900,18 @@ const chatComponents = {
         })
       }
       // The `/` palette's two outcomes (#338; the rule is in `command-palette.tsx`'s header).
-      // An extension command is a prompt like any other — the same `send` the button uses, so
-      // it queues through pi mid-run (#75) and is refused while disconnected, exactly as typed
-      // `/mode` is. A prompt template or a skill takes arguments: it becomes the draft, and
-      // focus lands after it so the next keystroke is the argument.
+      // ⚠ NEITHER TOUCHES WHAT THE USER HAS TYPED (PR #343 review). An extension command is a
+      // prompt like any other — the same `send` the button uses, so it queues through pi mid-run
+      // (#75) and is refused while disconnected, exactly as typed `/mode` is — and the draft
+      // stays, because it was not what got sent. A prompt template or a skill takes arguments,
+      // and pi reads a template only at the START of the message, so `/<name> ` goes in front
+      // and the words already typed become its argument; focus lands after them.
       const runCommand = (commandName: string): void => {
         send(`/${commandName}`, [])
         textareaRef.current?.focus()
       }
       const insertCommand = (commandName: string): void => {
-        setDraft(`/${commandName} `)
+        setDraft((current) => `/${commandName} ${current.trimStart()}`)
         textareaRef.current?.focus()
       }
 
@@ -948,6 +949,9 @@ const chatComponents = {
                 'run',
               )
             }
+            // The draft WAS the text: it clears here, at the submit, not in `send` — the palette
+            // sends through `send` too and must leave what the user has typed alone (PR #343 review).
+            setDraft('')
             send(text, images)
           }}
         >

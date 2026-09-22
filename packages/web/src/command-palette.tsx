@@ -49,8 +49,17 @@ import {
  * "no thread has run yet — commands appear after the first prompt"; a live or remembered list
  * with zero rows reads "this session registers no commands"; a filter that matches nothing
  * reads "no command matches". `remembered` is a small footer note — the list is right for this
- * thread (every session registers the same set) but it is the last session's, and the reader
- * should know the thread has not run.
+ * thread (every session builds it from the same sources under the same configuration) but it is
+ * the last session's, and the reader should know this thread has no live session. Not "has not
+ * run": the server cannot tell a thread that never ran from one that ran and idled out
+ * (PR #343 review), and a sentence the server cannot back is a sentence the palette must not say.
+ *
+ * ⚠ NO RADIX MENU ITEM MAY LIVE INSIDE THIS CONTENT. The dropdown's content feeds every printable
+ * key pressed anywhere inside it to its typeahead (`@radix-ui/react-menu`, `MenuContent.onKeyDown`)
+ * with no guard for inputs; it is harmless only because this content registers zero menu items,
+ * so the typeahead has nothing to focus. One `PromptInputActionMenuItem` here and filtering
+ * would yank focus out of the filter box (PR #343 review). Arrow keys are safe on their own:
+ * Radix returns before handling them unless the content itself is the target.
  *
  * The filter is NAME-FIRST, not cmdk's default fuzzy score. cmdk scores value and keywords as
  * one string, and on the real list `pla` ranked `/mode` ("… | plan | …" in its description)
@@ -79,7 +88,7 @@ type PaletteState =
 const NO_THREAD_YET = 'no thread has run yet — commands appear after the first prompt'
 const NO_COMMANDS = 'this session registers no commands'
 const NO_MATCH = 'no command matches'
-const REMEMBERED_NOTE = 'from the last session — this thread has not run yet'
+const REMEMBERED_NOTE = 'from the last session — this thread has no live session'
 
 /** One cmdk group per source, in the order the palette shows them. */
 const GROUPS: ReadonlyArray<{ readonly source: RuntimeCommand['source']; readonly heading: string }> = [
@@ -88,12 +97,14 @@ const GROUPS: ReadonlyArray<{ readonly source: RuntimeCommand['source']; readonl
   { source: 'skill', heading: 'skills' },
 ]
 
-/** Name-first ranking for cmdk's `filter` (header): `1` is an exact name, `0` hides the row. */
+/** Name-first ranking for cmdk's `filter` (header): `1` is a match at the start of the name, `0` hides the row. */
 export function rankCommand(rowValue: string, search: string, keywords?: readonly string[]): number {
   const needle = search.toLowerCase()
   const nameAt = rowValue.toLowerCase().indexOf(needle)
-  // `/name` — position 1 is the very start of the name; later starts rank lower but stay above 0.5.
-  if (nameAt >= 0) return 1 - (nameAt - 1) / (2 * rowValue.length)
+  // `/name` — the name starts at 1; a search typed with its own `/` matches at 0 and counts as the
+  // start too (else it would score above 1, by name length — PR #343 review). Later starts rank
+  // lower but stay above 0.5.
+  if (nameAt >= 0) return 1 - (Math.max(nameAt, 1) - 1) / (2 * rowValue.length)
   const inDescription = keywords?.some((keyword) => keyword.toLowerCase().includes(needle)) ?? false
   return inDescription ? 0.25 : 0
 }
@@ -165,6 +176,9 @@ export function CommandPalette({
         <SlashIcon />
       </PromptInputActionMenuTrigger>
       <PromptInputActionMenuContent
+        // The trigger sits at the composer's right edge; anchored `start`, 28rem of popup ran off
+        // the viewport at 1100px (Chromium smoke). `end` keeps it inside at every width the composer fits.
+        align="end"
         className="w-[28rem] p-0"
         onFocus={(event: React.FocusEvent<HTMLDivElement>): void => {
           if (event.target === event.currentTarget) filterRef.current?.focus()

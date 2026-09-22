@@ -701,6 +701,58 @@ test('Enter or the button: one POST …/prompt each and the draft clears; DURING
   await pane.unmount()
 })
 
+// ⚠ THE PALETTE LEAVES THE DRAFT ALONE (#338, PR #343 review). `send` used to clear the draft
+// itself, so picking an extension command destroyed what was typed; and the insert overwrote it.
+// The clear belongs to the submit — the draft WAS that text — and a template goes in FRONT of
+// the words already typed, which become its argument, because pi reads `/name` at the start only.
+test('the `/` palette: an extension command sends and the typed draft stays; a template is inserted ahead of it', async () => {
+  const pane = await mountPane({
+    server: {
+      commands: [
+        { name: 'mode', source: 'extension', description: 'the mode' },
+        { name: 'review', source: 'prompt', description: 'review it' },
+      ],
+    },
+  })
+  await pane.settle(SNAPSHOT_IDLE)
+  await flush(async () => {
+    typeInto(pane.composer(), 'and then deploy it')
+    await tick()
+  })
+  const openPalette = async (): Promise<void> => {
+    await flush(async () => {
+      const trigger = pane.container.querySelector<HTMLButtonElement>('button[aria-label="commands"]')
+      if (trigger === null) throw new Error('expected the `/` button')
+      trigger.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }))
+      await tick()
+    })
+    await eventually(() => expect(document.querySelectorAll('[cmdk-item]').length).toBe(2))
+  }
+  const pick = async (label: string): Promise<void> => {
+    await flush(async () => {
+      const row = [...document.querySelectorAll<HTMLElement>('[cmdk-item]')].find(
+        (candidate) => candidate.getAttribute('data-value') === label,
+      )
+      if (row === undefined) throw new Error(`expected the ${label} row`)
+      row.click()
+      await tick()
+    })
+  }
+  await openPalette()
+  await pick('/mode')
+  await eventually(() => {
+    expect(pane.server.prompts).toEqual([{ message: '/mode' }])
+    expect(pane.composer().value).toBe('and then deploy it')
+  })
+  await openPalette()
+  await pick('/review')
+  await eventually(() => {
+    expect(pane.composer().value).toBe('/review and then deploy it')
+    expect(pane.server.prompts).toHaveLength(1)
+  })
+  await pane.unmount()
+})
+
 test('⚠ the follow closing mid-run: the notice, disconnected on the bar, no stop, and Enter sends nothing', async () => {
   const pane = await mountPane()
   await pane.settle({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 2 })

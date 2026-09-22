@@ -5,6 +5,7 @@ import type {
   EnsoThreadEvents,
   EnsoThreadHistory,
   EnsoThreadInspection,
+  RuntimeCommand,
 } from '@enso/core'
 
 /**
@@ -66,6 +67,8 @@ export interface ScriptedFetchOptions {
    */
   readonly inspection?: Omit<EnsoThreadInspection, 'threadId' | 'sessionId'>
   readonly events?: Omit<EnsoThreadEvents, 'threadId'>
+  /** The `/` palette's list (#338); `source: 'live'`. Absent: a live thread registering nothing. */
+  readonly commands?: readonly RuntimeCommand[]
 }
 
 export function createScriptedFetch(options: ScriptedFetchOptions = {}): ScriptedFetch {
@@ -111,6 +114,11 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     if (events?.[1] !== undefined) {
       const threadId = decodeURIComponent(events[1])
       return Response.json({ threadId, emitted: [], sent: [], ...options.events })
+    }
+    const commands = /^\/api\/threads\/([^/]+)\/commands$/.exec(path)
+    if (commands?.[1] !== undefined) {
+      const threadId = decodeURIComponent(commands[1])
+      return Response.json({ threadId, commands: options.commands ?? [], source: 'live' })
     }
     const inspection = /^\/api\/threads\/([^/]+)$/.exec(path)
     if (inspection?.[1] !== undefined) {

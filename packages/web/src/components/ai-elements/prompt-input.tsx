@@ -37,6 +37,10 @@
  *   `PromptInputActionMenuTrigger`'s default child is upstream's `PlusIcon`; the palette passes
  *   its own `SlashIcon`. The `tooltip` prop upstream's `PromptInputButton` grew is NOT taken:
  *   this port's button is `ComponentProps<typeof Button>`, so the trigger's props are the same.
+ *   ⚠ `PromptInputActionMenuItem` is taken back with its group and used by nothing: the menu's
+ *   content feeds every printable key inside it to Radix's typeahead, which is inert only while
+ *   the content holds zero menu items. Do not put one beside a `PromptInputCommand` — see
+ *   `command-palette.tsx`'s header (PR #343 review).
  */
 import type {
 	ChangeEventHandler,
