@@ -55,6 +55,12 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Holds that every documented export carries `@group`, that the subdivided group carries `@category`, and that both names are declared in the config’s order lists. Which group a symbol belongs in is a judgement it cannot make.',
   },
+  'test/mermaid-gate.test.ts': {
+    roots: ['docs'],
+    exceptions: [],
+    limitation:
+      'Parses every mermaid fence under `docs/` and names the ones mermaid refuses. It cannot say a diagram is true, readable, or in agreement with the prose beside it — only that it renders rather than showing the reader a parse error.',
+  },
   'test/site-gate.test.ts': {
     roots: ['docs', 'site/astro.config.ts', '.github/workflows/docs-site.yml'],
     exceptions: [],

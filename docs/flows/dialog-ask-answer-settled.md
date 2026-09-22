@@ -22,10 +22,10 @@ sequenceDiagram
   H->>H: awaitDialog — mint id, park { resolve, request } in pendingDialogs
   H-->>F: observation extension-ui-request { id, blocking: true, dialog, origin }
   F-->>B: routeUiRequest — { id, dialog } checked against ZenOpenDialog, card rendered
-  Note over X,B: the thread is busy (parked); nothing in the server or the browser holds the promise
+  Note over X,B: the thread is busy (parked) · nothing in the server or the browser holds the promise
   B->>R: POST …/dialog { id, value | confirmed | cancelled: true }
   R->>R: peek (404 cold) · openDialogs().find(id) (404 spent) · validateDialogAnswer unless cancel (422)
-  R->>H: runtime.answerDialog(answer) — then 204 to B; the response says nothing else
+  R->>H: runtime.answerDialog(answer) — then 204 to B · the response says nothing else
   H->>H: pending.resolve ⇒ finish(value, 'answered'): delete entry, clear timer, unhook signal
   H-->>F: observation dialog-settled { id, outcome } — every follower drops the card for THIS id
   H-->>X: the extension's promise resolves — after the settle is on the stream

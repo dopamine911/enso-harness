@@ -24,7 +24,7 @@ sequenceDiagram
   G->>P: clearQueue() — BEFORE the abort
   P-->>F: queue { steering: [], followUp: [] }
   P-->>G: { steering, followUp }
-  G->>P: abort() — kept as abortInFlight; the next acquire awaits it
+  G->>P: abort() — kept as abortInFlight · the next acquire awaits it
   G-->>R: { outcome: aborted, restored: [...steering, ...followUp] }
   R-->>C: 200 { threadId, restored }
   C-->>B: { outcome: aborted, restored } ⇒ takeBack: never-asked bubbles leave, draft += restored

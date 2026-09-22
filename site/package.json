@@ -2,10 +2,11 @@
   "name": "@zen/site",
   "private": true,
   "type": "module",
+  "//": "⚠ Every script runs astro from the REPOSITORY ROOT (`cd ..`), never from here. starlight-typedoc resolves `typedoc.json` against the working directory, so `astro build` run inside site/ finds no config, converts nothing, and fails with `NoReflectionsError` behind a misleading hint about browser APIs. `--root site` keeps Astro pointed at this directory (#188).",
   "scripts": {
-    "build": "astro build",
-    "dev": "astro dev",
-    "preview": "astro preview"
+    "build": "cd .. && astro build --root site",
+    "dev": "cd .. && astro dev --root site",
+    "preview": "cd .. && astro preview --root site"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.42.2",

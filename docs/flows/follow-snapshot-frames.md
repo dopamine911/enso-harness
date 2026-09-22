@@ -32,7 +32,7 @@ sequenceDiagram
   P->>H: agent_settled / busy flips
   T-->>R: status { live, busy, generation }
   R-->>B: data: { type: "status", … }
-  B->>B: reconnect ⇒ a NEW follow ⇒ a NEW snapshot; nothing is resumed
+  B->>B: reconnect ⇒ a NEW follow ⇒ a NEW snapshot · nothing is resumed
 ```
 
 ## The invariants it shows
