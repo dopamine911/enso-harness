@@ -230,6 +230,9 @@ const alertShown = (container: HTMLElement): { title: string; description: strin
 
 test('the totals line says the day, its counts and its cost, and the summaries read in words', async () => {
   const page = await mountStats(healthy())
+  // The hand-over (#144's last row): the day's bundle, as a download of the route that makes it.
+  const bundleLink = [...page.container.querySelectorAll('a')].find((anchor) => anchor.hasAttribute('download'))
+  expect(bundleLink?.getAttribute('href')).toBe('/api/logs/bundle')
   await eventually(() => {
     const shown = page.container.textContent ?? ''
     expect(shown).toContain(

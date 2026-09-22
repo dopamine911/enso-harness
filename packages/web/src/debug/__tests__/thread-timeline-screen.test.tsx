@@ -226,6 +226,8 @@ test('⚠ both tails and the log render as one list in time order, each row tagg
   const anchors = [...page.container.querySelectorAll('a')].map((anchor) => anchor.getAttribute('href') ?? '')
   expect(anchors).toContain(`/?thread=${THREAD_ID}`)
   expect(anchors).toContain('/debug')
+  // The hand-over (#144's last row): THIS thread's bundle, from the route that makes it.
+  expect(anchors).toContain(`/api/logs/bundle?thread=${THREAD_ID}`)
   // A log row's own thread id drills down, on this page.
   const rowAnchor = page.container.querySelector('[aria-label="thread timeline"] a')?.getAttribute('href') ?? ''
   expect(rowAnchor.startsWith('/debug')).toBe(true)
