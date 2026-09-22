@@ -336,6 +336,9 @@ test('every secret path fragment is load-bearing on its own — a basename regex
     '/.kube/config': '/home/u/.kube/config',
     // #204: `auth.json` matches no basename pattern, which is exactly how it was readable.
     '/.enso/': '/home/u/project/.enso/pi-agent/auth.json',
+    // The directory `.enso/` used to be: still on disk in every checkout until its owner moves
+    // it, still holding `auth.json` and `secrets.env`, and denied for exactly that reason.
+    '/.zen/': '/home/u/project/.zen/pi-agent/auth.json',
   }
   // The map must cover the policy exactly — a fragment added without a case here is a gap.
   expect(Object.keys(onlyTheFragmentCatches).sort()).toEqual([...fragments].sort())

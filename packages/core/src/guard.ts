@@ -61,6 +61,13 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
     // Reading the log is a human command — `bun run logs` — which uses node fs and never
     // passes this guard. Writes were already denied (`ENSO_PERSISTENCE_WRITE_DIRECTORIES`).
     '/.enso/',
+    // ⚠ AND THE DIRECTORY IT USED TO BE. The rename to `.enso/` is a hard cutover — nothing
+    // READS `.zen/` any more — but every existing checkout still HAS one, holding exactly these
+    // files, until somebody runs `mv .zen .enso`. Dropping it from this list would have made an
+    // agent able to read the secrets directory it was never able to read before, for the window
+    // between merging and that command. A deny rule for a directory that should not exist costs
+    // nothing and expires on its own; this is not a compatibility path, it is the opposite of one.
+    '/.zen/',
   ],
   // `enso.config.json` is Enso's committed config (#59) and carries web_fetch's
   // host allowlist (#54): a write there widens the harness's egress for every FUTURE
