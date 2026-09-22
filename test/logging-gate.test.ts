@@ -13,7 +13,7 @@ import { codeOffenders } from './gate-support.ts'
  *      slice 3) and the vendored ai-elements components are inside it, and clean.
  *   2. `@logtape/*` is named only where the schema lives (`core/src/log.ts`) and where a
  *      process configures its sink (`core/src/log-process.ts`, `web/src/browser-logging.ts`).
- *      Everything else goes through `zenLogger`, so the record shape is ours to hold and the
+ *      Everything else goes through `ensoLogger`, so the record shape is ours to hold and the
  *      substrate is ours to swap (one maintainer — the #132 assessment's named risk).
  *
  * ⚠ It rides `codeOffenders` (#254), and that is the point of the rewrite: this gate kept its
@@ -36,7 +36,7 @@ import { codeOffenders } from './gate-support.ts'
  *
  * What it still cannot catch, said up front: it is a line scan. A specifier assembled at
  * runtime (`"@log" + "tape/logtape"`) is out of reach by construction, and the record SHAPE
- * is held by `@zen/core`'s schema rather than by this gate.
+ * is held by `@enso/core`'s schema rather than by this gate.
  */
 
 const MIGRATED_ROOTS = [
@@ -56,8 +56,8 @@ const LOGTAPE_IMPORT = /["']@logtape\//
  * and it is a declared, reasoned exception (`no-duplicate-shapes.test.ts`'s barrel note).
  */
 const LOGTAPE_ALLOWED = [
-  // The record schema and `zenLogger` itself — the one place the substrate's types are ours
-  // to re-export. Leaves only if the record shape stops being held in @zen/core.
+  // The record schema and `ensoLogger` itself — the one place the substrate's types are ours
+  // to re-export. Leaves only if the record shape stops being held in @enso/core.
   'packages/core/src/log.ts',
   // The node-side sink configurator (`@logtape/file`, `/pretty`, `/redaction`). Leaves when
   // a process configures its sink through a seam of ours instead of LogTape's own API.
@@ -70,7 +70,7 @@ function offendersMatching(pattern: RegExp, allowed: readonly string[]): string[
   return codeOffenders({ roots: MIGRATED_ROOTS, allowed, lineMatches: (line: string) => pattern.test(line) })
 }
 
-test('⚠ no production console.* in a migrated root — every record goes through zenLogger (#132)', () => {
+test('⚠ no production console.* in a migrated root — every record goes through ensoLogger (#132)', () => {
   expect(offendersMatching(CONSOLE_CALL, [])).toEqual([])
 })
 

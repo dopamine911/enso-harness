@@ -49,7 +49,7 @@ const fetchReturning =
   async (): Promise<Response> =>
     response
 
-const QUERY_TEXT = 'what is zen-harness'
+const QUERY_TEXT = 'what is Enso'
 
 function wireOptions(fetchUrl: FetchUrl): AnthropicWireSearchOptions {
   return {
@@ -74,21 +74,21 @@ const SEARCHED_EVENTS = [
       type: 'web_search_tool_result',
       tool_use_id: 'srv1',
       content: [
-        { type: 'web_search_result', url: 'https://example.com/zen', title: 'Zen docs' },
+        { type: 'web_search_result', url: 'https://example.com/enso', title: 'Enso docs' },
         { type: 'web_search_result', url: 'https://example.com/other.zip', title: 'Junk archive' },
       ],
     },
   },
   { type: 'content_block_start', content_block: { type: 'text', text: '' } },
-  { type: 'content_block_delta', delta: { type: 'text_delta', text: 'zen-harness is a guarded pi setup.' } },
+  { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Enso is a guarded pi setup.' } },
   {
     type: 'content_block_delta',
     delta: {
       type: 'citations_delta',
       citation: {
         type: 'web_search_result_location',
-        url: 'https://example.com/zen',
-        title: 'Zen docs',
+        url: 'https://example.com/enso',
+        title: 'Enso docs',
         cited_text: 'a guarded pi setup',
       },
     },
@@ -100,8 +100,8 @@ test('a stream with search blocks and citations comes back as `searched`, marker
   expect(outcome.kind).toBe('searched')
   if (outcome.kind !== 'searched') throw new Error('unreachable')
   // The citation marker lands right after the cited text, numbered into the source list.
-  expect(outcome.answerText).toBe('zen-harness is a guarded pi setup[1].')
-  expect(outcome.sources[0]).toEqual({ title: 'Zen docs', url: 'https://example.com/zen' })
+  expect(outcome.answerText).toBe('Enso is a guarded pi setup[1].')
+  expect(outcome.sources[0]).toEqual({ title: 'Enso docs', url: 'https://example.com/enso' })
   // The uncited junk archive is hygiene-filtered; the cited source is NOT re-filtered.
   expect(outcome.sources).toHaveLength(1)
 })

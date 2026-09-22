@@ -2,23 +2,23 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:te
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { LogRecorder } from '@logtape/testing/recorder'
 import {
+  type EnsoObservation,
+  EnsoStoredThread,
+  EnsoThreadEvents,
+  EnsoThreadHistory,
+  EnsoThreadInspection,
+  EnsoThreadSummary,
+  type EnsoTranscriptEntry,
   type PromptOutcome,
   type PromptRequest,
-  type ZenObservation,
-  ZenStoredThread,
-  ZenThreadEvents,
-  ZenThreadHistory,
-  ZenThreadInspection,
-  ZenThreadSummary,
-  type ZenTranscriptEntry,
-} from '@zen/core'
-import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
+} from '@enso/core'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import type { LogRecorder } from '@logtape/testing/recorder'
 import { Check } from 'typebox/value'
 import type { AgentHost, HostedThreadInspection } from '../../host/agent-host.ts'
 import { transcriptOf } from '../../host/transcript.ts'
-import { startZenServer } from '../index.ts'
+import { startEnsoServer } from '../index.ts'
 import {
   createFakeAgentHost,
   createFakeHostedThread,
@@ -30,21 +30,21 @@ import { openFollow } from './follow-reader.ts'
 
 let logs: LogRecorder
 beforeAll(async () => {
-  logs = await recordZenLogs()
+  logs = await recordEnsoLogs()
 })
 beforeEach(() => logs.clear())
-afterAll(releaseZenLogs)
+afterAll(releaseEnsoLogs)
 
 /**
  * The server's routes beside the wire, over real HTTP (#76, #86, #95, #97): what the
  * inspection, history and session-listing routes report about threads the prompt route
  * built. A fake host whose sessions record `abort` / `dispose` calls, handed in through
- * `ZenServerOptions.host`, makes each contract an assertion. The server binds port 0;
+ * `EnsoServerOptions.host`, makes each contract an assertion. The server binds port 0;
  * `listening` yields the bound URL. The wire itself is `follow.test.ts`.
  */
 
 /** How a scripted session pushes observations at its followers. */
-type EmitPiEvent = (observation: ZenObservation) => void
+type EmitPiEvent = (observation: EnsoObservation) => void
 
 interface FakeSessionScript {
   /** Called on every prompt; emit events through `emit`, signal acceptance via `outcome`. */
@@ -110,16 +110,16 @@ function fakeHost(
 
 /** A harness dir with an empty pi manifest — enough for `assertVendorLinks` to pass. */
 function emptyHarnessDir(): string {
-  const directory = mkdtempSync(join(tmpdir(), 'zen-handler-harness-'))
+  const directory = mkdtempSync(join(tmpdir(), 'enso-handler-harness-'))
   mkdirSync(directory, { recursive: true })
   writeFileSync(join(directory, 'package.json'), JSON.stringify({ name: 'fake-harness', pi: {} }))
   return directory
 }
 
 // What the runtime says to its subscriber — observations, since L2 (#162 workstream 4).
-const SETTLED: ZenObservation = { kind: 'settled' }
-const TEXT_DELTA: ZenObservation = { kind: 'text-delta', contentIndex: 0, delta: 'hi' }
-const SELECT_DIALOG: ZenObservation = {
+const SETTLED: EnsoObservation = { kind: 'settled' }
+const TEXT_DELTA: EnsoObservation = { kind: 'text-delta', contentIndex: 0, delta: 'hi' }
+const SELECT_DIALOG: EnsoObservation = {
   kind: 'extension-ui-request',
   id: 'd1',
   method: 'select',
@@ -161,11 +161,11 @@ async function startWith(
   wrapHost: (host: AgentHost) => AgentHost = (host: AgentHost) => host,
 ): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[] }> {
   const { host, built, requested } = fakeHost(script, stored)
-  const started = startZenServer({
+  const started = startEnsoServer({
     cwd: tmpdir(),
     harnessPackageDir: emptyHarnessDir(),
-    agentDir: mkdtempSync(join(tmpdir(), 'zen-handler-agent-')),
-    logsDir: mkdtempSync(join(tmpdir(), 'zen-logs-')),
+    agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
+    logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
     host: wrapHost(host),
   })
@@ -258,7 +258,7 @@ test('GET /api/threads/:id returns the branch as the transcript of ours, with se
   expect(response.status).toBe(200)
   const inspection: unknown = await response.json()
   // Closed schema: a host internal cannot leak by an accidental spread.
-  expect(Check(ZenThreadInspection, inspection)).toBe(true)
+  expect(Check(EnsoThreadInspection, inspection)).toBe(true)
   expect(inspection).toMatchObject({
     threadId: 't1',
     sessionId: 'session-1',
@@ -271,7 +271,7 @@ test('GET /api/threads/:id returns the branch as the transcript of ours, with se
   // The branch as the transcript of ours (L2): the session entry the host does not model is
   // `other` with its type, the picc `modes` entry is `custom` with its data — a reader
   // cross-checks the mode without knowing the vendor's stored shape.
-  const entries = (inspection as ZenThreadInspection).entries
+  const entries = (inspection as EnsoThreadInspection).entries
   expect(entries).toHaveLength(2)
   expect(entries[0]).toMatchObject({ kind: 'other', type: 'session' })
   expect(entries[1]).toMatchObject({ kind: 'custom', customType: 'modes', data: { mode: 'plan' } })
@@ -300,8 +300,8 @@ test('GET /api/threads/:id/events returns the emitted and sent tails of a run, i
   const response = await fetch(`${url}/api/threads/t1/events`)
   expect(response.status).toBe(200)
   const events: unknown = await response.json()
-  expect(Check(ZenThreadEvents, events)).toBe(true)
-  const { emitted, sent } = events as ZenThreadEvents
+  expect(Check(EnsoThreadEvents, events)).toBe(true)
+  const { emitted, sent } = events as EnsoThreadEvents
   // The host's funnel: three deltas fold into one row with an exact count, then the settle —
   // in the observation vocabulary the follow carries (L2), not the runtime's event types.
   expect(emitted.map((event) => [event.type, event.count])).toEqual([
@@ -327,7 +327,7 @@ test('⚠ the events route of an unknown thread is a 404 and builds no session; 
 
 // ── resume (#95) ─────────────────────────────────────────────────────────────
 
-const STORED_BRANCH: ZenTranscriptEntry[] = transcriptOf([
+const STORED_BRANCH: EnsoTranscriptEntry[] = transcriptOf([
   { type: 'custom', customType: 'modes', data: { mode: 'plan' }, id: 'p', parentId: null, timestamp: '' },
   {
     type: 'message',
@@ -359,7 +359,7 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
       firstMessage: 'earlier question',
     },
     'stored-2': {
-      transcript: [] as ZenTranscriptEntry[],
+      transcript: [] as EnsoTranscriptEntry[],
       modified: new Date('2026-09-08T11:00:00.000Z'),
       firstMessage: '   ',
     },
@@ -370,7 +370,7 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
   const response = await fetch(`${url}/api/stored-threads`)
   expect(response.status).toBe(200)
   const listed: unknown = await response.json()
-  expect(Array.isArray(listed) && listed.every((thread) => Check(ZenStoredThread, thread))).toBe(true)
+  expect(Array.isArray(listed) && listed.every((thread) => Check(EnsoStoredThread, thread))).toBe(true)
   expect(listed).toEqual([
     {
       threadId: 'stored-1',
@@ -392,7 +392,7 @@ test("GET /api/threads/:id/history serves a STORED thread's branch as messages w
   const response = await fetch(`${url}/api/threads/stored-1/history`)
   expect(response.status).toBe(200)
   const history: unknown = await response.json()
-  expect(Check(ZenThreadHistory, history)).toBe(true)
+  expect(Check(EnsoThreadHistory, history)).toBe(true)
   expect(history).toMatchObject({
     threadId: 'stored-1',
     permissionMode: { mode: 'plan' },
@@ -415,11 +415,11 @@ test("⚠ a thread this server holds IDLE is resumable — /history reads pi's m
   }
   const { url, built } = await startWith(settlesAtOnce, stored)
   await prompt(url, 't1', 'hello')
-  const listed = (await (await fetch(`${url}/api/stored-threads`)).json()) as ZenStoredThread[]
+  const listed = (await (await fetch(`${url}/api/stored-threads`)).json()) as EnsoStoredThread[]
   expect(listed.find((thread) => thread.threadId === 't1')?.busy).toBe(false)
   const response = await fetch(`${url}/api/threads/t1/history`)
   expect(response.status).toBe(200)
-  const history = (await response.json()) as ZenThreadHistory
+  const history = (await response.json()) as EnsoThreadHistory
   // The fake's LIVE mode is `default` while its stored file says `plan`: an idle live
   // thread's history is what pi holds now, the session's own answer, not the file's.
   expect(history.permissionMode).toEqual({ mode: 'default', available: ['default', 'acceptEdits'] })
@@ -429,7 +429,7 @@ test("⚠ a thread this server holds IDLE is resumable — /history reads pi's m
 })
 
 // ⚠ THE COLD READ IS RACED, AND THE RACE IS ON THE BOOT PATH (#214). Boot adopts a named
-// thread from /history before showing a pane, so another tab — or `zen-thread` — can prompt
+// thread from /history before showing a pane, so another tab — or `enso-thread` — can prompt
 // the same id while the file is being read. Both routes decide what they hold AFTER that
 // read (`thread-read.ts#readThreadMount`). Before #214 only the follow re-peeked and
 // /history answered from the peek it took BEFORE the await, so the two disagreed: the file's
@@ -455,7 +455,7 @@ test('⚠ a thread built WHILE /history reads the file is served pi\u2019s branc
 
   const response = await fetch(`${url}/api/threads/t1/history`)
   expect(response.status).toBe(200)
-  const history = (await response.json()) as ZenThreadHistory
+  const history = (await response.json()) as EnsoThreadHistory
 
   const controller = new AbortController()
   openFollows.push(controller)
@@ -478,7 +478,7 @@ test('⚠ GET /api/threads/:id/history serves a thread that is BUSY here — a r
   await prompt(url, 't1', '/mode')
   const response = await fetch(`${url}/api/threads/t1/history`)
   expect(response.status).toBe(200)
-  expect(((await response.json()) as ZenThreadHistory).threadId).toBe('t1')
+  expect(((await response.json()) as EnsoThreadHistory).threadId).toBe('t1')
   // Looking did not build a second session.
   expect(built).toHaveLength(1)
 })
@@ -488,18 +488,18 @@ test('GET /api/threads lists live threads with busy state and the run number', a
   // An open question holds the thread: taken, never released.
   await prompt(url, 'held-thread', '/mode')
   const summaries: unknown = await (await fetch(`${url}/api/threads`)).json()
-  expect(Array.isArray(summaries) && summaries.every((summary) => Check(ZenThreadSummary, summary))).toBe(true)
+  expect(Array.isArray(summaries) && summaries.every((summary) => Check(EnsoThreadSummary, summary))).toBe(true)
   expect(summaries).toMatchObject([{ threadId: 'held-thread', busy: true, generation: 1, sessionFile: null }])
 })
 
 test('⚠ a bind conflict rejects `listening` instead of hanging, and reports the clash (#81 review)', async () => {
   const { host } = fakeHost({ onPrompt: neverPrompted })
   // Occupy a real port by letting the OS pick one (port 0).
-  const first = startZenServer({
+  const first = startEnsoServer({
     cwd: tmpdir(),
     harnessPackageDir: emptyHarnessDir(),
-    agentDir: mkdtempSync(join(tmpdir(), 'zen-handler-agent-')),
-    logsDir: mkdtempSync(join(tmpdir(), 'zen-logs-')),
+    agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
+    logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
     host,
   })
@@ -509,11 +509,11 @@ test('⚠ a bind conflict rejects `listening` instead of hanging, and reports th
   // Asking for the same port must not dangle: before the fix `listening` never settled
   // (Bun does not re-fire 'listening' after an 'error'), so `await listening` hung forever.
   // Now it rejects, and the human-readable clash is still logged, naming the port.
-  const second = startZenServer({
+  const second = startEnsoServer({
     cwd: tmpdir(),
     harnessPackageDir: emptyHarnessDir(),
-    agentDir: mkdtempSync(join(tmpdir(), 'zen-handler-agent-')),
-    logsDir: mkdtempSync(join(tmpdir(), 'zen-logs-')),
+    agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
+    logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: occupied,
     host,
   })
@@ -531,7 +531,7 @@ test("⚠ GET /api/about answers the bundle's own header, and writes no record",
   expect(response.status).toBe(200)
   const about = (await response.json()) as Record<string, unknown>
   // Every field the bundle's header carries, and nothing undefined among them.
-  expect(Object.keys(about).sort()).toEqual(['at', 'bun', 'os', 'pi', 'selection', 'zen'])
+  expect(Object.keys(about).sort()).toEqual(['at', 'bun', 'enso', 'os', 'pi', 'selection'])
   expect(Number.isNaN(new Date(String(about.at)).getTime())).toBe(false)
   for (const twice of [0, 1]) await fetch(`${url}/api/about?call=${twice}`)
   expect(logs.records.length).toBe(before)
@@ -598,6 +598,6 @@ test('the dev page and the header-less CLIs are unaffected', async () => {
   for (const origin of ['http://127.0.0.1:5178', 'http://localhost:5178', 'http://127.0.0.1:5179']) {
     expect((await fetch(`${url}/api/about`, { headers: { Origin: origin } })).status).toBe(200)
   }
-  // `zen-thread.ts` and `curl` send no Origin at all.
+  // `enso-thread.ts` and `curl` send no Origin at all.
   expect((await fetch(`${url}/api/about`)).status).toBe(200)
 })

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { DEFAULT_GUARD_POLICY } from '@zen/core'
+import { DEFAULT_GUARD_POLICY } from '@enso/core'
 import {
   isInsideAnyRoot,
   isPersistenceWriteTarget,
@@ -13,8 +13,8 @@ import {
   resolveAgainstCwd,
 } from '../paths.ts'
 
-const root = mkdtempSync(join(tmpdir(), 'zen-guard-'))
-const outside = mkdtempSync(join(tmpdir(), 'zen-outside-'))
+const root = mkdtempSync(join(tmpdir(), 'enso-guard-'))
+const outside = mkdtempSync(join(tmpdir(), 'enso-outside-'))
 mkdirSync(join(root, 'src'), { recursive: true })
 writeFileSync(join(outside, 'target.txt'), 'x')
 
@@ -112,14 +112,14 @@ test('anything inside a dangerous directory is a persistence write target', () =
 })
 
 // ⚠ The ZEN ADDITIONS: pi's OWN persistence surfaces, which picc's Claude-Code corpus
-// cannot know about. Each line is a real load path (receipts in scripts/zen.ts's header).
-test("pi's own persistence surfaces are write targets — the zen additions", () => {
+// cannot know about. Each line is a real load path (receipts in scripts/enso.ts's header).
+test("pi's own persistence surfaces are write targets — the enso additions", () => {
   // A project-local .pi/settings.json installs an extension for the next plain `pi` run.
   expect(isPersistenceWriteTarget(join(root, '.pi', 'settings.json'))).toBe(true)
   // pi discovers skills from ~/.agents/skills/ even under a redirected agent dir.
   expect(isPersistenceWriteTarget('/home/u/.agents/skills/evil/SKILL.md')).toBe(true)
   // The harness's own agent dir holds settings, extensions and auth for future sessions.
-  expect(isPersistenceWriteTarget(join(root, '.zen', 'pi-agent', 'settings.json'))).toBe(true)
+  expect(isPersistenceWriteTarget(join(root, '.enso', 'pi-agent', 'settings.json'))).toBe(true)
   // Segment-anchored, like the vendored list: a name merely containing one is NOT caught.
   expect(isPersistenceWriteTarget(join(root, 'api', 'spec.ts'))).toBe(false)
   expect(isPersistenceWriteTarget(join(root, 'pi-tools', 'x.ts'))).toBe(false)
@@ -140,7 +140,7 @@ test('a name merely containing a dangerous name is NOT caught', () => {
 
 test('⚠ a symlink with an innocent name pointing at a shell-init file is caught', () => {
   // The write target EXISTS as a symlink; realpath reveals the true basename.
-  const dotfiles = mkdtempSync(join(tmpdir(), 'zen-dotfiles-'))
+  const dotfiles = mkdtempSync(join(tmpdir(), 'enso-dotfiles-'))
   writeFileSync(join(dotfiles, '.bashrc'), '# rc')
   const link = join(root, 'innocent-notes.txt')
   symlinkSync(join(dotfiles, '.bashrc'), link)
@@ -148,7 +148,7 @@ test('⚠ a symlink with an innocent name pointing at a shell-init file is caugh
 })
 
 test('⚠ a NEW file through a symlinked directory that is really a dangerous dir is caught', () => {
-  const agentConfigDir = mkdtempSync(join(tmpdir(), 'zen-agent-'))
+  const agentConfigDir = mkdtempSync(join(tmpdir(), 'enso-agent-'))
   const realClaude = join(agentConfigDir, '.claude')
   mkdirSync(realClaude)
   const link = join(root, 'innocent-dir')
@@ -220,7 +220,7 @@ test("⚠ a unicode space in the cwd is NOT collapsed — pi's base-directory op
  *
  * ⚠ WHICH pi, exactly: the one in the WORKSPACE tree, which is the one the in-process host
  * imports (#69) and NOT, by construction, the `pi` the terminal launcher finds on `PATH`.
- * That second resolution is bounded by `scripts/zen-launch.ts#SUPPORTED_PI_VERSIONS` — the
+ * That second resolution is bounded by `scripts/enso-launch.ts#SUPPORTED_PI_VERSIONS` — the
  * launcher refuses a pi outside the range this corpus has been run against, and
  * `scripts/__tests__/pi-version-parity.test.ts` asserts the range still covers the pi resolved here (#217).
  *
@@ -335,6 +335,9 @@ test('every secret path fragment is load-bearing on its own — a basename regex
     '/.pgpass': '/home/u/.pgpass',
     '/.kube/config': '/home/u/.kube/config',
     // #204: `auth.json` matches no basename pattern, which is exactly how it was readable.
+    '/.enso/': '/home/u/project/.enso/pi-agent/auth.json',
+    // The directory `.enso/` used to be: still on disk in every checkout until its owner moves
+    // it, still holding `auth.json` and `secrets.env`, and denied for exactly that reason.
     '/.zen/': '/home/u/project/.zen/pi-agent/auth.json',
   }
   // The map must cover the policy exactly — a fragment added without a case here is a gap.

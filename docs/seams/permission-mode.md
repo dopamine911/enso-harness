@@ -8,7 +8,7 @@ layers away from it — leak **L3**, which #162 workstream 4 closed in three ste
 vendor persists, registers and is *told* is below the `AgentHost` / `ThreadRuntime` seam, in
 `web/src/host/permission-mode-adapter.ts` and `agent-host.ts`; the server asks the host; the host emits
 the `permission-mode` observation on a change and the browser folds that alone; changing the mode is a
-control route. `@zen/core` is `ZenPermissionModeState` and the route's body.
+control route. `@enso/core` is `EnsoPermissionModeState` and the route's body.
 
 Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Refresh with
 `bun scripts/docs/refresh-fences.ts docs/seams/permission-mode.md`.
@@ -18,7 +18,7 @@ Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Ref
 What crosses to the browser: the mode a run is in, and the modes it may switch to — at run start as
 the receipt, and on every change as the observation, one shape for both.
 
-<!-- source: packages/core/src/permission-mode.ts#ZenPermissionModeState -->
+<!-- source: packages/core/src/permission-mode.ts#EnsoPermissionModeState -->
 ```ts
 /**
  * The receipt a run starts with (#84) — and the value of the `permission-mode` CUSTOM chunk that
@@ -28,13 +28,13 @@ the receipt, and on every change as the observation, one shape for both.
  * runtime's mode extension registers, intersected with the commands this session actually
  * registers, in the extension's order (the host decides).
  */
-export const ZenPermissionModeState = Type.Object({
+export const EnsoPermissionModeState = Type.Object({
   mode: Type.String({ minLength: 1 }),
   available: Type.Array(Type.String({ minLength: 1 })),
 })
 ```
 
-<!-- source: packages/core/src/observation.ts#ZenPermissionMode -->
+<!-- source: packages/core/src/observation.ts#EnsoPermissionMode -->
 ```ts
 /**
  * The permission mode changed, and what a run may switch to now (#162 workstream 4, L3).
@@ -42,17 +42,17 @@ export const ZenPermissionModeState = Type.Object({
  * The HOST emits this when its mode extension persists a change — the one observation the
  * browser reads the mode from mid-run, so no surface knows which extension's entry it was or
  * what that entry looks like. The same `{ mode, available }` a run starts with
- * (`ZenPermissionModeState`): one shape for the receipt and for the change.
+ * (`EnsoPermissionModeState`): one shape for the receipt and for the change.
  */
-export const ZenPermissionMode = Type.Object({
+export const EnsoPermissionMode = Type.Object({
   kind: Type.Literal('permission-mode'),
-  ...ZenPermissionModeState.properties,
+  ...EnsoPermissionModeState.properties,
 })
 ```
 
 And what crosses the other way — the one thing the browser may say about the mode:
 
-<!-- source: packages/core/src/permission-mode.ts#ZenPermissionModeChange -->
+<!-- source: packages/core/src/permission-mode.ts#EnsoPermissionModeChange -->
 ```ts
 /**
  * The body of `POST /api/threads/:threadId/mode` (L3 step C): the mode to switch to.
@@ -61,7 +61,7 @@ And what crosses the other way — the one thing the browser may say about the m
  * a busy thread (409); the change itself arrives on the follow as `permission-mode`, never from
  * the click.
  */
-export const ZenPermissionModeChange = Type.Object({
+export const EnsoPermissionModeChange = Type.Object({
   mode: Type.String({ minLength: 1 }),
 })
 ```
@@ -127,7 +127,7 @@ its branch — so the server never spells the vendor's set:
  * served before any run exists, so the header reads `default` from the first paint rather than
  * `unknown`.
  */
-export function freshPermissionModeState(): ZenPermissionModeState {
+export function freshPermissionModeState(): EnsoPermissionModeState {
   return { mode: PICC_DEFAULT_PERMISSION_MODE, available: [...PICC_PERMISSION_MODES] }
 }
 ```
@@ -141,7 +141,7 @@ export function freshPermissionModeState(): ZenPermissionModeState {
  * built to ask what it registers (#86's rule: looking must not build), so the cold answer
  * offers what picc always offers.
  */
-export function storedPermissionModeState(transcript: readonly ZenTranscriptEntry[]): ZenPermissionModeState {
+export function storedPermissionModeState(transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState {
   for (let position = transcript.length - 1; position >= 0; position -= 1) {
     const entry = transcript[position]
     if (entry?.kind !== 'custom') continue
@@ -183,7 +183,7 @@ cold thread, from `host.storedPermissionMode(branch)`. That choice is made once,
 both read it from there — one reader, so the two cannot answer differently about a thread that goes
 live mid-read (#214). The inspection and summary report the live mode. And
 `GET /api/mode` answers `host.freshPermissionMode()` before any run exists. The run receipt
-(`ZenPromptReceipt`, `packages/core/src/follow.ts:158-169`) does **not** carry the mode; it carries
+(`EnsoPromptReceipt`, `packages/core/src/follow.ts:158-169`) does **not** carry the mode; it carries
 `messageId`, `generation` and `queued` only.
 
 **Said by the host, mid-run.** When the host's session subscription sees the vendor persist a mode, it
@@ -191,7 +191,7 @@ emits its own `permission_mode` event right after it (`host/agent-host.ts`, the 
 pinned by `agent-host.test.ts` against the real extension). The mapper carries it as the
 `permission-mode` observation (`host/map-events.ts#mapPermissionMode`), and `to-agui.ts` emits it as
 a CUSTOM chunk named `permission-mode`, carrying the observation whole; the run-start receipt is the
-snapshot's `permissionMode`, the same `ZenPermissionModeState` shape. The vendor's `custom-entry`
+snapshot's `permissionMode`, the same `EnsoPermissionModeState` shape. The vendor's `custom-entry`
 still crosses as itself — recorded and counted by the debug pane, rendered by nothing.
 
 **Shown by the browser, two views, one feed.** The mode — off the snapshot
@@ -199,7 +199,7 @@ still crosses as itself — recorded and counted by the debug pane, rendered by 
 (`custom-event-router.ts`): `permission-mode.tsx` (the composer's `<select>`, which says `unknown` until
 a real value has arrived) and `mode-lines.ts` (one transcript line per distinct value, worded as state).
 Neither knows what a vendor entry is. **Changing the mode is a control route** (step C):
-`POST …/mode` with `ZenPermissionModeChange` (`follow-connection.ts#changeMode`, from the composer's
+`POST …/mode` with `EnsoPermissionModeChange` (`follow-connection.ts#changeMode`, from the composer's
 select in `chat-screen.tsx`) → `changeThreadMode` (`server/follow.ts`: acquires like a prompt, 409 while
 busy, 422 for a mode the thread does not offer) → `ThreadRuntime.setPermissionMode` → the host runs the
 vendor's per-mode command as a prompt (`permission-mode-adapter.ts#piccModeCommand`). Invariant 2: the
@@ -231,7 +231,7 @@ last entry wins, none is `default`, another extension's custom entry is not a mo
 
 **Nothing.** Above the host, no surface reads the vendor's persisted entry, spells its set, or names
 its commands; the vendor gate's allowlist has no row for this seam. What the browser knows of the mode
-is `ZenPermissionModeState` in, `ZenPermissionModeChange` out.
+is `EnsoPermissionModeState` in, `EnsoPermissionModeChange` out.
 
 ## Pivot cost
 
@@ -239,10 +239,10 @@ is `ZenPermissionModeState` in, `ZenPermissionModeChange` out.
 the initial mode, the walk, the entry reader, the command a mode is set with) and `agent-host.ts` (the
 command-name intersection, the `permission_mode` emission, `setPermissionMode`) under `host/`. Nothing
 above them.
-`ZenFollowSnapshot`, the inspection, the summary, the router, the store's fold and both server cold
+`EnsoFollowSnapshot`, the inspection, the summary, the router, the store's fold and both server cold
 paths do not change: they hold `{ mode, available }` and the fakes prove the server runs on that alone.
 
-**Fix L3** (#162 workstream 4; goals §3.2: "the mode is `ZenPermissionMode` with picc as *an*
+**Fix L3** (#162 workstream 4; goals §3.2: "the mode is `EnsoPermissionMode` with picc as *an*
 implementation the host adapts"), in three steps:
 
 - **A — done.** The walk, the initial mode and the registered set went below the seam into
@@ -252,7 +252,7 @@ implementation the host adapts"), in three steps:
 - **B — done.** The host emits `permission_mode` when it sees the vendor's entry; the mapper carries
   it as the `permission-mode` observation; the browser's two readers fold the `permission-mode` observation and stopped knowing
   a custom entry's shape; the tooltip stopped naming the vendor. `readPiccPersistedMode` and the
-  `customType` followed the rest below the seam; `@zen/core` is `ZenPermissionModeState` alone. Four
+  `customType` followed the rest below the seam; `@enso/core` is `EnsoPermissionModeState` alone. Four
   allowlist lines deleted.
 - **C — done.** `POST …/mode` → `changeThreadMode` → `ThreadRuntime.setPermissionMode`; the host
   translates to the vendor's command; the select posts a mode and sends no prompt. Pinned on the wire

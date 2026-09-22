@@ -1,3 +1,4 @@
+import { ENSO_LOG_ROOT, type EnsoBrowserLogBatch, type EnsoLogLine, ensoLogLineOf } from '@enso/core'
 import {
   configure,
   getConsoleSink,
@@ -7,14 +8,13 @@ import {
   type Sink,
   withFilter,
 } from '@logtape/logtape'
-import { ZEN_LOG_ROOT, type ZenBrowserLogBatch, type ZenLogLine, zenLogLineOf } from '@zen/core'
 import { createStore, type Store } from './store.ts'
 
 /**
  * The browser's logging (#132 slice 3). Three sinks, one `configure`, called once from
  * `main.tsx` before the page mounts:
  *
- *   ring     — the last {@link LOG_RING_CAPACITY} records as {@link ZenLogLine}s, in a
+ *   ring     — the last {@link LOG_RING_CAPACITY} records as {@link EnsoLogLine}s, in a
  *              store the `?debug` drawer renders and the bundle (slice 4) reads. Every
  *              level the page runs at. In memory, gone with the tab — a debugging surface
  *              puts no traffic in the trace it is reading (#86), so nothing is pulled.
@@ -28,7 +28,7 @@ import { createStore, type Store } from './store.ts'
  *              as they happen.
  *
  * `?log=debug` (or `trace`) is the page's knob, beside `?debug`; the default is `info`. The
- * browser has no `AsyncLocalStorage`, so `withZenLogContext` is inert here: every record
+ * browser has no `AsyncLocalStorage`, so `withEnsoLogContext` is inert here: every record
  * names its `threadId` explicitly (`log.with({ threadId })` per connection).
  *
  * ⚠ `@logtape/logtape` only — the core package is browser-safe; `@logtape/file` is not
@@ -41,18 +41,18 @@ export const SHIP_BATCH_SIZE = 20
 const SHIP_FLUSH_MS = 1000
 const LOGS_ROUTE = '/api/logs'
 
-export interface LogRing extends Store<readonly ZenLogLine[]> {
+export interface LogRing extends Store<readonly EnsoLogLine[]> {
   readonly sink: Sink
 }
 
 /** The last N records, newest last, as lines — one shape with the file. */
 export function createLogRing(capacity = LOG_RING_CAPACITY): LogRing {
-  const store = createStore<readonly ZenLogLine[]>([])
+  const store = createStore<readonly EnsoLogLine[]>([])
   return {
     get: store.get,
     subscribe: store.subscribe,
     sink: (record: LogRecord) => {
-      const appended = [...store.get(), zenLogLineOf(record)]
+      const appended = [...store.get(), ensoLogLineOf(record)]
       store.set(appended.length > capacity ? appended.slice(-capacity) : appended)
     },
   }
@@ -88,7 +88,7 @@ const SHIPPED_LEVELS: Readonly<Record<LogLevel, 'info' | 'warning' | 'error' | u
 export function createLogShipper(options: LogShipperOptions): LogShipper {
   const batchSize = options.batchSize ?? SHIP_BATCH_SIZE
   const flushMs = options.flushMs ?? SHIP_FLUSH_MS
-  let pending: ZenBrowserLogBatch['records'] = []
+  let pending: EnsoBrowserLogBatch['records'] = []
   // The timer in flight, by number: a flush by count or by hand bumps it, so a timer that
   // was scheduled before finds itself stale and does nothing — by count and by time are
   // mutually exclusive, with no handle to type across bun (an object) and the browser (a number).
@@ -96,7 +96,7 @@ export function createLogShipper(options: LogShipperOptions): LogShipper {
   const flush = (keepalive = false): void => {
     schedule += 1
     if (pending.length === 0) return
-    const batch: ZenBrowserLogBatch = { page: options.page, records: pending }
+    const batch: EnsoBrowserLogBatch = { page: options.page, records: pending }
     pending = []
     // Fire and forget, and NEVER log the outcome: a failing log route must not feed itself.
     void options
@@ -113,7 +113,7 @@ export function createLogShipper(options: LogShipperOptions): LogShipper {
     sink: (record: LogRecord) => {
       const level = SHIPPED_LEVELS[record.level]
       if (level === undefined) return
-      const line = zenLogLineOf(record)
+      const line = ensoLogLineOf(record)
       pending.push({
         at: line['@timestamp'],
         level,
@@ -172,11 +172,11 @@ export async function configureBrowserLogging(options: BrowserLoggingOptions): P
   }
   await configure({
     reset: true,
-    sinks: { zen: stamped },
+    sinks: { enso: stamped },
     loggers: [
       // The tree lets everything through; the ring's and console's filters pick the level,
       // and the shipper picks its own (`info`+) regardless of the page's.
-      { category: [ZEN_LOG_ROOT], lowestLevel: 'trace', sinks: ['zen'] },
+      { category: [ENSO_LOG_ROOT], lowestLevel: 'trace', sinks: ['enso'] },
       { category: ['logtape', 'meta'], sinks: [] },
     ],
   })

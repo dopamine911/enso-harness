@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
-import { describeThreadEvent, isZenThreadId, threadEventColumns, type ZenThreadEvent } from '../thread-inspection.ts'
+import { describeThreadEvent, type EnsoThreadEvent, isEnsoThreadId, threadEventColumns } from '../thread-inspection.ts'
 import { describeTranscriptEntry } from '../transcript.ts'
 
-// The row formats are shared by the `?debug` drawer and `zen-thread.ts` (PR #100 review: one
+// The row formats are shared by the `?debug` drawer and `enso-thread.ts` (PR #100 review: one
 // definition, after the #86 pair had drifted). What a human reads off either surface is pinned here.
 
 test('a transcript entry row: time, kind, custom type, message role, tool name, and the mode when the entry carries one', () => {
@@ -38,19 +38,19 @@ test('a transcript entry row: time, kind, custom type, message role, tool name, 
 
 // The id names a FILE (#95): what a filesystem could read is out; what the browser mints is in.
 test('a thread id is a UUID or the like — never a path, never a flag, never unbounded', () => {
-  expect(isZenThreadId(crypto.randomUUID())).toBe(true)
-  expect(isZenThreadId('stored-1')).toBe(true)
-  expect(isZenThreadId('a'.repeat(64))).toBe(true)
-  expect(isZenThreadId('a'.repeat(65))).toBe(false)
-  expect(isZenThreadId('')).toBe(false)
-  expect(isZenThreadId('../../evil')).toBe(false)
-  expect(isZenThreadId('with space')).toBe(false)
-  expect(isZenThreadId('a.b')).toBe(false)
-  expect(isZenThreadId('-flag')).toBe(false)
-  expect(isZenThreadId(42)).toBe(false)
+  expect(isEnsoThreadId(crypto.randomUUID())).toBe(true)
+  expect(isEnsoThreadId('stored-1')).toBe(true)
+  expect(isEnsoThreadId('a'.repeat(64))).toBe(true)
+  expect(isEnsoThreadId('a'.repeat(65))).toBe(false)
+  expect(isEnsoThreadId('')).toBe(false)
+  expect(isEnsoThreadId('../../evil')).toBe(false)
+  expect(isEnsoThreadId('with space')).toBe(false)
+  expect(isEnsoThreadId('a.b')).toBe(false)
+  expect(isEnsoThreadId('-flag')).toBe(false)
+  expect(isEnsoThreadId(42)).toBe(false)
 })
 
-function threadEvent(overrides: Partial<ZenThreadEvent>): ZenThreadEvent {
+function threadEvent(overrides: Partial<EnsoThreadEvent>): EnsoThreadEvent {
   return {
     sequence: 1,
     type: 'entry_appended',

@@ -1,9 +1,9 @@
 {
-  "name": "@zen/core",
+  "name": "@enso/core",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Every TypeBox schema in zen-harness. One place, so a shape cannot be duplicated by accident.",
+  "description": "Every TypeBox schema in Enso. One place, so a shape cannot be duplicated by accident.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {

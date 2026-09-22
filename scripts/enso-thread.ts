@@ -12,26 +12,26 @@
  *
  * Read-only. Talks to the loopback dev server only.
  *
- * Usage:  bun scripts/zen-thread.ts                 # every live thread, one line each
- *         bun scripts/zen-thread.ts <threadId>      # one thread: summary, then the branch
- *         bun scripts/zen-thread.ts <threadId> --events  # the event tails (#97): what the
+ * Usage:  bun scripts/enso-thread.ts                 # every live thread, one line each
+ *         bun scripts/enso-thread.ts <threadId>      # one thread: summary, then the branch
+ *         bun scripts/enso-thread.ts <threadId> --events  # the event tails (#97): what the
  *                                                          # host emitted, with provenance,
  *                                                          # then what the server sent
- *         bun scripts/zen-thread.ts <threadId> --json   # the raw payload, for piping
+ *         bun scripts/enso-thread.ts <threadId> --json   # the raw payload, for piping
  *
- * The server address defaults to the dev server's; override with ZEN_SERVER_URL.
+ * The server address defaults to the dev server's; override with ENSO_SERVER_URL.
  */
 
 import type {
-  ZenThreadEvent,
-  ZenThreadEvents,
-  ZenThreadInspection,
-  ZenThreadSummary,
+  EnsoThreadEvent,
+  EnsoThreadEvents,
+  EnsoThreadInspection,
+  EnsoThreadSummary,
 } from '../packages/core/src/index.ts'
 // The row formats are core's, shared with the drawer: one definition, so the two views cannot drift.
 import { describeTranscriptEntry, threadEventColumns } from '../packages/core/src/index.ts'
 
-const serverUrl: string = process.env.ZEN_SERVER_URL ?? 'http://127.0.0.1:5179'
+const serverUrl: string = process.env.ENSO_SERVER_URL ?? 'http://127.0.0.1:5179'
 const [threadId, ...flags] = process.argv.slice(2)
 const wantsJson = flags.includes('--json')
 const wantsEvents = flags.includes('--events')
@@ -42,18 +42,18 @@ async function fetchJson<T>(path: string): Promise<T> {
   try {
     response = await fetch(`${serverUrl}${path}`)
   } catch (error) {
-    process.stderr.write(`zen-thread: cannot reach ${serverUrl} — is \`bun run dev\` up? (${String(error)})\n`)
+    process.stderr.write(`enso-thread: cannot reach ${serverUrl} — is \`bun run dev\` up? (${String(error)})\n`)
     process.exit(1)
   }
   if (!response.ok) {
-    process.stderr.write(`zen-thread: ${response.status} ${await response.text()}\n`)
+    process.stderr.write(`enso-thread: ${response.status} ${await response.text()}\n`)
     process.exit(1)
   }
   return (await response.json()) as T
 }
 
 if (threadId === undefined) {
-  const threads = await fetchJson<ZenThreadSummary[]>('/api/threads')
+  const threads = await fetchJson<EnsoThreadSummary[]>('/api/threads')
   if (threads.length === 0) {
     process.stdout.write('no live threads — nothing has run since the server started, or every session idled out\n')
   }
@@ -68,13 +68,13 @@ if (threadId === undefined) {
 }
 
 /** The drawer's row, as a table: the provenance column padded so `held`/`dropped` line up down the page. */
-function describeThreadEvent(event: ZenThreadEvent): string {
+function describeThreadEvent(event: EnsoThreadEvent): string {
   const columns = threadEventColumns(event)
   return `${columns.when}  ${columns.provenance.padEnd(12)} ${columns.subject}`
 }
 
 if (wantsEvents) {
-  const events = await fetchJson<ZenThreadEvents>(`/api/threads/${encodeURIComponent(threadId)}/events`)
+  const events = await fetchJson<EnsoThreadEvents>(`/api/threads/${encodeURIComponent(threadId)}/events`)
   if (wantsJson) {
     process.stdout.write(`${JSON.stringify(events, null, 2)}\n`)
     process.exit(0)
@@ -87,7 +87,7 @@ if (wantsEvents) {
   process.exit(0)
 }
 
-const inspection: ZenThreadInspection = await fetchJson<ZenThreadInspection>(
+const inspection: EnsoThreadInspection = await fetchJson<EnsoThreadInspection>(
   `/api/threads/${encodeURIComponent(threadId)}`,
 )
 if (wantsJson) {

@@ -1,5 +1,5 @@
 import { basename } from 'node:path'
-import { isSecretShapedName } from '@zen/core/secrets'
+import { isSecretShapedName } from '@enso/core/secrets'
 import { EXEC_TERMINATORS, FIND_COMMAND, findExecPayloads, TRANSPARENT_COMMAND_WRAPPERS } from './network-egress.ts'
 import {
   extractFlatShellCommandSegments,
@@ -11,7 +11,7 @@ import {
 /**
  * The bash environment-dump deny (#89) — DEPTH, not the fix.
  *
- * The fix is `quarantineSecrets` in `@zen/core`: secrets are deleted from the process
+ * The fix is `quarantineSecrets` in `@enso/core`: secrets are deleted from the process
  * environment before any session or child exists, so an environment listing shows none.
  * This deny exists so that a REGRESSION there is loud rather than silent — a `bash env`
  * that would have printed a key is refused with a reason naming #89, instead of quietly

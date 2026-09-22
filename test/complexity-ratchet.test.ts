@@ -94,7 +94,7 @@ function filePins(): Record<string, number> {
  * cannot be read there is thrown on rather than dropped, because a dropped row is silent slack.
  */
 function measuredAboveCeiling(ceiling: number): Record<string, number> {
-  const directory = mkdtempSync(join(tmpdir(), 'zen-complexity-'))
+  const directory = mkdtempSync(join(tmpdir(), 'enso-complexity-'))
   let report: string
   try {
     const config = join(directory, 'biome.jsonc')

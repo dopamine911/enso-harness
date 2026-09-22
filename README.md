@@ -1,7 +1,7 @@
-# zen-harness
+# Enso
 
 A **pi package** that provides **two surfaces over one agent loop**. [pi](https://github.com/earendil-works/pi)
-owns the loop, the providers, sessions, and compaction; zen-harness adds guards, tools, and state as pi
+owns the loop, the providers, sessions, and compaction; Enso adds guards, tools, and state as pi
 extensions, and presents them through a terminal launcher and a web application. Neither surface has its
 own brain — both are clients of the same package running against the same pi.
 
@@ -17,7 +17,7 @@ compaction — and **no confinement at all**. Out of the box, an agent with repo
 unrestricted `bash` tool can read `~/.aws/credentials`, append to `~/.bashrc`, and post the repository
 anywhere, and nothing in pi distinguishes any of that from fetching a public document
 ([`docs/concepts/pi-immediate-needs.md`](docs/concepts/pi-immediate-needs.md) catalogues the gaps,
-ranked). zen-harness is the layer that makes running agents on pi *survivable*: a guarded floor that is
+ranked). Enso is the layer that makes running agents on pi *survivable*: a guarded floor that is
 always on, an egress story that is a committed policy instead of an absence, and enough observability
 that what an agent did is auditable after the fact.
 
@@ -39,21 +39,21 @@ every landed change carries live receipts — a real run, not just a green suite
 
 ```bash
 bun install            # postinstall links the vendor packages into the harness
-bun run zen            # a VANILLA pi with only zen-harness loaded (isolated agent dir)
-bun run zen -p "..."   # non-interactive print run (loads the print variant — see below)
+bun run Enso            # a VANILLA pi with only Enso loaded (isolated agent dir)
+bun run Enso -p "..."   # non-interactive print run (loads the print variant — see below)
 bun run dev            # both web surfaces: API server on :5179, app on :5178
 bun run check:all      # THE gate: biome → tsc → fallow → bun test → coverage floor
 ```
 
-`bun run zen` launches pi with three isolation mechanisms, each closing a different hole:
-`PI_CODING_AGENT_DIR` points pi at `.zen/pi-agent` (a scratch config dir — none of your global
+`bun run Enso` launches pi with three isolation mechanisms, each closing a different hole:
+`PI_CODING_AGENT_DIR` points pi at `.enso/pi-agent` (a scratch config dir — none of your global
 packages, settings, keybindings, or credentials are visible), `--no-extensions` suppresses discovery
 (including this repo's own `.pi/settings.json`, which would otherwise load the package twice), and
 `--no-skills` (pi discovers skills from `~/.agents/skills/` too, which the agent dir does not
 redirect). The scratch dir has no credentials, so `/login` once inside it (or a
 [`pi-multi-account`](https://www.npmjs.com/package/pi-multi-account) slot) is how they get there.
 ⚠ An exported `ANTHROPIC_API_KEY` does NOT reach pi: `#89`'s quarantine deletes every
-secret-shaped environment variable before the spawn, and says which on stderr (`zen: secrets kept
+secret-shaped environment variable before the spawn, and says which on stderr (`Enso: secrets kept
 out of pi's environment`). Provider auth lives in pi's own `auth.json`, by design —
 [`packages/core/src/secrets.ts`](packages/core/src/secrets.ts) holds the rule, and
 [`docs/reference/env-and-config.md`](docs/reference/env-and-config.md) the environment it leaves.
@@ -91,7 +91,7 @@ the five rounds of adversarial hardening that shaped them (PR #55) are the heade
 The sanctioned web access that replaces what the egress deny took away. The design premise for
 `web_fetch`: the measured record (a 1,753-review survey, 99.2 % approvals) says human approval prompts
 cannot carry egress policy — a **committed allowlist that accretes from real denials** can. So the host
-allowlist lives in [`zen.config.json`](zen.config.json), **empty by default**, read once at session
+allowlist lives in [`enso.config.json`](enso.config.json), **empty by default**, read once at session
 start, and the refusal message is the product: it names the file, shows the JSON to write, and says the
 change is a human's to make. Redirects are reported, never followed; every body arrives behind an
 untrusted-content banner; one stderr audit line per call, refusals included.
@@ -108,13 +108,13 @@ The gates, limits, wire facts (the OAuth identity line) and recorded non-coverag
 extensions' headers and [`docs/seams/web-providers.md`](docs/seams/web-providers.md); every config
 field and environment variable is [`docs/reference/env-and-config.md`](docs/reference/env-and-config.md).
 
-## `zen.config.json` and the path helpers (`@zen/core`, #59)
+## `enso.config.json` and the path helpers (`@enso/core`, #59)
 
 **One committed config file**, one section per consumer, TypeBox-validated with a loading contract every
 future section inherits: parse fails **closed** (`unreadable` is never "no policy"), and the schema is
 **strict on unknown keys** — a typo refuses loudly instead of configuring nothing. The config belongs to
-the zen-harness *install*: located from the harness's own tree, never from the session cwd, so a foreign
-checkout's `zen.config.json` cannot become this session's allowlist. `packages/core/src/paths.ts` is
+the Enso *install*: located from the harness's own tree, never from the session cwd, so a foreign
+checkout's `enso.config.json` cannot become this session's allowlist. `packages/core/src/paths.ts` is
 the one place that walks the filesystem for roots — realpath-first, because bun does not resolve
 `import.meta.url` through the print harness's symlink mirror — and an anchor test names any file that
 walks on its own. Fields and defaults: [`docs/reference/env-and-config.md`](docs/reference/env-and-config.md).
@@ -124,7 +124,7 @@ walks on its own. Fields and defaults: [`docs/reference/env-and-config.md`](docs
 `picc-permission-modes` fails closed when it cannot prompt — every mutating tool denied, no escape
 hatch — so a `-p` run under the full package could chat and do nothing else. Non-interactive runs
 (explicit `-p`, or stdin that is not a TTY) therefore load a **print variant** materialized under
-`.zen/print-harness/`: the harness manifest minus that one extension, with every other package-root
+`.enso/print-harness/`: the harness manifest minus that one extension, with every other package-root
 entry symlinked in place so relative imports keep resolving. Guards, web_fetch, web_search, skills, prompts and
 themes all still load — a print run has the harness's own floor, minus the interactive permission
 model that cannot exist without a human to ask. The mirror is rebuilt idempotently on every launch, so
@@ -136,7 +136,7 @@ Bun's fullstack dev server end to end — no vite, no node. The backend hosts pi
 per thread, #69) and serves a TanStack AI chat client. Neither half has its own loop; the browser is a
 client of the same harness the TUI runs.
 
-**The wire is `ZenObservation`, not AG-UI (#112).** pi's events become observations (`@zen/core`) and
+**The wire is `EnsoObservation`, not AG-UI (#112).** pi's events become observations (`@enso/core`) and
 cross as a per-thread *follow* — one snapshot, then observations with a sequence number — while a
 prompt, a stop, a dialog answer and a mode change are each one unary POST whose effect arrives on the
 follow like any run's. The browser derives AG-UI in memory for TanStack's renderer; it is never on the
@@ -154,7 +154,7 @@ deliberately ordered, since the proxy does not retry a refused connection.
 
 ## The log (#132)
 
-One file for the harness: `.zen/logs/zen-YYYY-MM-DD.jsonl`, every process appending, one JSON record
+One file for the harness: `.enso/logs/enso-YYYY-MM-DD.jsonl`, every process appending, one JSON record
 per line, redacted by field name before it is written. Every record names what it knows —
 `threadId`, `generation`, `seq`, `toolCallId` — so one thread's story reads across layers. The browser
 logs to the same file (`process: browser`). The contract is [`docs/seams/logging.md`](docs/seams/logging.md);
@@ -162,9 +162,9 @@ the variables are in [`docs/reference/env-and-config.md`](docs/reference/env-and
 the knob:
 
 ```sh
-ZEN_LOG_LEVEL=info    bun run dev   # default: the spine — runs, tool calls, verdicts, questions, failures
-ZEN_LOG_LEVEL=debug   bun run dev   # every observation, one compact line each
-ZEN_LOG_LEVEL="info,zen.server.events=trace" bun run dev   # one subtree up
+ENSO_LOG_LEVEL=info    bun run dev   # default: the spine — runs, tool calls, verdicts, questions, failures
+ENSO_LOG_LEVEL=debug   bun run dev   # every observation, one compact line each
+ENSO_LOG_LEVEL="info,Enso.server.events=trace" bun run dev   # one subtree up
 ```
 
 Read it back rendered the way the terminal shows it live:
@@ -175,7 +175,7 @@ bun run logs --follow            # keep printing as records land
 bun run logs --thread 6923e6     # one thread, by id or prefix
 bun run logs --level debug --since 10m
 bun run logs --json | jq …       # the matching lines raw
-bun run logs bundle [--thread ID] > zen-bundle.md   # what a user hands over; reads back with --file
+bun run logs bundle [--thread ID] > Enso-bundle.md   # what a user hands over; reads back with --file
 ```
 
 **The bundle** is one markdown file — versions, each live thread's inspection, the day's records for
@@ -195,7 +195,7 @@ along at exact-pinned versions:
 [`pi-multi-account`](https://www.npmjs.com/package/pi-multi-account), and a theme. pi loads packages
 with separate module roots, so `scripts/link-vendor-packages.ts` (postinstall) symlinks every harness
 dependency into the harness's own `node_modules` — a missing one is a *silently skipped* resource, so
-`zen.ts` refuses to launch when it detects the gap.
+`enso.ts` refuses to launch when it detects the gap.
 
 ## Repo layout
 

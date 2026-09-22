@@ -2,7 +2,7 @@
 
 > **Status (#167, #162 workstream 11):** archived — harvest record (2026-09-02) from a retired predecessor. What was taken is in the tree (the egress deny's signal labels, `data/magpie-signal-labels.json`); the rest stays retired.
 
-**Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the zen-harness project.
+**Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the Enso project.
 
 Magpie (repo: `~/Projects/ai-projects/command-center`) is retired. Daniel: *"Magpie is dead and will be.
 At a later phase we will harvest some features."* This is the record of what it was attempting, what is
@@ -179,7 +179,7 @@ Paths verified 2026-09-02 against the repo.
 
 | # | Artefact | Path | Why |
 |---|---|---|---|
-| ~~1~~ | ~~**zqlite**~~ — **retired 2026-09-03** | `packages/zqlite/` | Was top of this list. Dropped when zen-harness standardised on **TypeBox** (pi's tool API requires it and it *is* JSON Schema at the HTTP boundary), which makes zqlite's Zod dependency a port rather than a lift. Persistence goes to **Kysely** instead — typed SQL over `Static<>`-derived types, with hand-written migrations. See `../architecture.md` § Persistence. |
+| ~~1~~ | ~~**zqlite**~~ — **retired 2026-09-03** | `packages/zqlite/` | Was top of this list. Dropped when Enso standardised on **TypeBox** (pi's tool API requires it and it *is* JSON Schema at the HTTP boundary), which makes zqlite's Zod dependency a port rather than a lift. Persistence goes to **Kysely** instead — typed SQL over `Static<>`-derived types, with hand-written migrations. See `../architecture.md` § Persistence. |
 | 2 | **The struggle extractors** | `packages/core/src/struggle.ts` | Pure functions over an event stream. Take the extractors and the per-signal docs; leave the weights. Apply the field verdicts above. |
 | 3 | **The signal docs** | `docs/signals/*.md` + `dropped/` | The per-doc structure (pattern / detection / window / weight rationale / false positives / evidence shape) is a reusable template for any behavioural indicator, and keeping dropped signals with their reason is the right archival habit. |
 | 4 | **Cost-analysis panels** | `packages/dashboard/src/components/panels/tokens/CompactionCliffPanel.tsx`, `CacheLeveragePanel.tsx`, `EffectiveVsRawPanel.tsx` | These measure precisely what [`prompt-cache-architecture.md`](../prompt-cache-architecture.md) says is invisible to an agent. The instrument already exists. |

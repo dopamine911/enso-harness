@@ -1,16 +1,16 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
-import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import type { HostedThread } from '../../host/agent-host.ts'
 import { createThreadRegistry, type ScheduleIdleDisposal, type ThreadRegistry } from '../thread-registry.ts'
 import { createFakeHostedThread, type FakeHostedThread, type FakeThreadParts, takeQueue } from './fake-hosted-thread.ts'
 
 let logs: LogRecorder
 beforeAll(async () => {
-  logs = await recordZenLogs()
+  logs = await recordEnsoLogs()
 })
 beforeEach(() => logs.clear())
-afterAll(releaseZenLogs)
+afterAll(releaseEnsoLogs)
 
 function ignore(): void {
   // The lifecycle tests never prompt, answer, or subscribe — only acquire/release/stop/dispose matter.

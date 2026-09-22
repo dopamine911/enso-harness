@@ -22,7 +22,7 @@
  * ⓘ Named non-coverage: the map is unbounded, and a client that omits `threadId` gets a
  * fresh session per request that lives for the idle window. Loopback-only, dev-only server.
  */
-import { type ThreadRuntime, type ZenObservation, type ZenThreadInspection, zenLogger } from '@zen/core'
+import { type EnsoObservation, type EnsoThreadInspection, ensoLogger, type ThreadRuntime } from '@enso/core'
 import type { HostedThread } from '../host/agent-host.ts'
 import { createEventTail, type EventTail } from '../host/event-tail.ts'
 import { recordObservation } from './observation-log.ts'
@@ -37,7 +37,7 @@ import { recordObservation } from './observation-log.ts'
  * experiment.
  */
 export type ThreadFeedFrame =
-  | { readonly kind: 'observation'; readonly seq: number; readonly observation: ZenObservation }
+  | { readonly kind: 'observation'; readonly seq: number; readonly observation: EnsoObservation }
   | { readonly kind: 'status'; readonly live: boolean; readonly busy: boolean; readonly generation: number }
 
 export type ThreadFeedListener = (frame: ThreadFeedFrame) => void
@@ -89,7 +89,7 @@ const wallClock: ScheduleIdleDisposal = (dispose: () => void, afterMs: number): 
   return { cancel: (): void => clearTimeout(timer) }
 }
 
-const log = zenLogger('server', 'threads')
+const log = ensoLogger('server', 'threads')
 
 export interface ThreadRegistryOptions {
   /** Builds a hosted session for a thread — `AgentHost.createSession`. Injected so tests need no pi. */
@@ -123,7 +123,7 @@ export interface ThreadRegistry {
    * a prompt pi refused after its receipt went out (`prompt-rejected`). No feed (nobody
    * following): nothing to tell, and the problem channel already has it.
    */
-  announce(threadId: string, observation: ZenObservation): void
+  announce(threadId: string, observation: EnsoObservation): void
   /**
    * Abort the run in flight on a thread (#116) — the operator's stop, addressed by thread
    * because the lease that took the run lives in the prompt route's closure and a later
@@ -184,7 +184,7 @@ export interface ThreadLease {
   /**
    * Which acquisition this is, counted per thread id for the server's lifetime — the fence
    * a stale lease is checked against, and the number the browser's `status` frame
-   * carries so the two can be compared (`ZenThreadInspection.generation`).
+   * carries so the two can be compared (`EnsoThreadInspection.generation`).
    */
   readonly generation: number
   /** The run is over and nothing is parked: start the idle clock. Stale: a reported no-op. */
@@ -196,7 +196,7 @@ export interface ThreadLease {
  * A live thread as the wire describes it — `GET /api/threads/:id` and the bundle both
  * say this, from here, so they cannot drift.
  */
-export function inspectThread(view: ThreadView): ZenThreadInspection {
+export function inspectThread(view: ThreadView): EnsoThreadInspection {
   const inspection = view.hosted.inspect()
   return {
     threadId: view.threadId,
@@ -321,7 +321,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     })
   }
 
-  function publishObservation(feed: ThreadFeed, observation: ZenObservation): void {
+  function publishObservation(feed: ThreadFeed, observation: EnsoObservation): void {
     feed.seq += 1
     recordObservation(feed.threadId, generations.get(feed.threadId) ?? 0, feed.seq, observation)
     publish(feed, { kind: 'observation', seq: feed.seq, observation })
@@ -495,7 +495,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
       log.info('run {generation} acquired', { threadId, generation: thread.generation })
       return leaseOf(threadId, thread)
     },
-    announce(threadId: string, observation: ZenObservation): void {
+    announce(threadId: string, observation: EnsoObservation): void {
       const feed = feeds.get(threadId)
       if (feed !== undefined) publishObservation(feed, observation)
     },

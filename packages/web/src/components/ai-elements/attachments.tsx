@@ -6,7 +6,7 @@
  * - kept `Attachments`, `Attachment`, `AttachmentPreview`, `AttachmentRemove` and their
  *   contexts, in the `grid` variant's shape; the `inline`/`list` variants, `AttachmentInfo`,
  *   `getAttachmentLabel`, and the media-category switch are removed — the only attachment this
- *   composer takes is an image (`ZEN_IMAGE_MIME_TYPES`), so every preview is an `<img>`
+ *   composer takes is an image (`ENSO_IMAGE_MIME_TYPES`), so every preview is an `<img>`
  * - removed `AttachmentHoverCard*` (no `hover-card` primitive here; a 96 px thumbnail is
  *   the preview)
  * - `FileUIPart | SourceDocumentUIPart` from the Vercel AI SDK → `PromptAttachment` from

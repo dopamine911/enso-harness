@@ -9,7 +9,7 @@ import { openFollow, WireSchemaViolation } from './follow-reader.ts'
  * error, so a malformed frame surfaced as a bun-test timeout with no diagnosis, or as a
  * green test that never awaited another frame.
  *
- * The follow is served here by a bare `Bun.serve` rather than the zen server: these are
+ * The follow is served here by a bare `Bun.serve` rather than the enso server: these are
  * properties of the READER, and the only way to put a frame the server cannot type on the
  * wire is to write the bytes directly.
  */
@@ -44,7 +44,7 @@ const urlOf = (server: Server<undefined>): string => `http://localhost:${server.
 
 const STATUS = JSON.stringify({ type: 'status', live: false, busy: false, generation: 0 })
 
-test('a frame that satisfies ZenFollowFrame is recorded and awaited by count', async () => {
+test('a frame that satisfies EnsoFollowFrame is recorded and awaited by count', async () => {
   const follow = await openFollow(urlOf(sseServer(`: keepalive\ndata: ${STATUS}\n\n`)), 't1')
   await follow.untilFrames(1)
   expect(follow.frames[0]).toEqual({ type: 'status', live: false, busy: false, generation: 0 })
@@ -53,7 +53,7 @@ test('a frame that satisfies ZenFollowFrame is recorded and awaited by count', a
   follow.close()
 })
 
-test('a frame off the wire that fails ZenFollowFrame rejects the await that asked for it', async () => {
+test('a frame off the wire that fails EnsoFollowFrame rejects the await that asked for it', async () => {
   // Typechecks nowhere: `generation` is required, and this is what a required field left
   // `undefined` looks like once `JSON.stringify` has dropped it.
   const malformed = JSON.stringify({ type: 'status', live: true, busy: false })

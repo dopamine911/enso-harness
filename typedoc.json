@@ -9,7 +9,7 @@
     "packages/harness/core/index.ts"
   ],
   "tsconfig": "tsconfig.typedoc.json",
-  "name": "zen-harness — owned contracts",
+  "name": "Enso — owned contracts",
   "readme": "none",
   "useFirstParagraphOfCommentAsSummary": true,
   "excludeExternals": true,

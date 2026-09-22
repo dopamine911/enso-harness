@@ -1,8 +1,8 @@
 # Provider auth and client identity
 
-**Written** 2026-09-03 by Claude (Opus 5) at Daniel's request, for the zen-harness project.
+**Written** 2026-09-03 by Claude (Opus 5) at Daniel's request, for the Enso project.
 
-Why zen-harness treats provider authentication as a first-class design surface, and what the
+Why Enso treats provider authentication as a first-class design surface, and what the
 alternative looks like in practice. Grounded in the source of two harnesses read on this machine on
 2026-09-03:
 
@@ -21,7 +21,7 @@ safety axis. This covers what it lacks on the auth axis, and what a fork did abo
 
 ## The problem this document exists to record
 
-zen-harness is a multi-provider harness. The provider it will be used with most is Anthropic, and
+Enso is a multi-provider harness. The provider it will be used with most is Anthropic, and
 Anthropic's consumer plans (Pro/Max) are not the same product as the API. The plan is sold for use
 through Anthropic's own clients; the API is sold per token. A third-party harness that wants to run on
 the model has one honest route — API billing — and the plan is not it.
@@ -140,7 +140,7 @@ step on each other, and the mitigation is a string check on a header nobody docu
 text of the failure that retired a credential. This part is straightforwardly better than pi's and is
 the part worth copying.
 
-## Why zen-harness will not do this
+## Why Enso will not do this
 
 Not primarily an ethics argument — though the ethics are not close, and obtaining a paid entitlement by
 defeating the check that gates it is the plain description of layers 3 and 4. Three engineering reasons
@@ -162,21 +162,21 @@ design against.
 the category of term violation that ends accounts rather than generating a warning, and it would be
 Daniel's work account, with 715-109's AWS and ThingsBoard work sitting behind the same identity.
 
-There is a fourth reason specific to this project: zen-harness is a **multi-provider** harness. An auth
+There is a fourth reason specific to this project: Enso is a **multi-provider** harness. An auth
 layer whose Anthropic path is a bundle of pinned impersonation constants is not a provider abstraction —
 it is a special case that leaks its shape into everything above it. The design goal is one credential
 model that holds for Anthropic, OpenAI-compatible endpoints, a local llama.cpp server, and whatever
 comes next. Forgery does not generalize.
 
-## What zen-harness does instead, and what it intends to
+## What Enso does instead, and what it intends to
 
-**Auth is provider-neutral and honest about identity.** No per-provider identity forgery; zen-harness
-identifies as zen-harness. That part is built, in the sense that nothing here forges anything.
+**Auth is provider-neutral and honest about identity.** No per-provider identity forgery; Enso
+identifies as Enso. That part is built, in the sense that nothing here forges anything.
 
 **What exists today, in two places.** Provider auth is *pi's*, not ours: it lives in pi's own
 `auth.json` under the scratch agent dir, written by `/login` and by `pi-multi-account` (#7) — stated
 at `packages/core/src/secrets.ts:30-33`. The harness extensions' own keys are a separate channel:
-`.zen/secrets.env`, read per call by `readSecret` (`secrets.ts:83-86`) so a rotation needs no restart,
+`.enso/secrets.env`, read per call by `readSecret` (`secrets.ts:83-86`) so a rotation needs no restart,
 and gated against the model's `read` tool. Both are listed in
 [`reference/env-and-config.md`](../reference/env-and-config.md).
 
@@ -200,8 +200,8 @@ itself has no issue of its own, and until it has one this paragraph is the only 
 **The provider set is the answer to cost, not the billing path.** For Anthropic specifically that means
 API billing when Anthropic is required. For everything else it means the harness is genuinely
 multi-provider: OpenAI-compatible endpoints, a self-hosted llama.cpp or ollama server at zero marginal
-cost for loop-wiring and smoke work, and whatever else is authenticated. Most of zen-harness — the guard
-extension, `@zen/core`, persistence, the tool-result renderers, and every read-only pane over existing
+cost for loop-wiring and smoke work, and whatever else is authenticated. Most of Enso — the guard
+extension, `@enso/core`, persistence, the tool-result renderers, and every read-only pane over existing
 transcripts — needs no inference at all, so provider cost gates a much smaller slice of the build than it
 first appears to.
 
@@ -212,7 +212,7 @@ is a real option and it is not this one.
 
 Read 2026-09-03 from the installed v1.13.8 (`~/.pi/agent/npm/node_modules/pi-multi-account`, one 183 KB
 `index.ts`, zero runtime dependencies). Repo: `github.com/Sarrius/pi-multi-account`. Relevant here
-because zen-harness needs a multi-account credential model and this is the only worked example.
+because Enso needs a multi-account credential model and this is the only worked example.
 
 **It implements no login flow of its own.** It imports pi's `loginAnthropic` and
 `refreshAnthropicToken` and wraps them. No client id, no authorize URL, no token endpoint appears in its
@@ -239,7 +239,7 @@ the provider the rotation exists to serve. This is the same root cause as
 [Observability](#observability-what-pi-cannot-tell-you): pi's credential record carries no account
 identity, so anything downstream has to invent one.
 
-**Worth taking for zen-harness**, and separable from the attestation layers above:
+**Worth taking for Enso**, and separable from the attestation layers above:
 
 - the provider-slot pattern — N synthetic providers over one base URL, each with its own credential row
 - discovery from the credential store rather than hand-maintained config
@@ -249,21 +249,21 @@ identity, so anything downstream has to invent one.
 - a decision log that states it excludes credentials, so a rotation can be explained after the fact
 
 **Not worth reimplementing:** the volatile-token identity fallback — it is a symptom of pi's credential
-shape, and zen-harness storing `accountId` removes the need for it.
+shape, and Enso storing `accountId` removes the need for it.
 
-⚠ **On layers 3b and 4: zen-harness depends on them, by decision.** `pi-multi-account` is vendored into
+⚠ **On layers 3b and 4: Enso depends on them, by decision.** `pi-multi-account` is vendored into
 the harness package (PR #6), and it supplies both. Daniel's call, made 2026-09-03 with the tradeoff on
 the table: he is a reverse engineer, the risk is his account, and the alternative was no subscription
-access from zen at all.
+access from Enso at all.
 
 So state the position precisely rather than letting this document imply a purity it does not have:
 
-- zen-harness does not **author** the transport fingerprint or the attestation. That line holds.
-- zen-harness **inherits** layers 1 and 3a from pi itself, on every OAuth request, unavoidably — see
+- Enso does not **author** the transport fingerprint or the attestation. That line holds.
+- Enso **inherits** layers 1 and 3a from pi itself, on every OAuth request, unavoidably — see
   § What pi does. There is no opt-out short of patching pi.
-- zen-harness **depends on** layers 3b and 4 through a vendored third-party package, deliberately.
+- Enso **depends on** layers 3b and 4 through a vendored third-party package, deliberately.
 
-The engineering objections in § Why zen-harness will not do this are unchanged and now apply to a
+The engineering objections in § Why Enso will not do this are unchanged and now apply to a
 dependency rather than to our own code: eight constants pinned to something Anthropic ships on its own
 schedule, no version-checkable pin, and a failure mode that surfaces as inference errors far from the
 cause. The disagreeing `cch` implementations above are the sharpest evidence. What changes is who is
@@ -290,7 +290,7 @@ on this machine: a work-account row carrying the full `invalid_grant` response f
 readable three weeks later, which is what identified the cause immediately. pi's equivalent failure
 produced a session that exited 0 with no output.
 
-Both are zen-harness requirements. A session that cannot authenticate must exit non-zero and say why, and
+Both are Enso requirements. A session that cannot authenticate must exit non-zero and say why, and
 a credential that has been retired must carry the reason it was retired. Neither has anything to do with
 which billing path a harness takes — they are just the difference between a diagnosable failure and an
 afternoon of guessing.

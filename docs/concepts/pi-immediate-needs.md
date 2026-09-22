@@ -2,7 +2,7 @@
 
 > **Status (#167, #162 workstream 11):** a triage inventory, kept live. Landed: the guard suite (path confinement, bash timeout, secret denial, network egress — `docs/seams/guards.md`), `web_fetch`/`web_search` behind one provider seam (`docs/seams/web-providers.md`), the log (`docs/seams/logging.md`), the permission mode as our seam. Deferred, deliberately: see `architecture.md` → *Deferred*. Items here are not re-triaged; the seam pages are the current statement.
 
-**Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the zen-harness project.
+**Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the Enso project.
 
 What has to exist before pi is safe to run unattended on a real repository. Grounded in the source, not
 in the docs' exclusion list — every absence below was checked by reading the file that would contain it.
@@ -254,4 +254,4 @@ pi's credential handling has two gaps of the same character — a session that c
 with no output, and a retired credential carries no record of why it was retired. They are not safety
 guards, so they are not tiered above; they live in
 [`provider-auth-and-client-identity.md`](./provider-auth-and-client-identity.md) § Observability, which
-also covers why zen-harness will not follow omp's route to subscription billing.
+also covers why Enso will not follow omp's route to subscription billing.

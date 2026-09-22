@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test'
-import { ZEN_TOOL_RESULT_KEY, type ZenObservation } from '@zen/core'
+import { ENSO_TOOL_RESULT_KEY, type EnsoObservation } from '@enso/core'
 import { Check } from 'typebox/value'
 import { mapPiEvent, toolResultMetadata } from '../map-events.ts'
 import { RuntimeEventSchema } from '../runtime-event.ts'
 
-const kindOf = (event: Parameters<typeof mapPiEvent>[0]): ZenObservation['kind'] => mapPiEvent(event).kind
+const kindOf = (event: Parameters<typeof mapPiEvent>[0]): EnsoObservation['kind'] => mapPiEvent(event).kind
 
 // --- streaming deltas, and the usage that rides on every one
 test('a text delta maps, carrying usage', () => {
@@ -149,7 +149,7 @@ test('an unknown truncation unit falls back to lines rather than propagating gar
 
 test('the descriptor is wrapped under the namespaced metadata key', () => {
   const descriptor = { kind: 'pi.tool.bash', props: {} }
-  expect(toolResultMetadata(descriptor)).toEqual({ [ZEN_TOOL_RESULT_KEY]: descriptor })
+  expect(toolResultMetadata(descriptor)).toEqual({ [ENSO_TOOL_RESULT_KEY]: descriptor })
   expect(toolResultMetadata(undefined)).toBeUndefined()
 })
 
@@ -359,7 +359,7 @@ test("the host's extension_ui_settled maps to dialog-settled; an outcome the uni
   expect(mapPiEvent({ type: 'extension_ui_settled', id: 'd1', outcome: 'vanished' })).toMatchObject({
     kind: 'unmapped',
   })
-  // A settle must name a question: an empty id is the same drift (`ZenDialogSettled.id` is minLength 1).
+  // A settle must name a question: an empty id is the same drift (`EnsoDialogSettled.id` is minLength 1).
   expect(mapPiEvent({ type: 'extension_ui_settled', id: '', outcome: 'answered' })).toMatchObject({ kind: 'unmapped' })
 })
 

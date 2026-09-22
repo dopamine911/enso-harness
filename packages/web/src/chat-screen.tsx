@@ -1,3 +1,12 @@
+import {
+  type DialogAnswer,
+  ENSO_IMAGE_MAX_BYTES,
+  ENSO_IMAGE_MIME_TYPES,
+  ENSO_PROMPT_MAX_IMAGES,
+  type EnsoDialogSpec,
+  type EnsoPromptImage,
+  isEnsoImageMimeType,
+} from '@enso/core'
 import type { ContentPart } from '@tanstack/ai'
 import type { ConnectConnectionAdapter, UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, type ChatUISelectedPart, selectChatUI } from '@tanstack/ai-client/ui'
@@ -9,15 +18,6 @@ import {
   type LayoutProps,
   type MessageProps,
 } from '@tanstack/ai-react/ui'
-import {
-  type DialogAnswer,
-  isZenImageMimeType,
-  ZEN_IMAGE_MAX_BYTES,
-  ZEN_IMAGE_MIME_TYPES,
-  ZEN_PROMPT_MAX_IMAGES,
-  type ZenDialogSpec,
-  type ZenPromptImage,
-} from '@zen/core'
 import { ArrowUpIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from './components/ai-elements/attachments.tsx'
@@ -52,7 +52,8 @@ import { Button } from './components/ui/button.tsx'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './components/ui/card.tsx'
 import { Input } from './components/ui/input.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
-import { routeZenCustomEvent } from './custom-event-router.ts'
+import { routeEnsoCustomEvent } from './custom-event-router.ts'
+import type { EnsoRendererMap } from './EnsoToolResult.tsx'
 import { createFixtureChat } from './fixture-conversation.ts'
 import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.ts'
 import { ThreadNotifications } from './notifications.tsx'
@@ -79,10 +80,9 @@ import {
 } from './thread-stores.ts'
 import { readThreadUrl, type ThreadUrl, urlForThread } from './thread-url.ts'
 import { ThreadsRail, UNTITLED_THREAD } from './threads-rail.tsx'
-import type { ZenRendererMap } from './ZenToolResult.tsx'
 
 /**
- * The zen web surface (#24, #17) — every component and the chat wiring, importable with
+ * The enso web surface (#24, #17) — every component and the chat wiring, importable with
  * no DOM at module scope (the ENTRY that mounts it is main.tsx, kept thin so the
  * coverage manifest can import everything else). Composed per `docs/ui/react`; presentation layer per #31
  * (shadcn radix-nova theme + components vendored from ai-elements, laid out after the
@@ -127,7 +127,7 @@ import type { ZenRendererMap } from './ZenToolResult.tsx'
  * is exactly what the contract promises for an unknown kind — so empty is the honest
  * default, not a gap. A renderer is added when a tool earns one.
  */
-const descriptorRenderers: ZenRendererMap = {}
+const descriptorRenderers: EnsoRendererMap = {}
 
 /**
  * `?fixture` swaps the live server connection for the scripted conversation in
@@ -181,7 +181,7 @@ function threadChatOptions(stores: ThreadStores): ThreadChatOptions {
      * stream processor: every CUSTOM chunk fires this with `(chunk.name, chunk.value)`.
      * The dispatch itself lives in `custom-event-router.ts` so it is testable (#53 S1.3).
      */
-    onCustomEvent: (eventType: string, data: unknown): void => routeZenCustomEvent(stores, eventType, data),
+    onCustomEvent: (eventType: string, data: unknown): void => routeEnsoCustomEvent(stores, eventType, data),
   }
 }
 /** The options type the widget map below is written against — one shape for every thread. */
@@ -315,7 +315,7 @@ function PermissionModeControl(): React.ReactNode {
 }
 
 /*
- * ⓘ `DialogAnswerControls` and `ZenDialogCard` are exported for `__tests__/chat-screen.test.tsx`
+ * ⓘ `DialogAnswerControls` and `EnsoDialogCard` are exported for `__tests__/chat-screen.test.tsx`
  * (#49): static renders of each dialog method. Nothing outside this file and that test imports
  * them. `PendingDialog` is asserted through the mounted pane (`thread-pane.test.tsx`, #118).
  */
@@ -323,7 +323,7 @@ function PermissionModeControl(): React.ReactNode {
 /**
  * pi's blocking dialogs — `select`, `confirm`, `input`, `editor` — answered from the page (#27, #112).
  *
- * The question arrives on the follow as a blocking `extension-ui-request` (the `ZenDialogSpec` the
+ * The question arrives on the follow as a blocking `extension-ui-request` (the `EnsoDialogSpec` the
  * server built, validated again by the router before it reaches the store), and the answer
  * is one `POST /api/threads/:id/dialog`. No interrupt: the run keeps going on the follow
  * while the human decides, and nothing on the server is parked.
@@ -344,7 +344,7 @@ export function DialogAnswerControls({
   answer,
   disabled,
 }: {
-  dialog: ZenDialogSpec
+  dialog: EnsoDialogSpec
   answer: (payload: { value: string } | { confirmed: boolean }) => void
   /** An answer is already in flight: every control refuses a second one — see {@link OpenQuestion} (#275). */
   disabled: boolean
@@ -430,7 +430,7 @@ export function DialogAnswerControls({
  * — which is why there is no live region here: a polite region wrapping the card would read the
  * whole question a second time.
  */
-export function ZenDialogCard({
+export function EnsoDialogCard({
   dialogId,
   dialog,
   answer,
@@ -440,13 +440,13 @@ export function ZenDialogCard({
 }: {
   /** The open question's id — unique per question, so the `aria-labelledby` target is too. */
   dialogId: string
-  dialog: ZenDialogSpec
+  dialog: EnsoDialogSpec
   answer: (payload: { value: string } | { confirmed: boolean }) => void
   cancel: () => void
   disabled: boolean
   ref?: React.Ref<HTMLDivElement>
 }): React.ReactNode {
-  const titleId = `zen-dialog-title-${dialogId}`
+  const titleId = `enso-dialog-title-${dialogId}`
   return (
     <Card ref={ref} role="group" aria-labelledby={titleId} className="my-4">
       <CardHeader>
@@ -510,7 +510,7 @@ function PendingDialog(): React.ReactNode {
  * `refused` (422) or `unreachable` answer leaves the question standing, so those re-open the
  * controls; anything else spends it and this unmounts.
  */
-function OpenQuestion({ id, dialog }: { id: string; dialog: ZenDialogSpec }): React.ReactNode {
+function OpenQuestion({ id, dialog }: { id: string; dialog: EnsoDialogSpec }): React.ReactNode {
   const stores = useThreadStores()
   const [settling, setSettling] = useState(false)
   const inFlight = useRef(false)
@@ -531,7 +531,7 @@ function OpenQuestion({ id, dialog }: { id: string; dialog: ZenDialogSpec }): Re
     })
   }
   return (
-    <ZenDialogCard
+    <EnsoDialogCard
       ref={card}
       dialogId={id}
       dialog={dialog}
@@ -552,11 +552,11 @@ export function describeAttachmentError(error: PromptInputError): string {
   const files = error.count === 1 ? '1 file was' : `${error.count} files were`
   switch (error.code) {
     case 'accept':
-      return `${files} not attached: only images are attached here (${ZEN_IMAGE_MIME_TYPES.map((mimeType) => mimeType.slice('image/'.length)).join(', ')})`
+      return `${files} not attached: only images are attached here (${ENSO_IMAGE_MIME_TYPES.map((mimeType) => mimeType.slice('image/'.length)).join(', ')})`
     case 'max_file_size':
-      return `${files} not attached: an image is at most ${(ZEN_IMAGE_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB`
+      return `${files} not attached: an image is at most ${(ENSO_IMAGE_MAX_BYTES / (1024 * 1024)).toFixed(0)} MB`
     case 'max_files':
-      return `${files} not attached: at most ${ZEN_PROMPT_MAX_IMAGES} images on one prompt`
+      return `${files} not attached: at most ${ENSO_PROMPT_MAX_IMAGES} images on one prompt`
   }
 }
 
@@ -832,7 +832,7 @@ const chatComponents = {
        * land nowhere this page can see. An image with no words is a prompt (pi-ai keeps the
        * image and drops the empty text block); nothing at all is not.
        */
-      const send = (text: string, images: readonly ZenPromptImage[]): void => {
+      const send = (text: string, images: readonly EnsoPromptImage[]): void => {
         if (disconnected) return
         if (text.trim().length === 0 && images.length === 0) return
         setDraft('')
@@ -853,7 +853,7 @@ const chatComponents = {
         // message goes into the transcript here, and the text goes to pi now: pi lists it on
         // the follow for every follower (`queue`, the list above this composer) and claims
         // it when the run's turn ends. Refused or unreachable, the words come back to the
-        // draft. ⚠ The images do not: pi's queue hands back texts (`ZenAbortReceipt.restored`),
+        // draft. ⚠ The images do not: pi's queue hands back texts (`EnsoAbortReceipt.restored`),
         // and the composer's attachments are the form's, not this component's — re-attach.
         const id = crypto.randomUUID()
         heldLocally.current.push({ id, text })
@@ -885,10 +885,10 @@ const chatComponents = {
       return (
         <PromptInput
           className="mx-auto w-full max-w-3xl px-4 pb-4"
-          accept={ZEN_IMAGE_MIME_TYPES.join(',')}
+          accept={ENSO_IMAGE_MIME_TYPES.join(',')}
           multiple
-          maxFiles={ZEN_PROMPT_MAX_IMAGES}
-          maxFileSize={ZEN_IMAGE_MAX_BYTES}
+          maxFiles={ENSO_PROMPT_MAX_IMAGES}
+          maxFileSize={ENSO_IMAGE_MAX_BYTES}
           // A file the form would not take is said, not dropped (#68): the reason names the cap.
           onError={(error: PromptInputError): void =>
             stores.notifications.push(describeAttachmentError(error), 'warning', 'run')
@@ -897,13 +897,13 @@ const chatComponents = {
             // The form hands back `data:` URLs (blob → FileReader); the wire takes bytes + kind.
             // The form's `accept` already filtered by `File.type`; this is the same set, as a
             // guard rather than a cast, and a miss is said the same way the form says one.
-            const images: ZenPromptImage[] = []
+            const images: EnsoPromptImage[] = []
             let notImages = 0
             for (const file of files) {
               const inline = /^data:([^;,]+);base64,(.*)$/.exec(file.url)
               const mimeType = inline?.[1]
               const data = inline?.[2]
-              if (mimeType === undefined || data === undefined || !isZenImageMimeType(mimeType)) {
+              if (mimeType === undefined || data === undefined || !isEnsoImageMimeType(mimeType)) {
                 notImages += 1
                 continue
               }
@@ -968,7 +968,7 @@ const chatComponents = {
                 <ConversationContent className="mx-auto w-full max-w-3xl">
                   {chat.messages.length === 0 ? (
                     <ConversationEmptyState
-                      icon={<img src="/logo-full.png" alt="zen-harness" className="w-44" />}
+                      icon={<img src="/logo-full.png" alt="Enso" className="w-44" />}
                       title=""
                       description="ask pi something to get started"
                     />
@@ -1215,7 +1215,7 @@ export function ChatScreen(): React.ReactNode {
         {/* The ensō mark, cropped from .local/logo.png into public/enso.png —
 				    kanagawa fujiWhite cream, so it reads on the Wave background. */}
         <img src="/enso.png" alt="" className="size-6" />
-        <h1 className="font-medium text-muted-foreground text-sm">zen-harness</h1>
+        <h1 className="font-medium text-muted-foreground text-sm">Enso</h1>
         {isFixtureMode ? (
           <span className="rounded-full border px-2 py-0.5 text-muted-foreground text-xs">fixture</span>
         ) : null}

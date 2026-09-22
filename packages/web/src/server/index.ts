@@ -3,18 +3,18 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join } from 'node:path'
 import {
   base64DecodedBytes,
-  isZenThreadId,
-  withZenLogContext,
-  ZEN_IMAGE_MAX_BYTES,
-  ZEN_PROMPT_BODY_MAX_BYTES,
-  ZEN_PROMPT_MAX_IMAGES,
-  type ZenStoredThread,
-  type ZenThreadEvents,
-  type ZenThreadHistory,
-  type ZenThreadSummary,
-  zenLogger,
-} from '@zen/core'
-import { missingVendorPaths } from '@zen/core/pi-manifest'
+  ENSO_IMAGE_MAX_BYTES,
+  ENSO_PROMPT_BODY_MAX_BYTES,
+  ENSO_PROMPT_MAX_IMAGES,
+  type EnsoStoredThread,
+  type EnsoThreadEvents,
+  type EnsoThreadHistory,
+  type EnsoThreadSummary,
+  ensoLogger,
+  isEnsoThreadId,
+  withEnsoLogContext,
+} from '@enso/core'
+import { missingVendorPaths } from '@enso/core/pi-manifest'
 import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost } from '../host/agent-host.ts'
 import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
@@ -75,7 +75,7 @@ function isLoopbackAuthority(authority: string): boolean {
   return host === LOOPBACK_ONLY || host === 'localhost' || host === '[::1]'
 }
 
-const log = zenLogger('server', 'http')
+const log = ensoLogger('server', 'http')
 
 /** A body that outgrew its route's cap: the read stopped, nothing was buffered past it. */
 class BodyTooLargeError extends Error {
@@ -192,7 +192,7 @@ function refuseWith(response: ServerResponse, outcome: { readonly status: number
  * caller's problem: 400 written here, `undefined` returned, and the server stays up.
  *
  * Since #95 the id is also pi's session id, which pi puts in a FILENAME — so a decoded id
- * that is not thread-id shaped (`isZenThreadId`: `../x`, spaces, anything a filesystem could
+ * that is not thread-id shaped (`isEnsoThreadId`: `../x`, spaces, anything a filesystem could
  * read) is the same 400. Nothing downstream ever sees an id that failed here.
  */
 function decodeThreadId(rawSegment: string, response: ServerResponse): string | undefined {
@@ -202,20 +202,20 @@ function decodeThreadId(rawSegment: string, response: ServerResponse): string | 
   } catch {
     decoded = ''
   }
-  if (isZenThreadId(decoded)) return decoded
+  if (isEnsoThreadId(decoded)) return decoded
   response.writeHead(400, { 'Content-Type': 'text/plain' })
   response.end('malformed thread id')
   return undefined
 }
 
-export interface ZenServerOptions {
+export interface EnsoServerOptions {
   /**
    * Where pi runs — the tree it will read and write. With no sandbox (#24) this value IS
    * the blast radius; it comes from the launcher's own arguments, never from a request.
    */
   cwd: string
   /**
-   * The zen-harness pi package directory, loaded as the ONLY extension source.
+   * The Enso pi package directory, loaded as the ONLY extension source.
    *
    * ⚠ Required, not optional. An optional value here would make "no guards" the default
    * for anyone who forgot it, which is exactly the state the first live run was in.
@@ -238,7 +238,7 @@ export interface ZenServerOptions {
 }
 
 /** What a started server hands back — the node server plus the lifecycle the launchers drive. */
-export interface ZenServerHandle {
+export interface EnsoServerHandle {
   readonly server: Server
   readonly url: string
   /** Resolves with the bound origin once listening; rejects if the bind failed. */
@@ -251,7 +251,7 @@ export interface ZenServerHandle {
  * the in-process host inherits the same obligation.
  *
  * The spawned `pi --mode rpc` inherited the environment, so pi loaded the OPERATOR'S GLOBAL
- * CONFIG — `~/.pi/agent`, all sixteen of their packages, and **not the zen harness**.
+ * CONFIG — `~/.pi/agent`, all sixteen of their packages, and **not the enso harness**.
  * Observed directly in the first SSE stream: pi-lens status lines, powerline widgets and a
  * pi-multi-account advisor warning, none of which this package installs. The web surface
  * was running with **no Tier 0 guard at all**.
@@ -274,34 +274,34 @@ export interface ZenServerHandle {
  * 400 took a detour through expiry checks and rpc-mode hypotheses, none of which were the
  * cause.
  *
- * `scripts/zen.ts` already refuses to launch on the same condition. The server had no
+ * `scripts/enso.ts` already refuses to launch on the same condition. The server had no
  * equivalent, which is the asymmetry this closes: two launch points, one precondition, and
  * it must be enforced at both or the unenforced one becomes the confusing path. Since #221
- * the precondition is also one IMPLEMENTATION — `@zen/core/pi-manifest` — so "what pi will
+ * the precondition is also one IMPLEMENTATION — `@enso/core/pi-manifest` — so "what pi will
  * read as a literal vendor path" is decided in one file rather than at each launch point.
  */
 function assertVendorLinks(harnessPackageDir: string): void {
   const manifestPath = join(harnessPackageDir, 'package.json')
   if (!existsSync(manifestPath)) {
-    throw new Error(`zen-server: no package.json at ${harnessPackageDir}`)
+    throw new Error(`enso-server: no package.json at ${harnessPackageDir}`)
   }
   // The manifest is parsed JSON and stays `unknown` here: the narrowing belongs to the one
   // module that knows what pi reads out of it (#221).
   const missing = missingVendorPaths(JSON.parse(readFileSync(manifestPath, 'utf8')), harnessPackageDir)
   if (missing.length > 0) {
     throw new Error(
-      `zen-server: vendor package paths are missing from the harness package:\n` +
+      `enso-server: vendor package paths are missing from the harness package:\n` +
         `${missing.map((vendorPath) => `  - ${vendorPath}`).join('\n')}\n` +
         `Run \`bun install\` (its postinstall relinks the vendor packages).`,
     )
   }
 }
 
-export function startZenServer(options: ZenServerOptions): ZenServerHandle {
+export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   if (options.cwd.length === 0) {
     // ⚠ Fail at startup rather than on the first request. A bad `cwd` discovered mid-run
     // is a confusing failure; discovered at boot it is a one-line message.
-    throw new Error('zen-server: cwd must not be empty')
+    throw new Error('enso-server: cwd must not be empty')
   }
   assertVendorLinks(options.harnessPackageDir)
 
@@ -333,11 +333,11 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
   }
 
   // ── Session inspection (#86): what a live thread's session ACTUALLY contains, for a
-  // human (the debug drawer) or an agent (`scripts/zen-thread.ts`) to cross-check the
+  // human (the debug drawer) or an agent (`scripts/enso-thread.ts`) to cross-check the
   // derived views against. Read-only. Never creates a session — `threads.peek`, never
   // `acquire`: looking must not be the thing that spins pi up. Loopback-only by the
   // server's bind; the branch is conversation and tool output, which is the point.
-  function summarize(thread: ThreadView): ZenThreadSummary {
+  function summarize(thread: ThreadView): EnsoThreadSummary {
     const inspection = thread.hosted.inspect()
     return {
       threadId: thread.threadId,
@@ -363,7 +363,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
       response.end(`no live session for thread ${threadId}`)
       return
     }
-    const payload: ZenThreadEvents = {
+    const payload: EnsoThreadEvents = {
       threadId,
       emitted: thread.hosted.emittedEvents(),
       sent: thread.sent.recent(),
@@ -379,7 +379,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
    */
   async function respondWithStoredThreads(response: ServerResponse): Promise<void> {
     const stored = await host.listSessions()
-    const payload: ZenStoredThread[] = stored.map((session) => ({
+    const payload: EnsoStoredThread[] = stored.map((session) => ({
       threadId: session.id,
       ...(session.firstMessage.trim().length === 0 ? {} : { title: session.firstMessage.trim() }),
       lastActivityAt: session.modified.toISOString(),
@@ -418,7 +418,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
       return
     }
 
-    const payload: ZenThreadHistory = {
+    const payload: EnsoThreadHistory = {
       threadId,
       messages: mount.messages,
       permissionMode: mount.permissionMode,
@@ -456,7 +456,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
   const bundle = createBundleRoute({ threads, logsDir: options.logsDir, runtimeVersion: AGENT_RUNTIME_VERSION })
 
   function respondWithBundle(url: string, response: ServerResponse): void {
-    const outcome = bundle(new URL(url, 'http://zen').searchParams)
+    const outcome = bundle(new URL(url, 'http://enso').searchParams)
     if (outcome.status !== 200) {
       response.writeHead(outcome.status, { 'Content-Type': 'text/plain' })
       response.end(outcome.reason)
@@ -538,7 +538,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
       if (segment === undefined) continue
       const threadId = decodeThreadId(segment, response)
       if (threadId !== undefined) {
-        withZenLogContext({ threadId }, () => {
+        withEnsoLogContext({ threadId }, () => {
           const work = respond(threadId, request, response)
           if (work !== undefined) answerOrFail(work, response)
         })
@@ -550,8 +550,8 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
 
   async function respondToPrompt(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
     const body = await readJsonBody(request, response, {
-      maxBytes: ZEN_PROMPT_BODY_MAX_BYTES,
-      capText: `a prompt body is at most ${ZEN_PROMPT_BODY_MAX_BYTES} bytes (${ZEN_PROMPT_MAX_IMAGES} images of ${ZEN_IMAGE_MAX_BYTES} bytes, base64, plus text)`,
+      maxBytes: ENSO_PROMPT_BODY_MAX_BYTES,
+      capText: `a prompt body is at most ${ENSO_PROMPT_BODY_MAX_BYTES} bytes (${ENSO_PROMPT_MAX_IMAGES} images of ${ENSO_IMAGE_MAX_BYTES} bytes, base64, plus text)`,
       parse: readPromptBody,
     })
     if (body === undefined) return
@@ -787,7 +787,7 @@ export function startZenServer(options: ZenServerOptions): ZenServerHandle {
   server.on('error', (error: NodeJS.ErrnoException) => {
     if (error.code === 'EADDRINUSE') {
       log.error(
-        'port {port} is already in use — another zen server is probably running; stop it, or pass a different port',
+        'port {port} is already in use — another enso server is probably running; stop it, or pass a different port',
         {
           port,
         },

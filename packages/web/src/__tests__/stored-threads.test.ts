@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { ZenThreadHistory } from '@zen/core'
+import type { EnsoThreadHistory } from '@enso/core'
 import {
   createResumeRequests,
   createStoredThreadsStore,
@@ -73,8 +73,8 @@ test('the earlier list excludes every session already owned by this page', () =>
 // ── last click wins (PR #104 review) ─────────────────────────────────────────
 
 interface Deferred {
-  promise: Promise<ZenThreadHistory>
-  resolve: (history: ZenThreadHistory) => void
+  promise: Promise<EnsoThreadHistory>
+  resolve: (history: EnsoThreadHistory) => void
   reject: (error: Error) => void
 }
 
@@ -84,7 +84,7 @@ interface Deferred {
  * to the same promise first — so no timer stands in for "the response was processed".
  */
 function controlledHistory(): {
-  fetch: (threadId: string) => Promise<ZenThreadHistory>
+  fetch: (threadId: string) => Promise<EnsoThreadHistory>
   resolve: (threadId: string) => Promise<void>
   reject: (threadId: string, message: string) => Promise<void>
 } {
@@ -96,7 +96,7 @@ function controlledHistory(): {
     )
   return {
     fetch: (threadId: string) => {
-      const deferred = Promise.withResolvers<ZenThreadHistory>()
+      const deferred = Promise.withResolvers<EnsoThreadHistory>()
       pending.set(threadId, deferred)
       return deferred.promise
     },

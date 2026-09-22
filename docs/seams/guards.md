@@ -11,7 +11,7 @@ Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Ref
 
 ## The contract
 
-What a guard reads. One schema, in `@zen/core`, with its regex corpus beside it — the module header says
+What a guard reads. One schema, in `@enso/core`, with its regex corpus beside it — the module header says
 why the policy is not split across two packages.
 
 <!-- source: packages/core/src/guard.ts#GuardPolicy -->
@@ -20,7 +20,7 @@ why the policy is not split across two packages.
  * The Tier 0 guard policy.
  *
  * ⚠ The regex constants at the bottom are not schemas, and they live here anyway. Splitting
- * the policy — schema in `@zen/core`, patterns beside the extension — would put half of one
+ * the policy — schema in `@enso/core`, patterns beside the extension — would put half of one
  * decision in each of two packages, which is the duplication this package exists to prevent.
  * The policy is one thing; it is declared in one place.
  */
@@ -63,25 +63,32 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
     '/.netrc',
     '/.pgpass',
     '/.kube/config',
-    // The harness's OWN credential dir (#204): `.zen/secrets.env` (#89) and, under
-    // `.zen/pi-agent/`, pi's `auth.json`, the provider-failover files and every session
+    // The harness's OWN credential dir (#204): `.enso/secrets.env` (#89) and, under
+    // `.enso/pi-agent/`, pi's `auth.json`, the provider-failover files and every session
     // transcript — all `0600` on disk, i.e. the operator's own umask calls them secret.
     // The basename gate below covered `secrets.env` alone, so `auth.json` was readable
-    // and `grep path=.zen` recursed the lot; `containsPathFragment` appends a separator,
+    // and `grep path=.enso` recursed the lot; `containsPathFragment` appends a separator,
     // so this one entry denies the directory itself and everything under it.
-    // ⚠ THE COST, stated: the agent can no longer read `.zen/logs/*.jsonl` with a tool.
+    // ⚠ THE COST, stated: the agent can no longer read `.enso/logs/*.jsonl` with a tool.
     // Reading the log is a human command — `bun run logs` — which uses node fs and never
-    // passes this guard. Writes were already denied (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`).
+    // passes this guard. Writes were already denied (`ENSO_PERSISTENCE_WRITE_DIRECTORIES`).
+    '/.enso/',
+    // ⚠ AND THE DIRECTORY IT USED TO BE. The rename to `.enso/` is a hard cutover — nothing
+    // READS `.zen/` any more — but every existing checkout still HAS one, holding exactly these
+    // files, until somebody runs `mv .zen .enso`. Dropping it from this list would have made an
+    // agent able to read the secrets directory it was never able to read before, for the window
+    // between merging and that command. A deny rule for a directory that should not exist costs
+    // nothing and expires on its own; this is not a compatibility path, it is the opposite of one.
     '/.zen/',
   ],
-  // `zen.config.json` is zen-harness's committed config (#59) and carries web_fetch's
+  // `enso.config.json` is Enso's committed config (#59) and carries web_fetch's
   // host allowlist (#54): a write there widens the harness's egress for every FUTURE
   // session (it is read once at extension load, so the running session cannot re-read
   // its own edit). Same rationale as `.cc-safety-net` below — the guard is the only
   // layer keeping the agent from editing the policy that gates it. Fragment matching is
   // deliberately loose (any path whose name contains it is refused) — over-blocking a
   // lookalike file fails safe and says so.
-  protectedWriteFragments: ['/.git/', 'zen.config.json'],
+  protectedWriteFragments: ['/.git/', 'enso.config.json'],
   defaultBashTimeoutSeconds: 120,
   // The ad-hoc HTTP/TCP clients plus the PowerShell fetch cmdlets (the raw scan sees
   // those; a POSIX segment never will). git and interpreters deliberately absent (#9).
@@ -109,8 +116,8 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
 Four more top-level constants in the same module are corpus, not schema, and are read by
 `packages/harness/core/paths.ts`: `PERSISTENCE_WRITE_BASENAMES` and `PERSISTENCE_WRITE_DIRECTORIES`
 (vendored lists of shell-init, git, editor and agent-config paths a write would *install* something
-into, matched by exact basename — `guard.ts:89-126`), `ZEN_PERSISTENCE_WRITE_DIRECTORIES` (`.pi`,
-`.agents`, `.zen`, `.cc-safety-net`: the runtime's and the harness's own persistence surfaces, kept
+into, matched by exact basename — `guard.ts:89-126`), `ENSO_PERSISTENCE_WRITE_DIRECTORIES` (`.pi`,
+`.agents`, `.enso`, `.cc-safety-net`: the runtime's and the harness's own persistence surfaces, kept
 apart so the vendored block stays byte-comparable, `guard.ts:128-150`), and `SECRET_BASENAME_PATTERNS`
 (`guard.ts:152-161`).
 
@@ -192,7 +199,7 @@ arrives `isError` (`:339-359`); `tool_call` calls `decide` and logs the verdict 
 5. **Every other tool with a `path` is a reader**, by exclusion, and a credential pattern denies it
    (`:486-500`). Exclusion, not inclusion: an inclusion list naming only `read` once let `grep` over
    `~/.aws` through (header, `:27-33`). Since #204 the same policy also runs on the shell route, so
-   `read .zen/pi-agent/auth.json` and `cat .zen/pi-agent/auth.json` agree — they did not.
+   `read .enso/pi-agent/auth.json` and `cat .enso/pi-agent/auth.json` agree — they did not.
 
 **Every verdict is a record** (#132): a denial at `warn` with the tool, the path and the reason; an
 allow at `debug`; never silent (`:361-373`; pinned by `guards.test.ts:77-97`).
@@ -225,10 +232,10 @@ writes are *our* layers' jobs (`:36-41`).
   line — "the guard's write-allowlist names cc-safety-net's state directory: a path, not an import.
   Leaves when the harness owns the list of directories an extension may write."
 - **The schema rule**: `packages/harness/core/index.ts:4-9` — no TypeBox schema is declared there; the
-  policy is imported from `@zen/core` or does not exist.
+  policy is imported from `@enso/core` or does not exist.
 - **The pi-version parity gate** (#217, `scripts/__tests__/pi-version-parity.test.ts`): the replica's
   agreement with pi is pinned against the WORKSPACE copy only; the `pi` the terminal launcher spawns is
-  bounded instead by `scripts/zen-launch.ts#SUPPORTED_PI_VERSIONS`, which the launcher refuses outside
+  bounded instead by `scripts/enso-launch.ts#SUPPORTED_PI_VERSIONS`, which the launcher refuses outside
   and that test holds equal to the corpus's pi. Without it the corpus described a pi the terminal
   surface need never have run.
 
@@ -244,7 +251,7 @@ registration and the hook's event types do not. That is already the arbiter's sh
 owning the verdict, participants as libraries beneath it — designed, deferred while the count is two
 with aligned fail direction (`tool-call-participants.test.ts:9-21`).
 
-A smaller crossing, named: `guard.ts`'s `ZEN_PERSISTENCE_WRITE_DIRECTORIES` spells the analyzer's state
+A smaller crossing, named: `guard.ts`'s `ENSO_PERSISTENCE_WRITE_DIRECTORIES` spells the analyzer's state
 directory as a path (`:144-148`), which is the gate's one guard line.
 
 ## Pivot cost

@@ -1,27 +1,27 @@
 import { expect, test } from 'bun:test'
-import { ZEN_REDACTED, type ZenLogLine } from '../log.ts'
+import { ENSO_REDACTED, type EnsoLogLine } from '../log.ts'
 import { browserSection, buildLogBundle, bundleRecordsText, isLogBundle, redactionManifest } from '../log-bundle.ts'
-import { parseZenLogLine } from '../log-process.ts'
-import type { ZenThreadInspection } from '../thread-inspection.ts'
+import { parseEnsoLogLine } from '../log-process.ts'
+import type { EnsoThreadInspection } from '../thread-inspection.ts'
 
-const line = (message: string, properties: Record<string, unknown>): ZenLogLine => ({
+const line = (message: string, properties: Record<string, unknown>): EnsoLogLine => ({
   '@timestamp': '2026-09-10T01:00:00.000Z',
   level: 'INFO',
-  logger: 'zen.server.events',
+  logger: 'enso.server.events',
   message,
   properties,
 })
 
 const about = {
   at: '2026-09-10T01:02:03.000Z',
-  zen: 'abc123 (main)',
+  enso: 'abc123 (main)',
   pi: '0.84.4',
   bun: '1.4.2',
   os: 'linux 6.12 x64',
   selection: "thread t1 from today's file",
 }
 
-const inspection: ZenThreadInspection = {
+const inspection: EnsoThreadInspection = {
   threadId: 't1',
   sessionId: 's1',
   cwd: '/work',
@@ -37,8 +37,8 @@ const inspection: ZenThreadInspection = {
 
 test('the manifest counts redaction MARKERS per field — what the reader is not seeing — and nothing else', () => {
   const lines = [
-    line('prompt refused', { threadId: 't1', tavilyApiKey: ZEN_REDACTED, reason: 'denied' }),
-    line('usage', { threadId: 't1', tokens: ZEN_REDACTED, tavilyApiKey: ZEN_REDACTED }),
+    line('prompt refused', { threadId: 't1', tavilyApiKey: ENSO_REDACTED, reason: 'denied' }),
+    line('usage', { threadId: 't1', tokens: ENSO_REDACTED, tavilyApiKey: ENSO_REDACTED }),
     // A literal value that merely resembles the marker's shape is not a redaction.
     line('plain', { threadId: 't1', note: '[REDACTED-ish]' }),
   ]
@@ -55,11 +55,11 @@ test('a bundle is a log file with prose around it: the records come back out ver
   expect(isLogBundle(JSON.stringify(server[0]))).toBe(false)
   const recovered = bundleRecordsText(text)
     .split('\n')
-    .map((raw) => parseZenLogLine(raw))
+    .map((raw) => parseEnsoLogLine(raw))
   expect(recovered).toEqual([...server, ...ring])
 
   // The prose says what a triage reads first.
-  expect(text).toContain('- zen: `abc123 (main)`')
+  expect(text).toContain('- enso: `abc123 (main)`')
   expect(text).toContain('- pi: `0.84.4`')
   expect(text).toContain('### thread t1')
   expect(text).toContain('mode: plan · available: default, plan')
@@ -69,7 +69,7 @@ test('a bundle is a log file with prose around it: the records come back out ver
 })
 
 test("the cut is visible: capped records say 'the last N of M'; redacted fields are listed with their counts", () => {
-  const lines = [line('a', { tavilyApiKey: ZEN_REDACTED }), line('b', {})]
+  const lines = [line('a', { tavilyApiKey: ENSO_REDACTED }), line('b', {})]
   const text = buildLogBundle({ about, threads: [], lines, matched: 7 })
   expect(text).toContain('## log — the last 2 of 7 records')
   expect(text).toContain('- `tavilyApiKey` × 1')

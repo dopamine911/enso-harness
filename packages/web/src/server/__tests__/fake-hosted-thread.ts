@@ -1,13 +1,13 @@
 import type {
   DialogAnswer,
+  EnsoDialogSpec,
+  EnsoObservation,
+  EnsoPermissionModeState,
+  EnsoTranscriptEntry,
   PromptOutcome,
   PromptRequest,
   ThreadRuntime,
-  ZenDialogSpec,
-  ZenObservation,
-  ZenPermissionModeState,
-  ZenTranscriptEntry,
-} from '@zen/core'
+} from '@enso/core'
 import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
 
@@ -40,9 +40,9 @@ export interface FakeThreadRecord {
 export interface FakeThreadParts {
   readonly record: FakeThreadRecord
   /** Push one observation at every subscriber, live, and into the tail the events route reads (L2: the seam speaks observations). */
-  readonly emit: (observation: ZenObservation) => void
+  readonly emit: (observation: EnsoObservation) => void
   /** Every blocking question emitted and not yet answered — what the real host's `openDialogs` reads. */
-  readonly open: Map<string, ZenDialogSpec>
+  readonly open: Map<string, EnsoDialogSpec>
 }
 
 export interface FakeHostedThread extends FakeThreadParts {
@@ -63,7 +63,7 @@ export function takeQueue(record: FakeThreadRecord): { interrupting: string[]; e
 }
 
 export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): FakeHostedThread {
-  const listeners = new Set<(observation: ZenObservation) => void>()
+  const listeners = new Set<(observation: EnsoObservation) => void>()
   const record: FakeThreadRecord = {
     prompts: [],
     answers: [],
@@ -73,12 +73,12 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     disposed: 0,
     queue: { interrupting: [], enqueued: [] },
   }
-  const open = new Map<string, ZenDialogSpec>()
+  const open = new Map<string, EnsoDialogSpec>()
   // Records into the same tail the real host does, so the events route sees the real shape
   // (coalesced rows); delivers only live, so every row is `live`. The real host's
   // held/replayed/dropped provenance is pinned in agent-host.test.ts.
   const emitted = createEventTail()
-  const emit = (observation: ZenObservation): void => {
+  const emit = (observation: EnsoObservation): void => {
     if (observation.kind === 'extension-ui-request' && observation.blocking && observation.dialog !== undefined) {
       open.set(observation.id, observation.dialog)
     }
@@ -112,7 +112,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       outcome.onAccepted()
       emit({ kind: 'permission-mode', mode, available: runtime.permissionModeState().available })
     },
-    subscribe: (onObservation: (observation: ZenObservation) => void) => {
+    subscribe: (onObservation: (observation: EnsoObservation) => void) => {
       listeners.add(onObservation)
       return () => {
         listeners.delete(onObservation)
@@ -156,14 +156,14 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
 
 /** What a fake host "has on disk" (#95): a stored thread by id, with its transcript and the mode it was left in. */
 export interface FakeStoredThread {
-  readonly transcript: ZenTranscriptEntry[]
+  readonly transcript: EnsoTranscriptEntry[]
   readonly modified: Date
   readonly firstMessage: string
   /** The mode the fake reports for this thread's branch; the fresh mode when absent. */
   readonly mode?: string
 }
 
-const FAKE_FRESH_MODE: ZenPermissionModeState = { mode: 'default', available: ['default'] }
+const FAKE_FRESH_MODE: EnsoPermissionModeState = { mode: 'default', available: ['default'] }
 
 /**
  * The one fake of the storage seam (`docs/seams/storage.md`): an `AgentHost` whose listing
@@ -175,12 +175,12 @@ const FAKE_FRESH_MODE: ZenPermissionModeState = { mode: 'default', available: ['
 export function createFakeAgentHost(
   createSession: AgentHost['createSession'],
   stored: Record<string, FakeStoredThread> = {},
-  fresh: ZenPermissionModeState = FAKE_FRESH_MODE,
+  fresh: EnsoPermissionModeState = FAKE_FRESH_MODE,
 ): AgentHost {
   return {
     createSession,
     freshPermissionMode: () => fresh,
-    storedPermissionMode: (transcript: readonly ZenTranscriptEntry[]): ZenPermissionModeState => {
+    storedPermissionMode: (transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState => {
       const storedThread = Object.values(stored).find((candidate) => candidate.transcript === transcript)
       return { mode: storedThread?.mode ?? fresh.mode, available: fresh.available }
     },

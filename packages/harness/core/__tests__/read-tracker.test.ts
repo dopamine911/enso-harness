@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createSessionReadTracker } from '../read-tracker.ts'
 
-const root = mkdtempSync(join(tmpdir(), 'zen-read-tracker-'))
+const root = mkdtempSync(join(tmpdir(), 'enso-read-tracker-'))
 
 /** Move a file's mtime one full second forward — unambiguous at any stat resolution. */
 function touchForward(filePath: string): void {

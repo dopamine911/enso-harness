@@ -48,16 +48,16 @@ test('titleFromUrl: last path segment, else hostname, else the raw string', () =
 
 test('cleanSources normalizes, junk-filters, titles, and dedupes in order', () => {
   const cleaned = cleanSources([
-    { title: 'Zen', url: 'https://example.com/zen?utm_source=x' },
-    { url: 'https://example.com/zen' },
+    { title: 'Enso', url: 'https://example.com/enso?utm_source=x' },
+    { url: 'https://example.com/enso' },
     { url: 'https://example.com/junk.zip' },
     { url: 'https://example.com/other' },
   ])
   expect(cleaned).toEqual([
-    { title: 'Zen', url: 'https://example.com/zen' },
+    { title: 'Enso', url: 'https://example.com/enso' },
     // The same page under a different title is a second entry (title is identity too),
     // with the fallback title derived from the path.
-    { title: 'zen', url: 'https://example.com/zen' },
+    { title: 'enso', url: 'https://example.com/enso' },
     { title: 'other', url: 'https://example.com/other' },
   ])
 })
@@ -96,7 +96,7 @@ test('applyByteIndexCitations inserts at BYTE offsets without corrupting multi-b
 const MODEL: SearchModel = {
   id: 'm',
   api: 'anthropic-messages',
-  provider: 'zen-test-provider',
+  provider: 'enso-test-provider',
   baseUrl: 'https://example.test',
   reasoning: false,
   maxTokens: 1,
@@ -137,7 +137,7 @@ test('resolveModelAuth without key or auth header asks the environment reader fo
     },
   )
   expect(resolved).toEqual({ ok: true, headers: { 'x-unrelated': '1' } })
-  expect(asked).toEqual(['zen-test-provider'])
+  expect(asked).toEqual(['enso-test-provider'])
 })
 
 // --- tavily ---
@@ -152,14 +152,14 @@ test('tavily sends the query, bounded results, bearer key, and only non-empty do
     capturedBody = JSON.parse(init.body ?? '{}') as Record<string, unknown>
     return Response.json({
       results: [
-        { title: 'Zen docs', url: 'https://example.com/zen', content: 'a guarded pi setup' },
+        { title: 'Enso docs', url: 'https://example.com/enso', content: 'a guarded pi setup' },
         { url: 'https://example.com/untitled' },
         { notAUrl: true },
       ],
     })
   }
   const outcome = await runTavilyProviderSearch({
-    query: 'zen-harness',
+    query: 'Enso',
     apiKey: 'tv-key',
     includeDomains: ['example.com'],
     excludeDomains: [],
@@ -175,7 +175,7 @@ test('tavily sends the query, bounded results, bearer key, and only non-empty do
   expect(outcome.kind).toBe('searched')
   if (outcome.kind !== 'searched') throw new Error('unreachable')
   expect(outcome.snippets).toEqual([
-    { title: 'Zen docs', url: 'https://example.com/zen', snippet: 'a guarded pi setup' },
+    { title: 'Enso docs', url: 'https://example.com/enso', snippet: 'a guarded pi setup' },
     { title: 'https://example.com/untitled', url: 'https://example.com/untitled', snippet: undefined },
   ])
   expect(outcome.sources).toHaveLength(2)

@@ -3,17 +3,17 @@ import { readFileSync } from 'node:fs'
 import { isIP } from 'node:net'
 import type { AgentToolResult, ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import {
+  ENSO_CONFIG_EXAMPLE,
+  ENSO_CONFIG_FILENAME,
   EXTERNAL_WEB_CONTENT_NOTICE,
-  parseZenConfig,
+  ensoLogger,
+  parseEnsoConfig,
   WEB_FETCH_MAX_RESPONSE_BYTES,
   WEB_FETCH_TIMEOUT_MS,
   WEB_FETCH_TOOL_NAME,
   WebFetchToolParameters,
-  ZEN_CONFIG_EXAMPLE,
-  ZEN_CONFIG_FILENAME,
-  zenLogger,
-} from '@zen/core'
-import { findRepoRoot, zenConfigPath } from '@zen/core/paths'
+} from '@enso/core'
+import { ensoConfigPath, findRepoRoot } from '@enso/core/paths'
 import {
   isFetchableContentType,
   isHostAllowed,
@@ -29,16 +29,16 @@ import {
  * Three properties the shell path could never have:
  *
  * 1. **A committed, empty-by-default host allowlist.** The `webFetch.allowedHosts`
- *    section of `zen.config.json` at the REPOSITORY root (#59) names every fetchable
+ *    section of `enso.config.json` at the REPOSITORY root (#59) names every fetchable
  *    host; it ships EMPTY as the recorded policy, and each host a human adds is one
  *    reviewable diff line. ⚠ Read ONCE at extension load, deliberately: the running
  *    session cannot widen its own egress by editing the file — an edit takes effect next
  *    session, after it has sat in `git status` where a human sees it. (write/edit on the
  *    file are also denied by the guard's `protectedWriteFragments`; a bash redirect into
  *    it is the stated residual, made inert within the session by the load-once read.)
- *    ⚠ The config belongs to the zen-harness INSTALL: located via `findRepoRoot` from
+ *    ⚠ The config belongs to the Enso INSTALL: located via `findRepoRoot` from
  *    this module's own tree, never from the session cwd — a foreign checkout's
- *    `zen.config.json` must not become this session's allowlist (see config.ts).
+ *    `enso.config.json` must not become this session's allowlist (see config.ts).
  * 2. **An audit line per call** — every outcome, refusals included, prints one stderr line
  *    naming the URL and what happened.
  * 3. **Bounded response handling** — http(s) only, no credentials in URLs, redirects
@@ -70,7 +70,7 @@ export interface WebFetchRequestInit {
  */
 export interface WebFetchDependencies {
   /**
-   * Where `zen.config.json` lives — read from AND named in refusal messages. May throw
+   * Where `enso.config.json` lives — read from AND named in refusal messages. May throw
    * (a broken install has no findable root); the extension fails CLOSED on that.
    */
   locateConfigFile: () => string
@@ -80,7 +80,7 @@ export interface WebFetchDependencies {
   resolveHostAddresses: (hostname: string) => Promise<string[]>
 }
 
-const USER_AGENT = 'zen-harness-web-fetch'
+const USER_AGENT = 'enso-web-fetch'
 
 export function createWebFetch(dependencies: WebFetchDependencies): (pi: ExtensionAPI) => void {
   return function webFetch(pi: ExtensionAPI): void {
@@ -94,7 +94,7 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
     let configPath: string | undefined
     try {
       configPath = dependencies.locateConfigFile()
-      const parsed = parseZenConfig(dependencies.readConfigText(configPath))
+      const parsed = parseEnsoConfig(dependencies.readConfigText(configPath))
       if (parsed.kind === 'ok') {
         allowedHosts = parsed.config.webFetch.allowedHosts
       } else {
@@ -105,7 +105,7 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
     }
     // A locate failure leaves no path to name; the filename plus its home still tells
     // the human where to look.
-    const configDisplayPath = configPath ?? `${ZEN_CONFIG_FILENAME} (at the zen-harness repository root)`
+    const configDisplayPath = configPath ?? `${ENSO_CONFIG_FILENAME} (at the Enso repository root)`
 
     pi.registerTool({
       name: WEB_FETCH_TOOL_NAME,
@@ -135,7 +135,7 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
             rawUrl,
             `the ${WEB_FETCH_TOOL_NAME} host allowlist could not be used — ${configProblem}. ` +
               `Nothing is fetchable until a human fixes ${configDisplayPath} ` +
-              `(expected shape: ${ZEN_CONFIG_EXAMPLE}) and restarts the session.`,
+              `(expected shape: ${ENSO_CONFIG_EXAMPLE}) and restarts the session.`,
           )
         }
         if (allowedHosts.length === 0) {
@@ -143,7 +143,7 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
             rawUrl,
             `the ${WEB_FETCH_TOOL_NAME} host allowlist is EMPTY — the recorded default policy (#54), ` +
               `not an accident. No host is fetchable until a human adds one: edit ` +
-              `${configDisplayPath} to name exact hostnames, e.g. ${ZEN_CONFIG_EXAMPLE}, ` +
+              `${configDisplayPath} to name exact hostnames, e.g. ${ENSO_CONFIG_EXAMPLE}, ` +
               `commit the change so it is reviewed like code, and restart the session — the allowlist ` +
               `is read once at session start. Do not edit that file from this session; ask the human.`,
           )
@@ -313,7 +313,7 @@ async function renderResponse(url: URL, rawUrl: string, response: Response): Pro
   }
 }
 
-const log = zenLogger('extension', 'web-fetch')
+const log = ensoLogger('extension', 'web-fetch')
 
 /** One record per call, every outcome — the audit property #54 names (#132: in the file, at `info`; a refusal at `warn`). */
 function auditLine(outcome: string, url: string, detail: string): void {
@@ -351,10 +351,10 @@ async function readBodyUpTo(response: Response, maxBytes: number): Promise<{ tex
  * The pi entry point — real filesystem, DNS and fetch, wired at the composition root.
  * `findRepoRoot` realpaths before walking, which is what keeps the named path the
  * COMMITTED file even when the print harness (#20) runs this extension through its
- * `.zen/print-harness/` symlink mirror (observed live 2026-09-04, PR #58).
+ * `.enso/print-harness/` symlink mirror (observed live 2026-09-04, PR #58).
  */
 export default createWebFetch({
-  locateConfigFile: () => zenConfigPath(findRepoRoot(import.meta.url)),
+  locateConfigFile: () => ensoConfigPath(findRepoRoot(import.meta.url)),
   readConfigText: (path: string) => readFileSync(path, 'utf8'),
   fetchUrl: (url: string, init: WebFetchRequestInit) => fetch(url, init),
   resolveHostAddresses: async (hostname: string) =>

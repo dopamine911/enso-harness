@@ -1,6 +1,6 @@
 # Verification
 
-How zen-harness proves a change and holds the boundaries the refactor depends on (#170). The generated
+How Enso proves a change and holds the boundaries the refactor depends on (#170). The generated
 [verification inventory](./reference/verification-inventory.md) is the factual table: every gate,
 ratchet and reusable test double, its current count, source and stated limitation. This page explains
 how to use it. It does not repeat the inventory.
@@ -52,7 +52,7 @@ Publishing is separate and **manual**: `.github/workflows/docs-site.yml` runs on
 asked to (`deploy: true`); otherwise it uploads the built site as an artifact. Nothing publishes on
 a push, because gate 7 has already proved the build on every PR and a second one would buy only
 Actions minutes. ⚠ The workflow takes the site's base path from the repository
-(`ZEN_SITE_BASE: /${{ github.event.repository.name }}` → `scripts/docs/site-base.ts`, the one
+(`ENSO_SITE_BASE: /${{ github.event.repository.name }}` → `scripts/docs/site-base.ts`, the one
 reader Astro, the projector and the crawl all share). A project site is served from
 `/<repository>`, and a wrong base builds valid HTML whose every internal link 404s with nothing
 failing — so it is derived rather than written down, and `test/site-gate.test.ts` holds that.
@@ -96,7 +96,7 @@ The important boundary gates for consolidation:
 - `docs-gate.test.ts` — sourced fences equal declarations and generated pages equal their generator;
 - `prose-citation-gate.test.ts` — a line cited beside a symbol lands inside that symbol's own declaration;
 - `presentation-gate.test.ts` — ported files name their provenance and import no application state;
-- `logging-gate.test.ts` — records use `zenLogger`; the logging substrate stays behind it;
+- `logging-gate.test.ts` — records use `ensoLogger`; the logging substrate stays behind it;
 - `harness-barrel-gate.test.ts` — the harness barrel exports exactly what the extensions import;
 - `no-duplicate-paths.test.ts` / `no-duplicate-shapes.test.ts` — roots and schemas have one home.
 
@@ -133,8 +133,8 @@ Use the narrowest real surface:
 - **Browser transport** — `createScriptedFetch` drives the real prompt/follow adapter with a streamed
   body and controlled routes; it is not a mock echo.
 - **Follow HTTP** — `openFollow` reads the real SSE endpoint and records frames.
-- **Logging** — the single `recordZenLogs` (`packages/core/src/__tests__/log-recorder.ts`, one for
-  every package) replaces the sink while calls still go through `zenLogger` and its structured
+- **Logging** — the single `recordEnsoLogs` (`packages/core/src/__tests__/log-recorder.ts`, one for
+  every package) replaces the sink while calls still go through `ensoLogger` and its structured
   properties.
 - **DOM** — the shared environment owns process-wide browser globals for mounted component tests.
 
@@ -161,7 +161,7 @@ green gate.
 uses the `@model` slice and its required credentials. Unit tests prove folds and races; they do not
 prove layout or interaction.
 
-**TUI / launcher behavior:** run `scripts/zen.ts` or the relevant CLI and observe its output/state.
+**TUI / launcher behavior:** run `scripts/enso.ts` or the relevant CLI and observe its output/state.
 Typecheck and unit tests cannot prove process environment, package loading, terminal rendering or
 provider access.
 

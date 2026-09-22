@@ -71,10 +71,10 @@ test('⚠ every page the sidebar names exists, and a README becomes its section 
 test('the projection rewrites every link class a route cannot serve (#188)', () => {
   const page = 'reference/flows.md'
   // A sibling page: `.md` is a 404 as a route, and `/README` is the section index, not a page.
-  expect(rewriteLinks('[routes](./routes.md)', page)).toBe('[routes](/zen-harness/reference/routes/)')
-  expect(rewriteLinks('[seams](../seams/README.md)', page)).toBe('[seams](/zen-harness/seams/)')
+  expect(rewriteLinks('[routes](./routes.md)', page)).toBe('[routes](/enso/reference/routes/)')
+  expect(rewriteLinks('[seams](../seams/README.md)', page)).toBe('[seams](/enso/seams/)')
   // A directory, which resolves to that directory's index.
-  expect(rewriteLinks('[flows](../flows/)', page)).toBe('[flows](/zen-harness/flows/)')
+  expect(rewriteLinks('[flows](../flows/)', page)).toBe('[flows](/enso/flows/)')
   // Out of `docs/` into the source tree: there is no source tree under a site.
   expect(rewriteLinks('[src](../../packages/web/src/server/index.ts#L47)', page)).toBe(
     '[src](https://github.com/dopamine911/zen-harness-foundation/blob/main/packages/web/src/server/index.ts#L47)',
@@ -86,9 +86,7 @@ test('the projection rewrites every link class a route cannot serve (#188)', () 
   // ⚠ The repository README is the site's root and its links are REPO-relative, not
   // docs-relative — the one page where `docs/architecture.md` and `./architecture.md` mean the
   // same thing. Anchored wrongly, every link on the site's front page points into the blob.
-  expect(rewriteLinks('[arch](docs/architecture.md)', 'README.md', 'repository')).toBe(
-    '[arch](/zen-harness/architecture/)',
-  )
+  expect(rewriteLinks('[arch](docs/architecture.md)', 'README.md', 'repository')).toBe('[arch](/enso/architecture/)')
   expect(rewriteLinks('[lint](biome.jsonc)', 'README.md', 'repository')).toBe(
     '[lint](https://github.com/dopamine911/zen-harness-foundation/blob/main/biome.jsonc)',
   )
@@ -105,7 +103,7 @@ test('the projection rewrites every link class a route cannot serve (#188)', () 
  * and the site is broken in a way that reads as broken documentation. So the workflow takes the
  * base from the repository rather than repeating a literal that rots on a rename or a fork.
  *
- * ⚠ The local build's default is the OTHER value (`/zen-harness`), which is exactly why this is
+ * ⚠ The local build's default is the OTHER value (`/enso`), which is exactly why this is
  * checked here: the two are supposed to differ, so neither one being wrong is visible by
  * comparing them. What is checkable is that the published one is derived at all.
  */
@@ -118,11 +116,11 @@ test('⚠ the docs-site workflow derives its base and builds the API first (#188
   expect(workflow).toContain('workflow_dispatch:')
   expect(workflow).not.toMatch(/^\s{2}(?:push|pull_request):/m)
   // Derived from the repository, never a literal — the failure this test exists for.
-  expect(workflow).toContain('ZEN_SITE_BASE: /${{ github.event.repository.name }}')
+  expect(workflow).toContain('ENSO_SITE_BASE: /${{ github.event.repository.name }}')
   // ⚠ Anything that is not the expression, rather than a lowercase literal (PR #330 review): a
   // repository whose name starts with a capital — `Zen-Harness` is a valid GitHub name — would
   // have walked straight past a `/[a-z]/` check, hardcoded and undetected.
-  expect(workflow).not.toMatch(/ZEN_SITE_BASE:\s*\/(?!\$\{\{)/)
+  expect(workflow).not.toMatch(/ENSO_SITE_BASE:\s*\/(?!\$\{\{)/)
   // ⚠ `docs:api` no longer PRODUCES anything the site needs — it validates with `--emit none`,
   // and the site generates its own API pages from the same `typedoc.json`. It still runs first,
   // because a contract that fails to document should fail before a full static build, not after.
@@ -144,7 +142,7 @@ test('⚠ the docs-site workflow derives its base and builds the API first (#188
  * way to show that it reads anything.
  */
 test('a section is a directory that holds pages, not a name on a list (#188)', () => {
-  const dist = mkdtempSync(join(tmpdir(), 'zen-site-dist-'))
+  const dist = mkdtempSync(join(tmpdir(), 'enso-site-dist-'))
   // A section with its own page, and one without: only the second is a 404 a reader can reach.
   mkdirSync(join(dist, 'seams'), { recursive: true })
   writeFileSync(join(dist, 'seams', 'index.html'), '<html lang="en"></html>')
@@ -161,16 +159,16 @@ test('a section is a directory that holds pages, not a name on a list (#188)', (
 
 test('the crawl reads the hrefs a site serves, and skips the ones it cannot answer for (#188)', () => {
   const html = [
-    '<a href="/zen-harness/reference/routes/">a</a>',
+    '<a href="/enso/reference/routes/">a</a>',
     '<a href="../seams/guards/">b</a>',
     '<a href="https://example.invalid/x">external</a>',
     '<a href="mailto:nobody@example.invalid">mail</a>',
     '<a href="#anchor">fragment</a>',
   ].join('\n')
   // External, mail and pure-fragment hrefs are not this build's to answer for.
-  expect(internalHrefs(html)).toEqual(['/zen-harness/reference/routes/', '../seams/guards/'])
+  expect(internalHrefs(html)).toEqual(['/enso/reference/routes/', '../seams/guards/'])
   // Site-absolute (with and without the base) and page-relative land in one frame: under `dist`.
-  expect(resolveHref('/zen-harness/reference/routes/', 'site/dist/index.html')).toBe('site/dist/reference/routes')
+  expect(resolveHref('/enso/reference/routes/', 'site/dist/index.html')).toBe('site/dist/reference/routes')
   expect(resolveHref('../seams/guards/', 'site/dist/flows/resume/index.html')).toBe('site/dist/flows/seams/guards')
   expect(resolveHref('#anchor', 'site/dist/index.html')).toBe('site/dist/index.html')
 })

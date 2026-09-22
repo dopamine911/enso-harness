@@ -34,18 +34,18 @@ import { type Static, Type } from 'typebox'
  *
  * @group Logging
  */
-export type ZenLogLayer = 'server' | 'host' | 'extension' | 'browser'
+export type EnsoLogLayer = 'server' | 'host' | 'extension' | 'browser'
 
 /**
  * What every record carries when it knows it.
  *
- * These are the identities the wire already has (`ZenObservation`, #112) — a line that names
+ * These are the identities the wire already has (`EnsoObservation`, #112) — a line that names
  * them can be joined to the transcript, the event tail (#97), and the other layers' lines about
  * the same moment.
  *
  * @group Logging
  */
-export interface ZenLogProperties {
+export interface EnsoLogProperties {
   readonly threadId?: string
   /** The acquisition the record belongs to (the `status` frame's `generation`, #109). */
   readonly generation?: number
@@ -69,67 +69,67 @@ export interface ZenLogProperties {
  *
  * @group Logging
  */
-export type ZenLogPayload = ZenLogProperties | (() => ZenLogProperties)
+export type EnsoLogPayload = EnsoLogProperties | (() => EnsoLogProperties)
 
 /**
  * The typed surface.
  *
  * Five levels; `fatal` is not vocabulary here. The tiers (#132): `info` is the spine — what
  * happened; `debug` is every observation, one compact line; `trace` is the same with the
- * payload. `ZEN_LOG_LEVEL` picks the tier (`log-process.ts`).
+ * payload. `ENSO_LOG_LEVEL` picks the tier (`log-process.ts`).
  *
  * @group Logging
  */
-export interface ZenLogger {
-  trace(message: string, properties?: ZenLogPayload): void
-  debug(message: string, properties?: ZenLogPayload): void
-  info(message: string, properties?: ZenLogPayload): void
-  warn(message: string, properties?: ZenLogPayload): void
-  error(message: string, properties?: ZenLogPayload): void
+export interface EnsoLogger {
+  trace(message: string, properties?: EnsoLogPayload): void
+  debug(message: string, properties?: EnsoLogPayload): void
+  info(message: string, properties?: EnsoLogPayload): void
+  warn(message: string, properties?: EnsoLogPayload): void
+  error(message: string, properties?: EnsoLogPayload): void
   /** A logger whose every record carries `properties` — bind `threadId` once per handler. */
-  with(properties: ZenLogProperties): ZenLogger
+  with(properties: EnsoLogProperties): EnsoLogger
 }
 
 /**
- * The root category. A configurator routes `["zen"]` and every layer inherits.
+ * The root category. A configurator routes `["enso"]` and every layer inherits.
  *
  * @group Logging
  */
-export const ZEN_LOG_ROOT = 'zen'
+export const ENSO_LOG_ROOT = 'enso'
 
-function wrap(logger: Logger): ZenLogger {
+function wrap(logger: Logger): EnsoLogger {
   return {
-    trace(message: string, properties?: ZenLogPayload): void {
+    trace(message: string, properties?: EnsoLogPayload): void {
       logger.trace(message, properties)
     },
-    debug(message: string, properties?: ZenLogPayload): void {
+    debug(message: string, properties?: EnsoLogPayload): void {
       logger.debug(message, properties)
     },
-    info(message: string, properties?: ZenLogPayload): void {
+    info(message: string, properties?: EnsoLogPayload): void {
       logger.info(message, properties)
     },
-    warn(message: string, properties?: ZenLogPayload): void {
+    warn(message: string, properties?: EnsoLogPayload): void {
       logger.warn(message, properties)
     },
-    error(message: string, properties?: ZenLogPayload): void {
+    error(message: string, properties?: EnsoLogPayload): void {
       logger.error(message, properties)
     },
-    with(properties: ZenLogProperties): ZenLogger {
+    with(properties: EnsoLogProperties): EnsoLogger {
       return wrap(logger.with(properties))
     },
   }
 }
 
 /**
- * The one way to get a logger: `zenLogger("server", "follow")` is the category
- * `["zen", "server", "follow"]`, a child of the layer, a grandchild of the root.
+ * The one way to get a logger: `ensoLogger("server", "follow")` is the category
+ * `["enso", "server", "follow"]`, a child of the layer, a grandchild of the root.
  *
  * Module level, once per file.
  *
  * @group Logging
  */
-export function zenLogger(layer: ZenLogLayer, ...subcategory: readonly string[]): ZenLogger {
-  return wrap(getLogger([ZEN_LOG_ROOT, layer, ...subcategory]))
+export function ensoLogger(layer: EnsoLogLayer, ...subcategory: readonly string[]): EnsoLogger {
+  return wrap(getLogger([ENSO_LOG_ROOT, layer, ...subcategory]))
 }
 
 /**
@@ -148,7 +148,7 @@ export function zenLogger(layer: ZenLogLayer, ...subcategory: readonly string[])
  *
  * @group Logging
  */
-export function withZenLogContext<T>(properties: ZenLogProperties, callback: () => T): T {
+export function withEnsoLogContext<T>(properties: EnsoLogProperties, callback: () => T): T {
   return withContext(properties, callback)
 }
 
@@ -170,7 +170,7 @@ export function withZenLogContext<T>(properties: ZenLogProperties, callback: () 
  *
  * @group Logging
  */
-export const ZEN_REDACT_FIELDS: readonly RegExp[] = [/api[-_]?key/i, /secret/i, /password/i, /token/i, /credential/i]
+export const ENSO_REDACT_FIELDS: readonly RegExp[] = [/api[-_]?key/i, /secret/i, /password/i, /token/i, /credential/i]
 
 /**
  * What a redacted field's value becomes on disk.
@@ -182,19 +182,19 @@ export const ZEN_REDACT_FIELDS: readonly RegExp[] = [/api[-_]?key/i, /secret/i, 
  *
  * @group Logging
  */
-export const ZEN_REDACTED = '[REDACTED]'
+export const ENSO_REDACTED = '[REDACTED]'
 
 /**
  * What a known secret VALUE becomes wherever it appears — inside a message, a guard's
  * `reason`, a `trace` payload (#139).
  *
- * A distinct marker from `ZEN_REDACTED` so the bundle's manifest can count the two passes
+ * A distinct marker from `ENSO_REDACTED` so the bundle's manifest can count the two passes
  * separately: a field name redacted is a record shaped right, a value redacted is a leak that
  * was caught.
  *
  * @group Logging
  */
-export const ZEN_REDACTED_VALUE = '[REDACTED:value]'
+export const ENSO_REDACTED_VALUE = '[REDACTED:value]'
 
 /**
  * One line of the JSONL file, as LogTape's `jsonLinesFormatter` writes it — pinned here
@@ -206,7 +206,7 @@ export const ZEN_REDACTED_VALUE = '[REDACTED:value]'
  *
  * @group Logging
  */
-export const ZenLogLine = Type.Object(
+export const EnsoLogLine = Type.Object(
   {
     '@timestamp': Type.String(),
     level: Type.Union([
@@ -224,9 +224,9 @@ export const ZenLogLine = Type.Object(
   { additionalProperties: false },
 )
 /** @group Logging */
-export type ZenLogLine = Static<typeof ZenLogLine>
+export type EnsoLogLine = Static<typeof EnsoLogLine>
 
-const LINE_LEVEL: Readonly<Record<LogLevel, ZenLogLine['level']>> = {
+const LINE_LEVEL: Readonly<Record<LogLevel, EnsoLogLine['level']>> = {
   trace: 'TRACE',
   debug: 'DEBUG',
   info: 'INFO',
@@ -244,7 +244,7 @@ const LINE_LEVEL: Readonly<Record<LogLevel, ZenLogLine['level']>> = {
  *
  * @group Logging
  */
-export function zenLogLineOf(record: LogRecord): ZenLogLine {
+export function ensoLogLineOf(record: LogRecord): EnsoLogLine {
   return {
     '@timestamp': new Date(record.timestamp).toISOString(),
     level: LINE_LEVEL[record.level],
@@ -262,12 +262,12 @@ export function zenLogLineOf(record: LogRecord): ZenLogLine {
  * The server re-emits each through its own logger as `process: "browser"`, so they land in the
  * same file, redacted by the same sink, and `bun run logs --process browser` finds them. `at`
  * is the browser's clock; the file's `@timestamp` is the server's receipt. `page` tells two
- * tabs apart. `logger` must be under `zen.browser`: the server will not be told what the host
+ * tabs apart. `logger` must be under `enso.browser`: the server will not be told what the host
  * or the guard said.
  *
  * @group Logging
  */
-export const ZenBrowserLogBatch = Type.Object(
+export const EnsoBrowserLogBatch = Type.Object(
   {
     page: Type.String({ minLength: 1, maxLength: 64 }),
     records: Type.Array(
@@ -275,7 +275,7 @@ export const ZenBrowserLogBatch = Type.Object(
         {
           at: Type.String(),
           level: Type.Union([Type.Literal('info'), Type.Literal('warning'), Type.Literal('error')]),
-          logger: Type.String({ pattern: '^zen\\.browser(\\.[A-Za-z0-9-]+)*$' }),
+          logger: Type.String({ pattern: '^enso\\.browser(\\.[A-Za-z0-9-]+)*$' }),
           message: Type.String({ maxLength: 4096 }),
           properties: Type.Record(Type.String(), Type.Unknown()),
         },
@@ -287,4 +287,4 @@ export const ZenBrowserLogBatch = Type.Object(
   { additionalProperties: false },
 )
 /** @group Logging */
-export type ZenBrowserLogBatch = Static<typeof ZenBrowserLogBatch>
+export type EnsoBrowserLogBatch = Static<typeof EnsoBrowserLogBatch>

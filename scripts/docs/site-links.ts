@@ -50,7 +50,7 @@ export function internalHrefs(html: string): string[] {
  * Where `href` lands on disk, given the page that carries it.
  *
  * The three branches produce paths in two different frames, which is why the last line strips
- * rather than always prefixing: a site-absolute href (`/zen-harness/x/`, or `/x/`) names a path
+ * rather than always prefixing: a site-absolute href (`/enso/x/`, or `/x/`) names a path
  * INSIDE the built site and has to be joined onto `site/dist/`, while a relative href resolved
  * against the page — which already lives under `site/dist/` — comes back carrying that prefix
  * from `relative(ROOT, …)`. Stripping first makes both frames one.

@@ -9,10 +9,10 @@
  *
  * ⚠ THE DEFAULT IS THE LOCAL ONE, AND PUBLISHING OVERRIDES IT. A GitHub project site is served
  * from `/<repository>`, which is not this repository's short name, so the publish workflow sets
- * `ZEN_SITE_BASE` from the repository itself rather than repeating a literal that would rot the
+ * `ENSO_SITE_BASE` from the repository itself rather than repeating a literal that would rot the
  * first time the repo is renamed or forked.
  */
-export const SITE_BASE: string = process.env.ZEN_SITE_BASE ?? '/zen-harness'
+export const SITE_BASE: string = process.env.ENSO_SITE_BASE ?? '/enso'
 
 /**
  * The origin the site is served from, which Astro needs to emit a sitemap at all.
@@ -25,4 +25,4 @@ export const SITE_BASE: string = process.env.ZEN_SITE_BASE ?? '/zen-harness'
  * inventing a real one would put a URL nobody serves into a sitemap. The publish workflow sets
  * the owner's Pages origin.
  */
-export const SITE_URL: string = process.env.ZEN_SITE_URL ?? 'https://example.invalid'
+export const SITE_URL: string = process.env.ENSO_SITE_URL ?? 'https://example.invalid'

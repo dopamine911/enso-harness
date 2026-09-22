@@ -7,7 +7,13 @@ import type {
 } from '@earendil-works/pi-coding-agent'
 import { Theme } from '@earendil-works/pi-coding-agent'
 import type { Component, TUI } from '@earendil-works/pi-tui'
-import { type DialogAnswer, isZenDialogSpec, type ZenDialogOutcome, type ZenOpenDialog, zenLogger } from '@zen/core'
+import {
+  type DialogAnswer,
+  type EnsoDialogOutcome,
+  type EnsoOpenDialog,
+  ensoLogger,
+  isEnsoDialogSpec,
+} from '@enso/core'
 import { type LiftedPermissionDialog, liftPermissionDialog } from './permission-dialog.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 
@@ -73,7 +79,7 @@ interface PendingDialog {
   request: BlockingDialogRequest
 }
 
-export interface ZenExtensionUiContextOptions {
+export interface EnsoExtensionUiContextOptions {
   /** Where every record goes — the host's event emitter, so records interleave with session events in order. */
   emit: (event: RuntimeEvent) => void
   /** The thread this context serves — on every record it writes. */
@@ -104,14 +110,14 @@ const CUSTOM_COMPONENT_BUILD_TIMEOUT_MS = 2000
  */
 const CONFIRM_DISMISSED: boolean = false
 
-const hostLog = zenLogger('host', 'ui')
+const hostLog = ensoLogger('host', 'ui')
 
-export interface ZenExtensionUiContext {
+export interface EnsoExtensionUiContext {
   readonly uiContext: ExtensionUIContext
   /** Deliver an answer. Unknown ids are reported, not thrown — the extension is not waiting on them. */
   answerDialog(response: DialogAnswer): void
   /** Every pending question, oldest first, as the follow's snapshot lists them (#114). Empty once settled. */
-  openDialogs(): ZenOpenDialog[]
+  openDialogs(): EnsoOpenDialog[]
   /** Cancel every pending dialog — session teardown. Each blocked extension call resolves to its cancel value. */
   cancelAllDialogs(): void
   /**
@@ -192,11 +198,11 @@ function createNeutralTheme(): PiTheme {
       toolErrorBg: bg,
     },
     '256color',
-    { name: 'zen-web-neutral' },
+    { name: 'enso-web-neutral' },
   )
 }
 
-export function createZenExtensionUiContext(options: ZenExtensionUiContextOptions): ZenExtensionUiContext {
+export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOptions): EnsoExtensionUiContext {
   const { emit } = options
   const log = hostLog.with({ threadId: options.threadId })
   const liftDialog = options.liftDialog ?? liftPermissionDialog
@@ -272,7 +278,7 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
     return new Promise<T>((resolve) => {
       const id = crypto.randomUUID()
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined
-      const finish = (value: T, outcome: ZenDialogOutcome): void => {
+      const finish = (value: T, outcome: EnsoDialogOutcome): void => {
         if (!pendingDialogs.delete(id)) return // already settled by another path
         if (timeoutHandle !== undefined) clearTimeout(timeoutHandle)
         dialogOptions?.signal?.removeEventListener('abort', onAbort)
@@ -453,13 +459,13 @@ export function createZenExtensionUiContext(options: ZenExtensionUiContextOption
       }
       pending.resolve(response)
     },
-    openDialogs(): ZenOpenDialog[] {
-      const open: ZenOpenDialog[] = []
+    openDialogs(): EnsoOpenDialog[] {
+      const open: EnsoOpenDialog[] = []
       for (const [dialogId, { request }] of pendingDialogs) {
         // The request IS a dialog spec structurally (the mapper builds the browser's spec
         // from the same fields); checked rather than cast, so a request shape the spec
         // does not admit (a select with no options) is not listed as a question here either.
-        if (isZenDialogSpec(request)) open.push({ id: dialogId, dialog: request })
+        if (isEnsoDialogSpec(request)) open.push({ id: dialogId, dialog: request })
       }
       return open
     },

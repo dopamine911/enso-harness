@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
-import { isPrintRun, piArguments, piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from '../zen-launch.ts'
+import { isPrintRun, piArguments, piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from '../enso-launch.ts'
 
 /**
- * The terminal launcher's decisions (docs/flows/boot-and-launchers.md, stated gap: `zen.ts`
+ * The terminal launcher's decisions (docs/flows/boot-and-launchers.md, stated gap: `enso.ts`
  * had no test of its own). The launcher spawns pi and is not driven here; what it decides
  * before spawning is — the isolation triple, the print-run reading, and the version range,
  * against a `pi --version` line of the test's making. The vendor-path precondition moved out

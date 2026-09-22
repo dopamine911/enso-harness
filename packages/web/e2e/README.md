@@ -8,7 +8,7 @@ Drives the real dev surface end to end and leaves screenshots behind for a PR. N
 
 ```bash
 bun run e2e          # model-free tier: /mode dialog round trip, an image paste, the thread URL, seven screenshots
-bun run e2e:model    # one real model turn (costs tokens, needs .zen/pi-agent identity)
+bun run e2e:model    # one real model turn (costs tokens, needs .enso/pi-agent identity)
 ```
 
 First time on a machine: `bunx playwright install chromium` (the pinned `@playwright/test`

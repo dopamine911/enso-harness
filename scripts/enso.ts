@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Launch a VANILLA pi with only zen-harness loaded.
+ * Launch a VANILLA pi with only Enso loaded.
  *
  * Isolation is two independent mechanisms, because each closes a different hole:
  *
@@ -8,7 +8,7 @@
  *                        installed packages, settings, keybindings, themes or
  *                        credentials are visible. Verified: 16 packages -> 0.
  *   --no-extensions      disables discovery, which also suppresses the PROJECT-local
- *                        .pi/settings.json in this repo (it installs zen-harness as a
+ *                        .pi/settings.json in this repo (it installs Enso as a
  *                        package). Without it the package would load twice — once
  *                        from discovery, once from -e.
  *   --no-skills          ⚠ REQUIRED, and neither flag above covers it. pi discovers
@@ -44,18 +44,18 @@
  * ⚠ THE `pi` SPAWNED HERE IS VERSION-GATED (#217). It comes from `PATH`, while the guard's
  *   replica of pi's path resolver is pinned against the pi in the workspace tree — two
  *   resolutions that nothing held together. The version is read before the spawn and refused
- *   outside `zen-launch.ts#SUPPORTED_PI_VERSIONS`; see the block below.
+ *   outside `enso-launch.ts#SUPPORTED_PI_VERSIONS`; see the block below.
  *
- * Usage:  bun run zen -p "hello"
- *         ZEN_AGENT_DIR=/somewhere/else bun run zen
+ * Usage:  bun run enso -p "hello"
+ *         ENSO_AGENT_DIR=/somewhere/else bun run enso
  */
 import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { findRepoRoot, harnessPackageDir, printHarnessDir, zenAgentDir } from '../packages/core/src/paths.ts'
+import { ensoAgentDir, findRepoRoot, harnessPackageDir, printHarnessDir } from '../packages/core/src/paths.ts'
 import { declaredResources, missingVendorPaths } from '../packages/core/src/pi-manifest.ts'
 import { quarantineSecrets } from '../packages/core/src/secrets.ts'
+import { isPrintRun, piArguments, piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from './enso-launch.ts'
 import { buildPrintManifest, materializePrintHarness } from './print-harness.ts'
-import { isPrintRun, piArguments, piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from './zen-launch.ts'
 
 const repoRoot = findRepoRoot(import.meta.url)
 const packageRoot = harnessPackageDir(repoRoot)
@@ -67,24 +67,24 @@ let resources: string[] | undefined
 try {
   resources = declaredResources(manifest)
 } catch (error) {
-  process.stderr.write(`zen: ${error instanceof Error ? error.message : String(error)}\n`)
+  process.stderr.write(`enso: ${error instanceof Error ? error.message : String(error)}\n`)
   process.exit(1)
 }
 if (resources.length === 0) {
-  process.stderr.write('zen: packages/harness/package.json declares no pi resources\n')
+  process.stderr.write('enso: packages/harness/package.json declares no pi resources\n')
   process.exit(1)
 }
 
-// The check and its reason: `@zen/core/pi-manifest#missingVendorPaths`. Refuse to launch on a gap.
+// The check and its reason: `@enso/core/pi-manifest#missingVendorPaths`. Refuse to launch on a gap.
 const missing = missingVendorPaths(manifest, packageRoot)
 if (missing.length > 0) {
-  process.stderr.write('zen: vendor package paths are missing from the harness package:\n')
+  process.stderr.write('enso: vendor package paths are missing from the harness package:\n')
   for (const missingPath of missing) process.stderr.write(`  - ${missingPath}\n`)
-  process.stderr.write('zen: run `bun install` (its postinstall relinks the vendor packages)\n')
+  process.stderr.write('enso: run `bun install` (its postinstall relinks the vendor packages)\n')
   process.exit(1)
 }
 
-const agentDir: string = process.env.ZEN_AGENT_DIR ?? zenAgentDir(repoRoot)
+const agentDir: string = process.env.ENSO_AGENT_DIR ?? ensoAgentDir(repoRoot)
 mkdirSync(agentDir, { recursive: true })
 
 const passthroughArgs = process.argv.slice(2)
@@ -96,7 +96,7 @@ const passthroughArgs = process.argv.slice(2)
  * scripts/print-harness.ts) is the harness minus that one extension: guards and
  * multi-account still load, skills/prompts/themes still load, and the run has OUR guards
  * only — bash unconfined (#9), the pre-picc posture. Launch-time mode selection upstream
- * (#13) is the durable fix; this is the honest interim. The trigger: `zen-launch.ts#isPrintRun`.
+ * (#13) is the durable fix; this is the honest interim. The trigger: `enso-launch.ts#isPrintRun`.
  */
 const printRun = isPrintRun(passthroughArgs, process.stdin.isTTY === true)
 
@@ -104,14 +104,14 @@ const packageToLoad: string = printRun
   ? materializePrintHarness(printHarnessDir(repoRoot), packageRoot, buildPrintManifest(manifest))
   : packageRoot
 
-// The isolation triple's two argument legs: `zen-launch.ts#piArguments`.
+// The isolation triple's two argument legs: `enso-launch.ts#piArguments`.
 const args = piArguments(packageToLoad, passthroughArgs)
 
 /**
  * ⚠ SECRETS OUT BEFORE ANY CHILD (#89). bun auto-loaded a root `.env` into THIS process's
  * environment; the spread below would carry every key into pi and from there into every
  * `bash` child — which is how `TAVILY_API_KEY` ended up in a transcript. The extensions
- * that need a key read `.zen/secrets.env` directly (`readSecret`); the environment carries
+ * that need a key read `.enso/secrets.env` directly (`readSecret`); the environment carries
  * none, and a root `.env` that still holds a secret is reported as misplaced.
  *
  * ⚠ FIRST, not just before the pi spawn (PR #294 review). `secrets.ts` says "before any
@@ -124,11 +124,11 @@ const args = piArguments(packageToLoad, passthroughArgs)
  */
 const quarantine = quarantineSecrets(process.env, repoRoot)
 if (quarantine.removed.length > 0)
-  process.stderr.write(`zen: secrets kept out of pi's environment (#89): ${quarantine.removed.join(', ')}\n`)
+  process.stderr.write(`enso: secrets kept out of pi's environment (#89): ${quarantine.removed.join(', ')}\n`)
 if (quarantine.misplaced.length > 0) {
   process.stderr.write(
-    `zen: ⚠ the root .env defines ${quarantine.misplaced.join(', ')} — bun autoloads .env into every bun child, ` +
-      'so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env.\n',
+    `enso: ⚠ the root .env defines ${quarantine.misplaced.join(', ')} — bun autoloads .env into every bun child, ` +
+      'so a tool can still read it there. Move it to .enso/secrets.env (#89); it is not read from .env.\n',
   )
 }
 
@@ -140,7 +140,7 @@ if (quarantine.misplaced.length > 0) {
  * a shim printing `0.85.0` earlier on `PATH`: it launched, and the whole suite stayed green —
  * the guard resolving a path differently from the tool it gates is exactly the failure the
  * replica exists to prevent. So the version is read BEFORE the spawn and refused when it falls
- * outside `zen-launch.ts#SUPPORTED_PI_VERSIONS`, the shape `assertVendorLinks` already uses on
+ * outside `enso-launch.ts#SUPPORTED_PI_VERSIONS`, the shape `assertVendorLinks` already uses on
  * the other surface: one precondition, enforced at both launch points.
  *
  * There is no override flag, deliberately: the range is widened by running the corpus against
@@ -181,37 +181,37 @@ try {
   if (outcome === null) {
     probe.kill('SIGKILL')
     process.stderr.write(
-      `zen: \`pi --version\` did not answer within ${PI_PROBE_TIMEOUT_MS / 1000}s, so the version the guards ` +
+      `enso: \`pi --version\` did not answer within ${PI_PROBE_TIMEOUT_MS / 1000}s, so the version the guards ` +
         'are pinned against could not be read (#217)\n',
     )
     process.exit(1)
   }
   if (outcome.status !== 0) {
     process.stderr.write(
-      `zen: \`pi --version\` exited ${outcome.status}, so the version the guards are pinned against ` +
+      `enso: \`pi --version\` exited ${outcome.status}, so the version the guards are pinned against ` +
         'could not be read (#217)\n',
     )
     process.exit(1)
   }
   reportedPiVersion = outcome.text
 } catch {
-  process.stderr.write('zen: no `pi` on PATH — the terminal surface spawns it, so install it first\n')
+  process.stderr.write('enso: no `pi` on PATH — the terminal surface spawns it, so install it first\n')
   process.exit(1)
 }
 if (!piVersionSupported(reportedPiVersion)) {
   process.stderr.write(
-    `zen: the \`pi\` on PATH reports ${reportedPiVersion === '' ? 'no version' : reportedPiVersion}, ` +
+    `enso: the \`pi\` on PATH reports ${reportedPiVersion === '' ? 'no version' : reportedPiVersion}, ` +
       `outside the range the guards are pinned against ` +
       `(>=${piVersionText(SUPPORTED_PI_VERSIONS.minimum)} <${piVersionText(SUPPORTED_PI_VERSIONS.below)}).\n` +
       "The guard replicates pi's path resolver; against an unpinned pi a deny can be computed against the wrong\n" +
       'target (#217). Either use the pinned pi, or run the corpus against this one and widen the range:\n' +
-      '  bun test packages/harness/core/__tests__/paths.test.ts   then scripts/zen-launch.ts#SUPPORTED_PI_VERSIONS\n',
+      '  bun test packages/harness/core/__tests__/paths.test.ts   then scripts/enso-launch.ts#SUPPORTED_PI_VERSIONS\n',
   )
   process.exit(1)
 }
 
 process.stderr.write(
-  `zen: vanilla pi ${reportedPiVersion} | agent-dir=${agentDir} | package=${packageToLoad}` +
+  `enso: vanilla pi ${reportedPiVersion} | agent-dir=${agentDir} | package=${packageToLoad}` +
     `${printRun ? ' (print variant, no permission modes — #20)' : ''} | ` +
     `${resources.length} declared resource path(s)\n`,
 )

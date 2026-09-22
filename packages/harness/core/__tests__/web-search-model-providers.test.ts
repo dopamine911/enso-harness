@@ -54,7 +54,7 @@ function fakeModel(overrides: Partial<SearchModel>): SearchModel {
 
 function modelRequest(model: SearchModel, fetchUrl: FetchUrl): ModelSearchRequest {
   return {
-    query: 'what is zen-harness',
+    query: 'what is Enso',
     model,
     resolveAuth: async () => TEST_AUTH,
     fetchUrl,
@@ -86,8 +86,8 @@ function googleGroundedEvents(): unknown[] {
         {
           content: { parts: [] },
           groundingMetadata: {
-            webSearchQueries: ['zen-harness'],
-            groundingChunks: [{ web: { uri: 'https://example.com/zen', title: 'Zen docs' } }],
+            webSearchQueries: ['Enso'],
+            groundingChunks: [{ web: { uri: 'https://example.com/enso', title: 'Enso docs' } }],
             groundingSupports: [{ segment: { endIndex: answerByteLength }, groundingChunkIndices: [0] }],
           },
         },
@@ -103,7 +103,7 @@ test('google: grounded stream → searched, byte-safe citation markers, chunk-or
   expect(outcome.kind).toBe('searched')
   if (outcome.kind !== 'searched') throw new Error('unreachable')
   expect(outcome.answerText).toBe(`${GOOGLE_ANSWER}[1]`)
-  expect(outcome.sources).toEqual([{ title: 'Zen docs', url: 'https://example.com/zen' }])
+  expect(outcome.sources).toEqual([{ title: 'Enso docs', url: 'https://example.com/enso' }])
 })
 
 test('google: an answer with NO grounding metadata is `ungrounded`', async () => {
@@ -163,10 +163,10 @@ const OPENAI_MODEL = fakeModel({ provider: 'openai', api: 'openai-responses', id
 
 const OPENAI_SEARCHED_EVENTS = [
   { type: 'response.web_search_call.searching', item_id: 'ws1' },
-  { type: 'response.output_text.delta', delta: 'zen-harness is a guarded pi setup.' },
+  { type: 'response.output_text.delta', delta: 'Enso is a guarded pi setup.' },
   {
     type: 'response.output_text.annotation.added',
-    annotation: { type: 'url_citation', url: 'https://example.com/zen', title: 'Zen docs', end_index: 34 },
+    annotation: { type: 'url_citation', url: 'https://example.com/enso', title: 'Enso docs', end_index: 34 },
   },
   { type: 'response.completed', response: { output: [] } },
 ]
@@ -183,8 +183,8 @@ test('openai: a stream with web_search_call activity → searched with index-ins
   expect(outcome.kind).toBe('searched')
   if (outcome.kind !== 'searched') throw new Error('unreachable')
   // end_index 34 is the string's end — the marker inserts at that character offset.
-  expect(outcome.answerText).toBe('zen-harness is a guarded pi setup.[1]')
-  expect(outcome.sources).toEqual([{ title: 'Zen docs', url: 'https://example.com/zen' }])
+  expect(outcome.answerText).toBe('Enso is a guarded pi setup.[1]')
+  expect(outcome.sources).toEqual([{ title: 'Enso docs', url: 'https://example.com/enso' }])
 })
 
 test('openai: text with no search activity and no citations is `ungrounded`', async () => {

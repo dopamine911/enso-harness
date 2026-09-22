@@ -78,7 +78,7 @@ function git(root: string, ...args: string[]): string {
  * resolution (in the second parent only).
  */
 function fixtureRange(resolution: 'writes-the-marker' | 'drops-the-marker'): { root: string; range: string } {
-  const root = mkdtempSync(join(tmpdir(), 'zen-secret-scan-'))
+  const root = mkdtempSync(join(tmpdir(), 'enso-secret-scan-'))
   const marker = MARKER
   git(root, 'init', '-q', '-b', 'main', '.')
   writeFileSync(join(root, 'config.txt'), 'shared = 1\n')

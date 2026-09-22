@@ -62,7 +62,7 @@ export default defineConfig({
           },
         }),
       ],
-      title: 'zen-harness',
+      title: 'Enso',
       description: 'The harness architecture, its seams, and the reference material generated from its source.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/dopamine911/zen-harness-foundation' }],
       // Four sections, in the order a reader needs them: what it is, how it behaves, what it

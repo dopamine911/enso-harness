@@ -1,7 +1,17 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import type { ZenLogLine, ZenThreadEvent, ZenThreadEvents, ZenThreadInspection, ZenTranscriptEntry } from '@zen/core'
+import type {
+  EnsoLogLine,
+  EnsoThreadEvent,
+  EnsoThreadEvents,
+  EnsoThreadInspection,
+  EnsoTranscriptEntry,
+} from '@enso/core'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { FOLLOW_ENDED_CUSTOM_EVENT, RECENT_CUSTOM_CHUNK_CAPACITY, routeZenCustomEvent } from '../custom-event-router.ts'
+import {
+  FOLLOW_ENDED_CUSTOM_EVENT,
+  RECENT_CUSTOM_CHUNK_CAPACITY,
+  routeEnsoCustomEvent,
+} from '../custom-event-router.ts'
 import {
   type BrowserBelief,
   type BundleState,
@@ -33,7 +43,7 @@ const noop = (): void => {
   // Static markup runs no handlers; the callbacks exist only to satisfy the props.
 }
 
-const piccEntry = (mode: string, id: string): ZenTranscriptEntry => ({
+const piccEntry = (mode: string, id: string): EnsoTranscriptEntry => ({
   kind: 'custom',
   customType: 'modes',
   data: { mode },
@@ -41,7 +51,7 @@ const piccEntry = (mode: string, id: string): ZenTranscriptEntry => ({
   at: '2026-09-08T10:00:00.000Z',
 })
 
-function inspection(overrides: Partial<ZenThreadInspection> = {}): ZenThreadInspection {
+function inspection(overrides: Partial<EnsoThreadInspection> = {}): EnsoThreadInspection {
   return {
     threadId: 't1',
     sessionId: 'session-1',
@@ -70,18 +80,18 @@ function believing(mode: string | undefined, generation: number | undefined = 1)
 
 const render = (
   browser: BrowserBelief,
-  session: ZenThreadInspection | undefined,
+  session: EnsoThreadInspection | undefined,
   error?: string,
   copyState: CopyState = 'idle',
 ): string => renderWith({ browser, inspection: session, error, copyState })
 
 interface RenderOverrides {
   readonly browser: BrowserBelief
-  readonly inspection: ZenThreadInspection | undefined
+  readonly inspection: EnsoThreadInspection | undefined
   readonly error?: string | undefined
   readonly copyState?: CopyState
   readonly bundleState?: BundleState
-  readonly events?: ZenThreadEvents
+  readonly events?: EnsoThreadEvents
 }
 
 const renderWith = ({
@@ -169,8 +179,8 @@ test('before the first fetch, and on a failed one, the session column says why',
 // ── the router's record ──────────────────────────────────────────────────────
 
 test('every CUSTOM chunk the router sees is recorded, oldest first, with a stable identity', () => {
-  routeZenCustomEvent(stores, 'permission-mode', { kind: 'permission-mode', mode: 'default', available: [] })
-  routeZenCustomEvent(stores, 'unmapped', { kind: 'unmapped', event: { type: 'some_future_event' } })
+  routeEnsoCustomEvent(stores, 'permission-mode', { kind: 'permission-mode', mode: 'default', available: [] })
+  routeEnsoCustomEvent(stores, 'unmapped', { kind: 'unmapped', event: { type: 'some_future_event' } })
   const recorded = stores.recentChunks.get()
   expect(recorded.map((chunk) => chunk.name)).toEqual(['permission-mode', 'unmapped'])
   expect(recorded[0]?.sequence).toBeLessThan(recorded[1]?.sequence ?? 0)
@@ -180,15 +190,15 @@ test('every CUSTOM chunk the router sees is recorded, oldest first, with a stabl
 // page's own run flag toggles — a run another tab started never toggles it.
 test('⚠ the refresh trigger moves on a status frame, a persisted mode or a settled question — and on nothing else', () => {
   expect(latestServerStateSequence(stores.recentChunks.get())).toBeUndefined()
-  routeZenCustomEvent(stores, 'permission-mode', { kind: 'permission-mode', mode: 'default', available: [] })
-  routeZenCustomEvent(stores, 'message-end', { kind: 'message-end', role: 'assistant' })
+  routeEnsoCustomEvent(stores, 'permission-mode', { kind: 'permission-mode', mode: 'default', available: [] })
+  routeEnsoCustomEvent(stores, 'message-end', { kind: 'message-end', role: 'assistant' })
   expect(latestServerStateSequence(stores.recentChunks.get())).toBeUndefined()
-  routeZenCustomEvent(stores, 'status', { type: 'status', live: true, busy: false, generation: 1 })
+  routeEnsoCustomEvent(stores, 'status', { type: 'status', live: true, busy: false, generation: 1 })
   const afterStatus = latestServerStateSequence(stores.recentChunks.get())
   expect(afterStatus).toBeDefined()
   // Chunks that do not mean "the server changed" leave the trigger where it was.
-  routeZenCustomEvent(stores, 'unmapped', { kind: 'unmapped', event: { type: 'message_update' } })
-  routeZenCustomEvent(stores, 'extension-ui-request', {
+  routeEnsoCustomEvent(stores, 'unmapped', { kind: 'unmapped', event: { type: 'message_update' } })
+  routeEnsoCustomEvent(stores, 'extension-ui-request', {
     kind: 'extension-ui-request',
     id: '',
     method: 'notify',
@@ -197,20 +207,20 @@ test('⚠ the refresh trigger moves on a status frame, a persisted mode or a set
     message: 'm',
   })
   expect(latestServerStateSequence(stores.recentChunks.get())).toBe(afterStatus)
-  routeZenCustomEvent(stores, 'dialog-settled', { kind: 'dialog-settled', id: 'd1', outcome: 'answered' })
+  routeEnsoCustomEvent(stores, 'dialog-settled', { kind: 'dialog-settled', id: 'd1', outcome: 'answered' })
   expect(latestServerStateSequence(stores.recentChunks.get())).toBeGreaterThan(afterStatus ?? 0)
   const afterSettle = latestServerStateSequence(stores.recentChunks.get())
-  routeZenCustomEvent(stores, 'custom-entry', { kind: 'custom-entry', customType: 'modes', data: { mode: 'plan' } })
+  routeEnsoCustomEvent(stores, 'custom-entry', { kind: 'custom-entry', customType: 'modes', data: { mode: 'plan' } })
   const afterEntry = latestServerStateSequence(stores.recentChunks.get())
   expect(afterEntry).toBeGreaterThan(afterSettle ?? 0)
   // The follow ending under the page (step 8): the last fetch may describe a session that is gone.
-  routeZenCustomEvent(stores, FOLLOW_ENDED_CUSTOM_EVENT, { threadId: 't1' })
+  routeEnsoCustomEvent(stores, FOLLOW_ENDED_CUSTOM_EVENT, { threadId: 't1' })
   expect(latestServerStateSequence(stores.recentChunks.get())).toBeGreaterThan(afterEntry ?? 0)
 })
 
 test('the record is a ring: beyond capacity the oldest chunks fall off', () => {
   for (let sent = 0; sent < RECENT_CUSTOM_CHUNK_CAPACITY + 5; sent += 1) {
-    routeZenCustomEvent(stores, 'unmapped', { sent })
+    routeEnsoCustomEvent(stores, 'unmapped', { sent })
   }
   const recorded = stores.recentChunks.get()
   expect(recorded).toHaveLength(RECENT_CUSTOM_CHUNK_CAPACITY)
@@ -220,12 +230,12 @@ test('the record is a ring: beyond capacity the oldest chunks fall off', () => {
 // A model turn is a run of `unmapped` chunks; without the inner event type they are
 // indistinguishable rows, which is the opposite of what a debug list is for.
 test('an unmapped chunk is described by the runtime event it carries; every other chunk by its name', () => {
-  routeZenCustomEvent(stores, 'unmapped', {
+  routeEnsoCustomEvent(stores, 'unmapped', {
     kind: 'unmapped',
     event: { type: 'tool_execution_start', toolName: 'bash' },
   })
-  routeZenCustomEvent(stores, 'permission-mode', { kind: 'permission-mode', mode: 'plan', available: [] })
-  routeZenCustomEvent(stores, 'status', { type: 'status', live: true, busy: false, generation: 1 })
+  routeEnsoCustomEvent(stores, 'permission-mode', { kind: 'permission-mode', mode: 'plan', available: [] })
+  routeEnsoCustomEvent(stores, 'status', { type: 'status', live: true, busy: false, generation: 1 })
   const [unmapped, receipt, statusChunk] = stores.recentChunks.get()
   expect(unmapped && describeChunk(unmapped)).toBe('unmapped (tool_execution_start)')
   expect(receipt && describeChunk(receipt)).toBe('permission-mode')
@@ -298,30 +308,30 @@ test('the bundle outcome is named beside the button, and building disables it', 
 })
 
 test("the bundle is the server's file with the page's ring appended; the name is the header's, or the thread's when the header is missing", async () => {
-  const ring: ZenLogLine[] = [
+  const ring: EnsoLogLine[] = [
     {
       '@timestamp': '2026-09-10T01:00:00.000Z',
       level: 'WARN',
-      logger: 'zen.browser.follow',
+      logger: 'enso.browser.follow',
       message: 'follow failed',
       properties: {},
     },
   ]
   const served = (headers: Record<string, string>) => (): Promise<Response> =>
-    Promise.resolve(new Response('# zen-harness log bundle\n\n## log — 0 records\n', { status: 200, headers }))
+    Promise.resolve(new Response('# Enso log bundle\n\n## log — 0 records\n', { status: 200, headers }))
 
   const named = await fetchThreadBundle(
     't1',
     ring,
-    served({ 'Content-Disposition': 'attachment; filename="zen-bundle-2026-09-10-t1.md"' }),
+    served({ 'Content-Disposition': 'attachment; filename="enso-bundle-2026-09-10-t1.md"' }),
   )
-  expect(named.filename).toBe('zen-bundle-2026-09-10-t1.md')
-  expect(named.text.startsWith('# zen-harness log bundle')).toBe(true)
+  expect(named.filename).toBe('enso-bundle-2026-09-10-t1.md')
+  expect(named.text.startsWith('# Enso log bundle')).toBe(true)
   expect(named.text).toContain('## browser logged — 1 records')
   expect(named.text).toContain(JSON.stringify(ring[0]))
 
   const unnamed = await fetchThreadBundle('6923e620-856a-4132-a9c8-1a2ff7d271f9', ring, served({}))
-  expect(unnamed.filename).toBe('zen-bundle-6923e620.md')
+  expect(unnamed.filename).toBe('enso-bundle-6923e620.md')
 
   // A refused bundle is the server's reason, with its status as data — like the inspection.
   const refused = (): Promise<Response> =>
@@ -331,7 +341,7 @@ test("the bundle is the server's file with the page's ring appended; the name is
 
 // ── the event tails (#97): the ordering view ────────────────────────────────────
 
-function threadEvent(overrides: Partial<ZenThreadEvent>): ZenThreadEvent {
+function threadEvent(overrides: Partial<EnsoThreadEvent>): EnsoThreadEvent {
   return {
     sequence: 1,
     type: 'entry_appended',
@@ -343,7 +353,7 @@ function threadEvent(overrides: Partial<ZenThreadEvent>): ZenThreadEvent {
 }
 
 test('both tails render under their own heading; a dropped event is marked as a failure', () => {
-  const events: ZenThreadEvents = {
+  const events: EnsoThreadEvents = {
     threadId: 't1',
     emitted: [threadEvent({ provenance: 'dropped', type: 'notify' })],
     sent: [threadEvent({ provenance: 'sent', type: 'RUN_FINISHED' })],

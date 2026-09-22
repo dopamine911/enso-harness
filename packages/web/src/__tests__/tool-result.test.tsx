@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
+import { ENSO_TOOL_RESULT_KEY, isEnsoToolResultDescriptor, readEnsoToolResultDescriptor } from '@enso/core'
 import type { ToolResultPart } from '@tanstack/ai'
-import { isZenToolResultDescriptor, readZenToolResultDescriptor, ZEN_TOOL_RESULT_KEY } from '@zen/core'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { toolResultState, type ZenRendererMap, ZenToolResult } from '../ZenToolResult.tsx'
+import { type EnsoRendererMap, EnsoToolResult, toolResultState } from '../EnsoToolResult.tsx'
 
 const partWith = (overrides: Partial<ToolResultPart>): ToolResultPart => ({
   type: 'tool-result',
@@ -12,39 +12,39 @@ const partWith = (overrides: Partial<ToolResultPart>): ToolResultPart => ({
   ...overrides,
 })
 
-const renderers: ZenRendererMap = {
+const renderers: EnsoRendererMap = {
   diff: (props: Record<string, unknown>) => <span data-known>{String(props.summary)}</span>,
 }
 
 const html = (result?: ToolResultPart, runOpen = true): string =>
-  renderToStaticMarkup(<ZenToolResult result={result} runOpen={runOpen} renderers={renderers} />)
+  renderToStaticMarkup(<EnsoToolResult result={result} runOpen={runOpen} renderers={renderers} />)
 
 // --- the descriptor reader, pure and surface-independent
 test('reads a well-formed descriptor out of metadata', () => {
-  const found = readZenToolResultDescriptor({
-    [ZEN_TOOL_RESULT_KEY]: { kind: 'diff', props: { summary: '3 files' } },
+  const found = readEnsoToolResultDescriptor({
+    [ENSO_TOOL_RESULT_KEY]: { kind: 'diff', props: { summary: '3 files' } },
   })
   expect(found?.kind).toBe('diff')
 })
-test('absent metadata yields no descriptor', () => expect(readZenToolResultDescriptor(undefined)).toBeUndefined())
+test('absent metadata yields no descriptor', () => expect(readEnsoToolResultDescriptor(undefined)).toBeUndefined())
 test('a malformed descriptor is rejected, not coerced', () => {
-  expect(isZenToolResultDescriptor({ kind: '', props: {} })).toBe(false)
-  expect(isZenToolResultDescriptor({ kind: 'diff' })).toBe(false)
-  expect(isZenToolResultDescriptor('diff')).toBe(false)
+  expect(isEnsoToolResultDescriptor({ kind: '', props: {} })).toBe(false)
+  expect(isEnsoToolResultDescriptor({ kind: 'diff' })).toBe(false)
+  expect(isEnsoToolResultDescriptor('diff')).toBe(false)
 })
 
 // --- rendering. ⚠ Every case below must produce VISIBLE output; a blank render is the
 // failure mode this contract exists to prevent.
 test('a known kind renders through its renderer', () => {
   const rendered = html(
-    partWith({ metadata: { [ZEN_TOOL_RESULT_KEY]: { kind: 'diff', props: { summary: '3 files' } } } }),
+    partWith({ metadata: { [ENSO_TOOL_RESULT_KEY]: { kind: 'diff', props: { summary: '3 files' } } } }),
   )
   expect(rendered).toContain('3 files')
-  expect(rendered).toContain('data-zen-kind="diff"')
+  expect(rendered).toContain('data-enso-kind="diff"')
 })
 
 test('⚠ an UNKNOWN kind falls back to the envelope text, never to blank', () => {
-  const rendered = html(partWith({ metadata: { [ZEN_TOOL_RESULT_KEY]: { kind: 'no-such-renderer', props: {} } } }))
+  const rendered = html(partWith({ metadata: { [ENSO_TOOL_RESULT_KEY]: { kind: 'no-such-renderer', props: {} } } }))
   expect(rendered).toContain('PLAIN TEXT FORM')
   expect(rendered.length).toBeGreaterThan(0)
 })
@@ -58,7 +58,7 @@ test('an in-flight call says so rather than rendering nothing', () => expect(htm
 // stopped call read `running…` forever. Same absence, run over: aborted — still, not pulsing.
 test('⚠ no result once the run is over is ABORTED, not running', () => {
   const rendered = html(undefined, false)
-  expect(rendered).toContain('data-zen-tool-result="aborted"')
+  expect(rendered).toContain('data-enso-tool-result="aborted"')
   expect(rendered).toContain('aborted — the run ended before this call returned')
   expect(rendered).not.toContain('running')
   expect(rendered).not.toContain('animate-pulse')
@@ -71,18 +71,18 @@ test('an errored result shows the error, not the descriptor', () => {
   const rendered = html(
     partWith({
       error: 'tool exploded',
-      metadata: { [ZEN_TOOL_RESULT_KEY]: { kind: 'diff', props: { summary: 'x' } } },
+      metadata: { [ENSO_TOOL_RESULT_KEY]: { kind: 'diff', props: { summary: 'x' } } },
     }),
   )
   expect(rendered).toContain('tool exploded')
-  expect(rendered).not.toContain('data-zen-kind')
+  expect(rendered).not.toContain('data-enso-kind')
 })
 
 test('truncation is rendered from data, not from a pre-rendered string', () => {
   const rendered = html(
     partWith({
       metadata: {
-        [ZEN_TOOL_RESULT_KEY]: {
+        [ENSO_TOOL_RESULT_KEY]: {
           kind: 'diff',
           props: { summary: 's' },
           truncated: { shown: 500, total: 4000, unit: 'lines' },
@@ -107,5 +107,5 @@ test('array content renders every part as JSON, one per line, never dropped', ()
   )
   expect(rendered).toContain('first')
   expect(rendered).toContain('image/png')
-  expect(rendered).toContain('data-zen-tool-result="text"')
+  expect(rendered).toContain('data-enso-tool-result="text"')
 })

@@ -1,4 +1,4 @@
-import { type ZenLogProperties, type ZenObservation, zenLogger } from '@zen/core'
+import { type EnsoLogProperties, type EnsoObservation, ensoLogger } from '@enso/core'
 import { forgetRun, takeFirstDeltaMs } from './run-timing.ts'
 
 /**
@@ -13,15 +13,15 @@ import { forgetRun, takeFirstDeltaMs } from './run-timing.ts'
  *             become a count of characters, not the text.
  *   `trace` — the same, plus a second record carrying the whole observation.
  *
- * `ZEN_LOG_LEVEL` picks the tier (`log-process.ts`); `zen.server.events` is the category to
- * turn up alone (`ZEN_LOG_LEVEL=info,zen.server.events=trace`).
+ * `ENSO_LOG_LEVEL` picks the tier (`log-process.ts`); `enso.server.events` is the category to
+ * turn up alone (`ENSO_LOG_LEVEL=info,enso.server.events=trace`).
  *
  * ⚠ Never the text itself below `trace`. At `debug` a delta is `{ chars }`, a tool result
  * `{ chars, isError }` — the transcript is pi's session file, not this one; this file says
  * WHEN and WHAT KIND, and at `trace`, for one investigation, everything.
  */
 
-const events = zenLogger('server', 'events')
+const events = ensoLogger('server', 'events')
 
 /** The kinds that are the spine at `info`; everything else is `debug`. */
 const SPINE: Readonly<Record<string, true>> = {
@@ -50,7 +50,7 @@ function piEventName(event: unknown): string {
 }
 
 /** The ids and sizes a compact line carries, per kind — no text below `trace`. */
-function compactOf(observation: ZenObservation): ZenLogProperties {
+function compactOf(observation: EnsoObservation): EnsoLogProperties {
   switch (observation.kind) {
     case 'tool-call':
       return { toolCallId: observation.toolCallId, toolName: observation.toolName }
@@ -102,7 +102,7 @@ function compactOf(observation: ZenObservation): ZenLogProperties {
  * A notify or a status line is a fire-and-forget request pi's extensions send by the dozen
  * at session start (four before the first prompt, live); a question is the one that matters.
  */
-function isSpine(observation: ZenObservation): boolean {
+function isSpine(observation: EnsoObservation): boolean {
   if (observation.kind === 'extension-ui-request') return observation.blocking
   return SPINE[observation.kind] === true
 }
@@ -112,14 +112,14 @@ export function recordObservation(
   threadId: string,
   generation: number,
   seq: number,
-  observation: ZenObservation,
+  observation: EnsoObservation,
 ): void {
   // ⚠ THUNKS, not objects (#284). At the default tier both of these are dropped, and the
   // eager payload — `compactOf`'s switch, a spread, a second object holding the whole
   // observation — was built per observation anyway: 1.04 µs of the 1.62 µs `recordObservation`
   // cost, against 0.15 µs to serialise the frame that actually reaches the browser. LogTape
   // calls the thunk only once a sink will read it.
-  const compact = (): ZenLogProperties => ({
+  const compact = (): EnsoLogProperties => ({
     threadId,
     generation,
     seq,

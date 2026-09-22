@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { DEFAULT_GUARD_POLICY } from '@zen/core'
+import { DEFAULT_GUARD_POLICY } from '@enso/core'
 import { findDeniedNetworkEgress, type NetworkEgressMatch } from '../network-egress.ts'
 import { extractFlatShellCommandSegments } from '../shell-segments.ts'
 import { braced } from './shell-fixtures.ts'

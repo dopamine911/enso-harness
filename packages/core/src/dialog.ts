@@ -7,8 +7,8 @@ import { Compile } from 'typebox/compile'
  * pi's rpc mode has four dialog methods — `select`, `confirm`, `input`, `editor` — that
  * emit an `extension_ui_request` and BLOCK the extension until an `extension_ui_response`
  * with the matching id arrives (pi `rpc-types.d.ts`, read at v0.84.4). These schemas are
- * the harness's model of that exchange: the QUESTION (`ZenDialogSpec`), which rides to the
- * browser on the follow as a blocking `extension-ui-request`, and the ANSWER (`ZenDialogAnswer`), which
+ * the harness's model of that exchange: the QUESTION (`EnsoDialogSpec`), which rides to the
+ * browser on the follow as a blocking `extension-ui-request`, and the ANSWER (`EnsoDialogAnswer`), which
  * rides back in `POST /api/threads/:id/dialog`.
  *
  * ⚠ The answer shapes mirror pi's response contract EXACTLY, minus the envelope
@@ -33,7 +33,7 @@ import { Compile } from 'typebox/compile'
  *
  * @group Dialogs
  */
-export const ZenDialogSpec = Type.Union([
+export const EnsoDialogSpec = Type.Union([
   Type.Object({
     method: Type.Literal('select'),
     title: Type.String(),
@@ -66,19 +66,19 @@ export const ZenDialogSpec = Type.Union([
   }),
 ])
 /** @group Dialogs */
-export type ZenDialogSpec = Static<typeof ZenDialogSpec>
+export type EnsoDialogSpec = Static<typeof EnsoDialogSpec>
 
 /**
  * A resolved answer. Cancellation is NOT an answer — see the module header.
  *
  * @group Dialogs
  */
-export const ZenDialogAnswer = Type.Union([
+export const EnsoDialogAnswer = Type.Union([
   Type.Object({ value: Type.String() }),
   Type.Object({ confirmed: Type.Boolean() }),
 ])
 /** @group Dialogs */
-export type ZenDialogAnswer = Static<typeof ZenDialogAnswer>
+export type EnsoDialogAnswer = Static<typeof EnsoDialogAnswer>
 
 /**
  * One question pi is blocked on, as the follow's snapshot lists it (#114) — so a follow
@@ -89,15 +89,15 @@ export type ZenDialogAnswer = Static<typeof ZenDialogAnswer>
  *
  * @group Dialogs
  */
-export const ZenOpenDialog = Type.Object({ id: Type.String({ minLength: 1 }), dialog: ZenDialogSpec })
+export const EnsoOpenDialog = Type.Object({ id: Type.String({ minLength: 1 }), dialog: EnsoDialogSpec })
 /** @group Dialogs */
-export type ZenOpenDialog = Static<typeof ZenOpenDialog>
+export type EnsoOpenDialog = Static<typeof EnsoOpenDialog>
 
-const dialogSpecValidator = Compile(ZenDialogSpec)
-const dialogAnswerValidator = Compile(ZenDialogAnswer)
+const dialogSpecValidator = Compile(EnsoDialogSpec)
+const dialogAnswerValidator = Compile(EnsoDialogAnswer)
 
 /** @group Dialogs */
-export function isZenDialogSpec(value: unknown): value is ZenDialogSpec {
+export function isEnsoDialogSpec(value: unknown): value is EnsoDialogSpec {
   return dialogSpecValidator.Check(value)
 }
 
@@ -112,7 +112,7 @@ export function isZenDialogSpec(value: unknown): value is ZenDialogSpec {
  *
  * @group Dialogs
  */
-export function validateDialogAnswer(spec: ZenDialogSpec, payload: unknown): string | undefined {
+export function validateDialogAnswer(spec: EnsoDialogSpec, payload: unknown): string | undefined {
   if (!dialogAnswerValidator.Check(payload)) {
     return `the payload is not a dialog answer ({ value: string } or { confirmed: boolean })`
   }

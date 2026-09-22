@@ -306,12 +306,12 @@ test('an input dialog: what is typed is the answer, one POST …/dialog, uncontr
     return { field: found, answerButton: answer }
   })
   await flush(async () => {
-    field.value = 'zen' // uncontrolled: the form reads the field at submit, no React state in between
+    field.value = 'enso' // uncontrolled: the form reads the field at submit, no React state in between
     answerButton.click()
     await tick()
   })
   await eventually(() => {
-    expect(pane.server.dialogs).toEqual([{ id: 'd3', value: 'zen' }])
+    expect(pane.server.dialogs).toEqual([{ id: 'd3', value: 'enso' }])
     expect(pane.container.textContent).not.toContain('Name?')
   })
   await pane.unmount()
@@ -750,7 +750,7 @@ test('⚠ a tool call reads running… while its run is open and aborted once th
     },
   )
   const step = (): string | null =>
-    pane.container.querySelector('[data-zen-tool-call]')?.getAttribute('data-zen-tool-call') ?? null
+    pane.container.querySelector('[data-enso-tool-call]')?.getAttribute('data-enso-tool-call') ?? null
   await eventually(() => {
     expect(step()).toBe('pending')
     expect(pane.container.textContent).toContain('running…')
@@ -805,8 +805,8 @@ test("⚠ a refused or aborted tool call's result reads error LIVE — the same 
     },
   )
   await eventually(() => {
-    const row = pane.container.querySelector('[data-zen-tool-call]')
-    expect(row?.getAttribute('data-zen-tool-call')).toBe('error')
+    const row = pane.container.querySelector('[data-enso-tool-call]')
+    expect(row?.getAttribute('data-enso-tool-call')).toBe('error')
     expect(row?.hasAttribute('open')).toBe(true) // an error opens itself
     expect(pane.container.textContent).toContain('blocked: outside the write root')
     expect(pane.status()).toContain('working') // the model has the output and is composing
@@ -841,8 +841,8 @@ test('⚠ a tool result the wire lands on a LATER message still completes the ca
       observation: { kind: 'tool-call', toolCallId: 'c3', toolName: 'bash', args: { command: 'ls' } },
     },
   )
-  const call = (): Element | null => pane.container.querySelector('[data-zen-tool-call]')
-  await eventually(() => expect(call()?.getAttribute('data-zen-tool-call')).toBe('pending'))
+  const call = (): Element | null => pane.container.querySelector('[data-enso-tool-call]')
+  await eventually(() => expect(call()?.getAttribute('data-enso-tool-call')).toBe('pending'))
 
   // pi takes the queued prompt: this ENDS the bubble holding the call and opens a new one,
   // and everything after it — the result included — belongs to the new message.
@@ -863,7 +863,7 @@ test('⚠ a tool result the wire lands on a LATER message still completes the ca
     { type: 'observation', seq: 6, observation: { kind: 'text-delta', contentIndex: 0, delta: 'two files' } },
   )
   await eventually(() => {
-    expect(call()?.getAttribute('data-zen-tool-call')).toBe('done')
+    expect(call()?.getAttribute('data-enso-tool-call')).toBe('done')
     expect(pane.container.textContent).toContain('a.ts b.ts')
     expect(pane.container.textContent).not.toContain('running…')
   })

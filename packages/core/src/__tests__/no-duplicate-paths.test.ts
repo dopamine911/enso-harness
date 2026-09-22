@@ -73,7 +73,7 @@ function offendersContaining(needle: string, allowedFiles: readonly string[]): s
 }
 
 /**
- * ⚠ Scan by PATTERN, not by a quoted literal. `offendersContaining('".zen"')` went blind the day
+ * ⚠ Scan by PATTERN, not by a quoted literal. `offendersContaining('".enso"')` went blind the day
  * the formatter switched to single quotes: the needle matched nothing, the offender list was empty,
  * and the gate passed while enforcing nothing. A gate that cannot fail is worse than no gate — it
  * reads as protection. Quote characters belong in the pattern as a class, never baked into a needle.
@@ -111,14 +111,14 @@ test('⚠ no source resolves a path from its own location — that is the seven-
   expect(offendersMatching(RESOLVES_FROM_OWN_LOCATION, [], 'a path resolved from its own location')).toEqual([])
 })
 
-test('⚠ the ".zen" literal is assembled only in paths.ts (plus guard.ts, where it is corpus data)', () => {
-  // guard.ts's exception is ZEN_PERSISTENCE_WRITE_DIRECTORIES: there ".zen" is a DENIED
+test('⚠ the ".enso" literal is assembled only in paths.ts (plus guard.ts, where it is corpus data)', () => {
+  // guard.ts's exception is ENSO_PERSISTENCE_WRITE_DIRECTORIES: there ".enso" is a DENIED
   // DIRECTORY NAME in the write-guard's corpus, not a path being assembled — rewiring the
   // corpus to import from paths.ts would couple the guard's deny-list to the helper for
   // no safety gain (the corpus lists names to REFUSE; paths.ts assembles paths to USE).
   const GUARD_CORPUS_MODULE = join('packages', 'core', 'src', 'guard.ts')
   // Either quote style: the literal is what matters, not how the formatter spells it today.
-  expect(offendersMatching(/['"]\.zen['"]/, [PATHS_MODULE, GUARD_CORPUS_MODULE], '".zen"')).toEqual([])
+  expect(offendersMatching(/['"]\.enso['"]/, [PATHS_MODULE, GUARD_CORPUS_MODULE], '".enso"')).toEqual([])
 })
 
 // The storage seam (#102, `docs/architecture.md` → Persistence): pi's `SessionManager` and the

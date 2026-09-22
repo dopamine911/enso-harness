@@ -48,7 +48,7 @@ afterAll(() => {
 
 /** A `system/` pair in a temp tree; returns the path bun would hand `onLoad`. */
 function systemFixture(parts: { system: string; argumentsIndex: string }): string {
-  const directory = mkdtempSync(join(tmpdir(), 'zen-strict-binding-'))
+  const directory = mkdtempSync(join(tmpdir(), 'enso-strict-binding-'))
   fixtureDirectories.push(directory)
   mkdirSync(join(directory, 'arguments'))
   writeFileSync(join(directory, 'system.mjs'), parts.system)
@@ -107,7 +107,7 @@ test('⚠ a system.mjs that lost the bare-star line is a named build failure, ne
     system: 'export * from "./arguments/index.mjs";\n',
     argumentsIndex: ARGUMENTS_INDEX_MJS,
   })
-  expect(() => rewrittenSource(path)).toThrow(/zen-strict-binding-workaround: /)
+  expect(() => rewrittenSource(path)).toThrow(/enso-strict-binding-workaround: /)
   expect(() => rewrittenSource(path)).toThrow(/system\.mjs lost the bare-star line/)
 })
 

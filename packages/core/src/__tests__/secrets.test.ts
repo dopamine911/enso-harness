@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { rootDotenvPath, zenSecretsPath } from '../paths.ts'
+import { ensoSecretsPath, rootDotenvPath } from '../paths.ts'
 import {
   isSecretShapedName,
   knownSecretValues,
@@ -14,15 +14,15 @@ import {
 
 /**
  * #89: secrets stay out of the environment the model's tools inherit. The reader takes
- * the gated `.zen/secrets.env`; the quarantine empties an environment of anything
+ * the gated `.enso/secrets.env`; the quarantine empties an environment of anything
  * secret-shaped or file-defined and reports a root `.env` that still holds a secret. Both
  * run on their own inputs — no test touches `process.env`.
  */
 
-/** A scratch repo root with `.zen/` present, the way `zen.ts` and the host find it. */
+/** A scratch repo root with `.enso/` present, the way `enso.ts` and the host find it. */
 function scratchRepoRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'zen-secrets-'))
-  mkdirSync(join(root, '.zen'))
+  const root = mkdtempSync(join(tmpdir(), 'enso-secrets-'))
+  mkdirSync(join(root, '.enso'))
   return root
 }
 
@@ -65,18 +65,18 @@ test('the dotenv subset: comments, export, quotes, trailing comments, CRLF', () 
   expect(parsed.has('NOT')).toBe(false)
 })
 
-// ⚠ THE ONE SOURCE. A secret is read from `.zen/secrets.env` per call, and NEVER from the
+// ⚠ THE ONE SOURCE. A secret is read from `.enso/secrets.env` per call, and NEVER from the
 // root `.env` — a fallback there would keep a misplaced file silently working, which is
 // the opposite of loud.
-test('a secret is read from .zen/secrets.env per call; the root .env is never a source', () => {
+test('a secret is read from .enso/secrets.env per call; the root .env is never a source', () => {
   const root = scratchRepoRoot()
   expect(readSecret(root, 'TAVILY_API_KEY')).toBeUndefined()
   writeFileSync(rootDotenvPath(root), 'TAVILY_API_KEY=misplaced\n')
   expect(readSecret(root, 'TAVILY_API_KEY')).toBeUndefined()
-  writeFileSync(zenSecretsPath(root), 'TAVILY_API_KEY=first\n')
+  writeFileSync(ensoSecretsPath(root), 'TAVILY_API_KEY=first\n')
   expect(readSecret(root, 'TAVILY_API_KEY')).toBe('first')
   // Rotated on disk → the next read sees it, no restart.
-  writeFileSync(zenSecretsPath(root), 'TAVILY_API_KEY=rotated\n')
+  writeFileSync(ensoSecretsPath(root), 'TAVILY_API_KEY=rotated\n')
   expect(readSecret(root, 'TAVILY_API_KEY')).toBe('rotated')
 })
 
@@ -85,7 +85,7 @@ test('a secret is read from .zen/secrets.env per call; the root .env is never a 
 // legitimately need PATH, HOME, TERM and the harness's own PI_* variables.
 test('⚠ the quarantine removes secret-shaped and file-defined names, and nothing else', () => {
   const root = scratchRepoRoot()
-  writeFileSync(zenSecretsPath(root), 'TAVILY_API_KEY=tvly\nHARMLESS_LOOKING=but-in-the-file\n')
+  writeFileSync(ensoSecretsPath(root), 'TAVILY_API_KEY=tvly\nHARMLESS_LOOKING=but-in-the-file\n')
   const environment: Record<string, string | undefined> = {
     PATH: '/usr/bin',
     HOME: '/home/x',
@@ -135,7 +135,7 @@ test('with no secrets file the quarantine still removes secret-shaped names from
 test("⚠ the logger's value set is the secrets file plus secret-shaped env names, deduped, short values left out", () => {
   const root = scratchRepoRoot()
   writeFileSync(
-    zenSecretsPath(root),
+    ensoSecretsPath(root),
     ['TAVILY_API_KEY=tvly-long-enough-to-scan', 'HARMLESS_LOOKING=but-in-the-file-so-secret', 'SHORT=abc'].join('\n'),
   )
   const values = knownSecretValues(root, {
@@ -166,7 +166,7 @@ test('no secrets file and no secret-shaped names: an empty set, so the value pas
 // rest of that process's life.
 test('⚠ the tracking set follows a rotation, and hands back the SAME array while the file is unchanged', () => {
   const root = scratchRepoRoot()
-  writeFileSync(zenSecretsPath(root), 'TAVILY_API_KEY=tvly-notarealsecret-first\n')
+  writeFileSync(ensoSecretsPath(root), 'TAVILY_API_KEY=tvly-notarealsecret-first\n')
   const tracking = knownSecretValuesTracking(root, {})
   expect(tracking()).toEqual(['tvly-notarealsecret-first'])
   // ⚠ IDENTITY, not contents: `redactingKnownValues` asks per record and rebuilds its
@@ -175,7 +175,7 @@ test('⚠ the tracking set follows a rotation, and hands back the SAME array whi
   // coming back, not a wrong redaction.
   expect(tracking()).toBe(tracking())
   const before = tracking()
-  writeFileSync(zenSecretsPath(root), 'TAVILY_API_KEY=tvly-notarealsecret-rotated\n')
+  writeFileSync(ensoSecretsPath(root), 'TAVILY_API_KEY=tvly-notarealsecret-rotated\n')
   expect(tracking()).toEqual(['tvly-notarealsecret-rotated'])
   expect(tracking()).not.toBe(before)
 })
@@ -184,6 +184,6 @@ test('the tracking set starts empty when there is no file and picks the file up 
   const root = scratchRepoRoot()
   const tracking = knownSecretValuesTracking(root, {})
   expect(tracking()).toEqual([])
-  writeFileSync(zenSecretsPath(root), 'TAVILY_API_KEY=tvly-notarealsecret-appeared\n')
+  writeFileSync(ensoSecretsPath(root), 'TAVILY_API_KEY=tvly-notarealsecret-appeared\n')
   expect(tracking()).toEqual(['tvly-notarealsecret-appeared'])
 })

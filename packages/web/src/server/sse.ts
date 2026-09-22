@@ -1,5 +1,5 @@
 import type { ServerResponse } from 'node:http'
-import { zenLogger } from '@zen/core'
+import { ensoLogger } from '@enso/core'
 
 /**
  * The SSE plumbing every streaming route shares: the response headers and the keepalive.
@@ -7,7 +7,7 @@ import { zenLogger } from '@zen/core'
  * the dispatcher.
  */
 
-const log = zenLogger('server', 'sse')
+const log = ensoLogger('server', 'sse')
 
 export const SSE_HEADERS = {
   'Content-Type': 'text/event-stream',

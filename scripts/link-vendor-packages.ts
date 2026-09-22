@@ -45,12 +45,12 @@ interface PackageManifest {
  *
  *  1. the packages the manifest's `node_modules/…` resource paths reach into — pi reads
  *     those as literal paths relative to the package root, so a missing one is a silently
- *     skipped resource. That reading is `@zen/core/pi-manifest`'s since #221, prefix and
+ *     skipped resource. That reading is `@enso/core/pi-manifest`'s since #221, prefix and
  *     scope-splitting included; this script no longer spells either.
  *  2. EVERY entry in `dependencies` — because pi loads packages with separate module roots,
- *     so a bare `import "@zen/core"` from an extension is not guaranteed to resolve by
+ *     so a bare `import "@enso/core"` from an extension is not guaranteed to resolve by
  *     walking up to the repo root the way plain Node would. ⚠ This is the case that made
- *     the list insufficient: `@zen/core` appears nowhere in the manifest paths, only as an
+ *     the list insufficient: `@enso/core` appears nowhere in the manifest paths, only as an
  *     import in the source, so a manifest-only sweep left it unlinked and the extension
  *     failed at load rather than at typecheck.
  */

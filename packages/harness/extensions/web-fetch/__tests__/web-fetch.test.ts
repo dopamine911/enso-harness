@@ -1,14 +1,14 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { parseZenConfig, WEB_FETCH_MAX_RESPONSE_BYTES, WEB_FETCH_TOOL_NAME, ZEN_CONFIG_FILENAME } from '@zen/core'
-import { auditRecords, recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
-import { findRepoRoot, zenConfigPath } from '@zen/core/paths'
+import { ENSO_CONFIG_FILENAME, parseEnsoConfig, WEB_FETCH_MAX_RESPONSE_BYTES, WEB_FETCH_TOOL_NAME } from '@enso/core'
+import { auditRecords, recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import { ensoConfigPath, findRepoRoot } from '@enso/core/paths'
 import { createWebFetch, type WebFetchDependencies, type WebFetchRequestInit } from '../index.ts'
 
 /**
  * The web_fetch extension (#54), against injected IO seams — no test here touches the
  * network, DNS, or the committed config file (one shape-pin at the bottom reads the
- * real `zen.config.json`, read-only). The gate's per-dimension vectors live in
+ * real `enso.config.json`, read-only). The gate's per-dimension vectors live in
  * `core/__tests__/web-fetch-policy.test.ts`; these tests cover the WIRING: which gate
  * fires first, what each refusal message carries, and that a refused call never fetches.
  */
@@ -25,7 +25,7 @@ interface CapturedTool {
   ) => Promise<{ content: { type: string; text: string }[] }>
 }
 
-const CONFIG_PATH = '/repo/zen.config.json'
+const CONFIG_PATH = '/repo/enso.config.json'
 const ALLOWED_HOST = 'docs.example.com'
 
 /** The config file's committed shape (#59) with the given hosts in web_fetch's section. */
@@ -126,7 +126,7 @@ test('an UNFINDABLE repo root refuses every call and still names the file for th
     },
   })
   const text = await run(loaded, 'https://docs.example.com/')
-  expect(text).toContain(ZEN_CONFIG_FILENAME)
+  expect(text).toContain(ENSO_CONFIG_FILENAME)
   expect(text).toContain('repository root')
   expect(loaded.fetchedUrls).toEqual([])
 })
@@ -331,7 +331,7 @@ test('a network failure comes back as a refusal, not a throw', async () => {
 // --- the audit property (#54: "auditable by construction") -------------------------------
 
 test('every call writes exactly one audit record — fetched at info, refused at warn (#54, #132)', async () => {
-  const logs = await recordZenLogs()
+  const logs = await recordEnsoLogs()
   try {
     const loaded = loadWebFetch()
     await run(loaded, 'https://docs.example.com/guide')
@@ -342,7 +342,7 @@ test('every call writes exactly one audit record — fetched at info, refused at
       ['warning', 'refused', 'https://evil.example/'],
     ])
   } finally {
-    await releaseZenLogs()
+    await releaseEnsoLogs()
   }
 })
 
@@ -363,11 +363,11 @@ test('the config is read ONCE at extension load, never per call', async () => {
 
 // --- the committed config file itself, located the way the composition root locates it ---
 
-test('the committed zen.config.json is found via findRepoRoot and parses against the schema', () => {
+test('the committed enso.config.json is found via findRepoRoot and parses against the schema', () => {
   // Dogfoods the exact expression the default dependencies use — so this test also pins
   // that the located path is the CHECKOUT's config (derived from this file's tree, never
   // from process.cwd(); the paths tests prove that discrimination with a tmp fixture).
-  const committedPath = zenConfigPath(findRepoRoot(import.meta.url))
-  const parsed = parseZenConfig(readFileSync(committedPath, 'utf8'))
+  const committedPath = ensoConfigPath(findRepoRoot(import.meta.url))
+  const parsed = parseEnsoConfig(readFileSync(committedPath, 'utf8'))
   expect(parsed.kind).toBe('ok')
 })

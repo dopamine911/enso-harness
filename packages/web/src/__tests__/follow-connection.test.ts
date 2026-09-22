@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
 import { EventType } from '@ag-ui/core'
+import type { EnsoFollowFrame } from '@enso/core'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { StreamChunk } from '@tanstack/ai'
-import type { ZenFollowFrame } from '@zen/core'
-import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from '../custom-event-router.ts'
 import { createFollowConnection, type FollowConnection } from '../follow-connection.ts'
 import { createScriptedFetch, type ScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
@@ -509,7 +509,7 @@ test('⚠ when pi CLAIMS a queued prompt (a user message-start after an assistan
 // PR #120 review: the callers fire-and-forget (`void connection.abort()`), so a network
 // failure must be an OUTCOME the adapter reports, never a rejection that escapes them.
 test('a unary POST that never gets an answer is `unreachable` — reported once, not thrown (#116); a RECORD and a NOTICE from one site (#132)', async () => {
-  const logs = await recordZenLogs()
+  const logs = await recordEnsoLogs()
   try {
     const problems: string[] = []
     const connection = createFollowConnection({
@@ -527,7 +527,7 @@ test('a unary POST that never gets an answer is `unreachable` — reported once,
     // The record: the event and its properties, under the browser's category, with the thread.
     logs.assertLogged({
       level: 'warning',
-      category: ['zen', 'browser', 'follow'],
+      category: ['enso', 'browser', 'follow'],
       rawMessage: '{what} unreachable: {error}',
       properties: { threadId: 't1', what: 'abort', error: 'TypeError: fetch failed' },
     })
@@ -538,7 +538,7 @@ test('a unary POST that never gets an answer is `unreachable` — reported once,
     })
     expect(logs.records).toHaveLength(2)
   } finally {
-    await releaseZenLogs()
+    await releaseEnsoLogs()
   }
 })
 
@@ -625,10 +625,10 @@ test('⚠ the follow closing under an open run is a run error, then the ending i
 
 test('a frame that fails the wire schema is reported and skipped, never rendered', async () => {
   const server = scripted()
-  server.frame({ type: 'status', live: true, busy: 'yes', generation: 1 } as unknown as ZenFollowFrame)
+  server.frame({ type: 'status', live: true, busy: 'yes', generation: 1 } as unknown as EnsoFollowFrame)
   server.frame(SNAPSHOT_IDLE)
   await server.untilChunks(1)
-  expect(server.problems).toEqual([expect.stringContaining('fails ZenFollowFrame')])
+  expect(server.problems).toEqual([expect.stringContaining('fails EnsoFollowFrame')])
   expect(server.chunks[0]).toMatchObject({ name: 'snapshot' })
   server.abort()
 })

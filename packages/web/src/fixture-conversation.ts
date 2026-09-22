@@ -18,7 +18,7 @@ import { createChat, type TanStackChat } from '@shadcn/helpers/tanstack-ai'
  * VISIBLE on the styling page (an alert firing, or a live link) instead of latent.
  *
  * ⚠ What this fixture CANNOT produce: a #27 dialog interrupt. The helper has no writer
- * operation for an interrupt outcome, so `ZenDialogInterrupt` styling is verified against
+ * operation for an interrupt outcome, so `EnsoDialogInterrupt` styling is verified against
  * live `/mode` (or the fake-transport unit tests), not here.
  */
 // The explicit return type is REQUIRED, not style: without it tsc infers a type that

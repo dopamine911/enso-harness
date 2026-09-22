@@ -107,7 +107,7 @@ function opensABody(lines: readonly string[], first: number): boolean {
  * this gate can hold, and a name it declares zero times is a use, not a declaration.
  *
  * ⚠ A CALL AT STATEMENT POSITION READS AS A MEMBER DECLARATION, and the member form is needed:
- * `answerDialog(…): void {` and `openDialogs(): ZenOpenDialog[] {` are how a runtime contract
+ * `answerDialog(…): void {` and `openDialogs(): EnsoOpenDialog[] {` are how a runtime contract
  * is written, and pages cite them. `writeFrame(` on its own line is a call, and taking it for
  * a declaration would hold a page to the span of an unrelated statement. The body is what
  * separates them: a declaration opens one.
@@ -298,11 +298,11 @@ test('a mention in every flavour the walker reads is a file, not an unread liter
     expect(SOURCE_MENTION.test(mention)).toBe(true)
   }
   // …and a backticked identifier is still a symbol, not a file.
-  for (const symbol of ['followThread', 'ZenFollowFrame', 'settled']) {
+  for (const symbol of ['followThread', 'EnsoFollowFrame', 'settled']) {
     expect(SOURCE_MENTION.test(symbol)).toBe(false)
     expect(IDENTIFIER.test(symbol)).toBe(true)
   }
   // The same set inside a citation: "(`server/follow.ts` line 126)".
-  expect(CITED_FILE.exec('`scripts/zen.ts` line 4')?.[1]).toBe('scripts/zen.ts')
+  expect(CITED_FILE.exec('`scripts/enso.ts` line 4')?.[1]).toBe('scripts/enso.ts')
   expect(CITED_FILE.exec('`packages/web/src/shim.mts` line 4')?.[1]).toBe('packages/web/src/shim.mts')
 })

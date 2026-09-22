@@ -1,6 +1,6 @@
 import { type Static, Type } from 'typebox'
-import { ZenPermissionModeState } from './permission-mode.ts'
-import { ZenTranscriptEntry } from './transcript.ts'
+import { EnsoPermissionModeState } from './permission-mode.ts'
+import { EnsoTranscriptEntry } from './transcript.ts'
 
 /**
  * What a live thread's session ACTUALLY contains, as the server reports it (#86).
@@ -8,7 +8,7 @@ import { ZenTranscriptEntry } from './transcript.ts'
  * Everything the web surface shows is a derived view of the stream; these are the shapes
  * that let a human or an agent see the thing they derive from and cross-check. Served by
  * `GET /api/threads` and `GET /api/threads/:threadId`, rendered by the debug drawer and
- * printed by `scripts/zen-thread.ts`.
+ * printed by `scripts/enso-thread.ts`.
  *
  * ⚠ READ-ONLY, LOOPBACK-ONLY, DEV-ONLY — the server that serves these binds `127.0.0.1`
  * and says so in its header. `entries` is the session branch itself: conversation, tool
@@ -27,7 +27,7 @@ import { ZenTranscriptEntry } from './transcript.ts'
  *
  * @group Thread inspection
  */
-export const ZenThreadSummary = Type.Object(
+export const EnsoThreadSummary = Type.Object(
   {
     threadId: Type.String(),
     sessionId: Type.String(),
@@ -52,25 +52,25 @@ export const ZenThreadSummary = Type.Object(
   { additionalProperties: false },
 )
 /** @group Thread inspection */
-export type ZenThreadSummary = Static<typeof ZenThreadSummary>
+export type EnsoThreadSummary = Static<typeof EnsoThreadSummary>
 
 /**
  * One live thread, in full: the summary plus the session branch and what it may run.
  *
  * @group Thread inspection
  */
-export const ZenThreadInspection = Type.Object(
+export const EnsoThreadInspection = Type.Object(
   {
     threadId: Type.String(),
     sessionId: Type.String(),
     cwd: Type.String(),
     sessionDir: Type.String(),
     sessionFile: Type.Union([Type.String(), Type.Null()]),
-    permissionMode: ZenPermissionModeState,
+    permissionMode: EnsoPermissionModeState,
     /** Slash commands this session registers — extensions, prompt templates, skills. */
     commands: Type.Array(Type.String()),
     busy: Type.Boolean(),
-    /** See {@link ZenThreadSummary}. */
+    /** See {@link EnsoThreadSummary}. */
     generation: Type.Integer({ minimum: 0 }),
     lastActivityAt: Type.String(),
     /**
@@ -79,12 +79,12 @@ export const ZenThreadInspection = Type.Object(
      * messages with their parts, tool results with their descriptors, an extension's custom
      * entries, and `other` for every kind the host does not model — counted, never invented.
      */
-    entries: Type.Array(ZenTranscriptEntry),
+    entries: Type.Array(EnsoTranscriptEntry),
   },
   { additionalProperties: false },
 )
 /** @group Thread inspection */
-export type ZenThreadInspection = Static<typeof ZenThreadInspection>
+export type EnsoThreadInspection = Static<typeof EnsoThreadInspection>
 
 /**
  * Where one recorded event came from (#97) — the axis an ordering bug lives on.
@@ -97,7 +97,7 @@ export type ZenThreadInspection = Static<typeof ZenThreadInspection>
  *
  * @group Thread inspection
  */
-export const ZenEventProvenance = Type.Union([
+export const EnsoEventProvenance = Type.Union([
   Type.Literal('live'),
   Type.Literal('held'),
   Type.Literal('replayed'),
@@ -105,7 +105,7 @@ export const ZenEventProvenance = Type.Union([
   Type.Literal('sent'),
 ])
 /** @group Thread inspection */
-export type ZenEventProvenance = Static<typeof ZenEventProvenance>
+export type EnsoEventProvenance = Static<typeof EnsoEventProvenance>
 
 /**
  * One event in a thread's tail.
@@ -115,7 +115,7 @@ export type ZenEventProvenance = Static<typeof ZenEventProvenance>
  *
  * @group Thread inspection
  */
-export const ZenThreadEvent = Type.Object(
+export const EnsoThreadEvent = Type.Object(
   {
     /** Monotonic per thread — identity, since type + time can collide. */
     sequence: Type.Number(),
@@ -123,7 +123,7 @@ export const ZenThreadEvent = Type.Object(
     type: Type.String(),
     /** The inner name when the type alone says nothing: a custom entry's `customType`, a ui request's method, a tool's name, a CUSTOM chunk's name. */
     name: Type.Optional(Type.String()),
-    provenance: ZenEventProvenance,
+    provenance: EnsoEventProvenance,
     /** ISO 8601 — when the FIRST of a coalesced run was recorded. */
     at: Type.String(),
     /** How many consecutive same-shaped events this record stands for. */
@@ -132,23 +132,23 @@ export const ZenThreadEvent = Type.Object(
   { additionalProperties: false },
 )
 /** @group Thread inspection */
-export type ZenThreadEvent = Static<typeof ZenThreadEvent>
+export type EnsoThreadEvent = Static<typeof EnsoThreadEvent>
 
 /**
  * A thread's two tails: what the host emitted (with how), and what the server sent.
  *
  * @group Thread inspection
  */
-export const ZenThreadEvents = Type.Object(
+export const EnsoThreadEvents = Type.Object(
   {
     threadId: Type.String(),
-    emitted: Type.Array(ZenThreadEvent),
-    sent: Type.Array(ZenThreadEvent),
+    emitted: Type.Array(EnsoThreadEvent),
+    sent: Type.Array(EnsoThreadEvent),
   },
   { additionalProperties: false },
 )
 /** @group Thread inspection */
-export type ZenThreadEvents = Static<typeof ZenThreadEvents>
+export type EnsoThreadEvents = Static<typeof EnsoThreadEvents>
 
 /**
  * The three columns of an event row: `12:34:56` · `held ×3` · `entry_appended modes`.
@@ -168,11 +168,11 @@ export interface ThreadEventColumns {
  * here once.
  *
  * How the columns are joined is layout, the surface's own: the drawer joins with a space
- * (`describeThreadEvent`), `zen-thread.ts` pads them into a table.
+ * (`describeThreadEvent`), `enso-thread.ts` pads them into a table.
  *
  * @group Thread inspection
  */
-export function threadEventColumns(event: ZenThreadEvent): ThreadEventColumns {
+export function threadEventColumns(event: EnsoThreadEvent): ThreadEventColumns {
   return {
     when: event.at.slice(11, 19),
     provenance: event.count > 1 ? `${event.provenance} ×${event.count}` : event.provenance,
@@ -185,7 +185,7 @@ export function threadEventColumns(event: ZenThreadEvent): ThreadEventColumns {
  *
  * @group Thread inspection
  */
-export function describeThreadEvent(event: ZenThreadEvent): string {
+export function describeThreadEvent(event: EnsoThreadEvent): string {
   const columns = threadEventColumns(event)
   return `${columns.when} ${columns.provenance} ${columns.subject}`
 }
@@ -202,11 +202,11 @@ export function describeThreadEvent(event: ZenThreadEvent): string {
  * attack. Checked by the server at BOTH entry points (the chat body and the thread routes);
  * the host never sees an id that failed here.
  */
-const ZEN_THREAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+const ENSO_THREAD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 
 /** @group Thread inspection */
-export function isZenThreadId(value: unknown): value is string {
-  return typeof value === 'string' && ZEN_THREAD_ID_PATTERN.test(value)
+export function isEnsoThreadId(value: unknown): value is string {
+  return typeof value === 'string' && ENSO_THREAD_ID_PATTERN.test(value)
 }
 
 /**
@@ -219,7 +219,7 @@ export function isZenThreadId(value: unknown): value is string {
  *
  * @group Thread inspection
  */
-export const ZenStoredThread = Type.Object(
+export const EnsoStoredThread = Type.Object(
   {
     threadId: Type.String(),
     /** The first user message, or undefined for a session with none — the rail's title, as deepseek does. */
@@ -239,7 +239,7 @@ export const ZenStoredThread = Type.Object(
   { additionalProperties: false },
 )
 /** @group Thread inspection */
-export type ZenStoredThread = Static<typeof ZenStoredThread>
+export type EnsoStoredThread = Static<typeof EnsoStoredThread>
 
 /**
  * How a stored branch ends when its last turn did not settle (#109): a prompt the
@@ -252,32 +252,32 @@ export type ZenStoredThread = Static<typeof ZenStoredThread>
  *
  * @group Thread inspection
  */
-export const ZenInterruptedTail = Type.Union([
+export const EnsoInterruptedTail = Type.Union([
   Type.Literal('unanswered-prompt'),
   Type.Literal('tool-call-without-result'),
 ])
 /** @group Thread inspection */
-export type ZenInterruptedTail = Static<typeof ZenInterruptedTail>
+export type EnsoInterruptedTail = Static<typeof EnsoInterruptedTail>
 
 /**
  * A thread's history as the browser mounts it (#95): the transcript as TanStack `UIMessage`s —
  * assembled by the server's `transcript-to-messages` reader, the same way the live stream is
  * adapted to AG-UI — plus the opening permission mode the transcript persists.
  *
- * Carried as `Unknown` because the shape is TanStack's, not zen's; the durable form is the
- * runtime's log, decoded by the host into `ZenTranscriptEntry` (L2).
+ * Carried as `Unknown` because the shape is TanStack's, not enso's; the durable form is the
+ * runtime's log, decoded by the host into `EnsoTranscriptEntry` (L2).
  *
  * @group Thread inspection
  */
-export const ZenThreadHistory = Type.Object(
+export const EnsoThreadHistory = Type.Object(
   {
     threadId: Type.String(),
     messages: Type.Array(Type.Unknown()),
-    permissionMode: ZenPermissionModeState,
-    /** Present only when the branch ends inside a turn — see {@link ZenInterruptedTail}. */
-    interrupted: Type.Optional(ZenInterruptedTail),
+    permissionMode: EnsoPermissionModeState,
+    /** Present only when the branch ends inside a turn — see {@link EnsoInterruptedTail}. */
+    interrupted: Type.Optional(EnsoInterruptedTail),
   },
   { additionalProperties: false },
 )
 /** @group Thread inspection */
-export type ZenThreadHistory = Static<typeof ZenThreadHistory>
+export type EnsoThreadHistory = Static<typeof EnsoThreadHistory>

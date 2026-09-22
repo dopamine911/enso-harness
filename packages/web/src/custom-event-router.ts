@@ -1,10 +1,10 @@
 import {
-  ZenFollowSnapshot,
-  ZenFollowStatus,
-  ZenObservation,
-  ZenOpenDialog,
-  type ZenPermissionModeState,
-} from '@zen/core'
+  EnsoFollowSnapshot,
+  EnsoFollowStatus,
+  EnsoObservation,
+  EnsoOpenDialog,
+  type EnsoPermissionModeState,
+} from '@enso/core'
 import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
 import { createStore, type Store } from './store.ts'
@@ -20,24 +20,24 @@ import type { ThreadStores } from './thread-stores.ts'
 export const FOLLOW_ENDED_CUSTOM_EVENT = 'follow-ended'
 
 /**
- * JIT validators, compiled once at module load — the `@zen/core` convention
+ * JIT validators, compiled once at module load — the `@enso/core` convention
  * (`config.ts`, `dialog.ts`, `thread-runtime.ts`, `tool-result.ts`).
  *
  * `Compile` rather than `Check` because these run per CHUNK on the browser's main thread,
  * and `Check` re-walks the schema on every call: measured 6.77 µs interpreted against
- * 0.042 µs compiled for a `text-delta` against the 19-member `ZenObservation` union (once
+ * 0.042 µs compiled for a `text-delta` against the 19-member `EnsoObservation` union (once
  * per streamed token), 2.93 µs against 0.012 µs for a status, and 44.6 µs against 0.51 µs
  * for a 50-message snapshot — 138 µs against 1.84 µs at 500 messages (#281).
  *
- * `ZenOpenDialog` in `routeUiRequest` stays interpreted on purpose: it is checked once per
+ * `EnsoOpenDialog` in `routeUiRequest` stays interpreted on purpose: it is checked once per
  * BLOCKING QUESTION — once per human decision, against a per-token union here — so its
  * 5.20 µs buys nothing worth a fourth validator, and compiling it would imply the dialog
  * path was hot. If that check ever becomes frequent, something is re-asking, which is a bug
  * and not a validator's cost.
  */
-const snapshotValidator = Compile(ZenFollowSnapshot)
-const statusValidator = Compile(ZenFollowStatus)
-const observationValidator = Compile(ZenObservation)
+const snapshotValidator = Compile(EnsoFollowSnapshot)
+const statusValidator = Compile(EnsoFollowStatus)
+const observationValidator = Compile(EnsoObservation)
 
 /**
  * The browser's ONE path from an AG-UI CUSTOM chunk to a thread's stores (mode lines,
@@ -49,15 +49,15 @@ const observationValidator = Compile(ZenObservation)
  * ONE VOCABULARY (#162 workstream 5). A chunk's name is a discriminator a type of ours
  * already declares, and its value is that whole thing:
  *
- *   `ZenObservation.kind`     value: the observation — what the adapter derives from the
+ *   `EnsoObservation.kind`     value: the observation — what the adapter derives from the
  *                             follow's `observation` frames (`to-agui.ts#custom`)
- *   `ZenFollowFrame.type`     `snapshot` | `status` — value: the frame, as it came off the
+ *   `EnsoFollowFrame.type`     `snapshot` | `status` — value: the frame, as it came off the
  *                             wire; the run-start receipts (mode, open questions, generation)
  *                             are read off the snapshot itself, not re-shaped into names
  *   `FOLLOW_ENDED_CUSTOM_EVENT`      the adapter's own fact, above
  *
- * Before this the adapter emitted a parallel `zen.*` vocabulary — `zen.mode` for a
- * `permission-mode`, `zen.notify` for an `extension-ui-request`, a forged notify for a
+ * Before this the adapter emitted a parallel `enso.*` vocabulary — `enso.mode` for a
+ * `permission-mode`, `enso.notify` for an `extension-ui-request`, a forged notify for a
  * `permission-mode-rejected` — and every rename had two sides to land on (#53 S1.3).
  *
  * ⚠ THE THREAD COMES FROM THE CALLER, NOT THE CHUNK. TanStack hands `onCustomEvent` only
@@ -76,7 +76,7 @@ const observationValidator = Compile(ZenObservation)
  * where a throw would end the run. Kinds this surface does not render (`custom-entry`,
  * `unmapped`) are recorded and fall through — see the mapper for why they exist at all.
  */
-export function routeZenCustomEvent(stores: ThreadStores, eventType: string, data: unknown): void {
+export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, data: unknown): void {
   stores.recentChunks.record(eventType, data)
   if (eventType === FOLLOW_ENDED_CUSTOM_EVENT) {
     // The server went away under this page (#103 receipt): said where the human looks —
@@ -110,7 +110,7 @@ export function routeZenCustomEvent(stores: ThreadStores, eventType: string, dat
 }
 
 /** One receipt, two views (#84, L3): the current-mode store (state) and the transcript line (history). */
-function applyPermissionMode(stores: ThreadStores, state: ZenPermissionModeState): void {
+function applyPermissionMode(stores: ThreadStores, state: EnsoPermissionModeState): void {
   stores.permissionMode.applyReceipt(state)
   stores.modeLines.apply(state)
 }
@@ -121,7 +121,7 @@ function applyStatus(stores: ThreadStores, generation: number): void {
   if (stores.disconnected.get()) stores.disconnected.set(false)
 }
 
-function routeObservation(stores: ThreadStores, observation: ZenObservation): void {
+function routeObservation(stores: ThreadStores, observation: EnsoObservation): void {
   switch (observation.kind) {
     case 'permission-mode':
       // The run-start receipt and a mid-run change fold into the same two stores.
@@ -170,10 +170,10 @@ function routeObservation(stores: ThreadStores, observation: ZenObservation): vo
  * waits on the server, unrendered until the next snapshot lists it — which is exactly what
  * `ThreadStores.dialog` says this page does.
  */
-function routeUiRequest(stores: ThreadStores, observation: ZenObservation & { kind: 'extension-ui-request' }): void {
+function routeUiRequest(stores: ThreadStores, observation: EnsoObservation & { kind: 'extension-ui-request' }): void {
   if (observation.blocking) {
     const open = { id: observation.id, dialog: observation.dialog }
-    if (!Check(ZenOpenDialog, open)) {
+    if (!Check(EnsoOpenDialog, open)) {
       // Said even when a card is up: the unreadable question is parked on the server either way.
       stores.notifications.push('pi asked a question this page could not read; it was left unanswered', 'error', 'run')
       return

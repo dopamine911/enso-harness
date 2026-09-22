@@ -16,7 +16,7 @@ sequenceDiagram
   participant P as runtime (tool_call hook)
   participant G as guards handler (extensions/guards/index.ts)
   participant A as cc-safety-net (library)
-  participant L as log (.zen/logs)
+  participant L as log (.enso/logs)
   participant H as host mapper (map-events.ts)
   participant B as browser (to-agui.ts)
 

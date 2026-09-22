@@ -1,9 +1,9 @@
 import { EventType } from '@ag-ui/core'
+import { ENSO_TOOL_RESULT_KEY, type EnsoObservation } from '@enso/core'
 import type { StreamChunk } from '@tanstack/ai'
-import { ZEN_TOOL_RESULT_KEY, type ZenObservation } from '@zen/core'
 
 /**
- * `ZenObservation` → AG-UI `StreamChunk` (#24, #112).
+ * `EnsoObservation` → AG-UI `StreamChunk` (#24, #112).
  *
  * WHERE THIS RUNS, AND WHY
  * TanStack AI's chat client consumes `StreamChunk = AGUIEvent` — the Agent Client protocol
@@ -12,7 +12,7 @@ import { ZEN_TOOL_RESULT_KEY, type ZenObservation } from '@zen/core'
  * (`follow-connection.ts`) runs THIS function on each one before handing the chunks to
  * TanStack. So the pipeline is three hops, the last one inside the page:
  *
- *     pi rpc event  →  ZenObservation  →  AG-UI StreamChunk  →  TanStack client
+ *     pi rpc event  →  EnsoObservation  →  AG-UI StreamChunk  →  TanStack client
  *                   ^ map-events.ts    ^ this module, in the browser
  *
  * Nothing serialises the output of this module and nothing stores it (`docs/architecture.md`,
@@ -69,14 +69,14 @@ export interface AguiIdentifiers {
 /**
  * An observation AG-UI has no vocabulary for rides a CUSTOM chunk NAMED BY ITS KIND and
  * carrying the observation whole (#162 workstream 5). One vocabulary: the router dispatches
- * on `ZenObservation.kind`, the same word the mapper, the follow and the debug pane use —
+ * on `EnsoObservation.kind`, the same word the mapper, the follow and the debug pane use —
  * there is no second list of names to rename on one side only.
  */
-function custom(observation: ZenObservation): StreamChunk {
+function custom(observation: EnsoObservation): StreamChunk {
   return { type: EventType.CUSTOM, name: observation.kind, value: observation }
 }
 
-export function observationToAguiEvents(observation: ZenObservation, ids: AguiIdentifiers): StreamChunk[] {
+export function observationToAguiEvents(observation: EnsoObservation, ids: AguiIdentifiers): StreamChunk[] {
   switch (observation.kind) {
     case 'text-delta':
       return [
@@ -126,14 +126,14 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
           role: 'tool',
           // The descriptor, under the same namespaced key it uses everywhere else.
           // Legal because AG-UI's BaseEvent declares `[k: string]: unknown`.
-          ...(observation.descriptor === undefined ? {} : { [ZEN_TOOL_RESULT_KEY]: observation.descriptor }),
+          ...(observation.descriptor === undefined ? {} : { [ENSO_TOOL_RESULT_KEY]: observation.descriptor }),
           // ⚠ `isError` has no AG-UI field on a tool result, and it is the only signal a
           // REFUSED or ABORTED call has (a guard block; pi's abort mid-tool). TanStack's
           // processor reads `state: "output-error"` off the chunk (a non-spec extra, legal
           // as above) and marks the result and its call `error`, with the content as the
           // error text — the same shape `transcript-to-messages` builds from the transcript, so a
           // live transcript and a resumed one agree (#130). Before this the flag rode as
-          // `zenIsError`, which nothing read: live said done, resume said error.
+          // `ensoIsError`, which nothing read: live said done, resume said error.
           ...(observation.isError ? { state: 'output-error' } : {}),
         },
       ]
@@ -147,7 +147,7 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
         return [custom(observation)]
       }
       // ⚠ THE DEGENERATE CASE: a blocking request whose fields did not form a
-      // `ZenDialogSpec` (or that carried no id). The connection declines it on pi's
+      // `EnsoDialogSpec` (or that carried no id). The connection declines it on pi's
       // behalf so the extension is not left hanging; the user still has to be told, or
       // a command that silently did nothing reads as a command that worked.
       //
@@ -219,7 +219,7 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
     case 'message-end':
       // One completed message's accounting (#45) — the thread-stats bar sums these.
       // CUSTOM because AG-UI has no usage vocabulary; the consumer reads `role` and `usage`
-      // off the one shape declared in @zen/core. A boundary without spend has nothing for
+      // off the one shape declared in @enso/core. A boundary without spend has nothing for
       // this view.
       return observation.usage === undefined ? [] : [custom(observation)]
 
@@ -245,7 +245,7 @@ export function observationToAguiEvents(observation: ZenObservation, ids: AguiId
 
     case 'permission-mode':
       // The mode changed mid-run (L3). The run-start receipt is the snapshot frame's
-      // `permissionMode`, the same `ZenPermissionModeState` shape; the browser's mode store
+      // `permissionMode`, the same `EnsoPermissionModeState` shape; the browser's mode store
       // and the transcript's mode line fold both and nothing else.
       return [custom(observation)]
 

@@ -4,16 +4,16 @@ import { WebFetchConfig } from './web-fetch.ts'
 import { WebSearchConfig } from './web-search.ts'
 
 /**
- * zen-harness's ONE committed config file (#59): `zen.config.json` at the repository
+ * Enso's ONE committed config file (#59): `enso.config.json` at the repository
  * root.
  *
- * Daniel's scope, 2026-09-04: "just a config file for zen-harness only, separate from pi" —
+ * Daniel's scope, 2026-09-04: "just a config file for Enso only, separate from pi" —
  * nothing here rides pi's settings or agent-dir surfaces.
  *
  * ⚠ THE CONFIG BELONGS TO THE ZEN-HARNESS INSTALL, NOT THE SESSION. It is located from
  * the harness's own file tree (`findRepoRoot` on a module inside this repo), NEVER from
- * the session cwd — zen can run against a foreign checkout (`bun run dev /some/path`),
- * and a foreign repo's `zen.config.json` must not become this session's allowlist.
+ * the session cwd — enso can run against a foreign checkout (`bun run dev /some/path`),
+ * and a foreign repo's `enso.config.json` must not become this session's allowlist.
  *
  * ⚠ STRICT ON UNKNOWN KEYS, deliberately. This is a policy file: a typo
  * (`"allowedHost"`) must refuse loudly, not silently configure nothing. The cost is
@@ -30,14 +30,14 @@ import { WebSearchConfig } from './web-search.ts'
  *
  * @group Configuration
  */
-export const ZEN_CONFIG_FILENAME = 'zen.config.json'
+export const ENSO_CONFIG_FILENAME = 'enso.config.json'
 
 /**
  * The example a refusal message shows a human who needs to change the config.
  *
  * @group Configuration
  */
-export const ZEN_CONFIG_EXAMPLE = `{ "webFetch": { "allowedHosts": ["docs.example.com"] } }`
+export const ENSO_CONFIG_EXAMPLE = `{ "webFetch": { "allowedHosts": ["docs.example.com"] } }`
 
 /**
  * The whole config file.
@@ -48,7 +48,7 @@ export const ZEN_CONFIG_EXAMPLE = `{ "webFetch": { "allowedHosts": ["docs.exampl
  *
  * @group Configuration
  */
-export const ZenConfig = Type.Object(
+export const EnsoConfig = Type.Object(
   {
     webFetch: WebFetchConfig,
     webSearch: Type.Optional(WebSearchConfig),
@@ -56,12 +56,12 @@ export const ZenConfig = Type.Object(
   { additionalProperties: false },
 )
 /** @group Configuration */
-export type ZenConfig = Static<typeof ZenConfig>
+export type EnsoConfig = Static<typeof EnsoConfig>
 
-const zenConfigValidator = Compile(ZenConfig)
+const ensoConfigValidator = Compile(EnsoConfig)
 
 /** @group Configuration */
-export type ZenConfigParseResult = { kind: 'ok'; config: ZenConfig } | { kind: 'unreadable'; reason: string }
+export type EnsoConfigParseResult = { kind: 'ok'; config: EnsoConfig } | { kind: 'unreadable'; reason: string }
 
 /**
  * Parse the config file's text.
@@ -71,18 +71,18 @@ export type ZenConfigParseResult = { kind: 'ok'; config: ZenConfig } | { kind: '
  *
  * @group Configuration
  */
-export function parseZenConfig(fileText: string): ZenConfigParseResult {
+export function parseEnsoConfig(fileText: string): EnsoConfigParseResult {
   let parsed: unknown
   try {
     parsed = JSON.parse(fileText)
   } catch (error) {
-    return { kind: 'unreadable', reason: `${ZEN_CONFIG_FILENAME} is not valid JSON (${String(error)})` }
+    return { kind: 'unreadable', reason: `${ENSO_CONFIG_FILENAME} is not valid JSON (${String(error)})` }
   }
-  if (!zenConfigValidator.Check(parsed)) {
+  if (!ensoConfigValidator.Check(parsed)) {
     return {
       kind: 'unreadable',
       reason:
-        `${ZEN_CONFIG_FILENAME} does not match the expected shape ${ZEN_CONFIG_EXAMPLE} ` +
+        `${ENSO_CONFIG_FILENAME} does not match the expected shape ${ENSO_CONFIG_EXAMPLE} ` +
         `(unknown keys are refused — a typo must fail loudly, not configure nothing)`,
     }
   }

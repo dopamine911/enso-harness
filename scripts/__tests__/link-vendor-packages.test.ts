@@ -20,22 +20,22 @@ import { linkVendorPackages, requiredPackageNames } from '../link-vendor-package
  * copy, a broken link is replaced, a package at neither is an error naming it.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), 'zen-link-vendor-'))
+const scratch = mkdtempSync(join(tmpdir(), 'enso-link-vendor-'))
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
 
 const MANIFEST = {
-  dependencies: { '@zen/core': 'workspace:*', 'cc-safety-net': '2.3.3' },
+  dependencies: { '@enso/core': 'workspace:*', 'cc-safety-net': '2.3.3' },
   pi: {
     extensions: ['./extensions/guards/index.ts', 'node_modules/@ladbabynpm/picc-permission-modes/index.ts'],
     themes: 'node_modules/@mammothb/pi-tokyonight-storm/theme.json',
   },
 }
 
-// ⚠ BOTH SOURCES. `@zen/core` appears in no manifest path — only in `dependencies` — and a
+// ⚠ BOTH SOURCES. `@enso/core` appears in no manifest path — only in `dependencies` — and a
 // manifest-only sweep once left it unlinked, failing the extension at load (header).
 test('required packages are every dependency plus every node_modules/… manifest path, scopes intact, once each', () => {
   expect(requiredPackageNames(MANIFEST).sort()).toEqual(
-    ['@ladbabynpm/picc-permission-modes', '@mammothb/pi-tokyonight-storm', '@zen/core', 'cc-safety-net'].sort(),
+    ['@ladbabynpm/picc-permission-modes', '@mammothb/pi-tokyonight-storm', '@enso/core', 'cc-safety-net'].sort(),
   )
   expect(requiredPackageNames({})).toEqual([])
   expect(requiredPackageNames({ pi: { extensions: ['./local/only.ts'] } })).toEqual([])
@@ -62,16 +62,16 @@ test('verify-or-fix: a present package is verified, an absent one is linked from
   const outcome = linkVendorPackages(repoRoot, packageRoot, MANIFEST)
   expect(outcome.verified).toEqual(['cc-safety-net'])
   expect(outcome.linked.sort()).toEqual(
-    ['@ladbabynpm/picc-permission-modes', '@mammothb/pi-tokyonight-storm', '@zen/core'].sort(),
+    ['@ladbabynpm/picc-permission-modes', '@mammothb/pi-tokyonight-storm', '@enso/core'].sort(),
   )
-  const linked = join(packageRoot, 'node_modules', '@zen', 'core')
+  const linked = join(packageRoot, 'node_modules', '@enso', 'core')
   expect(lstatSync(linked).isSymbolicLink()).toBe(true)
   // relative, so a moved checkout heals; and it resolves to the hoisted copy
   expect(readlinkSync(linked).startsWith('..')).toBe(true)
   expect(existsSync(join(linked, 'package.json'))).toBe(true)
   // a second run verifies everything and links nothing
   expect(linkVendorPackages(repoRoot, packageRoot, MANIFEST)).toEqual({
-    verified: expect.arrayContaining(['cc-safety-net', '@zen/core']),
+    verified: expect.arrayContaining(['cc-safety-net', '@enso/core']),
     linked: [],
   })
 })
@@ -92,6 +92,6 @@ test('a broken link is replaced with a working one', () => {
 
 test('a package at neither the package root nor the repo root is an error that names it', () => {
   const { repoRoot, packageRoot } = scratchRepo('missing')
-  hoist(repoRoot, '@zen/core')
+  hoist(repoRoot, '@enso/core')
   expect(() => linkVendorPackages(repoRoot, packageRoot, MANIFEST)).toThrow(/cc-safety-net|picc|tokyonight/)
 })

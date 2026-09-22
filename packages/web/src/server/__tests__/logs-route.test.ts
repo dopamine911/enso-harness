@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
-import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from '../logs-route.ts'
 
 /**
@@ -11,10 +11,10 @@ import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from '../logs-route.ts'
 
 let logs: LogRecorder
 beforeAll(async () => {
-  logs = await recordZenLogs()
+  logs = await recordEnsoLogs()
 })
 beforeEach(() => logs.clear())
-afterAll(releaseZenLogs)
+afterAll(releaseEnsoLogs)
 
 const batch = (records: unknown[]): string => JSON.stringify({ page: 'tab-1', records })
 
@@ -24,17 +24,17 @@ test("a good batch is re-emitted: the browser's category and level, its clock as
       {
         at: '2026-09-09T23:41:26.174Z',
         level: 'warning',
-        logger: 'zen.browser.follow',
+        logger: 'enso.browser.follow',
         message: 'the follow failed: {error}',
         properties: { threadId: 't1', error: 'TypeError: fetch failed' },
       },
-      { at: '2026-09-09T23:41:27.000Z', level: 'info', logger: 'zen.browser', message: 'page loaded', properties: {} },
+      { at: '2026-09-09T23:41:27.000Z', level: 'info', logger: 'enso.browser', message: 'page loaded', properties: {} },
     ]),
   )
   expect(outcome).toEqual({ status: 204 })
   logs.assertLogged({
     level: 'warning',
-    category: ['zen', 'browser', 'follow'],
+    category: ['enso', 'browser', 'follow'],
     rawMessage: 'the follow failed: {error}',
     properties: {
       threadId: 't1',
@@ -46,7 +46,7 @@ test("a good batch is re-emitted: the browser's category and level, its clock as
   })
   logs.assertLogged({
     level: 'info',
-    category: ['zen', 'browser'],
+    category: ['enso', 'browser'],
     rawMessage: 'page loaded',
     properties: { process: 'browser' },
   })
@@ -59,7 +59,7 @@ test('⚠ a bad batch is a 4xx that says why — and is NOT logged, so a page in
   // The browser may only speak for itself: another layer's category is refused.
   expect(
     receiveBrowserLogs(
-      batch([{ at: 'x', level: 'info', logger: 'zen.host.ui', message: 'not mine to say', properties: {} }]),
+      batch([{ at: 'x', level: 'info', logger: 'enso.host.ui', message: 'not mine to say', properties: {} }]),
     ),
   ).toMatchObject({ status: 400 })
   expect(receiveBrowserLogs(`{"page":"p","records":[],"pad":"${'x'.repeat(MAX_LOG_BODY_BYTES)}"}`)).toMatchObject({

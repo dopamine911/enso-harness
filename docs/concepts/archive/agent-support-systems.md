@@ -2,7 +2,7 @@
 
 > **Status (#167, #162 workstream 11):** archived — pre-build design note (2026-09-02) on ask-user, todo, memory, advisor, compaction. The dialog seam (`docs/seams/dialog.md`) is the one of these that exists here; the others are the harness's, not this repo's.
 
-**Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the zen-harness project.
+**Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the Enso project.
 
 Five systems that shape how well an agent works, none of which act on the world — they act on the
 agent's own knowledge, attention, and access to the operator. Ordered by how much each would change a

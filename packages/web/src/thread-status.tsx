@@ -1,8 +1,8 @@
 import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
+import { toolResultState } from './EnsoToolResult.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import type { ThreadStats } from './thread-stats.tsx'
-import { toolResultState } from './ZenToolResult.tsx'
 
 /**
  * The status bar (#90 PR 1): the always-on line that says what this session is doing and

@@ -1,8 +1,8 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
-import type { ZenOpenDialog } from './dialog.ts'
-import type { ZenObservation } from './observation.ts'
-import type { ZenPermissionModeState } from './permission-mode.ts'
+import type { EnsoOpenDialog } from './dialog.ts'
+import type { EnsoObservation } from './observation.ts'
+import type { EnsoPermissionModeState } from './permission-mode.ts'
 
 /**
  * The thread runtime: the contract the host implements for one thread, and the shapes that
@@ -15,7 +15,7 @@ import type { ZenPermissionModeState } from './permission-mode.ts'
  * to it; that transport is deleted, and until #162 workstream 4 (L2) the EVENT SHAPE that
  * mode defined survived as what `subscribe` handed out — the runtime's own fields, mapped
  * to observations above this seam. Now the host maps below it: a subscriber receives
- * `ZenObservation` and nothing of the runtime's. The module was called `pi-rpc.ts` until
+ * `EnsoObservation` and nothing of the runtime's. The module was called `pi-rpc.ts` until
  * #165 renamed it: the wire is gone, the contract is ours, and a name that says a vendor's
  * transport describes neither.
  *
@@ -45,7 +45,7 @@ export type PromptImageContent = Static<typeof PromptImageContent>
  * not the runtime's (#216).
  *
  * ⚠ IT WAS `StreamingBehavior = 'steer' | 'followUp'`: pi's own option name and pi's own
- * literals, declared as a Zen schema and published on `ZenPromptBody`, so the vendor's model
+ * literals, declared as an Enso schema and published on `EnsoPromptBody`, so the vendor's model
  * was the only vocabulary the wire accepted — and `docs/seams/thread-runtime.md` said the
  * opposite in the same breath. The vendor gate cannot see that class of leak: no import, no
  * vendor word. pi's spelling is produced in ONE place now, `host/agent-host.ts`, which is
@@ -57,9 +57,9 @@ export type PromptImageContent = Static<typeof PromptImageContent>
  *
  * @group Thread runtime
  */
-export const ZenPromptAdmission = Type.Union([Type.Literal('interrupt'), Type.Literal('enqueue')])
+export const EnsoPromptAdmission = Type.Union([Type.Literal('interrupt'), Type.Literal('enqueue')])
 /** @group Thread runtime */
-export type ZenPromptAdmission = Static<typeof ZenPromptAdmission>
+export type EnsoPromptAdmission = Static<typeof EnsoPromptAdmission>
 
 /**
  * One entry from pi's `get_commands`.
@@ -129,7 +129,7 @@ export interface PromptRequest {
   message: string
   images?: readonly PromptImageContent[]
   /** How the runtime should take it when a run is already streaming; the host maps it. */
-  admission?: ZenPromptAdmission
+  admission?: EnsoPromptAdmission
 }
 
 /** @group Thread runtime */
@@ -162,7 +162,7 @@ export const ThreadRuntime = Type.Object({
    * handed to the extension VERBATIM is an injection seam unless the server checks it).
    * Empty once answered, cancelled, or never asked.
    */
-  openDialogs: Type.Unsafe<() => ZenOpenDialog[]>(Type.Function([], Type.Unknown())),
+  openDialogs: Type.Unsafe<() => EnsoOpenDialog[]>(Type.Function([], Type.Unknown())),
   /** The slash commands this session can run — extension commands, prompt templates, skills. Synchronous: read off the live registry, no round trip. */
   listCommands: Type.Unsafe<() => RuntimeCommand[]>(Type.Function([], Type.Unknown())),
   /**
@@ -174,7 +174,7 @@ export const ThreadRuntime = Type.Object({
    * Synchronous: it walks the in-memory branch and registry, no round trip — and it is
    * deliberately NOT `listCommands`, whose call count the refusal path's tests pin.
    */
-  permissionModeState: Type.Unsafe<() => ZenPermissionModeState>(Type.Function([], Type.Unknown())),
+  permissionModeState: Type.Unsafe<() => EnsoPermissionModeState>(Type.Function([], Type.Unknown())),
   /**
    * Switch the mode (L3 step C, #162 workstream 4). The host translates to whatever its mode
    * extension accepts — for picc, the per-mode slash command, run as a prompt the same way
@@ -189,7 +189,7 @@ export const ThreadRuntime = Type.Object({
   ),
   /**
    * Receive every observation of this thread (L2, #162 workstream 4): the runtime's events
-   * mapped to `ZenObservation` BELOW this seam, plus what the host itself observes — a
+   * mapped to `EnsoObservation` BELOW this seam, plus what the host itself observes — a
    * dialog it opened, an extension's error, a mode its extension persisted. Nothing of the
    * runtime's own event shape reaches a subscriber. Observations emitted before the FIRST
    * subscriber are buffered and replayed to it, so nothing an extension says at start-up is
@@ -201,7 +201,7 @@ export const ThreadRuntime = Type.Object({
    * ⚠ `Type.Unsafe` keeps the schema for uniformity and the precise type for consumers; a
    * schema change must be mirrored in the annotation by hand.
    */
-  subscribe: Type.Unsafe<(onObservation: (observation: ZenObservation) => void) => () => void>(
+  subscribe: Type.Unsafe<(onObservation: (observation: EnsoObservation) => void) => () => void>(
     Type.Function([Type.Unknown()], Type.Unknown()),
   ),
   /** Abort the in-flight run and wait until the agent is idle. The session survives. */

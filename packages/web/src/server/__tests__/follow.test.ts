@@ -2,22 +2,22 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:te
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { LogRecorder } from '@logtape/testing/recorder'
 import {
   type DialogAnswer,
+  ENSO_IMAGE_MAX_BYTES,
+  ENSO_PROMPT_BODY_MAX_BYTES,
+  ENSO_PROMPT_MAX_IMAGES,
+  type EnsoFollowFrame,
+  type EnsoObservation,
   type PromptOutcome,
   type PromptRequest,
   type ThreadRuntime,
-  ZEN_IMAGE_MAX_BYTES,
-  ZEN_PROMPT_BODY_MAX_BYTES,
-  ZEN_PROMPT_MAX_IMAGES,
-  type ZenFollowFrame,
-  type ZenObservation,
-} from '@zen/core'
-import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
+} from '@enso/core'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import type { LogRecorder } from '@logtape/testing/recorder'
 import type { AgentHost } from '../../host/agent-host.ts'
 import { answerThreadDialog, type FollowRouteDeps } from '../follow.ts'
-import { startZenServer } from '../index.ts'
+import { startEnsoServer } from '../index.ts'
 import {
   createFakeAgentHost,
   createFakeHostedThread,
@@ -39,7 +39,7 @@ interface FakeHost {
   readonly host: AgentHost
   readonly built: FakeThreadRecord[]
   /** Emit into the LAST built session — every scenario here uses one thread. */
-  readonly emit: (observation: ZenObservation) => void
+  readonly emit: (observation: EnsoObservation) => void
   /** Fire the last prompt's acceptance (a slash command's completion signal). */
   readonly accept: () => void
 }
@@ -47,7 +47,7 @@ interface FakeHost {
 /** `overrides`: a test's own answer for one runtime method, over the fake's recording default (L3 step C). */
 function fakeHost(commands: string[] = ['mode'], overrides: Partial<ThreadRuntime> = {}): FakeHost {
   const built: FakeThreadRecord[] = []
-  let emit: (observation: ZenObservation) => void = () => undefined
+  let emit: (observation: EnsoObservation) => void = () => undefined
   let accept: () => void = () => undefined
   const host = createFakeAgentHost(() => {
     const fake = createFakeHostedThread({
@@ -66,11 +66,11 @@ function fakeHost(commands: string[] = ['mode'], overrides: Partial<ThreadRuntim
     emit = fake.emit
     return Promise.resolve(fake.hosted)
   })
-  return { host, built, emit: (observation: ZenObservation) => emit(observation), accept: () => accept() }
+  return { host, built, emit: (observation: EnsoObservation) => emit(observation), accept: () => accept() }
 }
 
 function emptyHarnessDir(): string {
-  const directory = mkdtempSync(join(tmpdir(), 'zen-follow-harness-'))
+  const directory = mkdtempSync(join(tmpdir(), 'enso-follow-harness-'))
   mkdirSync(directory, { recursive: true })
   writeFileSync(join(directory, 'package.json'), JSON.stringify({ name: 'fake-harness', pi: {} }))
   return directory
@@ -86,17 +86,17 @@ afterEach(async () => {
 
 let logs: LogRecorder
 beforeAll(async () => {
-  logs = await recordZenLogs()
+  logs = await recordEnsoLogs()
 })
 beforeEach(() => logs.clear())
-afterAll(releaseZenLogs)
+afterAll(releaseEnsoLogs)
 
 async function startWith(fake: FakeHost, sseKeepaliveMs = 1000): Promise<string> {
-  const started = startZenServer({
+  const started = startEnsoServer({
     cwd: tmpdir(),
     harnessPackageDir: emptyHarnessDir(),
-    agentDir: mkdtempSync(join(tmpdir(), 'zen-follow-agent-')),
-    logsDir: mkdtempSync(join(tmpdir(), 'zen-logs-')),
+    agentDir: mkdtempSync(join(tmpdir(), 'enso-follow-agent-')),
+    logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
     host: fake.host,
     sseKeepaliveMs,
@@ -130,9 +130,9 @@ async function threadSummary(url: string, threadId: string): Promise<Record<stri
 }
 
 // What the runtime says to its subscriber — observations, since L2 (#162 workstream 4).
-const SETTLED: ZenObservation = { kind: 'settled' }
-const TEXT_DELTA: ZenObservation = { kind: 'text-delta', contentIndex: 0, delta: 'hi' }
-const SELECT_DIALOG: ZenObservation = {
+const SETTLED: EnsoObservation = { kind: 'settled' }
+const TEXT_DELTA: EnsoObservation = { kind: 'text-delta', contentIndex: 0, delta: 'hi' }
+const SELECT_DIALOG: EnsoObservation = {
   kind: 'extension-ui-request',
   id: 'd1',
   method: 'select',
@@ -192,10 +192,10 @@ test("prompt answers at admission with a message id; the run is released by pi's
   })
   logs.assertLogged({
     level: 'debug',
-    category: ['zen', 'server', 'events'],
+    category: ['enso', 'server', 'events'],
     properties: { threadId: 't1', generation: 1, seq: 1, kind: 'text-delta', chars: 2 },
   })
-  logs.assertLogged({ level: 'info', category: ['zen', 'server', 'events'], properties: { seq: 2, kind: 'settled' } })
+  logs.assertLogged({ level: 'info', category: ['enso', 'server', 'events'], properties: { seq: 2, kind: 'settled' } })
   logs.assertLogged({
     level: 'info',
     rawMessage: /^run \{generation\} released/,
@@ -503,7 +503,7 @@ test("⚠ a question answered in one tab is settled on every follower's feed, an
     body: JSON.stringify({ id: 'd1', value: 'a' }),
   })
   expect(answered.status).toBe(204)
-  const settled: ZenFollowFrame = {
+  const settled: EnsoFollowFrame = {
     type: 'observation',
     seq: 2,
     observation: { kind: 'dialog-settled', id: 'd1', outcome: 'answered' },
@@ -843,7 +843,7 @@ test('[WARN] an image outside the allowlist, over the byte cap, or too many is a
   expect(notBase64.text).toContain('/images/0/data')
 
   // Over the cap by one byte, decoded — the base64 string is 4/3 longer and would pass a length check.
-  const oversized = Buffer.alloc(ZEN_IMAGE_MAX_BYTES + 1).toString('base64')
+  const oversized = Buffer.alloc(ENSO_IMAGE_MAX_BYTES + 1).toString('base64')
   const big = await promptWith(url, 't1', {
     message: 'x',
     images: [
@@ -856,7 +856,7 @@ test('[WARN] an image outside the allowlist, over the byte cap, or too many is a
 
   const tooMany = await promptWith(url, 't1', {
     message: 'x',
-    images: Array.from({ length: ZEN_PROMPT_MAX_IMAGES + 1 }, () => ({ mimeType: 'image/png', data })),
+    images: Array.from({ length: ENSO_PROMPT_MAX_IMAGES + 1 }, () => ({ mimeType: 'image/png', data })),
   })
   expect(tooMany.status).toBe(400)
   expect(tooMany.text).toContain('/images')
@@ -878,13 +878,13 @@ test('the edges are inside: an image of exactly the cap, exactly the maximum cou
   const url = await startWith(fake)
   const data = ONE_PIXEL_PNG.toString('base64')
 
-  const atCap = Buffer.alloc(ZEN_IMAGE_MAX_BYTES).toString('base64')
+  const atCap = Buffer.alloc(ENSO_IMAGE_MAX_BYTES).toString('base64')
   expect(
     (await promptWith(url, 't1', { message: 'x', images: [{ mimeType: 'image/jpeg', data: atCap }] })).status,
   ).toBe(202)
   expect(fake.built[0]?.prompts[0]?.images?.[0]?.data.length).toBe(atCap.length)
 
-  const twenty = Array.from({ length: ZEN_PROMPT_MAX_IMAGES }, (_, index) => ({
+  const twenty = Array.from({ length: ENSO_PROMPT_MAX_IMAGES }, (_, index) => ({
     mimeType: index === 0 ? ('image/gif' as const) : ('image/png' as const),
     data,
   }))
@@ -907,7 +907,7 @@ test('[WARN] a body past the wire cap is a 413 and the read stops — the server
   const chunk = 'x'.repeat(1024 * 1024)
   const body = new ReadableStream<Uint8Array>({
     start(controller: ReadableStreamDefaultController<Uint8Array>): void {
-      for (let sent = 0; sent <= ZEN_PROMPT_BODY_MAX_BYTES + chunk.length; sent += chunk.length) {
+      for (let sent = 0; sent <= ENSO_PROMPT_BODY_MAX_BYTES + chunk.length; sent += chunk.length) {
         controller.enqueue(new TextEncoder().encode(chunk))
       }
       controller.close()
@@ -931,7 +931,7 @@ test('[WARN] a body past the wire cap is a 413 and the read stops — the server
 // ── 10. the wire does not carry what the browser throws away (#279) ──────────────────
 
 /** pi's cadence: the whole output SO FAR, every tick — `bash` reports one every 100 ms. */
-function partialToolResult(text: string): ZenObservation {
+function partialToolResult(text: string): EnsoObservation {
   return { kind: 'tool-result', toolCallId: 'call-1', toolName: 'bash', text, complete: false, isError: false }
 }
 

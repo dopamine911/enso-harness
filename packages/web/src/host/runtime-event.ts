@@ -2,8 +2,8 @@ import { type Static, type TObject, Type } from 'typebox'
 
 /**
  * The runtime's event, as the host receives it — BELOW the thread-runtime seam since #162
- * workstream 4 (L2). Until then this shape was `@zen/core`'s, handed to subscribers and read
- * by a mapper above the host; now the host maps it to `ZenObservation` before anything
+ * workstream 4 (L2). Until then this shape was `@enso/core`'s, handed to subscribers and read
+ * by a mapper above the host; now the host maps it to `EnsoObservation` before anything
  * subscribes, and the shape is the host's own business. It is the rpc wire shape #69's
  * transport defined, which `session-events.ts` still replicates from the runtime's typed
  * events because the mapper and its tests consume exactly that.

@@ -8,7 +8,7 @@
 # ⚠ THE BASE PATH IS DERIVED, NEVER A LITERAL. A GitHub project site is served from
 # `/<repository>`, and a site built with the wrong `base` produces working HTML whose every
 # internal link 404s — the failure looks like broken documentation and is really one wrong
-# string. `ZEN_SITE_BASE` comes from the repository itself (`scripts/docs/site-base.ts` is the
+# string. `ENSO_SITE_BASE` comes from the repository itself (`scripts/docs/site-base.ts` is the
 # single reader; the projector, the link crawl and Astro all take it from there), so a rename or
 # a fork publishes correctly without anyone remembering this file exists.
 #
@@ -58,8 +58,8 @@ jobs:
 
       - name: Build the site and crawl its links
         env:
-          ZEN_SITE_BASE: /${{ github.event.repository.name }}
-          ZEN_SITE_URL: https://${{ github.repository_owner }}.github.io
+          ENSO_SITE_BASE: /${{ github.event.repository.name }}
+          ENSO_SITE_URL: https://${{ github.repository_owner }}.github.io
         run: bun run docs:site
 
       - name: Upload the built site

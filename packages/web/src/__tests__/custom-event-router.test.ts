@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import type { ZenDialogSpec, ZenFollowSnapshot, ZenFollowStatus, ZenObservation } from '@zen/core'
-import { FOLLOW_ENDED_CUSTOM_EVENT, routeZenCustomEvent } from '../custom-event-router.ts'
+import type { EnsoDialogSpec, EnsoFollowSnapshot, EnsoFollowStatus, EnsoObservation } from '@enso/core'
+import { FOLLOW_ENDED_CUSTOM_EVENT, routeEnsoCustomEvent } from '../custom-event-router.ts'
 import { clearThreadsForTest, mintThread, type ThreadStores } from '../thread-stores.ts'
 
 /**
@@ -9,8 +9,8 @@ import { clearThreadsForTest, mintThread, type ThreadStores } from '../thread-st
  * the suite green. These drive the extracted function with a fresh thread's stores
  * (#90 PR 3) and read them back.
  *
- * One vocabulary (#162 workstream 5): a chunk is named by `ZenObservation.kind` or
- * `ZenFollowFrame.type` and carries the whole thing, so every case here routes an
+ * One vocabulary (#162 workstream 5): a chunk is named by `EnsoObservation.kind` or
+ * `EnsoFollowFrame.type` and carries the whole thing, so every case here routes an
  * observation or a frame as the adapter would push it — never a re-shaped value.
  */
 
@@ -20,16 +20,16 @@ beforeEach(() => {
 })
 afterEach(() => clearThreadsForTest())
 
-const route = (eventType: string, data: unknown): void => routeZenCustomEvent(stores, eventType, data)
-const observe = (observation: ZenObservation): void => route(observation.kind, observation)
+const route = (eventType: string, data: unknown): void => routeEnsoCustomEvent(stores, eventType, data)
+const observe = (observation: EnsoObservation): void => route(observation.kind, observation)
 const notificationMessages = (): string[] => stores.notifications.get().map((notification) => notification.message)
 /** A snapshot always writes its mode line; tests about anything else read past it. */
 const noticesBesideModeLines = (): string[] => notificationMessages().filter((message) => !message.startsWith('Mode: '))
 
-const CONFIRM: ZenDialogSpec = { method: 'confirm', title: 'Apply?', message: 'm' }
-const SELECT: ZenDialogSpec = { method: 'select', title: 'Pick', options: ['a', 'b'] }
+const CONFIRM: EnsoDialogSpec = { method: 'confirm', title: 'Apply?', message: 'm' }
+const SELECT: EnsoDialogSpec = { method: 'select', title: 'Pick', options: ['a', 'b'] }
 
-const snapshot = (overrides: Partial<ZenFollowSnapshot> = {}): ZenFollowSnapshot => ({
+const snapshot = (overrides: Partial<EnsoFollowSnapshot> = {}): EnsoFollowSnapshot => ({
   type: 'snapshot',
   threadId: 't1',
   asOfSeq: 0,
@@ -41,7 +41,7 @@ const snapshot = (overrides: Partial<ZenFollowSnapshot> = {}): ZenFollowSnapshot
   openDialogs: [],
   ...overrides,
 })
-const status = (generation: number): ZenFollowStatus => ({ type: 'status', live: true, busy: false, generation })
+const status = (generation: number): EnsoFollowStatus => ({ type: 'status', live: true, busy: false, generation })
 
 // ⚠ ONE RECEIPT, TWO VIEWS (#84, L3). The mode — off the snapshot at run start, and as a
 // `permission-mode` observation on every mid-run change — is both state (the current-mode
@@ -112,7 +112,7 @@ test('dialog-settled drops the card for ITS id and no other (#114)', () => {
 // Newest-wins made the question being read vanish mid-read and left the page blank once the
 // newer one was answered, with pi still parked on the older one.
 test('a second live question never displaces the one on screen — the oldest holds the slot (#271)', () => {
-  const ask = (id: string, dialog: ZenDialogSpec): void =>
+  const ask = (id: string, dialog: EnsoDialogSpec): void =>
     observe({ kind: 'extension-ui-request', id, method: dialog.method, blocking: true, origin: 'run', dialog })
   ask('first', CONFIRM)
   ask('second', SELECT)
@@ -259,7 +259,7 @@ test('a permission-mode-rejected is a WARNING notice — the click did nothing a
 })
 
 // ⚠ THE VALUE IS VALIDATED WHOLE, AS THE OBSERVATION IT CLAIMS TO BE. A value that is not a
-// `ZenObservation` — or is one of a different kind than its chunk name — moves nothing. The
+// `EnsoObservation` — or is one of a different kind than its chunk name — moves nothing. The
 // wire already refused it (`follow-connection.ts`'s frame check); this is the second lock.
 test('a value that is not the observation its name claims moves no store', () => {
   route('extension-ui-request', { message: 'no kind, no method' })

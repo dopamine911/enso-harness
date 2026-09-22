@@ -7,7 +7,7 @@ import { codeOffenders, hasWordSequence, wordsOf } from './gate-support.ts'
  * ⚠ Enforcement, not a unit test — the same shape as `logging-gate.test.ts`. Two lines,
  * both ratchets:
  *
- *   1. `@earendil-works/*` is imported only under `VENDOR_ROOTS`. Everything else — `@zen/core`,
+ *   1. `@earendil-works/*` is imported only under `VENDOR_ROOTS`. Everything else — `@enso/core`,
  *      the server, the browser — talks our shapes, so a pi replacement is a rewrite of two
  *      directories rather than of the product (#69 is the pivot this survived once).
  *   2. A vendor extension's name (`picc`, `pi-multi-account`, `cc-safety-net`) appears in code
@@ -28,7 +28,7 @@ import { codeOffenders, hasWordSequence, wordsOf } from './gate-support.ts'
  * the graph cannot: a vendor's NAME in a string literal. Architecture → *Ownership boundary*.
  *
  * What it still cannot catch, said up front: it is a line scan, not a type checker.
- * `ZenThreadInspection.entries: unknown[]` carries pi's persistence format with no import and
+ * `EnsoThreadInspection.entries: unknown[]` carries pi's persistence format with no import and
  * no vendor name in it (goals L2). That needs a transcript type of ours. The third test this
  * header once anticipated — vendor-PREFIXED identifiers outside the host — is
  * `glossary-gate.test.ts` (#165), with L2's two files as its allowlist until the transcript
@@ -137,8 +137,8 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // manifest that did not name the real vendors would not be testing the real manifest.
   'scripts/__tests__/link-vendor-packages.test.ts',
   'scripts/__tests__/print-harness.test.ts',
-  // ⚠ `scripts/__tests__/zen-launch.test.ts` is NOT here any more: `declaredResources` and
-  // `missingVendorPaths` moved to `@zen/core` with #221, the manifests moved with them, and
+  // ⚠ `scripts/__tests__/enso-launch.test.ts` is NOT here any more: `declaredResources` and
+  // `missingVendorPaths` moved to `@enso/core` with #221, the manifests moved with them, and
   // the gate reported the leftover row as `allowlisted, matches nothing` rather than letting
   // it sit. The inventory shrinks when the leak does; that is the half of a ratchet that is
   // easy to omit.
@@ -183,7 +183,7 @@ test('⚠ a vendor extension is named in code only there — the allowlist is th
 // first two rows are the ones a `\b` boundary and a both-sides lookaround each missed.
 test('the matcher reads words, not substrings: a vendor name counts wherever it is spelled', () => {
   for (const line of [
-    "import { readPiccPersistedMode } from '@zen/core';", // camelCase — missed by lookarounds
+    "import { readPiccPersistedMode } from '@enso/core';", // camelCase — missed by lookarounds
     'export const PICC_PERMISSION_MODES = [] as const;', // `_` bounded — missed by \b
     'const dirs = [".cc-safety-net"];',
     'const config = ccSafetyNetConfig;',

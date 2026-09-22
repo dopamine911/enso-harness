@@ -31,18 +31,18 @@ document.addEventListener('visibilitychange', () => {
 })
 
 const rootElement = document.getElementById('root')
-if (rootElement === null) throw new Error('zen-harness: #root is missing from index.html')
+if (rootElement === null) throw new Error('Enso: #root is missing from index.html')
 // ⚠ The root is cached across module re-evaluations. This file cannot Fast Refresh (bun's
 // dev server warns "not accepted" and full-reloads on every edit here, as vite did before
 // #36 — an entry with side effects is never a refresh boundary), and a bare
 // `createRoot()` here then re-roots the same container, which React reports as an error
 // (seen live while verifying #29). Dev-only, but the cache is three lines and makes an
 // HMR edit render through the ONE root instead of racing two.
-const globalWithRoot = globalThis as { __zenReactRoot?: ReturnType<typeof createRoot> }
-if (globalWithRoot.__zenReactRoot === undefined) {
-  globalWithRoot.__zenReactRoot = createRoot(rootElement)
+const globalWithRoot = globalThis as { __ensoReactRoot?: ReturnType<typeof createRoot> }
+if (globalWithRoot.__ensoReactRoot === undefined) {
+  globalWithRoot.__ensoReactRoot = createRoot(rootElement)
 }
-const reactRoot: Root = globalWithRoot.__zenReactRoot
+const reactRoot: Root = globalWithRoot.__ensoReactRoot
 reactRoot.render(
   <StrictMode>
     <ChatScreen />

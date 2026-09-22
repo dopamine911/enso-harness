@@ -1,4 +1,4 @@
-import { isZenThreadId } from '@zen/core'
+import { isEnsoThreadId } from '@enso/core'
 
 /**
  * The thread a page URL names (#142): `?thread=<id>`. The URL is the source of truth for
@@ -8,7 +8,7 @@ import { isZenThreadId } from '@zen/core'
  * The query form, not a path: the dev server serves one page and a path would need a
  * fallback route; `?debug`, `?log` and `?fixture` already live in the query, and every
  * write here keeps them. A thread id IS pi's session id (#95), so the value is checked
- * with the same `isZenThreadId` the server checks it with — a malformed one is not a
+ * with the same `isEnsoThreadId` the server checks it with — a malformed one is not a
  * thread, and the page says so rather than showing nothing.
  */
 const THREAD_QUERY_PARAMETER = 'thread'
@@ -22,7 +22,7 @@ export type ThreadUrl =
 export function readThreadUrl(search: string): ThreadUrl {
   const named: unknown = new URLSearchParams(search).get(THREAD_QUERY_PARAMETER)
   if (named === null || named === '') return { kind: 'fresh' }
-  if (isZenThreadId(named)) return { kind: 'resume', threadId: named }
+  if (isEnsoThreadId(named)) return { kind: 'resume', threadId: named }
   return {
     kind: 'fresh',
     notice: `?thread=${String(named).slice(0, 40)} is not a thread id — opened a new thread instead`,

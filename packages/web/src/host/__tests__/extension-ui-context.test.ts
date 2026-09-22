@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
-import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import {
   type CustomComponentFactory,
-  createZenExtensionUiContext,
-  type ZenExtensionUiContext,
+  createEnsoExtensionUiContext,
+  type EnsoExtensionUiContext,
 } from '../extension-ui-context.ts'
 import { PICC_PERMISSION_DIALOG_MODULE } from '../permission-dialog.ts'
 import type { RuntimeEvent } from '../runtime-event.ts'
@@ -18,19 +18,19 @@ import type { RuntimeEvent } from '../runtime-event.ts'
 
 let logs: LogRecorder
 beforeAll(async () => {
-  logs = await recordZenLogs()
+  logs = await recordEnsoLogs()
 })
 beforeEach(() => logs.clear())
-afterAll(releaseZenLogs)
+afterAll(releaseEnsoLogs)
 
 const THREAD = 't-ui'
 
-function contextUnderTest(): ZenExtensionUiContext & { events: RuntimeEvent[]; requests: RuntimeEvent[] } {
+function contextUnderTest(): EnsoExtensionUiContext & { events: RuntimeEvent[]; requests: RuntimeEvent[] } {
   /** Every record the host emits — requests, settles (#114), fire-and-forget. */
   const events: RuntimeEvent[] = []
   /** The blocking/notify requests alone, so a test can name "the second question" without counting settles. */
   const requests: RuntimeEvent[] = []
-  const context = createZenExtensionUiContext({
+  const context = createEnsoExtensionUiContext({
     emit: (event: RuntimeEvent) => {
       events.push(event)
       if (event.type === 'extension_ui_request') requests.push(event)
@@ -98,8 +98,8 @@ test('input and editor resolve to the value, or undefined on cancel', async () =
   const { uiContext, answerDialog, requests } = contextUnderTest()
   const typed = uiContext.input('Name?', 'placeholder')
   expect(requests[0]).toMatchObject({ method: 'input', title: 'Name?', placeholder: 'placeholder' })
-  answerDialog({ id: requestId(requests[0]), value: 'zen' })
-  expect(await typed).toBe('zen')
+  answerDialog({ id: requestId(requests[0]), value: 'enso' })
+  expect(await typed).toBe('enso')
   const edited = uiContext.editor('Edit', 'prefill')
   expect(requests[1]).toMatchObject({ method: 'editor', title: 'Edit', prefill: 'prefill' })
   answerDialog({ id: requestId(requests[1]), cancelled: true })
@@ -198,7 +198,7 @@ test('fire-and-forget methods emit the rpc-shaped record and return immediately'
   uiContext.setWidget('w', ['line 1', 'line 2'], { placement: 'belowEditor' })
   // a component FACTORY has no serialisable form — pi's rule too — so it emits nothing
   uiContext.setWidget('ignored', () => ({ render: () => [], invalidate: () => undefined }))
-  uiContext.setTitle('zen')
+  uiContext.setTitle('enso')
   uiContext.setEditorText('draft')
   expect(events.map((event) => event.method)).toEqual([
     'notify',
@@ -314,7 +314,7 @@ test("cancelling the lifted prompt resolves picc's 'dismissed' value; a non-picc
 // the extension is released with "dismissed", the operator is told why, no request is emitted.
 test("⚠ a lift that rejects (picc's module did not load) fails closed: undefined to the extension, an error logged, no request", async () => {
   const events: RuntimeEvent[] = []
-  const { uiContext } = createZenExtensionUiContext({
+  const { uiContext } = createEnsoExtensionUiContext({
     emit: (event: RuntimeEvent) => events.push(event),
     threadId: THREAD,
     liftDialog: () => Promise.reject(new Error('Cannot find module filePermissionDialog.ts')),
@@ -359,7 +359,7 @@ test('⚠ a factory that throws or rejects against the inert terminal falls back
 
 test('⚠ an async factory that never produces a component is cut off at the build budget, not awaited forever', async () => {
   const events: RuntimeEvent[] = []
-  const { uiContext } = createZenExtensionUiContext({
+  const { uiContext } = createEnsoExtensionUiContext({
     emit: (event: RuntimeEvent) => events.push(event),
     threadId: THREAD,
     // The code's own timer with a tiny budget — the test awaits the promise it exposes, not a sleep.
@@ -396,7 +396,7 @@ test('a component whose dispose() throws is reported, not propagated — the cal
 test('a component that arrives after the build budget is disposed on arrival, since nobody will ever see it', async () => {
   const late = Promise.withResolvers<{ render: () => string[]; invalidate: () => void; dispose: () => void }>()
   let disposed = 0
-  const { uiContext } = createZenExtensionUiContext({
+  const { uiContext } = createEnsoExtensionUiContext({
     emit: () => undefined,
     threadId: THREAD,
     componentBuildTimeoutMs: 1,

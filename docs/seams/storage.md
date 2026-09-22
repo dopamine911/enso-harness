@@ -3,7 +3,7 @@
 The contract between the runtime's durable log and everything above the host: build or reopen a session
 under a thread's id, list what is on disk, read a stored transcript without building, report what one
 live session contains — and since #162 workstream 4 (L2), what crosses is the transcript of OURS
-(`ZenTranscriptEntry`): the host decodes the runtime's stored entries below this seam. Glossary domains: **Record** — the *storage seam* is the mechanism named there, "the
+(`EnsoTranscriptEntry`): the host decodes the runtime's stored entries below this seam. Glossary domains: **Record** — the *storage seam* is the mechanism named there, "the
 only file that touches the runtime's session manager or its file layout", a later store a one-file
 change (#102 §1) — and **Thread** (*stored thread*, *entry*, *branch* are what cross).
 
@@ -33,11 +33,11 @@ export interface AgentHost {
    * The transcript of a stored session, read-only — no pi session is built, nothing is
    * written (#86's rule: looking must not build). `undefined` when no file has that id.
    */
-  readTranscript(threadId: string): Promise<ZenTranscriptEntry[] | undefined>
+  readTranscript(threadId: string): Promise<EnsoTranscriptEntry[] | undefined>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
-  freshPermissionMode(): ZenPermissionModeState
+  freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
-  storedPermissionMode(transcript: readonly ZenTranscriptEntry[]): ZenPermissionModeState
+  storedPermissionMode(transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState
 }
 ```
 
@@ -56,7 +56,7 @@ export interface HostedThread {
    */
   inspect(): HostedThreadInspection
   /** The emitted tail (#97): what the host's `emit` funnel saw, with provenance. A fresh copy per call. */
-  emittedEvents(): ZenThreadEvent[]
+  emittedEvents(): EnsoThreadEvent[]
   /**
    * What the loaded extensions would say about a tool call, through the runtime's own hook
    * runner — the verdict a model's call would meet, without a model. Inspection, like the
@@ -85,7 +85,7 @@ export interface HostedThreadInspection {
   /** The session file once pi has flushed it; null while the session lives only in memory. */
   readonly sessionFile: string | null
   /** The branch, root to leaf, as the transcript of ours (L2): the runtime's entry shapes stay in `transcript.ts`. */
-  readonly entries: readonly ZenTranscriptEntry[]
+  readonly entries: readonly EnsoTranscriptEntry[]
   /** Slash commands this session registers. */
   readonly commands: readonly string[]
 }
@@ -107,9 +107,9 @@ export interface StoredThread {
 }
 ```
 
-The wire shapes the server derives from those, in `@zen/core`. The rail's listing:
+The wire shapes the server derives from those, in `@enso/core`. The rail's listing:
 
-<!-- source: packages/core/src/thread-inspection.ts#ZenStoredThread -->
+<!-- source: packages/core/src/thread-inspection.ts#EnsoStoredThread -->
 ```ts
 /**
  * One of pi's session files for this workspace (#95), as the rail lists it: a session the
@@ -119,7 +119,7 @@ The wire shapes the server derives from those, in `@zen/core`. The rail's listin
  * (`NewSessionOptions.id`), so the two never need a mapping, and a page-owned thread finds its
  * own file again after the server restarts.
  */
-export const ZenStoredThread = Type.Object(
+export const EnsoStoredThread = Type.Object(
   {
     threadId: Type.String(),
     /** The first user message, or undefined for a session with none — the rail's title, as deepseek does. */
@@ -142,23 +142,23 @@ export const ZenStoredThread = Type.Object(
 
 One live thread in full, on `GET /api/threads/:id` and in the bundle:
 
-<!-- source: packages/core/src/thread-inspection.ts#ZenThreadInspection -->
+<!-- source: packages/core/src/thread-inspection.ts#EnsoThreadInspection -->
 ```ts
 /**
  * One live thread, in full: the summary plus the session branch and what it may run.
  */
-export const ZenThreadInspection = Type.Object(
+export const EnsoThreadInspection = Type.Object(
   {
     threadId: Type.String(),
     sessionId: Type.String(),
     cwd: Type.String(),
     sessionDir: Type.String(),
     sessionFile: Type.Union([Type.String(), Type.Null()]),
-    permissionMode: ZenPermissionModeState,
+    permissionMode: EnsoPermissionModeState,
     /** Slash commands this session registers — extensions, prompt templates, skills. */
     commands: Type.Array(Type.String()),
     busy: Type.Boolean(),
-    /** See {@link ZenThreadSummary}. */
+    /** See {@link EnsoThreadSummary}. */
     generation: Type.Integer({ minimum: 0 }),
     lastActivityAt: Type.String(),
     /**
@@ -167,7 +167,7 @@ export const ZenThreadInspection = Type.Object(
      * messages with their parts, tool results with their descriptors, an extension's custom
      * entries, and `other` for every kind the host does not model — counted, never invented.
      */
-    entries: Type.Array(ZenTranscriptEntry),
+    entries: Type.Array(EnsoTranscriptEntry),
   },
   { additionalProperties: false },
 )
@@ -175,29 +175,29 @@ export const ZenThreadInspection = Type.Object(
 
 A thread's history as the browser mounts it, live or cold: `GET …/history` and every snapshot's `messages`:
 
-<!-- source: packages/core/src/thread-inspection.ts#ZenThreadHistory -->
+<!-- source: packages/core/src/thread-inspection.ts#EnsoThreadHistory -->
 ```ts
 /**
  * A thread's history as the browser mounts it (#95): the transcript as TanStack `UIMessage`s —
  * assembled by the server's `transcript-to-messages` reader, the same way the live stream is
  * adapted to AG-UI — plus the opening permission mode the transcript persists.
  *
- * Carried as `Unknown` because the shape is TanStack's, not zen's; the durable form is the
- * runtime's log, decoded by the host into `ZenTranscriptEntry` (L2).
+ * Carried as `Unknown` because the shape is TanStack's, not enso's; the durable form is the
+ * runtime's log, decoded by the host into `EnsoTranscriptEntry` (L2).
  */
-export const ZenThreadHistory = Type.Object(
+export const EnsoThreadHistory = Type.Object(
   {
     threadId: Type.String(),
     messages: Type.Array(Type.Unknown()),
-    permissionMode: ZenPermissionModeState,
-    /** Present only when the branch ends inside a turn — see {@link ZenInterruptedTail}. */
-    interrupted: Type.Optional(ZenInterruptedTail),
+    permissionMode: EnsoPermissionModeState,
+    /** Present only when the branch ends inside a turn — see {@link EnsoInterruptedTail}. */
+    interrupted: Type.Optional(EnsoInterruptedTail),
   },
   { additionalProperties: false },
 )
 ```
 
-<!-- source: packages/core/src/thread-inspection.ts#ZenInterruptedTail -->
+<!-- source: packages/core/src/thread-inspection.ts#EnsoInterruptedTail -->
 ```ts
 /**
  * How a stored branch ends when its last turn did not settle (#109): a prompt the
@@ -208,7 +208,7 @@ export const ZenThreadHistory = Type.Object(
  * synthetic `turn/end { interrupted }` on resume repair; here the report is the repair, and the
  * next prompt continues from the torn tail as pi would.
  */
-export const ZenInterruptedTail = Type.Union([
+export const EnsoInterruptedTail = Type.Union([
   Type.Literal('unanswered-prompt'),
   Type.Literal('tool-call-without-result'),
 ])
@@ -228,10 +228,10 @@ the live branch the same way. The host is tested against the real session manage
 `host/__tests__/agent-host.test.ts`.
 
 **Consumed by the server.** `packages/web/src/server/index.ts` owns the read routes:
-`GET /api/stored-threads` → `respondWithStoredThreads` maps each `StoredThread` to a `ZenStoredThread`,
+`GET /api/stored-threads` → `respondWithStoredThreads` maps each `StoredThread` to a `EnsoStoredThread`,
 marking `busy` by peeking the registry; `GET /api/threads` summarises each live thread from `inspect()`.
 `packages/web/src/server/thread-registry.ts` is the only builder (it is handed `host.createSession`),
-and its `inspectThread` is the one place a `ZenThreadInspection` is assembled, so the thread route and
+and its `inspectThread` is the one place a `EnsoThreadInspection` is assembled, so the thread route and
 the bundle cannot drift. The LIVE-OR-COLD read — `inspect().entries` when the thread is live,
 `host.readTranscript` when it is cold — is `packages/web/src/server/thread-read.ts`
 (`readThreadMount`), and it has one caller shape: `GET …/history` (404 when the server holds neither)
@@ -250,24 +250,24 @@ converter, so the test reads what the real host would hand out.
 
 - **The storage-seam test**: `packages/core/src/__tests__/no-duplicate-paths.test.ts` line 99 —
   "`SessionManager` is imported ONLY by the web host's agent-host.ts — the storage seam" — a scan of
-  every non-test source root; the `.zen` literal is likewise assembled only in `paths.ts` — plus
-  `guard.ts`, where it is corpus data for `ZEN_PERSISTENCE_WRITE_DIRECTORIES` (line 159).
+  every non-test source root; the `.enso` literal is likewise assembled only in `paths.ts` — plus
+  `guard.ts`, where it is corpus data for `ENSO_PERSISTENCE_WRITE_DIRECTORIES` (line 159).
 - **The vendor gate** (`test/vendor-gate.test.ts`, #145): the runtime's package is imported only under
   `packages/web/src/host/` and `packages/harness/extensions/`.
-- **Closed wire schemas**: `ZenThreadInspection`, `ZenStoredThread`, `ZenThreadHistory` are
+- **Closed wire schemas**: `EnsoThreadInspection`, `EnsoStoredThread`, `EnsoThreadHistory` are
   `additionalProperties: false` (thread-inspection.ts lines 84, 239, 280) — no host internal leaks by
-  an accidental spread; `server-handler.test.ts` line 444 checks summaries against `ZenThreadSummary`.
+  an accidental spread; `server-handler.test.ts` line 444 checks summaries against `EnsoThreadSummary`.
 
 ## What crosses it that should not
 
 **Nothing of the runtime's persistence format, since L2** (#162 workstream 4). Until then
 `AgentHost.readBranch` and `HostedThreadInspection.entries` returned `readonly unknown[]` — the
-runtime's own entry shapes — and `ZenThreadInspection` carried them to the wire "carried, not
+runtime's own entry shapes — and `EnsoThreadInspection` carried them to the wire "carried, not
 modelled", with three readers above the host knowing the vendor's field names. Now the host converts
 the branch in `packages/web/src/host/transcript.ts` — the one place above `session-events.ts` that
-reads a stored entry — and hands out `ZenTranscriptEntry[]` from `readTranscript` and `inspect()`;
+reads a stored entry — and hands out `EnsoTranscriptEntry[]` from `readTranscript` and `inspect()`;
 `server/transcript-to-messages.ts` assembles messages from ours and decodes nothing;
-`describeTranscriptEntry` in core formats ours for the drawer and `zen-thread.ts`; the stored mode
+`describeTranscriptEntry` in core formats ours for the drawer and `enso-thread.ts`; the stored mode
 walk reads our `custom` entries. The glossary gate's row for the old reader is gone, and the gate
 now refuses an allowlisted file it cannot find, so it cannot come back unnoticed.
 

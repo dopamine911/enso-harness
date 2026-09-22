@@ -1,4 +1,4 @@
-import { WEB_FETCH_MAX_URL_LENGTH } from '@zen/core'
+import { WEB_FETCH_MAX_URL_LENGTH } from '@enso/core'
 
 /**
  * web_fetch's pure policy (#54) — every decision that needs no IO. The extension in

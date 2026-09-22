@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
+import { EXTERNAL_WEB_CONTENT_NOTICE, WEB_SEARCH_TOOL_NAME } from '@enso/core'
+import { auditRecords, recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecord } from '@logtape/logtape'
-import { EXTERNAL_WEB_CONTENT_NOTICE, WEB_SEARCH_TOOL_NAME } from '@zen/core'
-import { auditRecords, recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import type { DeepseekSearchRequest, TavilySearchRequest, WebSearchOutcome } from '../../../core/index.ts'
 import { WebSearchProviderError } from '../../../core/index.ts'
 import { createWebSearch, fallbackReasonFor, type WebSearchDependencies } from '../index.ts'
@@ -25,23 +25,23 @@ interface CapturedTool {
   ) => Promise<{ content: { type: string; text: string }[] }>
 }
 
-const QUERY = 'what changed in zen'
+const QUERY = 'what changed in enso'
 const SEARCHED: WebSearchOutcome = {
   kind: 'searched',
   providerId: 'anthropic',
-  answerText: 'zen gained web_search[1].',
-  sources: [{ title: 'Zen docs', url: 'https://example.com/zen' }],
+  answerText: 'enso gained web_search[1].',
+  sources: [{ title: 'Enso docs', url: 'https://example.com/enso' }],
 }
 const UNGROUNDED: WebSearchOutcome = {
   kind: 'ungrounded',
   providerId: 'anthropic',
-  answerText: 'I believe zen gained web_search.',
+  answerText: 'I believe enso gained web_search.',
 }
 const TAVILY_RESULTS: WebSearchOutcome = {
   kind: 'searched',
   providerId: 'tavily',
-  sources: [{ title: 'Zen docs', url: 'https://example.com/zen' }],
-  snippets: [{ title: 'Zen docs', url: 'https://example.com/zen', snippet: 'web_search landed' }],
+  sources: [{ title: 'Enso docs', url: 'https://example.com/enso' }],
+  snippets: [{ title: 'Enso docs', url: 'https://example.com/enso', snippet: 'web_search landed' }],
 }
 
 /** A model whose api routes to the anthropic provider. */
@@ -64,7 +64,7 @@ function loadWebSearch(
   const tavilyRequests: LoadedWebSearch['tavilyRequests'] = []
   const deepseekKeys: (string | undefined)[] = []
   const dependencies: WebSearchDependencies = {
-    locateConfigFile: () => '/repo/zen.config.json',
+    locateConfigFile: () => '/repo/enso.config.json',
     readConfigText: () => JSON.stringify({ webFetch: { allowedHosts: [] } }),
     readEnvironmentVariable: (variableName: string) => environment[variableName],
     runProviders: {
@@ -109,12 +109,12 @@ async function run(loaded: LoadedWebSearch, extensionContext: unknown): Promise<
 
 /** Capture the audit records for one call (#132: records, not stderr lines). */
 async function withAuditCapture<T>(action: () => Promise<T>): Promise<{ value: T; audits: readonly LogRecord[] }> {
-  const logs = await recordZenLogs()
+  const logs = await recordEnsoLogs()
   try {
     const value = await action()
     return { value, audits: auditRecords(logs, 'web-search') }
   } finally {
-    await releaseZenLogs()
+    await releaseEnsoLogs()
   }
 }
 
@@ -123,8 +123,8 @@ test('a searched primary renders the via-line, the notice, the answer, and the s
   const { value: text, audits } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
   expect(text.startsWith('Searched the web via anthropic.')).toBe(true)
   expect(text).toContain(EXTERNAL_WEB_CONTENT_NOTICE)
-  expect(text).toContain('zen gained web_search[1].')
-  expect(text).toContain('1. [Zen docs](https://example.com/zen)')
+  expect(text).toContain('enso gained web_search[1].')
+  expect(text).toContain('1. [Enso docs](https://example.com/enso)')
   expect(loaded.calls.tavily).toBe(0)
   // One audit record, naming provider and outcome, never any key material.
   expect(audits).toHaveLength(1)
@@ -147,7 +147,7 @@ test('ungrounded with no Tavily key: labeled as NOT a search result, no notice, 
   const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
   expect(text.startsWith('No web search was performed')).toBe(true)
   expect(text).toContain('NOT a search result')
-  expect(text).toContain('I believe zen gained web_search.')
+  expect(text).toContain('I believe enso gained web_search.')
   expect(text).not.toContain(EXTERNAL_WEB_CONTENT_NOTICE)
   expect(text).not.toContain('Searched the web')
 })
@@ -340,7 +340,7 @@ test('an unreadable config fails CLOSED: every call refuses, no provider runs', 
   })
   const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
   expect(text.startsWith('Not searched:')).toBe(true)
-  expect(text).toContain('zen.config.json')
+  expect(text).toContain('enso.config.json')
   expect(loaded.calls.anthropic).toBe(0)
   expect(loaded.calls.tavily).toBe(0)
 })

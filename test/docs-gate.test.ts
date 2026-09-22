@@ -261,7 +261,7 @@ function architectureTreePaths(text: string): string[] {
   return paths
 }
 
-/** A path git ignores is not in a checkout — CI has no `.zen/` — so its absence is not drift. */
+/** A path git ignores is not in a checkout — CI has no `.enso/` — so its absence is not drift. */
 function isGitIgnored(path: string): boolean {
   return Bun.spawnSync(['git', 'check-ignore', '-q', path], { cwd: REPOSITORY_ROOT }).exitCode === 0
 }
@@ -269,7 +269,7 @@ function isGitIgnored(path: string): boolean {
 test('⚠ every path the architecture tree names exists, or is gitignored (#162 workstream 11)', () => {
   const text = readFileSync(join(DOCS_ROOT, 'architecture.md'), 'utf8')
   // the root line is the repository itself
-  const paths = architectureTreePaths(text).map((path) => path.replace(/^zen-harness\//, ''))
+  const paths = architectureTreePaths(text).map((path) => path.replace(/^Enso\//, ''))
   expect(paths.length).toBeGreaterThan(20)
   const missing = paths.filter((path) => !(existsSync(join(REPOSITORY_ROOT, path)) || isGitIgnored(path)))
   expect(missing).toEqual([])
@@ -475,7 +475,7 @@ test('the extractor drops the tags that file a symbol in the API index, and noth
  * thirteenth author does.
  */
 function seamsTableOver(edit: (directory: string) => void): { exitCode: number; stdout: string; stderr: string } {
-  const directory = mkdtempSync(join(tmpdir(), 'zen-seams-'))
+  const directory = mkdtempSync(join(tmpdir(), 'enso-seams-'))
   cpSync(join(DOCS_ROOT, 'seams'), directory, { recursive: true })
   edit(directory)
   const run = Bun.spawnSync(['bun', 'scripts/docs/seams-table.ts', directory], { cwd: REPOSITORY_ROOT })
