@@ -780,6 +780,15 @@ test('⚠ the follow closing mid-run: the notice, disconnected on the bar, no st
   })
   expect(pane.server.prompts).toEqual([])
   expect(pane.composer().value).toBe('this must not send')
+  // ⚠ Past the port's disabled-button check: a submit that reaches the form anyway — a future
+  // keybinding, an upstream re-fetch dropping that check — still sends nothing AND keeps the
+  // words. The draft clears on `send` having sent, not on the submit having happened (PR #343 review).
+  await flush(async () => {
+    pane.composer().form?.requestSubmit()
+    await tick()
+  })
+  expect(pane.server.prompts).toEqual([])
+  expect(pane.composer().value).toBe('this must not send')
   await pane.unmount()
 })
 

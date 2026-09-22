@@ -849,11 +849,13 @@ const chatComponents = {
        * Nothing sends while disconnected (#119, PR #123 review): the prompt would reach a
        * server that rebuilds the thread, but this page's follow is gone, so the reply would
        * land nowhere this page can see. An image with no words is a prompt (pi-ai keeps the
-       * image and drops the empty text block); nothing at all is not.
+       * image and drops the empty text block); nothing at all is not. Says whether it sent, so
+       * the submit clears the draft on THAT — not on three predicates in three files agreeing
+       * that a submit always reaches the wire (PR #343 review, round 2).
        */
-      const send = (text: string, images: readonly EnsoPromptImage[]): void => {
-        if (disconnected) return
-        if (text.trim().length === 0 && images.length === 0) return
+      const send = (text: string, images: readonly EnsoPromptImage[]): boolean => {
+        if (disconnected) return false
+        if (text.trim().length === 0 && images.length === 0) return false
         const parts: ContentPart[] = [
           ...(text.length === 0 ? [] : [{ type: 'text' as const, content: text }]),
           ...images.map((image) => ({
@@ -863,7 +865,7 @@ const chatComponents = {
         ]
         if (!chat.sessionGenerating) {
           void chat.sendMessage({ content: parts })
-          return
+          return true
         }
         // A prompt DURING a run queues through pi (#75). ⚠ Not `chat.sendMessage`: TanStack
         // holds a send in its own queue while the run it started is open and delivers it at
@@ -879,6 +881,7 @@ const chatComponents = {
         void stores.connection.prompt(text, images).then((outcome) => {
           if (outcome === 'refused' || outcome === 'unreachable') takeBack([text])
         })
+        return true
       }
       /** Texts pi never took come back to the draft, and their never-asked bubbles leave the transcript. */
       const takeBack = (texts: readonly string[]): void => {
@@ -905,14 +908,21 @@ const chatComponents = {
       // (#75) and is refused while disconnected, exactly as typed `/mode` is — and the draft
       // stays, because it was not what got sent. A prompt template or a skill takes arguments,
       // and pi reads a template only at the START of the message, so `/<name> ` goes in front
-      // and the words already typed become its argument; focus lands after them.
+      // and the words already typed become its argument. Focus lands after them BY CONSTRUCTION:
+      // the caret is placed at the end once React has committed the new value (a frame later),
+      // not left to the browser's default after a programmatic change (PR #343 review, round 2).
       const runCommand = (commandName: string): void => {
         send(`/${commandName}`, [])
         textareaRef.current?.focus()
       }
       const insertCommand = (commandName: string): void => {
         setDraft((current) => `/${commandName} ${current.trimStart()}`)
-        textareaRef.current?.focus()
+        requestAnimationFrame(() => {
+          const field = textareaRef.current
+          if (field === null) return
+          field.focus()
+          field.setSelectionRange(field.value.length, field.value.length)
+        })
       }
 
       return (
@@ -950,9 +960,9 @@ const chatComponents = {
               )
             }
             // The draft WAS the text: it clears here, at the submit, not in `send` — the palette
-            // sends through `send` too and must leave what the user has typed alone (PR #343 review).
-            setDraft('')
-            send(text, images)
+            // sends through `send` too and must leave what the user has typed alone (PR #343 review)
+            // — and only if something went: a submit `send` refuses keeps its words.
+            if (send(text, images)) setDraft('')
           }}
         >
           {/* The composer chrome (#90): the knobs at the point of use, deepseek's shape. */}
