@@ -27,10 +27,10 @@ flowchart LR
 
 | Node | Contract | Input | Source |
 |---|---|---|---|
-| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:50`](../../packages/web/src/server/index.ts#L50)<br>[`packages/web/src/server/follow.ts:421`](../../packages/web/src/server/follow.ts#L421) |
-| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:49`](../../packages/web/src/server/index.ts#L49)<br>[`packages/web/src/server/follow.ts:332`](../../packages/web/src/server/follow.ts#L332) |
-| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:52`](../../packages/web/src/server/index.ts#L52)<br>[`packages/web/src/server/follow.ts:368`](../../packages/web/src/server/follow.ts#L368) |
-| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:48`](../../packages/web/src/server/index.ts#L48)<br>[`packages/web/src/server/follow.ts:242`](../../packages/web/src/server/follow.ts#L242) |
+| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:50`](../../packages/web/src/server/index.ts#L50)<br>[`packages/web/src/server/follow.ts:429`](../../packages/web/src/server/follow.ts#L429) |
+| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:49`](../../packages/web/src/server/index.ts#L49)<br>[`packages/web/src/server/follow.ts:340`](../../packages/web/src/server/follow.ts#L340) |
+| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:52`](../../packages/web/src/server/index.ts#L52)<br>[`packages/web/src/server/follow.ts:376`](../../packages/web/src/server/follow.ts#L376) |
+| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:48`](../../packages/web/src/server/index.ts#L48)<br>[`packages/web/src/server/follow.ts:250`](../../packages/web/src/server/follow.ts#L250) |
 
 ## Observation pipeline
 
@@ -52,7 +52,7 @@ flowchart LR
 |---|---|---|
 | `mapPiEvent (17 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:233`](../../packages/web/src/host/map-events.ts#L233) |
 | `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:471`](../../packages/core/src/observation.ts#L471) |
-| `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:159`](../../packages/web/src/server/follow.ts#L159) |
+| `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:167`](../../packages/web/src/server/follow.ts#L167) |
 | `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:390`](../../packages/web/src/follow-connection.ts#L390) |
 | `to-agui chunk` | [Observations](./observations.md) | [`packages/web/src/to-agui.ts:76`](../../packages/web/src/to-agui.ts#L76) |
 | `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:125`](../../packages/web/src/custom-event-router.ts#L125) |

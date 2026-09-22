@@ -81,10 +81,17 @@ export type PromptOutcome =
   | { readonly status: 202; readonly receipt: EnsoPromptReceipt }
   | { readonly status: 400; readonly reason: string }
 
-/** Leading token of a slash input, without the slash. `/mode auto` -> `mode`. */
+/**
+ * Leading token of a slash input, without the slash. `/mode auto` -> `mode`.
+ *
+ * Leading whitespace is not part of the question: `" /login"` is `/login` (#337 review) — the
+ * body's emptiness check already trims, and a slash command that hid behind a space would walk
+ * past the refusal and reach the model as text, the exact no-op the refusal exists to prevent.
+ */
 function slashCommandName(prompt: string): string | undefined {
-  if (!prompt.startsWith('/')) return undefined
-  const name = prompt.slice(1).trimEnd().split(/\s/)[0]
+  const trimmed = prompt.trimStart()
+  if (!trimmed.startsWith('/')) return undefined
+  const name = trimmed.slice(1).trimEnd().split(/\s/)[0]
   return name === undefined || name.length === 0 ? undefined : name
 }
 
@@ -105,6 +112,7 @@ function unavailableCommand(runtime: ThreadRuntime, command: string): string | u
     available.length === 0 ? 'none' : available.map((known) => `/${known.name}`).join(', ')
   }`
 }
+
 /**
  * Write one frame, recording it into the thread's sent tail (#97) when the thread is live
  * — the one place every frame crosses to a browser, so the record and the wire agree.

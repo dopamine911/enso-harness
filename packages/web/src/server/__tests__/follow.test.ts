@@ -774,7 +774,14 @@ test('⚠ an unknown slash command sent to a BUSY thread is the same 400 and que
   })
   expect(refused.status).toBe(400)
   expect(await refused.text()).toContain('/login is not available on this surface')
-  // Nothing reached the runtime for it, and the run it would have queued behind is untouched.
+  // A space in front is not a different question (#337 review): still refused, still nothing queued.
+  const spaced = await fetch(`${url}/api/threads/t1/prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: '  /login' }),
+  })
+  expect(spaced.status).toBe(400)
+  // Nothing reached the runtime for either, and the run it would have queued behind is untouched.
   expect(prompts).toBe(1)
   expect(await threadSummary(url, 't1')).toMatchObject({ busy: true, generation: 1 })
   // …and the other half of the contract: a command this surface CAN run still queues.

@@ -160,9 +160,10 @@ hole:
 ⚠ **An exported `ANTHROPIC_API_KEY` does not reach pi.** Enso deletes every secret-shaped environment
 variable before spawning and tells you which on stderr. Provider credentials belong in pi's own
 `auth.json`, so run `/login` once **in the terminal** (`bun run enso`) — it is one of pi's TUI
-commands, and the chat page refuses it by name rather than passing it to the model. The grant is
-per agent dir and both surfaces share it: log in once, and `bun run dev` uses the same
-credentials. The rule lives in [`packages/core/src/secrets.ts`](packages/core/src/secrets.ts).
+commands, and the server refuses any slash command the runtime does not offer rather than passing
+it to the model as text. The grant is per agent dir and both surfaces share it: log in once, and
+`bun run dev` uses the same credentials. The rule lives in
+[`packages/core/src/secrets.ts`](packages/core/src/secrets.ts).
 
 ---
 
