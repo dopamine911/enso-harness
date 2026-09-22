@@ -6,7 +6,7 @@ import { runGenerator } from './generator-support.ts'
 
 /**
  * Generates `docs/reference/env-and-config.md` (#170): the explicit environment boundary,
- * the composed `ZenConfig` shape, every `.zen/` path assembled by core, and the harness
+ * the composed `EnsoConfig` shape, every `.enso/` path assembled by core, and the harness
  * manifest resources. Small source-shape parsers keep the inventory tied to the declarations;
  * the prose that source cannot supply (purpose, default, phase, writer, lifetime) is checked
  * metadata whose source occurrence must still exist.
@@ -23,7 +23,7 @@ const SOURCE_ROOTS = ['packages', 'scripts', 'test'] as const
 const PROCESS_ENV_BASE = /\bprocess\s*\.\s*env\b/g
 const PROCESS_ENV_CHILD_OVERRIDE = /\{\s*\.\.\.\s*process\s*\.\s*env\s*,\s*([A-Za-z_$][\w$]*)\s*:/g
 const RUNTIME_PATH_EXPORT =
-  /export function (\w+)[^{]+\{\s*return join\(repoRoot, ZEN_RUNTIME_DIRECTORY, '([^']+)'\)\s*\}/g
+  /export function (\w+)[^{]+\{\s*return join\(repoRoot, ENSO_RUNTIME_DIRECTORY, '([^']+)'\)\s*\}/g
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
 
 function compareText(left: string, right: string): number {
@@ -50,7 +50,7 @@ interface EnvironmentMetadata extends EnvironmentOccurrence {
 
 const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
   {
-    key: 'ZEN_SITE_URL',
+    key: 'ENSO_SITE_URL',
     source: 'scripts/docs/site-base.ts',
     reader: '`scripts/docs/site-base.ts#SITE_URL` (module read)',
     purposeAndDefault:
@@ -58,11 +58,11 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'build',
   },
   {
-    key: 'ZEN_SITE_BASE',
+    key: 'ENSO_SITE_BASE',
     source: 'scripts/docs/site-base.ts',
     reader: '`scripts/docs/site-base.ts#SITE_BASE` (module read)',
     purposeAndDefault:
-      'Optional; the path the documentation site is served under. Defaults to `/zen-harness` for a local build. The publish workflow sets it to `/<repository>` — what a GitHub project site is served from — so the base is derived rather than a literal that rots on a rename.',
+      'Optional; the path the documentation site is served under. Defaults to `/enso` for a local build. The publish workflow sets it to `/<repository>` — what a GitHub project site is served from — so the base is derived rather than a literal that rots on a rename.',
     phase: 'build',
   },
   {
@@ -82,52 +82,52 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
   },
   {
     key: 'PI_CODING_AGENT_DIR',
-    source: 'scripts/zen.ts',
-    reader: '`scripts/zen.ts` (pi child environment write)',
+    source: 'scripts/enso.ts',
+    reader: '`scripts/enso.ts` (pi child environment write)',
     purposeAndDefault: 'Required pin to the selected agent directory in the spawned pi process.',
     phase: 'boot',
   },
   {
-    key: 'ZEN_AGENT_DIR',
-    source: 'scripts/zen.ts',
-    reader: '`scripts/zen.ts`',
-    purposeAndDefault: 'Optional agent-directory override; defaults to `.zen/pi-agent`.',
+    key: 'ENSO_AGENT_DIR',
+    source: 'scripts/enso.ts',
+    reader: '`scripts/enso.ts`',
+    purposeAndDefault: 'Optional agent-directory override; defaults to `.enso/pi-agent`.',
     phase: 'boot',
   },
   {
-    key: 'ZEN_LOG_CONSOLE',
+    key: 'ENSO_LOG_CONSOLE',
     source: 'packages/core/src/log-process.ts',
-    reader: '`packages/core/src/log-process.ts#parseZenLogLevels`',
+    reader: '`packages/core/src/log-process.ts#parseEnsoLogLevels`',
     purposeAndDefault:
       'Optional terminal log level; launcher default is `info`, while child-pi logging ' +
       'defaults to no console sink.',
     phase: 'boot / load',
   },
   {
-    key: 'ZEN_LOG_LEVEL',
+    key: 'ENSO_LOG_LEVEL',
     source: 'packages/core/src/log-process.ts',
-    reader: '`packages/core/src/log-process.ts#parseZenLogLevels`',
+    reader: '`packages/core/src/log-process.ts#parseEnsoLogLevels`',
     purposeAndDefault: 'Optional file log level and per-category overrides; defaults to `info`.',
     phase: 'boot / load',
   },
   {
-    key: 'ZEN_LOGS_DIR',
+    key: 'ENSO_LOGS_DIR',
     source: 'packages/core/src/log-process.ts',
     reader: '`packages/core/src/log-process.ts#logsDirFrom`',
-    purposeAndDefault: 'Optional log-directory override; an absent or empty value defaults to `.zen/logs`.',
+    purposeAndDefault: 'Optional log-directory override; an absent or empty value defaults to `.enso/logs`.',
     phase: 'boot / load / per-call',
   },
   {
-    key: 'ZEN_SERVER_URL',
-    source: 'scripts/zen-logs.ts',
-    reader: '`scripts/zen-logs.ts#bundle`',
+    key: 'ENSO_SERVER_URL',
+    source: 'scripts/enso-logs.ts',
+    reader: '`scripts/enso-logs.ts#bundle`',
     purposeAndDefault: 'Optional live-server URL for bundle retrieval; defaults to `http://127.0.0.1:5179`.',
     phase: 'per-call',
   },
   {
-    key: 'ZEN_SERVER_URL',
-    source: 'scripts/zen-thread.ts',
-    reader: '`scripts/zen-thread.ts`',
+    key: 'ENSO_SERVER_URL',
+    source: 'scripts/enso-thread.ts',
+    reader: '`scripts/enso-thread.ts`',
     purposeAndDefault: 'Optional live-server URL for thread inspection; defaults to `http://127.0.0.1:5179`.',
     phase: 'boot',
   },
@@ -164,7 +164,7 @@ const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
   {
     field: 'webFetch.allowedHosts',
     required: 'yes',
-    defaultWhenOmitted: 'None in the schema; the committed policy is shown from `zen.config.json` below.',
+    defaultWhenOmitted: 'None in the schema; the committed policy is shown from `enso.config.json` below.',
     reader: '`packages/harness/extensions/web-fetch/index.ts#createWebFetch`',
     check: { file: 'packages/harness/extensions/web-fetch/index.ts', contains: 'parsed.config.webFetch.allowedHosts' },
   },
@@ -228,7 +228,7 @@ interface RuntimePathMetadata {
 const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
   {
     helper: 'printHarnessDir',
-    path: '.zen/print-harness',
+    path: '.enso/print-harness',
     writer:
       '`scripts/print-harness.ts#materializePrintHarness` rebuilds the package mirror ' +
       'for non-interactive launches.',
@@ -236,8 +236,8 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
     check: { file: 'scripts/print-harness.ts', contains: 'export function materializePrintHarness' },
   },
   {
-    helper: 'zenAgentDir',
-    path: '.zen/pi-agent',
+    helper: 'ensoAgentDir',
+    path: '.enso/pi-agent',
     writer:
       'The TUI/server launchers create it; pi and `createAgentHost` write settings, auth, ' +
       'sessions, and the multi-account pin.',
@@ -248,18 +248,18 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
     },
   },
   {
-    helper: 'zenLogsDir',
-    path: '.zen/logs',
+    helper: 'ensoLogsDir',
+    path: '.enso/logs',
     writer: '`configureProcessLogging` creates it and every harness process appends to the day file.',
     lifetime: 'One file per local day; logging retains 14 days.',
     check: { file: 'packages/core/src/log-process.ts', contains: 'const KEEP_DAYS = 14' },
   },
   {
-    helper: 'zenSecretsPath',
-    path: '.zen/secrets.env',
+    helper: 'ensoSecretsPath',
+    path: '.enso/secrets.env',
     writer: 'Operator only; harness code reads and quarantines but never writes it.',
     lifetime: 'Machine-local until the operator edits or removes it; secret reads are per call.',
-    check: { file: 'packages/core/src/secrets.ts', contains: 'readDotenvFile(zenSecretsPath(repoRoot)).get(name)' },
+    check: { file: 'packages/core/src/secrets.ts', contains: 'readDotenvFile(ensoSecretsPath(repoRoot)).get(name)' },
   },
 ]
 
@@ -463,7 +463,7 @@ function configInventory(): { fields: ConfigFieldMetadata[]; committedAllowedHos
   const webFetchSource = readFileSync(join(ROOT, 'packages/core/src/web-fetch.ts'), 'utf8')
   const webSearchSource = readFileSync(join(ROOT, 'packages/core/src/web-search.ts'), 'utf8')
   const discovered = [
-    ...objectFields(configSource, 'ZenConfig'),
+    ...objectFields(configSource, 'EnsoConfig'),
     ...objectFields(webFetchSource, 'WebFetchConfig', 'webFetch.'),
     ...objectFields(webSearchSource, 'WebSearchConfig', 'webSearch.'),
   ].sort()
@@ -473,14 +473,14 @@ function configInventory(): { fields: ConfigFieldMetadata[]; committedAllowedHos
     const unclassified = discovered.filter((field) => !classified.includes(field))
     const stale = classified.filter((field) => !discovered.includes(field))
     throw new Error(
-      `ZenConfig metadata differs from schema; UNCLASSIFIED: ${unclassified.join(', ') || '(none)'}; ` +
+      `EnsoConfig metadata differs from schema; UNCLASSIFIED: ${unclassified.join(', ') || '(none)'}; ` +
         `metadata without a field: ${stale.join(', ') || '(none)'}`,
     )
   }
   for (const row of metadata) assertSourceCheck(row.check)
-  const committed: unknown = JSON.parse(readFileSync(join(ROOT, 'zen.config.json'), 'utf8'))
+  const committed: unknown = JSON.parse(readFileSync(join(ROOT, 'enso.config.json'), 'utf8'))
   if (typeof committed !== 'object' || committed === null || !('webFetch' in committed)) {
-    throw new Error('zen.config.json has no webFetch section')
+    throw new Error('enso.config.json has no webFetch section')
   }
   const webFetch: unknown = committed.webFetch
   const committedAllowedHosts =
@@ -491,7 +491,7 @@ function configInventory(): { fields: ConfigFieldMetadata[]; committedAllowedHos
 function runtimePathInventory(): RuntimePathMetadata[] {
   const pathSource = readFileSync(join(ROOT, 'packages/core/src/paths.ts'), 'utf8')
   const discovered = [...pathSource.matchAll(RUNTIME_PATH_EXPORT)]
-    .map((match) => ({ helper: match[1] ?? '', path: `.zen/${match[2] ?? ''}` }))
+    .map((match) => ({ helper: match[1] ?? '', path: `.enso/${match[2] ?? ''}` }))
     .sort((left, right) => compareText(left.path, right.path))
   const metadata = [...RUNTIME_PATH_METADATA].sort((left, right) => compareText(left.path, right.path))
   if (
@@ -500,7 +500,7 @@ function runtimePathInventory(): RuntimePathMetadata[] {
       metadata.map((row) => `${row.helper}\0${row.path}`),
     )
   ) {
-    throw new Error('`.zen/` path metadata differs from the exports assembled in packages/core/src/paths.ts')
+    throw new Error('`.enso/` path metadata differs from the exports assembled in packages/core/src/paths.ts')
   }
   for (const row of metadata) assertSourceCheck(row.check)
   return metadata
@@ -563,7 +563,7 @@ function generate(): string {
     '# Environment and configuration reference',
     '',
     'Generated from the owned source roots, `biome.jsonc`, the core config/path declarations,',
-    '`zen.config.json`, and `packages/harness/package.json`. No machine environment is read.',
+    '`enso.config.json`, and `packages/harness/package.json`. No machine environment is read.',
     '',
     '## Explicit environment keys',
     '',
@@ -580,7 +580,7 @@ function generate(): string {
     'whole-environment quarantine/pass-through operations have no concrete key to report; adding a new literal',
     'shape or a literal without checked metadata fails generation as `UNCLASSIFIED` rather than being omitted.',
     '',
-    '## `ZenConfig` schema',
+    '## `EnsoConfig` schema',
     '',
     'The whole-file schema is strict on unknown keys. Nested fields are explicit below. Defaults are consumer',
     'behavior when an optional field is omitted; required fields have no schema default.',
@@ -595,9 +595,9 @@ function generate(): string {
     'declaration layout in `config.ts`, `web-fetch.ts`, and `web-search.ts`; metadata and consumer probes must',
     'match every discovered field or generation fails.',
     '',
-    '## `.zen/` runtime paths',
+    '## `.enso/` runtime paths',
     '',
-    'These are every exported path assembled with `ZEN_RUNTIME_DIRECTORY` in `packages/core/src/paths.ts`.',
+    'These are every exported path assembled with `ENSO_RUNTIME_DIRECTORY` in `packages/core/src/paths.ts`.',
     '',
     '| Path | Assembler | Writer | Lifetime |',
     '|---|---|---|---|',

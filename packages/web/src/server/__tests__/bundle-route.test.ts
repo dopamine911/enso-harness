@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { bundleRecordsText, ZEN_REDACTED, type ZenLogLine } from '@zen/core'
-import { parseZenLogLine, zenLogFilename } from '@zen/core/log-process'
+import { bundleRecordsText, ENSO_REDACTED, type EnsoLogLine } from '@enso/core'
+import { ensoLogFilename, parseEnsoLogLine } from '@enso/core/log-process'
 import { createEventTail } from '../../host/event-tail.ts'
 import {
   BUNDLE_MAX_RECORDS,
@@ -31,10 +31,10 @@ function liveThread(threadId: string): ThreadView {
   }
 }
 
-const line = (threadId: string, message: string, extra: Record<string, unknown> = {}): ZenLogLine => ({
+const line = (threadId: string, message: string, extra: Record<string, unknown> = {}): EnsoLogLine => ({
   '@timestamp': '2026-09-10T01:00:00.000Z',
   level: 'INFO',
-  logger: 'zen.server.events',
+  logger: 'enso.server.events',
   message,
   properties: { process: 'server', sequence: 1, threadId, ...extra },
 })
@@ -46,10 +46,10 @@ const bodyOf = (outcome: BundleRouteOutcome): string => {
   return outcome.body
 }
 
-function logsDirWith(lines: readonly (ZenLogLine | string)[]): string {
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-bundle-'))
+function logsDirWith(lines: readonly (EnsoLogLine | string)[]): string {
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-bundle-'))
   writeFileSync(
-    join(logsDir, zenLogFilename(DAY)),
+    join(logsDir, ensoLogFilename(DAY)),
     `${lines.map((entry) => (typeof entry === 'string' ? entry : JSON.stringify(entry))).join('\n')}\n`,
   )
   return logsDir
@@ -59,7 +59,7 @@ test("the bundle is today's records for the thread, its live inspection, and the
   const logsDir = logsDirWith([
     line('t1', 'run {generation} acquired', { generation: 1 }),
     line('t2', 'run {generation} acquired', { generation: 1 }),
-    line('t1', 'prompt refused', { tavilyApiKey: ZEN_REDACTED }),
+    line('t1', 'prompt refused', { tavilyApiKey: ENSO_REDACTED }),
   ])
   const route = createBundleRoute({
     threads: { list: () => [liveThread('t1'), liveThread('t2')] },
@@ -71,10 +71,10 @@ test("the bundle is today's records for the thread, its live inspection, and the
   if (outcome.status !== 200) throw new Error(outcome.reason)
   const { filename, body } = outcome
 
-  expect(filename).toBe('zen-bundle-2026-09-10-t1.md')
+  expect(filename).toBe('enso-bundle-2026-09-10-t1.md')
   const records = bundleRecordsText(body)
     .split('\n')
-    .map((raw) => parseZenLogLine(raw))
+    .map((raw) => parseEnsoLogLine(raw))
   expect(records.map((record) => (typeof record === 'string' ? record : record.properties?.threadId))).toEqual([
     't1',
     't1',
@@ -84,11 +84,11 @@ test("the bundle is today's records for the thread, its live inspection, and the
   expect(body).toContain('- `tavilyApiKey` × 1')
   // The version is the HOST's (#145): the route is handed a string and prints that one.
   expect(body).toContain('- pi: `1.2.3`')
-  expect(body).toContain("selection: thread t1 from today's file (zen-2026-09-10.jsonl")
+  expect(body).toContain("selection: thread t1 from today's file (enso-2026-09-10.jsonl")
 })
 
 test('[WARN] no thread: every record and every live thread; the cap keeps the NEWEST and the heading says so', () => {
-  const many: ZenLogLine[] = []
+  const many: EnsoLogLine[] = []
   for (let sequence = 0; sequence < BUNDLE_MAX_RECORDS + 3; sequence += 1) {
     many.push(line('t1', 'record {sequence}', { sequence }))
   }
@@ -102,7 +102,7 @@ test('[WARN] no thread: every record and every live thread; the cap keeps the NE
   if (outcome.status !== 200) throw new Error(outcome.reason)
   const { filename, body } = outcome
 
-  expect(filename).toBe('zen-bundle-2026-09-10.md')
+  expect(filename).toBe('enso-bundle-2026-09-10.md')
   expect(body).toContain(`## log — the last ${BUNDLE_MAX_RECORDS} of ${BUNDLE_MAX_RECORDS + 3} records`)
   const records = bundleRecordsText(body).split('\n')
   expect(records).toHaveLength(BUNDLE_MAX_RECORDS)
@@ -111,7 +111,7 @@ test('[WARN] no thread: every record and every live thread; the cap keeps the NE
 })
 
 test('a missing file and a malformed line are said in the selection, never silently absent', () => {
-  const empty = mkdtempSync(join(tmpdir(), 'zen-bundle-empty-'))
+  const empty = mkdtempSync(join(tmpdir(), 'enso-bundle-empty-'))
   const route = createBundleRoute({
     threads: { list: () => [] },
     logsDir: empty,
@@ -148,12 +148,12 @@ test("[WARN] a thread that is not id-shaped is a 400, never a filename: a quote 
   // A prefix of a valid id is a valid id: the one check serves both the filter and the filename.
   expect(route(new URLSearchParams({ thread: '6923e6' }))).toMatchObject({
     status: 200,
-    filename: 'zen-bundle-2026-09-10-6923e6.md',
+    filename: 'enso-bundle-2026-09-10-6923e6.md',
   })
 })
 
 test('the checkout is described from .git by hand: a branch ref, a detached head, and no checkout at all', () => {
-  const repo = mkdtempSync(join(tmpdir(), 'zen-checkout-'))
+  const repo = mkdtempSync(join(tmpdir(), 'enso-checkout-'))
   expect(describeCheckout(repo)).toBe('unknown (no .git)')
 
   mkdirSync(join(repo, '.git', 'refs', 'heads', 'feat'), { recursive: true })
@@ -186,7 +186,7 @@ test("⚠ /api/about carries the same about the bundle's header does — one bui
   )
   expect(about.at).toBe(DAY.toISOString())
   for (const row of [
-    `- zen: \`${about.zen}\``,
+    `- enso: \`${about.enso}\``,
     `- pi: \`${about.pi}\``,
     `- bun: \`${about.bun}\``,
     `- os: ${about.os}`,

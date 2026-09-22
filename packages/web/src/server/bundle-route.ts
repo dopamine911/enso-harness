@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { arch, platform, release } from 'node:os'
 import { join } from 'node:path'
-import { buildLogBundle, isZenThreadId, type ZenBundleAbout, type ZenLogLine } from '@zen/core'
-import { parseZenLogLine, zenLogFilename } from '@zen/core/log-process'
-import { findRepoRoot } from '@zen/core/paths'
+import { buildLogBundle, type EnsoBundleAbout, type EnsoLogLine, isEnsoThreadId } from '@enso/core'
+import { ensoLogFilename, parseEnsoLogLine } from '@enso/core/log-process'
+import { findRepoRoot } from '@enso/core/paths'
 import { inspectThread, type ThreadView } from './thread-registry.ts'
 
 /**
@@ -66,12 +66,12 @@ export function describeCheckout(repoRoot: string): string {
 function selectRecords(
   text: string,
   threadPrefix: string | undefined,
-): { readonly lines: ZenLogLine[]; readonly malformed: number } {
-  const lines: ZenLogLine[] = []
+): { readonly lines: EnsoLogLine[]; readonly malformed: number } {
+  const lines: EnsoLogLine[] = []
   let malformed = 0
   for (const raw of text.split('\n')) {
     if (raw.length === 0) continue
-    const parsed = parseZenLogLine(raw)
+    const parsed = parseEnsoLogLine(raw)
     if (typeof parsed === 'string') {
       malformed += 1
       continue
@@ -93,7 +93,7 @@ function thisCheckout(): string {
 }
 
 export function createBundleRoute(deps: BundleRouteDeps): (query: URLSearchParams) => BundleRouteOutcome {
-  const zen = thisCheckout()
+  const enso = thisCheckout()
   const now = deps.now ?? ((): Date => new Date())
   return (query: URLSearchParams): BundleRouteOutcome => {
     const at = now()
@@ -103,10 +103,10 @@ export function createBundleRoute(deps: BundleRouteDeps): (query: URLSearchParam
     // id is itself a valid id, so the one check covers both — and it is what keeps the value
     // out of the `Content-Disposition` header: a `"` would end the filename, a CR/LF would
     // throw inside the request callback (PR #138 review).
-    if (threadPrefix !== undefined && !isZenThreadId(threadPrefix)) {
+    if (threadPrefix !== undefined && !isEnsoThreadId(threadPrefix)) {
       return { status: 400, reason: 'thread must be a thread id or a prefix of one' }
     }
-    const file = join(deps.logsDir, zenLogFilename(at))
+    const file = join(deps.logsDir, ensoLogFilename(at))
     const text = existsSync(file) ? readFileSync(file, 'utf8') : ''
     const { lines, malformed } = selectRecords(text, threadPrefix)
     const threads = deps.threads
@@ -115,22 +115,22 @@ export function createBundleRoute(deps: BundleRouteDeps): (query: URLSearchParam
       .map(inspectThread)
     const selection = [
       threadPrefix === undefined ? 'every thread' : `thread ${threadPrefix}`,
-      `from today's file (${zenLogFilename(at)}, the local day — an earlier day is an earlier file)`,
+      `from today's file (${ensoLogFilename(at)}, the local day — an earlier day is an earlier file)`,
       existsSync(file) ? '' : '— which does not exist yet: no process has logged today',
       malformed === 0 ? '' : `— ${malformed} line(s) of it were not records and are left out`,
     ]
       .filter((part) => part.length > 0)
       .join(' ')
-    const about = describeAbout({ zen, runtimeVersion: deps.runtimeVersion, at, selection })
+    const about = describeAbout({ enso, runtimeVersion: deps.runtimeVersion, at, selection })
     const body = buildLogBundle({
       about,
       threads,
       lines: lines.slice(-BUNDLE_MAX_RECORDS),
       matched: lines.length,
     })
-    const day = zenLogFilename(at).slice('zen-'.length, -'.jsonl'.length)
+    const day = ensoLogFilename(at).slice('enso-'.length, -'.jsonl'.length)
     const filename =
-      threadPrefix === undefined ? `zen-bundle-${day}.md` : `zen-bundle-${day}-${threadPrefix.slice(0, 8)}.md`
+      threadPrefix === undefined ? `enso-bundle-${day}.md` : `enso-bundle-${day}-${threadPrefix.slice(0, 8)}.md`
     return { status: 200, filename, body }
   }
 }
@@ -141,14 +141,14 @@ export function createBundleRoute(deps: BundleRouteDeps): (query: URLSearchParam
  * checkout, which runtime, which machine.
  */
 function describeAbout(input: {
-  readonly zen: string
+  readonly enso: string
   readonly runtimeVersion: string
   readonly at: Date
   readonly selection: string
-}): ZenBundleAbout {
+}): EnsoBundleAbout {
   return {
     at: input.at.toISOString(),
-    zen: input.zen,
+    enso: input.enso,
     pi: input.runtimeVersion,
     bun: typeof Bun === 'undefined' ? 'not bun' : Bun.version,
     os: `${platform()} ${release()} ${arch()}`,
@@ -166,12 +166,12 @@ function describeAbout(input: {
 export function createAboutRoute(deps: {
   readonly runtimeVersion: string
   readonly now?: () => Date
-}): () => ZenBundleAbout {
-  const zen = thisCheckout()
+}): () => EnsoBundleAbout {
+  const enso = thisCheckout()
   const now = deps.now ?? ((): Date => new Date())
-  return (): ZenBundleAbout =>
+  return (): EnsoBundleAbout =>
     describeAbout({
-      zen,
+      enso,
       runtimeVersion: deps.runtimeVersion,
       at: now(),
       selection: "no records: this is the bundle's header alone, for this process, now",

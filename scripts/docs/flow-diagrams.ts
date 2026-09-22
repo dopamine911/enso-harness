@@ -21,14 +21,14 @@ import { discoverRoutes, type ResolvedRoute } from './routes.ts'
  * hand-drawn architecture diagram is the worst documentation this repository could own: it is
  * read as authoritative, it is checked by nobody, and it is wrong the first week a route moves.
  * So every node here is a value read out of code — `discoverRoutes()` finds the routes exactly
- * as `routes.ts` does, and the observation kinds come from the `ZenObservation` union itself. A
+ * as `routes.ts` does, and the observation kinds come from the `EnsoObservation` union itself. A
  * route added, renamed or deleted changes this page or fails the docs gate; there is no third
  * option in which the picture stays pretty and stops being true.
  *
  * WHAT EACH DIAGRAM IS DRAWN FROM:
  *   • control plane — `discoverRoutes()`: method, path, handler and the runtime factory each
  *     control route reaches, plus the dispatcher line that proves the route is wired.
- *   • observation pipeline — the `ZenObservation` union's members and the producers that emit
+ *   • observation pipeline — the `EnsoObservation` union's members and the producers that emit
  *     their `kind`, then the fixed stages every observation crosses (follow frame, browser
  *     adapter, event router).
  *
@@ -80,7 +80,7 @@ function controlPlane(routes: readonly ResolvedRoute[]): string[] {
     lines.push(`  ${id} --> ${handlerId}[${nodeLabel(`${factoryName}()`)}]`)
     lines.push(`  ${handlerId} --> Runtime`)
   }
-  lines.push('  Runtime["ThreadRuntime"] --> Observations["ZenObservation stream"]', '```')
+  lines.push('  Runtime["ThreadRuntime"] --> Observations["EnsoObservation stream"]', '```')
   return lines
 }
 
@@ -133,10 +133,10 @@ function pipelineStages(mappedKinds: readonly string[]): PipelineStage[] {
     },
     {
       id: 'Schema',
-      label: 'ZenObservation',
+      label: 'EnsoObservation',
       contract: '[Core exports](./core-exports.md)',
       path: OBSERVATION_PATH,
-      line: lineOf(OBSERVATION_PATH, /export const ZenObservation = Type\.Union/),
+      line: lineOf(OBSERVATION_PATH, /export const EnsoObservation = Type\.Union/),
     },
     {
       id: 'Frame',
@@ -194,7 +194,7 @@ function generate(): string {
     '<!-- generated: scripts/docs/flow-diagrams.ts -->',
     '# Generated flows',
     '',
-    'Every node below is read out of the source the flow runs through — the route table in `packages/web/src/server/index.ts` and the `ZenObservation` union in `packages/core/src/observation.ts`. Nothing here is drawn by hand, so a route or a kind that moves changes this page or fails the docs gate.',
+    'Every node below is read out of the source the flow runs through — the route table in `packages/web/src/server/index.ts` and the `EnsoObservation` union in `packages/core/src/observation.ts`. Nothing here is drawn by hand, so a route or a kind that moves changes this page or fails the docs gate.',
     '',
     '## Control plane',
     '',

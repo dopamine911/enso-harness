@@ -9,7 +9,7 @@
  *   (pi's queue has no per-item cancel — a stop clears it whole and hands the texts back),
  *   `QueueItemAttachment`/`QueueItemImage`/`QueueItemFile` (attachments are #68), and the
  *   `QueueMessage`/`QueueMessagePart`/`QueueTodo` types that fed them — the queued items here
- *   are pi's texts, `string[]` on the wire (`ZenQueue`)
+ *   are pi's texts, `string[]` on the wire (`EnsoQueue`)
  * - `QueueList` renders a plain scrolling `div` instead of shadcn's `ScrollArea`, which this
  *   repo has not adopted (`components/ui/` has no scroll-area); `max-h-40 overflow-y-auto`
  *   gives the same bound

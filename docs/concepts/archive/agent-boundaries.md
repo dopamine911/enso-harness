@@ -2,7 +2,7 @@
 
 > **Status (#167, #162 workstream 11):** archived — pre-build design note (2026-09-02), written before the tree existed. What it argued for landed as the guard suite (`packages/harness/extensions/guards/`, `docs/seams/guards.md`) and the permission-mode seam; the rest is context, not a plan.
 
-**Written** 2026-09-02, by Claude (Opus 5) at Daniel's request, for the zen-harness project.
+**Written** 2026-09-02, by Claude (Opus 5) at Daniel's request, for the Enso project.
 
 **Perspective and bias, stated up front.** I operate under the boundaries described here, which makes
 this a report from inside rather than a documentation summary — I can say which constraints actually
@@ -552,7 +552,7 @@ reason to settle Phase 0 first — it is what makes openness an advantage instea
 ## Part 6 — Where each piece lands in a pi-based stack
 
 Upstream paths are given relative to each project's repository root, because a local clone location is
-the first thing to rot. As of 2026-09-02 the clones sit under `zen-harness/.ideas/{pi,oh-my-pi,dsh}`.
+the first thing to rot. As of 2026-09-02 the clones sit under `Enso/.ideas/{pi,oh-my-pi,dsh}`.
 
 | Boundary | Seam | Effort |
 |---|---|---|

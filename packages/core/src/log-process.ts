@@ -1,18 +1,18 @@
 /**
- * A process's sink (#132 item 2): ONE log for the harness — `.zen/logs/zen-YYYY-MM-DD.jsonl`,
+ * A process's sink (#132 item 2): ONE log for the harness — `.enso/logs/enso-YYYY-MM-DD.jsonl`,
  * every process appending to the same day's file, every record redacted by field name
  * before it is written, and — for a terminal — a pretty console sink beside it at its own
  * level.
  *
- * And THE KNOB: `ZEN_LOG_LEVEL` picks the tier the file holds, per subsystem if wanted;
- * `ZEN_LOG_CONSOLE` the terminal's.
+ * And THE KNOB: `ENSO_LOG_LEVEL` picks the tier the file holds, per subsystem if wanted;
+ * `ENSO_LOG_CONSOLE` the terminal's.
  *
  * Called by a LAUNCHER (`dev.ts`, `dev-web.ts`, the harness extension when pi is a child),
- * never by `startZenServer`: a library configures nothing, so a test that starts the server
+ * never by `startEnsoServer`: a library configures nothing, so a test that starts the server
  * sees no output it did not ask for, and a test that wants the records installs
  * `@logtape/testing`'s recorder in its own `configure`.
  *
- * ⚠ Imported as `@zen/core/log-process`, NEVER from the barrel. `@logtape/file` builds its
+ * ⚠ Imported as `@enso/core/log-process`, NEVER from the barrel. `@logtape/file` builds its
  * sinks at module evaluation (`createFileSinks()` on `node:fs`), so it is not tree-shaken
  * the way `paths.ts`'s unused `node:fs` is — exported from `index.ts` it took the page down
  * (`ReferenceError: import_node_fs4 is not defined`, the slice-2 receipt). The barrel stays
@@ -69,26 +69,26 @@ import {
 import { getPrettyFormatter } from '@logtape/pretty'
 import { redactByField } from '@logtape/redaction'
 import { Check } from 'typebox/value'
-import { ZEN_LOG_ROOT, ZEN_REDACT_FIELDS, ZEN_REDACTED, ZEN_REDACTED_VALUE, ZenLogLine } from './log.ts'
-import { zenLogsDir } from './paths.ts'
+import { ENSO_LOG_ROOT, ENSO_REDACT_FIELDS, ENSO_REDACTED, ENSO_REDACTED_VALUE, EnsoLogLine } from './log.ts'
+import { ensoLogsDir } from './paths.ts'
 
 /**
- * A per-category override: `zen.host.events=trace` turns one subtree up without the rest.
+ * A per-category override: `enso.host.events=trace` turns one subtree up without the rest.
  *
  * @group Logging
  */
-export interface ZenLogOverride {
+export interface EnsoLogOverride {
   readonly category: readonly string[]
   readonly level: LogLevel
 }
 
 /** @group Logging */
-export interface ZenLogLevels {
-  /** The file's lowest level for everything under `zen` not named by an override. */
+export interface EnsoLogLevels {
+  /** The file's lowest level for everything under `enso` not named by an override. */
   readonly file: LogLevel
   /** The terminal's; undefined for no console sink. Global — overrides are for the file. */
   readonly console: LogLevel | undefined
-  readonly overrides: readonly ZenLogOverride[]
+  readonly overrides: readonly EnsoLogOverride[]
 }
 
 /**
@@ -103,60 +103,97 @@ export const DEFAULT_FILE_LEVEL: LogLevel = 'info'
  *
  * @group Logging
  */
-export class ZenLogLevelError extends Error {
+export class EnsoLogLevelError extends Error {
   constructor(variable: string, value: string) {
     super(
       `${variable}=${JSON.stringify(value)} is not a log level. Use one of trace, debug, info, warning, error, fatal; ` +
-        `per-category overrides as \`info,zen.host.events=trace\`.`,
+        `per-category overrides as \`info,enso.host.events=trace\`.`,
     )
-    this.name = 'ZenLogLevelError'
+    this.name = 'EnsoLogLevelError'
   }
 }
 
 /**
- * The knobs, from the environment a launcher was started with:
- *   ZEN_LOG_LEVEL="info"                              — the file's tier (default `info`)
- *   ZEN_LOG_LEVEL="info,zen.host.events=trace"        — plus one subtree turned up
- *   ZEN_LOG_CONSOLE="warning"                          — the terminal's (the launcher's default otherwise)
- * `warn` is accepted for `warning`, since that is what `ZenLogger` calls it.
+ * A variable from before the rename, still set. Thrown at startup, naming every one of them.
+ *
+ * ⚠ A RENAMED KNOB THAT NOBODY READS IS SILENT, AND SILENCE IS THE WORST OUTCOME HERE. Every
+ * `ZEN_*` variable became `ENSO_*`; a shell profile or a CI job still exporting the old spelling
+ * would simply get the default — a session logging at `info` when its author asked for `trace`,
+ * and nothing anywhere saying why. So a stale variable is a REFUSAL, not a shrug.
+ *
+ * Thrown from `parseEnsoLogLevels`, which every process that configures logging calls with its
+ * own environment — the launchers, the server, the pi extension — so there is one check and no
+ * process that skips it.
  *
  * @group Logging
  */
-export function parseZenLogLevels(
+export class RetiredEnvironmentError extends Error {
+  constructor(names: readonly string[]) {
+    super(
+      `${names.join(', ')} ${names.length === 1 ? 'is' : 'are'} from before the Enso rename and nothing reads ` +
+        `${names.length === 1 ? 'it' : 'them'}. Rename to ${names.map((name) => name.replace(/^ZEN_/, 'ENSO_')).join(', ')}.`,
+    )
+    this.name = 'RetiredEnvironmentError'
+  }
+}
+
+/**
+ * Every `ZEN_*` name the given environment still carries, in the order a reader would fix them.
+ *
+ * @group Logging
+ */
+export function retiredEnvironmentNames(environment: Readonly<Record<string, string | undefined>>): string[] {
+  return Object.keys(environment)
+    .filter((name) => name.startsWith('ZEN_') && environment[name] !== undefined)
+    .sort()
+}
+
+/**
+ * The knobs, from the environment a launcher was started with:
+ *   ENSO_LOG_LEVEL="info"                              — the file's tier (default `info`)
+ *   ENSO_LOG_LEVEL="info,enso.host.events=trace"        — plus one subtree turned up
+ *   ENSO_LOG_CONSOLE="warning"                          — the terminal's (the launcher's default otherwise)
+ * `warn` is accepted for `warning`, since that is what `EnsoLogger` calls it.
+ *
+ * @group Logging
+ */
+export function parseEnsoLogLevels(
   environment: Readonly<Record<string, string | undefined>>,
   defaults: { readonly console: LogLevel | undefined },
-): ZenLogLevels {
+): EnsoLogLevels {
+  const retired = retiredEnvironmentNames(environment)
+  if (retired.length > 0) throw new RetiredEnvironmentError(retired)
   let file: LogLevel = DEFAULT_FILE_LEVEL
-  const overrides: ZenLogOverride[] = []
-  const levelValue = environment.ZEN_LOG_LEVEL
+  const overrides: EnsoLogOverride[] = []
+  const levelValue = environment.ENSO_LOG_LEVEL
   if (levelValue !== undefined && levelValue.trim().length > 0) {
     for (const token of levelValue.split(',')) {
       const part = token.trim()
       if (part.length === 0) continue
       const separator = part.indexOf('=')
       if (separator === -1) {
-        file = levelOf('ZEN_LOG_LEVEL', part)
+        file = levelOf('ENSO_LOG_LEVEL', part)
         continue
       }
       const category = part.slice(0, separator).trim().split('.')
-      if (category[0] !== ZEN_LOG_ROOT || category.some((segment) => segment.length === 0)) {
-        throw new ZenLogLevelError('ZEN_LOG_LEVEL', part)
+      if (category[0] !== ENSO_LOG_ROOT || category.some((segment) => segment.length === 0)) {
+        throw new EnsoLogLevelError('ENSO_LOG_LEVEL', part)
       }
-      overrides.push({ category, level: levelOf('ZEN_LOG_LEVEL', part.slice(separator + 1)) })
+      overrides.push({ category, level: levelOf('ENSO_LOG_LEVEL', part.slice(separator + 1)) })
     }
   }
-  const consoleValue = environment.ZEN_LOG_CONSOLE
+  const consoleValue = environment.ENSO_LOG_CONSOLE
   const console =
     consoleValue === undefined || consoleValue.trim().length === 0
       ? defaults.console
-      : levelOf('ZEN_LOG_CONSOLE', consoleValue)
+      : levelOf('ENSO_LOG_CONSOLE', consoleValue)
   return { file, console, overrides }
 }
 
 function levelOf(variable: string, raw: string): LogLevel {
   const value = raw.trim().toLowerCase()
   const level = value === 'warn' ? 'warning' : value
-  if (!isLogLevel(level)) throw new ZenLogLevelError(variable, raw)
+  if (!isLogLevel(level)) throw new EnsoLogLevelError(variable, raw)
   return level
 }
 
@@ -164,13 +201,13 @@ function levelOf(variable: string, raw: string): LogLevel {
  * The level a record's category must reach to be written: the longest override prefix that
  * matches, else the file's level.
  *
- * `["zen","host","events"]` is matched by an override on `zen.host.events`, then `zen.host`,
- * then `zen`.
+ * `["enso","host","events"]` is matched by an override on `enso.host.events`, then `enso.host`,
+ * then `enso`.
  *
  * @group Logging
  */
-export function effectiveFileLevel(levels: ZenLogLevels, category: readonly string[]): LogLevel {
-  let best: ZenLogOverride | undefined
+export function effectiveFileLevel(levels: EnsoLogLevels, category: readonly string[]): LogLevel {
+  let best: EnsoLogOverride | undefined
   for (const override of levels.overrides) {
     if (override.category.length > category.length) continue
     if (best !== undefined && override.category.length <= best.category.length) continue
@@ -180,7 +217,7 @@ export function effectiveFileLevel(levels: ZenLogLevels, category: readonly stri
 }
 
 /** The lowest of every configured level — what the logger tree must let through for the sinks to choose. */
-function lowestOf(levels: ZenLogLevels): LogLevel {
+function lowestOf(levels: EnsoLogLevels): LogLevel {
   let lowest: LogLevel = levels.file
   for (const candidate of [levels.console, ...levels.overrides.map((override) => override.level)]) {
     if (candidate !== undefined && compareLogLevel(candidate, lowest) < 0) lowest = candidate
@@ -190,7 +227,7 @@ function lowestOf(levels: ZenLogLevels): LogLevel {
 
 /**
  * The value pass (#139): every known secret VALUE, wherever it appears, replaced with
- * `ZEN_REDACTED_VALUE` — in the rendered message, in the raw template, and in every string
+ * `ENSO_REDACTED_VALUE` — in the rendered message, in the raw template, and in every string
  * property, however deeply the property nests. `undefined` when there is nothing to scan
  * for, so a process with no secret store pays nothing on the write path.
  *
@@ -208,7 +245,7 @@ function valueScrubber(values: readonly string[]): ((value: unknown) => unknown)
   if (scannable.length === 0) return undefined
   const pattern = new RegExp(scannable.map((secret) => secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g')
   const scrubbed = (value: unknown): unknown => {
-    if (typeof value === 'string') return value.replace(pattern, ZEN_REDACTED_VALUE)
+    if (typeof value === 'string') return value.replace(pattern, ENSO_REDACTED_VALUE)
     if (Array.isArray(value)) return value.map(scrubbed)
     // ⚠ An Error's `message` and `stack` are own but NON-ENUMERABLE, so the structural
     // rebuild below turns `log.error('…: {error}', { error })` into `{}` — and the records
@@ -238,7 +275,7 @@ function valueScrubber(values: readonly string[]): ((value: unknown) => unknown)
  * identity: no allocation, no scan, nothing on the write path at all.
  *
  * ⚠ A THUNK is asked per record, which is the point (#207): the READER is per call —
- * `readSecret` re-reads `.zen/secrets.env` every time, and web-search's own refusal tells the
+ * `readSecret` re-reads `.enso/secrets.env` every time, and web-search's own refusal tells the
  * operator to rotate a key with the launcher running — so a snapshot taken at configure left
  * every rotated key readable and unredactable for the rest of the process's life. The
  * alternation is rebuilt only when the thunk hands back a DIFFERENT array
@@ -281,18 +318,18 @@ function redactingKnownValues(values: readonly string[] | (() => readonly string
 
 /** @group Logging */
 export interface ProcessLoggingOptions {
-  /** `zenLogsDir(repoRoot)` — created if absent. */
+  /** `ensoLogsDir(repoRoot)` — created if absent. */
   readonly logsDir: string
   /** Which launcher this is — `server`, `web`, `pi` — on every record it writes, since the file is shared. */
   readonly process: string
-  /** From `parseZenLogLevels`; the defaults when omitted: file `info`, no console. */
-  readonly levels?: ZenLogLevels
+  /** From `parseEnsoLogLevels`; the defaults when omitted: file `info`, no console. */
+  readonly levels?: EnsoLogLevels
   /**
    * The secret values to scrub wherever they appear, from `knownSecretValues` (#139).
    * Omitted — a test, a process with no secret store — means the value pass does not run.
    *
    * A THUNK — `knownSecretValuesTracking(repoRoot)` — is what a launcher passes (#207): it is
-   * asked per record, so a key rotated in `.zen/secrets.env` while the process runs is
+   * asked per record, so a key rotated in `.enso/secrets.env` while the process runs is
    * redacted from the next record on, matching the reader, which was always per call. An
    * array is a snapshot of the set at configure time and stays one.
    */
@@ -300,20 +337,20 @@ export interface ProcessLoggingOptions {
 }
 
 /**
- * Where this process writes: `ZEN_LOGS_DIR` when set — a user keeping logs elsewhere, a test
- * keeping them out of the checkout — else `.zen/logs` under the repo (`zenLogsDir`).
+ * Where this process writes: `ENSO_LOGS_DIR` when set — a user keeping logs elsewhere, a test
+ * keeping them out of the checkout — else `.enso/logs` under the repo (`ensoLogsDir`).
  *
  * One rule for every launcher and for the extension, so they land in the same file.
  *
  * @group Logging
  */
 export function logsDirFrom(environment: Readonly<Record<string, string | undefined>>, repoRoot: string): string {
-  const configured = environment.ZEN_LOGS_DIR
-  return configured === undefined || configured.length === 0 ? zenLogsDir(repoRoot) : configured
+  const configured = environment.ENSO_LOGS_DIR
+  return configured === undefined || configured.length === 0 ? ensoLogsDir(repoRoot) : configured
 }
 
 /**
- * `zen-2026-09-09.jsonl`: the harness's one log for that day — the machine's LOCAL day, not
+ * `enso-2026-09-09.jsonl`: the harness's one log for that day — the machine's LOCAL day, not
  * UTC.
  *
  * The file is for the person at the machine: at 19:05 local `bun run logs` must not say "no log
@@ -322,13 +359,13 @@ export function logsDirFrom(environment: Readonly<Record<string, string | undefi
  *
  * @group Logging
  */
-export function zenLogFilename(date: Date): string {
+export function ensoLogFilename(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
-  return `zen-${date.getFullYear()}-${month}-${day}.jsonl`
+  return `enso-${date.getFullYear()}-${month}-${day}.jsonl`
 }
 
-const ZEN_LOG_FILENAME = /^zen-(\d{4}-\d{2}-\d{2})\.jsonl$/
+const ENSO_LOG_FILENAME = /^enso-(\d{4}-\d{2}-\d{2})\.jsonl$/
 const KEEP_DAYS = 14
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -336,7 +373,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
  * Create today's file before anything opens it, owner-only, and tighten it if an earlier
  * build or a wider umask left it readable by the group (#207).
  *
- * The day file quotes the material of files that are themselves `0600` — `.zen/secrets.env`
+ * The day file quotes the material of files that are themselves `0600` — `.enso/secrets.env`
  * through a record that carries a value the redactor did not know yet, a guard `reason`
  * echoing a command, a `trace` payload — and it was created `0664`, because LogTape's node
  * driver opens with `fs.openSync(path, 'a')` and the sink takes no mode. "The file stays safe
@@ -357,7 +394,7 @@ function owningTheDayFile(logsDir: string): () => void {
     const now = Date.now()
     if (now < ownedThrough) return
     const today = new Date(now)
-    const descriptor = openSync(join(logsDir, zenLogFilename(today)), 'a', 0o600)
+    const descriptor = openSync(join(logsDir, ensoLogFilename(today)), 'a', 0o600)
     try {
       const mode = fstatSync(descriptor).mode & 0o777
       if ((mode & 0o077) !== 0) fchmodSync(descriptor, mode & 0o700)
@@ -384,7 +421,7 @@ export function isLoggingConfigured(): boolean {
  * @group Logging
  */
 export async function configureProcessLogging(options: ProcessLoggingOptions): Promise<() => Promise<void>> {
-  const levels: ZenLogLevels = options.levels ?? { file: DEFAULT_FILE_LEVEL, console: undefined, overrides: [] }
+  const levels: EnsoLogLevels = options.levels ?? { file: DEFAULT_FILE_LEVEL, console: undefined, overrides: [] }
   mkdirSync(options.logsDir, { recursive: true })
   // Before the sink opens the file: it opens eagerly, with no mode of its own (#207).
   const ownTheDayFile = owningTheDayFile(options.logsDir)
@@ -392,9 +429,9 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
   const fileSink = getTimeRotatingFileSink({
     directory: options.logsDir,
     interval: 'daily',
-    filename: zenLogFilename,
+    filename: ensoLogFilename,
     parseFilename: (filename: string): Date | null => {
-      const day = ZEN_LOG_FILENAME.exec(filename)?.[1]
+      const day = ENSO_LOG_FILENAME.exec(filename)?.[1]
       return day === undefined ? null : new Date(`${day}T00:00:00`) // local midnight, as the name was made
     },
     maxAgeMs: KEEP_DAYS * DAY_MS,
@@ -420,28 +457,28 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
   // (the pretty formatter, `properties: true`), and a secret-shaped value on stdout is the
   // same leak with a different reader — the #134 review caught the console sink bare.
   // Each sink is wrapped on its own so LogTape's per-sink error containment still holds.
-  const redaction = { fieldPatterns: [...ZEN_REDACT_FIELDS], action: (): string => ZEN_REDACTED }
+  const redaction = { fieldPatterns: [...ENSO_REDACT_FIELDS], action: (): string => ENSO_REDACTED }
   // …and the VALUE pass outside it (#139): field names cannot see a token quoted in a
   // message, a guard's `reason`, or a `trace` payload. Measured before it was written —
   // 193 ns for an ordinary record, 725 ns for a 20 KB payload, so a 50k-record `trace` day
   // costs ~10 ms: the write path is the right place, and the file stays safe at rest (#132).
   const redactValues = redactingKnownValues(options.secretValues ?? [])
   const sinks: Record<string, Sink> = { file: redactValues(redactByField(file, redaction)) }
-  const zenSinks = ['file']
+  const ensoSinks = ['file']
   const metaSinks: string[] = []
   if (levels.console !== undefined) {
     const pretty = getConsoleSink({
       formatter: getPrettyFormatter({ timestamp: 'time', properties: true, categoryWidth: 24 }),
     })
     sinks.console = redactValues(redactByField(withFilter(pretty, levels.console), redaction))
-    zenSinks.push('console')
+    ensoSinks.push('console')
     metaSinks.push('console')
   }
   await configure({
     sinks,
     loggers: [
       // The tree lets the lowest configured level through; each sink's filter decides.
-      { category: [ZEN_LOG_ROOT], lowestLevel: lowestOf(levels), sinks: zenSinks },
+      { category: [ENSO_LOG_ROOT], lowestLevel: lowestOf(levels), sinks: ensoSinks },
       // LogTape's own reports — a sink that threw, a misconfiguration. Never to the file
       // that may be the thing failing.
       { category: ['logtape', 'meta'], lowestLevel: 'warning', sinks: metaSinks },
@@ -452,7 +489,7 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
   // the debug lines says why — and WHO is writing (#144). A shared file makes "the
   // processes" mean "who has written to today's file"; with a pid and a start time,
   // liveness is inferable from the last write without any process asking to be counted.
-  getLogger([ZEN_LOG_ROOT, 'log']).info('logging configured: file {file}, console {console}, overrides {overrides}', {
+  getLogger([ENSO_LOG_ROOT, 'log']).info('logging configured: file {file}, console {console}, overrides {overrides}', {
     file: levels.file,
     console: levels.console ?? 'off',
     overrides: levels.overrides.map((override) => `${override.category.join('.')}=${override.level}`),
@@ -492,7 +529,7 @@ export function installLoggingShutdown(dispose: () => Promise<void>): void {
 // ── Reading the file back (#132: `bun run logs`, and the bundle's reader) ─────────────────
 
 const PLACEHOLDER = /\{([^{}]+)\}/g
-const LEVEL_OF_LINE: Readonly<Record<ZenLogLine['level'], LogLevel>> = {
+const LEVEL_OF_LINE: Readonly<Record<EnsoLogLine['level'], LogLevel>> = {
   TRACE: 'trace',
   DEBUG: 'debug',
   INFO: 'info',
@@ -509,14 +546,14 @@ const LEVEL_OF_LINE: Readonly<Record<ZenLogLine['level'], LogLevel>> = {
  *
  * @group Logging
  */
-export function parseZenLogLine(raw: string): ZenLogLine | string {
+export function parseEnsoLogLine(raw: string): EnsoLogLine | string {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch {
     return 'not JSON'
   }
-  return Check(ZenLogLine, parsed) ? parsed : 'not a ZenLogLine'
+  return Check(EnsoLogLine, parsed) ? parsed : 'not a EnsoLogLine'
 }
 
 /**
@@ -530,7 +567,7 @@ export function parseZenLogLine(raw: string): ZenLogLine | string {
  *
  * @group Logging
  */
-export function logRecordOf(line: ZenLogLine): LogRecord {
+export function logRecordOf(line: EnsoLogLine): LogRecord {
   const properties = line.properties ?? {}
   const template = line.message ?? ''
   const message: unknown[] = []
@@ -559,9 +596,9 @@ export function logRecordOf(line: ZenLogLine): LogRecord {
  *
  * @group Logging
  */
-export function zenLogLineRenderer(
+export function ensoLogLineRenderer(
   options: { readonly wordWrap?: boolean | number; readonly colors?: boolean } = {},
-): (line: ZenLogLine) => string {
+): (line: EnsoLogLine) => string {
   const pretty = getPrettyFormatter({
     timestamp: 'time',
     properties: true,
@@ -569,5 +606,5 @@ export function zenLogLineRenderer(
     wordWrap: options.wordWrap ?? true,
     colors: options.colors ?? true,
   })
-  return (line: ZenLogLine): string => pretty(logRecordOf(line))
+  return (line: EnsoLogLine): string => pretty(logRecordOf(line))
 }

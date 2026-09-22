@@ -2,12 +2,12 @@ import {
   browserSection,
   describeThreadEvent,
   describeTranscriptEntry,
-  type ZenLogLine,
-  type ZenThreadEvent,
-  ZenThreadEvents,
-  ZenThreadInspection,
-  type ZenTranscriptEntry,
-} from '@zen/core'
+  type EnsoLogLine,
+  type EnsoThreadEvent,
+  EnsoThreadEvents,
+  EnsoThreadInspection,
+  type EnsoTranscriptEntry,
+} from '@enso/core'
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Check } from 'typebox/value'
 import type { FetchLike } from './browser-logging.ts'
@@ -19,9 +19,9 @@ import { boundedFailureDetail } from './stored-threads.ts'
 import type { ThreadStats } from './thread-stats.tsx'
 import { browserLogging } from './thread-stores.ts'
 
-const NO_LINES: readonly ZenLogLine[] = []
+const NO_LINES: readonly EnsoLogLine[] = []
 /** A page mounted without `configureBrowserLogging` (tests) has no ring: nothing to subscribe to, nothing logged. */
-function useRing(ring: Store<readonly ZenLogLine[]> | undefined): readonly ZenLogLine[] {
+function useRing(ring: Store<readonly EnsoLogLine[]> | undefined): readonly EnsoLogLine[] {
   return useSyncExternalStore(
     ring?.subscribe ?? (() => () => undefined),
     ring?.get ?? (() => NO_LINES),
@@ -58,7 +58,7 @@ export interface BrowserBelief {
   /** The acquisition this page's last run held (the `status` frame's `generation`, #109); undefined before a run. */
   readonly generation: number | undefined
   /** This thread's records from the page's ring (#132): what the browser LOGGED, newest last. */
-  readonly logged: readonly ZenLogLine[]
+  readonly logged: readonly EnsoLogLine[]
 }
 
 /**
@@ -93,9 +93,9 @@ export interface ThreadDebugViewProps {
   readonly threadId: string
   readonly browser: BrowserBelief
   /** The server's answer, or undefined before the first refresh. */
-  readonly inspection: ZenThreadInspection | undefined
+  readonly inspection: EnsoThreadInspection | undefined
   /** The thread's two event tails (#97), fetched alongside the inspection; undefined before the first refresh. */
-  readonly events: ZenThreadEvents | undefined
+  readonly events: EnsoThreadEvents | undefined
   /** Why the last refresh produced nothing — a 404 for a thread that has not run yet, a down server. */
   readonly error: string | undefined
   /** The last copy's outcome; the label beside the button says which. */
@@ -132,7 +132,7 @@ export function describeChunk(chunk: RecordedCustomEvent): string {
  * keys by its position in the branch — two such entries in the same second with the same type
  * would otherwise collide on the description and React would reuse the wrong row (PR #87 review).
  */
-function entryKey(entry: ZenTranscriptEntry, position: number): string {
+function entryKey(entry: EnsoTranscriptEntry, position: number): string {
   return `${position}:${entry.id}`
 }
 
@@ -143,7 +143,7 @@ function Mismatch({ when, says }: { when: boolean; says: string }): React.ReactN
   )
 }
 
-function EventTailList({ events }: { events: readonly ZenThreadEvent[] }): React.ReactNode {
+function EventTailList({ events }: { events: readonly EnsoThreadEvent[] }): React.ReactNode {
   if (events.length === 0) return <div>nothing yet</div>
   return (
     <ol>
@@ -237,7 +237,7 @@ export function ThreadDebugView({
                 className={line.level === 'WARN' || line.level === 'ERROR' ? 'text-destructive' : ''}
               >
                 {line['@timestamp'].slice(11, 23)} {line.level.toLowerCase()}{' '}
-                {line.logger.replace(/^zen\.browser\.?/, '')} {line.message}
+                {line.logger.replace(/^enso\.browser\.?/, '')} {line.message}
               </li>
             ))}
           </ol>
@@ -304,25 +304,27 @@ export class InspectionFetchError extends Error {
 }
 
 /** Fetches one thread's inspection; a non-2xx becomes an `InspectionFetchError`. */
-async function fetchThreadInspection(threadId: string): Promise<ZenThreadInspection> {
+async function fetchThreadInspection(threadId: string): Promise<EnsoThreadInspection> {
   const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}`)
   if (!response.ok) throw new InspectionFetchError(response.status, boundedFailureDetail(await response.text()))
   const payload: unknown = await response.json()
-  if (!Check(ZenThreadInspection, payload)) throw new Error("the server's inspection payload did not match its schema")
+  if (!Check(EnsoThreadInspection, payload)) throw new Error("the server's inspection payload did not match its schema")
   return payload
 }
 
 /** Fetches one thread's event tails (#97); the same 404 rule as the inspection. */
-async function fetchThreadEvents(threadId: string): Promise<ZenThreadEvents> {
+async function fetchThreadEvents(threadId: string): Promise<EnsoThreadEvents> {
   const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/events`)
   if (!response.ok) throw new InspectionFetchError(response.status, boundedFailureDetail(await response.text()))
   const payload: unknown = await response.json()
-  if (!Check(ZenThreadEvents, payload)) throw new Error("the server's events payload did not match its schema")
+  if (!Check(EnsoThreadEvents, payload)) throw new Error("the server's events payload did not match its schema")
   return payload
 }
 
 /** One refresh = both payloads, so the three columns describe the same moment. */
-async function fetchThreadDebug(threadId: string): Promise<{ session: ZenThreadInspection; events: ZenThreadEvents }> {
+async function fetchThreadDebug(
+  threadId: string,
+): Promise<{ session: EnsoThreadInspection; events: EnsoThreadEvents }> {
   const [session, events] = await Promise.all([fetchThreadInspection(threadId), fetchThreadEvents(threadId)])
   return { session, events }
 }
@@ -404,7 +406,7 @@ export type BundleState = 'idle' | 'building' | 'saved' | { readonly failed: str
  */
 export async function fetchThreadBundle(
   threadId: string,
-  ring: readonly ZenLogLine[],
+  ring: readonly EnsoLogLine[],
   fetchImpl: FetchLike = fetch,
 ): Promise<{ filename: string; text: string }> {
   const response = await fetchImpl(`/api/logs/bundle?thread=${encodeURIComponent(threadId)}`)
@@ -412,7 +414,7 @@ export async function fetchThreadBundle(
   const disposition = response.headers.get('Content-Disposition') ?? ''
   const named = /filename="([^"]+)"/.exec(disposition)?.[1]
   const text = `${await response.text()}\n${browserSection(ring, typeof window === 'undefined' ? undefined : window.location.href)}`
-  return { filename: named ?? `zen-bundle-${threadId.slice(0, 8)}.md`, text }
+  return { filename: named ?? `enso-bundle-${threadId.slice(0, 8)}.md`, text }
 }
 
 /** Hands the browser a file to save — an object URL for a moment, then released. */
@@ -447,8 +449,8 @@ export function ThreadDebugDrawer(): React.ReactNode {
   const logging = useStore(browserLogging)
   const ring = useRing(logging?.ring)
   const logged = useMemo(() => ring.filter((line) => line.properties?.threadId === threadId), [ring, threadId])
-  const [session, setSession] = useState<ZenThreadInspection | undefined>(undefined)
-  const [events, setEvents] = useState<ZenThreadEvents | undefined>(undefined)
+  const [session, setSession] = useState<EnsoThreadInspection | undefined>(undefined)
+  const [events, setEvents] = useState<EnsoThreadEvents | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [copyState, setCopyState] = useState<CopyState>('idle')
   const [bundleState, setBundleState] = useState<BundleState>('idle')

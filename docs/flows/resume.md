@@ -20,12 +20,12 @@ sequenceDiagram
 
   B->>S: GET /api/stored-threads
   S->>H: listSessions() — the runtime's own listing, one header parse per file, newest first
-  S-->>B: ZenStoredThread[] { threadId, title = first user message, lastActivityAt, messageCount, busy = peek }
+  S-->>B: EnsoStoredThread[] { threadId, title = first user message, lastActivityAt, messageCount, busy = peek }
   B->>S: GET /api/threads/:id/history — readThreadUrl(?thread=) at boot, or a rail click
   S->>T: peek(threadId) — never builds
   S->>H: readTranscript(threadId) when cold · inspect().entries when live
   H->>D: open the file into memory, walk the branch → transcriptOf
-  S-->>B: ZenThreadHistory { messages: transcriptToMessages, permissionMode: storedPermissionMode, interrupted? }
+  S-->>B: EnsoThreadHistory { messages: transcriptToMessages, permissionMode: storedPermissionMode, interrupted? }
   B->>B: adoptThread — stores under the stored id, mode applied, urlForThread written
   B->>F: GET …/follow
   F-->>B: snapshot { live: false, messages, permissionMode, openDialogs: [] }
@@ -70,13 +70,13 @@ sequenceDiagram
 
 What crosses the storage seam on every cold read, and what `inspect().entries` holds live:
 
-<!-- source: packages/core/src/transcript.ts#ZenTranscriptEntry -->
+<!-- source: packages/core/src/transcript.ts#EnsoTranscriptEntry -->
 ```ts
-export const ZenTranscriptEntry = Type.Union([
-  ZenTranscriptMessage,
-  ZenTranscriptToolResult,
-  ZenTranscriptCustom,
-  ZenTranscriptOther,
+export const EnsoTranscriptEntry = Type.Union([
+  EnsoTranscriptMessage,
+  EnsoTranscriptToolResult,
+  EnsoTranscriptCustom,
+  EnsoTranscriptOther,
 ])
 ```
 

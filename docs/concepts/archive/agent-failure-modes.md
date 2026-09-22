@@ -2,7 +2,7 @@
 
 > **Status (#167, #162 workstream 11):** archived — pre-build catalogue (2026-09-02) of one agent session's errors. Informs `the-craft` and the receipts discipline; describes no code in this tree.
 
-**Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the zen-harness project.
+**Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the Enso project.
 
 A catalogue of every error I made in one long working session, with the mechanism that produced each and
 the gate that would have caught it. The point is not confession — it is that the errors cluster, and the

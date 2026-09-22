@@ -4,7 +4,7 @@ import { type Static, Type } from 'typebox'
  * The Tier 0 guard policy.
  *
  * ⚠ The regex constants at the bottom are not schemas, and they live here anyway. Splitting
- * the policy — schema in `@zen/core`, patterns beside the extension — would put half of one
+ * the policy — schema in `@enso/core`, patterns beside the extension — would put half of one
  * decision in each of two packages, which is the duplication this package exists to prevent.
  * The policy is one thing; it is declared in one place.
  *
@@ -51,25 +51,25 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
     '/.netrc',
     '/.pgpass',
     '/.kube/config',
-    // The harness's OWN credential dir (#204): `.zen/secrets.env` (#89) and, under
-    // `.zen/pi-agent/`, pi's `auth.json`, the provider-failover files and every session
+    // The harness's OWN credential dir (#204): `.enso/secrets.env` (#89) and, under
+    // `.enso/pi-agent/`, pi's `auth.json`, the provider-failover files and every session
     // transcript — all `0600` on disk, i.e. the operator's own umask calls them secret.
     // The basename gate below covered `secrets.env` alone, so `auth.json` was readable
-    // and `grep path=.zen` recursed the lot; `containsPathFragment` appends a separator,
+    // and `grep path=.enso` recursed the lot; `containsPathFragment` appends a separator,
     // so this one entry denies the directory itself and everything under it.
-    // ⚠ THE COST, stated: the agent can no longer read `.zen/logs/*.jsonl` with a tool.
+    // ⚠ THE COST, stated: the agent can no longer read `.enso/logs/*.jsonl` with a tool.
     // Reading the log is a human command — `bun run logs` — which uses node fs and never
-    // passes this guard. Writes were already denied (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`).
-    '/.zen/',
+    // passes this guard. Writes were already denied (`ENSO_PERSISTENCE_WRITE_DIRECTORIES`).
+    '/.enso/',
   ],
-  // `zen.config.json` is zen-harness's committed config (#59) and carries web_fetch's
+  // `enso.config.json` is Enso's committed config (#59) and carries web_fetch's
   // host allowlist (#54): a write there widens the harness's egress for every FUTURE
   // session (it is read once at extension load, so the running session cannot re-read
   // its own edit). Same rationale as `.cc-safety-net` below — the guard is the only
   // layer keeping the agent from editing the policy that gates it. Fragment matching is
   // deliberately loose (any path whose name contains it is refused) — over-blocking a
   // lookalike file fails safe and says so.
-  protectedWriteFragments: ['/.git/', 'zen.config.json'],
+  protectedWriteFragments: ['/.git/', 'enso.config.json'],
   defaultBashTimeoutSeconds: 120,
   // The ad-hoc HTTP/TCP clients plus the PowerShell fetch cmdlets (the raw scan sees
   // those; a POSIX segment never will). git and interpreters deliberately absent (#9).
@@ -150,13 +150,13 @@ export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.git', '.vscod
  *
  *   `.pi`      — a project-local `.pi/settings.json` installs an extension package that
  *                loads on the user's next plain `pi` session in that repo (the exact
- *                mechanism scripts/zen.ts suppresses with --no-extensions).
+ *                mechanism scripts/enso.ts suppresses with --no-extensions).
  *   `.agents`  — pi discovers skills from `~/.agents/skills/` even under a redirected
- *                agent dir (scripts/zen.ts's --no-skills note); a written skill loads
+ *                agent dir (scripts/enso.ts's --no-skills note); a written skill loads
  *                next session.
- *   `.zen`     — the harness's own agent dir (`.zen/pi-agent`: settings, extensions,
+ *   `.enso`     — the harness's own agent dir (`.enso/pi-agent`: settings, extensions,
  *                auth.json). No agent task legitimately writes there via write/edit;
- *                scripts/zen.ts writes `.zen/print-harness` through node fs, which never
+ *                scripts/enso.ts writes `.enso/print-harness` through node fs, which never
  *                passes this guard.
  *   `.cc-safety-net` — cc-safety-net's own policy dir (#9). Probed 2026-09-04: its
  *                checkCommand DENIES `rm -rf .cc-safety-net` but ALLOWS a shell redirect
@@ -166,7 +166,7 @@ export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.git', '.vscod
  *
  * @group Guards
  */
-export const ZEN_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.pi', '.agents', '.zen', '.cc-safety-net']
+export const ENSO_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.pi', '.agents', '.enso', '.cc-safety-net']
 
 /**
  * Basenames that deny a read outright, regardless of directory.

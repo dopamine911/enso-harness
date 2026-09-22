@@ -4,18 +4,19 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { reset } from '@logtape/logtape'
 import { Check } from 'typebox/value'
-import { withZenLogContext, ZEN_REDACTED, ZEN_REDACTED_VALUE, ZenLogLine, zenLogger } from '../log.ts'
+import { ENSO_REDACTED, ENSO_REDACTED_VALUE, EnsoLogLine, ensoLogger, withEnsoLogContext } from '../log.ts'
 import { redactionManifest } from '../log-bundle.ts'
 import {
   configureProcessLogging,
+  EnsoLogLevelError,
   effectiveFileLevel,
+  ensoLogFilename,
+  ensoLogLineRenderer,
   logRecordOf,
-  parseZenLogLevels,
-  ZenLogLevelError,
-  zenLogFilename,
-  zenLogLineRenderer,
+  parseEnsoLogLevels,
+  retiredEnvironmentNames,
 } from '../log-process.ts'
-import { zenSecretsPath } from '../paths.ts'
+import { ensoSecretsPath } from '../paths.ts'
 import { knownSecretValuesTracking, readSecret } from '../secrets.ts'
 
 /**
@@ -30,15 +31,15 @@ const linesOf = (file: string): string[] =>
     .split('\n')
     .filter((line) => line.length > 0)
 
-test("⚠ the JSONL file: every line validates ZenLogLine; a secret-shaped field is gone and its VALUE appears nowhere; the route's threadId is on a record that never named it", async () => {
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-'))
+test("⚠ the JSONL file: every line validates EnsoLogLine; a secret-shaped field is gone and its VALUE appears nowhere; the route's threadId is on a record that never named it", async () => {
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-'))
   const dispose = await configureProcessLogging({ logsDir, process: 'server' })
-  const log = zenLogger('server', 'probe')
-  const file = join(logsDir, zenLogFilename(new Date()))
+  const log = ensoLogger('server', 'probe')
+  const file = join(logsDir, ensoLogFilename(new Date()))
   // The first record is the configuration itself.
   expect(linesOf(file)).toHaveLength(1)
 
-  withZenLogContext({ threadId: 't-ctx' }, () => {
+  withEnsoLogContext({ threadId: 't-ctx' }, () => {
     // A module deep under the route logs with no threadId of its own …
     log.info('something under the route happened: {detail}', {
       toolCallId: 'c1',
@@ -60,8 +61,8 @@ test("⚠ the JSONL file: every line validates ZenLogLine; a secret-shaped field
   expect(lines.join('\n')).not.toContain('MUST-NOT-LAND')
 
   const parsed = lines.map((line) => JSON.parse(line) as unknown)
-  for (const record of parsed) expect(Check(ZenLogLine, record)).toBe(true)
-  const [configured, underRoute, refusal] = parsed as ZenLogLine[]
+  for (const record of parsed) expect(Check(EnsoLogLine, record)).toBe(true)
+  const [configured, underRoute, refusal] = parsed as EnsoLogLine[]
   expect(configured?.properties).toMatchObject({ process: 'server', sequence: 1, file: 'info', console: 'off' })
   // Who wrote this file, and since when (#144): a shared file makes "the processes" mean
   // "who has written today", and liveness is then inferable from the last write.
@@ -73,12 +74,12 @@ test("⚠ the JSONL file: every line validates ZenLogLine; a secret-shaped field
 
   // Implicit context: the route's threadId is on the record; its own properties stay. The
   // message is the TEMPLATE — the event, not its values — so a bundle can filter on it.
-  expect(underRoute?.logger).toBe('zen.server.probe')
+  expect(underRoute?.logger).toBe('enso.server.probe')
   expect(underRoute?.level).toBe('INFO')
   expect(underRoute?.message).toBe('something under the route happened: {detail}')
   expect(underRoute?.properties).toMatchObject({ process: 'server', sequence: 2, threadId: 't-ctx', toolCallId: 'c1' })
-  // `tokens` is on ZEN_REDACT_FIELDS by design (token) — a marker, and the test says so.
-  expect(underRoute?.properties?.tokens).toBe(ZEN_REDACTED)
+  // `tokens` is on ENSO_REDACT_FIELDS by design (token) — a marker, and the test says so.
+  expect(underRoute?.properties?.tokens).toBe(ENSO_REDACTED)
 
   // Redaction at write: the field is a MARKER — the reader knows it was there — and its value is gone.
   expect(refusal?.level).toBe('WARN')
@@ -86,7 +87,7 @@ test("⚠ the JSONL file: every line validates ZenLogLine; a secret-shaped field
     process: 'server',
     sequence: 3,
     threadId: 't-plain',
-    tavilyApiKey: ZEN_REDACTED,
+    tavilyApiKey: ENSO_REDACTED,
     reason: 'denied',
   })
   expect(refusal?.message).toBe('a refusal named the key')
@@ -99,13 +100,13 @@ test('⚠ the terminal is redacted too: a secret-shaped property never reaches c
     printed.push(parts.map(String).join(' '))
   })
   try {
-    const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-'))
+    const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-'))
     const dispose = await configureProcessLogging({
       logsDir,
       process: 'server',
       levels: { file: 'info', console: 'info', overrides: [] },
     })
-    zenLogger('server', 'probe').info('a refusal named the key: {reason}', {
+    ensoLogger('server', 'probe').info('a refusal named the key: {reason}', {
       tavilyApiKey: 'tvly-MUST-NOT-PRINT',
       reason: 'denied',
     })
@@ -119,16 +120,16 @@ test('⚠ the terminal is redacted too: a secret-shaped property never reaches c
 })
 
 test('⚠ two processes, one file: every line lands whole — the property the dated, unbuffered, O_APPEND design rests on', async () => {
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-'))
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-'))
   const child = join(logsDir, 'writer.ts')
   writeFileSync(
     child,
     [
       // By path: the script lives in a tmpdir, outside the workspace's module resolution.
-      `import { zenLogger } from ${JSON.stringify(join(import.meta.dir, '..', 'log.ts'))};`,
+      `import { ensoLogger } from ${JSON.stringify(join(import.meta.dir, '..', 'log.ts'))};`,
       `import { configureProcessLogging } from ${JSON.stringify(join(import.meta.dir, '..', 'log-process.ts'))};`,
       `const dispose = await configureProcessLogging({ logsDir: ${JSON.stringify(logsDir)}, process: process.argv[2] });`,
-      `const log = zenLogger("server", "writer");`,
+      `const log = ensoLogger("server", "writer");`,
       `for (let i = 0; i < 200; i++) log.info("line {i} from {who}: {pad}", { i, who: process.argv[2], pad: "x".repeat(600) });`,
       `await dispose();`,
     ].join('\n'),
@@ -139,10 +140,10 @@ test('⚠ two processes, one file: every line lands whole — the property the d
   expect(await Promise.all([alpha.exited, bravo.exited])).toEqual([0, 0])
   // ⚠ `bun test` runs in UTC; the children run in the machine's zone and name the file by
   // their local day (as the launchers do), so read whatever day file they made.
-  const written = readdirSync(logsDir).filter((name) => /^zen-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name))
+  const written = readdirSync(logsDir).filter((name) => /^enso-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name))
   expect(written).toHaveLength(1)
-  const parsed = linesOf(join(logsDir, written[0] ?? '')).map((line) => JSON.parse(line) as ZenLogLine)
-  expect(parsed.every((record) => Check(ZenLogLine, record))).toBe(true)
+  const parsed = linesOf(join(logsDir, written[0] ?? '')).map((line) => JSON.parse(line) as EnsoLogLine)
+  expect(parsed.every((record) => Check(EnsoLogLine, record))).toBe(true)
   // 200 records + the configuration record, per process.
   expect(parsed.filter((record) => record.properties?.process === 'alpha')).toHaveLength(201)
   expect(parsed.filter((record) => record.properties?.process === 'bravo')).toHaveLength(201)
@@ -152,16 +153,16 @@ test('⚠ a stop signal flushes the file and exits 128 + the signal (#267): SIGI
   // In a CHILD, because the contract IS the exit code a supervisor reads, and the handler's
   // last act is `process.exit`. A red line here means a stop either loses the records still
   // in the sink or reports a code the hub cannot tell an orderly stop from a crash by.
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-'))
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-'))
   const child = join(logsDir, 'stoppable.ts')
   writeFileSync(
     child,
     [
-      `import { zenLogger } from ${JSON.stringify(join(import.meta.dir, '..', 'log.ts'))};`,
+      `import { ensoLogger } from ${JSON.stringify(join(import.meta.dir, '..', 'log.ts'))};`,
       `import { configureProcessLogging, installLoggingShutdown } from ${JSON.stringify(join(import.meta.dir, '..', 'log-process.ts'))};`,
       `const dispose = await configureProcessLogging({ logsDir: ${JSON.stringify(logsDir)}, process: process.argv[2] });`,
       `installLoggingShutdown(dispose);`,
-      `zenLogger("server", "stoppable").info("the record written before the stop by {who}", { who: process.argv[2] });`,
+      `ensoLogger("server", "stoppable").info("the record written before the stop by {who}", { who: process.argv[2] });`,
       `process.stdout.write("ready\\n");`,
       // Alive until signalled by an open stdin handle, not a timer: nothing here waits on a clock.
       `process.stdin.resume();`,
@@ -182,15 +183,15 @@ test('⚠ a stop signal flushes the file and exits 128 + the signal (#267): SIGI
     }
     running.kill(signal)
     expect(await running.exited).toBe(code)
-    const written = readdirSync(logsDir).filter((name) => /^zen-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name))
-    const records = linesOf(join(logsDir, written[0] ?? '')).map((line) => JSON.parse(line) as ZenLogLine)
+    const written = readdirSync(logsDir).filter((name) => /^enso-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name))
+    const records = linesOf(join(logsDir, written[0] ?? '')).map((line) => JSON.parse(line) as EnsoLogLine)
     // Flushed, not just registered: the record the child wrote before the signal is in the file.
     expect(records.some((record) => record.properties?.who === signal)).toBe(true)
   }
 })
 
 test('a second configure in the same process is refused — one configurator per process, or it is a bug', async () => {
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-'))
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-'))
   await configureProcessLogging({ logsDir, process: 'server' })
   await expect(configureProcessLogging({ logsDir, process: 'web' })).rejects.toThrow()
 })
@@ -202,20 +203,20 @@ test("a line reads back as the record it was: the template's placeholders take t
     '@timestamp': '2026-09-09T23:41:22.799Z',
     level: 'WARN',
     message: '{toolName} denied: {reason} — {absent}',
-    logger: 'zen.extension.guards',
+    logger: 'enso.extension.guards',
     properties: { toolName: 'write', reason: 'outside the root', threadId: 't1' },
   })
-  expect(record.category).toEqual(['zen', 'extension', 'guards'])
+  expect(record.category).toEqual(['enso', 'extension', 'guards'])
   expect(record.level).toBe('warning')
   expect(record.timestamp).toBe(Date.parse('2026-09-09T23:41:22.799Z'))
   expect(record.message).toEqual(['', 'write', ' denied: ', 'outside the root', ' — ', '{absent}', ''])
   expect(record.rawMessage).toBe('{toolName} denied: {reason} — {absent}')
   // Rendered by the terminal's formatter: the values in the sentence, no braces left.
-  const rendered = zenLogLineRenderer({ wordWrap: false })({
+  const rendered = ensoLogLineRenderer({ wordWrap: false })({
     '@timestamp': '2026-09-09T23:41:22.799Z',
     level: 'INFO',
     message: 'run {generation} acquired',
-    logger: 'zen.server.threads',
+    logger: 'enso.server.threads',
     properties: { generation: 1 },
   }).replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g'), '')
   expect(rendered).toContain('run 1 acquired')
@@ -224,62 +225,64 @@ test("a line reads back as the record it was: the template's placeholders take t
 
 // ── the knob ──────────────────────────────────────────────────────────────────────────
 
-test("ZEN_LOG_LEVEL: a tier, optional per-category overrides; ZEN_LOG_CONSOLE its own; the launcher's console default otherwise", () => {
-  expect(parseZenLogLevels({}, { console: 'info' })).toEqual({ file: 'info', console: 'info', overrides: [] })
-  expect(parseZenLogLevels({ ZEN_LOG_LEVEL: 'trace', ZEN_LOG_CONSOLE: 'warn' }, { console: 'info' })).toEqual({
+test("ENSO_LOG_LEVEL: a tier, optional per-category overrides; ENSO_LOG_CONSOLE its own; the launcher's console default otherwise", () => {
+  expect(parseEnsoLogLevels({}, { console: 'info' })).toEqual({ file: 'info', console: 'info', overrides: [] })
+  expect(parseEnsoLogLevels({ ENSO_LOG_LEVEL: 'trace', ENSO_LOG_CONSOLE: 'warn' }, { console: 'info' })).toEqual({
     file: 'trace',
     console: 'warning',
     overrides: [],
   })
   expect(
-    parseZenLogLevels(
-      { ZEN_LOG_LEVEL: 'info, zen.host.events=trace ,zen.extension.guards=debug' },
+    parseEnsoLogLevels(
+      { ENSO_LOG_LEVEL: 'info, enso.host.events=trace ,enso.extension.guards=debug' },
       { console: undefined },
     ),
   ).toEqual({
     file: 'info',
     console: undefined,
     overrides: [
-      { category: ['zen', 'host', 'events'], level: 'trace' },
-      { category: ['zen', 'extension', 'guards'], level: 'debug' },
+      { category: ['enso', 'host', 'events'], level: 'trace' },
+      { category: ['enso', 'extension', 'guards'], level: 'debug' },
     ],
   })
 })
 
 test('⚠ a knob value that is not a level is a startup error naming it — never a silent default', () => {
-  expect(() => parseZenLogLevels({ ZEN_LOG_LEVEL: 'verbose' }, { console: undefined })).toThrow(ZenLogLevelError)
-  expect(() => parseZenLogLevels({ ZEN_LOG_LEVEL: 'info,host.events=trace' }, { console: undefined })).toThrow(
+  expect(() => parseEnsoLogLevels({ ENSO_LOG_LEVEL: 'verbose' }, { console: undefined })).toThrow(EnsoLogLevelError)
+  expect(() => parseEnsoLogLevels({ ENSO_LOG_LEVEL: 'info,host.events=trace' }, { console: undefined })).toThrow(
     /host\.events=trace/,
   )
-  expect(() => parseZenLogLevels({ ZEN_LOG_CONSOLE: 'loud' }, { console: undefined })).toThrow(/ZEN_LOG_CONSOLE="loud"/)
+  expect(() => parseEnsoLogLevels({ ENSO_LOG_CONSOLE: 'loud' }, { console: undefined })).toThrow(
+    /ENSO_LOG_CONSOLE="loud"/,
+  )
 })
 
 test("the effective level is the longest matching override, else the file's", () => {
-  const levels = parseZenLogLevels(
-    { ZEN_LOG_LEVEL: 'info,zen.host=debug,zen.host.events=trace' },
+  const levels = parseEnsoLogLevels(
+    { ENSO_LOG_LEVEL: 'info,enso.host=debug,enso.host.events=trace' },
     { console: undefined },
   )
-  expect(effectiveFileLevel(levels, ['zen', 'server', 'http'])).toBe('info')
-  expect(effectiveFileLevel(levels, ['zen', 'host'])).toBe('debug')
-  expect(effectiveFileLevel(levels, ['zen', 'host', 'ui'])).toBe('debug')
-  expect(effectiveFileLevel(levels, ['zen', 'host', 'events'])).toBe('trace')
-  expect(effectiveFileLevel(levels, ['zen', 'host', 'events', 'deep'])).toBe('trace')
+  expect(effectiveFileLevel(levels, ['enso', 'server', 'http'])).toBe('info')
+  expect(effectiveFileLevel(levels, ['enso', 'host'])).toBe('debug')
+  expect(effectiveFileLevel(levels, ['enso', 'host', 'ui'])).toBe('debug')
+  expect(effectiveFileLevel(levels, ['enso', 'host', 'events'])).toBe('trace')
+  expect(effectiveFileLevel(levels, ['enso', 'host', 'events', 'deep'])).toBe('trace')
 })
 
 test("⚠ the file holds the tier the knob picked: at info a debug line is not written; with the subtree turned up, it is — and the console's level is its own", async () => {
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-'))
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-'))
   const dispose = await configureProcessLogging({
     logsDir,
     process: 'server',
-    levels: parseZenLogLevels({ ZEN_LOG_LEVEL: 'info,zen.host.events=trace' }, { console: undefined }),
+    levels: parseEnsoLogLevels({ ENSO_LOG_LEVEL: 'info,enso.host.events=trace' }, { console: undefined }),
   })
-  zenLogger('server', 'http').debug('not written')
-  zenLogger('server', 'http').info('written')
-  zenLogger('host', 'events').trace('written too, the subtree is up')
-  zenLogger('host', 'ui').debug('not written, a sibling subtree')
+  ensoLogger('server', 'http').debug('not written')
+  ensoLogger('server', 'http').info('written')
+  ensoLogger('host', 'events').trace('written too, the subtree is up')
+  ensoLogger('host', 'ui').debug('not written, a sibling subtree')
   await dispose()
-  const messages = linesOf(join(logsDir, zenLogFilename(new Date()))).map(
-    (line) => (JSON.parse(line) as ZenLogLine).message,
+  const messages = linesOf(join(logsDir, ensoLogFilename(new Date()))).map(
+    (line) => (JSON.parse(line) as EnsoLogLine).message,
   )
   expect(messages.slice(1)).toEqual(['written', 'written too, the subtree is up'])
 })
@@ -288,9 +291,9 @@ test("⚠ the file holds the tier the knob picked: at info a debug line is not w
 // both away. A thunk is the whole point only if the gate runs FIRST — a `wrap` that called
 // it and forwarded the object would type-check, pass every other test here, and buy nothing.
 test('⚠ a payload thunk is called only for a record the tier admits — and its object is the line', async () => {
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-thunk-'))
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-thunk-'))
   const dispose = await configureProcessLogging({ logsDir, process: 'server' })
-  const log = zenLogger('server', 'probe')
+  const log = ensoLogger('server', 'probe')
   let built = 0
   const payload = (): { chars: number } => {
     built += 1
@@ -302,7 +305,7 @@ test('⚠ a payload thunk is called only for a record the tier admits — and it
   log.info('admitted, {chars} of them', payload)
   expect(built).toBe(1)
   await dispose()
-  const written = linesOf(join(logsDir, zenLogFilename(new Date()))).map((line) => JSON.parse(line) as ZenLogLine)
+  const written = linesOf(join(logsDir, ensoLogFilename(new Date()))).map((line) => JSON.parse(line) as EnsoLogLine)
   // One line beyond the configuration record: the dropped pair never reached the file, and
   // the admitted one carries what the thunk returned.
   expect(written.slice(1).map((line) => [line.message, line.properties?.chars])).toEqual([
@@ -314,7 +317,7 @@ test('⚠ a payload thunk is called only for a record the tier admits — and it
 // message, inside an innocently-named property, or inside a `trace` payload — and those are
 // exactly the shapes a guard's `reason` and a tool's output take.
 test('⚠ a known secret VALUE is scrubbed wherever it appears: in the message, in a plainly-named property, inside a trace payload (#139)', async () => {
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-values-'))
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-values-'))
   const secret = 'tvly-LIVE-VALUE-MUST-NOT-LAND'
   const dispose = await configureProcessLogging({
     logsDir,
@@ -322,7 +325,7 @@ test('⚠ a known secret VALUE is scrubbed wherever it appears: in the message, 
     levels: { file: 'trace', console: undefined, overrides: [] },
     secretValues: [secret],
   })
-  const log = zenLogger('server', 'probe')
+  const log = ensoLogger('server', 'probe')
   // 1. quoted in the message itself — no property to name.
   log.info(`a command was refused: curl -H "x-key: ${secret}" https://example.com`)
   // 2. inside a property whose name is not secret-shaped: a guard's reason, a path.
@@ -331,24 +334,24 @@ test('⚠ a known secret VALUE is scrubbed wherever it appears: in the message, 
   log.trace('tool-result payload', { observation: { kind: 'tool-result', text: `KEY=${secret}\n`, isError: false } })
   await dispose()
 
-  const text = readFileSync(join(logsDir, zenLogFilename(new Date())), 'utf8')
+  const text = readFileSync(join(logsDir, ensoLogFilename(new Date())), 'utf8')
   expect(text).not.toContain('LIVE-VALUE-MUST-NOT-LAND')
   // Present, and counted as a value redaction rather than a field one — the manifest tells a
   // reader that something leaked and was caught, not that a field was shaped right.
-  const lines = linesOf(join(logsDir, zenLogFilename(new Date()))).map((line) => JSON.parse(line) as ZenLogLine)
-  for (const line of lines) expect(Check(ZenLogLine, line)).toBe(true)
+  const lines = linesOf(join(logsDir, ensoLogFilename(new Date()))).map((line) => JSON.parse(line) as EnsoLogLine)
+  for (const line of lines) expect(Check(EnsoLogLine, line)).toBe(true)
   expect(redactionManifest(lines).values).toBe(3)
   // The rest of each record survives: this is a replacement, not a dropped record.
   expect(text).toContain('https://example.com')
-  expect(text).toContain(ZEN_REDACTED_VALUE)
+  expect(text).toContain(ENSO_REDACTED_VALUE)
 })
 
 test('with no known values the pass does not run — an ordinary record is untouched', async () => {
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-novalues-'))
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-novalues-'))
   const dispose = await configureProcessLogging({ logsDir, process: 'server' })
-  zenLogger('server', 'probe').info('nothing to scrub here')
+  ensoLogger('server', 'probe').info('nothing to scrub here')
   await dispose()
-  expect(readFileSync(join(logsDir, zenLogFilename(new Date())), 'utf8')).toContain('nothing to scrub here')
+  expect(readFileSync(join(logsDir, ensoLogFilename(new Date())), 'utf8')).toContain('nothing to scrub here')
 })
 
 // Review of the lint/hardening pass. The value pass rebuilds every object structurally, and
@@ -356,22 +359,22 @@ test('with no known values the pass does not run — an ordinary record is untou
 // wrote `{}`. The records that carry an Error are exactly the ones someone reads to find out
 // why: the guard's analyzer-failure deny, the server's handler failure.
 test('⚠ an Error property survives the value pass with its message and stack — and is still scrubbed', async () => {
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-error-'))
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-error-'))
   const secret = 'tvly-LIVE-VALUE-IN-AN-ERROR'
   const dispose = await configureProcessLogging({
     logsDir,
     process: 'server',
     secretValues: [secret],
   })
-  zenLogger('server', 'probe').error('handler failed: {error}', {
+  ensoLogger('server', 'probe').error('handler failed: {error}', {
     error: new Error(`refused while sending ${secret}`),
   })
   await dispose()
 
-  const file = join(logsDir, zenLogFilename(new Date()))
+  const file = join(logsDir, ensoLogFilename(new Date()))
   const text = readFileSync(file, 'utf8')
   // Every process's first record is `logging configured`; the one under test is the ERROR.
-  const records = linesOf(file).map((line) => JSON.parse(line) as ZenLogLine)
+  const records = linesOf(file).map((line) => JSON.parse(line) as EnsoLogLine)
   const record = records.find((candidate) => candidate.level === 'ERROR')
   const properties = record?.properties ?? {}
   if (!('error' in properties)) throw new Error('the record carried no error property at all')
@@ -383,25 +386,25 @@ test('⚠ an Error property survives the value pass with its message and stack �
   expect('stack' in error && typeof error.stack).toBe('string')
   // …and the secret quoted inside it does not.
   expect(text).not.toContain('LIVE-VALUE-IN-AN-ERROR')
-  expect('message' in error && String(error.message)).toContain(ZEN_REDACTED_VALUE)
+  expect('message' in error && String(error.message)).toContain(ENSO_REDACTED_VALUE)
 })
 
 // PR #153 review, issue 1: a JS alternation takes the FIRST matching branch, not the longest.
 // Two live keys from one provider — or a key and its rotation — routinely share a prefix.
 test('⚠ a known value that is a prefix of another known value does not truncate the redaction', async () => {
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-prefix-'))
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-prefix-'))
   const dispose = await configureProcessLogging({
     logsDir,
     process: 'server',
     // The shorter one first: the order `knownSecretValues` would have produced from a file.
     secretValues: ['sk-notarealsecret-abc', 'sk-notarealsecret-abcdef99'],
   })
-  zenLogger('server', 'probe').info('leaked: sk-notarealsecret-abcdef99')
+  ensoLogger('server', 'probe').info('leaked: sk-notarealsecret-abcdef99')
   await dispose()
-  const text = readFileSync(join(logsDir, zenLogFilename(new Date())), 'utf8')
+  const text = readFileSync(join(logsDir, ensoLogFilename(new Date())), 'utf8')
   // Before the fix this file held `[REDACTED:value]def99` — the tail of a live key.
   expect(text).not.toContain('def99')
-  expect(text).toContain(`leaked: ${ZEN_REDACTED_VALUE}`)
+  expect(text).toContain(`leaked: ${ENSO_REDACTED_VALUE}`)
 })
 
 // PR #153 review, issue 2: the console sink is wrapped the same way as the file (#134's
@@ -413,40 +416,40 @@ test('⚠ the terminal gets the value pass too: a known secret never reaches con
   })
   try {
     const dispose = await configureProcessLogging({
-      logsDir: mkdtempSync(join(tmpdir(), 'zen-logs-console-')),
+      logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-console-')),
       process: 'server',
       levels: { file: 'info', console: 'info', overrides: [] },
       secretValues: ['tvly-notarealsecret-console'],
     })
     // Quoted in the message and in a plainly-named property: neither is a secret-shaped
     // FIELD, so the name pass has nothing to catch and only the value pass can.
-    zenLogger('server', 'probe').info('a command carried tvly-notarealsecret-console', {
+    ensoLogger('server', 'probe').info('a command carried tvly-notarealsecret-console', {
       reason: 'the command carried tvly-notarealsecret-console',
     })
     await dispose()
     expect(printed.join('\n')).not.toContain('tvly-notarealsecret-console')
-    expect(printed.join('\n')).toContain(ZEN_REDACTED_VALUE)
+    expect(printed.join('\n')).toContain(ENSO_REDACTED_VALUE)
   } finally {
     spy.mockRestore()
   }
 })
 
 // #207: the read path was per call and the redaction path was a boot snapshot. A key added
-// or rotated in `.zen/secrets.env` while a launcher runs is immediately live for
+// or rotated in `.enso/secrets.env` while a launcher runs is immediately live for
 // `readSecret` — web-search's own refusal tells the operator to do exactly this — and was
 // absent from every sink's alternation for the remaining lifetime of that process.
 test('⚠ a key rotated while the process runs is redacted from the next record on, no restart (#207)', async () => {
-  const repoRoot = mkdtempSync(join(tmpdir(), 'zen-rotation-root-'))
-  mkdirSync(join(repoRoot, '.zen'))
-  const secretsFile = zenSecretsPath(repoRoot)
+  const repoRoot = mkdtempSync(join(tmpdir(), 'enso-rotation-root-'))
+  mkdirSync(join(repoRoot, '.enso'))
+  const secretsFile = ensoSecretsPath(repoRoot)
   writeFileSync(secretsFile, 'TAVILY_API_KEY=tvly-notarealsecret-BOOT-000\n')
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-rotation-'))
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-rotation-'))
   const dispose = await configureProcessLogging({
     logsDir,
     process: 'server',
     secretValues: knownSecretValuesTracking(repoRoot, {}),
   })
-  const log = zenLogger('server', 'probe')
+  const log = ensoLogger('server', 'probe')
   log.warn('bash command refused: {reason}', {
     reason: 'the command carried --token tvly-notarealsecret-BOOT-000',
   })
@@ -458,13 +461,13 @@ test('⚠ a key rotated while the process runs is redacted from the next record 
   })
   await dispose()
 
-  const text = readFileSync(join(logsDir, zenLogFilename(new Date())), 'utf8')
+  const text = readFileSync(join(logsDir, ensoLogFilename(new Date())), 'utf8')
   // Reproduced before the thunk existed: this line held the rotated key verbatim.
   expect(text).not.toContain('ROTATED-999')
   // …and the key the snapshot did know is still redacted: the rebuild replaces the set, it
   // does not shift a window over it.
   expect(text).not.toContain('BOOT-000')
-  expect(text.split(ZEN_REDACTED_VALUE)).toHaveLength(3)
+  expect(text.split(ENSO_REDACTED_VALUE)).toHaveLength(3)
 })
 
 // #207, same surface: the day file was `0664` while every source it may quote — the secrets
@@ -476,18 +479,40 @@ test('⚠ a key rotated while the process runs is redacted from the next record 
 // writer owns it on the next record. It needs a fake clock inside LogTape's sink; a red line
 // here would mean today's file, not tomorrow's.
 test('⚠ the day file is created owner-only (#207)', async () => {
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-mode-'))
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-mode-'))
   const dispose = await configureProcessLogging({ logsDir, process: 'server' })
   await dispose()
-  expect(statSync(join(logsDir, zenLogFilename(new Date()))).mode & 0o777).toBe(0o600)
+  expect(statSync(join(logsDir, ensoLogFilename(new Date()))).mode & 0o777).toBe(0o600)
 })
 
 test('a day file an older build left group-readable is tightened when a process configures (#207)', async () => {
-  const logsDir = mkdtempSync(join(tmpdir(), 'zen-logs-mode-legacy-'))
-  const legacyFile = join(logsDir, zenLogFilename(new Date()))
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-logs-mode-legacy-'))
+  const legacyFile = join(logsDir, ensoLogFilename(new Date()))
   writeFileSync(legacyFile, '')
   chmodSync(legacyFile, 0o664)
   const dispose = await configureProcessLogging({ logsDir, process: 'server' })
   await dispose()
   expect(statSync(legacyFile).mode & 0o777).toBe(0o600)
+})
+
+/**
+ * ⚠ A RENAMED KNOB THAT NOBODY READS IS SILENT. Every `ZEN_*` variable became `ENSO_*` with the
+ * Enso rename; a shell profile still exporting the old spelling would otherwise get the default
+ * and no explanation — a session logging at `info` when its author asked for `trace`. The refusal
+ * is thrown from the one function every process that configures logging calls.
+ */
+test('⚠ a variable from before the rename is refused by name, never ignored', () => {
+  expect(retiredEnvironmentNames({ ENSO_LOG_LEVEL: 'trace' })).toEqual([])
+  // Unset is not stale: an absent variable is absent however it is spelled.
+  expect(retiredEnvironmentNames({ ZEN_LOG_LEVEL: undefined })).toEqual([])
+  expect(retiredEnvironmentNames({ ZEN_LOG_LEVEL: 'trace', ZEN_LOGS_DIR: '/tmp/x' })).toEqual([
+    'ZEN_LOGS_DIR',
+    'ZEN_LOG_LEVEL',
+  ])
+  // The throw names every stale variable AND what to rename it to, so the fix is the message.
+  expect(() => parseEnsoLogLevels({ ZEN_LOG_LEVEL: 'trace' }, { console: 'info' })).toThrow(
+    /ZEN_LOG_LEVEL.*Rename to ENSO_LOG_LEVEL/s,
+  )
+  // And a clean environment still parses.
+  expect(parseEnsoLogLevels({ ENSO_LOG_LEVEL: 'debug' }, { console: 'info' }).file).toBe('debug')
 })

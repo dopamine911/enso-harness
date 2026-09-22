@@ -1,6 +1,6 @@
 # Glossary — one word, one meaning
 
-The vocabulary of zen-harness, by domain (#161, under #162). This document is the authority for what a
+The vocabulary of Enso, by domain (#161, under #162). This document is the authority for what a
 word means here; `architecture.md` → *Nouns* keeps the identity table and defers to this for
 everything else.
 
@@ -14,7 +14,7 @@ Two rules built the document, and every edit keeps them:
    their peer.
 2. **Definitions are ours.** An entry is *meaning · id · minted by · owner and lifetime*, in prose. No
    copied type, schema, event union or field list from anything we vendor. Where a definition wants a
-   shape it points at ours in `@zen/core` by name only, never by body — and never at theirs. Vendor
+   shape it points at ours in `@enso/core` by name only, never by body — and never at theirs. Vendor
    names appear in exactly one place, the [vendor map](#vendor-map) at the end; a definition that needs
    the map to be understood is wrong. The one other place a vendor's name appears is the
    [Retired](#retired) table, where a vendor-prefixed identifier is quoted in order to be renamed.
@@ -59,10 +59,10 @@ each: `thread` is the noun everywhere the id crosses; `session` is reserved for 
 | Term | Meaning | Id | Minted by | Owner, lifetime |
 |---|---|---|---|---|
 | **project** | the working tree the runtime reads and writes | its path | the server at startup, never from a request | the server process; one project, many threads |
-| **thread** | one conversation, the user-facing unit: what the rail lists, what the URL names, what a run acquires. `thread` is the noun for the id everywhere it crosses — routes, wire types, the browser | `threadId`, UUID-shaped (`isZenThreadId`), validated as a filename component at every entry point | the browser, or reused from a stored thread on resume | the registry's entry while live; the id outlives it |
-| **session** | **reserved**: the runtime's durable, append-only log and the runtime's own live object over it. Nothing of ours that means *thread* may say session. *Decision (1):* the one legitimate zen-owned use is the three fields that locate that log — `sessionId`, `sessionDir`, `sessionFile` on an inspection — because they name the log, not the conversation | the same string as `threadId` (#95) | the runtime, under the browser's id | 1:1 with the thread; the log outlives everything |
-| **stored thread** | a thread whose log is on disk and can be resumed: what the rail lists after a restart. Wire: `ZenStoredThread` | `threadId` | the runtime's first flush — the file does not exist until the first assistant message | the storage seam lists it; the file is the record |
-| **entry** | one line of the runtime's log: a message, a tool call, a tool result, a model change, or a custom entry an extension persisted | the runtime's entry id and parent id | the runtime | carried verbatim, read defensively, never modelled above the host — since [leak L2](./seams/README.md#leak-numbers) the branch is read as `ZenTranscriptEntry`, a type of ours |
+| **thread** | one conversation, the user-facing unit: what the rail lists, what the URL names, what a run acquires. `thread` is the noun for the id everywhere it crosses — routes, wire types, the browser | `threadId`, UUID-shaped (`isEnsoThreadId`), validated as a filename component at every entry point | the browser, or reused from a stored thread on resume | the registry's entry while live; the id outlives it |
+| **session** | **reserved**: the runtime's durable, append-only log and the runtime's own live object over it. Nothing of ours that means *thread* may say session. *Decision (1):* the one legitimate Enso-owned use is the three fields that locate that log — `sessionId`, `sessionDir`, `sessionFile` on an inspection — because they name the log, not the conversation | the same string as `threadId` (#95) | the runtime, under the browser's id | 1:1 with the thread; the log outlives everything |
+| **stored thread** | a thread whose log is on disk and can be resumed: what the rail lists after a restart. Wire: `EnsoStoredThread` | `threadId` | the runtime's first flush — the file does not exist until the first assistant message | the storage seam lists it; the file is the record |
+| **entry** | one line of the runtime's log: a message, a tool call, a tool result, a model change, or a custom entry an extension persisted | the runtime's entry id and parent id | the runtime | carried verbatim, read defensively, never modelled above the host — since [leak L2](./seams/README.md#leak-numbers) the branch is read as `EnsoTranscriptEntry`, a type of ours |
 | **branch** | the root-to-leaf chain of entries the runtime currently considers the conversation; a stored thread's history is its branch rebuilt as messages on every cold read | entry ids | the runtime | the runtime; moved by tree navigation and by a fork |
 | **custom entry** | an entry an extension appended to persist its own state — the permission mode is one; run provenance will be more. The pattern for anything durable that must travel with a fork | `customType` | the appending extension | the log; a fork inherits it by construction |
 | **fork** | a new log whose header names its parent; the branch is copied to the fork point | a new thread id; `parentSession` in its header | the runtime | the runtime |
@@ -107,7 +107,7 @@ ends the wait** (invariant 2). Every route is unary — prompt, abort, answer �
 what the act caused arrives on the follow, for every follower alike. Nothing here closes a run.
 
 - **prompt** — what a user sends: text, optional images as bytes, and a streaming behavior. Crosses
-  `POST …/prompt` as `ZenPromptBody`. A prompt is not a run and not a message: it is *admitted*, and
+  `POST …/prompt` as `EnsoPromptBody`. A prompt is not a run and not a message: it is *admitted*, and
   the follow carries everything after.
 - **message** — what the transcript holds and the model sees: a user message, an assistant message, a
   tool call and its result. Rebuilt from the branch on every cold read.
@@ -121,7 +121,7 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
 - **prompt-rejected** — an observation, not an HTTP error: the runtime refused a prompt after admission,
   named by `messageId`, with its reason.
 - **admission** — what a prompt asks for when a run is already in flight: **interrupt** (enter at the
-  next turn boundary) or **enqueue** (wait for settle). Required then; rejected otherwise. Zen's two
+  next turn boundary) or **enqueue** (wait for settle). Required then; rejected otherwise. Enso's two
   words since #216; the runtime's own pair is produced under `host/` and nowhere else.
 - **queue** — the prompts waiting behind the run in flight: the interrupting ones first, then the
   enqueued. An observation every follower sees; the list above the composer.
@@ -135,7 +135,7 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
   the browser holds one card slot (#114). Every settle path emits *dialog-settled* so every follower
   drops the card; the snapshot lists every open question so a reconnect renders it at once.
 - **dialog kind** — `select`, `confirm`, `input`, `editor`. *Decision (5):* these four are **ours by
-  adoption**: they are the right set of primitives for a surface, `ZenDialogSpec` names them, and an
+  adoption**: they are the right set of primitives for a surface, `EnsoDialogSpec` names them, and an
   answer is validated against the question's kind. They are not renamed and not mapped.
 - **answer** — the response to one dialog, `POST …/dialog`, validated against the question; 204 when
   the question was spent.
@@ -157,7 +157,7 @@ answer before a tool runs; nothing after it does.
   is unsure (invariant 5). The mode *concept* is ours; today's implementation is a vendor extension
   read below the seam since [leak L3](./seams/README.md#leak-numbers) closed it (#162 workstream 4).
 - **mode** — the permission mode, and nothing else. *Decision (3):* the runtime's own interface setting
-  (interactive, non-interactive, driven in-process) is **not given a word of ours**: no zen code
+  (interactive, non-interactive, driven in-process) is **not given a word of ours**: no Enso code
   tracks it, and `surface` — the candidate — already means TUI-or-web. It stays under the host and in
   the vendor map.
 - **guard** — the extension that answers the tool-call hook before a tool runs. What startup asserts is
@@ -170,7 +170,7 @@ answer before a tool runs; nothing after it does.
   job (#12) and a freeze-review decision. Every verdict is a log record: a denial at `warn`, an allow
   at `debug`, never silent.
 - **policy** — what a guard reads: write roots, secret path fragments, protected write fragments,
-  denied network binaries. `GuardPolicy` in `@zen/core`; from `zen.config.json`, once, failing closed.
+  denied network binaries. `GuardPolicy` in `@enso/core`; from `enso.config.json`, once, failing closed.
 - **rule** — one line of a policy, or one named check of the command analyzer (`ruleId`): the identity
   of *which* rule caught a call, asserted where identity matters and elided where only the direction
   does.
@@ -208,14 +208,14 @@ observation; stop, answer and prompt are Control, and never share a surface with
   call starting, a turn ending, a question asked. Never on our wire, never stored by us. Minted by the
   runtime; seen only under the host.
 - **observation** — one semantic fact about a thread, in our vocabulary, derived from an event by the
-  host's mapper: `ZenObservation` in `@zen/core`. The wire between server and browser (#112), and the
+  host's mapper: `EnsoObservation` in `@enso/core`. The wire between server and browser (#112), and the
   thing a log record at `debug` describes. Derived in memory, never written. Each has a **kind**
   (`text-delta`, `tool-call`, `tool-result`, `queue`, `settled`, …); one kind, **unmapped**, carries an
   event the mapper has no word for yet, so nothing is dropped silently.
 - **seq** — an observation's position on its thread: monotonic per thread, the identity a browser and
   the server compare. *Id:* integer. *Minted by:* the registry, at publish.
 - **frame** — one unit the follow transmits: a **snapshot**, an **observation** with its `seq`, or a
-  **status**. `ZenFollowFrame`.
+  **status**. `EnsoFollowFrame`.
 - **snapshot** — the first frame of every follow: the thread as of `asOfSeq` — history, open dialogs,
   queue, mode, busy and generation. **The snapshot is the resync** (invariant 3): nothing is replayed
   by cursor; a reconnect opens a new follow and gets a new snapshot.
@@ -236,7 +236,7 @@ observation; stop, answer and prompt are Control, and never share a surface with
 - **origin** — where a dialog request was raised: during thread start (`session-start`, before any run)
   or inside a run. Tagged at the source.
 - **inspection** — one live thread in full, as a read: its ids, busy and generation, the branch, the
-  mode, what it may run. `ZenThreadInspection` on `GET …/threads/:id`; a **summary** is the same at a
+  mode, what it may run. `EnsoThreadInspection` on `GET …/threads/:id`; a **summary** is the same at a
   glance, for the list. Peeks, never builds.
 - **custom event** — in the browser, an observation that is not part of the transcript proper — mode,
   queue, dialog settled, follow ended — routed to its store by the name it already has: the
@@ -260,7 +260,7 @@ harness did). The first is canonical and never rewritten by us; the second is th
 
 - **entry** — see Thread. One line of the runtime's log; a *branch* is a chain of them; a *custom
   entry* is an extension's. Not a record.
-- **record** — one line of *our* log file, `.zen/logs/zen-YYYY-MM-DD.jsonl`: a message that is an
+- **record** — one line of *our* log file, `.enso/logs/enso-YYYY-MM-DD.jsonl`: a message that is an
   *event* with placeholders, and properties that stay structured (`threadId`, `generation`, `seq`,
   `toolCallId`) so a file can be filtered, not grepped. Written unbuffered and **redacted at write**.
   Not an entry.
@@ -281,8 +281,8 @@ harness did). The first is canonical and never rewritten by us; the second is th
   day's records fenced as JSONL, the redaction manifest, and the browser's ring. What a user hands over.
 - **about** — the process's own facts: versions, checkout, knobs, pid. The same block heads the bundle
   and answers `GET /api/about`.
-- **config** — `zen.config.json` at the repo root, committed, read once at extension load, failing
-  closed (#59). Secrets are not config: `.zen/secrets.env`, read per call, quarantined.
+- **config** — `enso.config.json` at the repo root, committed, read once at extension load, failing
+  closed (#59). Secrets are not config: `.enso/secrets.env`, read per call, quarantined.
 - **run provenance** — what a fork point will additionally record — project revision, context
   manifest, active rules and skills, configuration — as custom entries in the runtime's log, never a
   side file. Schema designed in the lineage phase against a real fork (#126).
@@ -372,29 +372,29 @@ outside the two vendor roots. *Legitimate* names where the old word may still ap
 `packages/web/src/host/` and `packages/harness/extensions/`, the vendor map, the three log-locating
 fields, and the gate that spells the words in order to refuse them. The `Pi*` names of the thread
 runtime's own shapes (`PiPromptRequest`, `PiRpcEvent`, …) went with them — goals L1 — to `PromptRequest`,
-`RuntimeEvent`, `RuntimeCommand`, `DialogAnswer`, `ZenPromptAdmission`, `PromptImageContent`,
-`ZenPermissionModeState`. `RuntimeEvent` and `EventDelivery` left `@zen/core` with L2 (#162
+`RuntimeEvent`, `RuntimeCommand`, `DialogAnswer`, `EnsoPromptAdmission`, `PromptImageContent`,
+`EnsoPermissionModeState`. `RuntimeEvent` and `EventDelivery` left `@enso/core` with L2 (#162
 workstream 4): the runtime's event and stored-entry shapes are read only under `host/`
 (`runtime-event.ts`, `map-events.ts`, `transcript.ts`), where the `Pi*` prefix is allowed to say so.
 
 | Retired | Meant | Replacement | Was at | Legitimate |
 |---|---|---|---|---|
-| `PiSession` | the runtime contract for one thread the host implements (prompt, abort, answer, subscribe, dispose) | **`ThreadRuntime`** — the seam has a name that says whose it is. *Decision (2):* not `HostSession` (session is reserved) and not `ZenSessionRuntime` (same reason) | `packages/core/src/pi-rpc.ts` | — |
+| `PiSession` | the runtime contract for one thread the host implements (prompt, abort, answer, subscribe, dispose) | **`ThreadRuntime`** — the seam has a name that says whose it is. *Decision (2):* not `HostSession` (session is reserved) and not `EnsoSessionRuntime` (same reason) | `packages/core/src/pi-rpc.ts` | — |
 | `HostedSession`, `HostedSessionInspection` | the host's side of a live thread: the runtime plus inspect and the emitted tail | **`HostedThread`**, **`HostedThreadInspection`** | `packages/web/src/host/agent-host.ts` | — |
-| `StoredSession` | a thread whose log is on disk, as the host lists it | **`StoredThread`** — the wire already says `ZenStoredThread` | `packages/web/src/host/agent-host.ts` | — |
-| `ZenCustomSessionEntry` | a custom entry observation | **`ZenCustomEntry`** | `packages/core/src/observation.ts` | — |
+| `StoredSession` | a thread whose log is on disk, as the host lists it | **`StoredThread`** — the wire already says `EnsoStoredThread` | `packages/web/src/host/agent-host.ts` | — |
+| `EnsoCustomSessionEntry` | a custom entry observation | **`EnsoCustomEntry`** | `packages/core/src/observation.ts` | — |
 | `session-inspection.ts` | the thread inspection module | **`thread-inspection.ts`** | `packages/core/src/` | — |
 | `describeSessionEntry` | the formatter for one entry of a transcript | **`describeTranscriptEntry`**, in `transcript.ts` — the entry is the transcript's, so the formatter moved there with it | `packages/core/src/` | — |
 | `pi-rpc.ts` | the module holding the runtime contract and its wire shapes | **`thread-runtime.ts`** — the name says a transport it no longer is (#69) | `packages/core/src/` | — |
-| `zen-session.mjs` | the thread inspection CLI | **`zen-thread.ts`** | `scripts/` | — |
+| `enso-session.mjs` | the thread inspection CLI | **`enso-thread.ts`** | `scripts/` | — |
 | "sessions" (rail heading, prose in the browser) | threads | **threads** | `packages/web/src/threads-rail.tsx` | — |
 | `sessionId`, `sessionDir`, `sessionFile` | where the runtime's log is | **kept** — they name the log, which is what session means | inspections, the CLI | yes |
-| `chunk` in zen-owned names (`RecordedCustomChunk`, "said as a chunk") | a custom event the browser recorded | **custom event** (`RecordedCustomEvent`) — chunk is the state layer's word and stays in its adapter | `packages/web/src/custom-event-router.ts`, comments | the adapter that derives the state layer's stream |
+| `chunk` in Enso-owned names (`RecordedCustomChunk`, "said as a chunk") | a custom event the browser recorded | **custom event** (`RecordedCustomEvent`) — chunk is the state layer's word and stays in its adapter | `packages/web/src/custom-event-router.ts`, comments | the adapter that derives the state layer's stream |
 | `turns` as a count of user messages | prompts | **prompts** | `packages/web/src/thread-status.tsx` | — |
 | `ToolStep`, "step" | a tool call rendered as a row | **tool call** (`ToolCallRow`) | `packages/web/src/selected-message-part.tsx` | the adapter that emits the state layer's step events |
 | `HostedThread.session` (was `hosted.session` at every call site) | the thread's runtime handle | **`HostedThread.runtime`** — found by the gate: a field that said session and held the runtime | `packages/web/src/host/agent-host.ts` and the server | — |
 | `describePiRpcEvent` | the event tail's one-line description of what arrived | **`describeObservation`** — it describes an OBSERVATION, which is what the tail holds now (L2) | `packages/web/src/host/event-tail.ts` | — |
-| `data-zen-tool-step` | the tool-call row's status attribute | **`data-zen-tool-call`** | `packages/web/src/selected-message-part.tsx` | — |
+| `data-enso-tool-step` | the tool-call row's status attribute | **`data-enso-tool-call`** | `packages/web/src/selected-message-part.tsx` | — |
 | `conversation`, `chat` as nouns for the unit | a thread | **thread**; *transcript* for what it shows | prose | `chat` for the state layer's object, in the adapter |
 | `layer` meaning "who wrote it" in the log sense | the process | **process** for the OS process; **layer** keeps its code-region meaning | comments in `packages/core/src/log.ts` | — |
 | `surface` as a word for the runtime's interface setting | — | **none** — see *mode*, Decision (3) | not in code | — |
@@ -454,5 +454,5 @@ What ours has that the columns do not: *parked* (dsh's design never blocks the s
 a 202 body (dsh returns `{ messageId }` and nothing else), *provenance* on the tail (#97), the
 *generation* as a single fence rather than dsh's three counters. What theirs has that ours does not
 yet: dsh's `TurnEndReason.interrupted` for a log whose last turn never settled (ours is
-`ZenInterruptedTail`, read-only), the inbox's `claimed` / `discarded`, and runtime invariant
+`EnsoInterruptedTail`, read-only), the inbox's `claimed` / `discarded`, and runtime invariant
 companions — all noted in #109.

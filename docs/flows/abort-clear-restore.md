@@ -69,7 +69,7 @@ sequenceDiagram
 
 ## The receipt contract
 
-<!-- source: packages/core/src/follow.ts#ZenAbortReceipt -->
+<!-- source: packages/core/src/follow.ts#EnsoAbortReceipt -->
 ```ts
 /**
  * What `POST /api/threads/:id/abort` answers with when pi was told (#116, #75): the prompts
@@ -80,7 +80,7 @@ sequenceDiagram
  * Never delivered silently on the next turn, never dropped. Empty when nothing waited. The
  * run's own end still arrives on the follow.
  */
-export const ZenAbortReceipt = Type.Object(
+export const EnsoAbortReceipt = Type.Object(
   {
     threadId: Type.String(),
     restored: Type.Array(Type.String()),

@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import type { ExtensionAPI, ToolCallEvent, ToolCallEventResult, ToolResultEvent } from '@earendil-works/pi-coding-agent'
-import { DEFAULT_GUARD_POLICY, type GuardPolicy, WEB_FETCH_TOOL_NAME, zenLogger } from '@zen/core'
+import { DEFAULT_GUARD_POLICY, ensoLogger, type GuardPolicy, WEB_FETCH_TOOL_NAME } from '@enso/core'
 import { type CheckCommandResult, checkCommand } from 'cc-safety-net/api'
 import {
   canonicalToolName,
@@ -141,12 +141,12 @@ const MUTATING_PATH_TOOLS = new Set([TOOL_WRITE, TOOL_EDIT])
 /**
  * ⚠ `threadId` on these records is INHERITED, never passed: in the web host pi runs
  * in-process, the prompt route binds `{ threadId }` in `AsyncLocalStorage`
- * (`withZenLogContext`), and the agent loop that reaches this handler is still inside that
+ * (`withEnsoLogContext`), and the agent loop that reaches this handler is still inside that
  * async chain — proven by the slice-2 receipt, not designed. Move extensions to a worker or
  * a child (the TUI already runs pi as one) and every verdict loses its thread with no test
  * going red; a record here would then need the id handed to it explicitly.
  */
-const log = zenLogger('extension', 'guards')
+const log = ensoLogger('extension', 'guards')
 
 const KNOWLEDGE_CONFERRING_TOOLS = new Set([TOOL_READ, TOOL_WRITE])
 
@@ -207,7 +207,7 @@ export default createGuards({ analyzeBashCommand: checkCommand })
  *    printing a key into the transcript again. `environment-dump.ts` states its
  *    non-coverage (the interpreters), the same as the egress deny.
  * 4. The secret-path deny (#204) — the READER GATE'S OWN POLICY on this route. Measured
- *    before it existed: `read .zen/secrets.env` was refused and `cat .zen/secrets.env`
+ *    before it existed: `read .enso/secrets.env` was refused and `cat .enso/secrets.env`
  *    was allowed, because nothing on the bash route resolved a path and cc-safety-net's
  *    corpus is `~/.aws`, `~/.ssh`, `.env`-basename — its "secret access THROUGH bash"
  *    half does not know this harness's own credential dir. LAST of the four: a command
@@ -273,7 +273,7 @@ function shellCommandDenial(
         `Secrets are kept out of the tool environment (#89), so an environment dump or a ` +
         `secret-shaped variable expansion is refused rather than trusted to be empty. ` +
         `If a command needs a value from the environment, name a non-secret variable; ` +
-        `API keys are read by the harness's own tools from .zen/secrets.env, never the root .env.`,
+        `API keys are read by the harness's own tools from .enso/secrets.env, never the root .env.`,
     }
   }
 
@@ -287,8 +287,8 @@ function shellCommandDenial(
         `so this route refuses it too (#204) — one policy, both routes, because a secret ` +
         `read is the precondition for exfiltration. This gates the WORD, not the read, so a ` +
         `mention counts: if the word is prose or a search pattern rather than a path, spell ` +
-        `it so it is not one (an escaped dot, '/\\.zen/', passes). The harness's own ` +
-        `credential dir (.zen/) is off limits for inspection either way; the log-reading ` +
+        `it so it is not one (an escaped dot, '/\\.enso/', passes). The harness's own ` +
+        `credential dir (.enso/) is off limits for inspection either way; the log-reading ` +
         `path is "bun run logs", a human command and not a tool call.`,
     }
   }

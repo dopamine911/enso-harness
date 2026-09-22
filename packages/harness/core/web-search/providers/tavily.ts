@@ -10,7 +10,7 @@ import { asRecord, asString } from '../wire-json.ts'
  * One POST to Tavily's search endpoint returns title/url/snippet results; there is no
  * synthesized answer and no searched/ungrounded ambiguity (a response IS a search). Armed
  * solely by `TAVILY_API_KEY` being present in the environment — no config knob; the key never
- * enters `zen.config.json` and is never logged. Domain include/exclude (the `webSearch.tavily`
+ * enters `enso.config.json` and is never logged. Domain include/exclude (the `webSearch.tavily`
  * config section) pass through to the API verbatim.
  *
  * @group Web search

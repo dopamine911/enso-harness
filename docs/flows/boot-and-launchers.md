@@ -1,7 +1,7 @@
 # Flow: boot and launchers — the manifest, the isolation triple, the print mirror, the vendor links
 
-Two launchers start the runtime with only this harness loaded: the terminal launcher (`scripts/zen.ts`)
-spawns it as a child; the server (`startZenServer` → `createAgentHost`) runs it in-process (#69). Both
+Two launchers start the runtime with only this harness loaded: the terminal launcher (`scripts/enso.ts`)
+spawns it as a child; the server (`startEnsoServer` → `createAgentHost`) runs it in-process (#69). Both
 read one manifest, `packages/harness/package.json` → `pi`, and enforce the same preconditions before any
 of the runtime is imported — vendor links present, the isolation triple applied, secrets out of the
 environment (#89). What differs is flags on a spawn versus loader options, and the print variant (#20).
@@ -11,7 +11,7 @@ environment (#89). What differs is flags on a spawn versus loader options, and t
 ```mermaid
 sequenceDiagram
   participant I as bun install (postinstall → link-vendor-packages.ts)
-  participant Z as terminal launcher (zen.ts)
+  participant Z as terminal launcher (Enso.ts)
   participant S as server (server/index.ts → host/agent-host.ts)
   participant M as manifest (packages/harness/package.json → pi)
   participant R as runtime
@@ -19,7 +19,7 @@ sequenceDiagram
   I->>M: dependencies ∪ node_modules/ resource paths = the required names · present → verified · absent → link the hoisted copy, or exit 1
   Z->>M: read pi.* — every node_modules/ path must exist, or refuse (exit 1, naming each path and `bun install`)
   S->>M: assertVendorLinks — the same check, the same message, before the host is created
-  Z->>Z: isPrintRun (-p · --print · stdin not a TTY) → buildPrintManifest + materializePrintHarness → .zen/print-harness
+  Z->>Z: isPrintRun (-p · --print · stdin not a TTY) → buildPrintManifest + materializePrintHarness → .enso/print-harness
   Z->>Z: pi --version — inside the range the guard corpus was run against, or refuse (exit 1, naming both bounds)
   Z->>R: quarantineSecrets, then spawn pi --no-extensions --no-skills -e the package dir · env PI_CODING_AGENT_DIR = the agent dir
   S->>S: process.env.PI_CODING_AGENT_DIR = agentDir → childProxy pinned off → quarantineSecrets
@@ -44,7 +44,7 @@ sequenceDiagram
    a record before `session_start` today, so the position decides nothing yet — it is first so that
    stays true when one does (`extensions/logging/index.ts` header, *Why first in the manifest*).
 3. **Isolation is three mechanisms, each closing a different hole — the same three at both launch
-   points.** `PI_CODING_AGENT_DIR` points the runtime at `.zen/pi-agent`: none of the user's packages,
+   points.** `PI_CODING_AGENT_DIR` points the runtime at `.enso/pi-agent`: none of the user's packages,
    settings or credentials are visible. `--no-extensions` turns discovery off — including this repo's
    own `.pi/settings.json`, which installs the package and would load it twice. `--no-skills` is required
    and covered by neither: `~/.agents/skills/` is outside the agent dir. The host applies the same triple
@@ -56,16 +56,16 @@ sequenceDiagram
    runtime skips a missing manifest resource path without a word (the symptom, once, was an HTTP 400
    several layers away). Only `node_modules/` paths are checked; `./extensions/…` is our own source.
    Upstream, `link-vendor-packages.ts` runs from the root `postinstall` as verify-or-fix over every
-   `dependencies` entry plus the `node_modules/` paths — `@zen/core` is only an import, and was unlinked.
-   One precondition, and since #221 one IMPLEMENTATION: `@zen/core/pi-manifest` owns both pi assumptions
+   `dependencies` entry plus the `node_modules/` paths — `@enso/core` is only an import, and was unlinked.
+   One precondition, and since #221 one IMPLEMENTATION: `@enso/core/pi-manifest` owns both pi assumptions
    (a `pi.*` value is a path or an array of them; a `node_modules/` path is literal, not a specifier),
    and all three readers call it. It was written three times before, with the prefix spelled as a
    constant twice and a bare literal once — which is why the duplicate-shape gate never named them.
 6. **A print run loads a generated mirror, not a flag.** The trigger is "this run cannot prompt". The
    mode extension fails closed when it cannot prompt, the runtime has no per-extension exclusion, and
-   invariant 4 forbids passing files — so the variant is a package under `.zen/print-harness`: the
+   invariant 4 forbids passing files — so the variant is a package under `.enso/print-harness`: the
    filtered manifest (the fence below) plus a symlink for EVERY package-root entry, by `readdir`, since
-   extensions import siblings by relative path. `zen.config.json` is not mirrored and must not be:
+   extensions import siblings by relative path. `enso.config.json` is not mirrored and must not be:
    `findRepoRoot` realpaths out of the mirror first. A print run has our guards only — `bash` unconfined (#9).
 7. **The terminal launcher refuses a `pi` it was not pinned against (#217).** The two surfaces resolve
    pi differently and only one was bounded: in-process imports the WORKSPACE copy, while the terminal
@@ -73,8 +73,8 @@ sequenceDiagram
    not on pi's export map) and the corpus that keeps the copy honest reads the workspace copy — so on
    the terminal surface the guard could resolve a path differently from the tool it gates, and compute
    a deny against the wrong target, with the whole suite green (reproduced with a shim printing
-   `0.85.0` earlier on `PATH`). So `zen.ts` reads `pi --version` before the spawn and refuses outside
-   `zen-launch.ts#SUPPORTED_PI_VERSIONS` — no override flag, because the range means "the corpus has
+   `0.85.0` earlier on `PATH`). So `enso.ts` reads `pi --version` before the spawn and refuses outside
+   `enso-launch.ts#SUPPORTED_PI_VERSIONS` — no override flag, because the range means "the corpus has
    been run against this", and `packages/harness/package.json` → `peerDependencies` states the same
    bound. The probe fails closed three ways beside the range: it is bounded at 5s (a wedged
    `pi --version` used to park the launcher silently — worse than the refusal it exists to print,
@@ -139,10 +139,10 @@ that title, so a renamed or deleted pin fails this page.
 <!-- test: scripts/__tests__/print-harness.test.ts#materializePrintHarness writes the filtered manifest and symlinks into the real package -->
 - **Invariant 6, the mirror** — every sibling linked, idempotent, a dead link removed.
 
-<!-- test: scripts/__tests__/zen-launch.test.ts#pi is launched with --no-extensions, --no-skills and -e <package>, ahead of the user’s arguments -->
-- **Invariants 3 and 4, the launcher's own decisions** — [`zen-launch.test.ts`](../../scripts/__tests__/zen-launch.test.ts):
+<!-- test: scripts/__tests__/enso-launch.test.ts#pi is launched with --no-extensions, --no-skills and -e <package>, ahead of the user’s arguments -->
+- **Invariants 3 and 4, the launcher's own decisions** — [`enso-launch.test.ts`](../../scripts/__tests__/enso-launch.test.ts):
   the isolation triple's two argument legs, in order, ahead of the user's; the print-run trigger.
-  (`zen.ts` spawns; `zen-launch.ts` decides, and is what is pinned.)
+  (`enso.ts` spawns; `enso-launch.ts` decides, and is what is pinned.)
 <!-- test: scripts/__tests__/link-vendor-packages.test.ts#verify-or-fix: a present package is verified, an absent one is linked from the hoisted copy, and the link resolves -->
 - **Invariant 5, the linker** — [`link-vendor-packages.test.ts`](../../scripts/__tests__/link-vendor-packages.test.ts):
   both sources of required packages; verify-or-fix; a broken link replaced; a missing package named.
@@ -154,13 +154,13 @@ that title, so a renamed or deleted pin fails this page.
 - **Invariant 7, the two resolutions** — [`pi-version-parity.test.ts`](../../scripts/__tests__/pi-version-parity.test.ts):
   the workspace pi the guard corpus resolves is inside the range the launcher enforces, and the
   harness's `peerDependencies` states that same bound.
-<!-- test: scripts/__tests__/zen-launch.test.ts#the tested pi range includes its minimum and excludes the version it stops below -->
+<!-- test: scripts/__tests__/enso-launch.test.ts#the tested pi range includes its minimum and excludes the version it stops below -->
 - **Invariant 7, the range itself** — the boundaries of `piVersionSupported`, and its fail-closed
   reading of a version it cannot parse.
 
 ## Where it is stated
 
-The terminal launcher: [`scripts/zen.ts`](../../scripts/zen.ts) (header). The mirror:
+The terminal launcher: [`scripts/enso.ts`](../../scripts/enso.ts) (header). The mirror:
 [`scripts/print-harness.ts`](../../scripts/print-harness.ts) (header, `materializePrintHarness`). The
 linker: [`scripts/link-vendor-packages.ts`](../../scripts/link-vendor-packages.ts) (`requiredPackageNames`).
 pi's manifest-resource layout, for all three readers: `packages/core/src/pi-manifest.ts` (header).

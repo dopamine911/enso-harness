@@ -42,7 +42,7 @@ unportable primitive is one nobody can re-fetch.
    `files.includes`, bunfig's `coveragePathIgnorePatterns`, `.fallowrc.jsonc`'s
    `ignoreFindings`) are not something a directory should inherit in silence.
 2. **Presentation only.** Nothing here may import the state layer — our stores, the follow
-   connection, `@zen/core`'s wire schemas, TanStack's client. A primitive that reads a
+   connection, `@enso/core`'s wire schemas, TanStack's client. A primitive that reads a
    thread's store cannot be re-fetched, which makes the exclusions above indefensible. The
    same gate enforces it.
 3. **This is a standing fork.** Registry updates do not merge themselves; see the procedure

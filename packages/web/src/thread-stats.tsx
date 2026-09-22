@@ -21,7 +21,7 @@ import { createStore, type Store } from './store.ts'
  * territory; this bar states only what it measured.
  */
 
-interface ZenUsageShape {
+interface EnsoUsageShape {
   input: number
   output: number
   cacheRead: number
@@ -42,11 +42,11 @@ const EMPTY_STATS: ThreadStats = { totalCost: 0, lastRequestInputTokens: undefin
 
 /**
  * ⓘ Looks like map-events' `readUsage` but parses a DIFFERENT shape, deliberately: that
- * one reads pi's wire usage (`{cost: {total}}`), this one reads our own `ZenUsage`
+ * one reads pi's wire usage (`{cost: {total}}`), this one reads our own `EnsoUsage`
  * (`{totalCost}`) after it crossed the CUSTOM chunk. One shared helper would need a shape
  * switch, which costs more than the ~10 lines it saves (PR #51 review, nit 2).
  */
-function readUsageShape(raw: unknown): ZenUsageShape | undefined {
+function readUsageShape(raw: unknown): EnsoUsageShape | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const usage = raw as Record<string, unknown>
   const numberAt = (key: string): number => (typeof usage[key] === 'number' ? (usage[key] as number) : 0)
@@ -65,7 +65,7 @@ export interface ThreadStatsStore extends Store<ThreadStats> {
    * chat-screen.tsx: a malformed value changes nothing rather than throwing in the stream loop.
    *
    * ⚠ Cost sums over EVERY counted message (assistant and toolResult summaries — pi's own
-   * attribution rule, see ZenMessageEnd in @zen/core), but "last request" reads ASSISTANT
+   * attribution rule, see EnsoMessageEnd in @enso/core), but "last request" reads ASSISTANT
    * messages only: a toolResult summary is a side model call whose prompt is the tool output,
    * not the conversation — letting it overwrite the number would show a misleading dip.
    *

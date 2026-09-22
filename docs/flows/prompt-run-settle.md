@@ -63,7 +63,7 @@ sequenceDiagram
 
 ## The receipt contract
 
-<!-- source: packages/core/src/follow.ts#ZenPromptReceipt -->
+<!-- source: packages/core/src/follow.ts#EnsoPromptReceipt -->
 ```ts
 /**
  * What `POST /api/threads/:id/prompt` answers with: ADMISSION, not a result.
@@ -73,7 +73,7 @@ sequenceDiagram
  * behind, and the follow carries everything after (deepseek-harness: `followup()` returns
  * void).
  */
-export const ZenPromptReceipt = Type.Object(
+export const EnsoPromptReceipt = Type.Object(
   {
     threadId: Type.String(),
     /** Minted at admission — the identity a client correlates this message by. */

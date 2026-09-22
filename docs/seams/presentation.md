@@ -46,7 +46,7 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * browser's queue, invisible to other tabs and lost on reload. This POSTs now with
    * `admission: enqueue`, so the runtime queues it and every follower sees it.
    */
-  readonly prompt: (text: string, images?: readonly ZenPromptImage[]) => Promise<PromptOutcome>
+  readonly prompt: (text: string, images?: readonly EnsoPromptImage[]) => Promise<PromptOutcome>
   /**
    * Switch the permission mode (L3 step C): `POST …/mode`, a control route, never a prompt —
    * the browser says a mode and no command. The change arrives on the follow as `permission-mode`,
@@ -160,7 +160,7 @@ export interface ThreadStores {
    * waits on the server, answerable from this thread after a reload. Also cleared by an
    * answer this page sends that the server takes or reports gone.
    */
-  readonly dialog: WritableStore<ZenPendingDialog | undefined>
+  readonly dialog: WritableStore<EnsoPendingDialog | undefined>
   /**
    * The follow ended under this page (#119): the server closed, restarted, or dropped the
    * connection, and nothing here reconnects — the thread's state on this page is as of that
@@ -182,7 +182,7 @@ export interface ThreadStores {
 }
 ```
 
-The one path from a custom event to those stores is `routeZenCustomEvent` (`custom-event-router.ts:77-108`,
+The one path from a custom event to those stores is `routeEnsoCustomEvent` (`custom-event-router.ts:77-108`,
 in prose): it records every event in `recentChunks`, then dispatches on the name, which is the
 observation's `kind` or the frame's `type` (#162 workstream 5) — a `snapshot` to the mode stores, the
 dialog slot and `generation`; a `status` to `generation` (and clears `disconnected`);
@@ -208,10 +208,10 @@ the state layer passes `onCustomEvent` no thread id (lines 153-161).
 the generated table in [`ported-provenance.md`](./ported-provenance.md); the eight `ui/` shadcn
 primitives beneath the same fence are receipted by [`components/ui/README.md`](../../packages/web/src/components/ui/README.md)
 instead, because the shadcn registry is re-fetched by style and version rather than by commit.
-The renderers that stay ours are outside the ported directory: the dialog card is `ZenDialogCard` in
-`chat-screen.tsx` itself (`#ZenDialogCard`), and the tool-result descriptor renderer, notices, the mode select
+The renderers that stay ours are outside the ported directory: the dialog card is `EnsoDialogCard` in
+`chat-screen.tsx` itself (`#EnsoDialogCard`), and the tool-result descriptor renderer, notices, the mode select
 and the status bar are the `SelectedMessagePart`, `ThreadNotifications`, `PermissionModeSelect`,
-`ThreadStatusBar` and `ZenRendererMap` imports at lines 55-81.
+`ThreadStatusBar` and `EnsoRendererMap` imports at lines 55-81.
 
 **A second connection today: the fixture.** `?fixture` swaps the live adapter for the scripted
 conversation in `fixture-conversation.ts` (`chat-screen.tsx:176`, `connection: isFixtureMode ?
@@ -242,7 +242,7 @@ need none: an upstream re-port is the second implementation, and the gate is wha
      it does not spell them: `stateLayerTarget` (line 68) RESOLVES every specifier a ported file
      writes — `@/x` through the `@/*` → `./src/*` map, a relative path from the file — and refuses
      anything landing under `packages/web/src` outside `components/` and `lib/`
-     (`PRESENTATION_DIRECTORIES`, line 58), plus `@zen/core` and any `@tanstack/*`
+     (`PRESENTATION_DIRECTORIES`, line 58), plus `@enso/core` and any `@tanstack/*`
      (`FORBIDDEN_PACKAGE`, line 59), which are not ours to resolve. Both spellings, because PR
      #152's review found the alias row missing (lines 46-48). Derived, because the hand-written
      list it replaced had gone stale in silence: it named `session-stats`, renamed to
@@ -279,8 +279,8 @@ need none: an upstream re-port is the second implementation, and the gate is wha
 
 ## What crosses it that should not
 
-**The state layer's message shape crosses two wire payloads.** `ZenThreadHistory.messages`
-(`thread-inspection.ts` line 228) and `ZenFollowSnapshot.messages` (`follow.ts` line 35) are both
+**The state layer's message shape crosses two wire payloads.** `EnsoThreadHistory.messages`
+(`thread-inspection.ts` line 228) and `EnsoFollowSnapshot.messages` (`follow.ts` line 35) are both
 `Type.Array(Type.Unknown())` on purpose — core must not own the client's transport shape — and both
 carry the client's `UIMessage`s. They are built by `transcriptToMessages` in
 `server/transcript-to-messages.ts`, the read-side twin of `to-agui.ts`, which imports `MessagePart`
@@ -327,10 +327,10 @@ The per-thread stores, the router's dispatch, and the fixture path are shaped by
 client, and survive.
 
 What does not change: the fourteen ported components — the gate proves none imports a store, the
-connection, `@zen/core` or the client, so a state layer they have never seen cannot reach them — and
-every shape in `@zen/core` EXCEPT the two named above, because the wire otherwise carries observations
-and the client's stream vocabulary was only ever made in memory from them. `ZenThreadHistory.messages`
-and `ZenFollowSnapshot.messages` are the exception, and the cheapest kind to miss: their declarations
+connection, `@enso/core` or the client, so a state layer they have never seen cannot reach them — and
+every shape in `@enso/core` EXCEPT the two named above, because the wire otherwise carries observations
+and the client's stream vocabulary was only ever made in memory from them. `EnsoThreadHistory.messages`
+and `EnsoFollowSnapshot.messages` are the exception, and the cheapest kind to miss: their declarations
 need not change at all, since `Unknown` admits a new message shape as silently as the old one — which
 is why the pivot has to find their two producers and the reviver by hand, with no schema diff and no
 type error pointing at them.

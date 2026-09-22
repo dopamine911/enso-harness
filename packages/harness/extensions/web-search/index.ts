@@ -8,17 +8,17 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent'
 import {
+  ENSO_CONFIG_FILENAME,
   EXTERNAL_WEB_CONTENT_NOTICE,
-  parseZenConfig,
+  ensoLogger,
+  parseEnsoConfig,
   WEB_SEARCH_TIMEOUT_MS,
   WEB_SEARCH_TOOL_NAME,
   type WebSearchConfig,
   WebSearchToolParameters,
-  ZEN_CONFIG_FILENAME,
-  zenLogger,
-} from '@zen/core'
-import { findRepoRoot, zenConfigPath } from '@zen/core/paths'
-import { readSecret } from '@zen/core/secrets'
+} from '@enso/core'
+import { ensoConfigPath, findRepoRoot } from '@enso/core/paths'
+import { readSecret } from '@enso/core/secrets'
 import {
   DEEPSEEK_API_KEY_VARIABLE,
   type DeepseekSearchRequest,
@@ -43,17 +43,17 @@ import {
 
 /**
  * The web_search tool (#63) — provider-native search with a Tavily fallback, consumed
- * from pi-web-search 1.4.0 (© ttttmr, MIT) and retyped behind zen's seams.
+ * from pi-web-search 1.4.0 (© ttttmr, MIT) and retyped behind enso's seams.
  *
  * The shape, in one pass:
  *
- * 1. **Primary selection.** `zen.config.json`'s optional `webSearch.backend: "deepseek"`
+ * 1. **Primary selection.** `enso.config.json`'s optional `webSearch.backend: "deepseek"`
  *    pins the dedicated DeepSeek backend; otherwise the CURRENT MODEL routes to its own
  *    native search API (anthropic / google / openai families), billing the same identity
  *    the conversation does. A model with no native search selects nothing.
  * 2. **The fallback.** When the primary is unavailable, fails, or answers WITHOUT
  *    searching (`ungrounded`), and `TAVILY_API_KEY` is present in the gated secrets file
- *    `.zen/secrets.env` (#89 — never the process environment), one Tavily call answers instead. Key absent → the primary's own outcome is
+ *    `.enso/secrets.env` (#89 — never the process environment), one Tavily call answers instead. Key absent → the primary's own outcome is
  *    returned unchanged. No config knob arms this — a key is a secret and secrets never
  *    enter the committed config.
  * 3. **The ACCURATE response** (#63, the requirement this exists for): every result's
@@ -71,7 +71,7 @@ import {
 
 /** The IO seams. Provider runs are injectable so the fallback policy is testable alone. */
 export interface WebSearchDependencies {
-  /** Where `zen.config.json` lives. May throw; the extension fails CLOSED on that. */
+  /** Where `enso.config.json` lives. May throw; the extension fails CLOSED on that. */
   locateConfigFile: () => string
   readConfigText: (path: string) => string
   /** Env reads happen HERE (composition root) — providers receive values, never names. */
@@ -121,7 +121,7 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
     let configPath: string | undefined
     try {
       configPath = dependencies.locateConfigFile()
-      const parsed = parseZenConfig(dependencies.readConfigText(configPath))
+      const parsed = parseEnsoConfig(dependencies.readConfigText(configPath))
       if (parsed.kind === 'ok') {
         webSearchConfig = parsed.config.webSearch ?? {}
       } else {
@@ -130,7 +130,7 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
     } catch (error) {
       configProblem = `the config file could not be read: ${String(error)}`
     }
-    const configDisplayPath = configPath ?? `${ZEN_CONFIG_FILENAME} (at the zen-harness repository root)`
+    const configDisplayPath = configPath ?? `${ENSO_CONFIG_FILENAME} (at the Enso repository root)`
 
     pi.registerTool({
       name: WEB_SEARCH_TOOL_NAME,
@@ -197,7 +197,7 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
           auditLine('refused', primary.providerId, query, primary.reason)
           return refusal(
             `${primary.reason}. The Tavily fallback is not armed — a human can set ` +
-              `${TAVILY_API_KEY_VARIABLE} in .zen/secrets.env (never in ${ZEN_CONFIG_FILENAME}, never in ` +
+              `${TAVILY_API_KEY_VARIABLE} in .enso/secrets.env (never in ${ENSO_CONFIG_FILENAME}, never in ` +
               `the root .env, never in the environment — #89). No restart needed; the file is read per call.`,
           )
         }
@@ -404,7 +404,7 @@ function renderOutcome(outcome: WebSearchOutcome, fallbackReason: string | undef
   return { content: [{ type: 'text', text: bodySections.join('\n\n') }], details: undefined }
 }
 
-const log = zenLogger('extension', 'web-search')
+const log = ensoLogger('extension', 'web-search')
 
 /** One record per call, every outcome — the audit property (#54's discipline; #132: in the file). */
 function auditLine(outcome: string, providerId: WebSearchProviderId | undefined, query: string, detail: string): void {
@@ -419,9 +419,9 @@ function auditLine(outcome: string, providerId: WebSearchProviderId | undefined,
  * the print harness's symlink mirror (#20, same rationale as web_fetch's root).
  */
 export default createWebSearch({
-  locateConfigFile: () => zenConfigPath(findRepoRoot(import.meta.url)),
+  locateConfigFile: () => ensoConfigPath(findRepoRoot(import.meta.url)),
   readConfigText: (path: string) => readFileSync(path, 'utf8'),
-  // ⚠ From the gated `.zen/secrets.env` FILE, never `process.env` (#89): the host
+  // ⚠ From the gated `.enso/secrets.env` FILE, never `process.env` (#89): the host
   // quarantines every secret out of the environment before a session exists, precisely so
   // a `bash` child cannot print it. Extension code is trusted to read the file the model's
   // `read` cannot. The composition root keeps the dependency's name — the providers still

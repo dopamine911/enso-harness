@@ -8,8 +8,8 @@ fails when the checked-in page differs. Regenerate with `bun <generator> > <page
 |---|---|---|
 | [HTTP routes](./routes.md) | What routes exist; what crosses each; what can build, mutate or log? | `scripts/docs/routes.ts` |
 | [Observations](./observations.md) | What produces every observation kind; what the browser derives; who consumes it? | `scripts/docs/observations.ts` |
-| [Core exports](./core-exports.md) | What `@zen/core` exposes; is it wire, host contract, policy or node-only; who imports it? | `scripts/docs/core-exports.ts` |
-| [Environment and configuration](./env-and-config.md) | What enters by environment, committed config, `.zen/` path or harness manifest; when is it read? | `scripts/docs/env-and-config.ts` |
+| [Core exports](./core-exports.md) | What `@enso/core` exposes; is it wire, host contract, policy or node-only; who imports it? | `scripts/docs/core-exports.ts` |
+| [Environment and configuration](./env-and-config.md) | What enters by environment, committed config, `.enso/` path or harness manifest; when is it read? | `scripts/docs/env-and-config.ts` |
 | [Code-local decisions](./decisions.md) | Which leading source headers record a decision, which issues own it, and what sentence opens it? | `scripts/docs/decisions.ts` |
 | [Verification inventory](./verification-inventory.md) | What every gate enforces; what ratchets; which reusable test double drives which seam? | `scripts/docs/verification-inventory.ts` |
 

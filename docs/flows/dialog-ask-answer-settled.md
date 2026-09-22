@@ -21,7 +21,7 @@ sequenceDiagram
   X->>H: ctx.ui.confirm(title, message, { signal?, timeout? })
   H->>H: awaitDialog — mint id, park { resolve, request } in pendingDialogs
   H-->>F: observation extension-ui-request { id, blocking: true, dialog, origin }
-  F-->>B: routeUiRequest — { id, dialog } checked against ZenOpenDialog, card rendered
+  F-->>B: routeUiRequest — { id, dialog } checked against EnsoOpenDialog, card rendered
   Note over X,B: the thread is busy (parked) · nothing in the server or the browser holds the promise
   B->>R: POST …/dialog { id, value | confirmed | cancelled: true }
   R->>R: peek (404 cold) · openDialogs().find(id) (404 spent) · validateDialogAnswer unless cancel (422)
@@ -53,7 +53,7 @@ sequenceDiagram
    degrades a wrong-shaped answer to that value. An answer naming no pending id is a logged warning.
 5. **The settle is for one id, on every follower; the snapshot's list is complete.** The browser
    drops the card only when `dialog-settled` names the id it shows. `openDialogs()` walks the pending
-   map in insertion order — oldest first — checking each request with `isZenDialogSpec` rather than
+   map in insertion order — oldest first — checking each request with `isEnsoDialogSpec` rather than
    casting; the snapshot carries that list whole, so a reconnect renders the card and an empty list
    clears one.
 6. **Stop stops: the run's abort settles every pending dialog as `aborted`.** `agent-host.ts#abort`
@@ -77,7 +77,7 @@ sequenceDiagram
  * put a string the extension never offered into its control flow. That is an injection
  * seam, and it is closed HERE rather than trusted to the renderer.
  */
-export function validateDialogAnswer(spec: ZenDialogSpec, payload: unknown): string | undefined {
+export function validateDialogAnswer(spec: EnsoDialogSpec, payload: unknown): string | undefined {
   if (!dialogAnswerValidator.Check(payload)) {
     return `the payload is not a dialog answer ({ value: string } or { confirmed: boolean })`
   }

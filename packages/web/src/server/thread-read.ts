@@ -1,5 +1,5 @@
+import type { EnsoInterruptedTail, EnsoOpenDialog, EnsoPermissionModeState } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
-import type { ZenInterruptedTail, ZenOpenDialog, ZenPermissionModeState } from '@zen/core'
 import type { AgentHost } from '../host/agent-host.ts'
 import type { ThreadRegistry } from './thread-registry.ts'
 import { interruptedTail, transcriptToMessages } from './transcript-to-messages.ts'
@@ -16,7 +16,7 @@ import { interruptedTail, transcriptToMessages } from './transcript-to-messages.
  * same thread live with pi's own branch and the session's own mode. That is the shape invariant
  * 5 refuses — a surface presenting one state while the server holds another — with no MISMATCH
  * to name it, because each side is internally consistent. It is on the boot path: boot adopts a
- * named thread from `/history` before showing a pane, so another tab or `zen-thread` prompting
+ * named thread from `/history` before showing a pane, so another tab or `enso-thread` prompting
  * the same id during that fetch is enough.
  *
  * ⚠ THE RE-PEEK IS THE POINT, and it is why the cold read is awaited BEFORE anything is
@@ -50,14 +50,14 @@ export interface ThreadMount {
   /** The branch as the messages a chat mounts with: pi's memory when live, the file when cold. */
   readonly messages: UIMessage[]
   /** Set only when the branch ends inside a turn (#109). */
-  readonly interrupted: ZenInterruptedTail | undefined
+  readonly interrupted: EnsoInterruptedTail | undefined
   readonly live: boolean
   readonly busy: boolean
   readonly generation: number
   /** The live session's own mode, or the one this branch persists. */
-  readonly permissionMode: ZenPermissionModeState
+  readonly permissionMode: EnsoPermissionModeState
   /** Every question pi is blocked on, oldest first (#114); empty when the thread is not live. */
-  readonly openDialogs: ZenOpenDialog[]
+  readonly openDialogs: EnsoOpenDialog[]
 }
 
 export async function readThreadMount(deps: ThreadReadDeps, threadId: string): Promise<ThreadMount> {

@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/flow-diagrams.ts -->
 # Generated flows
 
-Every node below is read out of the source the flow runs through — the route table in `packages/web/src/server/index.ts` and the `ZenObservation` union in `packages/core/src/observation.ts`. Nothing here is drawn by hand, so a route or a kind that moves changes this page or fails the docs gate.
+Every node below is read out of the source the flow runs through — the route table in `packages/web/src/server/index.ts` and the `EnsoObservation` union in `packages/core/src/observation.ts`. Nothing here is drawn by hand, so a route or a kind that moves changes this page or fails the docs gate.
 
 ## Control plane
 
@@ -22,15 +22,15 @@ flowchart LR
   Browser -->|POST /api/threads/:threadId/prompt| R_POST_api_threads_threadId_prompt["respondToPrompt → promptThread"]
   R_POST_api_threads_threadId_prompt --> H_respondToPrompt_promptThread["promptThread()"]
   H_respondToPrompt_promptThread --> Runtime
-  Runtime["ThreadRuntime"] --> Observations["ZenObservation stream"]
+  Runtime["ThreadRuntime"] --> Observations["EnsoObservation stream"]
 ```
 
 | Node | Contract | Input | Source |
 |---|---|---|---|
 | `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:47`](../../packages/web/src/server/index.ts#L47)<br>[`packages/web/src/server/follow.ts:405`](../../packages/web/src/server/follow.ts#L405) |
 | `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:46`](../../packages/web/src/server/index.ts#L46)<br>[`packages/web/src/server/follow.ts:316`](../../packages/web/src/server/follow.ts#L316) |
-| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `ZenPermissionModeChange` | [`packages/web/src/server/index.ts:49`](../../packages/web/src/server/index.ts#L49)<br>[`packages/web/src/server/follow.ts:352`](../../packages/web/src/server/follow.ts#L352) |
-| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `ZenPromptBody` | [`packages/web/src/server/index.ts:45`](../../packages/web/src/server/index.ts#L45)<br>[`packages/web/src/server/follow.ts:221`](../../packages/web/src/server/follow.ts#L221) |
+| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:49`](../../packages/web/src/server/index.ts#L49)<br>[`packages/web/src/server/follow.ts:352`](../../packages/web/src/server/follow.ts#L352) |
+| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:45`](../../packages/web/src/server/index.ts#L45)<br>[`packages/web/src/server/follow.ts:221`](../../packages/web/src/server/follow.ts#L221) |
 
 ## Observation pipeline
 
@@ -40,7 +40,7 @@ One pi event becomes one observation and crosses six stages to reach the browser
 flowchart LR
   Pi["pi runtime event"]
   Pi --> Mapper["mapPiEvent (17 kinds)"]
-  Mapper --> Schema["ZenObservation"]
+  Mapper --> Schema["EnsoObservation"]
   Schema --> Frame["observation frame"]
   Frame --> Connection["follow connection"]
   Connection --> Adapter["to-agui chunk"]
@@ -51,7 +51,7 @@ flowchart LR
 | Stage | Contract | Source |
 |---|---|---|
 | `mapPiEvent (17 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:229`](../../packages/web/src/host/map-events.ts#L229) |
-| `ZenObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:466`](../../packages/core/src/observation.ts#L466) |
+| `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:466`](../../packages/core/src/observation.ts#L466) |
 | `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:140`](../../packages/web/src/server/follow.ts#L140) |
 | `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:390`](../../packages/web/src/follow-connection.ts#L390) |
 | `to-agui chunk` | [Observations](./observations.md) | [`packages/web/src/to-agui.ts:76`](../../packages/web/src/to-agui.ts#L76) |

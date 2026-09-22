@@ -5,7 +5,7 @@ import { filesUnder } from '../scripts/source-tree.ts'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
- * One place for every shape: no TypeBox schema is declared outside `@zen/core` (#53, #255).
+ * One place for every shape: no TypeBox schema is declared outside `@enso/core` (#53, #255).
  *
  * ⚠ Enforcement, not a unit test — the shape of `vendor-gate.test.ts`. Nothing else stops the
  * next session declaring `Type.Object` beside a consumer, which is exactly the drift that made
@@ -41,8 +41,8 @@ function insideCore(path: string): boolean {
  * A TypeBox schema declaration, independent of the export keyword and of line breaks (#255).
  *
  * ⚠ The needle it replaced required `export const`, the name and `= Type.` on ONE PHYSICAL
- * LINE, and every evasion was idiomatic rather than exotic: `const ZenFoo = Type.Object({…})`
- * followed by `export { ZenFoo }` is a normal refactor; `export const ZenFoo: TObject =` with
+ * LINE, and every evasion was idiomatic rather than exotic: `const EnsoFoo = Type.Object({…})`
+ * followed by `export { EnsoFoo }` is a normal refactor; `export const EnsoFoo: TObject =` with
  * `Type.Object({` wrapped to the next line is what the FORMATTER produces at 120 columns once
  * the annotation is long; `export default`, `export let` and `export var` were simply not in
  * it. So the export keyword is optional, `default` is its own branch, and `\s` after the `=`
@@ -58,7 +58,7 @@ function insideCore(path: string): boolean {
 const SCHEMA_DECLARATION =
   /(?:^|\n)\s*(?:export\s+default\s+Type\.|(?:export\s+)?(?:const|let|var)\s+[A-Za-z][A-Za-z0-9_]*\s*(?::[^=\n]*)?=\s*Type\.)/
 
-test('⚠ no TypeBox schema is declared outside @zen/core (#53, #255)', () => {
+test('⚠ no TypeBox schema is declared outside @enso/core (#53, #255)', () => {
   const offenders = SEARCHED_ROOTS.flatMap((root) => filesUnder(join(REPOSITORY_ROOT, root)))
     .filter((path) => !insideCore(path))
     .filter((path) => SCHEMA_DECLARATION.test(readFileSync(path, 'utf8')))
@@ -85,12 +85,12 @@ test('the core exclusion is a path segment, so a sibling package is still scanne
 // a careless widening would report as second declaration sites.
 test('the needle matches every declaration spelling, and no line that merely quotes one (#255)', () => {
   for (const declaration of [
-    'export const ZenFoo = Type.Object({})',
-    'const ZenFoo = Type.Object({})\nexport { ZenFoo }',
-    'export const ZenFoo: TObject<{ kind: TLiteral<"foo"> }> =\n  Type.Object({ kind: Type.Literal("foo") })',
+    'export const EnsoFoo = Type.Object({})',
+    'const EnsoFoo = Type.Object({})\nexport { EnsoFoo }',
+    'export const EnsoFoo: TObject<{ kind: TLiteral<"foo"> }> =\n  Type.Object({ kind: Type.Literal("foo") })',
     'export default Type.Object({})',
-    'export let ZenFoo = Type.Object({})',
-    'export var ZenFoo = Type.Object({})',
+    'export let EnsoFoo = Type.Object({})',
+    'export var EnsoFoo = Type.Object({})',
   ]) {
     expect(SCHEMA_DECLARATION.test(`const before = 1\n${declaration}\n`)).toBe(true)
   }

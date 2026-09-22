@@ -8,10 +8,10 @@ import {
   type InlineExtension,
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
+import type { EnsoObservation } from '@enso/core'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import { findRepoRoot, harnessPackageDir } from '@enso/core/paths'
 import type { LogRecorder } from '@logtape/testing/recorder'
-import type { ZenObservation } from '@zen/core'
-import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
-import { findRepoRoot, harnessPackageDir } from '@zen/core/paths'
 import {
   type AgentHost,
   createAgentHost,
@@ -38,16 +38,16 @@ import { readPiccPersistedMode, storedPermissionModeState } from '../permission-
 
 const repoRoot = findRepoRoot(import.meta.url)
 const harnessDir = harnessPackageDir(repoRoot)
-const agentDir = mkdtempSync(join(tmpdir(), 'zen-host-agent-'))
+const agentDir = mkdtempSync(join(tmpdir(), 'enso-host-agent-'))
 const openSessions: HostedThread[] = []
 
 let logs: LogRecorder
 beforeAll(async () => {
-  logs = await recordZenLogs()
+  logs = await recordEnsoLogs()
 })
 afterAll(async () => {
   for (const hosted of openSessions) hosted.runtime.dispose()
-  await releaseZenLogs()
+  await releaseEnsoLogs()
 })
 
 /** The five extension path suffixes the harness manifest declares, in load order. */
@@ -62,8 +62,8 @@ const MANIFEST_EXTENSION_MARKERS = [
 
 /** Collect every event a session emits, from its first subscriber on (the host replays what came before). */
 /** Everything the runtime says to its subscriber — observations, since L2 (#162 workstream 4). */
-function collectEvents(hosted: HostedThread): ZenObservation[] {
-  const events: ZenObservation[] = []
+function collectEvents(hosted: HostedThread): EnsoObservation[] {
+  const events: EnsoObservation[] = []
   hosted.runtime.subscribe((observation) => events.push(observation))
   return events
 }
@@ -91,8 +91,11 @@ async function hostedSession(extensionFactories: InlineExtension[] = []): Promis
 const OBSERVATION_DEADLINE_MILLISECONDS = 5000
 
 /** Resolves with the first observation matching `matches`, or rejects at the deadline — never a tick count. */
-function untilObservation(hosted: HostedThread, matches: (event: ZenObservation) => boolean): Promise<ZenObservation> {
-  const { promise, resolve, reject } = Promise.withResolvers<ZenObservation>()
+function untilObservation(
+  hosted: HostedThread,
+  matches: (event: EnsoObservation) => boolean,
+): Promise<EnsoObservation> {
+  const { promise, resolve, reject } = Promise.withResolvers<EnsoObservation>()
   const timer = setTimeout(
     () => reject(new Error(`no matching observation within ${OBSERVATION_DEADLINE_MILLISECONDS}ms`)),
     OBSERVATION_DEADLINE_MILLISECONDS,
@@ -113,7 +116,7 @@ const nextTick = (): Promise<void> => {
 }
 
 test("⚠ childProxy is pinned off in the agent dir's multi-account config, other keys preserved", () => {
-  const scratch = mkdtempSync(join(tmpdir(), 'zen-host-seed-'))
+  const scratch = mkdtempSync(join(tmpdir(), 'enso-host-seed-'))
   const configPath = join(scratch, 'provider-failover.json')
   // absent → created with just the pin
   seedMultiAccountChildProxyOff(scratch)
@@ -127,7 +130,7 @@ test("⚠ childProxy is pinned off in the agent dir's multi-account config, othe
     providerOrder: ['anthropic'],
   })
   // and creating a host seeds it in the host's own agent dir — before any session exists
-  const hostAgentDir = mkdtempSync(join(tmpdir(), 'zen-host-seed-at-boot-'))
+  const hostAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-seed-at-boot-'))
   createAgentHost({ cwd: repoRoot, agentDir: hostAgentDir, harnessPackageDir: harnessDir })
   expect(existsSync(join(hostAgentDir, 'provider-failover.json'))).toBe(true)
   expect(JSON.parse(readFileSync(join(hostAgentDir, 'provider-failover.json'), 'utf8'))).toEqual({ childProxy: false })
@@ -142,7 +145,7 @@ test('⚠ creating a host removes secret-shaped variables from its environment, 
   logs.clear()
   createAgentHost({
     cwd: repoRoot,
-    agentDir: mkdtempSync(join(tmpdir(), 'zen-host-quarantine-')),
+    agentDir: mkdtempSync(join(tmpdir(), 'enso-host-quarantine-')),
     harnessPackageDir: harnessDir,
     environment,
   })
@@ -181,7 +184,7 @@ test('⚠ session_start fires exactly once per session, and two sessions do not 
   let factoryRuns = 0
   const startsPerInstance: number[] = []
   const probe: InlineExtension = {
-    name: 'zen-host-probe',
+    name: 'enso-host-probe',
     factory: (pi: ExtensionAPI) => {
       factoryRuns += 1
       const mine = factoryRuns - 1
@@ -201,7 +204,7 @@ test('⚠⚠ a dialog an extension opens reaches the subscriber and its answer r
   let confirmed: boolean | undefined
   let settled = false
   const probe: InlineExtension = {
-    name: 'zen-host-dialog-probe',
+    name: 'enso-host-dialog-probe',
     factory: (pi: ExtensionAPI) => {
       pi.on('session_start', (_event, extensionContext) => {
         // Fire-and-forget on purpose: awaiting here would block bindExtensions until the
@@ -233,7 +236,7 @@ test('⚠⚠ a dialog an extension opens reaches the subscriber and its answer r
 test("a cancelled dialog resolves to pi's cancel value, and dispose cancels what is still pending", async () => {
   const answers: unknown[] = []
   const probe: InlineExtension = {
-    name: 'zen-host-cancel-probe',
+    name: 'enso-host-cancel-probe',
     factory: (pi: ExtensionAPI) => {
       pi.on('session_start', (_event, extensionContext) => {
         void extensionContext.ui.select('Pick', ['a', 'b']).then((answer) => answers.push(answer))
@@ -262,7 +265,7 @@ test('an answer naming no pending dialog is reported, never thrown', async () =>
 
 test('⚠ a throwing session_start becomes an extension-error observation; the session is still created', async () => {
   const probe: InlineExtension = {
-    name: 'zen-host-throwing-probe',
+    name: 'enso-host-throwing-probe',
     factory: (pi: ExtensionAPI) => {
       pi.on('session_start', () => {
         throw new Error('probe: session_start threw')
@@ -273,7 +276,7 @@ test('⚠ a throwing session_start becomes an extension-error observation; the s
   const events = collectEvents(hosted)
   const error = events.find((event) => event.kind === 'extension-error')
   expect(error).toMatchObject({ event: 'session_start', error: 'probe: session_start threw' })
-  expect(String((error as { extensionPath?: unknown })?.extensionPath)).toContain('zen-host-throwing-probe')
+  expect(String((error as { extensionPath?: unknown })?.extensionPath)).toContain('enso-host-throwing-probe')
 })
 
 // ⚠ THE HOST MUST BE LISTENING WHILE session_start RUNS (#88). Extensions persist state
@@ -284,7 +287,7 @@ test('⚠ a throwing session_start becomes an extension-error observation; the s
 // Found by the #86 drawer: two `modes` entries on the branch, one `custom-entry` in the browser.
 test('⚠ an entry an extension persists during session_start reaches the first subscriber (#88)', async () => {
   const probe: InlineExtension = {
-    name: 'zen-host-startup-entry-probe',
+    name: 'enso-host-startup-entry-probe',
     factory: (pi: ExtensionAPI) => {
       pi.on('session_start', () => {
         pi.appendEntry('probe-startup', { seen: true }) // the same call picc makes for `modes`
@@ -309,7 +312,7 @@ test('⚠ an entry an extension persists during session_start reaches the first 
 test("⚠ the host emits permission-mode after the vendor's modes entry — mode and the modes it registered", async () => {
   const hosted = await hostedSession()
   const events = collectEvents(hosted)
-  const isVendorModeEntry = (event: ZenObservation): boolean =>
+  const isVendorModeEntry = (event: EnsoObservation): boolean =>
     event.kind === 'custom-entry' &&
     readPiccPersistedMode({ customType: event.customType, data: event.data }) !== undefined
   const entryIndex = events.findIndex(isVendorModeEntry)
@@ -388,7 +391,7 @@ test('⚠ through the runtime, the real guards refuse a write outside the worksp
 test('⚠ first block is final: a later extension cannot un-block the guards, and its own block on an allowed call stands', async () => {
   const seen: string[] = []
   const laterExtension: InlineExtension = {
-    name: 'zen-host-later-participant-probe',
+    name: 'enso-host-later-participant-probe',
     factory: (pi: ExtensionAPI) => {
       pi.on('tool_call', (event) => {
         seen.push(event.toolName)
@@ -418,7 +421,7 @@ test('⚠ first block is final: a later extension cannot un-block the guards, an
 test("⚠ Stop stops: the run's abort settles a pending dialog as `aborted` — the card drops, the extension resumes with its cancel value", async () => {
   let outcome: unknown = 'unsettled'
   const probe: InlineExtension = {
-    name: 'zen-host-abort-dialog-probe',
+    name: 'enso-host-abort-dialog-probe',
     factory: (pi: ExtensionAPI) => {
       pi.on('session_start', (_event, extensionContext) => {
         void extensionContext.ui.confirm('Still here?', 'after an abort').then((answer) => {
@@ -490,9 +493,9 @@ function noopListener(): void {
 
 /** Emits a notify on command — used to produce an event while nobody is subscribed. */
 const lateNotifyProbe: InlineExtension = {
-  name: 'zen-host-late-notify-probe',
+  name: 'enso-host-late-notify-probe',
   factory: (pi: ExtensionAPI) => {
-    pi.registerCommand('zen-late-notify', {
+    pi.registerCommand('enso-late-notify', {
       description: 'emit a notify while nobody is listening',
       handler: async (_args: string, extensionContext: ExtensionCommandContext) => {
         extensionContext.ui.notify('late notify', 'info')
@@ -507,7 +510,7 @@ test('⚠ events are held only until the FIRST subscriber; with nobody listening
   // and end it before its first token. The probe command emits a notify while no one is
   // subscribed; the next subscriber must NOT see it.
   const hosted = await hostedSession([lateNotifyProbe])
-  const firstSubscriberEvents: ZenObservation[] = []
+  const firstSubscriberEvents: EnsoObservation[] = []
   const unsubscribeFirst = hosted.runtime.subscribe((observation) => firstSubscriberEvents.push(observation))
   // Startup records were replayed to the first subscriber.
   expect(
@@ -517,12 +520,12 @@ test('⚠ events are held only until the FIRST subscriber; with nobody listening
 
   await new Promise<void>((resolve, reject) => {
     hosted.runtime.prompt(
-      { message: '/zen-late-notify' },
+      { message: '/enso-late-notify' },
       { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )
   })
 
-  const secondSubscriberEvents: ZenObservation[] = []
+  const secondSubscriberEvents: EnsoObservation[] = []
   hosted.runtime.subscribe((observation) => secondSubscriberEvents.push(observation))
   expect(
     secondSubscriberEvents.filter(
@@ -560,14 +563,14 @@ test("⚠ the emitted tail records each event's provenance: held at startup, rep
   // With a subscriber attached the command's notify is `live`; with none, `dropped`.
   await new Promise<void>((resolve, reject) => {
     hosted.runtime.prompt(
-      { message: '/zen-late-notify' },
+      { message: '/enso-late-notify' },
       { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )
   })
   unsubscribe()
   await new Promise<void>((resolve, reject) => {
     hosted.runtime.prompt(
-      { message: '/zen-late-notify' },
+      { message: '/enso-late-notify' },
       { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )
   })
@@ -603,7 +606,7 @@ test("⚠ subscribe delivers startup records with origin `session-start` and a r
 
   await new Promise<void>((resolve, reject) => {
     hosted.runtime.prompt(
-      { message: '/zen-late-notify' },
+      { message: '/enso-late-notify' },
       { onAccepted: resolve, onRejected: (reason: string) => reject(new Error(reason)) },
     )
   })

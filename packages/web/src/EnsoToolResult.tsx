@@ -1,8 +1,8 @@
+import { type EnsoToolResultDescriptor, readEnsoToolResultDescriptor } from '@enso/core'
 import type { ToolResultPart } from '@tanstack/ai'
-import { readZenToolResultDescriptor, type ZenToolResultDescriptor } from '@zen/core'
 
 /**
- * The web renderer for a zen tool result — the React half of #18's contract.
+ * The web renderer for a enso tool result — the React half of #18's contract.
  *
  * Shaped to be usable as a `toolsComponents` entry in TanStack AI's `createChatUI`, whose
  * `ToolProps` is `{ part, result?, interrupt? }`. We take only `result` so this stays
@@ -15,7 +15,7 @@ import { readZenToolResultDescriptor, type ZenToolResultDescriptor } from '@zen/
  */
 
 /** Renderers keyed by descriptor `kind`. Absent keys are not an error — see the fallback. */
-export type ZenRendererMap = Record<string, (props: Record<string, unknown>) => React.ReactNode>
+export type EnsoRendererMap = Record<string, (props: Record<string, unknown>) => React.ReactNode>
 
 /**
  * What one tool call is in, read off its result — the ONE definition (PR #93 review).
@@ -48,7 +48,7 @@ function TextFallback({ result }: { result: ToolResultPart }): React.ReactNode {
   const text =
     typeof result.content === 'string' ? result.content : result.content.map((part) => JSON.stringify(part)).join('\n')
   return (
-    <pre data-zen-tool-result="text" className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">
+    <pre data-enso-tool-result="text" className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">
       {text}
     </pre>
   )
@@ -57,17 +57,17 @@ function TextFallback({ result }: { result: ToolResultPart }): React.ReactNode {
 function TruncationNote({
   truncated,
 }: {
-  truncated: NonNullable<ZenToolResultDescriptor['truncated']>
+  truncated: NonNullable<EnsoToolResultDescriptor['truncated']>
 }): React.ReactNode {
   // Rendered here, from data — the terminal renders the same fields differently.
   return (
-    <p data-zen-truncation className="text-muted-foreground text-xs">
+    <p data-enso-truncation className="text-muted-foreground text-xs">
       showing {truncated.shown} of {truncated.total} {truncated.unit}
     </p>
   )
 }
 
-export function ZenToolResult({
+export function EnsoToolResult({
   result,
   runOpen,
   renderers,
@@ -80,13 +80,13 @@ export function ZenToolResult({
   result: ToolResultPart | undefined
   /** The call's run is still in flight — see {@link toolResultState}. */
   runOpen: boolean
-  renderers: ZenRendererMap
+  renderers: EnsoRendererMap
 }): React.ReactNode {
   const state = toolResultState(result, runOpen)
   // No result yet — the call is in flight. Say so rather than rendering nothing.
   if (state.status === 'pending') {
     return (
-      <p data-zen-tool-result="pending" className="animate-pulse text-muted-foreground text-xs">
+      <p data-enso-tool-result="pending" className="animate-pulse text-muted-foreground text-xs">
         running…
       </p>
     )
@@ -95,7 +95,7 @@ export function ZenToolResult({
   // server going away, or a torn tail on resume. Still, not pulsing; the words say why.
   if (state.status === 'aborted') {
     return (
-      <p data-zen-tool-result="aborted" className="text-muted-foreground text-xs">
+      <p data-enso-tool-result="aborted" className="text-muted-foreground text-xs">
         aborted — the run ended before this call returned
       </p>
     )
@@ -105,7 +105,7 @@ export function ZenToolResult({
   if (state.status === 'error') {
     return (
       <pre
-        data-zen-tool-result="error"
+        data-enso-tool-result="error"
         className="overflow-x-auto rounded-md border border-destructive/50 bg-destructive/10 p-3 font-mono text-destructive text-xs"
       >
         {state.error}
@@ -113,7 +113,7 @@ export function ZenToolResult({
     )
   }
 
-  const descriptor = readZenToolResultDescriptor(state.result.metadata)
+  const descriptor = readEnsoToolResultDescriptor(state.result.metadata)
   if (descriptor === undefined) return <TextFallback result={state.result} />
 
   const render = renderers[descriptor.kind]
@@ -122,7 +122,7 @@ export function ZenToolResult({
   if (render === undefined) return <TextFallback result={state.result} />
 
   return (
-    <div data-zen-tool-result="descriptor" data-zen-kind={descriptor.kind}>
+    <div data-enso-tool-result="descriptor" data-enso-kind={descriptor.kind}>
       {render(descriptor.props)}
       {descriptor.truncated !== undefined ? <TruncationNote truncated={descriptor.truncated} /> : null}
     </div>

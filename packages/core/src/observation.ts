@@ -1,14 +1,14 @@
 import { type Static, Type } from 'typebox'
-import { ZenDialogSpec } from './dialog.ts'
-import { ZenPermissionModeState } from './permission-mode.ts'
-import { ZenToolResultDescriptor } from './tool-result.ts'
+import { EnsoDialogSpec } from './dialog.ts'
+import { EnsoPermissionModeState } from './permission-mode.ts'
+import { EnsoToolResultDescriptor } from './tool-result.ts'
 
 /**
  * What a pi rpc event becomes for a surface to render.
  *
  * ⚠ THE UNION HAS NO "SKIP" MEMBER, BY DESIGN.
  * Every silent-drop bug this project has hit had one shape — a producer emitting something
- * a consumer quietly ignored. `ZenUnmapped` exists so that an unrecognised event is
+ * a consumer quietly ignored. `EnsoUnmapped` exists so that an unrecognised event is
  * carried rather than discarded, and the absence of a skip case is what makes dropping
  * inexpressible rather than merely discouraged.
  */
@@ -19,7 +19,7 @@ import { ZenToolResultDescriptor } from './tool-result.ts'
  * @group Observations
  * @category Turns and cost
  */
-export const ZenUsage = Type.Object({
+export const EnsoUsage = Type.Object({
   input: Type.Integer({ minimum: 0 }),
   output: Type.Integer({ minimum: 0 }),
   cacheRead: Type.Integer({ minimum: 0 }),
@@ -30,7 +30,7 @@ export const ZenUsage = Type.Object({
  * @group Observations
  * @category Turns and cost
  */
-export type ZenUsage = Static<typeof ZenUsage>
+export type EnsoUsage = Static<typeof EnsoUsage>
 
 /**
  * A streaming text delta. ⚠ `usage` rides along on EVERY one — see `message_update`.
@@ -38,22 +38,22 @@ export type ZenUsage = Static<typeof ZenUsage>
  * @group Observations
  * @category Message stream
  */
-export const ZenTextDelta = Type.Object({
+export const EnsoTextDelta = Type.Object({
   kind: Type.Literal('text-delta'),
   contentIndex: Type.Integer({ minimum: 0 }),
   delta: Type.String(),
-  usage: Type.Optional(ZenUsage),
+  usage: Type.Optional(EnsoUsage),
 })
 
 /**
  * @group Observations
  * @category Message stream
  */
-export const ZenThinkingDelta = Type.Object({
+export const EnsoThinkingDelta = Type.Object({
   kind: Type.Literal('thinking-delta'),
   contentIndex: Type.Integer({ minimum: 0 }),
   delta: Type.String(),
-  usage: Type.Optional(ZenUsage),
+  usage: Type.Optional(EnsoUsage),
 })
 
 /**
@@ -62,7 +62,7 @@ export const ZenThinkingDelta = Type.Object({
  * @group Observations
  * @category Tool calls
  */
-export const ZenToolCall = Type.Object({
+export const EnsoToolCall = Type.Object({
   kind: Type.Literal('tool-call'),
   toolCallId: Type.String(),
   toolName: Type.String(),
@@ -80,14 +80,14 @@ export const ZenToolCall = Type.Object({
  * @group Observations
  * @category Tool calls
  */
-export const ZenToolResultObservation = Type.Object({
+export const EnsoToolResultObservation = Type.Object({
   kind: Type.Literal('tool-result'),
   toolCallId: Type.String(),
   toolName: Type.String(),
   text: Type.String(),
   complete: Type.Boolean(),
   isError: Type.Boolean(),
-  descriptor: Type.Optional(ZenToolResultDescriptor),
+  descriptor: Type.Optional(EnsoToolResultDescriptor),
 })
 
 /**
@@ -115,12 +115,12 @@ export const ZenToolResultObservation = Type.Object({
  * @group Observations
  * @category Extension surface
  */
-export const ZenNotifyType = Type.Union([Type.Literal('info'), Type.Literal('warning'), Type.Literal('error')])
+export const EnsoNotifyType = Type.Union([Type.Literal('info'), Type.Literal('warning'), Type.Literal('error')])
 /**
  * @group Observations
  * @category Extension surface
  */
-export type ZenNotifyType = Static<typeof ZenNotifyType>
+export type EnsoNotifyType = Static<typeof EnsoNotifyType>
 
 /**
  * Where a ui request came from (#96) — tagged at the SOURCE, never inferred.
@@ -139,26 +139,26 @@ export type ZenNotifyType = Static<typeof ZenNotifyType>
  * @group Observations
  * @category Extension surface
  */
-export const ZenUiRequestOrigin = Type.Union([Type.Literal('session-start'), Type.Literal('run')])
+export const EnsoUiRequestOrigin = Type.Union([Type.Literal('session-start'), Type.Literal('run')])
 /**
  * @group Observations
  * @category Extension surface
  */
-export type ZenUiRequestOrigin = Static<typeof ZenUiRequestOrigin>
+export type EnsoUiRequestOrigin = Static<typeof EnsoUiRequestOrigin>
 
 /**
  * @group Observations
  * @category Extension surface
  */
-export const ZenExtensionUiRequest = Type.Object({
+export const EnsoExtensionUiRequest = Type.Object({
   kind: Type.Literal('extension-ui-request'),
   id: Type.String(),
   method: Type.String(),
   blocking: Type.Boolean(),
-  origin: ZenUiRequestOrigin,
-  dialog: Type.Optional(ZenDialogSpec),
+  origin: EnsoUiRequestOrigin,
+  dialog: Type.Optional(EnsoDialogSpec),
   message: Type.Optional(Type.String()),
-  notifyType: Type.Optional(ZenNotifyType),
+  notifyType: Type.Optional(EnsoNotifyType),
 })
 
 /**
@@ -171,7 +171,7 @@ export const ZenExtensionUiRequest = Type.Object({
  * @group Observations
  * @category Permission and dialogs
  */
-export const ZenDialogOutcome = Type.Union([
+export const EnsoDialogOutcome = Type.Union([
   Type.Literal('answered'),
   Type.Literal('cancelled'),
   Type.Literal('timeout'),
@@ -181,7 +181,7 @@ export const ZenDialogOutcome = Type.Union([
  * @group Observations
  * @category Permission and dialogs
  */
-export type ZenDialogOutcome = Static<typeof ZenDialogOutcome>
+export type EnsoDialogOutcome = Static<typeof EnsoDialogOutcome>
 
 /**
  * A blocking question is no longer waiting (#114).
@@ -194,17 +194,17 @@ export type ZenDialogOutcome = Static<typeof ZenDialogOutcome>
  * @group Observations
  * @category Permission and dialogs
  */
-export const ZenDialogSettled = Type.Object({
+export const EnsoDialogSettled = Type.Object({
   kind: Type.Literal('dialog-settled'),
-  /** `minLength: 1`, as `ZenOpenDialog.id` — a settle must name a question (PR #115 review). */
+  /** `minLength: 1`, as `EnsoOpenDialog.id` — a settle must name a question (PR #115 review). */
   id: Type.String({ minLength: 1 }),
-  outcome: ZenDialogOutcome,
+  outcome: EnsoDialogOutcome,
 })
 /**
  * @group Observations
  * @category Permission and dialogs
  */
-export type ZenDialogSettled = Static<typeof ZenDialogSettled>
+export type EnsoDialogSettled = Static<typeof EnsoDialogSettled>
 
 /**
  * A CUSTOM session entry was appended (#29) — an extension persisted state via
@@ -214,7 +214,7 @@ export type ZenDialogSettled = Static<typeof ZenDialogSettled>
  * persisted state is now `data`", and it may be re-appended without anything having
  * changed (picc persists on session start and on rule updates, not only on a mode
  * change). A renderer that wants to show a change must diff against the previous value
- * itself. `data` is `Type.Unknown()` for the same reason `ZenUnmapped.event` is: the
+ * itself. `data` is `Type.Unknown()` for the same reason `EnsoUnmapped.event` is: the
  * shape belongs to the extension that wrote it, and constraining it here would turn
  * "we do not render this yet" into "the transport is broken".
  *
@@ -225,7 +225,7 @@ export type ZenDialogSettled = Static<typeof ZenDialogSettled>
  * @group Observations
  * @category The union
  */
-export const ZenCustomEntry = Type.Object({
+export const EnsoCustomEntry = Type.Object({
   kind: Type.Literal('custom-entry'),
   customType: Type.String(),
   data: Type.Unknown(),
@@ -234,7 +234,7 @@ export const ZenCustomEntry = Type.Object({
  * @group Observations
  * @category The union
  */
-export type ZenCustomEntry = Static<typeof ZenCustomEntry>
+export type EnsoCustomEntry = Static<typeof EnsoCustomEntry>
 
 /**
  * The permission mode changed, and what a run may switch to now (#162 workstream 4, L3).
@@ -242,20 +242,20 @@ export type ZenCustomEntry = Static<typeof ZenCustomEntry>
  * The HOST emits this when its mode extension persists a change — the one observation the
  * browser reads the mode from mid-run, so no surface knows which extension's entry it was or
  * what that entry looks like. The same `{ mode, available }` a run starts with
- * (`ZenPermissionModeState`): one shape for the receipt and for the change.
+ * (`EnsoPermissionModeState`): one shape for the receipt and for the change.
  *
  * @group Observations
  * @category Permission and dialogs
  */
-export const ZenPermissionMode = Type.Object({
+export const EnsoPermissionMode = Type.Object({
   kind: Type.Literal('permission-mode'),
-  ...ZenPermissionModeState.properties,
+  ...EnsoPermissionModeState.properties,
 })
 /**
  * @group Observations
  * @category Permission and dialogs
  */
-export type ZenPermissionMode = Static<typeof ZenPermissionMode>
+export type EnsoPermissionMode = Static<typeof EnsoPermissionMode>
 
 /**
  * A mode change the route told the runtime about was REJECTED after the 204 went out (L3
@@ -268,7 +268,7 @@ export type ZenPermissionMode = Static<typeof ZenPermissionMode>
  * @group Observations
  * @category Permission and dialogs
  */
-export const ZenPermissionModeRejected = Type.Object({
+export const EnsoPermissionModeRejected = Type.Object({
   kind: Type.Literal('permission-mode-rejected'),
   mode: Type.String({ minLength: 1 }),
   reason: Type.String(),
@@ -277,7 +277,7 @@ export const ZenPermissionModeRejected = Type.Object({
  * @group Observations
  * @category Permission and dialogs
  */
-export type ZenPermissionModeRejected = Static<typeof ZenPermissionModeRejected>
+export type EnsoPermissionModeRejected = Static<typeof EnsoPermissionModeRejected>
 
 /**
  * A message began — pi's `message_start` (#112).
@@ -289,7 +289,7 @@ export type ZenPermissionModeRejected = Static<typeof ZenPermissionModeRejected>
  * @group Observations
  * @category Message stream
  */
-export const ZenMessageStart = Type.Object({
+export const EnsoMessageStart = Type.Object({
   kind: Type.Literal('message-start'),
   /** pi's message role, carried as pi names it. */
   role: Type.String(),
@@ -299,7 +299,7 @@ export const ZenMessageStart = Type.Object({
  * @group Observations
  * @category Message stream
  */
-export type ZenMessageStart = Static<typeof ZenMessageStart>
+export type EnsoMessageStart = Static<typeof EnsoMessageStart>
 
 /**
  * A message completed — pi's `message_end` — with its accounting when it has any (#45).
@@ -319,16 +319,16 @@ export type ZenMessageStart = Static<typeof ZenMessageStart>
  * @group Observations
  * @category Message stream
  */
-export const ZenMessageEnd = Type.Object({
+export const EnsoMessageEnd = Type.Object({
   kind: Type.Literal('message-end'),
   role: Type.String(),
-  usage: Type.Optional(ZenUsage),
+  usage: Type.Optional(EnsoUsage),
 })
 /**
  * @group Observations
  * @category Message stream
  */
-export type ZenMessageEnd = Static<typeof ZenMessageEnd>
+export type EnsoMessageEnd = Static<typeof EnsoMessageEnd>
 
 /**
  * pi's `turn_start` / `turn_end` (#112).
@@ -341,17 +341,17 @@ export type ZenMessageEnd = Static<typeof ZenMessageEnd>
  * @group Observations
  * @category Turns and cost
  */
-export const ZenTurnStart = Type.Object({ kind: Type.Literal('turn-start') })
+export const EnsoTurnStart = Type.Object({ kind: Type.Literal('turn-start') })
 /**
  * @group Observations
  * @category Turns and cost
  */
-export type ZenTurnStart = Static<typeof ZenTurnStart>
+export type EnsoTurnStart = Static<typeof EnsoTurnStart>
 /**
  * @group Observations
  * @category Turns and cost
  */
-export const ZenTurnEnd = Type.Object({
+export const EnsoTurnEnd = Type.Object({
   kind: Type.Literal('turn-end'),
   /** How many tool results the request produced — the step row's count, without the results themselves (they crossed as `tool-result`). */
   toolResults: Type.Integer({ minimum: 0 }),
@@ -360,7 +360,7 @@ export const ZenTurnEnd = Type.Object({
  * @group Observations
  * @category Turns and cost
  */
-export type ZenTurnEnd = Static<typeof ZenTurnEnd>
+export type EnsoTurnEnd = Static<typeof EnsoTurnEnd>
 
 /**
  * What is waiting behind the run in flight (#75, #112, #216): prompts that will INTERRUPT at
@@ -380,7 +380,7 @@ export type ZenTurnEnd = Static<typeof ZenTurnEnd>
  * @group Observations
  * @category Prompt admission
  */
-export const ZenQueue = Type.Object({
+export const EnsoQueue = Type.Object({
   kind: Type.Literal('queue'),
   interrupting: Type.Array(Type.String()),
   enqueued: Type.Array(Type.String()),
@@ -389,7 +389,7 @@ export const ZenQueue = Type.Object({
  * @group Observations
  * @category Prompt admission
  */
-export type ZenQueue = Static<typeof ZenQueue>
+export type EnsoQueue = Static<typeof EnsoQueue>
 
 /**
  * pi refused a prompt at preflight (#112) — the one observation the SERVER synthesises,
@@ -401,7 +401,7 @@ export type ZenQueue = Static<typeof ZenQueue>
  * @group Observations
  * @category Prompt admission
  */
-export const ZenPromptRejected = Type.Object({
+export const EnsoPromptRejected = Type.Object({
   kind: Type.Literal('prompt-rejected'),
   messageId: Type.String(),
   reason: Type.String(),
@@ -410,7 +410,7 @@ export const ZenPromptRejected = Type.Object({
  * @group Observations
  * @category Prompt admission
  */
-export type ZenPromptRejected = Static<typeof ZenPromptRejected>
+export type EnsoPromptRejected = Static<typeof EnsoPromptRejected>
 
 /**
  * An extension threw. Surfaced, never swallowed.
@@ -418,7 +418,7 @@ export type ZenPromptRejected = Static<typeof ZenPromptRejected>
  * @group Observations
  * @category Extension surface
  */
-export const ZenExtensionError = Type.Object({
+export const EnsoExtensionError = Type.Object({
   kind: Type.Literal('extension-error'),
   extensionPath: Type.String(),
   event: Type.String(),
@@ -431,7 +431,7 @@ export const ZenExtensionError = Type.Object({
  * @group Observations
  * @category Turns and cost
  */
-export const ZenRunEnded = Type.Object({
+export const EnsoRunEnded = Type.Object({
   kind: Type.Literal('run-ended'),
   willRetry: Type.Boolean(),
 })
@@ -442,7 +442,7 @@ export const ZenRunEnded = Type.Object({
  * @group Observations
  * @category Turns and cost
  */
-export const ZenSettled = Type.Object({ kind: Type.Literal('settled') })
+export const EnsoSettled = Type.Object({ kind: Type.Literal('settled') })
 
 /**
  * Anything not modelled above, carried through so it can be logged or displayed.
@@ -454,7 +454,7 @@ export const ZenSettled = Type.Object({ kind: Type.Literal('settled') })
  * @group Observations
  * @category The union
  */
-export const ZenUnmapped = Type.Object({
+export const EnsoUnmapped = Type.Object({
   kind: Type.Literal('unmapped'),
   event: Type.Unknown(),
 })
@@ -463,29 +463,29 @@ export const ZenUnmapped = Type.Object({
  * @group Observations
  * @category The union
  */
-export const ZenObservation = Type.Union([
-  ZenTextDelta,
-  ZenThinkingDelta,
-  ZenToolCall,
-  ZenToolResultObservation,
-  ZenCustomEntry,
-  ZenPermissionMode,
-  ZenPermissionModeRejected,
-  ZenMessageStart,
-  ZenMessageEnd,
-  ZenTurnStart,
-  ZenTurnEnd,
-  ZenQueue,
-  ZenPromptRejected,
-  ZenExtensionError,
-  ZenExtensionUiRequest,
-  ZenDialogSettled,
-  ZenRunEnded,
-  ZenSettled,
-  ZenUnmapped,
+export const EnsoObservation = Type.Union([
+  EnsoTextDelta,
+  EnsoThinkingDelta,
+  EnsoToolCall,
+  EnsoToolResultObservation,
+  EnsoCustomEntry,
+  EnsoPermissionMode,
+  EnsoPermissionModeRejected,
+  EnsoMessageStart,
+  EnsoMessageEnd,
+  EnsoTurnStart,
+  EnsoTurnEnd,
+  EnsoQueue,
+  EnsoPromptRejected,
+  EnsoExtensionError,
+  EnsoExtensionUiRequest,
+  EnsoDialogSettled,
+  EnsoRunEnded,
+  EnsoSettled,
+  EnsoUnmapped,
 ])
 /**
  * @group Observations
  * @category The union
  */
-export type ZenObservation = Static<typeof ZenObservation>
+export type EnsoObservation = Static<typeof EnsoObservation>

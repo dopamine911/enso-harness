@@ -12,7 +12,7 @@
  *   bun run logs --date 2026-09-08     another day's file
  *   bun run logs --json                the matching lines raw, for jq
  *   bun run logs --color | less -R     colors kept through a pipe
- *   bun run logs --file zen-bundle.md  a bundle someone attached (or any log file), read like today's
+ *   bun run logs --file enso-bundle.md  a bundle someone attached (or any log file), read like today's
  *   bun run logs bundle > b.md         make a bundle from the running server (--thread ID for one thread)
  *
  * ⚠ The file stores each message as its TEMPLATE with the values in `properties`, so a
@@ -24,13 +24,13 @@
 import { existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
-import { bundleRecordsText, isLogBundle, type ZenLogLine } from '../packages/core/src/index.ts'
+import { bundleRecordsText, type EnsoLogLine, isLogBundle } from '../packages/core/src/index.ts'
 import {
+  ensoLogFilename,
+  ensoLogLineRenderer,
   logRecordOf,
   logsDirFrom,
-  parseZenLogLine,
-  zenLogFilename,
-  zenLogLineRenderer,
+  parseEnsoLogLine,
 } from '../packages/core/src/log-process.ts'
 import { findRepoRoot } from '../packages/core/src/paths.ts'
 
@@ -64,7 +64,7 @@ export interface Query {
 
 export const USAGE =
   'usage: bun run logs [--follow] [--level trace|debug|info|warning|error] [--thread ID] [--process NAME] [--since 10m] [--date YYYY-MM-DD] [--file PATH] [--json] [--color]\n' +
-  '       bun run logs bundle [--thread ID] > zen-bundle.md'
+  '       bun run logs bundle [--thread ID] > enso-bundle.md'
 
 /** A flag the parser could not accept — the main prints it with the usage and exits 2. */
 export class UsageError extends Error {
@@ -142,7 +142,7 @@ export function parseArguments(argv: readonly string[]): Query {
   return { date, follow, json, color, level, thread, process: processName, sinceMs, file }
 }
 
-export function matches(query: Query, line: ZenLogLine, notBefore: number): boolean {
+export function matches(query: Query, line: EnsoLogLine, notBefore: number): boolean {
   const record = logRecordOf(line)
   if ((LEVEL_RANK[record.level] ?? 0) < query.level) return false
   if (record.timestamp < notBefore) return false
@@ -153,10 +153,10 @@ export function matches(query: Query, line: ZenLogLine, notBefore: number): bool
 }
 
 /** Print every matching line in `text`; a line that is not a record is said, not skipped silently. */
-function print(query: Query, render: (line: ZenLogLine) => string, text: string, notBefore: number): void {
+function print(query: Query, render: (line: EnsoLogLine) => string, text: string, notBefore: number): void {
   for (const raw of text.split('\n')) {
     if (raw.length === 0) continue
-    const parsed = parseZenLogLine(raw)
+    const parsed = parseEnsoLogLine(raw)
     if (typeof parsed === 'string') {
       process.stdout.write(`(${parsed}) ${raw}\n`)
       continue
@@ -169,7 +169,7 @@ function print(query: Query, render: (line: ZenLogLine) => string, text: string,
 /** Poll until the day's file exists — `--follow` started before the first launcher of the day. */
 async function untilExists(file: string): Promise<void> {
   if (existsSync(file)) return
-  process.stderr.write(`zen-logs: waiting for ${file} …\n`)
+  process.stderr.write(`enso-logs: waiting for ${file} …\n`)
   while (!existsSync(file)) await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS))
 }
 
@@ -198,7 +198,7 @@ export function followReader(): (chunk: Buffer) => string {
   }
 }
 
-function follow(query: Query, render: (line: ZenLogLine) => string, file: string): void {
+function follow(query: Query, render: (line: EnsoLogLine) => string, file: string): void {
   // Poll from where the first read ended; one descriptor for the life of the process.
   let offset = statSync(file).size
   const descriptor = openSync(file, 'r')
@@ -222,19 +222,19 @@ function follow(query: Query, render: (line: ZenLogLine) => string, file: string
  */
 async function bundle(argv: readonly string[]): Promise<void> {
   const query = parseArguments(argv)
-  const serverUrl = process.env.ZEN_SERVER_URL ?? 'http://127.0.0.1:5179'
+  const serverUrl = process.env.ENSO_SERVER_URL ?? 'http://127.0.0.1:5179'
   const url = `${serverUrl}/api/logs/bundle${query.thread === undefined ? '' : `?thread=${encodeURIComponent(query.thread)}`}`
   let response: Response
   try {
     response = await fetch(url)
   } catch (error) {
     process.stderr.write(
-      `zen-logs: no server at ${serverUrl} (${error instanceof Error ? error.message : String(error)}) — a bundle needs the running server for its threads; is \`bun run dev\` up? The file alone is \`bun run logs --json\`.\n`,
+      `enso-logs: no server at ${serverUrl} (${error instanceof Error ? error.message : String(error)}) — a bundle needs the running server for its threads; is \`bun run dev\` up? The file alone is \`bun run logs --json\`.\n`,
     )
     process.exit(1)
   }
   if (!response.ok) {
-    process.stderr.write(`zen-logs: ${url} answered ${response.status}: ${await response.text()}\n`)
+    process.stderr.write(`enso-logs: ${url} answered ${response.status}: ${await response.text()}\n`)
     process.exit(1)
   }
   process.stdout.write(await response.text())
@@ -250,20 +250,20 @@ async function main(argv: readonly string[]): Promise<void> {
     query = parseArguments(argv)
   } catch (error) {
     if (!(error instanceof UsageError)) throw error
-    process.stderr.write(`zen-logs: ${error.message}\n\n${USAGE}\n`)
+    process.stderr.write(`enso-logs: ${error.message}\n\n${USAGE}\n`)
     process.exit(2)
   }
   // A terminal gets colors and wraps to its width; a pipe (`| less`, `> file`) gets plain,
   // whole lines. `--color` keeps colors through a pipe (`| less -R`).
   const onTerminal = process.stdout.isTTY === true
-  const render = zenLogLineRenderer({ wordWrap: onTerminal, colors: onTerminal || query.color })
+  const render = ensoLogLineRenderer({ wordWrap: onTerminal, colors: onTerminal || query.color })
   const notBefore = query.sinceMs === undefined ? 0 : Date.now() - query.sinceMs
 
   if (query.file !== undefined) {
     // A bundle is a log file with prose around it: its fenced records, in order. Anything
     // else is read as a raw log — the same parser says what is not a record.
     if (!existsSync(query.file)) {
-      process.stderr.write(`zen-logs: no such file ${query.file}\n`)
+      process.stderr.write(`enso-logs: no such file ${query.file}\n`)
       process.exit(1)
     }
     const text = readFileSync(query.file, 'utf8')
@@ -272,11 +272,11 @@ async function main(argv: readonly string[]): Promise<void> {
   }
 
   const logsDir = logsDirFrom(process.env, findRepoRoot(import.meta.url))
-  const file = join(logsDir, zenLogFilename(query.date))
+  const file = join(logsDir, ensoLogFilename(query.date))
   if (query.follow) await untilExists(file)
   else if (!existsSync(file)) {
     process.stderr.write(
-      `zen-logs: no log for ${zenLogFilename(query.date)} in ${logsDir} — has a launcher run today?\n`,
+      `enso-logs: no log for ${ensoLogFilename(query.date)} in ${logsDir} — has a launcher run today?\n`,
     )
     process.exit(1)
   }

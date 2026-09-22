@@ -19,30 +19,30 @@ Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Ref
 The union. Closed, and with no "skip" member by design (module header, `observation.ts` lines 9–13):
 an event the mapper has no word for becomes `unmapped`, so dropping is inexpressible.
 
-<!-- source: packages/core/src/observation.ts#ZenObservation -->
+<!-- source: packages/core/src/observation.ts#EnsoObservation -->
 ```ts
 /**
  */
-export const ZenObservation = Type.Union([
-  ZenTextDelta,
-  ZenThinkingDelta,
-  ZenToolCall,
-  ZenToolResultObservation,
-  ZenCustomEntry,
-  ZenPermissionMode,
-  ZenPermissionModeRejected,
-  ZenMessageStart,
-  ZenMessageEnd,
-  ZenTurnStart,
-  ZenTurnEnd,
-  ZenQueue,
-  ZenPromptRejected,
-  ZenExtensionError,
-  ZenExtensionUiRequest,
-  ZenDialogSettled,
-  ZenRunEnded,
-  ZenSettled,
-  ZenUnmapped,
+export const EnsoObservation = Type.Union([
+  EnsoTextDelta,
+  EnsoThinkingDelta,
+  EnsoToolCall,
+  EnsoToolResultObservation,
+  EnsoCustomEntry,
+  EnsoPermissionMode,
+  EnsoPermissionModeRejected,
+  EnsoMessageStart,
+  EnsoMessageEnd,
+  EnsoTurnStart,
+  EnsoTurnEnd,
+  EnsoQueue,
+  EnsoPromptRejected,
+  EnsoExtensionError,
+  EnsoExtensionUiRequest,
+  EnsoDialogSettled,
+  EnsoRunEnded,
+  EnsoSettled,
+  EnsoUnmapped,
 ])
 ```
 
@@ -51,12 +51,12 @@ column of [`../reference/observations.md`](../reference/observations.md) names e
 not repeated here. The one shape shared across kinds is the accounting that rides on a text delta and a
 message end:
 
-<!-- source: packages/core/src/observation.ts#ZenUsage -->
+<!-- source: packages/core/src/observation.ts#EnsoUsage -->
 ```ts
 /**
  * Token and cost accounting, present on `message_update`, assistant and tool messages.
  */
-export const ZenUsage = Type.Object({
+export const EnsoUsage = Type.Object({
   input: Type.Integer({ minimum: 0 }),
   output: Type.Integer({ minimum: 0 }),
   cacheRead: Type.Integer({ minimum: 0 }),
@@ -68,12 +68,12 @@ export const ZenUsage = Type.Object({
 The frames. Every follow opens with exactly one snapshot, then observations each with a `seq` greater
 than the last, and status frames (`follow.ts` header, lines 11–15):
 
-<!-- source: packages/core/src/follow.ts#ZenFollowFrame -->
+<!-- source: packages/core/src/follow.ts#EnsoFollowFrame -->
 ```ts
-export const ZenFollowFrame = Type.Union([ZenFollowSnapshot, ZenFollowObservation, ZenFollowStatus])
+export const EnsoFollowFrame = Type.Union([EnsoFollowSnapshot, EnsoFollowObservation, EnsoFollowStatus])
 ```
 
-<!-- source: packages/core/src/follow.ts#ZenFollowSnapshot -->
+<!-- source: packages/core/src/follow.ts#EnsoFollowSnapshot -->
 ```ts
 /**
  * The server↔browser wire (#112): a thread's feed, as the follow route serves it.
@@ -84,11 +84,11 @@ export const ZenFollowFrame = Type.Union([ZenFollowSnapshot, ZenFollowObservatio
  * a new snapshot; there is no cursor to resume from, because the snapshot IS the resync
  * (deepseek-harness: one complete snapshot per generation, then only deltas).
  *
- * The payload is `ZenObservation` — the same layer the event tails and the debug pane
+ * The payload is `EnsoObservation` — the same layer the event tails and the debug pane
  * reason in. AG-UI is not on this wire; a browser adapter derives it if a renderer wants it
  * (`docs/architecture.md`, decided constraints).
  */
-export const ZenFollowSnapshot = Type.Object(
+export const EnsoFollowSnapshot = Type.Object(
   {
     type: Type.Literal('snapshot'),
     threadId: Type.String(),
@@ -97,34 +97,34 @@ export const ZenFollowSnapshot = Type.Object(
     /** A pi session exists for the thread on this server. False: served cold from the file, or empty. */
     live: Type.Boolean(),
     busy: Type.Boolean(),
-    /** See `ZenThreadSummary.generation`. */
+    /** See `EnsoThreadSummary.generation`. */
     generation: Type.Integer({ minimum: 0 }),
-    permissionMode: ZenPermissionModeState,
-    /** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not zen's. */
+    permissionMode: EnsoPermissionModeState,
+    /** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not enso's. */
     messages: Type.Array(Type.Unknown()),
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */
-    openDialogs: Type.Array(ZenOpenDialog),
-    interrupted: Type.Optional(ZenInterruptedTail),
+    openDialogs: Type.Array(EnsoOpenDialog),
+    interrupted: Type.Optional(EnsoInterruptedTail),
   },
   { additionalProperties: false },
 )
 ```
 
-<!-- source: packages/core/src/follow.ts#ZenFollowObservation -->
+<!-- source: packages/core/src/follow.ts#EnsoFollowObservation -->
 ```ts
-export const ZenFollowObservation = Type.Object(
+export const EnsoFollowObservation = Type.Object(
   {
     type: Type.Literal('observation'),
     seq: Type.Integer({ minimum: 1 }),
-    observation: ZenObservation,
+    observation: EnsoObservation,
   },
   { additionalProperties: false },
 )
 ```
 
-<!-- source: packages/core/src/follow.ts#ZenFollowStatus -->
+<!-- source: packages/core/src/follow.ts#EnsoFollowStatus -->
 ```ts
-export const ZenFollowStatus = Type.Object(
+export const EnsoFollowStatus = Type.Object(
   {
     type: Type.Literal('status'),
     live: Type.Boolean(),
@@ -156,7 +156,7 @@ through the mapper (lines 317–319); the prompt route's `announce` (line 496) e
 one frame per feed frame — `observation` with its `seq`, `status` with `live`/`busy`/`generation`
 (lines 134–141) — after a snapshot taken in the same tick as the subscription, exact as of `asOfSeq`
 (lines 117–120, 148–159). In the browser `packages/web/src/follow-connection.ts` checks every frame
-against `ZenFollowFrame` with a validator compiled at module load (line 497, compiled at 71), pushes
+against `EnsoFollowFrame` with a validator compiled at module load (line 497, compiled at 71), pushes
 the snapshot and status frames whole as chunks named by their type (lines 383–389), closes runs on
 `settled` (line 396) and matches `prompt-rejected` to the prompt it
 queued (line 400). `packages/web/src/to-agui.ts` is the adapter proper: observation → state-layer
@@ -169,40 +169,40 @@ leaves, the registry forgets the feed and `seq` restarts with the next follower,
 
 ## What fences it
 
-- **The kinds oracle**: `packages/core/src/__tests__/observation-kinds.ts` (`@zen/core/observation-kinds`) derives every `kind`
+- **The kinds oracle**: `packages/core/src/__tests__/observation-kinds.ts` (`@enso/core/observation-kinds`) derives every `kind`
   literal from the union itself — never a hard-coded count, which drifted once (566e8b1). Two sweeps
   compare against it: `host/__tests__/observation-sweep.test.ts` proves every event the mapper
-  handles, plus the server-synthesised kinds, validates against `ZenObservation` and covers every
+  handles, plus the server-synthesised kinds, validates against `EnsoObservation` and covers every
   member; `__tests__/to-agui.test.ts` proves the adapter handles every member. The oracle lives
-  in `@zen/core` because both sweeps sit in zones that may import only `core` (#173).
+  in `@enso/core` because both sweeps sit in zones that may import only `core` (#173).
 - **The generated inventory**: `docs/reference/observations.md` must equal its generator's stdout
   (`test/docs-gate.test.ts`); a kind with no producer or consumer is printed as a finding, not omitted.
 - **Closed frames**: the three frame schemas are `additionalProperties: false` (`follow.ts` lines
-  40, 50, 61); the browser refuses a frame that fails `ZenFollowFrame` with a problem record, not a
+  40, 50, 61); the browser refuses a frame that fails `EnsoFollowFrame` with a problem record, not a
   crash (`follow-connection.ts` lines 497–500).
 - **The vendor gate** (`test/vendor-gate.test.ts`, #145): the mapper and the adapter import
-  `@zen/core`, not the runtime's package.
+  `@enso/core`, not the runtime's package.
 
 ## What crosses it that should not
 
-**`ZenQueue` keeps the runtime's SHAPE, under our words (#216).** pi's `queue_update` holds two
+**`EnsoQueue` keeps the runtime's SHAPE, under our words (#216).** pi's `queue_update` holds two
 lists — steering messages, which enter at the next step boundary, and follow-ups, which enter after
-the run settles — and `observation.ts#ZenQueue` has the same two as `interrupting` / `enqueued`,
+the run settles — and `observation.ts#EnsoQueue` has the same two as `interrupting` / `enqueued`,
 mapped in `host/map-events.ts` where pi's field names are read and nowhere else. The inbound half is
-`ZenPromptAdmission` on the prompt body (`thread-runtime.md` → *What crosses it that should not*).
+`EnsoPromptAdmission` on the prompt body (`thread-runtime.md` → *What crosses it that should not*).
 What still crosses is the SPLIT, and no consumer uses it: the router concatenates the two lists into
 one `ThreadStores.queue`, and the abort receipt concatenates them too. It survives because a follower
 renders what is waiting and "this one cuts in" is a different sentence from "this one waits its
 turn"; a runtime with one queue class, or three, changes this shape and nothing above it.
 
-**`messages` on the snapshot is the state layer's shape.** `ZenFollowSnapshot.messages`
+**`messages` on the snapshot is the state layer's shape.** `EnsoFollowSnapshot.messages`
 (`follow.ts` line 35), carried as `Type.Array(Type.Unknown())`: not an observation but the storage
 seam's rebuild, built by `server/transcript-to-messages.ts` and put on the opening snapshot by the
 follow route — see `storage.md`, and `presentation.md` → *What crosses it that should not*, which
 prices it. It is on THIS wire, with `Unknown` in place of a shape, and no client reads it off the
 snapshot today.
 
-**`ZenUnmapped.event` is `Type.Unknown()`** by decision, and is the one place a raw event crosses to
+**`EnsoUnmapped.event` is `Type.Unknown()`** by decision, and is the one place a raw event crosses to
 the browser whole.
 
 **The mapper reads the runtime's field names — below the seam.** `map-events.ts` declares
@@ -211,11 +211,11 @@ the browser whole.
 `ThreadRuntime.subscribe` hands out observations. Nothing above the host reads an event.
 
 **Nothing of the browser's old parallel vocabulary, since #162 workstream 5.** The browser used to
-route observations to its stores by a second set of names — eleven `zen.*` custom events, `zen.mode`
-for a `permission-mode`, `zen.notify` for an `extension-ui-request`, a forged notify for a
+route observations to its stores by a second set of names — eleven `Enso.*` custom events, `enso.mode`
+for a `permission-mode`, `enso.notify` for an `extension-ui-request`, a forged notify for a
 `permission-mode-rejected` — and a rename had two sides to land on. A CUSTOM chunk is now named by
-`ZenObservation.kind` and carries the observation whole (`to-agui.ts#custom`); the snapshot and status
-frames cross whole, named by `ZenFollowFrame.type`; the one chunk that is neither — the follow ending
+`EnsoObservation.kind` and carries the observation whole (`to-agui.ts#custom`); the snapshot and status
+frames cross whole, named by `EnsoFollowFrame.type`; the one chunk that is neither — the follow ending
 under the page — is `FOLLOW_ENDED_CUSTOM_EVENT`, declared by its only reader, the router.
 `custom-event-names.ts` is gone.
 
@@ -235,7 +235,7 @@ today without a runtime at all.
 Replace the state layer instead and the adapter goes: `to-agui.ts` and the
 router — "a renderer that stops speaking AG-UI deletes it and the adapter" (`to-agui.ts` line 28).
 The observation vocabulary survives whole, and so does every frame that carries one. The wire does
-NOT: `ZenFollowSnapshot.messages` is the state layer's shape on this wire and
-`ZenThreadHistory.messages` is the same shape on the history route, both as `Unknown` — so both
+NOT: `EnsoFollowSnapshot.messages` is the state layer's shape on this wire and
+`EnsoThreadHistory.messages` is the same shape on the history route, both as `Unknown` — so both
 change format with no schema diff to show it, which is why `presentation.md` → *Pivot cost* names
 seven sites and not three.

@@ -1,4 +1,4 @@
-import type { ZenStoredThread } from '@zen/core'
+import type { EnsoStoredThread } from '@enso/core'
 import { Button } from './components/ui/button.tsx'
 import { cn } from './lib/utils.ts'
 import { pageClock } from './page-clock.ts'
@@ -57,7 +57,7 @@ export interface ThreadsRailProps {
   /** Undefined while a URL-named thread is still being adopted (#142): nothing is highlighted. */
   readonly activeThreadId: string | undefined
   /** Stored threads not open on this page, newest first — already filtered by the caller. */
-  readonly earlier: readonly ZenStoredThread[]
+  readonly earlier: readonly EnsoStoredThread[]
   /** Why the earlier list could not be fetched, or undefined. Shown where the rows would be. */
   readonly earlierError: string | undefined
   readonly onSelect: (threadId: string) => void
@@ -76,7 +76,7 @@ function EarlierThreadRow({
   thread,
   onResume,
 }: {
-  thread: ZenStoredThread
+  thread: EnsoStoredThread
   onResume: (threadId: string) => void
 }): React.ReactNode {
   const at = new Date(thread.lastActivityAt)

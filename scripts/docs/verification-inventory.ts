@@ -240,10 +240,10 @@ interface DoubleMetadata {
 const DOUBLE_METADATA: readonly DoubleMetadata[] = [
   {
     file: 'packages/core/src/__tests__/log-recorder.ts',
-    symbol: 'recordZenLogs',
-    label: '`recordZenLogs`',
+    symbol: 'recordEnsoLogs',
+    label: '`recordEnsoLogs`',
     seam: 'LogTape in-memory sink, one for every package (#178)',
-    productionSurface: 'every record through `zenLogger` — extension audits, web and server records',
+    productionSurface: 'every record through `ensoLogger` — extension audits, web and server records',
     exported: true,
   },
   {
@@ -266,7 +266,7 @@ const DOUBLE_METADATA: readonly DoubleMetadata[] = [
     file: 'packages/web/src/__tests__/scripted-server.ts',
     symbol: 'SNAPSHOT_IDLE',
     label: '`SNAPSHOT_IDLE`',
-    seam: 'reusable `ZenFollowSnapshot` fixture',
+    seam: 'reusable `EnsoFollowSnapshot` fixture',
     productionSurface: 'browser follow snapshot handling',
     exported: true,
   },
@@ -463,7 +463,7 @@ function exportedDoubleKeys(): string[] {
   for (const file of supportFiles()) {
     const source = repositoryFile(file)
     for (const match of source.matchAll(
-      /^export\s+(?:async\s+)?function\s+(create\w+|recordZenLogs|openFollow|releaseDom)\b/gm,
+      /^export\s+(?:async\s+)?function\s+(create\w+|recordEnsoLogs|openFollow|releaseDom)\b/gm,
     )) {
       keys.push(`${file}#${match[1]}`)
     }
@@ -479,13 +479,13 @@ function validateDouble(metadata: DoubleMetadata): void {
   if (!declaration.test(source)) throw new Error(`${metadata.file}: stale double metadata for ${metadata.symbol}`)
 }
 
-/** `@zen/core/<subpath>` → the file core's export map names, read once; other bare specifiers → undefined. */
+/** `@enso/core/<subpath>` → the file core's export map names, read once; other bare specifiers → undefined. */
 const CORE_SUBPATH_TARGETS: ReadonlyMap<string, string> = new Map(
   Object.entries(
     (JSON.parse(repositoryFile('packages/core/package.json')) as { exports: Record<string, string> }).exports,
   )
     .filter(([subpath]) => subpath !== '.')
-    .map(([subpath, target]) => [`@zen/core/${subpath.slice(2)}`, `packages/core/${target.replace(/^\.\//, '')}`]),
+    .map(([subpath, target]) => [`@enso/core/${subpath.slice(2)}`, `packages/core/${target.replace(/^\.\//, '')}`]),
 )
 
 function coreSubpathTarget(specifier: string): string | undefined {

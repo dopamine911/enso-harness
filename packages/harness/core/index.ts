@@ -1,12 +1,12 @@
 /**
  * The harness's own core — path resolution, guard state, and the web-search seam's vocabulary.
  *
- * ⚠ Schemas are NOT declared here. Every TypeBox schema in this repo lives in `@zen/core`,
+ * ⚠ Schemas are NOT declared here. Every TypeBox schema in this repo lives in `@enso/core`,
  * so that a shape is either declared there or does not exist. Re-exporting them from here
  * would defeat that: a consumer could import `GuardPolicy` from two places and neither
  * import would look wrong.
  *
- * Import schemas from `@zen/core` directly. Import path helpers from here.
+ * Import schemas from `@enso/core` directly. Import path helpers from here.
  *
  * ⚠ THE LIST IS WHAT THE EXTENSIONS IMPORT, AND NOTHING ELSE (#263). It used to be the
  * modules' full public surface, which is a different claim and an unfalsifiable one: 17 names

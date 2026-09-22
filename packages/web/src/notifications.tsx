@@ -1,4 +1,4 @@
-import type { ZenNotifyType, ZenUiRequestOrigin } from '@zen/core'
+import type { EnsoNotifyType, EnsoUiRequestOrigin } from '@enso/core'
 import { InfoIcon, OctagonAlertIcon, TriangleAlertIcon } from 'lucide-react'
 import { cn } from '@/lib/utils.ts'
 import { createStore, type Store, useStore, useThreadStores } from './store.ts'
@@ -27,16 +27,16 @@ import { createStore, type Store, useStore, useThreadStores } from './store.ts'
  * not noise.
  */
 
-export interface ZenNotification {
+export interface EnsoNotification {
   id: number
   message: string
-  notifyType: ZenNotifyType | undefined
+  notifyType: EnsoNotifyType | undefined
   /**
    * `session-start`: an extension's notice replayed from the session's own start.
    * `run`: everything else — a run's notice, and the harness's own `Mode:` line (#84),
    * which is not extension chatter and stays open however early it arrives.
    */
-  origin: ZenUiRequestOrigin
+  origin: EnsoUiRequestOrigin
   at: Date
 }
 
@@ -47,17 +47,17 @@ export interface ZenNotification {
  */
 const MAX_KEPT_NOTIFICATIONS = 100
 
-export interface NotificationsStore extends Store<ReadonlyArray<ZenNotification>> {
-  readonly push: (message: string, notifyType: ZenNotifyType | undefined, origin: ZenUiRequestOrigin) => void
+export interface NotificationsStore extends Store<ReadonlyArray<EnsoNotification>> {
+  readonly push: (message: string, notifyType: EnsoNotifyType | undefined, origin: EnsoUiRequestOrigin) => void
 }
 
 export function createNotificationsStore(): NotificationsStore {
-  const store = createStore<ReadonlyArray<ZenNotification>>([])
+  const store = createStore<ReadonlyArray<EnsoNotification>>([])
   let nextNotificationId = 1
   return {
     get: store.get,
     subscribe: store.subscribe,
-    push: (message: string, notifyType: ZenNotifyType | undefined, origin: ZenUiRequestOrigin) => {
+    push: (message: string, notifyType: EnsoNotifyType | undefined, origin: EnsoUiRequestOrigin) => {
       const appended = [...store.get(), { id: nextNotificationId++, message, notifyType, origin, at: new Date() }]
       store.set(appended.slice(-MAX_KEPT_NOTIFICATIONS))
     },
@@ -65,7 +65,7 @@ export function createNotificationsStore(): NotificationsStore {
 }
 
 /** The grouping rule (#96), in one place: a startup notice that is merely informational. */
-function isStartupNotice(notification: ZenNotification): boolean {
+function isStartupNotice(notification: EnsoNotification): boolean {
   return notification.origin === 'session-start' && (notification.notifyType ?? 'info') === 'info'
 }
 
@@ -83,7 +83,7 @@ const NOTIFY_TYPE_ICONS = {
  * it stays muted with the triangle icon carrying the distinction; an absent type renders
  * as info. The full timestamp lives in `title` (hover) — the visible line stays short.
  */
-export function NotificationLine({ notification }: { notification: ZenNotification }): React.ReactNode {
+export function NotificationLine({ notification }: { notification: EnsoNotification }): React.ReactNode {
   const Icon = NOTIFY_TYPE_ICONS[notification.notifyType ?? 'info']
   return (
     <div
@@ -105,11 +105,11 @@ export function NotificationLine({ notification }: { notification: ZenNotificati
  * native `<details>` — keyboard- and screen-reader-complete without a component, and its
  * open state survives a re-render of the list because React keeps the element.
  */
-function StartupNotices({ notifications }: { notifications: readonly ZenNotification[] }): React.ReactNode {
+function StartupNotices({ notifications }: { notifications: readonly EnsoNotification[] }): React.ReactNode {
   if (notifications.length === 0) return null
   const noun = notifications.length === 1 ? 'notice' : 'notices'
   return (
-    <details data-zen-startup-notices="" className="text-muted-foreground text-xs">
+    <details data-enso-startup-notices="" className="text-muted-foreground text-xs">
       <summary className="cursor-pointer">
         {notifications.length} startup {noun} from extensions
       </summary>

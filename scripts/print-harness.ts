@@ -1,18 +1,18 @@
 /**
- * The PRINT-MODE harness variant (#20): the zen-harness package minus picc-permission-modes.
+ * The PRINT-MODE harness variant (#20): the Enso package minus picc-permission-modes.
  *
  * WHY A VARIANT PACKAGE AND NOT A FLAG
  * picc fails closed when it cannot prompt (`ctx.hasUI` false → every mutating tool denied),
- * which is the correct direction for the package and exactly wrong for `zen -p`: a print
+ * which is the correct direction for the package and exactly wrong for `enso -p`: a print
  * run could complete no task requiring `write` or `bash`. There is no escape hatch — mode
  * lives in the session tree, set only via `/mode` interactively (upstream launch-time mode
  * selection is #13, the durable fix). pi offers no per-extension CLI exclusion either: `-e`
  * loads a whole package by its manifest, and passing extension FILES individually silently
- * drops every other resource kind (skills, prompts, themes — see scripts/zen.ts's header).
+ * drops every other resource kind (skills, prompts, themes — see scripts/enso.ts's header).
  *
  * So print mode loads a GENERATED package: a scratch dir whose manifest is the harness
  * manifest with the picc extension filtered out, and whose resource directories are
- * symlinks into the real package — everything else loads exactly as interactive zen loads
+ * symlinks into the real package — everything else loads exactly as interactive enso loads
  * it. pi resolves the exact manifest paths through the symlinks; the docs' symlink caveat
  * applies to GLOBS, and this manifest lists resource roots and files directly.
  *
@@ -106,7 +106,7 @@ export function materializePrintHarness(
   // ⚠ EVERY package-root entry is mirrored, not a curated list: extensions import their
   // siblings by relative path (guards reaches `../../core/index.ts`), and pi resolves
   // those against the variant's path — a missing sibling is a launch-time module error.
-  // readdir keeps the mirror complete as the package grows. ⓘ `zen.config.json` (#59) is
+  // readdir keeps the mirror complete as the package grows. ⓘ `enso.config.json` (#59) is
   // NOT mirrored and does not need to be: it lives at the REPO root, and web-fetch finds
   // it via `findRepoRoot`, which realpaths out of this mirror before walking (paths.ts) —
   // do not "fix" the mirror to carry it.

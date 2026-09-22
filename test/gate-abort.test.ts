@@ -89,7 +89,7 @@ test('⚠ docs/verification.md counts and numbers the gates the file actually ru
  * `scripts/gate.ts` against it.
  */
 function runGateOver(body: string): { status: number | null; stdout: string; stderr: string; output: string } {
-  const scratch = mkdtempSync(join(tmpdir(), 'zen-gate-abort-'))
+  const scratch = mkdtempSync(join(tmpdir(), 'enso-gate-abort-'))
   writeFileSync(join(scratch, 'crash.sh'), `#!/bin/sh\n${body}`, { mode: 0o755 })
   // ⚠ DERIVED FROM `GATES`, never listed (#188): a hand-written set of five stopped matching
   // the day a sixth gate was added, and the fixture then failed on the missing script rather

@@ -20,7 +20,7 @@ import { assertExactKeys, runGenerator } from './generator-support.ts'
  * carry the title and leak section `seamRow` reads.
  *
  * The leak column is the reason this is generated: the hand-written table said L2, L3 and "the
- * parallel `zen.*` names" for a week after each was closed. A page's own leak section is the
+ * parallel `enso.*` names" for a week after each was closed. A page's own leak section is the
  * one place that is kept current (it is what a reviewer is handed), so the table reads it.
  */
 
@@ -54,7 +54,7 @@ const SEAM_METADATA: Record<string, SeamMetadata> = {
   },
   'observation.md': {
     domain: 'Observation',
-    gate: 'kinds sweeps over `@zen/core/observation-kinds`; `observations.md` generated',
+    gate: 'kinds sweeps over `@enso/core/observation-kinds`; `observations.md` generated',
   },
   'dialog.md': { domain: 'Control', gate: 'extension-UI-context tests' },
   'permission-mode.md': { domain: 'Permission', gate: 'vendor gate; `code-offenders` stale-row check' },

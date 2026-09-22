@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
+import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecord } from '@logtape/logtape'
-import { recordZenLogs, releaseZenLogs } from '@zen/core/log-recorder'
 import { recordObservation } from '../observation-log.ts'
 import { noteRunAdmitted } from '../run-timing.ts'
 
@@ -11,14 +11,14 @@ import { noteRunAdmitted } from '../run-timing.ts'
  * tier that dates the first token.
  */
 
-afterEach(releaseZenLogs)
+afterEach(releaseEnsoLogs)
 
 function firstDeltaRecords(records: readonly LogRecord[]): readonly LogRecord[] {
   return records.filter((record) => String(record.rawMessage).includes('first delta'))
 }
 
 test('⚠ the first delta of a run is one info record with the latency; the rest stay debug deltas', async () => {
-  const logs = await recordZenLogs()
+  const logs = await recordEnsoLogs()
   noteRunAdmitted('obs-t1', 1)
   for (const delta of ['he', 'llo']) {
     recordObservation('obs-t1', 1, 1, { kind: 'text-delta', contentIndex: 0, delta })
@@ -37,7 +37,7 @@ test('⚠ the first delta of a run is one info record with the latency; the rest
 })
 
 test('a run with no delta leaves nothing behind: after it settles, a late delta records no latency', async () => {
-  const logs = await recordZenLogs()
+  const logs = await recordEnsoLogs()
   noteRunAdmitted('obs-t2', 4)
   recordObservation('obs-t2', 4, 9, { kind: 'settled' })
   recordObservation('obs-t2', 4, 10, { kind: 'text-delta', contentIndex: 0, delta: 'x' })

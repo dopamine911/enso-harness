@@ -26,7 +26,7 @@ import { PERSISTENCE_WRITE_BASENAMES, PERSISTENCE_WRITE_DIRECTORIES } from '../g
  * reordered upstream is not a behaviour change for us — both lists are membership tests — so
  * a red line here means "re-fit the copy and its comment", not "a hole opened".
  *
- * NOT asserted: our own additions (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`) are deliberately a
+ * NOT asserted: our own additions (`ENSO_PERSISTENCE_WRITE_DIRECTORIES`) are deliberately a
  * separate constant so the vendored block stays byte-comparable, and picc has no reason to
  * know them.
  */

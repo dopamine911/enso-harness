@@ -1,13 +1,13 @@
 import { expect, test } from 'bun:test'
 import { Check } from 'typebox/value'
 import {
-  isZenToolResultDescriptor,
+  type EnsoDialogSpec,
+  EnsoObservation,
+  EnsoToolResultDescriptor,
+  EnsoUsage,
+  isEnsoToolResultDescriptor,
   PromptImageContent,
   validateDialogAnswer,
-  type ZenDialogSpec,
-  ZenObservation,
-  ZenToolResultDescriptor,
-  ZenUsage,
 } from '../index.ts'
 
 /**
@@ -18,39 +18,39 @@ import {
 
 // --- the schemas really are JSON Schema objects, which is the reason for choosing TypeBox
 test('a schema is literally a JSON Schema object', () => {
-  expect(ZenToolResultDescriptor).toMatchObject({ type: 'object' })
-  expect(ZenToolResultDescriptor.required).toContain('kind')
-  expect(ZenToolResultDescriptor.required).toContain('props')
+  expect(EnsoToolResultDescriptor).toMatchObject({ type: 'object' })
+  expect(EnsoToolResultDescriptor.required).toContain('kind')
+  expect(EnsoToolResultDescriptor.required).toContain('props')
   // optional fields are absent from `required`, which is what an OpenAPI consumer reads
-  expect(ZenToolResultDescriptor.required).not.toContain('truncated')
+  expect(EnsoToolResultDescriptor.required).not.toContain('truncated')
 })
 
-test('the observation union is expressed as a JSON Schema union', () => expect(ZenObservation).toHaveProperty('anyOf'))
+test('the observation union is expressed as a JSON Schema union', () => expect(EnsoObservation).toHaveProperty('anyOf'))
 
 // --- and the validators actually reject
 test('the descriptor validator rejects every malformed shape', () => {
-  expect(isZenToolResultDescriptor({ kind: 'diff', props: {} })).toBe(true)
-  expect(isZenToolResultDescriptor({ kind: '', props: {} })).toBe(false)
-  expect(isZenToolResultDescriptor({ kind: 'diff' })).toBe(false)
-  expect(isZenToolResultDescriptor({ props: {} })).toBe(false)
-  expect(isZenToolResultDescriptor('diff')).toBe(false)
-  expect(isZenToolResultDescriptor(null)).toBe(false)
+  expect(isEnsoToolResultDescriptor({ kind: 'diff', props: {} })).toBe(true)
+  expect(isEnsoToolResultDescriptor({ kind: '', props: {} })).toBe(false)
+  expect(isEnsoToolResultDescriptor({ kind: 'diff' })).toBe(false)
+  expect(isEnsoToolResultDescriptor({ props: {} })).toBe(false)
+  expect(isEnsoToolResultDescriptor('diff')).toBe(false)
+  expect(isEnsoToolResultDescriptor(null)).toBe(false)
 })
 
 test('a negative truncation count is rejected, not silently rendered', () =>
-  expect(isZenToolResultDescriptor({ kind: 'd', props: {}, truncated: { shown: -1, total: 5, unit: 'lines' } })).toBe(
+  expect(isEnsoToolResultDescriptor({ kind: 'd', props: {}, truncated: { shown: -1, total: 5, unit: 'lines' } })).toBe(
     false,
   ))
 
 test('an unknown truncation unit is rejected by the schema', () =>
-  expect(isZenToolResultDescriptor({ kind: 'd', props: {}, truncated: { shown: 1, total: 5, unit: 'furlongs' } })).toBe(
-    false,
-  ))
+  expect(
+    isEnsoToolResultDescriptor({ kind: 'd', props: {}, truncated: { shown: 1, total: 5, unit: 'furlongs' } }),
+  ).toBe(false))
 
 test('usage rejects non-integer token counts', () => {
-  expect(Check(ZenUsage, { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 })).toBe(true)
-  expect(Check(ZenUsage, { input: 1.5, output: 2, cacheRead: 0, cacheWrite: 0 })).toBe(false)
-  expect(Check(ZenUsage, { input: 1, output: 2 })).toBe(false)
+  expect(Check(EnsoUsage, { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 })).toBe(true)
+  expect(Check(EnsoUsage, { input: 1.5, output: 2, cacheRead: 0, cacheWrite: 0 })).toBe(false)
+  expect(Check(EnsoUsage, { input: 1, output: 2 })).toBe(false)
 })
 
 // --- pi wire schemas
@@ -65,10 +65,10 @@ test('image content is validated, so a malformed attachment fails at the boundar
 // let a `confirmed` through to a `select`, or an arbitrary object through as an answer, would put
 // a string the extension never offered into its control flow; each row below is one such bug.
 test('validateDialogAnswer refuses every answer shape a dialog did not ask for, and names the shape it wanted', () => {
-  const select: ZenDialogSpec = { method: 'select', title: 'Pick', options: ['a', 'b'] }
-  const confirm: ZenDialogSpec = { method: 'confirm', title: 'Apply?', message: 'm' }
-  const input: ZenDialogSpec = { method: 'input', title: 'Name?' }
-  const editor: ZenDialogSpec = { method: 'editor', title: 'Edit' }
+  const select: EnsoDialogSpec = { method: 'select', title: 'Pick', options: ['a', 'b'] }
+  const confirm: EnsoDialogSpec = { method: 'confirm', title: 'Apply?', message: 'm' }
+  const input: EnsoDialogSpec = { method: 'input', title: 'Name?' }
+  const editor: EnsoDialogSpec = { method: 'editor', title: 'Edit' }
   // not an answer at all
   expect(validateDialogAnswer(select, { anything: 1 })).toContain('not a dialog answer')
   expect(validateDialogAnswer(select, 'a')).toContain('not a dialog answer')

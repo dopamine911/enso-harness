@@ -1,17 +1,17 @@
-import type { ZenPermissionModeState, ZenTranscriptEntry } from '@zen/core'
+import type { EnsoPermissionModeState, EnsoTranscriptEntry } from '@enso/core'
 
 /**
  * picc-permission-modes' PERSISTED MODE, as the host reads it (#84; below the seam since
  * #162 workstream 4, L3). picc keeps its current mode in a closure — `let currentMode =
  * "default"` — with no getter and no setter beyond its own slash commands. The one
  * observable artifact is the session entry it persists on every change:
- * `pi.appendEntry("modes", { mode, … })`. This file is where zen knows that; above the
- * `AgentHost` seam a caller sees `ZenPermissionModeState` and nothing of picc's.
+ * `pi.appendEntry("modes", { mode, … })`. This file is where enso knows that; above the
+ * `AgentHost` seam a caller sees `EnsoPermissionModeState` and nothing of picc's.
  *
  * ⚠ `PICC_PERMISSION_MODES` is the set picc registers a slash command for (`/default`,
  * `/acceptEdits`, …). It is what the mode DROPDOWN may offer: the host intersects it with the
  * commands a session registers, so a mode picc stops registering disappears from the menu
- * and a mode zen has never heard of is never offered. Order is picc's own, and is the
+ * and a mode enso has never heard of is never offered. Order is picc's own, and is the
  * display order.
  */
 
@@ -82,7 +82,7 @@ export function persistedPermissionMode(branch: readonly unknown[]): string {
  * served before any run exists, so the header reads `default` from the first paint rather than
  * `unknown`.
  */
-export function freshPermissionModeState(): ZenPermissionModeState {
+export function freshPermissionModeState(): EnsoPermissionModeState {
   return { mode: PICC_DEFAULT_PERMISSION_MODE, available: [...PICC_PERMISSION_MODES] }
 }
 
@@ -93,7 +93,7 @@ export function freshPermissionModeState(): ZenPermissionModeState {
  * built to ask what it registers (#86's rule: looking must not build), so the cold answer
  * offers what picc always offers.
  */
-export function storedPermissionModeState(transcript: readonly ZenTranscriptEntry[]): ZenPermissionModeState {
+export function storedPermissionModeState(transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState {
   for (let position = transcript.length - 1; position >= 0; position -= 1) {
     const entry = transcript[position]
     if (entry?.kind !== 'custom') continue

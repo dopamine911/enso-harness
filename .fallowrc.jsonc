@@ -12,8 +12,8 @@
     "packages/harness/extensions/web-search/index.ts",
     // Loaded by Bun from `packages/web/bunfig.toml` → `plugins`.
     "packages/web/src/server/bun-plugin-strict-binding-workaround.ts",
-    // Run directly: `bun scripts/zen-thread.ts`; not a package.json script.
-    "scripts/zen-thread.ts",
+    // Run directly: `bun scripts/enso-thread.ts`; not a package.json script.
+    "scripts/enso-thread.ts",
     // Spawned by `test/docs-gate.test.ts` and run by hand: `bun scripts/docs/<name>.ts`.
     "scripts/docs/*.ts"
   ],
@@ -30,32 +30,32 @@
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui"
   ],
-  "ignorePatterns": [".inspiration/**", ".local/**", ".zen/**", "dist-types/**"],
-  // "Every shape is a schema in @zen/core" (architecture → The shared core) emits a `Static<typeof X>`
+  "ignorePatterns": [".inspiration/**", ".local/**", ".enso/**", "dist-types/**"],
+  // "Every shape is a schema in @enso/core" (architecture → The shared core) emits a `Static<typeof X>`
   // type for every schema whether or not code names the type; the unnamed ones are still the
   // contract's public surface, not dead code (#175 bucket C). BY NAME, never "*": a genuinely
   // unused core export must still show. A schema whose type gains a consumer leaves this list.
   "ignoreExports": [
-    { "file": "packages/core/src/dialog.ts", "exports": ["ZenDialogAnswer"] },
-    { "file": "packages/core/src/follow.ts", "exports": ["ZenFollowObservation"] },
+    { "file": "packages/core/src/dialog.ts", "exports": ["EnsoDialogAnswer"] },
+    { "file": "packages/core/src/follow.ts", "exports": ["EnsoFollowObservation"] },
     {
       "file": "packages/core/src/observation.ts",
       "exports": [
-        "ZenCustomEntry",
-        "ZenDialogSettled",
-        "ZenMessageStart",
-        "ZenPermissionMode",
-        "ZenPermissionModeRejected",
-        "ZenPromptRejected",
-        "ZenQueue",
-        "ZenTurnEnd",
-        "ZenTurnStart"
+        "EnsoCustomEntry",
+        "EnsoDialogSettled",
+        "EnsoMessageStart",
+        "EnsoPermissionMode",
+        "EnsoPermissionModeRejected",
+        "EnsoPromptRejected",
+        "EnsoQueue",
+        "EnsoTurnEnd",
+        "EnsoTurnStart"
       ]
     },
-    { "file": "packages/core/src/tool-result.ts", "exports": ["ZenTruncation", "ZenTruncationUnit"] },
+    { "file": "packages/core/src/tool-result.ts", "exports": ["EnsoTruncation", "EnsoTruncationUnit"] },
     {
       "file": "packages/core/src/transcript.ts",
-      "exports": ["ZenTranscriptCustom", "ZenTranscriptMessage", "ZenTranscriptOther", "ZenTranscriptToolResult"]
+      "exports": ["EnsoTranscriptCustom", "EnsoTranscriptMessage", "EnsoTranscriptOther", "EnsoTranscriptToolResult"]
     },
     { "file": "packages/core/src/web-fetch.ts", "exports": ["WebFetchConfig"] },
     { "file": "packages/core/src/web-search.ts", "exports": ["WebSearchToolParameters"] }
@@ -70,7 +70,7 @@
   // classes are excluded by decision, each with its reason:
   // - the vendored components, for the reason `ignoreFindings` gives above — dupes has its own
   //   ignore list, so the decision is written twice;
-  // - `@zen/core`: "every shape is a schema" (architecture → The shared core) emits a
+  // - `@enso/core`: "every shape is a schema" (architecture → The shared core) emits a
   //   `Type.Object` + `Static` pair per schema on purpose, and the tool pairs those as clones.
   //   The convention IS the repetition; a real clone in core is found by the reviewer, not here.
   // What stays in the count and is NOT excluded: consecutive metadata rows in the generators,

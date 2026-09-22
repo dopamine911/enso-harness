@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
+import { ENSO_TOOL_RESULT_KEY, type EnsoInterruptedTail } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
-import { ZEN_TOOL_RESULT_KEY, type ZenInterruptedTail } from '@zen/core'
 import { transcriptOf } from '../../host/transcript.ts'
 import { interruptedTail, transcriptToMessages } from '../transcript-to-messages.ts'
 
@@ -114,7 +114,7 @@ test('⚠ a tool result is paired into the assistant message holding its call; t
     name: 'bash',
     content: 'a.ts\nb.ts',
     state: 'complete',
-    metadata: { [ZEN_TOOL_RESULT_KEY]: { kind: 'pi.tool.bash', truncated: { shown: 2, total: 40, unit: 'lines' } } },
+    metadata: { [ENSO_TOOL_RESULT_KEY]: { kind: 'pi.tool.bash', truncated: { shown: 2, total: 40, unit: 'lines' } } },
   })
   expect(withCall?.parts[1]).not.toHaveProperty('error')
 })
@@ -176,7 +176,8 @@ test('entries that are not messages, and malformed messages, never throw: skippe
 // Read off the ENTRIES since #220 — the fact is the transcript's, not the renderer's — so
 // these cases run the file through the host's decoder and stop there.
 
-const branchTail = (branch: readonly unknown[]): ZenInterruptedTail | undefined => interruptedTail(transcriptOf(branch))
+const branchTail = (branch: readonly unknown[]): EnsoInterruptedTail | undefined =>
+  interruptedTail(transcriptOf(branch))
 
 const call = (id: string): BranchEntry =>
   entry(id, { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: {} }] })

@@ -12,22 +12,22 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
+  type EnsoObservation,
+  type EnsoOpenDialog,
+  type EnsoPermissionModeState,
+  type EnsoPromptAdmission,
+  type EnsoThreadEvent,
+  type EnsoTranscriptEntry,
+  ensoLogger,
   type PromptOutcome,
   type PromptRequest,
   type RuntimeCommand,
   type ThreadRuntime,
-  type ZenObservation,
-  type ZenOpenDialog,
-  type ZenPermissionModeState,
-  type ZenPromptAdmission,
-  type ZenThreadEvent,
-  type ZenTranscriptEntry,
-  zenLogger,
-} from '@zen/core'
-import { findRepoRoot } from '@zen/core/paths'
-import { quarantineSecrets } from '@zen/core/secrets'
+} from '@enso/core'
+import { findRepoRoot } from '@enso/core/paths'
+import { quarantineSecrets } from '@enso/core/secrets'
 import { createEventTail, describeObservation } from './event-tail.ts'
-import { createZenExtensionUiContext } from './extension-ui-context.ts'
+import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
 import { mapPiEvent } from './map-events.ts'
 import {
   freshPermissionModeState,
@@ -41,7 +41,7 @@ import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
 import { transcriptOf } from './transcript.ts'
 
-const log = zenLogger('host')
+const log = ensoLogger('host')
 
 /**
  * pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning
@@ -83,8 +83,8 @@ const log = zenLogger('host')
  * this process and every `bash` child inherits this process's environment, which bun's
  * `.env` autoload had filled with `TAVILY_API_KEY`; `bash env` printed it into a
  * transcript. `quarantineSecrets` deletes every secret-shaped name and every name the
- * secrets file defines. The extensions that need a key read `.zen/secrets.env` directly
- * (`readSecret`) — see `@zen/core`'s secrets.ts for why the root `.env` is the wrong place.
+ * secrets file defines. The extensions that need a key read `.enso/secrets.env` directly
+ * (`readSecret`) — see `@enso/core`'s secrets.ts for why the root `.env` is the wrong place.
  */
 
 /** The agent dir's multi-account config file, and the one key this host must pin in it. */
@@ -95,16 +95,16 @@ const MULTI_ACCOUNT_CHILD_PROXY_KEY = 'childProxy'
 const PROMPT_SOURCE_RPC = 'rpc'
 
 /**
- * Zen's admission word → pi's `streamingBehavior` literal (#216). THE ONLY PLACE the vendor's
+ * Enso's admission word → pi's `streamingBehavior` literal (#216). THE ONLY PLACE the vendor's
  * spelling is produced on the prompt path: the wire, the route, the registry and the browser
  * all speak `interrupt`/`enqueue`, and a runtime that names its two differently is this table
- * and nothing else. A third admission is a literal in `@zen/core` and a row here.
+ * and nothing else. A third admission is a literal in `@enso/core` and a row here.
  *
  * ⚠ The value type is pi's own (`PromptOptions['streamingBehavior']`), never restated: pi
  * renaming or widening its literals is then a compile error in this table, which is the one
  * place that should care.
  */
-const STREAMING_BEHAVIOR_OF: Record<ZenPromptAdmission, NonNullable<PromptOptions['streamingBehavior']>> = {
+const STREAMING_BEHAVIOR_OF: Record<EnsoPromptAdmission, NonNullable<PromptOptions['streamingBehavior']>> = {
   interrupt: 'steer',
   enqueue: 'followUp',
 }
@@ -117,7 +117,7 @@ export interface AgentHostOptions {
   cwd: string
   /** Scratch config dir — the operator's own packages and credentials stay invisible. */
   agentDir: string
-  /** The zen harness pi package directory; loaded as the ONLY extension source. */
+  /** The enso harness pi package directory; loaded as the ONLY extension source. */
   harnessPackageDir: string
   /**
    * The environment the secrets quarantine (#89) scrubs — `process.env` in production, the
@@ -148,7 +148,7 @@ export interface HostedThreadInspection {
   /** The session file once pi has flushed it; null while the session lives only in memory. */
   readonly sessionFile: string | null
   /** The branch, root to leaf, as the transcript of ours (L2): the runtime's entry shapes stay in `transcript.ts`. */
-  readonly entries: readonly ZenTranscriptEntry[]
+  readonly entries: readonly EnsoTranscriptEntry[]
   /** Slash commands this session registers. */
   readonly commands: readonly string[]
 }
@@ -164,7 +164,7 @@ export interface HostedThread {
    */
   inspect(): HostedThreadInspection
   /** The emitted tail (#97): what the host's `emit` funnel saw, with provenance. A fresh copy per call. */
-  emittedEvents(): ZenThreadEvent[]
+  emittedEvents(): EnsoThreadEvent[]
   /**
    * What the loaded extensions would say about a tool call, through the runtime's own hook
    * runner — the verdict a model's call would meet, without a model. Inspection, like the
@@ -235,11 +235,11 @@ export interface AgentHost {
    * The transcript of a stored session, read-only — no pi session is built, nothing is
    * written (#86's rule: looking must not build). `undefined` when no file has that id.
    */
-  readTranscript(threadId: string): Promise<ZenTranscriptEntry[] | undefined>
+  readTranscript(threadId: string): Promise<EnsoTranscriptEntry[] | undefined>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
-  freshPermissionMode(): ZenPermissionModeState
+  freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
-  storedPermissionMode(transcript: readonly ZenTranscriptEntry[]): ZenPermissionModeState
+  storedPermissionMode(transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState
 }
 
 /**
@@ -296,7 +296,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
   if (quarantine.misplaced.length > 0) {
     log.warn(
-      'the root .env defines {misplaced} — bun autoloads .env into every bun child, so a tool can still read it there. Move it to .zen/secrets.env (#89); it is not read from .env',
+      'the root .env defines {misplaced} — bun autoloads .env into every bun child, so a tool can still read it there. Move it to .enso/secrets.env (#89); it is not read from .env',
       { misplaced: quarantine.misplaced },
     )
   }
@@ -327,7 +327,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     return (await listSessions()).find((stored) => stored.id === threadId)?.path
   }
 
-  async function readTranscript(threadId: string): Promise<ZenTranscriptEntry[] | undefined> {
+  async function readTranscript(threadId: string): Promise<EnsoTranscriptEntry[] | undefined> {
     const path = await storedSessionPath(threadId)
     if (path === undefined) return undefined
     // `open` loads the file into memory and writes nothing until an append.
@@ -341,7 +341,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       cwd,
       agentDir,
       resourceLoaderOptions: {
-        // The isolation triple `scripts/zen.ts` documents, expressed as loader options:
+        // The isolation triple `scripts/enso.ts` documents, expressed as loader options:
         // no discovery (`--no-extensions`), no ~/.agents skills (`--no-skills`), and the
         // harness package as the one extension source (`-e <dir>` — pi resolves a
         // directory's `pi` manifest for extensions, skills, prompts AND themes).
@@ -394,7 +394,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // were when no rpc client was reading the pipe.
     // Subscribers receive OBSERVATIONS (L2, #162 workstream 4): the runtime's event is mapped
     // here, at delivery, and its shape never leaves the host.
-    const listeners = new Set<(observation: ZenObservation) => void>()
+    const listeners = new Set<(observation: EnsoObservation) => void>()
     const heldUntilFirstSubscriber: RuntimeEvent[] = []
     let hasHadSubscriber = false
     // The emitted tail (#97): every event through this funnel, with HOW it was delivered.
@@ -421,7 +421,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       for (const listener of listeners) listener(observation)
     }
 
-    const ui = createZenExtensionUiContext({ emit, threadId })
+    const ui = createEnsoExtensionUiContext({ emit, threadId })
 
     // ⚠ SUBSCRIBE BEFORE BINDING (#88). Extensions persist state during `session_start` —
     // picc writes its opening `modes` entry there — and pi emits `entry_appended` to whoever
@@ -440,7 +440,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
      * directly rather than through `listCommands` — that call's count is a contract the
      * refusal path's tests pin, and this is not a refusal lookup.
      */
-    function currentPermissionModeState(): ZenPermissionModeState {
+    function currentPermissionModeState(): EnsoPermissionModeState {
       const mode = persistedPermissionMode(sessionManager.getBranch())
       const registered = new Set(
         session.extensionRunner.getRegisteredCommands().map((command) => command.invocationName),
@@ -507,7 +507,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       answerDialog(response: DialogAnswer): void {
         ui.answerDialog(response)
       },
-      openDialogs(): ZenOpenDialog[] {
+      openDialogs(): EnsoOpenDialog[] {
         return ui.openDialogs()
       },
       listCommands(): RuntimeCommand[] {
@@ -538,7 +538,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // forget, acceptance is completion, and the change arrives as `permission_mode`.
         runtime.prompt({ message: piccModeCommand(mode) }, outcome)
       },
-      subscribe(onObservation: (observation: ZenObservation) => void): () => void {
+      subscribe(onObservation: (observation: EnsoObservation) => void): () => void {
         listeners.add(onObservation)
         hasHadSubscriber = true
         if (heldUntilFirstSubscriber.length > 0) {
@@ -563,7 +563,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         )
       },
       clearQueue(): { interrupting: string[]; enqueued: string[] } {
-        // The runtime's two lists under Zen's words (#216) — the only place either spelling is
+        // The runtime's two lists under Enso's words (#216) — the only place either spelling is
         // translated on this side, as `map-events.ts` is on the observation side.
         const cleared = session.clearQueue()
         return { interrupting: cleared.steering, enqueued: cleared.followUp }

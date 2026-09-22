@@ -1,9 +1,9 @@
-import { ZenFollowFrame } from '@zen/core'
+import { EnsoFollowFrame } from '@enso/core'
 import { Check } from 'typebox/value'
 
 /**
  * A follow as a test reads it: frames and keepalive comments as they arrive, awaited by
- * count — never by a guessed delay. Every frame is checked against `ZenFollowFrame` on the
+ * count — never by a guessed delay. Every frame is checked against `EnsoFollowFrame` on the
  * way in, so a shape the browser could not read fails the test that produced it.
  *
  * ⚠ HOW THAT FAILURE TRAVELS (#231). The check cannot throw from the reader's own loop —
@@ -23,7 +23,7 @@ import { Check } from 'typebox/value'
  * Lives under `__tests__/` deliberately: the coverage manifest skips that directory.
  */
 export interface OpenFollow {
-  readonly frames: ZenFollowFrame[]
+  readonly frames: EnsoFollowFrame[]
   readonly comments: () => number
   /** Resolves once at least `count` frames have arrived; rejects once the wire has failed. */
   readonly untilFrames: (count: number) => Promise<void>
@@ -36,10 +36,10 @@ export interface OpenFollow {
   readonly close: () => void
 }
 
-/** A frame off the wire that `ZenFollowFrame` refuses: the server wrote a shape the browser could not read. */
+/** A frame off the wire that `EnsoFollowFrame` refuses: the server wrote a shape the browser could not read. */
 export class WireSchemaViolation extends Error {
   constructor(line: string) {
-    super(`frame off the wire fails ZenFollowFrame: ${line}`)
+    super(`frame off the wire fails EnsoFollowFrame: ${line}`)
     this.name = 'WireSchemaViolation'
   }
 }
@@ -56,7 +56,7 @@ export async function openFollow(
 ): Promise<OpenFollow> {
   const response = await fetch(`${url}/api/threads/${threadId}/follow`, { signal: controller.signal })
   if (response.status !== 200) throw new Error(`follow ${threadId}: ${response.status} ${await response.text()}`)
-  const frames: ZenFollowFrame[] = []
+  const frames: EnsoFollowFrame[] = []
   let comments = 0
   let failure: Error | undefined
   const waiters: Array<() => void> = []
@@ -71,7 +71,7 @@ export async function openFollow(
     }
     if (!line.startsWith('data: ')) return
     const frame: unknown = JSON.parse(line.slice('data: '.length))
-    if (Check(ZenFollowFrame, frame)) frames.push(frame)
+    if (Check(EnsoFollowFrame, frame)) frames.push(frame)
     else failure ??= new WireSchemaViolation(line)
   }
   const reader = response.body?.getReader()

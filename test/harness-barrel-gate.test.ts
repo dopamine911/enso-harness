@@ -28,7 +28,7 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
  *
  * WHAT IT DOES NOT HOLD. Internal reachability: `shell-segments.ts` and
  * `web-search/anthropic-wire.ts` left the barrel with #263 and are imported directly by their
- * siblings and their own tests, which is what internal means. `@zen/core`'s equivalent rule is
+ * siblings and their own tests, which is what internal means. `@enso/core`'s equivalent rule is
  * MODULE reachability (`packages/core/src/__tests__/no-duplicate-shapes.test.ts`) and exists
  * for a different reason — one search for a schema. This package declares no schemas, so the
  * two barrels are held to the claims they each make, not to one shared rule.

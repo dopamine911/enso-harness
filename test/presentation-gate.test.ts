@@ -71,16 +71,16 @@ const PROVENANCE_RECEIPTS: Record<string, string> = {
  * alias for their ui primitives, so `@/store.ts` is the MORE natural way to write the import
  * this gate exists to refuse, and a relative-only pattern would have waved it through.
  *
- * `@zen/core` is the wire: a presentation component taking a `ZenObservation` is reading the
+ * `@enso/core` is the wire: a presentation component taking a `EnsoObservation` is reading the
  * protocol, which is the renderer's job (README rule 4 — types are retyped as they cross, not
  * imported); `@tanstack/*` is the vendored state layer itself. Neither is ours to resolve, so
- * both are named — subpaths included, since `@zen/core/log-process` is the same package
+ * both are named — subpaths included, since `@enso/core/log-process` is the same package
  * (PR #153 review).
  */
 const WEB_SOURCE_ROOT = 'packages/web/src'
 /** All a ported file may reach inside our sources: the ui primitives, the class-name helper, each other. */
 const PRESENTATION_DIRECTORIES = ['components', 'lib']
-const FORBIDDEN_PACKAGE = /^(?:@zen\/core(?:\/.+)?|@tanstack\/.+)$/
+const FORBIDDEN_PACKAGE = /^(?:@enso\/core(?:\/.+)?|@tanstack\/.+)$/
 /** `from "x"`, a bare `import "x"` and a dynamic `import("x")` — every spelling that pulls a module in. */
 const IMPORT_SPECIFIER = /(?:from|import)\s*\(?\s*["']([^"']+)["']/g
 
@@ -213,8 +213,8 @@ test('the state-layer resolver catches every spelling — the alias, the relativ
     // nothing presentation may import, so "outside the tree" may not read as "allowed".
     '@/../../core/src/observation.ts',
     '../../../../core/src/guard.ts',
-    '@zen/core',
-    '@zen/core/log-process',
+    '@enso/core',
+    '@enso/core/log-process',
     '@tanstack/react-ai',
   ]) {
     if (stateLayerTarget(ported, specifier) === undefined) wavedThrough.push(specifier)

@@ -1,4 +1,4 @@
-import type { ZenEventProvenance, ZenObservation, ZenThreadEvent } from '@zen/core'
+import type { EnsoEventProvenance, EnsoObservation, EnsoThreadEvent } from '@enso/core'
 
 /**
  * A thread's event tail (#97): the last N events through one funnel, with provenance.
@@ -27,23 +27,23 @@ import type { ZenEventProvenance, ZenObservation, ZenThreadEvent } from '@zen/co
 const EVENT_TAIL_CAPACITY = 200
 
 export interface EventTail {
-  readonly record: (type: string, name: string | undefined, provenance: ZenEventProvenance) => void
+  readonly record: (type: string, name: string | undefined, provenance: EnsoEventProvenance) => void
   /** Oldest first. A fresh copy per call — the caller's to keep or mutate; the ring is untouched. */
-  readonly recent: () => ZenThreadEvent[]
+  readonly recent: () => EnsoThreadEvent[]
 }
 
 export function createEventTail(capacity = EVENT_TAIL_CAPACITY): EventTail {
-  const ring: ZenThreadEvent[] = []
+  const ring: EnsoThreadEvent[] = []
   let nextSequence = 0
   return {
-    record: (type: string, name: string | undefined, provenance: ZenEventProvenance) => {
+    record: (type: string, name: string | undefined, provenance: EnsoEventProvenance) => {
       const last = ring.at(-1)
       if (last !== undefined && last.type === type && last.name === name && last.provenance === provenance) {
         ring[ring.length - 1] = { ...last, count: last.count + 1 }
         return
       }
       nextSequence += 1
-      const entry: ZenThreadEvent = {
+      const entry: EnsoThreadEvent = {
         sequence: nextSequence,
         type,
         provenance,
@@ -64,7 +64,7 @@ export function createEventTail(capacity = EVENT_TAIL_CAPACITY): EventTail {
  * Since the host maps below the seam, what it emits IS observations, and the tail says so in
  * the same vocabulary the follow carries; the runtime's event types stay inside the mapper.
  */
-export function describeObservation(observation: ZenObservation): { type: string; name: string | undefined } {
+export function describeObservation(observation: EnsoObservation): { type: string; name: string | undefined } {
   switch (observation.kind) {
     case 'custom-entry':
       return { type: observation.kind, name: observation.customType }

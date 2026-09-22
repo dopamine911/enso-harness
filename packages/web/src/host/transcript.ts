@@ -1,4 +1,4 @@
-import type { ZenTranscriptEntry, ZenTranscriptPart } from '@zen/core'
+import type { EnsoTranscriptEntry, EnsoTranscriptPart } from '@enso/core'
 import { contentToText, descriptorFrom } from './map-events.ts'
 
 /**
@@ -44,10 +44,10 @@ interface PiContentPart {
   mimeType?: unknown
 }
 
-function partsOf(content: unknown): ZenTranscriptPart[] {
+function partsOf(content: unknown): EnsoTranscriptPart[] {
   if (typeof content === 'string') return [{ type: 'text', text: content }]
   if (!Array.isArray(content)) return []
-  const parts: ZenTranscriptPart[] = []
+  const parts: EnsoTranscriptPart[] = []
   for (const raw of content as PiContentPart[]) {
     if (typeof raw !== 'object' || raw === null) continue
     if (raw.type === 'text' && typeof raw.text === 'string') parts.push({ type: 'text', text: raw.text })
@@ -66,7 +66,7 @@ function stampOf(entry: PiSessionEntry): { at?: string } {
   return typeof entry.timestamp === 'string' ? { at: entry.timestamp } : {}
 }
 
-function messageEntry(entry: PiSessionEntry, id: string): ZenTranscriptEntry | undefined {
+function messageEntry(entry: PiSessionEntry, id: string): EnsoTranscriptEntry | undefined {
   if (typeof entry.message !== 'object' || entry.message === null) return undefined
   const stored = entry.message as PiStoredMessage
   if (stored.role === 'user' || stored.role === 'assistant') {
@@ -90,7 +90,7 @@ function messageEntry(entry: PiSessionEntry, id: string): ZenTranscriptEntry | u
 }
 
 /** One stored entry → one entry of ours; never undefined, so the transcript is as long as the branch. */
-function transcriptEntryOf(raw: unknown, position: number): ZenTranscriptEntry {
+function transcriptEntryOf(raw: unknown, position: number): EnsoTranscriptEntry {
   const entry = (typeof raw === 'object' && raw !== null ? raw : {}) as PiSessionEntry
   const id = typeof entry.id === 'string' ? entry.id : `entry-${position}`
   const type = typeof entry.type === 'string' ? entry.type : 'unknown'
@@ -111,6 +111,6 @@ function transcriptEntryOf(raw: unknown, position: number): ZenTranscriptEntry {
 }
 
 /** The branch, root to leaf, as the transcript — same length, same order. */
-export function transcriptOf(branch: readonly unknown[]): ZenTranscriptEntry[] {
+export function transcriptOf(branch: readonly unknown[]): EnsoTranscriptEntry[] {
   return branch.map(transcriptEntryOf)
 }

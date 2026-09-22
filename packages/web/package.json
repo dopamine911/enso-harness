@@ -1,9 +1,9 @@
 {
-  "name": "@zen/web",
+  "name": "@enso/web",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The zen-harness web surface. Outside the pi manifest \u2014 pi does nothing with a frontend.",
+  "description": "The Enso web surface. Outside the pi manifest \u2014 pi does nothing with a frontend.",
   "scripts": {
     "dev:server": "bun src/server/dev.ts",
     "dev:web": "bun src/server/dev-web.ts"
@@ -19,7 +19,7 @@
     "@tanstack/ai": "0.53.0",
     "@tanstack/ai-client": "0.31.0",
     "@tanstack/ai-react": "0.24.0",
-    "@zen/core": "*",
+    "@enso/core": "*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.40.0",

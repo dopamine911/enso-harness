@@ -12,7 +12,7 @@ import { declaredResources, missingVendorPaths, vendorPackageNames } from '../pi
  * (`scripts/__tests__/link-vendor-packages.test.ts`).
  */
 
-const scratch = mkdtempSync(join(tmpdir(), 'zen-pi-manifest-'))
+const scratch = mkdtempSync(join(tmpdir(), 'enso-pi-manifest-'))
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
 
 const MANIFEST = {

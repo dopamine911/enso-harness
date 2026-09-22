@@ -14,7 +14,7 @@ Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Ref
 
 The question, one shape per kind:
 
-<!-- source: packages/core/src/dialog.ts#ZenDialogSpec -->
+<!-- source: packages/core/src/dialog.ts#EnsoDialogSpec -->
 ```ts
 /**
  * One dialog question, per method.
@@ -23,7 +23,7 @@ The question, one shape per kind:
  * pi resolves the dialog itself when it lapses, so an answer arriving after it is written
  * to an id nobody is waiting on. Carried so a surface can stop offering a dead question.
  */
-export const ZenDialogSpec = Type.Union([
+export const EnsoDialogSpec = Type.Union([
   Type.Object({
     method: Type.Literal('select'),
     title: Type.String(),
@@ -59,7 +59,7 @@ export const ZenDialogSpec = Type.Union([
 
 A question while it waits — what the snapshot lists, keyed by the id the answer names:
 
-<!-- source: packages/core/src/dialog.ts#ZenOpenDialog -->
+<!-- source: packages/core/src/dialog.ts#EnsoOpenDialog -->
 ```ts
 /**
  * One question pi is blocked on, as the follow's snapshot lists it (#114) — so a follow
@@ -68,7 +68,7 @@ A question while it waits — what the snapshot lists, keyed by the id the answe
  *
  * `id` is the request id the answer is keyed by.
  */
-export const ZenOpenDialog = Type.Object({ id: Type.String({ minLength: 1 }), dialog: ZenDialogSpec })
+export const EnsoOpenDialog = Type.Object({ id: Type.String({ minLength: 1 }), dialog: EnsoDialogSpec })
 ```
 
 The answer, as it crosses `POST /api/threads/:id/dialog` and reaches the runtime:
@@ -94,9 +94,9 @@ export type DialogAnswer = { id: string } & (
 
 The two checks both sides enforce — is this a question, does this payload answer *this* question:
 
-<!-- source: packages/core/src/dialog.ts#isZenDialogSpec -->
+<!-- source: packages/core/src/dialog.ts#isEnsoDialogSpec -->
 ```ts
-export function isZenDialogSpec(value: unknown): value is ZenDialogSpec {
+export function isEnsoDialogSpec(value: unknown): value is EnsoDialogSpec {
   return dialogSpecValidator.Check(value)
 }
 ```
@@ -112,7 +112,7 @@ export function isZenDialogSpec(value: unknown): value is ZenDialogSpec {
  * put a string the extension never offered into its control flow. That is an injection
  * seam, and it is closed HERE rather than trusted to the renderer.
  */
-export function validateDialogAnswer(spec: ZenDialogSpec, payload: unknown): string | undefined {
+export function validateDialogAnswer(spec: EnsoDialogSpec, payload: unknown): string | undefined {
   if (!dialogAnswerValidator.Check(payload)) {
     return `the payload is not a dialog answer ({ value: string } or { confirmed: boolean })`
   }
@@ -137,7 +137,7 @@ export function validateDialogAnswer(spec: ZenDialogSpec, payload: unknown): str
 
 How the wait ended, and where the question was raised — both tagged at the source:
 
-<!-- source: packages/core/src/observation.ts#ZenDialogOutcome -->
+<!-- source: packages/core/src/observation.ts#EnsoDialogOutcome -->
 ```ts
 /**
  * How a blocking question stopped waiting (#114).
@@ -146,7 +146,7 @@ How the wait ended, and where the question was raised — both tagged at the sou
  * delivered for a reason — the browser's cancel or the session's teardown (`cancelled`), the
  * extension's own `timeout`, or the caller's abort signal (`aborted`).
  */
-export const ZenDialogOutcome = Type.Union([
+export const EnsoDialogOutcome = Type.Union([
   Type.Literal('answered'),
   Type.Literal('cancelled'),
   Type.Literal('timeout'),
@@ -154,7 +154,7 @@ export const ZenDialogOutcome = Type.Union([
 ])
 ```
 
-<!-- source: packages/core/src/observation.ts#ZenUiRequestOrigin -->
+<!-- source: packages/core/src/observation.ts#EnsoUiRequestOrigin -->
 ```ts
 /**
  * Where a ui request came from (#96) — tagged at the SOURCE, never inferred.
@@ -170,20 +170,20 @@ export const ZenDialogOutcome = Type.Union([
  *
  * A closed union: a third origin fails at the mapper, loudly, not silently in a consumer.
  */
-export const ZenUiRequestOrigin = Type.Union([Type.Literal('session-start'), Type.Literal('run')])
+export const EnsoUiRequestOrigin = Type.Union([Type.Literal('session-start'), Type.Literal('run')])
 ```
 
 The host's side of it — what `agent-host.ts` binds to a session and what the runtime contract's
 `answerDialog` / `openDialogs` delegate to:
 
-<!-- source: packages/web/src/host/extension-ui-context.ts#ZenExtensionUiContext -->
+<!-- source: packages/web/src/host/extension-ui-context.ts#EnsoExtensionUiContext -->
 ```ts
-export interface ZenExtensionUiContext {
+export interface EnsoExtensionUiContext {
   readonly uiContext: ExtensionUIContext
   /** Deliver an answer. Unknown ids are reported, not thrown — the extension is not waiting on them. */
   answerDialog(response: DialogAnswer): void
   /** Every pending question, oldest first, as the follow's snapshot lists them (#114). Empty once settled. */
-  openDialogs(): ZenOpenDialog[]
+  openDialogs(): EnsoOpenDialog[]
   /** Cancel every pending dialog — session teardown. Each blocked extension call resolves to its cancel value. */
   cancelAllDialogs(): void
   /**
@@ -199,13 +199,13 @@ export interface ZenExtensionUiContext {
 
 ## Who implements it, who consumes it
 
-**Implemented once**, by `createZenExtensionUiContext` in `packages/web/src/host/extension-ui-context.ts`
+**Implemented once**, by `createEnsoExtensionUiContext` in `packages/web/src/host/extension-ui-context.ts`
 (line 199). The host is the UI: it implements the interface extensions call and turns each call into
 the same record the mapper already consumed over the old transport (header lines 29–33). The four
 blocking methods — `select`, `confirm`, `input`, `editor` (lines 304–350) — go through one
 `awaitDialog` (line 266): mint an id, park the request in a pending map, emit the request, and block
 until an answer, a cancel, the caller's abort signal or its own timeout. Every path that stops the wait
-goes through `finish` (line 275), which deletes the pending entry, emits the settle record with its
+goes through `finish` (line 281), which deletes the pending entry, emits the settle record with its
 outcome (line 279) and resolves the extension with its value — `undefined` for `select`/`input`/
 `editor`, `false` for `confirm`, on every non-answer outcome (lines 259–260). That is why the settle
 observation exists at all: the runtime has no event for a question ending (lines 262–264).
@@ -221,13 +221,13 @@ question is spent, lines 308–315), validates a non-cancel answer against the q
 (line 320) and answers 204 (line 321). `server/index.ts` maps that outcome to the response (lines
 594–608). The follow's snapshot lists every open question, oldest first, so a reconnect renders the
 card at once (`follow.ts` line 151; `openDialogs` at extension-ui-context.ts line 458 checks each
-request with `isZenDialogSpec` rather than casting, line 464).
+request with `isEnsoDialogSpec` rather than casting, line 464).
 
 **Consumed by the browser.** The question arrives as an `extension-ui-request` observation whose
-`dialog` the mapper checked with `isZenDialogSpec` (`map-events.ts` line 131); the adapter passes the
+`dialog` the mapper checked with `isEnsoDialogSpec` (`map-events.ts` line 131); the adapter passes the
 observation whole on a CUSTOM chunk named by its kind (`to-agui.ts#custom`) and the router checks
-`{ id, dialog }` again against `ZenOpenDialog` before it reaches the store (`custom-event-router.ts#routeUiRequest`). `ZenDialogCard` in
-`packages/web/src/chat-screen.tsx` (`#ZenDialogCard`) renders one card and hands `answerDialog` in
+`{ id, dialog }` again against `EnsoOpenDialog` before it reaches the store (`custom-event-router.ts#routeUiRequest`). `EnsoDialogCard` in
+`packages/web/src/chat-screen.tsx` (`#EnsoDialogCard`) renders one card and hands `answerDialog` in
 `packages/web/src/follow-connection.ts` (line 632) exactly the answer shapes — `{ value }`,
 `{ confirmed }`, `{ cancelled: true }` — because the server forwards them verbatim (chat-screen.tsx
 lines 457–461). The card drops on `dialog-settled` for its id, whoever answered (router lines 136–141), and
@@ -235,7 +235,7 @@ the snapshot's complete list replaces what is shown (`follow-connection.ts` line
 
 **Fakes.** `follow.test.ts` drives the answer route over an inline runtime whose `openDialogs` the test
 controls; `extension-ui-context.test.ts` exercises the context against scripted extension calls,
-including the fail-closed lift (`ZenExtensionUiContextOptions.liftDialog`, lines 82–86).
+including the fail-closed lift (`EnsoExtensionUiContextOptions.liftDialog`, lines 82–86).
 
 ## What fences it
 
@@ -257,7 +257,7 @@ including the fail-closed lift (`ZenExtensionUiContextOptions.liftDialog`, lines
 **The four kinds are the runtime's extension-UI method names — kept, by decision.** Goals §2 lists
 this as **L4** with "probably keep"; the glossary decided it (*dialog kind*, Decision 5): `select`,
 `confirm`, `input`, `editor` are ours by adoption, the right set of primitives for a surface,
-`ZenDialogSpec` names them, an answer is validated against them, and they are neither renamed nor
+`EnsoDialogSpec` names them, an answer is validated against them, and they are neither renamed nor
 mapped. The answer shapes likewise mirror the runtime's response contract minus its envelope
 (`dialog.ts` lines 14–24) so the server adds the envelope and nothing else. A decision, not a leak:
 a replacement loop would be adapted *to* this vocabulary.
@@ -278,8 +278,8 @@ widget calls are emitted and dropped (extension-ui-context.ts header lines 45–
 
 ## Pivot cost
 
-Replace the runtime and the vocabulary stays: `ZenDialogSpec`, `ZenOpenDialog`, `DialogAnswer`,
-`ZenDialogOutcome`, the validator, the answer route, the snapshot's list, the card and the router do not
+Replace the runtime and the vocabulary stays: `EnsoDialogSpec`, `EnsoOpenDialog`, `DialogAnswer`,
+`EnsoDialogOutcome`, the validator, the answer route, the snapshot's list, the card and the router do not
 change — the answer route's tests in `follow.test.ts` and the card's static renders already run with no
 runtime. What changes is `extension-ui-context.ts` (implement the new loop's question interface, or
 none if it has no extensions) and `permission-dialog.ts` (or delete it, if the new loop has no

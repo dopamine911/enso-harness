@@ -1,7 +1,7 @@
-# `@zen/core`
+# `@enso/core`
 
-**Every TypeBox schema in zen-harness lives here** — plus, since #59, the two pieces of
-runtime the whole workspace shares: the `zen.config.json` loader and the path helpers.
+**Every TypeBox schema in Enso lives here** — plus, since #59, the two pieces of
+runtime the whole workspace shares: the `enso.config.json` loader and the path helpers.
 Nothing else does.
 
 ## Why one package
@@ -39,8 +39,8 @@ were four such schemas; the subprocess transport they described is deleted.)
 | `thread-runtime.ts` | the thread runtime contract the host implements, and the runtime event shape (the rpc-mode vocabulary the host reproduces in-process) |
 | `web-fetch.ts` | web_fetch's config section, tool parameters, and caps (#54) |
 | `web-search.ts` | web_search's optional config section (backend pin + Tavily domain filters), tool parameters, and the per-attempt deadline (#63) |
-| `config.ts` | `zen.config.json`: the whole-file schema and the fail-closed loading contract (#59) |
-| `paths.ts` | the workspace path helpers — `findRepoRoot` (realpath-first) and the `.zen` dirs (#59); node/bun only, tree-shaken out of the browser bundle |
+| `config.ts` | `enso.config.json`: the whole-file schema and the fail-closed loading contract (#59) |
+| `paths.ts` | the workspace path helpers — `findRepoRoot` (realpath-first) and the `.enso` dirs (#59); node/bun only, tree-shaken out of the browser bundle |
 
-`index.ts` re-exports all of it. Import from `@zen/core`, never from a module path — the
+`index.ts` re-exports all of it. Import from `@enso/core`, never from a module path — the
 barrel is what makes "is this shape already declared?" answerable by one search.

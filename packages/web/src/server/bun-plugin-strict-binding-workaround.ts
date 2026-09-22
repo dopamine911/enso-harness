@@ -41,7 +41,7 @@ const EXPECTED_INDEX_CONTENT = "export * as Arguments from './arguments.mjs';"
 class StrictBindingWorkaroundStaleError extends Error {
   constructor(detail: string) {
     super(
-      `zen-strict-binding-workaround: typebox no longer matches the shape this plugin ` +
+      `enso-strict-binding-workaround: typebox no longer matches the shape this plugin ` +
         `rewrites (${detail}). Re-derive the workaround or delete it if bun fixed the ` +
         `reserved-identifier HMR binding bug.`,
     )
@@ -50,7 +50,7 @@ class StrictBindingWorkaroundStaleError extends Error {
 }
 
 const strictBindingWorkaround: BunPlugin = {
-  name: 'zen-strict-binding-workaround',
+  name: 'enso-strict-binding-workaround',
   setup(build: PluginBuilder): void {
     build.onLoad({ filter: /typebox[/\\]build[/\\]system[/\\]system\.mjs$/ }, (args) => {
       const source = readFileSync(args.path, 'utf8')

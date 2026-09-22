@@ -1,14 +1,14 @@
 import {
-  isZenDialogSpec,
-  ZEN_TOOL_RESULT_KEY,
-  ZenDialogOutcome,
-  type ZenDialogSpec,
-  ZenNotifyType,
-  type ZenObservation,
-  ZenPermissionModeState,
-  type ZenToolResultDescriptor,
-  type ZenUsage,
-} from '@zen/core'
+  ENSO_TOOL_RESULT_KEY,
+  EnsoDialogOutcome,
+  type EnsoDialogSpec,
+  EnsoNotifyType,
+  type EnsoObservation,
+  EnsoPermissionModeState,
+  type EnsoToolResultDescriptor,
+  type EnsoUsage,
+  isEnsoDialogSpec,
+} from '@enso/core'
 import { Check } from 'typebox/value'
 import type { EventDelivery, RuntimeEvent } from './runtime-event.ts'
 
@@ -18,7 +18,7 @@ import type { EventDelivery, RuntimeEvent } from './runtime-event.ts'
  * This is the one seam that has to understand both protocols, and owning it is what buys
  * back the two things `@tanstack/ai-acp` drops: image input and streamed usage.
  *
- * ⚠ The observation SCHEMAS live in `@zen/core`. This module is the mapping only — the
+ * ⚠ The observation SCHEMAS live in `@enso/core`. This module is the mapping only — the
  * shapes are declared once, in one package, so a second `usage` or a second `truncation`
  * cannot appear beside a different consumer.
  *
@@ -43,7 +43,7 @@ interface PiToolDetails {
   [field: string]: unknown
 }
 
-function readUsage(raw: unknown): ZenUsage | undefined {
+function readUsage(raw: unknown): EnsoUsage | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const usage = raw as Record<string, unknown>
   const numberAt = (key: string): number => (typeof usage[key] === 'number' ? (usage[key] as number) : 0)
@@ -76,7 +76,7 @@ export function contentToText(content: unknown): string {
  * inventing a `kind` per tool here would put rendering decisions in the transport. A tool
  * that wants a richer descriptor should emit one; this is the floor, not the ceiling.
  */
-export function descriptorFrom(toolName: string, details: unknown): ZenToolResultDescriptor | undefined {
+export function descriptorFrom(toolName: string, details: unknown): EnsoToolResultDescriptor | undefined {
   if (typeof details !== 'object' || details === null) return undefined
   const truncation = (details as PiToolDetails).truncation
   if (truncation === null || truncation === undefined) return undefined
@@ -95,13 +95,13 @@ export function descriptorFrom(toolName: string, details: unknown): ZenToolResul
 
 /** The metadata bag to attach to a TanStack `ToolResultPart`, or undefined if there is none. */
 export function toolResultMetadata(
-  descriptor: ZenToolResultDescriptor | undefined,
+  descriptor: EnsoToolResultDescriptor | undefined,
 ): Record<string, unknown> | undefined {
-  return descriptor === undefined ? undefined : { [ZEN_TOOL_RESULT_KEY]: descriptor }
+  return descriptor === undefined ? undefined : { [ENSO_TOOL_RESULT_KEY]: descriptor }
 }
 
 /** The `extension_ui_request` case of {@link mapPiEvent}, on its own because of its size. */
-function mapExtensionUiRequest(event: RuntimeEvent, delivery: EventDelivery): ZenObservation {
+function mapExtensionUiRequest(event: RuntimeEvent, delivery: EventDelivery): EnsoObservation {
   // ⚠ pi's Extension UI sub-protocol, and it splits in two (`docs/rpc.md` § Extension
   // UI Protocol):
   //
@@ -116,7 +116,7 @@ function mapExtensionUiRequest(event: RuntimeEvent, delivery: EventDelivery): Ze
   // carrying this id reaches the extension's promise. The session
   // layer answers dialogs by handing them to the browser as AG-UI interrupts
   // (#27), and what it needs from this hop is the QUESTION — so the dialog fields
-  // are read here, defensively, into the one shared `ZenDialogSpec` shape.
+  // are read here, defensively, into the one shared `EnsoDialogSpec` shape.
   //
   // ⚠ Defensively means: a blocking request whose fields do not form a
   // well-shaped question still maps as `blocking: true` with `dialog` absent.
@@ -128,7 +128,7 @@ function mapExtensionUiRequest(event: RuntimeEvent, delivery: EventDelivery): Ze
   for (const field of ['title', 'options', 'message', 'placeholder', 'prefill', 'timeout']) {
     if (event[field] !== undefined) dialogCandidate[field] = event[field]
   }
-  const dialog: ZenDialogSpec | undefined = isZenDialogSpec(dialogCandidate) ? dialogCandidate : undefined
+  const dialog: EnsoDialogSpec | undefined = isEnsoDialogSpec(dialogCandidate) ? dialogCandidate : undefined
   // ⚠ A notify's `message` IS the request (#29): pi's wire shape is
   // `{method: "notify", message, notifyType?}`, and dropping the message here is
   // how a mode change once completed with nothing visible. Copied for notify ONLY —
@@ -137,13 +137,13 @@ function mapExtensionUiRequest(event: RuntimeEvent, delivery: EventDelivery): Ze
   // copied only when it is one of pi's three declared values (info|warning|error);
   // an unrecognised value degrades to an untyped notification, never a validation
   // failure.
-  const notifyFields: { message?: string; notifyType?: ZenNotifyType } = {}
+  const notifyFields: { message?: string; notifyType?: EnsoNotifyType } = {}
   if (method === 'notify') {
     notifyFields.message = String(event.message ?? '')
     // The declared values come from the schema, not a literal list — the browser
     // router (custom-event-router.ts) makes the same check the same way.
     const notifyTypeCandidate = event.notifyType
-    if (Check(ZenNotifyType, notifyTypeCandidate)) {
+    if (Check(EnsoNotifyType, notifyTypeCandidate)) {
       notifyFields.notifyType = notifyTypeCandidate
     }
   }
@@ -180,9 +180,9 @@ function textsOf(value: unknown): string[] {
  * entry that was. Checked like every crossing: a malformed one is carried as unmapped, never
  * dropped.
  */
-function mapPermissionMode(event: RuntimeEvent): ZenObservation {
+function mapPermissionMode(event: RuntimeEvent): EnsoObservation {
   const { type: _type, ...state } = event
-  if (Check(ZenPermissionModeState, state)) return { kind: 'permission-mode', ...state }
+  if (Check(EnsoPermissionModeState, state)) return { kind: 'permission-mode', ...state }
   return { kind: 'unmapped', event }
 }
 
@@ -190,7 +190,7 @@ function mapPermissionMode(event: RuntimeEvent): ZenObservation {
  * A message began (#112). A USER message carries its text so a second follower sees the
  * prompt another tab sent; every other role's content arrives by its own events.
  */
-function mapMessageStart(event: RuntimeEvent): ZenObservation {
+function mapMessageStart(event: RuntimeEvent): EnsoObservation {
   const message = event.message as { role?: unknown; content?: unknown } | undefined
   const role = roleOf(message)
   return role === 'user'
@@ -209,7 +209,7 @@ function mapMessageStart(event: RuntimeEvent): ZenObservation {
  * getUsageCostBreakdown): assistant messages and toolResult messages WITH usage are
  * attributable spend; every other completed message is a boundary without it.
  */
-function mapMessageEnd(event: RuntimeEvent): ZenObservation {
+function mapMessageEnd(event: RuntimeEvent): EnsoObservation {
   const message = event.message as { role?: unknown; usage?: unknown } | undefined
   const role = roleOf(message)
   const usage = readUsage(message?.usage)
@@ -226,7 +226,7 @@ function mapMessageEnd(event: RuntimeEvent): ZenObservation {
  * the session's own start — becomes `origin: "session-start"` on a ui request; `live` is
  * `"run"`. Defaults to live: every caller but the pump is mapping a run's stream.
  */
-export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'): ZenObservation {
+export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'): EnsoObservation {
   switch (event.type) {
     case 'message_update': {
       const delta = event.assistantMessageEvent as { type?: string; contentIndex?: number; delta?: string } | undefined
@@ -253,11 +253,11 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
       return { kind: 'turn-start' }
 
     case 'turn_end':
-      // pi's turn: one model request and its tool results (dsh's step — see @zen/core).
+      // pi's turn: one model request and its tool results (dsh's step — see @enso/core).
       return { kind: 'turn-end', toolResults: countOf(event.toolResults) }
 
     case 'queue_update':
-      // pi's two field names, read here and nowhere else (#216): the wire carries Zen's.
+      // pi's two field names, read here and nowhere else (#216): the wire carries Enso's.
       return { kind: 'queue', interrupting: textsOf(event.steering), enqueued: textsOf(event.followUp) }
 
     case 'tool_execution_start':
@@ -314,7 +314,7 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
       // An outcome the union does not name is a host/mapper drift, not a pi event to
       // carry through: it stays unmapped so the debug pane shows it.
       const { id, outcome } = event
-      if (typeof id === 'string' && id.length > 0 && Check(ZenDialogOutcome, outcome)) {
+      if (typeof id === 'string' && id.length > 0 && Check(EnsoDialogOutcome, outcome)) {
         return { kind: 'dialog-settled', id, outcome }
       }
       return { kind: 'unmapped', event }

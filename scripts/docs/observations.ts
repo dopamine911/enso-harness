@@ -4,7 +4,7 @@ import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { assertExactKeys, runGenerator } from './generator-support.ts'
 
 /**
- * Generates `docs/reference/observations.md`: every member of `ZenObservation`, its producer,
+ * Generates `docs/reference/observations.md`: every member of `EnsoObservation`, its producer,
  * follow carrier, browser adapter emissions, and browser-side destination. Extraction follows
  * this repository's deliberately simple declaration and switch shapes.
  */
@@ -47,7 +47,7 @@ const CUSTOM_METADATA: Record<string, CustomMetadata> = {
 }
 
 /**
- * The chunks that are not observations: the follow's frames, named by `ZenFollowFrame.type`
+ * The chunks that are not observations: the follow's frames, named by `EnsoFollowFrame.type`
  * and carried whole, and the adapter's own `follow-ended`. Checked against the adapter's
  * `name: frame.type` push and the router's `eventType === '<name>'` branches.
  */
@@ -80,13 +80,13 @@ function unique(values: readonly string[]): string[] {
 }
 
 export function unionMembers(source: string): string[] {
-  const union = /export const ZenObservation = Type\.Union\(\[([\s\S]*?)\n\]\)/.exec(source)
-  if (union?.[1] === undefined) throw new Error('observations: could not find the ZenObservation union')
+  const union = /export const EnsoObservation = Type\.Union\(\[([\s\S]*?)\n\]\)/.exec(source)
+  if (union?.[1] === undefined) throw new Error('observations: could not find the EnsoObservation union')
   const members = union[1]
     .split('\n')
     .map((line) => line.trim().replace(/,$/, ''))
     .filter((line) => /^[A-Za-z_$][\w$]*$/.test(line))
-  if (members.length !== new Set(members).size) throw new Error('observations: ZenObservation repeats a schema member')
+  if (members.length !== new Set(members).size) throw new Error('observations: EnsoObservation repeats a schema member')
   return members
 }
 
@@ -276,9 +276,9 @@ function generate(): string {
     '<!-- generated: scripts/docs/observations.ts -->',
     '# Observation inventory',
     '',
-    'Generated from `ZenObservation`, the pi-event mapper, the prompt route, the follow carrier, the AG-UI adapter and the browser chunk router. One vocabulary (#162 workstream 5): a CUSTOM chunk is named by the observation `kind` (or the frame `type`) it carries whole.',
+    'Generated from `EnsoObservation`, the pi-event mapper, the prompt route, the follow carrier, the AG-UI adapter and the browser chunk router. One vocabulary (#162 workstream 5): a CUSTOM chunk is named by the observation `kind` (or the frame `type`) it carries whole.',
     '',
-    "> Parser limitation: schemas must be direct identifiers in `ZenObservation = Type.Union([…])` and direct `Type.Object` declarations with one inline `kind` literal. Producers are recognized from object-literal `kind` fields. Adapter output recognizes `case` blocks, `EventType.*`, `custom(observation)` and explicit empty-array branches; router branches are `case '<kind>':` lines; browser store semantics remain explicit checked metadata.",
+    "> Parser limitation: schemas must be direct identifiers in `EnsoObservation = Type.Union([…])` and direct `Type.Object` declarations with one inline `kind` literal. Producers are recognized from object-literal `kind` fields. Adapter output recognizes `case` blocks, `EventType.*`, `custom(observation)` and explicit empty-array branches; router branches are `case '<kind>':` lines; browser store semantics remain explicit checked metadata.",
     '',
     'A carrier marked **ELIDED** does not reach the browser in that state (#279): the observation is still numbered, still logged at `trace` and still counted in the `emitted` tail of `/api/threads/:id/events`, but no frame is written — the adapter emission for that state is `dropped`, so the bytes would be serialised and schema-checked for nothing. The `sent` tail claims only what crossed, and frame `seq` skips the elided numbers.',
     '',

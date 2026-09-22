@@ -1,19 +1,19 @@
 import { EventType } from '@ag-ui/core'
+import {
+  type DialogAnswer,
+  ENSO_IMAGE_MIME_TYPES,
+  EnsoAbortReceipt,
+  type EnsoFollowFrame,
+  EnsoFollowFrame as EnsoFollowFrameSchema,
+  type EnsoPromptBody,
+  type EnsoPromptImage,
+  EnsoPromptReceipt,
+  ensoLogger,
+  isEnsoImageMimeType,
+} from '@enso/core'
 import type { MessagePart, StreamChunk } from '@tanstack/ai'
 import type { ModelMessage, UIMessage } from '@tanstack/ai/client'
 import type { RunAgentInputContext, SubscribeConnectionAdapter } from '@tanstack/ai-client'
-import {
-  type DialogAnswer,
-  isZenImageMimeType,
-  ZEN_IMAGE_MIME_TYPES,
-  ZenAbortReceipt,
-  type ZenFollowFrame,
-  ZenFollowFrame as ZenFollowFrameSchema,
-  type ZenPromptBody,
-  type ZenPromptImage,
-  ZenPromptReceipt,
-  zenLogger,
-} from '@zen/core'
 import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from './custom-event-router.ts'
@@ -33,7 +33,7 @@ import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
  *   close()      releases that subscription's socket when the page lets the thread go (#272);
  *                the page's live threads are bounded, so a follow has to be able to end.
  *
- * ⚠ AG-UI IS MADE HERE AND ONLY HERE. The wire carries `ZenObservation` (`docs/architecture.md`,
+ * ⚠ AG-UI IS MADE HERE AND ONLY HERE. The wire carries `EnsoObservation` (`docs/architecture.md`,
  * decided constraints); this adapter derives the chunk vocabulary TanStack's client consumes,
  * in memory, per view. Nothing is stored in it and nothing else reads it.
  *
@@ -55,10 +55,10 @@ import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
  * declined here on pi's behalf, and the run error `to-agui.ts` emits tells the user.
  */
 
-const followLog = zenLogger('browser', 'follow')
+const followLog = ensoLogger('browser', 'follow')
 
 /**
- * The wire validator, compiled once at module load — the `@zen/core` convention
+ * The wire validator, compiled once at module load — the `@enso/core` convention
  * (`config.ts:47`, `dialog.ts:83-84`, `thread-runtime.ts:60`, `tool-result.ts:94`).
  *
  * `Compile` rather than `Check` because this runs on EVERY frame off the follow — once per
@@ -68,7 +68,7 @@ const followLog = zenLogger('browser', 'follow')
  * interpreted on purpose: one per prompt and one per abort is not a hot path, and compiling
  * them would imply otherwise.
  */
-const followFrameValidator = Compile(ZenFollowFrameSchema)
+const followFrameValidator = Compile(EnsoFollowFrameSchema)
 
 /** The template with its values in, as a notice reads it: `dialog {id} {outcome}` → `dialog d1 refused`. */
 function sentence(template: string, properties: Record<string, unknown>): string {
@@ -124,14 +124,14 @@ function textOf(parts: readonly MessagePart[]): string {
 const DATA_URL = /^data:([^;,]+);base64,([A-Za-z0-9+/]*={0,2})$/
 
 /**
- * The user's image parts as the wire takes them (#68): inline bytes only. `ZenPromptImage`
+ * The user's image parts as the wire takes them (#68): inline bytes only. `EnsoPromptImage`
  * has no `url` — a server-side fetch would be egress the guards do not cover — so a part
  * whose source is a URL that is not a `data:` URL is REFUSED here, by name, before anything
  * is posted; the server never learns of it. A `data:` URL is bytes already, so it crosses.
  * The mime type is the part's own; the server holds the allowlist and says which is refused.
  */
-function imagesOf(parts: readonly MessagePart[]): { images: ZenPromptImage[]; refused: string[] } {
-  const images: ZenPromptImage[] = []
+function imagesOf(parts: readonly MessagePart[]): { images: EnsoPromptImage[]; refused: string[] } {
+  const images: EnsoPromptImage[] = []
   const refused: string[] = []
   for (const part of parts) {
     if (part.type !== 'image') continue
@@ -144,8 +144,8 @@ function imagesOf(parts: readonly MessagePart[]): { images: ZenPromptImage[]; re
       continue
     }
     const [mimeType, data] = inline
-    if (!isZenImageMimeType(mimeType)) {
-      refused.push(`${mimeType}: not a kind this wire takes (${ZEN_IMAGE_MIME_TYPES.join(', ')})`)
+    if (!isEnsoImageMimeType(mimeType)) {
+      refused.push(`${mimeType}: not a kind this wire takes (${ENSO_IMAGE_MIME_TYPES.join(', ')})`)
       continue
     }
     images.push({ mimeType, data })
@@ -235,7 +235,7 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * browser's queue, invisible to other tabs and lost on reload. This POSTs now with
    * `admission: enqueue`, so the runtime queues it and every follower sees it.
    */
-  readonly prompt: (text: string, images?: readonly ZenPromptImage[]) => Promise<PromptOutcome>
+  readonly prompt: (text: string, images?: readonly EnsoPromptImage[]) => Promise<PromptOutcome>
   /**
    * Switch the permission mode (L3 step C): `POST …/mode`, a control route, never a prompt —
    * the browser says a mode and no command. The change arrives on the follow as `permission-mode`,
@@ -382,7 +382,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     }
   }
 
-  function observe(frame: ZenFollowFrame): void {
+  function observe(frame: EnsoFollowFrame): void {
     if (frame.type === 'snapshot' || frame.type === 'status') {
       // The frame crosses to the router WHOLE, named by its type (#162 workstream 5): the
       // run-start receipts — mode, the complete open-question list, the generation — are
@@ -498,7 +498,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       try {
         for await (const raw of frames) {
           if (!followFrameValidator.Check(raw)) {
-            problem('a frame off the wire fails ZenFollowFrame: {frame}', { frame: raw })
+            problem('a frame off the wire fails EnsoFollowFrame: {frame}', { frame: raw })
             continue
           }
           observe(raw)
@@ -560,7 +560,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       closeRun(run, { type: EventType.RUN_ERROR, runId: run.runId, message: reason })
       return
     }
-    const body: ZenPromptBody = { message, ...(images.length === 0 ? {} : { images }) }
+    const body: EnsoPromptBody = { message, ...(images.length === 0 ? {} : { images }) }
     let response: Response
     try {
       response = await fetchImpl(`${base}/prompt`, {
@@ -586,7 +586,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       return
     }
     const receipt: unknown = await response.json()
-    if (!Check(ZenPromptReceipt, receipt)) {
+    if (!Check(EnsoPromptReceipt, receipt)) {
       log.warn('the prompt receipt did not match its schema', { runId: run.runId })
       closeRun(run, {
         type: EventType.RUN_ERROR,
@@ -654,7 +654,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     if (response === undefined) return { outcome: 'unreachable', restored: [] }
     if (response.status === 200) {
       const receipt: unknown = await response.json()
-      if (Check(ZenAbortReceipt, receipt)) return { outcome: 'aborted', restored: receipt.restored }
+      if (Check(EnsoAbortReceipt, receipt)) return { outcome: 'aborted', restored: receipt.restored }
       problem('the abort receipt did not match its schema — anything queued is lost')
       return { outcome: 'aborted', restored: [] }
     }
@@ -675,8 +675,8 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     return outcome
   }
 
-  async function prompt(text: string, images: readonly ZenPromptImage[] = []): Promise<PromptOutcome> {
-    const body: ZenPromptBody = {
+  async function prompt(text: string, images: readonly EnsoPromptImage[] = []): Promise<PromptOutcome> {
+    const body: EnsoPromptBody = {
       message: text,
       admission: 'enqueue',
       ...(images.length === 0 ? {} : { images: [...images] }),
@@ -691,7 +691,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       return 'refused'
     }
     const receipt: unknown = await response.json()
-    if (!Check(ZenPromptReceipt, receipt)) {
+    if (!Check(EnsoPromptReceipt, receipt)) {
       problem('the prompt receipt did not match its schema')
       return 'refused'
     }

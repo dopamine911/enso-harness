@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test'
-import { ZenObservation } from '@zen/core'
-import { observationKindsDeclaredByTheUnion } from '@zen/core/observation-kinds'
+import { EnsoObservation } from '@enso/core'
+import { observationKindsDeclaredByTheUnion } from '@enso/core/observation-kinds'
 import { Check } from 'typebox/value'
 import { mapPiEvent } from '../map-events.ts'
 
 // --- the mapper's output validates against the union it claims to produce
-test('EVERY observation the mapper can emit validates against ZenObservation', () => {
+test('EVERY observation the mapper can emit validates against EnsoObservation', () => {
   const events = [
     {
       type: 'message_update',
@@ -48,7 +48,7 @@ test('EVERY observation the mapper can emit validates against ZenObservation', (
   ]
   for (const event of events) {
     const observation = mapPiEvent(event)
-    expect(Check(ZenObservation, observation)).toBe(true)
+    expect(Check(EnsoObservation, observation)).toBe(true)
   }
   // and the set above actually covers every member of the union — derived from the union
   // itself, never a hard-coded count: the count drifted once (566e8b1 bumped the sibling
@@ -59,7 +59,7 @@ test('EVERY observation the mapper can emit validates against ZenObservation', (
     { kind: 'prompt-rejected', messageId: 'm', reason: 'r' },
     { kind: 'permission-mode-rejected', mode: 'plan', reason: 'r' },
   ] as const
-  for (const observation of synthesised) expect(Check(ZenObservation, observation)).toBe(true)
+  for (const observation of synthesised) expect(Check(EnsoObservation, observation)).toBe(true)
   const coveredKinds: string[] = [
     ...new Set([
       ...events.map((event) => mapPiEvent(event).kind),

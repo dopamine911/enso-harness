@@ -56,7 +56,7 @@ sequenceDiagram
 
 ## The frame contract
 
-<!-- source: packages/core/src/follow.ts#ZenFollowSnapshot -->
+<!-- source: packages/core/src/follow.ts#EnsoFollowSnapshot -->
 ```ts
 /**
  * The server↔browser wire (#112): a thread's feed, as the follow route serves it.
@@ -67,11 +67,11 @@ sequenceDiagram
  * a new snapshot; there is no cursor to resume from, because the snapshot IS the resync
  * (deepseek-harness: one complete snapshot per generation, then only deltas).
  *
- * The payload is `ZenObservation` — the same layer the event tails and the debug pane
+ * The payload is `EnsoObservation` — the same layer the event tails and the debug pane
  * reason in. AG-UI is not on this wire; a browser adapter derives it if a renderer wants it
  * (`docs/architecture.md`, decided constraints).
  */
-export const ZenFollowSnapshot = Type.Object(
+export const EnsoFollowSnapshot = Type.Object(
   {
     type: Type.Literal('snapshot'),
     threadId: Type.String(),
@@ -80,14 +80,14 @@ export const ZenFollowSnapshot = Type.Object(
     /** A pi session exists for the thread on this server. False: served cold from the file, or empty. */
     live: Type.Boolean(),
     busy: Type.Boolean(),
-    /** See `ZenThreadSummary.generation`. */
+    /** See `EnsoThreadSummary.generation`. */
     generation: Type.Integer({ minimum: 0 }),
-    permissionMode: ZenPermissionModeState,
-    /** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not zen's. */
+    permissionMode: EnsoPermissionModeState,
+    /** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not enso's. */
     messages: Type.Array(Type.Unknown()),
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */
-    openDialogs: Type.Array(ZenOpenDialog),
-    interrupted: Type.Optional(ZenInterruptedTail),
+    openDialogs: Type.Array(EnsoOpenDialog),
+    interrupted: Type.Optional(EnsoInterruptedTail),
   },
   { additionalProperties: false },
 )

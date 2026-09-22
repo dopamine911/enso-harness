@@ -11,12 +11,12 @@
  *   1. `quarantineSecrets` — at startup, before any session or child process exists,
  *      DELETE every secret-shaped variable and every name the secrets files define from
  *      `process.env`. bun's autoload into THIS process is thereby undone; the spawn spread
- *      in `zen.ts` and the in-process host both start from an environment that carries
+ *      in `enso.ts` and the in-process host both start from an environment that carries
  *      none.
- *   2. The secrets file is `.zen/secrets.env`, NOT the root `.env` (`zenSecretsPath`).
+ *   2. The secrets file is `.enso/secrets.env`, NOT the root `.env` (`ensoSecretsPath`).
  *      Scrubbing the parent is not enough: bun auto-loads `.env*` from the cwd into EVERY
  *      bun process, so a `bun -e` the model runs from the repo root re-reads a root `.env`
- *      itself — verified with `env -i`, the receipt in PR #98. `.zen/` is a path bun never
+ *      itself — verified with `env -i`, the receipt in PR #98. `.enso/` is a path bun never
  *      loads from; a root `.env` that still defines a secret is reported as MISPLACED.
  *   3. `readSecret` — the extensions that need a key (web_search's Tavily and DeepSeek
  *      providers) read the gated file DIRECTLY, at call time. Extension code is trusted;
@@ -39,7 +39,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { rootDotenvPath, zenSecretsPath } from './paths.ts'
+import { ensoSecretsPath, rootDotenvPath } from './paths.ts'
 
 const SECRET_SHAPED_NAME = /(?:^|_)(?:API_KEY|TOKEN|SECRET|PASSWORD)S?(?:$|_)/
 
@@ -95,12 +95,12 @@ export function readDotenvFile(path: string): Map<string, string> {
 }
 
 /**
- * One secret by name from `.zen/secrets.env` — the extensions' read path. Per call, so a rotation needs no restart.
+ * One secret by name from `.enso/secrets.env` — the extensions' read path. Per call, so a rotation needs no restart.
  *
  * @group Secrets
  */
 export function readSecret(repoRoot: string, name: string): string | undefined {
-  return readDotenvFile(zenSecretsPath(repoRoot)).get(name)
+  return readDotenvFile(ensoSecretsPath(repoRoot)).get(name)
 }
 
 /**
@@ -115,7 +115,7 @@ const SHORTEST_SCANNABLE_SECRET = 8
  * Redaction by field name cannot see a token quoted inside a message, a guard's `reason`, or a
  * `trace` payload; this is the set those passes scan for.
  *
- * Two sources, both ours: `.zen/secrets.env` — everything in it is a secret by definition —
+ * Two sources, both ours: `.enso/secrets.env` — everything in it is a secret by definition —
  * and the environment's own secret-shaped names, for a process configured before
  * `quarantineSecrets` has run. After quarantine the environment half is empty by design,
  * and the file half is what still matters: it is where the provider key a tool might echo
@@ -131,7 +131,7 @@ export function knownSecretValues(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): readonly string[] {
   const values = new Set<string>()
-  for (const secretValue of readDotenvFile(zenSecretsPath(repoRoot)).values()) {
+  for (const secretValue of readDotenvFile(ensoSecretsPath(repoRoot)).values()) {
     if (secretValue.length >= SHORTEST_SCANNABLE_SECRET) values.add(secretValue)
   }
   for (const [variableName, variableValue] of Object.entries(environment)) {
@@ -142,7 +142,7 @@ export function knownSecretValues(
 }
 
 /**
- * The same set as `knownSecretValues`, as a THUNK that re-reads `.zen/secrets.env` when the
+ * The same set as `knownSecretValues`, as a THUNK that re-reads `.enso/secrets.env` when the
  * file changes (#207).
  *
  * The reader is per call — `readSecret` re-reads the file every time, so a rotated key is live
@@ -172,7 +172,7 @@ export function knownSecretValuesTracking(
   repoRoot: string,
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): () => readonly string[] {
-  const secretsPath = zenSecretsPath(repoRoot)
+  const secretsPath = ensoSecretsPath(repoRoot)
   const ABSENT = -1
   let seenMtime = ABSENT
   let seenSize = ABSENT
@@ -196,12 +196,12 @@ export function knownSecretValuesTracking(
 export interface QuarantineReport {
   /** Names deleted from the environment, sorted. Never values — this is what a startup log line prints. */
   readonly removed: readonly string[]
-  /** Secret-shaped names the ROOT `.env` defines: bun would autoload them into every bun child. Move them to `.zen/secrets.env`. */
+  /** Secret-shaped names the ROOT `.env` defines: bun would autoload them into every bun child. Move them to `.enso/secrets.env`. */
   readonly misplaced: readonly string[]
 }
 
 /**
- * Remove from `environment` every secret-shaped name and every name `.zen/secrets.env`
+ * Remove from `environment` every secret-shaped name and every name `.enso/secrets.env`
  * defines (whatever its shape — everything in the secrets file is a secret by definition),
  * and report a root `.env` that still holds secret-shaped names.
  *
@@ -218,7 +218,7 @@ export interface QuarantineReport {
  */
 export function quarantineSecrets(environment: Record<string, string | undefined>, repoRoot: string): QuarantineReport {
   const rootDotenv = readDotenvFile(rootDotenvPath(repoRoot))
-  const doomed = new Set<string>(readDotenvFile(zenSecretsPath(repoRoot)).keys())
+  const doomed = new Set<string>(readDotenvFile(ensoSecretsPath(repoRoot)).keys())
   for (const variableName of Object.keys(environment)) if (isSecretShapedName(variableName)) doomed.add(variableName)
   const removed: string[] = []
   for (const doomedName of doomed) {

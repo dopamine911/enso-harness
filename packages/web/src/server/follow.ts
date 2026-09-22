@@ -2,18 +2,18 @@ import type { ServerResponse } from 'node:http'
 import {
   base64DecodedBytes,
   type DialogAnswer,
+  ENSO_IMAGE_MAX_BYTES,
+  type EnsoAbortReceipt,
+  type EnsoFollowFrame,
+  EnsoPermissionModeChange,
+  type EnsoPromptAdmission,
+  EnsoPromptBody,
+  type EnsoPromptReceipt,
+  ensoLogger,
   isWholeBase64,
   type PromptImageContent,
   validateDialogAnswer,
-  ZEN_IMAGE_MAX_BYTES,
-  type ZenAbortReceipt,
-  type ZenFollowFrame,
-  ZenPermissionModeChange,
-  type ZenPromptAdmission,
-  ZenPromptBody,
-  type ZenPromptReceipt,
-  zenLogger,
-} from '@zen/core'
+} from '@enso/core'
 import { Check, Errors } from 'typebox/value'
 import type { AgentHost } from '../host/agent-host.ts'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
@@ -55,13 +55,13 @@ import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
  *                                  released by the prompt route's observer, not by this
  *                                  route. 200 with the restored queue; 409 nothing in flight; 404 not live.
  *
- * The wire shapes — `ZenFollowFrame`, `ZenPromptReceipt` — are TypeBox in `@zen/core`
- * (`follow.ts` there), like every other crossing; the payload is `ZenObservation`, and AG-UI
+ * The wire shapes — `EnsoFollowFrame`, `EnsoPromptReceipt` — are TypeBox in `@enso/core`
+ * (`follow.ts` there), like every other crossing; the payload is `EnsoObservation`, and AG-UI
  * is not on this wire (`docs/architecture.md`, decided constraints). The receipt of what the
  * split retires is on #109; the decision and its sequence are #112.
  */
 
-const log = zenLogger('server', 'follow')
+const log = ensoLogger('server', 'follow')
 
 export interface FollowRouteDeps {
   readonly threads: ThreadRegistry
@@ -71,13 +71,13 @@ export interface FollowRouteDeps {
 
 export interface PromptBody {
   readonly message: string
-  readonly admission?: ZenPromptAdmission
+  readonly admission?: EnsoPromptAdmission
   /** Attached images (#68), already in pi's shape; absent — not empty — when the prompt has none. */
   readonly images?: readonly PromptImageContent[]
 }
 
 export type PromptOutcome =
-  | { readonly status: 202; readonly receipt: ZenPromptReceipt }
+  | { readonly status: 202; readonly receipt: EnsoPromptReceipt }
   | { readonly status: 400; readonly reason: string }
 
 /** Leading token of a slash input, without the slash. `/mode auto` -> `mode`. */
@@ -104,7 +104,7 @@ function slashCommandName(prompt: string): string | undefined {
  * browser side reads, and the sent tail does not record them either: it claims only what
  * crossed.
  */
-function writeFrame(threads: ThreadRegistry, threadId: string, response: ServerResponse, frame: ZenFollowFrame): void {
+function writeFrame(threads: ThreadRegistry, threadId: string, response: ServerResponse, frame: EnsoFollowFrame): void {
   if (frame.type === 'observation' && frame.observation.kind === 'tool-result' && !frame.observation.complete) return
   const name = frame.type === 'observation' ? frame.observation.kind : undefined
   threads.sentTail(threadId)?.record(frame.type, name, 'sent')
@@ -164,7 +164,7 @@ const MEGABYTE = 1024 * 1024
 const megabytes = (bytes: number): string => `${(bytes / MEGABYTE).toFixed(1)} MB`
 
 /**
- * The prompt body, shape-checked against `ZenPromptBody` (#112: closed schemas on the wire).
+ * The prompt body, shape-checked against `EnsoPromptBody` (#112: closed schemas on the wire).
  *
  * Throws `Error`s whose message is the 400 text — the first thing wrong, by path, so a refused
  * image says which one and why rather than "did not match" (#68: never silently dropped). The
@@ -177,11 +177,11 @@ export function readPromptBody(raw: string): PromptBody {
   } catch (error) {
     throw new Error(`malformed prompt body: ${String(error)}`)
   }
-  if (!Check(ZenPromptBody, parsed)) {
-    const first = Errors(ZenPromptBody, parsed)[0]
+  if (!Check(EnsoPromptBody, parsed)) {
+    const first = Errors(EnsoPromptBody, parsed)[0]
     const where =
       first === undefined ? '' : ` at ${first.instancePath === '' ? '/' : first.instancePath}: ${first.message}`
-    throw new Error(`prompt body must match ZenPromptBody${where}`)
+    throw new Error(`prompt body must match EnsoPromptBody${where}`)
   }
   // Whitespace-only is refused here rather than taking a lease to hand pi nothing.
   if (parsed.message.trim().length === 0 && parsed.images === undefined) {
@@ -189,12 +189,12 @@ export function readPromptBody(raw: string): PromptBody {
   }
   const images = parsed.images?.map((image, position): PromptImageContent => {
     if (!isWholeBase64(image.data)) {
-      throw new Error(`prompt body must match ZenPromptBody at /images/${position}/data: must be whole base64 groups`)
+      throw new Error(`prompt body must match EnsoPromptBody at /images/${position}/data: must be whole base64 groups`)
     }
     const bytes = base64DecodedBytes(image.data)
-    if (bytes > ZEN_IMAGE_MAX_BYTES) {
+    if (bytes > ENSO_IMAGE_MAX_BYTES) {
       throw new Error(
-        `image ${position + 1} of ${parsed.images?.length ?? 0} is ${megabytes(bytes)}; an image is at most ${megabytes(ZEN_IMAGE_MAX_BYTES)}`,
+        `image ${position + 1} of ${parsed.images?.length ?? 0} is ${megabytes(bytes)}; an image is at most ${megabytes(ENSO_IMAGE_MAX_BYTES)}`,
       )
     }
     return { type: 'image', data: image.data, mimeType: image.mimeType }
@@ -352,7 +352,7 @@ export type ModeChangeOutcome =
 export async function changeThreadMode(
   deps: FollowRouteDeps,
   threadId: string,
-  change: ZenPermissionModeChange,
+  change: EnsoPermissionModeChange,
 ): Promise<ModeChangeOutcome> {
   const { threads } = deps
   const live = threads.peek(threadId)
@@ -380,19 +380,19 @@ export async function changeThreadMode(
 }
 
 /** The mode-change body, checked against its schema — a control route takes exactly its shape. */
-export function readModeChangeBody(raw: string): ZenPermissionModeChange {
+export function readModeChangeBody(raw: string): EnsoPermissionModeChange {
   let body: unknown
   try {
     body = JSON.parse(raw)
   } catch (error) {
     throw new Error(`malformed mode body: ${String(error)}`)
   }
-  if (!Check(ZenPermissionModeChange, body)) throw new Error('mode body needs a non-empty `mode`')
+  if (!Check(EnsoPermissionModeChange, body)) throw new Error('mode body needs a non-empty `mode`')
   return body
 }
 
 export type AbortRouteOutcome =
-  | { readonly status: 200; readonly receipt: ZenAbortReceipt }
+  | { readonly status: 200; readonly receipt: EnsoAbortReceipt }
   | { readonly status: 404; readonly reason: string }
   | { readonly status: 409; readonly reason: string }
 

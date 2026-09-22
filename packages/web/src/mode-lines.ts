@@ -1,4 +1,4 @@
-import { ZenPermissionModeState } from '@zen/core'
+import { EnsoPermissionModeState } from '@enso/core'
 import { Check } from 'typebox/value'
 import type { NotificationsStore } from './notifications.tsx'
 
@@ -35,7 +35,7 @@ export function createModeLines(notifications: NotificationsStore): ModeLines {
   let lastRenderedMode: string | undefined
   return {
     apply: (value: unknown) => {
-      if (!Check(ZenPermissionModeState, value)) return
+      if (!Check(EnsoPermissionModeState, value)) return
       if (value.mode === lastRenderedMode) return
       lastRenderedMode = value.mode
       // The harness's own line, not an extension's notice: never grouped with the startup

@@ -2,20 +2,20 @@ import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, sep as pathSeparator, resolve } from 'node:path'
 import {
+  ENSO_PERSISTENCE_WRITE_DIRECTORIES,
   PERSISTENCE_WRITE_BASENAMES,
   PERSISTENCE_WRITE_DIRECTORIES,
   SECRET_BASENAME_PATTERNS,
-  ZEN_PERSISTENCE_WRITE_DIRECTORIES,
-} from '@zen/core'
-import { fileUrlToPath, isFileUrl } from '@zen/core/paths'
+} from '@enso/core'
+import { fileUrlToPath, isFileUrl } from '@enso/core/paths'
 
 /**
- * The full directory-segment deny set: picc's vendored corpus plus the zen additions
- * (pi's own persistence surfaces — see the constants' comments in @zen/core guard.ts).
+ * The full directory-segment deny set: picc's vendored corpus plus the enso additions
+ * (pi's own persistence surfaces — see the constants' comments in @enso/core guard.ts).
  */
 const ALL_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [
   ...PERSISTENCE_WRITE_DIRECTORIES,
-  ...ZEN_PERSISTENCE_WRITE_DIRECTORIES,
+  ...ENSO_PERSISTENCE_WRITE_DIRECTORIES,
 ]
 
 /**
@@ -194,7 +194,7 @@ const PROC_ENVIRON_PATH = /^\/proc\/[^/]+\/environ$/
  * fragment or by basename.
  *
  * No filesystem access and no resolution: this is the question to ask about a shell word whose
- * value is not knowable from the text (`"$HOME/.zen/auth.json"` — see `shell-secret-paths.ts`),
+ * value is not knowable from the text (`"$HOME/.enso/auth.json"` — see `shell-secret-paths.ts`),
  * where {@link looksLikeSecret}'s realpath leg has nothing to resolve.
  *
  * @group Guard predicates

@@ -9,7 +9,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const harnessPackageRoot = join(repoRoot, 'packages', 'harness')
 
 const exampleManifest = {
-  name: 'zen-harness',
+  name: 'enso',
   pi: {
     extensions: [
       './extensions/guards/index.ts',
@@ -31,7 +31,7 @@ test('buildPrintManifest removes exactly the picc extension and keeps everything
   expect(printManifest.pi.skills).toEqual(['./skills'])
   expect(printManifest.pi.prompts).toEqual(['./prompts'])
   expect(printManifest.pi.themes).toEqual(['./themes'])
-  expect(printManifest.name).toBe('zen-harness-print')
+  expect(printManifest.name).toBe('enso-print')
   // The input is not mutated — interactive launches read the same object.
   expect(exampleManifest.pi.extensions).toHaveLength(3)
 })
@@ -64,7 +64,7 @@ test('a manifest where picc is the only extension refuses rather than launching 
 })
 
 test('materializePrintHarness writes the filtered manifest and symlinks into the real package', () => {
-  const printDir = mkdtempSync(join(tmpdir(), 'zen-print-harness-test-'))
+  const printDir = mkdtempSync(join(tmpdir(), 'enso-print-harness-test-'))
   try {
     const returned = materializePrintHarness(printDir, harnessPackageRoot, buildPrintManifest(exampleManifest))
     expect(returned).toBe(printDir)

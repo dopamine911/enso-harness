@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from '../zen-launch.ts'
+import { piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from '../enso-launch.ts'
 
 /**
  * THE TWO PI RESOLUTIONS, HELD TOGETHER (#217). The guard REPLICATES pi's path normaliser —
@@ -11,17 +11,17 @@ import { piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from '../zen
  *
  *   corpus    `packages/harness/core/__tests__/paths.test.ts` → `import.meta.resolve(…)`
  *             → `node_modules/@earendil-works/pi-coding-agent/dist/utils/paths.js`
- *   terminal  `scripts/zen.ts` → `Bun.spawn(['pi', …])` → the first `pi` on `PATH`
+ *   terminal  `scripts/enso.ts` → `Bun.spawn(['pi', …])` → the first `pi` on `PATH`
  *
  * Those are different resolutions, and until #217 nothing related them: measured 2026-09-18, a
  * shim printing `0.85.0` earlier on `PATH` launched with the whole suite green, so the guard
  * could resolve a path differently from the tool it gates and compute a deny against the wrong
- * target. `zen.ts` now refuses a `pi` outside `SUPPORTED_PI_VERSIONS`; this file is the other
+ * target. `enso.ts` now refuses a `pi` outside `SUPPORTED_PI_VERSIONS`; this file is the other
  * half — that the range still covers the pi the corpus actually pinned.
  *
  * ⚠ A red line here means the two ends have drifted apart. If the WORKSPACE pi moved (a
  * devDependency bump), the corpus is now pinning a pi the launcher refuses: run the corpus
- * against it, then move `SUPPORTED_PI_VERSIONS` in `scripts/zen-launch.ts` — in that order,
+ * against it, then move `SUPPORTED_PI_VERSIONS` in `scripts/enso-launch.ts` — in that order,
  * because the range means "the corpus has been run against this".
  *
  * ⚠ WHAT THIS DOES NOT COVER, stated: the version of the pi BINARY, not the versions of the
@@ -59,7 +59,7 @@ test('⚠ the pi the guard corpus pins against is a pi the terminal launcher wil
 // The range is also a PUBLISHED contract: a consumer installing the harness reads
 // `peerDependencies`, not the launcher. `>=0.84.0` said the corpus covers versions it has never
 // been run against; the two must state the same bound, and `^0.84.4` is that bound for a 0.x
-// package — the boundary tests in `zen-launch.test.ts`, beside this file, pin the equivalence.
+// package — the boundary tests in `enso-launch.test.ts`, beside this file, pin the equivalence.
 test('the harness declares the peer range the launcher enforces', () => {
   const manifestPath = join(import.meta.dir, '..', '..', 'packages', 'harness', 'package.json')
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {

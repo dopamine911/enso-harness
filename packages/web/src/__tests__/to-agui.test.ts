@@ -1,13 +1,13 @@
 import { expect, test } from 'bun:test'
 import { EventType } from '@ag-ui/core'
+import { ENSO_TOOL_RESULT_KEY, type EnsoObservation, isEnsoToolResultDescriptor } from '@enso/core'
+import { observationKindsDeclaredByTheUnion } from '@enso/core/observation-kinds'
 import type { StreamChunk } from '@tanstack/ai'
-import { isZenToolResultDescriptor, ZEN_TOOL_RESULT_KEY, type ZenObservation } from '@zen/core'
-import { observationKindsDeclaredByTheUnion } from '@zen/core/observation-kinds'
 import { type AguiIdentifiers, observationToAguiEvents } from '../to-agui.ts'
 
 const ids: AguiIdentifiers = { messageId: 'm1', runId: 'r1', threadId: 't1' }
-const toAgui = (observation: ZenObservation): StreamChunk[] => observationToAguiEvents(observation, ids)
-const types = (observation: ZenObservation): StreamChunk['type'][] => toAgui(observation).map((event) => event.type)
+const toAgui = (observation: EnsoObservation): StreamChunk[] => observationToAguiEvents(observation, ids)
+const types = (observation: EnsoObservation): StreamChunk['type'][] => toAgui(observation).map((event) => event.type)
 
 test('a text delta becomes TEXT_MESSAGE_CONTENT carrying the message id', () => {
   const [event] = toAgui({ kind: 'text-delta', contentIndex: 0, delta: 'Hello ' })
@@ -72,7 +72,7 @@ test('a completed tool result becomes TOOL_CALL_RESULT with its text', () => {
 // ⚠ `isError` has no AG-UI field on a tool result and is the only signal a REFUSED or ABORTED
 // call has. The field that matters is the one TanStack's processor READS — `state:
 // "output-error"` (activities/chat/stream/processor.js, `handleToolCallResultEvent`). The
-// earlier `zenIsError` was read by nothing, and this test passed while a denial rendered as
+// earlier `ensoIsError` was read by nothing, and this test passed while a denial rendered as
 // success (#130). The mounted pane pins the observable half: the step row reads `error`.
 test('an errored result carries the state TanStack reads, so a denial cannot render as success', () => {
   const [errored] = toAgui({
@@ -129,13 +129,13 @@ test('an extension error becomes RUN_ERROR naming the extension and the hook', (
 })
 
 // ⚠ ONE VOCABULARY (#162 workstream 5). Whatever AG-UI has no word for rides CUSTOM named by
-// `ZenObservation.kind` and carrying the observation WHOLE — so #29's "the notify payload must
+// `EnsoObservation.kind` and carrying the observation WHOLE — so #29's "the notify payload must
 // survive the last hop" and #45's "role and usage intact" are the same fact: the value IS the
 // observation, and the router reads it by the kind the mapper gave it. The first hop
 // (runtime event → observation) is pinned in host/__tests__/map-events.test.ts; the two
-// meet on `ZenObservation`, which the mapper sweep validates.
+// meet on `EnsoObservation`, which the mapper sweep validates.
 test('every CUSTOM chunk is named by its kind and carries the observation whole — nothing re-shaped, nothing forged', () => {
-  const custom: ZenObservation[] = [
+  const custom: EnsoObservation[] = [
     {
       kind: 'extension-ui-request',
       id: 'n1',
@@ -175,7 +175,7 @@ test('every CUSTOM chunk is named by its kind and carries the observation whole 
 })
 
 test('nothing is silently dropped: every kind except an in-flight result and a bare message boundary yields an event', () => {
-  const observations: ZenObservation[] = [
+  const observations: EnsoObservation[] = [
     { kind: 'text-delta', contentIndex: 0, delta: 'a' },
     { kind: 'thinking-delta', contentIndex: 0, delta: 'b' },
     { kind: 'tool-call', toolCallId: 'c', toolName: 'bash', args: {} },
@@ -213,7 +213,7 @@ test('nothing is silently dropped: every kind except an in-flight result and a b
   }
   // The AG-UI view opens one message per run, so a per-message boundary has no event in
   // it (#112) — the follow carries boundaries; this view's loss is stated, not silent.
-  const bareBoundaries: ZenObservation[] = [
+  const bareBoundaries: EnsoObservation[] = [
     { kind: 'message-start', role: 'user', text: 'hi' },
     { kind: 'message-end', role: 'user' },
   ]
@@ -227,9 +227,9 @@ test('nothing is silently dropped: every kind except an in-flight result and a b
   expect(coveredKinds.sort()).toEqual(observationKindsDeclaredByTheUnion())
 })
 
-// ⚠⚠ #18's descriptor must survive the LAST hop: ZenObservation → AG-UI StreamChunk, and
+// ⚠⚠ #18's descriptor must survive the LAST hop: EnsoObservation → AG-UI StreamChunk, and
 // still be readable. The first hop (the runtime's `details` bag → descriptor) is the host's
-// and is pinned in host/__tests__/map-events.test.ts; `ZenToolResult.descriptor` is the type
+// and is pinned in host/__tests__/map-events.test.ts; `EnsoToolResult.descriptor` is the type
 // the two hops meet on.
 test('the tool-result descriptor survives observation → AG-UI intact', () => {
   const [event] = observationToAguiEvents(
@@ -244,8 +244,8 @@ test('the tool-result descriptor survives observation → AG-UI intact', () => {
     },
     ids,
   )
-  const carried = (event as Record<string, unknown>)[ZEN_TOOL_RESULT_KEY]
-  expect(isZenToolResultDescriptor(carried)).toBe(true)
+  const carried = (event as Record<string, unknown>)[ENSO_TOOL_RESULT_KEY]
+  expect(isEnsoToolResultDescriptor(carried)).toBe(true)
   expect(carried).toMatchObject({
     kind: 'pi.tool.bash',
     truncated: { shown: 500, total: 4000, unit: 'lines' },
@@ -256,7 +256,7 @@ test('the tool-result descriptor survives observation → AG-UI intact', () => {
 })
 
 test('a result with no descriptor carries no descriptor key at all', () => {
-  const observation: ZenObservation = {
+  const observation: EnsoObservation = {
     kind: 'tool-result',
     toolCallId: 'c1',
     toolName: 'bash',
@@ -264,7 +264,7 @@ test('a result with no descriptor carries no descriptor key at all', () => {
     complete: true,
     isError: false,
   }
-  expect(observationToAguiEvents(observation, ids)[0]).not.toHaveProperty(ZEN_TOOL_RESULT_KEY)
+  expect(observationToAguiEvents(observation, ids)[0]).not.toHaveProperty(ENSO_TOOL_RESULT_KEY)
 })
 
 // ⚠ The deliberate drop (#53 S3): terminal-addressed fire-and-forget requests produce NO

@@ -1,11 +1,11 @@
 import type {
-  ZenFollowFrame,
-  ZenFollowSnapshot,
-  ZenStoredThread,
-  ZenThreadEvents,
-  ZenThreadHistory,
-  ZenThreadInspection,
-} from '@zen/core'
+  EnsoFollowFrame,
+  EnsoFollowSnapshot,
+  EnsoStoredThread,
+  EnsoThreadEvents,
+  EnsoThreadHistory,
+  EnsoThreadInspection,
+} from '@enso/core'
 
 /**
  * A scripted server behind `fetch` (#112, #118): one follow body the test writes SSE frames
@@ -19,7 +19,7 @@ import type {
 export interface ScriptedFetch {
   readonly fetch: typeof fetch
   /** Write one frame onto the open follow. */
-  readonly frame: (frame: ZenFollowFrame) => void
+  readonly frame: (frame: EnsoFollowFrame) => void
   /** End the follow body — the server went away. */
   readonly closeFollow: () => void
   readonly prompts: Array<{ message: string; admission?: string; images?: unknown[] }>
@@ -56,16 +56,16 @@ export interface ScriptedFetchOptions {
   readonly queued?: string[]
   readonly mode?: { mode: string; available: string[] }
   /** What `GET /api/stored-threads` lists — the rail's Previous Threads (#95). */
-  readonly storedThreads?: ZenStoredThread[]
+  readonly storedThreads?: EnsoStoredThread[]
   /** What `GET /api/threads/:id/history` answers for a resume click; keyed by thread id. */
-  readonly histories?: Record<string, ZenThreadHistory>
+  readonly histories?: Record<string, EnsoThreadHistory>
   /**
    * What the debug pane's two reads answer — `GET /api/threads/:id` and `…/events` (#86). One
    * inspection for every thread id (the pane compares it with the page's belief, so a test
    * scripts the disagreement it wants); 404 when absent, the pane's "no live session yet".
    */
-  readonly inspection?: Omit<ZenThreadInspection, 'threadId' | 'sessionId'>
-  readonly events?: Omit<ZenThreadEvents, 'threadId'>
+  readonly inspection?: Omit<EnsoThreadInspection, 'threadId' | 'sessionId'>
+  readonly events?: Omit<EnsoThreadEvents, 'threadId'>
 }
 
 export function createScriptedFetch(options: ScriptedFetchOptions = {}): ScriptedFetch {
@@ -164,7 +164,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   }) as typeof fetch
   return {
     fetch: fetchImpl,
-    frame: (frame: ZenFollowFrame) => write(`data: ${JSON.stringify(frame)}\n\n`),
+    frame: (frame: EnsoFollowFrame) => write(`data: ${JSON.stringify(frame)}\n\n`),
     closeFollow: () => close(),
     prompts,
     dialogs,
@@ -178,7 +178,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   }
 }
 
-export const SNAPSHOT_IDLE: ZenFollowSnapshot = {
+export const SNAPSHOT_IDLE: EnsoFollowSnapshot = {
   type: 'snapshot',
   threadId: 't1',
   asOfSeq: 0,

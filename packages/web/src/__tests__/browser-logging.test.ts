@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
+import { EnsoBrowserLogBatch, ensoLogger } from '@enso/core'
 import { type LogRecord, reset } from '@logtape/logtape'
-import { ZenBrowserLogBatch, zenLogger } from '@zen/core'
 import { Check } from 'typebox/value'
 import {
   configureBrowserLogging,
@@ -51,12 +51,12 @@ function recordingFetch(answer: () => Promise<Response> = () => Promise.resolve(
 test("the ring keeps the last N as lines, newest last, at the page's level; the shipper takes info and up regardless", async () => {
   const { fetch, posts } = recordingFetch()
   const { ring } = await configureBrowserLogging({ fetch, level: 'debug', page: 'p1' })
-  const log = zenLogger('browser', 'probe')
+  const log = ensoLogger('browser', 'probe')
   log.debug('only the ring hears this', { threadId: 't1' })
   log.warn('both hear this: {what}', { threadId: 't1', what: 'a problem' })
   expect(ring.get().map((line) => [line.level, line.message, line.logger])).toEqual([
-    ['DEBUG', 'only the ring hears this', 'zen.browser.probe'],
-    ['WARN', 'both hear this: {what}', 'zen.browser.probe'],
+    ['DEBUG', 'only the ring hears this', 'enso.browser.probe'],
+    ['WARN', 'both hear this: {what}', 'enso.browser.probe'],
   ])
   // A per-page count on every record, for order and for the drawer's key.
   expect(ring.get().map((line) => line.properties?.pageSequence)).toEqual([1, 2])
@@ -64,12 +64,12 @@ test("the ring keeps the last N as lines, newest last, at the page's level; the 
   expect(posts).toHaveLength(0)
 })
 
-test('⚠ the shipper batches by count or by time, ships only info and up, sends a valid ZenBrowserLogBatch, and never logs a failure', async () => {
+test('⚠ the shipper batches by count or by time, ships only info and up, sends a valid EnsoBrowserLogBatch, and never logs a failure', async () => {
   const { fetch, posts, nextPost } = recordingFetch(() => Promise.reject(new Error('server down')))
   const shipper = createLogShipper({ fetch, page: 'p2', flushMs: 1 })
   const at = Date.now()
   const record = (level: 'debug' | 'info' | 'warning', message: string): LogRecord => ({
-    category: ['zen', 'browser', 'follow'],
+    category: ['enso', 'browser', 'follow'],
     level,
     timestamp: at,
     message: [message],
@@ -82,15 +82,15 @@ test('⚠ the shipper batches by count or by time, ships only info and up, sends
   // The timer's flush: awaited as the POST it produces, not as a duration.
   await nextPost()
   expect(posts).toHaveLength(1)
-  expect(Check(ZenBrowserLogBatch, posts[0]?.body)).toBe(true)
+  expect(Check(EnsoBrowserLogBatch, posts[0]?.body)).toBe(true)
   expect(posts[0]?.body).toMatchObject({
     page: 'p2',
-    records: [{ level: 'info', logger: 'zen.browser.follow', message: 'shipped', properties: { threadId: 't1' } }],
+    records: [{ level: 'info', logger: 'enso.browser.follow', message: 'shipped', properties: { threadId: 't1' } }],
   })
   // By count: a full batch goes at once, without the timer.
   for (let index = 0; index < SHIP_BATCH_SIZE; index += 1) shipper.sink(record('warning', `w${index}`))
   expect(posts).toHaveLength(2)
-  const second = posts[1]?.body as ZenBrowserLogBatch | undefined
+  const second = posts[1]?.body as EnsoBrowserLogBatch | undefined
   expect(second?.records).toHaveLength(SHIP_BATCH_SIZE)
   // The rejected POSTs above were swallowed — the test is still running, nothing threw.
   // A hide-time flush is `keepalive`, so the browser lets it finish after the page goes.
@@ -103,7 +103,7 @@ test('the ring is bounded', () => {
   const ring = createLogRing(3)
   for (let index = 0; index < 5; index += 1) {
     ring.sink({
-      category: ['zen'],
+      category: ['enso'],
       level: 'info',
       timestamp: 0,
       message: [`m${index}`],

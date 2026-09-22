@@ -4,11 +4,11 @@
  * Before this module, seven call sites each computed the repo root by counting `..`
  * segments off their own `import.meta.url` — a shape that breaks silently when a file
  * moves (dev.ts carried `4×".."`). An anchor test (`no-duplicate-paths.test.ts`) now
- * refuses an eighth copy: `fileURLToPath` and inline `.zen` path assembly outside this
+ * refuses an eighth copy: `fileURLToPath` and inline `.enso` path assembly outside this
  * module fail the suite by name.
  *
  * ⚠ REALPATH FIRST, then walk — load-bearing, observed live (PR #58 receipts): bun does
- * NOT realpath `import.meta.url` through the `.zen/print-harness/` symlink mirror, so a
+ * NOT realpath `import.meta.url` through the `.enso/print-harness/` symlink mirror, so a
  * walk from the un-resolved module path starts inside the mirror. The mirror's entries
  * are symlinks back into the real tree, so resolving first lands the walk in the real
  * checkout; walking first would search the wrong ancestry.
@@ -23,7 +23,7 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ZEN_CONFIG_FILENAME } from './config.ts'
+import { ENSO_CONFIG_FILENAME } from './config.ts'
 
 /**
  * Thrown when no ancestor of the start path is a workspace root.
@@ -34,7 +34,7 @@ export class RepoRootNotFoundError extends Error {
   constructor(startPath: string) {
     super(
       `no ancestor of "${startPath}" is a workspace root (a directory whose package.json ` +
-        `carries a "workspaces" field) — is this file inside the zen-harness checkout?`,
+        `carries a "workspaces" field) — is this file inside the Enso checkout?`,
     )
     this.name = 'RepoRootNotFoundError'
   }
@@ -106,7 +106,7 @@ export function fileUrlToPath(fileUrl: string): string {
  * The start path is realpath-resolved BEFORE walking — see the module header for why.
  *
  * ⚠ This finds the root of the checkout the given FILE lives in — for a module inside
- * this repo that is always the zen-harness checkout, never the session cwd. That
+ * this repo that is always the Enso checkout, never the session cwd. That
  * distinction is what `config.ts` relies on; do not "fix" this to consult `process.cwd()`.
  *
  * @group Workspace paths
@@ -122,27 +122,27 @@ export function findRepoRoot(startPathOrFileUrl: string): string {
   }
 }
 
-/** The `.zen` runtime dir names, assembled here and nowhere else (the anchor enforces it). */
-const ZEN_RUNTIME_DIRECTORY = '.zen'
+/** The `.enso` runtime dir names, assembled here and nowhere else (the anchor enforces it). */
+const ENSO_RUNTIME_DIRECTORY = '.enso'
 
 /**
  * pi's scratch agent dir — settings, extensions, auth. Shared by the TUI launcher and the web server.
  *
  * @group Workspace paths
  */
-export function zenAgentDir(repoRoot: string): string {
-  return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'pi-agent')
+export function ensoAgentDir(repoRoot: string): string {
+  return join(repoRoot, ENSO_RUNTIME_DIRECTORY, 'pi-agent')
 }
 
 /**
- * The harness's secrets file (#89): `.zen/secrets.env`, NOT `.env` at the root.
+ * The harness's secrets file (#89): `.enso/secrets.env`, NOT `.env` at the root.
  *
  * bun auto-loads `.env*` from the cwd into EVERY bun process — including a `bun -e` the model
  * runs from the repo root — so a root `.env` reaches a tool child no matter what the parent
  * scrubbed (verified with `env -i`).
  *
- * `.zen/` is git-ignored, write-protected (`ZEN_PERSISTENCE_WRITE_DIRECTORIES`) and read-denied
- * on BOTH tool routes by the `/.zen/` fragment in
+ * `.enso/` is git-ignored, write-protected (`ENSO_PERSISTENCE_WRITE_DIRECTORIES`) and read-denied
+ * on BOTH tool routes by the `/.enso/` fragment in
  * {@link core/src!DEFAULT_GUARD_POLICY | DEFAULT_GUARD_POLICY}: the reader gate for every tool
  * carrying a path, and the shell deny (#204) for a literal path word in `bash`/`powershell`.
  * ⚠ The shell leg is a bar, not a boundary — `shell-secret-paths.ts` states what a
@@ -160,8 +160,8 @@ export function zenAgentDir(repoRoot: string): string {
  *
  * @group Workspace paths
  */
-export function zenSecretsPath(repoRoot: string): string {
-  return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'secrets.env')
+export function ensoSecretsPath(repoRoot: string): string {
+  return join(repoRoot, ENSO_RUNTIME_DIRECTORY, 'secrets.env')
 }
 
 /**
@@ -179,24 +179,24 @@ export function rootDotenvPath(repoRoot: string): string {
  * @group Workspace paths
  */
 export function printHarnessDir(repoRoot: string): string {
-  return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'print-harness')
+  return join(repoRoot, ENSO_RUNTIME_DIRECTORY, 'print-harness')
 }
 
 /**
- * Where the harness's log lives (#132): `.zen/logs/zen-YYYY-MM-DD.jsonl`, ONE file per day
+ * Where the harness's log lives (#132): `.enso/logs/enso-YYYY-MM-DD.jsonl`, ONE file per day
  * that every process appends to (dated, never renamed, so a second writer is safe — see
  * `web/server/logging.ts`).
  *
- * Under `.zen/` so bun never autoloads from it and the write gate already knows it (guard.ts).
+ * Under `.enso/` so bun never autoloads from it and the write gate already knows it (guard.ts).
  *
  * @group Workspace paths
  */
-export function zenLogsDir(repoRoot: string): string {
-  return join(repoRoot, ZEN_RUNTIME_DIRECTORY, 'logs')
+export function ensoLogsDir(repoRoot: string): string {
+  return join(repoRoot, ENSO_RUNTIME_DIRECTORY, 'logs')
 }
 
 /**
- * The harness package — the directory `zen.ts` hands to pi's `-e`.
+ * The harness package — the directory `enso.ts` hands to pi's `-e`.
  *
  * @group Workspace paths
  */
@@ -214,10 +214,10 @@ export function webPackageDir(repoRoot: string): string {
 }
 
 /**
- * The committed config file's path under a repository root (#59): `zen.config.json`, beside `package.json`.
+ * The committed config file's path under a repository root (#59): `enso.config.json`, beside `package.json`.
  *
  * @group Workspace paths
  */
-export function zenConfigPath(repoRoot: string): string {
-  return join(repoRoot, ZEN_CONFIG_FILENAME)
+export function ensoConfigPath(repoRoot: string): string {
+  return join(repoRoot, ENSO_CONFIG_FILENAME)
 }

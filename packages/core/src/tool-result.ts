@@ -41,7 +41,7 @@ import { Compile } from 'typebox/compile'
 /**
  * The metadata key our descriptor occupies. Namespaced, because `metadata` is a shared bag.
  *
- * ⚠ NO DOT, DELIBERATELY. The first version was `"zen.toolResult"`, and a dot inside a key
+ * ⚠ NO DOT, DELIBERATELY. The first version was `"enso.toolResult"`, and a dot inside a key
  * is legal JSON but collides with every path-based accessor — `expect(...).toHaveProperty()`,
  * lodash `get`, JSONPath — all of which read `a.b` as "property b of property a". That cost
  * a failing test within minutes of the key being used, and it would have cost a consumer
@@ -51,16 +51,16 @@ import { Compile } from 'typebox/compile'
  *
  * @group Tool results
  */
-export const ZEN_TOOL_RESULT_KEY = 'zen:toolResult' as const
+export const ENSO_TOOL_RESULT_KEY = 'enso:toolResult' as const
 
 /**
  * Units a truncation can be counted in. Closed, because a surface must render each one.
  *
  * @group Tool results
  */
-export const ZenTruncationUnit = Type.Union([Type.Literal('lines'), Type.Literal('bytes'), Type.Literal('items')])
+export const EnsoTruncationUnit = Type.Union([Type.Literal('lines'), Type.Literal('bytes'), Type.Literal('items')])
 /** @group Tool results */
-export type ZenTruncationUnit = Static<typeof ZenTruncationUnit>
+export type EnsoTruncationUnit = Static<typeof EnsoTruncationUnit>
 
 /**
  * Truncation carried as data, never pre-rendered (#18).
@@ -70,13 +70,13 @@ export type ZenTruncationUnit = Static<typeof ZenTruncationUnit>
  *
  * @group Tool results
  */
-export const ZenTruncation = Type.Object({
+export const EnsoTruncation = Type.Object({
   shown: Type.Integer({ minimum: 0 }),
   total: Type.Integer({ minimum: 0 }),
-  unit: ZenTruncationUnit,
+  unit: EnsoTruncationUnit,
 })
 /** @group Tool results */
-export type ZenTruncation = Static<typeof ZenTruncation>
+export type EnsoTruncation = Static<typeof EnsoTruncation>
 
 /**
  * A tool result, described rather than rendered.
@@ -88,15 +88,15 @@ export type ZenTruncation = Static<typeof ZenTruncation>
  *
  * @group Tool results
  */
-export const ZenToolResultDescriptor = Type.Object({
+export const EnsoToolResultDescriptor = Type.Object({
   /** Renderer selector. Unknown values MUST fall back to the envelope's `content`. */
   kind: Type.String({ minLength: 1 }),
   /** Serializable props for the selected renderer. Never a rendered element. */
   props: Type.Record(Type.String(), Type.Unknown()),
-  truncated: Type.Optional(ZenTruncation),
+  truncated: Type.Optional(EnsoTruncation),
 })
 /** @group Tool results */
-export type ZenToolResultDescriptor = Static<typeof ZenToolResultDescriptor>
+export type EnsoToolResultDescriptor = Static<typeof EnsoToolResultDescriptor>
 
 /**
  * JIT validator, compiled once at module load.
@@ -104,14 +104,14 @@ export type ZenToolResultDescriptor = Static<typeof ZenToolResultDescriptor>
  * `Compile` rather than `Check` because this runs on every tool result that crosses the
  * wire; `Check` re-walks the schema per call.
  */
-const descriptorValidator = Compile(ZenToolResultDescriptor)
+const descriptorValidator = Compile(EnsoToolResultDescriptor)
 
 /**
  * Runtime shape check, from the schema rather than beside it.
  *
  * @group Tool results
  */
-export function isZenToolResultDescriptor(value: unknown): value is ZenToolResultDescriptor {
+export function isEnsoToolResultDescriptor(value: unknown): value is EnsoToolResultDescriptor {
   return descriptorValidator.Check(value)
 }
 
@@ -123,10 +123,10 @@ export function isZenToolResultDescriptor(value: unknown): value is ZenToolResul
  *
  * @group Tool results
  */
-export function readZenToolResultDescriptor(
+export function readEnsoToolResultDescriptor(
   metadata: Record<string, unknown> | undefined,
-): ZenToolResultDescriptor | undefined {
+): EnsoToolResultDescriptor | undefined {
   if (metadata === undefined) return undefined
-  const candidate = metadata[ZEN_TOOL_RESULT_KEY]
-  return isZenToolResultDescriptor(candidate) ? candidate : undefined
+  const candidate = metadata[ENSO_TOOL_RESULT_KEY]
+  return isEnsoToolResultDescriptor(candidate) ? candidate : undefined
 }

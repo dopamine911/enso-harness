@@ -1,6 +1,6 @@
 # Harness design principles — what Claude Code gets structurally right
 
-**Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the zen-harness project.
+**Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the Enso project.
 
 Companion to [`agent-boundaries.md`](./archive/agent-boundaries.md) (safety and permissions) and
 [`agent-tooling.md`](./agent-tooling.md) (tools from the consumer side). This one is about

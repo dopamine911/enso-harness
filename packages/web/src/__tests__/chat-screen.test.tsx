@@ -1,15 +1,15 @@
 import { afterEach, expect, test } from 'bun:test'
+import type { EnsoDialogSpec } from '@enso/core'
 import type { ChatUISelectedPart } from '@tanstack/ai-client/ui'
-import type { ZenDialogSpec } from '@zen/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
   DialogAnswerControls,
   describeAttachmentError,
+  EnsoDialogCard,
   type KeyedPart,
   keyedParts,
   settleDialog,
   ThreadPane,
-  ZenDialogCard,
 } from '../chat-screen.tsx'
 import type { DialogAnswerOutcome, FollowConnection } from '../follow-connection.ts'
 import { createStore } from '../store.ts'
@@ -26,7 +26,7 @@ import { selectIn } from './static-markup.ts'
 
 afterEach(() => clearThreadsForTest())
 
-const SELECT_DIALOG: ZenDialogSpec = {
+const SELECT_DIALOG: EnsoDialogSpec = {
   method: 'select',
   title: 'Select permission mode',
   options: ['Default', 'Plan'],
@@ -36,7 +36,7 @@ function neverCalled(): void {
   // Static markup runs no handlers; the callbacks exist only to satisfy the props.
 }
 
-const answerControls = (dialog: ZenDialogSpec): string =>
+const answerControls = (dialog: EnsoDialogSpec): string =>
   renderToStaticMarkup(<DialogAnswerControls dialog={dialog} answer={neverCalled} disabled={false} />)
 
 // --- one render per dialog method
@@ -89,7 +89,7 @@ test('editor renders a multi-line field prefilled with the draft', () => {
 // --- the card, and the slot that shows the thread's open question
 test('the dialog card renders pi-is-asking with the title, the controls and a cancel', () => {
   const rendered = renderToStaticMarkup(
-    <ZenDialogCard dialogId="d1" dialog={SELECT_DIALOG} answer={neverCalled} cancel={neverCalled} disabled={false} />,
+    <EnsoDialogCard dialogId="d1" dialog={SELECT_DIALOG} answer={neverCalled} cancel={neverCalled} disabled={false} />,
   )
   expect(rendered).toContain('pi is asking')
   expect(rendered).toContain('Select permission mode')
@@ -105,7 +105,7 @@ test('the dialog card renders pi-is-asking with the title, the controls and a ca
 // arrived — nothing changed on the server.
 test('⚠ settleDialog clears the question when it is spent and keeps it when the answer was refused or never arrived', async () => {
   const settle = async (outcome: DialogAnswerOutcome): Promise<boolean> => {
-    const dialog = createStore<{ id: string; dialog: ZenDialogSpec } | undefined>({ id: 'd1', dialog: SELECT_DIALOG })
+    const dialog = createStore<{ id: string; dialog: EnsoDialogSpec } | undefined>({ id: 'd1', dialog: SELECT_DIALOG })
     const connection = { answerDialog: () => Promise.resolve(outcome) } as unknown as FollowConnection
     await settleDialog({ connection, dialog }, { id: 'd1', value: 'Default' })
     return dialog.get() !== undefined

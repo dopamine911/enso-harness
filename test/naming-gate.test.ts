@@ -58,7 +58,7 @@ interface NamingDiagnostic {
  * the formatter) that may legitimately land on the same lines.
  */
 function namingGateDiagnostics(source: string): NamingDiagnostic[] {
-  const directory = mkdtempSync(join(tmpdir(), 'zen-naming-gate-'))
+  const directory = mkdtempSync(join(tmpdir(), 'enso-naming-gate-'))
   try {
     const fixture = join(directory, 'fixture.ts')
     writeFileSync(fixture, source)

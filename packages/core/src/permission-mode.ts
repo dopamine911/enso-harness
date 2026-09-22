@@ -20,12 +20,12 @@ import { type Static, Type } from 'typebox'
  *
  * @group Permission mode
  */
-export const ZenPermissionModeState = Type.Object({
+export const EnsoPermissionModeState = Type.Object({
   mode: Type.String({ minLength: 1 }),
   available: Type.Array(Type.String({ minLength: 1 })),
 })
 /** @group Permission mode */
-export type ZenPermissionModeState = Static<typeof ZenPermissionModeState>
+export type EnsoPermissionModeState = Static<typeof EnsoPermissionModeState>
 
 /**
  * The body of `POST /api/threads/:threadId/mode` (L3 step C): the mode to switch to.
@@ -36,8 +36,8 @@ export type ZenPermissionModeState = Static<typeof ZenPermissionModeState>
  *
  * @group Permission mode
  */
-export const ZenPermissionModeChange = Type.Object({
+export const EnsoPermissionModeChange = Type.Object({
   mode: Type.String({ minLength: 1 }),
 })
 /** @group Permission mode */
-export type ZenPermissionModeChange = Static<typeof ZenPermissionModeChange>
+export type EnsoPermissionModeChange = Static<typeof EnsoPermissionModeChange>

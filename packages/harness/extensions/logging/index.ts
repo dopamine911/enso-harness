@@ -1,8 +1,8 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
-import { zenLogger } from '@zen/core'
-import { configureProcessLogging, isLoggingConfigured, logsDirFrom, parseZenLogLevels } from '@zen/core/log-process'
-import { findRepoRoot } from '@zen/core/paths'
-import { knownSecretValuesTracking } from '@zen/core/secrets'
+import { ensoLogger } from '@enso/core'
+import { configureProcessLogging, isLoggingConfigured, logsDirFrom, parseEnsoLogLevels } from '@enso/core/log-process'
+import { findRepoRoot } from '@enso/core/paths'
+import { knownSecretValuesTracking } from '@enso/core/secrets'
 
 /**
  * The extension process's logging (#132), and the one record only an extension can write:
@@ -12,7 +12,7 @@ import { knownSecretValuesTracking } from '@zen/core/secrets'
  *   - in-process (the web host): the server's launcher configured logging before pi
  *     existed, and `isLoggingConfigured()` says so — this configures nothing, and the
  *     extensions' records land in the server's file through the server's configure;
- *   - as a child (`zen.ts` → pi): nothing has configured, so this configures — the same
+ *   - as a child (`enso.ts` → pi): nothing has configured, so this configures — the same
  *     day's file as everyone else, `process: "pi"`, NO console sink (stderr is the TUI's).
  *
  * ⚠ Never configure when something already has: LogTape's `configure` throws on a second
@@ -20,8 +20,8 @@ import { knownSecretValuesTracking } from '@zen/core/secrets'
  * and a `reset: true` here would silently replace the server's sinks with ours. The
  * `after_provider_response` handler registers either way: it is not about configuration.
  *
- * The knobs are the same: `ZEN_LOG_LEVEL` for the file's tier, per-category overrides in
- * it; `ZEN_LOG_CONSOLE` is ignored here on purpose.
+ * The knobs are the same: `ENSO_LOG_LEVEL` for the file's tier, per-category overrides in
+ * it; `ENSO_LOG_CONSOLE` is ignored here on purpose.
  *
  * WHY FIRST IN THE MANIFEST (`packages/harness/package.json` → `pi.extensions`): the sink is
  * configured here, at load, awaited. Today no extension writes a record before
@@ -40,13 +40,13 @@ export function createLoggingExtension(
     const disposeLogging = await configureProcessLogging({
       logsDir: logsDirFrom(environment, repoRoot),
       process: 'pi',
-      levels: parseZenLogLevels(environment, { console: undefined }),
+      levels: parseEnsoLogLevels(environment, { console: undefined }),
       // The value pass (#139): pi as a child writes tool output and model text, which is
       // exactly where a known secret is quoted rather than named — and asked per record, so
       // a key rotated mid-session is redacted from the next record on (#207).
       secretValues: knownSecretValuesTracking(repoRoot, environment),
     })
-    zenLogger('extension', 'logging').debug('configured by the extension: pi is a child process')
+    ensoLogger('extension', 'logging').debug('configured by the extension: pi is a child process')
     pi.on('session_shutdown', async (): Promise<void> => {
       await disposeLogging()
     })
@@ -74,7 +74,7 @@ const RECORDED_RESPONSE_HEADERS = [
  * case-insensitively anyway, since that is a provider's choice to change.
  */
 function recordProviderResponses(pi: ExtensionAPI): void {
-  const log = zenLogger('extension', 'provider')
+  const log = ensoLogger('extension', 'provider')
   pi.on('after_provider_response', (event): void => {
     const headers = new Map(
       Object.entries(event.headers).map(([headerName, headerValue]) => [headerName.toLowerCase(), headerValue]),

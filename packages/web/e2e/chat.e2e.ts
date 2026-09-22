@@ -6,7 +6,7 @@
  *     completes without a model turn, so it exercises composer → server → pi → dialog park
  *     (#27) → answer → quick-close end to end for free.
  *   - `@model`: one real model turn. Costs tokens and needs a working provider identity
- *     (`.zen/pi-agent`); excluded unless you pass `--grep @model` (see README.md).
+ *     (`.enso/pi-agent`); excluded unless you pass `--grep @model` (see README.md).
  *
  * Screenshots are the deliverable — they go to OUTPUT_DIRECTORY/screenshots under fixed
  * names (README.md). Assertions are deliberately few: this is a smoke with receipts, not a
@@ -39,7 +39,7 @@ const STOP_BUTTON_NAME = 'stop the run'
  * is persisted with `pi.appendEntry("modes", …)` into the RUN'S OWN pi session file
  * (`destination: "session"`), never into `settings.json`. Every web run is a fresh session,
  * so answering "Accept edits" here cannot flip the TUI's mode. It does leave one session
- * JSONL per run under `.zen/pi-agent/sessions/`, like any other run.
+ * JSONL per run under `.enso/pi-agent/sessions/`, like any other run.
  */
 const MODE_COMMAND = '/mode'
 const MODE_OPTION_LABEL = /accept edits/i
@@ -108,7 +108,7 @@ test.describe('chat surface', () => {
     await captureScreenshot(page, '03-mode-answered')
   })
 
-  test('paste an image: thumbnail, send enabled, the bytes on the wire as ZenPromptImage (model-free)', async ({
+  test('paste an image: thumbnail, send enabled, the bytes on the wire as EnsoPromptImage (model-free)', async ({
     page,
   }) => {
     // The prompt route is answered here, not by pi: this pins the browser's half of #68 — paste

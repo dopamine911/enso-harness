@@ -19,15 +19,15 @@ const CORE_SOURCE = join(ROOT, 'packages/core/src')
 const BARREL = join(CORE_SOURCE, 'index.ts')
 /**
  * The node-only subpaths (#211): declared in package.json `exports`, never on the barrel, so
- * the browser graph cannot reach `node:*` through `@zen/core`. Each is read like the barrel is.
+ * the browser graph cannot reach `node:*` through `@enso/core`. Each is read like the barrel is.
  */
 const SUBPATH_MODULES: readonly { readonly file: string; readonly entrypoint: SubpathEntrypoint }[] = [
-  { file: 'log-process.ts', entrypoint: '@zen/core/log-process' },
-  { file: 'paths.ts', entrypoint: '@zen/core/paths' },
-  { file: 'pi-manifest.ts', entrypoint: '@zen/core/pi-manifest' },
-  { file: 'secrets.ts', entrypoint: '@zen/core/secrets' },
+  { file: 'log-process.ts', entrypoint: '@enso/core/log-process' },
+  { file: 'paths.ts', entrypoint: '@enso/core/paths' },
+  { file: 'pi-manifest.ts', entrypoint: '@enso/core/pi-manifest' },
+  { file: 'secrets.ts', entrypoint: '@enso/core/secrets' },
 ]
-type SubpathEntrypoint = '@zen/core/log-process' | '@zen/core/paths' | '@zen/core/pi-manifest' | '@zen/core/secrets'
+type SubpathEntrypoint = '@enso/core/log-process' | '@enso/core/paths' | '@enso/core/pi-manifest' | '@enso/core/secrets'
 
 type Classification = 'wire' | 'host contract' | 'config/policy' | 'node-only utility'
 type Region = 'web/host' | 'web/server' | 'web/browser' | 'harness' | 'scripts'
@@ -83,7 +83,7 @@ interface PublicExport {
   readonly symbol: string
   readonly kind: Kind
   readonly module: string
-  readonly entrypoint: '@zen/core' | SubpathEntrypoint
+  readonly entrypoint: '@enso/core' | SubpathEntrypoint
   readonly declarationLine: number
   readonly classification: Classification
   readonly domain: string
@@ -141,7 +141,7 @@ function barrelExports(source: string): PublicExport[] {
     const body = block[1] ?? ''
     const module = block[2] ?? ''
     for (const specifier of namedSpecifiers(body)) {
-      exports.push(checkedExport(specifier.symbol, specifier.kind, module, '@zen/core'))
+      exports.push(checkedExport(specifier.symbol, specifier.kind, module, '@enso/core'))
     }
   }
   return exports
@@ -206,12 +206,12 @@ function regionOf(path: string): Region | undefined {
 }
 
 function importedEntrypoint(importer: string, specifier: string): PublicExport['entrypoint'] | undefined {
-  if (specifier === '@zen/core') return '@zen/core'
+  if (specifier === '@enso/core') return '@enso/core'
   const bySpecifier = SUBPATH_MODULES.find((subpath) => subpath.entrypoint === specifier)
   if (bySpecifier !== undefined) return bySpecifier.entrypoint
   if (!specifier.startsWith('.')) return undefined
   const target = resolve(dirname(importer), specifier)
-  if (target === BARREL) return '@zen/core'
+  if (target === BARREL) return '@enso/core'
   const byFile = SUBPATH_MODULES.find((subpath) => join(CORE_SOURCE, subpath.file) === target)
   return byFile?.entrypoint
 }
@@ -273,8 +273,8 @@ process.stdout.write(
     'Generated from the named re-export blocks in `packages/core/src/index.ts`, the top-level exports',
     'of `packages/core/src/log-process.ts`, and static named imports in production source. Counts are',
     'importing files, not reference occurrences; tests are excluded. `web/browser` is web source outside',
-    '`host/` and `server/`. The generator recognizes `@zen/core`,',
-    '`@zen/core/log-process`, and relative imports resolving to those entrypoints.',
+    '`host/` and `server/`. The generator recognizes `@enso/core`,',
+    '`@enso/core/log-process`, and relative imports resolving to those entrypoints.',
     '',
     'Parser limits: named static imports and named re-export blocks only. Default/star exports, dynamic',
     'imports, `require`, namespace imports, and string references do not count. Classification and',

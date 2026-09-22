@@ -1,9 +1,9 @@
 import { type Static, Type } from 'typebox'
-import { ZenOpenDialog } from './dialog.ts'
-import { ZenObservation } from './observation.ts'
-import { ZenPermissionModeState } from './permission-mode.ts'
-import { ZenInterruptedTail } from './thread-inspection.ts'
-import { ZenPromptAdmission } from './thread-runtime.ts'
+import { EnsoOpenDialog } from './dialog.ts'
+import { EnsoObservation } from './observation.ts'
+import { EnsoPermissionModeState } from './permission-mode.ts'
+import { EnsoInterruptedTail } from './thread-inspection.ts'
+import { EnsoPromptAdmission } from './thread-runtime.ts'
 
 /**
  * The server↔browser wire (#112): a thread's feed, as the follow route serves it.
@@ -14,13 +14,13 @@ import { ZenPromptAdmission } from './thread-runtime.ts'
  * a new snapshot; there is no cursor to resume from, because the snapshot IS the resync
  * (deepseek-harness: one complete snapshot per generation, then only deltas).
  *
- * The payload is `ZenObservation` — the same layer the event tails and the debug pane
+ * The payload is `EnsoObservation` — the same layer the event tails and the debug pane
  * reason in. AG-UI is not on this wire; a browser adapter derives it if a renderer wants it
  * (`docs/architecture.md`, decided constraints).
  *
  * @group Follow wire
  */
-export const ZenFollowSnapshot = Type.Object(
+export const EnsoFollowSnapshot = Type.Object(
   {
     type: Type.Literal('snapshot'),
     threadId: Type.String(),
@@ -29,34 +29,34 @@ export const ZenFollowSnapshot = Type.Object(
     /** A pi session exists for the thread on this server. False: served cold from the file, or empty. */
     live: Type.Boolean(),
     busy: Type.Boolean(),
-    /** See `ZenThreadSummary.generation`. */
+    /** See `EnsoThreadSummary.generation`. */
     generation: Type.Integer({ minimum: 0 }),
-    permissionMode: ZenPermissionModeState,
-    /** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not zen's. */
+    permissionMode: EnsoPermissionModeState,
+    /** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not enso's. */
     messages: Type.Array(Type.Unknown()),
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */
-    openDialogs: Type.Array(ZenOpenDialog),
-    interrupted: Type.Optional(ZenInterruptedTail),
+    openDialogs: Type.Array(EnsoOpenDialog),
+    interrupted: Type.Optional(EnsoInterruptedTail),
   },
   { additionalProperties: false },
 )
 /** @group Follow wire */
-export type ZenFollowSnapshot = Static<typeof ZenFollowSnapshot>
+export type EnsoFollowSnapshot = Static<typeof EnsoFollowSnapshot>
 
 /** @group Follow wire */
-export const ZenFollowObservation = Type.Object(
+export const EnsoFollowObservation = Type.Object(
   {
     type: Type.Literal('observation'),
     seq: Type.Integer({ minimum: 1 }),
-    observation: ZenObservation,
+    observation: EnsoObservation,
   },
   { additionalProperties: false },
 )
 /** @group Follow wire */
-export type ZenFollowObservation = Static<typeof ZenFollowObservation>
+export type EnsoFollowObservation = Static<typeof EnsoFollowObservation>
 
 /** @group Follow wire */
-export const ZenFollowStatus = Type.Object(
+export const EnsoFollowStatus = Type.Object(
   {
     type: Type.Literal('status'),
     live: Type.Boolean(),
@@ -66,12 +66,12 @@ export const ZenFollowStatus = Type.Object(
   { additionalProperties: false },
 )
 /** @group Follow wire */
-export type ZenFollowStatus = Static<typeof ZenFollowStatus>
+export type EnsoFollowStatus = Static<typeof EnsoFollowStatus>
 
 /** @group Follow wire */
-export const ZenFollowFrame = Type.Union([ZenFollowSnapshot, ZenFollowObservation, ZenFollowStatus])
+export const EnsoFollowFrame = Type.Union([EnsoFollowSnapshot, EnsoFollowObservation, EnsoFollowStatus])
 /** @group Follow wire */
-export type ZenFollowFrame = Static<typeof ZenFollowFrame>
+export type EnsoFollowFrame = Static<typeof EnsoFollowFrame>
 
 /**
  * The image types the Anthropic wire accepts (#68).
@@ -81,40 +81,42 @@ export type ZenFollowFrame = Static<typeof ZenFollowFrame>
  *
  * @group Follow wire
  */
-export const ZenImageMimeType = Type.Union([
+export const EnsoImageMimeType = Type.Union([
   Type.Literal('image/png'),
   Type.Literal('image/jpeg'),
   Type.Literal('image/gif'),
   Type.Literal('image/webp'),
 ])
 /** @group Follow wire */
-export type ZenImageMimeType = Static<typeof ZenImageMimeType>
+export type EnsoImageMimeType = Static<typeof EnsoImageMimeType>
 /**
  * The same set as a list — the form's `accept`, the notice's wording. ⚠ Derived from the schema, not written twice.
  *
  * @group Follow wire
  */
-export const ZEN_IMAGE_MIME_TYPES: readonly ZenImageMimeType[] = ZenImageMimeType.anyOf.map((literal) => literal.const)
+export const ENSO_IMAGE_MIME_TYPES: readonly EnsoImageMimeType[] = EnsoImageMimeType.anyOf.map(
+  (literal) => literal.const,
+)
 /**
  * Narrows a mime string the browser reported (`File.type`, a `data:` URL's head) to the kinds the wire takes — no cast.
  *
  * @group Follow wire
  */
-export function isZenImageMimeType(value: string): value is ZenImageMimeType {
-  return (ZEN_IMAGE_MIME_TYPES as readonly string[]).includes(value)
+export function isEnsoImageMimeType(value: string): value is EnsoImageMimeType {
+  return (ENSO_IMAGE_MIME_TYPES as readonly string[]).includes(value)
 }
 /**
  * Anthropic's per-image cap, decoded bytes. Checked on the decoded size, not the base64 length.
  *
  * @group Follow wire
  */
-export const ZEN_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+export const ENSO_IMAGE_MAX_BYTES = 5 * 1024 * 1024
 /**
  * Images on one prompt. Claude.ai's own composer stops at 20; a pasted batch rarely nears this.
  *
  * @group Follow wire
  */
-export const ZEN_PROMPT_MAX_IMAGES = 20
+export const ENSO_PROMPT_MAX_IMAGES = 20
 /**
  * The most a prompt body may be on the wire: every image at its cap in base64 (4/3 of the
  * bytes, rounded up to a 4-byte group), plus room for the text.
@@ -123,8 +125,8 @@ export const ZEN_PROMPT_MAX_IMAGES = 20
  *
  * @group Follow wire
  */
-export const ZEN_PROMPT_BODY_MAX_BYTES: number =
-  ZEN_PROMPT_MAX_IMAGES * Math.ceil(ZEN_IMAGE_MAX_BYTES / 3) * 4 + 1024 * 1024
+export const ENSO_PROMPT_BODY_MAX_BYTES: number =
+  ENSO_PROMPT_MAX_IMAGES * Math.ceil(ENSO_IMAGE_MAX_BYTES / 3) * 4 + 1024 * 1024
 
 /**
  * The base64 alphabet with trailing `=` padding — what `btoa` and `FileReader.readAsDataURL`
@@ -157,33 +159,33 @@ export function isWholeBase64(data: string): boolean {
  *
  * @group Follow wire
  */
-export const ZenPromptImage = Type.Object(
+export const EnsoPromptImage = Type.Object(
   {
     // ⚠ A spelled-out tuple, not `Type.Union(list.map(...))`: TypeBox's static type of a union
     // over a non-tuple array is `never`, which every cast in the browser then satisfied silently.
-    mimeType: ZenImageMimeType,
+    mimeType: EnsoImageMimeType,
     data: Type.String({ minLength: 1, pattern: BASE64 }),
   },
   { additionalProperties: false },
 )
 /** @group Follow wire */
-export type ZenPromptImage = Static<typeof ZenPromptImage>
+export type EnsoPromptImage = Static<typeof EnsoPromptImage>
 
 /**
  * What `POST /api/threads/:id/prompt` takes. The shape is checked here; the byte cap is checked on the decoded size by the route.
  *
  * @group Follow wire
  */
-export const ZenPromptBody = Type.Object(
+export const EnsoPromptBody = Type.Object(
   {
     message: Type.String(),
-    admission: Type.Optional(ZenPromptAdmission),
-    images: Type.Optional(Type.Array(ZenPromptImage, { minItems: 1, maxItems: ZEN_PROMPT_MAX_IMAGES })),
+    admission: Type.Optional(EnsoPromptAdmission),
+    images: Type.Optional(Type.Array(EnsoPromptImage, { minItems: 1, maxItems: ENSO_PROMPT_MAX_IMAGES })),
   },
   { additionalProperties: false },
 )
 /** @group Follow wire */
-export type ZenPromptBody = Static<typeof ZenPromptBody>
+export type EnsoPromptBody = Static<typeof EnsoPromptBody>
 
 /**
  * Decoded size of a base64 string, without decoding it: three bytes per four characters, less the padding.
@@ -207,7 +209,7 @@ export function base64DecodedBytes(data: string): number {
  *
  * @group Follow wire
  */
-export const ZenPromptReceipt = Type.Object(
+export const EnsoPromptReceipt = Type.Object(
   {
     threadId: Type.String(),
     /** Minted at admission — the identity a client correlates this message by. */
@@ -220,7 +222,7 @@ export const ZenPromptReceipt = Type.Object(
   { additionalProperties: false },
 )
 /** @group Follow wire */
-export type ZenPromptReceipt = Static<typeof ZenPromptReceipt>
+export type EnsoPromptReceipt = Static<typeof EnsoPromptReceipt>
 
 /**
  * What `POST /api/threads/:id/abort` answers with when pi was told (#116, #75): the prompts
@@ -233,7 +235,7 @@ export type ZenPromptReceipt = Static<typeof ZenPromptReceipt>
  *
  * @group Follow wire
  */
-export const ZenAbortReceipt = Type.Object(
+export const EnsoAbortReceipt = Type.Object(
   {
     threadId: Type.String(),
     restored: Type.Array(Type.String()),
@@ -241,4 +243,4 @@ export const ZenAbortReceipt = Type.Object(
   { additionalProperties: false },
 )
 /** @group Follow wire */
-export type ZenAbortReceipt = Static<typeof ZenAbortReceipt>
+export type EnsoAbortReceipt = Static<typeof EnsoAbortReceipt>

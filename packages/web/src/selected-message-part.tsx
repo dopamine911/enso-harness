@@ -5,7 +5,7 @@
 import type { ChatUISelectedPart, ChatUISelectedToolPart } from '@tanstack/ai-client/ui'
 import { TextPart } from '@tanstack/ai-react/ui'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from './components/ai-elements/reasoning.tsx'
-import { type ToolResultState, toolResultState, type ZenRendererMap, ZenToolResult } from './ZenToolResult.tsx'
+import { type EnsoRendererMap, EnsoToolResult, type ToolResultState, toolResultState } from './EnsoToolResult.tsx'
 
 /**
  * The argument a step row is summarised by, in precedence. Each of pi's built-ins and the
@@ -64,7 +64,7 @@ const STEP_DOT: Record<ToolResultState['status'], string> = {
  * A tool call as one compact row — `● read  packages/web/src/x.ts` — with IN and OUT folded
  * beneath it (#90 PR 2; Copilot Chat's step rows are the reference). What the agent is
  * doing reads step by step instead of as a wall of output. Done/pending/error is
- * `toolResultState`, the one definition the status bar and `ZenToolResult` also read; an
+ * `toolResultState`, the one definition the status bar and `EnsoToolResult` also read; an
  * error opens itself, because a failure behind a click is a failure missed.
  */
 function ToolCallRow({
@@ -74,7 +74,7 @@ function ToolCallRow({
 }: {
   selected: ChatUISelectedToolPart
   runOpen: boolean
-  renderers: ZenRendererMap
+  renderers: EnsoRendererMap
 }): React.ReactNode {
   const input = readToolInput(selected)
   const summary = summarizeToolInput(input)
@@ -83,7 +83,7 @@ function ToolCallRow({
     // Only an error opens itself: its body is a reason the reader needs (the guard's refusal,
     // the command's stderr). `aborted` has nothing more inside — its whole story is the one
     // word on the row (the run ended first), so opening it would show a static line.
-    <details data-zen-tool-call={status} open={status === 'error'} className="group my-1">
+    <details data-enso-tool-call={status} open={status === 'error'} className="group my-1">
       <summary className="flex cursor-pointer list-none items-center gap-2 font-mono text-muted-foreground text-xs marker:hidden">
         <span aria-hidden="true" className={STEP_DOT[status]} />
         <span className="text-foreground">{selected.part.name}</span>
@@ -101,9 +101,9 @@ function ToolCallRow({
         </pre>
         <div className="font-mono text-muted-foreground text-xs uppercase">out</div>
         {/* ⚠ THE INTEGRATION POINT #18 EXISTS FOR. Every tool result renders through
-				    `ZenToolResult`: the descriptor is read from the result's metadata, and an
+				    `EnsoToolResult`: the descriptor is read from the result's metadata, and an
 				    absent result (the call is still in flight) renders the visible pending state. */}
-        <ZenToolResult result={selected.result} runOpen={runOpen} renderers={renderers} />
+        <EnsoToolResult result={selected.result} runOpen={runOpen} renderers={renderers} />
       </div>
     </details>
   )
@@ -157,13 +157,13 @@ export function SelectedMessagePart({
   selected: ChatUISelectedPart
   isStreaming: boolean
   runOpen: boolean
-  renderers: ZenRendererMap
+  renderers: EnsoRendererMap
 }): React.ReactNode {
   if (selected.key === 'toolCall') return <ToolCallRow selected={selected} runOpen={runOpen} renderers={renderers} />
   // An UNMATCHED result (its call never streamed — a protocol wrinkle, not a normal
   // state) still renders through the same contract rather than vanishing.
   if (selected.key === 'toolResult') {
-    return <ZenToolResult result={selected.part} runOpen={runOpen} renderers={renderers} />
+    return <EnsoToolResult result={selected.part} runOpen={runOpen} renderers={renderers} />
   }
   // TextPart is the markdown pipeline of record (react-markdown, sanitize LAST). `prose`
   // is @tailwindcss/typography — TextPart emits bare markdown HTML with no classes of

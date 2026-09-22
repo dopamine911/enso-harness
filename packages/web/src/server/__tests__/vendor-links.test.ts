@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startZenServer } from '../index.ts'
+import { startEnsoServer } from '../index.ts'
 
 /**
  * ⚠ The precondition that was missing when a real run failed.
@@ -11,13 +11,13 @@ import { startZenServer } from '../index.ts'
  * hoisted linker leaves the harness tree to our postinstall), pi skips a missing
  * manifest resource path
  * SILENTLY, and the visible symptom was an HTTP 400 from the provider several layers away.
- * `scripts/zen.ts` already refused to launch on this; the server did not. These assert it
+ * `scripts/enso.ts` already refused to launch on this; the server did not. These assert it
  * now does, at both launch points.
  */
 
 function fakeHarness(manifestPi: Record<string, string[]>, createLinks: boolean): string {
-  const directory = mkdtempSync(join(tmpdir(), 'zen-harness-fake-'))
-  writeFileSync(join(directory, 'package.json'), JSON.stringify({ name: 'zen-harness', pi: manifestPi }))
+  const directory = mkdtempSync(join(tmpdir(), 'enso-fake-'))
+  writeFileSync(join(directory, 'package.json'), JSON.stringify({ name: 'Enso', pi: manifestPi }))
   if (createLinks) {
     for (const entry of Object.values(manifestPi).flat()) {
       if (!entry.startsWith('node_modules/')) continue
@@ -30,8 +30,8 @@ function fakeHarness(manifestPi: Record<string, string[]>, createLinks: boolean)
 }
 /** A harness whose `pi` is whatever a future edit — or a typo — put there. */
 function fakeHarnessWithPi(pi: unknown): string {
-  const directory = mkdtempSync(join(tmpdir(), 'zen-harness-malformed-'))
-  writeFileSync(join(directory, 'package.json'), JSON.stringify({ name: 'zen-harness', pi }))
+  const directory = mkdtempSync(join(tmpdir(), 'enso-malformed-'))
+  writeFileSync(join(directory, 'package.json'), JSON.stringify({ name: 'Enso', pi }))
   return directory
 }
 
@@ -42,7 +42,7 @@ test('refuses to start when a vendor manifest path is missing', () => {
     { extensions: ['./extensions/guards/index.ts', 'node_modules/pi-multi-account/index.ts'] },
     false,
   )
-  expect(() => startZenServer({ cwd, harnessPackageDir: harness, agentDir: tmpdir(), logsDir: tmpdir() })).toThrow(
+  expect(() => startEnsoServer({ cwd, harnessPackageDir: harness, agentDir: tmpdir(), logsDir: tmpdir() })).toThrow(
     /vendor package paths are missing/,
   )
 })
@@ -53,7 +53,7 @@ test('the refusal NAMES the missing path and the fix', () => {
   // undefined, and the message assertions fail on `undefined` rather than being skipped.
   let thrown: unknown
   try {
-    startZenServer({ cwd, harnessPackageDir: harness, agentDir: tmpdir(), logsDir: tmpdir() })
+    startEnsoServer({ cwd, harnessPackageDir: harness, agentDir: tmpdir(), logsDir: tmpdir() })
   } catch (error) {
     thrown = error
   }
@@ -65,11 +65,11 @@ test('the refusal NAMES the missing path and the fix', () => {
 
 test('starts when every vendor path resolves', async () => {
   const harness = fakeHarness({ extensions: ['node_modules/pi-multi-account/index.ts'] }, true)
-  const started = startZenServer({
+  const started = startEnsoServer({
     cwd,
     harnessPackageDir: harness,
     agentDir: tmpdir(),
-    logsDir: mkdtempSync(join(tmpdir(), 'zen-logs-')),
+    logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
   })
   expect(started.url).toContain('127.0.0.1')
@@ -79,11 +79,11 @@ test('starts when every vendor path resolves', async () => {
 test('a non-vendor manifest path is not required to exist', async () => {
   // `./extensions/...` is our own source; only `node_modules/` entries are link-dependent.
   const harness = fakeHarness({ extensions: ['./extensions/guards/index.ts'] }, false)
-  const started = startZenServer({
+  const started = startEnsoServer({
     cwd,
     harnessPackageDir: harness,
     agentDir: tmpdir(),
-    logsDir: mkdtempSync(join(tmpdir(), 'zen-logs-')),
+    logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
   })
   // It started: the URL is bound. (Was `expect(true).toBe(true)` — #53 S3.)
@@ -93,7 +93,7 @@ test('a non-vendor manifest path is not required to exist', async () => {
 
 test('refuses when the harness package.json itself is absent', () => {
   expect(() =>
-    startZenServer({
+    startEnsoServer({
       cwd,
       harnessPackageDir: join(tmpdir(), 'definitely-not-here'),
       agentDir: tmpdir(),
@@ -104,7 +104,7 @@ test('refuses when the harness package.json itself is absent', () => {
 
 test('refuses an empty cwd before touching the filesystem', () => {
   expect(() =>
-    startZenServer({
+    startEnsoServer({
       cwd: '',
       harnessPackageDir: fakeHarness({ extensions: [] }, true),
       agentDir: tmpdir(),
@@ -123,7 +123,7 @@ test('refuses an empty cwd before touching the filesystem', () => {
  */
 test('a `pi` that is not an object is refused by name, not walked character by character', () => {
   expect(() =>
-    startZenServer({
+    startEnsoServer({
       cwd,
       harnessPackageDir: fakeHarnessWithPi('node_modules/pi-multi-account/index.ts'),
       agentDir: tmpdir(),
@@ -135,16 +135,16 @@ test('a `pi` that is not an object is refused by name, not walked character by c
 /**
  * The other half: a resource path that is neither a string nor a string array — the obvious
  * future edit is a nested object for a new resource kind — is DROPPED, as
- * `scripts/zen-launch.ts` drops it. It used to reach `.startsWith` and throw a `TypeError`
- * out of the boot path, so `bun run dev` died with an unrelated message while `bun run zen`
+ * `scripts/enso-launch.ts` drops it. It used to reach `.startsWith` and throw a `TypeError`
+ * out of the boot path, so `bun run dev` died with an unrelated message while `bun run enso`
  * launched fine.
  */
 test('a non-string resource path is skipped, not handed to `.startsWith`', async () => {
-  const started = startZenServer({
+  const started = startEnsoServer({
     cwd,
     harnessPackageDir: fakeHarnessWithPi({ extensions: [{ path: 'node_modules/whatever' }], skills: 42 }),
     agentDir: tmpdir(),
-    logsDir: mkdtempSync(join(tmpdir(), 'zen-logs-')),
+    logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
   })
   expect(started.url).toContain('127.0.0.1')

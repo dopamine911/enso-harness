@@ -1,6 +1,6 @@
 # Prompt-cache architecture — the constraint that shapes prompt layering
 
-**Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the zen-harness project.
+**Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the Enso project.
 
 Mechanics here come from the bundled Anthropic API reference read on 2026-09-02, not from recollection —
 which matters, because writing this from memory would have missed three purpose-built primitives and

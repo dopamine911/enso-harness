@@ -125,7 +125,7 @@ test('an import-shaped string that names no installed package is not an import (
 
 // The keyword anchor, asserted against the shape that was live when it was added (PR #302
 // review). Unanchored — or anchored with `\b`, which does not help, because a word boundary
-// sits between `.` and `from` — `Buffer.from('🚀', 'utf8')` in `scripts/__tests__/zen-logs.test.ts`
+// sits between `.` and `from` — `Buffer.from('🚀', 'utf8')` in `scripts/__tests__/enso-logs.test.ts`
 // entered the graph as an import of a package named `🚀`. Harmless there; the same shape
 // spelled `Array.from('@tanstack/ai-react')` would satisfy the `overrides` equality above
 // without anyone importing the package.
@@ -137,10 +137,10 @@ test('a member call is not an import position, however it is spelled (#223)', ()
   )
   // …and the import positions it must still see, on one line each.
   expect(
-    [`} from '@tanstack/ai-react/ui'`, `await import('@zen/core')`, `require('node:fs')`].map((line) =>
+    [`} from '@tanstack/ai-react/ui'`, `await import('@enso/core')`, `require('node:fs')`].map((line) =>
       [...line.matchAll(IMPORT_SPECIFIER)].map((match) => match[1]),
     ),
-  ).toEqual([['@tanstack/ai-react/ui'], ['@zen/core'], ['node:fs']])
+  ).toEqual([['@tanstack/ai-react/ui'], ['@enso/core'], ['node:fs']])
 })
 
 /**

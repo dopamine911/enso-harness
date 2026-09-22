@@ -9,7 +9,7 @@ import { type Static, Type } from 'typebox'
  * retrieval API as the fallback. The provider wire code lives in
  * `packages/harness/core/web-search/`; the extension that wires IO and owns selection
  * lives in `packages/harness/extensions/web-search/`. This module holds the shared
- * shapes: the tool's parameter schema and its `zen.config.json` section.
+ * shapes: the tool's parameter schema and its `enso.config.json` section.
  */
 
 /**
@@ -49,11 +49,11 @@ export const WebSearchToolParameters = Type.Object({
 export type WebSearchToolParameters = Static<typeof WebSearchToolParameters>
 
 /**
- * web_search's OPTIONAL section of `zen.config.json`.
+ * web_search's OPTIONAL section of `enso.config.json`.
  *
  * ⚠ The section is optional AND must stay optional: the whole-file schema is
  * `additionalProperties: false` with a fail-closed parse, so a REQUIRED new section
- * would render every already-committed `zen.config.json` unreadable — and an unreadable
+ * would render every already-committed `enso.config.json` unreadable — and an unreadable
  * config refuses ALL web_fetch calls too. Absent section = the defaults below.
  *
  * - `backend: "deepseek"` pins the dedicated DeepSeek backend (its Anthropic-compatible

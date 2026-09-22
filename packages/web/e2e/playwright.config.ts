@@ -2,7 +2,7 @@
  * Playwright config for the MANUAL web smoke (#71).
  *
  * This is not part of `bun test` or the gate. It drives the real dev surface — the bun
- * fullstack server on 5178 proxying `/api` to the zen server on 5179 — and writes
+ * fullstack server on 5178 proxying `/api` to the enso server on 5179 — and writes
  * screenshots a PR author drags into the PR. Run it with `bun run e2e` from the repo root;
  * see README.md in this directory for the two tiers (model-free by default, `@model` opt-in).
  *
@@ -15,14 +15,14 @@
  * `process.env.CI`; there is no CI run of this suite (named non-scope on #71), and a dev
  * who already has `bun run dev` up should not have the harness fight it for the port.
  *
- * ⚠ `workers: 1`. Every test shares ONE zen server, and the server hosts ONE pi session per
+ * ⚠ `workers: 1`. Every test shares ONE enso server, and the server hosts ONE pi session per
  * request with one cwd — parallel browsers would interleave their runs' stderr and, for
  * the `@model` tier, race for the same provider identity.
  */
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { findRepoRoot } from '@enso/core/paths'
 import { defineConfig } from '@playwright/test'
-import { findRepoRoot } from '@zen/core/paths'
 
 const e2eDirectory = dirname(fileURLToPath(import.meta.url))
 // `bun run dev` must run from the repo root: scripts/dev.ts resolves the web package

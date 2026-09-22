@@ -1,5 +1,5 @@
 import { type Static, Type } from 'typebox'
-import { ZenToolResultDescriptor } from './tool-result.ts'
+import { EnsoToolResultDescriptor } from './tool-result.ts'
 
 /**
  * The transcript (#162 workstream 4, leak L2's persistence side): a thread's branch, root to
@@ -7,9 +7,9 @@ import { ZenToolResultDescriptor } from './tool-result.ts'
  *
  * The host reads the runtime's session log and produces these below the `AgentHost` seam;
  * nothing above it — the history route, the cold snapshot, the `?debug` drawer,
- * `zen-thread.ts`, the mode walk — sees the runtime's stored shapes.
+ * `enso-thread.ts`, the mode walk — sees the runtime's stored shapes.
  *
- * The same discipline as `ZenObservation`: decoded, not carried. A message's content is
+ * The same discipline as `EnsoObservation`: decoded, not carried. A message's content is
  * already parts of ours (text, thinking, an image, a tool call), a tool result is already a
  * result with its descriptor, so a reader assembles and never decodes. An entry kind the
  * host does not model crosses as `other` with its `type` — counted, never invented, and a
@@ -21,7 +21,7 @@ import { ZenToolResultDescriptor } from './tool-result.ts'
  *
  * @group Transcript
  */
-export const ZenTranscriptPart = Type.Union([
+export const EnsoTranscriptPart = Type.Union([
   Type.Object({ type: Type.Literal('text'), text: Type.String() }),
   Type.Object({ type: Type.Literal('thinking'), thinking: Type.String() }),
   Type.Object({ type: Type.Literal('image'), data: Type.String(), mimeType: Type.String() }),
@@ -35,7 +35,7 @@ export const ZenTranscriptPart = Type.Union([
   Type.Object({ type: Type.Literal('other'), kind: Type.String() }),
 ])
 /** @group Transcript */
-export type ZenTranscriptPart = Static<typeof ZenTranscriptPart>
+export type EnsoTranscriptPart = Static<typeof EnsoTranscriptPart>
 
 const base = {
   id: Type.String(),
@@ -48,21 +48,21 @@ const base = {
  *
  * @group Transcript
  */
-export const ZenTranscriptMessage = Type.Object({
+export const EnsoTranscriptMessage = Type.Object({
   kind: Type.Literal('message'),
   ...base,
   role: Type.Union([Type.Literal('user'), Type.Literal('assistant')]),
-  parts: Type.Array(ZenTranscriptPart),
+  parts: Type.Array(EnsoTranscriptPart),
 })
 /** @group Transcript */
-export type ZenTranscriptMessage = Static<typeof ZenTranscriptMessage>
+export type EnsoTranscriptMessage = Static<typeof EnsoTranscriptMessage>
 
 /**
  * A tool's answer to a call, with the rendering descriptor the tool attached (#18).
  *
  * @group Transcript
  */
-export const ZenTranscriptToolResult = Type.Object({
+export const EnsoTranscriptToolResult = Type.Object({
   kind: Type.Literal('tool-result'),
   ...base,
   toolCallId: Type.String(),
@@ -70,51 +70,51 @@ export const ZenTranscriptToolResult = Type.Object({
   /** The result as text — what a transcript shows and a step row's `output` reads. */
   text: Type.String(),
   isError: Type.Boolean(),
-  descriptor: Type.Optional(ZenToolResultDescriptor),
+  descriptor: Type.Optional(EnsoToolResultDescriptor),
 })
 /** @group Transcript */
-export type ZenTranscriptToolResult = Static<typeof ZenTranscriptToolResult>
+export type EnsoTranscriptToolResult = Static<typeof EnsoTranscriptToolResult>
 
 /**
  * State an extension persisted (`pi.appendEntry`): the shape belongs to the extension.
  *
  * @group Transcript
  */
-export const ZenTranscriptCustom = Type.Object({
+export const EnsoTranscriptCustom = Type.Object({
   kind: Type.Literal('custom'),
   ...base,
   customType: Type.String(),
   data: Type.Unknown(),
 })
 /** @group Transcript */
-export type ZenTranscriptCustom = Static<typeof ZenTranscriptCustom>
+export type EnsoTranscriptCustom = Static<typeof EnsoTranscriptCustom>
 
 /**
  * An entry kind the host does not model — a model change, a compaction, a label. Counted, never invented.
  *
  * @group Transcript
  */
-export const ZenTranscriptOther = Type.Object({
+export const EnsoTranscriptOther = Type.Object({
   kind: Type.Literal('other'),
   ...base,
   type: Type.String(),
 })
 /** @group Transcript */
-export type ZenTranscriptOther = Static<typeof ZenTranscriptOther>
+export type EnsoTranscriptOther = Static<typeof EnsoTranscriptOther>
 
 /** @group Transcript */
-export const ZenTranscriptEntry = Type.Union([
-  ZenTranscriptMessage,
-  ZenTranscriptToolResult,
-  ZenTranscriptCustom,
-  ZenTranscriptOther,
+export const EnsoTranscriptEntry = Type.Union([
+  EnsoTranscriptMessage,
+  EnsoTranscriptToolResult,
+  EnsoTranscriptCustom,
+  EnsoTranscriptOther,
 ])
 /** @group Transcript */
-export type ZenTranscriptEntry = Static<typeof ZenTranscriptEntry>
+export type EnsoTranscriptEntry = Static<typeof EnsoTranscriptEntry>
 
 /**
  * One entry as a row — `12:34:56 message user`, `12:34:56 custom:modes mode=plan` — THE
- * definition (PR #100 review): the drawer and `zen-thread.ts` had one each and had drifted.
+ * definition (PR #100 review): the drawer and `enso-thread.ts` had one each and had drifted.
  * A custom entry's `data.mode` is shown when present because the drawer's one use of this
  * row is checking which mode the branch ended in; the entry's own shape is otherwise not
  * this function's to know.
@@ -124,7 +124,7 @@ function isPrimitive(value: unknown): value is string | number | boolean {
 }
 
 /** @group Transcript */
-export function describeTranscriptEntry(entry: ZenTranscriptEntry): string {
+export function describeTranscriptEntry(entry: EnsoTranscriptEntry): string {
   const when = entry.at === undefined ? '' : entry.at.slice(11, 19)
   switch (entry.kind) {
     case 'message':

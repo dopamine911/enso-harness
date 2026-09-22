@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { WEB_FETCH_MAX_URL_LENGTH } from '@zen/core'
+import { WEB_FETCH_MAX_URL_LENGTH } from '@enso/core'
 import { isFetchableContentType, isHostAllowed, isPublicIpAddress, parseWebFetchUrl } from '../web-fetch-policy.ts'
 
 /**

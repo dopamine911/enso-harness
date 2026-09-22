@@ -63,11 +63,11 @@ const RETIRED_WORD_SEQUENCES = [
  */
 const VENDOR_PREFIXED_IDENTIFIER = /\bPi[A-Z][A-Za-z0-9]*|\bisPi[A-Z]/
 /**
- * …and the retired FILE names, matched against a path only. `session inspection` and `zen
+ * …and the retired FILE names, matched against a path only. `session inspection` and `enso
  * session` are too common as adjacent prose words (`session: ${inspection.sessionId}`) to
  * refuse on a line; as a file name each is exact.
  */
-const RETIRED_PATH_SEQUENCES = [...RETIRED_WORD_SEQUENCES, ['session', 'inspection'], ['zen', 'session']] as const
+const RETIRED_PATH_SEQUENCES = [...RETIRED_WORD_SEQUENCES, ['session', 'inspection'], ['enso', 'session']] as const
 
 const RETIRED_ALLOWED: readonly string[] = [
   // The gate itself: it names the retired words in order to refuse them.
@@ -205,7 +205,7 @@ test('the matcher sees a retired name however it is spelled, and leaves the rese
   }
   for (const path of [
     'packages/core/src/session-inspection.ts',
-    'scripts/zen-session.mjs',
+    'scripts/enso-session.mjs',
     'packages/core/src/pi-rpc.ts',
   ]) {
     expect(pathNamesRetired(path)).toBe(true)
@@ -213,8 +213,8 @@ test('the matcher sees a retired name however it is spelled, and leaves the rese
   expect(namesRetired("const line = '- session: ' + inspection.sessionId")).toBe(false)
   for (const line of [
     'const { sessionId, sessionDir, sessionFile } = inspection',
-    "const origin: ZenUiRequestOrigin = 'session-start'",
-    'export const ZenStoredThread = Type.Object({})',
+    "const origin: EnsoUiRequestOrigin = 'session-start'",
+    'export const EnsoStoredThread = Type.Object({})',
     'const steps = recipe.steps',
     'publishObservation(feed, mapPiEvent(event, delivery))', // mid-identifier: names what it maps
     "for (const name of ['PATH', 'PI_CODING_AGENT_DIR'])", // the runtime's own variable
@@ -231,8 +231,8 @@ test('a decided name has to be declared, not merely contained (#241, PR #287 rev
   // Why not the sibling matcher: it says yes to the same longer name, by design.
   expect(hasWordSequence(wordsOf('describeObservationList'), ['describe', 'observation'])).toBe(true)
   // A hyphenated attribute is one name, so a longer attribute is not it.
-  expect(spelledNames('<span data-zen-tool-call="running" />').has('data-zen-tool-call')).toBe(true)
-  expect(spelledNames('<span data-zen-tool-call-status="running" />').has('data-zen-tool-call')).toBe(false)
+  expect(spelledNames('<span data-enso-tool-call="running" />').has('data-enso-tool-call')).toBe(true)
+  expect(spelledNames('<span data-enso-tool-call-status="running" />').has('data-enso-tool-call')).toBe(false)
 })
 
 test('a replacement is resolved by shape, and an unknown shape is reported (#241, PR #287 review)', () => {

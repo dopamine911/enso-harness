@@ -3,12 +3,12 @@ import { join } from 'node:path'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
- * The browser zone must bundle for the browser (#211). `@zen/core`'s barrel used to re-export
+ * The browser zone must bundle for the browser (#211). `@enso/core`'s barrel used to re-export
  * `paths.ts` and `secrets.ts`, whose bare `node:fs` / `node:url` specifiers are resolved at
  * link time — before anything is tree-shaken — so a production build of the web surface
  * failed outright (`Browser polyfill for module "node:url" doesn't have a matching export
  * named "fileURLToPath"`), and the HMR dev server was the only thing that ran it. Those
- * modules are subpaths now (`@zen/core/paths`, `@zen/core/secrets`, beside `log-process`).
+ * modules are subpaths now (`@enso/core/paths`, `@enso/core/secrets`, beside `log-process`).
  *
  * ⚠ Enforcement, not a unit test — the shape of the other gates: this is the sensor the
  * zone table lacked. It builds the real entry for the real target and fails by the bundler's

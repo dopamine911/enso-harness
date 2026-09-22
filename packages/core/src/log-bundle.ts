@@ -1,5 +1,5 @@
-import { ZEN_REDACTED, ZEN_REDACTED_VALUE, type ZenLogLine } from './log.ts'
-import type { ZenThreadInspection } from './thread-inspection.ts'
+import { ENSO_REDACTED, ENSO_REDACTED_VALUE, type EnsoLogLine } from './log.ts'
+import type { EnsoThreadInspection } from './thread-inspection.ts'
 import { describeTranscriptEntry } from './transcript.ts'
 
 /**
@@ -10,7 +10,7 @@ import { describeTranscriptEntry } from './transcript.ts'
  *
  * Pure: strings in, one string out. The server assembles the inputs (`bundle-route.ts`),
  * the drawer appends the browser's ring, `bun run logs --file` reads the result back —
- * the records are a fenced JSONL block, one `ZenLogLine` per line, exactly as on disk, so
+ * the records are a fenced JSONL block, one `EnsoLogLine` per line, exactly as on disk, so
  * the reader needs no special case: a bundle IS a log file with prose around it.
  *
  * ⚠ Never auto-uploaded, never written anywhere but where the user asks. It is theirs to
@@ -25,11 +25,11 @@ import { describeTranscriptEntry } from './transcript.ts'
  *
  * @group Logging
  */
-export interface ZenBundleAbout {
+export interface EnsoBundleAbout {
   /** When the bundle was made, ISO UTC. */
   readonly at: string
   /** The harness checkout's commit and branch, or why that is unknown. */
-  readonly zen: string
+  readonly enso: string
   readonly pi: string
   readonly bun: string
   readonly os: string
@@ -38,12 +38,12 @@ export interface ZenBundleAbout {
 }
 
 /** @group Logging */
-export interface ZenBundleInputs {
-  readonly about: ZenBundleAbout
+export interface EnsoBundleInputs {
+  readonly about: EnsoBundleAbout
   /** The live threads' inspections — the ones the selection covers. */
-  readonly threads: readonly ZenThreadInspection[]
+  readonly threads: readonly EnsoThreadInspection[]
   /** The records, oldest first, already filtered and capped by the caller. */
-  readonly lines: readonly ZenLogLine[]
+  readonly lines: readonly EnsoLogLine[]
   /** How many records matched before the cap, so the bundle says "last N of M". */
   readonly matched: number
 }
@@ -58,19 +58,19 @@ export interface ZenBundleInputs {
  *
  * @group Logging
  */
-export function redactionManifest(lines: readonly ZenLogLine[]): Readonly<Record<string, number>> {
+export function redactionManifest(lines: readonly EnsoLogLine[]): Readonly<Record<string, number>> {
   const counts: Record<string, number> = {}
   for (const line of lines) {
     for (const [fieldName, fieldValue] of Object.entries(line.properties ?? {})) {
-      if (fieldValue === ZEN_REDACTED) counts[fieldName] = (counts[fieldName] ?? 0) + 1
+      if (fieldValue === ENSO_REDACTED) counts[fieldName] = (counts[fieldName] ?? 0) + 1
     }
-    if (JSON.stringify(line).includes(ZEN_REDACTED_VALUE)) counts.values = (counts.values ?? 0) + 1
+    if (JSON.stringify(line).includes(ENSO_REDACTED_VALUE)) counts.values = (counts.values ?? 0) + 1
   }
   return counts
 }
 
 const FENCE = '```'
-const BUNDLE_HEADING = '# zen-harness log bundle'
+const BUNDLE_HEADING = '# Enso log bundle'
 const RECORDS_FENCE = new RegExp(`^${FENCE}jsonl\\n([\\s\\S]*?)\\n${FENCE}$`, 'gm')
 
 /**
@@ -98,7 +98,7 @@ export function bundleRecordsText(bundle: string): string {
 }
 
 /** The records as they are on disk, fenced — what `bun run logs --file` reads out of a bundle. */
-function recordsSection(lines: readonly ZenLogLine[], matched: number): string {
+function recordsSection(lines: readonly EnsoLogLine[], matched: number): string {
   const heading =
     lines.length === matched
       ? `## log — ${lines.length} records`
@@ -106,7 +106,7 @@ function recordsSection(lines: readonly ZenLogLine[], matched: number): string {
   return `${heading}\n\n${FENCE}jsonl\n${lines.map((line) => JSON.stringify(line)).join('\n')}\n${FENCE}\n`
 }
 
-function threadSection(inspection: ZenThreadInspection): string {
+function threadSection(inspection: EnsoThreadInspection): string {
   const rows = [
     `- session: \`${inspection.sessionId}\``,
     `- cwd: \`${inspection.cwd}\``,
@@ -125,7 +125,7 @@ function threadSection(inspection: ZenThreadInspection): string {
  *
  * @group Logging
  */
-export function browserSection(lines: readonly ZenLogLine[], pageUrl?: string): string {
+export function browserSection(lines: readonly EnsoLogLine[], pageUrl?: string): string {
   // The page's URL names the thread (#142): the line a reader opens to see it live.
   const page = pageUrl === undefined ? '' : `\nPage: ${pageUrl}\n`
   if (lines.length === 0) return `## browser logged\n${page}\nnothing — the page's ring was empty for this selection\n`
@@ -135,7 +135,7 @@ export function browserSection(lines: readonly ZenLogLine[], pageUrl?: string): 
 }
 
 /** @group Logging */
-export function buildLogBundle(inputs: ZenBundleInputs): string {
+export function buildLogBundle(inputs: EnsoBundleInputs): string {
   const { about } = inputs
   const manifest = redactionManifest(inputs.lines)
   const redacted = Object.entries(manifest).sort(([left], [right]) => left.localeCompare(right))
@@ -147,7 +147,7 @@ export function buildLogBundle(inputs: ZenBundleInputs): string {
     '',
     '## about',
     '',
-    `- zen: \`${about.zen}\``,
+    `- enso: \`${about.enso}\``,
     `- pi: \`${about.pi}\``,
     `- bun: \`${about.bun}\``,
     `- os: ${about.os}`,
@@ -157,7 +157,7 @@ export function buildLogBundle(inputs: ZenBundleInputs): string {
     '',
     redacted.length === 0
       ? 'nothing — no record carried a secret-shaped field, and no known secret value appeared in one'
-      : `Two passes at write, both before the line reached this file. A **field** row is a property whose NAME is secret-shaped: its value became \`${ZEN_REDACTED}\` and the name stayed, so you can see what is missing. The \`values\` row counts records where a known secret VALUE appeared somewhere it was not named — quoted in a message, in a tool result, in a payload — and became \`${ZEN_REDACTED_VALUE}\` (#139).\n\n${redacted
+      : `Two passes at write, both before the line reached this file. A **field** row is a property whose NAME is secret-shaped: its value became \`${ENSO_REDACTED}\` and the name stayed, so you can see what is missing. The \`values\` row counts records where a known secret VALUE appeared somewhere it was not named — quoted in a message, in a tool result, in a payload — and became \`${ENSO_REDACTED_VALUE}\` (#139).\n\n${redacted
           .map(([name, count]) => `- \`${name}\` × ${count}`)
           .join('\n')}`,
     '',

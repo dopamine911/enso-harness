@@ -1,12 +1,12 @@
 /**
- * The terminal launcher's decisions, apart from the launch (`zen.ts` spawns; this decides):
+ * The terminal launcher's decisions, apart from the launch (`enso.ts` spawns; this decides):
  * the isolation triple as pi's arguments, the print-run trigger, and whether the pi it is
  * about to spawn is one the guard was pinned against. Pure so
- * `scripts/__tests__/zen-launch.test.ts` can pin them — the launcher itself has no test,
+ * `scripts/__tests__/enso-launch.test.ts` can pin them — the launcher itself has no test,
  * because it spawns pi (docs/flows/boot-and-launchers.md).
  *
  * ⚠ The vendor-path precondition is NOT here. It was, in a copy of its own, until #221 gave
- * pi's manifest-resource layout one owner: `@zen/core/pi-manifest`. `zen.ts` calls that
+ * pi's manifest-resource layout one owner: `@enso/core/pi-manifest`. `enso.ts` calls that
  * directly, as the server and the linker do.
  */
 
@@ -14,12 +14,12 @@
  * ⚠ THE PI THE GUARD'S REPLICA IS PINNED AGAINST (#217). `packages/harness/core/paths.ts`
  * REPLICATES pi's path normaliser — it is not on pi's export map, so it is copied, and
  * `packages/harness/core/__tests__/paths.test.ts` keeps the copy honest against the pi in the
- * WORKSPACE tree (`import.meta.resolve`). `zen.ts` spawns a bare `pi` from `PATH`, which is a
+ * WORKSPACE tree (`import.meta.resolve`). `enso.ts` spawns a bare `pi` from `PATH`, which is a
  * different resolution bounded by nothing: measured 2026-09-18, a shim reporting 0.85.0 earlier
  * on `PATH` launched with the whole suite green — so the guard could resolve a path differently
  * from the tool it gates, and a deny would be computed against the wrong target.
  *
- * So the tested range is stated ONCE, here, and both ends read it: `zen.ts` refuses a `pi`
+ * So the tested range is stated ONCE, here, and both ends read it: `enso.ts` refuses a `pi`
  * outside it before the spawn, and `scripts/__tests__/pi-version-parity.test.ts` asserts the workspace pi the
  * corpus pins against is inside it. Widening it means running the corpus against the new pi
  * FIRST. It is `^0.84.4` — the harness's peer range and the workspace devDependency.

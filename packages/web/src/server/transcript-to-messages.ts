@@ -1,10 +1,10 @@
-import type { MessagePart, UIMessage } from '@tanstack/ai-client'
 import {
-  ZEN_TOOL_RESULT_KEY,
-  type ZenInterruptedTail,
-  type ZenTranscriptEntry,
-  type ZenTranscriptPart,
-} from '@zen/core'
+  ENSO_TOOL_RESULT_KEY,
+  type EnsoInterruptedTail,
+  type EnsoTranscriptEntry,
+  type EnsoTranscriptPart,
+} from '@enso/core'
+import type { MessagePart, UIMessage } from '@tanstack/ai-client'
 
 /**
  * The transcript → TanStack `UIMessage`s (#95): the history a resumed thread mounts with.
@@ -26,7 +26,7 @@ import {
  */
 
 /** One part as TanStack renders it. An unmodelled part renders as a marker, never vanishes. */
-function messagePart(part: ZenTranscriptPart): MessagePart {
+function messagePart(part: EnsoTranscriptPart): MessagePart {
   switch (part.type) {
     case 'text':
       return { type: 'text', content: part.text }
@@ -57,7 +57,7 @@ function createdAt(at: string | undefined): { createdAt?: Date } {
 /** Attach a tool result to the assistant message holding its call; false if no call is found. */
 function attachToolResult(
   messages: UIMessage[],
-  result: Extract<ZenTranscriptEntry, { kind: 'tool-result' }>,
+  result: Extract<EnsoTranscriptEntry, { kind: 'tool-result' }>,
 ): boolean {
   for (let position = messages.length - 1; position >= 0; position -= 1) {
     const candidate = messages[position]
@@ -73,7 +73,7 @@ function attachToolResult(
       content: result.text,
       state: result.isError ? 'error' : 'complete',
       ...(result.isError ? { error: result.text } : {}),
-      ...(result.descriptor === undefined ? {} : { metadata: { [ZEN_TOOL_RESULT_KEY]: result.descriptor } }),
+      ...(result.descriptor === undefined ? {} : { metadata: { [ENSO_TOOL_RESULT_KEY]: result.descriptor } }),
     })
     return true
   }
@@ -81,7 +81,7 @@ function attachToolResult(
 }
 
 /** The transcript, root to leaf, as the messages a chat mounts with. Entries that are not messages are skipped. */
-export function transcriptToMessages(transcript: readonly ZenTranscriptEntry[]): UIMessage[] {
+export function transcriptToMessages(transcript: readonly EnsoTranscriptEntry[]): UIMessage[] {
   const messages: UIMessage[] = []
   for (const transcriptEntry of transcript) {
     if (transcriptEntry.kind === 'message') {
@@ -105,7 +105,11 @@ export function transcriptToMessages(transcript: readonly ZenTranscriptEntry[]):
  * direction `attachToolResult` pairs in, so a result that precedes its call counts for
  * neither (it is dropped from the messages too).
  */
-function isAnsweredAfter(transcript: readonly ZenTranscriptEntry[], messageIndex: number, toolCallId: string): boolean {
+function isAnsweredAfter(
+  transcript: readonly EnsoTranscriptEntry[],
+  messageIndex: number,
+  toolCallId: string,
+): boolean {
   for (let position = messageIndex + 1; position < transcript.length; position += 1) {
     const entry = transcript[position]
     if (entry?.kind === 'tool-result' && entry.toolCallId === toolCallId) return true
@@ -114,10 +118,10 @@ function isAnsweredAfter(transcript: readonly ZenTranscriptEntry[], messageIndex
 }
 
 /**
- * Whether the transcript ends inside a turn (#109, `ZenInterruptedTail`).
+ * Whether the transcript ends inside a turn (#109, `EnsoInterruptedTail`).
  *
  * ⚠ READ OFF THE ENTRIES, NEVER OFF THE MESSAGES (#220). Both vocabularies can express
- * "a call without its result", and they are not equals: `ZenInterruptedTail` is a zen wire
+ * "a call without its result", and they are not equals: `EnsoInterruptedTail` is a enso wire
  * value — it crosses on the snapshot frame and the history payload and becomes a warning
  * notice in the browser (`thread-stores.ts`) — while a `ToolCallPart.state` literal is
  * TanStack's, pinned but not ours. Deriving the wire value from the renderer's spelling made
@@ -133,7 +137,7 @@ function isAnsweredAfter(transcript: readonly ZenTranscriptEntry[], messageIndex
  * reply with text and no open call reads as settled even if it was cut short — the transcript
  * carries no fact that says so, and inventing one would be a guess.
  */
-export function interruptedTail(transcript: readonly ZenTranscriptEntry[]): ZenInterruptedTail | undefined {
+export function interruptedTail(transcript: readonly EnsoTranscriptEntry[]): EnsoInterruptedTail | undefined {
   const lastMessageIndex = transcript.findLastIndex((entry) => entry.kind === 'message')
   const lastMessage = transcript[lastMessageIndex]
   if (lastMessage === undefined || lastMessage.kind !== 'message') return undefined

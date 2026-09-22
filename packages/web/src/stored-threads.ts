@@ -1,4 +1,4 @@
-import { ZenStoredThread, ZenThreadHistory } from '@zen/core'
+import { EnsoStoredThread, EnsoThreadHistory } from '@enso/core'
 import { Check } from 'typebox/value'
 import { createStore, type Store } from './store.ts'
 
@@ -18,7 +18,7 @@ import { createStore, type Store } from './store.ts'
  */
 
 export interface StoredThreadsState {
-  readonly threads: readonly ZenStoredThread[]
+  readonly threads: readonly EnsoStoredThread[]
   /** Why the last refresh produced nothing — a down server, a payload off its schema. */
   readonly error: string | undefined
 }
@@ -37,9 +37,9 @@ export function createStoredThreadsStore(
     refresh: async () => {
       try {
         const listed = await fetchStoredThreads()
-        const wellFormed = Array.isArray(listed) && listed.every((thread) => Check(ZenStoredThread, thread))
+        const wellFormed = Array.isArray(listed) && listed.every((thread) => Check(EnsoStoredThread, thread))
         if (!wellFormed) throw new Error("the server's session listing did not match its schema")
-        store.set({ threads: listed as ZenStoredThread[], error: undefined })
+        store.set({ threads: listed as EnsoStoredThread[], error: undefined })
       } catch (error) {
         store.set({ threads: store.get().threads, error: error instanceof Error ? error.message : String(error) })
       }
@@ -74,11 +74,11 @@ async function fetchStoredThreadList(): Promise<unknown> {
 }
 
 /** A stored thread's history, for `adoptThread`; a non-2xx throws with the status in the message. */
-export async function fetchThreadHistory(threadId: string): Promise<ZenThreadHistory> {
+export async function fetchThreadHistory(threadId: string): Promise<EnsoThreadHistory> {
   const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/history`)
   if (!response.ok) throw new Error(await describeFailedResponse(response))
   const payload: unknown = await response.json()
-  if (!Check(ZenThreadHistory, payload)) throw new Error("the server's history payload did not match its schema")
+  if (!Check(EnsoThreadHistory, payload)) throw new Error("the server's history payload did not match its schema")
   return payload
 }
 
@@ -96,8 +96,8 @@ export async function fetchThreadHistory(threadId: string): Promise<ZenThreadHis
  * the moment two requests overlap, and the boot's resume and a rail click can.
  */
 export function createResumeRequests<TIntent>(
-  fetchHistory: (threadId: string) => Promise<ZenThreadHistory>,
-  onHistory: (history: ZenThreadHistory, intent: TIntent) => void,
+  fetchHistory: (threadId: string) => Promise<EnsoThreadHistory>,
+  onHistory: (history: EnsoThreadHistory, intent: TIntent) => void,
   onFailure: (message: string, intent: TIntent) => void,
 ): (threadId: string, intent: TIntent) => void {
   let latest: string | undefined
@@ -125,8 +125,8 @@ export function createResumeRequests<TIntent>(
  * identity.
  */
 export function storedThreadsNotOnThisPage(
-  stored: readonly ZenStoredThread[],
+  stored: readonly EnsoStoredThread[],
   pageThreadIds: ReadonlySet<string>,
-): ZenStoredThread[] {
+): EnsoStoredThread[] {
   return stored.filter((thread) => !pageThreadIds.has(thread.threadId))
 }

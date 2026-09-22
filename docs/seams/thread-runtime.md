@@ -13,7 +13,7 @@ Every fence on this page is the source, checked by `test/docs-gate.test.ts`. Ref
 ## The contract
 
 The runtime itself. Function-bearing, and declared as a schema anyway — the one rule ("every shape is
-a schema in `@zen/core`") beats a finer rule that needs explaining; the module header says so.
+a schema in `@enso/core`") beats a finer rule that needs explaining; the module header says so.
 
 <!-- source: packages/core/src/thread-runtime.ts#ThreadRuntime -->
 ```ts
@@ -37,7 +37,7 @@ export const ThreadRuntime = Type.Object({
    * handed to the extension VERBATIM is an injection seam unless the server checks it).
    * Empty once answered, cancelled, or never asked.
    */
-  openDialogs: Type.Unsafe<() => ZenOpenDialog[]>(Type.Function([], Type.Unknown())),
+  openDialogs: Type.Unsafe<() => EnsoOpenDialog[]>(Type.Function([], Type.Unknown())),
   /** The slash commands this session can run — extension commands, prompt templates, skills. Synchronous: read off the live registry, no round trip. */
   listCommands: Type.Unsafe<() => RuntimeCommand[]>(Type.Function([], Type.Unknown())),
   /**
@@ -49,7 +49,7 @@ export const ThreadRuntime = Type.Object({
    * Synchronous: it walks the in-memory branch and registry, no round trip — and it is
    * deliberately NOT `listCommands`, whose call count the refusal path's tests pin.
    */
-  permissionModeState: Type.Unsafe<() => ZenPermissionModeState>(Type.Function([], Type.Unknown())),
+  permissionModeState: Type.Unsafe<() => EnsoPermissionModeState>(Type.Function([], Type.Unknown())),
   /**
    * Switch the mode (L3 step C, #162 workstream 4). The host translates to whatever its mode
    * extension accepts — for picc, the per-mode slash command, run as a prompt the same way
@@ -64,7 +64,7 @@ export const ThreadRuntime = Type.Object({
   ),
   /**
    * Receive every observation of this thread (L2, #162 workstream 4): the runtime's events
-   * mapped to `ZenObservation` BELOW this seam, plus what the host itself observes — a
+   * mapped to `EnsoObservation` BELOW this seam, plus what the host itself observes — a
    * dialog it opened, an extension's error, a mode its extension persisted. Nothing of the
    * runtime's own event shape reaches a subscriber. Observations emitted before the FIRST
    * subscriber are buffered and replayed to it, so nothing an extension says at start-up is
@@ -76,7 +76,7 @@ export const ThreadRuntime = Type.Object({
    * ⚠ `Type.Unsafe` keeps the schema for uniformity and the precise type for consumers; a
    * schema change must be mirrored in the annotation by hand.
    */
-  subscribe: Type.Unsafe<(onObservation: (observation: ZenObservation) => void) => () => void>(
+  subscribe: Type.Unsafe<(onObservation: (observation: EnsoObservation) => void) => () => void>(
     Type.Function([Type.Unknown()], Type.Unknown()),
   ),
   /** Abort the in-flight run and wait until the agent is idle. The session survives. */
@@ -101,7 +101,7 @@ export interface PromptRequest {
   message: string
   images?: readonly PromptImageContent[]
   /** How the runtime should take it when a run is already streaming; the host maps it. */
-  admission?: ZenPromptAdmission
+  admission?: EnsoPromptAdmission
 }
 ```
 
@@ -115,14 +115,14 @@ export interface PromptOutcome {
 }
 ```
 
-<!-- source: packages/core/src/thread-runtime.ts#ZenPromptAdmission -->
+<!-- source: packages/core/src/thread-runtime.ts#EnsoPromptAdmission -->
 ```ts
 /**
  * What to do when a prompt arrives while the agent is already streaming — ZEN's two words,
  * not the runtime's (#216).
  *
  * ⚠ IT WAS `StreamingBehavior = 'steer' | 'followUp'`: pi's own option name and pi's own
- * literals, declared as a Zen schema and published on `ZenPromptBody`, so the vendor's model
+ * literals, declared as an Enso schema and published on `EnsoPromptBody`, so the vendor's model
  * was the only vocabulary the wire accepted — and `docs/seams/thread-runtime.md` said the
  * opposite in the same breath. The vendor gate cannot see that class of leak: no import, no
  * vendor word. pi's spelling is produced in ONE place now, `host/agent-host.ts`, which is
@@ -132,7 +132,7 @@ export interface PromptOutcome {
  * `interrupt` — take the prompt at the next step boundary. `enqueue` — after the run settles.
  * Two because the runtime has two; a third is a literal here and a mapping there.
  */
-export const ZenPromptAdmission = Type.Union([Type.Literal('interrupt'), Type.Literal('enqueue')])
+export const EnsoPromptAdmission = Type.Union([Type.Literal('interrupt'), Type.Literal('enqueue')])
 ```
 
 <!-- source: packages/core/src/thread-runtime.ts#PromptImageContent -->
@@ -170,7 +170,7 @@ export type DialogAnswer = { id: string } & (
 
 What crosses it outward — an observation of ours, and nothing of the runtime's (L2, #162 workstream
 4): the host maps its runtime's events below this seam, so a subscriber's callback receives
-`ZenObservation` (the union on `observation.md`). The runtime's own event shape is the host's
+`EnsoObservation` (the union on `observation.md`). The runtime's own event shape is the host's
 business, in `packages/web/src/host/runtime-event.ts`, and the mapper that reads it,
 `packages/web/src/host/map-events.ts`, sits beside it.
 
@@ -253,20 +253,20 @@ same one builder with its four consumers.
 
 **The admission vocabulary is ours now, and the mapping is one table (#216, closed).** It was not:
 `StreamingBehavior = 'steer' | 'followUp'` was pi's own option name and pi's own literals, declared
-as a Zen schema and published on `ZenPromptBody` — and because that body is closed, a Zen-owned word
+as a Enso schema and published on `EnsoPromptBody` — and because that body is closed, a Enso-owned word
 was a 400. The vendor's model was not merely carried across the wire, it was **the only vocabulary
 the wire accepted**, while this page's last line said the opposite. The vendor gate could not see it:
 no import, no vendor word.
 
-What replaced it: `ZenPromptAdmission = 'interrupt' | 'enqueue'` (`thread-runtime.ts`),
-`ZenPromptBody.admission` on the wire, `ZenQueue.interrupting` / `.enqueued` on the follow's SSE
+What replaced it: `EnsoPromptAdmission = 'interrupt' | 'enqueue'` (`thread-runtime.ts`),
+`EnsoPromptBody.admission` on the wire, `EnsoQueue.interrupting` / `.enqueued` on the follow's SSE
 stream, and `clearQueue` returning `{ interrupting, enqueued }`. pi's two spellings are produced in
 exactly two places, both under `host/`: `agent-host.ts#STREAMING_BEHAVIOR_OF` inbound (whose value
 type is pi's own `PromptOptions['streamingBehavior']`, so a vendor rename is a compile error in the
 table) and `map-events.ts` outbound, where `queue_update`'s `steering`/`followUp` are read. A runtime
-that admits prompts differently is a literal in `@zen/core` and a row in that table.
+that admits prompts differently is a literal in `@enso/core` and a row in that table.
 
-⚠ It is a BREAKING wire change, deliberately and once: `ZenPromptBody` is closed and its union is
+⚠ It is a BREAKING wire change, deliberately and once: `EnsoPromptBody` is closed and its union is
 closed, so there was no overlap window in either direction — an old tab posting `followUp` gets a 400
 against the new server exactly as a new tab posting `enqueue` would have against the old one. The
 alternative was to delete the field (no consumer uses the distinction: `steer` was sent by nothing,
@@ -280,7 +280,7 @@ carried as strings. Small, stated.
 **Nothing of the runtime's event shape, since L2** (#162 workstream 4). Until then `subscribe` handed
 out `RuntimeEvent` — open on purpose, the runtime's own fields carried verbatim — and the mapper that
 read those fields sat *above* the host. Now the host maps at delivery: a subscriber receives
-`ZenObservation`, the event shape and the mapper (`runtime-event.ts`, `map-events.ts`) are under
+`EnsoObservation`, the event shape and the mapper (`runtime-event.ts`, `map-events.ts`) are under
 `host/`, and the runtime's event types appear nowhere above it — not on the follow, not in the
 events route's tail (which records observation kinds), not in a fake (the fakes emit observations).
 The persistence-side half of L2 is on the storage page.
@@ -302,7 +302,7 @@ loop's typed events directly and retire the replicated wire shape), `extension-u
 The server, the registry, the routes, the follow, the browser and every test that drives the server
 over the fake do not change — that is what the fake proves today, and it is the whole point of the
 seam. The steer/follow-up exception this section used to carry is gone with #216: a runtime with no
-such distinction, or with one queue class or three, is now `ZenPromptAdmission`'s literals, the two
+such distinction, or with one queue class or three, is now `EnsoPromptAdmission`'s literals, the two
 host-side tables that map them, and whatever the page renders — not the wire schema, not the prompt
 route, not the browser's send. The rename itself cost 24 files (13 production, 11 test) plus five doc
 pages, measured over `packages/` and `scripts/`, SOURCE only — `dist-types/` carries a generated copy

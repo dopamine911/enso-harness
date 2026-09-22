@@ -30,8 +30,8 @@ test('every module is reachable: from the barrel, or from a subpath package.json
   // link time, before anything is shaken, so a node-only module ON the barrel breaks a
   // browser build outright — measured on #211, and `test/browser-bundle-gate.test.ts` is
   // the sensor. Two more are test-only: the recording sink (#178) is
-  // `@zen/core/log-recorder` and the observation-kinds oracle (#173) is
-  // `@zen/core/observation-kinds`, both from under `__tests__`, where the logging gate's
+  // `@enso/core/log-recorder` and the observation-kinds oracle (#173) is
+  // `@enso/core/observation-kinds`, both from under `__tests__`, where the logging gate's
   // three-file LogTape inventory does not look.
   const modules = readdirSync(join(import.meta.dir, '..'), { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.ts') && entry.name !== 'index.ts')
@@ -65,12 +65,12 @@ test('the schemas the rest of the repo depends on are actually exported', () => 
   for (const name of [
     'GuardPolicy',
     'DEFAULT_GUARD_POLICY',
-    'ZenToolResultDescriptor',
-    'ZenObservation',
+    'EnsoToolResultDescriptor',
+    'EnsoObservation',
     'ThreadRuntime',
     'RuntimeCommand',
     'PromptImageContent',
-    'ZenPromptAdmission',
+    'EnsoPromptAdmission',
   ]) {
     expect(core).toHaveProperty(name)
   }

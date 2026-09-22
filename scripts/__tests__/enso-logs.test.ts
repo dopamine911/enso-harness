@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import type { ZenLogLine } from '../../packages/core/src/index.ts'
-import { followReader, matches, parseArguments, UsageError } from '../zen-logs.ts'
+import type { EnsoLogLine } from '../../packages/core/src/index.ts'
+import { followReader, matches, parseArguments, UsageError } from '../enso-logs.ts'
 
 /**
  * The reader's own logic (#132, `bun run logs`): the flags, and what a line must be to print.
@@ -45,7 +45,7 @@ test('flags: defaults, every flag, and the local-day --date', () => {
   expect(parseArguments(['--since', '30s']).sinceMs).toBe(30_000)
   expect(parseArguments(['--since', '2h']).sinceMs).toBe(7_200_000)
   expect(parseArguments(['--since', '1d']).sinceMs).toBe(86_400_000)
-  expect(parseArguments(['--file', 'zen-bundle.md']).file).toBe('zen-bundle.md')
+  expect(parseArguments(['--file', 'enso-bundle.md']).file).toBe('enso-bundle.md')
 
   // The file is named by the local day, so the date is read as local noon — never a day off at a zone boundary.
   const dated = parseArguments(['--date', '2026-09-08']).date
@@ -61,11 +61,11 @@ test('a flag the reader cannot take is a UsageError naming the problem, never a 
   expect(() => parseArguments(['--file', 'b.md', '--follow'])).toThrow(/cannot be followed/)
 })
 
-const line = (overrides: Partial<ZenLogLine> = {}): ZenLogLine => ({
+const line = (overrides: Partial<EnsoLogLine> = {}): EnsoLogLine => ({
   '@timestamp': '2026-09-09T23:41:26.174Z',
   level: 'WARN',
   message: '{toolName} denied: {reason}',
-  logger: 'zen.extension.guards',
+  logger: 'enso.extension.guards',
   properties: { process: 'server', threadId: '6923e620-856a-4132-a9c8-1a2ff7d271f9', toolName: 'write' },
   ...overrides,
 })

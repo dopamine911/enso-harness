@@ -1,5 +1,5 @@
 {
-  "name": "zen-harness-foundation",
+  "name": "enso-foundation",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -24,9 +24,9 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "link:vendor": "bun scripts/link-vendor-packages.ts",
     "postinstall": "bun scripts/link-vendor-packages.ts",
-    "zen": "bun scripts/zen.ts",
+    "enso": "bun scripts/enso.ts",
     "dev": "bun scripts/dev.ts",
-    "logs": "bun scripts/zen-logs.ts",
+    "logs": "bun scripts/enso-logs.ts",
     "dev:server": "bun run --silent --cwd packages/web dev:server",
     "dev:web": "bun run --silent --cwd packages/web dev:web",
     "e2e": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep-invert @model",

@@ -1,5 +1,5 @@
+import { type EnsoDialogSpec, type EnsoInterruptedTail, type EnsoThreadHistory, ensoLogger } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
-import { type ZenDialogSpec, type ZenInterruptedTail, type ZenThreadHistory, zenLogger } from '@zen/core'
 import type { BrowserLogging } from './browser-logging.ts'
 import { createRecentChunksStore, type RecentChunksStore } from './custom-event-router.ts'
 import { createFollowConnection, type FollowConnection } from './follow-connection.ts'
@@ -67,7 +67,7 @@ export interface ThreadStores {
    * waits on the server, answerable from this thread after a reload. Also cleared by an
    * answer this page sends that the server takes or reports gone.
    */
-  readonly dialog: WritableStore<ZenPendingDialog | undefined>
+  readonly dialog: WritableStore<EnsoPendingDialog | undefined>
   /**
    * The follow ended under this page (#119): the server closed, restarted, or dropped the
    * connection, and nothing here reconnects — the thread's state on this page is as of that
@@ -88,9 +88,9 @@ export interface ThreadStores {
   readonly connection: FollowConnection
 }
 
-export interface ZenPendingDialog {
+export interface EnsoPendingDialog {
   readonly id: string
-  readonly dialog: ZenDialogSpec
+  readonly dialog: EnsoDialogSpec
 }
 
 /**
@@ -108,7 +108,7 @@ function createThreadStores(threadId: string, history: readonly UIMessage[], fet
     modeLines: createModeLines(notifications),
     recentChunks: createRecentChunksStore(),
     generation: createStore<number | undefined>(undefined),
-    dialog: createStore<ZenPendingDialog | undefined>(undefined),
+    dialog: createStore<EnsoPendingDialog | undefined>(undefined),
     disconnected: createStore(false),
     queue: createStore<readonly string[]>([]),
     connection: createFollowConnection({
@@ -124,7 +124,7 @@ function createThreadStores(threadId: string, history: readonly UIMessage[], fet
  * the head of the transcript's notices, never a toast, because the next prompt continues
  * from the torn tail and the user should know that before typing it.
  */
-const INTERRUPTED_TAIL_NOTICE: Record<ZenInterruptedTail, string> = {
+const INTERRUPTED_TAIL_NOTICE: Record<EnsoInterruptedTail, string> = {
   'unanswered-prompt':
     "This session's last prompt was never answered — its run was cut off before a reply. The next prompt continues from there.",
   'tool-call-without-result':
@@ -156,7 +156,7 @@ export const browserLogging: WritableStore<BrowserLogging | undefined> = createS
 )
 
 /** The page's live list, as the record reads it: a thread minted, adopted or dropped (#272). */
-const threadLog = zenLogger('browser', 'threads')
+const threadLog = ensoLogger('browser', 'threads')
 
 const threads = new Map<string, ThreadStores>()
 const summaries = new Map<string, ThreadSummary>()
@@ -288,7 +288,7 @@ export function mintThread(fetchImpl?: typeof fetch): ThreadStores {
  * JSON turns TanStack's `Date` into a string on the history route.
  *
  * Restore it at the browser boundary and reject rows that cannot be UI messages;
- * `ZenThreadHistory.messages` is intentionally unknown because core must not own TanStack's
+ * `EnsoThreadHistory.messages` is intentionally unknown because core must not own TanStack's
  * transport shape.
  */
 export function reviveHistoryMessages(messages: readonly unknown[]): UIMessage[] {
@@ -323,7 +323,7 @@ export function reviveHistoryMessages(messages: readonly unknown[]): UIMessage[]
  * Adopting a thread already on this page returns it — the rail cannot hold one twice — and
  * adopting one past the page's follow budget drops an idle thread to make room (#272).
  */
-export function adoptThread(history: ZenThreadHistory): ThreadStores {
+export function adoptThread(history: EnsoThreadHistory): ThreadStores {
   const existing = threads.get(history.threadId)
   if (existing !== undefined) return existing
   makeRoomForOneMore()
