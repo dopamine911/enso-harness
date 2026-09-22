@@ -12,6 +12,7 @@ import {
   ensoLogger,
   isWholeBase64,
   type PromptImageContent,
+  type ThreadRuntime,
   validateDialogAnswer,
 } from '@enso/core'
 import { Check, Errors } from 'typebox/value'
@@ -80,12 +81,38 @@ export type PromptOutcome =
   | { readonly status: 202; readonly receipt: EnsoPromptReceipt }
   | { readonly status: 400; readonly reason: string }
 
-/** Leading token of a slash input, without the slash. `/mode auto` -> `mode`. */
+/**
+ * Leading token of a slash input, without the slash. `/mode auto` -> `mode`.
+ *
+ * Leading whitespace is not part of the question: `" /login"` is `/login` (#337 review) — the
+ * body's emptiness check already trims, and a slash command that hid behind a space would walk
+ * past the refusal and reach the model as text, the exact no-op the refusal exists to prevent.
+ */
 function slashCommandName(prompt: string): string | undefined {
-  if (!prompt.startsWith('/')) return undefined
-  const name = prompt.slice(1).trimEnd().split(/\s/)[0]
+  const trimmed = prompt.trimStart()
+  if (!trimmed.startsWith('/')) return undefined
+  const name = trimmed.slice(1).trimEnd().split(/\s/)[0]
   return name === undefined || name.length === 0 ? undefined : name
 }
+
+/**
+ * Why a slash command cannot run here, or `undefined` when it can. Takes the command already
+ * parsed, so the one parse serves both this and the idle path's "acceptance is completion".
+ *
+ * ⚠ ASKED ON BOTH ADMISSION PATHS. The runtime treats a slash command it does not know as
+ * ORDINARY TEXT for the model, so the refusal is what stands between `/login` and a chat
+ * message that says "/login". It was asked only of an idle thread: a command sent while a run
+ * held the thread was queued straight into the runtime, and vanished — pi's TUI built-ins
+ * (`/login`, `/model`, `/compact`, …) are not extension commands and have no handler here.
+ */
+function unavailableCommand(runtime: ThreadRuntime, command: string): string | undefined {
+  const available = runtime.listCommands()
+  if (available.some((known) => known.name === command)) return undefined
+  return `/${command} is not available on this surface. Available here: ${
+    available.length === 0 ? 'none' : available.map((known) => `/${known.name}`).join(', ')
+  }`
+}
+
 /**
  * Write one frame, recording it into the thread's sent tail (#97) when the thread is live
  * — the one place every frame crosses to a browser, so the record and the wire agree.
@@ -209,10 +236,12 @@ export function readPromptBody(raw: string): PromptBody {
 /**
  * Fire a prompt and answer at admission.
  *
- * A BUSY thread (a run in flight, or a dialog the follow is showing) is not refused and
- * not acquired again: the message goes to the runtime with an admission (`enqueue` unless
- * the caller asked to `steer`), which is #75's decision. The run in flight keeps its lease;
- * its `settled` releases the thread once everything queued has run.
+ * A BUSY thread (a run in flight, or a dialog the follow is showing) is not acquired again:
+ * the message goes to the runtime with an admission (`enqueue` unless the caller asked to
+ * `steer`), which is #75's decision. The run in flight keeps its lease; its `settled`
+ * releases the thread once everything queued has run. The ONE refusal both paths share is a
+ * slash command this surface cannot run (`unavailableCommand`, #337): that is a 400 before
+ * anything is queued, busy or idle alike.
  *
  * An IDLE thread is taken; the prompt's own `settled` (or, for a slash command, its
  * acceptance — an extension command never settles) releases it through the feed. No HTTP
@@ -227,8 +256,11 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
     threads.announce(threadId, { kind: 'prompt-rejected', messageId, reason })
   }
 
+  const command = slashCommandName(body.message)
   const live = threads.peek(threadId)
   if (live?.busy === true) {
+    const unavailable = command === undefined ? undefined : unavailableCommand(live.hosted.runtime, command)
+    if (unavailable !== undefined) return { status: 400, reason: unavailable }
     live.hosted.runtime.prompt(
       {
         message: body.message,
@@ -241,18 +273,10 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
   }
 
   const lease = await threads.acquire(threadId)
-  const command = slashCommandName(body.message)
-  if (command !== undefined) {
-    const available = lease.runtime.listCommands()
-    if (!available.some((known) => known.name === command)) {
-      lease.release()
-      return {
-        status: 400,
-        reason: `/${command} is not available on this surface. Available here: ${
-          available.length === 0 ? 'none' : available.map((known) => `/${known.name}`).join(', ')
-        }`,
-      }
-    }
+  const unavailable = command === undefined ? undefined : unavailableCommand(lease.runtime, command)
+  if (unavailable !== undefined) {
+    lease.release()
+    return { status: 400, reason: unavailable }
   }
 
   // The run's end, observed the way a follower would: the thread's own `settled`.

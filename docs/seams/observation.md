@@ -143,7 +143,7 @@ the thread-runtime seam since L2, #162 workstream 4)
 runtime event in, one observation out, never `undefined` (header lines 25–28). Its second parameter is
 the delivery the host tagged (#96): `replayed` becomes `origin: "session-start"` on a ui request, `live`
 becomes `"run"` (lines 225–227). The one kind the server synthesises itself is `prompt-rejected`: the
-prompt route in `packages/web/src/server/follow.ts` announces it (line 219) when the runtime refuses
+prompt route in `packages/web/src/server/follow.ts` announces it (line 256) when the runtime refuses
 a prompt after its receipt went out. Both are grounded in the kinds table's "Produced by" column.
 
 **Minted once.** The registry, `packages/web/src/server/thread-registry.ts`, is the only place a `seq`
@@ -152,10 +152,10 @@ is assigned: `publishObservation` (line 330) increments the feed's counter, reco
 payload), then publishes. The feed subscribes the runtime once per live thread and routes every event
 through the mapper (lines 323–325); the prompt route's `announce` (line 504) enters the same counter.
 
-**Consumed by the follow route and the browser.** `followThread` (`server/follow.ts` line 126) writes
+**Consumed by the follow route and the browser.** `followThread` (`server/follow.ts` line 154) writes
 one frame per feed frame — `observation` with its `seq`, `status` with `live`/`busy`/`generation`
-(lines 134–141) — after a snapshot taken in the same tick as the subscription, exact as of `asOfSeq`
-(lines 117–120, 148–159). In the browser `packages/web/src/follow-connection.ts` checks every frame
+(lines 160–170) — after a snapshot taken in the same tick as the subscription, exact as of `asOfSeq`
+(lines 144–148, 176–187). In the browser `packages/web/src/follow-connection.ts` checks every frame
 against `EnsoFollowFrame` with a validator compiled at module load (line 497, compiled at 71), pushes
 the snapshot and status frames whole as chunks named by their type (lines 383–389), closes runs on
 `settled` (line 396) and matches `prompt-rejected` to the prompt it
@@ -163,7 +163,7 @@ queued (line 400). `packages/web/src/to-agui.ts` is the adapter proper: observat
 chunk, run in the page, never serialised or stored (header lines 5–34).
 
 **The resync rule.** Nothing is replayed by cursor. A reconnect opens a new follow and gets a new
-snapshot (`follow.ts` header lines 13–15; `server/follow.ts` lines 148–159); when the last follower
+snapshot (`follow.ts` header lines 13–15; `server/follow.ts` lines 176–187); when the last follower
 leaves, the registry forgets the feed and `seq` restarts with the next follower, snapshot-first
 (`thread-registry.ts` lines 515–519). `asOfSeq` is the watermark the snapshot is complete through.
 

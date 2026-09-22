@@ -751,6 +751,45 @@ test('an unknown slash command is a 400 at admission and releases the thread', a
   expect(await threadSummary(url, 't1')).toMatchObject({ busy: false })
 })
 
+// ⚠ THE BUSY PATH SKIPPED THE CHECK. A `/login` typed while a run held the thread was queued
+// straight into the runtime — which treats a slash command it does not know as ordinary text —
+// and nothing happened: no refusal, no record, no answer. Found live, the day #336 merged. The
+// refusal is the same on both paths, and the run in flight is untouched by it.
+test('⚠ an unknown slash command sent to a BUSY thread is the same 400 and queues nothing; a known one still queues', async () => {
+  let prompts = 0
+  const fake = fakeHost(['mode'], {
+    prompt: () => {
+      prompts += 1
+    },
+  })
+  const url = await startWith(fake)
+  const follow = await openFollow(url, 't1')
+  await follow.untilFrames(1)
+  expect((await prompt(url, 't1', 'first')).body).toMatchObject({ queued: false, generation: 1 })
+  await follow.untilFrames(3)
+  const refused = await fetch(`${url}/api/threads/t1/prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: '/login' }),
+  })
+  expect(refused.status).toBe(400)
+  expect(await refused.text()).toContain('/login is not available on this surface')
+  // A space in front is not a different question (#337 review): still refused, still nothing queued.
+  const spaced = await fetch(`${url}/api/threads/t1/prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: '  /login' }),
+  })
+  expect(spaced.status).toBe(400)
+  // Nothing reached the runtime for either, and the run it would have queued behind is untouched.
+  expect(prompts).toBe(1)
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: true, generation: 1 })
+  // …and the other half of the contract: a command this surface CAN run still queues.
+  expect((await prompt(url, 't1', '/mode plan')).body).toMatchObject({ queued: true, generation: 1 })
+  expect(prompts).toBe(2)
+  follow.close()
+})
+
 test('a whitespace-only message is a 400 before any lease or session exists', async () => {
   const fake = fakeHost()
   const url = await startWith(fake)
