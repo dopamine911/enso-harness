@@ -1,249 +1,293 @@
 # Enso
 
-A **pi package** that provides **two surfaces over one agent loop**. [pi](https://github.com/earendil-works/pi)
-owns the loop, the providers, sessions, and compaction; Enso adds guards, tools, and state as pi
-extensions, and presents them through a terminal launcher and a web application. Neither surface has its
-own brain — both are clients of the same package running against the same pi.
+**Enso makes it safe to let a coding agent loose on your machine.**
 
-The founding stance and end-state design live in [`docs/architecture.md`](docs/architecture.md); every
-contract is a page under [`docs/seams/`](docs/seams/README.md); the research behind the early decisions is
-[`docs/concepts/`](docs/concepts/). This README is the map of what is **built and running today**, and
-why each piece is shaped the way it is — the *how* lives at the code and on those pages, once.
+It is a package for [pi](https://github.com/earendil-works/pi), a small, excellent coding agent. pi
+runs the conversation: it talks to the model, calls tools, keeps sessions. Enso adds the part pi
+deliberately leaves out — a floor of rules about what the agent may actually *do* — plus a web app and
+a terminal launcher to work with.
 
-## Why this exists
+New here? Read this page, then [the architecture](docs/architecture.md). Everything else is linked
+from those two, and the whole set is browsable at
+**[the docs site](https://dopamine911.github.io/zen-harness-foundation/)**.
 
-pi is a deliberately minimal coding agent: a superb loop, 60+ providers, sessions, branching,
-compaction — and **no confinement at all**. Out of the box, an agent with repository read access and an
-unrestricted `bash` tool can read `~/.aws/credentials`, append to `~/.bashrc`, and post the repository
-anywhere, and nothing in pi distinguishes any of that from fetching a public document
-([`docs/concepts/pi-immediate-needs.md`](docs/concepts/pi-immediate-needs.md) catalogues the gaps,
-ranked). Enso is the layer that makes running agents on pi *survivable*: a guarded floor that is
-always on, an egress story that is a committed policy instead of an absence, and enough observability
-that what an agent did is auditable after the fact.
+---
 
-Two decisions shape everything else:
+## The problem
 
-- **pi owns the loop; there is no second agent.** Every temptation to build a competing loop — in the
-  web backend, in a worker, in the chat framework — is refused. Features are written once as pi
-  extensions and work in both surfaces, because they talk to pi's event and tool APIs, never to a UI.
-- **A package, never a fork.** A package cannot entangle; extensions compose onto pinned vendor
-  releases and can be replaced piecemeal. (The cautionary tale is oh-my-pi, surveyed in
-  `.inspiration/` — it forked pi, which is exactly why its features are hard to lift.)
+pi ships with an unrestricted `bash` tool and no confinement of any kind. That is a deliberate choice
+by its authors, and out of the box it means an agent can:
 
-A third fact colors the engineering style: **this repo is built and reviewed largely by agents**, in
-sessions with no shared memory. So conventions that would elsewhere live in tribal knowledge are
-enforced by tests (the gates), gaps are recorded as *pinned tests* rather than prose, and
-every landed change carries live receipts — a real run, not just a green suite.
+- read `~/.aws/credentials`, or your SSH keys, and put them in its own context;
+- append a line to `~/.bashrc` that runs next time you open a terminal;
+- `curl` your repository to any host on the internet.
+
+Nothing in pi distinguishes any of that from fetching a public document. For a tool you leave running
+while you make coffee, that is the whole ballgame.
+
+Enso is the layer that makes it survivable:
+
+| | |
+|---|---|
+| **A floor that is always on** | Every tool call passes a guard before it runs. Deny is final. |
+| **Egress you can point at** | Network clients are refused in `bash`; there is one sanctioned way out, with an allowlist you commit to the repo. |
+| **An audit trail** | One log, one line per event, redacted as it is written — so *what the agent did* is answerable afterwards. |
+
+What Enso is **not**: a sandbox. It is string analysis over commands, which closes specific,
+enumerable holes and says plainly where it stops. More on that under
+[Security, honestly](#security-honestly).
+
+---
+
+## Two rules that explain the rest of the design
+
+**1. pi owns the loop. There is no second agent.** Every temptation to build a competing loop — in the
+web backend, in a worker, in the chat UI — is refused. Features are written **once**, as pi
+extensions, and work in both the terminal and the browser, because they talk to pi's event and tool
+APIs and never to a user interface.
+
+**2. A package, never a fork.** Enso composes onto a pinned release of pi. A fork entangles: you
+inherit every upstream change and your own features get harder to lift out each month. (The
+cautionary tale is `oh-my-pi`, which forked — which is exactly why its features are hard to reuse.)
+
+There is also a third fact that shapes how the code is written: **this repository is built and
+reviewed largely by agents**, in sessions that share no memory. So the things that would normally live
+in a team's heads live in tests instead — the *gates* — and every landed change carries a real run as
+evidence, not just a green suite.
+
+---
 
 ## Quick start
 
 ```bash
-bun install            # postinstall links the vendor packages into the harness
-bun run Enso            # a VANILLA pi with only Enso loaded (isolated agent dir)
-bun run Enso -p "..."   # non-interactive print run (loads the print variant — see below)
-bun run dev            # both web surfaces: API server on :5179, app on :5178
-bun run check:all      # THE gate: biome → tsc → fallow → bun test → coverage floor
+bun install          # links the vendored pi packages into the harness
+bun run enso         # start pi in your terminal, with Enso loaded
+bun run dev          # the web app: API on :5179, app on :5178
+bun run check:all    # the gate — everything CI runs, in one command
+bun run logs         # read today's log, rendered
 ```
 
-`bun run Enso` launches pi with three isolation mechanisms, each closing a different hole:
-`PI_CODING_AGENT_DIR` points pi at `.enso/pi-agent` (a scratch config dir — none of your global
-packages, settings, keybindings, or credentials are visible), `--no-extensions` suppresses discovery
-(including this repo's own `.pi/settings.json`, which would otherwise load the package twice), and
-`--no-skills` (pi discovers skills from `~/.agents/skills/` too, which the agent dir does not
-redirect). The scratch dir has no credentials, so `/login` once inside it (or a
-[`pi-multi-account`](https://www.npmjs.com/package/pi-multi-account) slot) is how they get there.
-⚠ An exported `ANTHROPIC_API_KEY` does NOT reach pi: `#89`'s quarantine deletes every
-secret-shaped environment variable before the spawn, and says which on stderr (`Enso: secrets kept
-out of pi's environment`). Provider auth lives in pi's own `auth.json`, by design —
-[`packages/core/src/secrets.ts`](packages/core/src/secrets.ts) holds the rule, and
-[`docs/reference/env-and-config.md`](docs/reference/env-and-config.md) the environment it leaves.
+### What `bun run enso` actually does
+
+It starts **vanilla pi with only Enso loaded**, and isolates it three ways — each closing a different
+hole:
+
+| Mechanism | What it stops |
+|---|---|
+| `PI_CODING_AGENT_DIR=.enso/pi-agent` | Your global pi packages, settings and credentials are invisible to this run. |
+| `--no-extensions` | pi's own discovery, which would otherwise load this repo's package a second time. |
+| `--no-skills` | Skills discovered from `~/.agents/skills/`, which the agent-dir redirect does not cover. |
+
+⚠ **An exported `ANTHROPIC_API_KEY` does not reach pi.** Enso deletes every secret-shaped environment
+variable before spawning and tells you which on stderr. Provider credentials belong in pi's own
+`auth.json`, so run `/login` once inside the scratch agent dir. The rule lives in
+[`packages/core/src/secrets.ts`](packages/core/src/secrets.ts).
 
 ---
 
-## The guard suite (`packages/harness/extensions/guards/`)
+## How the pieces fit
 
-The always-on floor: one `tool_call` handler, **additive** by design — pi resolves *tools* first-wins,
-so a guard implemented as a tool override is only safe while it loads first, but event handlers all
-run and the first `block` is final, whatever the load order. What it enforces, in precedence order:
-the fail-closed policy floor (#4: tool names canonicalised, the policy checked against pi's live tool
-list, a mismatch denies *everything*); bash policy in two layers (#9: `cc-safety-net` as a pinned
-*library*, then the network egress deny); write confinement inside the workspace with persistence
-vectors refused (#21); the read gate by *exclusion* — every other tool carrying a `path` is a reader;
-read-before-write (#10) and stale-write detection (#11).
-
-Each of those is a paragraph in the extension's own header comment — the one statement kept at the
-code, with the incident that motivated it — and the contract, its fakes and its gate are
-[`docs/seams/guards.md`](docs/seams/guards.md). This README does not restate them.
-
-## The network egress deny
-
-A **bar, not a boundary**: string analysis that closes bounded, enumerable classes and says so. The
-denied clients (`curl`, `wget`, `nc`, `ssh`, …) are matched per shell segment at command position,
-with quoting resolved to the literal the shell would run, wrappers unwrapped, word-synthesis refused
-outright, and unparseable input escalated to a coarse scan. Its deny message points the model at the
-sanctioned path (`web_fetch`), and every stated non-coverage — `git` remotes, interpreters, cross-call
-indirection — is a pinned test, so it reads as a record and never as confinement. The match modes and
-the five rounds of adversarial hardening that shaped them (PR #55) are the header of
-`packages/harness/core/network-egress.ts`.
-
-## `web_fetch` and `web_search` (`packages/harness/extensions/`, #54, #63)
-
-The sanctioned web access that replaces what the egress deny took away. The design premise for
-`web_fetch`: the measured record (a 1,753-review survey, 99.2 % approvals) says human approval prompts
-cannot carry egress policy — a **committed allowlist that accretes from real denials** can. So the host
-allowlist lives in [`enso.config.json`](enso.config.json), **empty by default**, read once at session
-start, and the refusal message is the product: it names the file, shows the JSON to write, and says the
-change is a human's to make. Redirects are reported, never followed; every body arrives behind an
-untrusted-content banner; one stderr audit line per call, refusals included.
-
-`web_search` is provider-native search — the *current* model's own search API, billed to the identity
-the conversation uses — with a Tavily retrieval fallback armed solely by `TAVILY_API_KEY` being present
-(a key is a secret; secrets never enter the committed file). Outcomes are keyed on the wire's search
-activity, **never on source count**: an answer the model produced without searching is labelled as
-such and carries no banner, because it is not web content. Consumed from
-[pi-web-search](https://github.com/ttttmr/pi-web-search) (MIT), retyped to this repo's rules, behind
-one provider seam so a split into packages is mechanical.
-
-The gates, limits, wire facts (the OAuth identity line) and recorded non-coverage are the two
-extensions' headers and [`docs/seams/web-providers.md`](docs/seams/web-providers.md); every config
-field and environment variable is [`docs/reference/env-and-config.md`](docs/reference/env-and-config.md).
-
-## `enso.config.json` and the path helpers (`@enso/core`, #59)
-
-**One committed config file**, one section per consumer, TypeBox-validated with a loading contract every
-future section inherits: parse fails **closed** (`unreadable` is never "no policy"), and the schema is
-**strict on unknown keys** — a typo refuses loudly instead of configuring nothing. The config belongs to
-the Enso *install*: located from the harness's own tree, never from the session cwd, so a foreign
-checkout's `enso.config.json` cannot become this session's allowlist. `packages/core/src/paths.ts` is
-the one place that walks the filesystem for roots — realpath-first, because bun does not resolve
-`import.meta.url` through the print harness's symlink mirror — and an anchor test names any file that
-walks on its own. Fields and defaults: [`docs/reference/env-and-config.md`](docs/reference/env-and-config.md).
-
-## The print variant (#20)
-
-`picc-permission-modes` fails closed when it cannot prompt — every mutating tool denied, no escape
-hatch — so a `-p` run under the full package could chat and do nothing else. Non-interactive runs
-(explicit `-p`, or stdin that is not a TTY) therefore load a **print variant** materialized under
-`.enso/print-harness/`: the harness manifest minus that one extension, with every other package-root
-entry symlinked in place so relative imports keep resolving. Guards, web_fetch, web_search, skills, prompts and
-themes all still load — a print run has the harness's own floor, minus the interactive permission
-model that cannot exist without a human to ask. The mirror is rebuilt idempotently on every launch, so
-a moved repo heals and a renamed sibling does not leave a dead link pi would skip in silence.
-
-## The web surface (`packages/web/`)
-
-Bun's fullstack dev server end to end — no vite, no node. The backend hosts pi in-process (one runtime
-per thread, #69) and serves a TanStack AI chat client. Neither half has its own loop; the browser is a
-client of the same harness the TUI runs.
-
-**The wire is `EnsoObservation`, not AG-UI (#112).** pi's events become observations (`@enso/core`) and
-cross as a per-thread *follow* — one snapshot, then observations with a sequence number — while a
-prompt, a stop, a dialog answer and a mode change are each one unary POST whose effect arrives on the
-follow like any run's. The browser derives AG-UI in memory for TanStack's renderer; it is never on the
-wire or stored. Every route is [`docs/reference/routes.md`](docs/reference/routes.md); the nouns,
-lifecycles and invariants are `docs/architecture.md` → *The control plane*.
-
-What that buys, built and running: streaming chat with tool-call rendering over one structured
-payload; pi's blocking dialogs answered from the browser (#27, #112, #114) with no run parked for them
-— the question and its settling both cross on the follow, so a second tab or a reload gets the same
-card; a thread-stats bar (#45); mode changes as chat-adjacent lines; the URL names the thread (#142);
-images on a prompt (#68), stored in the session and rendered back from the snapshot.
-
-The dev entry (`bun run dev`) starts the API server first, then the web surface with an `/api` proxy —
-deliberately ordered, since the proxy does not retry a refused connection.
-
-## The log (#132)
-
-One file for the harness: `.enso/logs/enso-YYYY-MM-DD.jsonl`, every process appending, one JSON record
-per line, redacted by field name before it is written. Every record names what it knows —
-`threadId`, `generation`, `seq`, `toolCallId` — so one thread's story reads across layers. The browser
-logs to the same file (`process: browser`). The contract is [`docs/seams/logging.md`](docs/seams/logging.md);
-the variables are in [`docs/reference/env-and-config.md`](docs/reference/env-and-config.md). Levels are
-the knob:
-
-```sh
-ENSO_LOG_LEVEL=info    bun run dev   # default: the spine — runs, tool calls, verdicts, questions, failures
-ENSO_LOG_LEVEL=debug   bun run dev   # every observation, one compact line each
-ENSO_LOG_LEVEL="info,Enso.server.events=trace" bun run dev   # one subtree up
+```
+     you                                     the model
+      │                                          ▲
+      ▼                                          │
+ terminal (bun run enso)  ──┐            ┌──  pi's loop
+                            ├─►  pi  ◄───┤
+ browser (bun run dev)    ──┘            └──  Enso's extensions
+                                                  │
+                                    guards · web_fetch · web_search · logging
+                                                  │
+                                            .enso/  (state: logs, secrets, pi auth)
 ```
 
-Read it back rendered the way the terminal shows it live:
+Both surfaces are clients of the same pi running the same extensions. Nothing in the browser has its
+own agent loop.
+
+### The guard suite — the always-on floor
+
+One handler on pi's `tool_call` event. It is **additive**: pi resolves *tools* first-wins, so a guard
+written as a tool override is only safe while it loads first — but event handlers all run, and the
+first block is final regardless of load order. In precedence order it enforces:
+
+1. **A fail-closed policy floor** — tool names are canonicalised and checked against pi's live tool
+   list; a mismatch denies *everything* rather than guessing.
+2. **Bash policy**, in two layers: a pinned `cc-safety-net` library, then the network egress deny.
+3. **Write confinement** to the workspace, with persistence vectors (shell profiles, autostart) refused.
+4. **A read gate by exclusion** — every tool carrying a `path` is treated as a reader, so a new tool is
+   guarded on the day it appears rather than the day someone remembers it.
+5. **Read-before-write** and **stale-write** detection.
+
+Contract, fakes and gate: [`docs/seams/guards.md`](docs/seams/guards.md).
+
+### The network egress deny — a bar, not a boundary
+
+`curl`, `wget`, `nc`, `ssh` and friends are refused inside `bash`, matched per shell segment at
+command position, with quoting resolved to the literal the shell would actually run. The refusal
+points the model at the sanctioned path instead of just saying no.
+
+Everything it **cannot** catch — `git` remotes, interpreters, indirection across calls — is a test
+that says so out loud. That way the file reads as a record of coverage, never as a promise of
+confinement. See the header of `packages/harness/core/network-egress.ts`.
+
+### `web_fetch` and `web_search` — the sanctioned way out
+
+`web_fetch` reads a URL **only if its host is on an allowlist you committed** to
+[`enso.config.json`](enso.config.json). The list is empty by default. When a fetch is refused, the
+message names the file, shows the exact JSON to add, and says the change is a human's to make.
+
+Why an allowlist and not a prompt? Because the measured record says approval prompts do not carry
+policy: in a survey of 1,753 reviews, 99.2 % were approved. A prompt people always accept is not a
+control. An allowlist that grows from real denials is.
+
+`web_search` uses the *current model's own* search API, billed to the identity the conversation
+already uses, with a Tavily fallback that arms itself only if `TAVILY_API_KEY` is present — a key is a
+secret, and secrets never go in the committed file.
+
+Details: [`docs/seams/web-providers.md`](docs/seams/web-providers.md).
+
+### `enso.config.json` — one config file
+
+One committed file, one section per consumer, schema-validated, with a loading contract every future
+section inherits:
+
+- parsing fails **closed** — "unreadable" is never treated as "no policy";
+- unknown keys are **rejected** — a typo refuses loudly instead of silently configuring nothing;
+- it is found from Enso's own tree, never the directory you happen to be in, so another checkout's
+  config can never become this session's allowlist.
+
+### The print variant
+
+The permission-modes extension fails closed when it cannot ask a human — so a `-p` (non-interactive)
+run under the full package could chat and do nothing else. Enso therefore materialises a **print
+variant** under `.enso/print-harness/`: the same package minus that one extension, everything else
+symlinked into place. A print run keeps the guard floor; it loses only the interactive permission
+model, which cannot function with nobody to ask.
+
+### The web surface
+
+Bun's fullstack server end to end — no vite, no node. The backend hosts pi in-process (one runtime per
+thread) and serves a TanStack AI chat client.
+
+**The wire is `EnsoObservation`, not AG-UI.** pi's events become observations, and a browser tab
+*follows* a thread: one snapshot, then observations with sequence numbers. A prompt, a stop, a dialog
+answer and a mode change are each one POST whose effect comes back on the follow — so a second tab, or
+a reload, sees exactly the same thing. AG-UI is derived in the browser for the renderer; it is never
+on the wire and never stored.
+
+Working today: streaming chat with tool-call rendering, pi's blocking dialogs answered from the
+browser, a thread-stats bar, permission-mode changes as chat lines, the thread id in the URL, and
+image attachments. Routes: [`docs/reference/routes.md`](docs/reference/routes.md).
+
+### The log
+
+One file for everything: `.enso/logs/enso-YYYY-MM-DD.jsonl`. Every process appends to it, one JSON
+record per line, redacted by field name *before* it is written. Records carry `threadId`,
+`generation`, `seq` and `toolCallId`, so one thread's story can be read across layers. The browser
+logs to the same file.
 
 ```sh
-bun run logs                     # today, info and up
-bun run logs --follow            # keep printing as records land
-bun run logs --thread 6923e6     # one thread, by id or prefix
-bun run logs --level debug --since 10m
-bun run logs --json | jq …       # the matching lines raw
-bun run logs bundle [--thread ID] > Enso-bundle.md   # what a user hands over; reads back with --file
+ENSO_LOG_LEVEL=info  bun run dev    # default: runs, tool calls, verdicts, questions, failures
+ENSO_LOG_LEVEL=debug bun run dev    # every observation, one compact line each
+
+bun run logs                        # today, rendered as the terminal shows it live
+bun run logs --follow               # keep printing as records land
+bun run logs --thread 6923e6        # one thread, by id or prefix
+bun run logs --json | jq …          # the raw matching lines
+bun run logs bundle > enso-bundle.md
 ```
 
-**The bundle** is one markdown file — versions, each live thread's inspection, the day's records for
-the thread as JSONL, and a manifest of what was redacted (a value becomes `[REDACTED]`; the name stays,
-so the reader knows what is missing). Never uploaded anywhere: the user attaches it.
+A **bundle** is one markdown file — versions, each live thread's inspection, the day's records, and a
+manifest of what was redacted (values become `[REDACTED]`; names stay, so you know what is missing).
+Nothing is uploaded anywhere; you attach it yourself.
 
-## The vendored pi packages
+---
 
-Declared explicitly in `packages/harness/package.json` → `pi.extensions`, **guards before any vendor
-extension** — pi resolves *tools* first-wins, so a vendor extension must never get to register a tool
-name ahead of ours; a directory glob (which orders by filename) cannot promise that. Logging is
-declared first, ahead of the guards, for a different reason: it configures the sink at load, so it has
-to run before anything can write a record (`docs/flows/boot-and-launchers.md`, invariant 2). Riding
-along at exact-pinned versions:
-[`@ladbabynpm/picc-permission-modes`](https://www.npmjs.com/package/@ladbabynpm/picc-permission-modes)
-(Claude-Code-style permission modes — default / acceptEdits / plan / bypass — interactive runs only),
-[`pi-multi-account`](https://www.npmjs.com/package/pi-multi-account), and a theme. pi loads packages
-with separate module roots, so `scripts/link-vendor-packages.ts` (postinstall) symlinks every harness
-dependency into the harness's own `node_modules` — a missing one is a *silently skipped* resource, so
-`enso.ts` refuses to launch when it detects the gap.
+## How this repo proves it works
+
+`bun run check:all` is the only definition of green. The pre-commit hook and CI both run exactly it —
+**seven steps, stopping at the first failure**:
+
+| # | Step | What it does |
+|---|---|---|
+| 1 | `biome` | lint, format, import order, and this repo's naming rules |
+| 2 | `typecheck` | `tsc -b` across every package |
+| 3 | `dead-code` | unused files, exports and dependencies, against a committed baseline |
+| 4 | `test` | the full suite — **1016 tests** today |
+| 5 | `coverage` | line and function floors over *every* source file, not just imported ones |
+| 6 | `api-docs` | TypeDoc over the public contracts, with warnings fatal |
+| 7 | `site` | builds the docs site and crawls every built page for dead links |
+
+Twenty of those tests are **gates**: tests about the source tree rather than about behaviour — "no
+production `console.*`", "every documented export is grouped", "every diagram parses". Each one names
+its offenders rather than counting them, so the failure message is the fix.
+
+The practices underneath, which are worth copying:
+
+- **Mutation-test the important assertions.** Break the code, watch the test go red, revert. A test
+  that cannot fail proves nothing — and several in this repo were found to be exactly that.
+- **Name gaps as tests.** A known limitation is a passing test that documents it, not a comment.
+- **Docs are checked, not trusted.** Every page either quotes source and is diffed against it, or is
+  generated from source. A code fence that drifts fails the gate.
+- **Receipts, not claims.** A change lands with a real run attached.
+
+Full detail: [`docs/verification.md`](docs/verification.md) (how to read it) and
+[`docs/reference/verification-inventory.md`](docs/reference/verification-inventory.md) (every gate,
+generated).
+
+---
+
+## Security, honestly
+
+Enso's guards are **bars that accrete, not boundaries**.
+
+String analysis can close bounded, enumerable classes of trouble — a new quoting trick gets fixed
+cheaply — and every residual hole is a named test rather than a hope. What a bar fundamentally cannot
+do is out-parse a shell or survive an interpreter; that is sandboxing's job, and sandboxing is the
+agreed direction. A parser claiming confinement would read as coverage without being coverage, which
+is worse than nothing.
+
+So: run Enso when you want an agent that cannot casually wander off. Do not run it as though the
+machine were isolated. It isn't yet.
+
+---
+
+## Where to read next
+
+In the order that makes sense if you are new:
+
+1. [`docs/architecture.md`](docs/architecture.md) — the founding stance, the seams, the phases.
+2. [`docs/glossary.md`](docs/glossary.md) — one word, one meaning. Worth skimming *before* the code.
+3. [`docs/seams/`](docs/seams/README.md) — 11 pages, one per contract, quoting the source verbatim.
+4. [`docs/flows/`](docs/flows/README.md) — 8 pages: what happens, step by step, when you send a prompt
+   or a tool gets blocked.
+5. [`docs/reference/`](docs/reference/README.md) — 7 generated tables: routes, observations, exports,
+   environment, decisions, verification, flows.
+
+The same content, with search and the generated API reference, is at
+**[the docs site](https://dopamine911.github.io/zen-harness-foundation/)**.
+
+---
 
 ## Repo layout
 
-The tree, annotated, is `docs/architecture.md` → *Package structure* — and the docs gate checks that
-every path it names exists. `docs/` itself: `architecture.md` (why), `glossary.md` (what a word means),
-`seams/` (one page per contract, source verbatim), `reference/` (generated tables),
-`verification.md` (what green means), `concepts/` (the live design notes; `concepts/archive/` the
-pre-build ones).
+```
+packages/core/       schemas and shared contracts (@enso/core)
+packages/harness/    the pi package: extensions (guards, web_fetch, web_search, logging) + core helpers
+packages/web/        the web surface — Bun server hosting pi, plus the browser app
+scripts/             launchers, the gate, the docs generators   (all TypeScript, no exceptions)
+docs/                architecture, glossary, seams, flows, generated reference
+site/                the Starlight docs site — a projection of docs/, never a second copy
+test/                repo-wide gates
+```
 
-**`scripts/` is TypeScript** (#269, #308). Everything there is started by bun — every `package.json`
-script that runs one runs `bun scripts/<name>`, `postinstall` included, and the launchers' own
-shebang is `#!/usr/bin/env bun` — and bun loads `.ts` directly, so nothing under `scripts/` needs to
-be JavaScript and a new script is `.ts` with no decision to make. The six files that predated the
-rule moved with #308, and their JSDoc types (39 `@param`/`@template`/`@import`/`@returns` tags)
-became real ones, so the rule now has no exceptions to name. `scripts/tsconfig.json` no longer sets
-`allowJs`, which is what makes a seventh impossible rather than merely gated: a `.mjs` there is
-outside its `include` and is not type-checked at all. `test/scripts-extensions.test.ts` holds both
-directions — a non-`.ts` file under `scripts/` fails, and so does prose here that names one.
+State the agent and the tools use lives in `.enso/` (logs, secrets, pi's auth) and is gitignored.
 
-## How this repo verifies itself
-
-`bun run check:all` is the single source of "green" — the pre-commit hook and CI both run it: biome,
-tsc, fallow (dead code against a committed baseline and the architecture boundaries as zones, #163,
-#173), `bun test`, then a coverage floor over a **full denominator** — bun measures coverage only over
-files a test imported, so `test/coverage-manifest.test.ts` imports every library source file to close
-that hole. Every gate with its rule and allowlist, every ratchet's value, every test double and its
-consumers: [`docs/reference/verification-inventory.md`](docs/reference/verification-inventory.md);
-how to read it, and which proof a change needs: [`docs/verification.md`](docs/verification.md).
-
-The working practice beneath the gate: security-relevant assertions are **mutation-tested** (break the
-code, watch the test go red, revert — a test that cannot fail proves nothing); every landed change
-carries **live receipts**; known gaps are **pinned as tests that identify themselves as records**;
-offenders are **named, never counted**; and a doc either quotes source and is checked against it, or
-is generated from source and is diffed against it (`test/docs-gate.test.ts`).
-
-## Security posture, honestly stated
-
-Guards here are **bars that accrete, not boundaries**. String analysis closes bounded, enumerable
-classes — a new quoting trick gets fixed, cheaply — and every residual is a named test, not a hope.
-What a bar cannot do (out-parse a shell, survive an interpreter) is sandboxing's job, which is the
-agreed direction; a parser that claimed confinement would read as coverage and not be coverage. The
-review workflow is built for this: a fresh-eyes nitpicking reviewer against a broad-scope builder,
-where multiple "needs work" rounds on a security PR are the system working.
+---
 
 ## Where this is going
 
-The phases in [`docs/architecture.md`](docs/architecture.md): Phase 0 (the guard floor) is built and
-hardened; Phase 1–2 features are landing (web chat, dialogs, stats — with the context pane, editor,
-project/CI panes, memory and health still ahead); Phase 3 is the backfill, replacing vendored
-extensions with our own once the feature set is whole. Work is tracked in issues; the open set is the
-roadmap.
+Phase 0 — the guard floor — is built and hardened. Phases 1–2 are landing now: web chat, dialogs and
+stats are working; the context pane, editor, project/CI panes, memory and health are still ahead.
+Phase 3 is the backfill, replacing vendored extensions with our own once the feature set is whole.
+
+Work is tracked in issues; the open set is the roadmap.
