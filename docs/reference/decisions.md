@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 209.**
+**Decision headers: 210.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -141,6 +141,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/__tests__/follow-reader.ts` | `#231` | A follow as a test reads it: frames and keepalive comments as they arrive, awaited by count — never by a guessed delay. |
 | `packages/web/src/server/__tests__/follow.test.ts` | `#109`, `#112` | The wire, measured (#109's receipt, kept as the contract — #112). |
 | `packages/web/src/server/__tests__/logs-route.test.ts` | `#132` | `POST /api/logs` (#132 slice 3): the browser's batch into this process's logger, under the browser's own category, at its level, marked as the browser's — or a 4xx that is never a record of its own. |
+| `packages/web/src/server/__tests__/logs-stats-route.test.ts` | `#144`, `#336` | The stats route's own three facts (#144 slice 4, PR #336 review): WHICH file it folds is the clock's local day, a day nobody has written is an empty answer and not a failure, and a line that is not a record is counted rather than folded. |
 | `packages/web/src/server/__tests__/logs-tail-route.test.ts` | `#97`, `#144` | `GET /api/logs/tail` (#144 slice 2), over real HTTP: the day's file, filtered server-side, as frames the browser's schema takes — and NO record of its own, which is the rule the whole debug surface rests on (#144, #97). |
 | `packages/web/src/server/__tests__/observation-log.test.ts` | `#144` | The tier an observation lands at, and the one record that is not an observation at all: the run's time to first token (#144). |
 | `packages/web/src/server/__tests__/run-timing.test.ts` | `#144` | Time to first token, once per run (#144). |

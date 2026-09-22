@@ -743,9 +743,13 @@ export function openLogTail(options: {
     if (size > offset) {
       descriptor ??= openSync(file, 'r')
       const chunk = Buffer.alloc(size - offset)
-      readSync(descriptor, chunk, 0, chunk.length, offset)
-      offset = size
-      text = decode(chunk)
+      // `stat` then `read` are two calls: a file truncated between them answers fewer bytes
+      // than the size said, without an error. Advance by what was READ, never by what was
+      // promised, and decode only that — the next step's `size < offset` check then re-opens
+      // from the head rather than this one decoding a tail of zeros as a record (PR #336 review).
+      const read = readSync(descriptor, chunk, 0, chunk.length, offset)
+      offset += read
+      text = decode(chunk.subarray(0, read))
     }
     const lines: EnsoLogLine[] = []
     let matched = 0

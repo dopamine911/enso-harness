@@ -51,46 +51,76 @@ export type LogTailQuery =
   | { readonly filter: EnsoLogFilter; readonly from: number | undefined }
   | { readonly reason: string }
 
+/** A refusal, as every reader below spells one. */
+interface Refused {
+  readonly reason: string
+}
+
+/** A parameter's text when it was given, or `undefined` when absent or empty — the two cases the defaults cover. */
+function given(query: URLSearchParams, parameter: string): string | undefined {
+  const raw = query.get(parameter)
+  return raw === null || raw.length === 0 ? undefined : raw
+}
+
+function readLevel(query: URLSearchParams): number | Refused {
+  const level = given(query, 'level')
+  if (level === undefined) return ENSO_LOG_LEVEL_RANK.info ?? 2
+  return (
+    ENSO_LOG_LEVEL_RANK[level.toLowerCase()] ?? {
+      reason: `level must be one of ${Object.keys(ENSO_LOG_LEVEL_RANK).join(', ')}`,
+    }
+  )
+}
+
+/**
+ * The same check the bundle route makes, for the same reason: a prefix of a valid id is itself
+ * a valid id, and nothing shaped otherwise should reach a filter (#95).
+ */
+function readThread(query: URLSearchParams): string | undefined | Refused {
+  const thread = given(query, 'thread')
+  if (thread !== undefined && !isEnsoThreadId(thread))
+    return { reason: 'thread must be a thread id or a prefix of one' }
+  return thread
+}
+
+function readNotBefore(query: URLSearchParams, now: () => Date): number | Refused {
+  const since = given(query, 'since')
+  if (since === undefined) return 0
+  const window = parseLogSince(since)
+  if (window === undefined) return { reason: 'since wants a duration like 30s, 10m, 2h, 1d' }
+  return now().getTime() - window
+}
+
+function readFrom(query: URLSearchParams): number | undefined | Refused {
+  const from = given(query, 'from')
+  if (from === undefined) return undefined
+  const offset = Number(from)
+  return Number.isSafeInteger(offset) && offset >= 0 ? offset : { reason: 'from wants a byte offset' }
+}
+
+function isRefused(value: unknown): value is Refused {
+  return typeof value === 'object' && value !== null && 'reason' in value
+}
+
 /**
  * The query string as the filter the reader runs.
  *
  * Every parameter is optional and every bad one is REFUSED rather than defaulted: a page
  * that asked for `level=infp` and was quietly given `info` would show a filtered log while
  * claiming to show another, which is the one failure a debugging surface must not have. The
- * defaults apply only when the parameter is absent.
+ * defaults apply only when the parameter is absent. One reader per parameter, each answering
+ * its value or its refusal, so the parse reads as the list of questions it is.
  */
 export function parseLogTailQuery(query: URLSearchParams, now: () => Date): LogTailQuery {
-  const level = query.get('level')
-  let levelRank = ENSO_LOG_LEVEL_RANK.info ?? 2
-  if (level !== null && level.length > 0) {
-    const wanted = ENSO_LOG_LEVEL_RANK[level.toLowerCase()]
-    if (wanted === undefined) return { reason: `level must be one of ${Object.keys(ENSO_LOG_LEVEL_RANK).join(', ')}` }
-    levelRank = wanted
-  }
-  const threadParameter = query.get('thread')
-  const thread = threadParameter === null || threadParameter.length === 0 ? undefined : threadParameter
-  // The same check the bundle route makes, for the same reason: a prefix of a valid id is
-  // itself a valid id, and nothing shaped otherwise should reach a filter (#95).
-  if (thread !== undefined && !isEnsoThreadId(thread)) {
-    return { reason: 'thread must be a thread id or a prefix of one' }
-  }
-  const processParameter = query.get('process')
-  const processName = processParameter === null || processParameter.length === 0 ? undefined : processParameter
-  const since = query.get('since')
-  let notBefore = 0
-  if (since !== null && since.length > 0) {
-    const window = parseLogSince(since)
-    if (window === undefined) return { reason: 'since wants a duration like 30s, 10m, 2h, 1d' }
-    notBefore = now().getTime() - window
-  }
-  const fromParameter = query.get('from')
-  let from: number | undefined
-  if (fromParameter !== null && fromParameter.length > 0) {
-    const offset = Number(fromParameter)
-    if (!Number.isSafeInteger(offset) || offset < 0) return { reason: 'from wants a byte offset' }
-    from = offset
-  }
-  return { filter: { levelRank, thread, process: processName, notBefore }, from }
+  const levelRank = readLevel(query)
+  if (isRefused(levelRank)) return levelRank
+  const thread = readThread(query)
+  if (isRefused(thread)) return thread
+  const notBefore = readNotBefore(query, now)
+  if (isRefused(notBefore)) return notBefore
+  const from = readFrom(query)
+  if (isRefused(from)) return from
+  return { filter: { levelRank, thread, process: given(query, 'process'), notBefore }, from }
 }
 
 /**
