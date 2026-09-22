@@ -54,7 +54,7 @@ the site's navigation, theme and search instead of TypeDoc's own HTML shell.
 Publishing is separate and **manual**: `.github/workflows/docs-site.yml` runs on
 `workflow_dispatch`, builds the same two steps, and deploys to GitHub Pages only when the run is
 asked to (`deploy: true`); otherwise it uploads the built site as an artifact. Nothing publishes on
-a push, because gate 7 has already proved the build on every PR and a second one would buy only
+a push, because gate 8 has already proved the build on every PR and a second one would buy only
 Actions minutes. ⚠ The workflow takes the site's base path from the repository
 (`ENSO_SITE_BASE: /${{ github.event.repository.name }}` → `scripts/docs/site-base.ts`, the one
 reader Astro, the projector and the crawl all share). A project site is served from
@@ -68,8 +68,8 @@ restored afterwards, so a partial commit (`git add -p`) is gated on what CI will
 two exceptions are `git commit -a` and `git commit -- <path>`, where git hands the hook a
 temporary index; there it gates the working tree and says so on the first line of its output.
 CI adds independent jobs or advisory steps — secret
-scan, automated review, React Doctor, `fallow audit` over the changed files — but none replaces the
-eight-step gate. A green editor or a
+scan, automated review, `fallow audit` over the changed files — but none replaces the
+eight-step gate (react-doctor was one of them until #342 made it gate 4). A green editor or a
 single test is not repository green.
 
 `test/coverage-manifest.test.ts` closes Bun's denominator hole: Bun reports coverage only for files a

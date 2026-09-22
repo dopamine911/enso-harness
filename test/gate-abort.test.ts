@@ -90,6 +90,49 @@ test('⚠ docs/verification.md counts and numbers the gates the file actually ru
 })
 
 /**
+ * The free prose around the lists names gates by number too — "gate 7 builds the site", "it is
+ * gate 5 inside check:all" — and the pins above cannot see it: they match list rows. #342
+ * inserted a gate and three such sentences kept their old numbers in the two files the PR was
+ * renumbering (PR #345 review). So each mention is read as a sentence, and the sentence must
+ * name the gate it points at — by the gate's own name, or by a word only that gate's work uses.
+ */
+const GATE_PROSE_MARKS: Readonly<Record<string, RegExp>> = {
+  biome: /biome|lint/i,
+  typecheck: /typecheck|tsc/i,
+  'dead-code': /dead-code|fallow/i,
+  'react-doctor': /react-doctor/i,
+  test: /bun test|the suite/i,
+  coverage: /coverage/i,
+  'api-docs': /typedoc|api-docs/i,
+  site: /site|build|crawl/i,
+}
+
+test('⚠ every prose "gate N" names the gate it points at — the lists are pinned, the sentences were not (#342)', async () => {
+  const pages = ['docs/verification.md', 'README.md', 'scripts/gate.ts', join('.github', 'workflows', 'ci.yml')]
+  const misses: string[] = []
+  for (const page of pages) {
+    const source = await Bun.file(join(import.meta.dir, '..', page)).text()
+    for (const match of source.matchAll(/\bgate (\d+)\b/g)) {
+      const number = Number(match[1])
+      const gate = GATES[number - 1]
+      const at = match.index ?? 0
+      // The sentence: back to the previous full stop or blank line, forward to the next.
+      const start = Math.max(source.lastIndexOf('. ', at), source.lastIndexOf('\n\n', at)) + 1
+      const stop = source.indexOf('.', at + match[0].length)
+      const sentence = source
+        .slice(start, stop === -1 ? undefined : stop)
+        .replace(/\s+/g, ' ')
+        .trim()
+      const mark = gate === undefined ? undefined : GATE_PROSE_MARKS[gate.name]
+      if (gate === undefined) misses.push(`${page}: "${sentence}" — there is no gate ${number}`)
+      else if (mark === undefined) misses.push(`gate-abort: no prose mark for gate "${gate.name}"`)
+      else if (!mark.test(sentence)) misses.push(`${page}: "${sentence}" — gate ${number} is ${gate.name}`)
+    }
+  }
+  expect(misses).toEqual([])
+})
+
+/**
  * Builds a throwaway package whose `lint` gate runs `body`, then runs the real
  * `scripts/gate.ts` against it.
  */
