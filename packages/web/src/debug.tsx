@@ -5,14 +5,15 @@ import './styles/global.css'
 import { StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { configureBrowserLogging, pageLogLevel } from './browser-logging.ts'
-import { LogTailScreen } from './debug/log-tail-screen.tsx'
+import { DebugScreen } from './debug/debug-screen.tsx'
 
 /**
- * THE OBSERVATION ENTRY (#144 slice 2), deliberately thin: mount the log page, nothing else.
- * Everything importable lives in `debug/log-tail-screen.tsx` and `debug/log-tail-connection.ts`
- * so the coverage manifest can put them in the denominator — this file is excluded from the
- * import-everything discipline BY NAME, on the same contract `main.tsx` carries, and it is one
- * of the two modules allowed to touch the DOM at module scope.
+ * THE OBSERVATION ENTRY (#144 slices 2–3), deliberately thin: read the URL, mount the debug
+ * page, nothing else. Everything importable lives under `debug/` — `debug-screen.tsx` (the
+ * page by its URL), `log-tail-screen.tsx`, `thread-timeline-screen.tsx`, `log-row.tsx` and
+ * `log-tail-connection.ts` — so the coverage manifest can put them in the denominator: this
+ * file is excluded from the import-everything discipline BY NAME, on the same contract
+ * `main.tsx` carries, and it is one of the two modules allowed to touch the DOM at module scope.
  *
  * ⚠ A SEPARATE PAGE FROM THE CHAT SCREEN, on purpose. A debugging surface is observation: it
  * reads, it writes nothing, it makes no records, it offers no control. Sharing an entry with
@@ -42,6 +43,6 @@ globalWithRoot.__ensoDebugReactRoot ??= createRoot(rootElement)
 const reactRoot: Root = globalWithRoot.__ensoDebugReactRoot
 reactRoot.render(
   <StrictMode>
-    <LogTailScreen />
+    <DebugScreen search={window.location.search} />
   </StrictMode>,
 )

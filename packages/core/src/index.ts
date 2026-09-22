@@ -143,6 +143,7 @@ export {
   RuntimeCommand,
   ThreadRuntime,
 } from './thread-runtime.ts'
+export { type EnsoTimelineEntry, threadTimeline, timelineJoinKeys } from './thread-timeline.ts'
 export {
   ENSO_TOOL_RESULT_KEY,
   EnsoToolResultDescriptor,

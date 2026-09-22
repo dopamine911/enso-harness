@@ -163,8 +163,10 @@ test('⚠ a capped read reads as the last N of M records, and malformed lines ar
   await page.unmount()
 })
 
-// #142: a thread id on this page is a way into the thread it names, not a string to copy.
-test('⚠ a record’s thread id is a link to the chat page for that thread', async () => {
+// #142, and #144 slice 3: a thread id on this page is a way into the thread it names — its
+// TIMELINE on this same page, not the chat page. Within the observation surface an id drills
+// down; leaving the surface is the timeline header's one deliberate link.
+test('⚠ a record’s thread id is a link to that thread’s timeline on this page', async () => {
   const page = await mountTail()
   const properties = { threadId: 'thread-01ABCDEF', generation: 4, process: 'server', attempt: { tries: 2 } }
   await page.send(backlogOf([line('run {generation} acquired', properties)]))
@@ -173,7 +175,9 @@ test('⚠ a record’s thread id is a link to the chat page for that thread', as
     if (found === null) throw new Error('expected the thread id to be a link')
     return found
   })
-  expect(link.getAttribute('href')).toBe('/?thread=thread-01ABCDEF')
+  const href = link.getAttribute('href') ?? ''
+  expect(href.startsWith('/debug')).toBe(true)
+  expect(href).toContain('?thread=thread-01ABCDEF')
   // The template's own placeholder is rendered with its value in place and is NOT repeated in
   // the tail; a property the message never named is, JSON and all.
   expect(page.container.textContent).toContain('run 4 acquired')

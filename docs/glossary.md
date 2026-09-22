@@ -233,6 +233,10 @@ observation; stop, answer and prompt are Control, and never share a surface with
 - **provenance** — how an event reached its subscriber: `live`, `held` (buffered until the first
   subscriber), `replayed`, `dropped`, `sent`. Tagged at the source, never inferred; the axis an ordering
   bug lives on.
+- **timeline** — one thread's two tails and its log records, as one list ordered by each row's own
+  stamp: `threadTimeline` in `@enso/core`, shown at `debug.html?thread=<id>` (#144). The join keys
+  are uneven — a log record carries `generation`, `seq`, `toolCallId`; a tail event only its own
+  `sequence` — and the page says so rather than guessing.
 - **origin** — where a dialog request was raised: during thread start (`session-start`, before any run)
   or inside a run. Tagged at the source.
 - **inspection** — one live thread in full, as a read: its ids, busy and generation, the branch, the
@@ -281,11 +285,12 @@ harness did). The first is canonical and never rewritten by us; the second is th
   day's records fenced as JSONL, the redaction manifest, and the browser's ring. What a user hands over.
 - **about** — the process's own facts: versions, checkout, knobs, pid. The same block heads the bundle
   and answers `GET /api/about`.
-- **tail** — the day's file read forward as it grows, filtered by the reader's question: what
+- **log tail** — the day's file read forward as it grows, filtered by the reader's question: what
   `bun run logs --follow` prints and what `GET /api/logs/tail` streams to the debug page, over one
   filter (`logLineMatches`) and one decoder. A **backlog** frame is the file as it stands and
   replaces the reader's view; a **records** frame is what has landed since. Never a second store:
-  the tail reads the same file the bundle exports (#144).
+  the log tail reads the same file the bundle exports (#144). Not the event *tail* under
+  Observation, which is a thread's recent events kept in memory.
 - **config** — `enso.config.json` at the repo root, committed, read once at extension load, failing
   closed (#59). Secrets are not config: `.enso/secrets.env`, read per call, quarantined.
 - **run provenance** — what a fork point will additionally record — project revision, context

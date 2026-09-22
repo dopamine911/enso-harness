@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 200.**
+**Decision headers: 205.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -20,6 +20,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/__tests__/picc-corpus-contract.test.ts` | `#7`, `#20`, `#222` | The picc CORPUS CONTRACT TEST (#222), the shape of `cc-safety-net-contract.test.ts` and `agent-loop-contract.test.ts`: read the installed vendor, assert the shape we copied. |
 | `packages/core/src/__tests__/secrets.test.ts` | `#89` | #89: secrets stay out of the environment the model's tools inherit. |
 | `packages/core/src/__tests__/thread-inspection.test.ts` | `#86`, `#100` | The row formats are shared by the `?debug` drawer and `enso-thread.ts` (PR #100 review: one definition, after the #86 pair had drifted). |
+| `packages/core/src/__tests__/thread-timeline.test.ts` | `#144` | One thread, one ordering (#144 slice 3): the two tails and the log, by time, with the arrival order kept inside a tie and an unreadable stamp kept rather than dropped. |
 | `packages/core/src/config.ts` | `#59` | Enso's ONE committed config file (#59): `enso.config.json` at the repository root. |
 | `packages/core/src/dialog.ts` | `#27`, `#112` | pi's blocking extension dialogs, as data (#27, #112). |
 | `packages/core/src/follow.ts` | `#112` | The server↔browser wire (#112): a thread's feed, as the follow route serves it. |
@@ -33,6 +34,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/secrets.ts` | `#7`, `#89`, `#98` | Secrets stay OUT of the environment the model's tools inherit (#89). |
 | `packages/core/src/thread-inspection.ts` | `#86` | What a live thread's session ACTUALLY contains, as the server reports it (#86). |
 | `packages/core/src/thread-runtime.ts` | `#69`, `#162`, `#165` | The thread runtime: the contract the host implements for one thread, and the shapes that cross it (`docs/glossary.md` → Thread, Control). |
+| `packages/core/src/thread-timeline.ts` | `#132`, `#144` | One thread, one ordering (#144 slice 3). |
 | `packages/core/src/tool-result.ts` | `#16`, `#17`, `#18` | The tool-result payload contract (#18), as a TypeBox schema. |
 | `packages/core/src/transcript.ts` | `#162` | The transcript (#162 workstream 4, leak L2's persistence side): a thread's branch, root to leaf, as entries of OURS. |
 | `packages/core/src/web-fetch.ts` | `#9`, `#54`, `#59` | The web_fetch tool's shapes and policy constants (#54). |
@@ -104,8 +106,11 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/custom-event-router.ts` | `#103` | The one chunk that is neither an observation nor a frame: the follow ended without this page leaving it (#103 receipt) — the server closed, restarted, or dropped the connection. |
 | `packages/web/src/debug/__tests__/log-tail-connection.test.ts` | `#144` | The log tail client (#144 slice 2), driven over a scripted body: SSE text the test writes, read as the page reads it. |
 | `packages/web/src/debug/__tests__/log-tail-screen.test.tsx` | `#118` | ⚠ Loaded by a DYNAMIC import, and that is the one place this repo needs one: react-dom/client probes the DOM when its module evaluates (`"oninput" in document`), and bun evaluates node_modules imports before a local side-effect import can register happy-dom — statically imported it sits in an IE-era polyfill mode where `onChange` never fires. |
+| `packages/web/src/debug/debug-screen.tsx` | `#144` | The debug page, by its URL (#144 slice 3): `debug.html` is the day's tail, and `debug.html?thread=<id>` is that thread's timeline. |
+| `packages/web/src/debug/log-row.tsx` | `#144` | One log record, one rendering (#144 slice 3) — shared by the day's tail and a thread's timeline, so a record reads IDENTICALLY on both pages and a reader who follows a thread id from the tail into the timeline finds the same row, not a second dialect of it. |
 | `packages/web/src/debug/log-tail-connection.ts` | `#144` | The browser's connection to `GET /api/logs/tail` (#144 slice 2): the day's file, filtered by the server, arriving as SSE frames. |
 | `packages/web/src/debug/log-tail-screen.tsx` | `#144` | The debug log page (#144 slice 2): the day's records, as the file has them, in a browser. |
+| `packages/web/src/debug/thread-timeline-screen.tsx` | `#144` | One thread's timeline (#144 slice 3): what the host emitted, what the server sent, and what was logged, as ONE list ordered by time — on the debug page at `debug.html?thread=<id>`. |
 | `packages/web/src/fixture-conversation.ts` | `#27`, `#31` | The styling dev loop (#31): a scripted conversation streamed through the REAL `useChat` pipeline as local AG-UI events — no server, no pi. |
 | `packages/web/src/follow-connection.ts` | `#112`, `#272`, `#274` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |
 | `packages/web/src/host/__tests__/agent-host.test.ts` | `#27`, `#69` | The in-process host against the REAL harness package (#69) — every extension the manifest names loads, and inline probe extensions observe what the host does. |
