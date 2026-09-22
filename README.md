@@ -188,6 +188,7 @@ logs to the same file.
 ```sh
 ENSO_LOG_LEVEL=info  bun run dev    # default: runs, tool calls, verdicts, questions, failures
 ENSO_LOG_LEVEL=debug bun run dev    # every observation, one compact line each
+ENSO_LOG_LEVEL="info,enso.server.events=trace" bun run dev   # one subsystem up, the rest at info
 
 bun run logs                        # today, rendered as the terminal shows it live
 bun run logs --follow               # keep printing as records land
@@ -212,7 +213,7 @@ Nothing is uploaded anywhere; you attach it yourself.
 | 1 | `biome` | lint, format, import order, and this repo's naming rules |
 | 2 | `typecheck` | `tsc -b` across every package |
 | 3 | `dead-code` | unused files, exports and dependencies, against a committed baseline |
-| 4 | `test` | the full suite — **1016 tests** today |
+| 4 | `test` | the whole suite |
 | 5 | `coverage` | line and function floors over *every* source file, not just imported ones |
 | 6 | `api-docs` | TypeDoc over the public contracts, with warnings fatal |
 | 7 | `site` | builds the docs site and crawls every built page for dead links |

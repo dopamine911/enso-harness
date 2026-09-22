@@ -122,10 +122,10 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
       'Matches a named TypeBox declaration in any export spelling, across line breaks, whole-file — so a commented-out declaration is reported and a schema built by a helper rather than declared is not.',
   },
   'test/gate-abort.test.ts': {
-    roots: ['scripts/gate.ts'],
+    roots: ['scripts/gate.ts', 'docs/verification.md', 'README.md'],
     exceptions: [],
     limitation:
-      'Recognizes the known fatal stderr banners; arbitrary tool corruption with different output is outside the matcher.',
+      'Recognizes the known fatal stderr banners; arbitrary tool corruption with different output is outside the matcher. It also holds the two pages that state what the gate IS — the step lists and the gate census — against `GATES` and the generated inventory, but says nothing about the prose around them.',
   },
   'test/glossary-gate.test.ts': {
     rootArrays: ['SEARCHED_ROOTS'],
