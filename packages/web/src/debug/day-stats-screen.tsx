@@ -15,7 +15,7 @@ import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.tsx'
 import { Button } from '../components/ui/button.tsx'
 import { Spinner } from '../components/ui/spinner.tsx'
 import { timeOfDay } from './log-row.tsx'
-import { timelineUrlForThread } from './log-tail-screen.tsx'
+import { bundleUrl, timelineUrlForThread } from './log-tail-screen.tsx'
 
 /**
  * The day's stats and the processes view (#144 slice 4): what today cost, per thread and per
@@ -473,6 +473,9 @@ export function DayStatsScreen({ fetch: pageFetch }: { fetch?: FetchLike } = {})
         <TerminalActions>
           <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href="/debug">
             the day's log
+          </a>
+          <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href={bundleUrl()} download>
+            download the day's bundle
           </a>
           <TerminalStatus>
             <Spinner />

@@ -133,6 +133,16 @@ function describeView(view: LogTailView, settled: boolean): string {
 }
 
 /**
+ * The bundle's URL — the day's, or one thread's — for the hand-over row of #144's table. A
+ * plain link to `GET /api/logs/bundle`: the browser saves the attachment, nothing is POSTed,
+ * and the route writes no record. The bundle and this page read the same file, so what a
+ * reader hands over is what they were looking at.
+ */
+export function bundleUrl(threadId?: string): string {
+  return threadId === undefined ? '/api/logs/bundle' : `/api/logs/bundle?thread=${encodeURIComponent(threadId)}`
+}
+
+/**
  * This page's own URL for a thread's timeline (#144 slice 3). Built by `thread-url.ts`'s
  * helper rather than by concatenating `?thread=`, so the file that OWNS the query parameter
  * is the only one that spells it — and an empty search is passed on purpose: the tail's own
@@ -325,6 +335,9 @@ export function LogTailScreen({ fetch: pageFetch }: { fetch?: FetchLike } = {}):
         <TerminalActions>
           <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href="/debug?stats">
             the day's stats
+          </a>
+          <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href={bundleUrl()} download>
+            download the day's bundle
           </a>
           <TerminalStatus>
             <Spinner />
