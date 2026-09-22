@@ -52,7 +52,9 @@ export {
 } from './follow.ts'
 export {
   DEFAULT_GUARD_POLICY,
+  ENSO_GUARD_RULES,
   ENSO_PERSISTENCE_WRITE_DIRECTORIES,
+  type EnsoGuardRule,
   GuardPolicy,
   PERSISTENCE_WRITE_BASENAMES,
   PERSISTENCE_WRITE_DIRECTORIES,
@@ -81,6 +83,24 @@ export {
   isLogBundle,
   redactionManifest,
 } from './log-bundle.ts'
+export {
+  dayStats,
+  ENSO_LOG_EVENTS,
+  EnsoDayStats,
+  EnsoDurationSummary,
+} from './log-stats.ts'
+export {
+  ENSO_LOG_LEVEL_NAMES,
+  ENSO_LOG_LEVEL_RANK,
+  type EnsoLogFilter,
+  type EnsoLogLevelName,
+  EnsoLogTailFrame,
+  LOG_TAIL_MAX_RECORDS,
+  logLineMatches,
+  logLineMessageParts,
+  logLineText,
+  parseLogSince,
+} from './log-tail.ts'
 export {
   EnsoCustomEntry,
   EnsoDialogOutcome,
@@ -132,6 +152,7 @@ export {
   RuntimeCommand,
   ThreadRuntime,
 } from './thread-runtime.ts'
+export { type EnsoTimelineEntry, threadTimeline, timelineJoinKeys } from './thread-timeline.ts'
 export {
   ENSO_TOOL_RESULT_KEY,
   EnsoToolResultDescriptor,

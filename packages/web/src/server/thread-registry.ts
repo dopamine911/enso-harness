@@ -22,7 +22,13 @@
  * ⓘ Named non-coverage: the map is unbounded, and a client that omits `threadId` gets a
  * fresh session per request that lives for the idle window. Loopback-only, dev-only server.
  */
-import { type EnsoObservation, type EnsoThreadInspection, ensoLogger, type ThreadRuntime } from '@enso/core'
+import {
+  ENSO_LOG_EVENTS,
+  type EnsoObservation,
+  type EnsoThreadInspection,
+  ensoLogger,
+  type ThreadRuntime,
+} from '@enso/core'
 import type { HostedThread } from '../host/agent-host.ts'
 import { createEventTail, type EventTail } from '../host/event-tail.ts'
 import { recordObservation } from './observation-log.ts'
@@ -395,7 +401,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     thread.busy = false
     thread.lastActivityAt = Date.now()
     publishStatus(threadId, thread)
-    log.info('run {generation} released; idle timer {idleTimeoutMs} ms', {
+    log.info(ENSO_LOG_EVENTS.runReleased, {
       threadId,
       generation: thread.generation,
       idleTimeoutMs,
@@ -492,7 +498,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
       generations.set(threadId, thread.generation)
       thread.lastActivityAt = Date.now()
       publishStatus(threadId, thread)
-      log.info('run {generation} acquired', { threadId, generation: thread.generation })
+      log.info(ENSO_LOG_EVENTS.runAcquired, { threadId, generation: thread.generation })
       return leaseOf(threadId, thread)
     },
     announce(threadId: string, observation: EnsoObservation): void {

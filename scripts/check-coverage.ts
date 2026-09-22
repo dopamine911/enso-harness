@@ -58,8 +58,11 @@ export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89
  * module is not a red, while both partial reports measured in #234 (2 and 20 records) are.
  * `test/coverage-manifest.test.ts` pins this between the denominator it walks and 80% of it, so
  * it can neither overshoot into a spurious red nor rot into vacuity as the tree grows.
+ *
+ * Re-measured 2026-09-22 (#144 slices 2–3, 95 owned sources after the debug page's seven
+ * modules): the manifest's 80% bound asked for 76, so the same ~10%-under convention gives 85.
  */
-export const MINIMUM_REPORTED_FILES = 75
+export const MINIMUM_REPORTED_FILES = 85
 
 const LCOV_PATH = join(findRepoRoot(import.meta.url), 'coverage', 'lcov.info')
 

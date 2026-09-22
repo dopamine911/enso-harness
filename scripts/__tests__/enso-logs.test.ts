@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { EnsoLogLine } from '../../packages/core/src/index.ts'
-import { followReader, matches, parseArguments, UsageError } from '../enso-logs.ts'
+import { matches, parseArguments, UsageError } from '../enso-logs.ts'
 
 /**
  * The reader's own logic (#132, `bun run logs`): the flags, and what a line must be to print.
@@ -89,23 +89,4 @@ test('a line prints when it clears the level, is after --since, and matches the 
   expect(matches(parseArguments(['--thread', '6923']), line({ properties: { process: 'server' } }), 0)).toBe(false)
   const { properties: _dropped, ...withoutProperties } = line()
   expect(matches(parseArguments([]), withoutProperties, 0)).toBe(true)
-})
-
-/**
- * `--follow` reads a growing file by byte range, so a poll can cut anything in half. Both
- * halves are silent when they go wrong: a split character became `U+FFFD` in the printed
- * record (reproduced live with a 🚀 straddling a poll), and a split line would print a
- * fragment as an unparseable record.
- */
-test('⚠ following a file: a character and a line split across polls each survive the boundary', () => {
-  const read = followReader()
-  const rocket = Buffer.from('🚀', 'utf8')
-  expect(rocket.length).toBe(4)
-
-  // A character cut in half: nothing is printable yet, and no replacement char is invented.
-  expect(read(Buffer.concat([Buffer.from('launch '), rocket.subarray(0, 2)]))).toBe('')
-  // The rest of the character arrives with the rest of the line.
-  expect(read(Buffer.concat([rocket.subarray(2), Buffer.from(' done\ntail')]))).toBe('launch 🚀 done')
-  // …and the fragment after the last newline waits rather than printing half a record.
-  expect(read(Buffer.from(' end\n'))).toBe('tail end')
 })

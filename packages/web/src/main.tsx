@@ -27,7 +27,7 @@ browserLogging.set(
   }),
 )
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') browserLogging.get()?.shipper.flush(true)
+  if (document.visibilityState === 'hidden') browserLogging.get()?.shipper?.flush(true)
 })
 
 const rootElement = document.getElementById('root')

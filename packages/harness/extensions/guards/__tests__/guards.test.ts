@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from '
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createCodingTools, createPowerShellTool, createReadOnlyTools } from '@earendil-works/pi-coding-agent'
+import { ENSO_GUARD_RULES } from '@enso/core'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { createGuards, GUARD_POLICY_TOOL_NAMES, type GuardDependencies } from '../index.ts'
@@ -94,6 +95,24 @@ test('⚠ every verdict is a record: a denial at warn with the tool, the path an
     properties: { toolCallId: 't', toolName: 'write', path: 'src/a.ts' },
   })
   logs.assertNotLogged({ level: 'warning' })
+})
+
+// ⚠ THE WORD A DAY'S STATS COUNT BY (#144 slice 4). The reason is prose for the model; a count
+// over prose is a regex over sentences that were written to be read. `rule` is the closed
+// vocabulary (`ENSO_GUARD_RULES`) beside it — and it stays OURS: pi is handed `{ block, reason }`
+// and nothing else, so nothing of this harness rides on the runtime's published contract.
+test('⚠ a denial record names its rule from the closed vocabulary; pi receives block and reason alone', () => {
+  const verdict = call('write', { path: '/etc/passwd' })
+  expect(verdict).toEqual({ block: true, reason: expect.stringContaining('outside the workspace') })
+  logs.assertLogged({
+    level: 'warning',
+    rawMessage: '{toolName} denied: {reason}',
+    properties: (properties: Readonly<Record<string, unknown>>) =>
+      properties.rule === 'write-confinement' && ENSO_GUARD_RULES.includes(properties.rule),
+  })
+  logs.clear()
+  call('read', { path: join(cwd, '.aws', 'credentials') })
+  logs.assertLogged({ level: 'warning', properties: { rule: 'secret-read' } })
 })
 
 test('registers a tool_call handler', () => expect(typeof loadGuard()).toBe('function'))

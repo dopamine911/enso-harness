@@ -1,0 +1,24 @@
+<!doctype html>
+<!-- The observation surface (#144 slice 2), a SEPARATE page from the control surface: the
+     chat page prompts, aborts and answers dialogs; this one only reads the log. Same shell,
+     same one stylesheet, its own entry. -->
+<!-- class="dark" selects Kanagawa Wave, this app's default theme — the same default
+     kanagawa.nvim ships. Removing the class yields Kanagawa Lotus (light). The shadcn
+     variables for both live in src/styles/global.css. -->
+<html lang="en" class="dark">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="color-scheme" content="dark" />
+		<!-- A real relative path, not "/favicon.png": bun's HTML bundler resolves every
+		     <link> href against this file and hard-fails on an absolute URL it cannot map
+		     to a source file (#36). It bundles and content-hashes the icon; the copy in
+		     public/ still serves the browsers that request /favicon.png out of habit. -->
+		<link rel="icon" type="image/png" href="./public/favicon.png" />
+		<title>Enso · debug</title>
+	</head>
+	<body>
+		<div id="root"></div>
+		<script type="module" src="/src/debug.tsx"></script>
+	</body>
+</html>

@@ -1,4 +1,4 @@
-import { type EnsoLogProperties, type EnsoObservation, ensoLogger } from '@enso/core'
+import { ENSO_LOG_EVENTS, type EnsoLogProperties, type EnsoObservation, ensoLogger } from '@enso/core'
 import { forgetRun, takeFirstDeltaMs } from './run-timing.ts'
 
 /**
@@ -126,8 +126,8 @@ export function recordObservation(
     kind: observation.kind,
     ...compactOf(observation),
   })
-  if (isSpine(observation)) events.info('{kind}', compact)
-  else events.debug('{kind}', compact)
+  if (isSpine(observation)) events.info(ENSO_LOG_EVENTS.observation, compact)
+  else events.debug(ENSO_LOG_EVENTS.observation, compact)
   events.trace('{kind} payload', () => ({ threadId, generation, seq, kind: observation.kind, observation }))
   // Time to first token, at `info` (#144): the deltas themselves are `debug`, so without this
   // one line the latency a person actually asks about is only visible to whoever was already
@@ -135,7 +135,7 @@ export function recordObservation(
   if (observation.kind === 'text-delta' || observation.kind === 'thinking-delta') {
     const firstDeltaMs = takeFirstDeltaMs(threadId, generation)
     if (firstDeltaMs !== undefined) {
-      events.info('run {generation} first delta after {firstDeltaMs}ms', {
+      events.info(ENSO_LOG_EVENTS.runFirstDelta, {
         threadId,
         generation,
         seq,
@@ -144,4 +144,23 @@ export function recordObservation(
       })
     }
   } else if (observation.kind === 'settled') forgetRun(threadId, generation)
+  // Spend, at `info` (#144 slice 4): `message-end` is not the spine — most are boundaries
+  // with nothing on them — but the ones pi attributes usage to are the whole of "what did
+  // today cost", and at `debug` that answer was only in the file for whoever was already
+  // turned up. One record per attributed message, the same unit pi's `/stats` sums, so a
+  // day's cost derived here matches pi's — never the per-delta usage, which is cumulative.
+  if (observation.kind === 'message-end' && observation.usage !== undefined) {
+    events.info(ENSO_LOG_EVENTS.messageUsage, {
+      threadId,
+      generation,
+      seq,
+      role: observation.role,
+      ...(observation.model === undefined ? {} : { model: observation.model }),
+      input: observation.usage.input,
+      output: observation.usage.output,
+      cacheRead: observation.usage.cacheRead,
+      cacheWrite: observation.usage.cacheWrite,
+      ...(observation.usage.totalCost === undefined ? {} : { totalCost: observation.usage.totalCost }),
+    })
+  }
 }

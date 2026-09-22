@@ -49,8 +49,9 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { closeSync, fchmodSync, fstatSync, mkdirSync, openSync } from 'node:fs'
+import { closeSync, fchmodSync, fstatSync, mkdirSync, openSync, readSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+
 import { getTimeRotatingFileSink } from '@logtape/file'
 import {
   compareLogLevel,
@@ -70,6 +71,8 @@ import { getPrettyFormatter } from '@logtape/pretty'
 import { redactByField } from '@logtape/redaction'
 import { Check } from 'typebox/value'
 import { ENSO_LOG_ROOT, ENSO_REDACT_FIELDS, ENSO_REDACTED, ENSO_REDACTED_VALUE, EnsoLogLine } from './log.ts'
+import { ENSO_LOG_EVENTS } from './log-stats.ts'
+import { type EnsoLogFilter, LOG_TAIL_MAX_RECORDS, logLineMatches, logLineMessageParts } from './log-tail.ts'
 import { ensoLogsDir } from './paths.ts'
 
 /**
@@ -489,7 +492,7 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
   // the debug lines says why — and WHO is writing (#144). A shared file makes "the
   // processes" mean "who has written to today's file"; with a pid and a start time,
   // liveness is inferable from the last write without any process asking to be counted.
-  getLogger([ENSO_LOG_ROOT, 'log']).info('logging configured: file {file}, console {console}, overrides {overrides}', {
+  getLogger([ENSO_LOG_ROOT, 'log']).info(ENSO_LOG_EVENTS.loggingConfigured, {
     file: levels.file,
     console: levels.console ?? 'off',
     overrides: levels.overrides.map((override) => `${override.category.join('.')}=${override.level}`),
@@ -528,7 +531,6 @@ export function installLoggingShutdown(dispose: () => Promise<void>): void {
 
 // ── Reading the file back (#132: `bun run logs`, and the bundle's reader) ─────────────────
 
-const PLACEHOLDER = /\{([^{}]+)\}/g
 const LEVEL_OF_LINE: Readonly<Record<EnsoLogLine['level'], LogLevel>> = {
   TRACE: 'trace',
   DEBUG: 'debug',
@@ -557,34 +559,21 @@ export function parseEnsoLogLine(raw: string): EnsoLogLine | string {
 }
 
 /**
- * A line of the file, back into the record it was — the message re-joined from its
- * template and properties (`"run {generation} acquired"` + `{ generation: 1 }` →
- * `["run ", 1, " acquired"]`, LogTape's alternating text/value shape), so any LogTape
- * formatter renders it exactly as the console did when it was written.
- *
- * A placeholder with no property renders as itself, so a template that outgrew its record still
- * reads.
+ * A line of the file, back into the record it was: the category split, the level and the
+ * instant read back, and the message re-joined from its template and properties by
+ * `logLineMessageParts` — the grammar the browser shares — so any LogTape formatter renders
+ * it exactly as the console did when it was written.
  *
  * @group Logging
  */
 export function logRecordOf(line: EnsoLogLine): LogRecord {
-  const properties = line.properties ?? {}
-  const template = line.message ?? ''
-  const message: unknown[] = []
-  let cursor = 0
-  for (const match of template.matchAll(PLACEHOLDER)) {
-    const name = match[1] ?? ''
-    message.push(template.slice(cursor, match.index), name in properties ? properties[name] : match[0])
-    cursor = match.index + match[0].length
-  }
-  message.push(template.slice(cursor))
   return {
     category: line.logger.split('.'),
     level: LEVEL_OF_LINE[line.level],
     timestamp: Date.parse(line['@timestamp']),
-    message,
-    rawMessage: template,
-    properties,
+    message: logLineMessageParts(line),
+    rawMessage: line.message ?? '',
+    properties: line.properties ?? {},
   }
 }
 
@@ -607,4 +596,231 @@ export function ensoLogLineRenderer(
     colors: options.colors ?? true,
   })
   return (line: EnsoLogLine): string => pretty(logRecordOf(line))
+}
+
+// ── Following the file (#144 slice 2: `--follow`, and the tail route) ─────────────────────
+
+/**
+ * The decoder a poll-based reader needs. Two different things straddle a poll boundary and
+ * both are the same carry: BYTES — a multibyte character cut in half by the byte range
+ * decodes to U+FFFD unless the incomplete sequence waits for the next chunk (a 🚀 split
+ * across a poll printed `launch ??? done`) — and LINES, where a partial last record waits for
+ * its newline.
+ *
+ * ⚠ The carry is BYTES, not text, and the split is at the last `0x0A` (PR #336 review). A
+ * newline never occurs inside a multibyte UTF-8 sequence, so cutting at one never cuts a
+ * character — which is why one carry serves both cases — and, more to the point, the carry's
+ * LENGTH is then a byte count a reader can subtract from its file offset. The tail publishes
+ * `offset − carried()` as the byte a reconnect resumes from; publishing the raw read offset
+ * put a reconnecting page mid-record, and the record's tail parsed as malformed and was lost.
+ *
+ * `decode` returns the complete lines in this chunk, newline-separated and without a trailing
+ * one, or the empty string when nothing completed.
+ *
+ * @group Logging
+ */
+export interface LogChunkDecoder {
+  readonly decode: (chunk: Buffer) => string
+  /** Bytes held back — the partial line after the last newline seen. */
+  readonly carried: () => number
+}
+
+/** @group Logging */
+export function logChunkDecoder(): LogChunkDecoder {
+  let carry: Buffer = Buffer.alloc(0)
+  return {
+    decode: (chunk: Buffer): string => {
+      const pending = carry.length === 0 ? chunk : Buffer.concat([carry, chunk])
+      const lastNewline = pending.lastIndexOf(0x0a)
+      if (lastNewline === -1) {
+        carry = pending
+        return ''
+      }
+      // A COPY, not a view (PR #336 review, round two): `pending` is the read buffer, and on
+      // the backlog read that buffer is the whole day. A view onto its last hundred bytes
+      // pinned the whole allocation for as long as no newline arrived — on an idle log, for
+      // the life of the connection, per tab. The carry is the bytes after the last newline,
+      // so the copy is tiny by construction.
+      carry = Buffer.from(pending.subarray(lastNewline + 1))
+      return pending.subarray(0, lastNewline).toString('utf8')
+    },
+    carried: (): number => carry.length,
+  }
+}
+
+/**
+ * What one step of a tail found.
+ *
+ * @group Logging
+ */
+export interface EnsoLogTailStep {
+  /** `backlog` — this is the file's whole view; `records` — these landed since the last step. */
+  readonly type: 'backlog' | 'records'
+  /** The local day the file is named for: a change is the midnight rotation. */
+  readonly day: string
+  /** The byte the next step continues from, and what a reconnecting client passes as `?from=`. */
+  readonly offset: number
+  /** The matching records, oldest first, capped to the newest `maxRecords`. */
+  readonly lines: readonly EnsoLogLine[]
+  /** How many matched BEFORE the cap — `matched > lines.length` is "the last N of M". */
+  readonly matched: number
+  /** Lines that were not records at all. A count, not the text: enough to send a reader to the file. */
+  readonly malformed: number
+}
+
+/**
+ * An open tail: one `step` per poll, and the `close` that releases the descriptor.
+ *
+ * ⚠ `close` is not optional housekeeping. One descriptor is held for the life of the tail so
+ * a poll is a `statSync` and a `readSync` rather than an open per tick; a caller that drops
+ * the handle instead of closing it leaks one descriptor per connection, which on a page the
+ * operator leaves open and reloads is the kind of leak that surfaces as `EMFILE` hours later.
+ *
+ * @group Logging
+ */
+export interface EnsoLogTail {
+  readonly step: () => EnsoLogTailStep
+  readonly close: () => void
+}
+
+/**
+ * Open a tail over the day's file; the returned step reads whatever has appeared since the
+ * last call, filters it, and caps it.
+ *
+ * ⚠ `type` is not a flag anyone sets: A STEP THAT BEGAN AT BYTE 0 IS THE FILE'S WHOLE VIEW,
+ * and any other step is an append. That one rule covers the first step with no `from`, the
+ * local-midnight rotation onto a new filename, a file truncated in place, and — with one check
+ * the rule alone did not give (PR #336 review) — a file REPLACED under the same name: `stat` is
+ * by path and `read` is by descriptor, so an unlink-and-recreate that grew past the old offset
+ * read zero bytes from the old inode forever. The inode is compared on every step, and a
+ * change is a restart from the head.
+ *
+ * ⚠ TWO SHAPES ARE NOT COVERED, and are stated rather than claimed (PR #336 review, round
+ * two). A file truncated and regrown past the old offset WITHIN ONE POLL — the `> file` or
+ * `cp` shape — keeps its inode and its size, so nothing here fires and the read starts
+ * mid-content of the rewritten file, which the reader sees as one malformed line and the
+ * records before it missing. And a `from` carries the day it belongs to but not the inode, so
+ * a reconnect after an unlink-and-recreate resumes at a byte of the OLD file applied to the
+ * new one. Closing either needs the token to describe the file's content, not its position;
+ * until then, `bun run logs` reads the day whole and is the reader that cannot be fooled.
+ *
+ * ⚠ ONE `stat`, never `exists` then `stat`: two calls are a window, and a file removed inside
+ * it (the 14-day prune, an `rm`) made the second throw from a timer with nothing above it.
+ *
+ * ⚠ The CLI's `--follow` starts at the END of the file (it has already printed the day) and
+ * this starts at its HEAD, because a page that opens with nothing on it is not a log viewer.
+ * That is the `from` parameter, not a second reader.
+ *
+ * The first step therefore reads the whole day into memory once, which is what
+ * `GET /api/logs/bundle` already does for the same file; the cap bounds what is handed on,
+ * not what is read.
+ *
+ * @group Logging
+ */
+export function openLogTail(options: {
+  readonly logsDir: string
+  readonly filter: EnsoLogFilter
+  /** Defaults to `LOG_TAIL_MAX_RECORDS`. */
+  readonly maxRecords?: number
+  /**
+   * Resume here instead of the day's head — the offset a previous frame carried, and the day
+   * that offset is a position in. The first step compares that day to the file it resolves
+   * and drops the offset on a mismatch: the route validated the day against one `now()`, this
+   * picks the file with another, and a midnight in between is the head of a day skipped.
+   */
+  readonly from?: { readonly offset: number; readonly day: string }
+  /** The clock the day's filename is computed from; a test moves it across midnight. */
+  readonly now?: () => Date
+}): EnsoLogTail {
+  const maxRecords = options.maxRecords ?? LOG_TAIL_MAX_RECORDS
+  const now = options.now ?? ((): Date => new Date())
+  let filename = ''
+  let descriptor: number | undefined
+  let inode: number | undefined
+  let offset = 0
+  let decoder = logChunkDecoder()
+  const close = (): void => {
+    if (descriptor !== undefined) closeSync(descriptor)
+    descriptor = undefined
+    inode = undefined
+  }
+  /** Back to the head of whatever file is there next: descriptor, offset and carry all dropped. */
+  const restart = (): void => {
+    close()
+    offset = 0
+    decoder = logChunkDecoder()
+  }
+  const step = (): EnsoLogTailStep => {
+    const today = ensoLogFilename(now())
+    if (today !== filename) {
+      if (filename === '') {
+        // The first call: the caller's `from` is honoured only for the file it names.
+        const day = today.slice('enso-'.length, -'.jsonl'.length)
+        if (options.from !== undefined && options.from.day === day) offset = options.from.offset
+      } else restart() // a rotation starts the new day at its head
+      filename = today
+    }
+    const day = filename.slice('enso-'.length, -'.jsonl'.length)
+    const file = join(options.logsDir, filename)
+    const stat = statSync(file, { throwIfNoEntry: false })
+    if (stat === undefined) {
+      // No process has written today yet, or the file was removed under us. Either way the
+      // next step re-opens from the head — with an empty carry, so a partial line read just
+      // before the removal is not prepended to the new file's first record.
+      restart()
+      return { type: 'backlog', day, offset: 0, lines: [], matched: 0, malformed: 0 }
+    }
+    // Truncated in place, or replaced by a different file under the same name: the offset
+    // names a byte the descriptor cannot read, or the descriptor is the old inode.
+    if (stat.size < offset || (inode !== undefined && inode !== stat.ino)) restart()
+    const startedAt = offset
+    let text = ''
+    if (stat.size > offset) {
+      if (descriptor === undefined) {
+        descriptor = openSync(file, 'r')
+        inode = fstatSync(descriptor).ino
+      }
+      const chunk = Buffer.alloc(stat.size - offset)
+      // `stat` then `read` are two calls: a file truncated between them answers fewer bytes
+      // than the size said, without an error. Advance by what was READ, never by what was
+      // promised, and decode only that.
+      const read = readSync(descriptor, chunk, 0, chunk.length, offset)
+      offset += read
+      text = decoder.decode(chunk.subarray(0, read))
+    }
+    const found = selectRecords(text, options.filter)
+    return {
+      type: startedAt === 0 ? 'backlog' : 'records',
+      day,
+      // The byte a reconnect resumes from: after the last COMPLETE line, not after the last
+      // read. The carry is this tail's own state and a new tail does not have it.
+      offset: offset - decoder.carried(),
+      lines: found.lines.slice(-maxRecords),
+      matched: found.matched,
+      malformed: found.malformed,
+    }
+  }
+  return { step, close }
+}
+
+/** The records in a run of complete lines that answer the filter, and how many lines were not records. */
+function selectRecords(
+  text: string,
+  filter: EnsoLogFilter,
+): { readonly lines: EnsoLogLine[]; readonly matched: number; readonly malformed: number } {
+  const lines: EnsoLogLine[] = []
+  let matched = 0
+  let malformed = 0
+  for (const raw of text.split('\n')) {
+    if (raw.length === 0) continue
+    const parsed = parseEnsoLogLine(raw)
+    if (typeof parsed === 'string') {
+      malformed += 1
+      continue
+    }
+    if (!logLineMatches(filter, parsed)) continue
+    matched += 1
+    lines.push(parsed)
+  }
+  return { lines, matched, malformed }
 }

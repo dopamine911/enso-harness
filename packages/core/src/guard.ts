@@ -32,6 +32,48 @@ export const GuardPolicy = Type.Object({
 export type GuardPolicy = Static<typeof GuardPolicy>
 
 /**
+ * The rules a denial can name, one per refusal site in the guard (#144 slice 4).
+ *
+ * A denial's `reason` is prose for the model — it names the path, the construct, the way
+ * out — and prose is not something a day's stats can count by. `rule` is the closed word the
+ * record carries beside it, so "denials by rule" is a count over a vocabulary rather than a
+ * regex over sentences that were written to be read, not matched. Declared here, not in the
+ * extension, because the reader that counts them is `@enso/core`'s and must not import the
+ * guard to learn its words.
+ *
+ * @group Guards
+ */
+export const ENSO_GUARD_RULES = [
+  /** #4's fail-closed floor: the policy names a tool pi does not have, so everything is refused. */
+  'policy-mismatch',
+  /** cc-safety-net's verdict on a bash command — destructive, or secret access through the shell. */
+  'cc-safety-net',
+  /** An ad-hoc network client at command position, or a construct the deny cannot see through (#9, #57). */
+  'network-egress',
+  /** An environment listing or a secret-shaped expansion (#89). */
+  'environment-dump',
+  /** A credential path named in a shell command (#204). */
+  'secret-path',
+  /** A write that resolves outside the workspace roots. */
+  'write-confinement',
+  /** A write into the harness's own protected internals. */
+  'protected-internals',
+  /** A write to a shell-init, git, editor or agent-config path that would execute later (#21). */
+  'persistence-write',
+  /** A write to a path that matches a credential pattern. */
+  'secret-write',
+  /** A mutation of a file that changed on disk since the session last read it (#11). */
+  'stale-write',
+  /** A whole-file write to an existing file the session has never read (#10). */
+  'read-before-write',
+  /** A read of a path that matches a credential pattern, by any tool carrying a `path`. */
+  'secret-read',
+] as const
+
+/** @group Guards */
+export type EnsoGuardRule = (typeof ENSO_GUARD_RULES)[number]
+
+/**
  * Defaults.
  *
  * Deliberately conservative on reads of credential material and on writes outside the workspace

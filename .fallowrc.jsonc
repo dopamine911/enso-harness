@@ -158,7 +158,13 @@
         "allow": ["core", "harness-core", "harness-extensions", "host", "server", "browser", "scripts"]
       }
     ],
-    "coverage": { "requireAllFiles": true, "allowUnmatched": ["packages/web/index.html"] },
+    // Both HTML entries: an `.html` is the bundler's entry, not a module in any zone. The chat
+    // page and the debug page (#144 slice 2) are the two, and naming each keeps a third from
+    // arriving unremarked.
+    "coverage": {
+      "requireAllFiles": true,
+      "allowUnmatched": ["packages/web/index.html", "packages/web/debug.html"]
+    },
     // The storage seam (`no-duplicate-paths`): one file constructs the session manager.
     "calls": {
       "forbidden": [

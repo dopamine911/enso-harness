@@ -23,30 +23,24 @@
 
 import { existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { StringDecoder } from 'node:string_decoder'
-import { bundleRecordsText, type EnsoLogLine, isLogBundle } from '../packages/core/src/index.ts'
+import {
+  bundleRecordsText,
+  ENSO_LOG_LEVEL_RANK,
+  type EnsoLogFilter,
+  type EnsoLogLine,
+  isLogBundle,
+  logLineMatches,
+  parseLogSince,
+} from '../packages/core/src/index.ts'
 import {
   ensoLogFilename,
   ensoLogLineRenderer,
-  logRecordOf,
+  logChunkDecoder,
   logsDirFrom,
   parseEnsoLogLine,
 } from '../packages/core/src/log-process.ts'
 import { findRepoRoot } from '../packages/core/src/paths.ts'
 
-const LEVEL_RANK: Readonly<Record<string, number>> = {
-  trace: 0,
-  debug: 1,
-  info: 2,
-  warning: 3,
-  warn: 3,
-  error: 4,
-  fatal: 5,
-}
-const SINCE = /^(\d+)(s|m|h|d)$/
-/** `--since` units: the suffix at index N is worth `UNIT_MS[N]` milliseconds. */
-const UNIT_SUFFIXES = ['s', 'm', 'h', 'd'] as const
-const UNIT_MS = [1000, 60_000, 3_600_000, 86_400_000] as const
 const FOLLOW_POLL_MS = 250
 
 export interface Query {
@@ -83,7 +77,7 @@ export function parseArguments(argv: readonly string[]): Query {
   let follow = false
   let json = false
   let color = false
-  let level = LEVEL_RANK.info ?? 2
+  let level = ENSO_LOG_LEVEL_RANK.info ?? 2
   let thread: string | undefined
   let processName: string | undefined
   let sinceMs: number | undefined
@@ -104,7 +98,7 @@ export function parseArguments(argv: readonly string[]): Query {
         break
       case '--level': {
         const wanted = value().toLowerCase()
-        level = LEVEL_RANK[wanted] ?? usage(`${wanted} is not a level`)
+        level = ENSO_LOG_LEVEL_RANK[wanted] ?? usage(`${wanted} is not a level`)
         flagIndex += 1
         break
       }
@@ -117,9 +111,7 @@ export function parseArguments(argv: readonly string[]): Query {
         flagIndex += 1
         break
       case '--since': {
-        const match = SINCE.exec(value())
-        if (match === null) usage(`--since wants a duration like 30s, 10m, 2h, 1d`)
-        sinceMs = Number(match[1]) * (UNIT_MS[UNIT_SUFFIXES.indexOf(match[2] as 's' | 'm' | 'h' | 'd')] ?? 60_000)
+        sinceMs = parseLogSince(value()) ?? usage(`--since wants a duration like 30s, 10m, 2h, 1d`)
         flagIndex += 1
         break
       }
@@ -142,14 +134,15 @@ export function parseArguments(argv: readonly string[]): Query {
   return { date, follow, json, color, level, thread, process: processName, sinceMs, file }
 }
 
+/** The flags as the one filter `logLineMatches` reads — the tail route builds the same shape from its query. */
 export function matches(query: Query, line: EnsoLogLine, notBefore: number): boolean {
-  const record = logRecordOf(line)
-  if ((LEVEL_RANK[record.level] ?? 0) < query.level) return false
-  if (record.timestamp < notBefore) return false
-  const properties = line.properties ?? {}
-  if (query.thread !== undefined && !String(properties.threadId ?? '').startsWith(query.thread)) return false
-  if (query.process !== undefined && properties.process !== query.process) return false
-  return true
+  const filter: EnsoLogFilter = {
+    levelRank: query.level,
+    thread: query.thread,
+    process: query.process,
+    notBefore,
+  }
+  return logLineMatches(filter, line)
 }
 
 /** Print every matching line in `text`; a line that is not a record is said, not skipped silently. */
@@ -173,43 +166,18 @@ async function untilExists(file: string): Promise<void> {
   while (!existsSync(file)) await new Promise((resolve) => setTimeout(resolve, FOLLOW_POLL_MS))
 }
 
-/**
- * The reader `--follow` polls with. Two different things straddle a poll boundary and each
- * needs its own carry, which is why this is one function and not two lines inside the timer:
- * BYTES — a multibyte character cut in half by the byte range decodes to U+FFFD unless the
- * decoder holds the incomplete sequence for the next chunk (a 🚀 split across a poll printed
- * `launch ??? done`) — and LINES, where a partial last record waits for its newline.
- *
- * Returns the complete lines in this chunk, newline-separated and without a trailing one, or
- * the empty string when the chunk ended mid-line. Exported for its test.
- */
-export function followReader(): (chunk: Buffer) => string {
-  const decoder = new StringDecoder('utf8')
-  let carry = ''
-  return (chunk: Buffer): string => {
-    const text = carry + decoder.write(chunk)
-    const lastNewline = text.lastIndexOf('\n')
-    if (lastNewline === -1) {
-      carry = text
-      return ''
-    }
-    carry = text.slice(lastNewline + 1)
-    return text.slice(0, lastNewline)
-  }
-}
-
 function follow(query: Query, render: (line: EnsoLogLine) => string, file: string): void {
   // Poll from where the first read ended; one descriptor for the life of the process.
   let offset = statSync(file).size
   const descriptor = openSync(file, 'r')
-  const read = followReader()
+  const decoder = logChunkDecoder()
   setInterval(() => {
     const size = statSync(file).size
     if (size <= offset) return
     const chunk = Buffer.alloc(size - offset)
     readSync(descriptor, chunk, 0, chunk.length, offset)
     offset = size
-    const lines = read(chunk)
+    const lines = decoder.decode(chunk)
     if (lines.length > 0) print(query, render, lines, 0)
   }, FOLLOW_POLL_MS)
 }

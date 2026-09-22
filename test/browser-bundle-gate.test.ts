@@ -16,19 +16,27 @@ import { REPOSITORY_ROOT } from './gate-support.ts'
  * through the barrel, a new subpath, or a browser file importing the wrong thing.
  */
 
-const WEB_ENTRY = join(REPOSITORY_ROOT, 'packages/web/src/main.tsx')
+/**
+ * BOTH entries, because the zone is the graph and not one file (#144 slice 2). The debug page
+ * is a second entry with its own imports — it reaches `@enso/core` for the tail's frame and
+ * filter vocabulary — so a `node:`-only module could enter the browser through it while
+ * `main.tsx` stayed clean, and the sensor would say nothing.
+ */
+const WEB_ENTRIES = ['packages/web/src/main.tsx', 'packages/web/src/debug.tsx'] as const
 
-test('⚠ the web surface bundles for the browser target: no node:-only module is reachable from the browser zone (#211)', async () => {
-  const result = await Bun.build({
-    entrypoints: [WEB_ENTRY],
-    target: 'browser',
-    // No `outdir`: the build is the check, and its artifacts stay in memory.
-    // The dev server's Tailwind plugin owns `.css`; here a stylesheet is text the build may ignore.
-    loader: { '.css': 'text' },
+for (const entry of WEB_ENTRIES) {
+  test(`⚠ ${entry} bundles for the browser target: no node:-only module is reachable from the browser zone (#211, #144)`, async () => {
+    const result = await Bun.build({
+      entrypoints: [join(REPOSITORY_ROOT, entry)],
+      target: 'browser',
+      // No `outdir`: the build is the check, and its artifacts stay in memory.
+      // The dev server's Tailwind plugin owns `.css`; here a stylesheet is text the build may ignore.
+      loader: { '.css': 'text' },
+    })
+    const messages = result.logs.filter((log) => log.level === 'error').map((log) => log.message)
+    expect(messages).toEqual([])
+    expect(result.success).toBe(true)
+    // Something was bundled — a wrong entry path would "succeed" with nothing.
+    expect(result.outputs.length).toBeGreaterThan(0)
   })
-  const messages = result.logs.filter((log) => log.level === 'error').map((log) => log.message)
-  expect(messages).toEqual([])
-  expect(result.success).toBe(true)
-  // Something was bundled — a wrong entry path would "succeed" with nothing.
-  expect(result.outputs.length).toBeGreaterThan(0)
-})
+}

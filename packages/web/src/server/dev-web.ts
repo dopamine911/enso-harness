@@ -24,6 +24,10 @@ import {
 } from '@enso/core/log-process'
 import { findRepoRoot, webPackageDir } from '@enso/core/paths'
 import { knownSecretValuesTracking } from '@enso/core/secrets'
+// A SECOND entry, not a route inside the first (#144 slice 2): the observation surface — a
+// read-only view of the day's log — is its own page, so the page that controls pi and the
+// page that only watches it cannot drift into one bundle.
+import debugPage from '../../debug.html'
 import homepage from '../../index.html'
 
 const WEB_PORT = 5178
@@ -89,6 +93,7 @@ try {
     development: { hmr: true, console: true },
     routes: {
       '/': homepage,
+      '/debug': debugPage,
       '/api/*': proxyToApiServer,
       // Everything else falls through to the public assets (favicon, logos). Bun's
       // directory route rejects non-canonical paths and clamps symlink escapes, and a

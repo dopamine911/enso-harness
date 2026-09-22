@@ -39,6 +39,7 @@ const LIBRARY_SOURCE_ROOTS = [
  */
 const ENTRY_POINT_EXCEPTIONS = [
   'packages/web/src/main.tsx',
+  'packages/web/src/debug.tsx',
   'packages/web/src/server/dev.ts',
   'packages/web/src/server/dev-web.ts',
 ] as const
