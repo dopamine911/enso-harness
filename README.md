@@ -321,10 +321,11 @@ choose whether and where to share the bundle.
 | 1 | `biome` | lint, format, import order, and this repo's naming rules |
 | 2 | `typecheck` | `tsc -b` across every package |
 | 3 | `dead-code` | unused files, exports and dependencies, against a committed baseline |
-| 4 | `test` | the whole suite |
-| 5 | `coverage` | line and function floors over *every* source file, not just imported ones |
-| 6 | `api-docs` | TypeDoc over the public contracts, with warnings fatal |
-| 7 | `site` | builds the docs site and crawls every built page for dead links |
+| 4 | `react-doctor` | react-doctor over the web surface, offline, failing on an error-severity finding |
+| 5 | `test` | the whole suite |
+| 6 | `coverage` | line and function floors over *every* source file, not just imported ones |
+| 7 | `api-docs` | TypeDoc over the public contracts, with warnings fatal |
+| 8 | `site` | builds the docs site and crawls every built page for dead links |
 
 Twenty of those tests are **gates**: tests about the source tree rather than about behaviour — "no
 production `console.*`", "every documented export is grouped", "every diagram parses". Each one names

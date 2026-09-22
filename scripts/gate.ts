@@ -26,17 +26,24 @@
  *   3. dead-code — `fallow dead-code --quiet --baseline fallow-baseline.json`: fails on a finding
  *                  that is not already in the committed identity baseline. After typecheck,
  *                  because fallow's graph is syntactic.
- *   4. test      — `bun test`, not `vitest run`. bunfig keeps coverage always on, so this
- *                  writes `coverage/lcov.info` for gate 5.
- *   5. coverage  — `bun scripts/check-coverage.ts`: the TOTAL line and function floors over the
+ *   4. react-doctor — `react-doctor --project packages/web --no-score --no-supply-chain --blocking error`:
+ *                  react-doctor's lint pass over the web surface, failing on an error-severity
+ *                  finding (#342). Offline by construction: `--no-score` skips the score API, the
+ *                  share URL and the crash trace, `--no-supply-chain` the Socket.dev lookups — a
+ *                  pre-commit hook must not phone home. After typecheck, as dead-code is: the pass
+ *                  is syntactic. The rule set is upstream's and moves between versions, so a bump
+ *                  of the `react-doctor` pin is a gate change and is reviewed as one (#208).
+ *   5. test      — `bun test`, not `vitest run`. bunfig keeps coverage always on, so this
+ *                  writes `coverage/lcov.info` for gate 6.
+ *   6. coverage  — `bun scripts/check-coverage.ts`: the TOTAL line and function floors over the
  *                  full denominator, which bun's own per-file `coverageThreshold` cannot express.
- *   6. api-docs  — `typedoc --emit none`: the owned contract surface across both barrels, with warnings
+ *   7. api-docs  — `typedoc --emit none`: the owned contract surface across both barrels, with warnings
  *                  FATAL. TypeDoc's warnings are documentation drift — a `{@link}` whose target
  *                  was renamed, a type a documented signature exposes but nothing exports — and
  *                  none of them is visible to `tsc`. `--emit none`: it VALIDATES, and the site
  *                  renders the same surface as native pages (`starlight-typedoc`), so the
  *                  contract is converted once for checking and once for reading (#188).
- *   7. site      — `bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts`:
+ *   8. site      — `bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts`:
  *                  projects `docs/` into the Starlight site, builds it, and
  *                  crawls every built page for dead internal links. The BUILD is not the check —
  *                  `astro build` reported success over 139 dead links, because a page's
@@ -140,6 +147,20 @@ export const GATES: readonly Gate[] = [
     name: 'dead-code',
     describe: 'fallow: no dead-code finding beyond the committed baseline',
     script: 'deadcode:check',
+  },
+  {
+    // AFTER typecheck, as dead-code is: react-doctor's pass is syntactic (#342). Promoted from
+    // the advisory CI job (`continue-on-error`, once per PR, never local) so the verdict can
+    // block, and so the hook, `check:all` and CI inherit one definition. `--blocking error` is
+    // the ratchet's starting rung: green on the day with nothing to accept; the nine warnings
+    // are triaged on #342 and `--blocking warning` is its own decision. ⚠ OFFLINE FLAGS ARE
+    // LOAD-BEARING: `--no-score --no-supply-chain` are the score API, share URL, crash trace and
+    // Socket.dev lookups — every one a network call a pre-commit hook may not make. The rule
+    // set is upstream's and moves between versions: a bump of the `react-doctor` pin is a gate
+    // change and is reviewed as one (#208).
+    name: 'react-doctor',
+    describe: 'react-doctor: no error-severity finding on the web surface',
+    script: 'doctor:check',
   },
   {
     name: 'test',
