@@ -35,12 +35,17 @@ at the first failure:
    function floors. The current values are generated under *Ratchets* in the inventory.
 6. **API docs** — `typedoc` over both barrels with `treatWarningsAsErrors` (#188). TypeDoc's warnings
    *are* documentation drift — a `{@link}` whose target was renamed, a type a documented signature
-   exposes but nothing exports — and none of them is visible to `tsc`. It writes the HTML the site
-   serves, so the API reference is built once, by the step that owns it.
+   exposes but nothing exports — and none of them is visible to `tsc`. It runs with `--emit none`:
+   the step validates, and the site renders the same surface as native pages from the same
+   `typedoc.json` (`starlight-typedoc`), so nothing here produces an artifact to keep in step.
 7. **Site** — projects `docs/` into the Starlight site, builds it, then crawls every built page for
    dead internal links (#188). **The build is not the check.** `astro build` reported success over 139
    dead links on the first run, because a page's `./routes.md` and `../../packages/…#L47` are both
    correct on GitHub and both 404 as routes; `scripts/docs/site-links.ts` is what notices.
+
+The API reference is part of the site rather than a second site behind a link: `starlight-typedoc`
+generates one markdown page per entry point into the Starlight content tree, so the contracts carry
+the site's navigation, theme and search instead of TypeDoc's own HTML shell.
 
 Publishing is separate and **manual**: `.github/workflows/docs-site.yml` runs on
 `workflow_dispatch`, builds the same two steps, and deploys to GitHub Pages only when the run is

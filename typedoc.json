@@ -9,7 +9,6 @@
     "packages/harness/core/index.ts"
   ],
   "tsconfig": "tsconfig.typedoc.json",
-  "out": "site/public/api",
   "name": "zen-harness — owned contracts",
   "readme": "none",
   "useFirstParagraphOfCommentAsSummary": true,

@@ -25,19 +25,14 @@ import { SITE_BASE as BASE } from './site-base.ts'
 const ROOT = findRepoRoot(import.meta.url)
 const DIST = 'site/dist'
 
-/** What the `api-docs` gate step writes, and what the sidebar's `/api/` link serves. */
-const API_OUTPUT = 'site/public/api'
-
 /** Every built HTML page, repo-relative. */
 function builtPages(): string[] {
   const pages: string[] = []
   const walk = (directory: string): void => {
     for (const childName of readdirSync(directory)) {
       const path = join(directory, childName)
-      // `api/` is TypeDoc's own build, checked by the `api-docs` gate and not re-crawled here.
-      if (statSync(path).isDirectory()) {
-        if (childName !== 'api') walk(path)
-      } else if (childName.endsWith('.html')) pages.push(relative(ROOT, path))
+      if (statSync(path).isDirectory()) walk(path)
+      else if (childName.endsWith('.html')) pages.push(relative(ROOT, path))
     }
   }
   walk(join(ROOT, DIST))
@@ -89,30 +84,9 @@ export function deadLinks(): string[] {
   return dead
 }
 
-/**
- * The API reference is built by the `api-docs` step (`typedoc` → `site/public/api/`), not by
- * this one, and the sidebar links `/api/` unconditionally.
- *
- * ⚠ A MISSING PREREQUISITE MUST NOT REPORT AS A DEAD LINK. `bun run docs:site` on its own —
- * before `docs:api` has ever run — builds a site with no `api/` in it, and the crawl below
- * would then name `/api/` on all 46 pages as broken documentation. It is not: it is one step
- * that has not run. `scripts/gate.ts` orders `api-docs` before `site`, so the gate never sees
- * it; a developer running the script by hand does, and gets the true sentence instead of 46
- * false ones.
- */
-export function missingApiReference(output: string = API_OUTPUT): string | undefined {
-  if (existsSync(join(ROOT, output, 'index.html'))) return undefined
-  return `site-links: ${output}/ is empty — run \`bun run docs:api\` first (it builds what the sidebar's /api/ link serves)`
-}
-
 if (import.meta.main) {
   if (!existsSync(join(ROOT, DIST))) {
     process.stderr.write(`site-links: ${DIST} does not exist — run \`bun run docs:site\` first\n`)
-    process.exit(1)
-  }
-  const missing = missingApiReference()
-  if (missing !== undefined) {
-    process.stderr.write(`${missing}\n`)
     process.exit(1)
   }
   const dead = deadLinks()

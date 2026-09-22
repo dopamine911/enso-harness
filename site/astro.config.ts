@@ -1,6 +1,7 @@
 import starlight from '@astrojs/starlight'
 import { defineConfig } from 'astro/config'
 import mermaid from 'astro-mermaid'
+import starlightTypeDoc, { typeDocSidebarGroup } from 'starlight-typedoc'
 import { SITE_BASE, SITE_URL } from '../scripts/docs/site-base.ts'
 
 /**
@@ -11,9 +12,15 @@ import { SITE_BASE, SITE_URL } from '../scripts/docs/site-base.ts'
  * the pages beside the code they describe. The projected tree is gitignored and rebuilt on
  * every build, so the only editable copy is the one in `docs/`.
  *
- * The API reference is TypeDoc's HTML, copied to `public/api/` by the same script and linked
- * from the sidebar rather than re-rendered: TypeDoc owns that surface (`typedoc.json`, the
- * `api-docs` gate), and rebuilding it here would be a second renderer of one contract.
+ * The API reference is generated INTO this site by `starlight-typedoc`, not linked out to a
+ * TypeDoc HTML build: the contracts get the site's navigation, theme and search, and a reader
+ * moving from a seam page to a symbol never leaves. Its options still come from the repository's
+ * `typedoc.json` — the one place the entry points and the `@group`/`@category` organisation are
+ * declared — which the plugin reads itself.
+ *
+ * ⚠ It does NOT inherit `treatWarningsAsErrors`: measured, a `{@link}` pointing at a name that
+ * does not exist renders here and exits 0. The `api-docs` gate step catches that; this build
+ * renders what that step has already validated.
  *
  * `srcDir`/`outDir` stay inside `site/`; nothing this build writes leaves it.
  */
@@ -26,6 +33,20 @@ export default defineConfig({
   integrations: [
     mermaid({ theme: 'neutral', autoTheme: true }),
     starlight({
+      plugins: [
+        // The API reference as NATIVE pages, not a second site behind a link (#188). TypeDoc's
+        // options come from the repository's `typedoc.json`, which the plugin reads itself, so
+        // the entry points, the `@group`/`@category` organisation and the fatal warnings are
+        // still declared in one place.
+        starlightTypeDoc({
+          output: 'api',
+          sidebar: { label: 'API reference' },
+          // ⚠ Markdown-only options live HERE, never in `typedoc.json`: that file is also read by
+          // the `api-docs` gate step, which runs TypeDoc without the markdown plugin and refuses
+          // an option it does not know.
+          typeDoc: { outputFileStrategy: 'modules' },
+        }),
+      ],
       title: 'zen-harness',
       description: 'The harness architecture, its seams, and the reference material generated from its source.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/dopamine911/zen-harness-foundation' }],
@@ -59,8 +80,8 @@ export default defineConfig({
             { slug: 'reference/verification-inventory' },
           ],
         },
-        // Built by TypeDoc into `public/api/`, not by Astro: a link, never a page.
-        { label: 'API reference', link: '/api/' },
+        // The plugin fills this in with the generated tree; the placeholder is where it lands.
+        typeDocSidebarGroup,
         {
           label: 'Development',
           items: [

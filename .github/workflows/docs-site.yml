@@ -50,9 +50,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # TypeDoc first: it writes `site/public/api/`, which the site serves and the link crawl
-      # then checks. Reversed, the crawl refuses by name (`site-links.ts#missingApiReference`).
-      - name: Build the API reference
+      # TypeDoc first, and it emits nothing: the step VALIDATES the documented surface with
+      # warnings fatal. The site generates its own API pages from the same `typedoc.json`, so
+      # this ordering buys fail-fast, not an artifact.
+      - name: Validate the documented API surface
         run: bun run docs:api
 
       - name: Build the site and crawl its links

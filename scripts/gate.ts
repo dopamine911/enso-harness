@@ -30,11 +30,13 @@
  *                  writes `coverage/lcov.info` for gate 5.
  *   5. coverage  — `bun scripts/check-coverage.ts`: the TOTAL line and function floors over the
  *                  full denominator, which bun's own per-file `coverageThreshold` cannot express.
- *   6. api-docs  — `typedoc`: the owned contract surface across both barrels, with warnings
+ *   6. api-docs  — `typedoc --emit none`: the owned contract surface across both barrels, with warnings
  *                  FATAL. TypeDoc's warnings are documentation drift — a `{@link}` whose target
  *                  was renamed, a type a documented signature exposes but nothing exports — and
- *                  none of them is visible to `tsc`. Writes `site/public/api/`, gitignored (#188).
- *   7. site      — `bun scripts/docs/site-content.ts && bun run --cwd site build && bun scripts/docs/site-links.ts`:
+ *                  none of them is visible to `tsc`. `--emit none`: it VALIDATES, and the site
+ *                  renders the same surface as native pages (`starlight-typedoc`), so the
+ *                  contract is converted once for checking and once for reading (#188).
+ *   7. site      — `bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts`:
  *                  projects `docs/` into the Starlight site, builds it, and
  *                  crawls every built page for dead internal links. The BUILD is not the check —
  *                  `astro build` reported success over 139 dead links, because a page's
@@ -162,11 +164,17 @@ export const GATES: readonly Gate[] = [
     // program — each is a doc that has stopped matching the code, and none of them is visible
     // to `tsc`. Two were live when the step was added and both are fixed in the same commit.
     //
-    // It writes `site/public/api/` (gitignored) rather than a checked-in artifact: the HTML is
-    // a view, and diffing rendered markup would gate the renderer's version, not this repo's
-    // contracts. What is gated is that the surface still DOCUMENTS — the source comments are
-    // the artifact, and the fences and the docs gate already hold those to the code. The site
-    // step below serves what this step writes, so the API is built once, by its owner.
+    // It emits NOTHING (`--emit none`). The step exists to fail on drift, not to produce an
+    // artifact: the API pages are markdown the site generates from the same `typedoc.json`
+    // (`starlight-typedoc`), so there is no HTML to diff and no build product to keep in step.
+    // What is gated is that the surface still DOCUMENTS — the source comments are the artifact,
+    // and the fences and the docs gate already hold those to the code.
+    //
+    // ⚠ THIS IS NOT REDUNDANT WITH THE SITE STEP, AND THAT WAS MEASURED. A `{@link}` pointed at
+    // a name that does not exist fails HERE with exit 4 — and the site build renders it, exits
+    // 0, and publishes the dead link: `starlight-typedoc` runs TypeDoc through its own logger
+    // and `treatWarningsAsErrors` does not reach it. Delete this step and documentation drift
+    // ships silently.
     name: 'api-docs',
     describe: 'typedoc: the owned contract surface documents, with warnings fatal',
     script: 'docs:api',
