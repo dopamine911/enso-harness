@@ -84,9 +84,36 @@ export function deadLinks(): string[] {
   return dead
 }
 
+/**
+ * A SECTION with no page of its own — `/api/` when the API reference exists only at
+ * `/api/core/src/` and friends.
+ *
+ * ⚠ The crawl above cannot see this, and did not: it follows links, and nothing in the site
+ * LINKS a bare section path. The sidebar presents `API reference` as a group of pages, so
+ * `/api/` was never an href — it was only a URL a reader reaches by trimming one, or by
+ * following a link written somewhere this repository does not build. It 404ed on the published
+ * site while every gate was green.
+ *
+ * Depth one only: `/api/core/` is a namespace segment of an entry point's path, not a section
+ * anybody navigates to, and demanding a page there would mean generating pages nobody reads.
+ */
+export function unservedSections(): string[] {
+  const root = join(ROOT, DIST)
+  return readdirSync(root)
+    .filter((name) => !['_astro', 'pagefind'].includes(name))
+    .filter((name) => statSync(join(root, name)).isDirectory())
+    .filter((name) => !existsSync(join(root, name, 'index.html')))
+    .map((name) => `/${name}/`)
+}
+
 if (import.meta.main) {
   if (!existsSync(join(ROOT, DIST))) {
     process.stderr.write(`site-links: ${DIST} does not exist — run \`bun run docs:site\` first\n`)
+    process.exit(1)
+  }
+  const unserved = unservedSections()
+  if (unserved.length > 0) {
+    process.stderr.write(`site-links: ${unserved.length} section(s) with no page\n${unserved.join('\n')}\n`)
     process.exit(1)
   }
   const dead = deadLinks()
@@ -95,5 +122,7 @@ if (import.meta.main) {
     process.stderr.write(`site-links: ${dead.length} dead internal link(s)\n${dead.join('\n')}\n`)
     process.exit(1)
   }
-  process.stdout.write(`site-links: every internal link in ${builtPages().length} built pages resolves\n`)
+  process.stdout.write(
+    `site-links: every internal link in ${builtPages().length} built pages resolves, every section is served\n`,
+  )
 }
