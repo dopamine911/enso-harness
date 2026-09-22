@@ -124,6 +124,24 @@ export function withFrontmatter(source: string, page: string, anchoredAt: 'docs'
   return `---\ntitle: "${title}"\n---\n\n${body}`
 }
 
+/**
+ * The title a DERIVED section index carries in the sidebar.
+ *
+ * ⚠ Titled, never path-named. `title: "concepts/archive"` put a lowercase path in the navigation
+ * beside pages with real titles, where it read as a broken entry — reported from the published
+ * site, not caught here.
+ *
+ * ⚠ Every word, not just the first (PR #333 review). `charAt(0).toUpperCase()` is right for every
+ * directory this repository has today and wrong for the first hyphenated one: `getting-started`
+ * would have arrived as `Getting-started overview`, which is the kind of thing nobody fixes
+ * because nobody owns it.
+ */
+export function sectionTitle(directory: string): string {
+  const segment = directory.split('/').at(-1) ?? directory
+  const words = segment.split('-').map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+  return `${words.join(' ')} overview`
+}
+
 function project(): { written: number; indexes: number } {
   const target = join(ROOT, CONTENT)
   // Rebuilt wholesale: a page deleted from `docs/` must not survive in the site's content.
@@ -160,7 +178,10 @@ function project(): { written: number; indexes: number } {
       return `- [${title}](${SITE_BASE}/${page.replace(/\.md$/, '')}/)`
     })
     mkdirSync(join(target, directory), { recursive: true })
-    writeFileSync(join(target, directory, 'index.md'), `---\ntitle: "${directory}"\n---\n\n${entries.join('\n')}\n`)
+    writeFileSync(
+      join(target, directory, 'index.md'),
+      `---\ntitle: "${sectionTitle(directory)}"\n---\n\n${entries.join('\n')}\n`,
+    )
     indexes += 1
   }
 
