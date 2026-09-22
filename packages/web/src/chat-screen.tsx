@@ -22,7 +22,6 @@ import {
 import { ArrowUpIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { CommandPalette } from './command-palette.tsx'
-import { runHostCommand } from './commands-connection.ts'
 import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from './components/ai-elements/attachments.tsx'
 import {
   Conversation,
@@ -962,16 +961,15 @@ const chatComponents = {
       // dialog is rendered ONCE here, for the chip and the palette's `/model` row alike (#338 slice 2).
       const [modelDialog, setModelDialog] = useState<string | undefined>(undefined)
       // A `host` command runs through its own route, never as a prompt: `POST …/command`, a
-      // control like the mode select's. Nothing here moves the chip — the `model` observation
-      // on the follow does (invariant 2). A 409 (running) or 422 (the host's reason) is said as
-      // a warning notice, the way a refused mode change is; the click did nothing else.
+      // control like the mode select's — on the SAME connection, so a 409 (running) or a 422
+      // (the host's reason) is recorded and said the one way a refused mode change is (PR #344
+      // review). Nothing here moves the chip — the `model` observation on the follow does
+      // (invariant 2); the click did nothing else.
       const host: HostCommandHandlers = {
         onHost: (commandName: string, optionId?: string): void => {
-          void runHostCommand(stores.threadId, {
+          void stores.connection.runHostCommand({
             name: commandName,
             ...(optionId === undefined ? {} : { value: optionId }),
-          }).catch((failure: unknown) => {
-            stores.notifications.push(failure instanceof Error ? failure.message : String(failure), 'warning', 'run')
           })
         },
         onOpenModelDialog: setModelDialog,

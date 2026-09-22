@@ -1,11 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { EnsoThreadCommands } from '@enso/core'
-import {
-  COMMANDS_SCHEMA_MISMATCH,
-  CommandsFetchError,
-  fetchThreadCommands,
-  runHostCommand,
-} from '../commands-connection.ts'
+import { COMMANDS_SCHEMA_MISMATCH, CommandsFetchError, fetchThreadCommands } from '../commands-connection.ts'
 
 /**
  * The palette's read (#338): the route's answer validated, a non-2xx said with its status and
@@ -57,23 +52,4 @@ test('a payload the schema refuses is a schema error, not a rendered guess', asy
   const { source: _dropped, ...withoutSource } = LIVE
   const server = answering(Response.json(withoutSource))
   await expect(fetchThreadCommands('thread-1', server.fetch)).rejects.toThrow(COMMANDS_SCHEMA_MISMATCH)
-})
-
-test('a host command is one JSON POST to the thread-scoped command route; a 204 resolves', async () => {
-  const server = answering(new Response(null, { status: 204 }))
-  await expect(runHostCommand('thread 1/x', { name: 'thinking', value: 'high' }, server.fetch)).resolves.toBeUndefined()
-  expect(server.asked).toEqual(['/api/threads/thread%201%2Fx/command'])
-  expect(server.inits[0]?.method).toBe('POST')
-  expect(server.inits[0]?.headers).toEqual({ 'Content-Type': 'application/json' })
-  expect(JSON.parse(String(server.inits[0]?.body))).toEqual({ name: 'thinking', value: 'high' })
-})
-
-test("a refused host command throws `<status> <body>` — the host's reason, verbatim", async () => {
-  const server = answering(new Response('thinking level xhigh is not offered by this model', { status: 422 }))
-  const failure = await runHostCommand('thread-1', { name: 'thinking', value: 'xhigh' }, server.fetch).catch(
-    (thrown: unknown) => thrown,
-  )
-  expect(failure).toBeInstanceOf(CommandsFetchError)
-  expect((failure as CommandsFetchError).status).toBe(422)
-  expect((failure as Error).message).toBe('422 thinking level xhigh is not offered by this model')
 })

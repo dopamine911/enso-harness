@@ -817,7 +817,9 @@ test('the model chip and thinking level follow the snapshot; picking a model POS
     expect(document.querySelector('[role="dialog"]')).toBeNull()
     // The scripted 422: said, verbatim, as a notice; the chip did not move (no observation came).
     const notices = [...pane.container.querySelectorAll('[role="status"]')].map((notice) => notice.textContent)
-    expect(notices.some((notice) => notice?.includes('422 model fake/fake-2 is not available here'))).toBe(true)
+    expect(
+      notices.some((notice) => notice?.includes('/model refused: 422 model fake/fake-2 is not available here')),
+    ).toBe(true)
     expect(chip().textContent).toContain('Fake One')
   })
 

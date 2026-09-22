@@ -18,6 +18,7 @@ import {
 } from '@enso/core'
 import { Check, Errors } from 'typebox/value'
 import type { AgentHost } from '../host/agent-host.ts'
+import { HostCommandRefused } from '../host/host-commands.ts'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
 import { readThreadMount } from './thread-read.ts'
 import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
@@ -449,13 +450,17 @@ export async function runHostCommand(
   const { threads } = deps
   const live = threads.peek(threadId)
   if (live?.busy === true) {
-    return { status: 409, reason: `thread ${threadId} is running; change the model when it settles` }
+    return { status: 409, reason: `thread ${threadId} is running; change ${run.name} when it settles` }
   }
   const lease = await threads.acquire(threadId)
   try {
     await lease.runtime.runHostCommand(run)
   } catch (error) {
-    return { status: 422, reason: error instanceof Error ? error.message : String(error) }
+    // ⚠ Only a refusal the host DECIDED is the caller's 422 (PR #344 review). Anything else is a
+    // fault — a pi API that moved, a bug — and propagates to the handler's 500 rather than
+    // reaching the user as a sentence claiming their choice was refused.
+    if (error instanceof HostCommandRefused) return { status: 422, reason: error.message }
+    throw error
   } finally {
     lease.release()
   }

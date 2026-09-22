@@ -21,6 +21,19 @@ import type { EnsoHostCommandRun, EnsoModelChoice, EnsoModelState, RuntimeComman
  * every available model rather than parsed back into two parts.
  */
 
+/**
+ * A refusal the host DECIDED (PR #344 review): an unknown command, a model not on offer, a
+ * level the model does not have, a provider pi has no credentials for. The route says exactly
+ * this class as 422 with the reason verbatim; any other throw is a fault and stays a 500 —
+ * a `TypeError` from a moved pi API must not reach the user as "your choice was refused".
+ */
+export class HostCommandRefused extends Error {
+  constructor(reason: string) {
+    super(reason)
+    this.name = 'HostCommandRefused'
+  }
+}
+
 const HOST_COMMAND_MODEL = 'model'
 const HOST_COMMAND_THINKING = 'thinking'
 

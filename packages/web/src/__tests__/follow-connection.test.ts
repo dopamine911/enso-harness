@@ -390,6 +390,60 @@ test('a refused mode change names the outcome and is reported — busy is not a 
   expect(await refusedConnection.changeMode('nope')).toBe('refused')
 })
 
+// ── the host-command route (#338 slice 2) — the mode route's shape, the mode route's failure path ──
+test('runHostCommand is one JSON POST to …/command; told on 204; the store moves only when the feed says so', async () => {
+  const server = scripted()
+  server.frame(SNAPSHOT_IDLE)
+  await server.untilChunks(1)
+  expect(await server.connection.runHostCommand({ name: 'thinking', value: 'high' })).toBe('told')
+  expect(server.hostCommands).toEqual([{ name: 'thinking', value: 'high' }])
+  expect(server.prompts).toEqual([])
+  expect(server.modeChanges).toEqual([])
+  expect(server.chunks.some((chunk) => chunk.type === EventType.CUSTOM && chunk.name === 'model')).toBe(false)
+  server.frame({
+    type: 'observation',
+    seq: 1,
+    observation: {
+      kind: 'model',
+      model: { provider: 'fake', id: 'one', name: 'Fake One' },
+      thinkingLevel: 'high',
+      availableThinkingLevels: ['off', 'low', 'medium', 'high'],
+    },
+  })
+  await server.untilChunks(2)
+  expect(server.chunks.at(-1)).toMatchObject({
+    type: EventType.CUSTOM,
+    name: 'model',
+    value: { thinkingLevel: 'high' },
+  })
+  expect(server.problems).toEqual([])
+  server.abort()
+})
+
+test('a refused host command names the outcome and is RECORDED — the same path a refused mode change takes (PR #344 review)', async () => {
+  const busy = createScriptedFetch({
+    commandStatus: 409,
+    commandBody: 'thread t1 is running; change thinking when it settles',
+  })
+  const busyProblems: string[] = []
+  const busyConnection = createFollowConnection({
+    threadId: 't1',
+    fetch: busy.fetch,
+    onProblem: (reported: unknown) => busyProblems.push(String(reported)),
+  })
+  expect(await busyConnection.runHostCommand({ name: 'thinking', value: 'low' })).toBe('busy')
+  expect(busyProblems).toEqual(['thread t1: /thinking busy: 409 thread t1 is running; change thinking when it settles'])
+  const refused = createScriptedFetch({ commandStatus: 422, commandBody: 'model nope/x is not available here' })
+  const refusedProblems: string[] = []
+  const refusedConnection = createFollowConnection({
+    threadId: 't1',
+    fetch: refused.fetch,
+    onProblem: (reported: unknown) => refusedProblems.push(String(reported)),
+  })
+  expect(await refusedConnection.runHostCommand({ name: 'model', value: 'nope/x' })).toBe('refused')
+  expect(refusedProblems).toEqual(['thread t1: /model refused: 422 model nope/x is not available here'])
+})
+
 test('abort is one POST to …/abort and names what the server did; it closes no run itself — the feed does (#116)', async () => {
   const server = scripted()
   server.frame(SNAPSHOT_IDLE)

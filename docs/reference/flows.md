@@ -28,11 +28,11 @@ flowchart LR
 
 | Node | Contract | Input | Source |
 |---|---|---|---|
-| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:56`](../../packages/web/src/server/index.ts#L56)<br>[`packages/web/src/server/follow.ts:490`](../../packages/web/src/server/follow.ts#L490) |
+| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:56`](../../packages/web/src/server/index.ts#L56)<br>[`packages/web/src/server/follow.ts:495`](../../packages/web/src/server/follow.ts#L495) |
 | `respondToHostCommand → runHostCommand` | [`POST /api/threads/:threadId/command`](./routes.md) | path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level | [`packages/web/src/server/index.ts:60`](../../packages/web/src/server/index.ts#L60) |
-| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:55`](../../packages/web/src/server/index.ts#L55)<br>[`packages/web/src/server/follow.ts:351`](../../packages/web/src/server/follow.ts#L351) |
-| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:58`](../../packages/web/src/server/index.ts#L58)<br>[`packages/web/src/server/follow.ts:387`](../../packages/web/src/server/follow.ts#L387) |
-| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:54`](../../packages/web/src/server/index.ts#L54)<br>[`packages/web/src/server/follow.ts:261`](../../packages/web/src/server/follow.ts#L261) |
+| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:55`](../../packages/web/src/server/index.ts#L55)<br>[`packages/web/src/server/follow.ts:352`](../../packages/web/src/server/follow.ts#L352) |
+| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:58`](../../packages/web/src/server/index.ts#L58)<br>[`packages/web/src/server/follow.ts:388`](../../packages/web/src/server/follow.ts#L388) |
+| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:54`](../../packages/web/src/server/index.ts#L54)<br>[`packages/web/src/server/follow.ts:262`](../../packages/web/src/server/follow.ts#L262) |
 
 ## Observation pipeline
 
@@ -54,8 +54,8 @@ flowchart LR
 |---|---|---|
 | `mapPiEvent (18 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:245`](../../packages/web/src/host/map-events.ts#L245) |
 | `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:494`](../../packages/core/src/observation.ts#L494) |
-| `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:177`](../../packages/web/src/server/follow.ts#L177) |
-| `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:390`](../../packages/web/src/follow-connection.ts#L390) |
+| `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:178`](../../packages/web/src/server/follow.ts#L178) |
+| `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:401`](../../packages/web/src/follow-connection.ts#L401) |
 | `to-agui chunk` | [Observations](./observations.md) | [`packages/web/src/to-agui.ts:76`](../../packages/web/src/to-agui.ts#L76) |
 | `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:128`](../../packages/web/src/custom-event-router.ts#L128) |
 

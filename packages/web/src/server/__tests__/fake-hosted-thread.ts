@@ -13,7 +13,7 @@ import type {
 } from '@enso/core'
 import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
-import { decideHostCommand, hostCommandRows } from '../../host/host-commands.ts'
+import { decideHostCommand, HostCommandRefused, hostCommandRows } from '../../host/host-commands.ts'
 
 /**
  * The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a
@@ -135,7 +135,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       // What the real host does: the shared decision, the set, then the state said as `model`.
       record.hostCommands.push(run)
       const decision = decideHostCommand(run, record.modelState, FAKE_MODELS)
-      if (decision.kind === 'refused') return Promise.reject(new Error(decision.reason))
+      if (decision.kind === 'refused') return Promise.reject(new HostCommandRefused(decision.reason))
       record.modelState =
         decision.kind === 'model'
           ? { ...record.modelState, model: { ...decision.model } }

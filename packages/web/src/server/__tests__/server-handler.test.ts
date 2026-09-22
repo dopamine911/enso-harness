@@ -13,6 +13,7 @@ import {
   type EnsoTranscriptEntry,
   type PromptOutcome,
   type PromptRequest,
+  type ThreadRuntime,
 } from '@enso/core'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
@@ -52,6 +53,8 @@ type EmitPiEvent = (observation: EnsoObservation) => void
 interface FakeSessionScript {
   /** Called on every prompt; emit events through `emit`, signal acceptance via `outcome`. */
   onPrompt: (emit: EmitPiEvent, outcome: PromptOutcome, message: string) => void
+  /** Further runtime members to replace over the fake's own — a fault to inject, say. */
+  runtime?: (parts: FakeThreadParts) => Partial<ThreadRuntime>
 }
 
 /**
@@ -92,17 +95,18 @@ function fakeHost(
     (threadId: string) => {
       requested.push(threadId)
       const fake = createFakeHostedThread({
-        runtime: ({ record, emit }: FakeThreadParts) => ({
+        runtime: (parts: FakeThreadParts) => ({
           prompt: (request: PromptRequest, outcome: PromptOutcome) => {
-            record.prompts.push(request)
-            script.onPrompt(emit, outcome, request.message)
+            parts.record.prompts.push(request)
+            script.onPrompt(parts.emit, outcome, request.message)
           },
           // picc's row first, the host's two after — the real host's order (#338 slice 2).
           listCommands: () => [
             { name: 'mode', source: 'extension' },
-            ...hostCommandRows(record.modelState, FAKE_MODELS),
+            ...hostCommandRows(parts.record.modelState, FAKE_MODELS),
           ],
           permissionModeState: () => ({ mode: 'default', available: ['default', 'acceptEdits'] }),
+          ...script.runtime?.(parts),
         }),
         inspect: piccShapedInspection(),
       })
@@ -249,9 +253,17 @@ test('⚠ a thread id that is not thread-id shaped is a 400 at every entry point
   const { url, built, requested } = await startWith({ onPrompt: neverPrompted })
   const evil = encodeURIComponent('../../evil')
   expect(await prompt(url, '../../evil', 'hi')).toBe(400)
-  for (const route of ['', '/history', '/events', '/follow']) {
+  for (const route of ['', '/history', '/events', '/follow', '/commands']) {
     expect((await fetch(`${url}/api/threads/${evil}${route}`)).status).toBe(400)
   }
+  // The one thread route that DOES build on purpose (#338 slice 2, #341) — so the one whose
+  // id check "builds nothing" most needs to cover (PR #344 review).
+  const command = await fetch(`${url}/api/threads/${evil}/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'thinking', value: 'high' }),
+  })
+  expect(command.status).toBe(400)
   expect(built).toHaveLength(0)
   expect(requested).toEqual([])
   // And the server is still up.
@@ -260,9 +272,12 @@ test('⚠ a thread id that is not thread-id shaped is a 400 at every entry point
 
 // ⚠ THE PALETTE'S SOURCE, SAID (#338). A thread has no session until its first prompt, and
 // looking must not build (#86) — so the route cannot ask a runtime that does not exist. Every
-// session registers the same commands (the manifest is fixed), so the last built session's list
-// is the next one's; the answer says which it is, and a palette that quietly showed a stale list
-// would be a palette that lies. Before any session: `none`, an empty list, no build.
+// session builds its list from the same sources under the same configuration, as they stood at
+// that build, so the last built session's list is the next one's until a file changes on disk;
+// the answer says which it is, and a palette that quietly showed a stale list would be a palette
+// that lies. Before any session: `none`, an empty list, no build. A `remembered` host row's
+// options are the last build's too — the models a provider offered THEN, credentials as they
+// stood then — which is why the row keeps them and loses its value.
 test('⚠ GET …/commands says where its list came from: none before any session, remembered after one, live for the thread that has it', async () => {
   const { url, built } = await startWith(settlesAtOnce)
   const commandsOf = async (threadId: string): Promise<unknown> =>
@@ -351,6 +366,23 @@ test('⚠ POST …/command sets the thinking level on a thread that never ran: 2
   expect(extra.status).toBe(400)
   // Still the one build: every run above acquired the same live thread.
   expect(built).toHaveLength(1)
+})
+
+// ⚠ A FAULT IS NOT A REFUSAL (PR #344 review): only a refusal the host decided is the 422 the user
+// reads as "your choice was refused"; anything else the runtime throws is the handler's 500.
+test('POST …/command: a runtime fault is a 500, never a 422 dressed as a refusal', async () => {
+  const { url } = await startWith({
+    onPrompt: neverPrompted,
+    runtime: () => ({
+      runHostCommand: () => Promise.reject(new TypeError('session.setModel is not a function')),
+    }),
+  })
+  const faulted = await fetch(`${url}/api/threads/faulty/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'thinking', value: 'low' }),
+  })
+  expect(faulted.status).toBe(500)
 })
 
 test('POST …/command is refused while the thread runs (409) — a setting is not queued behind a run', async () => {

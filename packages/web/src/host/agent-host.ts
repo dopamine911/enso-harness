@@ -31,7 +31,7 @@ import { findRepoRoot } from '@enso/core/paths'
 import { quarantineSecrets } from '@enso/core/secrets'
 import { createEventTail, describeObservation } from './event-tail.ts'
 import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
-import { decideHostCommand, hostCommandRows } from './host-commands.ts'
+import { decideHostCommand, HostCommandRefused, hostCommandRows } from './host-commands.ts'
 import { mapPiEvent } from './map-events.ts'
 import {
   freshPermissionModeState,
@@ -610,12 +610,19 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         const decision = decideHostCommand(run, currentModelState(), session.modelRuntime.getAvailableSnapshot())
         switch (decision.kind) {
           case 'refused':
-            throw new Error(decision.reason)
+            throw new HostCommandRefused(decision.reason)
           case 'model':
             // pi refuses a provider with no credentials (`No API key for provider/id`) — its
             // sentence is the reason; the snapshot lists authenticated providers, so it is the
-            // rare case of a credential that lapsed between the listing and the choice.
-            await session.setModel(decision.model)
+            // rare case of a credential that lapsed between the listing and the choice. That
+            // one throw is a refusal; anything else `setModel` throws is a fault, and stays one.
+            try {
+              await session.setModel(decision.model)
+            } catch (error) {
+              if (error instanceof Error && /no api key/i.test(error.message))
+                throw new HostCommandRefused(error.message)
+              throw error
+            }
             break
           case 'thinking': {
             // The decision checked the level against this same list; the lookup is how the string
