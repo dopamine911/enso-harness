@@ -167,6 +167,9 @@ test('the backlog is the view, and a records frame is appended to it', async () 
   const page = await mountTail()
   // Nothing has arrived: the page is waiting, and says so in the header's spinner.
   expect(spinner(page.container)).not.toBeNull()
+  // The hand-over (#144's last row): the day's bundle, as a download of the route that makes it.
+  const bundleLink = [...page.container.querySelectorAll('a')].find((anchor) => anchor.hasAttribute('download'))
+  expect(bundleLink?.getAttribute('href')).toBe('/api/logs/bundle')
   await page.send(backlogOf([line('the day so far'), line('and then this')]))
   await eventually(() => {
     expect(page.container.textContent).toContain('the day so far')

@@ -30,6 +30,7 @@ import { LogRow, ROW_HEIGHT_PX, timeOfDay } from './log-row.tsx'
 import { DEFAULT_LOG_TAIL_FILTER, type LogTailResume, openLogTailStream } from './log-tail-connection.ts'
 import {
   applyLogTailFrame,
+  bundleUrl,
   describeRecordCount,
   EMPTY_LOG_TAIL_VIEW,
   LogLevelSelect,
@@ -374,6 +375,13 @@ export function ThreadTimelineScreen({ threadId, fetch: pageFetch }: ThreadTimel
           </a>
           <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href="/debug">
             the day's log
+          </a>
+          <a
+            className="px-2 text-primary text-xs underline-offset-2 hover:underline"
+            href={bundleUrl(threadId)}
+            download
+          >
+            download this thread's bundle
           </a>
           <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href="/debug?stats">
             the day's stats
