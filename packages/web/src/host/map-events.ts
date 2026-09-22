@@ -2,6 +2,7 @@ import {
   ENSO_TOOL_RESULT_KEY,
   EnsoDialogOutcome,
   type EnsoDialogSpec,
+  EnsoModelState,
   EnsoNotifyType,
   type EnsoObservation,
   EnsoPermissionModeState,
@@ -187,6 +188,17 @@ function mapPermissionMode(event: RuntimeEvent): EnsoObservation {
 }
 
 /**
+ * The host's other own event (#338 slice 2): the model and thinking level now, said once per
+ * change — after a `/model` or `/thinking` from the palette, or a failover swap pi's extension
+ * made (`agent-host.ts`'s header says where each half is heard). Same crossing check as the mode.
+ */
+function mapModel(event: RuntimeEvent): EnsoObservation {
+  const { type: _type, ...state } = event
+  if (Check(EnsoModelState, state)) return { kind: 'model', ...state }
+  return { kind: 'unmapped', event }
+}
+
+/**
  * A message began (#112). A USER message carries its text so a second follower sees the
  * prompt another tab sent; every other role's content arrives by its own events.
  */
@@ -326,6 +338,9 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
 
     case 'permission_mode':
       return mapPermissionMode(event)
+
+    case 'model':
+      return mapModel(event)
 
     case 'entry_appended': {
       // ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via

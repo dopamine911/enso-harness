@@ -6,6 +6,7 @@ import {
   type EnsoDialogSpec,
   type EnsoPromptImage,
   isEnsoImageMimeType,
+  type RuntimeCommand,
 } from '@enso/core'
 import type { ContentPart } from '@tanstack/ai'
 import type { ConnectConnectionAdapter, UIMessage } from '@tanstack/ai-client'
@@ -21,6 +22,7 @@ import {
 import { ArrowUpIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { CommandPalette } from './command-palette.tsx'
+import { runHostCommand } from './commands-connection.ts'
 import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from './components/ai-elements/attachments.tsx'
 import {
   Conversation,
@@ -57,6 +59,7 @@ import { routeEnsoCustomEvent } from './custom-event-router.ts'
 import type { EnsoRendererMap } from './EnsoToolResult.tsx'
 import { createFixtureChat } from './fixture-conversation.ts'
 import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.ts'
+import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState } from './model-state.tsx'
 import { ThreadNotifications } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
@@ -313,6 +316,32 @@ function PermissionModeControl(): React.ReactNode {
       onSelect={(next: string) => void stores.connection.changeMode(next)}
     />
   )
+}
+
+/**
+ * The composer row's model controls (#338 slice 2, the control half of #44): the `thinking`
+ * select and the model chip, both reading the thread's model store, both changing it through
+ * `POST …/command` — a control, not a prompt, like the mode select beside them. The chip opens
+ * the model dialog the owner renders (`onOpenModelDialog`), the same one the palette's `/model`
+ * row opens. ⚠ NOT disabled while a run is in flight or before the first run: pi takes a model
+ * change between turns, the route answers 409 while busy and the refusal is said as a notice —
+ * and choosing before the first prompt is the point (#341, `model-state.tsx`'s header).
+ */
+function ModelControls({ onHost, onOpenModelDialog }: HostCommandHandlers): React.ReactNode {
+  const state = useModelState()
+  return (
+    <>
+      <ThinkingLevelSelect state={state} onSelect={(level: string): void => onHost('thinking', level)} />
+      <ModelChip state={state} onOpen={(): void => onOpenModelDialog('model')} />
+    </>
+  )
+}
+
+/** How a `host` command is run and how the model dialog is opened — the composer's, handed to its chrome and palette. */
+interface HostCommandHandlers {
+  readonly onHost: (commandName: string, optionId?: string) => void
+  /** Open the dialog for a `select` host command, by name. */
+  readonly onOpenModelDialog: (commandName: string) => void
 }
 
 /*
@@ -576,6 +605,7 @@ function ComposerBody({
   onStop,
   onRunCommand,
   onInsertCommand,
+  host,
 }: {
   draft: string
   setDraft: (next: string) => void
@@ -585,6 +615,7 @@ function ComposerBody({
   onStop: () => void
   onRunCommand: (commandName: string) => void
   onInsertCommand: (commandName: string) => void
+  host: HostCommandHandlers
 }): React.ReactNode {
   const stores = useThreadStores()
   const attachments = usePromptInputAttachments()
@@ -612,12 +643,15 @@ function ComposerBody({
           className="max-h-40 min-h-9 flex-1 resize-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
         />
         {/* The `/` palette (#338): the session's slash commands, grouped; an extension command
-            runs through `send`, a prompt template or skill lands in the draft with focus. */}
+            runs through `send`, a prompt template or skill lands in the draft with focus, a host
+            command POSTs (slice 2) and `/model` opens the dialog the composer renders. */}
         <CommandPalette
           threadId={stores.threadId}
           disabled={disconnected}
           onRun={onRunCommand}
           onInsert={onInsertCommand}
+          onHost={host.onHost}
+          onOpenModelDialog={(command: RuntimeCommand): void => host.onOpenModelDialog(command.name)}
         />
         {/* Attach (#68): the same file dialog a paste or a drop bypasses. */}
         <PromptInputButton
@@ -924,6 +958,24 @@ const chatComponents = {
           field.setSelectionRange(field.value.length, field.value.length)
         })
       }
+      // The `select` host command whose dialog is open (`model`); undefined while closed. The
+      // dialog is rendered ONCE here, for the chip and the palette's `/model` row alike (#338 slice 2).
+      const [modelDialog, setModelDialog] = useState<string | undefined>(undefined)
+      // A `host` command runs through its own route, never as a prompt: `POST …/command`, a
+      // control like the mode select's. Nothing here moves the chip — the `model` observation
+      // on the follow does (invariant 2). A 409 (running) or 422 (the host's reason) is said as
+      // a warning notice, the way a refused mode change is; the click did nothing else.
+      const host: HostCommandHandlers = {
+        onHost: (commandName: string, optionId?: string): void => {
+          void runHostCommand(stores.threadId, {
+            name: commandName,
+            ...(optionId === undefined ? {} : { value: optionId }),
+          }).catch((failure: unknown) => {
+            stores.notifications.push(failure instanceof Error ? failure.message : String(failure), 'warning', 'run')
+          })
+        },
+        onOpenModelDialog: setModelDialog,
+      }
 
       return (
         <PromptInput
@@ -965,10 +1017,18 @@ const chatComponents = {
             if (send(text, images)) setDraft('')
           }}
         >
-          {/* The composer chrome (#90): the knobs at the point of use, deepseek's shape. */}
-          <div className="flex items-center justify-end px-1 pb-1">
+          {/* The composer chrome (#90): the knobs at the point of use, deepseek's shape — the
+              model chip and thinking level (#338 slice 2) beside the mode. */}
+          <div className="flex items-center justify-end gap-3 px-1 pb-1">
+            <ModelControls {...host} />
             <PermissionModeControl />
           </div>
+          <ModelChoiceDialog
+            threadId={stores.threadId}
+            command={modelDialog}
+            onClose={(): void => setModelDialog(undefined)}
+            onPick={host.onHost}
+          />
           <ComposerBody
             draft={draft}
             setDraft={setDraft}
@@ -978,6 +1038,7 @@ const chatComponents = {
             onStop={stopRun}
             onRunCommand={runCommand}
             onInsertCommand={insertCommand}
+            host={host}
           />
         </PromptInput>
       )

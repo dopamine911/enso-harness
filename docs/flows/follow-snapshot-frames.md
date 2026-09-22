@@ -83,6 +83,8 @@ export const EnsoFollowSnapshot = Type.Object(
     /** See `EnsoThreadSummary.generation`. */
     generation: Type.Integer({ minimum: 0 }),
     permissionMode: EnsoPermissionModeState,
+    /** The session's model and thinking level (#338 slice 2); `null` when the thread is not live — a stored thread does not say. */
+    model: Type.Union([EnsoModelState, Type.Null()]),
     /** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not enso's. */
     messages: Type.Array(Type.Unknown()),
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */

@@ -16,6 +16,7 @@ import {
   type AgentHost,
   createAgentHost,
   type HostedThread,
+  MODEL_WATCH_EXTENSION_PATH,
   seedMultiAccountChildProxyOff,
   stopRunThenSettleDialogs,
 } from '../agent-host.ts'
@@ -156,13 +157,16 @@ test('⚠ creating a host removes secret-shaped variables from its environment, 
   expect(JSON.stringify(notice)).not.toContain('must-not-survive')
 })
 
-test("exactly the manifest's six extensions load, in order, with no load errors", async () => {
+test("exactly the manifest's six extensions load, in order, then the host's own model watcher, with no load errors", async () => {
   const hosted = await hostedSession()
   const loaded = hosted.loadedExtensionPaths
-  expect(loaded).toHaveLength(MANIFEST_EXTENSION_MARKERS.length)
+  // The seventh is not the manifest's: it is the host's listener for pi's `model_select`, the
+  // only place a model swap is announced (#338 slice 2; `agent-host.ts` header). Listed, not hidden.
+  expect(loaded).toHaveLength(MANIFEST_EXTENSION_MARKERS.length + 1)
   MANIFEST_EXTENSION_MARKERS.forEach((marker, index) => {
     expect(loaded[index]?.endsWith(marker)).toBe(true)
   })
+  expect(loaded[MANIFEST_EXTENSION_MARKERS.length]).toBe(MODEL_WATCH_EXTENSION_PATH)
   logs.assertNotLogged({ rawMessage: /failed to load/ })
 })
 

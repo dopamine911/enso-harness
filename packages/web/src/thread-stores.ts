@@ -4,6 +4,7 @@ import type { BrowserLogging } from './browser-logging.ts'
 import { createRecentChunksStore, type RecentChunksStore } from './custom-event-router.ts'
 import { createFollowConnection, type FollowConnection } from './follow-connection.ts'
 import { createModeLines, type ModeLines } from './mode-lines.ts'
+import { createModelStore, type ModelStore } from './model-state.tsx'
 import { createNotificationsStore, type NotificationsStore } from './notifications.tsx'
 import { createPermissionModeStore, type PermissionModeStore } from './permission-mode.tsx'
 import { createStore, type Store, type WritableStore } from './store.ts'
@@ -45,6 +46,8 @@ export interface ThreadStores {
    */
   readonly history: readonly UIMessage[]
   readonly permissionMode: PermissionModeStore
+  /** The session's model and thinking level (#338 slice 2); `null` until a live snapshot or `model` observation says. */
+  readonly model: ModelStore
   readonly stats: ThreadStatsStore
   readonly notifications: NotificationsStore
   readonly modeLines: ModeLines
@@ -103,6 +106,7 @@ function createThreadStores(threadId: string, history: readonly UIMessage[], fet
     threadId,
     history,
     permissionMode: createPermissionModeStore(),
+    model: createModelStore(),
     stats: createThreadStatsStore(),
     notifications,
     modeLines: createModeLines(notifications),

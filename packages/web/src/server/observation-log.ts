@@ -82,6 +82,11 @@ function compactOf(observation: EnsoObservation): EnsoLogProperties {
       return { mode: observation.mode }
     case 'permission-mode-rejected':
       return { mode: observation.mode, reason: observation.reason }
+    case 'model':
+      return {
+        model: observation.model === null ? 'none' : `${observation.model.provider}/${observation.model.id}`,
+        thinkingLevel: observation.thinkingLevel,
+      }
     case 'extension-error':
       return { extensionPath: observation.extensionPath, event: observation.event }
     case 'run-ended':

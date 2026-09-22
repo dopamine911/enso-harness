@@ -42,6 +42,13 @@ test('EVERY observation the mapper can emit validates against EnsoObservation', 
     { type: 'queue_update', steering: [], followUp: ['x'] },
     { type: 'entry_appended', entry: { type: 'custom', customType: 'modes', data: { mode: 'acceptEdits' } } },
     { type: 'permission_mode', mode: 'acceptEdits', available: ['default', 'acceptEdits'] },
+    // The host's own model event (#338 slice 2), said by the watcher extension or a command.
+    {
+      type: 'model',
+      model: { provider: 'anthropic', id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
+      thinkingLevel: 'medium',
+      availableThinkingLevels: ['off', 'low', 'medium', 'high'],
+    },
     { type: 'agent_end', willRetry: true },
     { type: 'agent_settled' },
     { type: 'totally_unknown', payload: [1, 2, 3] },

@@ -109,6 +109,7 @@ export {
   EnsoExtensionUiRequest,
   EnsoMessageEnd,
   EnsoMessageStart,
+  EnsoModelObservation,
   EnsoNotifyType,
   EnsoObservation,
   EnsoPermissionMode,
@@ -144,8 +145,12 @@ export {
 } from './thread-inspection.ts'
 export {
   type DialogAnswer,
+  EnsoHostCommandRun,
+  EnsoModelChoice,
+  EnsoModelState,
   EnsoPromptAdmission,
   EnsoThreadCommands,
+  HostCommandOption,
   isRuntimeCommand,
   PromptImageContent,
   type PromptOutcome,

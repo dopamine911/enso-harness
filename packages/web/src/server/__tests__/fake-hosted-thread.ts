@@ -1,6 +1,9 @@
 import type {
   DialogAnswer,
   EnsoDialogSpec,
+  EnsoHostCommandRun,
+  EnsoModelChoice,
+  EnsoModelState,
   EnsoObservation,
   EnsoPermissionModeState,
   EnsoTranscriptEntry,
@@ -10,6 +13,7 @@ import type {
 } from '@enso/core'
 import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
+import { decideHostCommand, hostCommandRows } from '../../host/host-commands.ts'
 
 /**
  * The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a
@@ -24,11 +28,29 @@ import { createEventTail, describeObservation } from '../../host/event-tail.ts'
  * replaces that method over the fake's own parts and keeps the rest.
  */
 
+/** The models the fake "could run" (#338 slice 2): two, so a `/model` switch has somewhere to go. */
+const FAKE_MODEL_ONE: EnsoModelChoice = { provider: 'fake', id: 'fake-1', name: 'Fake One' }
+const FAKE_MODEL_TWO: EnsoModelChoice = { provider: 'fake', id: 'fake-2', name: 'Fake Two' }
+export const FAKE_MODELS: readonly EnsoModelChoice[] = [FAKE_MODEL_ONE, FAKE_MODEL_TWO]
+
+/** What the fake starts on: the first fake model, thinking `medium` of four levels. */
+function freshFakeModelState(): EnsoModelState {
+  return {
+    model: { ...FAKE_MODEL_ONE },
+    thinkingLevel: 'medium',
+    availableThinkingLevels: ['off', 'low', 'medium', 'high'],
+  }
+}
+
 export interface FakeThreadRecord {
   readonly prompts: PromptRequest[]
   readonly answers: DialogAnswer[]
   /** Every mode the server asked for, in order (L3 step C). */
   readonly modeChanges: string[]
+  /** Every host command the server ran, in order — accepted or refused (#338 slice 2). */
+  readonly hostCommands: EnsoHostCommandRun[]
+  /** The model state `modelState()` reads and `runHostCommand` writes; a test sets it to start elsewhere. */
+  modelState: EnsoModelState
   aborts: number
   queueClears: number
   disposed: number
@@ -68,6 +90,8 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     prompts: [],
     answers: [],
     modeChanges: [],
+    hostCommands: [],
+    modelState: freshFakeModelState(),
     aborts: 0,
     queueClears: 0,
     disposed: 0,
@@ -103,7 +127,22 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       }
     },
     openDialogs: () => [...open].map(([id, dialog]) => ({ id, dialog })),
-    listCommands: () => [],
+    // pi's rows first (none by default; a test's override supplies its own), then the host's two
+    // over the fake's models — the real host's order.
+    listCommands: () => hostCommandRows(record.modelState, FAKE_MODELS),
+    modelState: () => record.modelState,
+    runHostCommand: (run: EnsoHostCommandRun) => {
+      // What the real host does: the shared decision, the set, then the state said as `model`.
+      record.hostCommands.push(run)
+      const decision = decideHostCommand(run, record.modelState, FAKE_MODELS)
+      if (decision.kind === 'refused') return Promise.reject(new Error(decision.reason))
+      record.modelState =
+        decision.kind === 'model'
+          ? { ...record.modelState, model: { ...decision.model } }
+          : { ...record.modelState, thinkingLevel: decision.level }
+      emit({ kind: 'model', ...record.modelState })
+      return Promise.resolve()
+    },
     permissionModeState: () => ({ mode: 'default', available: ['default'] }),
     setPermissionMode: (mode: string, outcome: PromptOutcome) => {
       // What the real host does: the vendor's command is accepted (an extension command's

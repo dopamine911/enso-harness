@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from 'bun:test'
-import type { EnsoThreadCommands } from '@enso/core'
+import type { EnsoThreadCommands, RuntimeCommand } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import type { CommandPalette as CommandPaletteComponent, rankCommand as RankCommand } from '../command-palette.tsx'
@@ -26,8 +26,9 @@ const {
  * dropdown-menu) and the palette inside it (cmdk) both render here — the trigger opens on
  * `pointerdown` as Radix's does, the rows are cmdk's `[cmdk-item]`s, the filter is its input.
  * What these pin: one fetch PER OPEN, the grouping and the description, the filter narrowing,
- * the selection rule (extension → run, prompt/skill → insert), the three empty/remembered
- * sentences, and a failed fetch rendered inside the palette with its status and body.
+ * the selection rule (extension → run, prompt/skill → insert, host by kind: level → a page then
+ * `onHost`, select → the owner's dialog, #338 slice 2), the three empty/remembered sentences,
+ * and a failed fetch rendered inside the palette with its status and body.
  */
 
 afterAll(releaseDom)
@@ -65,10 +66,38 @@ const LIVE: EnsoThreadCommands = {
   source: 'live',
 }
 
+/** The two host rows the server appends (#338 slice 2), as a live list carries them — with a current `value`. */
+const HOST_ROWS: readonly RuntimeCommand[] = [
+  {
+    name: 'model',
+    source: 'host',
+    kind: 'select',
+    description: 'switch the model',
+    value: 'fake/one',
+    options: [
+      { id: 'fake/one', label: 'Fake One', detail: 'fake' },
+      { id: 'fake/two', label: 'Fake Two', detail: 'fake' },
+    ],
+  },
+  {
+    name: 'thinking',
+    source: 'host',
+    kind: 'level',
+    description: 'set the thinking level',
+    value: 'medium',
+    options: ['off', 'low', 'medium', 'high'].map((level) => ({ id: level, label: level })),
+  },
+]
+const WITH_HOST: EnsoThreadCommands = { ...LIVE, commands: [...LIVE.commands, ...HOST_ROWS] }
+
 interface MountedPalette {
   readonly asked: string[]
   readonly runs: string[]
   readonly inserts: string[]
+  /** Every `onHost` call, as `[name, optionId?]`. */
+  readonly hosts: Array<[string, string | undefined]>
+  /** Every `onOpenModelDialog` call's row. */
+  readonly dialogs: RuntimeCommand[]
   readonly trigger: () => HTMLButtonElement
   readonly open: () => Promise<void>
   readonly close: () => Promise<void>
@@ -85,6 +114,8 @@ async function mountPalette(respond: () => Response): Promise<MountedPalette> {
   const asked: string[] = []
   const runs: string[] = []
   const inserts: string[] = []
+  const hosts: Array<[string, string | undefined]> = []
+  const dialogs: RuntimeCommand[] = []
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
@@ -101,6 +132,12 @@ async function mountPalette(respond: () => Response): Promise<MountedPalette> {
         }}
         onInsert={(commandName: string): void => {
           inserts.push(commandName)
+        }}
+        onHost={(commandName: string, optionId?: string): void => {
+          hosts.push([commandName, optionId])
+        }}
+        onOpenModelDialog={(command: RuntimeCommand): void => {
+          dialogs.push(command)
         }}
       />,
     )
@@ -119,6 +156,8 @@ async function mountPalette(respond: () => Response): Promise<MountedPalette> {
     asked,
     runs,
     inserts,
+    hosts,
+    dialogs,
     trigger,
     palette,
     // Radix opens its trigger on a primary-button pointerdown, not on click.
@@ -292,6 +331,156 @@ test('a prompt row INSERTS: `onInsert` with the bare name, and nothing runs', as
   })
   await eventually(() => expect(mounted.inserts).toEqual(['review']))
   expect(mounted.runs).toEqual([])
+  await mounted.unmount()
+})
+
+// ⚠ HOST ROWS RENDER BY KIND (#338 slice 2). `settings` is OURS and FIRST; the right-hand label is
+// the current option's `label`, dim, off the row's `value` — so a reader sees `Fake One` and
+// `medium` without opening anything, the chip's two facts in the palette too.
+test('the host group renders first as `settings`, each row with its current value on the right', async () => {
+  const mounted = await mountPalette(() => Response.json(WITH_HOST))
+  await mounted.open()
+  await eventually(() =>
+    expect(mounted.rows()).toEqual(['/model', '/thinking', '/mode', '/plan', '/review', '/deploy']),
+  )
+  const headings = [...mounted.palette().querySelectorAll<HTMLElement>('[cmdk-group-heading]')].map(
+    (heading) => heading.textContent,
+  )
+  expect(headings).toEqual(['settings', 'extensions', 'prompts', 'skills'])
+  expect(mounted.row('/model').textContent).toBe('/modelswitch the modelFake One')
+  expect(mounted.row('/thinking').textContent).toBe('/thinkingset the thinking levelmedium')
+  await mounted.unmount()
+})
+
+// A `level` row is a PAGE inside the same cmdk root: its options replace the list, the filter
+// box is the same one (emptied), and Escape or Backspace-on-empty returns to the root without
+// closing the menu — Claude Code's second step, minus a second popup.
+test('a level row opens its options as a page; Escape returns to the root; picking one is `onHost(name, id)` and closes', async () => {
+  const mounted = await mountPalette(() => Response.json(WITH_HOST))
+  await mounted.open()
+  const thinkingRow = await eventually(() => mounted.row('/thinking'))
+  await flush(async () => {
+    typeInto(mounted.filter(), 'think')
+    await tick()
+  })
+  await eventually(() => expect(mounted.rows()).toEqual(['/thinking']))
+  await flush(async () => {
+    thinkingRow.click()
+    await tick()
+  })
+  await eventually(() => expect(mounted.rows()).toEqual(['off', 'low', 'medium', 'high']))
+  // The page's filter starts empty (what narrowed the root would not narrow the page), and the
+  // current level is marked.
+  expect(mounted.filter().value).toBe('')
+  expect(mounted.row('medium').getAttribute('data-checked')).toBe('true')
+  expect(mounted.row('high').getAttribute('data-checked')).toBe('false')
+  expect(mounted.palette().querySelector('[cmdk-group-heading]')?.textContent).toBe('/thinking')
+  // Escape: back to the root, the menu still open. (Cancelable, as a browser's keydown is: the
+  // palette PREVENTS it so the dismissable layer does not read it as a close.)
+  await flush(async () => {
+    mounted.filter().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await tick()
+  })
+  await eventually(() =>
+    expect(mounted.rows()).toEqual(['/model', '/thinking', '/mode', '/plan', '/review', '/deploy']),
+  )
+  // Backspace on an empty filter: the same way back.
+  await flush(async () => {
+    mounted.row('/thinking').click()
+    await tick()
+  })
+  await eventually(() => expect(mounted.rows()).toEqual(['off', 'low', 'medium', 'high']))
+  await flush(async () => {
+    mounted.filter().dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }))
+    await tick()
+  })
+  await eventually(() => expect(mounted.rows()).toHaveLength(6))
+  // And the pick: the option's id with the command's name, once the menu has closed.
+  await flush(async () => {
+    mounted.row('/thinking').click()
+    await tick()
+  })
+  const highRow = await eventually(() => mounted.row('high'))
+  await flush(async () => {
+    highRow.click()
+    await tick()
+  })
+  await eventually(() => {
+    expect(mounted.hosts).toEqual([['thinking', 'high']])
+    expect(document.querySelector('[cmdk-root]')).toBeNull()
+  })
+  expect(mounted.runs).toEqual([])
+  expect(mounted.inserts).toEqual([])
+  expect(mounted.dialogs).toEqual([])
+  await mounted.unmount()
+})
+
+test('a select row closes the palette and hands the row to `onOpenModelDialog`; nothing is posted by the palette', async () => {
+  const mounted = await mountPalette(() => Response.json(WITH_HOST))
+  await mounted.open()
+  const modelRow = await eventually(() => mounted.row('/model'))
+  await flush(async () => {
+    modelRow.click()
+    await tick()
+  })
+  await eventually(() => {
+    expect(mounted.dialogs.map((row) => row.name)).toEqual(['model'])
+    expect(mounted.dialogs[0]?.options).toEqual(HOST_ROWS[0]?.options)
+    expect(document.querySelector('[cmdk-root]')).toBeNull()
+  })
+  expect(mounted.hosts).toEqual([])
+  await mounted.unmount()
+})
+
+// The #341 case: a thread with no live session gets the `remembered` list, whose host rows the
+// server strips `value` from. No right-hand label — and the row STILL opens its page, because
+// choosing before the first prompt is what the rows are for.
+test('a remembered host row without a value shows no label and still opens its page', async () => {
+  const stripped = HOST_ROWS.map(({ value: _current, ...row }) => row)
+  const mounted = await mountPalette(() =>
+    Response.json({ ...LIVE, commands: [...LIVE.commands, ...stripped], source: 'remembered' }),
+  )
+  await mounted.open()
+  const thinkingRow = await eventually(() => mounted.row('/thinking'))
+  expect(thinkingRow.textContent).toBe('/thinkingset the thinking level')
+  expect(mounted.row('/model').textContent).toBe('/modelswitch the model')
+  await flush(async () => {
+    thinkingRow.click()
+    await tick()
+  })
+  await eventually(() => expect(mounted.rows()).toEqual(['off', 'low', 'medium', 'high']))
+  expect([...mounted.palette().querySelectorAll('[cmdk-item][data-checked="true"]')]).toHaveLength(0)
+  await mounted.unmount()
+})
+
+// An `action` row runs bare (slice 4's `/compact`), and so does a host row with NO kind — the
+// palette's fallthrough. (A kind the schema does not list cannot arrive: `fetchThreadCommands`
+// refuses the payload whole, so "unknown kind" is a code path the wire never reaches.)
+test('an action row — or a host row with no kind — is `onHost(name)` bare', async () => {
+  const rows: RuntimeCommand[] = [
+    { name: 'compact', source: 'host', kind: 'action', description: 'compact the context' },
+    { name: 'kindless', source: 'host' },
+  ]
+  const mounted = await mountPalette(() => Response.json({ ...LIVE, commands: rows }))
+  await mounted.open()
+  const compactRow = await eventually(() => mounted.row('/compact'))
+  await flush(async () => {
+    compactRow.click()
+    await tick()
+  })
+  await eventually(() => expect(mounted.hosts).toEqual([['compact', undefined]]))
+  await mounted.open()
+  const kindlessRow = await eventually(() => mounted.row('/kindless'))
+  await flush(async () => {
+    kindlessRow.click()
+    await tick()
+  })
+  await eventually(() =>
+    expect(mounted.hosts).toEqual([
+      ['compact', undefined],
+      ['kindless', undefined],
+    ]),
+  )
   await mounted.unmount()
 })
 

@@ -28,6 +28,8 @@ export interface ScriptedFetch {
   readonly dialogs: unknown[]
   /** Every body `POST …/mode` received (L3 step C). */
   readonly modeChanges: unknown[]
+  /** Every body `POST …/command` received (#338 slice 2) — a host command's `{ name, value? }`. */
+  readonly hostCommands: unknown[]
   /** How many `POST …/abort` the server saw (#116). */
   readonly abortCount: () => number
   /** Hold the next prompt's answer; returns the release. */
@@ -53,6 +55,9 @@ export interface ScriptedFetchOptions {
   readonly abortStatus?: number
   /** What `POST …/mode` answers; 204 by default. */
   readonly modeStatus?: number
+  /** What `POST …/command` answers; 204 by default. A non-204 carries `commandBody` (the host's reason) as its text. */
+  readonly commandStatus?: number
+  readonly commandBody?: string
   /** What the stop hands back (#75): the prompts pi had queued. Answered with the 200 receipt. */
   readonly queued?: string[]
   readonly mode?: { mode: string; available: string[] }
@@ -79,6 +84,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   const dialogStatus = options.dialogStatus ?? 204
   const abortStatus = options.abortStatus ?? 200
   const modeStatus = options.modeStatus ?? 204
+  const commandStatus = options.commandStatus ?? 204
   const mode = options.mode ?? { mode: 'default', available: ['default', 'plan'] }
   let aborts = 0
   let write: (text: string) => void = () => undefined
@@ -88,6 +94,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   const prompts: Array<{ message: string; admission?: string; images?: unknown[] }> = []
   const dialogs: unknown[] = []
   const modeChanges: unknown[] = []
+  const hostCommands: unknown[] = []
   /** Question ids the server has TAKEN an answer for — the shape of the real route's 404. */
   const spentQuestions = new Set<string>()
   /** The follow: one SSE body per subscription; the latest one is where `frame` writes. */
@@ -156,6 +163,11 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
       modeChanges.push(JSON.parse(String(init?.body)))
       return Promise.resolve(new Response(modeStatus === 204 ? null : 'no', { status: modeStatus }))
     },
+    command: (init: RequestInit | undefined): Promise<Response> => {
+      hostCommands.push(JSON.parse(String(init?.body)))
+      if (commandStatus === 204) return Promise.resolve(new Response(null, { status: 204 }))
+      return Promise.resolve(new Response(options.commandBody ?? 'no', { status: commandStatus }))
+    },
     abort: (): Promise<Response> => {
       aborts += 1
       if (abortStatus !== 200) return Promise.resolve(new Response('no', { status: abortStatus }))
@@ -177,6 +189,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     prompts,
     dialogs,
     modeChanges,
+    hostCommands,
     abortCount: () => aborts,
     holdPrompt: () => {
       const gate = Promise.withResolvers<void>()
@@ -194,6 +207,7 @@ export const SNAPSHOT_IDLE: EnsoFollowSnapshot = {
   busy: false,
   generation: 0,
   permissionMode: { mode: 'default', available: ['default', 'plan'] },
+  model: null,
   messages: [],
   openDialogs: [],
 }

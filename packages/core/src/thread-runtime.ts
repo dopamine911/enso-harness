@@ -62,6 +62,44 @@ export const EnsoPromptAdmission = Type.Union([Type.Literal('interrupt'), Type.L
 export type EnsoPromptAdmission = Static<typeof EnsoPromptAdmission>
 
 /**
+ * One choice a `host` command offers (#338 slice 2): `id` is what `POST …/command` sends back,
+ * `label` what the row shows, `detail` a dimmer second column (a model's provider).
+ *
+ * @group Thread runtime
+ */
+export const HostCommandOption = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  label: Type.String(),
+  detail: Type.Optional(Type.String()),
+})
+/** @group Thread runtime */
+export type HostCommandOption = Static<typeof HostCommandOption>
+
+/**
+ * The model a session runs and how hard it thinks (#338 slice 2, the control half of #44):
+ * `model` is `null` when the session has none pi will run (no provider authenticated);
+ * `thinkingLevel` is pi's — one of `availableThinkingLevels`, which the current model decides
+ * (`off` for a model that cannot reason).
+ *
+ * @group Thread runtime
+ */
+export const EnsoModelChoice = Type.Object({
+  provider: Type.String({ minLength: 1 }),
+  id: Type.String({ minLength: 1 }),
+  name: Type.String(),
+})
+/** @group Thread runtime */
+export type EnsoModelChoice = Static<typeof EnsoModelChoice>
+/** @group Thread runtime */
+export const EnsoModelState = Type.Object({
+  model: Type.Union([EnsoModelChoice, Type.Null()]),
+  thinkingLevel: Type.String(),
+  availableThinkingLevels: Type.Array(Type.String()),
+})
+/** @group Thread runtime */
+export type EnsoModelState = Static<typeof EnsoModelState>
+
+/**
  * One entry from pi's `get_commands`.
  *
  * ⚠ `source` matters for a reason the field name does not convey: these are the ONLY
@@ -75,13 +113,41 @@ export type EnsoPromptAdmission = Static<typeof EnsoPromptAdmission>
  */
 export const RuntimeCommand = Type.Object({
   name: Type.String(),
-  source: Type.Union([Type.Literal('extension'), Type.Literal('prompt'), Type.Literal('skill')]),
+  /** pi's three, plus `host` — ours, declared by kind (#338 slice 2). */
+  source: Type.Union([Type.Literal('extension'), Type.Literal('prompt'), Type.Literal('skill'), Type.Literal('host')]),
   description: Type.Optional(Type.String()),
   location: Type.Optional(Type.String()),
   path: Type.Optional(Type.String()),
+  /**
+   * `host` rows only (#338): what the row IS, not what widget draws it. `select` — one of many
+   * `options`, the second step filters them (`/model`); `level` — one of a few ordered `options`,
+   * chosen in place (`/thinking`); `action` — runs with no value (`/compact`, `/login`; later
+   * slices). The palette renders by kind; nothing is per-command UI.
+   */
+  kind: Type.Optional(Type.Union([Type.Literal('select'), Type.Literal('level'), Type.Literal('action')])),
+  /** `host` rows: the current choice, as an `options[].id`. Absent when the list is `remembered` — a thread with no live session has no current value to show. */
+  value: Type.Optional(Type.String()),
+  /** `host` rows with `kind: 'select' | 'level'`: what may be chosen. */
+  options: Type.Optional(Type.Array(HostCommandOption)),
 })
 /** @group Thread runtime */
 export type RuntimeCommand = Static<typeof RuntimeCommand>
+
+/**
+ * `POST /api/threads/:id/command` (#338 slice 2): run a `host` command. `value` is one of the
+ * row's `options[].id` for `select`/`level`; absent for `action`.
+ *
+ * @group Thread runtime
+ */
+export const EnsoHostCommandRun = Type.Object(
+  {
+    name: Type.String({ minLength: 1 }),
+    value: Type.Optional(Type.String({ minLength: 1 })),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread runtime */
+export type EnsoHostCommandRun = Static<typeof EnsoHostCommandRun>
 
 const commandValidator = Compile(RuntimeCommand)
 
@@ -189,8 +255,25 @@ export const ThreadRuntime = Type.Object({
    * Empty once answered, cancelled, or never asked.
    */
   openDialogs: Type.Unsafe<() => EnsoOpenDialog[]>(Type.Function([], Type.Unknown())),
-  /** The slash commands this session can run — extension commands, prompt templates, skills. Synchronous: read off the live registry, no round trip. */
+  /**
+   * The slash commands this session can run — extension commands, prompt templates, skills, and
+   * the host's own (`source: 'host'`, #338 slice 2: `/model`, `/thinking`, each with its current
+   * `value` and its `options`). Synchronous: read off the live registry and the session, no
+   * round trip.
+   */
   listCommands: Type.Unsafe<() => RuntimeCommand[]>(Type.Function([], Type.Unknown())),
+  /** The model and thinking level this session runs with now (#338 slice 2). Synchronous. */
+  modelState: Type.Unsafe<() => EnsoModelState>(Type.Function([], Type.Unknown())),
+  /**
+   * Run a `host` command (#338 slice 2): `model` with an `options[].id` (`provider/id`),
+   * `thinking` with a level. Resolves when applied; the change itself arrives on the feed as a
+   * `model` observation, for every follower. REJECTS with a reason a reader can act on — an
+   * unknown model, a level this model does not offer, a provider with no credentials (pi's
+   * `setModel` refuses that) — and the route says it as 422.
+   */
+  runHostCommand: Type.Unsafe<(run: EnsoHostCommandRun) => Promise<void>>(
+    Type.Function([Type.Unknown()], Type.Unknown()),
+  ),
   /**
    * The permission-mode receipt a run starts with (#84): picc's CURRENT mode for this
    * session, computed the way picc itself restores it — the last persisted `modes` entry

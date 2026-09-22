@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import type { EnsoDialogSpec, EnsoFollowSnapshot, EnsoFollowStatus, EnsoObservation } from '@enso/core'
+import type { EnsoDialogSpec, EnsoFollowSnapshot, EnsoFollowStatus, EnsoModelState, EnsoObservation } from '@enso/core'
 import { FOLLOW_ENDED_CUSTOM_EVENT, routeEnsoCustomEvent } from '../custom-event-router.ts'
 import { clearThreadsForTest, mintThread, type ThreadStores } from '../thread-stores.ts'
 
@@ -37,6 +37,7 @@ const snapshot = (overrides: Partial<EnsoFollowSnapshot> = {}): EnsoFollowSnapsh
   busy: false,
   generation: 1,
   permissionMode: { mode: 'default', available: ['default'] },
+  model: null,
   messages: [],
   openDialogs: [],
   ...overrides,
@@ -59,6 +60,31 @@ test("the snapshot's permissionMode is the run-start receipt, folded by the same
   route('snapshot', snapshot({ permissionMode: { mode: 'plan', available: ['default', 'plan'] } }))
   expect(stores.permissionMode.get()).toEqual({ mode: 'plan', available: ['default', 'plan'] })
   expect(notificationMessages()).toEqual(['Mode: plan'])
+})
+
+// #338 slice 2: the model store has ONE source, the follow — the snapshot's `model` and the
+// `model` observation the host emits after a `/model` or `/thinking` run. `null` is a fact the
+// snapshot states (not live), not an absence to skip over.
+const LIVE_MODEL: EnsoModelState = {
+  model: { provider: 'fake', id: 'one', name: 'Fake One' },
+  thinkingLevel: 'medium',
+  availableThinkingLevels: ['off', 'low', 'medium', 'high'],
+}
+
+test("the snapshot's model seeds the model store; a null snapshot leaves it null (#338 slice 2)", () => {
+  expect(stores.model.get()).toBeNull()
+  route('snapshot', snapshot())
+  expect(stores.model.get()).toBeNull()
+  route('snapshot', snapshot({ model: LIVE_MODEL }))
+  expect(stores.model.get()).toEqual(LIVE_MODEL)
+})
+
+test('a model observation replaces the model store with the state the host says (#338 slice 2)', () => {
+  route('snapshot', snapshot({ model: LIVE_MODEL }))
+  observe({ kind: 'model', ...LIVE_MODEL, thinkingLevel: 'high' })
+  expect(stores.model.get()).toEqual({ ...LIVE_MODEL, thinkingLevel: 'high' })
+  observe({ kind: 'model', model: null, thinkingLevel: 'off', availableThinkingLevels: [] })
+  expect(stores.model.get()).toEqual({ model: null, thinkingLevel: 'off', availableThinkingLevels: [] })
 })
 
 // ⚠ THE BROWSER NO LONGER READS A VENDOR ENTRY (L3). A persisted `modes` entry still crosses

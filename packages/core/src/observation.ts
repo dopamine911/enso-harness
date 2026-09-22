@@ -1,6 +1,7 @@
 import { type Static, Type } from 'typebox'
 import { EnsoDialogSpec } from './dialog.ts'
 import { EnsoPermissionModeState } from './permission-mode.ts'
+import { EnsoModelState } from './thread-runtime.ts'
 import { EnsoToolResultDescriptor } from './tool-result.ts'
 
 /**
@@ -268,6 +269,28 @@ export type EnsoPermissionMode = Static<typeof EnsoPermissionMode>
  * @group Observations
  * @category Permission and dialogs
  */
+/**
+ * The model or thinking level changed (#338 slice 2) — by `POST …/command`, by an extension
+ * (pi-multi-account's failover swaps the model mid-run), or by pi restoring a session. The
+ * snapshot frame's `model` is the same shape at run start; the composer chip folds both.
+ *
+ * @group Observations
+ * @category Permission and dialogs
+ */
+export const EnsoModelObservation = Type.Object({
+  kind: Type.Literal('model'),
+  ...EnsoModelState.properties,
+})
+/**
+ * @group Observations
+ * @category Permission and dialogs
+ */
+export type EnsoModelObservation = Static<typeof EnsoModelObservation>
+
+/**
+ * @group Observations
+ * @category Permission and dialogs
+ */
 export const EnsoPermissionModeRejected = Type.Object({
   kind: Type.Literal('permission-mode-rejected'),
   mode: Type.String({ minLength: 1 }),
@@ -476,6 +499,7 @@ export const EnsoObservation = Type.Union([
   EnsoCustomEntry,
   EnsoPermissionMode,
   EnsoPermissionModeRejected,
+  EnsoModelObservation,
   EnsoMessageStart,
   EnsoMessageEnd,
   EnsoTurnStart,

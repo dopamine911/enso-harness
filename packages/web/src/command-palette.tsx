@@ -39,11 +39,23 @@ import {
  * command with no arguments runs, and `/mode` bare opens picc's select dialog, which is the
  * nicer UX). A `prompt` template or a `skill` is INSERTED — `onInsert(name)`, and the owner puts
  * `/<name> ` in the composer and focuses it — because those take arguments the user has yet to
- * type. Both callbacks fire from the menu's `onCloseAutoFocus`, AFTER the menu has closed: the
- * menu's focus trap would otherwise pull focus straight back from the textarea the owner just
- * focused, and the menu's own "return focus to the trigger" is prevented so the owner's choice
- * of focus stands. A close without a selection (Escape, click-away) fires nothing and returns
- * focus to the `/` button as the menu does by itself.
+ * type. A `host` row renders BY KIND, nothing per command (#338 slice 2): a `level` row (`/thinking`)
+ * replaces the list with its options — a PAGE inside the same cmdk root, filtered by the same box;
+ * Escape or Backspace on an empty filter returns to the root — and picking one is
+ * `onHost(name, optionId)`. A `select` row (`/model`) closes the palette and hands the row to
+ * `onOpenModelDialog`: the owner renders the `ModelSelector` dialog (the second step Claude Code's
+ * `Switch model…` opens), so the palette holds no dialog state. An `action` row — and any kind
+ * this palette does not know, since a newer host may declare one — is `onHost(name)`. Every
+ * callback fires from the menu's `onCloseAutoFocus`, AFTER the menu has closed: the menu's focus
+ * trap would otherwise pull focus straight back from the textarea the owner just focused, and
+ * the menu's own "return focus to the trigger" is prevented so the owner's choice of focus
+ * stands. A close without a selection (Escape, click-away) fires nothing and returns focus to
+ * the `/` button as the menu does by itself.
+ *
+ * A `host` row shows its current option's `label` on the right, dim (`Fake One`, `medium`), when
+ * the row carries a `value`; a `remembered` list carries none — the server strips it, because a
+ * thread with no live session has no current value — and the row still opens its step: choosing
+ * the model before the first prompt is the #341 case, not an error.
  *
  * Empty states say WHICH empty: `source: 'none'` (no session built in this process yet) reads
  * "no thread has run yet — commands appear after the first prompt"; a live or remembered list
@@ -76,6 +88,10 @@ export interface CommandPaletteProps {
   readonly onRun: (commandName: string) => void
   /** A `prompt` template or a `skill` was chosen: put `/<name> ` in the composer and focus it. */
   readonly onInsert: (commandName: string) => void
+  /** A `host` command was chosen — an `action` bare, a `level`'s option with its id: `POST …/command`. */
+  readonly onHost: (commandName: string, optionId?: string) => void
+  /** A `select` host row was chosen: the owner opens the model dialog for it; the palette has closed. */
+  readonly onOpenModelDialog: (command: RuntimeCommand) => void
   /** The composer is not taking input (disconnected); the `/` button follows it. */
   readonly disabled?: boolean
 }
@@ -90,12 +106,26 @@ const NO_COMMANDS = 'this session registers no commands'
 const NO_MATCH = 'no command matches'
 const REMEMBERED_NOTE = 'from the last session — this thread has no live session'
 
-/** One cmdk group per source, in the order the palette shows them. */
+/** One cmdk group per source, in the order the palette shows them — ours first: it is short, and the settings are what a chip points at. */
 const GROUPS: ReadonlyArray<{ readonly source: RuntimeCommand['source']; readonly heading: string }> = [
+  { source: 'host', heading: 'settings' },
   { source: 'extension', heading: 'extensions' },
   { source: 'prompt', heading: 'prompts' },
   { source: 'skill', heading: 'skills' },
 ]
+
+/** What a chosen row does once the menu has closed (header): delivered from `onCloseAutoFocus`. */
+type Choice =
+  | { readonly kind: 'run'; readonly command: RuntimeCommand }
+  | { readonly kind: 'insert'; readonly command: RuntimeCommand }
+  | { readonly kind: 'host'; readonly command: RuntimeCommand; readonly optionId?: string }
+  | { readonly kind: 'dialog'; readonly command: RuntimeCommand }
+
+/** The row's current option, by `value`, for the dim label on the right; the raw `value` if no option carries it. */
+function currentLabel(command: RuntimeCommand): string | undefined {
+  if (command.value === undefined) return undefined
+  return command.options?.find((option) => option.id === command.value)?.label ?? command.value
+}
 
 /** Name-first ranking for cmdk's `filter` (header): `1` is a match at the start of the name, `0` hides the row. */
 export function rankCommand(rowValue: string, search: string, keywords?: readonly string[]): number {
@@ -120,14 +150,20 @@ export function CommandPalette({
   fetch: fetchImpl,
   onRun,
   onInsert,
+  onHost,
+  onOpenModelDialog,
   disabled = false,
 }: CommandPaletteProps): React.ReactNode {
   const [open, setOpen] = useState(false)
   const [state, setState] = useState<PaletteState>({ kind: 'loading' })
+  // The `level` row whose options replace the list (header); undefined at the root.
+  const [page, setPage] = useState<RuntimeCommand | undefined>(undefined)
+  // The filter's text, controlled so a page change clears it: what narrowed the root would not narrow the page.
+  const [search, setSearch] = useState('')
   // Which open a response belongs to; a response from an earlier open is dropped.
   const openCount = useRef(0)
   // The row chosen before the menu closed; delivered from `onCloseAutoFocus` (header).
-  const pending = useRef<RuntimeCommand | undefined>(undefined)
+  const pending = useRef<Choice | undefined>(undefined)
   // The filter box. A Radix menu focuses its own content on open (`onOpenAutoFocus` is not
   // exposed — a menu is roving-focus by design); whenever the content ITSELF takes focus, it is
   // handed on to the filter so the first keystroke filters — Claude Code's palette does the same.
@@ -139,6 +175,8 @@ export function CommandPalette({
     const opening = openCount.current + 1
     openCount.current = opening
     setState({ kind: 'loading' })
+    setPage(undefined)
+    setSearch('')
     void fetchThreadCommands(threadId, fetchImpl).then(
       (commands) => {
         if (openCount.current === opening) setState({ kind: 'loaded', commands })
@@ -151,9 +189,27 @@ export function CommandPalette({
     )
   }
 
-  const choose = (command: RuntimeCommand): void => {
-    pending.current = command
+  const finish = (choice: Choice): void => {
+    pending.current = choice
     setOpen(false)
+  }
+
+  const enterPage = (command: RuntimeCommand): void => {
+    setPage(command)
+    setSearch('')
+  }
+
+  const leavePage = (): void => {
+    setPage(undefined)
+    setSearch('')
+  }
+
+  const choose = (command: RuntimeCommand): void => {
+    if (command.source === 'extension') finish({ kind: 'run', command })
+    else if (command.source !== 'host') finish({ kind: 'insert', command })
+    else if (command.kind === 'level') enterPage(command)
+    else if (command.kind === 'select') finish({ kind: 'dialog', command })
+    else finish({ kind: 'host', command })
   }
 
   const deliverChoice = (event: Event): void => {
@@ -162,8 +218,34 @@ export function CommandPalette({
     pending.current = undefined
     // The owner decides where focus goes next, not the menu's return-to-trigger.
     event.preventDefault()
-    if (chosen.source === 'extension') onRun(chosen.name)
-    else onInsert(chosen.name)
+    switch (chosen.kind) {
+      case 'run':
+        onRun(chosen.command.name)
+        break
+      case 'insert':
+        onInsert(chosen.command.name)
+        break
+      case 'host':
+        if (chosen.optionId === undefined) onHost(chosen.command.name)
+        else onHost(chosen.command.name, chosen.optionId)
+        break
+      case 'dialog':
+        onOpenModelDialog(chosen.command)
+        break
+    }
+  }
+
+  // A page's way back (header): Escape stays inside the menu — prevented here, so the
+  // dismissable layer does not close it — and Backspace with nothing to delete returns too.
+  const escapeFromPage = (event: KeyboardEvent): void => {
+    if (page === undefined) return
+    event.preventDefault()
+    leavePage()
+  }
+  const backspaceFromPage = (event: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (page === undefined || event.key !== 'Backspace' || event.currentTarget.value.length > 0) return
+    event.preventDefault()
+    leavePage()
   }
 
   return (
@@ -184,9 +266,16 @@ export function CommandPalette({
           if (event.target === event.currentTarget) filterRef.current?.focus()
         }}
         onCloseAutoFocus={deliverChoice}
+        onEscapeKeyDown={escapeFromPage}
       >
         <PromptInputCommand label="commands" filter={rankCommand}>
-          <PromptInputCommandInput ref={filterRef} placeholder="filter commands…" />
+          <PromptInputCommandInput
+            ref={filterRef}
+            value={search}
+            onValueChange={setSearch}
+            onKeyDown={backspaceFromPage}
+            placeholder={page === undefined ? 'filter commands…' : `${page.description ?? `/${page.name}`}…`}
+          />
           <PromptInputCommandList>
             {state.kind === 'loading' ? (
               <div role="status" className="px-2 py-3 text-muted-foreground text-sm">
@@ -198,7 +287,28 @@ export function CommandPalette({
                 {state.detail}
               </div>
             ) : null}
-            {state.kind === 'loaded' ? (
+            {state.kind === 'loaded' && page !== undefined ? (
+              <>
+                <PromptInputCommandEmpty>{NO_MATCH}</PromptInputCommandEmpty>
+                <PromptInputCommandGroup heading={`/${page.name}`}>
+                  {(page.options ?? []).map((option) => (
+                    <PromptInputCommandItem
+                      key={option.id}
+                      value={option.id}
+                      keywords={option.detail === undefined ? [option.label] : [option.label, option.detail]}
+                      data-checked={option.id === page.value}
+                      onSelect={(): void => finish({ kind: 'host', command: page, optionId: option.id })}
+                    >
+                      <span className="whitespace-nowrap">{option.label}</span>
+                      {option.detail === undefined ? null : (
+                        <span className="truncate text-muted-foreground">{option.detail}</span>
+                      )}
+                    </PromptInputCommandItem>
+                  ))}
+                </PromptInputCommandGroup>
+              </>
+            ) : null}
+            {state.kind === 'loaded' && page === undefined ? (
               <>
                 <PromptInputCommandEmpty>{emptyText(state.commands)}</PromptInputCommandEmpty>
                 {GROUPS.map(({ source, heading }) => {
@@ -206,19 +316,27 @@ export function CommandPalette({
                   if (rows.length === 0) return null
                   return (
                     <PromptInputCommandGroup key={source} heading={heading}>
-                      {rows.map((command) => (
-                        <PromptInputCommandItem
-                          key={command.name}
-                          value={`/${command.name}`}
-                          keywords={command.description === undefined ? [] : [command.description]}
-                          onSelect={(): void => choose(command)}
-                        >
-                          <span className="whitespace-nowrap font-mono">/{command.name}</span>
-                          {command.description === undefined ? null : (
-                            <span className="truncate text-muted-foreground">{command.description}</span>
-                          )}
-                        </PromptInputCommandItem>
-                      ))}
+                      {rows.map((command) => {
+                        const label = currentLabel(command)
+                        return (
+                          <PromptInputCommandItem
+                            key={command.name}
+                            value={`/${command.name}`}
+                            keywords={command.description === undefined ? [] : [command.description]}
+                            onSelect={(): void => choose(command)}
+                          >
+                            <span className="whitespace-nowrap font-mono">/{command.name}</span>
+                            {command.description === undefined ? null : (
+                              <span className="truncate text-muted-foreground">{command.description}</span>
+                            )}
+                            {label === undefined ? null : (
+                              <span className="ml-auto whitespace-nowrap pl-2 text-muted-foreground text-xs">
+                                {label}
+                              </span>
+                            )}
+                          </PromptInputCommandItem>
+                        )
+                      })}
                     </PromptInputCommandGroup>
                   )
                 })}

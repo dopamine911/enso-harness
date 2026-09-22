@@ -138,6 +138,8 @@ export interface ThreadStores {
    */
   readonly history: readonly UIMessage[]
   readonly permissionMode: PermissionModeStore
+  /** The session's model and thinking level (#338 slice 2); `null` until a live snapshot or `model` observation says. */
+  readonly model: ModelStore
   readonly stats: ThreadStatsStore
   readonly notifications: NotificationsStore
   readonly modeLines: ModeLines

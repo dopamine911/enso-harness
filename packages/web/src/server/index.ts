@@ -18,6 +18,7 @@ import {
 } from '@enso/core'
 import { missingVendorPaths } from '@enso/core/pi-manifest'
 import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost } from '../host/agent-host.ts'
+import { withoutHostValues } from '../host/host-commands.ts'
 import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
   abortThread,
@@ -27,8 +28,10 @@ import {
   followThread,
   promptThread,
   readDialogBody,
+  readHostCommandBody,
   readModeChangeBody,
   readPromptBody,
+  runHostCommand,
 } from './follow.ts'
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
 import { createLogStatsRoute } from './logs-stats-route.ts'
@@ -53,6 +56,8 @@ const THREAD_DIALOG_ROUTE = /^\/api\/threads\/([^/?#]+)\/dialog$/
 const THREAD_ABORT_ROUTE = /^\/api\/threads\/([^/?#]+)\/abort$/
 /** `POST …/mode` (#162 workstream 4, L3 step C): switch the mode as a control route, not a prompt. */
 const THREAD_MODE_ROUTE = /^\/api\/threads\/([^/?#]+)\/mode$/
+/** `POST …/command` (#338 slice 2): run a `host` command — `/model`, `/thinking` — as a control route, not a prompt. */
+const THREAD_COMMAND_ROUTE = /^\/api\/threads\/([^/?#]+)\/command$/
 
 /**
  * The dev backend: the thread routes the browser's `FollowConnection` talks to (#112), and
@@ -451,14 +456,18 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    * The slash commands a thread can run (#338). Live: its runtime's own list. Not live: the
    * list the last built session registered, or none — said as `source`, because looking must
    * not build (#86) and a palette that quietly showed a stale list would be a palette that lies.
-   * No record: this is the palette OPENING, and a reader opening a menu is not an event.
+   * A remembered list's host rows lose their `value` (#338 slice 2): this thread has no session
+   * and so no current model; the options are every session's. No record: this is the palette
+   * OPENING, and a reader opening a menu is not an event.
    */
   function respondWithThreadCommands(threadId: string, response: ServerResponse): void {
     const live = threads.peek(threadId)
     const remembered = threads.rememberedCommands()
     let payload: EnsoThreadCommands = { threadId, commands: [], source: 'none' }
     if (live !== undefined) payload = { threadId, commands: live.hosted.runtime.listCommands(), source: 'live' }
-    else if (remembered !== undefined) payload = { threadId, commands: [...remembered], source: 'remembered' }
+    else if (remembered !== undefined) {
+      payload = { threadId, commands: withoutHostValues(remembered), source: 'remembered' }
+    }
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify(payload))
   }
@@ -575,6 +584,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_PROMPT_ROUTE, respond: respondToPrompt },
     { method: 'POST', route: THREAD_DIALOG_ROUTE, respond: respondToDialog },
     { method: 'POST', route: THREAD_MODE_ROUTE, respond: respondToModeChange },
+    { method: 'POST', route: THREAD_COMMAND_ROUTE, respond: respondToHostCommand },
     {
       method: 'POST',
       route: THREAD_ABORT_ROUTE,
@@ -729,6 +739,38 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       return
     }
     log.info('mode change to {mode} told', { threadId, mode: change.mode })
+    response.writeHead(204)
+    response.end()
+  }
+
+  async function respondToHostCommand(
+    threadId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    // A command name and one option id; the dialog cap is generous for it.
+    const run = await readJsonBody(request, response, {
+      maxBytes: MAX_DIALOG_BODY_BYTES,
+      capText: `a host command is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+      parse: readHostCommandBody,
+    })
+    if (run === undefined) return
+    const outcome = await runHostCommand(followDeps, threadId, run)
+    if (outcome.status !== 204) {
+      log.warn('host command {name} refused ({status}): {reason}', {
+        threadId,
+        name: run.name,
+        status: outcome.status,
+        reason: outcome.reason,
+      })
+      refuseWith(response, outcome)
+      return
+    }
+    log.info('host command {name} applied', {
+      threadId,
+      name: run.name,
+      ...(run.value === undefined ? {} : { value: run.value }),
+    })
     response.writeHead(204)
     response.end()
   }

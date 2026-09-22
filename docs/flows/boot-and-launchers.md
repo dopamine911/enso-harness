@@ -118,7 +118,7 @@ export function buildPrintManifest(manifest: HarnessManifest): PrintManifest {
 Each marker below is checked by `test/docs-gate.test.ts`: the file must declare a test with exactly
 that title, so a renamed or deleted pin fails this page.
 
-<!-- test: packages/web/src/host/__tests__/agent-host.test.ts#exactly the manifest's six extensions load, in order, with no load errors -->
+<!-- test: packages/web/src/host/__tests__/agent-host.test.ts#exactly the manifest's six extensions load, in order, then the host's own model watcher, with no load errors -->
 - **Invariant 1, in-process** — [`agent-host.test.ts`](../../packages/web/src/host/__tests__/agent-host.test.ts):
   the loaded paths equal the manifest, in its order, no load error.
 <!-- test: packages/harness/extensions/__tests__/tool-call-participants.test.ts#⚠ exactly the two known tool_call participants — a third means #4's arbiter is due -->

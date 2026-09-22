@@ -38,8 +38,25 @@ export const ThreadRuntime = Type.Object({
    * Empty once answered, cancelled, or never asked.
    */
   openDialogs: Type.Unsafe<() => EnsoOpenDialog[]>(Type.Function([], Type.Unknown())),
-  /** The slash commands this session can run — extension commands, prompt templates, skills. Synchronous: read off the live registry, no round trip. */
+  /**
+   * The slash commands this session can run — extension commands, prompt templates, skills, and
+   * the host's own (`source: 'host'`, #338 slice 2: `/model`, `/thinking`, each with its current
+   * `value` and its `options`). Synchronous: read off the live registry and the session, no
+   * round trip.
+   */
   listCommands: Type.Unsafe<() => RuntimeCommand[]>(Type.Function([], Type.Unknown())),
+  /** The model and thinking level this session runs with now (#338 slice 2). Synchronous. */
+  modelState: Type.Unsafe<() => EnsoModelState>(Type.Function([], Type.Unknown())),
+  /**
+   * Run a `host` command (#338 slice 2): `model` with an `options[].id` (`provider/id`),
+   * `thinking` with a level. Resolves when applied; the change itself arrives on the feed as a
+   * `model` observation, for every follower. REJECTS with a reason a reader can act on — an
+   * unknown model, a level this model does not offer, a provider with no credentials (pi's
+   * `setModel` refuses that) — and the route says it as 422.
+   */
+  runHostCommand: Type.Unsafe<(run: EnsoHostCommandRun) => Promise<void>>(
+    Type.Function([Type.Unknown()], Type.Unknown()),
+  ),
   /**
    * The permission-mode receipt a run starts with (#84): picc's CURRENT mode for this
    * session, computed the way picc itself restores it — the last persisted `modes` entry
@@ -190,10 +207,22 @@ What the runtime says it can run — one entry per slash command:
  */
 export const RuntimeCommand = Type.Object({
   name: Type.String(),
-  source: Type.Union([Type.Literal('extension'), Type.Literal('prompt'), Type.Literal('skill')]),
+  /** pi's three, plus `host` — ours, declared by kind (#338 slice 2). */
+  source: Type.Union([Type.Literal('extension'), Type.Literal('prompt'), Type.Literal('skill'), Type.Literal('host')]),
   description: Type.Optional(Type.String()),
   location: Type.Optional(Type.String()),
   path: Type.Optional(Type.String()),
+  /**
+   * `host` rows only (#338): what the row IS, not what widget draws it. `select` — one of many
+   * `options`, the second step filters them (`/model`); `level` — one of a few ordered `options`,
+   * chosen in place (`/thinking`); `action` — runs with no value (`/compact`, `/login`; later
+   * slices). The palette renders by kind; nothing is per-command UI.
+   */
+  kind: Type.Optional(Type.Union([Type.Literal('select'), Type.Literal('level'), Type.Literal('action')])),
+  /** `host` rows: the current choice, as an `options[].id`. Absent when the list is `remembered` — a thread with no live session has no current value to show. */
+  value: Type.Optional(Type.String()),
+  /** `host` rows with `kind: 'select' | 'level'`: what may be chosen. */
+  options: Type.Optional(Type.Array(HostCommandOption)),
 })
 ```
 
@@ -275,7 +304,18 @@ on purpose, so the rename preserves the capability and leaves that decision open
 
 **`listCommands` returns the runtime's command entries** (`RuntimeCommand`: name, source,
 description). The shape is ours by declaration; its `source` values are the runtime's categories
-carried as strings. Small, stated.
+carried as strings — plus `host`, which is not the runtime's at all (#338 slice 2): the host appends
+its own rows, `/model` and `/thinking`, each declaring a **kind** (`select`, `level`, `action`), its
+current `value` and its `options`, so the palette renders them by kind with no per-command UI. Small,
+stated.
+
+**`modelState` and `runHostCommand` are the control half of #44** (#338 slice 2). The state is what
+the session runs with now — model, thinking level, the levels that model offers — on the snapshot
+frame and as the `model` observation whenever it changes, by whichever hand: the palette's `POST
+…/command`, an extension's failover swap, pi restoring a session. `runHostCommand` is the one way
+the browser changes it: the host validates (an unknown model, a level the model does not offer, a
+provider pi has no credentials for) and REJECTS with a reason the route says as 422, and the change
+itself is never the route's answer — it is the observation every follower reads.
 
 **Nothing of the runtime's event shape, since L2** (#162 workstream 4). Until then `subscribe` handed
 out `RuntimeEvent` — open on purpose, the runtime's own fields carried verbatim — and the mapper that
