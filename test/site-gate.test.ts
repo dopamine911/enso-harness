@@ -1,7 +1,9 @@
 import { expect, test } from 'bun:test'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { contentPath, documentationPages, pageTitle, rewriteLinks } from '../scripts/docs/site-content.ts'
+import { internalHrefs, resolveHref, unservedSections } from '../scripts/docs/site-links.ts'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
@@ -130,4 +132,45 @@ test('⚠ the docs-site workflow derives its base and builds the API first (#188
   expect(siteAt).toBeGreaterThan(apiAt)
   // What is uploaded is what was crawled.
   expect(workflow).toContain('path: site/dist')
+})
+
+/**
+ * The crawl's own readers, against a synthetic tree (PR #332 review).
+ *
+ * ⚠ Before this, `unservedSections`, `internalHrefs` and `resolveHref` were exercised only
+ * end-to-end by gate step 7 against the real built site — which means the `/api/` fix was
+ * "mutation-checked" by hand (delete `api/index.html`, watch the gate fail) and nothing would
+ * have pinned it through a refactor. A gate whose reader is only ever run on one input has no
+ * way to show that it reads anything.
+ */
+test('a section is a directory that holds pages, not a name on a list (#188)', () => {
+  const dist = mkdtempSync(join(tmpdir(), 'zen-site-dist-'))
+  // A section with its own page, and one without: only the second is a 404 a reader can reach.
+  mkdirSync(join(dist, 'seams'), { recursive: true })
+  writeFileSync(join(dist, 'seams', 'index.html'), '<html lang="en"></html>')
+  mkdirSync(join(dist, 'api', 'core'), { recursive: true })
+  writeFileSync(join(dist, 'api', 'core', 'index.html'), '<html lang="en"></html>')
+  // An asset directory: no page anywhere beneath it, and no name this code knows.
+  mkdirSync(join(dist, '_astro'), { recursive: true })
+  writeFileSync(join(dist, '_astro', 'app.css'), 'body{}')
+  mkdirSync(join(dist, 'whatever-the-next-plugin-writes'), { recursive: true })
+  writeFileSync(join(dist, 'whatever-the-next-plugin-writes', 'index.pf_meta'), 'x')
+
+  expect(unservedSections(dist)).toEqual(['/api/'])
+})
+
+test('the crawl reads the hrefs a site serves, and skips the ones it cannot answer for (#188)', () => {
+  const html = [
+    '<a href="/zen-harness/reference/routes/">a</a>',
+    '<a href="../seams/guards/">b</a>',
+    '<a href="https://example.invalid/x">external</a>',
+    '<a href="mailto:nobody@example.invalid">mail</a>',
+    '<a href="#anchor">fragment</a>',
+  ].join('\n')
+  // External, mail and pure-fragment hrefs are not this build's to answer for.
+  expect(internalHrefs(html)).toEqual(['/zen-harness/reference/routes/', '../seams/guards/'])
+  // Site-absolute (with and without the base) and page-relative land in one frame: under `dist`.
+  expect(resolveHref('/zen-harness/reference/routes/', 'site/dist/index.html')).toBe('site/dist/reference/routes')
+  expect(resolveHref('../seams/guards/', 'site/dist/flows/resume/index.html')).toBe('site/dist/flows/seams/guards')
+  expect(resolveHref('#anchor', 'site/dist/index.html')).toBe('site/dist/index.html')
 })

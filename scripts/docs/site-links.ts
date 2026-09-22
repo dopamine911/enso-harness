@@ -64,7 +64,11 @@ export function resolveHref(href: string, page: string): string {
     return relative(ROOT, resolve(ROOT, page, '..', withoutFragment))
   })()
   const insideDist = fromBase.startsWith(`${DIST}/`) ? fromBase.slice(DIST.length + 1) : fromBase
-  return join(DIST, insideDist)
+  // ⚠ Without the trim the two frames disagree on a trailing slash — `join` keeps the one a
+  // site-absolute href carries, `relative` has already dropped it from a page-relative one
+  // (PR #332 review, found by the first test to call this with both shapes). `isServed` tolerates
+  // either, so the difference was invisible until something compared the strings.
+  return join(DIST, insideDist).replace(/\/$/, '')
 }
 
 /** A path the built site serves: the file itself, or the directory's `index.html`. */
@@ -84,9 +88,50 @@ export function deadLinks(): string[] {
   return dead
 }
 
+/** Whether `directory` holds a built page anywhere beneath it. */
+function holdsAPage(directory: string): boolean {
+  for (const childName of readdirSync(directory)) {
+    const path = join(directory, childName)
+    if (statSync(path).isDirectory() ? holdsAPage(path) : childName.endsWith('.html')) return true
+  }
+  return false
+}
+
+/**
+ * A SECTION with no page of its own — `/api/` when the API reference exists only at
+ * `/api/core/src/` and friends.
+ *
+ * ⚠ The crawl above cannot see this, and did not: it follows links, and nothing in the site
+ * LINKS a bare section path. The sidebar presents `API reference` as a group of pages, so
+ * `/api/` was never an href — it was only a URL a reader reaches by trimming one, or by
+ * following a link written somewhere this repository does not build. It 404ed on the published
+ * site while every gate was green.
+ *
+ * ⚠ A SECTION IS A DIRECTORY THAT HOLDS PAGES, never a name on a list (PR #332 review). The
+ * build also writes asset directories — `_astro/`, `pagefind/` today, whatever the next plugin
+ * adds tomorrow — and excluding those BY NAME makes the gate false-fail the day one appears.
+ * Measured: both hold exactly zero `.html` files among their 107 and 75, so "holds a page" tells
+ * a section from an asset dump without knowing either one's name.
+ *
+ * Depth one only: `/api/core/` is a namespace segment of an entry point's path, not a section
+ * anybody navigates to, and demanding a page there would mean generating pages nobody reads.
+ */
+export function unservedSections(distRoot: string = join(ROOT, DIST)): string[] {
+  return readdirSync(distRoot)
+    .filter((childName) => statSync(join(distRoot, childName)).isDirectory())
+    .filter((childName) => holdsAPage(join(distRoot, childName)))
+    .filter((childName) => !existsSync(join(distRoot, childName, 'index.html')))
+    .map((childName) => `/${childName}/`)
+}
+
 if (import.meta.main) {
   if (!existsSync(join(ROOT, DIST))) {
     process.stderr.write(`site-links: ${DIST} does not exist — run \`bun run docs:site\` first\n`)
+    process.exit(1)
+  }
+  const unserved = unservedSections()
+  if (unserved.length > 0) {
+    process.stderr.write(`site-links: ${unserved.length} section(s) with no page\n${unserved.join('\n')}\n`)
     process.exit(1)
   }
   const dead = deadLinks()
@@ -95,5 +140,7 @@ if (import.meta.main) {
     process.stderr.write(`site-links: ${dead.length} dead internal link(s)\n${dead.join('\n')}\n`)
     process.exit(1)
   }
-  process.stdout.write(`site-links: every internal link in ${builtPages().length} built pages resolves\n`)
+  process.stdout.write(
+    `site-links: every internal link in ${builtPages().length} built pages resolves, every section is served\n`,
+  )
 }

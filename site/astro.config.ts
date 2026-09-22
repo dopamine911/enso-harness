@@ -44,7 +44,13 @@ export default defineConfig({
           // ⚠ Markdown-only options live HERE, never in `typedoc.json`: that file is also read by
           // the `api-docs` gate step, which runs TypeDoc without the markdown plugin and refuses
           // an option it does not know.
-          typeDoc: { outputFileStrategy: 'modules' },
+          typeDoc: {
+            outputFileStrategy: 'modules',
+            // ⚠ Without this the generated index lands at `api/readme/`, and `/api/` — the path
+            // the sidebar section and every hand-written link point at — is a 404 on the
+            // published site. Measured on the deployed build, not in review.
+            entryFileName: 'index',
+          },
         }),
       ],
       title: 'zen-harness',
