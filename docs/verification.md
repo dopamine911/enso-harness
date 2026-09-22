@@ -30,9 +30,10 @@ at the first failure:
    `.fallowrc.jsonc` names every program fallow cannot see a loader for (the harness extensions, the
    Bun plugin, the direct-run scripts), and `test/fallow-config.test.ts` holds its extension entries
    equal to the harness manifest.
-4. **react-doctor** — `react-doctor --project packages/web --no-score --no-supply-chain --blocking error`
+4. **react-doctor** — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`
    (#342): the web surface, failing on an error-severity finding. Offline flags are part of the
-   command, not options — a pre-commit hook must not phone home. The rule set is upstream's, so
+   command, not options — a pre-commit hook must not phone home — and so is `--scope full`: on a
+   terminal, with changes on the branch, react-doctor otherwise asks what to scan and waits. The rule set is upstream's, so
    a bump of the pinned `react-doctor` is a gate change.
 5. **Bun test** — the complete test tree, with text and LCOV coverage reporters.
 6. **Aggregate coverage** — `scripts/check-coverage.ts` reads LCOV and enforces the total line and

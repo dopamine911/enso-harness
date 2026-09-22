@@ -33,7 +33,7 @@
     "e2e:model": "bunx playwright test --config packages/web/e2e/playwright.config.ts --grep @model",
     "coverage:check": "bun scripts/check-coverage.ts",
     "doctor": "bunx react-doctor --verbose",
-    "doctor:check": "react-doctor --project packages/web --no-score --no-supply-chain --blocking error",
+    "doctor:check": "react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error",
     "docs:api": "typedoc --emit none",
     "docs:site": "bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts"
   },
