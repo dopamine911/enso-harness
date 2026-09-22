@@ -145,6 +145,7 @@ export {
 export {
   type DialogAnswer,
   EnsoPromptAdmission,
+  EnsoThreadCommands,
   isRuntimeCommand,
   PromptImageContent,
   type PromptOutcome,

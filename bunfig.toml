@@ -17,6 +17,10 @@ linker = "hoisted"
 # would demand every file hit 83% today. The TOTAL floor lives in scripts/check-coverage.ts,
 # run as its own gate after the tests — see that file's header.
 [test]
+# Radix decides `useLayoutEffect`-or-no-op by `document` AT MODULE EVALUATION, and one module
+# cache serves every test file: a static-markup test loading it DOM-free first would break every
+# later mounted dropdown (#338). The preload evaluates those modules under a DOM, then removes it.
+preload = ["./packages/web/src/__tests__/radix-preload.ts"]
 # Always collect, so the gate's `bun test` writes the lcov the coverage gate then reads.
 coverage = true
 coverageReporter = ["text", "lcov"]

@@ -27,6 +27,7 @@ import {
   type EnsoObservation,
   type EnsoThreadInspection,
   ensoLogger,
+  type RuntimeCommand,
   type ThreadRuntime,
 } from '@enso/core'
 import type { HostedThread } from '../host/agent-host.ts'
@@ -152,6 +153,13 @@ export interface ThreadRegistry {
   sentTail(threadId: string): EventTail | undefined
   /** Every live thread, for the inspection listing. Never creates. */
   list(): ThreadView[]
+  /**
+   * The slash commands the most recently built session registered (#338), for a thread that
+   * has none yet. Every session registers the same set — the manifest is fixed — so the last
+   * one's answer is the next one's, and asking it builds nothing (#86). `undefined` before
+   * any session has been built in this process.
+   */
+  rememberedCommands(): readonly RuntimeCommand[] | undefined
   /** Dispose every session — server shutdown. */
   shutdown(): void
   /** Observable state for tests. */
@@ -359,6 +367,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
 
   /** Set by `shutdown`: no build may publish a session into a registry that is being torn down. */
   let shutDown = false
+  /** The last built session's `listCommands()` — see `rememberedCommands`. */
+  let lastCommands: readonly RuntimeCommand[] | undefined
 
   async function buildThread(threadId: string): Promise<ThreadEntry> {
     const hosted = await createSession(threadId)
@@ -381,6 +391,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     threads.set(threadId, thread)
     attachFeed(threadId, thread)
     publishStatus(threadId, thread)
+    lastCommands = hosted.runtime.listCommands()
     // ⚠ ONE inspection, read twice (#285). `inspect()` decodes the whole branch into the
     // transcript and stats the session file; for a thread resumed from a long stored
     // session that is the entire history, and this line is at `info`, so nothing drops it.
@@ -535,6 +546,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     },
     sentTail(threadId: string): EventTail | undefined {
       return threads.get(threadId)?.sent
+    },
+    rememberedCommands(): readonly RuntimeCommand[] | undefined {
+      return lastCommands
     },
     list(): ThreadView[] {
       return [...threads.entries()].map(([threadId, thread]) => viewOf(threadId, thread))

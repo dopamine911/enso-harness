@@ -20,6 +20,7 @@ import {
 } from '@tanstack/ai-react/ui'
 import { ArrowUpIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { CommandPalette } from './command-palette.tsx'
 import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from './components/ai-elements/attachments.tsx'
 import {
   Conversation,
@@ -561,24 +562,31 @@ export function describeAttachmentError(error: PromptInputError): string {
 }
 
 /**
- * Inside the ported form: the attachment strip, the textarea, the attach / stop / send
- * buttons. A separate component because the attachments live in the form's context
+ * Inside the ported form: the attachment strip, the textarea, the `/` palette, the attach /
+ * stop / send buttons. A separate component because the attachments live in the form's context
  * (`usePromptInputAttachments`), and "can send" depends on them — an image with no words
  * sends (#68).
  */
 function ComposerBody({
   draft,
   setDraft,
+  textareaRef,
   disconnected,
   running,
   onStop,
+  onRunCommand,
+  onInsertCommand,
 }: {
   draft: string
   setDraft: (next: string) => void
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>
   disconnected: boolean
   running: boolean
   onStop: () => void
+  onRunCommand: (commandName: string) => void
+  onInsertCommand: (commandName: string) => void
 }): React.ReactNode {
+  const stores = useThreadStores()
   const attachments = usePromptInputAttachments()
   const canSend = (draft.trim().length > 0 || attachments.files.length > 0) && !disconnected
   return (
@@ -595,12 +603,21 @@ function ComposerBody({
       )}
       <div className="flex items-end gap-2">
         <PromptInputTextarea
+          ref={textareaRef}
           value={draft}
           onChange={(event: React.ChangeEvent<HTMLTextAreaElement>) => setDraft(event.target.value)}
           placeholder={disconnected ? 'disconnected — reload and resume from the rail' : 'ask pi something'}
           autoComplete="off"
           rows={1}
           className="max-h-40 min-h-9 flex-1 resize-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
+        />
+        {/* The `/` palette (#338): the session's slash commands, grouped; an extension command
+            runs through `send`, a prompt template or skill lands in the draft with focus. */}
+        <CommandPalette
+          threadId={stores.threadId}
+          disabled={disconnected}
+          onRun={onRunCommand}
+          onInsert={onInsertCommand}
         />
         {/* Attach (#68): the same file dialog a paste or a drop bypasses. */}
         <PromptInputButton
@@ -812,6 +829,8 @@ const chatComponents = {
       // Controlled, so the send button can disable on empty and a take-back can write it —
       // the ai-elements chatbot example's PromptInput does the same.
       const [draft, setDraft] = useState('')
+      // The textarea, so a palette choice can put focus back where typing continues (#338).
+      const textareaRef = useRef<HTMLTextAreaElement | null>(null)
       // The user messages this composer put in the transcript for prompts pi is still
       // HOLDING (#75): a stop hands those texts back, and the bubble that was never asked
       // leaves with them — pi's TUI does the same. A claimed prompt's bubble stays.
@@ -881,6 +900,19 @@ const chatComponents = {
           if (restored.length > 0) takeBack(restored)
         })
       }
+      // The `/` palette's two outcomes (#338; the rule is in `command-palette.tsx`'s header).
+      // An extension command is a prompt like any other — the same `send` the button uses, so
+      // it queues through pi mid-run (#75) and is refused while disconnected, exactly as typed
+      // `/mode` is. A prompt template or a skill takes arguments: it becomes the draft, and
+      // focus lands after it so the next keystroke is the argument.
+      const runCommand = (commandName: string): void => {
+        send(`/${commandName}`, [])
+        textareaRef.current?.focus()
+      }
+      const insertCommand = (commandName: string): void => {
+        setDraft(`/${commandName} `)
+        textareaRef.current?.focus()
+      }
 
       return (
         <PromptInput
@@ -926,9 +958,12 @@ const chatComponents = {
           <ComposerBody
             draft={draft}
             setDraft={setDraft}
+            textareaRef={textareaRef}
             disconnected={disconnected}
             running={chat.sessionGenerating}
             onStop={stopRun}
+            onRunCommand={runCommand}
+            onInsertCommand={insertCommand}
           />
         </PromptInput>
       )

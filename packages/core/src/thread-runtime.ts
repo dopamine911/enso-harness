@@ -91,6 +91,30 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
 }
 
 /**
+ * What `GET /api/threads/:id/commands` answers (#338): the slash commands a thread can run,
+ * for the palette that lists them.
+ *
+ * ⚠ `source` is HONEST ABOUT WHERE THE LIST CAME FROM, because looking must not build (#86).
+ * A thread has no session until its first prompt, and a session is the only thing that can be
+ * asked what it registers. So a live thread answers `live`; a thread without a session answers
+ * `remembered` — the list the most recently built session in this process registered, which is
+ * the same list for every session because the manifest is fixed — or `none` before any session
+ * has been built. The palette shows the list either way and says which it is.
+ *
+ * @group Thread runtime
+ */
+export const EnsoThreadCommands = Type.Object(
+  {
+    threadId: Type.String(),
+    commands: Type.Array(RuntimeCommand),
+    source: Type.Union([Type.Literal('live'), Type.Literal('remembered'), Type.Literal('none')]),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread runtime */
+export type EnsoThreadCommands = Static<typeof EnsoThreadCommands>
+
+/**
  * ── The thread runtime contract (#69) ───────────────────────────────────────────────────
  *
  * What the web server needs from a thread's runtime, whatever hosts it. Today the host is

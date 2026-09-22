@@ -143,6 +143,11 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
   cancel or the thread's teardown), `timeout` (the extension's own), `aborted` (the run's abort).
 - **notify** — a one-way notice from an extension (`info`, `warning`, `error`), shown as a transcript
   line; nothing waits on it. Status-bar text addressed to a terminal is dropped, not shown.
+- **command palette** — the chat page's `/` menu (#338): every slash command the thread can run,
+  grouped by source (extension, prompt, skill — and `host` once ours land), filtered as you type.
+  Its list is `GET …/threads/:id/commands`, which says whether it came from the live session, the
+  last built one (`remembered`), or nowhere yet — looking must not build (#86). Selecting an
+  extension command sends it as a prompt; a template or skill is inserted for its arguments.
 
 ## Permission
 

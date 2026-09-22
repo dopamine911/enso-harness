@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   type EnsoObservation,
   EnsoStoredThread,
+  EnsoThreadCommands,
   EnsoThreadEvents,
   EnsoThreadHistory,
   EnsoThreadInspection,
@@ -249,6 +250,31 @@ test('⚠ a thread id that is not thread-id shaped is a 400 at every entry point
   expect(requested).toEqual([])
   // And the server is still up.
   expect((await fetch(`${url}/api/threads`)).status).toBe(200)
+})
+
+// ⚠ THE PALETTE'S SOURCE, SAID (#338). A thread has no session until its first prompt, and
+// looking must not build (#86) — so the route cannot ask a runtime that does not exist. Every
+// session registers the same commands (the manifest is fixed), so the last built session's list
+// is the next one's; the answer says which it is, and a palette that quietly showed a stale list
+// would be a palette that lies. Before any session: `none`, an empty list, no build.
+test('⚠ GET …/commands says where its list came from: none before any session, remembered after one, live for the thread that has it', async () => {
+  const { url, built } = await startWith(settlesAtOnce)
+  const commandsOf = async (threadId: string): Promise<unknown> =>
+    (await fetch(`${url}/api/threads/${threadId}/commands`)).json()
+
+  const before = await commandsOf('never-ran')
+  expect(Check(EnsoThreadCommands, before)).toBe(true)
+  expect(before).toEqual({ threadId: 'never-ran', commands: [], source: 'none' })
+  expect(built).toHaveLength(0)
+
+  await prompt(url, 'ran', 'hello')
+  const live = await commandsOf('ran')
+  expect(live).toMatchObject({ threadId: 'ran', source: 'live', commands: [{ name: 'mode', source: 'extension' }] })
+
+  // Another thread, no session of its own: the remembered list, and still no build for it.
+  const remembered = await commandsOf('never-ran')
+  expect(remembered).toMatchObject({ threadId: 'never-ran', source: 'remembered', commands: [{ name: 'mode' }] })
+  expect(built).toHaveLength(1)
 })
 
 test('GET /api/threads/:id returns the branch as the transcript of ours, with sessionFile null while unflushed', async () => {
