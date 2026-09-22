@@ -128,7 +128,7 @@ export function describeRecordCount(view: LogTailView): string {
 
 /** What is on screen, in words: the day, then the count — or that nothing is, and why that is not a wait. */
 function describeView(view: LogTailView, settled: boolean): string {
-  if (!view.opened) return settled ? 'nothing is being read — the question was refused' : 'waiting for the first frame'
+  if (!view.opened) return settled ? 'nothing is being read' : 'waiting for the first frame'
   return `${view.day} · ${describeRecordCount(view)}`
 }
 
@@ -269,10 +269,12 @@ export function LogTailScreen({ fetch: pageFetch }: { fetch?: FetchLike } = {}):
       from: resumeFrom.current,
       fetch: pageFetch,
       signal: controller.signal,
+      // A connection that came up is the recovery: whatever the last alert said is over. On
+      // OPEN, not on every frame — clearing per frame raced a bad frame and a good one in the
+      // same chunk into one render that showed no alert at all (PR #336 review, round two).
+      onOpen: () => setProblem(undefined),
       onFrame: (frame: EnsoLogTailFrame) => {
         resumeFrom.current = { day: frame.day, offset: frame.offset }
-        // A frame is the connection working: whatever the last alert said is over.
-        setProblem(undefined)
         setView((current: LogTailView) => applyLogTailFrame(current, frame))
       },
       onError: setProblem,

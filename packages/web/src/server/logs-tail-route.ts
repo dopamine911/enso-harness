@@ -51,8 +51,14 @@ export interface LogTailRouteDeps {
 }
 
 /** The question a query string asked, or why it is not one. */
+/** A resume point: the byte, and the day it was validated against — the tail re-checks it against the file it opens. */
+export interface LogTailResumePoint {
+  readonly offset: number
+  readonly day: string
+}
+
 export type LogTailQuery =
-  | { readonly filter: EnsoLogFilter; readonly from: number | undefined }
+  | { readonly filter: EnsoLogFilter; readonly from: LogTailResumePoint | undefined }
   | { readonly reason: string }
 
 /** A refusal, as every reader below spells one. */
@@ -102,13 +108,13 @@ function readNotBefore(query: URLSearchParams, now: () => Date): number | Refuse
  * `records`. A `day` that is not the file's day makes `from` mean nothing; a `from` with no
  * `day` is honoured as given, for a caller that knows what it is doing.
  */
-function readFrom(query: URLSearchParams, today: string): number | undefined | Refused {
+function readFrom(query: URLSearchParams, today: string): LogTailResumePoint | undefined | Refused {
   const from = given(query, 'from')
   if (from === undefined) return undefined
   const offset = Number(from)
   if (!Number.isSafeInteger(offset) || offset < 0) return { reason: 'from wants a byte offset' }
   const day = given(query, 'day')
-  return day === undefined || day === today ? offset : undefined
+  return day === undefined || day === today ? { offset, day: today } : undefined
 }
 
 function isRefused(value: unknown): value is Refused {
@@ -155,6 +161,9 @@ export function followLogTail(deps: LogTailRouteDeps, url: string, response: Ser
     logsDir: deps.logsDir,
     filter: parsed.filter,
     maxRecords: deps.maxRecords ?? LOG_TAIL_MAX_RECORDS,
+    // The day the offset was validated against goes with it: the tail asks `now()` again to
+    // pick its file, and a midnight between the two calls would otherwise apply yesterday's
+    // byte to today's file (PR #336 review, round two).
     ...(parsed.from === undefined ? {} : { from: parsed.from }),
     now,
   })
@@ -177,11 +186,17 @@ export function followLogTail(deps: LogTailRouteDeps, url: string, response: Ser
     try {
       found = tail.step()
     } catch (error) {
-      // A read that failed ends THIS stream, not the server: the page says the tail stopped
-      // and reconnects with backoff. The failure IS recorded — the one record this route
-      // writes, because a broken log directory is the file's own business and never the
-      // reader's presence. `end` fires `close`, which releases the rest.
-      log.error('the tail could not read the file: {error}', { error })
+      // A read that failed ends THIS stream, not the server — and SAYS SO ON THE STREAM, as
+      // an SSE `error` event the page treats as a refusal and does not retry (PR #336 review,
+      // round two: a bare `end` read as a clean close, the page reconnected every five
+      // seconds, and every reconnect failed the read again and recorded the failure into
+      // the file it could not read — the surface appearing in the trace, in a loop). With
+      // the page told, this record is written once per connection a reader opened; the
+      // failure is the file's own business, the reader's presence never is. `end` fires
+      // `close`, which releases the rest.
+      const reason = error instanceof Error ? error.message : String(error)
+      log.error('the tail could not read the file: {reason}', { reason, error })
+      response.write(`event: error\ndata: ${reason.replaceAll('\n', ' ')}\n\n`)
       response.end()
       return
     }

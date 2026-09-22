@@ -4,6 +4,7 @@ import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import { ensureDom, releaseDom } from '../../__tests__/dom-environment.ts'
 import type { FetchLike } from '../../browser-logging.ts'
+import { ROW_HEIGHT_PX } from '../log-row.tsx'
 import { NO_LIVE_SESSION, ThreadTimelineScreen } from '../thread-timeline-screen.tsx'
 
 // ⚠ Loaded by a DYNAMIC import, for the reason `log-tail-screen.test.tsx` gives: react-dom/client
@@ -76,6 +77,12 @@ interface EventsAnswer {
   body: unknown
 }
 
+/** What a log connection is answered INSTEAD of a stream: a status and the route's words about it. */
+interface ScriptedAnswer {
+  readonly status: number
+  readonly body: string
+}
+
 interface MountedTimeline {
   readonly container: HTMLElement
   /** Every URL the page has asked for, in order. */
@@ -85,19 +92,34 @@ interface MountedTimeline {
   readonly send: (frame: EnsoLogTailFrame) => Promise<void>
   /** Write anything at all into the open log connection — what the server would never send. */
   readonly sendRaw: (text: string) => Promise<void>
+  /** Close the open log connection cleanly, the way a dropped socket does: the page reconnects. */
+  readonly end: () => Promise<void>
   readonly unmount: () => Promise<void>
 }
 
-async function mountTimeline(answer: EventsAnswer): Promise<MountedTimeline> {
+/**
+ * Mount the page over a scripted server. The events route answers `answer`; the nth entry of
+ * `logAnswers` is what the nth log connection gets instead of a stream — a refusal, in the
+ * route's own words — and every log connection past that script is an open stream the test
+ * writes frames into.
+ */
+async function mountTimeline(
+  answer: EventsAnswer,
+  logAnswers: readonly ScriptedAnswer[] = [],
+): Promise<MountedTimeline> {
   const urls: string[] = []
   const encoder = new TextEncoder()
   let open: ReadableStreamDefaultController<Uint8Array> | undefined
+  let logConnections = 0
   const scriptedFetch: FetchLike = (input: string) => {
     urls.push(input)
     if (input.startsWith(EVENTS_ROUTE)) {
       const body = typeof answer.body === 'string' ? answer.body : JSON.stringify(answer.body)
       return Promise.resolve(new Response(body, { status: answer.status }))
     }
+    logConnections += 1
+    const refusal = logAnswers[logConnections - 1]
+    if (refusal !== undefined) return Promise.resolve(new Response(refusal.body, { status: refusal.status }))
     const body = new ReadableStream<Uint8Array>({
       start(controller: ReadableStreamDefaultController<Uint8Array>): void {
         open = controller
@@ -126,6 +148,12 @@ async function mountTimeline(answer: EventsAnswer): Promise<MountedTimeline> {
     sendRaw: async (text: string) => {
       await flush(async () => {
         open?.enqueue(encoder.encode(text))
+        await tick()
+      })
+    },
+    end: async () => {
+      await flush(async () => {
+        open?.close()
         await tick()
       })
     },
@@ -302,18 +330,50 @@ test('⚠ a failed events read stops the spinner once the log has opened, and is
   await page.unmount()
 })
 
-// ⚠ AN ALERT THAT OUTLIVES ITS CAUSE IS A LIE: the frame that arrives after a log failure is
-// the connection working again, and the alert that named the failure comes down with it
-// (PR #336 review). The tails' own alert is a different question and is not touched.
-test('⚠ the alert a bad log frame raised comes down when the next frame lands', async () => {
+// ⚠ AN ALERT THAT OUTLIVES ITS CAUSE IS A LIE — and one that comes down too early is another.
+// The recovery is the log CONNECTION coming up again, for the reason the tail page gives:
+// clearing on every frame raced a bad frame and a good one in the same chunk into one render
+// that showed no alert (PR #336 review, round two). The tails' own alert is a different
+// question and is not touched.
+test('⚠ the alert a bad log frame raised stays up through the same connection and comes down when a reconnect opens', async () => {
   const page = await mountTimeline({ status: 200, body: TAILS })
-  await page.sendRaw('data: {"type":"nope"}\n\n')
-  await eventually(() => expect(alertTexts(page.container)['the tail']).toContain('fails EnsoLogTailFrame'))
-  await page.send(backlogOf([line('2026-09-22T10:00:00.200Z', 'a record')]))
+  const landed = backlogOf([line('2026-09-22T10:00:00.200Z', 'a record beside the bad frame')])
+  // The race, in one chunk: the bad frame and the good one arrive together.
+  await page.sendRaw(`data: {"type":"nope"}\n\ndata: ${JSON.stringify(landed)}\n\n`)
   await eventually(() => {
-    expect(page.container.textContent).toContain('a record')
+    expect(page.container.textContent).toContain('a record beside the bad frame')
+    expect(alertTexts(page.container)['the tail']).toContain('fails EnsoLogTailFrame')
+  })
+  await page.end()
+  await eventually(() => {
+    const tailUrls = page.urls.filter((url) => url.startsWith('/api/logs/tail'))
+    expect(tailUrls[1]).toBe(`/api/logs/tail?thread=${THREAD_ID}&from=4096&day=2026-09-22`)
     expect(alertTexts(page.container)).toEqual({})
   })
+  expect(page.container.textContent).toContain('a record beside the bad frame')
+  await page.unmount()
+})
+
+// ⚠ A REFUSED LOG IS AN ANSWER, ON THIS PAGE TOO (PR #336 review, round two): the round-one
+// fix stopped the spinner but left the heading saying "waiting for the first frame" beside the
+// alert that refused it — half of the tail page's fix, applied here. Once the tails have
+// answered as well, nothing is being waited for, and the heading says what the log is.
+test('⚠ a refused log connection stops the spinner once the tails have answered, and the heading says nothing is being read', async () => {
+  const page = await mountTimeline({ status: 200, body: TAILS }, [
+    { status: 400, body: 'thread must be a thread id or a prefix of one' },
+  ])
+  await eventually(() => {
+    expect(alertTexts(page.container)).toEqual({
+      'the tail': 'the log tail refused: 400 thread must be a thread id or a prefix of one',
+    })
+    expect(rowTexts(page.container)).toHaveLength(3)
+    expect(spinner(page.container)).toBeNull()
+    expect(page.container.textContent).toContain(
+      `thread ${THREAD_ID} · 3 rows · host 2 · wire 1 · log nothing is being read`,
+    )
+  })
+  expect(page.container.textContent).not.toContain('waiting for the first frame')
+  expect(page.urls.filter((url) => url.startsWith('/api/logs/tail'))).toHaveLength(1)
   await page.unmount()
 })
 
@@ -358,7 +418,11 @@ test('⚠ scrolling up stops the view following the newest row, and returning re
   expect(scrollTop).toBe(0)
   expect(page.container.textContent).toContain('scroll to the bottom to follow again')
 
-  // Back at the bottom: the view follows the newest row again, and says so.
+  // Back at the bottom: the view follows the newest row again, and says so. "Follows" is a
+  // `scrollTo` aimed at the NEWEST row's offset — not any call at all (PR #336 review, round
+  // two: the assertion before this one passed on a `scrollTo` of 0, which is the top).
+  const newestRowTop = ROW_HEIGHT_PX * (rowTexts(page.container).length - 1)
+  expect(newestRowTop).toBeGreaterThan(0)
   scrollTop = 2000
   await flush(async () => {
     scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
@@ -366,7 +430,8 @@ test('⚠ scrolling up stops the view following the newest row, and returning re
   })
   await eventually(() => {
     expect(page.container.textContent).not.toContain('scroll to the bottom to follow again')
-    expect(follow).toHaveBeenCalled()
+    expect(follow).toHaveBeenCalledWith(expect.objectContaining({ top: newestRowTop }))
   })
+  for (const [target] of follow.mock.calls) expect(target).toEqual(expect.objectContaining({ top: newestRowTop }))
   await page.unmount()
 })

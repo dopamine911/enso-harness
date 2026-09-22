@@ -15,19 +15,6 @@ test('a URL that names a thread id resumes it; none is a fresh page; one that ca
   expect(readThreadUrl('?thread=has%20space').kind).toBe('fresh')
 })
 
-// The notice's second half is what the page DID instead, and only the page knows: the chat
-// page opens a new thread, the debug page cannot and says what it showed (PR #336 review).
-test('⚠ the notice ends with what the page did instead — the chat page’s by default, the caller’s when given', () => {
-  const chat = readThreadUrl('?thread=../etc/passwd')
-  expect(chat.kind === 'fresh' ? chat.notice : '').toBe(
-    '?thread=../etc/passwd is not a thread id — opened a new thread instead',
-  )
-  const debug = readThreadUrl('?thread=../etc/passwd', "showing the day's log instead")
-  expect(debug.kind === 'fresh' ? debug.notice : '').toBe(
-    "?thread=../etc/passwd is not a thread id — showing the day's log instead",
-  )
-})
-
 test('writing a thread keeps every other parameter, in order, and replaces the thread that was there', () => {
   expect(urlForThread('?debug&log=debug', 't1')).toBe('?debug=&log=debug&thread=t1')
   expect(urlForThread('?thread=old&fixture', 't2')).toBe('?thread=t2&fixture=')

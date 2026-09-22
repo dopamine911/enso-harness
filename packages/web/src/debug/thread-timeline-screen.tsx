@@ -216,16 +216,23 @@ function chatUrlForThread(threadId: string): string {
   return `/${urlForThread('', threadId)}`
 }
 
+/** The log half of the header: the count under the cap's honesty, a wait, or — after a refusal — neither. */
+function describeLogSide(view: LogTailView, logSettled: boolean): string {
+  if (view.opened) return describeRecordCount(view)
+  // A refused log connection is not a wait (PR #336 review, round two: the spinner stopped
+  // but the heading still said "waiting" beside the alert that refused it).
+  return logSettled ? 'nothing is being read' : 'waiting for the first frame'
+}
+
 /**
- * The header line, in words: which thread, how many rows, from where — the log count under
- * the tail's cap honesty — and, when the server holds no session, that this is the log alone.
+ * The header line, in words: which thread, how many rows, from where — the log side as
+ * `describeLogSide` says it — and, when the server holds no session, that this is the log alone.
  */
-function describeTimeline(threadId: string, rows: number, tails: TailsState, view: LogTailView): string {
+function describeTimeline(threadId: string, rows: number, tails: TailsState, logSide: string): string {
   const events = tails.kind === 'live' ? tails.events : undefined
-  const logCount = view.opened ? describeRecordCount(view) : 'waiting for the first frame'
   const summary =
     `thread ${threadId} · ${rows} rows · host ${events?.emitted.length ?? 0} · wire ${events?.sent.length ?? 0}` +
-    ` · log ${logCount}`
+    ` · log ${logSide}`
   return tails.kind === 'none' ? `${summary} · ${NO_LIVE_SESSION}` : summary
 }
 
@@ -293,10 +300,10 @@ export function ThreadTimelineScreen({ threadId, fetch: pageFetch }: ThreadTimel
       from: resumeFrom.current,
       fetch: fetchImpl,
       signal: controller.signal,
+      // On OPEN, not on every frame, for the reason the tail screen gives (PR #336 review).
+      onOpen: () => setLogProblem(undefined),
       onFrame: (frame: EnsoLogTailFrame) => {
         resumeFrom.current = { day: frame.day, offset: frame.offset }
-        // A frame is the connection working: whatever the last alert said is over.
-        setLogProblem(undefined)
         setView((current: LogTailView) => applyLogTailFrame(current, frame))
         if (frame.lines.length > 0) void refreshEvents()
       },
@@ -344,8 +351,8 @@ export function ThreadTimelineScreen({ threadId, fetch: pageFetch }: ThreadTimel
 
   const rows = virtualizer.getVirtualItems()
   const heading = useMemo(
-    () => describeTimeline(threadId, entries.length, tails, view),
-    [threadId, entries.length, tails, view],
+    () => describeTimeline(threadId, entries.length, tails, describeLogSide(view, logSettled)),
+    [threadId, entries.length, tails, view, logSettled],
   )
 
   return (

@@ -29,6 +29,13 @@ import type { FetchLike } from '../browser-logging.ts'
  * untrusted origin) are answers about the QUESTION: asking again changes nothing, and a page
  * that hammers the log route is putting load into the system it was opened to diagnose. Those
  * are reported once and the loop stops; only an ended stream or a 5xx is worth asking again.
+ *
+ * ⚠ SO IS A READ THE SERVER COULD NOT DO. The route says so on the stream itself — an SSE
+ * `event: error` carrying the reason — before it ends (PR #336 review, round two). Without
+ * that event a failed read looked exactly like a clean end, this loop reconnected every five
+ * seconds, and each reconnect made the server fail the read again and RECORD the failure into
+ * the very file it could not read: a surface that must not appear in the trace, appearing in
+ * it in a loop the loop itself drove. An error event is a refusal: reported once, not retried.
  */
 
 const LOG_TAIL_ROUTE = '/api/logs/tail'
@@ -108,6 +115,12 @@ export interface LogTailStreamOptions {
   readonly fetch?: FetchLike | undefined
   /** The page's own leaving: aborting it closes the socket and ends the loop. */
   readonly signal: AbortSignal
+  /**
+   * A connection came up and frames may follow. The moment a page clears the last alert: the
+   * recovery worth signalling is connection-level, and clearing on every FRAME raced a bad
+   * frame and a good one in the same chunk into one render that showed nothing (PR #336 review).
+   */
+  readonly onOpen?: (() => void) | undefined
   readonly onFrame: (frame: EnsoLogTailFrame) => void
   /** Anything that could not be delivered, in words a reader can act on. NEVER silent. */
   readonly onError: (problem: string) => void
@@ -172,7 +185,14 @@ async function readOneTail(options: LogTailStreamOptions, url: string): Promise<
       options.onError('the log tail answered with no body')
       return { outcome: 'ended', resume, delivered }
     }
-    for await (const payload of readSseData(response.body, options.signal)) {
+    options.onOpen?.()
+    for await (const { event, data: payload } of readSseData(response.body, options.signal)) {
+      if (event === 'error') {
+        // The server could not read the file and said so. Not a stream that ended: asking
+        // again makes it fail — and record the failure — again.
+        options.onError(`the log tail stopped: ${payload}`)
+        return { outcome: 'refused', resume, delivered }
+      }
       const frame = parseFrame(payload, options.onError)
       if (frame === undefined) continue
       resume = { day: frame.day, offset: frame.offset }
@@ -187,17 +207,27 @@ async function readOneTail(options: LogTailStreamOptions, url: string): Promise<
   return { outcome: options.signal.aborted ? 'aborted' : 'ended', resume, delivered }
 }
 
+/** One SSE message: its `data:` payload and the `event:` name that preceded it, if any. */
+interface SseMessage {
+  readonly event: string | undefined
+  readonly data: string
+}
+
 /**
- * The `data:` payloads of an SSE body, one at a time.
+ * The messages of an SSE body, one at a time: each `data:` line with the `event:` line that
+ * named it, or no name for a plain frame.
  *
- * A `: keepalive` comment is not a `data:` line, so it is skipped by the same test that finds
- * the frames. The unterminated tail of each chunk is carried forward, which is what makes a
- * frame split across two network chunks one frame rather than two halves of unreadable JSON.
+ * A `: keepalive` comment is neither, so it is skipped by the same test that finds the
+ * frames. The unterminated tail of each chunk is carried forward, which is what makes a frame
+ * split across two network chunks one frame rather than two halves of unreadable JSON. The
+ * route writes one `data:` per message, so a name applies to the next `data:` line and is
+ * then spent — the whole of the SSE grammar this page needs.
  */
-async function* readSseData(body: ReadableStream<Uint8Array>, signal: AbortSignal): AsyncGenerator<string> {
+async function* readSseData(body: ReadableStream<Uint8Array>, signal: AbortSignal): AsyncGenerator<SseMessage> {
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffered = ''
+  let event: string | undefined
   try {
     while (!signal.aborted) {
       const { value, done } = await reader.read()
@@ -206,7 +236,11 @@ async function* readSseData(body: ReadableStream<Uint8Array>, signal: AbortSigna
       const lines = buffered.split('\n')
       buffered = lines.pop() ?? ''
       for (const line of lines) {
-        if (line.startsWith('data: ')) yield line.slice('data: '.length)
+        if (line.startsWith('event: ')) event = line.slice('event: '.length)
+        else if (line.startsWith('data: ')) {
+          yield { event, data: line.slice('data: '.length) }
+          event = undefined
+        }
       }
     }
   } finally {

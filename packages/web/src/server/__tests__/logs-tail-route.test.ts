@@ -142,6 +142,8 @@ async function openTail(url: string, query = ''): Promise<OpenTail> {
 // ── the query ─────────────────────────────────────────────────────────────────────────────
 
 const NOW = (): Date => new Date('2026-09-22T10:00:00.000Z')
+/** The LOCAL day `NOW` falls on — the file is named by the machine's day, and a literal would be off by one at UTC−11 or UTC+14. */
+const TODAY = ensoLogFilename(NOW()).slice('enso-'.length, -'.jsonl'.length)
 
 function parse(query: string): LogTailQuery {
   return parseLogTailQuery(new URLSearchParams(query), NOW)
@@ -154,7 +156,7 @@ test('an absent parameter takes its default; a level, thread, process and since 
   })
   expect(parse(`level=debug&thread=6923e6&process=pi&since=10m&from=512`)).toEqual({
     filter: { levelRank: 1, thread: '6923e6', process: 'pi', notBefore: NOW().getTime() - 600_000 },
-    from: 512,
+    from: { offset: 512, day: TODAY },
   })
 })
 
@@ -253,9 +255,9 @@ test('a request from an untrusted origin is refused before the tail opens', asyn
 // still holds yesterday's byte; handed to today's file it skipped the head silently once today
 // outgrew it. `day` says which file the byte belongs to, and a mismatch drops it.
 test('⚠ a from that belongs to another day is dropped; one that names today, or no day, is kept', () => {
-  expect(parse('from=512&day=2026-09-22')).toMatchObject({ from: 512 })
-  expect(parse('from=512&day=2026-09-21')).toMatchObject({ from: undefined })
-  expect(parse('from=512')).toMatchObject({ from: 512 })
+  expect(parse(`from=512&day=${TODAY}`)).toMatchObject({ from: { offset: 512, day: TODAY } })
+  expect(parse('from=512&day=2020-01-01')).toMatchObject({ from: undefined })
+  expect(parse('from=512')).toMatchObject({ from: { offset: 512, day: TODAY } })
 })
 
 // ⚠ `constructor` and `__proto__` are not levels, and a plain object literal said otherwise
@@ -268,19 +270,27 @@ test('⚠ a level that is a prototype property is refused like any other non-lev
 })
 
 // ⚠ A step that throws — EACCES on the directory, EISDIR under the name — used to escape the
-// timer with nothing above it (PR #336 review). It ends THIS stream, the failure is a record,
-// and the server answers the next request.
-test('⚠ a read that fails ends the stream and is recorded; the server stays up', async () => {
+// timer with nothing above it (PR #336 review). It ends THIS stream and the server answers the
+// next request. ⚠ AND THE STREAM SAYS WHY (round two): a bare `end` read as a clean close, the
+// page reconnected every five seconds, and each reconnect recorded the failure into the file
+// it could not read. The `error` event is what lets the page stop asking; ONE record per
+// connection is the whole of what this route writes.
+test('⚠ a read that fails says so on the stream as an error event, records it once, and the server stays up', async () => {
   const { url, logsDir } = await startOverLogs()
   // A directory under the day's name: `stat` succeeds, `read` throws EISDIR.
   mkdirSync(join(logsDir, ensoLogFilename(new Date())))
+  const before = logs.records.length
   const controller = new AbortController()
   openTails.push(controller)
   const response = await fetch(`${url}/api/logs/tail`, { signal: controller.signal })
   expect(response.status).toBe(200)
   // The stream ends on its own: the body reads to completion without the test closing it.
-  await response.text()
-  expect(logs.records.some((record) => String(record.rawMessage).includes('could not read the file'))).toBe(true)
+  const body = await response.text()
+  expect(body).toMatch(/^event: error\ndata: .*EISDIR.*\n\n$/)
+  const failures = logs.records
+    .slice(before)
+    .filter((record) => String(record.rawMessage).includes('could not read the file'))
+  expect(failures).toHaveLength(1)
   expect((await fetch(`${url}/api/about`)).status).toBe(200)
 })
 
@@ -332,5 +342,37 @@ test('⚠ GET /api/logs/stats folds the whole day into EnsoDayStats, and writes 
     denials: [{ rule: 'network-egress', count: 1 }],
     models: [expect.objectContaining({ model: 'm', cost: 0.5 })],
   })
+  expect(logs.records.length).toBe(before)
+})
+
+// ⚠ A FOLD THAT THROWS IS A 500, NOT A DEAD SOCKET (PR #336 review, round two): the fold reads
+// the file synchronously before the head is written, so a read that fails answers a plain
+// status with a reason the reader can act on — and the failure IS recorded, exactly once,
+// because a stats read that fails is the one thing about this route worth a line in the file.
+test('⚠ GET /api/logs/stats over a day that cannot be read answers 500 with the reason, and records the failure once', async () => {
+  const { url, logsDir } = await startOverLogs()
+  // A directory under the day's name: not ENOENT, so not an empty day — `read` throws EISDIR.
+  mkdirSync(join(logsDir, ensoLogFilename(new Date())))
+  const before = logs.records.length
+  const response = await fetch(`${url}/api/logs/stats`)
+  expect(response.status).toBe(500)
+  expect(await response.text()).toBe('the day could not be read — see the server log')
+  const failures = logs.records
+    .slice(before)
+    .filter((record) => String(record.rawMessage).includes('could not be folded'))
+  expect(failures).toHaveLength(1)
+  expect(logs.records.length - before).toBe(1)
+})
+
+// A day nobody has written yet is an EMPTY day, not a failure: the file's absence is the
+// answer, and the route neither complains about it nor writes the first line of the day itself.
+test('GET /api/logs/stats over a day with no file yet is an empty day, and writes no record', async () => {
+  const { url } = await startOverLogs()
+  const before = logs.records.length
+  const response = await fetch(`${url}/api/logs/stats`)
+  expect(response.status).toBe(200)
+  const stats: unknown = await response.json()
+  expect(Check(EnsoDayStats, stats)).toBe(true)
+  expect(stats).toMatchObject({ records: 0 })
   expect(logs.records.length).toBe(before)
 })

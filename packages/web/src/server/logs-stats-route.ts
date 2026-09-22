@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { dayStats, type EnsoDayStats, type EnsoLogLine } from '@enso/core'
 import { ensoLogFilename, parseEnsoLogLine } from '@enso/core/log-process'
@@ -25,13 +25,28 @@ export interface LogStatsRouteDeps {
   readonly now?: () => Date
 }
 
+/**
+ * The day's text, or nothing when no process has written it. ONE call, never `exists` then
+ * `read` (PR #336 review, round two): a file pruned between the two made the read throw, and
+ * the boundary above answered 500 — plus a record — for the condition this route defines as
+ * the empty day. Any other failure still throws to that boundary.
+ */
+function readDayOrNothing(file: string): string {
+  try {
+    return readFileSync(file, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+    throw error
+  }
+}
+
 export function createLogStatsRoute(deps: LogStatsRouteDeps): () => EnsoDayStats {
   const now = deps.now ?? ((): Date => new Date())
   return (): EnsoDayStats => {
     const filename = ensoLogFilename(now())
     const day = filename.slice('enso-'.length, -'.jsonl'.length)
     const file = join(deps.logsDir, filename)
-    const text = existsSync(file) ? readFileSync(file, 'utf8') : ''
+    const text = readDayOrNothing(file)
     const lines: EnsoLogLine[] = []
     let malformed = 0
     for (const raw of text.split('\n')) {

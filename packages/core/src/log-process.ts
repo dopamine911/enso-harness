@@ -636,7 +636,12 @@ export function logChunkDecoder(): LogChunkDecoder {
         carry = pending
         return ''
       }
-      carry = pending.subarray(lastNewline + 1)
+      // A COPY, not a view (PR #336 review, round two): `pending` is the read buffer, and on
+      // the backlog read that buffer is the whole day. A view onto its last hundred bytes
+      // pinned the whole allocation for as long as no newline arrived — on an idle log, for
+      // the life of the connection, per tab. The carry is the bytes after the last newline,
+      // so the copy is tiny by construction.
+      carry = Buffer.from(pending.subarray(lastNewline + 1))
       return pending.subarray(0, lastNewline).toString('utf8')
     },
     carried: (): number => carry.length,
@@ -683,13 +688,21 @@ export interface EnsoLogTail {
  * last call, filters it, and caps it.
  *
  * ⚠ `type` is not a flag anyone sets: A STEP THAT BEGAN AT BYTE 0 IS THE FILE'S WHOLE VIEW,
- * and any other step is an append. That one rule covers every case a long-lived tail has —
- * the first step with no `from`, the local-midnight rotation onto a new filename, a file
- * truncated in place, and a file REPLACED under the same name — without a second concept.
- * The last of those needs one check the rule alone did not give (PR #336 review): `stat` is
+ * and any other step is an append. That one rule covers the first step with no `from`, the
+ * local-midnight rotation onto a new filename, a file truncated in place, and — with one check
+ * the rule alone did not give (PR #336 review) — a file REPLACED under the same name: `stat` is
  * by path and `read` is by descriptor, so an unlink-and-recreate that grew past the old offset
  * read zero bytes from the old inode forever. The inode is compared on every step, and a
  * change is a restart from the head.
+ *
+ * ⚠ TWO SHAPES ARE NOT COVERED, and are stated rather than claimed (PR #336 review, round
+ * two). A file truncated and regrown past the old offset WITHIN ONE POLL — the `> file` or
+ * `cp` shape — keeps its inode and its size, so nothing here fires and the read starts
+ * mid-content of the rewritten file, which the reader sees as one malformed line and the
+ * records before it missing. And a `from` carries the day it belongs to but not the inode, so
+ * a reconnect after an unlink-and-recreate resumes at a byte of the OLD file applied to the
+ * new one. Closing either needs the token to describe the file's content, not its position;
+ * until then, `bun run logs` reads the day whole and is the reader that cannot be fooled.
  *
  * ⚠ ONE `stat`, never `exists` then `stat`: two calls are a window, and a file removed inside
  * it (the 14-day prune, an `rm`) made the second throw from a timer with nothing above it.
@@ -709,8 +722,13 @@ export function openLogTail(options: {
   readonly filter: EnsoLogFilter
   /** Defaults to `LOG_TAIL_MAX_RECORDS`. */
   readonly maxRecords?: number
-  /** Resume here instead of the day's head — the offset a previous frame carried. */
-  readonly from?: number
+  /**
+   * Resume here instead of the day's head — the offset a previous frame carried, and the day
+   * that offset is a position in. The first step compares that day to the file it resolves
+   * and drops the offset on a mismatch: the route validated the day against one `now()`, this
+   * picks the file with another, and a midnight in between is the head of a day skipped.
+   */
+  readonly from?: { readonly offset: number; readonly day: string }
   /** The clock the day's filename is computed from; a test moves it across midnight. */
   readonly now?: () => Date
 }): EnsoLogTail {
@@ -719,7 +737,7 @@ export function openLogTail(options: {
   let filename = ''
   let descriptor: number | undefined
   let inode: number | undefined
-  let offset = options.from ?? 0
+  let offset = 0
   let decoder = logChunkDecoder()
   const close = (): void => {
     if (descriptor !== undefined) closeSync(descriptor)
@@ -735,9 +753,11 @@ export function openLogTail(options: {
   const step = (): EnsoLogTailStep => {
     const today = ensoLogFilename(now())
     if (today !== filename) {
-      // The first call keeps the caller's `from`; a rotation starts the new day at its head.
-      if (filename === '') close()
-      else restart()
+      if (filename === '') {
+        // The first call: the caller's `from` is honoured only for the file it names.
+        const day = today.slice('enso-'.length, -'.jsonl'.length)
+        if (options.from !== undefined && options.from.day === day) offset = options.from.offset
+      } else restart() // a rotation starts the new day at its head
       filename = today
     }
     const day = filename.slice('enso-'.length, -'.jsonl'.length)
@@ -768,30 +788,39 @@ export function openLogTail(options: {
       offset += read
       text = decoder.decode(chunk.subarray(0, read))
     }
-    const lines: EnsoLogLine[] = []
-    let matched = 0
-    let malformed = 0
-    for (const raw of text.split('\n')) {
-      if (raw.length === 0) continue
-      const parsed = parseEnsoLogLine(raw)
-      if (typeof parsed === 'string') {
-        malformed += 1
-        continue
-      }
-      if (!logLineMatches(options.filter, parsed)) continue
-      matched += 1
-      lines.push(parsed)
-    }
+    const found = selectRecords(text, options.filter)
     return {
       type: startedAt === 0 ? 'backlog' : 'records',
       day,
       // The byte a reconnect resumes from: after the last COMPLETE line, not after the last
       // read. The carry is this tail's own state and a new tail does not have it.
       offset: offset - decoder.carried(),
-      lines: lines.slice(-maxRecords),
-      matched,
-      malformed,
+      lines: found.lines.slice(-maxRecords),
+      matched: found.matched,
+      malformed: found.malformed,
     }
   }
   return { step, close }
+}
+
+/** The records in a run of complete lines that answer the filter, and how many lines were not records. */
+function selectRecords(
+  text: string,
+  filter: EnsoLogFilter,
+): { readonly lines: EnsoLogLine[]; readonly matched: number; readonly malformed: number } {
+  const lines: EnsoLogLine[] = []
+  let matched = 0
+  let malformed = 0
+  for (const raw of text.split('\n')) {
+    if (raw.length === 0) continue
+    const parsed = parseEnsoLogLine(raw)
+    if (typeof parsed === 'string') {
+      malformed += 1
+      continue
+    }
+    if (!logLineMatches(filter, parsed)) continue
+    matched += 1
+    lines.push(parsed)
+  }
+  return { lines, matched, malformed }
 }

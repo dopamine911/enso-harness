@@ -113,7 +113,12 @@ test('⚠ a step that ended mid-record publishes the offset of the last complete
   expect(step().lines.map((record) => record.message)).toEqual(['split across polls'])
   close()
   // …and a NEW tail resumed at the published offset reads the whole record, not its tail.
-  const resumed = openLogTail({ logsDir, filter: EVERYTHING, from: first.offset, now: () => DAY }).step()
+  const resumed = openLogTail({
+    logsDir,
+    filter: EVERYTHING,
+    from: { offset: first.offset, day: first.day },
+    now: () => DAY,
+  }).step()
   expect(resumed.malformed).toBe(0)
   expect(resumed.lines.map((record) => record.message)).toEqual(['split across polls'])
   rmSync(logsDir, { recursive: true })
@@ -208,7 +213,12 @@ test('⚠ a step resumed at an offset is an append, not a second copy of the day
   const seen = openLogTail({ logsDir, filter: EVERYTHING, now: () => DAY }).step()
   append(logsDir, DAY, line({ message: 'new' }))
 
-  const resumed = openLogTail({ logsDir, filter: EVERYTHING, from: seen.offset, now: () => DAY }).step()
+  const resumed = openLogTail({
+    logsDir,
+    filter: EVERYTHING,
+    from: { offset: seen.offset, day: seen.day },
+    now: () => DAY,
+  }).step()
   expect(resumed.type).toBe('records')
   expect(resumed.lines.map((record) => record.message)).toEqual(['new'])
   rmSync(logsDir, { recursive: true })

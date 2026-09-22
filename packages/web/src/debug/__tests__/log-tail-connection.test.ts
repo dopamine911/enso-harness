@@ -51,6 +51,8 @@ interface Run {
   readonly urls: string[]
   readonly frames: EnsoLogTailFrame[]
   readonly problems: string[]
+  /** The client's callbacks in the order they fired: `open` for a connection that came up, `frame` for each frame. */
+  readonly order: string[]
 }
 
 /**
@@ -62,6 +64,7 @@ async function run(connections: ReadonlyArray<readonly string[]>): Promise<Run> 
   const urls: string[] = []
   const frames: EnsoLogTailFrame[] = []
   const problems: string[] = []
+  const order: string[] = []
   const controller = new AbortController()
   const fetchTail: FetchLike = (input: string) => {
     urls.push(input)
@@ -76,10 +79,14 @@ async function run(connections: ReadonlyArray<readonly string[]>): Promise<Run> 
     filter: DEFAULT_LOG_TAIL_FILTER,
     fetch: fetchTail,
     signal: controller.signal,
-    onFrame: (frame: EnsoLogTailFrame) => frames.push(frame),
+    onOpen: () => order.push('open'),
+    onFrame: (frame: EnsoLogTailFrame) => {
+      order.push('frame')
+      frames.push(frame)
+    },
     onError: (problem: string) => problems.push(problem),
   })
-  return { urls, frames, problems }
+  return { urls, frames, problems, order }
 }
 
 test('the unasked question is the bare route; every parameter away from its default is in the URL', () => {
@@ -136,6 +143,44 @@ test('⚠ after the stream ends the client resumes from the last byte it was giv
   const { urls } = await run([[frameText(backlog), frameText({ ...records, day: '2026-09-23', offset: 64 })]])
   expect(urls[0]).toBe('/api/logs/tail')
   expect(urls[1]).toBe('/api/logs/tail?from=64&day=2026-09-23')
+})
+
+// ⚠ THE SERVER SAID WHY, AND THE CLIENT STOPS ASKING (PR #336 review, round two): a read the
+// route could not make ended its stream, and a bare end read as a clean close — so the page
+// reconnected every five seconds, and every reconnect recorded the failure into the file it
+// could not read. The `error` event is the route's word that asking again makes it fail again:
+// the client reports it, resolves, and does NOT reconnect.
+test('⚠ an error event ends the tail as a refusal: reported in the route’s words, resolved, never asked again', async () => {
+  const { urls, frames, problems } = await run([['event: error\ndata: EACCES: permission denied\n\n']])
+  expect(problems).toEqual(['the log tail stopped: EACCES: permission denied'])
+  expect(frames).toEqual([])
+  // A client that took this for a clean end would have asked again after its backoff, and the
+  // run's script answers a second ask by ending the run — so a reconnect is a second URL here,
+  // and the resolution above would have been the script's abort rather than the client's own.
+  expect(urls).toEqual(['/api/logs/tail'])
+})
+
+// `onOpen` is the moment a page clears its last alert (PR #336 review, round two): it is the
+// connection coming up, so it fires once per connection that did, ahead of that connection's
+// first frame — and never for a refusal, which is not a connection at all.
+test('onOpen fires once per connection that came up, before its first frame, and not for a refusal', async () => {
+  const { order } = await run([[frameText(backlog)], [frameText(records)]])
+  // The third `open` is the run's own closing connection: it comes up, empty, and ends the script.
+  expect(order).toEqual(['open', 'frame', 'open', 'frame', 'open'])
+
+  let opens = 0
+  const controller = new AbortController()
+  await openLogTailStream({
+    filter: { ...DEFAULT_LOG_TAIL_FILTER, since: 'soon' },
+    fetch: () => Promise.resolve(new Response('since wants a duration like 30s, 10m, 2h, 1d', { status: 400 })),
+    signal: controller.signal,
+    onOpen: () => {
+      opens += 1
+    },
+    onFrame: () => undefined,
+    onError: () => undefined,
+  })
+  expect(opens).toBe(0)
 })
 
 test('a refused question is reported and NOT asked again; a server error is', async () => {

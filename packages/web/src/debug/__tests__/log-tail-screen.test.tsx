@@ -80,6 +80,8 @@ interface MountedTail {
   readonly send: (frame: EnsoLogTailFrame) => Promise<void>
   /** Write anything at all into the open connection — what the server would never send. */
   readonly sendRaw: (text: string) => Promise<void>
+  /** Close the open connection cleanly, the way a dropped socket does: the page reconnects. */
+  readonly end: () => Promise<void>
   readonly unmount: () => Promise<void>
 }
 
@@ -125,6 +127,12 @@ async function mountTail(answers: readonly ScriptedAnswer[] = []): Promise<Mount
         await tick()
       })
     },
+    end: async () => {
+      await flush(async () => {
+        open?.close()
+        await tick()
+      })
+    },
     unmount: async () => {
       await flush(async () => root.unmount())
       container.remove()
@@ -151,6 +159,9 @@ const alertText = (container: HTMLElement): string | null =>
 /** The virtualized list's own height: rows times the row height, so it is the row COUNT made visible. */
 const listHeight = (container: HTMLElement): string =>
   container.querySelector<HTMLElement>('[aria-label="log records"] ol')?.style.height ?? ''
+
+/** How many rows the list has drawn — every row, when the list is shorter than the viewport. */
+const rowCount = (container: HTMLElement): number => container.querySelectorAll('[aria-label="log records"] li').length
 
 test('the backlog is the view, and a records frame is appended to it', async () => {
   const page = await mountTail()
@@ -257,27 +268,37 @@ test('⚠ a frame the page cannot read is named on the page, and the records alr
   await page.unmount()
 })
 
-// ⚠ AN ALERT THAT OUTLIVES ITS CAUSE IS A LIE: the frame that arrives after a failure is the
-// connection working again, and the alert that named the failure comes down with it
-// (PR #336 review: it stayed up beside a tail that had long since recovered).
-test('⚠ the alert a bad frame raised comes down when the next frame lands', async () => {
+// ⚠ AN ALERT THAT OUTLIVES ITS CAUSE IS A LIE — and one that comes down too early is another.
+// The recovery worth signalling is the CONNECTION coming up again: clearing on every frame
+// raced a bad frame and a good one in the same chunk into a single render that showed no alert
+// at all (PR #336 review, round two). So a good frame on the same connection leaves the alert
+// up, and the reconnect that opens takes it down.
+test('⚠ the alert a bad frame raised stays up through the same connection and comes down when a reconnect opens', async () => {
   const page = await mountTail()
   await page.send(backlogOf([line('the day so far')]))
   await eventually(() => expect(page.container.textContent).toContain('the day so far'))
-  await page.sendRaw('data: not json at all\n\n')
-  await eventually(() => expect(alertText(page.container)).toContain('is not JSON'))
-  await page.send({
+  // The race, in one chunk: the bad frame and the good one arrive together.
+  const landed = {
     type: 'records',
     day: '2026-09-22',
     offset: 8192,
-    lines: [line('landed after the bad frame')],
+    lines: [line('landed beside the bad frame')],
     matched: 1,
     malformed: 0,
-  })
+  } satisfies EnsoLogTailFrame
+  await page.sendRaw(`data: not json at all\n\ndata: ${JSON.stringify(landed)}\n\n`)
   await eventually(() => {
-    expect(page.container.textContent).toContain('landed after the bad frame')
+    expect(page.container.textContent).toContain('landed beside the bad frame')
+    expect(alertText(page.container)).toContain('is not JSON')
+  })
+  // The connection drops and the page asks again from the last byte; the answer opening is
+  // the recovery, and the alert comes down with it — before any frame has landed on it.
+  await page.end()
+  await eventually(() => {
+    expect(page.urls[1]).toBe('/api/logs/tail?from=8192&day=2026-09-22')
     expect(alertText(page.container)).toBeNull()
   })
+  expect(page.container.textContent).toContain('landed beside the bad frame')
   await page.unmount()
 })
 
@@ -314,7 +335,7 @@ test('⚠ a refused question stops the spinner and says nothing is being read; a
   const page = await mountTail([{ status: 400, body: 'since wants a duration like 30s, 10m, 2h, 1d' }])
   await eventually(() => {
     expect(alertText(page.container)).toBe('the log tail refused: 400 since wants a duration like 30s, 10m, 2h, 1d')
-    expect(page.container.textContent).toContain('nothing is being read — the question was refused')
+    expect(page.container.textContent).toContain('nothing is being read')
     expect(spinner(page.container)).toBeNull()
   })
   expect(page.container.textContent).not.toContain('waiting for the first frame')
@@ -409,7 +430,11 @@ test('⚠ scrolling up stops the view following the newest record, and returning
   expect(scrollTop).toBe(0)
   expect(page.container.textContent).toContain('scroll to the bottom to follow again')
 
-  // Back at the bottom: the view follows the newest row again, and says so.
+  // Back at the bottom: the view follows the newest row again, and says so. "Follows" is a
+  // `scrollTo` aimed at the NEWEST row's offset — not any call at all (PR #336 review, round
+  // two: the assertion before this one passed on a `scrollTo` of 0, which is the top).
+  const newestRowTop = ROW_HEIGHT_PX * (rowCount(page.container) - 1)
+  expect(newestRowTop).toBeGreaterThan(0)
   scrollTop = 2000
   await flush(async () => {
     scroller.dispatchEvent(new Event('scroll', { bubbles: true }))
@@ -417,7 +442,8 @@ test('⚠ scrolling up stops the view following the newest record, and returning
   })
   await eventually(() => {
     expect(page.container.textContent).not.toContain('scroll to the bottom to follow again')
-    expect(follow).toHaveBeenCalled()
+    expect(follow).toHaveBeenCalledWith(expect.objectContaining({ top: newestRowTop }))
   })
+  for (const [target] of follow.mock.calls) expect(target).toEqual(expect.objectContaining({ top: newestRowTop }))
   await page.unmount()
 })
