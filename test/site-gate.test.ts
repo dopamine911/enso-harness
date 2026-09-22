@@ -1,9 +1,7 @@
 import { expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { contentPath, documentationPages, pageTitle, rewriteLinks } from '../scripts/docs/site-content.ts'
-import { missingApiReference } from '../scripts/docs/site-links.ts'
 import { REPOSITORY_ROOT } from './gate-support.ts'
 
 /**
@@ -97,29 +95,6 @@ test('the projection rewrites every link class a route cannot serve (#188)', () 
 })
 
 /**
- * The prerequisite the crawl must not mistake for a defect (PR #328 review).
- *
- * `bun run docs:site` builds and crawls; it does NOT build the API reference — `docs:api` does,
- * into `site/public/api/`, and the sidebar links `/api/` on every page. Run standalone before
- * `docs:api` has ever run, the crawl would report that link dead on all 46 pages, which reads
- * as broken documentation and is really one unrun step.
- *
- * ⚠ The check is parameterised rather than reading the real output directory, because this test
- * is gate 4 and `api-docs` is gate 6: in a fresh checkout the artifact legitimately does not
- * exist yet when the suite runs, and a test asserting otherwise would fail for being early.
- */
-test('a missing API reference refuses by its own name, not as a dead link (#188)', () => {
-  const built = mkdtempSync(join(tmpdir(), 'zen-site-api-'))
-  writeFileSync(join(built, 'index.html'), '<html lang="en"></html>')
-  expect(missingApiReference(relative(REPOSITORY_ROOT, built))).toBeUndefined()
-
-  const empty = mkdtempSync(join(tmpdir(), 'zen-site-api-'))
-  const refusal = missingApiReference(relative(REPOSITORY_ROOT, empty))
-  // It names the step to run, so the reader does not go looking for a broken link.
-  expect(refusal).toContain('bun run docs:api')
-})
-
-/**
  * THE PUBLISHED SITE'S BASE PATH IS DERIVED, AND THE ORDER OF ITS TWO BUILDS IS NOT OPTIONAL.
  *
  * A GitHub project site is served from `/<repository>`, which is not this repository's short
@@ -146,7 +121,9 @@ test('⚠ the docs-site workflow derives its base and builds the API first (#188
   // repository whose name starts with a capital — `Zen-Harness` is a valid GitHub name — would
   // have walked straight past a `/[a-z]/` check, hardcoded and undetected.
   expect(workflow).not.toMatch(/ZEN_SITE_BASE:\s*\/(?!\$\{\{)/)
-  // `docs:api` writes what `docs:site` serves and crawls; reversed, the crawl refuses by name.
+  // ⚠ `docs:api` no longer PRODUCES anything the site needs — it validates with `--emit none`,
+  // and the site generates its own API pages from the same `typedoc.json`. It still runs first,
+  // because a contract that fails to document should fail before a full static build, not after.
   const apiAt = workflow.indexOf('bun run docs:api')
   const siteAt = workflow.indexOf('bun run docs:site')
   expect(apiAt).toBeGreaterThan(-1)

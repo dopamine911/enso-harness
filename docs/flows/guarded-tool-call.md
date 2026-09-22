@@ -24,9 +24,9 @@ sequenceDiagram
   P->>G: tool_call — handlers stacked, first block wins
   G->>G: canonicalToolName · floor: policy names ⊆ live tools?
   alt bash / powershell
-    G->>A: analyzeBashCommand({ command, cwd }) — bash only; a throw is a deny
+    G->>A: analyzeBashCommand({ command, cwd }) — bash only · a throw is a deny
     A-->>G: { kind, reason, ruleId? }
-    G->>G: egress deny (per segment; cannot-vouch floor) · environment-dump deny
+    G->>G: egress deny (per segment · cannot-vouch floor) · environment-dump deny
     G->>G: only a PASSED command gets defaultBashTimeoutSeconds
   else write / edit
     G->>G: write roots → protected fragment → persistence → credential → stale → unknown+exists

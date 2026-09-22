@@ -18,7 +18,7 @@ sequenceDiagram
   participant V as core/web-search (vocabulary.ts, auth.ts)
   participant P as native provider · Tavily (providers/*.ts)
 
-  Note over X: at load: zen.config.json read ONCE; unreadable ⇒ every call refuses, no provider runs
+  Note over X: at load: zen.config.json read ONCE · unreadable ⇒ every call refuses, no provider runs
   R->>X: execute({ query }, signal, onUpdate, context)
   X->>S: TAVILY_API_KEY — the fallback is armed iff present and non-empty
   X->>V: routedProviderIdForModel(context.model) — unless config pins backend "deepseek"

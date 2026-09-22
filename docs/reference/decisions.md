@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 191.**
+**Decision headers: 192.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -192,6 +192,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `test/glossary-gate.test.ts` | `#165`, `#241`, `#257`, `#287` | The glossary's Retired table, applied to the source tree (#165, `docs/glossary.md` → Retired). |
 | `test/harness-barrel-gate.test.ts` | `#173`, `#251`, `#263` | THE HARNESS BARREL IS ITS CONSUMPTION, AND THAT IS CHECKED (#263). |
 | `test/logging-gate.test.ts` | `#132`, `#162`, `#254` | Every record goes through the one logger (#132), and the substrate stays behind it. |
+| `test/mermaid-gate.test.ts` | `#188` | EVERY DIAGRAM IN THE DOCS PARSES (#188). |
 | `test/naming-gate.test.ts` | `#82`, `#83`, `#250` | The naming gate's exemption for externally-fixed KEYS (#82, PR #83 review), and the severity that decides whether a tier blocks (#250) or merely mentions. |
 | `test/no-lint-suppressions.test.ts` | `#82` | The gate may not be talked out of, one line at a time. |
 | `test/presentation-gate.test.ts` | `#31`, `#121`, `#174`, `#253` | Presentation stays presentation (#121 item 4, #31). |
