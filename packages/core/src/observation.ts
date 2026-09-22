@@ -323,6 +323,11 @@ export const EnsoMessageEnd = Type.Object({
   kind: Type.Literal('message-end'),
   role: Type.String(),
   usage: Type.Optional(EnsoUsage),
+  /**
+   * The model that produced an assistant message, as pi names it (#144 slice 4) — the axis
+   * "cost per model" is derived on. Absent on every message pi does not attribute to one.
+   */
+  model: Type.Optional(Type.String()),
 })
 /**
  * @group Observations

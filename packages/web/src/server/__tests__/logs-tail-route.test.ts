@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:te
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type EnsoLogLine, EnsoLogTailFrame } from '@enso/core'
+import { ENSO_LOG_EVENTS, EnsoDayStats, type EnsoLogLine, EnsoLogTailFrame } from '@enso/core'
 import { ensoLogFilename } from '@enso/core/log-process'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
@@ -247,4 +247,55 @@ test('a request from an untrusted origin is refused before the tail opens', asyn
   const { url } = await startOverLogs()
   const rebound = await fetch(`${url}/api/logs/tail`, { headers: { Host: 'attacker.example' } })
   expect(rebound.status).toBe(403)
+})
+
+// ── the day's stats ───────────────────────────────────────────────────────────────────────
+
+// ⚠ THE WHOLE DAY, and nothing of the reader's in it (#144 slice 4). The tail says "the last
+// N of M"; a stat over the last N would be a number that silently means "some of", so the
+// route folds the file entire — and, like every route the debug page calls, leaves no record
+// of having been asked.
+test('⚠ GET /api/logs/stats folds the whole day into EnsoDayStats, and writes no record', async () => {
+  const { url, logsDir } = await startOverLogs()
+  append(
+    logsDir,
+    line({
+      message: ENSO_LOG_EVENTS.runAcquired,
+      logger: 'enso.server.registry',
+      properties: { threadId: THREAD, generation: 1, process: 'server' },
+    }),
+    line({
+      message: ENSO_LOG_EVENTS.messageUsage,
+      properties: {
+        threadId: THREAD,
+        generation: 1,
+        role: 'assistant',
+        model: 'm',
+        input: 10,
+        output: 5,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalCost: 0.5,
+        process: 'server',
+      },
+    }),
+    line({
+      message: ENSO_LOG_EVENTS.toolDenied,
+      level: 'WARN',
+      logger: 'enso.extension.guards',
+      properties: { toolName: 'bash', rule: 'network-egress', reason: 'no', process: 'pi' },
+    }),
+  )
+  const before = logs.records.length
+  const response = await fetch(`${url}/api/logs/stats`)
+  expect(response.status).toBe(200)
+  const stats: unknown = await response.json()
+  expect(Check(EnsoDayStats, stats)).toBe(true)
+  expect(stats).toMatchObject({
+    records: 3,
+    totals: { runs: 1, cost: 0.5, denials: 1 },
+    denials: [{ rule: 'network-egress', count: 1 }],
+    models: [expect.objectContaining({ model: 'm', cost: 0.5 })],
+  })
+  expect(logs.records.length).toBe(before)
 })

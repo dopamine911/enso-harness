@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import {
   base64DecodedBytes,
   ENSO_IMAGE_MAX_BYTES,
+  ENSO_LOG_EVENTS,
   ENSO_PROMPT_BODY_MAX_BYTES,
   ENSO_PROMPT_MAX_IMAGES,
   type EnsoStoredThread,
@@ -29,6 +30,7 @@ import {
   readPromptBody,
 } from './follow.ts'
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
+import { createLogStatsRoute } from './logs-stats-route.ts'
 import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
 import { noteRunAdmitted } from './run-timing.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
@@ -473,6 +475,8 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   // The tail (#144 slice 2): the same day's file, filtered server-side and streamed, for the
   // debug page. Like the bundle it only reads; unlike the bundle it stays open.
   const logTailDeps: LogTailRouteDeps = { logsDir: options.logsDir, sseKeepaliveMs }
+  // The day, derived (#144 slice 4): the whole file folded per request, never the tail's cap.
+  const stats = createLogStatsRoute({ logsDir: options.logsDir })
 
   // ── The wire (#112): prompt / follow / dialog ────────────────────────────────────
   const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs }
@@ -584,7 +588,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     // literal's later key wins: the spread silently overwrote the outcome on every queued
     // prompt the browser sends, which is every prompt typed while a run is in flight. The
     // wire field keeps its name; the record's older one keeps its meaning.
-    log.info('prompt {messageId} {admission} on run {generation}', {
+    log.info(ENSO_LOG_EVENTS.promptAdmitted, {
       threadId,
       messageId,
       generation,
@@ -767,6 +771,13 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     if (request.method === 'GET' && url.startsWith('/api/logs/tail')) {
       // No log line here either, by the same rule (#144): the tail must not appear in the tail.
       followLogTail(logTailDeps, url, response)
+      return true
+    }
+    if (request.method === 'GET' && url === '/api/logs/stats') {
+      // No log line here either (#144): the fold is a read, and a record per refresh would be
+      // the reader's own presence in the day it is summing.
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify(stats()))
       return true
     }
     if (request.method === 'POST' && url === '/api/logs') {

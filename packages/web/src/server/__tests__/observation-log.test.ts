@@ -43,3 +43,36 @@ test('a run with no delta leaves nothing behind: after it settles, a late delta 
   recordObservation('obs-t2', 4, 10, { kind: 'text-delta', contentIndex: 0, delta: 'x' })
   expect(firstDeltaRecords(logs.records)).toHaveLength(0)
 })
+
+// ⚠ WHAT TODAY COST, at the spine's tier (#144 slice 4). `message-end` stays `debug` — most
+// are boundaries — but a message pi attributes spend to is one `info` line carrying the
+// accounting, so a day's cost is in the file for whoever reads it later, not only for whoever
+// was turned up. The unit is the completed message, the one pi's `/stats` sums.
+test('⚠ a message-end with usage is one info record with the tokens, the cost and the model; one without stays debug', async () => {
+  const logs = await recordEnsoLogs()
+  recordObservation('obs-t3', 2, 30, {
+    kind: 'message-end',
+    role: 'assistant',
+    model: 'claude-sonnet-4',
+    usage: { input: 120, output: 45, cacheRead: 1000, cacheWrite: 0, totalCost: 0.0123 },
+  })
+  recordObservation('obs-t3', 2, 31, { kind: 'message-end', role: 'user' })
+  const spend = logs.records.filter((record) => String(record.rawMessage).startsWith('message {role} used'))
+  expect(spend).toHaveLength(1)
+  expect(spend[0]?.level).toBe('info')
+  expect(spend[0]?.properties).toMatchObject({
+    threadId: 'obs-t3',
+    generation: 2,
+    seq: 30,
+    role: 'assistant',
+    model: 'claude-sonnet-4',
+    input: 120,
+    output: 45,
+    cacheRead: 1000,
+    cacheWrite: 0,
+    totalCost: 0.0123,
+  })
+  // The boundary without usage is the compact `debug` line and nothing more.
+  const boundary = logs.records.filter((record) => record.rawMessage === '{kind}' && record.properties?.seq === 31)
+  expect(boundary.map((record) => record.level)).toEqual(['debug'])
+})

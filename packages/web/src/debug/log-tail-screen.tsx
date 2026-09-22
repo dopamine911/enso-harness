@@ -292,6 +292,9 @@ export function LogTailScreen({ fetch: pageFetch }: { fetch?: FetchLike } = {}):
         <TerminalTitle>enso · logs</TerminalTitle>
         <LogTailControls filter={filter} following={following} onFilter={changeFilter} onFollowing={setFollowing} />
         <TerminalActions>
+          <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href="/debug?stats">
+            the day's stats
+          </a>
           <TerminalStatus>
             <Spinner />
           </TerminalStatus>

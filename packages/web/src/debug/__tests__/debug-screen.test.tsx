@@ -11,10 +11,11 @@ ensureDom()
 const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-dom/client')
 
 /**
- * The debug page by its URL (#144 slice 3): `?thread=<id>` is that thread's timeline, no
- * `thread` is the day's tail, and a `thread` that cannot be a thread id is the tail with the
- * mistake said above it. The server behind both is a fetch that never answers — the routing
- * is the question here, and the screens have their own tests.
+ * The debug page by its URL (#144 slices 3–4): `?thread=<id>` is that thread's timeline,
+ * `?stats` is the day's stats, no `thread` is the day's tail, and a `thread` that cannot be a
+ * thread id is the tail with the mistake said above it. The server behind all of them is a
+ * fetch that never answers — the routing is the question here, and the screens have their
+ * own tests.
  */
 afterAll(releaseDom)
 
@@ -53,6 +54,21 @@ test('no thread mounts the day’s tail, with nothing said above it', async () =
   const page = await mountDebug('?log=debug')
   expect(page.text).toContain('enso · logs')
   expect(page.text).not.toContain('the thread in the URL')
+  await page.unmount()
+})
+
+test('?stats mounts the day’s stats', async () => {
+  const page = await mountDebug('?stats')
+  expect(page.text).toContain('enso · day')
+  expect(page.text).not.toContain('enso · logs')
+  await page.unmount()
+})
+
+// The narrower question wins: a timeline link that carries a stale `?stats` still names one thread.
+test('?stats&thread=<id> mounts the timeline, not the stats', async () => {
+  const page = await mountDebug(`?stats&thread=${THREAD_ID}`)
+  expect(page.text).toContain(`thread ${THREAD_ID}`)
+  expect(page.text).not.toContain('enso · day')
   await page.unmount()
 })
 

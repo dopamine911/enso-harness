@@ -171,9 +171,10 @@ answer before a tool runs; nothing after it does.
   at `debug`, never silent.
 - **policy** — what a guard reads: write roots, secret path fragments, protected write fragments,
   denied network binaries. `GuardPolicy` in `@enso/core`; from `enso.config.json`, once, failing closed.
-- **rule** — one line of a policy, or one named check of the command analyzer (`ruleId`): the identity
-  of *which* rule caught a call, asserted where identity matters and elided where only the direction
-  does.
+- **rule** — the refusal site a denial names, from the closed vocabulary `ENSO_GUARD_RULES` in
+  `@enso/core` (`network-egress`, `secret-read`, `stale-write`, …): the word beside a verdict's prose
+  reason that a day's stats count by (#144). The command analyzer's own `ruleId`, when it has one, is
+  quoted inside the reason, not promoted to a rule of ours.
 - **participant** — one handler on the tool-call hook. Handlers are additive: every participant's handler
   runs and the first denial ends the call, so a denial is final whatever the load order. First-wins
   resolution applies to registered *tools*, not to handlers, and the guard registers none — see
@@ -291,6 +292,12 @@ harness did). The first is canonical and never rewritten by us; the second is th
   replaces the reader's view; a **records** frame is what has landed since. Never a second store:
   the log tail reads the same file the bundle exports (#144). Not the event *tail* under
   Observation, which is a thread's recent events kept in memory.
+- **day stats** — the day's file folded into figures: spend per thread and per model, run and turn
+  durations, time to first token, tool durations, denials by rule, and who wrote. `dayStats` in
+  `@enso/core`, answered by `GET /api/logs/stats` and shown at `debug.html?stats` (#144). Every
+  figure is derived from records; if one cannot be, the file gets the record, never a counter.
+- **event name** — a record's message TEMPLATE, values unrendered: what a bundle filters on and
+  what a stat folds over. Declared once in `ENSO_LOG_EVENTS` and imported by the producers.
 - **config** — `enso.config.json` at the repo root, committed, read once at extension load, failing
   closed (#59). Secrets are not config: `.enso/secrets.env`, read per call, quarantined.
 - **run provenance** — what a fork point will additionally record — project revision, context

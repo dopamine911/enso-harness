@@ -1,6 +1,13 @@
 import { existsSync } from 'node:fs'
 import type { ExtensionAPI, ToolCallEvent, ToolCallEventResult, ToolResultEvent } from '@earendil-works/pi-coding-agent'
-import { DEFAULT_GUARD_POLICY, ensoLogger, type GuardPolicy, WEB_FETCH_TOOL_NAME } from '@enso/core'
+import {
+  DEFAULT_GUARD_POLICY,
+  ENSO_LOG_EVENTS,
+  type EnsoGuardRule,
+  ensoLogger,
+  type GuardPolicy,
+  WEB_FETCH_TOOL_NAME,
+} from '@enso/core'
 import { type CheckCommandResult, checkCommand } from 'cc-safety-net/api'
 import {
   canonicalToolName,
@@ -189,6 +196,22 @@ export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI
 export default createGuards({ analyzeBashCommand: checkCommand })
 
 /**
+ * A refusal as this guard produces it: pi's `{ block, reason }` plus the RULE that refused
+ * (#144 slice 4). The rule is what the denial record carries and what a day's stats count
+ * by; the reason is prose for the model. Stripped back to pi's shape at the handler, so the
+ * runtime is handed exactly the contract it published and nothing of ours rides on it.
+ */
+interface GuardDenial {
+  readonly block: true
+  readonly reason: string
+  readonly rule: EnsoGuardRule
+}
+
+function deny(rule: EnsoGuardRule, reason: string): GuardDenial {
+  return { block: true, reason, rule }
+}
+
+/**
  * The shell-command denies, in order — a denied command must never have had its input
  * mutated, so the timeout patch stays in the handler, after this returns undefined.
  *
@@ -218,7 +241,7 @@ function shellCommandDenial(
   call: { toolName: string; command: string; cwd: string },
   dependencies: GuardDependencies,
   policy: GuardPolicy,
-): ToolCallEventResult | undefined {
+): GuardDenial | undefined {
   const { toolName, command, cwd } = call
   if (toolName === TOOL_BASH && command.length > 0) {
     let safetyNetVerdict: CheckCommandResult
@@ -234,7 +257,7 @@ function shellCommandDenial(
     if (safetyNetVerdict.kind === 'deny') {
       const ruleId =
         'ruleId' in safetyNetVerdict && safetyNetVerdict.ruleId !== undefined ? ` (${safetyNetVerdict.ruleId})` : ''
-      return { block: true, reason: `Bash command blocked by cc-safety-net${ruleId}: ${safetyNetVerdict.reason}` }
+      return deny('cc-safety-net', `Bash command blocked by cc-safety-net${ruleId}: ${safetyNetVerdict.reason}`)
     }
   }
 
@@ -244,45 +267,41 @@ function shellCommandDenial(
     // The floor (#57): not a name the guard saw, but a construct it cannot see through.
     // The refusal names the construct so the rewrite is obvious — and says why "cannot
     // vouch" is a denial here rather than a question.
-    return {
-      block: true,
-      reason:
-        `${toolName} command refused: ${egress.matched} — the network deny (#9) cannot vouch for what it ` +
+    return deny(
+      'network-egress',
+      `${toolName} command refused: ${egress.matched} — the network deny (#9) cannot vouch for what it ` +
         `cannot resolve, so it refuses rather than guesses. Rewrite without the nesting, the substitution, ` +
         `or the stream: name the command directly. Fetching is ${WEB_FETCH_TOOL_NAME} (#54), never a shell client.`,
-    }
+    )
   }
   if (egress !== undefined) {
-    return {
-      block: true,
-      reason:
-        `${toolName} network egress is blocked: "${egress.matched}" (matched by ${egress.via}). ` +
+    return deny(
+      'network-egress',
+      `${toolName} network egress is blocked: "${egress.matched}" (matched by ${egress.via}). ` +
         `Ad-hoc network clients are denied in shell commands (#9) — use the ${WEB_FETCH_TOOL_NAME} ` +
         `tool instead (#54): it fetches http(s) URLs from hosts on the committed allowlist. ` +
         `web_fetch and web_search (#63) are the only sanctioned web access. ` +
         `Do not try to work around the deny.`,
-    }
+    )
   }
 
   const dump = findEnvironmentDump(command, { coarse })
   if (dump !== undefined) {
-    return {
-      block: true,
-      reason:
-        `${toolName} environment listing is blocked: "${dump.matched}" (matched by ${dump.via}). ` +
+    return deny(
+      'environment-dump',
+      `${toolName} environment listing is blocked: "${dump.matched}" (matched by ${dump.via}). ` +
         `Secrets are kept out of the tool environment (#89), so an environment dump or a ` +
         `secret-shaped variable expansion is refused rather than trusted to be empty. ` +
         `If a command needs a value from the environment, name a non-secret variable; ` +
         `API keys are read by the harness's own tools from .enso/secrets.env, never the root .env.`,
-    }
+    )
   }
 
   const secret = findSecretPathWord(command, policy.secretPathFragments, cwd, { coarse })
   if (secret !== undefined) {
-    return {
-      block: true,
-      reason:
-        `${toolName} command refused: "${secret.matched}" names credential material ` +
+    return deny(
+      'secret-path',
+      `${toolName} command refused: "${secret.matched}" names credential material ` +
         `(matched by ${secret.via}). The read gate refuses that path for read/grep/find/ls, ` +
         `so this route refuses it too (#204) — one policy, both routes, because a secret ` +
         `read is the precondition for exfiltration. This gates the WORD, not the read, so a ` +
@@ -290,7 +309,7 @@ function shellCommandDenial(
         `it so it is not one (an escaped dot, '/\\.enso/', passes). The harness's own ` +
         `credential dir (.enso/) is off limits for inspection either way; the log-reading ` +
         `path is "bun run logs", a human command and not a tool call.`,
-    }
+    )
   }
   return undefined
 }
@@ -362,9 +381,11 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     }
   })
 
-  // Every verdict is a record (#132): a denial at `warn` with the tool, the path it named
-  // and the reason; an allow at `debug`. The transcript shows the model what was refused;
-  // this says WHEN, on which call, in the file beside every other layer's line about it.
+  // Every verdict is a record (#132): a denial at `warn` with the tool, the path it named,
+  // the RULE that refused (#144 — the word a day's stats count by) and the reason; an allow
+  // at `debug`. The transcript shows the model what was refused; this says WHEN, on which
+  // call, in the file beside every other layer's line about it. pi is handed its own shape
+  // back — `{ block, reason }` — and never our `rule`.
   pi.on('tool_call', (event, extensionContext): ToolCallEventResult | undefined => {
     const verdict = decide(event, extensionContext.cwd)
     const path = pathArgumentOf(event)
@@ -373,12 +394,15 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
       toolName: event.toolName,
       ...(path === undefined ? {} : { path }),
     }
-    if (verdict?.block === true) log.warn('{toolName} denied: {reason}', { ...properties, reason: verdict.reason })
-    else log.debug('{toolName} allowed', properties)
-    return verdict
+    if (verdict === undefined) {
+      log.debug('{toolName} allowed', properties)
+      return undefined
+    }
+    log.warn(ENSO_LOG_EVENTS.toolDenied, { ...properties, rule: verdict.rule, reason: verdict.reason })
+    return { block: verdict.block, reason: verdict.reason }
   })
 
-  function decide(event: ToolCallEvent, cwd: string): ToolCallEventResult | undefined {
+  function decide(event: ToolCallEvent, cwd: string): GuardDenial | undefined {
     const toolName = canonicalToolName(event.toolName)
 
     // --- #4's fail-closed floor: a policy/tool-list mismatch denies EVERYTHING, first.
@@ -389,10 +413,10 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
       verifyPolicyToolNames()
     }
     if (policyToolMismatch !== undefined) {
-      return {
-        block: true,
-        reason: `All tool calls are blocked until the guard policy matches pi's tools: ${policyToolMismatch}`,
-      }
+      return deny(
+        'policy-mismatch',
+        `All tool calls are blocked until the guard policy matches pi's tools: ${policyToolMismatch}`,
+      )
     }
 
     // --- bash/powershell (#9): deny first, patch last — a denied command must never
@@ -422,35 +446,27 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
       const roots = policy.writeRoots.length > 0 ? policy.writeRoots : [cwd]
 
       if (!isInsideAnyRoot(target, roots)) {
-        return {
-          block: true,
-          reason:
-            `Writing to "${candidate}" is blocked: it resolves to ${target}, outside the workspace ` +
+        return deny(
+          'write-confinement',
+          `Writing to "${candidate}" is blocked: it resolves to ${target}, outside the workspace ` +
             `(${roots.join(', ')}). pi resolves paths but does not confine them, so this guard does.`,
-        }
+        )
       }
       if (isProtectedForWrite(target, policy.protectedWriteFragments)) {
-        return {
-          block: true,
-          reason: `Writing to "${candidate}" is blocked: it targets protected internals.`,
-        }
+        return deny('protected-internals', `Writing to "${candidate}" is blocked: it targets protected internals.`)
       }
       // ⚠ Checked on the write path ONLY, deliberately: READING ~/.bashrc or .mcp.json is
       // routine and harmless. The danger is installation, not disclosure (#21).
       if (isPersistenceWriteTarget(target)) {
-        return {
-          block: true,
-          reason:
-            `Writing to "${candidate}" is blocked: it targets a shell-init, git, editor or ` +
+        return deny(
+          'persistence-write',
+          `Writing to "${candidate}" is blocked: it targets a shell-init, git, editor or ` +
             `agent-config persistence path — a write there is harmless now and executes ` +
             `later, outside this session, as the user.`,
-        }
+        )
       }
       if (looksLikeSecret(target, policy.secretPathFragments)) {
-        return {
-          block: true,
-          reason: `Writing to "${candidate}" is blocked: it matches a credential pattern.`,
-        }
+        return deny('secret-write', `Writing to "${candidate}" is blocked: it matches a credential pattern.`)
       }
       // --- #10 + #11: the session's knowledge of the target, in two distinct refusals.
       //
@@ -466,23 +482,21 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
       // the old intent unchanged may itself be the mistake.
       const knownState = readTracker.classifyPath(target)
       if (knownState === 'stale') {
-        return {
-          block: true,
-          reason:
-            `Mutating "${candidate}" is blocked: the file CHANGED on disk after this session ` +
+        return deny(
+          'stale-write',
+          `Mutating "${candidate}" is blocked: the file CHANGED on disk after this session ` +
             `last observed it — another agent, a git restore, or this session's own bash ` +
             `command modified it. Read "${candidate}" again to see the current content, ` +
             `then reconsider the change before re-applying it.`,
-        }
+        )
       }
       if (toolName === TOOL_WRITE && knownState === 'unknown' && existsSync(target)) {
-        return {
-          block: true,
-          reason:
-            `Writing to "${candidate}" is blocked: the file exists and this session has not ` +
+        return deny(
+          'read-before-write',
+          `Writing to "${candidate}" is blocked: the file exists and this session has not ` +
             `read it, so a whole-file write would replace content the session has never seen. ` +
             `Read "${candidate}" first, then write.`,
-        }
+        )
       }
       return undefined
     }
@@ -495,12 +509,11 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     // left `grep` over ~/.aws returning the credential line, past a guard whose own header
     // claimed it denied secret reads.
     if (looksLikeSecret(target, policy.secretPathFragments)) {
-      return {
-        block: true,
-        reason:
-          `Reading "${candidate}" via ${event.toolName} is blocked: it matches a credential pattern. ` +
+      return deny(
+        'secret-read',
+        `Reading "${candidate}" via ${event.toolName} is blocked: it matches a credential pattern. ` +
           `A secret read is the precondition for exfiltration, so this is denied even for inspection.`,
-      }
+      )
     }
 
     return undefined

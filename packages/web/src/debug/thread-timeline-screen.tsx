@@ -353,6 +353,9 @@ export function ThreadTimelineScreen({ threadId, fetch: pageFetch }: ThreadTimel
           <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href="/debug">
             the day's log
           </a>
+          <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href="/debug?stats">
+            the day's stats
+          </a>
           <TerminalStatus>
             <Spinner />
           </TerminalStatus>

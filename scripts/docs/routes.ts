@@ -15,6 +15,7 @@ const FOLLOW_PATH = 'packages/web/src/server/follow.ts'
 const BUNDLE_PATH = 'packages/web/src/server/bundle-route.ts'
 const LOGS_PATH = 'packages/web/src/server/logs-route.ts'
 const LOGS_TAIL_PATH = 'packages/web/src/server/logs-tail-route.ts'
+const LOGS_STATS_PATH = 'packages/web/src/server/logs-stats-route.ts'
 
 interface RouteMetadata {
   readonly method: 'GET' | 'POST'
@@ -186,6 +187,16 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     logs: 'no',
     factory: { path: LOGS_TAIL_PATH, declaration: 'export function followLogTail' },
   },
+  'GET /api/logs/stats': {
+    handler: 'createLogStatsRoute → stats',
+    input: 'none',
+    success: '200 `EnsoDayStats` JSON',
+    errors: '403 untrusted origin',
+    routeClass: 'observation',
+    builds: 'no',
+    logs: 'no',
+    factory: { path: LOGS_STATS_PATH, declaration: 'export function createLogStatsRoute' },
+  },
   'POST /api/logs': {
     handler: 'respondToBrowserLogs → receiveBrowserLogs',
     input: 'body: `EnsoBrowserLogBatch`',
@@ -236,6 +247,7 @@ export function discoverRoutes(): ResolvedRoute[] {
     [BUNDLE_PATH]: readFileSync(join(ROOT, BUNDLE_PATH), 'utf8'),
     [LOGS_PATH]: readFileSync(join(ROOT, LOGS_PATH), 'utf8'),
     [LOGS_TAIL_PATH]: readFileSync(join(ROOT, LOGS_TAIL_PATH), 'utf8'),
+    [LOGS_STATS_PATH]: readFileSync(join(ROOT, LOGS_STATS_PATH), 'utf8'),
   }
 
   const regexRoutes: DetectedRoute[] = [...server.matchAll(/^const ([A-Z][A-Z_]*_ROUTE) = \/.*\/$/gm)].map((match) => ({

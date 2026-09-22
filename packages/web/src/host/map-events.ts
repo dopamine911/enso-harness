@@ -210,11 +210,15 @@ function mapMessageStart(event: RuntimeEvent): EnsoObservation {
  * attributable spend; every other completed message is a boundary without it.
  */
 function mapMessageEnd(event: RuntimeEvent): EnsoObservation {
-  const message = event.message as { role?: unknown; usage?: unknown } | undefined
+  const message = event.message as { role?: unknown; usage?: unknown; model?: unknown } | undefined
   const role = roleOf(message)
   const usage = readUsage(message?.usage)
   if (usage !== undefined && (role === 'assistant' || role === 'toolResult')) {
-    return { kind: 'message-end', role, usage }
+    // pi names the model on the assistant message it came from (#144 slice 4); a summarised
+    // tool result carries none, and the observation says nothing rather than borrowing one.
+    return typeof message?.model === 'string'
+      ? { kind: 'message-end', role, usage, model: message.model }
+      : { kind: 'message-end', role, usage }
   }
   return { kind: 'message-end', role }
 }

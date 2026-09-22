@@ -71,6 +71,7 @@ import { getPrettyFormatter } from '@logtape/pretty'
 import { redactByField } from '@logtape/redaction'
 import { Check } from 'typebox/value'
 import { ENSO_LOG_ROOT, ENSO_REDACT_FIELDS, ENSO_REDACTED, ENSO_REDACTED_VALUE, EnsoLogLine } from './log.ts'
+import { ENSO_LOG_EVENTS } from './log-stats.ts'
 import { type EnsoLogFilter, logLineMatches, logLineMessageParts } from './log-tail.ts'
 import { ensoLogsDir } from './paths.ts'
 
@@ -491,7 +492,7 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
   // the debug lines says why — and WHO is writing (#144). A shared file makes "the
   // processes" mean "who has written to today's file"; with a pid and a start time,
   // liveness is inferable from the last write without any process asking to be counted.
-  getLogger([ENSO_LOG_ROOT, 'log']).info('logging configured: file {file}, console {console}, overrides {overrides}', {
+  getLogger([ENSO_LOG_ROOT, 'log']).info(ENSO_LOG_EVENTS.loggingConfigured, {
     file: levels.file,
     console: levels.console ?? 'off',
     overrides: levels.overrides.map((override) => `${override.category.join('.')}=${override.level}`),

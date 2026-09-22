@@ -171,7 +171,7 @@ test('⚠ a record’s thread id is a link to that thread’s timeline on this p
   const properties = { threadId: 'thread-01ABCDEF', generation: 4, process: 'server', attempt: { tries: 2 } }
   await page.send(backlogOf([line('run {generation} acquired', properties)]))
   const link = await eventually(() => {
-    const found = page.container.querySelector('a')
+    const found = page.container.querySelector('[aria-label="log records"] a')
     if (found === null) throw new Error('expected the thread id to be a link')
     return found
   })
