@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
+  type ExtensionAPI,
   type ExtensionError,
   type InlineExtension,
   initTheme,
@@ -12,6 +13,8 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
+  type EnsoHostCommandRun,
+  type EnsoModelState,
   type EnsoObservation,
   type EnsoOpenDialog,
   type EnsoPermissionModeState,
@@ -28,6 +31,7 @@ import { findRepoRoot } from '@enso/core/paths'
 import { quarantineSecrets } from '@enso/core/secrets'
 import { createEventTail, describeObservation } from './event-tail.ts'
 import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
+import { decideHostCommand, HostCommandRefused, hostCommandRows } from './host-commands.ts'
 import { mapPiEvent } from './map-events.ts'
 import {
   freshPermissionModeState,
@@ -85,11 +89,40 @@ const log = ensoLogger('host')
  * transcript. `quarantineSecrets` deletes every secret-shaped name and every name the
  * secrets file defines. The extensions that need a key read `.enso/secrets.env` directly
  * (`readSecret`) — see `@enso/core`'s secrets.ts for why the root `.env` is the wrong place.
+ *
+ * ⚠ THE HOST LOADS ONE EXTENSION OF ITS OWN, `<inline:enso-model-watch>` (#338 slice 2), because
+ * an extension is the only honest listener for a model change. pi 0.84.4 announces a model
+ * switch to extensions ALONE: `AgentSession.setModel` (`dist/core/agent-session.js:1252`)
+ * writes the `model_change` entry through `sessionManager.appendModelChange` (:1259) with no
+ * session event — `entry_appended` (:2026) is emitted only from the extension API's
+ * `appendEntry`, for custom entries — and then `_emitModelSelect` (:1236) puts `model_select`
+ * on the EXTENSION runner. The thinking level is the other way round: `setThinkingLevel`
+ * (:1358) emits `thinking_level_changed` on the session stream (:1370). The host hears each
+ * where it is said, re-reads `modelState()` and emits its own `model` event once per change —
+ * so a failover swap by pi-multi-account (`pi.setModel`, `index.ts:3679`) reaches the feed the
+ * same way a `/model` from the palette does. The watcher registers nothing else and is listed in
+ * `loadedExtensionPaths` like every extension pi loaded.
  */
 
 /** The agent dir's multi-account config file, and the one key this host must pin in it. */
 const MULTI_ACCOUNT_CONFIG_FILENAME = 'provider-failover.json'
 const MULTI_ACCOUNT_CHILD_PROXY_KEY = 'childProxy'
+
+/**
+ * The host's own extension (see the module header): named so `loadedExtensionPaths` says what
+ * it is, and exported so the load receipt's pin can name it beside the manifest's entries.
+ */
+const MODEL_WATCH_EXTENSION_NAME = 'enso-model-watch'
+export const MODEL_WATCH_EXTENSION_PATH = `<inline:${MODEL_WATCH_EXTENSION_NAME}>`
+
+/**
+ * pi's stand-in when no model could be chosen — `@earendil-works/pi-agent-core`
+ * `dist/agent.js:14` `DEFAULT_MODEL`, substituted by `createMutableAgentState` (:31) so
+ * `AgentSession.model` is typed optional but never is. Every model pi actually selects
+ * (`findInitialModel` in `dist/core/sdk.js:98`, `setModel`) is a registered, authenticated one;
+ * the placeholder means "none", and the seam says `null` for it (#338 slice 2).
+ */
+const PLACEHOLDER_MODEL = { provider: 'unknown', id: 'unknown' }
 
 /** pi's `InputSource` for prompts that arrive over a wire rather than a keyboard. */
 const PROMPT_SOURCE_RPC = 'rpc'
@@ -337,6 +370,15 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   async function createSession(threadId: string): Promise<HostedThread> {
     // Resolved BEFORE the services so a bad id fails before anything is built.
     const storedPath = await storedSessionPath(threadId)
+    // The watcher's handler is bound after the session exists (`announceModelState` below);
+    // `model_select` cannot fire before it — only the session's own methods emit it.
+    let onModelSelect = (): void => undefined
+    const modelWatch: InlineExtension = {
+      name: MODEL_WATCH_EXTENSION_NAME,
+      factory: (pi: ExtensionAPI): void => {
+        pi.on('model_select', () => onModelSelect())
+      },
+    }
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
@@ -344,11 +386,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // The isolation triple `scripts/enso.ts` documents, expressed as loader options:
         // no discovery (`--no-extensions`), no ~/.agents skills (`--no-skills`), and the
         // harness package as the one extension source (`-e <dir>` — pi resolves a
-        // directory's `pi` manifest for extensions, skills, prompts AND themes).
+        // directory's `pi` manifest for extensions, skills, prompts AND themes). Inline
+        // extensions load after the manifest's: the host's watcher first, then any probes.
         noExtensions: true,
         noSkills: true,
         additionalExtensionPaths: [harnessPackageDir],
-        ...(options.extensionFactories === undefined ? {} : { extensionFactories: [...options.extensionFactories] }),
+        extensionFactories: [modelWatch, ...(options.extensionFactories ?? [])],
       },
     })
     for (const diagnostic of services.diagnostics) {
@@ -448,6 +491,39 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       return { mode, available: PICC_PERMISSION_MODES.filter((candidate) => registered.has(candidate)) }
     }
 
+    /**
+     * The model and thinking level NOW (#338 slice 2), read off pi's agent state on every call:
+     * `model` is `null` for pi's placeholder (see `PLACEHOLDER_MODEL`), the levels are what the
+     * current model offers (`getAvailableThinkingLevels` — pi's whole list when there is no model).
+     */
+    function currentModelState(): EnsoModelState {
+      const { model } = session
+      const chosen =
+        model === undefined || (model.provider === PLACEHOLDER_MODEL.provider && model.id === PLACEHOLDER_MODEL.id)
+          ? null
+          : { provider: model.provider, id: model.id, name: model.name }
+      return {
+        model: chosen,
+        thinkingLevel: session.thinkingLevel,
+        availableThinkingLevels: session.getAvailableThinkingLevels(),
+      }
+    }
+
+    /**
+     * Say the model state as the host's own event, ONCE per change. A `/model` reaches here up to
+     * three times — `thinking_level_changed` when the new model clamps the level, `model_select`,
+     * and the command's own call — and every arrival reads the same state; the feed hears one.
+     */
+    let announcedModelState: string | undefined
+    function announceModelState(): void {
+      const state = currentModelState()
+      const serialized = JSON.stringify(state)
+      if (serialized === announcedModelState) return
+      announcedModelState = serialized
+      emit({ type: 'model', ...state })
+    }
+    onModelSelect = announceModelState
+
     const unsubscribeSession = session.subscribe((event) => {
       try {
         const wire = toRpcWireEvent(event)
@@ -458,6 +534,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         if (wire.type === 'entry_appended' && readPiccPersistedMode(wire.entry) !== undefined) {
           emit({ type: 'permission_mode', ...currentPermissionModeState() })
         }
+        // The thinking half of the model state — the module header says why the model half
+        // arrives through the watcher extension instead.
+        if (wire.type === 'thinking_level_changed') announceModelState()
       } catch (error) {
         log.error('a session event could not be emitted: {error}', { threadId, error })
       }
@@ -511,7 +590,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         return ui.openDialogs()
       },
       listCommands(): RuntimeCommand[] {
-        // The three sources pi's rpc `get_commands` assembles, in its order.
+        // The three sources pi's rpc `get_commands` assembles, in its order — then the host's
+        // own two (#338 slice 2), over the models pi could run right now.
         const commands: RuntimeCommand[] = []
         for (const command of session.extensionRunner.getRegisteredCommands()) {
           commands.push(describeCommand(command.invocationName, 'extension', command.description))
@@ -522,7 +602,39 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         for (const skill of session.resourceLoader.getSkills().skills) {
           commands.push(describeCommand(`skill:${skill.name}`, 'skill', skill.description))
         }
+        commands.push(...hostCommandRows(currentModelState(), session.modelRuntime.getAvailableSnapshot()))
         return commands
+      },
+      modelState: currentModelState,
+      async runHostCommand(run: EnsoHostCommandRun): Promise<void> {
+        const decision = decideHostCommand(run, currentModelState(), session.modelRuntime.getAvailableSnapshot())
+        switch (decision.kind) {
+          case 'refused':
+            throw new HostCommandRefused(decision.reason)
+          case 'model':
+            // pi refuses a provider with no credentials (`No API key for provider/id`) — its
+            // sentence is the reason; the snapshot lists authenticated providers, so it is the
+            // rare case of a credential that lapsed between the listing and the choice. That
+            // one throw is a refusal; anything else `setModel` throws is a fault, and stays one.
+            try {
+              await session.setModel(decision.model)
+            } catch (error) {
+              if (error instanceof Error && /no api key/i.test(error.message))
+                throw new HostCommandRefused(error.message)
+              throw error
+            }
+            break
+          case 'thinking': {
+            // The decision checked the level against this same list; the lookup is how the string
+            // becomes pi's `ThinkingLevel` without a cast.
+            const level = session.getAvailableThinkingLevels().find((offered) => offered === decision.level)
+            if (level !== undefined) session.setThinkingLevel(level)
+            break
+          }
+        }
+        // pi's own events have said it by now (see the module header); this is the guarantee
+        // that the caller's change is on the feed whatever pi's plumbing did — deduped.
+        announceModelState()
       },
       permissionModeState: currentPermissionModeState,
       setPermissionMode(mode: string, outcome: PromptOutcome): void {

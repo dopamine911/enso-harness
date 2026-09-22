@@ -255,6 +255,12 @@ export function observationToAguiEvents(observation: EnsoObservation, ids: AguiI
       // observation, a second shape for one fact.
       return [custom(observation)]
 
+    case 'model':
+      // The model or thinking level changed (#338 slice 2), said by the host after a `/model`
+      // or `/thinking` run. CUSTOM: AG-UI has no model vocabulary. The snapshot frame's `model`
+      // is the same `EnsoModelState` shape; the browser's model store folds both.
+      return [custom(observation)]
+
     case 'custom-entry':
       // An extension persisted state (#29) — a receipt, recorded and counted (the debug
       // pane's chunk tally) but rendered by nothing since L3 moved the mode onto its own

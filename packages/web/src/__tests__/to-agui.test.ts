@@ -195,6 +195,12 @@ test('nothing is silently dropped: every kind except an in-flight result and a b
     { kind: 'permission-mode', mode: 'acceptEdits', available: ['default', 'acceptEdits'] },
     { kind: 'permission-mode-rejected', mode: 'plan', reason: 'the command refused' },
     {
+      kind: 'model',
+      model: { provider: 'anthropic', id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
+      thinkingLevel: 'medium',
+      availableThinkingLevels: ['off', 'low', 'medium', 'high'],
+    },
+    {
       kind: 'message-end',
       role: 'assistant',
       usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },

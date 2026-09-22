@@ -149,7 +149,17 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
   last built one (`remembered` — this thread has no live session; every session builds the same
   set from the same sources, as they stood at that build), or nowhere yet — looking must not
   build (#86). Selecting an
-  extension command sends it as a prompt; a template or skill is inserted for its arguments.
+  extension command sends it as a prompt; a template or skill is inserted for its arguments; a
+  **host command** runs through `POST …/threads/:id/command`.
+- **host command** — a slash command that is ours, not the runtime's (#338 slice 2): `source: 'host'`,
+  declared by **kind** — `select` (one of many options, filtered in a second step: `/model`),
+  `level` (one of a few, chosen in place: `/thinking`), `action` (runs with no value). The palette
+  renders by kind; nothing is per-command UI. Running one builds the thread if it has no session:
+  choosing the model BEFORE the first prompt is the point (#341, the control half of #44).
+- **model state** — `EnsoModelState`: the session's model (`provider`, `id`, `name`; `null` when
+  the runtime has none it can run), its thinking level and the levels the model offers. On the
+  snapshot frame at run start and as the `model` observation whenever it changes — by the palette,
+  by an extension's failover, or by a resumed session. The composer chip reads nothing else.
 
 ## Permission
 

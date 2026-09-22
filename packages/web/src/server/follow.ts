@@ -5,6 +5,7 @@ import {
   ENSO_IMAGE_MAX_BYTES,
   type EnsoAbortReceipt,
   type EnsoFollowFrame,
+  EnsoHostCommandRun,
   EnsoPermissionModeChange,
   type EnsoPromptAdmission,
   EnsoPromptBody,
@@ -17,6 +18,7 @@ import {
 } from '@enso/core'
 import { Check, Errors } from 'typebox/value'
 import type { AgentHost } from '../host/agent-host.ts'
+import { HostCommandRefused } from '../host/host-commands.ts'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
 import { readThreadMount } from './thread-read.ts'
 import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
@@ -104,13 +106,22 @@ function slashCommandName(prompt: string): string | undefined {
  * message that says "/login". It was asked only of an idle thread: a command sent while a run
  * held the thread was queued straight into the runtime, and vanished — pi's TUI built-ins
  * (`/login`, `/model`, `/compact`, …) are not extension commands and have no handler here.
+ *
+ * A `host` row (#338 slice 2) is in the list and is NOT a prompt: `/model` typed into the
+ * composer would walk past a name check and reach the model as text, exactly the no-op above.
+ * It runs through `POST …/command`, which the palette does; the refusal says so.
  */
 function unavailableCommand(runtime: ThreadRuntime, command: string): string | undefined {
   const available = runtime.listCommands()
-  if (available.some((known) => known.name === command)) return undefined
-  return `/${command} is not available on this surface. Available here: ${
-    available.length === 0 ? 'none' : available.map((known) => `/${known.name}`).join(', ')
-  }`
+  const known = available.find((candidate) => candidate.name === command)
+  if (known === undefined) {
+    const runnable = available.filter((candidate) => candidate.source !== 'host')
+    return `/${command} is not available on this surface. Available here: ${
+      runnable.length === 0 ? 'none' : runnable.map((candidate) => `/${candidate.name}`).join(', ')
+    }`
+  }
+  if (known.source === 'host') return `/${command} is a setting here, not a prompt: choose it from the palette`
+  return undefined
 }
 
 /**
@@ -181,6 +192,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     busy: mount.busy,
     generation: mount.generation,
     permissionMode: mount.permissionMode,
+    model: mount.model,
     messages: mount.messages,
     openDialogs: mount.openDialogs,
     ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),
@@ -412,6 +424,60 @@ export function readModeChangeBody(raw: string): EnsoPermissionModeChange {
     throw new Error(`malformed mode body: ${String(error)}`)
   }
   if (!Check(EnsoPermissionModeChange, body)) throw new Error('mode body needs a non-empty `mode`')
+  return body
+}
+
+export type HostCommandOutcome =
+  | { readonly status: 204 }
+  | { readonly status: 409; readonly reason: string }
+  | { readonly status: 422; readonly reason: string }
+
+/**
+ * Run a `host` command (#338 slice 2) — `/model`, `/thinking` — as a control route, the way
+ * `changeThreadMode` runs a mode change: refused while a run holds the thread (409; the model is
+ * not swapped under a run in flight), else the thread is acquired — a thread that has never run
+ * BUILDS here, which is the point of choosing the model before the first prompt (#341) — the
+ * runtime applies it, the lease is released, 204. The runtime's refusal — an unknown command, a
+ * model not offered, a level this model lacks, a provider whose credentials pi rejects — is the
+ * 422's text verbatim. The change itself arrives on the follow as a `model` observation, said by
+ * the host once it holds; nothing is announced from here.
+ */
+export async function runHostCommand(
+  deps: FollowRouteDeps,
+  threadId: string,
+  run: EnsoHostCommandRun,
+): Promise<HostCommandOutcome> {
+  const { threads } = deps
+  const live = threads.peek(threadId)
+  if (live?.busy === true) {
+    return { status: 409, reason: `thread ${threadId} is running; change ${run.name} when it settles` }
+  }
+  const lease = await threads.acquire(threadId)
+  try {
+    await lease.runtime.runHostCommand(run)
+  } catch (error) {
+    // ⚠ Only a refusal the host DECIDED is the caller's 422 (PR #344 review). Anything else is a
+    // fault — a pi API that moved, a bug — and propagates to the handler's 500 rather than
+    // reaching the user as a sentence claiming their choice was refused.
+    if (error instanceof HostCommandRefused) return { status: 422, reason: error.message }
+    throw error
+  } finally {
+    lease.release()
+  }
+  return { status: 204 }
+}
+
+/** The host-command body, checked against its closed schema — `name`, optionally `value`, nothing else. */
+export function readHostCommandBody(raw: string): EnsoHostCommandRun {
+  let body: unknown
+  try {
+    body = JSON.parse(raw)
+  } catch (error) {
+    throw new Error(`malformed command body: ${String(error)}`)
+  }
+  if (!Check(EnsoHostCommandRun, body)) {
+    throw new Error('command body needs a non-empty `name` and at most a non-empty `value`')
+  }
   return body
 }
 

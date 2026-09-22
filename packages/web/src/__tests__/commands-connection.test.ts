@@ -4,7 +4,9 @@ import { COMMANDS_SCHEMA_MISMATCH, CommandsFetchError, fetchThreadCommands } fro
 
 /**
  * The palette's read (#338): the route's answer validated, a non-2xx said with its status and
- * body, a payload the schema refuses said as such. No DOM — a fetch seam and three responses.
+ * body, a payload the schema refuses said as such. And its write (#338 slice 2): a host command
+ * as one JSON POST to the thread's `command` route, a refusal said as `<status> <body>` — the
+ * host's reason verbatim, since the composer shows exactly that. No DOM — a fetch seam.
  */
 
 const LIVE: EnsoThreadCommands = {
@@ -13,13 +15,20 @@ const LIVE: EnsoThreadCommands = {
   source: 'live',
 }
 
-/** One canned response, and the URL it was asked for. */
-function answering(response: Response): { fetch: (input: string) => Promise<Response>; asked: string[] } {
+/** One canned response, and the URL and init it was asked with. */
+function answering(response: Response): {
+  fetch: (input: string, init?: RequestInit) => Promise<Response>
+  asked: string[]
+  inits: Array<RequestInit | undefined>
+} {
   const asked: string[] = []
+  const inits: Array<RequestInit | undefined> = []
   return {
     asked,
-    fetch: (input: string): Promise<Response> => {
+    inits,
+    fetch: (input: string, init?: RequestInit): Promise<Response> => {
       asked.push(input)
+      inits.push(init)
       return Promise.resolve(response)
     },
   }

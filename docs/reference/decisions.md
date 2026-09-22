@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 215.**
+**Decision headers: 217.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -108,8 +108,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/thread-url.test.ts` | `#142` | The URL is the source of truth for the active thread (#142): what it names, and what it cannot. |
 | `packages/web/src/__tests__/threads-rail.test.tsx` | `#90` | #90 PR 3: the sessions rail and the page's thread list behind it. |
 | `packages/web/src/browser-logging.ts` | `#86`, `#132` | The browser's logging (#132 slice 3). |
-| `packages/web/src/command-palette.tsx` | `#31`, `#338`, `#343` | The `/` command palette (#338, slice 1): Claude Code's `/` button in VS Code, as a popup over the composer — a filter box, rows grouped by where the command came from, a description on each row. |
-| `packages/web/src/commands-connection.ts` | `#144`, `#338` | The `/` palette's one read (#338, slice 1): `GET /api/threads/:id/commands` — the slash commands the thread's session registers, grouped by the server into extension commands, prompt templates and skills, with a `source` that says whose list it is (`live`: this thread's session; `remembered`: the last built session's, because every session builds it from the same sources under the same configuration and this thread has no live session — never ran, or ran and idled out; the server cannot tell; `none`: no session has been built in this process). |
+| `packages/web/src/command-palette.tsx` | `#31`, `#338`, `#341`, `#343` | The `/` command palette (#338, slice 1): Claude Code's `/` button in VS Code, as a popup over the composer — a filter box, rows grouped by where the command came from, a description on each row. |
+| `packages/web/src/commands-connection.ts` | `#144`, `#338`, `#344` | The `/` palette's one read (#338, slice 1): `GET /api/threads/:id/commands` — the slash commands the thread's session registers, grouped by the server into extension commands, prompt templates and skills, with a `source` that says whose list it is (`live`: this thread's session; `remembered`: the last built session's, because every session builds it from the same sources under the same configuration and this thread has no live session — never ran, or ran and idled out; the server cannot tell; `none`: no session has been built in this process). |
 | `packages/web/src/custom-event-router.ts` | `#103` | The one chunk that is neither an observation nor a frame: the follow ended without this page leaving it (#103 receipt) — the server closed, restarted, or dropped the connection. |
 | `packages/web/src/debug/__tests__/log-tail-connection.test.ts` | `#144` | The log tail client (#144 slice 2), driven over a scripted body: SSE text the test writes, read as the page reads it. |
 | `packages/web/src/debug/__tests__/log-tail-screen.test.tsx` | `#118` | ⚠ Loaded by a DYNAMIC import, and that is the one place this repo needs one: react-dom/client probes the DOM when its module evaluates (`"oninput" in document`), and bun evaluates node_modules imports before a local side-effect import can register happy-dom — statically imported it sits in an IE-era polyfill mode where `onChange` never fires. |
@@ -130,6 +130,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/session-events.test.ts` | `#69` | The replica of pi's unexported `toJsonEvent` (#69): what `map-events.ts` consumes must be byte-for-byte the rpc wire shape. |
 | `packages/web/src/host/agent-host.ts` | `#27`, `#69` | pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning `pi --mode rpc` per prompt. |
 | `packages/web/src/host/event-tail.ts` | `#69`, `#84`, `#86`, `#88`, `#97` | A thread's event tail (#97): the last N events through one funnel, with provenance. |
+| `packages/web/src/host/host-commands.ts` | `#338`, `#341` | The `host` command source (#338 slice 2) — the rows the host appends to `listCommands()` and the decision behind `runHostCommand`, as PURE functions over a model state and a model list. |
 | `packages/web/src/host/map-events.ts` | `#24` | pi rpc events → the observations a surface renders (#24). |
 | `packages/web/src/host/permission-dialog.ts` | `#27`, `#69`, `#73` | picc's permission prompt, lifted to a question the web surface can ask (#73). |
 | `packages/web/src/host/permission-mode-adapter.ts` | `#84`, `#162` | picc-permission-modes' PERSISTED MODE, as the host reads it (#84; below the seam since #162 workstream 4, L3). |
@@ -137,6 +138,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/session-events.ts` | `#69` | `AgentSessionEvent` → the rpc WIRE shape (#69). |
 | `packages/web/src/host/transcript.ts` | `#162` | The runtime's session branch → the transcript of ours (#162 workstream 4, L2's persistence side). |
 | `packages/web/src/mode-lines.ts` | `#29`, `#69`, `#88`, `#162` | Permission-mode lines in the transcript (#29, the remaining half). |
+| `packages/web/src/model-state.tsx` | `#44`, `#90`, `#338`, `#341` | The model the thread runs and how hard it thinks, as STATE — and the two composer controls that change them (#338 slice 2; the control half of #44). |
 | `packages/web/src/notifications.tsx` | `#29`, `#84`, `#94`, `#96` | pi's `notify` messages, rendered (#29). |
 | `packages/web/src/page-clock.ts` | `#278` | The page's clock as a store (#278): the one value that changes with no input. |
 | `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |

@@ -125,6 +125,18 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     logs: 'yes',
     factory: { path: FOLLOW_PATH, declaration: 'export function abortThread' },
   },
+  THREAD_COMMAND_ROUTE: {
+    method: 'POST',
+    path: '/api/threads/:threadId/command',
+    handler: 'respondToHostCommand → runHostCommand',
+    input: 'path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level',
+    success: '204 empty; the change arrives on the follow as `model`',
+    errors:
+      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 unknown command, model or level, or a provider without credentials; 500 handler failure',
+    routeClass: 'control',
+    builds: 'yes',
+    logs: 'yes',
+  },
   THREAD_MODE_ROUTE: {
     method: 'POST',
     path: '/api/threads/:threadId/mode',

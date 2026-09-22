@@ -39,6 +39,10 @@ const CUSTOM_METADATA: Record<string, CustomMetadata> = {
   'dialog-settled': { consumer: '`recentChunks`; `dialog`', routerBranch: true },
   'permission-mode': { consumer: '`recentChunks`; `permissionMode`; `modeLines`', routerBranch: true },
   'permission-mode-rejected': { consumer: '`recentChunks`; `notifications` (a warning)', routerBranch: true },
+  model: {
+    consumer: '`recentChunks`; `model` (the composer chip and thinking level, #338 slice 2)',
+    routerBranch: true,
+  },
   'custom-entry': {
     consumer: '`recentChunks` only; recorded and counted, rendered by nothing (L3)',
     routerBranch: false,

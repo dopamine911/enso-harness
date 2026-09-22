@@ -753,6 +753,94 @@ test('the `/` palette: an extension command sends and the typed draft stays; a t
   await pane.unmount()
 })
 
+// ⚠ THE COMPOSER'S MODEL CONTROLS ARE THE FEED'S, AND CHANGE IT THROUGH THE COMMAND ROUTE (#338
+// slice 2, the control half of #44). Before a live snapshot the chip says the model is unknown;
+// the snapshot's `model` names it; the chip opens the dialog the palette's `/model` shares;
+// picking POSTs `{ name: 'model', value }` and moves nothing itself — the `model` observation
+// does; a refusal (409 running, 422 the host's reason) is a warning notice, the click did nothing else.
+test('the model chip and thinking level follow the snapshot; picking a model POSTs …/command; a refusal is a notice', async () => {
+  const modelRow = {
+    name: 'model',
+    source: 'host' as const,
+    kind: 'select' as const,
+    description: 'switch the model',
+    value: 'fake/fake-1',
+    options: [
+      { id: 'fake/fake-1', label: 'Fake One', detail: 'fake' },
+      { id: 'fake/fake-2', label: 'Fake Two', detail: 'fake' },
+    ],
+  }
+  const pane = await mountPane({
+    server: { commands: [modelRow], commandStatus: 422, commandBody: 'model fake/fake-2 is not available here' },
+  })
+  await pane.settle(SNAPSHOT_IDLE)
+  const chip = (): HTMLButtonElement => {
+    const found = pane.container.querySelector<HTMLButtonElement>('button[aria-label="model"]')
+    if (found === null) throw new Error('expected the model chip')
+    return found
+  }
+  await eventually(() => expect(chip().textContent).toContain('default until the thread runs'))
+  expect(pane.container.querySelector('[aria-label="thinking level"]')).toBeNull()
+
+  await pane.settle({
+    ...SNAPSHOT_IDLE,
+    live: true,
+    model: {
+      model: { provider: 'fake', id: 'fake-1', name: 'Fake One' },
+      thinkingLevel: 'medium',
+      availableThinkingLevels: ['off', 'low', 'medium', 'high'],
+    },
+  })
+  await eventually(() => {
+    expect(chip().textContent).toContain('Fake One')
+    expect(pane.container.querySelector('[aria-label="thinking level"]')?.textContent).toBe('medium')
+  })
+
+  // The chip opens the dialog; the dialog reads the thread's commands and lists the row's options.
+  await flush(async () => {
+    chip().click()
+    await tick()
+  })
+  const secondOption = await eventually(() => {
+    const rows = [...document.querySelectorAll<HTMLElement>('[role="dialog"] [cmdk-item]')]
+    expect(rows.map((row) => row.getAttribute('data-value'))).toEqual(['fake/fake-1', 'fake/fake-2'])
+    const found = rows[1]
+    if (found === undefined) throw new Error('expected the second model')
+    return found
+  })
+  await flush(async () => {
+    secondOption.click()
+    await tick()
+  })
+  await eventually(() => {
+    expect(pane.server.hostCommands).toEqual([{ name: 'model', value: 'fake/fake-2' }])
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    // The scripted 422: said, verbatim, as a notice; the chip did not move (no observation came).
+    const notices = [...pane.container.querySelectorAll('[role="status"]')].map((notice) => notice.textContent)
+    expect(
+      notices.some((notice) => notice?.includes('/model refused: 422 model fake/fake-2 is not available here')),
+    ).toBe(true)
+    expect(chip().textContent).toContain('Fake One')
+  })
+
+  // The feed moves the chip — never the click.
+  await pane.settle({
+    type: 'observation',
+    seq: 1,
+    observation: {
+      kind: 'model',
+      model: { provider: 'fake', id: 'fake-2', name: 'Fake Two' },
+      thinkingLevel: 'high',
+      availableThinkingLevels: ['off', 'low', 'medium', 'high'],
+    },
+  })
+  await eventually(() => {
+    expect(chip().textContent).toContain('Fake Two')
+    expect(pane.container.querySelector('[aria-label="thinking level"]')?.textContent).toBe('high')
+  })
+  await pane.unmount()
+})
+
 test('⚠ the follow closing mid-run: the notice, disconnected on the bar, no stop, and Enter sends nothing', async () => {
   const pane = await mountPane()
   await pane.settle({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 2 })

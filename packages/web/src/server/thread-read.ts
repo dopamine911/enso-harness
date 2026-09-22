@@ -1,4 +1,4 @@
-import type { EnsoInterruptedTail, EnsoOpenDialog, EnsoPermissionModeState } from '@enso/core'
+import type { EnsoInterruptedTail, EnsoModelState, EnsoOpenDialog, EnsoPermissionModeState } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import type { AgentHost } from '../host/agent-host.ts'
 import type { ThreadRegistry } from './thread-registry.ts'
@@ -56,6 +56,8 @@ export interface ThreadMount {
   readonly generation: number
   /** The live session's own mode, or the one this branch persists. */
   readonly permissionMode: EnsoPermissionModeState
+  /** The live session's model and thinking level (#338 slice 2); `null` when not live — a file does not say what pi would run. */
+  readonly model: EnsoModelState | null
   /** Every question pi is blocked on, oldest first (#114); empty when the thread is not live. */
   readonly openDialogs: EnsoOpenDialog[]
 }
@@ -81,6 +83,7 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
     generation: nowLive?.generation ?? 0,
     permissionMode:
       nowLive === undefined ? host.storedPermissionMode(transcript) : nowLive.hosted.runtime.permissionModeState(),
+    model: nowLive === undefined ? null : nowLive.hosted.runtime.modelState(),
     openDialogs: nowLive === undefined ? [] : nowLive.hosted.runtime.openDialogs(),
   }
 }

@@ -20,6 +20,10 @@ import type { FetchLike } from './browser-logging.ts'
  * local to the popup that asked), and a caller that wants to treat a 404 apart reads `.status`.
  * Not shared with `thread-debug.tsx`'s `InspectionFetchError`: same shape, different endpoint,
  * and neither module is the other's dependency (#144, one direction per import).
+ *
+ * READS ONLY. The palette's one write — `POST …/command`, a `host` command's run (#338 slice 2)
+ * — is `FollowConnection.runHostCommand`, beside `changeMode`: the same control-route shape,
+ * the same recorded-and-said failure path, one convention for a thread write (PR #344 review).
  */
 export class CommandsFetchError extends Error {
   constructor(

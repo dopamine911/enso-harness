@@ -5,6 +5,7 @@ import {
   EnsoAbortReceipt,
   type EnsoFollowFrame,
   EnsoFollowFrame as EnsoFollowFrameSchema,
+  type EnsoHostCommandRun,
   type EnsoPromptBody,
   type EnsoPromptImage,
   EnsoPromptReceipt,
@@ -244,6 +245,14 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    */
   readonly changeMode: (mode: string) => Promise<ModeChangeOutcome>
   /**
+   * Run a `host` command (#338 slice 2): `POST …/command`, `/model` with an `options[].id` or
+   * `/thinking` with a level — the same control shape as `changeMode`, and the same failure
+   * path: `busy` (409) and `refused` (422, the host's reason) are recorded through `problem`
+   * and said once, the way a refused mode change is (PR #344 review). The store moves on the
+   * feed's `model` observation, never on the answer.
+   */
+  readonly runHostCommand: (run: EnsoHostCommandRun) => Promise<HostCommandOutcome>
+  /**
    * Release the thread's follow (#272): the socket closes and nothing else opens one on
    * this connection. The page calls it when a thread leaves its live list — a thread whose
    * pane is gone must not keep a stream the browser counts against its six-per-origin
@@ -257,6 +266,8 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
 }
 
 export type ModeChangeOutcome = 'told' | 'busy' | 'refused' | 'unreachable'
+/** What `runHostCommand` reports — the same four words as a mode change, for the same route shape. */
+export type HostCommandOutcome = ModeChangeOutcome
 
 export function createFollowConnection(options: FollowConnectionOptions): FollowConnection {
   const { threadId } = options
@@ -675,6 +686,23 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     return outcome
   }
 
+  async function runHostCommand(run: EnsoHostCommandRun): Promise<HostCommandOutcome> {
+    const response = await post('command', `/${run.name}${run.value === undefined ? '' : ` ${run.value}`}`, {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(run),
+    })
+    if (response === undefined) return 'unreachable'
+    if (response.status === 204) return 'told'
+    const outcome: HostCommandOutcome = response.status === 409 ? 'busy' : 'refused'
+    problem('/{name} {outcome}: {status} {body}', {
+      name: run.name,
+      outcome,
+      status: response.status,
+      body: await response.text(),
+    })
+    return outcome
+  }
+
   async function prompt(text: string, images: readonly EnsoPromptImage[] = []): Promise<PromptOutcome> {
     const body: EnsoPromptBody = {
       message: text,
@@ -713,5 +741,5 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     released.abort()
   }
 
-  return { subscribe, send, answerDialog, abort, prompt, changeMode, close }
+  return { subscribe, send, answerDialog, abort, prompt, changeMode, runHostCommand, close }
 }

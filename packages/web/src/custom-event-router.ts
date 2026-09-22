@@ -93,6 +93,9 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
   if (eventType === 'snapshot') {
     if (!snapshotValidator.Check(data)) return
     applyPermissionMode(stores, data.permissionMode)
+    // The session's model (#338 slice 2) — `null` when the thread is not live, applied as such:
+    // a snapshot is the resync, and a model this page cannot vouch for is no model.
+    stores.model.apply(data.model)
     // The complete list, every snapshot (#114): a reconnect's snapshot is the resync, so an
     // empty list is a fact ("nothing is waiting") this page must apply too — it clears a
     // card for a question that settled while the page was away. One card at a time: a
@@ -131,6 +134,11 @@ function routeObservation(stores: ThreadStores, observation: EnsoObservation): v
       // The click did nothing and the user is told (L3 step C) — a warning, composed here
       // where notices are rendered, not forged upstream as a notify observation.
       stores.notifications.push(`mode change to ${observation.mode} rejected: ${observation.reason}`, 'warning', 'run')
+      return
+    case 'model':
+      // The host applied a `/model` or `/thinking` run (#338 slice 2) — the state after, from
+      // pi's own event, never the option clicked. One store, the composer chip reads it.
+      stores.model.applyObservation(observation)
       return
     case 'extension-ui-request':
       routeUiRequest(stores, observation)

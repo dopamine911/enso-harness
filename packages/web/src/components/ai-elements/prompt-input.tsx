@@ -41,6 +41,11 @@
  *   content feeds every printable key inside it to Radix's typeahead, which is inert only while
  *   the content holds zero menu items. Do not put one beside a `PromptInputCommand` — see
  *   `command-palette.tsx`'s header (PR #343 review).
+ * - TAKEN BACK for the composer chip (#338, slice 2): `PromptInputSelect`, `PromptInputSelectTrigger`,
+ *   `PromptInputSelectContent`, `PromptInputSelectItem`, `PromptInputSelectValue` (a select in
+ *   the composer chrome, on shadcn `select`; upstream uses them for its model picker, here it is
+ *   the thinking level — pi's thinking is discrete levels, so a select is the truthful widget).
+ *   Same rules as the palette pieces above. `PromptInputHoverCard*` stays out: nothing hovers.
  */
 import type {
 	ChangeEventHandler,
@@ -71,6 +76,13 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select.tsx";
 import { cn } from "@/lib/utils.ts";
 
 /** A file the composer holds: a blob URL while attached, a `data:` URL once submitted. */
@@ -563,3 +575,38 @@ export const PromptInputCommandSeparator = ({
 	className,
 	...props
 }: PromptInputCommandSeparatorProps): React.ReactNode => <CommandSeparator className={cn(className)} {...props} />;
+
+export type PromptInputSelectProps = ComponentProps<typeof Select>;
+
+export const PromptInputSelect = (props: PromptInputSelectProps): React.ReactNode => <Select {...props} />;
+
+export type PromptInputSelectTriggerProps = ComponentProps<typeof SelectTrigger>;
+
+export const PromptInputSelectTrigger = ({ className, ...props }: PromptInputSelectTriggerProps): React.ReactNode => (
+	<SelectTrigger
+		className={cn(
+			"border-none bg-transparent font-medium text-muted-foreground shadow-none transition-colors",
+			"hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground",
+			className,
+		)}
+		{...props}
+	/>
+);
+
+export type PromptInputSelectContentProps = ComponentProps<typeof SelectContent>;
+
+export const PromptInputSelectContent = ({ className, ...props }: PromptInputSelectContentProps): React.ReactNode => (
+	<SelectContent className={cn(className)} {...props} />
+);
+
+export type PromptInputSelectItemProps = ComponentProps<typeof SelectItem>;
+
+export const PromptInputSelectItem = ({ className, ...props }: PromptInputSelectItemProps): React.ReactNode => (
+	<SelectItem className={cn(className)} {...props} />
+);
+
+export type PromptInputSelectValueProps = ComponentProps<typeof SelectValue>;
+
+export const PromptInputSelectValue = ({ className, ...props }: PromptInputSelectValueProps): React.ReactNode => (
+	<SelectValue className={cn(className)} {...props} />
+);
