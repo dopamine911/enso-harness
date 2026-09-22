@@ -33,6 +33,10 @@
  *                  pre-commit hook must not phone home. After typecheck, as dead-code is: the pass
  *                  is syntactic. The rule set is upstream's and moves between versions, so a bump
  *                  of the `react-doctor` pin is a gate change and is reviewed as one (#208).
+ *                  Cost: ~1.4 s wall for 141 files (measured 2026-09-23) — a rounding error beside
+ *                  `bun test`. The human-facing `doctor` script (`bunx react-doctor --verbose`) keeps
+ *                  the score and the share URL because a developer reading a report wants them; it
+ *                  runs the same pin, with a developer's ambient credentials, never in the gate.
  *   5. test      — `bun test`, not `vitest run`. bunfig keeps coverage always on, so this
  *                  writes `coverage/lcov.info` for gate 6.
  *   6. coverage  — `bun scripts/check-coverage.ts`: the TOTAL line and function floors over the
