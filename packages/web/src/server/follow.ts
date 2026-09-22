@@ -89,7 +89,8 @@ function slashCommandName(prompt: string): string | undefined {
 }
 
 /**
- * Why a slash command cannot run here, or `undefined` when it can (or the message is not one).
+ * Why a slash command cannot run here, or `undefined` when it can. Takes the command already
+ * parsed, so the one parse serves both this and the idle path's "acceptance is completion".
  *
  * ⚠ ASKED ON BOTH ADMISSION PATHS. The runtime treats a slash command it does not know as
  * ORDINARY TEXT for the model, so the refusal is what stands between `/login` and a chat
@@ -97,9 +98,7 @@ function slashCommandName(prompt: string): string | undefined {
  * held the thread was queued straight into the runtime, and vanished — pi's TUI built-ins
  * (`/login`, `/model`, `/compact`, …) are not extension commands and have no handler here.
  */
-function unavailableCommand(runtime: ThreadRuntime, message: string): string | undefined {
-  const command = slashCommandName(message)
-  if (command === undefined) return undefined
+function unavailableCommand(runtime: ThreadRuntime, command: string): string | undefined {
   const available = runtime.listCommands()
   if (available.some((known) => known.name === command)) return undefined
   return `/${command} is not available on this surface. Available here: ${
@@ -229,10 +228,12 @@ export function readPromptBody(raw: string): PromptBody {
 /**
  * Fire a prompt and answer at admission.
  *
- * A BUSY thread (a run in flight, or a dialog the follow is showing) is not refused and
- * not acquired again: the message goes to the runtime with an admission (`enqueue` unless
- * the caller asked to `steer`), which is #75's decision. The run in flight keeps its lease;
- * its `settled` releases the thread once everything queued has run.
+ * A BUSY thread (a run in flight, or a dialog the follow is showing) is not acquired again:
+ * the message goes to the runtime with an admission (`enqueue` unless the caller asked to
+ * `steer`), which is #75's decision. The run in flight keeps its lease; its `settled`
+ * releases the thread once everything queued has run. The ONE refusal both paths share is a
+ * slash command this surface cannot run (`unavailableCommand`, #337): that is a 400 before
+ * anything is queued, busy or idle alike.
  *
  * An IDLE thread is taken; the prompt's own `settled` (or, for a slash command, its
  * acceptance — an extension command never settles) releases it through the feed. No HTTP
@@ -247,9 +248,10 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
     threads.announce(threadId, { kind: 'prompt-rejected', messageId, reason })
   }
 
+  const command = slashCommandName(body.message)
   const live = threads.peek(threadId)
   if (live?.busy === true) {
-    const unavailable = unavailableCommand(live.hosted.runtime, body.message)
+    const unavailable = command === undefined ? undefined : unavailableCommand(live.hosted.runtime, command)
     if (unavailable !== undefined) return { status: 400, reason: unavailable }
     live.hosted.runtime.prompt(
       {
@@ -263,12 +265,11 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
   }
 
   const lease = await threads.acquire(threadId)
-  const unavailable = unavailableCommand(lease.runtime, body.message)
+  const unavailable = command === undefined ? undefined : unavailableCommand(lease.runtime, command)
   if (unavailable !== undefined) {
     lease.release()
     return { status: 400, reason: unavailable }
   }
-  const command = slashCommandName(body.message)
 
   // The run's end, observed the way a follower would: the thread's own `settled`.
   const settle = threads.observe(threadId, (frame: ThreadFeedFrame) => {

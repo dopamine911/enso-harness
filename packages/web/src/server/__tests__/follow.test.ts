@@ -755,7 +755,7 @@ test('an unknown slash command is a 400 at admission and releases the thread', a
 // straight into the runtime — which treats a slash command it does not know as ordinary text —
 // and nothing happened: no refusal, no record, no answer. Found live, the day #336 merged. The
 // refusal is the same on both paths, and the run in flight is untouched by it.
-test('⚠ an unknown slash command sent to a BUSY thread is the same 400, and queues nothing', async () => {
+test('⚠ an unknown slash command sent to a BUSY thread is the same 400 and queues nothing; a known one still queues', async () => {
   let prompts = 0
   const fake = fakeHost(['mode'], {
     prompt: () => {
@@ -777,6 +777,9 @@ test('⚠ an unknown slash command sent to a BUSY thread is the same 400, and qu
   // Nothing reached the runtime for it, and the run it would have queued behind is untouched.
   expect(prompts).toBe(1)
   expect(await threadSummary(url, 't1')).toMatchObject({ busy: true, generation: 1 })
+  // …and the other half of the contract: a command this surface CAN run still queues.
+  expect((await prompt(url, 't1', '/mode plan')).body).toMatchObject({ queued: true, generation: 1 })
+  expect(prompts).toBe(2)
   follow.close()
 })
 
