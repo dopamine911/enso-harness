@@ -116,9 +116,13 @@ export interface LogTailStreamOptions {
   /** The page's own leaving: aborting it closes the socket and ends the loop. */
   readonly signal: AbortSignal
   /**
-   * A connection came up and frames may follow. The moment a page clears the last alert: the
-   * recovery worth signalling is connection-level, and clearing on every FRAME raced a bad
-   * frame and a good one in the same chunk into one render that showed nothing (PR #336 review).
+   * A connection is delivering: fired before the FIRST message of each attempt, valid or not.
+   * The moment a page clears the last alert — and the one moment that satisfies both races
+   * (PR #336 review, rounds two and three): clearing on every frame let a bad frame and a good
+   * one in the same chunk batch into one render that showed nothing; clearing when the
+   * response merely OPENED blinked the alert on every reconnect of a connection that dropped
+   * before its first frame. The first message of an attempt is after the open and before any
+   * frame's own verdict.
    */
   readonly onOpen?: (() => void) | undefined
   readonly onFrame: (frame: EnsoLogTailFrame) => void
@@ -185,8 +189,12 @@ async function readOneTail(options: LogTailStreamOptions, url: string): Promise<
       options.onError('the log tail answered with no body')
       return { outcome: 'ended', resume, delivered }
     }
-    options.onOpen?.()
+    let opened = false
     for await (const { event, data: payload } of readSseData(response.body, options.signal)) {
+      if (!opened) {
+        opened = true
+        options.onOpen?.()
+      }
       if (event === 'error') {
         // The server could not read the file and said so. Not a stream that ended: asking
         // again makes it fail — and record the failure — again.
@@ -219,9 +227,14 @@ interface SseMessage {
  *
  * A `: keepalive` comment is neither, so it is skipped by the same test that finds the
  * frames. The unterminated tail of each chunk is carried forward, which is what makes a frame
- * split across two network chunks one frame rather than two halves of unreadable JSON. The
- * route writes one `data:` per message, so a name applies to the next `data:` line and is
- * then spent — the whole of the SSE grammar this page needs.
+ * split across two network chunks one frame rather than two halves of unreadable JSON.
+ *
+ * The grammar followed is the spec's block rule, not this route's emission (PR #336 review,
+ * round three): an `event:` name applies until the blank line that ends its block, the space
+ * after a field's colon is optional, and a trailing `\r` is not part of a line. The route
+ * writes one `data:` per block with `\n` line ends, so none of that is reachable today — but
+ * an intermediary on this path has rewritten bytes before (#98/#99), and a name that leaked
+ * past a blank line onto the next frame would have made that frame read as a failure.
  */
 async function* readSseData(body: ReadableStream<Uint8Array>, signal: AbortSignal): AsyncGenerator<SseMessage> {
   const reader = body.getReader()
@@ -235,17 +248,22 @@ async function* readSseData(body: ReadableStream<Uint8Array>, signal: AbortSigna
       buffered += decoder.decode(value, { stream: true })
       const lines = buffered.split('\n')
       buffered = lines.pop() ?? ''
-      for (const line of lines) {
-        if (line.startsWith('event: ')) event = line.slice('event: '.length)
-        else if (line.startsWith('data: ')) {
-          yield { event, data: line.slice('data: '.length) }
-          event = undefined
-        }
+      for (const rawLine of lines) {
+        const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+        if (line === '') event = undefined
+        else if (line.startsWith('event:')) event = fieldValue(line, 'event:')
+        else if (line.startsWith('data:')) yield { event, data: fieldValue(line, 'data:') }
       }
     }
   } finally {
     reader.releaseLock()
   }
+}
+
+/** A field's value: what follows the colon, less the one optional space the grammar allows. */
+function fieldValue(line: string, field: string): string {
+  const value = line.slice(field.length)
+  return value.startsWith(' ') ? value.slice(1) : value
 }
 
 /**

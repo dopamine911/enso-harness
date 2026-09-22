@@ -160,13 +160,35 @@ test('⚠ an error event ends the tail as a refusal: reported in the route’s w
   expect(urls).toEqual(['/api/logs/tail'])
 })
 
+// ⚠ THE SPEC'S BLOCK RULE, not this route's bytes (PR #336 review, round three). The route
+// writes `event: error\ndata: …\n\n` and nothing else, but an intermediary on this path has
+// rewritten bytes before (#98/#99): CRLF line ends, a field without the optional space, or a
+// name that outlives its block would each have read a failure as a frame, or a frame as a
+// failure — and reconnected, or stopped, wrongly.
+test('⚠ the SSE reader follows the grammar: CRLF, a colon without a space, and a name spent by its blank line', async () => {
+  const crlf = await run([['event: error\r\ndata: EACCES\r\n\r\n']])
+  expect(crlf.problems).toEqual(['the log tail stopped: EACCES'])
+  expect(crlf.urls).toHaveLength(1)
+
+  const tight = await run([['event:error\ndata:EACCES\n\n']])
+  expect(tight.problems).toEqual(['the log tail stopped: EACCES'])
+
+  // A name followed by a blank line names NOTHING after it: the frame that follows is a frame.
+  const leaked = await run([[`event: error\n\n${frameText(backlog)}`]])
+  expect(leaked.frames).toHaveLength(1)
+  expect(leaked.problems).toEqual([])
+})
+
 // `onOpen` is the moment a page clears its last alert (PR #336 review, round two): it is the
 // connection coming up, so it fires once per connection that did, ahead of that connection's
 // first frame — and never for a refusal, which is not a connection at all.
-test('onOpen fires once per connection that came up, before its first frame, and not for a refusal', async () => {
+// ⚠ Before the FIRST MESSAGE of an attempt, not when the response opens (PR #336 review, round
+// three): a connection accepted and then dropped before any message — a proxy dying mid-
+// handshake, repeatedly — would otherwise clear the page's alert on every reconnect and blink it.
+test('onOpen fires once per connection that delivers, before its first message, and not for a refusal or an empty connection', async () => {
   const { order } = await run([[frameText(backlog)], [frameText(records)]])
-  // The third `open` is the run's own closing connection: it comes up, empty, and ends the script.
-  expect(order).toEqual(['open', 'frame', 'open', 'frame', 'open'])
+  // The run's own closing connection comes up empty and ends the script: no `open` for it.
+  expect(order).toEqual(['open', 'frame', 'open', 'frame'])
 
   let opens = 0
   const controller = new AbortController()

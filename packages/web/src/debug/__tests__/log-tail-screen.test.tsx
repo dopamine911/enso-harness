@@ -291,11 +291,15 @@ test('⚠ the alert a bad frame raised stays up through the same connection and 
     expect(page.container.textContent).toContain('landed beside the bad frame')
     expect(alertText(page.container)).toContain('is not JSON')
   })
-  // The connection drops and the page asks again from the last byte; the answer opening is
-  // the recovery, and the alert comes down with it — before any frame has landed on it.
+  // The connection drops and the page asks again from the last byte. The answer OPENING is
+  // not yet the recovery (round three): a connection that opens and dies before a message
+  // would blink the alert. The alert stays until the new connection's first message.
   await page.end()
+  await eventually(() => expect(page.urls[1]).toBe('/api/logs/tail?from=8192&day=2026-09-22'))
+  expect(alertText(page.container)).toContain('is not JSON')
+  await page.send({ ...landed, offset: 8300, lines: [line('the reconnect delivered')] })
   await eventually(() => {
-    expect(page.urls[1]).toBe('/api/logs/tail?from=8192&day=2026-09-22')
+    expect(page.container.textContent).toContain('the reconnect delivered')
     expect(alertText(page.container)).toBeNull()
   })
   expect(page.container.textContent).toContain('landed beside the bad frame')

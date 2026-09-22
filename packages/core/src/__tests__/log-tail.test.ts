@@ -124,6 +124,32 @@ test('⚠ a step that ended mid-record publishes the offset of the last complete
   rmSync(logsDir, { recursive: true })
 })
 
+// ⚠ THE DAY THE OFFSET BELONGS TO (PR #336 review, rounds two and three). The route validates
+// the resume day against one `now()`; the tail picks its file with another. A midnight between
+// the two must not apply yesterday's byte to today's file — and nothing exercised that path,
+// so an unconditional `offset = from.offset` passed every test.
+test('⚠ a resume offset for another day than the file the first step resolves is dropped, not applied', () => {
+  const logsDir = mkdtempSync(join(tmpdir(), 'enso-tail-stale-day-'))
+  append(logsDir, DAY, line({ message: 'yesterday' }))
+  append(logsDir, NEXT_DAY, line({ message: 'today, first' }), line({ message: 'today, second' }))
+  const yesterday = openLogTail({ logsDir, filter: EVERYTHING, now: () => DAY }).step()
+  // Validated against DAY, opened after the clock has crossed into NEXT_DAY.
+  let today = DAY
+  const { step, close } = openLogTail({
+    logsDir,
+    filter: EVERYTHING,
+    from: { offset: yesterday.offset, day: yesterday.day },
+    now: () => today,
+  })
+  today = NEXT_DAY
+  const first = step()
+  expect(first.type).toBe('backlog')
+  expect(first.day).toBe('2026-09-23')
+  expect(first.lines.map((record) => record.message)).toEqual(['today, first', 'today, second'])
+  close()
+  rmSync(logsDir, { recursive: true })
+})
+
 // ⚠ `stat` is by path and `read` is by descriptor (PR #336 review). Unlink-and-recreate under
 // the same name — a rotation, an editor's save-by-rename — gives a new inode; once the new file
 // grew past the old offset, `size < offset` never fired and the old inode answered zero bytes

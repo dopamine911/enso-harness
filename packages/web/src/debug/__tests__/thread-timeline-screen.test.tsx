@@ -344,10 +344,21 @@ test('⚠ the alert a bad log frame raised stays up through the same connection 
     expect(page.container.textContent).toContain('a record beside the bad frame')
     expect(alertTexts(page.container)['the tail']).toContain('fails EnsoLogTailFrame')
   })
+  // A reconnect that OPENS is not yet the recovery (round three) — its first message is.
   await page.end()
   await eventually(() => {
     const tailUrls = page.urls.filter((url) => url.startsWith('/api/logs/tail'))
     expect(tailUrls[1]).toBe(`/api/logs/tail?thread=${THREAD_ID}&from=4096&day=2026-09-22`)
+  })
+  expect(alertTexts(page.container)['the tail']).toContain('fails EnsoLogTailFrame')
+  await page.send({
+    ...landed,
+    type: 'records',
+    offset: 4200,
+    lines: [line('2026-09-22T10:00:00.300Z', 'the reconnect delivered')],
+  })
+  await eventually(() => {
+    expect(page.container.textContent).toContain('the reconnect delivered')
     expect(alertTexts(page.container)).toEqual({})
   })
   expect(page.container.textContent).toContain('a record beside the bad frame')

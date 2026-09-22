@@ -194,6 +194,13 @@ export function followLogTail(deps: LogTailRouteDeps, url: string, response: Ser
       // the page told, this record is written once per connection a reader opened; the
       // failure is the file's own business, the reader's presence never is. `end` fires
       // `close`, which releases the rest.
+      //
+      // ⚠ EVERY read failure is terminal for the connection, the transient ones included
+      // (`EMFILE` under descriptor pressure, round three). Telling them apart would mean a
+      // bare end for the transient class, and a bare end is what the page retries — which
+      // under a *persistent* shortage is the loop above, one record per attempt. The page
+      // recovers a transient failure with its next question or a reload; that is the price
+      // of never looping into the file, and it is paid knowingly.
       const reason = error instanceof Error ? error.message : String(error)
       log.error('the tail could not read the file: {reason}', { reason, error })
       response.write(`event: error\ndata: ${reason.replaceAll('\n', ' ')}\n\n`)
