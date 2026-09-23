@@ -69,6 +69,13 @@ function describeContext(context: EnsoSessionUsage['context']): string {
   return `${context.percent.toFixed(1)}% of ${context.window}`
 }
 
+/** `cost $0.0041, 3846 in / 42 out, context 1.9% of 200000` — or `none yet` before the first snapshot. */
+function describeUsage(usage: EnsoSessionUsage | undefined): string {
+  if (usage === undefined) return 'none yet'
+  const prompted = usage.input + usage.cacheRead + usage.cacheWrite
+  return `cost $${usage.cost.toFixed(4)}, ${prompted} in / ${usage.output} out, context ${describeContext(usage.context)}`
+}
+
 /**
  * What a difference between the two run numbers means, in words — or undefined when they
  * agree or cannot be compared yet (#109). The server's number moves on every acquisition
@@ -224,12 +231,7 @@ export function ThreadDebugView({
             last run: {browser.generation === undefined ? 'none from this page' : `#${browser.generation}`}
             <Mismatch when={generationDrift !== undefined} says={generationDrift ?? ''} />
           </div>
-          <div>
-            usage:{' '}
-            {browser.usage === undefined
-              ? 'none yet'
-              : `cost $${browser.usage.cost.toFixed(4)}, ${browser.usage.input + browser.usage.cacheRead + browser.usage.cacheWrite} in / ${browser.usage.output} out, context ${describeContext(browser.usage.context)}`}
-          </div>
+          <div>usage: {describeUsage(browser.usage)}</div>
           <h4 className="mt-1 text-foreground">last {browser.recentChunks.length} CUSTOM chunks</h4>
           <ol>
             {browser.recentChunks.map((chunk) => (
