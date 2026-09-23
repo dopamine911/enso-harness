@@ -2,7 +2,6 @@ import {
   type EnsoEventProvenance,
   type EnsoLogLevelName,
   type EnsoLogLine,
-  type EnsoLogTailFrame,
   type EnsoThreadEvent,
   EnsoThreadEvents,
   type EnsoTimelineEntry,
@@ -10,33 +9,30 @@ import {
   threadTimeline,
   timelineJoinKeys,
 } from '@enso/core'
-import { useVirtualizer } from '@tanstack/react-virtual'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check } from 'typebox/value'
 import type { FetchLike } from '../browser-logging.ts'
 import {
   Terminal,
   TerminalActions,
-  TerminalContent,
   TerminalHeader,
   TerminalStatus,
   TerminalTitle,
 } from '../components/ai-elements/terminal.tsx'
-import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.tsx'
 import { Button } from '../components/ui/button.tsx'
 import { Spinner } from '../components/ui/spinner.tsx'
 import { urlForThread } from '../thread-url.ts'
 import { LogRow, ROW_HEIGHT_PX, timeOfDay } from './log-row.tsx'
-import { DEFAULT_LOG_TAIL_FILTER, type LogTailResume, openLogTailStream } from './log-tail-connection.ts'
+import { DEFAULT_LOG_TAIL_FILTER, type LogTailFilter } from './log-tail-connection.ts'
+import { bundleUrl, LogLevelSelect, timelineUrlForThread } from './log-tail-screen.tsx'
 import {
-  applyLogTailFrame,
-  bundleUrl,
+  ActionLink,
   describeRecordCount,
-  EMPTY_LOG_TAIL_VIEW,
-  LogLevelSelect,
   type LogTailView,
-  timelineUrlForThread,
-} from './log-tail-screen.tsx'
+  PinnedTail,
+  ProblemAlert,
+  useLogTailStream,
+} from './log-tail-view.tsx'
 
 /**
  * One thread's timeline (#144 slice 3): what the host emitted, what the server sent, and what
@@ -64,20 +60,14 @@ import {
  * failure of that route — a 5xx, a payload that misses its schema, a network fault — IS said,
  * verbatim, in an alert: a debugging surface never drops what it could not read.
  *
- * THE LIST IS VIRTUALIZED and AUTO-SCROLL STOPS WHEN THE READER SCROLLS UP, both for the tail's
- * reasons and by the tail's mechanism; a timeline that yanks a reader off the row they are
- * tracing is no better than a log viewer that does.
+ * THE LIST IS VIRTUALIZED and AUTO-SCROLL STOPS WHEN THE READER SCROLLS UP — the same
+ * `PinnedTail` the day's log renders (`log-tail-view.tsx`), so the two pages cannot drift apart
+ * on either rule; a timeline that yanks a reader off the row they are tracing is no better
+ * than a log viewer that does.
  */
 
 const EVENTS_ROUTE_PREFIX = '/api/threads/'
 
-/** Rows drawn beyond the viewport, so a fast scroll lands on content rather than on blanks. */
-const ROW_OVERSCAN = 16
-/**
- * How close to the bottom still counts as "at the newest record". A few pixels of slack: a
- * scroll container rounds, and a reader who is at the bottom has not asked to stop following.
- */
-const PINNED_TO_NEWEST_SLACK_PX = 48
 /** How much of a tool call id the join column shows. The whole id is the column's tooltip. */
 const TOOL_CALL_ID_SHOWN_CHARACTERS = 12
 
@@ -247,23 +237,8 @@ export interface ThreadTimelineScreenProps {
 export function ThreadTimelineScreen({ threadId, fetch: pageFetch }: ThreadTimelineScreenProps): React.ReactNode {
   const fetchImpl = pageFetch ?? browserFetch
   const [level, setLevel] = useState<EnsoLogLevelName>(DEFAULT_LOG_TAIL_FILTER.level)
-  const [view, setView] = useState<LogTailView>(EMPTY_LOG_TAIL_VIEW)
   const [tails, setTails] = useState<TailsState>({ kind: 'pending' })
   const [tailsProblem, setTailsProblem] = useState<string | undefined>(undefined)
-  const [logProblem, setLogProblem] = useState<string | undefined>(undefined)
-  const [pinnedToNewest, setPinnedToNewest] = useState(true)
-  const scrollElement = useRef<HTMLDivElement>(null)
-  /**
-   * The byte the next connection continues from. A REF, not state: it changes on every frame
-   * and nothing renders it, and as state it would re-open the connection it came from.
-   */
-  const resumeFrom = useRef<LogTailResume | undefined>(undefined)
-  /**
-   * Whether the log connection has said its last word — a refusal it will not retry. Until
-   * then a page with no frame yet is waiting; after it, it is not (PR #336 review: a refused
-   * question used to spin forever beside the alert that refused it).
-   */
-  const [logSettled, setLogSettled] = useState(false)
   /**
    * Only the LATEST request's outcome may be applied: a refresh fired by a frame can overtake
    * the one the button fired, and the older answer must not land on top of the newer one.
@@ -293,71 +268,31 @@ export function ThreadTimelineScreen({ threadId, fetch: pageFetch }: ThreadTimel
     }
   }, [refreshEvents])
 
-  useEffect(() => {
-    const controller = new AbortController()
-    setLogSettled(false)
-    void openLogTailStream({
-      filter: { level, thread: threadId, process: '', since: '' },
-      from: resumeFrom.current,
-      fetch: fetchImpl,
-      signal: controller.signal,
-      // On OPEN, not on every frame, for the reason the tail screen gives (PR #336 review).
-      onOpen: () => setLogProblem(undefined),
-      onFrame: (frame: EnsoLogTailFrame) => {
-        resumeFrom.current = { day: frame.day, offset: frame.offset }
-        setView((current: LogTailView) => applyLogTailFrame(current, frame))
-        if (frame.lines.length > 0) void refreshEvents()
-      },
-      onError: setLogProblem,
-    }).then(() => {
-      if (!controller.signal.aborted) setLogSettled(true)
-    })
-    return () => controller.abort()
-  }, [level, threadId, fetchImpl, refreshEvents])
+  // A record landing is the signal the thread did something: re-read its tails then.
+  const onRecords = useCallback((): void => void refreshEvents(), [refreshEvents])
+  const filter = useMemo((): LogTailFilter => ({ level, thread: threadId, process: '', since: '' }), [level, threadId])
+  const log = useLogTailStream({ filter, enabled: true, fetch: fetchImpl, onRecords })
+  const { restart } = log
 
-  const changeLevel = useCallback((next: EnsoLogLevelName): void => {
-    // A new question is a new answer: forget the byte this view was resumed from, so the
-    // re-opened connection reads the day's head and its first frame replaces the list.
-    resumeFrom.current = undefined
-    setView(EMPTY_LOG_TAIL_VIEW)
-    setLogProblem(undefined)
-    setPinnedToNewest(true)
-    setLevel(next)
-  }, [])
-
-  const entries = useMemo(
-    () => threadTimeline(tails.kind === 'live' ? tails.events : undefined, view.lines),
-    [tails, view.lines],
+  const changeLevel = useCallback(
+    (next: EnsoLogLevelName): void => {
+      restart()
+      setLevel(next)
+    },
+    [restart],
   )
 
-  const virtualizer = useVirtualizer({
-    count: entries.length,
-    getScrollElement: () => scrollElement.current,
-    estimateSize: () => ROW_HEIGHT_PX,
-    overscan: ROW_OVERSCAN,
-  })
-
-  const handleScroll = useCallback((): void => {
-    const element = scrollElement.current
-    if (element === null) return
-    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight
-    setPinnedToNewest(distanceFromBottom <= PINNED_TO_NEWEST_SLACK_PX)
-  }, [])
-
-  const newestRow = entries.length - 1
-  useEffect(() => {
-    if (!pinnedToNewest || newestRow < 0) return
-    virtualizer.scrollToIndex(newestRow)
-  }, [pinnedToNewest, newestRow, virtualizer])
-
-  const rows = virtualizer.getVirtualItems()
+  const entries = useMemo(
+    () => threadTimeline(tails.kind === 'live' ? tails.events : undefined, log.view.lines),
+    [tails, log.view.lines],
+  )
   const heading = useMemo(
-    () => describeTimeline(threadId, entries.length, tails, describeLogSide(view, logSettled)),
-    [threadId, entries.length, tails, view, logSettled],
+    () => describeTimeline(threadId, entries.length, tails, describeLogSide(log.view, log.settled)),
+    [threadId, entries.length, tails, log.view, log.settled],
   )
 
   return (
-    <Terminal className="h-dvh" isStreaming={!(view.opened || logSettled) || tails.kind === 'pending'}>
+    <Terminal className="h-dvh" isStreaming={!(log.view.opened || log.settled) || tails.kind === 'pending'}>
       <TerminalHeader>
         <TerminalTitle>enso · thread</TerminalTitle>
         <div className="flex flex-wrap items-center gap-2">
@@ -370,77 +305,33 @@ export function ThreadTimelineScreen({ threadId, fetch: pageFetch }: ThreadTimel
           </Button>
         </div>
         <TerminalActions>
-          <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href={chatUrlForThread(threadId)}>
-            open in chat
-          </a>
-          <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href="/debug">
-            the day's log
-          </a>
-          <a
-            className="px-2 text-primary text-xs underline-offset-2 hover:underline"
-            href={bundleUrl(threadId)}
-            download
-          >
+          <ActionLink href={chatUrlForThread(threadId)}>open in chat</ActionLink>
+          <ActionLink href="/debug">the day's log</ActionLink>
+          <ActionLink href={bundleUrl(threadId)} download>
             download this thread's bundle
-          </a>
-          <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href="/debug?stats">
-            the day's stats
-          </a>
+          </ActionLink>
+          <ActionLink href="/debug?stats">the day's stats</ActionLink>
           <TerminalStatus>
             <Spinner />
           </TerminalStatus>
         </TerminalActions>
       </TerminalHeader>
-      <div className="flex items-center gap-3 border-b px-4 py-1 font-mono text-muted-foreground text-xs">
-        <span>{heading}</span>
-        {pinnedToNewest ? null : <span>paused at your scroll position — scroll to the bottom to follow again</span>}
-      </div>
-      {tailsProblem === undefined ? null : (
-        <div className="px-4 pt-1">
-          <Alert variant="destructive">
-            <AlertTitle>the tails</AlertTitle>
-            <AlertDescription>{tailsProblem}</AlertDescription>
-          </Alert>
-        </div>
-      )}
-      {logProblem === undefined ? null : (
-        <div className="px-4 pt-1">
-          <Alert variant="destructive">
-            <AlertTitle>the tail</AlertTitle>
-            <AlertDescription>{logProblem}</AlertDescription>
-          </Alert>
-        </div>
-      )}
-      <TerminalContent
-        ref={scrollElement}
-        onScroll={handleScroll}
-        // `log` is the role for a live, append-ordered record view — the same reasoning the
-        // tail gives; the name says which list this is when both pages are open.
-        role="log"
-        aria-label="thread timeline"
-        className="text-xs"
-      >
-        <ol style={{ position: 'relative', height: virtualizer.getTotalSize(), width: '100%' }}>
-          {rows.map((row) => {
-            const timelineEntry = entries[row.index]
-            if (timelineEntry === undefined) return null
-            return (
-              <li
-                key={row.key}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  transform: `translateY(${row.start}px)`,
-                }}
-              >
-                <TimelineRow timelineEntry={timelineEntry} threadHref={timelineUrlForThread} />
-              </li>
-            )
-          })}
-        </ol>
-      </TerminalContent>
+      <PinnedTail
+        // A new level is a new question: it starts pinned to the newest row again (`PinnedTail`).
+        key={level}
+        items={entries}
+        heading={heading}
+        label="thread timeline"
+        notices={
+          <>
+            <ProblemAlert title="the tails" problem={tailsProblem} />
+            <ProblemAlert title="the tail" problem={log.problem} />
+          </>
+        }
+        renderItem={(timelineEntry: EnsoTimelineEntry) => (
+          <TimelineRow timelineEntry={timelineEntry} threadHref={timelineUrlForThread} />
+        )}
+      />
     </Terminal>
   )
 }
