@@ -217,8 +217,8 @@ test('⚠ raw HTML in model output renders as escaped text, never as an element'
 })
 
 // The markdown-link form of the same tripwire: the destination whose scheme would run is dropped
-// and the text stays. The https link beside it is the control — links render at all, so the
-// absence of the `javascript:` one is the renderer's decision, not a markdown miss.
+// and the text stays, in place. The https link beside it is the control — links render at all, so
+// the absence of the `javascript:` one is the renderer's decision, not a markdown miss.
 test('⚠ a markdown link with an executable destination renders as its text; a https link stays a link', () => {
   const rendered = html({
     key: 'text',
@@ -227,11 +227,20 @@ test('⚠ a markdown link with an executable destination renders as its text; a 
       content: '[run me](javascript:alert(1)) and [data](data:text/html,x) beside [safe](https://example.com)',
     },
   })
-  expect(rendered).toContain('<a href="https://example.com">safe</a>')
-  expect(rendered).toContain('run me')
-  expect(rendered).toContain('data')
+  expect(rendered).toContain('run me and data beside <a href="https://example.com">safe</a>')
   expect(rendered).not.toContain('javascript:')
   expect(rendered).not.toContain('data:text/html')
+})
+
+// The link filter is an ALLOWLIST (`@tanstack/markdown` `sanitizeUrl`): it strips control
+// characters and whitespace, then keeps only relative, http(s), mailto and tel. So a scheme
+// spelled in mixed case or split by a tab is still refused — a denylist on `javascript:` would pass both.
+test('⚠ a disguised executable scheme is refused too — mixed case, or split by a tab', () => {
+  for (const destination of ['JaVaScRiPt:alert(1)', 'java\tscript:alert(1)']) {
+    const rendered = html({ key: 'text', part: { type: 'text', content: `[inert](${destination})` } })
+    expect(rendered).toContain('inert')
+    expect(rendered).not.toContain('<a')
+  }
 })
 
 // The user's image (#68): inline bytes render as the image; a URL source stays visible as data, not fetched.

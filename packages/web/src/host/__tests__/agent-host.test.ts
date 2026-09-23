@@ -174,11 +174,7 @@ async function multiAccountStartupLine(hosted: HostedThread): Promise<string> {
   return notice.kind === 'extension-ui-request' ? String(notice.message) : ''
 }
 
-// ⚠ ORDER: the first test in this file to open a session. multi-account's root lease (below) is
-// process-wide, so a session any earlier test left open would make this one passive — whose
-// startup line names no config path at all.
 test('⚠ multi-account resolved its config inside the scratch agent dir, not ~/.pi/agent — the env was set first', async () => {
-  expect(openSessions).toHaveLength(0)
   const hosted = await hostedSession()
   // AWAITED, not read off the replay: since v1.23.0 the handler awaits its slot publishing
   // before it notifies, so the line can land after `createSession` resolves.
@@ -186,20 +182,18 @@ test('⚠ multi-account resolved its config inside the scratch agent dir, not ~/
 })
 
 /**
- * ⚠ A STATED GAP, pinned (pi 0.87 bump). pi-multi-account ≥1.22 keeps ONE root session per
- * process — a lease on `globalThis[Symbol.for('pi-multi-account:active-root-session')]`, taken
- * at `session_start`, released at `session_shutdown`. A session that starts while the lease is
- * held goes passive for its whole life: accounts register, automatic failover is OFF
- * (`automaticFailoverEnabled` is false). Upstream built it for in-process subagents; this
- * server hosts every thread in one process, so only the first live thread fails over.
- * Accepted because 1.23.0 is the only release that runs on pi 0.87 (1.21 and 1.22 depend on
- * pi-ai ^0.84 and ^0.85). If this goes red, upstream changed the lease — re-read it, then
- * update this record and the `agent-host.ts` header.
+ * ⚠ #351. pi-multi-account ≥1.22 keeps ONE root session per process — a lease on
+ * `globalThis[Symbol.for('pi-multi-account:active-root-session')]` — and a session that starts
+ * while it is held goes passive for its whole life: automatic failover OFF. The host clears the
+ * lease before each session binds, so every thread is a root (1.21's behaviour). Red means the
+ * host no longer clears it or upstream renamed the symbol: the thread in use would silently lose
+ * failover again — re-read the lease, then the `agent-host.ts` header.
  */
-test('⚠ a thread started while another is live gets multi-account PASSIVE — no failover (the root lease)', async () => {
-  await hostedSession()
+test('⚠ a thread started while another is live is a multi-account ROOT too — failover on (#351)', async () => {
+  const first = await hostedSession()
+  expect(await multiAccountStartupLine(first)).toMatch(/ loaded \(enabled\)/)
   const concurrent = await hostedSession()
-  expect(await multiAccountStartupLine(concurrent)).toContain('passive')
+  expect(await multiAccountStartupLine(concurrent)).toMatch(/ loaded \(enabled\)/)
 })
 
 // The chip's live state for a fresh thread comes from this observation (live check,

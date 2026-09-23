@@ -97,13 +97,17 @@ const log = ensoLogger('host')
  * spawns none. Read-merge-write: multi-account writes its defaults only when the file is
  * absent, and its user-facing commands read-merge-write the same file.
  *
- * ⚠ ONLY THE FIRST LIVE THREAD FAILS OVER (pi-multi-account ≥1.22). multi-account keeps one
- * ROOT session per process — a `globalThis` lease taken at `session_start`, released at
- * `session_shutdown` — and a session that starts while it is held stays passive for its whole
- * life: accounts register, automatic failover is off. Built upstream for in-process subagents;
- * every thread here is a session in this one process. Accepted with the pi 0.87 bump (1.23.0
- * is the only release that runs on it) and pinned in `__tests__/agent-host.test.ts`. The host
- * does not touch the lease: concurrent roots share `auth.json` and the state file.
+ * ⚠⚠ EVERY THREAD IS A MULTI-ACCOUNT ROOT, BY CLEARING ITS LEASE (#351). pi-multi-account ≥1.22
+ * keeps ONE root session per process — `globalThis[Symbol.for('pi-multi-account:active-root-
+ * session')]`, taken at `session_start`, released at `session_shutdown` — and a session that
+ * starts while it is held goes passive for its WHOLE life (the flag is never reset): accounts
+ * register, automatic failover is off. Built upstream for in-process subagents. Here every
+ * thread is a session in this one process and an idle one stays live for 30 minutes
+ * (`thread-registry.ts`), so the thread in use was usually the passive one. The host deletes
+ * the lease before each `bindExtensions`, which restores 1.21's behaviour — every thread fails
+ * over — including what 1.21 already did: concurrent roots write the same `auth.json` and
+ * state file. It couples the host to an upstream private symbol; `__tests__/agent-host.test.ts`
+ * goes red on a rename (a concurrent thread would start passive again).
  *
  * ⚠ `bindExtensions` IS CALLED EXACTLY ONCE PER SESSION. Every call emits `session_start`
  * (the guards reset their read tracker on it; multi-account resets thirteen failover
@@ -134,6 +138,8 @@ const log = ensoLogger('host')
 /** The agent dir's multi-account config file, and the one key this host must pin in it. */
 const MULTI_ACCOUNT_CONFIG_FILENAME = 'provider-failover.json'
 const MULTI_ACCOUNT_CHILD_PROXY_KEY = 'childProxy'
+/** pi-multi-account's per-process root lease — cleared before each session binds (module header). */
+const MULTI_ACCOUNT_ROOT_LEASE = Symbol.for('pi-multi-account:active-root-session')
 
 /**
  * The host's own extension (see the module header): named so `loadedExtensionPaths` says what
@@ -761,6 +767,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // (spike receipt: a throwing session_start is routed to onError and bindExtensions
     // resolves; it neither hangs nor rejects), and cross as the same `extension_error`
     // record the rpc mode emitted.
+    // The lease is free when this session's `session_start` asks for it — see the module header.
+    // Synchronous, and `bindExtensions` is what fires `session_start`, so nothing slips between.
+    Reflect.deleteProperty(globalThis, MULTI_ACCOUNT_ROOT_LEASE)
     await session.bindExtensions({
       uiContext: ui.uiContext,
       mode: EXTENSION_MODE_RPC,

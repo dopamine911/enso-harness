@@ -200,8 +200,11 @@ test('⚠ @shadcn/helpers’ peer ranges are knowingly violated — re-probe whe
  * `@tanstack/ai` pins `@ag-ui/core` EXACTLY to `0.1.1-canary.beta.0` through 0.58, and the root
  * `overrides` block forces `1.0.0` under it. Measured when this landed: 1.0.0's runtime exports
  * are a superset of the canary's except `EventType.THINKING_*` (removed; nothing here emits
- * them, and TanStack only reads them as `spec-event-keys` map keys), and TanStack's own
- * declarations check clean against 1.0.0 with `skipLibCheck` off.
+ * them). TanStack reads them only as `spec-event-keys` map keys, and through `@ag-ui/core`'s own
+ * enum — `dist/esm/utilities/spec-event-keys.js` imports `EventType` from `../types.js`, which
+ * re-exports `@ag-ui/core`'s; the copy in `client.js` serves the client entry only — so those
+ * keys read `undefined`, harmlessly. TanStack's own declarations check clean against 1.0.0 with
+ * `skipLibCheck` off.
  *
  * A red line means one side moved. If `@tanstack/ai` now declares 1.x itself (TanStack/ai
  * #1460/#1465, which also changes the terminal-event `usage` shape), the override is no longer
