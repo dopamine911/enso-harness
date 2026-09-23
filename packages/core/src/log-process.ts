@@ -369,6 +369,17 @@ export function ensoLogFilename(date: Date): string {
 }
 
 const ENSO_LOG_FILENAME = /^enso-(\d{4}-\d{2}-\d{2})\.jsonl$/
+
+/**
+ * The local day a log file is for — `2026-09-23` from `enso-2026-09-23.jsonl` — or `undefined`
+ * for any other name in the directory. The inverse of `ensoLogFilename`.
+ *
+ * @group Logging
+ */
+export function ensoLogDay(filename: string): string | undefined {
+  return ENSO_LOG_FILENAME.exec(filename)?.[1]
+}
+
 const KEEP_DAYS = 14
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -434,7 +445,7 @@ export async function configureProcessLogging(options: ProcessLoggingOptions): P
     interval: 'daily',
     filename: ensoLogFilename,
     parseFilename: (filename: string): Date | null => {
-      const day = ENSO_LOG_FILENAME.exec(filename)?.[1]
+      const day = ensoLogDay(filename)
       return day === undefined ? null : new Date(`${day}T00:00:00`) // local midnight, as the name was made
     },
     maxAgeMs: KEEP_DAYS * DAY_MS,

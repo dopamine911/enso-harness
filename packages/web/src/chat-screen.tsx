@@ -70,6 +70,7 @@ import {
   storedThreadsNotOnThisPage,
 } from './stored-threads.ts'
 import { ThreadDebugDrawer } from './thread-debug.tsx'
+import { ThreadStatsDrawer } from './thread-stats.tsx'
 import { ThreadStatusBar } from './thread-status.tsx'
 import {
   adoptThread,
@@ -220,6 +221,14 @@ function createThreadChatHook(stores: ThreadStores): ThreadChatHook {
  * not (PR #94 review). Exactly one pane is active, so exactly one column exists.
  */
 const DebugOpenContext = createContext(false)
+
+/**
+ * Whether THIS pane is the one on screen — the same reason as above, for the stats drawer
+ * (#45 phase 2, PR #358 review): its open/closed choice is the pane's own state and survives a
+ * switch away, but the drawer itself — its fixed `id`, its fetches, its `stores.usage`
+ * subscription — exists only while the pane is shown.
+ */
+const PaneActiveContext = createContext(true)
 
 /** One selected part paired with the React key that identifies it. */
 export interface KeyedPart {
@@ -1059,6 +1068,10 @@ const chatComponents = {
     layout: function ChatLayout({ Messages, Input }: LayoutProps<ThreadChatOptions>): React.ReactNode {
       const chat = useChatContext()
       const debugOpen = useContext(DebugOpenContext)
+      // The thread's stats drawer (#45 phase 2), opened from the status bar; per pane, like its thread.
+      const [statsOpen, setStatsOpen] = useState(false)
+      const active = useContext(PaneActiveContext)
+      const toggleStats = useCallback((): void => setStatsOpen((open) => !open), [])
       // The one place the transcript is selected (#280): here, where the chat is already read,
       // once per chunk instead of once per row.
       const selection = useMemo<TranscriptSelection>(() => {
@@ -1104,6 +1117,13 @@ const chatComponents = {
               <PendingQueue />
               <Input />
             </div>
+            {/* The thread's stats (#45 phase 2): per prompt, turn and tool — beside the
+						    transcript it describes, scrolling on its own like the debug pane. */}
+            {statsOpen && active ? (
+              <div id="thread-stats-pane" className="w-[28rem] shrink-0 overflow-y-auto border-l">
+                <ThreadStatsDrawer />
+              </div>
+            ) : null}
             {/* The session debug pane (#86): what the browser believes beside what pi's
 						    session holds, for THIS thread. Scrolls on its own so a long branch never
 						    moves the composer. */}
@@ -1115,7 +1135,12 @@ const chatComponents = {
           </div>
           {/* The status bar (#90): activity, prompts, tool calls, cost — always visible, full
 					    width under transcript AND debug pane, so it is the one place to look. */}
-          <ThreadStatusBar messages={chat.messages} generating={chat.sessionGenerating} />
+          <ThreadStatusBar
+            messages={chat.messages}
+            generating={chat.sessionGenerating}
+            statsOpen={statsOpen}
+            onToggleStats={toggleStats}
+          />
         </div>
       )
     },
@@ -1197,7 +1222,9 @@ export function ThreadPane({
     <div className={active ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
       <ThreadStoresContext.Provider value={stores}>
         <DebugOpenContext.Provider value={debugOpen && active}>
-          <chat.AppChat />
+          <PaneActiveContext.Provider value={active}>
+            <chat.AppChat />
+          </PaneActiveContext.Provider>
         </DebugOpenContext.Provider>
       </ThreadStoresContext.Provider>
     </div>

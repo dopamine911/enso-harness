@@ -37,6 +37,11 @@ export interface AgentHost {
    * whole file (#45). `undefined` when no file has that id.
    */
   readStoredThread(threadId: string): Promise<StoredThreadRead | undefined>
+  /**
+   * A stored thread analysed (#45 phase 2) — pi's totals over the whole file and the branch's
+   * per-turn stats, from one open, building nothing (#86). `undefined` when no file has that id.
+   */
+  readStoredThreadStats(threadId: string): Promise<StoredThreadStats | undefined>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
@@ -60,6 +65,8 @@ export interface HostedThread {
   inspect(): HostedThreadInspection
   /** The emitted tail (#97): what the host's `emit` funnel saw, with provenance. A fresh copy per call. */
   emittedEvents(): EnsoThreadEvent[]
+  /** The branch analysed (#45 phase 2): per request, per turn, per tool, off pi's own entries. */
+  branchStats(): BranchStats
   /**
    * What the loaded extensions would say about a tool call, through the runtime's own hook
    * runner — the verdict a model's call would meet, without a model. Inspection, like the
@@ -287,7 +294,7 @@ a thread that has only run slash commands has a full branch and no file, and `li
 Replace the store — another file layout, a database, a remote log — and the files that change are
 `packages/web/src/host/agent-host.ts` (`listSessions`, `readStoredThread`, the open-or-create in
 `createSession`, `inspect()`), `packages/web/src/host/transcript.ts` (the new store's entries → the
-transcript of ours) and `packages/web/src/host/session-usage.ts` (the new store's recorded spend → pi's
+transcript of ours), `packages/web/src/host/branch-stats.ts` (the new store's messages → per-turn stats) and `packages/web/src/host/session-usage.ts` (the new store's recorded spend → pi's
 totals). That is what the storage-seam test measures: a second importer of the session
 manager anywhere else is a failing test with the file named. The server routes, the registry, the
 follow's snapshot, the wire schemas, the reader, the drawer, the browser and every server test over

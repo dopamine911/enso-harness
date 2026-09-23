@@ -10,7 +10,6 @@ import {
   timelineJoinKeys,
 } from '@enso/core'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check } from 'typebox/value'
 import type { FetchLike } from '../browser-logging.ts'
 import {
   Terminal,
@@ -21,6 +20,7 @@ import {
 } from '../components/ai-elements/terminal.tsx'
 import { Button } from '../components/ui/button.tsx'
 import { Spinner } from '../components/ui/spinner.tsx'
+import { readSchemaRoute } from '../route-read.ts'
 import { urlForThread } from '../thread-url.ts'
 import { LogRow, ROW_HEIGHT_PX, timeOfDay } from './log-row.tsx'
 import { DEFAULT_LOG_TAIL_FILTER, type LogTailFilter } from './log-tail-connection.ts'
@@ -91,24 +91,17 @@ type EventsOutcome = Exclude<TailsState, { kind: 'pending' }> | { readonly kind:
 /** The browser's own `fetch`, as a stable value: an inline closure would re-open the tail on every render. */
 const browserFetch: FetchLike = (input: string, init?: RequestInit) => fetch(input, init)
 
-/**
- * The tails, or why not. A non-2xx other than 404 is reported with its status and body
- * VERBATIM: the reader is debugging, and the body is the server's own words about what went
- * wrong. A payload that misses its schema is reported too — never quietly rendered as nothing.
- */
+/** The tails, or why not — the read itself, and what each failure says, is `route-read.ts`'s. */
 async function fetchThreadEvents(threadId: string, fetchImpl: FetchLike): Promise<EventsOutcome> {
-  try {
-    const response = await fetchImpl(`${EVENTS_ROUTE_PREFIX}${encodeURIComponent(threadId)}/events`)
-    if (response.status === 404) return { kind: 'none' }
-    if (!response.ok) return { kind: 'failed', problem: `${response.status} ${await response.text()}`.trim() }
-    const payload: unknown = await response.json()
-    if (!Check(EnsoThreadEvents, payload)) {
-      return { kind: 'failed', problem: "the server's events payload did not match its schema" }
-    }
-    return { kind: 'live', events: payload }
-  } catch (error) {
-    return { kind: 'failed', problem: error instanceof Error ? error.message : String(error) }
-  }
+  const read = await readSchemaRoute(
+    `${EVENTS_ROUTE_PREFIX}${encodeURIComponent(threadId)}/events`,
+    EnsoThreadEvents,
+    'events',
+    fetchImpl,
+  )
+  if (read.kind === 'absent') return { kind: 'none' }
+  if (read.kind === 'failed') return read
+  return { kind: 'live', events: read.payload }
 }
 
 /**

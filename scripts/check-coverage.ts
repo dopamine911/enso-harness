@@ -61,8 +61,12 @@ export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89
  *
  * Re-measured 2026-09-22 (#144 slices 2–3, 95 owned sources after the debug page's seven
  * modules): the manifest's 80% bound asked for 76, so the same ~10%-under convention gives 85.
+ *
+ * Re-measured 2026-09-23 (#45: session usage, branch stats, the thread stats route, the drawer
+ * and the stats table it shares with the day's page — about 110 owned sources): the 80% bound
+ * asks for 88, and ~10% under gives 99.
  */
-export const MINIMUM_REPORTED_FILES = 85
+export const MINIMUM_REPORTED_FILES = 99
 
 const LCOV_PATH = join(findRepoRoot(import.meta.url), 'coverage', 'lcov.info')
 

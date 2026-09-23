@@ -4,7 +4,9 @@
 the `style` field of [`packages/web/components.json`](../../../components.json), with
 `baseColor: neutral`, `iconLibrary: lucide`, `rsc: false`, `tsx: true`.
 **Fetched by:** `shadcn@4.20.1` (`packages/web/package.json`), in commit `cc84ab4`
-("feat(#31): the presentation layer — shadcn theme + vendored ai-elements shells", 2026-09-03).
+("feat(#31): the presentation layer — shadcn theme + vendored ai-elements shells", 2026-09-03);
+`chart.tsx` later, by the same CLI and style, for #45's stats drawer — it brought `recharts`
+(pinned at the `3.8.0` the CLI chose) and no other dependency.
 **License:** MIT (the shadcn/ui project's licence, as published with the CLI).
 **Issue:** #31, fenced by `test/presentation-gate.test.ts` since #253.
 

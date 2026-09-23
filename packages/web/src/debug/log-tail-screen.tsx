@@ -11,6 +11,7 @@ import {
 import { Button } from '../components/ui/button.tsx'
 import { Input } from '../components/ui/input.tsx'
 import { Spinner } from '../components/ui/spinner.tsx'
+import { OptionSelect } from '../option-select.tsx'
 import { urlForThread } from '../thread-url.ts'
 import { LogRow } from './log-row.tsx'
 import { DEFAULT_LOG_TAIL_FILTER, type LogTailFilter } from './log-tail-connection.ts'
@@ -90,29 +91,14 @@ export interface LogLevelSelectProps {
   readonly onLevel: (level: EnsoLogLevelName) => void
 }
 
-/**
- * The level, as a control. Native `<select>` for the closed vocabulary — the same reasoning
- * the permission-mode control gives: keyboard- and screen-reader-complete without a
- * dependency. Shared with the timeline: one question, one control.
- */
+/** Every level, shown as it is named. */
+const LEVEL_OPTIONS: ReadonlyArray<readonly [EnsoLogLevelName, string]> = ENSO_LOG_LEVEL_NAMES.map(
+  (levelName) => [levelName, levelName] as const,
+)
+
+/** The level, as a control — `OptionSelect`, shared with the timeline: one question, one control. */
 export function LogLevelSelect({ controlId, level, onLevel }: LogLevelSelectProps): React.ReactNode {
-  return (
-    <select
-      id={controlId}
-      className="rounded-md border bg-background px-1.5 py-0.5 text-foreground text-xs"
-      value={level}
-      onChange={(event: React.ChangeEvent<HTMLSelectElement>) => {
-        const chosen = ENSO_LOG_LEVEL_NAMES.find((levelName) => levelName === event.target.value)
-        if (chosen !== undefined) onLevel(chosen)
-      }}
-    >
-      {ENSO_LOG_LEVEL_NAMES.map((levelName) => (
-        <option key={levelName} value={levelName}>
-          {levelName}
-        </option>
-      ))}
-    </select>
-  )
+  return <OptionSelect id={controlId} value={level} options={LEVEL_OPTIONS} onChange={onLevel} />
 }
 
 interface LogTailControlsProps {

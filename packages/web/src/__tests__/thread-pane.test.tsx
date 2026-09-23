@@ -75,6 +75,8 @@ interface MountedPane {
   /** Write frames, then let the adapter route them and React render. */
   readonly settle: (...frames: Parameters<ScriptedFetch['frame']>[0][]) => Promise<void>
   readonly unmount: () => Promise<void>
+  /** Re-render the pane shown or hidden, as the page does when the rail switches threads. */
+  readonly setActive: (active: boolean) => Promise<void>
   /** The status bar's words, e.g. `working · 0 turns …` with the separators dropped. */
   readonly status: () => string
   readonly stopButton: () => HTMLButtonElement | null
@@ -93,10 +95,10 @@ async function mountPane(
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
+  const render = (active: boolean): void =>
+    root.render(<ThreadPane threadId={stores.threadId} active={active} debugOpen={options.debugOpen ?? false} />)
   await flush(async () => {
-    root.render(
-      <ThreadPane threadId={stores.threadId} active={options.active ?? true} debugOpen={options.debugOpen ?? false} />,
-    )
+    render(options.active ?? true)
   })
   await flush(tick)
   const one = <T extends Element>(selector: string): T => {
@@ -117,6 +119,12 @@ async function mountPane(
     unmount: async () => {
       await flush(async () => root.unmount())
       container.remove()
+    },
+    setActive: async (active: boolean) => {
+      await flush(async () => {
+        render(active)
+        await tick()
+      })
     },
     status: () => one('#thread-status').textContent ?? '',
     stopButton: () => container.querySelector<HTMLButtonElement>('button[aria-label="stop the run"]'),
@@ -1106,6 +1114,26 @@ test("⚠ a frame on one thread's follow changes that pane and no other — cost
   })
   await alpha.unmount()
   await bravo.unmount()
+})
+
+// PR #358 review: every live pane stays mounted under `hidden`, so the stats drawer — its fixed
+// `id`, its fetches, its `stores.usage` subscription — must exist only in the pane on screen
+// (the debug column's rule, PR #94), and be open again when the thread is shown again.
+test('⚠ the stats drawer exists only while its pane is shown, and is back open when the pane is', async () => {
+  const pane = await mountPane({ active: true })
+  const toggle = pane.container.querySelector<HTMLButtonElement>('button[aria-controls="thread-stats-pane"]')
+  if (toggle === null) throw new Error('no stats toggle in the status bar')
+  await flush(async () => {
+    toggle.click()
+    await tick()
+  })
+  const drawers = (): number => pane.container.querySelectorAll('#thread-stats-pane').length
+  await eventually(() => expect(drawers()).toBe(1))
+  await pane.setActive(false)
+  expect(drawers()).toBe(0)
+  await pane.setActive(true)
+  expect(drawers()).toBe(1)
+  await pane.unmount()
 })
 
 // ── the page (#90): the rail, New Thread, switching, Previous Threads, resume (#95) ───────

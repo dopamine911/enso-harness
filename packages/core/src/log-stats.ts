@@ -208,6 +208,29 @@ function summarise(durations: readonly number[]): EnsoDurationSummary {
   return { count: durations.length, minMs, maxMs, meanMs: totalMs / durations.length, totalMs }
 }
 
+/**
+ * Several summaries as one — the days of a thread that spans them (#45), each folded on its own
+ * so a run's generation, which restarts with the server, never joins across a day boundary.
+ * No summary, or only empty ones, is the empty summary.
+ *
+ * @group Logging
+ */
+export function mergeDurationSummaries(summaries: readonly EnsoDurationSummary[]): EnsoDurationSummary {
+  const measured = summaries.filter((summary) => summary.count > 0)
+  if (measured.length === 0) return summarise([])
+  let count = 0
+  let totalMs = 0
+  let minMs = Number.POSITIVE_INFINITY
+  let maxMs = 0
+  for (const summary of measured) {
+    count += summary.count
+    totalMs += summary.totalMs
+    minMs = Math.min(minMs, summary.minMs)
+    maxMs = Math.max(maxMs, summary.maxMs)
+  }
+  return { count, minMs, maxMs, meanMs: totalMs / count, totalMs }
+}
+
 function addSpend(into: SpendTotals, properties: Readonly<Record<string, unknown>>): void {
   into.input += numberOf(properties.input) ?? 0
   into.output += numberOf(properties.output) ?? 0
@@ -255,8 +278,24 @@ interface Fold {
   readonly runs: Map<string, RunFold>
   readonly tools: Map<string, ToolFold>
   readonly openCalls: Map<string, { readonly toolName: string; readonly at: number }>
+  /** Each closed call's call → result, by `toolCallId` — what `toolCallDurations` answers. */
+  readonly callDurations: Map<string, number>
   readonly models: Map<string, SpendTotals>
   readonly denials: Map<string, number>
+}
+
+function foldOf(lines: readonly EnsoLogLine[]): Fold {
+  const fold: Fold = {
+    processes: new Map(),
+    runs: new Map(),
+    tools: new Map(),
+    openCalls: new Map(),
+    callDurations: new Map(),
+    models: new Map(),
+    denials: new Map(),
+  }
+  for (const line of lines) foldLine(fold, line)
+  return fold
 }
 
 function runOf(fold: Fold, properties: Properties): RunFold | undefined {
@@ -334,7 +373,10 @@ function foldTool(fold: Fold, kind: 'tool-call' | 'tool-result', properties: Pro
   if (call === undefined || toolCallId === undefined) return
   fold.openCalls.delete(toolCallId)
   const duration = instant - call.at
-  if (!Number.isNaN(duration) && duration >= 0) tool.durations.push(duration)
+  if (!Number.isNaN(duration) && duration >= 0) {
+    tool.durations.push(duration)
+    fold.callDurations.set(toolCallId, duration)
+  }
 }
 
 /** The compact observation line: the run's settle, or a tool's call or result. */
@@ -460,16 +502,27 @@ function processRowOf(process: ProcessFold): EnsoDayStats['processes'][number] {
  * @group Logging
  */
 export function dayStats(day: string, lines: readonly EnsoLogLine[], malformed: number): EnsoDayStats {
-  const fold: Fold = {
-    processes: new Map(),
-    runs: new Map(),
-    tools: new Map(),
-    openCalls: new Map(),
-    models: new Map(),
-    denials: new Map(),
-  }
-  for (const line of lines) foldLine(fold, line)
+  return foldDay(day, lines, malformed).stats
+}
 
+/**
+ * The day's stats AND each tool call's call → result, by `toolCallId` (#45 phase 2), from ONE
+ * fold — the same join `stats.tools` sums per tool, kept per call so a reader can rank the calls
+ * themselves. The thread stats route reads both off every day file it opens (PR #358 review:
+ * folding each day twice was the same work done again).
+ *
+ * @group Logging
+ */
+export function foldDay(
+  day: string,
+  lines: readonly EnsoLogLine[],
+  malformed: number,
+): { readonly stats: EnsoDayStats; readonly callDurations: ReadonlyMap<string, number> } {
+  const fold = foldOf(lines)
+  return { stats: statsOf(day, fold, lines.length, malformed), callDurations: fold.callDurations }
+}
+
+function statsOf(day: string, fold: Fold, records: number, malformed: number): EnsoDayStats {
   const runRows = [...fold.runs.values()].map(runRowOf)
   const threads = new Map<string, { runs: number } & SpendTotals>()
   for (const run of runRows) {
@@ -487,7 +540,7 @@ export function dayStats(day: string, lines: readonly EnsoLogLine[], malformed: 
 
   return {
     day,
-    records: lines.length,
+    records,
     malformed,
     processes: [...fold.processes.values()].map(processRowOf),
     runs: runRows,
