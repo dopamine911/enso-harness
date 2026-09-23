@@ -88,8 +88,7 @@ export function observationToAguiEvents(observation: EnsoObservation, ids: AguiI
       ]
 
     case 'thinking-delta':
-      // REASONING_*, not THINKING_* — the latter is deprecated in @ag-ui/core and slated
-      // for removal in 1.0.0.
+      // REASONING_*, not THINKING_* — @ag-ui/core 1.0.0 removed the latter from `EventType`.
       return [
         {
           type: EventType.REASONING_MESSAGE_CONTENT,

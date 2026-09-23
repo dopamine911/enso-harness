@@ -91,7 +91,11 @@ async function hostedSession(extensionFactories: InlineExtension[] = []): Promis
  */
 const OBSERVATION_DEADLINE_MILLISECONDS = 5000
 
-/** Resolves with the first observation matching `matches`, or rejects at the deadline — never a tick count. */
+/**
+ * Resolves with the first observation matching `matches`, or rejects at the deadline — never a tick count.
+ * A match may arrive DURING `subscribe` (the host replays what came before its first subscriber), so the
+ * callback only records the match; the unsubscribe runs once the promise has settled.
+ */
 function untilObservation(
   hosted: HostedThread,
   matches: (event: EnsoObservation) => boolean,
@@ -101,13 +105,14 @@ function untilObservation(
     () => reject(new Error(`no matching observation within ${OBSERVATION_DEADLINE_MILLISECONDS}ms`)),
     OBSERVATION_DEADLINE_MILLISECONDS,
   )
+  let matched = false
   const unsubscribe = hosted.runtime.subscribe((observation) => {
-    if (!matches(observation)) return
+    if (matched || !matches(observation)) return
+    matched = true
     clearTimeout(timer)
-    unsubscribe()
     resolve(observation)
   })
-  return promise
+  return promise.finally(unsubscribe)
 }
 
 const nextTick = (): Promise<void> => {
@@ -157,6 +162,46 @@ test('⚠ creating a host removes secret-shaped variables from its environment, 
   expect(JSON.stringify(notice)).not.toContain('must-not-survive')
 })
 
+/** multi-account's own startup line — `loaded (enabled)…` for the root, `loaded in passive…` otherwise. */
+async function multiAccountStartupLine(hosted: HostedThread): Promise<string> {
+  const notice = await untilObservation(
+    hosted,
+    (event) =>
+      event.kind === 'extension-ui-request' &&
+      event.method === 'notify' &&
+      /^pi-multi-account v\S+ loaded/.test(String(event.message)),
+  )
+  return notice.kind === 'extension-ui-request' ? String(notice.message) : ''
+}
+
+// ⚠ ORDER: the first test in this file to open a session. multi-account's root lease (below) is
+// process-wide, so a session any earlier test left open would make this one passive — whose
+// startup line names no config path at all.
+test('⚠ multi-account resolved its config inside the scratch agent dir, not ~/.pi/agent — the env was set first', async () => {
+  expect(openSessions).toHaveLength(0)
+  const hosted = await hostedSession()
+  // AWAITED, not read off the replay: since v1.23.0 the handler awaits its slot publishing
+  // before it notifies, so the line can land after `createSession` resolves.
+  expect(await multiAccountStartupLine(hosted)).toContain(join(agentDir, 'provider-failover.json'))
+})
+
+/**
+ * ⚠ A STATED GAP, pinned (pi 0.87 bump). pi-multi-account ≥1.22 keeps ONE root session per
+ * process — a lease on `globalThis[Symbol.for('pi-multi-account:active-root-session')]`, taken
+ * at `session_start`, released at `session_shutdown`. A session that starts while the lease is
+ * held goes passive for its whole life: accounts register, automatic failover is OFF
+ * (`automaticFailoverEnabled` is false). Upstream built it for in-process subagents; this
+ * server hosts every thread in one process, so only the first live thread fails over.
+ * Accepted because 1.23.0 is the only release that runs on pi 0.87 (1.21 and 1.22 depend on
+ * pi-ai ^0.84 and ^0.85). If this goes red, upstream changed the lease — re-read it, then
+ * update this record and the `agent-host.ts` header.
+ */
+test('⚠ a thread started while another is live gets multi-account PASSIVE — no failover (the root lease)', async () => {
+  await hostedSession()
+  const concurrent = await hostedSession()
+  expect(await multiAccountStartupLine(concurrent)).toContain('passive')
+})
+
 test("exactly the manifest's six extensions load, in order, then the host's own model watcher, with no load errors", async () => {
   const hosted = await hostedSession()
   const loaded = hosted.loadedExtensionPaths
@@ -168,20 +213,6 @@ test("exactly the manifest's six extensions load, in order, then the host's own 
   })
   expect(loaded[MANIFEST_EXTENSION_MARKERS.length]).toBe(MODEL_WATCH_EXTENSION_PATH)
   logs.assertNotLogged({ rawMessage: /failed to load/ })
-})
-
-test('⚠ multi-account resolved its config inside the scratch agent dir, not ~/.pi/agent — the env was set first', async () => {
-  const hosted = await hostedSession()
-  const events = collectEvents(hosted)
-  // The startup notify is emitted during session_start — before any subscriber existed —
-  // and replayed to the first one. Its text names the config path multi-account resolved.
-  const startupNotify = events.find(
-    (event) =>
-      event.kind === 'extension-ui-request' &&
-      event.method === 'notify' &&
-      String(event.message).includes('provider-failover.json'),
-  )
-  expect(startupNotify?.kind === 'extension-ui-request' ? startupNotify.message : undefined).toContain(agentDir)
 })
 
 test('⚠ session_start fires exactly once per session, and two sessions do not share an extension instance', async () => {

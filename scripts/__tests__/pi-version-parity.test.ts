@@ -58,7 +58,7 @@ test('⚠ the pi the guard corpus pins against is a pi the terminal launcher wil
 
 // The range is also a PUBLISHED contract: a consumer installing the harness reads
 // `peerDependencies`, not the launcher. `>=0.84.0` said the corpus covers versions it has never
-// been run against; the two must state the same bound, and `^0.84.4` is that bound for a 0.x
+// been run against; the two must state the same bound, and `^0.87.1` is that bound for a 0.x
 // package — the boundary tests in `enso-launch.test.ts`, beside this file, pin the equivalence.
 test('the harness declares the peer range the launcher enforces', () => {
   const manifestPath = join(import.meta.dir, '..', '..', 'packages', 'harness', 'package.json')

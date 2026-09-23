@@ -249,7 +249,7 @@ test("send opens TanStack's own run at admission; the thread's settle closes it"
     { type: EventType.TEXT_MESSAGE_START, messageId: expect.any(String), role: 'assistant' },
   ])
   const opened = server.chunks[2]
-  const messageId = opened !== undefined && 'messageId' in opened ? String(opened.messageId) : ''
+  const messageId = opened !== undefined && 'messageId' in opened ? opened.messageId : ''
 
   // The server's status for OUR generation is not a second run.
   server.frame({ type: 'status', live: true, busy: true, generation: 1 })

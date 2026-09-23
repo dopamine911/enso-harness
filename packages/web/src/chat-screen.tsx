@@ -101,9 +101,10 @@ import { ThreadsRail, UNTITLED_THREAD } from './threads-rail.tsx'
  *    assistant message BLANK with no error at all.
  *
  * 2. HAND-WROTE CHROME THAT SHIPS. `<p>{part.content}</p>` rendered assistant output as
- *    plain text where `TextPart` runs react-markdown with remark-gfm, rehype-highlight and
- *    `rehype-sanitize` LAST. Every reply from a coding agent is markdown, and sanitisation
- *    matters on its own: model output is untrusted text entering a DOM.
+ *    plain text where `TextPart` renders markdown safely (react-markdown with `rehype-sanitize`
+ *    LAST then; `@tanstack/markdown` with raw HTML escaped since `@tanstack/ai-react` 0.25).
+ *    Every reply from a coding agent is markdown, and safe rendering matters on its own:
+ *    model output is untrusted text entering a DOM.
  *
  * 3. OVER-CORRECTED INTO DEPRECATED COMPONENTS. Six of the eight exports are
  *    `@deprecated`, removed at 1.0.0 — `Chat`, `ChatMessage`, `ChatMessages`, `ChatInput`,

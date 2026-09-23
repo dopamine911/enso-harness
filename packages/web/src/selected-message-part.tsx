@@ -165,9 +165,9 @@ export function SelectedMessagePart({
   if (selected.key === 'toolResult') {
     return <EnsoToolResult result={selected.part} runOpen={runOpen} renderers={renderers} />
   }
-  // TextPart is the markdown pipeline of record (react-markdown, sanitize LAST). `prose`
-  // is @tailwindcss/typography — TextPart emits bare markdown HTML with no classes of
-  // its own, so the typography plugin is what styles it.
+  // TextPart is the markdown pipeline of record (`@tanstack/markdown`: raw HTML escaped,
+  // executable URLs dropped). `prose` is @tailwindcss/typography — TextPart emits bare
+  // markdown HTML with no classes of its own, so the typography plugin is what styles it.
   if (selected.part.type === 'text') {
     return (
       <div className="prose prose-sm dark:prose-invert max-w-none">
