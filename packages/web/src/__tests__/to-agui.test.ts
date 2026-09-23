@@ -130,7 +130,7 @@ test('an extension error becomes RUN_ERROR naming the extension and the hook', (
 
 // ⚠ ONE VOCABULARY (#162 workstream 5). Whatever AG-UI has no word for rides CUSTOM named by
 // `EnsoObservation.kind` and carrying the observation WHOLE — so #29's "the notify payload must
-// survive the last hop" and #45's "role and usage intact" are the same fact: the value IS the
+// survive the last hop" and #45's "the session's usage intact" are the same fact: the value IS the
 // observation, and the router reads it by the kind the mapper gave it. The first hop
 // (runtime event → observation) is pinned in host/__tests__/map-events.test.ts; the two
 // meet on `EnsoObservation`, which the mapper sweep validates.
@@ -160,9 +160,13 @@ test('every CUSTOM chunk is named by its kind and carries the observation whole 
     { kind: 'permission-mode-rejected', mode: 'plan', reason: 'the command refused' },
     { kind: 'custom-entry', customType: 'modes', data: { mode: 'acceptEdits' } },
     {
-      kind: 'message-end',
-      role: 'assistant',
-      usage: { input: 1200, output: 40, cacheRead: 300, cacheWrite: 50, totalCost: 0.0132 },
+      kind: 'session-usage',
+      cost: 0.0132,
+      input: 1200,
+      output: 40,
+      cacheRead: 300,
+      cacheWrite: 50,
+      context: { tokens: 1590, window: 200_000, percent: 0.795 },
     },
     { kind: 'queue', interrupting: ['stop'], enqueued: ['then'] },
     // ⚠ CUSTOM, not RAW. @ag-ui/core defines RAW and it looks made for this, but TanStack
@@ -200,11 +204,7 @@ test('nothing is silently dropped: every kind except an in-flight result and a b
       thinkingLevel: 'medium',
       availableThinkingLevels: ['off', 'low', 'medium', 'high'],
     },
-    {
-      kind: 'message-end',
-      role: 'assistant',
-      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
-    },
+    { kind: 'session-usage', cost: 0, input: 1, output: 1, cacheRead: 0, cacheWrite: 0, context: null },
     { kind: 'turn-start' },
     { kind: 'turn-end', toolResults: 1 },
     { kind: 'queue', interrupting: [], enqueued: ['later'] },
@@ -218,10 +218,13 @@ test('nothing is silently dropped: every kind except an in-flight result and a b
     expect(toAgui(observation).length).toBeGreaterThan(0)
   }
   // The AG-UI view opens one message per run, so a per-message boundary has no event in
-  // it (#112) — the follow carries boundaries; this view's loss is stated, not silent.
+  // it (#112) — the follow carries boundaries; this view's loss is stated, not silent. A
+  // message's accounting goes with it: the page reads the thread's total as `session-usage`
+  // (#45), and the per-message unit is the log's.
   const bareBoundaries: EnsoObservation[] = [
     { kind: 'message-start', role: 'user', text: 'hi' },
     { kind: 'message-end', role: 'user' },
+    { kind: 'message-end', role: 'assistant', usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } },
   ]
   for (const boundary of bareBoundaries) {
     expect(toAgui(boundary)).toEqual([])

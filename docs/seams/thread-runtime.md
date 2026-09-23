@@ -47,6 +47,8 @@ export const ThreadRuntime = Type.Object({
   listCommands: Type.Unsafe<() => RuntimeCommand[]>(Type.Function([], Type.Unknown())),
   /** The model and thinking level this session runs with now (#338 slice 2). Synchronous. */
   modelState: Type.Unsafe<() => EnsoModelState>(Type.Function([], Type.Unknown())),
+  /** What the session has spent and how full its context is, now (#45). Synchronous. */
+  sessionUsage: Type.Unsafe<() => EnsoSessionUsage>(Type.Function([], Type.Unknown())),
   /**
    * Run a `host` command (#338 slice 2): `model` with an `options[].id` (`provider/id`),
    * `thinking` with a level. Resolves when applied; the change itself arrives on the feed as a

@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import type { EnsoDialogSpec, EnsoFollowSnapshot, EnsoFollowStatus, EnsoModelState, EnsoObservation } from '@enso/core'
+import type {
+  EnsoDialogSpec,
+  EnsoFollowSnapshot,
+  EnsoFollowStatus,
+  EnsoModelState,
+  EnsoObservation,
+  EnsoSessionUsage,
+} from '@enso/core'
 import { FOLLOW_ENDED_CUSTOM_EVENT, routeEnsoCustomEvent } from '../custom-event-router.ts'
 import { clearThreadsForTest, mintThread, type ThreadStores } from '../thread-stores.ts'
 
@@ -29,6 +36,15 @@ const noticesBesideModeLines = (): string[] => notificationMessages().filter((me
 const CONFIRM: EnsoDialogSpec = { method: 'confirm', title: 'Apply?', message: 'm' }
 const SELECT: EnsoDialogSpec = { method: 'select', title: 'Pick', options: ['a', 'b'] }
 
+const NO_USAGE: EnsoSessionUsage = { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null }
+const SPENT: EnsoSessionUsage = {
+  cost: 0.5,
+  input: 100,
+  output: 10,
+  cacheRead: 20,
+  cacheWrite: 5,
+  context: { tokens: 135, window: 200_000, percent: 0.0675 },
+}
 const snapshot = (overrides: Partial<EnsoFollowSnapshot> = {}): EnsoFollowSnapshot => ({
   type: 'snapshot',
   threadId: 't1',
@@ -40,6 +56,7 @@ const snapshot = (overrides: Partial<EnsoFollowSnapshot> = {}): EnsoFollowSnapsh
   model: null,
   cwd: '/work/project',
   messages: [],
+  usage: NO_USAGE,
   openDialogs: [],
   ...overrides,
 })
@@ -53,8 +70,8 @@ test('a permission-mode observation reaches BOTH the current-mode store and the 
   observe({ kind: 'permission-mode', mode: 'acceptEdits', available: ['default', 'acceptEdits'] })
   expect(stores.permissionMode.get()).toEqual({ mode: 'acceptEdits', available: ['default', 'acceptEdits'] })
   expect(notificationMessages()).toEqual(['Mode: acceptEdits'])
-  // and it did NOT land in the stats store (the swap-the-two-apply-calls mutation)
-  expect(stores.stats.get().totalCost).toBe(0)
+  // and it did NOT land in the usage store (the swap-the-two-apply-calls mutation)
+  expect(stores.usage.get()).toBeUndefined()
 })
 
 test("the snapshot's permissionMode is the run-start receipt, folded by the same two stores", () => {
@@ -88,6 +105,18 @@ test("the snapshot's cwd is the thread's project, replaced by every later snapsh
   expect(stores.cwd.get()).toBe('/work/project')
   route('snapshot', snapshot({ cwd: '/work/other' }))
   expect(stores.cwd.get()).toBe('/work/other')
+})
+
+// #45: the thread's spend is pi's session total, whole — the snapshot seeds it (so a resumed or
+// reloaded thread shows what it spent), and each `session-usage` REPLACES it: applied twice, the
+// same observation is the same total, never double.
+test("the snapshot's usage seeds the usage store; a session-usage replaces it whole, never adds", () => {
+  expect(stores.usage.get()).toBeUndefined()
+  route('snapshot', snapshot({ usage: { ...NO_USAGE, cost: 0.25, input: 40 } }))
+  expect(stores.usage.get()).toEqual({ ...NO_USAGE, cost: 0.25, input: 40 })
+  observe({ kind: 'session-usage', ...SPENT })
+  observe({ kind: 'session-usage', ...SPENT })
+  expect(stores.usage.get()).toEqual(SPENT)
 })
 
 test('a model observation replaces the model store with the state the host says (#338 slice 2)', () => {
@@ -229,16 +258,6 @@ test('a queue observation is the whole queue, interrupting first; a malformed on
   expect(stores.queue.get()).toEqual([])
 })
 
-test('a message-end with usage reaches the thread-stats store and nothing else', () => {
-  observe({
-    kind: 'message-end',
-    role: 'assistant',
-    usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalCost: 0.5 },
-  })
-  expect(stores.stats.get().totalCost).toBe(0.5)
-  expect(notificationMessages()).toEqual([])
-})
-
 test('a notify pushes the message with each declared notify type', () => {
   for (const notifyType of ['info', 'warning', 'error'] as const) {
     observe({
@@ -300,7 +319,8 @@ test('a permission-mode-rejected is a WARNING notice — the click did nothing a
 // wire already refused it (`follow-connection.ts`'s frame check); this is the second lock.
 test('a value that is not the observation its name claims moves no store', () => {
   route('extension-ui-request', { message: 'no kind, no method' })
-  route('message-end', { kind: 'queue', interrupting: [], enqueued: [] })
+  route('session-usage', { kind: 'queue', interrupting: [], enqueued: [] })
+  route('session-usage', { ...SPENT, kind: 'session-usage', cost: -1 })
   route('extension-ui-request', {
     kind: 'extension-ui-request',
     id: '',
@@ -320,7 +340,7 @@ test('a value that is not the observation its name claims moves no store', () =>
   })
   expect(notificationMessages()).toEqual([])
   expect(stores.queue.get()).toEqual([])
-  expect(stores.stats.get().totalCost).toBe(0)
+  expect(stores.usage.get()).toBeUndefined()
 })
 
 test('a chunk this surface does not render is recorded and falls through untouched', () => {
@@ -328,7 +348,7 @@ test('a chunk this surface does not render is recorded and falls through untouch
   route('not-a-kind', { customType: 'modes', data: { mode: 'plan' } })
   route('', { message: 'x' })
   expect(notificationMessages()).toEqual([])
-  expect(stores.stats.get().totalCost).toBe(0)
+  expect(stores.usage.get()).toBeUndefined()
   expect(stores.recentChunks.get().map((chunk) => chunk.name)).toEqual(['unmapped', 'not-a-kind', ''])
 })
 
@@ -349,7 +369,7 @@ test('malformed payloads never throw and never render', () => {
   for (const eventType of [
     'extension-ui-request',
     'custom-entry',
-    'message-end',
+    'session-usage',
     'snapshot',
     'status',
     FOLLOW_ENDED_CUSTOM_EVENT,
@@ -358,7 +378,7 @@ test('malformed payloads never throw and never render', () => {
       expect(() => route(eventType, value)).not.toThrow()
     }
   }
-  expect(stores.stats.get().totalCost).toBe(0)
+  expect(stores.usage.get()).toBeUndefined()
   expect(stores.dialog.get()).toBeUndefined()
   // the one chunk whose value is not read: follow-ended says its piece whatever it carries
   expect(notificationMessages().every((message) => message.includes('the connection to the server ended'))).toBe(true)
@@ -369,14 +389,10 @@ test('malformed payloads never throw and never render', () => {
 // callback must land in that thread and no other.
 test("⚠ a chunk routed to one thread never touches another thread's stores", () => {
   const other = mintThread()
-  observe({
-    kind: 'message-end',
-    role: 'assistant',
-    usage: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalCost: 0.5 },
-  })
+  observe({ kind: 'session-usage', ...SPENT })
   observe({ kind: 'permission-mode', mode: 'plan', available: ['plan'] })
-  expect(stores.stats.get().totalCost).toBe(0.5)
-  expect(other.stats.get().totalCost).toBe(0)
+  expect(stores.usage.get()).toEqual(SPENT)
+  expect(other.usage.get()).toBeUndefined()
   expect(other.permissionMode.get().mode).toBeUndefined()
   expect(other.recentChunks.get()).toEqual([])
 })

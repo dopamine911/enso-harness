@@ -1,11 +1,13 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   type ExtensionAPI,
   type ExtensionCommandContext,
   type InlineExtension,
+  type SessionEntry,
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
 import type { EnsoObservation } from '@enso/core'
@@ -24,8 +26,9 @@ import { readPiccPersistedMode, storedPermissionModeState } from '../permission-
 
 /**
  * The in-process host against the REAL harness package (#69) — every extension the manifest
- * names loads, and inline probe extensions observe what the host does. No model, no key, no
- * network: nothing here prompts. What is asserted are the spike's receipts, pinned:
+ * names loads, and inline probe extensions observe what the host does. No key, no network: the
+ * one test that prompts runs pi's own scripted `faux` provider (#45). What is asserted are the
+ * spike's receipts, pinned:
  *
  *   - the isolation env is set before the first services (else multi-account reads ~/.pi/agent) —
  *     proven by WHERE multi-account resolved its config, not by reading the env back
@@ -714,7 +717,7 @@ test('createSession(threadId) with no file under that id CREATES the session und
   expect((await hostWith().listSessions()).some((stored) => stored.id === threadId)).toBe(false)
 })
 
-test('listSessions names stored sessions newest first with the first user message; readTranscript reads one without building pi', async () => {
+test('listSessions names stored sessions newest first with the first user message; readStoredThread reads one without building pi', async () => {
   const older = crypto.randomUUID()
   const newer = crypto.randomUUID()
   storeSession(older, 'older question', 'older answer')
@@ -728,7 +731,149 @@ test('listSessions names stored sessions newest first with the first user messag
     firstMessage: 'newer question',
     messageCount: 2,
   })
-  const transcript = await host.readTranscript(older)
+  const transcript = (await host.readStoredThread(older))?.transcript
   expect(transcript?.some((entry) => entry.kind === 'message' && entry.role === 'assistant')).toBe(true)
-  expect(await host.readTranscript('never-stored')).toBeUndefined()
+  expect(await host.readStoredThread('never-stored')).toBeUndefined()
+})
+
+// ── session usage (#45): pi's totals, live and stored ────────────────────────
+
+/**
+ * pi's scripted provider, reached THROUGH the runtime's own install: `@earendil-works/pi-ai` is
+ * pi's dependency, not ours, so it is resolved from pi-coding-agent's location rather than
+ * declared (the `agent-loop-contract.test.ts` precedent). The two functions used, typed at this
+ * one boundary by the extension API that consumes them.
+ */
+type ProviderConfig = Parameters<ExtensionAPI['registerProvider']>[1]
+/** pi's recorded usage, as a session entry carries it. */
+type RecordedUsage = Extract<SessionEntry, { type: 'usage' }>['usage']
+interface FauxModule {
+  createFauxCore(options: { provider: string; api: string; models: Array<{ id: string; contextWindow: number }> }): {
+    streamSimple: NonNullable<ProviderConfig['streamSimple']>
+    getModel(): Parameters<ExtensionAPI['setModel']>[0]
+    setResponses(responses: unknown[]): void
+  }
+  fauxAssistantMessage(text: string): unknown
+}
+const piCodingAgentDir = dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent')))
+const faux: FauxModule = await import(Bun.resolveSync('@earendil-works/pi-ai', piCodingAgentDir))
+
+// ⚠ THE ORDER IS pi's, AND IT IS THE BUG THIS PINS. pi hands `message_end` to listeners BEFORE it
+// appends the message to the session (`agent-session.js` `_handleAgentEvent`), so usage read at
+// `message_end` is one message short. The host says it at `turn_end` instead; a pi bump that moves
+// the append after `turn_end` would show every tab a total one request behind, and fails here.
+test("⚠ after a turn the host says the session's usage WITH that turn's spend in it, and pi's window (#45)", async () => {
+  const core = faux.createFauxCore({
+    provider: 'enso-faux',
+    api: 'enso-faux',
+    models: [{ id: 'faux-1', contextWindow: 50_000 }],
+  })
+  core.setResponses([faux.fauxAssistantMessage('hello there')])
+  const fauxModel: InlineExtension = {
+    name: 'enso-host-faux-model',
+    factory: (pi: ExtensionAPI) => {
+      // The CONFIG form with a literal key: pi marks the provider configured synchronously, so
+      // `setModel` below cannot race its availability refresh (the native form is async — it
+      // flaked: `setModel` answered false on some runs).
+      pi.registerProvider('enso-faux', {
+        api: 'enso-faux',
+        baseUrl: 'http://faux.invalid',
+        apiKey: 'faux',
+        streamSimple: core.streamSimple,
+        models: [
+          {
+            id: 'faux-1',
+            name: 'Faux One',
+            reasoning: false,
+            input: ['text'],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 50_000,
+            maxTokens: 1000,
+          },
+        ],
+      })
+      pi.on('session_start', async () => {
+        if (!(await pi.setModel(core.getModel()))) throw new Error('pi refused the faux model')
+      })
+    },
+  }
+  const hosted = await hostedSession([fauxModel])
+  const seen: EnsoObservation[] = []
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.subscribe((observation) => {
+    seen.push(observation)
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  hosted.runtime.prompt({ message: 'hi' }, { onAccepted: () => undefined, onRejected: settled.reject })
+  await settled.promise
+  const answered = seen.findIndex(
+    (observation) => observation.kind === 'message-end' && observation.role === 'assistant',
+  )
+  const spent = seen[answered]
+  const after = seen.slice(answered).find((observation) => observation.kind === 'session-usage')
+  if (spent?.kind !== 'message-end' || spent.usage === undefined || after?.kind !== 'session-usage') {
+    throw new Error(`no assistant spend followed by a session-usage: ${seen.map((observation) => observation.kind)}`)
+  }
+  expect(after.input).toBe(spent.usage.input)
+  expect(after.output).toBe(spent.usage.output)
+  expect(after.context?.window).toBe(50_000)
+  expect(after.context?.tokens).toBeGreaterThan(0)
+  const { kind: _kind, ...said } = after
+  expect(said).toEqual(hosted.runtime.sessionUsage())
+})
+
+// ⚠ A resumed thread and the tab that watched it accumulate must read ONE total. The file's fold
+// (`session-usage.ts`) re-states pi's `getSessionStats` rule; this pins the two equal on a session
+// with every kind pi counts — assistant, summarised tool result, a `usage` entry, a compaction —
+// and spend on a branch the session has since left.
+test("⚠ a stored session's usage is pi's own getSessionStats total — every branch, every kind it counts (#45)", async () => {
+  const threadId = crypto.randomUUID()
+  const file = storeSession(threadId, 'first question', 'first answer')
+  const spend = (input: number, total: number): RecordedUsage => ({
+    input,
+    output: 2,
+    cacheRead: 3,
+    cacheWrite: 4,
+    totalTokens: input + 9,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total },
+  })
+  const more = SessionManager.open(file)
+  const forkPoint = more.getLeafId()
+  if (forkPoint === null) throw new Error('the stored session has no leaf')
+  more.appendMessage({
+    role: 'assistant',
+    content: [{ type: 'text', text: 'on the branch left behind' }],
+    api: 'anthropic-messages',
+    provider: 'anthropic',
+    model: 'test',
+    usage: spend(10, 0.5),
+    stopReason: 'stop',
+    timestamp: Date.now(),
+  } as never)
+  more.branch(forkPoint)
+  more.appendMessage({
+    role: 'toolResult',
+    toolCallId: 'call-1',
+    toolName: 'read',
+    content: [{ type: 'text', text: 'summarised' }],
+    isError: false,
+    usage: spend(20, 0.25),
+    timestamp: Date.now(),
+  } as never)
+  more.appendUsage('cache_warm', 'anthropic', 'test', spend(30, 0.125))
+  more.appendCompaction('summary', null, 100, undefined, false, spend(40, 0.0625))
+
+  const host = hostWith()
+  const stored = await host.readStoredThread(threadId)
+  if (stored === undefined) throw new Error('the stored session was not found')
+  const hosted = await host.createSession(threadId)
+  openSessions.push(hosted)
+  const { context: storedContext, ...fromFile } = stored.usage
+  const { context: _liveContext, ...fromPi } = hosted.runtime.sessionUsage()
+  expect(fromFile).toEqual(fromPi)
+  // Every kind counted, the left branch included: 0.5 + 0.25 + 0.125 + 0.0625 (the first answer spent 0).
+  expect(fromFile.cost).toBe(0.9375)
+  expect(fromFile.input).toBe(1 + 10 + 20 + 30 + 40)
+  // A file does not say which model pi would run, so it does not say the window.
+  expect(storedContext).toBeNull()
 })

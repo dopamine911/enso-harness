@@ -100,6 +100,51 @@ export const EnsoModelState = Type.Object({
 export type EnsoModelState = Static<typeof EnsoModelState>
 
 /**
+ * How full the context window is, as pi reckons it (#45): pi's `getContextUsage()`, never a
+ * number of ours. `tokens` is pi's estimate — the latest assistant request's usage plus what
+ * has been added since — and `null` right after a compaction, until the next response says.
+ *
+ * @group Thread runtime
+ */
+export const EnsoContextUsage = Type.Object(
+  {
+    tokens: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
+    /** The current model's window; a model with none declared has no context usage at all. */
+    window: Type.Number({ exclusiveMinimum: 0 }),
+    percent: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread runtime */
+export type EnsoContextUsage = Static<typeof EnsoContextUsage>
+
+/**
+ * What a thread's session has spent, and how full its context is (#45) — pi's session totals,
+ * which stay authoritative: every usage pi recorded in the session, on every branch, including
+ * the model calls behind a compaction or a branch summary (`getSessionStats`). So a reload, a
+ * resume, or a second tab reads the same total the first tab saw accumulate.
+ *
+ * `context` is `null` when the thread is not live — a file does not say which model pi would
+ * run, so it does not say the window — or when the model declares none.
+ *
+ * @group Thread runtime
+ */
+export const EnsoSessionUsage = Type.Object(
+  {
+    /** Dollars, summed from each usage's `cost.total`; `0` for a provider that reports none. */
+    cost: Type.Number({ minimum: 0 }),
+    input: Type.Number({ minimum: 0 }),
+    output: Type.Number({ minimum: 0 }),
+    cacheRead: Type.Number({ minimum: 0 }),
+    cacheWrite: Type.Number({ minimum: 0 }),
+    context: Type.Union([EnsoContextUsage, Type.Null()]),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread runtime */
+export type EnsoSessionUsage = Static<typeof EnsoSessionUsage>
+
+/**
  * One entry from pi's `get_commands`.
  *
  * ⚠ `source` matters for a reason the field name does not convey: these are the ONLY
@@ -281,6 +326,8 @@ export const ThreadRuntime = Type.Object({
   listCommands: Type.Unsafe<() => RuntimeCommand[]>(Type.Function([], Type.Unknown())),
   /** The model and thinking level this session runs with now (#338 slice 2). Synchronous. */
   modelState: Type.Unsafe<() => EnsoModelState>(Type.Function([], Type.Unknown())),
+  /** What the session has spent and how full its context is, now (#45). Synchronous. */
+  sessionUsage: Type.Unsafe<() => EnsoSessionUsage>(Type.Function([], Type.Unknown())),
   /**
    * Run a `host` command (#338 slice 2): `model` with an `options[].id` (`provider/id`),
    * `thinking` with a level. Resolves when applied; the change itself arrives on the feed as a

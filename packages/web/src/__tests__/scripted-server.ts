@@ -209,6 +209,7 @@ export const SNAPSHOT_IDLE: EnsoFollowSnapshot = {
   permissionMode: { mode: 'default', available: ['default', 'plan'] },
   model: null,
   cwd: '/work/project',
+  usage: { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null },
   messages: [],
   openDialogs: [],
 }

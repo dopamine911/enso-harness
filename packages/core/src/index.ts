@@ -117,6 +117,7 @@ export {
   EnsoPromptRejected,
   EnsoQueue,
   EnsoRunEnded,
+  EnsoSessionUsageObservation,
   EnsoSettled,
   EnsoTextDelta,
   EnsoThinkingDelta,
@@ -145,10 +146,12 @@ export {
 } from './thread-inspection.ts'
 export {
   type DialogAnswer,
+  EnsoContextUsage,
   EnsoHostCommandRun,
   EnsoModelChoice,
   EnsoModelState,
   EnsoPromptAdmission,
+  EnsoSessionUsage,
   EnsoThreadCommands,
   HostCommandOption,
   type HostFlowOutcome,

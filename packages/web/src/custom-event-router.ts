@@ -97,6 +97,7 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     // a snapshot is the resync, and a model this page cannot vouch for is no model.
     stores.model.apply(data.model)
     stores.cwd.set(data.cwd)
+    stores.usage.set(data.usage)
     // The complete list, every snapshot (#114): a reconnect's snapshot is the resync, so an
     // empty list is a fact ("nothing is waiting") this page must apply too — it clears a
     // card for a question that settled while the page was away. One card at a time: a
@@ -151,9 +152,12 @@ function routeObservation(stores: ThreadStores, observation: EnsoObservation): v
       if (shown !== undefined && shown.id === observation.id) stores.dialog.set(undefined)
       return
     }
-    case 'message-end':
-      if (observation.usage !== undefined) stores.stats.applyUsage(observation)
+    case 'session-usage': {
+      // The session's totals and context now (#45) — whole, so the latest replaces.
+      const { kind: _kind, ...usage } = observation
+      stores.usage.set(usage)
       return
+    }
     case 'queue':
       // The whole queue (#75): what cuts in first, then what waits its turn.
       stores.queue.set([...observation.interrupting, ...observation.enqueued])

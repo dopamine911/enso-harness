@@ -204,7 +204,7 @@ test('the state-layer resolver catches every spelling — the alias, the relativ
     // export the hooks and components that carry it. A red line here is the #273 regression —
     // the extension, not the module list, is what the old pattern could not see.
     '@/permission-mode.tsx',
-    '@/thread-stats.tsx',
+    '@/model-state.tsx',
     '../../notifications.tsx',
     '@/thread-status.tsx',
     '@/to-agui.ts',

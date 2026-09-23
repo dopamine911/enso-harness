@@ -3,6 +3,7 @@ import {
   describeThreadEvent,
   describeTranscriptEntry,
   type EnsoLogLine,
+  type EnsoSessionUsage,
   type EnsoThreadEvent,
   EnsoThreadEvents,
   EnsoThreadInspection,
@@ -16,7 +17,6 @@ import { FOLLOW_ENDED_CUSTOM_EVENT, type RecordedCustomEvent } from './custom-ev
 import { type PermissionModeState, usePermissionMode } from './permission-mode.tsx'
 import { type Store, useStore, useThreadStores } from './store.ts'
 import { boundedFailureDetail } from './stored-threads.ts'
-import type { ThreadStats } from './thread-stats.tsx'
 import { browserLogging } from './thread-stores.ts'
 
 const NO_LINES: readonly EnsoLogLine[] = []
@@ -53,12 +53,27 @@ function useRing(ring: Store<readonly EnsoLogLine[]> | undefined): readonly Enso
 
 export interface BrowserBelief {
   readonly mode: PermissionModeState
-  readonly stats: ThreadStats
+  /** The session's totals and context this page last applied (#45); undefined before the first snapshot. */
+  readonly usage: EnsoSessionUsage | undefined
   readonly recentChunks: readonly RecordedCustomEvent[]
   /** The acquisition this page's last run held (the `status` frame's `generation`, #109); undefined before a run. */
   readonly generation: number | undefined
   /** This thread's records from the page's ring (#132): what the browser LOGGED, newest last. */
   readonly logged: readonly EnsoLogLine[]
+}
+
+/** `34% of 200000` — or why there is no number: not live, or unknown after a compaction. */
+function describeContext(context: EnsoSessionUsage['context']): string {
+  if (context === null) return 'none (not live, or no window declared)'
+  if (context.percent === null) return `unknown of ${context.window} (after a compaction)`
+  return `${context.percent.toFixed(1)}% of ${context.window}`
+}
+
+/** `cost $0.0041, 3846 in / 42 out, context 1.9% of 200000` — or `none yet` before the first snapshot. */
+function describeUsage(usage: EnsoSessionUsage | undefined): string {
+  if (usage === undefined) return 'none yet'
+  const prompted = usage.input + usage.cacheRead + usage.cacheWrite
+  return `cost $${usage.cost.toFixed(4)}, ${prompted} in / ${usage.output} out, context ${describeContext(usage.context)}`
 }
 
 /**
@@ -216,9 +231,7 @@ export function ThreadDebugView({
             last run: {browser.generation === undefined ? 'none from this page' : `#${browser.generation}`}
             <Mismatch when={generationDrift !== undefined} says={generationDrift ?? ''} />
           </div>
-          <div>
-            stats: {browser.stats.countedMessages} counted, cost ${browser.stats.totalCost.toFixed(4)}
-          </div>
+          <div>usage: {describeUsage(browser.usage)}</div>
           <h4 className="mt-1 text-foreground">last {browser.recentChunks.length} CUSTOM chunks</h4>
           <ol>
             {browser.recentChunks.map((chunk) => (
@@ -443,7 +456,7 @@ export function ThreadDebugDrawer(): React.ReactNode {
   const stores = useThreadStores()
   const { threadId } = stores
   const mode = usePermissionMode()
-  const stats = useStore(stores.stats)
+  const usage = useStore(stores.usage)
   const recentChunks = useStore(stores.recentChunks)
   const generation = useStore(stores.generation)
   const logging = useStore(browserLogging)
@@ -454,7 +467,7 @@ export function ThreadDebugDrawer(): React.ReactNode {
   const [error, setError] = useState<string | undefined>(undefined)
   const [copyState, setCopyState] = useState<CopyState>('idle')
   const [bundleState, setBundleState] = useState<BundleState>('idle')
-  const browser: BrowserBelief = { mode, stats, recentChunks, generation, logged }
+  const browser: BrowserBelief = { mode, usage, recentChunks, generation, logged }
   // One sequencer per thread id: a new thread starts a new "latest".
   const fetchLatest = useMemo(() => latestWins(() => fetchThreadDebug(threadId)), [threadId])
   const refresh = useCallback((): void => {

@@ -116,7 +116,7 @@ thread on the page gets its own:
  * ⚠ WHY INSTANCES, NOT MODULE STATE. Until this, every store was a module singleton — one
  * mode, one cost, one notification list per PAGE — which was correct only while a page
  * held exactly one thread. The sessions rail holds several and switches between them; a
- * run in one keeps streaming while another is on screen, and its `message-end` must land in
+ * run in one keeps streaming while another is on screen, and its `session-usage` must land in
  * ITS cost, not the visible thread's. So each thread gets its own set, created here, and
  * the pane that renders a thread provides them through `ThreadStoresContext`.
  *
@@ -150,7 +150,13 @@ export interface ThreadStores {
   readonly model: ModelStore
   /** The tree pi runs this thread in (#44), from every snapshot; undefined until the follow's first one. */
   readonly cwd: WritableStore<string | undefined>
-  readonly stats: ThreadStatsStore
+  /**
+   * What the session has spent and how full its context is (#45): the snapshot's `usage`, then
+   * each `session-usage` observation, each the WHOLE state from pi's session totals — so a
+   * reload, a resume or a second tab shows what the first tab saw accumulate. Undefined until
+   * the follow's first snapshot.
+   */
+  readonly usage: WritableStore<EnsoSessionUsage | undefined>
   readonly notifications: NotificationsStore
   readonly modeLines: ModeLines
   readonly recentChunks: RecentChunksStore
@@ -197,10 +203,11 @@ export interface ThreadStores {
 The one path from a custom event to those stores is `routeEnsoCustomEvent` (`custom-event-router.ts:77-108`,
 in prose): it records every event in `recentChunks`, then dispatches on the name, which is the
 observation's `kind` or the frame's `type` (#162 workstream 5) — a `snapshot` to the mode stores, the
-dialog slot and `generation`; a `status` to `generation` (and clears `disconnected`);
-`permission-mode` to the current mode and the mode lines; a blocking `extension-ui-request` to the
-dialog slot when it is free (the oldest question holds it, #271) and a notify to `notifications`;
-`dialog-settled` to the slot; `message-end` to `stats`;
+model, the project, the session's `usage`, the dialog slot and `generation`; a `status` to `generation`
+(and clears `disconnected`); `permission-mode` to the current mode and the mode lines; a `model` to the
+model store; a blocking `extension-ui-request` to the dialog slot when it is free (the oldest question
+holds it, #271) and a notify to `notifications`; `dialog-settled` to the slot; `session-usage` to
+`usage`, whole (#45);
 `queue` to `queue`; `permission-mode-rejected` to a warning notice; `follow-ended` to `disconnected`
 plus a notice. Every value is validated against its schema: a malformed one moves no store rather than
 throwing inside the state layer's stream loop, where a throw would end the run.

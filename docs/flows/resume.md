@@ -23,12 +23,12 @@ sequenceDiagram
   S-->>B: EnsoStoredThread[] { threadId, title = first user message, lastActivityAt, messageCount, busy = peek }
   B->>S: GET /api/threads/:id/history — readThreadUrl(?thread=) at boot, or a rail click
   S->>T: peek(threadId) — never builds
-  S->>H: readTranscript(threadId) when cold · inspect().entries when live
+  S->>H: readStoredThread(threadId) when cold · inspect().entries when live
   H->>D: open the file into memory, walk the branch → transcriptOf
   S-->>B: EnsoThreadHistory { messages: transcriptToMessages, permissionMode: storedPermissionMode, interrupted? }
   B->>B: adoptThread — stores under the stored id, mode applied, urlForThread written
   B->>F: GET …/follow
-  F-->>B: snapshot { live: false, messages, permissionMode, openDialogs: [] }
+  F-->>B: snapshot { live: false, messages, permissionMode, usage (the file's, no context), openDialogs: [] }
   B->>S: POST …/prompt
   S->>T: acquire → createSession(threadId)
   H->>D: the file already under that id is OPENED, not a fresh one
@@ -39,10 +39,10 @@ sequenceDiagram
 ## The invariants it shows
 
 1. **One id, end to end.** `createSession` resolves the thread id through the same listing
-   `readTranscript` uses: a file under that id is opened, none means one is created under it, so
+   `readStoredThread` uses: a file under that id is opened, none means one is created under it, so
    the file it later flushes is found next time. The browser adopts under the history's `threadId`
    (`thread-stores.ts#adoptThread`), so its next prompt reopens the same file.
-2. **Looking must not build (#86).** `readTranscript` opens the file into memory and writes nothing
+2. **Looking must not build (#86).** `readStoredThread` opens the file into memory and writes nothing
    until an append; the history route `peek`s the registry, and a thread neither live nor stored is
    a 404 — while the follow's cold read is an *empty* snapshot, so observation may precede the first
    prompt ([`follow-snapshot-frames.md`](./follow-snapshot-frames.md), invariant 2).
@@ -85,7 +85,7 @@ export const EnsoTranscriptEntry = Type.Union([
 Each marker below is checked by `test/docs-gate.test.ts`: the file must declare a test with exactly
 that title, so a renamed or deleted pin fails this page.
 
-<!-- test: packages/web/src/host/__tests__/agent-host.test.ts#listSessions names stored sessions newest first with the first user message; readTranscript reads one without building pi -->
+<!-- test: packages/web/src/host/__tests__/agent-host.test.ts#listSessions names stored sessions newest first with the first user message; readStoredThread reads one without building pi -->
 - **Invariants 2 and 3, at the seam** — [`agent-host.test.ts`](../../packages/web/src/host/__tests__/agent-host.test.ts),
   against the real session manager: order, first message, count, `undefined` for an id with no file.
 <!-- test: packages/web/src/host/__tests__/agent-host.test.ts#⚠ createSession(threadId) OPENS the session file already under that id — the branch is the stored one, not a fresh file -->

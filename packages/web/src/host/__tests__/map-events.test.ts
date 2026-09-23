@@ -257,6 +257,16 @@ test('a permission_mode event without a well-formed state is carried as unmapped
   expect(kindOf({ type: 'permission_mode', mode: 7, available: [] })).toBe('unmapped')
 })
 
+// #45: a usage the host could not read whole (a negative cost, a missing context) is carried for
+// the debug pane, never applied as the thread's total.
+test('a session_usage event without a well-formed usage is carried as unmapped, never dropped', () => {
+  const usage = { cost: 0.5, input: 1, output: 1, cacheRead: 0, cacheWrite: 0, context: null }
+  expect(kindOf({ type: 'session_usage', ...usage })).toBe('session-usage')
+  expect(kindOf({ type: 'session_usage', ...usage, cost: -1 })).toBe('unmapped')
+  const { context: _context, ...withoutContext } = usage
+  expect(kindOf({ type: 'session_usage', ...withoutContext })).toBe('unmapped')
+})
+
 // ⚠ Non-custom entries duplicate first-class observations (messages stream as
 // message_update), so they stay unmapped exactly as before this case existed.
 test('a non-custom entry stays unmapped', () =>

@@ -1,4 +1,10 @@
-import { type EnsoDialogSpec, type EnsoInterruptedTail, type EnsoThreadHistory, ensoLogger } from '@enso/core'
+import {
+  type EnsoDialogSpec,
+  type EnsoInterruptedTail,
+  type EnsoSessionUsage,
+  type EnsoThreadHistory,
+  ensoLogger,
+} from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import type { BrowserLogging } from './browser-logging.ts'
 import { createRecentChunksStore, type RecentChunksStore } from './custom-event-router.ts'
@@ -8,7 +14,6 @@ import { createModelStore, type ModelStore } from './model-state.tsx'
 import { createNotificationsStore, type NotificationsStore } from './notifications.tsx'
 import { createPermissionModeStore, type PermissionModeStore } from './permission-mode.tsx'
 import { createStore, type Store, type WritableStore } from './store.ts'
-import { createThreadStatsStore, type ThreadStatsStore } from './thread-stats.tsx'
 
 /**
  * Everything the browser knows about one thread beyond its messages (#90 PR 3).
@@ -16,7 +21,7 @@ import { createThreadStatsStore, type ThreadStatsStore } from './thread-stats.ts
  * ⚠ WHY INSTANCES, NOT MODULE STATE. Until this, every store was a module singleton — one
  * mode, one cost, one notification list per PAGE — which was correct only while a page
  * held exactly one thread. The sessions rail holds several and switches between them; a
- * run in one keeps streaming while another is on screen, and its `message-end` must land in
+ * run in one keeps streaming while another is on screen, and its `session-usage` must land in
  * ITS cost, not the visible thread's. So each thread gets its own set, created here, and
  * the pane that renders a thread provides them through `ThreadStoresContext`.
  *
@@ -50,7 +55,13 @@ export interface ThreadStores {
   readonly model: ModelStore
   /** The tree pi runs this thread in (#44), from every snapshot; undefined until the follow's first one. */
   readonly cwd: WritableStore<string | undefined>
-  readonly stats: ThreadStatsStore
+  /**
+   * What the session has spent and how full its context is (#45): the snapshot's `usage`, then
+   * each `session-usage` observation, each the WHOLE state from pi's session totals — so a
+   * reload, a resume or a second tab shows what the first tab saw accumulate. Undefined until
+   * the follow's first snapshot.
+   */
+  readonly usage: WritableStore<EnsoSessionUsage | undefined>
   readonly notifications: NotificationsStore
   readonly modeLines: ModeLines
   readonly recentChunks: RecentChunksStore
@@ -110,7 +121,7 @@ function createThreadStores(threadId: string, history: readonly UIMessage[], fet
     permissionMode: createPermissionModeStore(),
     model: createModelStore(),
     cwd: createStore<string | undefined>(undefined),
-    stats: createThreadStatsStore(),
+    usage: createStore<EnsoSessionUsage | undefined>(undefined),
     notifications,
     modeLines: createModeLines(notifications),
     recentChunks: createRecentChunksStore(),

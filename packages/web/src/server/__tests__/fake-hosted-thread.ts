@@ -6,6 +6,7 @@ import type {
   EnsoModelState,
   EnsoObservation,
   EnsoPermissionModeState,
+  EnsoSessionUsage,
   EnsoTranscriptEntry,
   HostFlowOutcome,
   PromptOutcome,
@@ -64,6 +65,16 @@ function freshFakeModelState(): EnsoModelState {
   }
 }
 
+/** A session that has spent nothing — no context, as a file or a fresh fake reports it. */
+const FAKE_NO_USAGE: EnsoSessionUsage = {
+  cost: 0,
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  context: null,
+}
+
 export interface FakeThreadRecord {
   readonly prompts: PromptRequest[]
   readonly answers: DialogAnswer[]
@@ -75,6 +86,8 @@ export interface FakeThreadRecord {
   readonly flows: Array<{ readonly run: EnsoHostCommandRun; settled: boolean; readonly settle: () => void }>
   /** The model state `modelState()` reads and `runHostCommand` writes; a test sets it to start elsewhere. */
   modelState: EnsoModelState
+  /** What `sessionUsage()` reads (#45); a test sets it to what pi would have summed. */
+  sessionUsage: EnsoSessionUsage
   aborts: number
   queueClears: number
   disposed: number
@@ -117,6 +130,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     hostCommands: [],
     flows: [],
     modelState: freshFakeModelState(),
+    sessionUsage: { ...FAKE_NO_USAGE },
     aborts: 0,
     queueClears: 0,
     disposed: 0,
@@ -156,6 +170,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     // over the fake's models — the real host's order.
     listCommands: () => fakeHostRows(record),
     modelState: () => record.modelState,
+    sessionUsage: () => record.sessionUsage,
     runHostCommand: (run: EnsoHostCommandRun) => {
       // What the real host does: the shared decision, the set, then the state said as `model`.
       record.hostCommands.push(run)
@@ -260,6 +275,8 @@ export interface FakeStoredThread {
   readonly firstMessage: string
   /** The mode the fake reports for this thread's branch; the fresh mode when absent. */
   readonly mode?: string
+  /** What pi's rule sums over the file (#45); nothing spent when absent. */
+  readonly usage?: EnsoSessionUsage
 }
 
 const FAKE_FRESH_MODE: EnsoPermissionModeState = { mode: 'default', available: ['default'] }
@@ -294,6 +311,13 @@ export function createFakeAgentHost(
           firstMessage: storedThread.firstMessage,
         })),
       ),
-    readTranscript: (threadId: string) => Promise.resolve(stored[threadId]?.transcript),
+    readStoredThread: (threadId: string) => {
+      const storedThread = stored[threadId]
+      return Promise.resolve(
+        storedThread === undefined
+          ? undefined
+          : { transcript: storedThread.transcript, usage: storedThread.usage ?? { ...FAKE_NO_USAGE } },
+      )
+    },
   }
 }

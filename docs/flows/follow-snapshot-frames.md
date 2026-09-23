@@ -22,8 +22,8 @@ sequenceDiagram
   B->>R: GET …/follow
   R->>T: observe(threadId) — same tick as the snapshot
   T-->>R: asOfSeq
-  R->>H: inspect().entries (live) · readTranscript (cold)
-  R-->>B: snapshot { asOfSeq, live, busy, generation, permissionMode, messages, openDialogs }
+  R->>H: inspect().entries (live) · readStoredThread (cold)
+  R-->>B: snapshot { asOfSeq, live, busy, generation, permissionMode, model, cwd, usage, messages, openDialogs }
   Note over H: first subscriber: held events REPLAYED, origin `session-start`, tail says `replayed`
   P->>H: event
   H-->>T: observation (LIVE)
@@ -97,6 +97,12 @@ export const EnsoFollowSnapshot = Type.Object(
      * reload (`follow-connection.ts`) rather than going quietly stale.
      */
     cwd: Type.String(),
+    /**
+     * What the session has spent and how full its context is (#45), as of this snapshot — pi's
+     * totals from the live session, or from the file when the thread is not live (then with no
+     * `context`). Later changes arrive as `session-usage` observations, each the whole state.
+     */
+    usage: EnsoSessionUsage,
     /** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not enso's. */
     messages: Type.Array(Type.Unknown()),
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */

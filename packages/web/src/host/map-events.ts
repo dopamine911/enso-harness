@@ -6,10 +6,12 @@ import {
   EnsoNotifyType,
   type EnsoObservation,
   EnsoPermissionModeState,
+  EnsoSessionUsage,
   type EnsoToolResultDescriptor,
   type EnsoUsage,
   isEnsoDialogSpec,
 } from '@enso/core'
+import type { Static, TSchema } from 'typebox'
 import { Check } from 'typebox/value'
 import type { EventDelivery, RuntimeEvent } from './runtime-event.ts'
 
@@ -176,26 +178,21 @@ function textsOf(value: unknown): string[] {
 }
 
 /**
- * The host's own event (L3, #162 workstream 4): it saw its mode extension persist a change
- * and says what the mode is now and what may be switched to — the browser never learns which
- * entry that was. Checked like every crossing: a malformed one is carried as unmapped, never
+ * The host's own events — its state, said whole, as the host reads it: the MODE after its mode
+ * extension persisted a change (L3, #162 workstream 4 — the browser never learns which entry
+ * that was); the MODEL and thinking level after a `/model`, a `/thinking` or a failover swap pi's
+ * extension made (#338 slice 2 — `agent-host.ts`'s header says where each half is heard); the
+ * session's USAGE after a turn, a run, a compaction or a model change (#45 — pi's
+ * `getSessionStats`). Checked like every crossing: a malformed one is carried as unmapped, never
  * dropped.
  */
-function mapPermissionMode(event: RuntimeEvent): EnsoObservation {
+function hostState<Schema extends TSchema>(
+  event: RuntimeEvent,
+  schema: Schema,
+  observe: (state: Static<Schema>) => EnsoObservation,
+): EnsoObservation {
   const { type: _type, ...state } = event
-  if (Check(EnsoPermissionModeState, state)) return { kind: 'permission-mode', ...state }
-  return { kind: 'unmapped', event }
-}
-
-/**
- * The host's other own event (#338 slice 2): the model and thinking level now, said once per
- * change — after a `/model` or `/thinking` from the palette, or a failover swap pi's extension
- * made (`agent-host.ts`'s header says where each half is heard). Same crossing check as the mode.
- */
-function mapModel(event: RuntimeEvent): EnsoObservation {
-  const { type: _type, ...state } = event
-  if (Check(EnsoModelState, state)) return { kind: 'model', ...state }
-  return { kind: 'unmapped', event }
+  return Check(schema, state) ? observe(state) : { kind: 'unmapped', event }
 }
 
 /**
@@ -337,10 +334,13 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
     }
 
     case 'permission_mode':
-      return mapPermissionMode(event)
+      return hostState(event, EnsoPermissionModeState, (mode) => ({ kind: 'permission-mode', ...mode }))
 
     case 'model':
-      return mapModel(event)
+      return hostState(event, EnsoModelState, (model) => ({ kind: 'model', ...model }))
+
+    case 'session_usage':
+      return hostState(event, EnsoSessionUsage, (usage) => ({ kind: 'session-usage', ...usage }))
 
     case 'entry_appended': {
       // ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via

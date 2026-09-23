@@ -1,13 +1,13 @@
 import { expect, test } from 'bun:test'
+import type { EnsoSessionUsage } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { ThreadStats } from '../thread-stats.tsx'
 import { countThread, describeActivity, ThreadStatusView } from '../thread-status.tsx'
 
 /**
  * #90 PR 1: the always-on status bar. Activity and counts are derived from the message
- * list the page already holds; cost from the #45 store. Tested as the two pure functions
- * plus a static render of the view, the thread-debug.test.tsx pattern.
+ * list the page already holds; cost and context from pi's session usage (#45). Tested as the
+ * two pure functions plus a static render of the view, the thread-debug.test.tsx pattern.
  */
 
 const user = (id: string, content: string): UIMessage => ({ id, role: 'user', parts: [{ type: 'text', content }] })
@@ -26,7 +26,7 @@ const result = (toolCallId: string): UIMessage['parts'][number] => ({
   state: 'complete',
 })
 
-const NO_STATS: ThreadStats = { totalCost: 0, lastRequestInputTokens: undefined, countedMessages: 0 }
+const NO_USAGE: EnsoSessionUsage = { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null }
 
 // ── activity ─────────────────────────────────────────────────────────────────
 
@@ -130,7 +130,7 @@ const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string 
     <ThreadStatusView
       activity={props.activity ?? { kind: 'idle' }}
       counts={props.counts ?? { prompts: 0, toolCalls: 0 }}
-      stats={props.stats ?? NO_STATS}
+      usage={'usage' in props ? props.usage : NO_USAGE}
       cwd={props.cwd}
     />,
   )
@@ -143,8 +143,8 @@ test('a fresh session renders idle with zeros — never an empty string', () => 
   expect(rendered).toContain('0 prompts')
   expect(rendered).toContain('0 tool calls')
   expect(rendered).toContain('$0.0000')
-  // No last-request figure before the first request: absent, not a fabricated zero.
-  expect(rendered).not.toContain('tok in')
+  // No context before a live session says its window: absent, not a fabricated zero.
+  expect(rendered).not.toContain('context')
 })
 
 test('disconnected renders as its own word, not pulsing, with the recovery in the title', () => {
@@ -161,15 +161,36 @@ test('the running tool is named, and counts read as English', () => {
   expect(rendered).toContain('1 tool call<')
 })
 
-test("cost and the last request's prompt size are labelled honestly", () => {
-  const rendered = render({ stats: { totalCost: 0.0132, lastRequestInputTokens: 12_345, countedMessages: 1 } })
+// #45: before the follow's first snapshot the page does not know what was spent — `$0.0000`
+// there was the resumed-thread bug (a thread that had spent, shown as free).
+test('cost before the first snapshot is unknown, not zero', () => {
+  const rendered = render({ usage: undefined })
+  expect(rendered).toContain('$—')
+  expect(rendered).not.toContain('$0.0000')
+})
+
+// The meter is pi's figure over pi's window: the percent it reports, the tokens in the title.
+test("context is pi's percent of its window, with the token count, clamped in the meter", () => {
+  const usage: EnsoSessionUsage = {
+    ...NO_USAGE,
+    cost: 0.0132,
+    context: { tokens: 68_400, window: 200_000, percent: 34.2 },
+  }
+  const rendered = render({ usage })
   expect(rendered).toContain('$0.0132')
-  expect(rendered).toContain('12,345')
-  // ⚠ "last … tok in", NOT "context": the window size does not cross the wire (#44), so a
-  // context label would claim a measurement this bar does not have. Visible text only —
-  // the hover title legitimately says "not a context-window percentage".
-  const visibleText = rendered.replace(/<[^>]*>/g, ' ')
-  expect(visibleText).not.toContain('context')
+  expect(rendered).toContain('34% · 68.4K / 200K')
+  expect(rendered).toContain('68,400 of 200,000 tokens')
+  expect(rendered).toContain('value="34"')
+  const over = render({ usage: { ...usage, context: { tokens: 210_000, window: 200_000, percent: 105 } } })
+  expect(over).toContain('105%')
+  expect(over).toContain('value="100"')
+})
+
+// pi says `tokens: null` after a compaction until the next response; a guessed number would lie.
+test('context after a compaction says unknown over the window, with no meter', () => {
+  const rendered = render({ usage: { ...NO_USAGE, context: { tokens: null, window: 200_000, percent: null } } })
+  expect(rendered).toContain('context ? / 200K')
+  expect(rendered).not.toContain('<meter')
 })
 
 // #44: the project, as a reader names it — the directory's own name on the bar, the full path on

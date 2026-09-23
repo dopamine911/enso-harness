@@ -19,6 +19,7 @@ import {
   type EnsoOpenDialog,
   type EnsoPermissionModeState,
   type EnsoPromptAdmission,
+  type EnsoSessionUsage,
   type EnsoThreadEvent,
   type EnsoTranscriptEntry,
   ensoLogger,
@@ -61,6 +62,7 @@ import {
 } from './permission-mode-adapter.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
+import { growsSessionSpend, liveSessionUsage, storedSessionUsage } from './session-usage.ts'
 import { transcriptOf } from './transcript.ts'
 
 const log = ensoLogger('host')
@@ -306,14 +308,23 @@ export interface AgentHost {
   /** pi's session files for this workspace, newest first — the resumable listing. */
   listSessions(): Promise<StoredThread[]>
   /**
-   * The transcript of a stored session, read-only — no pi session is built, nothing is
-   * written (#86's rule: looking must not build). `undefined` when no file has that id.
+   * A stored session, read-only — no pi session is built, nothing is written (#86's rule:
+   * looking must not build): its branch as the transcript of ours, and pi's totals over the
+   * whole file (#45). `undefined` when no file has that id.
    */
-  readTranscript(threadId: string): Promise<EnsoTranscriptEntry[] | undefined>
+  readStoredThread(threadId: string): Promise<StoredThreadRead | undefined>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
   storedPermissionMode(transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState
+}
+
+/** One stored session as `readStoredThread` reads it — both halves from one open of the file. */
+export interface StoredThreadRead {
+  /** The branch, root to leaf. */
+  readonly transcript: EnsoTranscriptEntry[]
+  /** Every usage in the file, on every branch, by pi's rule (`session-usage.ts`); no context. */
+  readonly usage: EnsoSessionUsage
 }
 
 /**
@@ -414,11 +425,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     return (await listSessions()).find((stored) => stored.id === threadId)?.path
   }
 
-  async function readTranscript(threadId: string): Promise<EnsoTranscriptEntry[] | undefined> {
+  async function readStoredThread(threadId: string): Promise<StoredThreadRead | undefined> {
     const path = await storedSessionPath(threadId)
     if (path === undefined) return undefined
     // `open` loads the file into memory and writes nothing until an append.
-    return transcriptOf(SessionManager.open(path).getBranch())
+    const stored = SessionManager.open(path)
+    return { transcript: transcriptOf(stored.getBranch()), usage: storedSessionUsage(stored.getEntries()) }
   }
 
   async function createSession(threadId: string): Promise<HostedThread> {
@@ -564,6 +576,24 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     }
 
     /**
+     * Say the session's totals and context as the host's own event (#45), ONCE per change — pi's
+     * `getSessionStats`, whole, never a delta, so a follower applies the latest and cannot
+     * double-count. Said after each event `growsSessionSpend` names (`session-usage.ts` says why
+     * those and not `message_end`), and on a model change.
+     *
+     * ⚠ DECLARED ABOVE `announceModelState`, which calls it: `announcedSessionUsage` is a `let`, and
+     * a call that ran before this line would throw (PR #357 review).
+     */
+    let announcedSessionUsage: string | undefined
+    function announceSessionUsage(): void {
+      const usage = liveSessionUsage(session.getSessionStats())
+      const serialized = JSON.stringify(usage)
+      if (serialized === announcedSessionUsage) return
+      announcedSessionUsage = serialized
+      emit({ type: 'session_usage', ...usage })
+    }
+
+    /**
      * Say the model state as the host's own event, ONCE per change. A `/model` reaches here up to
      * three times — `thinking_level_changed` when the new model clamps the level, `model_select`,
      * and the command's own call — and every arrival reads the same state; the feed hears one.
@@ -575,6 +605,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       if (serialized === announcedModelState) return
       announcedModelState = serialized
       emit({ type: 'model', ...state })
+      // A new model is a new context window: the usage's `context` moved with it.
+      announceSessionUsage()
     }
     onModelSelect = announceModelState
 
@@ -779,6 +811,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // The thinking half of the model state — the module header says why the model half
         // arrives through the watcher extension instead.
         if (wire.type === 'thinking_level_changed') announceModelState()
+        if (growsSessionSpend(event)) announceSessionUsage()
       } catch (error) {
         log.error('a session event could not be emitted: {error}', { threadId, error })
       }
@@ -873,6 +906,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         })
       },
       modelState: currentModelState,
+      sessionUsage: () => liveSessionUsage(session.getSessionStats()),
       async runHostCommand(run: EnsoHostCommandRun): Promise<void> {
         const decision = decideHostCommand(run, currentModelState(), session.modelRuntime.getAvailableSnapshot())
         switch (decision.kind) {
@@ -1001,7 +1035,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     cwd,
     createSession,
     listSessions,
-    readTranscript,
+    readStoredThread,
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,
   }

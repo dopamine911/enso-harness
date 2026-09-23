@@ -32,10 +32,11 @@ export interface AgentHost {
   /** pi's session files for this workspace, newest first — the resumable listing. */
   listSessions(): Promise<StoredThread[]>
   /**
-   * The transcript of a stored session, read-only — no pi session is built, nothing is
-   * written (#86's rule: looking must not build). `undefined` when no file has that id.
+   * A stored session, read-only — no pi session is built, nothing is written (#86's rule:
+   * looking must not build): its branch as the transcript of ours, and pi's totals over the
+   * whole file (#45). `undefined` when no file has that id.
    */
-  readTranscript(threadId: string): Promise<EnsoTranscriptEntry[] | undefined>
+  readStoredThread(threadId: string): Promise<StoredThreadRead | undefined>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
@@ -220,10 +221,12 @@ export const EnsoInterruptedTail = Type.Union([
 
 **Implemented once**, in `packages/web/src/host/agent-host.ts`, the only file that imports the runtime's
 `SessionManager`. `listSessions` goes through the runtime's own listing, never a directory scan,
-newest first. `readTranscript` resolves the id to a path through that listing, opens the file into
+newest first. `readStoredThread` resolves the id to a path through that listing, opens the file into
 memory (nothing is written until an append) and converts the branch through
 `packages/web/src/host/transcript.ts` — the one place above `session-events.ts` that reads the
-runtime's stored entry shapes. `createSession` resolves the same path, then *opens* the file or
+runtime's stored message shapes — and, from the same open, sums the spend pi recorded in the file
+through `packages/web/src/host/session-usage.ts` (#45): pi's `getSessionStats` rule over every entry,
+every branch, pinned equal to pi's own total in `agent-host.test.ts`. `createSession` resolves the same path, then *opens* the file or
 *creates* one under the thread's id: the thread id IS the session id (#95), so resume needs no mapping
 and no index file. `inspect()` reads ids and directory straight off the session manager and converts
 the live branch the same way. The host is tested against the real session manager in
@@ -235,7 +238,7 @@ marking `busy` by peeking the registry; `GET /api/threads` summarises each live 
 `packages/web/src/server/thread-registry.ts` is the only builder (it is handed `host.createSession`),
 and its `inspectThread` is the one place a `EnsoThreadInspection` is assembled, so the thread route and
 the bundle cannot drift. The LIVE-OR-COLD read — `inspect().entries` when the thread is live,
-`host.readTranscript` when it is cold — is `packages/web/src/server/thread-read.ts`
+`host.readStoredThread` when it is cold — is `packages/web/src/server/thread-read.ts`
 (`readThreadMount`), and it has one caller shape: `GET …/history` (404 when the server holds neither)
 and the follow's snapshot (an empty snapshot instead). ⚠ It was written twice until #214, and the two
 copies disagreed: the follow re-peeked the registry after the awaited file read and the history route
@@ -267,7 +270,7 @@ converter, so the test reads what the real host would hand out.
 runtime's own entry shapes — and `EnsoThreadInspection` carried them to the wire "carried, not
 modelled", with three readers above the host knowing the vendor's field names. Now the host converts
 the branch in `packages/web/src/host/transcript.ts` — the one place above `session-events.ts` that
-reads a stored entry — and hands out `EnsoTranscriptEntry[]` from `readTranscript` and `inspect()`;
+reads a stored entry — and hands out `EnsoTranscriptEntry[]` from `readStoredThread` and `inspect()`;
 `server/transcript-to-messages.ts` assembles messages from ours and decodes nothing;
 `describeTranscriptEntry` in core formats ours for the drawer and `enso-thread.ts`; the stored mode
 walk reads our `custom` entries. The glossary gate's row for the old reader is gone, and the gate
@@ -281,10 +284,11 @@ a thread that has only run slash commands has a full branch and no file, and `li
 
 ## Pivot cost
 
-Replace the store — another file layout, a database, a remote log — and the file that changes is
-`packages/web/src/host/agent-host.ts` (`listSessions`, `readTranscript`, the open-or-create in
-`createSession`, `inspect()`) and `packages/web/src/host/transcript.ts` (the new store's entries → the
-transcript of ours). That is what the storage-seam test measures: a second importer of the session
+Replace the store — another file layout, a database, a remote log — and the files that change are
+`packages/web/src/host/agent-host.ts` (`listSessions`, `readStoredThread`, the open-or-create in
+`createSession`, `inspect()`), `packages/web/src/host/transcript.ts` (the new store's entries → the
+transcript of ours) and `packages/web/src/host/session-usage.ts` (the new store's recorded spend → pi's
+totals). That is what the storage-seam test measures: a second importer of the session
 manager anywhere else is a failing test with the file named. The server routes, the registry, the
 follow's snapshot, the wire schemas, the reader, the drawer, the browser and every server test over
 the fake host do not change: the fake implements `AgentHost` from plain closures over stored
