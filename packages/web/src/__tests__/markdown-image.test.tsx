@@ -7,7 +7,7 @@ import { ensureDom, releaseDom } from './dom-environment.ts'
 // ⚠ A DOM before react-dom/client evaluates — `command-palette.test.tsx` has the reason.
 ensureDom()
 const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-dom/client')
-const { MarkdownImage }: typeof MarkdownImageModule = await import('../markdown-image.tsx')
+const { MarkdownImage, remoteImageHost }: typeof MarkdownImageModule = await import('../markdown-image.tsx')
 
 afterAll(releaseDom)
 
@@ -30,4 +30,9 @@ test('a remote markdown image loads when its button is clicked, not before', asy
   expect(container.querySelector('button')).toBeNull()
   await flush(async () => root.unmount())
   container.remove()
+})
+
+// A source that is not a URL at all still waits for a click, and the button names no fake host.
+test('an unparseable image source is remote, named as an unrecognised address', () => {
+  expect(remoteImageHost('http://[')).toBe('an unrecognised address')
 })

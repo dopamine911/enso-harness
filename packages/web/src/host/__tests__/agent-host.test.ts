@@ -184,10 +184,10 @@ test('⚠ multi-account resolved its config inside the scratch agent dir, not ~/
 /**
  * ⚠ #351. pi-multi-account ≥1.22 keeps ONE root session per process — a lease on
  * `globalThis[Symbol.for('pi-multi-account:active-root-session')]` — and a session that starts
- * while it is held goes passive for its whole life: automatic failover OFF. The host clears the
- * lease before each session binds, so every thread is a root (1.21's behaviour). Red means the
- * host no longer clears it or upstream renamed the symbol: the thread in use would silently lose
- * failover again — re-read the lease, then the `agent-host.ts` header.
+ * while it is held goes passive for its whole life: automatic failover OFF. The host holds that
+ * slot permanently empty from its creation, so every thread is a root (1.21's behaviour). Red
+ * means the host no longer holds it or upstream renamed the symbol: the thread in use would
+ * silently lose failover again — re-read the lease, then the `agent-host.ts` header.
  */
 test('⚠ a thread started while another is live is a multi-account ROOT too — failover on (#351)', async () => {
   const first = await hostedSession()

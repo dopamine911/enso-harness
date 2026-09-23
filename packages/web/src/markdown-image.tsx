@@ -13,19 +13,30 @@ import { type ComponentPropsWithoutRef, useState } from 'react'
  * Wired as `TextPart`'s `components.img`, TanStack's public override for intrinsic elements.
  */
 
-/** A base no page is served from: resolving against it separates this server's own paths from another host. */
-const LOCAL_BASE = new URL('http://enso.invalid/')
+/**
+ * Two bases no page is served from. A source that resolves to a DIFFERENT origin against each is
+ * relative — it names no host of its own and stays on this page's server. One that resolves to
+ * the same origin against both named its host itself, whatever that host is.
+ */
+const PROBE_BASES = [new URL('http://a.invalid/'), new URL('http://b.invalid/')] as const
+/** What the button names when the source is not a URL at all — still behind the click. */
+const UNRECOGNISED_ADDRESS = 'an unrecognised address'
 
 /**
  * The host a markdown image would be fetched from, or `undefined` when it stays on this page's
- * own server. PARSED, not pattern-matched: `//host/x` and `/\host/x` look relative, the link
- * filter keeps both, and a browser resolves both to another host. A source the parser refuses
- * is treated as remote — the click is the safe default for anything unrecognised.
+ * own server. Decided by whether the source DEPENDS on the base, not by comparing hosts:
+ * `//host/x` and `/\host/x` look relative, the link filter keeps both, and a browser resolves
+ * both to another host; and no host a model can write — a placeholder's included — is exempt.
+ *
+ * ⚠ An ABSOLUTE URL to this page's own origin counts as remote and waits for a click. That is
+ * deliberate: rendering has no page origin to compare against (static render and tests have no
+ * `window`), and the click is the safe direction. Do not "fix" it with `window.location`.
  */
 export function remoteImageHost(source: string): string | undefined {
-  if (!URL.canParse(source, LOCAL_BASE)) return source
-  const { host } = new URL(source, LOCAL_BASE)
-  return host === LOCAL_BASE.host ? undefined : host
+  const [first, second] = PROBE_BASES
+  if (!URL.canParse(source, first)) return UNRECOGNISED_ADDRESS
+  const resolved = new URL(source, first)
+  return resolved.origin === new URL(source, second).origin ? resolved.host || UNRECOGNISED_ADDRESS : undefined
 }
 
 /** `TextPart`'s `img`: a local image as itself, a remote one behind one click. */

