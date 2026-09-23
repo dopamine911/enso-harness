@@ -653,14 +653,15 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // The credential IS stored past this line (PR #346 review): what follows can fail —
         // pi refusing the model, the catalog not refreshing — and is said as a warning, never
         // as a failed login that `/logout` would then contradict by listing the credential.
-        let selected: string | undefined
         try {
-          selected = await settleAfterLogin(providerId)
+          const selected = await settleAfterLogin(providerId)
+          ui.uiContext.notify(loginDoneText(providerName, authType, selected), 'info')
         } catch (error) {
+          // Said ONCE, and neutrally: the throw may be the catalog refresh after the model was
+          // selected, so "could not select a model" would be wrong (PR #346 review 3).
           const reason = error instanceof Error ? error.message : String(error)
-          ui.uiContext.notify(`Logged in to ${providerName}; could not select a model: ${reason}`, 'warning')
+          ui.uiContext.notify(`Logged in to ${providerName}; post-login setup failed: ${reason}`, 'warning')
         }
-        ui.uiContext.notify(loginDoneText(providerName, authType, selected), 'info')
       } catch (error) {
         if (isFlowCancelled(error)) ui.uiContext.notify(`Login to ${providerName} cancelled.`, 'info')
         else {

@@ -421,14 +421,16 @@ test('⚠ POST …/command with a flow row: 202 on start, the thread is not busy
   expect(second.status).toBe(422)
   expect(await second.text()).toBe('/login is already in progress here')
 
-  // The flow ends on its own clock: its notify and the model state land on the feed. First let
-  // the prompt above and the refused start finish their lease frames — a predicate, not a count.
-  await follow.untilQuiet()
+  // The flow ends on its own clock: its notify and the model state land on the feed. Waited for
+  // by predicate — the `model` observation itself — and read as observations only, so the lease
+  // frames of the prompt and the refused start above cannot race the assertion.
   const beforeSettle = follow.frames.length
   thread.flows[0]?.settle()
-  await follow.untilFrames(beforeSettle + 2)
-  const kinds = follow.frames.map((frame) => (frame.type === 'observation' ? frame.observation.kind : frame.type))
-  expect(kinds.slice(beforeSettle)).toEqual(['extension-ui-request', 'model'])
+  await follow.untilFrame((frame) => frame.type === 'observation' && frame.observation.kind === 'model')
+  const observed = follow.frames
+    .slice(beforeSettle)
+    .flatMap((frame) => (frame.type === 'observation' ? [frame.observation.kind] : []))
+  expect(observed).toEqual(['extension-ui-request', 'model'])
 
   const refused = await run({ name: 'login', value: 'nowhere/oauth' })
   expect(refused.status).toBe(422)
