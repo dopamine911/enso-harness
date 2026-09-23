@@ -692,7 +692,9 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       body: JSON.stringify(run),
     })
     if (response === undefined) return 'unreachable'
-    if (response.status === 204) return 'told'
+    // 204: applied (`/model`, `/thinking`). 202: STARTED (`/login`, `/logout`, #338 slice 3) — the
+    // flow's questions and progress arrive on the feed; told is what this route can say.
+    if (response.status === 204 || response.status === 202) return 'told'
     const outcome: HostCommandOutcome = response.status === 409 ? 'busy' : 'refused'
     problem('/{name} {outcome}: {status} {body}', {
       name: run.name,

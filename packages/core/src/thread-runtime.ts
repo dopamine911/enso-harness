@@ -121,10 +121,15 @@ export const RuntimeCommand = Type.Object({
   /**
    * `host` rows only (#338): what the row IS, not what widget draws it. `select` — one of many
    * `options`, the second step filters them (`/model`); `level` — one of a few ordered `options`,
-   * chosen in place (`/thinking`); `action` — runs with no value (`/compact`, `/login`; later
-   * slices). The palette renders by kind; nothing is per-command UI.
+   * chosen in place (`/thinking`); `flow` — chosen like a `select`, but the choice STARTS
+   * something rather than applying it: `/login` and `/logout` (slice 3) run as dialog flows,
+   * their questions and progress arriving on the feed, the route answering 202 when the flow has
+   * begun; `action` — runs with no value (`/compact`, slice 4). The palette renders by kind;
+   * nothing is per-command UI.
    */
-  kind: Type.Optional(Type.Union([Type.Literal('select'), Type.Literal('level'), Type.Literal('action')])),
+  kind: Type.Optional(
+    Type.Union([Type.Literal('select'), Type.Literal('level'), Type.Literal('flow'), Type.Literal('action')]),
+  ),
   /** `host` rows: the current choice, as an `options[].id`. Absent when the list is `remembered` — a thread with no live session has no current value to show. */
   value: Type.Optional(Type.String()),
   /** `host` rows with `kind: 'select' | 'level'`: what may be chosen. */
@@ -273,6 +278,22 @@ export const ThreadRuntime = Type.Object({
    */
   runHostCommand: Type.Unsafe<(run: EnsoHostCommandRun) => Promise<void>>(
     Type.Function([Type.Unknown()], Type.Unknown()),
+  ),
+  /**
+   * Start a `flow` host command (#338 slice 3): `login` with a `provider/authType` option,
+   * `logout` with a provider. Fire-and-forget like `prompt`, and for the same reason: a login
+   * may wait minutes on a device code, and the route must not. `outcome.onAccepted` fires once
+   * the flow has begun (the route's 202); `onRejected(reason)` before that for an option the
+   * host cannot start (the route's 422). ⚠ A FLOW IS NOT A RUN: the lease is released on
+   * acceptance, as a mode change's is — holding it would mark the thread busy for the whole
+   * login (composer disabled, prompts refused; measured in the slice-3 smoke). The flow lives
+   * on the session instead: it ends with pi's own expiry, or when the session is disposed —
+   * the host aborts it then. The flow's questions are the same blocking dialogs an extension
+   * asks (`extension-ui-request`), its progress is `notify` lines, and its result is a `model`
+   * observation and a final notify.
+   */
+  startHostFlow: Type.Unsafe<(run: EnsoHostCommandRun, outcome: PromptOutcome) => void>(
+    Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
   ),
   /**
    * The permission-mode receipt a run starts with (#84): picc's CURRENT mode for this

@@ -435,8 +435,10 @@ export function DialogAnswerControls({
       ) : (
         <Input
           name="answer"
+          // A credential (#338 slice 3: `/login`'s API key) is masked, and never a transcript line.
+          type={dialog.method === 'input' && dialog.secret === true ? 'password' : 'text'}
           placeholder={dialog.placeholder ?? ''}
-          autoComplete="off"
+          autoComplete={dialog.method === 'input' && dialog.secret === true ? 'new-password' : 'off'}
           disabled={disabled}
           className="flex-1"
         />

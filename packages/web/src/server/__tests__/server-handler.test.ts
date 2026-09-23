@@ -19,16 +19,15 @@ import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { Check } from 'typebox/value'
 import type { AgentHost, HostedThreadInspection } from '../../host/agent-host.ts'
-import { hostCommandRows } from '../../host/host-commands.ts'
 import { transcriptOf } from '../../host/transcript.ts'
 import { startEnsoServer } from '../index.ts'
 import {
   createFakeAgentHost,
   createFakeHostedThread,
-  FAKE_MODELS,
   type FakeStoredThread,
   type FakeThreadParts,
   type FakeThreadRecord,
+  fakeHostRows,
 } from './fake-hosted-thread.ts'
 import { openFollow } from './follow-reader.ts'
 
@@ -101,10 +100,7 @@ function fakeHost(
             script.onPrompt(parts.emit, outcome, request.message)
           },
           // picc's row first, the host's two after — the real host's order (#338 slice 2).
-          listCommands: () => [
-            { name: 'mode', source: 'extension' },
-            ...hostCommandRows(parts.record.modelState, FAKE_MODELS),
-          ],
+          listCommands: () => [{ name: 'mode', source: 'extension' }, ...fakeHostRows(parts.record)],
           permissionModeState: () => ({ mode: 'default', available: ['default', 'acceptEdits'] }),
           ...script.runtime?.(parts),
         }),
@@ -291,12 +287,17 @@ test('⚠ GET …/commands says where its list came from: none before any sessio
   await prompt(url, 'ran', 'hello')
   const live = (await commandsOf('ran')) as EnsoThreadCommands
   expect(live).toMatchObject({ threadId: 'ran', source: 'live' })
-  // pi's row first, then the host's two (#338 slice 2) — each with its CURRENT value on a live thread.
+  // pi's row first, then the host's (#338 slices 2 and 3) — the settings with their CURRENT value
+  // on a live thread, the flows with none (there is no "current" login).
   expect(live.commands.map((command) => [command.name, command.source])).toEqual([
     ['mode', 'extension'],
     ['model', 'host'],
     ['thinking', 'host'],
+    ['login', 'host'],
+    ['logout', 'host'],
   ])
+  expect(live.commands[3]).toMatchObject({ kind: 'flow', options: [{ id: 'fake/oauth' }, { id: 'fake/api_key' }] })
+  expect(live.commands[3]?.value).toBeUndefined()
   expect(live.commands[1]).toMatchObject({ kind: 'select', value: 'fake/fake-1' })
   expect(live.commands[1]?.options?.map((option) => option.id)).toEqual(['fake/fake-1', 'fake/fake-2'])
   expect(live.commands[2]).toMatchObject({
@@ -310,7 +311,7 @@ test('⚠ GET …/commands says where its list came from: none before any sessio
   // thread has no current model, and a value that was another session's would be a lie.
   const remembered = (await commandsOf('never-ran')) as EnsoThreadCommands
   expect(remembered).toMatchObject({ threadId: 'never-ran', source: 'remembered' })
-  expect(remembered.commands.map((command) => command.name)).toEqual(['mode', 'model', 'thinking'])
+  expect(remembered.commands.map((command) => command.name)).toEqual(['mode', 'model', 'thinking', 'login', 'logout'])
   for (const hostRow of remembered.commands.filter((command) => command.source === 'host')) {
     expect(hostRow.value).toBeUndefined()
     expect(hostRow.options?.length ?? 0).toBeGreaterThan(0)
@@ -383,6 +384,53 @@ test('POST …/command: a runtime fault is a 500, never a 422 dressed as a refus
     body: JSON.stringify({ name: 'thinking', value: 'low' }),
   })
   expect(faulted.status).toBe(500)
+})
+
+// ⚠ A FLOW STARTS AND THE ROUTE SAYS SO (#338 slice 3): a login may wait minutes on a device code.
+// 202 once the host has accepted the option; the questions and progress are on the feed; and the
+// thread is NOT busy meanwhile — a login is not a run, the lease is released on acceptance, so the
+// composer stays open and a prompt during the wait is a prompt (the smoke found a held lease
+// locking the thread for the device-code wait).
+test('⚠ POST …/command with a flow row: 202 on start, the thread is not busy while it waits, a bad option is 422', async () => {
+  const { url, built } = await startWith(settlesAtOnce)
+  const run = async (body: unknown): Promise<Response> =>
+    fetch(`${url}/api/threads/flowing/command`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  const controller = new AbortController()
+  openFollows.push(controller)
+  const follow = await openFollow(url, 'flowing', controller)
+
+  const started = await run({ name: 'login', value: 'fake/oauth' })
+  expect(started.status).toBe(202)
+  expect(built).toHaveLength(1)
+  const thread = built[0]
+  if (thread === undefined) throw new Error('expected one build')
+  expect(thread.flows.map((flow) => flow.run)).toEqual([{ name: 'login', value: 'fake/oauth' }])
+
+  // snapshot, status(built), status(taken), status(released) — released BEFORE the flow ends.
+  await follow.untilFrames(4)
+  expect(follow.frames.at(-1)).toMatchObject({ type: 'status', live: true, busy: false })
+  // …so a prompt during the wait is accepted, not refused as busy.
+  expect(await prompt(url, 'flowing', 'hello while logging in')).toBe(202)
+
+  // The flow ends on its own clock: its notify and the model state land on the feed.
+  await follow.untilFrames(7) // taken, settled, released for the prompt above
+  const beforeSettle = follow.frames.length
+  thread.flows[0]?.settle()
+  await follow.untilFrames(beforeSettle + 2)
+  const kinds = follow.frames.map((frame) => (frame.type === 'observation' ? frame.observation.kind : frame.type))
+  expect(kinds.slice(beforeSettle)).toEqual(['extension-ui-request', 'model'])
+
+  const refused = await run({ name: 'login', value: 'nowhere/oauth' })
+  expect(refused.status).toBe(422)
+  expect(await refused.text()).toBe('login nowhere/oauth is not offered here')
+  const noFlow = await run({ name: 'logout', value: 'nobody' })
+  expect(noFlow.status).toBe(422)
+  expect(await noFlow.text()).toBe('no stored credential for nobody')
+  expect(built).toHaveLength(1)
 })
 
 test('POST …/command is refused while the thread runs (409) — a setting is not queued behind a run', async () => {

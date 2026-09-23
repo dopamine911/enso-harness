@@ -72,7 +72,12 @@ test('a select with detail renders it preformatted above the options — file co
 })
 
 test('input renders a single-line field with the placeholder and an Answer button', () => {
+  // A credential is masked (#338 slice 3: `/login`'s API key); a plain input is not.
+  const masked = answerControls({ method: 'input', title: 'API key', secret: true })
+  expect(masked).toContain('type="password"')
+  expect(masked).toContain('autoComplete="new-password"')
   const rendered = answerControls({ method: 'input', title: 'Name?', placeholder: 'your name' })
+  expect(rendered).toContain('type="text"')
   expect(rendered).toContain('placeholder="your name"')
   expect(rendered).toContain('<input')
   expect(rendered).not.toContain('<textarea')

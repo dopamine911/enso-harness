@@ -9,9 +9,8 @@ import { ensureDom, releaseDom } from './dom-environment.ts'
 // measurement. The dialog is a Radix portal; the select's trigger takes its text from a portal too.
 ensureDom()
 const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-dom/client')
-const { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, MODEL_NOT_LIVE }: typeof ModelStateModule = await import(
-  '../model-state.tsx'
-)
+const { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, MODEL_NOT_LIVE, rankOption }: typeof ModelStateModule =
+  await import('../model-state.tsx')
 
 /**
  * The composer's model controls (#338 slice 2), MOUNTED under happy-dom: the chip's two sentences
@@ -222,4 +221,17 @@ test('closed, the dialog renders nothing and reads nothing', async () => {
   expect(document.querySelector('[role="dialog"]')).toBeNull()
   expect(mounted.asked).toEqual([])
   await mounted.unmount()
+})
+
+// The dialog's filter is substring-first (#338 slice 3): cmdk's default fuzzy score matched
+// `openai` to 22 of 53 login options — any row spelling o-p-e-n-a-i in order. Typed text must
+// appear in the id, the label or the detail, and an earlier appearance ranks higher.
+test('rankOption hides a row the typed text does not appear in, and ranks an earlier appearance higher', () => {
+  expect(rankOption('openai/api_key', 'openai', ['OpenAI · API key', 'not configured'])).toBeGreaterThan(0)
+  expect(rankOption('opencode/api_key', 'openai', ['opencode · API key', 'not configured'])).toBe(0)
+  expect(rankOption('azure-openai-responses/api_key', 'openai', ['Azure OpenAI · API key'])).toBeGreaterThan(0)
+  expect(rankOption('openai/api_key', 'openai', ['OpenAI · API key'])).toBeGreaterThan(
+    rankOption('azure-openai-responses/api_key', 'openai', ['Azure OpenAI · API key']),
+  )
+  expect(rankOption('anything', '', [])).toBe(1)
 })

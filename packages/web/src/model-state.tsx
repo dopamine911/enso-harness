@@ -203,6 +203,25 @@ async function loadCommandRow(
  * the dialog and hands `(command, optionId)` to the owner, who POSTs it; the chip then moves on
  * the `model` observation, not on the pick.
  */
+/**
+ * Substring-first ranking for the option dialog (#338 slice 3): the typed text must APPEAR in
+ * the option's id, label or detail — earlier is better — or the row is hidden. cmdk's default
+ * fuzzy score matched `openai` to 22 of 53 login options (any row spelling o-p-e-n-a-i in order);
+ * the same reason the palette ranks names first (`command-palette.tsx`, `rankCommand`).
+ */
+export function rankOption(optionId: string, search: string, keywords?: readonly string[]): number {
+  const needle = search.toLowerCase()
+  if (needle.length === 0) return 1
+  let best = 0
+  for (const haystack of [optionId, ...(keywords ?? [])]) {
+    const lowered = haystack.toLowerCase()
+    const at = lowered.indexOf(needle)
+    if (at === -1) continue
+    best = Math.max(best, 1 - at / (2 * Math.max(lowered.length, 1)))
+  }
+  return best
+}
+
 export function ModelChoiceDialog({
   threadId,
   command,
@@ -235,7 +254,10 @@ export function ModelChoiceDialog({
         if (!next) onClose()
       }}
     >
-      <ModelSelectorContent title={state.kind === 'loaded' ? (state.row.description ?? `/${state.row.name}`) : 'model'}>
+      <ModelSelectorContent
+        title={state.kind === 'loaded' ? (state.row.description ?? `/${state.row.name}`) : 'model'}
+        filter={rankOption}
+      >
         <ModelSelectorInput placeholder="filter models…" />
         <ModelSelectorList>
           {state.kind === 'loading' ? (

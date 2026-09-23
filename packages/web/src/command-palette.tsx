@@ -55,7 +55,10 @@ import {
  * A `host` row shows its current option's `label` on the right, dim (`Fake One`, `medium`), when
  * the row carries a `value`; a `remembered` list carries none — the server strips it, because a
  * thread with no live session has no current value — and the row still opens its step: choosing
- * the model before the first prompt is the #341 case, not an error.
+ * the model before the first prompt is the #341 case, not an error. A `flow` row (`/login`,
+ * `/logout`, slice 3) opens the same option dialog a `select` does — the choice is the same
+ * gesture; what differs is what the server does with it (202: started, and the flow's questions
+ * arrive as dialog cards), and that is the route's business, not the palette's.
  *
  * Empty states say WHICH empty: `source: 'none'` (no session built in this process yet) reads
  * "no thread has run yet — commands appear after the first prompt"; a live or remembered list
@@ -208,7 +211,7 @@ export function CommandPalette({
     if (command.source === 'extension') finish({ kind: 'run', command })
     else if (command.source !== 'host') finish({ kind: 'insert', command })
     else if (command.kind === 'level') enterPage(command)
-    else if (command.kind === 'select') finish({ kind: 'dialog', command })
+    else if (command.kind === 'select' || command.kind === 'flow') finish({ kind: 'dialog', command })
     else finish({ kind: 'host', command })
   }
 

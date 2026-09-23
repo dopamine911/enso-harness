@@ -58,6 +58,22 @@ export const ThreadRuntime = Type.Object({
     Type.Function([Type.Unknown()], Type.Unknown()),
   ),
   /**
+   * Start a `flow` host command (#338 slice 3): `login` with a `provider/authType` option,
+   * `logout` with a provider. Fire-and-forget like `prompt`, and for the same reason: a login
+   * may wait minutes on a device code, and the route must not. `outcome.onAccepted` fires once
+   * the flow has begun (the route's 202); `onRejected(reason)` before that for an option the
+   * host cannot start (the route's 422). ⚠ A FLOW IS NOT A RUN: the lease is released on
+   * acceptance, as a mode change's is — holding it would mark the thread busy for the whole
+   * login (composer disabled, prompts refused; measured in the slice-3 smoke). The flow lives
+   * on the session instead: it ends with pi's own expiry, or when the session is disposed —
+   * the host aborts it then. The flow's questions are the same blocking dialogs an extension
+   * asks (`extension-ui-request`), its progress is `notify` lines, and its result is a `model`
+   * observation and a final notify.
+   */
+  startHostFlow: Type.Unsafe<(run: EnsoHostCommandRun, outcome: PromptOutcome) => void>(
+    Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
+  ),
+  /**
    * The permission-mode receipt a run starts with (#84): picc's CURRENT mode for this
    * session, computed the way picc itself restores it — the last persisted `modes` entry
    * in the session branch, else the initial `default` — and the modes this session may
@@ -215,10 +231,15 @@ export const RuntimeCommand = Type.Object({
   /**
    * `host` rows only (#338): what the row IS, not what widget draws it. `select` — one of many
    * `options`, the second step filters them (`/model`); `level` — one of a few ordered `options`,
-   * chosen in place (`/thinking`); `action` — runs with no value (`/compact`, `/login`; later
-   * slices). The palette renders by kind; nothing is per-command UI.
+   * chosen in place (`/thinking`); `flow` — chosen like a `select`, but the choice STARTS
+   * something rather than applying it: `/login` and `/logout` (slice 3) run as dialog flows,
+   * their questions and progress arriving on the feed, the route answering 202 when the flow has
+   * begun; `action` — runs with no value (`/compact`, slice 4). The palette renders by kind;
+   * nothing is per-command UI.
    */
-  kind: Type.Optional(Type.Union([Type.Literal('select'), Type.Literal('level'), Type.Literal('action')])),
+  kind: Type.Optional(
+    Type.Union([Type.Literal('select'), Type.Literal('level'), Type.Literal('flow'), Type.Literal('action')]),
+  ),
   /** `host` rows: the current choice, as an `options[].id`. Absent when the list is `remembered` — a thread with no live session has no current value to show. */
   value: Type.Optional(Type.String()),
   /** `host` rows with `kind: 'select' | 'level'`: what may be chosen. */
@@ -316,6 +337,17 @@ frame and as the `model` observation whenever it changes, by whichever hand: the
 the browser changes it: the host validates (an unknown model, a level the model does not offer, a
 provider pi has no credentials for) and REJECTS with a reason the route says as 422, and the change
 itself is never the route's answer — it is the observation every follower reads.
+
+**`startHostFlow` is a login as a dialog flow** (#338 slice 3). pi's `modelRuntime.login` asks its
+questions through an interaction — a text or secret prompt, a select, a code — and the host lifts
+each to the SAME blocking dialog an extension asks, so the browser renders and answers a login as
+it renders and answers picc's mode question; a secret is an `input` dialog with `secret: true`, which
+the browser masks and never echoes. Fire-and-forget like `prompt`, for the same reason: a device code
+may wait minutes, so the route answers 202 on acceptance — and releases the lease then, because a
+lease IS the registry's busy and a login is not a run (the smoke showed a held lease locking the
+composer for the device-code wait). The flow lives on the session; disposing the session aborts it. The stored
+credentials `/logout` offers are a cache — pi lists them asynchronously and `listCommands` is
+synchronous — refreshed at build and after every flow the host itself ran.
 
 **Nothing of the runtime's event shape, since L2** (#162 workstream 4). Until then `subscribe` handed
 out `RuntimeEvent` — open on purpose, the runtime's own fields carried verbatim — and the mapper that

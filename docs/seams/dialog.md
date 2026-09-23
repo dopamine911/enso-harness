@@ -47,6 +47,13 @@ export const EnsoDialogSpec = Type.Union([
     method: Type.Literal('input'),
     title: Type.String(),
     placeholder: Type.Optional(Type.String()),
+    /**
+     * The answer is a credential (#338 slice 3): an API key typed into `/login`. The browser
+     * masks the field and the answer is never echoed into a transcript line. pi's own
+     * `input` has no such flag — its login flow asks through `AuthPrompt.type: 'secret'` — so
+     * the host sets it when it lifts that prompt to a dialog.
+     */
+    secret: Type.Optional(Type.Literal(true)),
     timeout: Type.Optional(Type.Number({ minimum: 0 })),
   }),
   Type.Object({
@@ -194,6 +201,17 @@ export interface EnsoExtensionUiContext {
   abortAllDialogs(): void
   /** How many dialogs are blocked right now — observable state for tests and for the idle-timeout logic. */
   pendingDialogCount(): number
+  /**
+   * The HOST's own question, for a credential (#338 slice 3): pi's `AuthPrompt.type: 'secret'`
+   * lifted to an `input` dialog the browser masks. Not on `uiContext` — pi's interface has no
+   * such method, and an extension must not be able to ask a masked question the transcript then
+   * fails to show. Same wait, same settle record, same cancel value as `input`.
+   */
+  askSecret(
+    title: string,
+    placeholder: string | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<string | undefined>
 }
 ```
 
@@ -202,15 +220,15 @@ export interface EnsoExtensionUiContext {
 **Implemented once**, by `createEnsoExtensionUiContext` in `packages/web/src/host/extension-ui-context.ts`
 (line 199). The host is the UI: it implements the interface extensions call and turns each call into
 the same record the mapper already consumed over the old transport (header lines 29–33). The four
-blocking methods — `select`, `confirm`, `input`, `editor` (lines 304–350) — go through one
-`awaitDialog` (line 266): mint an id, park the request in a pending map, emit the request, and block
+blocking methods — `select`, `confirm`, `input`, `editor` (lines 319–365) — go through one
+`awaitDialog` (line 283): mint an id, park the request in a pending map, emit the request, and block
 until an answer, a cancel, the caller's abort signal or its own timeout. Every path that stops the wait
-goes through `finish` (line 281), which deletes the pending entry, emits the settle record with its
+goes through `finish` (line 292), which deletes the pending entry, emits the settle record with its
 outcome (line 279) and resolves the extension with its value — `undefined` for `select`/`input`/
 `editor`, `false` for `confirm`, on every non-answer outcome (lines 259–260). That is why the settle
 observation exists at all: the runtime has no event for a question ending (lines 262–264).
 `agent-host.ts` binds one context per session (line 401) and delegates the runtime contract's
-`answerDialog` and `openDialogs` to it (lines 586–591); `cancelAllDialogs` cancels every pending
+`answerDialog` and `openDialogs` to it (lines 736–741); `cancelAllDialogs` cancels every pending
 question at session teardown (line 468, called from `agent-host.ts:548`), so teardown is a settle
 path too.
 

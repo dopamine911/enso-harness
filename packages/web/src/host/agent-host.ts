@@ -32,6 +32,19 @@ import { quarantineSecrets } from '@enso/core/secrets'
 import { createEventTail, describeObservation } from './event-tail.ts'
 import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
 import { decideHostCommand, HostCommandRefused, hostCommandRows } from './host-commands.ts'
+import {
+  authEventText,
+  decideHostFlow,
+  type HostAuthEvent,
+  type HostAuthType,
+  hostFlowRows,
+  type LoginProviderFacts,
+  loginDoneText,
+  loginOptions,
+  logoutDoneText,
+  logoutOptions,
+  type StoredCredentialFacts,
+} from './host-flows.ts'
 import { mapPiEvent } from './map-events.ts'
 import {
   freshPermissionModeState,
@@ -524,6 +537,143 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     }
     onModelSelect = announceModelState
 
+    // ── The flows (#338 slice 3; `host-flows.ts` has the decisions and the words) ──────────
+    //
+    // ⚠ `listCommands` is synchronous and `listCredentials` is not (the credential store may be a
+    // file), so the stored credentials are a CACHE: read once the session is built, re-read after
+    // every flow the host itself ran. A credential saved by another process shows up at the next
+    // build, not before — said here so nobody debugs it as a bug.
+    let storedCredentials: readonly StoredCredentialFacts[] = []
+    // Every flow runs under this signal; `dispose` aborts it, so a device-code poll does not
+    // outlive the session it was logging in (the lease is not held — see `startHostFlow`).
+    const flowsAbort = new AbortController()
+    const providerNameOf = (providerId: string): string =>
+      session.modelRuntime.getProvider(providerId)?.name ?? providerId
+    async function refreshStoredCredentials(): Promise<void> {
+      try {
+        const listed = await session.modelRuntime.listCredentials({ signal: AbortSignal.timeout(15_000) })
+        storedCredentials = listed.map((credential) => ({
+          providerId: credential.providerId,
+          providerName: providerNameOf(credential.providerId),
+          type: credential.type,
+        }))
+      } catch (error) {
+        log.warn('stored credentials could not be listed: {error}', { threadId, error })
+      }
+    }
+    void refreshStoredCredentials()
+
+    function currentLoginOptions(): ReturnType<typeof loginOptions> {
+      const facts: LoginProviderFacts[] = session.modelRuntime.getProviders().map((provider) => {
+        const status = session.modelRuntime.getProviderAuthStatus(provider.id)
+        return {
+          id: provider.id,
+          name: provider.name,
+          offersOAuth: provider.auth.oauth !== undefined,
+          offersApiKeyLogin: provider.auth.apiKey?.login !== undefined,
+          configuredVia: status.configured ? (status.label ?? status.source) : undefined,
+        }
+      })
+      return loginOptions(facts)
+    }
+
+    /**
+     * pi asks; the browser answers through the dialog seam. A `secret` is masked (the host's own
+     * `askSecret`); a `select` crosses as labels and comes back as the chosen option's id;
+     * `text` and `manual_code` are plain inputs. No answer — cancelled, aborted — is pi's own
+     * "Login cancelled", which the flow reports as a cancellation, not a failure.
+     */
+    async function askAuthPrompt(
+      prompt: Parameters<Parameters<typeof session.modelRuntime.login>[2]['prompt']>[0],
+    ): Promise<string> {
+      const signal = prompt.signal
+      let answer: string | undefined
+      switch (prompt.type) {
+        case 'secret':
+          answer = await ui.askSecret(prompt.message, prompt.placeholder, signal)
+          break
+        case 'select': {
+          const labels = prompt.options.map((option) => option.label)
+          const chosen = await ui.uiContext.select(
+            prompt.message,
+            labels,
+            signal === undefined ? undefined : { signal },
+          )
+          answer = prompt.options.find((option) => option.label === chosen)?.id
+          break
+        }
+        default:
+          answer = await ui.uiContext.input(
+            prompt.message,
+            prompt.placeholder,
+            signal === undefined ? undefined : { signal },
+          )
+      }
+      if (answer === undefined) throw new Error('Login cancelled')
+      return answer
+    }
+
+    /**
+     * After a login: when the session had no model, the provider's first available one — pi's
+     * TUI picks its own per-provider default from a table it does not export; the first is
+     * honest and `/model` is one keystroke away. Then the catalog refresh pi's TUI also runs.
+     */
+    async function settleAfterLogin(providerId: string): Promise<string | undefined> {
+      let selected: string | undefined
+      if (currentModelState().model === null) {
+        const candidate = session.modelRuntime.getAvailableSnapshot().find((model) => model.provider === providerId)
+        if (candidate !== undefined) {
+          await session.setModel(candidate, { persist: true })
+          selected = candidate.id
+        }
+      }
+      const refresh = await session.modelRuntime.refresh({
+        providers: [providerId],
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (refresh.aborted || refresh.errors.size > 0) {
+        ui.uiContext.notify('Model catalog could not be refreshed; using cached models.', 'warning')
+      }
+      return selected
+    }
+
+    async function runLogin(providerId: string, authType: HostAuthType): Promise<void> {
+      const providerName = providerNameOf(providerId)
+      try {
+        await session.modelRuntime.login(providerId, authType, {
+          signal: flowsAbort.signal,
+          prompt: askAuthPrompt,
+          notify: (event: HostAuthEvent): void => ui.uiContext.notify(authEventText(event), 'info'),
+        })
+        const selected = await settleAfterLogin(providerId)
+        ui.uiContext.notify(loginDoneText(providerName, authType, selected), 'info')
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        if (reason === 'Login cancelled') ui.uiContext.notify(`Login to ${providerName} cancelled.`, 'info')
+        else ui.uiContext.notify(`Failed to log in to ${providerName}: ${reason}`, 'error')
+      } finally {
+        await refreshStoredCredentials()
+        announceModelState()
+      }
+    }
+
+    async function runLogout(providerId: string): Promise<void> {
+      const providerName = providerNameOf(providerId)
+      const type = storedCredentials.find((credential) => credential.providerId === providerId)?.type ?? 'api_key'
+      try {
+        await session.modelRuntime.logout(providerId, { signal: AbortSignal.timeout(15_000) })
+        ui.uiContext.notify(logoutDoneText(providerName, type), 'info')
+      } catch (error) {
+        ui.uiContext.notify(
+          `Logout from ${providerName} failed: ${error instanceof Error ? error.message : String(error)}`,
+          'error',
+        )
+      } finally {
+        await refreshStoredCredentials()
+        announceModelState()
+      }
+    }
+
     const unsubscribeSession = session.subscribe((event) => {
       try {
         const wire = toRpcWireEvent(event)
@@ -603,7 +753,21 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           commands.push(describeCommand(`skill:${skill.name}`, 'skill', skill.description))
         }
         commands.push(...hostCommandRows(currentModelState(), session.modelRuntime.getAvailableSnapshot()))
+        commands.push(...hostFlowRows(currentLoginOptions(), logoutOptions(storedCredentials)))
         return commands
+      },
+      startHostFlow(run: EnsoHostCommandRun, outcome: PromptOutcome): void {
+        let decision: ReturnType<typeof decideHostFlow>
+        try {
+          decision = decideHostFlow(run, currentLoginOptions(), logoutOptions(storedCredentials))
+        } catch (error) {
+          outcome.onRejected(error instanceof Error ? error.message : String(error))
+          return
+        }
+        outcome.onAccepted()
+        void (decision.kind === 'login'
+          ? runLogin(decision.providerId, decision.authType)
+          : runLogout(decision.providerId))
       },
       modelState: currentModelState,
       async runHostCommand(run: EnsoHostCommandRun): Promise<void> {
@@ -683,6 +847,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       dispose(): void {
         if (disposed) return
         disposed = true
+        flowsAbort.abort()
         ui.cancelAllDialogs()
         unsubscribeSession()
         // `AgentSession.dispose()` does NOT emit session_shutdown — only pi's runtime layer
