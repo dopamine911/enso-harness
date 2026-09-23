@@ -60,6 +60,8 @@ export interface ThreadMount {
   readonly model: EnsoModelState | null
   /** Every question pi is blocked on, oldest first (#114); empty when the thread is not live. */
   readonly openDialogs: EnsoOpenDialog[]
+  /** The tree pi runs this thread in (#44): the live session's own, or the one this host builds every session in. */
+  readonly cwd: string
 }
 
 export async function readThreadMount(deps: ThreadReadDeps, threadId: string): Promise<ThreadMount> {
@@ -68,7 +70,8 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
   /** The file, read only for a thread that is not live here — nothing is built to answer (#86). */
   const stored = live === undefined ? await host.readTranscript(threadId) : undefined
   const nowLive = threads.peek(threadId)
-  const transcript = nowLive === undefined ? (stored ?? []) : nowLive.hosted.inspect().entries
+  const inspection = nowLive?.hosted.inspect()
+  const transcript = inspection === undefined ? (stored ?? []) : inspection.entries
   const messages = transcriptToMessages(transcript)
   return {
     present: nowLive !== undefined || stored !== undefined,
@@ -85,5 +88,6 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
       nowLive === undefined ? host.storedPermissionMode(transcript) : nowLive.hosted.runtime.permissionModeState(),
     model: nowLive === undefined ? null : nowLive.hosted.runtime.modelState(),
     openDialogs: nowLive === undefined ? [] : nowLive.hosted.runtime.openDialogs(),
+    cwd: inspection?.cwd ?? host.cwd,
   }
 }

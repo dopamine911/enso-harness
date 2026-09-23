@@ -148,6 +148,8 @@ export interface ThreadStores {
   readonly permissionMode: PermissionModeStore
   /** The session's model and thinking level (#338 slice 2); `null` until a live snapshot or `model` observation says. */
   readonly model: ModelStore
+  /** The tree pi runs this thread in (#44), from every snapshot; undefined until the follow's first one. */
+  readonly cwd: WritableStore<string | undefined>
   readonly stats: ThreadStatsStore
   readonly notifications: NotificationsStore
   readonly modeLines: ModeLines

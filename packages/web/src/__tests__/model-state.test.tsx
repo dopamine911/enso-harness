@@ -95,7 +95,7 @@ async function mount(node: React.ReactNode): Promise<Mounted> {
 
 const noop = (): void => undefined
 
-test('the chip is a button either way: the model name when live, the not-live sentence when nothing is known', async () => {
+test('the chip is a button either way: the model and its provider when live, the not-live sentence when nothing is known', async () => {
   const opens: number[] = []
   const mounted = await mount(<ModelChip state={null} onOpen={(): void => void opens.push(1)} />)
   const chip = (): HTMLButtonElement => {
@@ -110,7 +110,13 @@ test('the chip is a button either way: the model name when live, the not-live se
   })
   expect(opens).toEqual([1])
   await mounted.render(<ModelChip state={LIVE_MODEL} onOpen={noop} />)
-  expect(chip().textContent).toBe('modelFake One')
+  expect(chip().textContent).toBe('modelFake One· fake')
+  // ⚠ #44: the same model on ANOTHER provider is a different answer — under multi-account, a
+  // failover to another account slot. Only the provider says so; the chip must change with it.
+  const swapped = { ...LIVE_MODEL, model: { provider: 'fake-account-2', id: 'fake-1', name: 'Fake One' } }
+  await mounted.render(<ModelChip state={swapped} onOpen={noop} />)
+  expect(chip().textContent).toBe('modelFake One· fake-account-2')
+  expect(chip().title).toContain('fake-account-2/fake-1')
   await mounted.render(<ModelChip state={{ ...LIVE_MODEL, model: null }} onOpen={noop} />)
   expect(chip().textContent).toBe('model: none')
   await mounted.unmount()

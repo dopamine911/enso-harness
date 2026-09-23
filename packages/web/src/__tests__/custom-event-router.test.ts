@@ -38,6 +38,7 @@ const snapshot = (overrides: Partial<EnsoFollowSnapshot> = {}): EnsoFollowSnapsh
   generation: 1,
   permissionMode: { mode: 'default', available: ['default'] },
   model: null,
+  cwd: '/work/project',
   messages: [],
   openDialogs: [],
   ...overrides,
@@ -77,6 +78,16 @@ test("the snapshot's model seeds the model store; a null snapshot leaves it null
   expect(stores.model.get()).toBeNull()
   route('snapshot', snapshot({ model: LIVE_MODEL }))
   expect(stores.model.get()).toEqual(LIVE_MODEL)
+})
+
+// #44: the project the status bar names is whatever the latest snapshot says — a reconnect's
+// snapshot is the resync, so a later one replaces an earlier one rather than being ignored.
+test("the snapshot's cwd is the thread's project, replaced by every later snapshot", () => {
+  expect(stores.cwd.get()).toBeUndefined()
+  route('snapshot', snapshot())
+  expect(stores.cwd.get()).toBe('/work/project')
+  route('snapshot', snapshot({ cwd: '/work/other' }))
+  expect(stores.cwd.get()).toBe('/work/other')
 })
 
 test('a model observation replaces the model store with the state the host says (#338 slice 2)', () => {

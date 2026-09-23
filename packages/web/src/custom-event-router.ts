@@ -96,6 +96,7 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     // The session's model (#338 slice 2) — `null` when the thread is not live, applied as such:
     // a snapshot is the resync, and a model this page cannot vouch for is no model.
     stores.model.apply(data.model)
+    stores.cwd.set(data.cwd)
     // The complete list, every snapshot (#114): a reconnect's snapshot is the resync, so an
     // empty list is a fact ("nothing is waiting") this page must apply too — it clears a
     // card for a question that settled while the page was away. One card at a time: a

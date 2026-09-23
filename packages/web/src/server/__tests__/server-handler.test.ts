@@ -389,6 +389,29 @@ test('⚠ POST …/command sets the thinking level on a thread that never ran: 2
   expect(built).toHaveLength(1)
 })
 
+// #44: the project indicator's source. A thread this server holds live says ITS session's cwd; one
+// it does not — cold, or never run — says the tree this host builds every session in. The two
+// differ here on purpose, so the precedence is what is pinned, not a coincidence of fixtures.
+test("a follow's snapshot names the thread's cwd: the host's tree before a session exists, the session's own once it does", async () => {
+  const { url } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({ ...host, cwd: '/host/tree' }))
+  const cold = new AbortController()
+  openFollows.push(cold)
+  expect((await openFollow(url, 'fresh', cold)).frames[0]).toMatchObject({
+    type: 'snapshot',
+    live: false,
+    cwd: '/host/tree',
+  })
+
+  expect(await prompt(url, 'fresh', 'hello')).toBe(202)
+  const live = new AbortController()
+  openFollows.push(live)
+  expect((await openFollow(url, 'fresh', live)).frames[0]).toMatchObject({
+    type: 'snapshot',
+    live: true,
+    cwd: '/fake/cwd',
+  })
+})
+
 // ⚠ A FAULT IS NOT A REFUSAL (PR #344 review): only a refusal the host decided is the 422 the user
 // reads as "your choice was refused"; anything else the runtime throws is the handler's 500.
 test('POST …/command: a runtime fault is a 500, never a 422 dressed as a refusal', async () => {

@@ -85,6 +85,13 @@ export const EnsoFollowSnapshot = Type.Object(
     permissionMode: EnsoPermissionModeState,
     /** The session's model and thinking level (#338 slice 2); `null` when the thread is not live — a stored thread does not say. */
     model: Type.Union([EnsoModelState, Type.Null()]),
+    /**
+     * The tree pi reads and writes for this thread (#44) — the live session's own cwd, or, when
+     * the thread is not live, the one this server builds every session in (`server/index.ts`
+     * takes it from its own launch arguments, never a request). What makes a wrong-project
+     * session visible.
+     */
+    cwd: Type.String(),
     /** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not enso's. */
     messages: Type.Array(Type.Unknown()),
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */

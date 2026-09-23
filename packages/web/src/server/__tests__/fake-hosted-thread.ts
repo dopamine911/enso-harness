@@ -277,6 +277,7 @@ export function createFakeAgentHost(
   fresh: EnsoPermissionModeState = FAKE_FRESH_MODE,
 ): AgentHost {
   return {
+    cwd: '/fake/cwd',
     createSession,
     freshPermissionMode: () => fresh,
     storedPermissionMode: (transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState => {
