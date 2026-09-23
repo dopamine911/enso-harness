@@ -202,6 +202,16 @@ export function loginDoneText(providerName: string, authType: HostAuthType, sele
   return selectedModel === undefined ? `${action}.` : `${action}. Selected ${selectedModel}.`
 }
 
+/**
+ * pi's compaction REFUSALS, as pi says them (`dist/core/agent-session.js:1485,1487,1501,1531`, 0.84.4):
+ * plain `Error`s distinguishable only by sentence — so, as with its "Login cancelled", the sentence
+ * is the contract (PR #347 review). A refusal is a warning; anything else is a failure.
+ */
+const COMPACTION_REFUSALS = ['Already compacted', 'Nothing to compact', 'Compaction cancelled']
+export function isCompactionRefusal(error: unknown): boolean {
+  return error instanceof Error && COMPACTION_REFUSALS.some((sentence) => error.message.startsWith(sentence))
+}
+
 /** What a finished compaction says: the numbers pi measured, and the one thing the page cannot do for itself yet. */
 export function compactDoneText(tokensBefore: number, estimatedTokensAfter: number | undefined): string {
   const after = estimatedTokensAfter === undefined ? 'fewer' : estimatedTokensAfter.toLocaleString('en-US')

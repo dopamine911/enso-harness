@@ -40,6 +40,7 @@ import {
   type HostAuthEvent,
   type HostAuthType,
   hostFlowRows,
+  isCompactionRefusal,
   isFlowCancelled,
   type LoginProviderFacts,
   loginDoneText,
@@ -688,12 +689,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         const compacted = await session.compact()
         ui.uiContext.notify(compactDoneText(compacted.tokensBefore, compacted.estimatedTokensAfter), 'info')
       } catch (error) {
-        // pi's refusals include "Nothing to compact (session too small)" — not a failure, so the
-        // line says what happened and carries pi's reason, as a warning (smoke, 2026-09-23).
-        ui.uiContext.notify(
-          `Compaction did not run: ${error instanceof Error ? error.message : String(error)}`,
-          'warning',
-        )
+        // pi's refusals ("Nothing to compact (session too small)", smoke 2026-09-23) are not
+        // failures: said as a warning with pi's reason. Anything else is (PR #347 review).
+        const reason = error instanceof Error ? error.message : String(error)
+        if (isCompactionRefusal(error)) ui.uiContext.notify(`Compaction did not run: ${reason}`, 'warning')
+        else ui.uiContext.notify(`Compaction failed: ${reason}`, 'error')
       }
     }
 
