@@ -29,6 +29,8 @@ export interface OpenFollow {
   readonly untilFrames: (count: number) => Promise<void>
   /** Resolves once at least `count` keepalive comments have arrived; rejects once the wire has failed. */
   readonly untilComments: (count: number) => Promise<void>
+  /** Resolves once a frame arriving FROM THIS CALL ON matches; rejects once the wire has failed. */
+  readonly untilFrame: (matches: (frame: EnsoFollowFrame) => boolean) => Promise<void>
   /** The first fault this follow saw, or `undefined` while the wire has been readable. */
   readonly failure: () => Error | undefined
   /** Resolves when the reader has stopped — the server closed, the transport failed, or the test closed the follow. */
@@ -111,6 +113,10 @@ export async function openFollow(
     frames,
     comments: () => comments,
     untilFrames: (count: number) => until(() => frames.length >= count),
+    untilFrame: (matches: (frame: EnsoFollowFrame) => boolean): Promise<void> => {
+      const from = frames.length
+      return until(() => frames.slice(from).some(matches))
+    },
     untilComments: (count: number) => until(() => comments >= count),
     failure: () => failure,
     ended: () => readerDone,

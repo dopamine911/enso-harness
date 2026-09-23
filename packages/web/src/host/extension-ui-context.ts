@@ -58,7 +58,7 @@ export type CustomComponentFactory<T> = (
 type BlockingDialogRequest =
   | { method: 'select'; title: string; options: string[]; message?: string; timeout?: number }
   | { method: 'confirm'; title: string; message: string; timeout?: number }
-  | { method: 'input'; title: string; placeholder?: string; timeout?: number }
+  | { method: 'input'; title: string; placeholder?: string; secret?: true; timeout?: number }
   | { method: 'editor'; title: string; prefill?: string }
 
 /**
@@ -128,6 +128,17 @@ export interface EnsoExtensionUiContext {
   abortAllDialogs(): void
   /** How many dialogs are blocked right now — observable state for tests and for the idle-timeout logic. */
   pendingDialogCount(): number
+  /**
+   * The HOST's own question, for a credential (#338 slice 3): pi's `AuthPrompt.type: 'secret'`
+   * lifted to an `input` dialog the browser masks. Not on `uiContext` — pi's interface has no
+   * such method, and an extension must not be able to ask a masked question the transcript then
+   * fails to show. Same wait, same settle record, same cancel value as `input`.
+   */
+  askSecret(
+    title: string,
+    placeholder: string | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<string | undefined>
 }
 
 /**
@@ -458,6 +469,18 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
         return
       }
       pending.resolve(response)
+    },
+    askSecret(
+      title: string,
+      placeholder: string | undefined,
+      signal: AbortSignal | undefined,
+    ): Promise<string | undefined> {
+      return awaitDialog(
+        { method: 'input', title, secret: true, ...(placeholder === undefined ? {} : { placeholder }) },
+        signal === undefined ? undefined : { signal },
+        undefined,
+        (response: DialogAnswer) => response.value,
+      )
     },
     openDialogs(): EnsoOpenDialog[] {
       const open: EnsoOpenDialog[] = []

@@ -126,7 +126,7 @@ function mapExtensionUiRequest(event: RuntimeEvent, delivery: EventDelivery): En
   // which is the bug this observation kind exists to make inexpressible.
   const method = String(event.method ?? 'unknown')
   const dialogCandidate: Record<string, unknown> = { method }
-  for (const field of ['title', 'options', 'message', 'placeholder', 'prefill', 'timeout']) {
+  for (const field of ['title', 'options', 'message', 'placeholder', 'prefill', 'secret', 'timeout']) {
     if (event[field] !== undefined) dialogCandidate[field] = event[field]
   }
   const dialog: EnsoDialogSpec | undefined = isEnsoDialogSpec(dialogCandidate) ? dialogCandidate : undefined

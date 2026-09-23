@@ -17,6 +17,10 @@
  *   in words instead
  * - `@repo/shadcn-ui/...` → `@/components/ui/<name>.tsx`, `@/lib/utils.ts`; explicit
  *   `React.ReactNode` return types (the port's rule, see `prompt-input.tsx`); removed `"use client"`
+ * - ADDED a `filter` prop on `ModelSelectorContent`, handed to the cmdk root (#338 slice 3):
+ *   upstream fixes cmdk's default fuzzy score, and over 53 login options `openai` matched 22 rows
+ *   (any row whose id, label or provider spelled o-p-e-n-a-i in order). The owner supplies a
+ *   substring-first ranking; without the prop the cmdk default applies, as upstream.
  */
 import type { ComponentProps, ReactNode } from "react";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command.tsx";
@@ -29,12 +33,14 @@ export const ModelSelector = (props: ModelSelectorProps): React.ReactNode => <Di
 
 export type ModelSelectorContentProps = ComponentProps<typeof DialogContent> & {
 	title?: ReactNode;
+	filter?: ComponentProps<typeof Command>["filter"];
 };
 
 export const ModelSelectorContent = ({
 	className,
 	children,
 	title = "Model Selector",
+	filter,
 	...props
 }: ModelSelectorContentProps): React.ReactNode => (
 	<DialogContent
@@ -43,7 +49,9 @@ export const ModelSelectorContent = ({
 		{...props}
 	>
 		<DialogTitle className="sr-only">{title}</DialogTitle>
-		<Command className="**:data-[slot=command-input-wrapper]:h-auto">{children}</Command>
+		<Command className="**:data-[slot=command-input-wrapper]:h-auto" {...(filter === undefined ? {} : { filter })}>
+			{children}
+		</Command>
 	</DialogContent>
 );
 

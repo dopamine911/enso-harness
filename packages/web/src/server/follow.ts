@@ -429,6 +429,7 @@ export function readModeChangeBody(raw: string): EnsoPermissionModeChange {
 
 export type HostCommandOutcome =
   | { readonly status: 204 }
+  | { readonly status: 202 }
   | { readonly status: 409; readonly reason: string }
   | { readonly status: 422; readonly reason: string }
 
@@ -453,6 +454,42 @@ export async function runHostCommand(
     return { status: 409, reason: `thread ${threadId} is running; change ${run.name} when it settles` }
   }
   const lease = await threads.acquire(threadId)
+  // ⚠ A `flow` row STARTS and the route answers 202 (#338 slice 3): a login may wait minutes on a
+  // device code, and its questions and progress are on the feed, not in this response. The lease
+  // is released on acceptance, as `changeThreadMode` releases on a command's acceptance: a lease
+  // IS the registry's "busy" (composer disabled, prompts 409, a generation bumped), and a login is
+  // not a run — the slice-3 smoke showed a held lease locking the thread for the device-code
+  // wait. The flow lives on the session; the host aborts it if the session is disposed.
+  let isFlow: boolean
+  try {
+    const row = lease.runtime.listCommands().find((command) => command.source === 'host' && command.name === run.name)
+    isFlow = row?.kind === 'flow'
+  } catch (error) {
+    lease.release()
+    throw error
+  }
+  if (isFlow) {
+    // ⚠ Every exit releases (PR #346 review): the two outcomes, and a synchronous fault in
+    // `startHostFlow` before either — which stays a fault (the handler's 500), with the lease
+    // back, rather than the held-lease lock this branch exists to avoid.
+    return new Promise<HostCommandOutcome>((resolve, reject) => {
+      let settled = false
+      const once = (outcome: () => void): void => {
+        if (settled) return
+        settled = true
+        lease.release()
+        outcome()
+      }
+      try {
+        lease.runtime.startHostFlow(run, {
+          onAccepted: () => once(() => resolve({ status: 202 })),
+          onRejected: (reason: string) => once(() => resolve({ status: 422, reason })),
+        })
+      } catch (error) {
+        once(() => reject(error))
+      }
+    })
+  }
   try {
     await lease.runtime.runHostCommand(run)
   } catch (error) {

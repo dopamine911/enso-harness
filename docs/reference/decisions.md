@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 217.**
+**Decision headers: 219.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -125,12 +125,14 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/agent-loop-contract.test.ts` | `#130` | A CONTRACT TEST on the runtime's loop, the shape of `cc-safety-net-contract.test.ts`: the wire shape of a refused tool call is the vendor's doing — a guard's `{ block, reason }` becomes an error result with the reason as its content, `isError: true` — and `map-events.ts` relies on it (the `tool_execution_end` case, "isError is the only signal a refused call has"). |
 | `packages/web/src/host/__tests__/event-tail.test.ts` | `#97` | #97's tail is a debugging surface: what it must not do is lie by omission. |
 | `packages/web/src/host/__tests__/extension-ui-context.test.ts` | `#69` | The `ExtensionUIContext` the host binds (#69), driven directly: the blocking methods become `extension_ui_request` records and resolve on an answer, a cancel, an abort signal or a timeout; the fire-and-forget methods emit and return; the terminal-only surface is inert — pi's rpc mode's behaviour, which extensions already tolerate. |
+| `packages/web/src/host/__tests__/host-flows.test.ts` | `#338` | The flow decisions (#338 slice 3), as the fake and the real host share them: what `/login` and `/logout` offer, what a run must name, and the words the flow says. |
 | `packages/web/src/host/__tests__/permission-dialog.test.ts` | `#73` | The coupling to picc's `FilePermissionDialog` (#73), pinned against the REAL class: the lift reads TypeScript-private fields by name, so this is what fails — loudly — when a picc refactor renames one. |
 | `packages/web/src/host/__tests__/permission-mode-adapter.test.ts` | `#95` | picc's own restore rule, applied to the raw branch, below the seam (L3 step A). |
 | `packages/web/src/host/__tests__/session-events.test.ts` | `#69` | The replica of pi's unexported `toJsonEvent` (#69): what `map-events.ts` consumes must be byte-for-byte the rpc wire shape. |
 | `packages/web/src/host/agent-host.ts` | `#27`, `#69` | pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning `pi --mode rpc` per prompt. |
 | `packages/web/src/host/event-tail.ts` | `#69`, `#84`, `#86`, `#88`, `#97` | A thread's event tail (#97): the last N events through one funnel, with provenance. |
 | `packages/web/src/host/host-commands.ts` | `#338`, `#341` | The `host` command source (#338 slice 2) — the rows the host appends to `listCommands()` and the decision behind `runHostCommand`, as PURE functions over a model state and a model list. |
+| `packages/web/src/host/host-flows.ts` | `#338` | The `flow` host commands (#338 slice 3): `/login` and `/logout`, as PURE decisions over what the model runtime reports — the rows the host appends to `listCommands()`, the check a run passes before anything starts, and the sentences the flow says as it goes. |
 | `packages/web/src/host/map-events.ts` | `#24` | pi rpc events → the observations a surface renders (#24). |
 | `packages/web/src/host/permission-dialog.ts` | `#27`, `#69`, `#73` | picc's permission prompt, lifted to a question the web surface can ask (#73). |
 | `packages/web/src/host/permission-mode-adapter.ts` | `#84`, `#162` | picc-permission-modes' PERSISTED MODE, as the host reads it (#84; below the seam since #162 workstream 4, L3). |

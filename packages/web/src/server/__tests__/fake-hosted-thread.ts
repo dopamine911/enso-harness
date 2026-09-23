@@ -9,11 +9,13 @@ import type {
   EnsoTranscriptEntry,
   PromptOutcome,
   PromptRequest,
+  RuntimeCommand,
   ThreadRuntime,
 } from '@enso/core'
 import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
 import { decideHostCommand, HostCommandRefused, hostCommandRows } from '../../host/host-commands.ts'
+import { decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
 
 /**
  * The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a
@@ -31,7 +33,19 @@ import { decideHostCommand, HostCommandRefused, hostCommandRows } from '../../ho
 /** The models the fake "could run" (#338 slice 2): two, so a `/model` switch has somewhere to go. */
 const FAKE_MODEL_ONE: EnsoModelChoice = { provider: 'fake', id: 'fake-1', name: 'Fake One' }
 const FAKE_MODEL_TWO: EnsoModelChoice = { provider: 'fake', id: 'fake-2', name: 'Fake Two' }
-export const FAKE_MODELS: readonly EnsoModelChoice[] = [FAKE_MODEL_ONE, FAKE_MODEL_TWO]
+const FAKE_MODELS: readonly EnsoModelChoice[] = [FAKE_MODEL_ONE, FAKE_MODEL_TWO]
+
+/** The fake's ways in and its one stored credential (#338 slice 3). */
+const FAKE_LOGIN_OPTIONS = [
+  { id: 'fake/oauth', label: 'Fake · subscription', detail: 'via stored' },
+  { id: 'fake/api_key', label: 'Fake · API key', detail: 'via stored' },
+]
+const FAKE_LOGOUT_OPTIONS = [{ id: 'fake', label: 'Fake', detail: 'stored subscription' }]
+
+/** The fake's host rows — `/model`, `/thinking`, `/login`, `/logout` — in the real host's order; a test that replaces `listCommands` puts pi's rows before these. */
+export function fakeHostRows(record: Pick<FakeThreadRecord, 'modelState'>): RuntimeCommand[] {
+  return [...hostCommandRows(record.modelState, FAKE_MODELS), ...hostFlowRows(FAKE_LOGIN_OPTIONS, FAKE_LOGOUT_OPTIONS)]
+}
 
 /** What the fake starts on: the first fake model, thinking `medium` of four levels. */
 function freshFakeModelState(): EnsoModelState {
@@ -49,6 +63,8 @@ export interface FakeThreadRecord {
   readonly modeChanges: string[]
   /** Every host command the server ran, in order — accepted or refused (#338 slice 2). */
   readonly hostCommands: EnsoHostCommandRun[]
+  /** Every flow the server started (#338 slice 3), and the hand that ends each: a test settles it when it chooses. */
+  readonly flows: Array<{ readonly run: EnsoHostCommandRun; settled: boolean; readonly settle: () => void }>
   /** The model state `modelState()` reads and `runHostCommand` writes; a test sets it to start elsewhere. */
   modelState: EnsoModelState
   aborts: number
@@ -91,6 +107,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     answers: [],
     modeChanges: [],
     hostCommands: [],
+    flows: [],
     modelState: freshFakeModelState(),
     aborts: 0,
     queueClears: 0,
@@ -129,7 +146,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     openDialogs: () => [...open].map(([id, dialog]) => ({ id, dialog })),
     // pi's rows first (none by default; a test's override supplies its own), then the host's two
     // over the fake's models — the real host's order.
-    listCommands: () => hostCommandRows(record.modelState, FAKE_MODELS),
+    listCommands: () => fakeHostRows(record),
     modelState: () => record.modelState,
     runHostCommand: (run: EnsoHostCommandRun) => {
       // What the real host does: the shared decision, the set, then the state said as `model`.
@@ -142,6 +159,39 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
           : { ...record.modelState, thinkingLevel: decision.level }
       emit({ kind: 'model', ...record.modelState })
       return Promise.resolve()
+    },
+    startHostFlow: (run: EnsoHostCommandRun, outcome: PromptOutcome) => {
+      // What the real host does: decide before accepting; then the flow runs on its own clock —
+      // here, until the test settles it — and ends with a notify and the model state said. The
+      // lease is the route's to release, on acceptance; the fake holds nothing.
+      try {
+        const pending = record.flows.find((flow) => !flow.settled)
+        if (pending !== undefined) throw new HostCommandRefused(`/${pending.run.name} is already in progress here`)
+        decideHostFlow(run, FAKE_LOGIN_OPTIONS, FAKE_LOGOUT_OPTIONS)
+      } catch (error) {
+        outcome.onRejected(error instanceof Error ? error.message : String(error))
+        return
+      }
+      outcome.onAccepted()
+      const entry = {
+        run,
+        settled: false,
+        settle: (): void => {
+          entry.settled = true
+          emit({
+            kind: 'extension-ui-request',
+            id: `flow-${record.flows.length}`,
+            method: 'notify',
+            blocking: false,
+            origin: 'run',
+            message:
+              run.name === 'logout' ? logoutDoneText('Fake', 'oauth') : loginDoneText('Fake', 'oauth', undefined),
+            notifyType: 'info',
+          })
+          emit({ kind: 'model', ...record.modelState })
+        },
+      }
+      record.flows.push(entry)
     },
     permissionModeState: () => ({ mode: 'default', available: ['default'] }),
     setPermissionMode: (mode: string, outcome: PromptOutcome) => {

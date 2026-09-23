@@ -432,6 +432,29 @@ test('a select row closes the palette and hands the row to `onOpenModelDialog`; 
   await mounted.unmount()
 })
 
+// A `flow` row (#338 slice 3) is the same gesture as a `select`: the options dialog opens and the
+// palette posts nothing — what the server does with the choice (start a login) is the route's.
+test('a flow row opens the options dialog exactly as a select row does, with no value on the right', async () => {
+  const loginRow: RuntimeCommand = {
+    name: 'login',
+    source: 'host',
+    kind: 'flow',
+    description: 'log in to a provider',
+    options: [{ id: 'anthropic/oauth', label: 'Anthropic · subscription', detail: 'not configured' }],
+  }
+  const mounted = await mountPalette(() => Response.json({ ...WITH_HOST, commands: [...WITH_HOST.commands, loginRow] }))
+  await mounted.open()
+  const row = await eventually(() => mounted.row('/login'))
+  expect(row.textContent).toBe('/loginlog in to a provider')
+  await flush(async () => {
+    row.click()
+    await tick()
+  })
+  await eventually(() => expect(mounted.dialogs.map((chosen) => chosen.name)).toEqual(['login']))
+  expect(mounted.hosts).toEqual([])
+  await mounted.unmount()
+})
+
 // The #341 case: a thread with no live session gets the `remembered` list, whose host rows the
 // server strips `value` from. No right-hand label — and the row STILL opens its page, because
 // choosing before the first prompt is what the rows are for.

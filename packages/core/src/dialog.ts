@@ -57,6 +57,13 @@ export const EnsoDialogSpec = Type.Union([
     method: Type.Literal('input'),
     title: Type.String(),
     placeholder: Type.Optional(Type.String()),
+    /**
+     * The answer is a credential (#338 slice 3): an API key typed into `/login`. The browser
+     * masks the field and the answer is never echoed into a transcript line. pi's own
+     * `input` has no such flag — its login flow asks through `AuthPrompt.type: 'secret'` — so
+     * the host sets it when it lifts that prompt to a dialog.
+     */
+    secret: Type.Optional(Type.Literal(true)),
     timeout: Type.Optional(Type.Number({ minimum: 0 })),
   }),
   Type.Object({

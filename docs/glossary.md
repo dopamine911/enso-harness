@@ -153,7 +153,10 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
   **host command** runs through `POST …/threads/:id/command`.
 - **host command** — a slash command that is ours, not the runtime's (#338 slice 2): `source: 'host'`,
   declared by **kind** — `select` (one of many options, filtered in a second step: `/model`),
-  `level` (one of a few, chosen in place: `/thinking`), `action` (runs with no value). The palette
+  `level` (one of a few, chosen in place: `/thinking`), `flow` (chosen like a select, but the choice
+  STARTS something: `/login`, `/logout` — the route answers 202 and the flow's questions arrive as
+  dialogs, its progress as notify lines, its end as a `model` observation), `action` (runs with no
+  value). The palette
   renders by kind; nothing is per-command UI. Running one builds the thread if it has no session:
   choosing the model BEFORE the first prompt is the point (#341, the control half of #44).
 - **model state** — `EnsoModelState`: the session's model (`provider`, `id`, `name`; `null` when

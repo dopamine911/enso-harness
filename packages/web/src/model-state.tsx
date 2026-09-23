@@ -194,6 +194,25 @@ async function loadCommandRow(
 }
 
 /**
+ * Substring-first ranking for the option dialog (#338 slice 3): the typed text must APPEAR in
+ * the option's id, label or detail — earlier is better — or the row is hidden. cmdk's default
+ * fuzzy score matched `openai` to 22 of 53 login options (any row spelling o-p-e-n-a-i in order);
+ * the same reason the palette ranks names first (`command-palette.tsx`, `rankCommand`).
+ */
+export function rankOption(optionId: string, search: string, keywords?: readonly string[]): number {
+  const needle = search.toLowerCase()
+  if (needle.length === 0) return 1
+  let best = 0
+  for (const haystack of [optionId, ...(keywords ?? [])]) {
+    const lowered = haystack.toLowerCase()
+    const at = lowered.indexOf(needle)
+    if (at === -1) continue
+    best = Math.max(best, 1 - at / (2 * Math.max(lowered.length, 1)))
+  }
+  return best
+}
+
+/**
  * The `/model` second step: `ModelSelector` (ai-elements: cmdk inside a dialog) filtering over
  * a `select` command's `options` by `label` and `detail` (the model's name and its provider).
  *
@@ -235,8 +254,11 @@ export function ModelChoiceDialog({
         if (!next) onClose()
       }}
     >
-      <ModelSelectorContent title={state.kind === 'loaded' ? (state.row.description ?? `/${state.row.name}`) : 'model'}>
-        <ModelSelectorInput placeholder="filter models…" />
+      <ModelSelectorContent
+        title={state.kind === 'loaded' ? (state.row.description ?? `/${state.row.name}`) : 'model'}
+        filter={rankOption}
+      >
+        <ModelSelectorInput placeholder="filter options…" />
         <ModelSelectorList>
           {state.kind === 'loading' ? (
             <div role="status" className="px-2 py-3 text-muted-foreground text-sm">

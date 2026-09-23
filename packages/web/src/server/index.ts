@@ -756,7 +756,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     })
     if (run === undefined) return
     const outcome = await runHostCommand(followDeps, threadId, run)
-    if (outcome.status !== 204) {
+    if (outcome.status !== 204 && outcome.status !== 202) {
       log.warn('host command {name} refused ({status}): {reason}', {
         threadId,
         name: run.name,
@@ -766,12 +766,12 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       refuseWith(response, outcome)
       return
     }
-    log.info('host command {name} applied', {
+    log.info(outcome.status === 202 ? 'host flow {name} started' : 'host command {name} applied', {
       threadId,
       name: run.name,
       ...(run.value === undefined ? {} : { value: run.value }),
     })
-    response.writeHead(204)
+    response.writeHead(outcome.status)
     response.end()
   }
 
