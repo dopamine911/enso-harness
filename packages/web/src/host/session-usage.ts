@@ -1,4 +1,4 @@
-import type { SessionEntry, SessionStats } from '@earendil-works/pi-coding-agent'
+import type { AgentSessionEvent, SessionEntry, SessionStats } from '@earendil-works/pi-coding-agent'
 import type { EnsoSessionUsage } from '@enso/core'
 
 /**
@@ -63,6 +63,32 @@ export function storedSessionUsage(entries: readonly SessionEntry[]): EnsoSessio
   const totals: Totals = { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
   for (const sessionEntry of entries) add(totals, usageOf(sessionEntry))
   return { ...totals, context: null }
+}
+
+/**
+ * Whether the session's recorded spend may have just grown — the events after which the host
+ * re-reads it (#45). Each is AFTER pi persisted what it counts: pi hands `message_end` to
+ * listeners BEFORE it appends the message (`agent-session.js` `_handleAgentEvent`: emit, then
+ * `appendMessage`), so `message_end` would read the totals one request short.
+ *
+ *   - `turn_end` follows every request's assistant message and tool results;
+ *   - `agent_end` closes a run a stop cut short of its turn;
+ *   - `compaction_end` follows a compaction's own model call and the context it emptied;
+ *   - `entry_appended` of a `usage` entry is pi's cache warmer (`cache-warmer.js`
+ *     `appendUsage('cache_warm', …)` → `onWarmed`): in its `idle` mode it warms BETWEEN runs,
+ *     where no turn follows to carry the spend (PR #357 review).
+ */
+export function growsSessionSpend(event: AgentSessionEvent): boolean {
+  switch (event.type) {
+    case 'turn_end':
+    case 'agent_end':
+    case 'compaction_end':
+      return true
+    case 'entry_appended':
+      return event.entry.type === 'usage'
+    default:
+      return false
+  }
 }
 
 /** A live session's totals and context, as pi reports them — nothing recomputed here. */

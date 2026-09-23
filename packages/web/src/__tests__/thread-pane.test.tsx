@@ -1100,7 +1100,7 @@ test("⚠ a frame on one thread's follow changes that pane and no other — cost
     expect(alpha.status()).toContain('$0.0123')
     expect(alpha.container.textContent).toContain('Only alpha asks')
     expect(bravo.status()).toContain('idle')
-    expect(bravo.status()).not.toContain('$0.0123')
+    expect(bravo.status()).toContain('$—')
     expect(bravo.container.textContent).not.toContain('Only alpha asks')
     expect(railBusy(bravo.stores.threadId)).toBe(false)
   })

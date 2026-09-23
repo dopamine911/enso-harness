@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 220.**
+**Decision headers: 221.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -129,6 +129,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/permission-dialog.test.ts` | `#73` | The coupling to picc's `FilePermissionDialog` (#73), pinned against the REAL class: the lift reads TypeScript-private fields by name, so this is what fails — loudly — when a picc refactor renames one. |
 | `packages/web/src/host/__tests__/permission-mode-adapter.test.ts` | `#95` | picc's own restore rule, applied to the raw branch, below the seam (L3 step A). |
 | `packages/web/src/host/__tests__/session-events.test.ts` | `#69` | The replica of pi's unexported `toJsonEvent` (#69): what `map-events.ts` consumes must be byte-for-byte the rpc wire shape. |
+| `packages/web/src/host/__tests__/session-usage.test.ts` | `#45` | #45: which session events make the host re-read pi's totals. |
 | `packages/web/src/host/agent-host.ts` | `#27`, `#69` | pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning `pi --mode rpc` per prompt. |
 | `packages/web/src/host/event-tail.ts` | `#69`, `#84`, `#86`, `#88`, `#97` | A thread's event tail (#97): the last N events through one funnel, with provenance. |
 | `packages/web/src/host/host-commands.ts` | `#338`, `#341` | The `host` command source (#338 slice 2) — the rows the host appends to `listCommands()` and the decision behind `runHostCommand`, as PURE functions over a model state and a model list. |

@@ -62,7 +62,7 @@ import {
 } from './permission-mode-adapter.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
-import { liveSessionUsage, storedSessionUsage } from './session-usage.ts'
+import { growsSessionSpend, liveSessionUsage, storedSessionUsage } from './session-usage.ts'
 import { transcriptOf } from './transcript.ts'
 
 const log = ensoLogger('host')
@@ -185,13 +185,6 @@ const STREAMING_BEHAVIOR_OF: Record<EnsoPromptAdmission, NonNullable<PromptOptio
 
 /** The `ExtensionMode` we bind — `ctx.mode` as extensions see it. rpc is the truthful one: no terminal, a remote surface. */
 const EXTENSION_MODE_RPC = 'rpc'
-
-/** The session events after which the file has grown by spend (#45) — `announceSessionUsage` says why these. */
-const SESSION_USAGE_BOUNDARIES: Readonly<Record<string, true>> = {
-  turn_end: true,
-  agent_end: true,
-  compaction_end: true,
-}
 
 export interface AgentHostOptions {
   /** The tree pi reads and writes. One per server, never from a request (see `server/index.ts`). */
@@ -583,6 +576,24 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     }
 
     /**
+     * Say the session's totals and context as the host's own event (#45), ONCE per change — pi's
+     * `getSessionStats`, whole, never a delta, so a follower applies the latest and cannot
+     * double-count. Said after each event `growsSessionSpend` names (`session-usage.ts` says why
+     * those and not `message_end`), and on a model change.
+     *
+     * ⚠ DECLARED ABOVE `announceModelState`, which calls it: `announcedSessionUsage` is a `let`, and
+     * a call that ran before this line would throw (PR #357 review).
+     */
+    let announcedSessionUsage: string | undefined
+    function announceSessionUsage(): void {
+      const usage = liveSessionUsage(session.getSessionStats())
+      const serialized = JSON.stringify(usage)
+      if (serialized === announcedSessionUsage) return
+      announcedSessionUsage = serialized
+      emit({ type: 'session_usage', ...usage })
+    }
+
+    /**
      * Say the model state as the host's own event, ONCE per change. A `/model` reaches here up to
      * three times — `thinking_level_changed` when the new model clamps the level, `model_select`,
      * and the command's own call — and every arrival reads the same state; the feed hears one.
@@ -598,25 +609,6 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       announceSessionUsage()
     }
     onModelSelect = announceModelState
-
-    /**
-     * Say the session's totals and context as the host's own event (#45), ONCE per change — pi's
-     * `getSessionStats`, whole, never a delta, so a follower applies the latest and cannot
-     * double-count. Said at the boundaries where the session file has just grown: after pi
-     * PERSISTED the messages, which it does after `message_end`'s listeners ran (`agent-session.js`
-     * `_handleAgentEvent`: emit, then `appendMessage`) — so `message_end` itself would read the
-     * totals one message short. `turn_end` follows every request's assistant message and tool
-     * results; `agent_end` closes a run a stop cut short of its turn; `compaction_end` follows a
-     * compaction's own model call and the context it emptied.
-     */
-    let announcedSessionUsage: string | undefined
-    function announceSessionUsage(): void {
-      const usage = liveSessionUsage(session.getSessionStats())
-      const serialized = JSON.stringify(usage)
-      if (serialized === announcedSessionUsage) return
-      announcedSessionUsage = serialized
-      emit({ type: 'session_usage', ...usage })
-    }
 
     // ── The flows (#338 slice 3; `host-flows.ts` has the decisions and the words) ──────────
     //
@@ -819,7 +811,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // The thinking half of the model state — the module header says why the model half
         // arrives through the watcher extension instead.
         if (wire.type === 'thinking_level_changed') announceModelState()
-        if (SESSION_USAGE_BOUNDARIES[wire.type] === true) announceSessionUsage()
+        if (growsSessionSpend(event)) announceSessionUsage()
       } catch (error) {
         log.error('a session event could not be emitted: {error}', { threadId, error })
       }
