@@ -421,8 +421,9 @@ test('⚠ POST …/command with a flow row: 202 on start, the thread is not busy
   expect(second.status).toBe(422)
   expect(await second.text()).toBe('/login is already in progress here')
 
-  // The flow ends on its own clock: its notify and the model state land on the feed.
-  await follow.untilFrames(9) // taken, settled, released for the prompt; taken, released for the refused start
+  // The flow ends on its own clock: its notify and the model state land on the feed. First let
+  // the prompt above and the refused start finish their lease frames — a predicate, not a count.
+  await follow.untilQuiet()
   const beforeSettle = follow.frames.length
   thread.flows[0]?.settle()
   await follow.untilFrames(beforeSettle + 2)

@@ -194,16 +194,6 @@ async function loadCommandRow(
 }
 
 /**
- * The `/model` second step: `ModelSelector` (ai-elements: cmdk inside a dialog) filtering over
- * a `select` command's `options` by `label` and `detail` (the model's name and its provider).
- *
- * The options are fetched when the dialog OPENS, from `GET …/commands` — never from the model
- * store, which is `null` before the first run (header), and never cached, for the palette's
- * reason: the list is the session's. The row's `value` marks the current choice. Picking closes
- * the dialog and hands `(command, optionId)` to the owner, who POSTs it; the chip then moves on
- * the `model` observation, not on the pick.
- */
-/**
  * Substring-first ranking for the option dialog (#338 slice 3): the typed text must APPEAR in
  * the option's id, label or detail — earlier is better — or the row is hidden. cmdk's default
  * fuzzy score matched `openai` to 22 of 53 login options (any row spelling o-p-e-n-a-i in order);
@@ -222,6 +212,16 @@ export function rankOption(optionId: string, search: string, keywords?: readonly
   return best
 }
 
+/**
+ * The `/model` second step: `ModelSelector` (ai-elements: cmdk inside a dialog) filtering over
+ * a `select` command's `options` by `label` and `detail` (the model's name and its provider).
+ *
+ * The options are fetched when the dialog OPENS, from `GET …/commands` — never from the model
+ * store, which is `null` before the first run (header), and never cached, for the palette's
+ * reason: the list is the session's. The row's `value` marks the current choice. Picking closes
+ * the dialog and hands `(command, optionId)` to the owner, who POSTs it; the chip then moves on
+ * the `model` observation, not on the pick.
+ */
 export function ModelChoiceDialog({
   threadId,
   command,
@@ -258,7 +258,7 @@ export function ModelChoiceDialog({
         title={state.kind === 'loaded' ? (state.row.description ?? `/${state.row.name}`) : 'model'}
         filter={rankOption}
       >
-        <ModelSelectorInput placeholder="filter models…" />
+        <ModelSelectorInput placeholder="filter options…" />
         <ModelSelectorList>
           {state.kind === 'loading' ? (
             <div role="status" className="px-2 py-3 text-muted-foreground text-sm">

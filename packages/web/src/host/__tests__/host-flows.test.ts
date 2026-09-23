@@ -94,4 +94,5 @@ test('every auth event is one line with the thing the user needs in it — the U
   expect(loginDoneText('OpenAI', 'oauth', 'gpt-5')).toBe('Logged in to OpenAI. Selected gpt-5.')
   expect(loginDoneText('OpenAI', 'api_key', undefined)).toBe('Saved API key for OpenAI.')
   expect(logoutDoneText('OpenAI', 'oauth')).toBe('Logged out of OpenAI.')
+  expect(logoutDoneText('OpenAI', undefined)).toBe('Removed the stored credential for OpenAI.')
 })

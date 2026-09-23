@@ -15,7 +15,7 @@ import type {
 import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
 import { decideHostCommand, HostCommandRefused, hostCommandRows } from '../../host/host-commands.ts'
-import { decideHostFlow, hostFlowRows, loginDoneText } from '../../host/host-flows.ts'
+import { decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
 
 /**
  * The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a
@@ -184,7 +184,8 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
             method: 'notify',
             blocking: false,
             origin: 'run',
-            message: loginDoneText('Fake', 'oauth', undefined),
+            message:
+              run.name === 'logout' ? logoutDoneText('Fake', 'oauth') : loginDoneText('Fake', 'oauth', undefined),
             notifyType: 'info',
           })
           emit({ kind: 'model', ...record.modelState })

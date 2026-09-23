@@ -650,7 +650,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           prompt: askAuthPrompt,
           notify: (event: HostAuthEvent): void => ui.uiContext.notify(authEventText(event), 'info'),
         })
-        const selected = await settleAfterLogin(providerId)
+        // The credential IS stored past this line (PR #346 review): what follows can fail —
+        // pi refusing the model, the catalog not refreshing — and is said as a warning, never
+        // as a failed login that `/logout` would then contradict by listing the credential.
+        let selected: string | undefined
+        try {
+          selected = await settleAfterLogin(providerId)
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error)
+          ui.uiContext.notify(`Logged in to ${providerName}; could not select a model: ${reason}`, 'warning')
+        }
         ui.uiContext.notify(loginDoneText(providerName, authType, selected), 'info')
       } catch (error) {
         if (isFlowCancelled(error)) ui.uiContext.notify(`Login to ${providerName} cancelled.`, 'info')
@@ -666,7 +675,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
     async function runLogout(providerId: string): Promise<void> {
       const providerName = providerNameOf(providerId)
-      const type = storedCredentials.find((credential) => credential.providerId === providerId)?.type ?? 'api_key'
+      const type = storedCredentials.find((credential) => credential.providerId === providerId)?.type
       try {
         await session.modelRuntime.logout(providerId, { signal: AbortSignal.timeout(15_000) })
         ui.uiContext.notify(logoutDoneText(providerName, type), 'info')

@@ -187,8 +187,9 @@ export function loginDoneText(providerName: string, authType: HostAuthType, sele
   return selectedModel === undefined ? `${action}.` : `${action}. Selected ${selectedModel}.`
 }
 
-/** The sentence a finished logout says — pi's own two, by credential type. */
-export function logoutDoneText(providerName: string, type: HostAuthType): string {
+/** The sentence a finished logout says — pi's own two, by credential type; a neutral one when the type is not known (the cache moved under the flow). */
+export function logoutDoneText(providerName: string, type: HostAuthType | undefined): string {
+  if (type === undefined) return `Removed the stored credential for ${providerName}.`
   return type === 'oauth'
     ? `Logged out of ${providerName}.`
     : `Removed stored API key for ${providerName}. Environment variables and models.json are unchanged.`
