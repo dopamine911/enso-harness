@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 220.**
+**Decision headers: 221.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -118,6 +118,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/debug/log-row.tsx` | `#144` | One log record, one rendering (#144 slice 3) — shared by the day's tail and a thread's timeline, so a record reads IDENTICALLY on both pages and a reader who follows a thread id from the tail into the timeline finds the same row, not a second dialect of it. |
 | `packages/web/src/debug/log-tail-connection.ts` | `#144`, `#336` | The browser's connection to `GET /api/logs/tail` (#144 slice 2): the day's file, filtered by the server, arriving as SSE frames. |
 | `packages/web/src/debug/log-tail-screen.tsx` | `#144` | The debug log page (#144 slice 2): the day's records, as the file has them, in a browser. |
+| `packages/web/src/debug/log-tail-view.tsx` | `#352` | What the two tail-fed pages — the day's log (`log-tail-screen.tsx`) and one thread's timeline (`thread-timeline-screen.tsx`) — share, held once (#352): the view the frames build, the hook that keeps one tail open and resumable, and the pinned, virtualized list both render into. |
 | `packages/web/src/debug/thread-timeline-screen.tsx` | `#144` | One thread's timeline (#144 slice 3): what the host emitted, what the server sent, and what was logged, as ONE list ordered by time — on the debug page at `debug.html?thread=<id>`. |
 | `packages/web/src/fixture-conversation.ts` | `#27`, `#31` | The styling dev loop (#31): a scripted conversation streamed through the REAL `useChat` pipeline as local AG-UI events — no server, no pi. |
 | `packages/web/src/follow-connection.ts` | `#112`, `#272`, `#274` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |

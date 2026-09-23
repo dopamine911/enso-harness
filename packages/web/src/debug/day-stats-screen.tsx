@@ -164,6 +164,37 @@ interface Column {
   readonly numeric?: boolean
 }
 
+/** A row's spend, as the core schema carries it on a thread's and a model's row alike. */
+type DaySpend = Pick<
+  EnsoDayStats['models'][number],
+  'messages' | 'cost' | 'input' | 'output' | 'cacheRead' | 'cacheWrite'
+>
+
+/**
+ * The spend columns the threads and models tables both end with (#352) — one list with its
+ * cells beside it, so a new token kind is a column in both or in neither.
+ */
+const SPEND_COLUMNS: readonly Column[] = [
+  { heading: 'messages', numeric: true },
+  { heading: 'cost', numeric: true },
+  { heading: 'in', numeric: true },
+  { heading: 'out', numeric: true },
+  { heading: 'cache read', numeric: true },
+  { heading: 'cache write', numeric: true },
+]
+
+/** The cells under {@link SPEND_COLUMNS}, in its order. */
+function spendCells(spend: DaySpend): string[] {
+  return [
+    countText(spend.messages),
+    costText(spend.cost),
+    countText(spend.input),
+    countText(spend.output),
+    countText(spend.cacheRead),
+    countText(spend.cacheWrite),
+  ]
+}
+
 interface StatsTableProps {
   readonly caption: string
   readonly columns: readonly Column[]
@@ -311,54 +342,21 @@ function DaySections({ view }: { view: DayView }): React.ReactNode {
       <StatsTable
         caption="threads (the day)"
         empty="no attributed thread today"
-        columns={[
-          { heading: 'thread' },
-          { heading: 'runs', numeric: true },
-          { heading: 'messages', numeric: true },
-          { heading: 'cost', numeric: true },
-          { heading: 'in', numeric: true },
-          { heading: 'out', numeric: true },
-          { heading: 'cache read', numeric: true },
-          { heading: 'cache write', numeric: true },
-        ]}
+        columns={[{ heading: 'thread' }, { heading: 'runs', numeric: true }, ...SPEND_COLUMNS]}
         rows={threads.map((thread) => ({
           key: thread.threadId,
           cells: [
             <ThreadLink key="thread" threadId={thread.threadId} />,
             countText(thread.runs),
-            countText(thread.messages),
-            costText(thread.cost),
-            countText(thread.input),
-            countText(thread.output),
-            countText(thread.cacheRead),
-            countText(thread.cacheWrite),
+            ...spendCells(thread),
           ],
         }))}
       />
       <StatsTable
         caption="models"
         empty="no attributed model today"
-        columns={[
-          { heading: 'model' },
-          { heading: 'messages', numeric: true },
-          { heading: 'cost', numeric: true },
-          { heading: 'in', numeric: true },
-          { heading: 'out', numeric: true },
-          { heading: 'cache read', numeric: true },
-          { heading: 'cache write', numeric: true },
-        ]}
-        rows={models.map((model) => ({
-          key: model.model,
-          cells: [
-            model.model,
-            countText(model.messages),
-            costText(model.cost),
-            countText(model.input),
-            countText(model.output),
-            countText(model.cacheRead),
-            countText(model.cacheWrite),
-          ],
-        }))}
+        columns={[{ heading: 'model' }, ...SPEND_COLUMNS]}
+        rows={models.map((model) => ({ key: model.model, cells: [model.model, ...spendCells(model)] }))}
       />
       <StatsTable
         caption="runs"

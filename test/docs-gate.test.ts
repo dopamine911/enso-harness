@@ -602,7 +602,7 @@ test('each gate-source reader answers its shape, and refuses rather than guessin
   expect(() => stringConstant('const ROOT = someCall()', 'ROOT', 'probe.ts')).toThrow(
     /probe\.ts: cannot parse string constant ROOT/,
   )
-  // Exported and fractional, because a threshold is both (`.fallowrc` pins 4.52).
+  // Exported and fractional, because a threshold is both (`.fallowrc` pins a two-decimal percentage).
   expect(numericConstant('export const FLOOR = 91.5', 'FLOOR', 'probe.ts')).toBe(91.5)
   expect(() => numericConstant('const FLOOR = computed', 'FLOOR', 'probe.ts')).toThrow(
     /probe\.ts: cannot parse numeric constant FLOOR/,
