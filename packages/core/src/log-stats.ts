@@ -278,8 +278,24 @@ interface Fold {
   readonly runs: Map<string, RunFold>
   readonly tools: Map<string, ToolFold>
   readonly openCalls: Map<string, { readonly toolName: string; readonly at: number }>
+  /** Each closed call's call → result, by `toolCallId` — what `toolCallDurations` answers. */
+  readonly callDurations: Map<string, number>
   readonly models: Map<string, SpendTotals>
   readonly denials: Map<string, number>
+}
+
+function foldOf(lines: readonly EnsoLogLine[]): Fold {
+  const fold: Fold = {
+    processes: new Map(),
+    runs: new Map(),
+    tools: new Map(),
+    openCalls: new Map(),
+    callDurations: new Map(),
+    models: new Map(),
+    denials: new Map(),
+  }
+  for (const line of lines) foldLine(fold, line)
+  return fold
 }
 
 function runOf(fold: Fold, properties: Properties): RunFold | undefined {
@@ -357,7 +373,10 @@ function foldTool(fold: Fold, kind: 'tool-call' | 'tool-result', properties: Pro
   if (call === undefined || toolCallId === undefined) return
   fold.openCalls.delete(toolCallId)
   const duration = instant - call.at
-  if (!Number.isNaN(duration) && duration >= 0) tool.durations.push(duration)
+  if (!Number.isNaN(duration) && duration >= 0) {
+    tool.durations.push(duration)
+    fold.callDurations.set(toolCallId, duration)
+  }
 }
 
 /** The compact observation line: the run's settle, or a tool's call or result. */
@@ -474,6 +493,16 @@ function processRowOf(process: ProcessFold): EnsoDayStats['processes'][number] {
 }
 
 /**
+ * Each tool call's call → result in these records, by `toolCallId` (#45 phase 2) — the same join
+ * `dayStats` sums per tool, kept per call so a reader can rank the calls themselves.
+ *
+ * @group Logging
+ */
+export function toolCallDurations(lines: readonly EnsoLogLine[]): ReadonlyMap<string, number> {
+  return foldOf(lines).callDurations
+}
+
+/**
  * Fold the day's records into its stats.
  *
  * Every join is by the ids a record carries — `threadId` + `generation` for a run,
@@ -483,15 +512,7 @@ function processRowOf(process: ProcessFold): EnsoDayStats['processes'][number] {
  * @group Logging
  */
 export function dayStats(day: string, lines: readonly EnsoLogLine[], malformed: number): EnsoDayStats {
-  const fold: Fold = {
-    processes: new Map(),
-    runs: new Map(),
-    tools: new Map(),
-    openCalls: new Map(),
-    models: new Map(),
-    denials: new Map(),
-  }
-  for (const line of lines) foldLine(fold, line)
+  const fold = foldOf(lines)
 
   const runRows = [...fold.runs.values()].map(runRowOf)
   const threads = new Map<string, { runs: number } & SpendTotals>()

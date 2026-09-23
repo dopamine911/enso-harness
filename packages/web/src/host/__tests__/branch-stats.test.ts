@@ -63,7 +63,7 @@ const call = (id: string, name: string, args: Record<string, unknown>): unknown 
 
 // ⚠ The branch, not the session: the answer left behind by `branch()` is spent (pi's total has
 // it) but is no turn of this conversation's.
-test("turn, prompt and tool stats follow the branch; a failure is pi's isError; a summarised result is its prompt's spend", () => {
+test("turn, prompt and call stats follow the branch; a failure is pi's isError; a call with no result is pending", () => {
   const session = SessionManager.inMemory(tmpdir())
   session.appendMessage({ role: 'user', content: 'first question', timestamp: Date.now() })
   const forkPoint = session.getLeafId()
@@ -77,23 +77,51 @@ test("turn, prompt and tool stats follow the branch; a failure is pi's isError; 
   session.appendMessage(toolResult({ toolCallId: 'c2', toolName: 'read', text: 'denied', isError: true, cost: 0.25 }))
   session.appendMessage(assistant([{ type: 'text', text: 'done' }], 0.125))
   session.appendMessage({ role: 'user', content: 'second   question\n  here', timestamp: Date.now() })
-  session.appendMessage(assistant([], 0.0625, 'error'))
+  session.appendMessage(assistant([call('c3', 'grep', { pattern: 'x' })], 0.0625, 'error'))
 
   const stats = branchStats(session.getBranch())
 
   expect(stats.turnStats.map((turn) => [turn.turn, turn.prompt, turn.cost, turn.toolCalls, turn.stopReason])).toEqual([
     [1, 1, 0.5, 2, 'stop'],
     [2, 1, 0.125, 0, 'stop'],
-    [3, 2, 0.0625, 0, 'error'],
+    [3, 2, 0.0625, 1, 'error'],
   ])
   expect(stats.promptStats).toEqual([
     { prompt: 1, text: 'first question', turnCount: 2, cost: 0.875, toolCalls: 2, failedToolCalls: 1 },
-    { prompt: 2, text: 'second question here', turnCount: 1, cost: 0.0625, toolCalls: 0, failedToolCalls: 0 },
+    { prompt: 2, text: 'second question here', turnCount: 1, cost: 0.0625, toolCalls: 1, failedToolCalls: 0 },
   ])
   expect(stats.branchCost).toBe(0.9375)
-  expect(stats.toolStats).toEqual([
-    { toolName: 'bash', calls: 1, failures: 0, inputChars: '{"command":"ls"}'.length, outputChars: 3 },
-    { toolName: 'read', calls: 1, failures: 1, inputChars: '{"path":"/etc/hosts"}'.length, outputChars: 6 },
+  expect(stats.callStats).toEqual([
+    {
+      toolCallId: 'c1',
+      toolName: 'bash',
+      turn: 1,
+      prompt: 1,
+      inputChars: '{"command":"ls"}'.length,
+      outputChars: 3,
+      isError: false,
+      pending: false,
+    },
+    {
+      toolCallId: 'c2',
+      toolName: 'read',
+      turn: 1,
+      prompt: 1,
+      inputChars: '{"path":"/etc/hosts"}'.length,
+      outputChars: 6,
+      isError: true,
+      pending: false,
+    },
+    {
+      toolCallId: 'c3',
+      toolName: 'grep',
+      turn: 3,
+      prompt: 2,
+      inputChars: '{"pattern":"x"}'.length,
+      outputChars: 0,
+      isError: false,
+      pending: true,
+    },
   ])
   expect(stats.firstAt).toBeDefined()
 })

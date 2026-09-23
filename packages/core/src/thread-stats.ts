@@ -70,26 +70,33 @@ export const EnsoPromptStats = Type.Object(
 export type EnsoPromptStats = Static<typeof EnsoPromptStats>
 
 /**
- * One tool, across the branch. Sizes are characters of the serialised arguments and of the
- * result's text — not tokens, and never a cost: a tool call has none of its own.
+ * One tool call on the branch — the unit livecraft's rankings rank ("costliest calls") and its
+ * per-tool totals sum. Sizes are characters of the serialised arguments and of the result's text:
+ * not tokens, and never a cost — a tool call has none of its own.
  *
  * @group Thread stats
  */
-export const EnsoToolStats = Type.Object(
+export const EnsoToolCallStats = Type.Object(
   {
+    toolCallId: Type.String(),
     toolName: Type.String(),
-    calls: Type.Integer({ minimum: 0 }),
-    /** Results pi marked `isError` — a guard's refusal is one (map-events.ts says why). */
-    failures: Type.Integer({ minimum: 0 }),
+    /** The turn whose assistant message made the call. */
+    turn: Type.Integer({ minimum: 1 }),
+    /** The prompt that turn answered; `0` before any prompt. */
+    prompt: Type.Integer({ minimum: 0 }),
     inputChars: Type.Integer({ minimum: 0 }),
     outputChars: Type.Integer({ minimum: 0 }),
-    /** Call → result, from the log; `count` below `calls` is the part that was not observed or was pruned. */
-    durations: EnsoDurationSummary,
+    /** pi marked the result `isError` — a guard's refusal is one (map-events.ts says why). */
+    isError: Type.Boolean(),
+    /** No result on the branch yet: running now, or a run that stopped under it. */
+    pending: Type.Boolean(),
+    /** Call → result, from the log — absent when the log never saw it or has pruned the day. */
+    durationMs: Type.Optional(Type.Number({ minimum: 0 })),
   },
   { additionalProperties: false },
 )
 /** @group Thread stats */
-export type EnsoToolStats = Static<typeof EnsoToolStats>
+export type EnsoToolCallStats = Static<typeof EnsoToolCallStats>
 
 /**
  * The thread, analysed.
@@ -107,8 +114,8 @@ export const EnsoThreadStats = Type.Object(
     branchCost: Type.Number({ minimum: 0 }),
     turnStats: Type.Array(EnsoTurnStats),
     promptStats: Type.Array(EnsoPromptStats),
-    /** Sorted by calls, most first. */
-    toolStats: Type.Array(EnsoToolStats),
+    /** In branch order. Per-tool totals are these, summed by the reader. */
+    callStats: Type.Array(EnsoToolCallStats),
     /** From the log: each run's first prompt → settle, and its time to first token. */
     latency: Type.Object(
       { prompts: EnsoDurationSummary, firstDelta: EnsoDurationSummary },

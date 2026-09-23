@@ -2,11 +2,11 @@ import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   dayStats,
-  type EnsoDurationSummary,
   type EnsoLogLine,
   type EnsoSessionUsage,
   type EnsoThreadStats,
   mergeDurationSummaries,
+  toolCallDurations,
 } from '@enso/core'
 import { ensoLogDay, ensoLogFilename } from '@enso/core/log-process'
 import type { AgentHost } from '../host/agent-host.ts'
@@ -92,13 +92,10 @@ export function createThreadStatsRoute(
     // From the branch's first entry's day; a branch with none has only today to look in.
     const firstDay = localDayOf(branch.firstAt === undefined ? now() : new Date(branch.firstAt))
     const days = logDaysOnDisk(deps.logsDir).filter((day) => day >= firstDay)
-    const folded = days.map((day) => dayStats(day, threadLines(deps.logsDir, day, threadId), 0))
-    const durationsOf = (toolName: string): EnsoDurationSummary =>
-      mergeDurationSummaries(
-        folded.flatMap((stats) =>
-          stats.tools.filter((tool) => tool.toolName === toolName).map((tool) => tool.durations),
-        ),
-      )
+    const lines = days.map((day) => threadLines(deps.logsDir, day, threadId))
+    const folded = days.map((day, position) => dayStats(day, lines[position] ?? [], 0))
+    // A toolCallId is unique across the thread, so the days' per-call maps merge without a clash.
+    const durationOf = new Map(lines.flatMap((dayLines) => [...toolCallDurations(dayLines)]))
     return {
       threadId,
       live: source.live,
@@ -106,7 +103,10 @@ export function createThreadStatsRoute(
       branchCost: branch.branchCost,
       turnStats: branch.turnStats,
       promptStats: branch.promptStats,
-      toolStats: branch.toolStats.map((tool) => ({ ...tool, durations: durationsOf(tool.toolName) })),
+      callStats: branch.callStats.map((call) => {
+        const durationMs = durationOf.get(call.toolCallId)
+        return durationMs === undefined ? call : { ...call, durationMs }
+      }),
       latency: {
         prompts: mergeDurationSummaries(folded.map((stats) => stats.totals.prompts)),
         firstDelta: mergeDurationSummaries(folded.map((stats) => stats.totals.firstDelta)),

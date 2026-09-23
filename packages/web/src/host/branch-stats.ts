@@ -1,5 +1,5 @@
 import type { SessionEntry } from '@earendil-works/pi-coding-agent'
-import type { EnsoPromptStats, EnsoToolStats, EnsoTurnStats } from '@enso/core'
+import type { EnsoPromptStats, EnsoToolCallStats, EnsoTurnStats } from '@enso/core'
 import { contentToText } from './map-events.ts'
 
 /**
@@ -18,16 +18,16 @@ import { contentToText } from './map-events.ts'
  * also carries (map-events.ts). An error turn (`stopReason: 'error'`) is a turn, with its cost.
  */
 
-/** One tool's tally before the log's durations are joined. */
-export type ToolTally = Omit<EnsoToolStats, 'durations'>
+/** One call before the log's duration is joined. */
+export type BranchCall = Omit<EnsoToolCallStats, 'durationMs'>
 
 export interface BranchStats {
   /** The turns' cost plus summarised tool results' — what the branch's own messages were attributed. */
   readonly branchCost: number
   readonly turnStats: EnsoTurnStats[]
   readonly promptStats: EnsoPromptStats[]
-  /** Most calls first; ties by name. */
-  readonly toolStats: ToolTally[]
+  /** In branch order; a call whose result has not landed is `pending`. */
+  readonly callStats: BranchCall[]
   /** The branch's first entry, ISO — where the thread's log days begin. Undefined for an empty branch. */
   readonly firstAt: string | undefined
 }
@@ -41,28 +41,19 @@ function promptText(content: unknown): string {
 }
 
 type MutablePrompt = { -readonly [Key in keyof EnsoPromptStats]: EnsoPromptStats[Key] }
-type MutableTally = { -readonly [Key in keyof ToolTally]: ToolTally[Key] }
+type MutableCall = { -readonly [Key in keyof BranchCall]: BranchCall[Key] }
 
 function freshPrompt(prompt: number, text: string): MutablePrompt {
   return { prompt, text, turnCount: 0, cost: 0, toolCalls: 0, failedToolCalls: 0 }
 }
 
-/** The walk's state: the prompt being answered, and each call's tool by id so its result lands on it. */
+/** The walk's state: the prompt being answered, and each call by id so its result lands on it. */
 interface Walk {
   readonly prompts: MutablePrompt[]
   readonly turnStats: EnsoTurnStats[]
-  readonly tools: Map<string, MutableTally>
-  readonly toolNameByCallId: Map<string, string>
+  readonly calls: MutableCall[]
+  readonly callById: Map<string, MutableCall>
   branchCost: number
-}
-
-function tallyOf(walk: Walk, toolName: string): MutableTally {
-  let tally = walk.tools.get(toolName)
-  if (tally === undefined) {
-    tally = { toolName, calls: 0, failures: 0, inputChars: 0, outputChars: 0 }
-    walk.tools.set(toolName, tally)
-  }
-  return tally
 }
 
 function currentPrompt(walk: Walk): MutablePrompt {
@@ -76,18 +67,27 @@ type ToolResultMessage = Extract<Message, { role: 'toolResult' }>
 
 function walkAssistant(walk: Walk, message: AssistantMessage): void {
   const prompt = currentPrompt(walk)
+  const turn = walk.turnStats.length + 1
   let toolCalls = 0
   for (const part of message.content) {
     if (part.type !== 'toolCall') continue
     toolCalls += 1
-    const tally = tallyOf(walk, part.name)
-    tally.calls += 1
-    tally.inputChars += JSON.stringify(part.arguments ?? {}).length
-    walk.toolNameByCallId.set(part.id, part.name)
+    const call: MutableCall = {
+      toolCallId: part.id,
+      toolName: part.name,
+      turn,
+      prompt: prompt.prompt,
+      inputChars: JSON.stringify(part.arguments ?? {}).length,
+      outputChars: 0,
+      isError: false,
+      pending: true,
+    }
+    walk.calls.push(call)
+    walk.callById.set(part.id, call)
   }
   const { usage } = message
   walk.turnStats.push({
-    turn: walk.turnStats.length + 1,
+    turn,
     prompt: prompt.prompt,
     model: message.model,
     cost: usage.cost.total,
@@ -106,13 +106,14 @@ function walkAssistant(walk: Walk, message: AssistantMessage): void {
 
 function walkToolResult(walk: Walk, message: ToolResultMessage): void {
   const prompt = currentPrompt(walk)
-  // The CALL names the tool, as in the log's fold: a result spelling it differently lands on its call.
-  const tally = tallyOf(walk, walk.toolNameByCallId.get(message.toolCallId) ?? message.toolName)
-  tally.outputChars += contentToText(message.content).length
-  if (message.isError) {
-    tally.failures += 1
-    prompt.failedToolCalls += 1
+  // Joined to its CALL by id, as the log's fold joins: the call names the tool.
+  const call = walk.callById.get(message.toolCallId)
+  if (call !== undefined) {
+    call.pending = false
+    call.outputChars = contentToText(message.content).length
+    call.isError = message.isError
   }
+  if (message.isError) prompt.failedToolCalls += 1
   // A summarised result is a model call of its own (pi's attribution rule): the prompt's spend, no turn.
   if (message.usage !== undefined) {
     prompt.cost += message.usage.cost.total
@@ -125,8 +126,8 @@ export function branchStats(branch: readonly SessionEntry[]): BranchStats {
   const walk: Walk = {
     prompts: [freshPrompt(0, '')],
     turnStats: [],
-    tools: new Map(),
-    toolNameByCallId: new Map(),
+    calls: [],
+    callById: new Map(),
     branchCost: 0,
   }
   for (const sessionEntry of branch) {
@@ -143,9 +144,7 @@ export function branchStats(branch: readonly SessionEntry[]): BranchStats {
     branchCost: walk.branchCost,
     turnStats: walk.turnStats,
     promptStats,
-    toolStats: [...walk.tools.values()].sort(
-      (first, second) => second.calls - first.calls || first.toolName.localeCompare(second.toolName),
-    ),
+    callStats: walk.calls,
     firstAt: branch[0]?.timestamp,
   }
 }

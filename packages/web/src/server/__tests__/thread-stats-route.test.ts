@@ -22,13 +22,30 @@ const FIRST_DAY = new Date(2026, 8, 21, 10)
 const TODAY = new Date(2026, 8, 22, 15)
 
 const USAGE: EnsoSessionUsage = { cost: 0.5, input: 100, output: 10, cacheRead: 0, cacheWrite: 0, context: null }
+/** A branch call, as the host walks one — no duration: the route joins that. */
+const branchCall = (toolCallId: string, toolName: string): BranchStats['callStats'][number] => ({
+  toolCallId,
+  toolName,
+  turn: 1,
+  prompt: 1,
+  inputChars: 10,
+  outputChars: 20,
+  isError: false,
+  pending: false,
+})
+
 const BRANCH: BranchStats = {
   branchCost: 0.25,
   turnStats: [],
   promptStats: [],
-  toolStats: [
-    { toolName: 'bash', calls: 3, failures: 0, inputChars: 30, outputChars: 300 },
-    { toolName: 'read', calls: 1, failures: 1, inputChars: 10, outputChars: 5 },
+  // `call-0` is timed only on a day before the branch began, `call-x` only under another
+  // thread's id, `call-3` nowhere: none of the three may come back with a duration.
+  callStats: [
+    branchCall('call-0', 'bash'),
+    branchCall('call-1', 'bash'),
+    branchCall('call-2', 'bash'),
+    branchCall('call-x', 'bash'),
+    branchCall('call-3', 'read'),
   ],
   firstAt: FIRST_DAY.toISOString(),
 }
@@ -100,7 +117,7 @@ function logsDirForTheThread(): string {
 
 const noLiveThread = { peek: (): ThreadView | undefined => undefined }
 
-test("a stored thread's tools carry the log's durations from the days its branch spans, and no other thread's", async () => {
+test("a stored thread's calls carry the log's durations from the days its branch spans, and no other thread's", async () => {
   const route = createThreadStatsRoute({
     threads: noLiveThread,
     host: createFakeAgentHost(() => Promise.reject(new Error('looking must not build')), {
@@ -114,15 +131,13 @@ test("a stored thread's tools carry the log's durations from the days its branch
   expect(stats?.usage).toEqual(USAGE)
   expect(stats?.branchCost).toBe(0.25)
   expect(stats?.logDays).toEqual(['2026-09-21', '2026-09-22'])
-  // Two of bash's three calls were timed — the day before the branch and the other thread are not.
-  expect(stats?.toolStats.find((tool) => tool.toolName === 'bash')?.durations).toEqual({
-    count: 2,
-    minMs: 100,
-    maxMs: 400,
-    meanMs: 250,
-    totalMs: 500,
-  })
-  expect(stats?.toolStats.find((tool) => tool.toolName === 'read')?.durations.count).toBe(0)
+  expect(stats?.callStats.map((call) => [call.toolCallId, call.durationMs])).toEqual([
+    ['call-0', undefined],
+    ['call-1', 400],
+    ['call-2', 100],
+    ['call-x', undefined],
+    ['call-3', undefined],
+  ])
   expect(stats?.latency.firstDelta).toMatchObject({ count: 2, minMs: 300, maxMs: 700 })
 })
 

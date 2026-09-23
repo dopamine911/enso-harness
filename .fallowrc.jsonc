@@ -90,9 +90,10 @@
   // folded the two tail pages onto `debug/log-tail-view.tsx` and the day-stats spend columns
   // onto one list: 3.5577944822700616 % (904 of 25409). 3.56 is the two-decimal value that
   // passes it. #45 phase 2 then went to 3.9 % (1024) before it folded: the stats drawer's fetch
-  // onto `route-read.ts` with the timeline's, its two charts onto one, `core-exports.ts`'s two
-  // module maps onto one table, and `routes.ts`'s six thread reads onto `threadRead` —
-  // 3.084607465588897 % (809 of 26227), pinned at 3.09. Re-measure with
+  // onto `route-read.ts` with the timeline's, its charts' axes onto one `turnAxes`, its select and
+  // the log level's onto `option-select.tsx`, `core-exports.ts`'s two module maps onto one table,
+  // and `routes.ts`'s six thread reads onto `threadRead` — 3.040667518604826 % (809 of 26606),
+  // pinned at 3.05. Re-measure with
   // `bunx fallow dupes --format json` (`stats.duplication_percentage`), and lower it the moment
   // a fold makes a smaller number pass.
   //
@@ -103,7 +104,7 @@
   "duplicates": {
     "mode": "semantic",
     "ignore": ["packages/web/src/components/**", "packages/core/src/**"],
-    "threshold": 3.09
+    "threshold": 3.05
   },
   // Complexity thresholds for `fallow audit` (the advisory job). CRAP is OFF, not raised: it is
   // cyclomatic × (1 − coverage)³, and fallow can only ESTIMATE coverage here — Bun's LCOV has no

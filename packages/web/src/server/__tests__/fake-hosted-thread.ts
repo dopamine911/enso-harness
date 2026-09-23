@@ -292,7 +292,7 @@ const FAKE_EMPTY_BRANCH: BranchStats = {
   branchCost: 0,
   turnStats: [],
   promptStats: [],
-  toolStats: [],
+  callStats: [],
   firstAt: undefined,
 }
 
