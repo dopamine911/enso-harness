@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import {
   authEventText,
+  compactDoneText,
   decideHostFlow,
   hostFlowRows,
   loginDoneText,
@@ -35,11 +36,15 @@ test('login options: one per provider per way in, by name; an ambient-only provi
 test('logout options are the stored credentials only, and the /logout row is absent while there are none', () => {
   const stored = logoutOptions([{ providerId: 'openai', providerName: 'OpenAI', type: 'oauth' }])
   expect(stored).toEqual([{ id: 'openai', label: 'OpenAI', detail: 'stored subscription' }])
-  expect(hostFlowRows(loginOptions(PROVIDERS), []).map((row) => row.name)).toEqual(['login'])
+  expect(hostFlowRows(loginOptions(PROVIDERS), []).map((row) => row.name)).toEqual(['login', 'compact'])
   expect(hostFlowRows(loginOptions(PROVIDERS), stored).map((row) => [row.name, row.kind])).toEqual([
     ['login', 'flow'],
     ['logout', 'flow'],
+    ['compact', 'action'],
   ])
+  const compact = hostFlowRows([], []).find((row) => row.name === 'compact')
+  expect(compact?.options).toBeUndefined()
+  expect(compact?.value).toBeUndefined()
 })
 
 test('a run names an offered option or is refused with the reason the route says; the option id splits at its LAST slash', () => {
@@ -69,7 +74,9 @@ test('a run names an offered option or is refused with the reason the route says
   expect(() => decideHostFlow({ name: 'logout', value: 'anthropic' }, login, logout)).toThrow(
     'no stored credential for anthropic',
   )
-  expect(() => decideHostFlow({ name: 'compact' }, login, logout)).toThrow('no host flow named compact')
+  expect(decideHostFlow({ name: 'compact' }, login, logout)).toEqual({ kind: 'compact' })
+  expect(() => decideHostFlow({ name: 'compact', value: 'now' }, login, logout)).toThrow('compact takes no value')
+  expect(() => decideHostFlow({ name: 'reload' }, login, logout)).toThrow('no host flow named reload')
 })
 
 test('every auth event is one line with the thing the user needs in it — the URL, the code', () => {
@@ -94,5 +101,11 @@ test('every auth event is one line with the thing the user needs in it — the U
   expect(loginDoneText('OpenAI', 'oauth', 'gpt-5')).toBe('Logged in to OpenAI. Selected gpt-5.')
   expect(loginDoneText('OpenAI', 'api_key', undefined)).toBe('Saved API key for OpenAI.')
   expect(logoutDoneText('OpenAI', 'oauth')).toBe('Logged out of OpenAI.')
+  expect(compactDoneText(84_120, 11_900)).toBe(
+    'Compacted the context: 84,120 → 11,900 tokens. Reload the page to see the compacted transcript.',
+  )
+  expect(compactDoneText(84_120, undefined)).toBe(
+    'Compacted the context from 84,120 tokens. Reload the page to see the compacted transcript.',
+  )
   expect(logoutDoneText('OpenAI', undefined)).toBe('Removed the stored credential for OpenAI.')
 })

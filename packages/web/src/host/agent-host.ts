@@ -22,6 +22,7 @@ import {
   type EnsoThreadEvent,
   type EnsoTranscriptEntry,
   ensoLogger,
+  type HostFlowOutcome,
   type PromptOutcome,
   type PromptRequest,
   type RuntimeCommand,
@@ -34,11 +35,13 @@ import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
 import { decideHostCommand, HostCommandRefused, hostCommandRows } from './host-commands.ts'
 import {
   authEventText,
+  compactDoneText,
   decideHostFlow,
   FlowCancelled,
   type HostAuthEvent,
   type HostAuthType,
   hostFlowRows,
+  isCompactionRefusal,
   isFlowCancelled,
   type LoginProviderFacts,
   loginDoneText,
@@ -674,6 +677,42 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       }
     }
 
+    /**
+     * `/compact` (#338 slice 4): pi summarises the context — a model call, seconds to a minute —
+     * so it starts and is followed like a login, but the route HOLDS THE LEASE until it settles:
+     * compaction rewrites the branch, pi refuses a prompt while it runs (`agent-session.js:837`),
+     * and `compact()` awaits `abort()` before it arms its own guard (:1469–1470), so a prompt in
+     * that window would run alongside the summary — the held lease is what forecloses it (PR #347
+     * review). Stop reaches it: `abort` below calls `abortCompaction`, and pi's own `dispose`
+     * does too (:587). The page's transcript is TanStack's copy of the messages and does not
+     * re-read the branch on its own, so the done line says to reload; the next snapshot is the
+     * compacted branch.
+     */
+    async function runCompact(): Promise<void> {
+      ui.uiContext.notify('Compacting the context…', 'info')
+      try {
+        const compacted = await session.compact()
+        ui.uiContext.notify(compactDoneText(compacted.tokensBefore, compacted.estimatedTokensAfter), 'info')
+      } catch (error) {
+        // pi's refusals ("Nothing to compact (session too small)", smoke 2026-09-23) are not
+        // failures: said as a warning with pi's reason. Anything else is (PR #347 review).
+        const reason = error instanceof Error ? error.message : String(error)
+        if (isCompactionRefusal(error)) ui.uiContext.notify(`Compaction did not run: ${reason}`, 'warning')
+        else ui.uiContext.notify(`Compaction failed: ${reason}`, 'error')
+      }
+    }
+
+    function runDecidedFlow(decision: ReturnType<typeof decideHostFlow>): Promise<void> {
+      switch (decision.kind) {
+        case 'login':
+          return runLogin(decision.providerId, decision.authType)
+        case 'logout':
+          return runLogout(decision.providerId)
+        case 'compact':
+          return runCompact()
+      }
+    }
+
     async function runLogout(providerId: string): Promise<void> {
       const providerName = providerNameOf(providerId)
       const type = storedCredentials.find((credential) => credential.providerId === providerId)?.type
@@ -773,7 +812,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         commands.push(...hostFlowRows(currentLoginOptions(), logoutOptions(storedCredentials)))
         return commands
       },
-      startHostFlow(run: EnsoHostCommandRun, outcome: PromptOutcome): void {
+      startHostFlow(run: EnsoHostCommandRun, outcome: HostFlowOutcome): void {
         let decision: ReturnType<typeof decideHostFlow>
         try {
           if (flowInProgress !== undefined)
@@ -785,10 +824,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         }
         outcome.onAccepted()
         flowInProgress = run.name
-        const flow =
-          decision.kind === 'login' ? runLogin(decision.providerId, decision.authType) : runLogout(decision.providerId)
+        const flow = runDecidedFlow(decision)
         void flow.finally(() => {
           flowInProgress = undefined
+          outcome.onSettled()
         })
       },
       modelState: currentModelState,
@@ -855,6 +894,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         }
       },
       abort(): Promise<void> {
+        // A compaction in flight is the run Stop is stopping (#338 slice 4): pi's `abort()` does
+        // not cancel it — `abortCompaction()` does, and is a no-op when none is running.
+        session.abortCompaction()
         return stopRunThenSettleDialogs(
           () => session.abort(),
           () => ui.abortAllDialogs(),

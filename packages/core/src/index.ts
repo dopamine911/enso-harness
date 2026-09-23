@@ -151,6 +151,7 @@ export {
   EnsoPromptAdmission,
   EnsoThreadCommands,
   HostCommandOption,
+  type HostFlowOutcome,
   isRuntimeCommand,
   PromptImageContent,
   type PromptOutcome,

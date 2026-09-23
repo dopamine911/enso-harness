@@ -295,6 +295,7 @@ test('⚠ GET …/commands says where its list came from: none before any sessio
     ['thinking', 'host'],
     ['login', 'host'],
     ['logout', 'host'],
+    ['compact', 'host'],
   ])
   expect(live.commands[3]).toMatchObject({ kind: 'flow', options: [{ id: 'fake/oauth' }, { id: 'fake/api_key' }] })
   expect(live.commands[3]?.value).toBeUndefined()
@@ -311,11 +312,20 @@ test('⚠ GET …/commands says where its list came from: none before any sessio
   // thread has no current model, and a value that was another session's would be a lie.
   const remembered = (await commandsOf('never-ran')) as EnsoThreadCommands
   expect(remembered).toMatchObject({ threadId: 'never-ran', source: 'remembered' })
-  expect(remembered.commands.map((command) => command.name)).toEqual(['mode', 'model', 'thinking', 'login', 'logout'])
-  for (const hostRow of remembered.commands.filter((command) => command.source === 'host')) {
-    expect(hostRow.value).toBeUndefined()
-    expect(hostRow.options?.length ?? 0).toBeGreaterThan(0)
-  }
+  expect(remembered.commands.map((command) => command.name)).toEqual([
+    'mode',
+    'model',
+    'thinking',
+    'login',
+    'logout',
+    'compact',
+  ])
+  const rememberedHostRows = remembered.commands.filter((command) => command.source === 'host')
+  expect(rememberedHostRows.every((hostRow) => hostRow.value === undefined)).toBe(true)
+  // An `action` row has no options to keep; every other host row keeps its.
+  const withOptions = rememberedHostRows.filter((hostRow) => hostRow.kind !== 'action')
+  expect(withOptions.map((hostRow) => hostRow.options?.length ?? 0).every((length) => length > 0)).toBe(true)
+  expect(withOptions).toHaveLength(4)
   expect(built).toHaveLength(1)
 })
 
@@ -358,9 +368,19 @@ test('⚠ POST …/command sets the thinking level on a thread that never ran: 2
   const switched = await run('fresh', { name: 'model', value: 'nope/nothing' })
   expect(switched.status).toBe(422)
   expect(await switched.text()).toBe('model nope/nothing is not available here')
-  const unknown = await run('fresh', { name: 'compact' })
+  const unknown = await run('fresh', { name: 'reload' })
   expect(unknown.status).toBe(422)
-  expect(await unknown.text()).toBe('no host command named compact')
+  expect(await unknown.text()).toBe('no host command named reload')
+  // `/compact` (slice 4) is an ACTION: it starts like a flow (202) but HOLDS the lease until it
+  // settles — a compaction rewrites the branch, so the thread is busy until then: a setting is 409
+  // (a prompt would be queued behind the lease, #75, and pi refuses it with its own reason).
+  const compacting = await run('fresh', { name: 'compact' })
+  expect(compacting.status).toBe(202)
+  const compaction = built[0]?.flows.at(-1)
+  expect(compaction?.run).toEqual({ name: 'compact' })
+  expect((await run('fresh', { name: 'thinking', value: 'low' })).status).toBe(409)
+  compaction?.settle()
+  expect((await run('fresh', { name: 'thinking', value: 'low' })).status).toBe(204)
   const malformed = await run('fresh', '{"name":')
   expect(malformed.status).toBe(400)
   const extra = await run('fresh', { name: 'thinking', value: 'low', extra: 1 })

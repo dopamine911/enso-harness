@@ -7,6 +7,7 @@ import type {
   EnsoObservation,
   EnsoPermissionModeState,
   EnsoTranscriptEntry,
+  HostFlowOutcome,
   PromptOutcome,
   PromptRequest,
   RuntimeCommand,
@@ -15,7 +16,7 @@ import type {
 import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
 import { decideHostCommand, HostCommandRefused, hostCommandRows } from '../../host/host-commands.ts'
-import { decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
+import { compactDoneText, decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
 
 /**
  * The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a
@@ -45,6 +46,13 @@ const FAKE_LOGOUT_OPTIONS = [{ id: 'fake', label: 'Fake', detail: 'stored subscr
 /** The fake's host rows — `/model`, `/thinking`, `/login`, `/logout` — in the real host's order; a test that replaces `listCommands` puts pi's rows before these. */
 export function fakeHostRows(record: Pick<FakeThreadRecord, 'modelState'>): RuntimeCommand[] {
   return [...hostCommandRows(record.modelState, FAKE_MODELS), ...hostFlowRows(FAKE_LOGIN_OPTIONS, FAKE_LOGOUT_OPTIONS)]
+}
+
+/** The sentence the fake's flow says when a test settles it — the real host's words, by flow. */
+function fakeFlowDoneText(flowName: string): string {
+  if (flowName === 'logout') return logoutDoneText('Fake', 'oauth')
+  if (flowName === 'compact') return compactDoneText(84_000, 12_000)
+  return loginDoneText('Fake', 'oauth', undefined)
 }
 
 /** What the fake starts on: the first fake model, thinking `medium` of four levels. */
@@ -160,7 +168,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       emit({ kind: 'model', ...record.modelState })
       return Promise.resolve()
     },
-    startHostFlow: (run: EnsoHostCommandRun, outcome: PromptOutcome) => {
+    startHostFlow: (run: EnsoHostCommandRun, outcome: HostFlowOutcome) => {
       // What the real host does: decide before accepting; then the flow runs on its own clock —
       // here, until the test settles it — and ends with a notify and the model state said. The
       // lease is the route's to release, on acceptance; the fake holds nothing.
@@ -184,11 +192,13 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
             method: 'notify',
             blocking: false,
             origin: 'run',
-            message:
-              run.name === 'logout' ? logoutDoneText('Fake', 'oauth') : loginDoneText('Fake', 'oauth', undefined),
+            message: fakeFlowDoneText(run.name),
             notifyType: 'info',
           })
-          emit({ kind: 'model', ...record.modelState })
+          // What the real host emits at the end, by flow: a login or logout re-announces the model
+          // state; a compaction says its line and nothing else (PR #347 review).
+          if (run.name !== 'compact') emit({ kind: 'model', ...record.modelState })
+          outcome.onSettled()
         },
       }
       record.flows.push(entry)
