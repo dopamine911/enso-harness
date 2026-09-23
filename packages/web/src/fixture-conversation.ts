@@ -35,6 +35,9 @@ export function createFixtureChat(): TanStackChat {
           '```ts\nconst answer = 42;\n```\n\n' +
           '| col A | col B |\n| --- | --- |\n| one | two |\n\n' +
           '---\n\n' +
+          // A remote image waits for a click (`markdown-image.tsx`): healthy is a button naming
+          // the host and URL, and nothing fetched until it is pressed.
+          '![remote image — healthy is a click-to-load button](https://img.shields.io/badge/enso-fixture-blue)\n\n' +
           '**Sanitization tripwires — if any of these is live, the renderer regressed:**\n\n' +
           'SENTINEL-BEFORE: the three tripwires sit between this sentence and SENTINEL-AFTER.\n\n' +
           // ⚠ The raw tags render as ESCAPED TEXT (`@tanstack/markdown` does not parse model HTML),

