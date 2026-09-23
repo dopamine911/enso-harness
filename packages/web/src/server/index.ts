@@ -40,6 +40,7 @@ import { noteRunAdmitted } from './run-timing.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
+import { createThreadStatsRoute } from './thread-stats-route.ts'
 
 /** `GET /api/threads/<threadId>` — the id is one path segment, percent-encoded by the caller. */
 const THREAD_ROUTE = /^\/api\/threads\/([^/?#]+)$/
@@ -49,6 +50,8 @@ const THREAD_EVENTS_ROUTE = /^\/api\/threads\/([^/?#]+)\/events$/
 const THREAD_HISTORY_ROUTE = /^\/api\/threads\/([^/?#]+)\/history$/
 /** `GET /api/threads/<threadId>/commands` — the slash commands the thread can run, for the palette (#338). */
 const THREAD_COMMANDS_ROUTE = /^\/api\/threads\/([^/?#]+)\/commands$/
+/** `GET /api/threads/<threadId>/stats` — the thread analysed: per prompt, turn and tool (#45). */
+const THREAD_STATS_ROUTE = /^\/api\/threads\/([^/?#]+)\/stats$/
 /** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
 const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/
 const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/
@@ -505,6 +508,25 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const logTailDeps: LogTailRouteDeps = { logsDir: options.logsDir, sseKeepaliveMs }
   // The day, derived (#144 slice 4): the whole file folded per request, never the tail's cap.
   const stats = createLogStatsRoute({ logsDir: options.logsDir })
+  // One thread, analysed (#45 phase 2): pi's session for the numbers, the day files for the times.
+  const threadStats = createThreadStatsRoute({ threads, host, logsDir: options.logsDir })
+
+  /**
+   * The thread's stats, or 404 for a thread the server holds neither live nor on disk. Built
+   * before the head, as `respondWithStats` is: a day file that fails to read is the 500
+   * `answerOrFail` writes, never a throw after a committed 200.
+   */
+  async function respondWithThreadStats(threadId: string, response: ServerResponse): Promise<void> {
+    const payload = await threadStats(threadId)
+    if (payload === undefined) {
+      response.writeHead(404, { 'Content-Type': 'text/plain' })
+      response.end(`no session for thread ${threadId}`)
+      return
+    }
+    const body = JSON.stringify(payload)
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(body)
+  }
 
   /**
    * The payload before the head (PR #336 review): the fold reads the file synchronously and
@@ -570,6 +592,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       method: 'GET',
       route: THREAD_COMMANDS_ROUTE,
       respond: idOnly(respondWithThreadCommands),
+    },
+    {
+      method: 'GET',
+      route: THREAD_STATS_ROUTE,
+      respond: idOnly(respondWithThreadStats),
     },
     {
       method: 'GET',

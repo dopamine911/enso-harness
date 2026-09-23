@@ -208,6 +208,29 @@ function summarise(durations: readonly number[]): EnsoDurationSummary {
   return { count: durations.length, minMs, maxMs, meanMs: totalMs / durations.length, totalMs }
 }
 
+/**
+ * Several summaries as one — the days of a thread that spans them (#45), each folded on its own
+ * so a run's generation, which restarts with the server, never joins across a day boundary.
+ * No summary, or only empty ones, is the empty summary.
+ *
+ * @group Logging
+ */
+export function mergeDurationSummaries(summaries: readonly EnsoDurationSummary[]): EnsoDurationSummary {
+  const measured = summaries.filter((summary) => summary.count > 0)
+  if (measured.length === 0) return summarise([])
+  let count = 0
+  let totalMs = 0
+  let minMs = Number.POSITIVE_INFINITY
+  let maxMs = 0
+  for (const summary of measured) {
+    count += summary.count
+    totalMs += summary.totalMs
+    minMs = Math.min(minMs, summary.minMs)
+    maxMs = Math.max(maxMs, summary.maxMs)
+  }
+  return { count, minMs, maxMs, meanMs: totalMs / count, totalMs }
+}
+
 function addSpend(into: SpendTotals, properties: Readonly<Record<string, unknown>>): void {
   into.input += numberOf(properties.input) ?? 0
   into.output += numberOf(properties.output) ?? 0

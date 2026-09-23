@@ -30,63 +30,52 @@ interface RouteMetadata {
   readonly factory?: { readonly path: string; readonly declaration: string }
 }
 
+/**
+ * A GET that reads one thread and builds nothing — six rows share everything but these four
+ * facts (and the follow's factory), so they are stated once (#45 phase 2 added the sixth).
+ */
+function threadRead(facts: Pick<RouteMetadata, 'path' | 'handler' | 'success' | 'errors' | 'factory'>): RouteMetadata {
+  return { method: 'GET', input: 'path: `threadId`', routeClass: 'observation', builds: 'no', logs: 'no', ...facts }
+}
+
 const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
-  THREAD_ROUTE: {
-    method: 'GET',
+  THREAD_ROUTE: threadRead({
     path: '/api/threads/:threadId',
     handler: 'respondWithThread',
-    input: 'path: `threadId`',
     success: '200 JSON',
     errors: '400 malformed thread id; 403 untrusted origin; 404 no live session',
-    routeClass: 'observation',
-    builds: 'no',
-    logs: 'no',
-  },
-  THREAD_EVENTS_ROUTE: {
-    method: 'GET',
+  }),
+  THREAD_EVENTS_ROUTE: threadRead({
     path: '/api/threads/:threadId/events',
     handler: 'respondWithThreadEvents',
-    input: 'path: `threadId`',
     success: '200 `EnsoThreadEvents` JSON',
     errors: '400 malformed thread id; 403 untrusted origin; 404 no live session',
-    routeClass: 'observation',
-    builds: 'no',
-    logs: 'no',
-  },
-  THREAD_COMMANDS_ROUTE: {
-    method: 'GET',
+  }),
+  THREAD_COMMANDS_ROUTE: threadRead({
     path: '/api/threads/:threadId/commands',
     handler: 'respondWithThreadCommands',
-    input: 'path: `threadId`',
     success: '200 `EnsoThreadCommands` JSON — `source` says live, remembered or none',
     errors: '400 malformed thread id; 403 untrusted origin',
-    routeClass: 'observation',
-    builds: 'no',
-    logs: 'no',
-  },
-  THREAD_HISTORY_ROUTE: {
-    method: 'GET',
+  }),
+  THREAD_STATS_ROUTE: threadRead({
+    path: '/api/threads/:threadId/stats',
+    handler: 'respondWithThreadStats',
+    success: "200 `EnsoThreadStats` JSON — pi's session for the numbers, the log's day files for the times",
+    errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
+  }),
+  THREAD_HISTORY_ROUTE: threadRead({
     path: '/api/threads/:threadId/history',
     handler: 'respondWithThreadHistory',
-    input: 'path: `threadId`',
     success: '200 `EnsoThreadHistory` JSON',
     errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
-    routeClass: 'observation',
-    builds: 'no',
-    logs: 'no',
-  },
-  THREAD_FOLLOW_ROUTE: {
-    method: 'GET',
+  }),
+  THREAD_FOLLOW_ROUTE: threadRead({
     path: '/api/threads/:threadId/follow',
     handler: 'followThread',
-    input: 'path: `threadId`',
     success: '200 SSE stream',
     errors: '400 malformed thread id; 403 untrusted origin; 500 handler failure',
-    routeClass: 'observation',
-    builds: 'no',
-    logs: 'no',
     factory: { path: FOLLOW_PATH, declaration: 'export async function followThread' },
-  },
+  }),
   THREAD_PROMPT_ROUTE: {
     method: 'POST',
     path: '/api/threads/:threadId/prompt',

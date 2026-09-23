@@ -1,0 +1,117 @@
+import { readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import {
+  dayStats,
+  type EnsoDurationSummary,
+  type EnsoLogLine,
+  type EnsoSessionUsage,
+  type EnsoThreadStats,
+  mergeDurationSummaries,
+} from '@enso/core'
+import { ensoLogDay, ensoLogFilename } from '@enso/core/log-process'
+import type { AgentHost } from '../host/agent-host.ts'
+import type { BranchStats } from '../host/branch-stats.ts'
+import { readLogFile } from './logs-stats-route.ts'
+import type { ThreadRegistry } from './thread-registry.ts'
+
+/**
+ * `GET /api/threads/:threadId/stats` (#45 phase 2): one thread, analysed — the chat's stats
+ * drawer reads it. The session half comes from pi (`branch-stats.ts`, `session-usage.ts`), the
+ * log half from the day files this thread's branch spans (`EnsoThreadStats` says which holds what).
+ *
+ * ⚠ LIVE-OR-COLD, READ THE WAY `thread-read.ts` READS: peek, read the file if not live, re-peek —
+ * a thread built during the read is answered from pi's memory, which is fresher than the file.
+ * Neither live nor stored is `undefined`, the route's 404. Looking builds nothing (#86).
+ *
+ * ⚠ EACH DAY IS FOLDED ON ITS OWN, then merged. `dayStats` joins a run by `threadId#generation`,
+ * and the generation restarts with the server: two days concatenated could join Monday's run 3
+ * to Tuesday's. A tool call that straddles midnight loses its duration — a stated loss, not a
+ * wrong one.
+ *
+ * ⚠ WRITES NO RECORD — the log-stats route's rule: a read of the trace must not appear in it.
+ */
+
+export interface ThreadStatsRouteDeps {
+  /** Only the peek: the route reads a live thread and never builds one (#86). */
+  readonly threads: Pick<ThreadRegistry, 'peek'>
+  readonly host: Pick<AgentHost, 'readStoredThreadStats'>
+  /** Where the day files are — the same directory the bundle, the tail and the day's stats read. */
+  readonly logsDir: string
+  /** ⓘ Injectable so a test names its day. */
+  readonly now?: () => Date
+}
+
+interface ThreadSource {
+  readonly live: boolean
+  readonly usage: EnsoSessionUsage
+  readonly branch: BranchStats
+}
+
+/** The day files present, oldest first — whatever the 14-day prune left. A missing directory has none. */
+function logDaysOnDisk(logsDir: string): string[] {
+  let names: string[]
+  try {
+    names = readdirSync(logsDir)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+  return names.flatMap((filename) => ensoLogDay(filename) ?? []).sort()
+}
+
+/** The local day a moment falls on, as the day files name it. */
+function localDayOf(moment: Date): string {
+  return ensoLogDay(ensoLogFilename(moment)) ?? ''
+}
+
+/** This thread's records in one day file. The raw id test first, so most lines are never parsed. */
+function threadLines(logsDir: string, day: string, threadId: string): EnsoLogLine[] {
+  const { lines } = readLogFile(join(logsDir, `enso-${day}.jsonl`), (raw) => raw.includes(threadId))
+  return lines.filter((line) => line.properties?.threadId === threadId)
+}
+
+export function createThreadStatsRoute(
+  deps: ThreadStatsRouteDeps,
+): (threadId: string) => Promise<EnsoThreadStats | undefined> {
+  const now = deps.now ?? ((): Date => new Date())
+
+  async function sourceOf(threadId: string): Promise<ThreadSource | undefined> {
+    const stored =
+      deps.threads.peek(threadId) === undefined ? await deps.host.readStoredThreadStats(threadId) : undefined
+    const nowLive = deps.threads.peek(threadId)
+    if (nowLive !== undefined) {
+      return { live: true, usage: nowLive.hosted.runtime.sessionUsage(), branch: nowLive.hosted.branchStats() }
+    }
+    return stored === undefined ? undefined : { live: false, ...stored }
+  }
+
+  return async (threadId: string): Promise<EnsoThreadStats | undefined> => {
+    const source = await sourceOf(threadId)
+    if (source === undefined) return undefined
+    const { branch } = source
+    // From the branch's first entry's day; a branch with none has only today to look in.
+    const firstDay = localDayOf(branch.firstAt === undefined ? now() : new Date(branch.firstAt))
+    const days = logDaysOnDisk(deps.logsDir).filter((day) => day >= firstDay)
+    const folded = days.map((day) => dayStats(day, threadLines(deps.logsDir, day, threadId), 0))
+    const durationsOf = (toolName: string): EnsoDurationSummary =>
+      mergeDurationSummaries(
+        folded.flatMap((stats) =>
+          stats.tools.filter((tool) => tool.toolName === toolName).map((tool) => tool.durations),
+        ),
+      )
+    return {
+      threadId,
+      live: source.live,
+      usage: source.usage,
+      branchCost: branch.branchCost,
+      turnStats: branch.turnStats,
+      promptStats: branch.promptStats,
+      toolStats: branch.toolStats.map((tool) => ({ ...tool, durations: durationsOf(tool.toolName) })),
+      latency: {
+        prompts: mergeDurationSummaries(folded.map((stats) => stats.totals.prompts)),
+        firstDelta: mergeDurationSummaries(folded.map((stats) => stats.totals.firstDelta)),
+      },
+      logDays: days,
+    }
+  }
+}

@@ -40,21 +40,31 @@ function readDayOrNothing(file: string): string {
   }
 }
 
+/**
+ * A day file's records, and how many lines were not records at all. An absent file is an empty
+ * day. `keep` sees each raw line first: a reader after one thread skips the parse for the rest.
+ */
+export function readLogFile(
+  file: string,
+  keep: (raw: string) => boolean = () => true,
+): { readonly lines: EnsoLogLine[]; readonly malformed: number } {
+  const lines: EnsoLogLine[] = []
+  let malformed = 0
+  for (const raw of readDayOrNothing(file).split('\n')) {
+    if (raw.length === 0 || !keep(raw)) continue
+    const parsed = parseEnsoLogLine(raw)
+    if (typeof parsed === 'string') malformed += 1
+    else lines.push(parsed)
+  }
+  return { lines, malformed }
+}
+
 export function createLogStatsRoute(deps: LogStatsRouteDeps): () => EnsoDayStats {
   const now = deps.now ?? ((): Date => new Date())
   return (): EnsoDayStats => {
     const filename = ensoLogFilename(now())
     const day = filename.slice('enso-'.length, -'.jsonl'.length)
-    const file = join(deps.logsDir, filename)
-    const text = readDayOrNothing(file)
-    const lines: EnsoLogLine[] = []
-    let malformed = 0
-    for (const raw of text.split('\n')) {
-      if (raw.length === 0) continue
-      const parsed = parseEnsoLogLine(raw)
-      if (typeof parsed === 'string') malformed += 1
-      else lines.push(parsed)
-    }
+    const { lines, malformed } = readLogFile(join(deps.logsDir, filename))
     return dayStats(day, lines, malformed)
   }
 }

@@ -88,6 +88,7 @@ export {
   ENSO_LOG_EVENTS,
   EnsoDayStats,
   EnsoDurationSummary,
+  mergeDurationSummaries,
 } from './log-stats.ts'
 export {
   ENSO_LOG_LEVEL_NAMES,
@@ -162,6 +163,7 @@ export {
   RuntimeCommand,
   ThreadRuntime,
 } from './thread-runtime.ts'
+export { EnsoPromptStats, EnsoThreadStats, EnsoToolStats, EnsoTurnStats } from './thread-stats.ts'
 export { type EnsoTimelineEntry, threadTimeline, timelineJoinKeys } from './thread-timeline.ts'
 export {
   ENSO_TOOL_RESULT_KEY,

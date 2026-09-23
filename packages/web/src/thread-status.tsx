@@ -134,6 +134,10 @@ export interface ThreadStatusViewProps {
   readonly usage?: EnsoSessionUsage | undefined
   /** The tree pi runs this thread in (#44); undefined until the follow's first snapshot. */
   readonly cwd?: string | undefined
+  /** Whether the thread's stats drawer is open (#45 phase 2) — the toggle's pressed state. */
+  readonly statsOpen?: boolean
+  /** Opens or closes the stats drawer; no toggle is drawn without it (a static render, a test). */
+  readonly onToggleStats?: (() => void) | undefined
 }
 
 const COMPACT_TOKENS = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
@@ -184,7 +188,14 @@ function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof 
 }
 
 /** Pure view — everything it shows arrives as props, so a static render pins the wording. */
-export function ThreadStatusView({ activity, counts, usage, cwd }: ThreadStatusViewProps): React.ReactNode {
+export function ThreadStatusView({
+  activity,
+  counts,
+  usage,
+  cwd,
+  statsOpen = false,
+  onToggleStats,
+}: ThreadStatusViewProps): React.ReactNode {
   const dotClass = activityDotClass(activity)
   const context = usage?.context ?? null
   return (
@@ -223,6 +234,18 @@ export function ThreadStatusView({ activity, counts, usage, cwd }: ThreadStatusV
       >
         {usage === undefined ? '$—' : `$${usage.cost.toFixed(4)}`}
       </span>
+      {onToggleStats === undefined ? null : (
+        <button
+          type="button"
+          className="text-foreground underline-offset-2 hover:underline"
+          aria-expanded={statsOpen}
+          aria-controls="thread-stats-pane"
+          title="per prompt, turn and tool: what this thread spent, and on what"
+          onClick={onToggleStats}
+        >
+          {statsOpen ? 'hide stats' : 'stats'}
+        </button>
+      )}
     </footer>
   )
 }
@@ -230,6 +253,8 @@ export function ThreadStatusView({ activity, counts, usage, cwd }: ThreadStatusV
 export interface ThreadStatusBarProps {
   readonly messages: ReadonlyArray<UIMessage>
   readonly generating: boolean
+  readonly statsOpen?: boolean
+  readonly onToggleStats?: () => void
 }
 
 /**
@@ -237,7 +262,12 @@ export interface ThreadStatusBarProps {
  * (the chat hook is bound inside chat-screen.tsx, and this module stays free of it), the
  * thread's usage store and its disconnected flag (#119) are read from context.
  */
-export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps): React.ReactNode {
+export function ThreadStatusBar({
+  messages,
+  generating,
+  statsOpen,
+  onToggleStats,
+}: ThreadStatusBarProps): React.ReactNode {
   const stores = useThreadStores()
   const usage = useStore(stores.usage)
   const disconnected = useStore(stores.disconnected)
@@ -248,6 +278,8 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
       counts={countThread(messages)}
       usage={usage}
       cwd={cwd}
+      statsOpen={statsOpen ?? false}
+      onToggleStats={onToggleStats}
     />
   )
 }

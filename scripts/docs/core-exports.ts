@@ -35,54 +35,35 @@ type Kind = 'type' | 'value'
 
 const REGIONS: readonly Region[] = ['web/host', 'web/server', 'web/browser', 'harness', 'scripts']
 
-/** Checked by `exportsOf`: a newly public module cannot acquire a classification by accident. */
-const CLASSIFICATION_BY_MODULE: Readonly<Record<string, Classification>> = {
-  'config.ts': 'config/policy',
-  'dialog.ts': 'wire',
-  'follow.ts': 'wire',
-  'guard.ts': 'config/policy',
-  'log.ts': 'wire',
-  'log-bundle.ts': 'node-only utility',
-  'log-process.ts': 'node-only utility',
-  'log-stats.ts': 'wire',
-  'log-tail.ts': 'wire',
-  'observation.ts': 'wire',
-  'paths.ts': 'node-only utility',
-  'pi-manifest.ts': 'node-only utility',
-  'permission-mode.ts': 'config/policy',
-  'secrets.ts': 'node-only utility',
-  'thread-inspection.ts': 'wire',
-  'thread-timeline.ts': 'wire',
-  'thread-runtime.ts': 'host contract',
-  'tool-result.ts': 'wire',
-  'transcript.ts': 'wire',
-  'web-fetch.ts': 'config/policy',
-  'web-search.ts': 'config/policy',
-}
-
-/** Glossary sections, assigned by module rather than inferred from symbol spelling. */
-const DOMAIN_BY_MODULE: Readonly<Record<string, string>> = {
-  'config.ts': 'Record, Permission',
-  'dialog.ts': 'Control',
-  'follow.ts': 'Control, Observation',
-  'guard.ts': 'Permission',
-  'log.ts': 'Record',
-  'log-bundle.ts': 'Record',
-  'log-process.ts': 'Record',
-  'log-stats.ts': 'Record, Observation',
-  'log-tail.ts': 'Record, Observation',
-  'observation.ts': 'Observation',
-  'paths.ts': 'Project vocabulary',
-  'pi-manifest.ts': 'Project vocabulary',
-  'permission-mode.ts': 'Permission',
-  'secrets.ts': 'Permission',
-  'thread-inspection.ts': 'Thread, Observation',
-  'thread-timeline.ts': 'Thread, Observation, Record',
-  'thread-runtime.ts': 'Thread, Control',
-  'tool-result.ts': 'Surface, Observation',
-  'transcript.ts': 'Thread, Record',
-  'web-fetch.ts': 'Permission, Control',
-  'web-search.ts': 'Permission, Control',
+/**
+ * Per public module: its classification, and the glossary sections it belongs to — assigned by
+ * module rather than inferred from symbol spelling. One row each, so a module cannot gain one
+ * without the other. Checked by `exportsOf`: a newly public module cannot acquire either by
+ * accident, and a row for a module that exports nothing is refused.
+ */
+const MODULE_FACTS: Readonly<Record<string, readonly [classification: Classification, domain: string]>> = {
+  'config.ts': ['config/policy', 'Record, Permission'],
+  'dialog.ts': ['wire', 'Control'],
+  'follow.ts': ['wire', 'Control, Observation'],
+  'guard.ts': ['config/policy', 'Permission'],
+  'log.ts': ['wire', 'Record'],
+  'log-bundle.ts': ['node-only utility', 'Record'],
+  'log-process.ts': ['node-only utility', 'Record'],
+  'log-stats.ts': ['wire', 'Record, Observation'],
+  'log-tail.ts': ['wire', 'Record, Observation'],
+  'observation.ts': ['wire', 'Observation'],
+  'paths.ts': ['node-only utility', 'Project vocabulary'],
+  'pi-manifest.ts': ['node-only utility', 'Project vocabulary'],
+  'permission-mode.ts': ['config/policy', 'Permission'],
+  'secrets.ts': ['node-only utility', 'Permission'],
+  'thread-inspection.ts': ['wire', 'Thread, Observation'],
+  'thread-timeline.ts': ['wire', 'Thread, Observation, Record'],
+  'thread-stats.ts': ['wire', 'Thread, Observation, Record'],
+  'thread-runtime.ts': ['host contract', 'Thread, Control'],
+  'tool-result.ts': ['wire', 'Surface, Observation'],
+  'transcript.ts': ['wire', 'Thread, Record'],
+  'web-fetch.ts': ['config/policy', 'Permission, Control'],
+  'web-search.ts': ['config/policy', 'Permission, Control'],
 }
 
 interface PublicExport {
@@ -124,10 +105,9 @@ function checkedExport(
   module: string,
   entrypoint: PublicExport['entrypoint'],
 ): PublicExport {
-  const classification = CLASSIFICATION_BY_MODULE[module]
-  const domain = DOMAIN_BY_MODULE[module]
-  if (classification === undefined) throw new Error(`${module} has no classification`)
-  if (domain === undefined) throw new Error(`${module} has no glossary domain`)
+  const facts = MODULE_FACTS[module]
+  if (facts === undefined) throw new Error(`${module} has no classification and glossary domain`)
+  const [classification, domain] = facts
   const path = join(CORE_SOURCE, module)
   return {
     symbol,
@@ -182,11 +162,8 @@ function exportsOf(): PublicExport[] {
     detectedModules.add(publicExport.module)
   }
   if (exports.length === 0) throw new Error('no public core exports detected')
-  for (const module of Object.keys(CLASSIFICATION_BY_MODULE)) {
+  for (const module of Object.keys(MODULE_FACTS)) {
     if (!detectedModules.has(module)) throw new Error(`${module} is classified but exports no public symbol`)
-  }
-  for (const module of Object.keys(DOMAIN_BY_MODULE)) {
-    if (!detectedModules.has(module)) throw new Error(`${module} has a glossary domain but exports no public symbol`)
   }
   return exports.sort(
     (left, right) => left.symbol.localeCompare(right.symbol) || left.entrypoint.localeCompare(right.entrypoint),

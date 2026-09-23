@@ -15,6 +15,7 @@ import type {
   ThreadRuntime,
 } from '@enso/core'
 import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
+import type { BranchStats } from '../../host/branch-stats.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
 import { decideHostCommand, HostCommandRefused, hostCommandRows } from '../../host/host-commands.ts'
 import { compactDoneText, decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
@@ -111,6 +112,8 @@ export interface FakeHostedThread extends FakeThreadParts {
 export interface FakeHostedThreadOptions {
   /** Methods to replace, built over the fake's parts; every other method keeps its recording default. */
   readonly runtime?: (parts: FakeThreadParts) => Partial<ThreadRuntime>
+  /** What `branchStats()` answers (#45 phase 2); an empty branch when absent. */
+  readonly branch?: BranchStats
   readonly inspect?: Partial<HostedThreadInspection>
 }
 
@@ -264,6 +267,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     emittedEvents: emitted.recent,
     // The fake loads no extensions: every probe is the hook's silence.
     probeToolCall: async (): Promise<undefined> => undefined,
+    branchStats: () => options.branch ?? FAKE_EMPTY_BRANCH,
   }
   return { hosted, record, emit, open }
 }
@@ -277,9 +281,20 @@ export interface FakeStoredThread {
   readonly mode?: string
   /** What pi's rule sums over the file (#45); nothing spent when absent. */
   readonly usage?: EnsoSessionUsage
+  /** The branch analysed (#45 phase 2); an empty branch when absent. */
+  readonly branch?: BranchStats
 }
 
 const FAKE_FRESH_MODE: EnsoPermissionModeState = { mode: 'default', available: ['default'] }
+
+/** A branch with nothing on it: no turn, no prompt, no tool, no first entry. */
+const FAKE_EMPTY_BRANCH: BranchStats = {
+  branchCost: 0,
+  turnStats: [],
+  promptStats: [],
+  toolStats: [],
+  firstAt: undefined,
+}
 
 /**
  * The one fake of the storage seam (`docs/seams/storage.md`): an `AgentHost` whose listing
@@ -317,6 +332,14 @@ export function createFakeAgentHost(
         storedThread === undefined
           ? undefined
           : { transcript: storedThread.transcript, usage: storedThread.usage ?? { ...FAKE_NO_USAGE } },
+      )
+    },
+    readStoredThreadStats: (threadId: string) => {
+      const storedThread = stored[threadId]
+      return Promise.resolve(
+        storedThread === undefined
+          ? undefined
+          : { usage: storedThread.usage ?? { ...FAKE_NO_USAGE }, branch: storedThread.branch ?? FAKE_EMPTY_BRANCH },
       )
     },
   }

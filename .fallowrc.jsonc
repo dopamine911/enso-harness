@@ -89,8 +89,12 @@
   // surface) then took it to 4.7 % unseen, and `main` sat at 4.79 % (1217 of 25411) until #352
   // folded the two tail pages onto `debug/log-tail-view.tsx` and the day-stats spend columns
   // onto one list: 3.5577944822700616 % (904 of 25409). 3.56 is the two-decimal value that
-  // passes it. Re-measure with `bunx fallow dupes --format json` (`stats.duplication_percentage`),
-  // and lower it the moment a fold makes a smaller number pass.
+  // passes it. #45 phase 2 then went to 3.9 % (1024) before it folded: the stats drawer's fetch
+  // onto `route-read.ts` with the timeline's, its two charts onto one, `core-exports.ts`'s two
+  // module maps onto one table, and `routes.ts`'s six thread reads onto `threadRead` —
+  // 3.084607465588897 % (809 of 26227), pinned at 3.09. Re-measure with
+  // `bunx fallow dupes --format json` (`stats.duplication_percentage`), and lower it the moment
+  // a fold makes a smaller number pass.
   //
   // Still advisory, not promoted: the promotion condition this comment has always stated —
   // "red for a real regression once" — cannot have been met while the ratchet was red for a
@@ -99,7 +103,7 @@
   "duplicates": {
     "mode": "semantic",
     "ignore": ["packages/web/src/components/**", "packages/core/src/**"],
-    "threshold": 3.56
+    "threshold": 3.09
   },
   // Complexity thresholds for `fallow audit` (the advisory job). CRAP is OFF, not raised: it is
   // cyclomatic × (1 − coverage)³, and fallow can only ESTIMATE coverage here — Bun's LCOV has no
@@ -108,8 +112,12 @@
   // `generate()` never has. Every complexity finding the audit raised on #180, #181 and #182
   // was `exceeded: crap` on a function the suite drives; cyclomatic (20) and cognitive (15)
   // never fired and stay on — cognitive is also biome's hard ceiling at 25.
+  // `ignore`: the vendored components, for the reason `ignoreFindings` gives above — their
+  // functions are upstream's, kept diffable (the shadcn `chart.tsx` #45 fetched arrived with a
+  // 22-branch tooltip formatter the audit then called ours).
   "health": {
-    "maxCrap": 0
+    "maxCrap": 0,
+    "ignore": ["packages/web/src/components/**"]
   },
   // `error` since the day-one list (five, all `rpc/`, recorded on #173) reached zero: a crossing
   // now fails the dead-code gate step. Coverage and forbidden-call findings share the severity.
