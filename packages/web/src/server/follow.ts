@@ -454,7 +454,8 @@ export async function runHostCommand(
     return { status: 409, reason: `thread ${threadId} is running; change ${run.name} when it settles` }
   }
   const lease = await threads.acquire(threadId)
-  // ⚠ A `flow` row STARTS and the route answers 202 (#338 slice 3): a login may wait minutes on a
+  // ⚠ A `flow` row STARTS and the route answers 202 (#338 slice 3), and so does an `action` (slice
+  // 4: `/compact` is a model call, seconds to a minute): a login may wait minutes on a
   // device code, and its questions and progress are on the feed, not in this response. The lease
   // is released on acceptance, as `changeThreadMode` releases on a command's acceptance: a lease
   // IS the registry's "busy" (composer disabled, prompts 409, a generation bumped), and a login is
@@ -463,7 +464,7 @@ export async function runHostCommand(
   let isFlow: boolean
   try {
     const row = lease.runtime.listCommands().find((command) => command.source === 'host' && command.name === run.name)
-    isFlow = row?.kind === 'flow'
+    isFlow = row?.kind === 'flow' || row?.kind === 'action'
   } catch (error) {
     lease.release()
     throw error

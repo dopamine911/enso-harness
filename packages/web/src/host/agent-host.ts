@@ -34,6 +34,7 @@ import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
 import { decideHostCommand, HostCommandRefused, hostCommandRows } from './host-commands.ts'
 import {
   authEventText,
+  compactDoneText,
   decideHostFlow,
   FlowCancelled,
   type HostAuthEvent,
@@ -674,6 +675,39 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       }
     }
 
+    /**
+     * `/compact` (#338 slice 4): pi summarises the context — a model call, seconds to a minute —
+     * so it starts and is followed like a login. The page's transcript is TanStack's copy of the
+     * messages and does not re-read the branch on its own, so the done line says to reload; the
+     * next snapshot is the compacted branch. pi aborts any in-flight agent operation first, which
+     * the route forecloses with its 409 while busy.
+     */
+    async function runCompact(): Promise<void> {
+      ui.uiContext.notify('Compacting the context…', 'info')
+      try {
+        const compacted = await session.compact()
+        ui.uiContext.notify(compactDoneText(compacted.tokensBefore, compacted.estimatedTokensAfter), 'info')
+      } catch (error) {
+        // pi's refusals include "Nothing to compact (session too small)" — not a failure, so the
+        // line says what happened and carries pi's reason, as a warning (smoke, 2026-09-23).
+        ui.uiContext.notify(
+          `Compaction did not run: ${error instanceof Error ? error.message : String(error)}`,
+          'warning',
+        )
+      }
+    }
+
+    function runDecidedFlow(decision: ReturnType<typeof decideHostFlow>): Promise<void> {
+      switch (decision.kind) {
+        case 'login':
+          return runLogin(decision.providerId, decision.authType)
+        case 'logout':
+          return runLogout(decision.providerId)
+        case 'compact':
+          return runCompact()
+      }
+    }
+
     async function runLogout(providerId: string): Promise<void> {
       const providerName = providerNameOf(providerId)
       const type = storedCredentials.find((credential) => credential.providerId === providerId)?.type
@@ -785,8 +819,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         }
         outcome.onAccepted()
         flowInProgress = run.name
-        const flow =
-          decision.kind === 'login' ? runLogin(decision.providerId, decision.authType) : runLogout(decision.providerId)
+        const flow = runDecidedFlow(decision)
         void flow.finally(() => {
           flowInProgress = undefined
         })

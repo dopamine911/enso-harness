@@ -15,7 +15,7 @@ import type {
 import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
 import { decideHostCommand, HostCommandRefused, hostCommandRows } from '../../host/host-commands.ts'
-import { decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
+import { compactDoneText, decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
 
 /**
  * The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a
@@ -45,6 +45,13 @@ const FAKE_LOGOUT_OPTIONS = [{ id: 'fake', label: 'Fake', detail: 'stored subscr
 /** The fake's host rows — `/model`, `/thinking`, `/login`, `/logout` — in the real host's order; a test that replaces `listCommands` puts pi's rows before these. */
 export function fakeHostRows(record: Pick<FakeThreadRecord, 'modelState'>): RuntimeCommand[] {
   return [...hostCommandRows(record.modelState, FAKE_MODELS), ...hostFlowRows(FAKE_LOGIN_OPTIONS, FAKE_LOGOUT_OPTIONS)]
+}
+
+/** The sentence the fake's flow says when a test settles it — the real host's words, by flow. */
+function fakeFlowDoneText(flowName: string): string {
+  if (flowName === 'logout') return logoutDoneText('Fake', 'oauth')
+  if (flowName === 'compact') return compactDoneText(84_000, 12_000)
+  return loginDoneText('Fake', 'oauth', undefined)
 }
 
 /** What the fake starts on: the first fake model, thinking `medium` of four levels. */
@@ -184,8 +191,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
             method: 'notify',
             blocking: false,
             origin: 'run',
-            message:
-              run.name === 'logout' ? logoutDoneText('Fake', 'oauth') : loginDoneText('Fake', 'oauth', undefined),
+            message: fakeFlowDoneText(run.name),
             notifyType: 'info',
           })
           emit({ kind: 'model', ...record.modelState })

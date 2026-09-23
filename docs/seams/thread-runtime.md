@@ -346,7 +346,9 @@ the browser masks and never echoes. Fire-and-forget like `prompt`, for the same 
 may wait minutes, so the route answers 202 on acceptance — and releases the lease then, because a
 lease IS the registry's busy and a login is not a run (the smoke showed a held lease locking the
 composer for the device-code wait). The flow lives on the session; disposing the session aborts it; one flow runs at a time per
-session, a second start is refused by name. The stored
+session, a second start is refused by name. `/compact` (slice 4) is an `action` on the same path:
+no option, a model call pi makes to summarise the branch, a notify with the token counts when it
+ends — and the page's transcript is TanStack's copy, so the line says to reload. The stored
 credentials `/logout` offers are a cache — pi lists them asynchronously and `listCommands` is
 synchronous — refreshed at build and after every flow the host itself ran.
 

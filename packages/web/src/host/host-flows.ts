@@ -42,6 +42,7 @@ export function isFlowCancelled(error: unknown): boolean {
 
 const HOST_FLOW_LOGIN = 'login'
 const HOST_FLOW_LOGOUT = 'logout'
+const HOST_ACTION_COMPACT = 'compact'
 
 /** pi's two ways in, as the row labels them. */
 export type HostAuthType = 'oauth' | 'api_key'
@@ -92,7 +93,11 @@ export function logoutOptions(credentials: readonly StoredCredentialFacts[]): Ho
     }))
 }
 
-/** The two flow rows, after `/model` and `/thinking`. `/logout` is absent while nothing is stored: a row with no options is a row that lies. */
+/**
+ * The flow rows, after `/model` and `/thinking`: `/login`, `/logout` when something is stored (a
+ * row with no options is a row that lies), and `/compact` (slice 4) — an `action`: no options, no
+ * value, and a run that takes a model call, so it starts and is followed like a flow.
+ */
 export function hostFlowRows(
   login: readonly HostCommandOption[],
   logout: readonly HostCommandOption[],
@@ -109,6 +114,12 @@ export function hostFlowRows(
       options: [...logout],
     })
   }
+  rows.push({
+    name: HOST_ACTION_COMPACT,
+    source: 'host',
+    kind: 'action',
+    description: 'compact the context into a summary',
+  })
   return rows
 }
 
@@ -116,6 +127,7 @@ export function hostFlowRows(
 export type HostFlowDecision =
   | { readonly kind: 'login'; readonly providerId: string; readonly authType: HostAuthType }
   | { readonly kind: 'logout'; readonly providerId: string }
+  | { readonly kind: 'compact' }
 
 export function decideHostFlow(
   run: EnsoHostCommandRun,
@@ -143,6 +155,9 @@ export function decideHostFlow(
       }
       return { kind: 'logout', providerId: run.value }
     }
+    case HOST_ACTION_COMPACT:
+      if (run.value !== undefined) throw new HostCommandRefused('compact takes no value')
+      return { kind: 'compact' }
     default:
       throw new HostCommandRefused(`no host flow named ${run.name}`)
   }
@@ -185,6 +200,12 @@ export function authEventText(event: HostAuthEvent): string {
 export function loginDoneText(providerName: string, authType: HostAuthType, selectedModel: string | undefined): string {
   const action = authType === 'oauth' ? `Logged in to ${providerName}` : `Saved API key for ${providerName}`
   return selectedModel === undefined ? `${action}.` : `${action}. Selected ${selectedModel}.`
+}
+
+/** What a finished compaction says: the numbers pi measured, and the one thing the page cannot do for itself yet. */
+export function compactDoneText(tokensBefore: number, estimatedTokensAfter: number | undefined): string {
+  const after = estimatedTokensAfter === undefined ? 'fewer' : estimatedTokensAfter.toLocaleString('en-US')
+  return `Compacted the context: ${tokensBefore.toLocaleString('en-US')} → ${after} tokens. Reload the page to see the compacted transcript.`
 }
 
 /** The sentence a finished logout says — pi's own two, by credential type; a neutral one when the type is not known (the cache moved under the flow). */
