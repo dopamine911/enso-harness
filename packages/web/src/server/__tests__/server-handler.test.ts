@@ -712,8 +712,8 @@ test('⚠ a thread built WHILE /history reads the file is served pi\u2019s branc
   let promptDuringRead: (() => Promise<number>) | undefined
   const { url } = await startWith(settlesAtOnce, stored, (host: AgentHost) => ({
     ...host,
-    readTranscript: async (threadId: string) => {
-      const transcript = await host.readTranscript(threadId)
+    readStoredThread: async (threadId: string) => {
+      const transcript = await host.readStoredThread(threadId)
       await promptDuringRead?.()
       promptDuringRead = undefined
       return transcript

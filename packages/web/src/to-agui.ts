@@ -216,11 +216,14 @@ export function observationToAguiEvents(observation: EnsoObservation, ids: AguiI
       return []
 
     case 'message-end':
-      // One completed message's accounting (#45) — the thread-stats bar sums these.
-      // CUSTOM because AG-UI has no usage vocabulary; the consumer reads `role` and `usage`
-      // off the one shape declared in @enso/core. A boundary without spend has nothing for
-      // this view.
-      return observation.usage === undefined ? [] : [custom(observation)]
+      // One completed message's accounting is the LOG's unit (#144 slice 4); the page reads the
+      // thread's total as `session-usage`, pi's own sum, so nothing here renders a message's share.
+      return []
+
+    case 'session-usage':
+      // The thread's spend and context after it changed (#45). CUSTOM because AG-UI has no usage
+      // vocabulary; the status bar applies the latest, whole.
+      return [custom(observation)]
 
     case 'turn-start':
       return [{ type: EventType.STEP_STARTED, stepName: 'turn' }]

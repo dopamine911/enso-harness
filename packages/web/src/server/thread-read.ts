@@ -1,4 +1,10 @@
-import type { EnsoInterruptedTail, EnsoModelState, EnsoOpenDialog, EnsoPermissionModeState } from '@enso/core'
+import type {
+  EnsoInterruptedTail,
+  EnsoModelState,
+  EnsoOpenDialog,
+  EnsoPermissionModeState,
+  EnsoSessionUsage,
+} from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import type { AgentHost } from '../host/agent-host.ts'
 import type { ThreadRegistry } from './thread-registry.ts'
@@ -62,16 +68,21 @@ export interface ThreadMount {
   readonly openDialogs: EnsoOpenDialog[]
   /** The tree pi runs this thread in (#44): the live session's own, or the one this host builds every session in. */
   readonly cwd: string
+  /** What the session has spent and how full its context is (#45): pi's live totals, or the file's with no context. */
+  readonly usage: EnsoSessionUsage
 }
+
+/** A thread with neither a session nor a file has spent nothing and has no window to fill. */
+const NO_USAGE: EnsoSessionUsage = { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null }
 
 export async function readThreadMount(deps: ThreadReadDeps, threadId: string): Promise<ThreadMount> {
   const { threads, host } = deps
   const live = threads.peek(threadId)
   /** The file, read only for a thread that is not live here — nothing is built to answer (#86). */
-  const stored = live === undefined ? await host.readTranscript(threadId) : undefined
+  const stored = live === undefined ? await host.readStoredThread(threadId) : undefined
   const nowLive = threads.peek(threadId)
   const inspection = nowLive?.hosted.inspect()
-  const transcript = inspection === undefined ? (stored ?? []) : inspection.entries
+  const transcript = inspection === undefined ? (stored?.transcript ?? []) : inspection.entries
   const messages = transcriptToMessages(transcript)
   return {
     present: nowLive !== undefined || stored !== undefined,
@@ -89,5 +100,6 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
     model: nowLive === undefined ? null : nowLive.hosted.runtime.modelState(),
     openDialogs: nowLive === undefined ? [] : nowLive.hosted.runtime.openDialogs(),
     cwd: inspection?.cwd ?? host.cwd,
+    usage: nowLive === undefined ? (stored?.usage ?? NO_USAGE) : nowLive.hosted.runtime.sessionUsage(),
   }
 }

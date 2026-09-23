@@ -3,7 +3,7 @@ import { EnsoOpenDialog } from './dialog.ts'
 import { EnsoObservation } from './observation.ts'
 import { EnsoPermissionModeState } from './permission-mode.ts'
 import { EnsoInterruptedTail } from './thread-inspection.ts'
-import { EnsoModelState, EnsoPromptAdmission } from './thread-runtime.ts'
+import { EnsoModelState, EnsoPromptAdmission, EnsoSessionUsage } from './thread-runtime.ts'
 
 /**
  * The server↔browser wire (#112): a thread's feed, as the follow route serves it.
@@ -46,6 +46,12 @@ export const EnsoFollowSnapshot = Type.Object(
      * reload (`follow-connection.ts`) rather than going quietly stale.
      */
     cwd: Type.String(),
+    /**
+     * What the session has spent and how full its context is (#45), as of this snapshot — pi's
+     * totals from the live session, or from the file when the thread is not live (then with no
+     * `context`). Later changes arrive as `session-usage` observations, each the whole state.
+     */
+    usage: EnsoSessionUsage,
     /** The branch as TanStack `UIMessage`s — `Unknown` because the shape is the renderer's, not enso's. */
     messages: Type.Array(Type.Unknown()),
     /** Every question pi is blocked on right now, oldest first (#114). Empty when not live. */

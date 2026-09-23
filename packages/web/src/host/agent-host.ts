@@ -19,6 +19,7 @@ import {
   type EnsoOpenDialog,
   type EnsoPermissionModeState,
   type EnsoPromptAdmission,
+  type EnsoSessionUsage,
   type EnsoThreadEvent,
   type EnsoTranscriptEntry,
   ensoLogger,
@@ -61,6 +62,7 @@ import {
 } from './permission-mode-adapter.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
+import { liveSessionUsage, storedSessionUsage } from './session-usage.ts'
 import { transcriptOf } from './transcript.ts'
 
 const log = ensoLogger('host')
@@ -184,6 +186,13 @@ const STREAMING_BEHAVIOR_OF: Record<EnsoPromptAdmission, NonNullable<PromptOptio
 /** The `ExtensionMode` we bind — `ctx.mode` as extensions see it. rpc is the truthful one: no terminal, a remote surface. */
 const EXTENSION_MODE_RPC = 'rpc'
 
+/** The session events after which the file has grown by spend (#45) — `announceSessionUsage` says why these. */
+const SESSION_USAGE_BOUNDARIES: Readonly<Record<string, true>> = {
+  turn_end: true,
+  agent_end: true,
+  compaction_end: true,
+}
+
 export interface AgentHostOptions {
   /** The tree pi reads and writes. One per server, never from a request (see `server/index.ts`). */
   cwd: string
@@ -306,14 +315,23 @@ export interface AgentHost {
   /** pi's session files for this workspace, newest first — the resumable listing. */
   listSessions(): Promise<StoredThread[]>
   /**
-   * The transcript of a stored session, read-only — no pi session is built, nothing is
-   * written (#86's rule: looking must not build). `undefined` when no file has that id.
+   * A stored session, read-only — no pi session is built, nothing is written (#86's rule:
+   * looking must not build): its branch as the transcript of ours, and pi's totals over the
+   * whole file (#45). `undefined` when no file has that id.
    */
-  readTranscript(threadId: string): Promise<EnsoTranscriptEntry[] | undefined>
+  readStoredThread(threadId: string): Promise<StoredThreadRead | undefined>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
   storedPermissionMode(transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState
+}
+
+/** One stored session as `readStoredThread` reads it — both halves from one open of the file. */
+export interface StoredThreadRead {
+  /** The branch, root to leaf. */
+  readonly transcript: EnsoTranscriptEntry[]
+  /** Every usage in the file, on every branch, by pi's rule (`session-usage.ts`); no context. */
+  readonly usage: EnsoSessionUsage
 }
 
 /**
@@ -414,11 +432,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     return (await listSessions()).find((stored) => stored.id === threadId)?.path
   }
 
-  async function readTranscript(threadId: string): Promise<EnsoTranscriptEntry[] | undefined> {
+  async function readStoredThread(threadId: string): Promise<StoredThreadRead | undefined> {
     const path = await storedSessionPath(threadId)
     if (path === undefined) return undefined
     // `open` loads the file into memory and writes nothing until an append.
-    return transcriptOf(SessionManager.open(path).getBranch())
+    const stored = SessionManager.open(path)
+    return { transcript: transcriptOf(stored.getBranch()), usage: storedSessionUsage(stored.getEntries()) }
   }
 
   async function createSession(threadId: string): Promise<HostedThread> {
@@ -575,8 +594,29 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       if (serialized === announcedModelState) return
       announcedModelState = serialized
       emit({ type: 'model', ...state })
+      // A new model is a new context window: the usage's `context` moved with it.
+      announceSessionUsage()
     }
     onModelSelect = announceModelState
+
+    /**
+     * Say the session's totals and context as the host's own event (#45), ONCE per change — pi's
+     * `getSessionStats`, whole, never a delta, so a follower applies the latest and cannot
+     * double-count. Said at the boundaries where the session file has just grown: after pi
+     * PERSISTED the messages, which it does after `message_end`'s listeners ran (`agent-session.js`
+     * `_handleAgentEvent`: emit, then `appendMessage`) — so `message_end` itself would read the
+     * totals one message short. `turn_end` follows every request's assistant message and tool
+     * results; `agent_end` closes a run a stop cut short of its turn; `compaction_end` follows a
+     * compaction's own model call and the context it emptied.
+     */
+    let announcedSessionUsage: string | undefined
+    function announceSessionUsage(): void {
+      const usage = liveSessionUsage(session.getSessionStats())
+      const serialized = JSON.stringify(usage)
+      if (serialized === announcedSessionUsage) return
+      announcedSessionUsage = serialized
+      emit({ type: 'session_usage', ...usage })
+    }
 
     // ── The flows (#338 slice 3; `host-flows.ts` has the decisions and the words) ──────────
     //
@@ -779,6 +819,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // The thinking half of the model state — the module header says why the model half
         // arrives through the watcher extension instead.
         if (wire.type === 'thinking_level_changed') announceModelState()
+        if (SESSION_USAGE_BOUNDARIES[wire.type] === true) announceSessionUsage()
       } catch (error) {
         log.error('a session event could not be emitted: {error}', { threadId, error })
       }
@@ -873,6 +914,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         })
       },
       modelState: currentModelState,
+      sessionUsage: () => liveSessionUsage(session.getSessionStats()),
       async runHostCommand(run: EnsoHostCommandRun): Promise<void> {
         const decision = decideHostCommand(run, currentModelState(), session.modelRuntime.getAvailableSnapshot())
         switch (decision.kind) {
@@ -1001,7 +1043,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     cwd,
     createSession,
     listSessions,
-    readTranscript,
+    readStoredThread,
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,
   }

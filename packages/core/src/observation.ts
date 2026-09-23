@@ -1,7 +1,7 @@
 import { type Static, Type } from 'typebox'
 import { EnsoDialogSpec } from './dialog.ts'
 import { EnsoPermissionModeState } from './permission-mode.ts'
-import { EnsoModelState } from './thread-runtime.ts'
+import { EnsoModelState, EnsoSessionUsage } from './thread-runtime.ts'
 import { EnsoToolResultDescriptor } from './tool-result.ts'
 
 /**
@@ -288,6 +288,25 @@ export const EnsoModelObservation = Type.Object({
 export type EnsoModelObservation = Static<typeof EnsoModelObservation>
 
 /**
+ * What the session has spent and how full its context is, after it changed (#45): said by the
+ * host after each turn, each run, each compaction, and each model change (a new model is a new
+ * window). The WHOLE state, never a delta — a follower applies the latest one and cannot
+ * double-count; the snapshot frame's `usage` is the same shape at follow start.
+ *
+ * @group Observations
+ * @category Message stream
+ */
+export const EnsoSessionUsageObservation = Type.Object({
+  kind: Type.Literal('session-usage'),
+  ...EnsoSessionUsage.properties,
+})
+/**
+ * @group Observations
+ * @category Message stream
+ */
+export type EnsoSessionUsageObservation = Static<typeof EnsoSessionUsageObservation>
+
+/**
  * @group Observations
  * @category Permission and dialogs
  */
@@ -331,12 +350,12 @@ export type EnsoMessageStart = Static<typeof EnsoMessageStart>
  * SAME cumulative usage for the in-flight message, so summing deltas would multiply cost
  * by the delta count; the honest unit is the completed message, emitted exactly once.
  *
- * ⚠ WHICH MESSAGES CARRY `usage` — pi's own attribution rule, copied so our total matches
- * pi's `/stats` (`core/usage-totals.js` getUsageCostBreakdown): `assistant` messages always;
- * a `toolResult` only when a model summarized the output. Every other completed message
- * is a boundary with no spend, and `usage` is absent. (pi also attributes compaction and
- * branch-summary entries; those cross as session entries, not `message_end`, and are not
- * counted here — a stated undercount, not a bug.) One event per durable fact: the
+ * ⚠ WHICH MESSAGES CARRY `usage` — pi's own attribution rule (`core/usage-totals.js`
+ * getUsageCostBreakdown): `assistant` messages always; a `toolResult` only when a model
+ * summarized the output. Every other completed message is a boundary with no spend, and
+ * `usage` is absent. This is the per-message unit the day's log folds (#144 slice 4); a
+ * thread's TOTAL is `session-usage`, pi's own sum, which also counts the compaction and
+ * branch-summary calls that never cross as a `message_end`. One event per durable fact: the
  * accounting travels with the message it belongs to, never as a side record.
  *
  * @group Observations
@@ -502,6 +521,7 @@ export const EnsoObservation = Type.Union([
   EnsoModelObservation,
   EnsoMessageStart,
   EnsoMessageEnd,
+  EnsoSessionUsageObservation,
   EnsoTurnStart,
   EnsoTurnEnd,
   EnsoQueue,

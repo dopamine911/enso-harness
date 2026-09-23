@@ -71,7 +71,7 @@ function inspection(overrides: Partial<EnsoThreadInspection> = {}): EnsoThreadIn
 function believing(mode: string | undefined, generation: number | undefined = 1): BrowserBelief {
   return {
     mode: { mode, available: ['default', 'plan'] },
-    stats: { totalCost: 0, lastRequestInputTokens: undefined, countedMessages: 0 },
+    usage: undefined,
     recentChunks: [],
     generation,
     logged: [],

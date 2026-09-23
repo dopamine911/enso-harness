@@ -43,11 +43,13 @@
       "exports": [
         "EnsoCustomEntry",
         "EnsoDialogSettled",
+        "EnsoMessageEnd",
         "EnsoMessageStart",
         "EnsoPermissionMode",
         "EnsoPermissionModeRejected",
         "EnsoPromptRejected",
         "EnsoQueue",
+        "EnsoSessionUsageObservation",
         "EnsoTurnEnd",
         "EnsoTurnStart"
       ]

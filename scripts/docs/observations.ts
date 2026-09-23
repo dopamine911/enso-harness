@@ -34,7 +34,10 @@ const CUSTOM_METADATA: Record<string, CustomMetadata> = {
       '`recentChunks`; `dialog` (a blocking question; or `notifications` if unreadable); `notifications` (a notify)',
     routerBranch: true,
   },
-  'message-end': { consumer: '`recentChunks`; `stats`', routerBranch: true },
+  'session-usage': {
+    consumer: "`recentChunks`; `usage` (the status bar's cost and context meter, #45)",
+    routerBranch: true,
+  },
   queue: { consumer: '`recentChunks`; `queue`', routerBranch: true },
   'dialog-settled': { consumer: '`recentChunks`; `dialog`', routerBranch: true },
   'permission-mode': { consumer: '`recentChunks`; `permissionMode`; `modeLines`', routerBranch: true },
@@ -57,7 +60,7 @@ const CUSTOM_METADATA: Record<string, CustomMetadata> = {
  */
 const FRAME_METADATA: Record<string, string> = {
   snapshot:
-    '`recentChunks`; `permissionMode`; `modeLines`; `dialog` (the complete open list); `generation`; `disconnected`',
+    '`recentChunks`; `permissionMode`; `modeLines`; `model`; `cwd`; `usage`; `dialog` (the complete open list); `generation`; `disconnected`',
   status: '`recentChunks`; `generation`; `disconnected`',
   'follow-ended': '`recentChunks`; `disconnected`; `notifications`',
 }

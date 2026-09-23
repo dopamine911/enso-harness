@@ -1,8 +1,8 @@
+import type { EnsoContextUsage, EnsoSessionUsage } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
 import { toolResultState } from './EnsoToolResult.tsx'
 import { useStore, useThreadStores } from './store.ts'
-import type { ThreadStats } from './thread-stats.tsx'
 
 /**
  * The status bar (#90 PR 1): the always-on line that says what this session is doing and
@@ -18,12 +18,18 @@ import type { ThreadStats } from './thread-stats.tsx'
  * before the first prompt (#84 round 2). A bar that appears only after the first request is
  * a bar you never learn to look at.
  *
- * ⚠ EVERYTHING HERE IS DERIVED FROM STATE THE PAGE ALREADY HOLDS — no new wire. Activity
- * from `chat.sessionGenerating` (the shared run flag — `isLoading` is request-local and the
- * follow adapter never raises it, #103 receipt) and the shape of the last message; counts from the message list;
- * cost and prompt size from the stats store (thread-stats.tsx). Timing — LLM time,
- * TTFT, tok/s — is NOT on the wire and is not invented here; the host would have to stamp
- * events. That is a later slice of #90, named there.
+ * ⚠ ACTIVITY AND COUNTS ARE DERIVED FROM STATE THE PAGE ALREADY HOLDS. Activity from
+ * `chat.sessionGenerating` (the shared run flag — `isLoading` is request-local and the follow
+ * adapter never raises it, #103 receipt) and the shape of the last message; counts from the
+ * message list. Timing — LLM time, TTFT, tok/s — is NOT on the wire and is not invented here;
+ * the host would have to stamp events. That is a later slice of #90, named there.
+ *
+ * ⚠ COST AND CONTEXT ARE PI'S, NOT SUMMED HERE (#45). The page used to add up each
+ * `message-end` it saw, so a reload, a resume from the rail or a second tab started again at
+ * `$0.0000` on a thread that had spent. The server now sends pi's session totals — in the
+ * follow's snapshot, then as each `session-usage` — and the bar shows the latest, whole. The
+ * context meter is pi's `getContextUsage()`: its estimate over its model's window, never a
+ * percentage of ours.
  *
  * ⓘ No `role="status"`/live region, deliberately (PR #51 review, nit 3): this is a
  * persistent readout that changes on every delta, and a live region would interrupt a
@@ -124,9 +130,41 @@ function activityLabel(activity: Activity): string {
 export interface ThreadStatusViewProps {
   readonly activity: Activity
   readonly counts: ThreadCounts
-  readonly stats: ThreadStats
+  /** pi's session totals and context (#45); undefined until the follow's first snapshot. */
+  readonly usage?: EnsoSessionUsage | undefined
   /** The tree pi runs this thread in (#44); undefined until the follow's first snapshot. */
   readonly cwd?: string | undefined
+}
+
+const COMPACT_TOKENS = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
+
+/** `34% · 68.4K / 200K` — pi's estimate over its window; `? / 200K` after a compaction, until the next response says. */
+function ContextMeter({ context }: { readonly context: EnsoContextUsage }): React.ReactNode {
+  const window = COMPACT_TOKENS.format(context.window)
+  if (context.tokens === null || context.percent === null) {
+    return (
+      <span title="context in use is unknown after a compaction until the model's next response reports it">
+        context ? / {window}
+      </span>
+    )
+  }
+  const percent = Math.round(context.percent)
+  return (
+    <span
+      className="flex items-center gap-1.5"
+      title={`${context.tokens.toLocaleString('en-US')} of ${context.window.toLocaleString('en-US')} tokens in the model's context window — pi's estimate: the latest request's usage plus what was added since`}
+    >
+      context
+      <meter
+        aria-label="context window used"
+        min={0}
+        max={100}
+        value={Math.min(percent, 100)}
+        className="h-1.5 w-16 appearance-none overflow-hidden rounded-full bg-muted-foreground/25 [&::-moz-meter-bar]:bg-foreground/60 [&::-webkit-meter-bar]:border-0 [&::-webkit-meter-bar]:bg-none [&::-webkit-meter-bar]:bg-transparent [&::-webkit-meter-optimum-value]:bg-foreground/60 [&::-webkit-meter-optimum-value]:bg-none"
+      />
+      {percent}% · {COMPACT_TOKENS.format(context.tokens)} / {window}
+    </span>
+  )
 }
 
 /** The project as a reader names it: the directory's own name; the full path rides in the tooltip. */
@@ -146,8 +184,9 @@ function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof 
 }
 
 /** Pure view — everything it shows arrives as props, so a static render pins the wording. */
-export function ThreadStatusView({ activity, counts, stats, cwd }: ThreadStatusViewProps): React.ReactNode {
+export function ThreadStatusView({ activity, counts, usage, cwd }: ThreadStatusViewProps): React.ReactNode {
   const dotClass = activityDotClass(activity)
+  const context = usage?.context ?? null
   return (
     <footer
       id="thread-status"
@@ -173,14 +212,17 @@ export function ThreadStatusView({ activity, counts, stats, cwd }: ThreadStatusV
       {cwd === undefined ? null : (
         <span title={`the tree pi reads and writes for this thread: ${cwd}`}>project {projectName(cwd)}</span>
       )}
-      <span className="ml-auto" title="sum of every model request this page has made (pi's own attribution rule)">
-        ${stats.totalCost.toFixed(4)}
-      </span>
-      {stats.lastRequestInputTokens === undefined ? null : (
-        <span title="prompt tokens the model saw on the latest request (input + cache read + cache write) — not a context-window percentage; the window size does not cross the wire">
-          last {stats.lastRequestInputTokens.toLocaleString('en-US')} tok in
+      {context === null ? null : (
+        <span className="ml-auto">
+          <ContextMeter context={context} />
         </span>
       )}
+      <span
+        className={context === null ? 'ml-auto' : undefined}
+        title="what this thread's session has spent — pi's own total, every model call on every branch, compactions included"
+      >
+        {usage === undefined ? '$—' : `$${usage.cost.toFixed(4)}`}
+      </span>
     </footer>
   )
 }
@@ -197,14 +239,14 @@ export interface ThreadStatusBarProps {
  */
 export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps): React.ReactNode {
   const stores = useThreadStores()
-  const stats = useStore(stores.stats)
+  const usage = useStore(stores.usage)
   const disconnected = useStore(stores.disconnected)
   const cwd = useStore(stores.cwd)
   return (
     <ThreadStatusView
       activity={describeActivity(messages, generating, disconnected)}
       counts={countThread(messages)}
-      stats={stats}
+      usage={usage}
       cwd={cwd}
     />
   )

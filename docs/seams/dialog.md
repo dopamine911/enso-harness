@@ -227,9 +227,9 @@ goes through `finish` (line 292), which deletes the pending entry, emits the set
 outcome (line 279) and resolves the extension with its value — `undefined` for `select`/`input`/
 `editor`, `false` for `confirm`, on every non-answer outcome (lines 259–260). That is why the settle
 observation exists at all: the runtime has no event for a question ending (lines 262–264).
-`agent-host.ts` binds one context per session (line 519) and delegates the runtime contract's
-`answerDialog` and `openDialogs` to it (lines 832–837); `cancelAllDialogs` cancels every pending
-question at session teardown (line 468, called from `agent-host.ts:955`), so teardown is a settle
+`agent-host.ts` binds one context per session (line 540) and delegates the runtime contract's
+`answerDialog` and `openDialogs` to it (lines 875–880); `cancelAllDialogs` cancels every pending
+question at session teardown (line 468, called from `agent-host.ts:999`), so teardown is a settle
 path too.
 
 **Consumed by the server.** `answerThreadDialog` in `packages/web/src/server/follow.ts` (line 306)
@@ -265,7 +265,7 @@ including the fail-closed lift (`EnsoExtensionUiContextOptions.liftDialog`, line
   line 279); the mapper turns an outcome the union does not name into `unmapped`, not a guess
   (`map-events.ts` lines 310–319).
 - **The kinds agree twice**: the host's `BlockingDialogRequest` (extension-ui-context.ts line 52) and
-  the mapper's `DIALOG_UI_METHODS` (`map-events.ts` line 32) name the same four methods, and the
+  the mapper's `DIALOG_UI_METHODS` (`map-events.ts` line 34) name the same four methods, and the
   host's comment says so.
 - **The vendor gate** (#145): `extension-ui-context.ts` and `permission-dialog.ts` import the runtime's
   package; nothing above `host/` does.

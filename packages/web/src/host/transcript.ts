@@ -4,7 +4,7 @@ import { contentToText, descriptorFrom } from './map-events.ts'
 /**
  * The runtime's session branch → the transcript of ours (#162 workstream 4, L2's persistence
  * side). This is where the runtime's stored entry shapes are read, and the only place above
- * `session-events.ts` that reads them: `AgentHost.readTranscript` and a hosted thread's
+ * `session-events.ts` that reads them: `AgentHost.readStoredThread` and a hosted thread's
  * `inspect()` hand out what this produces, and nothing above the seam decodes a stored
  * entry again.
  *

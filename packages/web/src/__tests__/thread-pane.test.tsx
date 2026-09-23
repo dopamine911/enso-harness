@@ -1074,9 +1074,13 @@ test("⚠ a frame on one thread's follow changes that pane and no other — cost
     type: 'observation',
     seq: 1,
     observation: {
-      kind: 'message-end',
-      role: 'assistant',
-      usage: { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0, totalCost: 0.0123 },
+      kind: 'session-usage',
+      cost: 0.0123,
+      input: 1000,
+      output: 100,
+      cacheRead: 0,
+      cacheWrite: 0,
+      context: null,
     },
   })
   await alpha.settle({
@@ -1096,7 +1100,7 @@ test("⚠ a frame on one thread's follow changes that pane and no other — cost
     expect(alpha.status()).toContain('$0.0123')
     expect(alpha.container.textContent).toContain('Only alpha asks')
     expect(bravo.status()).toContain('idle')
-    expect(bravo.status()).toContain('$0.0000')
+    expect(bravo.status()).not.toContain('$0.0123')
     expect(bravo.container.textContent).not.toContain('Only alpha asks')
     expect(railBusy(bravo.stores.threadId)).toBe(false)
   })

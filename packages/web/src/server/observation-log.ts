@@ -87,6 +87,11 @@ function compactOf(observation: EnsoObservation): EnsoLogProperties {
         model: observation.model === null ? 'none' : `${observation.model.provider}/${observation.model.id}`,
         thinkingLevel: observation.thinkingLevel,
       }
+    case 'session-usage':
+      return {
+        cost: observation.cost,
+        ...(observation.context?.percent == null ? {} : { contextPercent: observation.context.percent }),
+      }
     case 'extension-error':
       return { extensionPath: observation.extensionPath, event: observation.event }
     case 'run-ended':
