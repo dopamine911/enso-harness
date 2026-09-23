@@ -90,6 +90,101 @@ test('⚠ docs/verification.md counts and numbers the gates the file actually ru
 })
 
 /**
+ * The free prose around the lists names gates by number too — "gate 7 builds the site", "it is
+ * gate 5 inside check:all" — and the pins above cannot see it: they match list rows. #342
+ * inserted a gate and FOUR such sentences kept their old numbers, one of them in a workflow the
+ * first draft of this test did not read (PR #345 review, twice). So the files are derived, not
+ * listed — every design page, the README, the gate's own header, every workflow — and each mention
+ * must be ABOUT the gate it numbers: the clause holding the number names the gate (by its own name,
+ * or a word only its work uses), or, failing that, the whole sentence names it and NO other gate.
+ * The second rule is what caught `docs-site.yml`: its stale "(gate 7)" sat in a sentence that
+ * mentioned TypeDoc for an unrelated reason, so a plain word-presence check passed it.
+ */
+const GATE_PROSE_MARKS: Readonly<Record<string, RegExp>> = {
+  biome: /biome|lint/i,
+  typecheck: /typecheck|tsc/i,
+  'dead-code': /dead-code|fallow/i,
+  'react-doctor': /react-doctor/i,
+  test: /bun test|the suite/i,
+  coverage: /coverage/i,
+  'api-docs': /typedoc|api-docs/i,
+  site: /site|build|crawl/i,
+}
+
+/** Comment prefixes stripped so a YAML `#` or a TSDoc ` * ` at a line join does not split a clause. */
+const COMMENT_PREFIX = /^\s*(?:#|\/\/|\*)\s?/gm
+
+async function proseGatePages(): Promise<string[]> {
+  const root = join(import.meta.dir, '..')
+  const globbed = async (pattern: string): Promise<string[]> => {
+    const found: string[] = []
+    for await (const path of new Bun.Glob(pattern).scan({ cwd: root })) found.push(path)
+    return found
+  }
+  return [
+    ...(await globbed('docs/**/*.md')),
+    'README.md',
+    'scripts/gate.ts',
+    ...(await globbed('.github/workflows/*.yml')),
+  ].sort()
+}
+
+const CLAUSE_MARKS = [',', ';', ':', '(', ')', '\n']
+
+/** The sentence around offset `at`: from the previous full stop or blank line to the next. */
+function sentenceAround(source: string, at: number): { readonly text: string; readonly stop: number } {
+  const start = Math.max(source.lastIndexOf('. ', at), source.lastIndexOf('\n\n', at)) + 1
+  const stopAt = source.slice(at).search(/\.\s|\n\n/)
+  const stop = stopAt === -1 ? source.length : at + stopAt
+  return { text: source.slice(start, stop).replace(/\s+/g, ' ').trim(), stop }
+}
+
+/**
+ * The clause holding the mention: between the nearest punctuation boundaries. A bare
+ * parenthetical — "…crawls its links on every PR (gate 8)" — qualifies the clause before it, so
+ * that clause is returned instead: it is the one that must name the gate.
+ */
+function clauseAround(source: string, at: number, mention: string, sentenceStop: number): string {
+  const boundaryBefore = (offset: number): number =>
+    Math.max(...CLAUSE_MARKS.map((mark) => source.lastIndexOf(mark, offset))) + 1
+  const start = boundaryBefore(at)
+  const stopAt = source.slice(at).search(/[,;:()\n]/)
+  const clause = source.slice(start, stopAt === -1 ? sentenceStop : at + stopAt).trim()
+  if (clause.replace(mention, '').trim() !== '') return clause
+  const before = start - 1
+  return source.slice(boundaryBefore(before - 1), before).trim()
+}
+
+/** Why one "gate N" mention is wrong, or undefined when it is about the gate it numbers. */
+function proseGateMiss(page: string, source: string, match: RegExpMatchArray): string | undefined {
+  const number = Number(match[1])
+  const gate = GATES[number - 1]
+  const at = match.index ?? 0
+  const sentence = sentenceAround(source, at)
+  if (gate === undefined) return `${page}: "${sentence.text}" — there is no gate ${number}`
+  const mark = GATE_PROSE_MARKS[gate.name]
+  if (mark === undefined) return `gate-abort: no prose mark for gate "${gate.name}"`
+  if (mark.test(clauseAround(source, at, match[0], sentence.stop))) return undefined
+  const others = GATES.filter((other) => other.name !== gate.name && GATE_PROSE_MARKS[other.name]?.test(sentence.text))
+  if (mark.test(sentence.text) && others.length === 0) return undefined
+  const alsoReadsAs =
+    others.length === 0 ? '' : `, but the sentence also reads as ${others.map((other) => other.name).join('/')}`
+  return `${page}: "${sentence.text}" — gate ${number} is ${gate.name}${alsoReadsAs}`
+}
+
+test('⚠ every prose "gate N" is about the gate it numbers — the lists are pinned, the sentences were not (#342)', async () => {
+  const misses: string[] = []
+  for (const page of await proseGatePages()) {
+    const source = (await Bun.file(join(import.meta.dir, '..', page)).text()).replace(COMMENT_PREFIX, '')
+    for (const match of source.matchAll(/\bgate (\d+)\b/gi)) {
+      const miss = proseGateMiss(page, source, match)
+      if (miss !== undefined) misses.push(miss)
+    }
+  }
+  expect(misses).toEqual([])
+})
+
+/**
  * Builds a throwaway package whose `lint` gate runs `body`, then runs the real
  * `scripts/gate.ts` against it.
  */

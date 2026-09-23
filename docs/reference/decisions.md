@@ -197,7 +197,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/enso-logs.ts` | `#132` | See the log (#132): the day's file, rendered the way the terminal renders it live. |
 | `scripts/enso-thread.ts` | `#86`, `#97` | Inspect the live web server's threads from a shell — the agent's half of #86. |
 | `scripts/enso.ts` | `#20`, `#217` | Launch a VANILLA pi with only Enso loaded. |
-| `scripts/gate.ts` | `#188`, `#257` | Ported from slop-factory's bun example (examples/bun/scripts/gate.ts) — the shape is deliberately identical so improvements travel in either direction. |
+| `scripts/gate.ts` | `#188`, `#208`, `#257`, `#342` | Ported from slop-factory's bun example (examples/bun/scripts/gate.ts) — the shape is deliberately identical so improvements travel in either direction. |
 | `scripts/link-vendor-packages.ts` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
 | `scripts/print-harness.ts` | `#9`, `#13`, `#20` | The PRINT-MODE harness variant (#20): the Enso package minus picc-permission-modes. |
 | `scripts/source-tree.ts` | `#162`, `#174` | The one walk over the source tree (#174, #162 workstream 6: one walker per gate family). |

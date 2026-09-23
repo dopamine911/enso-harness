@@ -1,14 +1,15 @@
 # CI — the enforced quality gate.
 #
 # Runs the SAME gate as the local pre-commit hook (`bun run check:all` = biome → tsc → fallow →
-# bun test → the total-coverage floor → typedoc → the docs site and its link crawl), so "green"
+# react-doctor → bun test → the total-coverage floor → typedoc → the docs site and its link
+# crawl), so "green"
 # means one thing whether it ran on a machine or here. A commit made with `--no-verify`, or by
 # someone without the hook installed, is caught at the PR instead of slipping into main.
 #
-# The coverage floor needs no separate step: it is gate 5 inside check:all
+# The coverage floor needs no separate step: it is gate 6 inside check:all
 # (scripts/check-coverage.ts — the TOTAL floor bun's own per-file coverageThreshold
 # cannot express; see that file's header for the 2026-09-04 measurement). Nor does the site:
-# gate 7 builds it and crawls every built page for dead links (scripts/docs/site-links.ts).
+# gate 8 builds it and crawls every built page for dead links (scripts/docs/site-links.ts).
 name: CI
 
 on:
@@ -89,36 +90,3 @@ jobs:
       - name: fallow dupes (advisory — the threshold is the ratchet)
         if: ${{ !cancelled() }} # its own verdict, even when the audit above is red
         run: bunx fallow dupes
-
-  # ADVISORY, deliberately: react-doctor scores the web surface (0-100) and its findings
-  # are guidance, not a contract — so the job reports without ever blocking a merge.
-  # Promote it to a required check only after its signal has earned that (drop the
-  # continue-on-error and mark it required in branch protection).
-  #
-  # Runs once per PR, not on every push — same reasoning as `fallow-audit` above.
-  react-doctor:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    continue-on-error: true
-    if: github.event_name == 'pull_request' && github.event.action != 'synchronize'
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4"
-
-      # The pinned dev dependency, never `bunx react-doctor@latest` (#208): this job has the
-      # PR head checked out, so `latest` meant every pull request executed whatever that tag
-      # resolved to at that moment — unreviewable in a diff, absent from bun.lock, and with
-      # `continue-on-error` a hostile or broken release produced no red check at all. Same
-      # rule the fallow steps state thirty lines up. `bun run doctor` takes the same pin,
-      # where it runs with a developer's ambient credentials rather than CI's contents: read.
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      # Full scan for now — once the baseline is stable, narrow to `--scope changed`
-      # (new findings only; needs fetch-depth: 0 for the base diff).
-      - name: React Doctor (advisory — never blocks)
-        working-directory: packages/web
-        run: bunx react-doctor --verbose
