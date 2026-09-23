@@ -3,9 +3,13 @@
 // in `ai-elements/reasoning.tsx` replaces it (see that file's header).
 
 import type { ChatUISelectedPart, ChatUISelectedToolPart } from '@tanstack/ai-client/ui'
-import { TextPart } from '@tanstack/ai-react/ui'
+import { TextPart, type TextPartProps } from '@tanstack/ai-react/ui'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from './components/ai-elements/reasoning.tsx'
 import { type EnsoRendererMap, EnsoToolResult, type ToolResultState, toolResultState } from './EnsoToolResult.tsx'
+import { MarkdownImage } from './markdown-image.tsx'
+
+/** The intrinsic elements `TextPart` renders through ours — a remote image waits for a click (`markdown-image.tsx`). */
+const TEXT_PART_COMPONENTS: NonNullable<TextPartProps['components']> = { img: MarkdownImage }
 
 /**
  * The argument a step row is summarised by, in precedence. Each of pi's built-ins and the
@@ -165,13 +169,14 @@ export function SelectedMessagePart({
   if (selected.key === 'toolResult') {
     return <EnsoToolResult result={selected.part} runOpen={runOpen} renderers={renderers} />
   }
-  // TextPart is the markdown pipeline of record (react-markdown, sanitize LAST). `prose`
-  // is @tailwindcss/typography — TextPart emits bare markdown HTML with no classes of
-  // its own, so the typography plugin is what styles it.
+  // TextPart is the markdown pipeline of record (`@tanstack/markdown`: raw HTML escaped,
+  // executable URLs dropped; a remote image behind a click, ours). `prose` is
+  // @tailwindcss/typography — TextPart emits bare markdown HTML with no classes of its own, so
+  // the typography plugin is what styles it.
   if (selected.part.type === 'text') {
     return (
       <div className="prose prose-sm dark:prose-invert max-w-none">
-        <TextPart content={selected.part.content} />
+        <TextPart components={TEXT_PART_COMPONENTS} content={selected.part.content} />
       </div>
     )
   }

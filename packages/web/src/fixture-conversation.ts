@@ -7,15 +7,15 @@ import { createChat, type TanStackChat } from '@shadcn/helpers/tanstack-ai'
  * Open the app with `?fixture` and every send replays the next turn below.
  *
  * ⚠ Verified against THIS repo's TanStack versions by probe before adoption: the helper's
- * peer range names @tanstack/ai 0.40 and we run 0.53, so its compatibility is an observed
+ * peer range names @tanstack/ai 0.40 and we run 0.58, so its compatibility is an observed
  * fact, not a promise — thinking, tool-call, tool-result and text parts all materialize
- * (probe retained in the PR body). If a TanStack upgrade breaks the fixture page while
- * the live page still works, suspect this seam first.
+ * (`__tests__/fixture-conversation.test.ts` is that probe). If a TanStack upgrade breaks the
+ * fixture page while the live page still works, suspect this seam first.
  *
  * ⚠ Turn 1 is ADVERSARIAL on purpose. Model output is untrusted text entering a DOM, and
- * the text renderer's sanitize-last chain is a load-bearing claim: this turn carries an
- * onerror image, a javascript: link and a raw script tag, so a renderer regression is
- * VISIBLE on the styling page (an alert firing, or a live link) instead of latent.
+ * the text renderer's refusal to build elements from it is a load-bearing claim: this turn
+ * carries an onerror image, a javascript: link and a raw script tag, so a renderer regression
+ * is VISIBLE on the styling page (an alert firing, or a live link) instead of latent.
  *
  * ⚠ What this fixture CANNOT produce: a #27 dialog interrupt. The helper has no writer
  * operation for an interrupt outcome, so `EnsoDialogInterrupt` styling is verified against
@@ -35,19 +35,20 @@ export function createFixtureChat(): TanStackChat {
           '```ts\nconst answer = 42;\n```\n\n' +
           '| col A | col B |\n| --- | --- |\n| one | two |\n\n' +
           '---\n\n' +
+          // A remote image waits for a click (`markdown-image.tsx`): healthy is a button naming
+          // the host and URL, and nothing fetched until it is pressed.
+          '![remote image — healthy is a click-to-load button](https://img.shields.io/badge/enso-fixture-blue)\n\n' +
           '**Sanitization tripwires — if any of these is live, the renderer regressed:**\n\n' +
           'SENTINEL-BEFORE: the three tripwires sit between this sentence and SENTINEL-AFTER.\n\n' +
-          // ⚠ The `<img>` element itself SURVIVES sanitization — only its `onerror` is stripped —
-          // and a dead `src` draws the browser's broken-image icon, which read as a bug the
-          // first time someone looked (2026-09-08). The alt text is what a healthy render
-          // shows in its place; the tripwire is the handler, not the element.
-          '<img src="x" alt="[inert image tripwire — its onerror handler was stripped, which is the healthy state]" ' +
+          // ⚠ The raw tags render as ESCAPED TEXT (`@tanstack/markdown` does not parse model HTML),
+          // so the healthy page shows them as literal characters — that is the pass, not a glitch.
+          '<img src="x" alt="[image tripwire — healthy is this tag shown as text, never drawn]" ' +
           'onerror="alert(\'sanitize regression: img onerror fired\')">\n\n' +
           "[this link must be inert](javascript:alert('sanitize regression: javascript link fired'))\n\n" +
           "<script>alert('sanitize regression: script tag executed')</script>\n\n" +
-          'SENTINEL-AFTER: healthy is an inert image note and the link as plain text between the ' +
-          'sentinels, and no script anywhere. The regression signal is an alert firing or the ' +
-          'link above being clickable — never how the residue looks.\n',
+          'SENTINEL-AFTER: healthy is the tags above as literal text and the link as plain text ' +
+          'between the sentinels, and no script anywhere. The regression signal is an alert firing, ' +
+          'an image drawn, or the link above being clickable — never how the residue looks.\n',
       )
     })
     .user('now think about something and run a tool')

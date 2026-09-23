@@ -83,7 +83,7 @@ const log = ensoLogger('host')
  * never reused, whatever it costs in reload time (~10ms warm; the first load pays ~700ms).
  *
  * ⚠⚠ `PI_CODING_AGENT_DIR` MUST BE SET BEFORE THE FIRST SERVICES. pi-multi-account reads it
- * at MODULE IMPORT (`index.ts:714`) and derives `auth.json`, `settings.json`, `models.json`
+ * at MODULE IMPORT (`index.ts:752`) and derives `auth.json`, `settings.json`, `models.json`
  * from it. Spike receipt: unset, it read the operator's REAL `~/.pi/agent` — two real
  * accounts, real credentials — the exact isolation defect the first live run had (see
  * `server/index.ts`'s history). Set on `process.env` here, once, at host creation.
@@ -97,6 +97,24 @@ const log = ensoLogger('host')
  * spawns none. Read-merge-write: multi-account writes its defaults only when the file is
  * absent, and its user-facing commands read-merge-write the same file.
  *
+ * ⚠⚠ EVERY THREAD IS A MULTI-ACCOUNT ROOT: THE HOST HOLDS ITS LEASE SLOT EMPTY (#351).
+ * pi-multi-account ≥1.22 keeps ONE root session per process — `globalThis[Symbol.for('pi-multi-
+ * account:active-root-session')]`, taken at `session_start`, released at `session_shutdown` —
+ * and a session that starts while it is held goes passive for its WHOLE life (the flag is never
+ * reset): accounts register, automatic failover is off. Built upstream for in-process subagents.
+ * Here every thread is a session in this one process and an idle one stays live for 30 minutes
+ * (`thread-registry.ts`), so the thread in use was usually the passive one. At host creation the
+ * slot becomes an accessor that always reads `undefined` and ignores writes
+ * (`holdMultiAccountLeaseEmpty`), so every `session_start` finds no root and becomes one — 1.21's
+ * behaviour, including what 1.21 already did: concurrent roots write the same `auth.json` and
+ * state file. Installed ONCE rather than cleared per session: a per-session delete raced at
+ * microtask granularity — `session_start` handlers are awaited in turn, so a second thread's
+ * build could interleave between one thread's delete and its acquire. The release cannot remove
+ * the accessor: it deletes only when the slot holds its own owner (`index.ts:11361`), which the
+ * getter never returns. Coupled to an upstream private symbol until Sarrius/pi-multi-account#73
+ * ships a switch; `__tests__/agent-host.test.ts` goes red on a rename (a concurrent thread would
+ * start passive again).
+ *
  * ⚠ `bindExtensions` IS CALLED EXACTLY ONCE PER SESSION. Every call emits `session_start`
  * (the guards reset their read tracker on it; multi-account resets thirteen failover
  * guards). Without the call, `session_start` never fires and `ctx.hasUI` is false.
@@ -109,15 +127,16 @@ const log = ensoLogger('host')
  * (`readSecret`) — see `@enso/core`'s secrets.ts for why the root `.env` is the wrong place.
  *
  * ⚠ THE HOST LOADS ONE EXTENSION OF ITS OWN, `<inline:enso-model-watch>` (#338 slice 2), because
- * an extension is the only honest listener for a model change. pi 0.84.4 announces a model
- * switch to extensions ALONE: `AgentSession.setModel` (`dist/core/agent-session.js:1252`)
- * writes the `model_change` entry through `sessionManager.appendModelChange` (:1259) with no
- * session event — `entry_appended` (:2026) is emitted only from the extension API's
- * `appendEntry`, for custom entries — and then `_emitModelSelect` (:1236) puts `model_select`
- * on the EXTENSION runner. The thinking level is the other way round: `setThinkingLevel`
- * (:1358) emits `thinking_level_changed` on the session stream (:1370). The host hears each
+ * an extension is the only honest listener for a model change. pi 0.87.1 announces a model
+ * switch to extensions ALONE: `AgentSession.setModel` (`dist/core/agent-session.js:1645`)
+ * writes the `model_change` entry through `sessionManager.appendModelChange` (:1652) with no
+ * session event — `entry_appended` is emitted for custom entries from the extension API's
+ * `appendEntry` (:2419), for boundary drafts (:487) and for context edits (:680), never for a
+ * model change — and then `_emitModelSelect` (:1661) puts `model_select` on the EXTENSION
+ * runner. The thinking level is the other way round: `setThinkingLevel` (:1751) emits
+ * `thinking_level_changed` on the session stream (:1763). The host hears each
  * where it is said, re-reads `modelState()` and emits its own `model` event once per change —
- * so a failover swap by pi-multi-account (`pi.setModel`, `index.ts:3679`) reaches the feed the
+ * so a failover swap by pi-multi-account (`pi.setModel`, `index.ts:4031`) reaches the feed the
  * same way a `/model` from the palette does. The watcher registers nothing else and is listed in
  * `loadedExtensionPaths` like every extension pi loaded.
  */
@@ -125,6 +144,8 @@ const log = ensoLogger('host')
 /** The agent dir's multi-account config file, and the one key this host must pin in it. */
 const MULTI_ACCOUNT_CONFIG_FILENAME = 'provider-failover.json'
 const MULTI_ACCOUNT_CHILD_PROXY_KEY = 'childProxy'
+/** pi-multi-account's per-process root lease — held empty from host creation (module header). */
+const MULTI_ACCOUNT_ROOT_LEASE = Symbol.for('pi-multi-account:active-root-session')
 
 /**
  * The host's own extension (see the module header): named so `loadedExtensionPaths` says what
@@ -135,9 +156,9 @@ export const MODEL_WATCH_EXTENSION_PATH = `<inline:${MODEL_WATCH_EXTENSION_NAME}
 
 /**
  * pi's stand-in when no model could be chosen — `@earendil-works/pi-agent-core`
- * `dist/agent.js:14` `DEFAULT_MODEL`, substituted by `createMutableAgentState` (:31) so
+ * `dist/agent.js:18` `DEFAULT_MODEL`, substituted by `createMutableAgentState` (:40) so
  * `AgentSession.model` is typed optional but never is. Every model pi actually selects
- * (`findInitialModel` in `dist/core/sdk.js:98`, `setModel`) is a registered, authenticated one;
+ * (`findInitialModel` in `dist/core/sdk.js:99`, `setModel`) is a registered, authenticated one;
  * the placeholder means "none", and the seam says `null` for it (#338 slice 2).
  */
 const PLACEHOLDER_MODEL = { provider: 'unknown', id: 'unknown' }
@@ -322,6 +343,18 @@ export function seedMultiAccountChildProxyOff(agentDir: string): void {
   writeFileSync(configPath, `${JSON.stringify({ ...existing, [MULTI_ACCOUNT_CHILD_PROXY_KEY]: false }, null, '\t')}\n`)
 }
 
+/**
+ * Make multi-account's root-lease slot a permanent vacancy — see the module header. Idempotent:
+ * `configurable`, so a second host in the process redefines it to the same thing.
+ */
+function holdMultiAccountLeaseEmpty(): void {
+  Object.defineProperty(globalThis, MULTI_ACCOUNT_ROOT_LEASE, {
+    configurable: true,
+    get: (): undefined => undefined,
+    set: (): void => undefined,
+  })
+}
+
 /** `RuntimeCommand` with `description` present only when pi supplied one (`exactOptionalPropertyTypes`). */
 function describeCommand(
   name: string,
@@ -335,10 +368,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   const { cwd, agentDir, harnessPackageDir } = options
 
   // Order matters, and it is the module header's ⚠⚠ items: env before any pi module can
-  // be imported by the loader, the proxy pin before the first session_start, and the
-  // secrets out of the environment before anything can inherit it (#89).
+  // be imported by the loader, the proxy pin and the empty lease slot before the first
+  // session_start, and the secrets out of the environment before anything can inherit it (#89).
   process.env.PI_CODING_AGENT_DIR = agentDir
   seedMultiAccountChildProxyOff(agentDir)
+  holdMultiAccountLeaseEmpty()
   // The secrets file is a fact about THIS checkout (the harness), not about the tree pi
   // operates on — `cwd` may be anywhere, a tmpdir in tests — so it resolves from here.
   const quarantine = quarantineSecrets(options.environment ?? process.env, findRepoRoot(import.meta.url))
@@ -680,8 +714,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     /**
      * `/compact` (#338 slice 4): pi summarises the context — a model call, seconds to a minute —
      * so it starts and is followed like a login, but the route HOLDS THE LEASE until it settles:
-     * compaction rewrites the branch, pi refuses a prompt while it runs (`agent-session.js:837`),
-     * and `compact()` awaits `abort()` before it arms its own guard (:1469–1470), so a prompt in
+     * compaction rewrites the branch, pi refuses a prompt while it runs (`agent-session.js:1227`),
+     * and `compact()` awaits `abort()` before it arms its own guard (:1866–1867), so a prompt in
      * that window would run alongside the summary — the held lease is what forecloses it (PR #347
      * review). Stop reaches it: `abort` below calls `abortCompaction`, and pi's own `dispose`
      * does too (:587). The page's transcript is TanStack's copy of the messages and does not
@@ -759,6 +793,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         emit({ type: 'extension_error', extensionPath: error.extensionPath, event: error.event, error: error.error })
       },
     })
+    // The model the session STARTS with is on the feed too, not only later changes. It used to
+    // arrive by accident: pi-multi-account 1.21 re-applied its remembered model at `session_start`
+    // through `pi.setModel`, which fires `model_select`. From 1.22 it follows the session branch
+    // and calls nothing, so a fresh thread's chip read "default until the thread runs" after it
+    // had run (live check, 2026-09-23). Deduped, so an extension's own switch is not said twice.
+    announceModelState()
 
     let disposed = false
     const runtime: ThreadRuntime = {

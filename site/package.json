@@ -9,8 +9,8 @@
     "preview": "cd .. && astro preview --root site"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.42.2",
-    "astro": "^7.3.3",
+    "@astrojs/starlight": "^0.42.3",
+    "astro": "^7.3.4",
     "astro-mermaid": "^2.1.0",
     "mermaid": "^12.0.0",
     "starlight-typedoc": "^0.23.1",

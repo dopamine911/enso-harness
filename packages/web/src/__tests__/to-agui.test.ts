@@ -18,8 +18,8 @@ test('a text delta becomes TEXT_MESSAGE_CONTENT carrying the message id', () => 
   })
 })
 
-// REASONING_*, because THINKING_* is deprecated in @ag-ui/core and goes at 1.0.0.
-test('a thinking delta uses REASONING_MESSAGE_CONTENT, not the deprecated THINKING_*', () =>
+// REASONING_*, because @ag-ui/core 1.0.0 removed THINKING_* from `EventType`.
+test('a thinking delta uses REASONING_MESSAGE_CONTENT, not the removed THINKING_*', () =>
   expect(types({ kind: 'thinking-delta', contentIndex: 0, delta: 'hmm' })).toEqual([
     EventType.REASONING_MESSAGE_CONTENT,
   ]))

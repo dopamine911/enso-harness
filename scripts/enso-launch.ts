@@ -22,13 +22,13 @@
  * So the tested range is stated ONCE, here, and both ends read it: `enso.ts` refuses a `pi`
  * outside it before the spawn, and `scripts/__tests__/pi-version-parity.test.ts` asserts the workspace pi the
  * corpus pins against is inside it. Widening it means running the corpus against the new pi
- * FIRST. It is `^0.84.4` — the harness's peer range and the workspace devDependency.
+ * FIRST. It is `^0.87.1` — the harness's peer range and the workspace devDependency.
  */
 export const SUPPORTED_PI_VERSIONS = {
   /** The oldest pi the corpus has been run against. */
-  minimum: { major: 0, minor: 84, patch: 4 },
+  minimum: { major: 0, minor: 87, patch: 1 },
   /** The first pi it has NOT been run against. */
-  below: { major: 0, minor: 85, patch: 0 },
+  below: { major: 0, minor: 88, patch: 0 },
 }
 
 /**
@@ -89,8 +89,8 @@ function compareVersions(left: ReportedVersion, right: ReportedVersion): number 
 /**
  * Whether the version `pi --version` reported is inside {@link SUPPORTED_PI_VERSIONS}.
  *
- * ⚠ Reads the NUMERIC core only: a prerelease of the excluded version (`0.85.0-rc.1`) reads as
- * `0.85.0` and is refused, and output carrying no version at all is refused. Both are the safe
+ * ⚠ Reads the NUMERIC core only: a prerelease of the excluded version (`0.88.0-rc.1`) reads as
+ * `0.88.0` and is refused, and output carrying no version at all is refused. Both are the safe
  * direction — an unknown pi is exactly the case the corpus says nothing about.
  * @param reportedVersion whatever `pi --version` printed
  */

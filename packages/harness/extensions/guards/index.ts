@@ -41,7 +41,7 @@ import {
  * inclusion list naming only `read` left `grep` over ~/.aws returning the credential line.
  *
  * BASH POLICY (#9) — two layers inside this one handler, and the boundary stated honestly:
- * 1. `cc-safety-net@2.3.3` (exact pin, declared `./api` export, MIT) analyzes every bash
+ * 1. `cc-safety-net@2.4.6` (exact pin, declared `./api` export, MIT) analyzes every bash
  *    command: destructive git (`reset --hard`, `push --force`, `checkout --`), `rm -rf`
  *    on protected paths, and — the half that closes "every other guard is bypassable via
  *    bash" — SECRET ACCESS through the shell (`cat ~/.aws/credentials`, `.env` even as a

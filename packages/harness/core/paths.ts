@@ -57,7 +57,7 @@ export function normalizeWindowsShellPath(filePath: string): string {
 /**
  * Normalise a path string EXACTLY as pi's tools do before they resolve it.
  *
- * Replicated from pi-coding-agent 0.84.4 `dist/utils/paths.js` `normalizePath`
+ * Replicated from pi-coding-agent 0.87.1 `dist/utils/paths.js` `normalizePath`
  * (github.com/earendil-works/pi, MIT) — the function every path-bearing pi tool (`read`,
  * `write`, `edit`, `grep`, `find`, `ls`) resolves through via `resolveToCwd`. It is not on
  * the package's export map, so it is copied rather than imported; the corpus test in

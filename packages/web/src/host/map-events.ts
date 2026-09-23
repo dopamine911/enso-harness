@@ -311,7 +311,7 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
         complete: true,
         // ⚠ `isError` is the only signal a refused call has: the runtime turns a guard's
         // `{block: true, reason}` into an error result with the reason as its content —
-        // `@earendil-works/pi-agent-core@0.84.4` (bun.lock), `dist/agent-loop.js`, the
+        // `@earendil-works/pi-agent-core@0.87.1` (bun.lock), `dist/agent-loop.js`, the
         // `beforeResult?.block` branch: `createErrorToolResult(reason)`, `isError: true` —
         // pinned by `__tests__/agent-loop-contract.test.ts`, so a bump that moves it goes red. No distinct
         // "blocked" event exists. Treating any error result as displayable covers it — see

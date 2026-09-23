@@ -110,5 +110,5 @@ test('⚠ the e2e settle gate waits for the stop control to be gone, not for sen
   // To the closing brace in the first column: the body may hold braces of its own.
   const gate = specSource.slice(declaration, specSource.indexOf('\n}', declaration))
   expect(gate).toContain('STOP_BUTTON_NAME')
-  expect(gate).toContain('toHaveCount(0)')
+  expect(gate).toMatch(/toHaveCount\(0[,)]/)
 })

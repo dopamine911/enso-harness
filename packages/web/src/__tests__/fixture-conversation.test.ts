@@ -6,7 +6,7 @@ import { createFixtureChat } from '../fixture-conversation.ts'
  *
  * ⚠ Enforcement of a dependency FACT, not a unit test of the fixture's prose. The styling
  * page is scripted through `@shadcn/helpers/tanstack-ai`, whose peer range names
- * `@tanstack/ai` 0.40 while this repo runs 0.53 — deliberately, on the strength of one
+ * `@tanstack/ai` 0.40 while this repo runs 0.58 — deliberately, on the strength of one
  * observation: thinking, tool-call, tool-result and text parts all materialize. That
  * observation was a manual probe recorded in prose (`fixture-conversation.ts`'s header),
  * which is why `bun run check` and `bun run e2e` both passed with the helper entirely

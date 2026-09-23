@@ -68,7 +68,7 @@ export const ThreadRuntime = Type.Object({
    * the flow lives on the session until pi's own expiry or the session's disposal. An `action`
    * (compaction, slice 4) REWRITES THE BRANCH and is run-shaped: the lease is held until
    * `onSettled`, so the composer is closed, a prompt is 409 (pi itself refuses one mid-compaction,
-   * `agent-session.js:837`), and Stop reaches it (`abort` calls `abortCompaction`). The work's
+   * `agent-session.js:1227`), and Stop reaches it (`abort` calls `abortCompaction`). The work's
    * questions are the same blocking dialogs an extension asks (`extension-ui-request`), its
    * progress is `notify` lines, and its result is a `model` observation and a final notify.
    */

@@ -165,8 +165,8 @@ test('⚠ @shadcn/helpers is imported by the production bundle, so it is a depen
 
 /**
  * ⚠ A DELIBERATE VIOLATION, pinned so it stays deliberate. The helper declares support for
- * `@tanstack/ai` 0.40 and `@tanstack/ai-client` 0.20 and we run 0.53 and 0.31 — thirteen and
- * eleven minors past. It installs silently because all three peers are optional, so the
+ * `@tanstack/ai` 0.40 and `@tanstack/ai-client` 0.20 and we run 0.58 and 0.33 — eighteen and
+ * thirteen minors past. It installs silently because all three peers are optional, so the
  * installer will never be the detector. A red line here means one side moved: re-run
  * `fixture-conversation.test.ts` (the probe), and if the four part kinds still materialize,
  * update this row with the new pair. `ai` is absent on purpose — nothing in this repo imports
@@ -191,7 +191,36 @@ test('⚠ @shadcn/helpers’ peer ranges are knowingly violated — re-probe whe
       ai: '>=7.0.0 <8',
     },
     optionalPeers: ['@tanstack/ai', '@tanstack/ai-client', 'ai'],
-    weRun: { '@tanstack/ai': '0.53.0', '@tanstack/ai-client': '0.31.0', ai: undefined },
+    weRun: { '@tanstack/ai': '0.58.0', '@tanstack/ai-client': '0.33.2', ai: undefined },
+  })
+})
+
+/**
+ * ⚠ A DELIBERATE OVERRIDE, pinned so it stays deliberate — the shape of the helper row above.
+ * `@tanstack/ai` pins `@ag-ui/core` EXACTLY to `0.1.1-canary.beta.0` through 0.58, and the root
+ * `overrides` block forces `1.0.0` under it. Measured when this landed: 1.0.0's runtime exports
+ * are a superset of the canary's except `EventType.THINKING_*` (removed; nothing here emits
+ * them). TanStack reads them only as `spec-event-keys` map keys, and through `@ag-ui/core`'s own
+ * enum — `dist/esm/utilities/spec-event-keys.js` imports `EventType` from `../types.js`, which
+ * re-exports `@ag-ui/core`'s; the copy in `client.js` serves the client entry only — so those
+ * keys read `undefined`, harmlessly. TanStack's own declarations check clean against 1.0.0 with
+ * `skipLibCheck` off.
+ *
+ * A red line means one side moved. If `@tanstack/ai` now declares 1.x itself (TanStack/ai
+ * #1460/#1465, which also changes the terminal-event `usage` shape), the override is no longer
+ * a deviation: re-read that release's migration notes, then update this row.
+ */
+test('⚠ @ag-ui/core runs at 1.0.0 under a @tanstack/ai that pins the canary — re-check when either moves', () => {
+  expect({
+    tanstackDeclares: manifest('node_modules/@tanstack/ai/package.json').dependencies?.['@ag-ui/core'],
+    overriddenTo: root.overrides?.['@ag-ui/core'],
+    webDeclares: web.dependencies?.['@ag-ui/core'],
+    installed: manifest('node_modules/@ag-ui/core/package.json').version,
+  }).toEqual({
+    tanstackDeclares: '0.1.1-canary.beta.0',
+    overriddenTo: '1.0.0',
+    webDeclares: '1.0.0',
+    installed: '1.0.0',
   })
 })
 
