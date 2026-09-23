@@ -88,8 +88,8 @@ export {
   ENSO_LOG_EVENTS,
   EnsoDayStats,
   EnsoDurationSummary,
+  foldDay,
   mergeDurationSummaries,
-  toolCallDurations,
 } from './log-stats.ts'
 export {
   ENSO_LOG_LEVEL_NAMES,

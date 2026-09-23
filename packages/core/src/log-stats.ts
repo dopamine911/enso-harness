@@ -493,16 +493,6 @@ function processRowOf(process: ProcessFold): EnsoDayStats['processes'][number] {
 }
 
 /**
- * Each tool call's call → result in these records, by `toolCallId` (#45 phase 2) — the same join
- * `dayStats` sums per tool, kept per call so a reader can rank the calls themselves.
- *
- * @group Logging
- */
-export function toolCallDurations(lines: readonly EnsoLogLine[]): ReadonlyMap<string, number> {
-  return foldOf(lines).callDurations
-}
-
-/**
  * Fold the day's records into its stats.
  *
  * Every join is by the ids a record carries — `threadId` + `generation` for a run,
@@ -512,8 +502,27 @@ export function toolCallDurations(lines: readonly EnsoLogLine[]): ReadonlyMap<st
  * @group Logging
  */
 export function dayStats(day: string, lines: readonly EnsoLogLine[], malformed: number): EnsoDayStats {
-  const fold = foldOf(lines)
+  return foldDay(day, lines, malformed).stats
+}
 
+/**
+ * The day's stats AND each tool call's call → result, by `toolCallId` (#45 phase 2), from ONE
+ * fold — the same join `stats.tools` sums per tool, kept per call so a reader can rank the calls
+ * themselves. The thread stats route reads both off every day file it opens (PR #358 review:
+ * folding each day twice was the same work done again).
+ *
+ * @group Logging
+ */
+export function foldDay(
+  day: string,
+  lines: readonly EnsoLogLine[],
+  malformed: number,
+): { readonly stats: EnsoDayStats; readonly callDurations: ReadonlyMap<string, number> } {
+  const fold = foldOf(lines)
+  return { stats: statsOf(day, fold, lines.length, malformed), callDurations: fold.callDurations }
+}
+
+function statsOf(day: string, fold: Fold, records: number, malformed: number): EnsoDayStats {
   const runRows = [...fold.runs.values()].map(runRowOf)
   const threads = new Map<string, { runs: number } & SpendTotals>()
   for (const run of runRows) {
@@ -531,7 +540,7 @@ export function dayStats(day: string, lines: readonly EnsoLogLine[], malformed: 
 
   return {
     day,
-    records: lines.length,
+    records,
     malformed,
     processes: [...fold.processes.values()].map(processRowOf),
     runs: runRows,

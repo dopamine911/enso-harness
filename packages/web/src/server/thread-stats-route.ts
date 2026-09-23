@@ -1,12 +1,11 @@
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import {
-  dayStats,
   type EnsoLogLine,
   type EnsoSessionUsage,
   type EnsoThreadStats,
+  foldDay,
   mergeDurationSummaries,
-  toolCallDurations,
 } from '@enso/core'
 import { ensoLogDay, ensoLogFilename } from '@enso/core/log-process'
 import type { AgentHost } from '../host/agent-host.ts'
@@ -29,6 +28,15 @@ import type { ThreadRegistry } from './thread-registry.ts'
  * wrong one.
  *
  * ⚠ WRITES NO RECORD — the log-stats route's rule: a read of the trace must not appear in it.
+ *
+ * ⚠ THE COST, STATED (PR #358 review). With the drawer open this runs once per `session-usage` —
+ * each turn, run, compaction, model change or cache warm — and each run reads every day file
+ * since the branch began (up to the 14 the prune leaves), synchronously, as the day's stats route
+ * does; each day is folded once. At `info` a day file is a few hundred kilobytes and this is not
+ * felt; at `trace` on a long thread it would be. The fix is not written yet, and is a design, not
+ * a line: a day before today no longer changes once the rotation moves on, so it could be read
+ * once per thread — but that cache must forget a day the prune deletes, and must be bounded, or
+ * it grows with every thread this server has served.
  */
 
 export interface ThreadStatsRouteDeps {
@@ -92,10 +100,10 @@ export function createThreadStatsRoute(
     // From the branch's first entry's day; a branch with none has only today to look in.
     const firstDay = localDayOf(branch.firstAt === undefined ? now() : new Date(branch.firstAt))
     const days = logDaysOnDisk(deps.logsDir).filter((day) => day >= firstDay)
-    const lines = days.map((day) => threadLines(deps.logsDir, day, threadId))
-    const folded = days.map((day, position) => dayStats(day, lines[position] ?? [], 0))
+    // ONE fold per day, for both halves (PR #358 review).
+    const folded = days.map((day) => foldDay(day, threadLines(deps.logsDir, day, threadId), 0))
     // A toolCallId is unique across the thread, so the days' per-call maps merge without a clash.
-    const durationOf = new Map(lines.flatMap((dayLines) => [...toolCallDurations(dayLines)]))
+    const durationOf = new Map(folded.flatMap((fold) => [...fold.callDurations]))
     return {
       threadId,
       live: source.live,
@@ -108,8 +116,8 @@ export function createThreadStatsRoute(
         return durationMs === undefined ? call : { ...call, durationMs }
       }),
       latency: {
-        prompts: mergeDurationSummaries(folded.map((stats) => stats.totals.prompts)),
-        firstDelta: mergeDurationSummaries(folded.map((stats) => stats.totals.firstDelta)),
+        prompts: mergeDurationSummaries(folded.map((fold) => fold.stats.totals.prompts)),
+        firstDelta: mergeDurationSummaries(folded.map((fold) => fold.stats.totals.firstDelta)),
       },
       logDays: days,
     }
