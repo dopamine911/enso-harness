@@ -193,6 +193,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     generation: mount.generation,
     permissionMode: mount.permissionMode,
     model: mount.model,
+    cwd: mount.cwd,
     messages: mount.messages,
     openDialogs: mount.openDialogs,
     ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),

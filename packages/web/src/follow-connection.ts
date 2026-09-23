@@ -293,6 +293,32 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
   const queue: StreamChunk[] = []
   let wake: (() => void) | undefined
   const runs = new Map<string, OpenRun>()
+  /**
+   * A frame that fails the wire schema has been reported on this connection (PR #355 review).
+   * Once, not per frame: the usual cause is a version mismatch — a tab from an earlier bundle
+   * against a newer server, or the reverse under HMR — and then EVERY frame of the changed kind
+   * fails; a token stream of them would bury the transcript under one sentence.
+   */
+  let reportedWireMismatch = false
+
+  /**
+   * Whether a frame off the wire is one this page can read. ⚠ A failure is almost always a
+   * VERSION mismatch, not corruption: the schemas are closed (`additionalProperties: false`), so
+   * a field either side added fails the other's check — a dropped snapshot applies nothing (no
+   * messages, mode, model, dialog), and the page would look connected while stale. The notice
+   * says what fixes it; the frame rides in the record's properties, never in the sentence.
+   */
+  function admitted(raw: unknown): raw is EnsoFollowFrame {
+    if (followFrameValidator.Check(raw)) return true
+    if (!reportedWireMismatch) {
+      reportedWireMismatch = true
+      problem(
+        'a frame from the server does not match this page — the page and the server are from different versions; reload the page',
+        { frame: raw },
+      )
+    }
+    return false
+  }
   /** The run observation chunks attach to: the most recently opened. */
   let current: OpenRun | undefined
   /** `prompt-rejected` reasons that arrived before the receipt naming their run, by the receipt's `messageId`. */
@@ -508,11 +534,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     const pump = (async () => {
       try {
         for await (const raw of frames) {
-          if (!followFrameValidator.Check(raw)) {
-            problem('a frame off the wire fails EnsoFollowFrame: {frame}', { frame: raw })
-            continue
-          }
-          observe(raw)
+          if (admitted(raw)) observe(raw)
         }
       } catch (error) {
         if (!abort.aborted) problem('the follow failed: {error}', { error: String(error) })

@@ -301,6 +301,8 @@ export interface AgentHost {
    * own file again across a server restart.
    */
   createSession(threadId: string): Promise<HostedThread>
+  /** The tree every session this host builds runs in — the launch argument, one per server (`server/index.ts`). */
+  readonly cwd: string
   /** pi's session files for this workspace, newest first — the resumable listing. */
   listSessions(): Promise<StoredThread[]>
   /**
@@ -996,6 +998,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
 
   return {
+    cwd,
     createSession,
     listSessions,
     readTranscript,

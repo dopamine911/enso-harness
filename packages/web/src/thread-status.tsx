@@ -125,6 +125,13 @@ export interface ThreadStatusViewProps {
   readonly activity: Activity
   readonly counts: ThreadCounts
   readonly stats: ThreadStats
+  /** The tree pi runs this thread in (#44); undefined until the follow's first snapshot. */
+  readonly cwd?: string | undefined
+}
+
+/** The project as a reader names it: the directory's own name; the full path rides in the tooltip. */
+function projectName(cwd: string): string {
+  return cwd.split(/[\\/]/).findLast((segment) => segment.length > 0) ?? cwd
 }
 
 const DOT_DISCONNECTED = 'size-2 rounded-full bg-destructive'
@@ -139,7 +146,7 @@ function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof 
 }
 
 /** Pure view — everything it shows arrives as props, so a static render pins the wording. */
-export function ThreadStatusView({ activity, counts, stats }: ThreadStatusViewProps): React.ReactNode {
+export function ThreadStatusView({ activity, counts, stats, cwd }: ThreadStatusViewProps): React.ReactNode {
   const dotClass = activityDotClass(activity)
   return (
     <footer
@@ -163,6 +170,9 @@ export function ThreadStatusView({ activity, counts, stats }: ThreadStatusViewPr
       <span title="tool calls across this transcript, finished or not">
         {counts.toolCalls} {counts.toolCalls === 1 ? 'tool call' : 'tool calls'}
       </span>
+      {cwd === undefined ? null : (
+        <span title={`the tree pi reads and writes for this thread: ${cwd}`}>project {projectName(cwd)}</span>
+      )}
       <span className="ml-auto" title="sum of every model request this page has made (pi's own attribution rule)">
         ${stats.totalCost.toFixed(4)}
       </span>
@@ -189,11 +199,13 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
   const stores = useThreadStores()
   const stats = useStore(stores.stats)
   const disconnected = useStore(stores.disconnected)
+  const cwd = useStore(stores.cwd)
   return (
     <ThreadStatusView
       activity={describeActivity(messages, generating, disconnected)}
       counts={countThread(messages)}
       stats={stats}
+      cwd={cwd}
     />
   )
 }

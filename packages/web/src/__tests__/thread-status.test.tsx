@@ -131,6 +131,7 @@ const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string 
       activity={props.activity ?? { kind: 'idle' }}
       counts={props.counts ?? { prompts: 0, toolCalls: 0 }}
       stats={props.stats ?? NO_STATS}
+      cwd={props.cwd}
     />,
   )
 
@@ -169,4 +170,16 @@ test("cost and the last request's prompt size are labelled honestly", () => {
   // the hover title legitimately says "not a context-window percentage".
   const visibleText = rendered.replace(/<[^>]*>/g, ' ')
   expect(visibleText).not.toContain('context')
+})
+
+// #44: the project, as a reader names it — the directory's own name on the bar, the full path on
+// hover (two checkouts of one repo share a name; the path tells them apart). Before the first
+// snapshot there is nothing to say, so nothing is said.
+test('the project is the directory name with the full path in its title; absent until a snapshot says', () => {
+  expect(render({})).not.toContain('project')
+  const rendered = render({ cwd: '/home/dev/work/zen-harness-foundation/' })
+  expect(rendered).toContain('project zen-harness-foundation<')
+  expect(rendered).toContain(
+    'title="the tree pi reads and writes for this thread: /home/dev/work/zen-harness-foundation/"',
+  )
 })

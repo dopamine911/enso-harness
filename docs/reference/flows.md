@@ -28,11 +28,11 @@ flowchart LR
 
 | Node | Contract | Input | Source |
 |---|---|---|---|
-| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:56`](../../packages/web/src/server/index.ts#L56)<br>[`packages/web/src/server/follow.ts:552`](../../packages/web/src/server/follow.ts#L552) |
+| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:56`](../../packages/web/src/server/index.ts#L56)<br>[`packages/web/src/server/follow.ts:553`](../../packages/web/src/server/follow.ts#L553) |
 | `respondToHostCommand → runHostCommand` | [`POST /api/threads/:threadId/command`](./routes.md) | path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing | [`packages/web/src/server/index.ts:60`](../../packages/web/src/server/index.ts#L60) |
-| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:55`](../../packages/web/src/server/index.ts#L55)<br>[`packages/web/src/server/follow.ts:352`](../../packages/web/src/server/follow.ts#L352) |
-| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:58`](../../packages/web/src/server/index.ts#L58)<br>[`packages/web/src/server/follow.ts:388`](../../packages/web/src/server/follow.ts#L388) |
-| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:54`](../../packages/web/src/server/index.ts#L54)<br>[`packages/web/src/server/follow.ts:262`](../../packages/web/src/server/follow.ts#L262) |
+| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:55`](../../packages/web/src/server/index.ts#L55)<br>[`packages/web/src/server/follow.ts:353`](../../packages/web/src/server/follow.ts#L353) |
+| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:58`](../../packages/web/src/server/index.ts#L58)<br>[`packages/web/src/server/follow.ts:389`](../../packages/web/src/server/follow.ts#L389) |
+| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:54`](../../packages/web/src/server/index.ts#L54)<br>[`packages/web/src/server/follow.ts:263`](../../packages/web/src/server/follow.ts#L263) |
 
 ## Observation pipeline
 
@@ -55,8 +55,8 @@ flowchart LR
 | `mapPiEvent (18 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:245`](../../packages/web/src/host/map-events.ts#L245) |
 | `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:494`](../../packages/core/src/observation.ts#L494) |
 | `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:178`](../../packages/web/src/server/follow.ts#L178) |
-| `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:401`](../../packages/web/src/follow-connection.ts#L401) |
+| `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:427`](../../packages/web/src/follow-connection.ts#L427) |
 | `to-agui chunk` | [Observations](./observations.md) | [`packages/web/src/to-agui.ts:76`](../../packages/web/src/to-agui.ts#L76) |
-| `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:128`](../../packages/web/src/custom-event-router.ts#L128) |
+| `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:129`](../../packages/web/src/custom-event-router.ts#L129) |
 
 Kinds, in the union's order of declaration: `text-delta`, `thinking-delta`, `tool-call`, `tool-result`, `custom-entry`, `permission-mode`, `permission-mode-rejected`, `model`, `message-start`, `message-end`, `turn-start`, `turn-end`, `queue`, `prompt-rejected`, `extension-error`, `extension-ui-request`, `dialog-settled`, `run-ended`, `settled`, `unmapped`.

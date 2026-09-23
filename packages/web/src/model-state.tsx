@@ -140,23 +140,29 @@ function chipLabel(state: EnsoModelState | null): string {
   return state.model === null ? MODEL_NONE : state.model.name
 }
 
-/** The composer-row chip: the current model's `name`, or the not-live sentence; a button either way (header). */
+/**
+ * The composer-row chip: the current model's `name` and its PROVIDER, or the not-live sentence; a
+ * button either way (header). The provider is not decoration (#44): the same name runs on several
+ * providers, and under multi-account the provider id is WHICH ACCOUNT answers — a failover swap
+ * changes it and nothing else on the page would say so.
+ */
 export function ModelChip({ state, onOpen }: ModelChipProps): React.ReactNode {
   const label = chipLabel(state)
+  const model = state?.model ?? null
+  let title = 'the model this thread runs — change it here or with /model'
+  if (state === null) title = 'no live session yet — pick a model now and the first prompt runs on it (/model)'
+  else if (model !== null) title = `${model.provider}/${model.id} — ${title}`
   return (
     <button
       type="button"
       aria-label="model"
-      title={
-        state === null
-          ? 'no live session yet — pick a model now and the first prompt runs on it (/model)'
-          : 'the model this thread runs — change it here or with /model'
-      }
+      title={title}
       className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-muted-foreground text-xs hover:bg-accent hover:text-foreground"
       onClick={onOpen}
     >
-      {state === null || state.model === null ? null : <span>model</span>}
-      <span className={state === null || state.model === null ? undefined : 'text-foreground'}>{label}</span>
+      {model === null ? null : <span>model</span>}
+      <span className={model === null ? undefined : 'text-foreground'}>{label}</span>
+      {model === null ? null : <span className="max-w-[16ch] truncate">· {model.provider}</span>}
     </button>
   )
 }

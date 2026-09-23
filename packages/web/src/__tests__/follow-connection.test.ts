@@ -677,13 +677,21 @@ test('⚠ the follow closing under an open run is a run error, then the ending i
   ).toBe(false)
 })
 
-test('a frame that fails the wire schema is reported and skipped, never rendered', async () => {
+// ⚠ PR #355 review: the schemas are closed, so a tab from another version fails EVERY frame of a
+// changed kind — and a dropped snapshot applies nothing, leaving a pane that looks connected and
+// is stale. So the notice names the fix (reload), comes once per connection however many frames
+// fail, and keeps the frame out of the sentence (it is a whole transcript for a snapshot).
+test('a frame that fails the wire schema is skipped, and the page is told ONCE to reload — never rendered', async () => {
   const server = scripted()
   server.frame({ type: 'status', live: true, busy: 'yes', generation: 1 } as unknown as EnsoFollowFrame)
+  server.frame({ ...SNAPSHOT_IDLE, fromANewerServer: true } as unknown as EnsoFollowFrame)
   server.frame(SNAPSHOT_IDLE)
   await server.untilChunks(1)
-  expect(server.problems).toEqual([expect.stringContaining('fails EnsoFollowFrame')])
+  expect(server.problems).toEqual([
+    'thread t1: a frame from the server does not match this page — the page and the server are from different versions; reload the page',
+  ])
   expect(server.chunks[0]).toMatchObject({ name: 'snapshot' })
+  expect(server.chunks).toHaveLength(1)
   server.abort()
 })
 
