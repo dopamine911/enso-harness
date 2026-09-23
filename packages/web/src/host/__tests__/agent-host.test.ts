@@ -202,6 +202,15 @@ test('⚠ a thread started while another is live gets multi-account PASSIVE — 
   expect(await multiAccountStartupLine(concurrent)).toContain('passive')
 })
 
+// The chip's live state for a fresh thread comes from this observation (live check,
+// 2026-09-23): nothing else says the model a session STARTS with once no extension switches it
+// at `session_start` — multi-account ≥1.22 does not.
+test('a new session says the model it starts with, as its own `model` observation', async () => {
+  const hosted = await hostedSession()
+  const opening = await untilObservation(hosted, (event) => event.kind === 'model')
+  expect(opening).toEqual({ kind: 'model', ...hosted.runtime.modelState() })
+})
+
 test("exactly the manifest's six extensions load, in order, then the host's own model watcher, with no load errors", async () => {
   const hosted = await hostedSession()
   const loaded = hosted.loadedExtensionPaths

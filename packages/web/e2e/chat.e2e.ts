@@ -53,6 +53,15 @@ const ONE_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42
 const MODEL_PROMPT = 'Reply with exactly three words.'
 
 /**
+ * How long a run may take to settle. ⚠ Not `expect`'s 5 s default: a real model turn outlives it.
+ * Measured 2026-09-23 on claude-sonnet-4-5 with thinking: 2.2–3.8 s to the first delta, settled
+ * 4.3–4.4 s after acquisition, and the browser sees the run open ~1 s after the server — so the
+ * `@model` test failed 2 of 3 runs on turns that completed. A model-free run settles in well under
+ * a second either way.
+ */
+const RUN_SETTLE_TIMEOUT_MS = 60_000
+
+/**
  * A run is "settled" when the composer no longer offers to stop it — the stop button is
  * rendered ONLY while a run is in flight, so its absence is the one reading here that
  * actually flips. ⚠ NOT "send is visible": send is rendered unconditionally (disabled when
@@ -60,7 +69,7 @@ const MODEL_PROMPT = 'Reply with exactly three words.'
  * step named "wait for the run to settle" gated nothing.
  */
 async function waitForRunToSettle(page: Page): Promise<void> {
-  await expect(page.getByRole('button', { name: STOP_BUTTON_NAME })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: STOP_BUTTON_NAME })).toHaveCount(0, { timeout: RUN_SETTLE_TIMEOUT_MS })
 }
 
 /** The permission-mode select in the composer — what a resumed thread's persisted mode shows on (#142). */

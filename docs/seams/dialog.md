@@ -228,8 +228,8 @@ outcome (line 279) and resolves the extension with its value — `undefined` for
 `editor`, `false` for `confirm`, on every non-answer outcome (lines 259–260). That is why the settle
 observation exists at all: the runtime has no event for a question ending (lines 262–264).
 `agent-host.ts` binds one context per session (line 494) and delegates the runtime contract's
-`answerDialog` and `openDialogs` to it (lines 801–806); `cancelAllDialogs` cancels every pending
-question at session teardown (line 468, called from `agent-host.ts:924`), so teardown is a settle
+`answerDialog` and `openDialogs` to it (lines 807–812); `cancelAllDialogs` cancels every pending
+question at session teardown (line 468, called from `agent-host.ts:930`), so teardown is a settle
 path too.
 
 **Consumed by the server.** `answerThreadDialog` in `packages/web/src/server/follow.ts` (line 306)

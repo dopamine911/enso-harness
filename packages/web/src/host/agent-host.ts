@@ -768,6 +768,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         emit({ type: 'extension_error', extensionPath: error.extensionPath, event: error.event, error: error.error })
       },
     })
+    // The model the session STARTS with is on the feed too, not only later changes. It used to
+    // arrive by accident: pi-multi-account 1.21 re-applied its remembered model at `session_start`
+    // through `pi.setModel`, which fires `model_select`. From 1.22 it follows the session branch
+    // and calls nothing, so a fresh thread's chip read "default until the thread runs" after it
+    // had run (live check, 2026-09-23). Deduped, so an extension's own switch is not said twice.
+    announceModelState()
 
     let disposed = false
     const runtime: ThreadRuntime = {
