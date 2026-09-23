@@ -35,9 +35,11 @@ import { decideHostCommand, HostCommandRefused, hostCommandRows } from './host-c
 import {
   authEventText,
   decideHostFlow,
+  FlowCancelled,
   type HostAuthEvent,
   type HostAuthType,
   hostFlowRows,
+  isFlowCancelled,
   type LoginProviderFacts,
   loginDoneText,
   loginOptions,
@@ -547,6 +549,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // Every flow runs under this signal; `dispose` aborts it, so a device-code poll does not
     // outlive the session it was logging in (the lease is not held — see `startHostFlow`).
     const flowsAbort = new AbortController()
+    // ONE flow at a time per session (PR #346 review): two logins on one feed would interleave
+    // their questions with nothing to tell a reader which is which. The second is refused.
+    let flowInProgress: string | undefined
     const providerNameOf = (providerId: string): string =>
       session.modelRuntime.getProvider(providerId)?.name ?? providerId
     async function refreshStoredCredentials(): Promise<void> {
@@ -609,7 +614,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
             signal === undefined ? undefined : { signal },
           )
       }
-      if (answer === undefined) throw new Error('Login cancelled')
+      if (answer === undefined) throw new FlowCancelled()
       return answer
     }
 
@@ -648,9 +653,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         const selected = await settleAfterLogin(providerId)
         ui.uiContext.notify(loginDoneText(providerName, authType, selected), 'info')
       } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error)
-        if (reason === 'Login cancelled') ui.uiContext.notify(`Login to ${providerName} cancelled.`, 'info')
-        else ui.uiContext.notify(`Failed to log in to ${providerName}: ${reason}`, 'error')
+        if (isFlowCancelled(error)) ui.uiContext.notify(`Login to ${providerName} cancelled.`, 'info')
+        else {
+          const reason = error instanceof Error ? error.message : String(error)
+          ui.uiContext.notify(`Failed to log in to ${providerName}: ${reason}`, 'error')
+        }
       } finally {
         await refreshStoredCredentials()
         announceModelState()
@@ -759,15 +766,20 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       startHostFlow(run: EnsoHostCommandRun, outcome: PromptOutcome): void {
         let decision: ReturnType<typeof decideHostFlow>
         try {
+          if (flowInProgress !== undefined)
+            throw new HostCommandRefused(`/${flowInProgress} is already in progress here`)
           decision = decideHostFlow(run, currentLoginOptions(), logoutOptions(storedCredentials))
         } catch (error) {
           outcome.onRejected(error instanceof Error ? error.message : String(error))
           return
         }
         outcome.onAccepted()
-        void (decision.kind === 'login'
-          ? runLogin(decision.providerId, decision.authType)
-          : runLogout(decision.providerId))
+        flowInProgress = run.name
+        const flow =
+          decision.kind === 'login' ? runLogin(decision.providerId, decision.authType) : runLogout(decision.providerId)
+        void flow.finally(() => {
+          flowInProgress = undefined
+        })
       },
       modelState: currentModelState,
       async runHostCommand(run: EnsoHostCommandRun): Promise<void> {

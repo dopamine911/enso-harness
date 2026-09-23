@@ -460,19 +460,34 @@ export async function runHostCommand(
   // IS the registry's "busy" (composer disabled, prompts 409, a generation bumped), and a login is
   // not a run — the slice-3 smoke showed a held lease locking the thread for the device-code
   // wait. The flow lives on the session; the host aborts it if the session is disposed.
-  const row = lease.runtime.listCommands().find((command) => command.source === 'host' && command.name === run.name)
-  if (row?.kind === 'flow') {
-    return new Promise<HostCommandOutcome>((resolve) => {
-      lease.runtime.startHostFlow(run, {
-        onAccepted: () => {
-          lease.release()
-          resolve({ status: 202 })
-        },
-        onRejected: (reason: string) => {
-          lease.release()
-          resolve({ status: 422, reason })
-        },
-      })
+  let isFlow: boolean
+  try {
+    const row = lease.runtime.listCommands().find((command) => command.source === 'host' && command.name === run.name)
+    isFlow = row?.kind === 'flow'
+  } catch (error) {
+    lease.release()
+    throw error
+  }
+  if (isFlow) {
+    // ⚠ Every exit releases (PR #346 review): the two outcomes, and a synchronous fault in
+    // `startHostFlow` before either — which stays a fault (the handler's 500), with the lease
+    // back, rather than the held-lease lock this branch exists to avoid.
+    return new Promise<HostCommandOutcome>((resolve, reject) => {
+      let settled = false
+      const once = (outcome: () => void): void => {
+        if (settled) return
+        settled = true
+        lease.release()
+        outcome()
+      }
+      try {
+        lease.runtime.startHostFlow(run, {
+          onAccepted: () => once(() => resolve({ status: 202 })),
+          onRejected: (reason: string) => once(() => resolve({ status: 422, reason })),
+        })
+      } catch (error) {
+        once(() => reject(error))
+      }
     })
   }
   try {

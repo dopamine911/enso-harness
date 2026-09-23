@@ -345,7 +345,8 @@ it renders and answers picc's mode question; a secret is an `input` dialog with 
 the browser masks and never echoes. Fire-and-forget like `prompt`, for the same reason: a device code
 may wait minutes, so the route answers 202 on acceptance — and releases the lease then, because a
 lease IS the registry's busy and a login is not a run (the smoke showed a held lease locking the
-composer for the device-code wait). The flow lives on the session; disposing the session aborts it. The stored
+composer for the device-code wait). The flow lives on the session; disposing the session aborts it; one flow runs at a time per
+session, a second start is refused by name. The stored
 credentials `/logout` offers are a cache — pi lists them asynchronously and `listCommands` is
 synchronous — refreshed at build and after every flow the host itself ran.
 

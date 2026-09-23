@@ -416,8 +416,13 @@ test('⚠ POST …/command with a flow row: 202 on start, the thread is not busy
   // …so a prompt during the wait is accepted, not refused as busy.
   expect(await prompt(url, 'flowing', 'hello while logging in')).toBe(202)
 
+  // One flow at a time on a session: a second start while the first waits is refused, and says which.
+  const second = await run({ name: 'login', value: 'fake/api_key' })
+  expect(second.status).toBe(422)
+  expect(await second.text()).toBe('/login is already in progress here')
+
   // The flow ends on its own clock: its notify and the model state land on the feed.
-  await follow.untilFrames(7) // taken, settled, released for the prompt above
+  await follow.untilFrames(9) // taken, settled, released for the prompt; taken, released for the refused start
   const beforeSettle = follow.frames.length
   thread.flows[0]?.settle()
   await follow.untilFrames(beforeSettle + 2)
@@ -431,6 +436,29 @@ test('⚠ POST …/command with a flow row: 202 on start, the thread is not busy
   expect(noFlow.status).toBe(422)
   expect(await noFlow.text()).toBe('no stored credential for nobody')
   expect(built).toHaveLength(1)
+})
+
+// ⚠ THE LEASE COMES BACK ON A FAULT (PR #346 review): a runtime that throws while a flow is being
+// started — not a decided refusal — is the handler's 500, and the thread is not left busy under it.
+test('POST …/command: a flow start that faults is a 500 and releases the lease — the next prompt runs', async () => {
+  const { url } = await startWith({
+    onPrompt: (emit: EmitPiEvent, outcome: PromptOutcome) => {
+      outcome.onAccepted()
+      emit(SETTLED)
+    },
+    runtime: () => ({
+      startHostFlow: (): void => {
+        throw new TypeError('modelRuntime.getProviders is not a function')
+      },
+    }),
+  })
+  const faulted = await fetch(`${url}/api/threads/faulty-flow/command`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'login', value: 'fake/oauth' }),
+  })
+  expect(faulted.status).toBe(500)
+  expect(await prompt(url, 'faulty-flow', 'still mine')).toBe(202)
 })
 
 test('POST …/command is refused while the thread runs (409) — a setting is not queued behind a run', async () => {

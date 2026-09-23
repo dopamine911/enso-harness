@@ -23,6 +23,23 @@ import { HostCommandRefused } from './host-commands.ts'
  * `value`: there is no "current" login.
  */
 
+/**
+ * The user declined a flow's question (PR #346 review): typed, so the flow's catch and the prompt's
+ * throw are coupled by the compiler, not by a string. pi's OWN cancellation — its abort path — is
+ * the string `Login cancelled`, which `isFlowCancelled` also recognises; both are a cancel, not a
+ * failure.
+ */
+export class FlowCancelled extends Error {
+  constructor() {
+    super('Login cancelled')
+    this.name = 'FlowCancelled'
+  }
+}
+
+export function isFlowCancelled(error: unknown): boolean {
+  return error instanceof FlowCancelled || (error instanceof Error && error.message === 'Login cancelled')
+}
+
 const HOST_FLOW_LOGIN = 'login'
 const HOST_FLOW_LOGOUT = 'logout'
 

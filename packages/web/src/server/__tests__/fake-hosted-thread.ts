@@ -64,7 +64,7 @@ export interface FakeThreadRecord {
   /** Every host command the server ran, in order — accepted or refused (#338 slice 2). */
   readonly hostCommands: EnsoHostCommandRun[]
   /** Every flow the server started (#338 slice 3), and the hand that ends each: a test settles it when it chooses. */
-  readonly flows: Array<{ readonly run: EnsoHostCommandRun; readonly settle: () => void }>
+  readonly flows: Array<{ readonly run: EnsoHostCommandRun; settled: boolean; readonly settle: () => void }>
   /** The model state `modelState()` reads and `runHostCommand` writes; a test sets it to start elsewhere. */
   modelState: EnsoModelState
   aborts: number
@@ -165,15 +165,19 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       // here, until the test settles it — and ends with a notify and the model state said. The
       // lease is the route's to release, on acceptance; the fake holds nothing.
       try {
+        const pending = record.flows.find((flow) => !flow.settled)
+        if (pending !== undefined) throw new HostCommandRefused(`/${pending.run.name} is already in progress here`)
         decideHostFlow(run, FAKE_LOGIN_OPTIONS, FAKE_LOGOUT_OPTIONS)
       } catch (error) {
         outcome.onRejected(error instanceof Error ? error.message : String(error))
         return
       }
       outcome.onAccepted()
-      record.flows.push({
+      const entry = {
         run,
+        settled: false,
         settle: (): void => {
+          entry.settled = true
           emit({
             kind: 'extension-ui-request',
             id: `flow-${record.flows.length}`,
@@ -185,7 +189,8 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
           })
           emit({ kind: 'model', ...record.modelState })
         },
-      })
+      }
+      record.flows.push(entry)
     },
     permissionModeState: () => ({ mode: 'default', available: ['default'] }),
     setPermissionMode: (mode: string, outcome: PromptOutcome) => {
