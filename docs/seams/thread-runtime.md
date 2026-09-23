@@ -62,15 +62,17 @@ export const ThreadRuntime = Type.Object({
    * `logout` with a provider. Fire-and-forget like `prompt`, and for the same reason: a login
    * may wait minutes on a device code, and the route must not. `outcome.onAccepted` fires once
    * the flow has begun (the route's 202); `onRejected(reason)` before that for an option the
-   * host cannot start (the route's 422). ⚠ A FLOW IS NOT A RUN: the lease is released on
-   * acceptance, as a mode change's is — holding it would mark the thread busy for the whole
-   * login (composer disabled, prompts refused; measured in the slice-3 smoke). The flow lives
-   * on the session instead: it ends with pi's own expiry, or when the session is disposed —
-   * the host aborts it then. The flow's questions are the same blocking dialogs an extension
-   * asks (`extension-ui-request`), its progress is `notify` lines, and its result is a `model`
-   * observation and a final notify.
+   * host cannot start (the route's 422); `onSettled` when the work ends. ⚠ THE LEASE FOLLOWS THE
+   * KIND. A `flow` (login) is not a run: its lease is released on acceptance, as a mode change's
+   * is — holding it marked the thread busy for the whole device-code wait (slice-3 smoke) — and
+   * the flow lives on the session until pi's own expiry or the session's disposal. An `action`
+   * (compaction, slice 4) REWRITES THE BRANCH and is run-shaped: the lease is held until
+   * `onSettled`, so the composer is closed, a prompt is 409 (pi itself refuses one mid-compaction,
+   * `agent-session.js:837`), and Stop reaches it (`abort` calls `abortCompaction`). The work's
+   * questions are the same blocking dialogs an extension asks (`extension-ui-request`), its
+   * progress is `notify` lines, and its result is a `model` observation and a final notify.
    */
-  startHostFlow: Type.Unsafe<(run: EnsoHostCommandRun, outcome: PromptOutcome) => void>(
+  startHostFlow: Type.Unsafe<(run: EnsoHostCommandRun, outcome: HostFlowOutcome) => void>(
     Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
   ),
   /**
@@ -346,9 +348,11 @@ the browser masks and never echoes. Fire-and-forget like `prompt`, for the same 
 may wait minutes, so the route answers 202 on acceptance — and releases the lease then, because a
 lease IS the registry's busy and a login is not a run (the smoke showed a held lease locking the
 composer for the device-code wait). The flow lives on the session; disposing the session aborts it; one flow runs at a time per
-session, a second start is refused by name. `/compact` (slice 4) is an `action` on the same path:
-no option, a model call pi makes to summarise the branch, a notify with the token counts when it
-ends — and the page's transcript is TanStack's copy, so the line says to reload. The stored
+session, a second start is refused by name. `/compact` (slice 4) is an `action` on the same path
+with one difference: it REWRITES THE BRANCH, so the route holds the lease until it settles — the
+thread is busy, a setting is 409, Stop reaches it through `abortCompaction` — where a login's lease
+is released on acceptance. No option, a model call pi makes to summarise the branch, a notify with
+the token counts when it ends; the page's transcript is TanStack's copy, so the line says to reload. The stored
 credentials `/logout` offers are a cache — pi lists them asynchronously and `listCommands` is
 synchronous — refreshed at build and after every flow the host itself ran.
 

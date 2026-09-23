@@ -214,8 +214,12 @@ export function isCompactionRefusal(error: unknown): boolean {
 
 /** What a finished compaction says: the numbers pi measured, and the one thing the page cannot do for itself yet. */
 export function compactDoneText(tokensBefore: number, estimatedTokensAfter: number | undefined): string {
-  const after = estimatedTokensAfter === undefined ? 'fewer' : estimatedTokensAfter.toLocaleString('en-US')
-  return `Compacted the context: ${tokensBefore.toLocaleString('en-US')} → ${after} tokens. Reload the page to see the compacted transcript.`
+  const before = tokensBefore.toLocaleString('en-US')
+  const measured =
+    estimatedTokensAfter === undefined
+      ? `Compacted the context from ${before} tokens.`
+      : `Compacted the context: ${before} → ${estimatedTokensAfter.toLocaleString('en-US')} tokens.`
+  return `${measured} Reload the page to see the compacted transcript.`
 }
 
 /** The sentence a finished logout says — pi's own two, by credential type; a neutral one when the type is not known (the cache moved under the flow). */

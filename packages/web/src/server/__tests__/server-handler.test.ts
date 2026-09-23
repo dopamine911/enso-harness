@@ -371,10 +371,16 @@ test('⚠ POST …/command sets the thinking level on a thread that never ran: 2
   const unknown = await run('fresh', { name: 'reload' })
   expect(unknown.status).toBe(422)
   expect(await unknown.text()).toBe('no host command named reload')
-  // `/compact` (slice 4) is an ACTION: it starts like a flow and the route says 202.
+  // `/compact` (slice 4) is an ACTION: it starts like a flow (202) but HOLDS the lease until it
+  // settles — a compaction rewrites the branch, so the thread is busy until then: a setting is 409
+  // (a prompt would be queued behind the lease, #75, and pi refuses it with its own reason).
   const compacting = await run('fresh', { name: 'compact' })
   expect(compacting.status).toBe(202)
-  expect(built[0]?.flows.at(-1)?.run).toEqual({ name: 'compact' })
+  const compaction = built[0]?.flows.at(-1)
+  expect(compaction?.run).toEqual({ name: 'compact' })
+  expect((await run('fresh', { name: 'thinking', value: 'low' })).status).toBe(409)
+  compaction?.settle()
+  expect((await run('fresh', { name: 'thinking', value: 'low' })).status).toBe(204)
   const malformed = await run('fresh', '{"name":')
   expect(malformed.status).toBe(400)
   const extra = await run('fresh', { name: 'thinking', value: 'low', extra: 1 })

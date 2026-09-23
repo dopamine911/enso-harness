@@ -7,6 +7,7 @@ import type {
   EnsoObservation,
   EnsoPermissionModeState,
   EnsoTranscriptEntry,
+  HostFlowOutcome,
   PromptOutcome,
   PromptRequest,
   RuntimeCommand,
@@ -167,7 +168,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
       emit({ kind: 'model', ...record.modelState })
       return Promise.resolve()
     },
-    startHostFlow: (run: EnsoHostCommandRun, outcome: PromptOutcome) => {
+    startHostFlow: (run: EnsoHostCommandRun, outcome: HostFlowOutcome) => {
       // What the real host does: decide before accepting; then the flow runs on its own clock —
       // here, until the test settles it — and ends with a notify and the model state said. The
       // lease is the route's to release, on acceptance; the fake holds nothing.
@@ -194,7 +195,10 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
             message: fakeFlowDoneText(run.name),
             notifyType: 'info',
           })
-          emit({ kind: 'model', ...record.modelState })
+          // What the real host emits at the end, by flow: a login or logout re-announces the model
+          // state; a compaction says its line and nothing else (PR #347 review).
+          if (run.name !== 'compact') emit({ kind: 'model', ...record.modelState })
+          outcome.onSettled()
         },
       }
       record.flows.push(entry)

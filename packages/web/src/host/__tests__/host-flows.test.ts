@@ -104,6 +104,8 @@ test('every auth event is one line with the thing the user needs in it — the U
   expect(compactDoneText(84_120, 11_900)).toBe(
     'Compacted the context: 84,120 → 11,900 tokens. Reload the page to see the compacted transcript.',
   )
-  expect(compactDoneText(84_120, undefined)).toContain('84,120 → fewer tokens')
+  expect(compactDoneText(84_120, undefined)).toBe(
+    'Compacted the context from 84,120 tokens. Reload the page to see the compacted transcript.',
+  )
   expect(logoutDoneText('OpenAI', undefined)).toBe('Removed the stored credential for OpenAI.')
 })

@@ -461,33 +461,52 @@ export async function runHostCommand(
   // IS the registry's "busy" (composer disabled, prompts 409, a generation bumped), and a login is
   // not a run — the slice-3 smoke showed a held lease locking the thread for the device-code
   // wait. The flow lives on the session; the host aborts it if the session is disposed.
-  let isFlow: boolean
+  let started: 'flow' | 'action' | undefined
   try {
     const row = lease.runtime.listCommands().find((command) => command.source === 'host' && command.name === run.name)
-    isFlow = row?.kind === 'flow' || row?.kind === 'action'
+    started = row?.kind === 'flow' || row?.kind === 'action' ? row.kind : undefined
   } catch (error) {
     lease.release()
     throw error
   }
-  if (isFlow) {
+  if (started !== undefined) {
+    // ⚠ THE LEASE FOLLOWS THE KIND (PR #347 review). A `flow` releases on acceptance — a login is
+    // not a run, and holding it locked the composer for the device-code wait. An `action` holds
+    // until it settles — a compaction REWRITES THE BRANCH, pi refuses a prompt while it runs and
+    // arms that guard only after its own `abort()`, so the held lease is what keeps a prompt out
+    // of the window, marks the thread busy, and lets Stop reach it.
+    const releaseOn = started === 'flow' ? 'accepted' : 'settled'
     // ⚠ Every exit releases (PR #346 review): the two outcomes, and a synchronous fault in
     // `startHostFlow` before either — which stays a fault (the handler's 500), with the lease
     // back, rather than the held-lease lock this branch exists to avoid.
     return new Promise<HostCommandOutcome>((resolve, reject) => {
-      let settled = false
-      const once = (outcome: () => void): void => {
-        if (settled) return
-        settled = true
+      let answered = false
+      let released = false
+      const release = (): void => {
+        if (released) return
+        released = true
         lease.release()
+      }
+      const answer = (outcome: () => void): void => {
+        if (answered) return
+        answered = true
         outcome()
       }
       try {
         lease.runtime.startHostFlow(run, {
-          onAccepted: () => once(() => resolve({ status: 202 })),
-          onRejected: (reason: string) => once(() => resolve({ status: 422, reason })),
+          onAccepted: () => {
+            if (releaseOn === 'accepted') release()
+            answer(() => resolve({ status: 202 }))
+          },
+          onRejected: (reason: string) => {
+            release()
+            answer(() => resolve({ status: 422, reason }))
+          },
+          onSettled: release,
         })
       } catch (error) {
-        once(() => reject(error))
+        release()
+        answer(() => reject(error))
       }
     })
   }
