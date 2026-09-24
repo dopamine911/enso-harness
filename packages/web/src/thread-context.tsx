@@ -216,6 +216,25 @@ function RequestDetail({
 /** The narrowest a bar may draw: past this many bars, the chart scrolls sideways (dsh does). */
 const BAR_MIN_PX = 10
 
+/** A granularity's bars: one per request, or each prompt's last. */
+const barsOf = (requests: readonly EnsoContextRequest[], granularity: TrendGranularity): EnsoContextRequest[] =>
+  granularity === 'turn' ? [...requests] : lastRequestPerPrompt(requests)
+
+/** The bar a picked turn falls in — its own, or its prompt's; the latest when none is picked or it is gone. */
+function pickedBarIndex(
+  requests: readonly EnsoContextRequest[],
+  granularity: TrendGranularity,
+  pickedTurn: number | undefined,
+): number {
+  const bars = barsOf(requests, granularity)
+  if (pickedTurn === undefined) return bars.length - 1
+  const picked = requests.find((request) => request.turn === pickedTurn)
+  const index = bars.findIndex((bar) =>
+    granularity === 'turn' ? bar.turn === pickedTurn : bar.prompt === picked?.prompt,
+  )
+  return index === -1 ? bars.length - 1 : index
+}
+
 function ContextTrend({
   requests,
   onPick,
@@ -230,22 +249,24 @@ function ContextTrend({
   const [mode, setMode] = useState<TrendMode>('total')
   // The picked request by its turn — stable across a refresh and a change of granularity. None: the latest.
   const [pickedTurn, setPickedTurn] = useState<number | undefined>(undefined)
-  const bars = granularity === 'turn' ? [...requests] : lastRequestPerPrompt(requests)
+  const bars = barsOf(requests, granularity)
   const points = trendPoints(bars, granularity, mode)
-  const pickedIndex = (() => {
-    if (pickedTurn === undefined) return bars.length - 1
-    const picked = requests.find((request) => request.turn === pickedTurn)
-    const index = bars.findIndex((bar) =>
-      granularity === 'turn' ? bar.turn === pickedTurn : bar.prompt === picked?.prompt,
-    )
-    return index === -1 ? bars.length - 1 : index
-  })()
+  const pickedIndex = pickedBarIndex(requests, granularity, pickedTurn)
   const picked = bars[pickedIndex]
   const pick = (index: number): void => {
     const bar = bars[index]
     if (bar === undefined) return
     setPickedTurn(bar.turn)
     onPick(bar.turn)
+  }
+  // A picked turn lands in its prompt's bar — that prompt's LAST request — so a change of
+  // granularity can move the request shown; the page follows it (#362 review), or the browser and
+  // File Activity would stay on the turn the bar no longer is.
+  const changeGranularity = (next: TrendGranularity): void => {
+    setGranularity(next)
+    if (pickedTurn === undefined) return
+    const bar = barsOf(requests, next)[pickedBarIndex(requests, next, pickedTurn)]
+    if (bar !== undefined) onPick(bar.turn)
   }
   const compacted = points.filter((point) => {
     const first = point.request
@@ -259,7 +280,7 @@ function ContextTrend({
       aside={
         <span className="flex items-center gap-2">
           <span>✂ marks a compaction</span>
-          <Choice label="bar per" value={granularity} options={GRANULARITIES} onChange={setGranularity} />
+          <Choice label="bar per" value={granularity} options={GRANULARITIES} onChange={changeGranularity} />
           <Choice label="bar shows" value={mode} options={MODES} onChange={setMode} />
         </span>
       }

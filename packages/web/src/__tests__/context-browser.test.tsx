@@ -6,6 +6,7 @@ import { ContextBrowser, type ContextBrowserFocus, type ContextBrowserRequest } 
 import { ThreadStoresContext } from '../store.ts'
 import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
+import { waitUntil } from './wait-until.ts'
 
 /**
  * #361 phase 3: the Context Browser, mounted — it reads the request it is asked for, and a focus
@@ -86,13 +87,11 @@ test("a focus opens its element's category and row; the row shows the call's arg
       </ThreadStoresContext.Provider>,
     )
   })
-  const deadline = Date.now() + 2000
   const row = (): HTMLButtonElement | undefined =>
     [...container.querySelectorAll<HTMLButtonElement>('li li button')].find((button) =>
       button.textContent?.includes('bash ls -la'),
     )
-  while (row() === undefined && Date.now() < deadline)
-    await flush(() => new Promise((resolve) => setTimeout(resolve, 20)))
+  await waitUntil(() => row() !== undefined)
   expect(asked).toEqual([`/api/threads/${stores.threadId}/context/2`])
   expect(row()?.getAttribute('aria-expanded')).toBe('true')
   expect(container.textContent).toContain('ls -la')
@@ -141,11 +140,7 @@ test('a re-read keeps the reader where they are: a focused row they closed stays
       [...container.querySelectorAll<HTMLButtonElement>('li li button')].find((button) =>
         button.textContent?.includes('bash ls -la'),
       )
-    const until = async (ready: () => boolean): Promise<void> => {
-      const deadline = Date.now() + 2000
-      while (!ready() && Date.now() < deadline) await flush(() => new Promise((resolve) => setTimeout(resolve, 20)))
-    }
-    await until(() => row()?.getAttribute('aria-expanded') === 'true')
+    await waitUntil(() => row()?.getAttribute('aria-expanded') === 'true')
     expect(scrolled).toHaveLength(1)
     await flush(async () => {
       row()?.click()
@@ -155,7 +150,7 @@ test('a re-read keeps the reader where they are: a focused row they closed stays
     await flush(async () => {
       stores.usage.set({ cost: 0, input: 1, output: 1, cacheRead: 0, cacheWrite: 0, context: null })
     })
-    await until(() => asked.length === 2)
+    await waitUntil(() => asked.length === 2)
     await flush(() => new Promise((resolve) => setTimeout(resolve, 40)))
     expect(asked).toHaveLength(2)
     expect(row()?.getAttribute('aria-expanded')).toBe('false')
@@ -166,11 +161,6 @@ test('a re-read keeps the reader where they are: a focused row they closed stays
     Element.prototype.scrollIntoView = scrollIntoView
   }
 })
-
-const waitUntil = async (ready: () => boolean): Promise<void> => {
-  const deadline = Date.now() + 2000
-  while (!ready() && Date.now() < deadline) await flush(() => new Promise((resolve) => setTimeout(resolve, 20)))
-}
 
 // The trend picks a turn — every category closed — and then a file operation focuses a row of
 // that same turn: the row mounts a render after the focus arrives, and must still be scrolled to.

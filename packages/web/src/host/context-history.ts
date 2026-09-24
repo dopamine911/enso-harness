@@ -123,7 +123,13 @@ function entryEvents(walk: EventWalk, sessionEntry: SessionEntry): void {
   switch (sessionEntry.type) {
     case 'message':
       systemEvents(walk, sessionEntry)
-      if (sessionEntry.message.role === 'assistant') walk.turn += 1
+      if (sessionEntry.message.role === 'assistant') {
+        // The model that answered is the model in use — pi reads it the same way
+        // (`getSessionContextSettings`): a session opening on its default writes no
+        // `model_change`, and a later `/model` naming it again is no switch (#362 review).
+        walk.model = `${sessionEntry.message.provider}/${sessionEntry.message.model}`
+        walk.turn += 1
+      }
       return
     case 'custom_message':
       push(walk, sessionEntry, { kind: 'inject', label: sessionEntry.customType, tokens: changeAt(walk, sessionEntry) })

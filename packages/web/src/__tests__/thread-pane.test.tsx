@@ -3,7 +3,13 @@ import type { EnsoThreadStats } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import { ChatScreen, ThreadPane, type ThreadView } from '../chat-screen.tsx'
-import { clearThreadsForTest, mintThread, type ThreadStores, threadListStore } from '../thread-stores.ts'
+import {
+  clearThreadsForTest,
+  getThreadStores,
+  mintThread,
+  type ThreadStores,
+  threadListStore,
+} from '../thread-stores.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
 import { createScriptedFetch, type ScriptedFetch, type ScriptedFetchOptions, SNAPSHOT_IDLE } from './scripted-server.ts'
 
@@ -1322,6 +1328,48 @@ test('the Stats tab replaces the transcript in the thread on screen, and follows
     expect(page.container.querySelectorAll('#thread-view-stats')).toHaveLength(0)
     expect(shown('thread-view-chat')).toHaveLength(1)
   })
+  await page.unmount()
+})
+
+// A question from pi waits in the transcript; on another view the Chat tab and the status bar say
+// so, and nothing moves the reader (#362 review) — they switch when ready.
+test('a question waiting while Stats is shown is said on the Chat tab and in the status bar; the view stays', async () => {
+  const page = await mountPage()
+  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
+  if (newThread === undefined) throw new Error('expected a New Thread button')
+  await page.click(newThread)
+  const tab = (name: string): HTMLElement => {
+    const found = page.container.querySelector<HTMLElement>(`header [role="tab"]#thread-view-${name}-tab`)
+    if (found === null) throw new Error(`expected the ${name} tab`)
+    return found
+  }
+  const statusBar = (): string => page.visiblePanes()[0]?.textContent ?? ''
+  await flush(async () => {
+    tab('stats').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+    await tick()
+  })
+  const threadId = new URLSearchParams(window.location.search).get('thread')
+  if (threadId === null) throw new Error('expected the thread in the url')
+  expect(tab('chat').textContent).not.toContain('a question is waiting')
+  await flush(async () => {
+    getThreadStores(threadId).dialog.set({ id: 'd1', dialog: { method: 'confirm', title: 'Proceed?', message: '' } })
+    await tick()
+  })
+  expect(tab('stats').getAttribute('aria-selected')).toBe('true')
+  expect(tab('chat').textContent).toContain('a question is waiting')
+  expect(statusBar()).toContain('a question is waiting')
+  // On Chat the question is in view: the tab no longer flags it; the bar still says it waits.
+  await flush(async () => {
+    tab('chat').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+    await tick()
+  })
+  expect(tab('chat').textContent).not.toContain('a question is waiting')
+  expect(statusBar()).toContain('a question is waiting')
+  await flush(async () => {
+    getThreadStores(threadId).dialog.set(undefined)
+    await tick()
+  })
+  expect(statusBar()).not.toContain('a question is waiting')
   await page.unmount()
 })
 

@@ -876,3 +876,31 @@ test('the dev page and the header-less CLIs are unaffected', async () => {
   // `enso-thread.ts` and `curl` send no Origin at all.
   expect((await fetch(`${url}/api/about`)).status).toBe(200)
 })
+
+// #361 phase 3: the one thread route with a second path parameter. Only a turn number or `next`
+// matches it; a turn the branch lacks is a 404 that names the request.
+test('GET …/context/:request reads a turn or `next`; any other segment, or a turn not there, is a 404', async () => {
+  const detail = { elements: [], left: [] }
+  const { url, built } = await startWith(settlesAtOnce, {
+    s1: {
+      transcript: [],
+      modified: new Date('2026-09-24T10:00:00.000Z'),
+      firstMessage: 'one',
+      details: { '2': detail, next: detail },
+    },
+  })
+  const read = async (segment: string): Promise<{ status: number; body: string }> => {
+    const response = await fetch(`${url}/api/threads/s1/context/${segment}`)
+    return { status: response.status, body: await response.text() }
+  }
+  const turn = await read('2')
+  expect(turn.status).toBe(200)
+  expect(JSON.parse(turn.body)).toMatchObject({ threadId: 's1', request: 2 })
+  const next = await read('next')
+  expect(next.status).toBe(200)
+  expect(JSON.parse(next.body)).toMatchObject({ request: 'next' })
+  expect(await read('7')).toEqual({ status: 404, body: 'no request 7 on thread s1' })
+  for (const segment of ['0', '01', 'x', '-1']) expect((await read(segment)).status).toBe(404)
+  // Looking builds nothing (#86).
+  expect(built).toHaveLength(0)
+})

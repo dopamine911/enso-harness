@@ -62,17 +62,21 @@ export interface BranchRequestDetail {
 type MessageEntry = Extract<SessionEntry, { type: 'message' }>
 type AssistantMessage = Extract<MessageEntry['message'], { role: 'assistant' }>
 
-/** A request's context: pi's projection, its system prompt folded, its other elements priced, the entry ids it holds. */
+/** A request's context: pi's projection, its system prompt folded, its other elements priced, the messages it holds. */
 interface ProjectedContext {
   readonly entries: readonly ProjectedSessionEntry[]
   /** The one system prompt pi sends, folded from every system message (`foldSystem`). */
   readonly system: readonly SystemItem[]
   /** Per entry, its elements but its system messages, in order. */
   readonly items: readonly (readonly ContextItem[])[]
-  readonly entryIds: ReadonlySet<string>
+  /**
+   * Every message it holds, as `<entry id>#<message index>` — by MESSAGE, not by entry: an
+   * older compaction stays in the projection but sends nothing once a newer one keeps it.
+   */
+  readonly messageKeys: ReadonlySet<string>
 }
 
-const EMPTY_CONTEXT: ProjectedContext = { entries: [], system: [], items: [], entryIds: new Set() }
+const EMPTY_CONTEXT: ProjectedContext = { entries: [], system: [], items: [], messageKeys: new Set() }
 
 /** Every element of a context: the folded prompt first, as pi sends it, then each entry's. */
 function allItems(context: ProjectedContext): ContextItem[] {
@@ -81,8 +85,11 @@ function allItems(context: ProjectedContext): ContextItem[] {
 
 /**
  * The context at a leaf, with every entry's elements computed once per walk: an entry prices the
- * same in every request it is in — unless an edit reached it in between, which is in the key.
- * The prompt is folded per context: which system messages it replays is the context's.
+ * same in every request it is in — unless an edit reached it in between, or it projects to other
+ * messages there; both are in the key. ⚠ A compaction projects by POSITION (#362 review): pi
+ * sends the latest one's summary, and an older one inside the latest's kept range sends nothing
+ * (`buildSessionProjection`) — keyed by id alone, the walk replayed the older summary into every
+ * later request. The prompt is folded per context: which system messages it replays is the context's.
  */
 function createProjector(branch: readonly SessionEntry[]): (leafId: string | null) => ProjectedContext {
   const byId = new Map(branch.map((branchEntry) => [branchEntry.id, branchEntry]))
@@ -96,7 +103,7 @@ function createProjector(branch: readonly SessionEntry[]): (leafId: string | nul
     }
     const items = entries.map((projected) => {
       const { id } = projected.sourceEntry
-      const key = `${id} ${editOf.get(id) ?? ''}`
+      const key = `${id} ${editOf.get(id) ?? ''} ${projected.messages.length}`
       const entryItems = itemsByKey.get(key) ?? contextItems(projected)
       itemsByKey.set(key, entryItems)
       return entryItems
@@ -105,7 +112,9 @@ function createProjector(branch: readonly SessionEntry[]): (leafId: string | nul
       entries,
       system: foldSystem(systemSources(entries)),
       items,
-      entryIds: new Set(entries.map((projected) => projected.sourceEntry.id)),
+      messageKeys: new Set(
+        entries.flatMap(({ sourceEntry, messages }) => messages.map((_message, index) => `${sourceEntry.id}#${index}`)),
+      ),
     }
   }
 }
@@ -144,8 +153,9 @@ function additionsSince(previous: ProjectedContext, current: ProjectedContext): 
   const additions = systemAdditions(previous, current)
   eachMessage(current, (projected, messageIndex, calls) => {
     const message = projected.messages[messageIndex]
-    if (message === undefined || message.role === 'assistant' || previous.entryIds.has(projected.sourceEntry.id)) return
-    additions.push(messageLine(message, calls, `${projected.sourceEntry.id}#${messageIndex}`))
+    const key = `${projected.sourceEntry.id}#${messageIndex}`
+    if (message === undefined || message.role === 'assistant' || previous.messageKeys.has(key)) return
+    additions.push(messageLine(message, calls, key))
   })
   return additions
 }
@@ -245,10 +255,9 @@ export function branchRequestDetail(
     entered: !heldUnchanged(before.system, item),
   }))
   for (const [entryIndex, projected] of current.entries.entries()) {
-    const entered = !before.entryIds.has(projected.sourceEntry.id)
     const at = projected.sourceEntry.timestamp
     for (const contextItem of current.items[entryIndex] ?? [])
-      elements.push({ ...describeItem(contextItem, calls), at, entered })
+      elements.push({ ...describeItem(contextItem, calls), at, entered: !before.messageKeys.has(contextItem.key) })
   }
   // What left: a prompt element the fold no longer holds (a section deleted, a tool removed),
   // then every message no longer in the context.
@@ -258,8 +267,9 @@ export function branchRequestDetail(
     .map(({ item }) => systemLine(item))
   eachMessage(before, (projected, messageIndex, beforeCalls) => {
     const message = projected.messages[messageIndex]
-    if (message === undefined || current.entryIds.has(projected.sourceEntry.id)) return
-    left.push(messageLine(message, beforeCalls, `${projected.sourceEntry.id}#${messageIndex}`))
+    const key = `${projected.sourceEntry.id}#${messageIndex}`
+    if (message === undefined || current.messageKeys.has(key)) return
+    left.push(messageLine(message, beforeCalls, key))
   })
   return { elements, left }
 }

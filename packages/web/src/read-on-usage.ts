@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useThreadStores } from './store.ts'
 import { latestWins } from './thread-debug.tsx'
 
@@ -11,15 +11,17 @@ import { latestWins } from './thread-debug.tsx'
  * one issued is shown.
  *
  * `read` must be stable — a module-level function, or memoised — or every render would subscribe
- * again. A CHANGE of `read` is a new question (the Context Browser asks for another request): the
+ * again. `reading` is where an outcome starts, not an input: it is held, so a caller may write it
+ * inline (#362 review). A CHANGE of `read` is a new question (the Context Browser asks for another request): the
  * outcome goes back to `reading` until it is answered, so a failure of the last question is not
  * shown as this one's.
  */
 export function useReadOnUsage<Outcome>(read: (threadId: string) => Promise<Outcome>, reading: Outcome): Outcome {
   const stores = useThreadStores()
   const [outcome, setOutcome] = useState<Outcome>(reading)
+  const initial = useRef(reading)
   useEffect(() => {
-    setOutcome(reading)
+    setOutcome(initial.current)
     let mounted = true
     const readLatest = latestWins(() => read(stores.threadId))
     const refresh = (): void => {
@@ -33,6 +35,6 @@ export function useReadOnUsage<Outcome>(read: (threadId: string) => Promise<Outc
       mounted = false
       unsubscribe()
     }
-  }, [stores, read, reading])
+  }, [stores, read])
   return outcome
 }

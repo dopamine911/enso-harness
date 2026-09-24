@@ -103,6 +103,20 @@ test('events: an injected prompt section, a custom message, a prune and a compac
   expect(compaction?.tokens).toBe(tokens(20) - replaced)
 })
 
+// A session opening on its default model writes no `model_change` (pi writes one from `setModel`
+// only); the model that answered is the one in use, as pi's `getSessionContextSettings` reads it.
+test('a /model naming the model already answering is no switch; naming another is', () => {
+  const session = SessionManager.inMemory(tmpdir())
+  session.appendMessage({ role: 'user', content: 'go', timestamp: now() })
+  session.appendMessage(assistant([{ type: 'text', text: 'ok' }]))
+  session.appendModelChange('anthropic', 'claude-test')
+  session.appendMessage({ role: 'user', content: 'again', timestamp: now() })
+  session.appendMessage(assistant([{ type: 'text', text: 'ok' }]))
+  session.appendModelChange('anthropic', 'claude-other')
+  const { events } = branchContext(session.getBranch())
+  expect(events.map((event) => [event.kind, event.label])).toEqual([['switch', 'model anthropic/claude-other']])
+})
+
 // pi-agent-core writes a tools-only system message whenever the tools it can run differ from the
 // ones the transcript declared (`declareToolChanges`): it changes tools, not instructions.
 test('a later system message is named by what it changed: its sections, its tools, its instructions', () => {

@@ -243,3 +243,31 @@ test('a later system message patches the prompt: a section replaced counts once,
   const delta = events.find((event) => event.label.startsWith('system:'))
   expect(delta?.tokens).toBe(tokens(20) - tokens(80) - tokens(40) - tokens(JSON.stringify(TOOL).length))
 })
+
+// ⚠ pi projects a compaction by POSITION: the latest one sends its summary, an older one inside
+// its kept range sends nothing (`buildSessionProjection`). Two `/compact`s close together are
+// enough — and the trend, the browser and the event must all say what pi sent.
+test('a second compaction that keeps the first: its summary alone counts, in the trend, the detail and the event', () => {
+  const session = SessionManager.inMemory(tmpdir())
+  session.appendMessage({ role: 'user', content: 'one', timestamp: Date.now() })
+  session.appendMessage(assistant([{ type: 'text', text: 'a1' }]))
+  const kept = session.appendMessage({ role: 'user', content: 'two', timestamp: Date.now() })
+  session.appendCompaction('s'.repeat(400), kept, 9000)
+  session.appendMessage(assistant([{ type: 'text', text: 'a2' }]))
+  session.appendMessage({ role: 'user', content: 'three', timestamp: Date.now() })
+  session.appendMessage(assistant([{ type: 'text', text: 'a3' }]))
+  session.appendCompaction('t'.repeat(40), kept, 9000)
+  session.appendMessage(assistant([{ type: 'text', text: 'a4' }]))
+  const branch = session.getBranch()
+  const { requests, next, events } = branchContext(branch)
+  expect(requests.map((request) => request.estimated.injected)).toEqual([0, tokens(400), tokens(400), tokens(40)])
+  expect(next.injected).toBe(tokens(40))
+  const fourth = branchRequestDetail(branch, 4)
+  expect(
+    fourth?.elements.filter((element) => element.category === 'injected').map((element) => element.tokens),
+  ).toEqual([tokens(40)])
+  // The first summary is no longer sent: it left.
+  expect(fourth?.left.map((gone) => gone.label)).toEqual(['compaction summary'])
+  const compactions = events.filter((event) => event.kind === 'compact')
+  expect(compactions[1]?.tokens).toBe(tokens(40) - tokens(400))
+})

@@ -6,6 +6,7 @@ import { ThreadStoresContext } from '../store.ts'
 import type * as ThreadContextModule from '../thread-context.tsx'
 import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
+import { waitUntil } from './wait-until.ts'
 
 /**
  * #361 phase 5: `/context`'s dialog, mounted — it reads nothing while closed, and once open shows
@@ -62,9 +63,7 @@ test('closed, the dialog reads nothing; open, it shows Current Context and the C
     [...document.querySelectorAll('[role="dialog"] section[aria-label]')].map(
       (section) => section.getAttribute('aria-label') ?? '',
     )
-  const deadline = Date.now() + 2000
-  while (cards().length < 2 && Date.now() < deadline)
-    await flush(() => new Promise((resolve) => setTimeout(resolve, 20)))
+  await waitUntil(() => cards().length >= 2)
   expect(cards()).toEqual(['Current Context', 'Context Browser'])
   expect(asked[0]).toBe(`/api/threads/${stores.threadId}/context`)
   await flush(async () => root.unmount())

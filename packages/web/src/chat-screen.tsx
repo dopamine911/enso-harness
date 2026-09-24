@@ -1400,7 +1400,32 @@ function PaneSwitch({ open, pane, labels, title, onToggle, children }: PaneSwitc
  * and its roles. The panels are the active pane's own (`ChatLayout`), so each trigger names its
  * panel by id rather than through Radix's `TabsContent`, which would unmount the transcript.
  */
-function ViewTabs({ view, onView }: { view: ThreadView; onView: (view: ThreadView) => void }): React.ReactNode {
+/**
+ * A question from pi waits in the transcript while another view is shown (#362 review): the Chat
+ * tab says so, and the status bar beside it. Nothing moves the reader — they switch when ready;
+ * the run waits for the answer either way.
+ */
+function QuestionWaiting({ threadId }: { threadId: string }): React.ReactNode {
+  const pending = useStore(getThreadStores(threadId).dialog)
+  if (pending === undefined) return null
+  return (
+    <>
+      <span aria-hidden="true" className="size-2 rounded-full bg-destructive" />
+      <span className="sr-only">, a question is waiting</span>
+    </>
+  )
+}
+
+function ViewTabs({
+  view,
+  onView,
+  threadId,
+}: {
+  view: ThreadView
+  onView: (view: ThreadView) => void
+  /** The thread on screen, whose waiting question the Chat tab shows; none while resuming. */
+  threadId: string | undefined
+}): React.ReactNode {
   // Only the shown view's panel is in the page, so only its tab names one (#362 review): a
   // reference to a panel that is not there is one a screen reader cannot follow.
   const controls = (tab: ThreadView): string | undefined => (tab === view ? `thread-view-${tab}` : undefined)
@@ -1416,6 +1441,7 @@ function ViewTabs({ view, onView }: { view: ThreadView; onView: (view: ThreadVie
         <TabsTrigger value="chat" id="thread-view-chat-tab" aria-controls={controls('chat')}>
           <MessagesSquareIcon aria-hidden="true" />
           Chat
+          {view === 'chat' || threadId === undefined ? null : <QuestionWaiting threadId={threadId} />}
         </TabsTrigger>
         <TabsTrigger
           value="context"
@@ -1541,7 +1567,7 @@ export function ChatScreen(): React.ReactNode {
         <span className="min-w-0 flex-1 truncate text-sm" title={activeThreadId ?? ''}>
           {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
         </span>
-        <ViewTabs view={view} onView={setView} />
+        <ViewTabs view={view} onView={setView} threadId={active?.threadId} />
         {isDebugMode ? (
           <PaneSwitch
             open={debugOpen}

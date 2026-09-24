@@ -4,13 +4,10 @@ import { summarizeToolInput } from '@enso/core'
 // in `ai-elements/reasoning.tsx` replaces it (see that file's header).
 
 import type { ChatUISelectedPart, ChatUISelectedToolPart } from '@tanstack/ai-client/ui'
-import { TextPart, type TextPartProps } from '@tanstack/ai-react/ui'
+import { TextPart } from '@tanstack/ai-react/ui'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from './components/ai-elements/reasoning.tsx'
 import { type EnsoRendererMap, EnsoToolResult, type ToolResultState, toolResultState } from './EnsoToolResult.tsx'
-import { MarkdownImage } from './markdown-image.tsx'
-
-/** The intrinsic elements `TextPart` renders through ours — a remote image waits for a click (`markdown-image.tsx`). */
-const TEXT_PART_COMPONENTS: NonNullable<TextPartProps['components']> = { img: MarkdownImage }
+import { TEXT_PART_COMPONENTS } from './markdown-image.tsx'
 
 /**
  * The call's input as an object. TanStack parses it onto the selected part once the

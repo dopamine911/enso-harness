@@ -135,11 +135,11 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     path: '/api/threads/:threadId/command',
     handler: 'respondToHostCommand → runHostCommand',
     input:
-      'path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing',
+      "path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`) is the page's to open, never run",
     success:
       '204 empty for a setting (the change arrives on the follow as `model`); 202 empty for a flow or action (`login`, `logout`, `compact`) — started, its questions and progress arrive on the follow as dialogs and `notify` lines',
     errors:
-      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 unknown command, model or level, or a provider without credentials; 500 handler failure',
+      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 unknown command, model or level, a provider without credentials, or a `view` (`/context`) the page opens itself; 500 handler failure',
     routeClass: 'control',
     builds: 'yes',
     logs: 'yes',

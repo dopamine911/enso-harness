@@ -7,11 +7,11 @@ import {
   type EnsoContextRequest,
   EnsoContextRequestDetail,
 } from '@enso/core'
-import { TextPart, type TextPartProps } from '@tanstack/ai-react/ui'
+import { TextPart } from '@tanstack/ai-react/ui'
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Card, Choice, changeText, estimateText, MakeupBar, PERCENT, timeText } from './context-parts.tsx'
-import { MarkdownImage } from './markdown-image.tsx'
+import { TEXT_PART_COMPONENTS } from './markdown-image.tsx'
 import { OptionSelect } from './option-select.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
@@ -53,9 +53,6 @@ export interface ContextBrowserFocus {
 }
 
 type DetailOutcome = AnalysisOutcome<EnsoContextRequestDetail>
-
-/** The intrinsic elements `TextPart` renders through ours — a remote image waits for a click. */
-const TEXT_PART_COMPONENTS: NonNullable<TextPartProps['components']> = { img: MarkdownImage }
 
 /** An element's key, or one of a message's elements when the key names the message (`entry#0`). */
 const matchesKey = (element: EnsoContextElement, key: string): boolean =>
@@ -195,7 +192,8 @@ function Body({ body }: { body: EnsoContextBody }): React.ReactNode {
           ) : (
             <Arguments value={body.arguments} />
           )}
-          <TextBlock text={body.text} />
+          {/* An image-only result (a read of a PNG) has no text: its images are all it holds. */}
+          {body.text === '' ? null : <TextBlock text={body.text} />}
           <Images images={body.images} />
         </div>
       )

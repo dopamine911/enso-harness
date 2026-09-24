@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 254.**
+**Decision headers: 256.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -94,6 +94,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/context-activity.test.tsx` | `#361` | #361 phase 4: where Context Events and File Activity send the reader — an event to the first request it reached, an operation to its tool result in the request after its turn, and either to the next request when the branch has none that far yet. |
 | `packages/web/src/__tests__/context-browser.test.tsx` | `#361` | #361 phase 3: the Context Browser, mounted — it reads the request it is asked for, and a focus (a brief's line) opens that element's category and row, where its content is. |
 | `packages/web/src/__tests__/context-dialog.test.tsx` | `#361` | #361 phase 5: `/context`'s dialog, mounted — it reads nothing while closed, and once open shows the composition and the browser, not the tab's other cards (those stay on the Context tab). |
+| `packages/web/src/__tests__/context-trend.test.tsx` | `#361`, `#362` | #361: the trend's pick is the page's — the Context Browser opens it and File Activity counts up to it — including when a change of granularity moves it to another request (#362 review). |
 | `packages/web/src/__tests__/custom-event-router.test.ts` | `#53`, `#90`, `#162` | #53 S1.3: the CUSTOM-chunk router was an inline closure no test reached — renaming a chunk, dropping the notify-type allowlist, or swapping the two `apply*` calls all left the suite green. |
 | `packages/web/src/__tests__/dom-environment.ts` | `#118` | A browser DOM for the tests that MOUNT React (#118) — the mounted-pane tests, which need effects, `useSyncExternalStore` subscriptions and TanStack's `useChat` to actually run. |
 | `packages/web/src/__tests__/fixture-conversation.test.ts` | `#27`, `#218` | The compatibility probe that used to live in a PR body (#218). |
@@ -167,13 +168,14 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/option-select.tsx` | `#45` | A closed vocabulary as a control (#45 phase 2 folded the log level's and the stats drawer's copies): a native `<select>` — keyboard- and screen-reader-complete without a dependency, the reasoning the permission-mode control gives — that only ever hands back one of its options. |
 | `packages/web/src/page-clock.ts` | `#278` | The page's clock as a store (#278): the one value that changes with no input. |
 | `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |
-| `packages/web/src/read-on-usage.ts` | `#45`, `#361` | A thread's route, read on mount and again whenever the thread's usage moves (#45, #361) — the Stats and Context views' one refresh rule. |
+| `packages/web/src/read-on-usage.ts` | `#45`, `#361`, `#362` | A thread's route, read on mount and again whenever the thread's usage moves (#45, #361) — the Stats and Context views' one refresh rule. |
 | `packages/web/src/route-read.ts` | `#45` | One GET of a JSON route whose answer has a schema, in the three ways it can go — a failure is words, never a throw (#45 phase 2 folded the thread timeline's and the stats drawer's copies). |
 | `packages/web/src/server/__tests__/bun-plugin-strict-binding-workaround.test.ts` | `#237` | The dev bundle's one source rewrite, executed (#237). |
 | `packages/web/src/server/__tests__/fake-hosted-thread.ts` | `#178` | The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a `ThreadRuntime` from plain closures that records every call, so the server, the registry and the routes are driven over it and asserted through what it recorded. |
 | `packages/web/src/server/__tests__/follow-reader.test.ts` | `#231` | The double's own contract (#231). |
 | `packages/web/src/server/__tests__/follow-reader.ts` | `#231` | A follow as a test reads it: frames and keepalive comments as they arrive, awaited by count — never by a guessed delay. |
 | `packages/web/src/server/__tests__/follow.test.ts` | `#109`, `#112` | The wire, measured (#109's receipt, kept as the contract — #112). |
+| `packages/web/src/server/__tests__/live-or-stored.test.ts` | `#45`, `#361` | The analysis routes' one read rule (#45, #361), the rule `thread-read.ts` reads by: peek, read the file if not live, re-peek. |
 | `packages/web/src/server/__tests__/logs-route.test.ts` | `#132` | `POST /api/logs` (#132 slice 3): the browser's batch into this process's logger, under the browser's own category, at its level, marked as the browser's — or a 4xx that is never a record of its own. |
 | `packages/web/src/server/__tests__/logs-stats-route.test.ts` | `#144`, `#336` | The stats route's own three facts (#144 slice 4, PR #336 review): WHICH file it folds is the clock's local day, a day nobody has written is an empty answer and not a failure, and a line that is not a record is counted rather than folded. |
 | `packages/web/src/server/__tests__/logs-tail-route.test.ts` | `#97`, `#144` | `GET /api/logs/tail` (#144 slice 2), over real HTTP: the day's file, filtered server-side, as frames the browser's schema takes — and NO record of its own, which is the rule the whole debug surface rests on (#144, #97). |

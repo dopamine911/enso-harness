@@ -526,12 +526,13 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    */
   function analysisResponder(
     read: (threadId: string) => Promise<object | undefined>,
+    absent: (threadId: string) => string = (threadId: string): string => `no session for thread ${threadId}`,
   ): (threadId: string, response: ServerResponse) => Promise<void> {
     return async (threadId: string, response: ServerResponse): Promise<void> => {
       const payload = await read(threadId)
       if (payload === undefined) {
         response.writeHead(404, { 'Content-Type': 'text/plain' })
-        response.end(`no session for thread ${threadId}`)
+        response.end(absent(threadId))
         return
       }
       const body = JSON.stringify(payload)
@@ -541,18 +542,23 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
   const respondWithThreadStats = analysisResponder(threadStats)
   const respondWithThreadContext = analysisResponder(threadContext)
-  /** One request's context; the request is the route's second segment, a turn or `next`. */
+  /**
+   * One request's context; the request is the route's second capture, a turn or `next` — the
+   * dispatcher's own match, so the url is read once. A turn the thread lacks, or a thread held
+   * nowhere, is the 404 that names the request.
+   */
   function respondWithContextRequest(
     threadId: string,
-    request: IncomingMessage,
+    _request: IncomingMessage,
     response: ServerResponse,
+    match: RegExpExecArray,
   ): Promise<void> {
-    const segment = THREAD_CONTEXT_REQUEST_ROUTE.exec(request.url ?? '')?.[2]
-    // The dispatcher matched this same url, so a segment is always here — and were it not, the
-    // answer is "no such request", never the next one in its place.
-    if (segment === undefined) return analysisResponder(async () => undefined)(threadId, response)
+    const segment = match[2]
     const which: number | 'next' = segment === 'next' ? 'next' : Number(segment)
-    return analysisResponder((id: string) => contextRequest(id, which))(threadId, response)
+    return analysisResponder(
+      (id: string) => contextRequest(id, which),
+      (id: string) => `no request ${segment} on thread ${id}`,
+    )(threadId, response)
   }
 
   /**
@@ -594,6 +600,8 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     threadId: string,
     request: IncomingMessage,
     response: ServerResponse,
+    /** The row's own match: its first capture is the id, any further ones the route's to read. */
+    match: RegExpExecArray,
   ) => void | Promise<void>
   interface ThreadRoute {
     readonly method: 'GET' | 'POST'
@@ -661,12 +669,13 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     const url = request.url ?? ''
     for (const { method, route, respond } of THREAD_ROUTES) {
       if (request.method !== method) continue
-      const segment = route.exec(url)?.[1]
-      if (segment === undefined) continue
+      const match = route.exec(url)
+      const segment = match?.[1]
+      if (match === null || segment === undefined) continue
       const threadId = decodeThreadId(segment, response)
       if (threadId !== undefined) {
         withEnsoLogContext({ threadId }, () => {
-          const work = respond(threadId, request, response)
+          const work = respond(threadId, request, response, match)
           if (work !== undefined) answerOrFail(work, response)
         })
       }
