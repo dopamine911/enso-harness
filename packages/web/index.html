@@ -1,7 +1,7 @@
 <!doctype html>
-<!-- class="dark" selects Kanagawa Wave, this app's default theme — the same default
-     kanagawa.nvim ships. Removing the class yields Kanagawa Lotus (light). The shadcn
-     variables for both live in src/styles/global.css. -->
+<!-- class="dark" stays: every colour theme is dark (src/theme.ts), and `dark:` variants
+     follow it. Kanagawa Wave is the default; `data-theme` picks another, from the settings
+     dialog. The variables live in src/styles/global.css. -->
 <html lang="en" class="dark">
 	<head>
 		<meta charset="utf-8" />
@@ -13,6 +13,19 @@
 		     public/ still serves the browsers that request /favicon.png out of habit. -->
 		<link rel="icon" type="image/png" href="./public/favicon.png" />
 		<title>Enso</title>
+		<!-- The saved colour theme (src/theme.ts) on <html> before the first paint. INLINE on
+		     purpose: bun bundles every <script src> into the app's deferred module, which would
+		     run after a paint in the default theme. It only copies the saved id; an id no theme
+		     block matches falls back to the default, and main.tsx normalises it. The key is
+		     THEME_STORAGE_KEY — pinned by __tests__/theme.test.ts. -->
+		<script>
+			try {
+				const saved = localStorage.getItem('enso:theme')
+				if (saved) document.documentElement.dataset.theme = saved
+			} catch {
+				// Storage refused (private mode, a policy): the default theme stands.
+			}
+		</script>
 	</head>
 	<body>
 		<div id="root"></div>

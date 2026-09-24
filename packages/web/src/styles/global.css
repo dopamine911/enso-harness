@@ -2,6 +2,8 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+/* The colour themes — every palette, one block per theme (src/theme.ts). */
+@import "./themes.css";
 
 @plugin "@tailwindcss/typography";
 
@@ -52,88 +54,42 @@
 }
 
 /*
- * Kanagawa (rebelot/kanagawa.nvim) mapped onto the shadcn token structure.
- * Hex values are verbatim from the upstream palette (lua/kanagawa/colors.lua,
- * fetched 2026-09-03) — the mapping onto shadcn ROLES is ours:
- *   :root  = Lotus (the light variant)
- *   .dark  = Wave  (the default dark variant — index.html hardcodes class="dark",
- *            matching kanagawa.nvim's own default; remove the class for Lotus)
- * Two deliberate legibility swaps, both still kanagawa colors:
- *   - wave muted-foreground is springViolet1 (#938AA9), not the comment color
- *     fujiGray (#727169) — fujiGray is ~3.9:1 on sumiInk3 and muted-foreground
- *     carries real UI text here (tool names, timestamps, the reasoning trigger)
- *   - wave destructive is peachRed (#FF5D62), not samuraiRed (#E82424) —
- *     samuraiRed is ~3.3:1 on sumiInk3 and destructive is TEXT in the Alert
+ * THE PAGE'S MEASURES, named for what they hold. Pages use these utilities, never an arbitrary
+ * value — `test/style-tokens-gate.test.ts` refuses `…-[…]`, hex, rgb()/hsl(), raw palette colours
+ * and pixels in them. The widths are the `--container-*` scale, so both `max-w-*` and `w-*` exist.
  */
-:root {
-  --background: #f2ecbc; /* lotusWhite3 */
-  --foreground: #545464; /* lotusInk1 */
-  --card: #e5ddb0; /* lotusWhite2 */
-  --card-foreground: #545464; /* lotusInk1 */
-  --popover: #dcd5ac; /* lotusWhite1 */
-  --popover-foreground: #545464; /* lotusInk1 */
-  --primary: #4d699b; /* lotusBlue4 */
-  --primary-foreground: #f2ecbc; /* lotusWhite3 */
-  --secondary: #d5cea3; /* lotusWhite0 — the user bubble */
-  --secondary-foreground: #545464; /* lotusInk1 */
-  --muted: #e7dba0; /* lotusWhite4 */
-  --muted-foreground: #716e61; /* lotusGray2 */
-  --accent: #c7d7e0; /* lotusBlue1 — hover/selection wash */
-  --accent-foreground: #545464; /* lotusInk1 */
-  --destructive: #c84053; /* lotusRed */
-  --border: #d5cea3; /* lotusWhite0 */
-  --input: #d5cea3; /* lotusWhite0 */
-  --ring: #4d699b; /* lotusBlue4 */
-  --chart-1: #4d699b; /* lotusBlue4 */
-  --chart-2: #6f894e; /* lotusGreen */
-  --chart-3: #de9800; /* lotusYellow3 */
-  --chart-4: #624c83; /* lotusViolet4 */
-  --chart-5: #5e857a; /* lotusAqua2 */
-  --chart-6: #cc6d00; /* lotusOrange — the Context view's sixth category (#361) */
-  --radius: 0.625rem;
-  --sidebar: #e5ddb0; /* lotusWhite2 */
-  --sidebar-foreground: #545464; /* lotusInk1 */
-  --sidebar-primary: #4d699b; /* lotusBlue4 */
-  --sidebar-primary-foreground: #f2ecbc;
-  --sidebar-accent: #c7d7e0; /* lotusBlue1 */
-  --sidebar-accent-foreground: #545464;
-  --sidebar-border: #d5cea3; /* lotusWhite0 */
-  --sidebar-ring: #4d699b; /* lotusBlue4 */
+@theme {
+  --container-transcript: 48rem; /* the chat column, and the composer and queue under it */
+  --container-context-view: 72rem; /* the Context tab */
+  --container-stats-view: 56rem; /* the Stats tab */
+  --container-context-dialog: 64rem; /* /context's dialog */
+  --container-debug-pane: 30rem; /* the ?debug column */
+  --container-command-palette: 28rem; /* the / palette's popup */
+  --container-provider-label: 16ch; /* the model chip's provider */
 }
 
-.dark {
-  --background: #1f1f28; /* sumiInk3 — kanagawa's editor bg */
-  --foreground: #dcd7ba; /* fujiWhite */
-  --card: #2a2a37; /* sumiInk4 */
-  --card-foreground: #dcd7ba; /* fujiWhite */
-  --popover: #16161d; /* sumiInk0 — kanagawa floats */
-  --popover-foreground: #dcd7ba; /* fujiWhite */
-  --primary: #7e9cd8; /* crystalBlue */
-  --primary-foreground: #181820; /* sumiInk1 */
-  --secondary: #363646; /* sumiInk5 — the user bubble */
-  --secondary-foreground: #dcd7ba; /* fujiWhite */
-  --muted: #2a2a37; /* sumiInk4 */
-  --muted-foreground: #938aa9; /* springViolet1 — see header note */
-  --accent: #223249; /* waveBlue1 — kanagawa's selection */
-  --accent-foreground: #dcd7ba; /* fujiWhite */
-  --destructive: #ff5d62; /* peachRed — see header note */
-  --border: #363646; /* sumiInk5 */
-  --input: #363646; /* sumiInk5 */
-  --ring: #7e9cd8; /* crystalBlue */
-  --chart-1: #7e9cd8; /* crystalBlue */
-  --chart-2: #98bb6c; /* springGreen */
-  --chart-3: #e6c384; /* carpYellow */
-  --chart-4: #957fb8; /* oniViolet */
-  --chart-5: #7aa89f; /* waveAqua2 */
-  --chart-6: #ffa066; /* surimiOrange — the Context view's sixth category (#361) */
-  --sidebar: #16161d; /* sumiInk0 */
-  --sidebar-foreground: #dcd7ba; /* fujiWhite */
-  --sidebar-primary: #7e9cd8; /* crystalBlue */
-  --sidebar-primary-foreground: #181820;
-  --sidebar-accent: #223249; /* waveBlue1 */
-  --sidebar-accent-foreground: #dcd7ba;
-  --sidebar-border: #363646; /* sumiInk5 */
-  --sidebar-ring: #7e9cd8; /* crystalBlue */
+/* A tall dialog stops short of the viewport and scrolls inside. */
+@utility max-h-dialog {
+  max-height: 85vh;
+}
+
+/* A label column as wide as its longest label, the value taking the rest. */
+@utility grid-cols-label-value {
+  grid-template-columns: max-content 1fr;
+}
+
+/* A legend's entries: as many columns of at least 56 spacing units as fit. */
+@utility grid-cols-legend {
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--spacing) * 56), 1fr));
+}
+
+/* dsh's free headroom: the muted colour hatched, one spacing unit per stripe. */
+@utility bg-hatch {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--muted) 0 var(--spacing),
+    transparent var(--spacing) calc(var(--spacing) * 2)
+  );
 }
 
 @layer base {

@@ -367,7 +367,7 @@ function ToolUsageRow({
       </div>
       <span aria-hidden="true" className="block h-1 rounded-full bg-muted-foreground/20">
         <span
-          className="block h-full rounded-full bg-[var(--chart-1)]"
+          className="block h-full rounded-full bg-chart-1"
           style={{ width: `${largest > 0 ? (value / largest) * 100 : 0}%` }}
         />
       </span>
@@ -619,7 +619,7 @@ export function ThreadStatsView({
         )}
       </Section>
       <Section title="latency" aside="from the log">
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5">
+        <dl className="grid grid-cols-label-value gap-x-3 gap-y-0.5">
           <dt className="text-muted-foreground">prompt → settle</dt>
           <dd className="tabular-nums">{durationsText(stats.latency.prompts, 'not in the log')}</dd>
           <dt className="text-muted-foreground">first token</dt>

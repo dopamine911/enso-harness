@@ -75,6 +75,10 @@
   // - `@enso/core`: "every shape is a schema" (architecture → The shared core) emits a
   //   `Type.Object` + `Static` pair per schema on purpose, and the tool pairs those as clones.
   //   The convention IS the repetition; a real clone in core is found by the reviewer, not here.
+  // - `packages/web/src/styles/themes.css`: a colour theme IS the full set of shadcn variables, so
+  //   every palette block names the same variables with its own values — the tool pairs the names.
+  //   Nothing is shared to fold: a theme that borrowed another's values would be the drift
+  //   `__tests__/theme.test.ts` checks for (every theme defines every variable).
   // What stays in the count and is NOT excluded: consecutive metadata rows in the generators,
   // Playwright arrange/act blocks, the dispatcher's route branches — inventory. `threshold` is
   // the ratchet: fallow 3.25's regression baseline carries dead-code categories only, so the
@@ -93,7 +97,10 @@
   // onto `route-read.ts` with the timeline's, its charts' axes onto one `turnAxes`, its select and
   // the log level's onto `option-select.tsx`, `core-exports.ts`'s two module maps onto one table,
   // and `routes.ts`'s six thread reads onto `threadRead` — 3.040667518604826 % (809 of 26606),
-  // pinned at 3.05. Re-measure with
+  // pinned at 3.05. `main` then drifted down to ~2.77 % with the pin left behind; the colour
+  // themes' palette file joined the exclusions above (it also took the old Kanagawa Lotus/Wave
+  // pair out of the count — an exclusion, not a fold): 2.5538522532047048 % (773 of 30268),
+  // pinned at 2.56. Re-measure with
   // `bunx fallow dupes --format json` (`stats.duplication_percentage`), and lower it the moment
   // a fold makes a smaller number pass.
   //
@@ -103,8 +110,8 @@
   // after one.
   "duplicates": {
     "mode": "semantic",
-    "ignore": ["packages/web/src/components/**", "packages/core/src/**"],
-    "threshold": 3.05
+    "ignore": ["packages/web/src/components/**", "packages/core/src/**", "packages/web/src/styles/themes.css"],
+    "threshold": 2.56
   },
   // Complexity thresholds for `fallow audit` (the advisory job). CRAP is OFF, not raised: it is
   // cyclomatic × (1 − coverage)³, and fallow can only ESTIMATE coverage here — Bun's LCOV has no

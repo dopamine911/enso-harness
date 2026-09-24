@@ -134,7 +134,7 @@ function Json({ value }: { value: unknown }): React.ReactNode {
 function Arguments({ value }: { value: unknown }): React.ReactNode {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return <Json value={value} />
   return (
-    <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 rounded-md border p-2">
+    <dl className="grid grid-cols-label-value gap-x-3 gap-y-1 rounded-md border p-2">
       {Object.entries(value).map(([name, argument]) => (
         <div key={name} className="contents">
           <dt className="text-muted-foreground">{name}</dt>
@@ -224,7 +224,7 @@ function ElementRow({
         {open ? <ChevronDownIcon className="size-3 shrink-0" /> : <ChevronRightIcon className="size-3 shrink-0" />}
         <span className="min-w-0 flex-1 truncate">
           {element.entered ? (
-            <b className="mr-1 font-normal text-[var(--chart-2)]" title="entered since the previous request">
+            <b className="mr-1 font-normal text-chart-2" title="entered since the previous request">
               +
             </b>
           ) : null}
@@ -400,7 +400,7 @@ function CategoryRow({
               onChange={setOrder}
             />
           </div>
-          <ul className="max-h-[32rem] overflow-y-auto">
+          <ul className="max-h-128 overflow-y-auto">
             {shown.map((element) => (
               <ElementRow
                 key={element.key}

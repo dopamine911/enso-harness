@@ -1,0 +1,314 @@
+/*
+ * THE COLOUR THEMES (src/theme.ts). Each is the shadcn token set, chosen by `data-theme` on
+ * <html>; the settings dialog sets it and this browser keeps it. Every theme is dark, so the
+ * `dark` class stays on <html> and `dark:` variants follow it. A theme block is an ATTRIBUTE
+ * selector, not `html[…]`, so any element can wear one — the dialog's swatches draw each theme
+ * in its own colours — and the blocks come after `.dark` so they win at equal specificity.
+ *
+ * Kanagawa (rebelot/kanagawa.nvim) mapped onto the shadcn token structure.
+ * Hex values are verbatim from the upstream palette (lua/kanagawa/colors.lua,
+ * fetched 2026-09-03) — the mapping onto shadcn ROLES is ours:
+ *   :root  = Lotus (the light variant; no theme selects it today)
+ *   .dark  = Wave  (the default — index.html keeps class="dark", matching kanagawa.nvim's
+ *            own default)
+ * Two deliberate legibility swaps, both still kanagawa colors:
+ *   - wave muted-foreground is springViolet1 (#938AA9), not the comment color
+ *     fujiGray (#727169) — fujiGray is ~3.9:1 on sumiInk3 and muted-foreground
+ *     carries real UI text here (tool names, timestamps, the reasoning trigger)
+ *   - wave destructive is peachRed (#FF5D62), not samuraiRed (#E82424) —
+ *     samuraiRed is ~3.3:1 on sumiInk3 and destructive is TEXT in the Alert
+ *
+ * The other themes follow the same rule: muted-foreground and destructive carry text, so each
+ * holds 4.5:1 on its background. Where a theme's own colour falls short it is LIFTED toward that
+ * theme's foreground just far enough (≥4.6:1) — same hue, noted beside it.
+ */
+:root {
+  --background: #f2ecbc; /* lotusWhite3 */
+  --foreground: #545464; /* lotusInk1 */
+  --card: #e5ddb0; /* lotusWhite2 */
+  --card-foreground: #545464; /* lotusInk1 */
+  --popover: #dcd5ac; /* lotusWhite1 */
+  --popover-foreground: #545464; /* lotusInk1 */
+  --primary: #4d699b; /* lotusBlue4 */
+  --primary-foreground: #f2ecbc; /* lotusWhite3 */
+  --secondary: #d5cea3; /* lotusWhite0 — the user bubble */
+  --secondary-foreground: #545464; /* lotusInk1 */
+  --muted: #e7dba0; /* lotusWhite4 */
+  --muted-foreground: #716e61; /* lotusGray2 */
+  --accent: #c7d7e0; /* lotusBlue1 — hover/selection wash */
+  --accent-foreground: #545464; /* lotusInk1 */
+  --destructive: #c84053; /* lotusRed */
+  --border: #d5cea3; /* lotusWhite0 */
+  --input: #d5cea3; /* lotusWhite0 */
+  --ring: #4d699b; /* lotusBlue4 */
+  --chart-1: #4d699b; /* lotusBlue4 */
+  --chart-2: #6f894e; /* lotusGreen */
+  --chart-3: #de9800; /* lotusYellow3 */
+  --chart-4: #624c83; /* lotusViolet4 */
+  --chart-5: #5e857a; /* lotusAqua2 */
+  --chart-6: #cc6d00; /* lotusOrange — the Context view's sixth category (#361) */
+  --radius: 0.625rem;
+  --sidebar: #e5ddb0; /* lotusWhite2 */
+  --sidebar-foreground: #545464; /* lotusInk1 */
+  --sidebar-primary: #4d699b; /* lotusBlue4 */
+  --sidebar-primary-foreground: #f2ecbc;
+  --sidebar-accent: #c7d7e0; /* lotusBlue1 */
+  --sidebar-accent-foreground: #545464;
+  --sidebar-border: #d5cea3; /* lotusWhite0 */
+  --sidebar-ring: #4d699b; /* lotusBlue4 */
+}
+
+.dark,
+[data-theme="kanagawa-wave"] {
+  --background: #1f1f28; /* sumiInk3 — kanagawa's editor bg */
+  --foreground: #dcd7ba; /* fujiWhite */
+  --card: #2a2a37; /* sumiInk4 */
+  --card-foreground: #dcd7ba; /* fujiWhite */
+  --popover: #16161d; /* sumiInk0 — kanagawa floats */
+  --popover-foreground: #dcd7ba; /* fujiWhite */
+  --primary: #7e9cd8; /* crystalBlue */
+  --primary-foreground: #181820; /* sumiInk1 */
+  --secondary: #363646; /* sumiInk5 — the user bubble */
+  --secondary-foreground: #dcd7ba; /* fujiWhite */
+  --muted: #2a2a37; /* sumiInk4 */
+  --muted-foreground: #938aa9; /* springViolet1 — see header note */
+  --accent: #223249; /* waveBlue1 — kanagawa's selection */
+  --accent-foreground: #dcd7ba; /* fujiWhite */
+  --destructive: #ff5d62; /* peachRed — see header note */
+  --border: #363646; /* sumiInk5 */
+  --input: #363646; /* sumiInk5 */
+  --ring: #7e9cd8; /* crystalBlue */
+  --chart-1: #7e9cd8; /* crystalBlue */
+  --chart-2: #98bb6c; /* springGreen */
+  --chart-3: #e6c384; /* carpYellow */
+  --chart-4: #957fb8; /* oniViolet */
+  --chart-5: #7aa89f; /* waveAqua2 */
+  --chart-6: #ffa066; /* surimiOrange — the Context view's sixth category (#361) */
+  --sidebar: #16161d; /* sumiInk0 */
+  --sidebar-foreground: #dcd7ba; /* fujiWhite */
+  --sidebar-primary: #7e9cd8; /* crystalBlue */
+  --sidebar-primary-foreground: #181820;
+  --sidebar-accent: #223249; /* waveBlue1 */
+  --sidebar-accent-foreground: #dcd7ba;
+  --sidebar-border: #363646; /* sumiInk5 */
+  --sidebar-ring: #7e9cd8; /* crystalBlue */
+}
+
+/* Dracula — draculatheme.com/spec (bg, current line, foreground, comment, the six accents). */
+[data-theme="dracula"] {
+  --background: #282a36; /* background */
+  --foreground: #f8f8f2; /* foreground */
+  --card: #343746; /* the VS Code theme's lighter surface */
+  --card-foreground: #f8f8f2;
+  --popover: #21222c; /* the VS Code theme's darker surface */
+  --popover-foreground: #f8f8f2;
+  --primary: #bd93f9; /* purple */
+  --primary-foreground: #282a36;
+  --secondary: #44475a; /* current line — the user bubble */
+  --secondary-foreground: #f8f8f2;
+  --muted: #343746;
+  --muted-foreground: #8692b7; /* comment #6272a4 (3.0:1) lifted toward foreground, 4.6:1 */
+  --accent: #44475a; /* selection */
+  --accent-foreground: #f8f8f2;
+  --destructive: #ff5555; /* red */
+  --border: #44475a;
+  --input: #44475a;
+  --ring: #bd93f9;
+  --chart-1: #bd93f9; /* purple */
+  --chart-2: #50fa7b; /* green */
+  --chart-3: #f1fa8c; /* yellow */
+  --chart-4: #ff79c6; /* pink */
+  --chart-5: #8be9fd; /* cyan */
+  --chart-6: #ffb86c; /* orange */
+  --sidebar: #21222c;
+  --sidebar-foreground: #f8f8f2;
+  --sidebar-primary: #bd93f9;
+  --sidebar-primary-foreground: #282a36;
+  --sidebar-accent: #44475a;
+  --sidebar-accent-foreground: #f8f8f2;
+  --sidebar-border: #44475a;
+  --sidebar-ring: #bd93f9;
+}
+
+/* Nord — nordtheme.com (Polar Night nord0–3, Snow Storm nord4–6, Frost nord7–10, Aurora nord11–15). */
+[data-theme="nord"] {
+  --background: #2e3440; /* nord0 */
+  --foreground: #d8dee9; /* nord4 */
+  --card: #3b4252; /* nord1 */
+  --card-foreground: #d8dee9;
+  --popover: #3b4252; /* nord1 */
+  --popover-foreground: #d8dee9;
+  --primary: #88c0d0; /* nord8 */
+  --primary-foreground: #2e3440;
+  --secondary: #434c5e; /* nord2 — the user bubble */
+  --secondary-foreground: #eceff4; /* nord6 */
+  --muted: #3b4252; /* nord1 */
+  --muted-foreground: #949eb2; /* comment #616e88 (2.4:1) lifted toward nord4, 4.6:1 */
+  --accent: #434c5e; /* nord2 — the selection */
+  --accent-foreground: #eceff4;
+  --destructive: #cc8c93; /* nord11 #bf616a (3.1:1) lifted toward nord6, 4.6:1 */
+  --border: #434c5e; /* nord2 */
+  --input: #434c5e;
+  --ring: #88c0d0;
+  --chart-1: #81a1c1; /* nord9 */
+  --chart-2: #a3be8c; /* nord14 */
+  --chart-3: #ebcb8b; /* nord13 */
+  --chart-4: #b48ead; /* nord15 */
+  --chart-5: #8fbcbb; /* nord7 */
+  --chart-6: #d08770; /* nord12 */
+  --sidebar: #2e3440; /* nord0 — the rail keeps its border */
+  --sidebar-foreground: #d8dee9;
+  --sidebar-primary: #88c0d0;
+  --sidebar-primary-foreground: #2e3440;
+  --sidebar-accent: #434c5e;
+  --sidebar-accent-foreground: #eceff4;
+  --sidebar-border: #3b4252;
+  --sidebar-ring: #88c0d0;
+}
+
+/* One Dark — Atom's syntax and UI theme (the One Dark palette as the Atom packages define it). */
+[data-theme="one-dark"] {
+  --background: #282c34;
+  --foreground: #abb2bf;
+  --card: #2c313a;
+  --card-foreground: #abb2bf;
+  --popover: #21252b;
+  --popover-foreground: #abb2bf;
+  --primary: #61afef; /* blue */
+  --primary-foreground: #282c34;
+  --secondary: #3e4451; /* the selection — the user bubble */
+  --secondary-foreground: #d7dae0;
+  --muted: #2c313a;
+  --muted-foreground: #8f95a0; /* comment #7f848e (3.7:1) lifted toward foreground, 4.6:1 */
+  --accent: #3e4451;
+  --accent-foreground: #d7dae0;
+  --destructive: #d67982; /* red #e06c75 (4.4:1) lifted toward foreground, 4.6:1 */
+  --border: #3e4451;
+  --input: #3e4451;
+  --ring: #61afef;
+  --chart-1: #61afef; /* blue */
+  --chart-2: #98c379; /* green */
+  --chart-3: #e5c07b; /* yellow */
+  --chart-4: #c678dd; /* purple */
+  --chart-5: #56b6c2; /* cyan */
+  --chart-6: #d19a66; /* orange */
+  --sidebar: #21252b;
+  --sidebar-foreground: #abb2bf;
+  --sidebar-primary: #61afef;
+  --sidebar-primary-foreground: #282c34;
+  --sidebar-accent: #3e4451;
+  --sidebar-accent-foreground: #d7dae0;
+  --sidebar-border: #3e4451;
+  --sidebar-ring: #61afef;
+}
+
+/* Catppuccin Mocha — catppuccin.com/palette (base, mantle, crust, surfaces, overlays, text, accents). */
+[data-theme="catppuccin-mocha"] {
+  --background: #1e1e2e; /* base */
+  --foreground: #cdd6f4; /* text */
+  --card: #181825; /* mantle */
+  --card-foreground: #cdd6f4;
+  --popover: #11111b; /* crust */
+  --popover-foreground: #cdd6f4;
+  --primary: #cba6f7; /* mauve — Catppuccin's default accent */
+  --primary-foreground: #1e1e2e;
+  --secondary: #313244; /* surface0 — the user bubble */
+  --secondary-foreground: #cdd6f4;
+  --muted: #181825; /* mantle */
+  --muted-foreground: #9399b2; /* overlay2 */
+  --accent: #45475a; /* surface1 */
+  --accent-foreground: #cdd6f4;
+  --destructive: #f38ba8; /* red */
+  --border: #313244; /* surface0 */
+  --input: #45475a; /* surface1 */
+  --ring: #cba6f7;
+  --chart-1: #89b4fa; /* blue */
+  --chart-2: #a6e3a1; /* green */
+  --chart-3: #f9e2af; /* yellow */
+  --chart-4: #cba6f7; /* mauve */
+  --chart-5: #94e2d5; /* teal */
+  --chart-6: #fab387; /* peach */
+  --sidebar: #181825; /* mantle */
+  --sidebar-foreground: #cdd6f4;
+  --sidebar-primary: #cba6f7;
+  --sidebar-primary-foreground: #1e1e2e;
+  --sidebar-accent: #313244;
+  --sidebar-accent-foreground: #cdd6f4;
+  --sidebar-border: #313244;
+  --sidebar-ring: #cba6f7;
+}
+
+/*
+ * SynthWave '84 — robb0wen/synthwave-vscode, themes/synthwave-color-theme.json (fetched
+ * 2026-09-24): the workbench colours for the surfaces, the syntax colours for the accents.
+ */
+[data-theme="synthwave-84"] {
+  --background: #262335; /* editor.background */
+  --foreground: #ffffff; /* foreground */
+  --card: #2a2139; /* input.background */
+  --card-foreground: #ffffff;
+  --popover: #171520; /* activityBar.background */
+  --popover-foreground: #ffffff;
+  --primary: #ff7edb; /* the pink */
+  --primary-foreground: #262335;
+  --secondary: #37294d; /* list.hoverBackground, opaque — the user bubble */
+  --secondary-foreground: #ffffff;
+  --muted: #2a2139;
+  --muted-foreground: #848bbd; /* the comment colour, 4.7:1 */
+  --accent: #37294d;
+  --accent-foreground: #ffffff;
+  --destructive: #fe4450; /* errorForeground */
+  --border: #444251; /* editorIndentGuide.background */
+  --input: #444251;
+  --ring: #ff7edb;
+  --chart-1: #36f9f6; /* cyan */
+  --chart-2: #72f1b8; /* green */
+  --chart-3: #fede5d; /* yellow */
+  --chart-4: #ff7edb; /* pink */
+  --chart-5: #9d8bca; /* scrollbarSlider.background, opaque */
+  --chart-6: #ff8b39; /* orange */
+  --sidebar: #241b2f; /* sideBar.background */
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #ff7edb;
+  --sidebar-primary-foreground: #262335;
+  --sidebar-accent: #37294d;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #444251;
+  --sidebar-ring: #ff7edb;
+}
+
+/* Gruvbox Dark — morhetz/gruvbox, the dark palette at medium contrast (bg0, bg0_h, bg1–4, fg, fg4). */
+[data-theme="gruvbox-dark"] {
+  --background: #282828; /* bg0 */
+  --foreground: #ebdbb2; /* fg */
+  --card: #3c3836; /* bg1 */
+  --card-foreground: #ebdbb2;
+  --popover: #1d2021; /* bg0_h */
+  --popover-foreground: #ebdbb2;
+  --primary: #fabd2f; /* bright yellow */
+  --primary-foreground: #282828;
+  --secondary: #504945; /* bg2 — the user bubble */
+  --secondary-foreground: #ebdbb2;
+  --muted: #3c3836; /* bg1 */
+  --muted-foreground: #a89984; /* fg4 */
+  --accent: #504945; /* bg2 */
+  --accent-foreground: #ebdbb2;
+  --destructive: #f95b43; /* bright red #fb4934 (4.3:1) lifted toward fg, 4.6:1 */
+  --border: #504945; /* bg2 */
+  --input: #504945;
+  --ring: #fabd2f;
+  --chart-1: #83a598; /* bright blue */
+  --chart-2: #b8bb26; /* bright green */
+  --chart-3: #fabd2f; /* bright yellow */
+  --chart-4: #d3869b; /* bright purple */
+  --chart-5: #8ec07c; /* bright aqua */
+  --chart-6: #fe8019; /* bright orange */
+  --sidebar: #1d2021; /* bg0_h */
+  --sidebar-foreground: #ebdbb2;
+  --sidebar-primary: #fabd2f;
+  --sidebar-primary-foreground: #282828;
+  --sidebar-accent: #504945;
+  --sidebar-accent-foreground: #ebdbb2;
+  --sidebar-border: #3c3836;
+  --sidebar-ring: #fabd2f;
+}

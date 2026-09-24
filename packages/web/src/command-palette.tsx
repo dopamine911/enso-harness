@@ -295,7 +295,7 @@ export function CommandPalette({
         // The trigger sits at the composer's right edge; anchored `start`, 28rem of popup ran off
         // the viewport at 1100px (Chromium smoke). `end` keeps it inside at every width the composer fits.
         align="end"
-        className="w-[28rem] p-0"
+        className="w-command-palette p-0"
         onFocus={(event: React.FocusEvent<HTMLDivElement>): void => {
           if (event.target === event.currentTarget) filterRef.current?.focus()
         }}

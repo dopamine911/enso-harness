@@ -326,7 +326,7 @@ choose whether and where to share the bundle.
 | 7 | `api-docs` | TypeDoc over the public contracts, with warnings fatal |
 | 8 | `site` | builds the docs site and crawls every built page for dead links |
 
-Twenty of those tests are **gates**: tests about the source tree rather than about behaviour — "no
+Twenty-one of those tests are **gates**: tests about the source tree rather than about behaviour — "no
 production `console.*`", "every documented export is grouped", "every diagram parses". Each one names
 its offenders rather than counting them, so the failure message is the fix.
 

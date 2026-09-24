@@ -150,8 +150,14 @@ const NUMBER_WORDS: readonly string[] = [
   'eighteen',
   'nineteen',
   'twenty',
+  'twenty-one',
+  'twenty-two',
+  'twenty-three',
+  'twenty-four',
+  'twenty-five',
 ]
-const STATED_COUNT = /\b([a-z]+) today\b/
+// One word or a hyphenated pair: the gate count passed twenty with the style-tokens gate.
+const STATED_COUNT = /\b([a-z]+(?:-[a-z]+)?) today\b/
 
 /**
  * A `- **word** — …` entry, bullet line plus its indented continuations, as one line: the glossary

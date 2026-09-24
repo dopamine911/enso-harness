@@ -65,11 +65,7 @@ export function MakeupBar({
   const total = totalOf(makeup)
   const width = Math.max(scale, total)
   return (
-    <div
-      role="img"
-      aria-label={label}
-      className="relative flex h-3 w-full overflow-hidden rounded-sm bg-[repeating-linear-gradient(135deg,var(--muted)_0_4px,transparent_4px_8px)]"
-    >
+    <div role="img" aria-label={label} className="relative flex h-3 w-full overflow-hidden rounded-sm bg-hatch">
       {CONTEXT_CATEGORIES.map((category) => (
         <span
           key={category}
@@ -98,7 +94,7 @@ export function MakeupLegend({
 }): React.ReactNode {
   const total = totalOf(makeup)
   return (
-    <dl className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-x-4 gap-y-1 text-xs">
+    <dl className="mt-2 grid grid-cols-legend gap-x-4 gap-y-1 text-xs">
       {CONTEXT_CATEGORIES.map((category) => (
         <div key={category} className="flex items-center gap-2">
           <span

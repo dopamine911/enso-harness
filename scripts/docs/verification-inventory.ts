@@ -202,6 +202,18 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation:
       'Runs the `git log` the scanner runs, over fixture histories, with the flags read out of the workflow; it pins what gitleaks is handed, not that gitleaks ran or what its rules matched.',
   },
+  'test/style-tokens-gate.test.ts': {
+    rootArrays: ['PAGE_ROOTS'],
+    exceptions: [
+      {
+        constant: 'PIXELS_ALLOWED',
+        reason:
+          "The debug pages' virtualized log lists: the virtualizer places rows by arithmetic in pixels, so their row height is a pixel number by contract.",
+      },
+    ],
+    limitation:
+      'A line scan of page code: it refuses Tailwind arbitrary values, hex colours, colour functions, raw palette colours and pixel lengths or `*_PX` constants. A bare number handed to a `style` prop under another name, and anything in the vendored components or the stylesheet, are outside it.',
+  },
   'test/vendor-gate.test.ts': {
     rootArrays: ['SEARCHED_ROOTS'],
     exceptions: [
