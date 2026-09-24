@@ -38,6 +38,15 @@ test('unequal counts: found by text, markdown and truncation aside, the n-th of 
   expect(promptBubbleIndex(['queued elsewhere', long], truncated, 1)).toBe(1)
 })
 
+// PR #360 review: a whole prompt text must read as the WHOLE bubble — as a prefix, `hi` also
+// matched the `hi there` bubble drawn before it. Only a truncated text (`…`) is a prefix.
+test('an untruncated prompt matches its whole bubble, not a longer one it starts; an image marker is not text', () => {
+  const prompts = [prompt(1, 'hi there'), prompt(2, 'hi'), prompt(3, '[image content]what is this')]
+  const bubbles = ['held, not yet sent', 'hi there', 'hi', 'what is this']
+  expect(promptBubbleIndex(bubbles, prompts, 2)).toBe(2)
+  expect(promptBubbleIndex(bubbles, prompts, 3)).toBe(3)
+  expect(promptBubbleIndex(['held, not yet sent', 'hi there'], [prompt(1, 'hi')], 1)).toBeUndefined()
+})
 test('a prompt no bubble reads as — a queued one another tab sent — is not found, never guessed', () => {
   const prompts = [prompt(1, 'first'), prompt(2, 'sent from the other tab')]
   expect(promptBubbleIndex(['first'], prompts, 2)).toBeUndefined()

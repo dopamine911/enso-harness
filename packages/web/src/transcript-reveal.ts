@@ -35,9 +35,22 @@ function comparable(text: string): string {
   return text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
 }
 
-/** A prompt's stats text as a prefix of its bubble's: no image marker, no truncation ellipsis. */
-function promptStem(prompt: EnsoPromptStats): string {
-  return comparable(prompt.text.replaceAll('[image content]', '').replace(/…$/, ''))
+/**
+ * How `contentToText` (`host/map-events.ts`) names a part that is not text — `[image content]` —
+ * in the prompt text the stats carry. A bubble draws the image, not those words, so they go.
+ */
+const NON_TEXT_PART = /\[[\w-]+ content\]/g
+
+/**
+ * `branch-stats.ts` cuts a long prompt's text to 120 characters and ends it `…`. Only such a text
+ * is a prefix of its bubble; any other must read as the bubble does, all of it (PR #360 review:
+ * with a prefix, the stem `hi` also matched a `hi there` bubble).
+ */
+const TRUNCATED = '…'
+
+/** A prompt's stats text, compared as a bubble is; and whether it is only the text's start. */
+function promptStem(prompt: EnsoPromptStats): { readonly stem: string; readonly truncated: boolean } {
+  return { stem: comparable(prompt.text.replace(NON_TEXT_PART, '')), truncated: prompt.text.endsWith(TRUNCATED) }
 }
 
 /**
@@ -56,12 +69,13 @@ export function promptBubbleIndex(
   const wanted = prompted[position]
   if (wanted === undefined) return undefined
   if (bubbleTexts.length === prompted.length) return position
-  const stem = promptStem(wanted)
+  const { stem, truncated } = promptStem(wanted)
   if (stem.length === 0) return undefined
-  const occurrence = prompted.slice(0, position).filter((stats) => promptStem(stats) === stem).length
+  const occurrence = prompted.slice(0, position).filter((stats) => promptStem(stats).stem === stem).length
+  const readsAs = (text: string): boolean => (truncated ? comparable(text).startsWith(stem) : comparable(text) === stem)
   let seen = 0
   for (const [bubbleIndex, text] of bubbleTexts.entries()) {
-    if (!comparable(text).startsWith(stem)) continue
+    if (!readsAs(text)) continue
     if (seen === occurrence) return bubbleIndex
     seen += 1
   }
