@@ -33,7 +33,7 @@ import { readPiccPersistedMode, storedPermissionModeState } from '../permission-
  *   - the isolation env is set before the first services (else multi-account reads ~/.pi/agent) —
  *     proven by WHERE multi-account resolved its config, not by reading the env back
  *   - `childProxy: false` is seeded (else the second session in a process hangs under Bun)
- *   - exactly the manifest's six extensions load, with no load errors
+ *   - exactly the manifest's extensions load, in order, with no load errors
  *   - `session_start` fires exactly once per session, and two sessions do not share closures
  *   - a dialog an extension opens reaches a subscriber as an `extension-ui-request` observation and its
  *     answer resolves the extension's promise — the #27 round trip without a wire
@@ -54,7 +54,7 @@ afterAll(async () => {
   await releaseEnsoLogs()
 })
 
-/** The five extension path suffixes the harness manifest declares, in load order. */
+/** The extension path suffixes the harness manifest declares, in load order. */
 const MANIFEST_EXTENSION_MARKERS = [
   'extensions/logging/index.ts',
   'extensions/guards/index.ts',
@@ -62,6 +62,7 @@ const MANIFEST_EXTENSION_MARKERS = [
   'extensions/web-search/index.ts',
   'picc-permission-modes/index.ts',
   'pi-multi-account/index.ts',
+  'pi-ask-user/src/index.ts',
 ]
 
 /** Collect every event a session emits, from its first subscriber on (the host replays what came before). */
@@ -208,10 +209,10 @@ test('a new session says the model it starts with, as its own `model` observatio
   expect(opening).toEqual({ kind: 'model', ...hosted.runtime.modelState() })
 })
 
-test("exactly the manifest's six extensions load, in order, then the host's own model watcher, with no load errors", async () => {
+test("exactly the manifest's extensions load, in order, then the host's own model watcher, with no load errors", async () => {
   const hosted = await hostedSession()
   const loaded = hosted.loadedExtensionPaths
-  // The seventh is not the manifest's: it is the host's listener for pi's `model_select`, the
+  // The last is not the manifest's: it is the host's listener for pi's `model_select`, the
   // only place a model swap is announced (#338 slice 2; `agent-host.ts` header). Listed, not hidden.
   expect(loaded).toHaveLength(MANIFEST_EXTENSION_MARKERS.length + 1)
   MANIFEST_EXTENSION_MARKERS.forEach((marker, index) => {
@@ -753,23 +754,26 @@ interface FauxModule {
     getModel(): Parameters<ExtensionAPI['setModel']>[0]
     setResponses(responses: unknown[]): void
   }
-  fauxAssistantMessage(text: string): unknown
+  fauxAssistantMessage(content: unknown): unknown
+  fauxToolCall(name: string, arguments_: Record<string, unknown>): unknown
 }
 const piCodingAgentDir = dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent')))
 const faux: FauxModule = await import(Bun.resolveSync('@earendil-works/pi-ai', piCodingAgentDir))
 
-// ⚠ THE ORDER IS pi's, AND IT IS THE BUG THIS PINS. pi hands `message_end` to listeners BEFORE it
-// appends the message to the session (`agent-session.js` `_handleAgentEvent`), so usage read at
-// `message_end` is one message short. The host says it at `turn_end` instead; a pi bump that moves
-// the append after `turn_end` would show every tab a total one request behind, and fails here.
-test("⚠ after a turn the host says the session's usage WITH that turn's spend in it, and pi's window (#45)", async () => {
-  const core = faux.createFauxCore({
+type FauxCore = ReturnType<FauxModule['createFauxCore']>
+
+/** pi's scripted provider with one model and a 50k window — what a test scripts with `setResponses`. */
+function createFauxCore(): FauxCore {
+  return faux.createFauxCore({
     provider: 'enso-faux',
     api: 'enso-faux',
     models: [{ id: 'faux-1', contextWindow: 50_000 }],
   })
-  core.setResponses([faux.fauxAssistantMessage('hello there')])
-  const fauxModel: InlineExtension = {
+}
+
+/** An inline extension that registers `core` as a provider and selects its model at session start. */
+function fauxModelExtension(core: FauxCore): InlineExtension {
+  return {
     name: 'enso-host-faux-model',
     factory: (pi: ExtensionAPI) => {
       // The CONFIG form with a literal key: pi marks the provider configured synchronously, so
@@ -797,6 +801,16 @@ test("⚠ after a turn the host says the session's usage WITH that turn's spend 
       })
     },
   }
+}
+
+// ⚠ THE ORDER IS pi's, AND IT IS THE BUG THIS PINS. pi hands `message_end` to listeners BEFORE it
+// appends the message to the session (`agent-session.js` `_handleAgentEvent`), so usage read at
+// `message_end` is one message short. The host says it at `turn_end` instead; a pi bump that moves
+// the append after `turn_end` would show every tab a total one request behind, and fails here.
+test("⚠ after a turn the host says the session's usage WITH that turn's spend in it, and pi's window (#45)", async () => {
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('hello there')])
+  const fauxModel = fauxModelExtension(core)
   const hosted = await hostedSession([fauxModel])
   const seen: EnsoObservation[] = []
   const settled = Promise.withResolvers<void>()
@@ -876,4 +890,64 @@ test("⚠ a stored session's usage is pi's own getSessionStats total — every b
   expect(fromFile.input).toBe(1 + 10 + 20 + 30 + 40)
   // A file does not say which model pi would run, so it does not say the window.
   expect(storedContext).toBeNull()
+})
+
+// ── the agent asks (#12) ─────────────────────────────────────────────────────
+
+// ⚠⚠ The escalation channel end to end, without a wire: the MODEL calls `ask_user` (the adopted
+// `@d3ara1n/pi-ask-user`), and the question must arrive as the same `select` dialog the web card
+// renders — the host binds `ctx.mode = 'rpc'`, so the tool takes its dialog path, not its terminal
+// panel (whose `custom` resolves `undefined` here, which would read as "the user cancelled"). The
+// answer then has to reach the model as the tool's result. A vendor bump that routes the rpc path
+// through `custom`, or renames the tool, fails here.
+test('⚠⚠ the agent asks through ask_user: its question is a select dialog, and the answer is its tool result (#12)', async () => {
+  const core = createFauxCore()
+  core.setResponses([
+    faux.fauxAssistantMessage(
+      faux.fauxToolCall('ask_user', {
+        questions: [
+          {
+            header: 'Which database?',
+            tab: 'Database',
+            options: [
+              { label: 'Postgres', description: 'relational, a server' },
+              { label: 'SQLite', description: 'embedded, a file' },
+            ],
+          },
+        ],
+      }),
+    ),
+    faux.fauxAssistantMessage('Postgres it is.'),
+  ])
+  const hosted = await hostedSession([fauxModelExtension(core)])
+  const events = collectEvents(hosted)
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.subscribe((observation) => {
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  const asked = untilObservation(
+    hosted,
+    (observation) => observation.kind === 'extension-ui-request' && observation.method === 'select',
+  )
+  hosted.runtime.prompt({ message: 'set up storage' }, { onAccepted: () => undefined, onRejected: settled.reject })
+
+  const question = await asked
+  if (question.kind !== 'extension-ui-request' || question.dialog?.method !== 'select') {
+    throw new Error(`the question is not a select dialog: ${JSON.stringify(question)}`)
+  }
+  expect(question.blocking).toBe(true)
+  expect(question.dialog.title).toBe('Which database?')
+  expect(question.dialog.options).toContain('Postgres — relational, a server')
+  expect(question.dialog.options).toContain('SQLite — embedded, a file')
+
+  hosted.runtime.answerDialog({ id: question.id, value: 'Postgres — relational, a server' })
+  await settled.promise
+
+  const result = events.find((event) => event.kind === 'tool-result' && event.toolName === 'ask_user')
+  if (result?.kind !== 'tool-result') throw new Error(`no ask_user result: ${events.map((event) => event.kind)}`)
+  expect(result.isError).toBe(false)
+  expect(JSON.parse(result.text)).toMatchObject({
+    cancelled: false,
+    answers: [{ tab: 'Database', answer: 'Postgres' }],
+  })
 })

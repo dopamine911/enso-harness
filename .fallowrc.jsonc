@@ -21,6 +21,7 @@
     // Loaded by the runtime from the harness manifest (`pi.extensions`, `pi.themes`).
     "@ladbabynpm/picc-permission-modes",
     "pi-multi-account",
+    "@d3ara1n/pi-ask-user",
     "@mammothb/pi-tokyonight-storm",
     // Loaded by Bun from `packages/web/bunfig.toml` → `plugins`, and by the dev server's HMR.
     "bun-plugin-tailwind",

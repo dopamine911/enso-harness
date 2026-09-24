@@ -251,6 +251,18 @@ observation whole on a CUSTOM chunk named by its kind (`to-agui.ts#custom`) and 
 lines 457–461). The card drops on `dialog-settled` for its id, whoever answered (router lines 136–141), and
 the snapshot's complete list replaces what is shown (`follow-connection.ts` lines 383–389).
 
+**Asked by the agent (#12).** The model reaches this channel through one tool, `ask_user`, from the
+adopted `@d3ara1n/pi-ask-user` (exact-pinned in `packages/harness/package.json`, listed in its
+`pi.extensions`). The tool has two paths and chooses by `ctx.mode`: a terminal panel through `custom`
+under `tui`, and plain dialogs otherwise — one `select` per single-choice question (labels with their
+descriptions folded in, plus "✎ Type something…", which opens an `input`, and "→ Skip"), one `confirm`
+per option of a multi-choice one. The host binds `ctx.mode = 'rpc'` (`agent-host.ts`), so on the web
+every question is a `select`, `input` or `confirm` this page already describes: the card renders it and
+the validator fences it like any other. The answers return to the model as the tool's JSON result;
+an unanswered question returns `{ "cancelled": true, "answers": [] }`. What the model must do then —
+halt rather than route around — is not this seam's (#4). Pinned end to end, faux model to tool result,
+by `agent-host.test.ts#⚠⚠ the agent asks through ask_user: its question is a select dialog, and the answer is its tool result (#12)`.
+
 **Fakes.** `follow.test.ts` drives the answer route over an inline runtime whose `openDialogs` the test
 controls; `extension-ui-context.test.ts` exercises the context against scripted extension calls,
 including the fail-closed lift (`EnsoExtensionUiContextOptions.liftDialog`, lines 82–86).
