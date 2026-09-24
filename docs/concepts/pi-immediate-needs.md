@@ -1,7 +1,7 @@
 # pi — immediate needs
 
-> **Status (re-checked 2026-09-24 against the code):** Tier 0 and Tier 1 have landed; the escalation
-> tool (item 8) and recoverability (items 10 and 11) are open. The per-item state, with the seam page
+> **Status (re-checked 2026-09-24 against the code):** Tier 0, Tier 1 and the escalation tool (item 8)
+> have landed; recoverability (items 10 and 11) is open. The per-item state, with the seam page
 > or issue that is the current statement, is the **Status** column of [the table at the end](#the-order-in-one-table).
 > The item bodies below are the analysis as written on 2026-09-02 and are not re-triaged.
 
@@ -240,7 +240,7 @@ Start deny-by-default with a narrow allow set and let it accrete.
 | 5 | `write` requires prior read or a non-existent path | `tool_call` precondition | Small | **Landed** — `read-before-write` (#10) |
 | 6 | Stale-write detection | port omp `conflict-detect.ts` | Small port | **Landed** — `stale-write`, built rather than ported: the stamp is pi's own `ino:size:mtimeNs:ctimeNs` (#11) |
 | 7 | `write` overwrites without any signal | 5 and 6 together | — | **Landed** with 5 and 6 |
-| 8 | An ask tool, so halting is possible | `registerTool` | Small | **Half landed.** The extension → user channel exists on both surfaces ([`seams/dialog.md`](../seams/dialog.md)); the tool the *agent* calls to reach it does not — **#12, open** |
+| 8 | An ask tool, so halting is possible | `registerTool` | Small | **Landed by adoption** (#12) — `ask_user` from `@d3ara1n/pi-ask-user`, through the dialog seam on both surfaces ([`seams/dialog.md`](../seams/dialog.md) → *Asked by the agent*). What the model must do after an unanswered question (halt, not route around) is not built |
 | 9 | Modes | picc's permission modes | — | **Landed by adoption** (#13) — [`seams/permission-mode.md`](../seams/permission-mode.md). Prompt, tools and policy as one named artifact is Expansion-phase work |
 | 10 | Filesystem snapshot keyed to the session entry id | build — pi's `/tree` covers conversation rewind, neither harness covers the tree | Moderate | **Open** — #146 (supersedes #14): two published candidates to source-read first |
 | 11 | Worktree isolation | harness-level (omp's is Rust-bound, read only for shape) | Moderate | **Open** — #147 (supersedes #15): five published candidates to source-read first |

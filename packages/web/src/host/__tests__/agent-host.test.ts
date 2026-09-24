@@ -894,13 +894,19 @@ test("⚠ a stored session's usage is pi's own getSessionStats total — every b
 
 // ── the agent asks (#12) ─────────────────────────────────────────────────────
 
-// ⚠⚠ The escalation channel end to end, without a wire: the MODEL calls `ask_user` (the adopted
-// `@d3ara1n/pi-ask-user`), and the question must arrive as the same `select` dialog the web card
-// renders — the host binds `ctx.mode = 'rpc'`, so the tool takes its dialog path, not its terminal
-// panel (whose `custom` resolves `undefined` here, which would read as "the user cancelled"). The
-// answer then has to reach the model as the tool's result. A vendor bump that routes the rpc path
-// through `custom`, or renames the tool, fails here.
-test('⚠⚠ the agent asks through ask_user: its question is a select dialog, and the answer is its tool result (#12)', async () => {
+/** The option a test answers with — `ask_user` folds each description into the label it offers. */
+const POSTGRES_OPTION = 'Postgres — relational, a server'
+
+/**
+ * A hosted session whose faux model calls `ask_user` with one single-choice question, prompted and
+ * held at the question: the observations so far, the question as it arrived, and the run's settle.
+ */
+async function askedOneQuestion(): Promise<{
+  hosted: HostedThread
+  events: EnsoObservation[]
+  question: Extract<EnsoObservation, { kind: 'extension-ui-request' }>
+  settled: Promise<void>
+}> {
   const core = createFauxCore()
   core.setResponses([
     faux.fauxAssistantMessage(
@@ -917,7 +923,7 @@ test('⚠⚠ the agent asks through ask_user: its question is a select dialog, a
         ],
       }),
     ),
-    faux.fauxAssistantMessage('Postgres it is.'),
+    faux.fauxAssistantMessage('Understood.'),
   ])
   const hosted = await hostedSession([fauxModelExtension(core)])
   const events = collectEvents(hosted)
@@ -930,24 +936,44 @@ test('⚠⚠ the agent asks through ask_user: its question is a select dialog, a
     (observation) => observation.kind === 'extension-ui-request' && observation.method === 'select',
   )
   hosted.runtime.prompt({ message: 'set up storage' }, { onAccepted: () => undefined, onRejected: settled.reject })
-
   const question = await asked
-  if (question.kind !== 'extension-ui-request' || question.dialog?.method !== 'select') {
-    throw new Error(`the question is not a select dialog: ${JSON.stringify(question)}`)
-  }
-  expect(question.blocking).toBe(true)
-  expect(question.dialog.title).toBe('Which database?')
-  expect(question.dialog.options).toContain('Postgres — relational, a server')
-  expect(question.dialog.options).toContain('SQLite — embedded, a file')
+  if (question.kind !== 'extension-ui-request') throw new Error('unreachable: matched on kind')
+  return { hosted, events, question, settled: settled.promise }
+}
 
-  hosted.runtime.answerDialog({ id: question.id, value: 'Postgres — relational, a server' })
-  await settled.promise
-
+/** The JSON `ask_user` returned to the model, once the run has settled. */
+function askUserResult(events: EnsoObservation[]): unknown {
   const result = events.find((event) => event.kind === 'tool-result' && event.toolName === 'ask_user')
   if (result?.kind !== 'tool-result') throw new Error(`no ask_user result: ${events.map((event) => event.kind)}`)
   expect(result.isError).toBe(false)
-  expect(JSON.parse(result.text)).toMatchObject({
-    cancelled: false,
-    answers: [{ tab: 'Database', answer: 'Postgres' }],
-  })
+  return JSON.parse(result.text)
+}
+
+// ⚠⚠ The escalation channel end to end, without a wire: the MODEL calls `ask_user` (the adopted
+// `@d3ara1n/pi-ask-user`), and the question must arrive as the same `select` dialog the web card
+// renders — the host binds `ctx.mode = 'rpc'`, so the tool takes its dialog path, not its terminal
+// panel (whose `custom` resolves `undefined` here, which would read as "the user cancelled"). The
+// answer then has to reach the model as the tool's result. A vendor bump that routes the rpc path
+// through `custom`, or renames the tool, fails here.
+test('⚠⚠ the agent asks through ask_user: its question is a select dialog, and the answer is its tool result (#12)', async () => {
+  const { hosted, events, question, settled } = await askedOneQuestion()
+  expect(question.blocking).toBe(true)
+  expect(question.dialog).toMatchObject({ method: 'select', title: 'Which database?' })
+  if (question.dialog?.method !== 'select') throw new Error('not a select dialog')
+  expect(question.dialog.options).toContain(POSTGRES_OPTION)
+  expect(question.dialog.options).toContain('SQLite — embedded, a file')
+
+  hosted.runtime.answerDialog({ id: question.id, value: POSTGRES_OPTION })
+  await settled
+  expect(askUserResult(events)).toMatchObject({ cancelled: false, answers: [{ tab: 'Database', answer: 'Postgres' }] })
+})
+
+// The card's Cancel is `{ cancelled: true }` on the wire and pi's cancel value to the tool. The
+// seam page states what the model then reads; a vendor bump that threw, or waited, on a
+// dismissed question would leave the run hung or failed on the web, and fails here instead.
+test('a cancelled ask_user question returns { cancelled: true } to the model, and the run settles (#12)', async () => {
+  const { hosted, events, question, settled } = await askedOneQuestion()
+  hosted.runtime.answerDialog({ id: question.id, cancelled: true })
+  await settled
+  expect(askUserResult(events)).toMatchObject({ cancelled: true, answers: [] })
 })
