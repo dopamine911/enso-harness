@@ -1,6 +1,6 @@
 import { type Static, Type } from 'typebox'
 import { Compile } from 'typebox/compile'
-import type { EnsoOpenDialog } from './dialog.ts'
+import type { EnsoOpenDialog, EnsoQuestionAnswer } from './dialog.ts'
 import type { EnsoObservation } from './observation.ts'
 import type { EnsoPermissionModeState } from './permission-mode.ts'
 
@@ -268,9 +268,10 @@ export type EnsoThreadCommands = Static<typeof EnsoThreadCommands>
  * @group Thread runtime
  */
 export type DialogAnswer = { id: string } & (
-  | { cancelled: true; value?: never; confirmed?: never }
-  | { value: string; cancelled?: never; confirmed?: never }
-  | { confirmed: boolean; cancelled?: never; value?: never }
+  | { cancelled: true; value?: never; confirmed?: never; answers?: never }
+  | { value: string; cancelled?: never; confirmed?: never; answers?: never }
+  | { confirmed: boolean; cancelled?: never; value?: never; answers?: never }
+  | { answers: EnsoQuestionAnswer[]; cancelled?: never; value?: never; confirmed?: never }
 )
 
 /** @group Thread runtime */

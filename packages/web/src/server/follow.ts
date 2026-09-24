@@ -4,6 +4,7 @@ import {
   type DialogAnswer,
   ENSO_IMAGE_MAX_BYTES,
   type EnsoAbortReceipt,
+  EnsoDialogAnswer,
   type EnsoFollowFrame,
   EnsoHostCommandRun,
   EnsoPermissionModeChange,
@@ -325,7 +326,7 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
 
 /** The dialog body: pi's response shape, keyed by the request id the follow showed. */
 export function readDialogBody(raw: string): DialogAnswer {
-  let body: { id?: unknown; cancelled?: unknown; value?: unknown; confirmed?: unknown }
+  let body: { id?: unknown; cancelled?: unknown; value?: unknown; confirmed?: unknown; answers?: unknown }
   try {
     body = JSON.parse(raw) as typeof body
   } catch (error) {
@@ -335,7 +336,16 @@ export function readDialogBody(raw: string): DialogAnswer {
   if (body.cancelled === true) return { id: body.id, cancelled: true }
   if (typeof body.value === 'string') return { id: body.id, value: body.value }
   if (typeof body.confirmed === 'boolean') return { id: body.id, confirmed: body.confirmed }
-  throw new Error('dialog body needs cancelled, value, or confirmed')
+  // A questionnaire's answers (#12): the shape is checked here, where the body is read; whether
+  // they answer THIS question is `validateDialogAnswer`'s, against the open dialog.
+  if (body.answers !== undefined) {
+    const answers = { answers: body.answers }
+    if (!(Check(EnsoDialogAnswer, answers) && 'answers' in answers)) {
+      throw new Error('dialog body answers must be [{ selected: string[], other?: string }]')
+    }
+    return { id: body.id, answers: answers.answers }
+  }
+  throw new Error('dialog body needs cancelled, value, confirmed, or answers')
 }
 
 export type DialogOutcome =

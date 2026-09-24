@@ -28,11 +28,11 @@ flowchart LR
 
 | Node | Contract | Input | Source |
 |---|---|---|---|
-| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:64`](../../packages/web/src/server/index.ts#L64)<br>[`packages/web/src/server/follow.ts:554`](../../packages/web/src/server/follow.ts#L554) |
+| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:64`](../../packages/web/src/server/index.ts#L64)<br>[`packages/web/src/server/follow.ts:564`](../../packages/web/src/server/follow.ts#L564) |
 | `respondToHostCommand → runHostCommand` | [`POST /api/threads/:threadId/command`](./routes.md) | path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`) is the page's to open, never run | [`packages/web/src/server/index.ts:68`](../../packages/web/src/server/index.ts#L68) |
-| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:63`](../../packages/web/src/server/index.ts#L63)<br>[`packages/web/src/server/follow.ts:354`](../../packages/web/src/server/follow.ts#L354) |
-| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:66`](../../packages/web/src/server/index.ts#L66)<br>[`packages/web/src/server/follow.ts:390`](../../packages/web/src/server/follow.ts#L390) |
-| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:62`](../../packages/web/src/server/index.ts#L62)<br>[`packages/web/src/server/follow.ts:264`](../../packages/web/src/server/follow.ts#L264) |
+| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:63`](../../packages/web/src/server/index.ts#L63)<br>[`packages/web/src/server/follow.ts:364`](../../packages/web/src/server/follow.ts#L364) |
+| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:66`](../../packages/web/src/server/index.ts#L66)<br>[`packages/web/src/server/follow.ts:400`](../../packages/web/src/server/follow.ts#L400) |
+| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:62`](../../packages/web/src/server/index.ts#L62)<br>[`packages/web/src/server/follow.ts:265`](../../packages/web/src/server/follow.ts#L265) |
 
 ## Observation pipeline
 
@@ -52,9 +52,9 @@ flowchart LR
 
 | Stage | Contract | Source |
 |---|---|---|
-| `mapPiEvent (19 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:242`](../../packages/web/src/host/map-events.ts#L242) |
-| `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:513`](../../packages/core/src/observation.ts#L513) |
-| `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:178`](../../packages/web/src/server/follow.ts#L178) |
+| `mapPiEvent (19 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:245`](../../packages/web/src/host/map-events.ts#L245) |
+| `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:514`](../../packages/core/src/observation.ts#L514) |
+| `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:179`](../../packages/web/src/server/follow.ts#L179) |
 | `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:427`](../../packages/web/src/follow-connection.ts#L427) |
 | `to-agui chunk` | [Observations](./observations.md) | [`packages/web/src/to-agui.ts:76`](../../packages/web/src/to-agui.ts#L76) |
 | `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:130`](../../packages/web/src/custom-event-router.ts#L130) |

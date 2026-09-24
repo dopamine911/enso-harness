@@ -18,6 +18,7 @@
 // browser may import; `test/browser-bundle-gate.test.ts` builds the web surface for the browser
 // target and fails if a `node:` module is ever reachable from it again.
 
+export { ASK_USER_TOOL_NAME, AskUserToolParameters } from './ask-user.ts'
 export {
   ENSO_CONFIG_EXAMPLE,
   ENSO_CONFIG_FILENAME,
@@ -29,7 +30,11 @@ export {
   EnsoDialogAnswer,
   EnsoDialogSpec,
   EnsoOpenDialog,
+  EnsoQuestion,
+  EnsoQuestionAnswer,
+  type EnsoQuestionnaireResult,
   isEnsoDialogSpec,
+  QUESTIONNAIRE_COMPONENT_KEY,
   validateDialogAnswer,
 } from './dialog.ts'
 export {

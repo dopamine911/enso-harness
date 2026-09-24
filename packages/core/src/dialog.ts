@@ -22,7 +22,62 @@ import { Compile } from 'typebox/compile'
  *     confirm                  →  { confirmed: boolean }  (rpc-mode.js:85)
  *     any                      →  cancellation, which has NO payload here — it travels as
  *                                  pi's own `{ cancelled: true }` form and needs no check
+ *
+ * ⚠ ONE KIND IS OURS, NOT pi's: `questionnaire` — the agent's `ask_user` (#12), a whole set of
+ * questions asked and answered as one card. pi has no such method; the tool hands `custom` a
+ * component carrying the question under {@link QUESTIONNAIRE_COMPONENT_KEY}, and the host lifts
+ * it (as it lifts picc's permission prompt to a `select`). Its answer is `{ answers }`, one
+ * entry per question, and the host hands it to the tool — pi's response contract never sees it.
  */
+
+/**
+ * One question of a questionnaire. The shape is the one a model is asked for — Claude's
+ * AskUserQuestion: a short `header` (the card's tab), the `question`, the options (each a
+ * label and what choosing it means), and whether several may be chosen. A free-text answer
+ * ("Other") is always offered; the model does not list it.
+ *
+ * @group Dialogs
+ */
+export const EnsoQuestion = Type.Object({
+  header: Type.String({ minLength: 1 }),
+  question: Type.String({ minLength: 1 }),
+  options: Type.Array(
+    Type.Object({ label: Type.String({ minLength: 1 }), description: Type.Optional(Type.String()) }),
+    { minItems: 1 },
+  ),
+  multiSelect: Type.Boolean(),
+})
+/** @group Dialogs */
+export type EnsoQuestion = Static<typeof EnsoQuestion>
+
+/**
+ * How one question was answered: the labels chosen, and the free text when "Other" was used.
+ *
+ * @group Dialogs
+ */
+export const EnsoQuestionAnswer = Type.Object({
+  selected: Type.Array(Type.String()),
+  other: Type.Optional(Type.String()),
+})
+/** @group Dialogs */
+export type EnsoQuestionAnswer = Static<typeof EnsoQuestionAnswer>
+
+/**
+ * Where a questionnaire component carries its question for the host to read — a registered
+ * symbol, so the tool and the host agree on it without either importing the other.
+ *
+ * @group Dialogs
+ */
+export const QUESTIONNAIRE_COMPONENT_KEY: unique symbol = Symbol.for('enso.questionnaire')
+
+/**
+ * What a questionnaire resolves to in the asking tool: the answers, or a real decline. Never
+ * `undefined` from a host that lifted it — `undefined` means the host could not show it at all
+ * (pi's own rpc mode), and the tool falls back to asking one question at a time.
+ *
+ * @group Dialogs
+ */
+export type EnsoQuestionnaireResult = { cancelled: true } | { answers: EnsoQuestionAnswer[] }
 
 /**
  * One dialog question, per method.
@@ -71,6 +126,11 @@ export const EnsoDialogSpec = Type.Union([
     title: Type.String(),
     prefill: Type.Optional(Type.String()),
   }),
+  Type.Object({
+    method: Type.Literal('questionnaire'),
+    title: Type.String(),
+    questions: Type.Array(EnsoQuestion, { minItems: 1 }),
+  }),
 ])
 /** @group Dialogs */
 export type EnsoDialogSpec = Static<typeof EnsoDialogSpec>
@@ -83,6 +143,7 @@ export type EnsoDialogSpec = Static<typeof EnsoDialogSpec>
 export const EnsoDialogAnswer = Type.Union([
   Type.Object({ value: Type.String() }),
   Type.Object({ confirmed: Type.Boolean() }),
+  Type.Object({ answers: Type.Array(EnsoQuestionAnswer) }),
 ])
 /** @group Dialogs */
 export type EnsoDialogAnswer = Static<typeof EnsoDialogAnswer>
@@ -121,22 +182,58 @@ export function isEnsoDialogSpec(value: unknown): value is EnsoDialogSpec {
  */
 export function validateDialogAnswer(spec: EnsoDialogSpec, payload: unknown): string | undefined {
   if (!dialogAnswerValidator.Check(payload)) {
-    return `the payload is not a dialog answer ({ value: string } or { confirmed: boolean })`
+    return `the payload is not a dialog answer ({ value: string }, { confirmed: boolean } or { answers: [...] })`
   }
   switch (spec.method) {
     case 'confirm':
-      return 'confirmed' in payload
-        ? undefined
-        : `a 'confirm' dialog takes { confirmed: boolean }, got a 'value' answer`
+      return 'confirmed' in payload ? undefined : `a 'confirm' dialog takes { confirmed: boolean }`
     case 'select':
-      if (!('value' in payload)) {
-        return `a 'select' dialog takes { value: string }, got a 'confirmed' answer`
-      }
+      if (!('value' in payload)) return `a 'select' dialog takes { value: string }`
       return spec.options.includes(payload.value) ? undefined : `'${payload.value}' is not one of the offered options`
     case 'input':
     case 'editor':
-      return 'value' in payload
-        ? undefined
-        : `an '${spec.method}' dialog takes { value: string }, got a 'confirmed' answer`
+      return 'value' in payload ? undefined : `an '${spec.method}' dialog takes { value: string }`
+    case 'questionnaire':
+      if (!('answers' in payload)) return `a 'questionnaire' dialog takes { answers: [...] }`
+      return questionnaireRefusal(spec.questions, payload.answers)
   }
+}
+
+/**
+ * The questionnaire rule, per question and in order: every chosen label is one the question
+ * offered (the tool reads them back, so a label it never offered is the select-injection seam
+ * again), none twice; a single-choice question has exactly one answer — a label or "Other"; a
+ * multi-choice one at least one; and "Other" is never blank. A decline is `{ cancelled: true }`,
+ * not an empty answer, so an unanswered question is refused rather than read as "none".
+ */
+function questionnaireRefusal(
+  questions: readonly EnsoQuestion[],
+  answers: readonly EnsoQuestionAnswer[],
+): string | undefined {
+  if (answers.length !== questions.length) {
+    return `${answers.length} answers for ${questions.length} questions`
+  }
+  for (const [questionIndex, question] of questions.entries()) {
+    const refusal = questionAnswerRefusal(question, answers[questionIndex], questionIndex + 1)
+    if (refusal !== undefined) return refusal
+  }
+  return undefined
+}
+
+/** One question's answer against what it offered and allows — `number` is its place, for the refusal. */
+function questionAnswerRefusal(
+  question: EnsoQuestion,
+  answer: EnsoQuestionAnswer | undefined,
+  number: number,
+): string | undefined {
+  if (answer === undefined) return `question ${number} has no answer`
+  const offered = question.options.map((option) => option.label)
+  const stranger = answer.selected.find((label) => !offered.includes(label))
+  if (stranger !== undefined) return `'${stranger}' is not one of question ${number}'s options`
+  if (new Set(answer.selected).size !== answer.selected.length) return `question ${number} names an option twice`
+  if (answer.other?.trim() === '') return `question ${number}'s other answer is blank`
+  const count = answer.selected.length + (answer.other === undefined ? 0 : 1)
+  if (count === 0) return `question ${number} is unanswered`
+  if (!question.multiSelect && count > 1) return `question ${number} takes one answer, got ${count}`
+  return undefined
 }

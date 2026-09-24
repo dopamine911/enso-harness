@@ -1,7 +1,8 @@
 # Seam: the dialog vocabulary
 
-The contract for a question an extension asks that blocks the run until a human answers: the four
-kinds of question, how one is listed while open, what an answer is, how the wait ends. Glossary
+The contract for a question an extension asks that blocks the run until a human answers: the five
+kinds of question — pi's four and the agent's questionnaire — how one is listed while open, what an
+answer is, how the wait ends. Glossary
 domain: **Control** — *dialog*, *dialog kind*, *answer*, *outcome*, *notify* — with the settle and the
 origin crossing on the **Observation** side. Rule of the domain: a route tells the runtime, the feed
 says what happened (invariant 2); the answer is a unary `POST`, and every follower learns the card is
@@ -61,6 +62,11 @@ export const EnsoDialogSpec = Type.Union([
     title: Type.String(),
     prefill: Type.Optional(Type.String()),
   }),
+  Type.Object({
+    method: Type.Literal('questionnaire'),
+    title: Type.String(),
+    questions: Type.Array(EnsoQuestion, { minItems: 1 }),
+  }),
 ])
 ```
 
@@ -93,9 +99,10 @@ The answer, as it crosses `POST /api/threads/:id/dialog` and reaches the runtime
  * With the arms disjoint, `answer.cancelled === true` narrows, so every reader tests the VALUE.
  */
 export type DialogAnswer = { id: string } & (
-  | { cancelled: true; value?: never; confirmed?: never }
-  | { value: string; cancelled?: never; confirmed?: never }
-  | { confirmed: boolean; cancelled?: never; value?: never }
+  | { cancelled: true; value?: never; confirmed?: never; answers?: never }
+  | { value: string; cancelled?: never; confirmed?: never; answers?: never }
+  | { confirmed: boolean; cancelled?: never; value?: never; answers?: never }
+  | { answers: EnsoQuestionAnswer[]; cancelled?: never; value?: never; confirmed?: never }
 )
 ```
 
@@ -121,23 +128,20 @@ export function isEnsoDialogSpec(value: unknown): value is EnsoDialogSpec {
  */
 export function validateDialogAnswer(spec: EnsoDialogSpec, payload: unknown): string | undefined {
   if (!dialogAnswerValidator.Check(payload)) {
-    return `the payload is not a dialog answer ({ value: string } or { confirmed: boolean })`
+    return `the payload is not a dialog answer ({ value: string }, { confirmed: boolean } or { answers: [...] })`
   }
   switch (spec.method) {
     case 'confirm':
-      return 'confirmed' in payload
-        ? undefined
-        : `a 'confirm' dialog takes { confirmed: boolean }, got a 'value' answer`
+      return 'confirmed' in payload ? undefined : `a 'confirm' dialog takes { confirmed: boolean }`
     case 'select':
-      if (!('value' in payload)) {
-        return `a 'select' dialog takes { value: string }, got a 'confirmed' answer`
-      }
+      if (!('value' in payload)) return `a 'select' dialog takes { value: string }`
       return spec.options.includes(payload.value) ? undefined : `'${payload.value}' is not one of the offered options`
     case 'input':
     case 'editor':
-      return 'value' in payload
-        ? undefined
-        : `an '${spec.method}' dialog takes { value: string }, got a 'confirmed' answer`
+      return 'value' in payload ? undefined : `an '${spec.method}' dialog takes { value: string }`
+    case 'questionnaire':
+      if (!('answers' in payload)) return `a 'questionnaire' dialog takes { answers: [...] }`
+      return questionnaireRefusal(spec.questions, payload.answers)
   }
 }
 ```
@@ -226,81 +230,86 @@ export interface EnsoExtensionUiContext {
 ## Who implements it, who consumes it
 
 **Implemented once**, by `createEnsoExtensionUiContext` in `packages/web/src/host/extension-ui-context.ts`
-(line 224). The host is the UI: it implements the interface extensions call and turns each call into
-the same record the mapper already consumed over the old transport (header lines 29–33). The four
-blocking methods — `select`, `confirm`, `input`, `editor` (lines 336–382) — go through one
-`awaitDialog` (line 293): mint an id, park the request in a pending map, emit the request, and block
+(line 235). The host is the UI: it implements the interface extensions call and turns each call into
+the same record the mapper already consumed over the old transport (header lines 38–40). The four
+blocking methods — `select`, `confirm`, `input`, `editor` (lines 347–393) — go through one
+`awaitDialog` (line 304): mint an id, park the request in a pending map, emit the request, and block
 until an answer, a cancel, the caller's abort signal or its own timeout. Every path that stops the wait
-goes through `finish` (line 309), which deletes the pending entry, emits the settle record with its
-outcome (line 313) and resolves the extension with its value — `undefined` for `select`/`input`/
-`editor`, `false` for `confirm`, on every non-answer outcome (lines 286–287). That is why the settle
-observation exists at all: the runtime has no event for a question ending (lines 289–291).
+goes through `finish` (line 320), which deletes the pending entry, emits the settle record with its
+outcome (line 324) and resolves the extension with its value — `undefined` for `select`/`input`/
+`editor`, `false` for `confirm`, on every non-answer outcome (lines 297–298). That is why the settle
+observation exists at all: the runtime has no event for a question ending (lines 301–302).
 `agent-host.ts` binds one context per session (line 569) and delegates the runtime contract's
 `answerDialog` and `openDialogs` to it (lines 903–908); `cancelAllDialogs` cancels every pending
-question at session teardown (line 512, called from `agent-host.ts:1031`), so teardown is a settle
+question at session teardown (line 536, called from `agent-host.ts:1031`), so teardown is a settle
 path too.
 
-**Consumed by the server.** `answerThreadDialog` in `packages/web/src/server/follow.ts` (line 306)
-finds the open question by id on the live thread (line 309; 404 when the thread is not live or the
-question is spent, lines 308–315), validates a non-cancel answer against the question's kind
-(lines 316–319; 422 with the refusal, and the question stays open), then hands it to the runtime
-(line 320) and answers 204 (line 321). `server/index.ts` maps that outcome to the response (lines
-594–608). The follow's snapshot lists every open question, oldest first, so a reconnect renders the
-card at once (`follow.ts` line 151; `openDialogs` at extension-ui-context.ts line 502 checks each
-request with `isEnsoDialogSpec` rather than casting, line 508).
+**Consumed by the server.** `answerThreadDialog` in `packages/web/src/server/follow.ts` (line 364)
+finds the open question by id on the live thread (line 367; 404 when the thread is not live or the
+question is spent, lines 366–373), validates a non-cancel answer against the question's kind
+(lines 374–377; 422 with the refusal, and the question stays open), then hands it to the runtime
+(line 378) and answers 204 (line 379). `server/index.ts` maps that outcome to the response (lines
+767–789). The follow's snapshot lists every open question, oldest first, so a reconnect renders the
+card at once (`follow.ts` line 200; `openDialogs` at extension-ui-context.ts line 526 checks each
+request with `isEnsoDialogSpec` rather than casting, line 532).
 
 **Consumed by the browser.** The question arrives as an `extension-ui-request` observation whose
-`dialog` the mapper checked with `isEnsoDialogSpec` (`map-events.ts` line 131); the adapter passes the
+`dialog` the mapper checked with `isEnsoDialogSpec` (`map-events.ts` line 137); the adapter passes the
 observation whole on a CUSTOM chunk named by its kind (`to-agui.ts#custom`) and the router checks
 `{ id, dialog }` again against `EnsoOpenDialog` before it reaches the store (`custom-event-router.ts#routeUiRequest`). `EnsoDialogCard` in
 `packages/web/src/chat-screen.tsx` (`#EnsoDialogCard`) renders one card and hands `answerDialog` in
-`packages/web/src/follow-connection.ts` (line 632) exactly the answer shapes — `{ value }`,
-`{ confirmed }`, `{ cancelled: true }` — because the server forwards them verbatim (chat-screen.tsx
-lines 457–461). The card drops on `dialog-settled` for its id, whoever answered (router lines 136–141), and
-the snapshot's complete list replaces what is shown (`follow-connection.ts` lines 383–389).
+`packages/web/src/follow-connection.ts` (line 668) exactly the answer shapes — `{ value }`,
+`{ confirmed }`, `{ answers }`, `{ cancelled: true }` — because the server forwards them verbatim (chat-screen.tsx
+lines 631–632). The card drops on `dialog-settled` for its id, whoever answered (router lines 148–153), and
+the snapshot's list replaces what is shown (router line 105).
 
-**Asked by the agent (#12).** The model reaches this channel through one tool, `ask_user`, from the
-adopted `@d3ara1n/pi-ask-user` (exact-pinned in `packages/harness/package.json`, listed in its
-`pi.extensions`). It ships TypeScript source only and imports `@earendil-works/pi-tui`, an optional
-peer this repo does not declare — it resolves because the runtime itself depends on that package. The
-tool has two paths and chooses by `ctx.mode`: a terminal panel through `custom` under `tui`, plain
-dialogs otherwise. The host binds `ctx.mode = 'rpc'` (`agent-host.ts`), so on the web every question is
-a dialog this page already describes, rendered by the card and fenced by the validator:
+**Asked by the agent (#12).** The model reaches this channel through one tool, `ask_user`
+(`packages/harness/extensions/ask-user/index.ts`, ours; its parameters are `core/src/ask-user.ts`):
+one to four questions, each a short `header`, the `question`, two to four options (a label and what
+choosing it means) and `multiSelect`. The whole set is asked as ONE question of the fifth kind,
+`questionnaire`, because pi has no method for it:
 
-- **A single-choice question** is one `select` whose rows are the options (each label with its
-  description folded in as `label — description`), then "→ Skip this question" (unless the model set
-  `allowSkip: false`), then "✎ Type something…", which opens an `input`. After a typed answer the tool
-  asks once more, an optional `input` titled "Note for the agent (optional)", so a user who types sees
-  two input cards. Cancel is a real cancel: the model reads `{ "cancelled": true, "answers": [] }`.
-- **A multi-choice question** is one `confirm` per option. ⚠ It has **no cancel**: a confirm's cancel
-  value is `false`, which the tool reads as "not this option" and asks the next — declining every
-  card returns an *answered, empty* selection (`{ "cancelled": false, "answers": [{ …, "answers": [] }] }`),
-  which the model cannot tell from the user choosing nothing. Upstream's own comment says as much
-  (`confirm-false is indistinguishable from dismissal`).
-- **Stop** while the tool waits stops the run and leaves no card: the host settles pending questions
-  as the stop begins and refuses any the tool asks until it has finished (`agent-host.ts#stopRunSettlingDialogs`,
-  `refuseDialogsUntil`). The tool ignores its abort signal, so without the refusal a multi-choice
-  question would open its next card after the stop.
+- **The tool** hands `custom` a component carrying the questionnaire under
+  `QUESTIONNAIRE_COMPONENT_KEY` (`dialog.ts`), a registered symbol, so neither side imports the other.
+- **The host** lifts it (`host/questionnaire-dialog.ts#liftQuestionnaire`): the carried value is
+  validated against `EnsoDialogSpec` and rebuilt from the schema's own fields, at every level, so
+  nothing else it carried reaches a follower. A malformed one is no dialog at all, and `custom`
+  resolves `undefined`.
+- **The card** (`questionnaire-card.tsx#QuestionnaireControls`) shows a tab per question; a radio or
+  checkbox row per option, with its label and description; an "Other" row taking the user's own
+  words; and one "Submit answers", enabled once every question is answered. Picking a single choice
+  moves to the next tab.
+- **The answer** is `{ answers }`, one `{ selected, other? }` per question in order.
+  `validateDialogAnswer` refuses a label the question never offered, an unanswered question, more
+  than one answer to a single choice, and a blank "Other".
+- **Declining.** The card's Cancel is a real decline for every kind of question: the tool gets
+  `{ cancelled: true }`, never `undefined`, which means "this host could not show it".
+- **What the model reads** is the answers in plain words, or that the user declined.
 
-What the model must do after an unanswered question — halt rather than route around — is not this
-seam's (#4). Pinned end to end, faux model to tool result, by `agent-host.test.ts#⚠⚠ the agent asks through ask_user: its question is a select dialog, and the answer is its tool result (#12)`,
-with its siblings for the single-choice cancel, the multi-choice decline and Stop during each.
+Where no card can be shown — pi's own terminal, or pi's rpc mode, whose `custom` resolves `undefined`
+— the tool asks one plain `select` or `input` at a time. A multi-choice question is a toggle list
+closed by "✓ Done", so dismissing any prompt is a decline there too. **Stop** while the tool waits
+stops the run and leaves no card: the host settles pending questions as the stop begins and refuses
+any asked until it has finished (`agent-host.ts#stopRunSettlingDialogs`, `refuseDialogsUntil`). What
+the model must do after a decline — halt rather than route around — is not this seam's (#4). Pinned
+end to end, faux model to tool result, by `agent-host.test.ts#⚠⚠ the agent asks through ask_user: its questionnaire is one dialog, and the answers are its tool result (#12)`,
+with its siblings for the decline and Stop.
 
 **Fakes.** `follow.test.ts` drives the answer route over an inline runtime whose `openDialogs` the test
 controls; `extension-ui-context.test.ts` exercises the context against scripted extension calls,
-including the fail-closed lift (`EnsoExtensionUiContextOptions.liftDialog`, lines 88–92).
+including the fail-closed lift (`EnsoExtensionUiContextOptions.liftDialog`, lines 99–103).
 
 ## What fences it
 
 - **One validator, both sides**: `validateDialogAnswer` lives beside the schemas so the server and the
   card enforce the same rule (`dialog.ts#validateDialogAnswer`) — in particular that a `select` value
-  is one of the offered options (lines 108–112), since the runtime hands it to the extension verbatim
-  (an injection seam, closed at the server: `follow.ts` lines 301–303).
+  is one of the offered options (lines 176–179), since the runtime hands it to the extension verbatim
+  (an injection seam, closed at the server: `follow.ts` lines 359–360).
 - **The settle funnel**: `finish` is the one place a settle record is emitted (extension-ui-context.ts
-  line 313); the mapper turns an outcome the union does not name into `unmapped`, not a guess
-  (`map-events.ts` lines 310–319).
-- **The kinds agree twice**: the host's `BlockingDialogRequest` (extension-ui-context.ts line 58) and
-  the mapper's `DIALOG_UI_METHODS` (`map-events.ts` line 34) name the same four methods, and the
+  line 324); the mapper turns an outcome the union does not name into `unmapped`, not a guess
+  (`map-events.ts` lines 327–336).
+- **The kinds agree twice**: the host's `BlockingDialogRequest` (extension-ui-context.ts line 65) and
+  the mapper's `DIALOG_UI_METHODS` (`map-events.ts` line 38) name the same five methods, and the
   host's comment says so.
 - **The vendor gate** (#145): `extension-ui-context.ts` and `permission-dialog.ts` import the runtime's
   package; nothing above `host/` does.
@@ -315,19 +324,24 @@ mapped. The answer shapes likewise mirror the runtime's response contract minus 
 (`dialog.ts` lines 14–24) so the server adds the envelope and nothing else. A decision, not a leak:
 a replacement loop would be adapted *to* this vocabulary.
 
+**The fifth kind, `questionnaire`, is ours, not the runtime's** (#12). pi has no method for a set of
+questions, so the host lifts it from `ask_user`'s component the way it lifts the permission prompt
+below, and its `{ answers }` go to the tool, not to pi's response contract. A replacement runtime
+keeps it unchanged: nothing about it is pi's.
+
 **The permission prompt is lifted inside the host, legitimately.** The mode extension asks its
 file-permission question through `custom`, handing the runtime a terminal component; the host's
-`custom` (extension-ui-context.ts line 432) builds it and `permission-dialog.ts` lifts the one
-component it knows into a `select` (lines 451–452) whose options are the strings the extension reads back
+`custom` (extension-ui-context.ts line 443) builds it and `permission-dialog.ts` lifts the one
+component it knows into a `select` (line 475) whose options are the strings the extension reads back
 verbatim. That reads a vendor class by `instanceof` and its private fields by name, pinned by
 `permission-dialog.test.ts` (permission-dialog.ts lines 10–30) — vendor coupling, but under
 `packages/web/src/host/`, where the vendor gate allows it, and nothing above the host sees anything
 but a `select`. The mode itself is leak L3, on `permission-mode.md`.
 
 **`notify` rides the same observation.** A one-way notice is emitted by the host as a `notify` request
-(extension-ui-context.ts line 383) and mapped as an `extension-ui-request` the mapper marks
-non-blocking, since only the four methods block (`map-events.ts` line 154); status-bar and
-widget calls are emitted and dropped (extension-ui-context.ts header lines 51–53). Not a dialog.
+(extension-ui-context.ts line 394) and mapped as an `extension-ui-request` the mapper marks
+non-blocking, since only the five dialog methods block (`map-events.ts` line 160); status-bar and
+widget calls are emitted and dropped (extension-ui-context.ts header lines 54–56). Not a dialog.
 
 ## Pivot cost
 

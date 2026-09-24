@@ -136,7 +136,9 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
   drops the card; the snapshot lists every open question so a reconnect renders it at once.
 - **dialog kind** — `select`, `confirm`, `input`, `editor`. *Decision (5):* these four are **ours by
   adoption**: they are the right set of primitives for a surface, `EnsoDialogSpec` names them, and an
-  answer is validated against the question's kind. They are not renamed and not mapped.
+  answer is validated against the question's kind. They are not renamed and not mapped. A fifth,
+  `questionnaire`, is **ours outright** (#12): the agent's `ask_user` questions, asked as one card and
+  answered as `{ answers }`. The runtime has no such method; the host lifts it from the tool's component.
 - **answer** — the response to one dialog, `POST …/dialog`, validated against the question; 204 when
   the question was spent.
 - **outcome** — how a dialog stopped waiting: `answered` (a human's value), `cancelled` (the browser's
@@ -475,7 +477,7 @@ cc-safety-net, the command analyzer the bash guard wires as a library. *log subs
 | prompt / receipt | `prompt()` | `prompt()` unary → `{ messageId }` | `SubscribeConnectionAdapter.send` | — |
 | admission (#216) | `streamingBehavior`: `steer` or `followUp`; `steer()` / `follow_up()` | inbox `next-step` / `next-turn` | — | — |
 | queue | `queue_update`, `clearQueue()` | inbox `claimed` / `discarded` | the browser queue we do **not** use | — |
-| dialog / dialog kind | `extension_ui_request`; `ctx.ui.select / confirm / input / editor` | approval `request()` inside a turn | — | mode extension's `FilePermissionDialog`, lifted to `select` |
+| dialog / dialog kind | `extension_ui_request`; `ctx.ui.select / confirm / input / editor` | approval `request()` inside a turn | — | mode extension's `FilePermissionDialog`, lifted to `select`; `ask_user`'s questionnaire component, lifted to `questionnaire` (ours) |
 | notify | `ctx.ui.notify`; `setStatus` is dropped | — | — | — |
 | permission mode | — | `permission/preset` + knobs; `custom` derived | — | mode extension's modes (`default`, `acceptEdits`, `plan`, `bypassPermissions`), persisted as `customType: "modes"` |
 | (no word) — the runtime's interface setting | `ctx.mode`: `interactive` / `rpc` / `print` | — | — | — |

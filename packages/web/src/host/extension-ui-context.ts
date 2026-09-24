@@ -11,10 +11,13 @@ import {
   type DialogAnswer,
   type EnsoDialogOutcome,
   type EnsoOpenDialog,
+  type EnsoQuestion,
+  type EnsoQuestionnaireResult,
   ensoLogger,
   isEnsoDialogSpec,
 } from '@enso/core'
 import { type LiftedPermissionDialog, liftPermissionDialog } from './permission-dialog.ts'
+import { liftQuestionnaire } from './questionnaire-dialog.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 
 /** The factory `ExtensionUIContext.custom` receives, named so the method can be written without `Parameters<>`. */
@@ -54,12 +57,20 @@ export type CustomComponentFactory<T> = (
  * browser equivalent and returns its inert value.
  */
 
-/** The four dialog methods pi's rpc protocol names blocking. `map-events.ts` agrees (its `DIALOG_UI_METHODS`). */
+/**
+ * The blocking dialogs: the four pi's rpc protocol names, and the one that is ours — the
+ * questionnaire a lifted `ask_user` component asks (#12). `map-events.ts` agrees (its
+ * `DIALOG_UI_METHODS`).
+ */
 type BlockingDialogRequest =
   | { method: 'select'; title: string; options: string[]; message?: string; timeout?: number }
   | { method: 'confirm'; title: string; message: string; timeout?: number }
   | { method: 'input'; title: string; placeholder?: string; secret?: true; timeout?: number }
   | { method: 'editor'; title: string; prefill?: string }
+  | { method: 'questionnaire'; title: string; questions: EnsoQuestion[] }
+
+/** A questionnaire's non-answer: a real decline, never `undefined` — which means "not shown" (#12). */
+const QUESTIONNAIRE_DECLINED: EnsoQuestionnaireResult = { cancelled: true }
 
 /**
  * What a component factory is handed in place of a terminal. picc's factory reads only
@@ -432,6 +443,19 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
     async custom<T>(factory: CustomComponentFactory<T>): Promise<T> {
       const { promise, resolve } = Promise.withResolvers<T>()
       const component = await buildComponent(factory, resolve)
+      const questionnaire = liftQuestionnaire(component)
+      if (questionnaire !== undefined) {
+        disposeQuietly(component)
+        const result = await awaitDialog<EnsoQuestionnaireResult>(
+          questionnaire,
+          undefined,
+          QUESTIONNAIRE_DECLINED,
+          (response) => (response.answers === undefined ? QUESTIONNAIRE_DECLINED : { answers: response.answers }),
+        )
+        // `T` for the asking tool is `EnsoQuestionnaireResult` — what its component's `done` takes.
+        resolve(result as T)
+        return promise
+      }
       let lifted: LiftedPermissionDialog | undefined
       try {
         lifted = await liftDialog(component)

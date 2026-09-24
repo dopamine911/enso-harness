@@ -15,7 +15,7 @@
       "./extensions/web-search/index.ts",
       "node_modules/@ladbabynpm/picc-permission-modes/index.ts",
       "node_modules/pi-multi-account/index.ts",
-      "node_modules/@d3ara1n/pi-ask-user/src/index.ts"
+      "./extensions/ask-user/index.ts"
     ],
     "skills": [
       "./skills"
@@ -29,7 +29,6 @@
     ]
   },
   "dependencies": {
-    "@d3ara1n/pi-ask-user": "2.5.0",
     "@enso/core": "*",
     "@ladbabynpm/picc-permission-modes": "0.1.2",
     "@logtape/logtape": "2.3.7",
