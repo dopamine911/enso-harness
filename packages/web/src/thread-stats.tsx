@@ -1,5 +1,5 @@
 import { EnsoThreadStats, type EnsoToolCallStats, type EnsoTurnStats } from '@enso/core'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Area,
   AreaChart,
@@ -11,13 +11,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import type { FetchLike } from './browser-logging.ts'
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from './components/ui/chart.tsx'
 import { OptionSelect } from './option-select.tsx'
-import { readSchemaRoute } from './route-read.ts'
+import { useReadOnUsage } from './read-on-usage.ts'
+import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
 import { costText, countText, durationsText } from './stats-table.tsx'
-import { useThreadStores } from './store.ts'
-import { latestWins } from './thread-debug.tsx'
 import {
   type CallMetric,
   callValue,
@@ -53,23 +51,11 @@ import type { RevealStatsTarget, StatsTarget } from './transcript-reveal.ts'
  * what it is waiting for instead of drawing zeros.
  */
 
-export type StatsOutcome =
-  | { readonly kind: 'reading' }
-  | { readonly kind: 'read'; readonly stats: EnsoThreadStats }
-  | { readonly kind: 'failed'; readonly problem: string }
+export type StatsOutcome = AnalysisOutcome<EnsoThreadStats>
 
-/** The stats a thread's route answers, or why not — a 404 is a thread nothing has run in yet. */
-async function fetchThreadStats(threadId: string, fetchImpl: FetchLike = fetch): Promise<StatsOutcome> {
-  const read = await readSchemaRoute(
-    `/api/threads/${encodeURIComponent(threadId)}/stats`,
-    EnsoThreadStats,
-    'stats',
-    fetchImpl,
-  )
-  if (read.kind === 'absent') return { kind: 'failed', problem: 'nothing has run in this thread yet' }
-  if (read.kind === 'failed') return read
-  return { kind: 'read', stats: read.payload }
-}
+/** The thread's stats (stable, module-level: `useReadOnUsage` subscribes with it). */
+const readThreadStats = (threadId: string): Promise<StatsOutcome> =>
+  readThreadAnalysis(threadId, 'stats', EnsoThreadStats)
 
 // ── formats ──────────────────────────────────────────────────────────────────────────────────
 
@@ -549,7 +535,7 @@ export function ThreadStatsView({
   if (outcome.kind === 'reading')
     return <p className="p-3 text-muted-foreground text-xs">reading the thread's stats…</p>
   if (outcome.kind === 'failed') return <p className="p-3 text-muted-foreground text-xs">no stats: {outcome.problem}</p>
-  const { stats } = outcome
+  const stats = outcome.payload
   const headline = headlineOf(stats)
   const tools = toolSummaries(stats.callStats)
   const data = stats.turnStats.map((turn) => ({ ...turn, label: String(turn.turn) }))
@@ -655,35 +641,16 @@ export function ThreadStatsView({
 }
 
 /**
- * The drawer wired to its thread: read on open, and again whenever the thread's usage moves —
- * a SUBSCRIPTION, not a render dependency, as the debug drawer reads its chunks. Two reads can be
- * in flight (a turn lands while the first is out); only the latest one issued is shown.
- *
- * `onNavigate` is the pane's (`chat-screen.tsx`): it finds the target in that pane's transcript
- * and says whether it could.
+ * The Stats view wired to its thread: read on open and whenever the thread's usage moves
+ * (`read-on-usage.ts`). `onNavigate` is the pane's (`chat-screen.tsx`): it finds the target in
+ * that pane's transcript and says whether it could.
  */
 export function ThreadStatsDrawer({ onNavigate }: { readonly onNavigate?: RevealStatsTarget }): React.ReactNode {
-  const stores = useThreadStores()
-  const [outcome, setOutcome] = useState<StatsOutcome>({ kind: 'reading' })
+  const outcome = useReadOnUsage<StatsOutcome>(readThreadStats, ANALYSIS_READING)
   const [missed, setMissed] = useState<string | undefined>(undefined)
-  useEffect(() => {
-    let mounted = true
-    const readLatest = latestWins(() => fetchThreadStats(stores.threadId))
-    const read = (): void => {
-      void readLatest().then((latest) => {
-        if (mounted && latest !== undefined) setOutcome(latest)
-      })
-    }
-    read()
-    const unsubscribe = stores.usage.subscribe(read)
-    return () => {
-      mounted = false
-      unsubscribe()
-    }
-  }, [stores])
   const navigate =
     onNavigate === undefined || outcome.kind !== 'read'
       ? undefined
-      : (target: StatsTarget): void => setMissed(onNavigate(target, outcome.stats) ? undefined : missedText(target))
+      : (target: StatsTarget): void => setMissed(onNavigate(target, outcome.payload) ? undefined : missedText(target))
   return <ThreadStatsView outcome={outcome} onNavigate={navigate} missed={missed} />
 }

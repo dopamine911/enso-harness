@@ -1,0 +1,149 @@
+import { expect, test } from 'bun:test'
+import { tmpdir } from 'node:os'
+import { type SessionEntry, SessionManager } from '@earendil-works/pi-coding-agent'
+import { branchContext } from '../branch-context.ts'
+import { branchStats } from '../branch-stats.ts'
+
+/**
+ * #361: a thread's context, request by request, off pi's own entries — built here with pi's real
+ * session manager, so the entries read are the ones pi writes and the assembly is pi's own
+ * (`buildContextEntries`, compaction included).
+ */
+
+type RecordedUsage = Extract<SessionEntry, { type: 'usage' }>['usage']
+
+const usage = (input: number, cacheRead: number): RecordedUsage => ({
+  input,
+  output: 7,
+  cacheRead,
+  cacheWrite: 3,
+  totalTokens: input + cacheRead + 10,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 },
+})
+
+function assistant(parts: unknown[]): never {
+  return {
+    role: 'assistant',
+    content: parts,
+    api: 'anthropic-messages',
+    provider: 'anthropic',
+    model: 'claude-test',
+    usage: usage(100, 50),
+    stopReason: 'stop',
+    timestamp: Date.now(),
+  } as never
+}
+
+const TOOL = { name: 'bash', description: 'run a command', parameters: { type: 'object', properties: {} } }
+const tokens = (characters: number): number => Math.ceil(characters / 4)
+
+/** A leading system message as pi writes one: its own sections, a project file, one tool. */
+function systemPrompt(): never {
+  return {
+    role: 'system',
+    content: '',
+    sections: { preamble: 'p'.repeat(40), tools: 't'.repeat(40), project_context: 'a'.repeat(80) },
+    toolsAdded: [TOOL],
+    timestamp: Date.now(),
+  } as never
+}
+
+function threadWithACompaction(): SessionManager {
+  const session = SessionManager.inMemory(tmpdir())
+  session.appendMessage(systemPrompt())
+  session.appendMessage({ role: 'user', content: 'list files', timestamp: Date.now() })
+  session.appendMessage(assistant([{ type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'ls -la' } }]))
+  session.appendMessage({
+    role: 'toolResult',
+    toolCallId: 'c1',
+    toolName: 'bash',
+    content: [{ type: 'text', text: 'a b' }],
+    isError: false,
+    timestamp: Date.now(),
+  } as never)
+  session.appendCustomMessageEntry('reminder', 'r'.repeat(40), false)
+  session.appendMessage(assistant([{ type: 'text', text: '\ntwo files\nand more' }]))
+  const kept = session.appendMessage({ role: 'user', content: 'again', timestamp: Date.now() })
+  session.appendCompaction('s'.repeat(20), kept, 9000)
+  session.appendMessage(assistant([{ type: 'text', text: 'done' }]))
+  return session
+}
+
+test("a request's makeup: pi's own sections are the system prompt, a project file is injected, tools are their definitions", () => {
+  const [first] = branchContext(threadWithACompaction().getBranch()).requests
+  expect(first?.estimated).toEqual({
+    system: tokens(80),
+    tools: tokens(JSON.stringify([TOOL]).length),
+    user: tokens('list files'.length),
+    injected: tokens(80),
+    assistant: 0,
+    toolResults: 0,
+  })
+  expect(first?.actual).toEqual({ prompt: 153, output: 7, cacheRead: 50 })
+  expect(first?.brief).toEqual({
+    prompt: 'list files',
+    added: [
+      { category: 'system', label: 'system prompt' },
+      { category: 'user', label: 'list files' },
+    ],
+    moreAdded: 0,
+    reply: '',
+    toolCalls: ['bash'],
+  })
+})
+
+test('the brief names what entered since the previous request: a result by its call, a custom message by its type', () => {
+  const [, second] = branchContext(threadWithACompaction().getBranch()).requests
+  expect(second?.brief.added).toEqual([
+    { category: 'toolResults', label: 'bash ls -la' },
+    { category: 'injected', label: 'reminder' },
+  ])
+  expect(second?.brief.reply).toBe('two files')
+  expect(second?.estimated.injected).toBe(tokens(80) + tokens(40))
+  expect(second?.compaction).toBeUndefined()
+})
+
+// ⚠ pi's assembly, compaction included: after one, a request holds the prompt pi re-issues with
+// the compaction, the summary and the kept entries — not what the summary replaced.
+test("after a compaction a request holds the re-issued prompt, the summary and the kept entries, marked with pi's figure", () => {
+  const branch = threadWithACompaction().getBranch()
+  const { requests, next } = branchContext(branch)
+  const third = requests[2]
+  expect(third?.compaction).toEqual({ tokensBefore: 9000 })
+  expect(third?.estimated).toEqual({
+    system: tokens(80),
+    tools: tokens(JSON.stringify([TOOL]).length),
+    user: tokens('again'.length),
+    injected: tokens(80) + tokens(20),
+    assistant: 0,
+    toolResults: 0,
+  })
+  expect(next).toEqual({ ...third?.estimated, assistant: tokens('done'.length) } as typeof next)
+  // The numbering is the stats' numbering: turn N here is turn N in the Stats view.
+  expect(requests.map((request) => [request.turn, request.prompt])).toEqual(
+    branchStats(branch).turnStats.map((turn) => [turn.turn, turn.prompt]),
+  )
+})
+
+// An extension may prune a tool result from later requests (`context_edit`) — pi's projection
+// applies it, so the makeup is what was sent, not what is stored.
+test('a tool result an extension pruned no longer counts in the requests after the prune', () => {
+  const session = SessionManager.inMemory(tmpdir())
+  session.appendMessage(systemPrompt())
+  session.appendMessage({ role: 'user', content: 'read it', timestamp: Date.now() })
+  session.appendMessage(assistant([{ type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'cat big' } }]))
+  const result = session.appendMessage({
+    role: 'toolResult',
+    toolCallId: 'c1',
+    toolName: 'bash',
+    content: [{ type: 'text', text: 'x'.repeat(400) }],
+    isError: false,
+    timestamp: Date.now(),
+  } as never)
+  session.appendMessage(assistant([{ type: 'text', text: 'read' }]))
+  session.appendContextEdit(result, null)
+  session.appendMessage({ role: 'user', content: 'go on', timestamp: Date.now() })
+  session.appendMessage(assistant([{ type: 'text', text: 'ok' }]))
+  const { requests } = branchContext(session.getBranch())
+  expect(requests.map((request) => request.estimated.toolResults)).toEqual([0, tokens(400), 0])
+})

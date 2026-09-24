@@ -35,3 +35,34 @@ export async function readSchemaRoute<Schema extends TSchema>(
     return { kind: 'failed', problem: error instanceof Error ? error.message : String(error) }
   }
 }
+
+/**
+ * A thread analysis as a view holds it (#45, #361): still reading, read, or why not. The Stats and
+ * Context views read their routes this one way.
+ */
+export type AnalysisOutcome<Payload> =
+  | { readonly kind: 'reading' }
+  | { readonly kind: 'read'; readonly payload: Payload }
+  | { readonly kind: 'failed'; readonly problem: string }
+
+/** Where every analysis view starts. */
+export const ANALYSIS_READING = { kind: 'reading' } as const
+
+/**
+ * `GET /api/threads/:threadId/<analysis>` — `stats`, `context`. A 404 is a thread nothing has run
+ * in yet: held neither live nor on disk.
+ */
+export async function readThreadAnalysis<Schema extends TSchema>(
+  threadId: string,
+  analysis: string,
+  schema: Schema,
+  fetchImpl: FetchLike = fetch,
+): Promise<AnalysisOutcome<Static<Schema>>> {
+  const read = await readSchemaRoute(
+    `/api/threads/${encodeURIComponent(threadId)}/${analysis}`,
+    schema,
+    analysis,
+    fetchImpl,
+  )
+  return read.kind === 'absent' ? { kind: 'failed', problem: 'nothing has run in this thread yet' } : read
+}

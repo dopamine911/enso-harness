@@ -28,11 +28,11 @@ flowchart LR
 
 | Node | Contract | Input | Source |
 |---|---|---|---|
-| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:59`](../../packages/web/src/server/index.ts#L59)<br>[`packages/web/src/server/follow.ts:554`](../../packages/web/src/server/follow.ts#L554) |
-| `respondToHostCommand → runHostCommand` | [`POST /api/threads/:threadId/command`](./routes.md) | path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing | [`packages/web/src/server/index.ts:63`](../../packages/web/src/server/index.ts#L63) |
-| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:58`](../../packages/web/src/server/index.ts#L58)<br>[`packages/web/src/server/follow.ts:354`](../../packages/web/src/server/follow.ts#L354) |
-| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:61`](../../packages/web/src/server/index.ts#L61)<br>[`packages/web/src/server/follow.ts:390`](../../packages/web/src/server/follow.ts#L390) |
-| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:57`](../../packages/web/src/server/index.ts#L57)<br>[`packages/web/src/server/follow.ts:264`](../../packages/web/src/server/follow.ts#L264) |
+| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:62`](../../packages/web/src/server/index.ts#L62)<br>[`packages/web/src/server/follow.ts:554`](../../packages/web/src/server/follow.ts#L554) |
+| `respondToHostCommand → runHostCommand` | [`POST /api/threads/:threadId/command`](./routes.md) | path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing | [`packages/web/src/server/index.ts:66`](../../packages/web/src/server/index.ts#L66) |
+| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:61`](../../packages/web/src/server/index.ts#L61)<br>[`packages/web/src/server/follow.ts:354`](../../packages/web/src/server/follow.ts#L354) |
+| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:64`](../../packages/web/src/server/index.ts#L64)<br>[`packages/web/src/server/follow.ts:390`](../../packages/web/src/server/follow.ts#L390) |
+| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:60`](../../packages/web/src/server/index.ts#L60)<br>[`packages/web/src/server/follow.ts:264`](../../packages/web/src/server/follow.ts#L264) |
 
 ## Observation pipeline
 

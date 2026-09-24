@@ -42,6 +42,8 @@ export interface AgentHost {
    * per-turn stats, from one open, building nothing (#86). `undefined` when no file has that id.
    */
   readStoredThreadStats(threadId: string): Promise<StoredThreadStats | undefined>
+  /** A stored thread's context, request by request (#361) — one open, nothing built (#86). */
+  readStoredThreadContext(threadId: string): Promise<StoredThreadContext | undefined>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
@@ -67,6 +69,8 @@ export interface HostedThread {
   emittedEvents(): EnsoThreadEvent[]
   /** The branch analysed (#45 phase 2): per request, per turn, per tool, off pi's own entries. */
   branchStats(): BranchStats
+  /** The branch's context, request by request (#361): what each was assembled from, by pi's own assembly. */
+  branchContext(): BranchContext
   /**
    * What the loaded extensions would say about a tool call, through the runtime's own hook
    * runner — the verdict a model's call would meet, without a model. Inspection, like the

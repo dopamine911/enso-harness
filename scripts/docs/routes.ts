@@ -63,6 +63,12 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     success: "200 `EnsoThreadStats` JSON — pi's session for the numbers, the log's day files for the times",
     errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
   }),
+  THREAD_CONTEXT_ROUTE: threadRead({
+    path: '/api/threads/:threadId/context',
+    handler: 'respondWithThreadContext',
+    success: "200 `EnsoThreadContext` JSON — pi's branch, request by request, and its context meter",
+    errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
+  }),
   THREAD_HISTORY_ROUTE: threadRead({
     path: '/api/threads/:threadId/history',
     handler: 'respondWithThreadHistory',

@@ -3,14 +3,13 @@ import { join } from 'node:path'
 import {
   type EnsoDurationSummary,
   type EnsoLogLine,
-  type EnsoSessionUsage,
   type EnsoThreadStats,
   foldDay,
   mergeDurationSummaries,
 } from '@enso/core'
 import { ensoLogDay, ensoLogFilename } from '@enso/core/log-process'
 import type { AgentHost } from '../host/agent-host.ts'
-import type { BranchStats } from '../host/branch-stats.ts'
+import { liveOrStored } from './live-or-stored.ts'
 import { readLogFile } from './logs-stats-route.ts'
 import type { ThreadRegistry } from './thread-registry.ts'
 
@@ -19,9 +18,7 @@ import type { ThreadRegistry } from './thread-registry.ts'
  * drawer reads it. The session half comes from pi (`branch-stats.ts`, `session-usage.ts`), the
  * log half from the day files this thread's branch spans (`EnsoThreadStats` says which holds what).
  *
- * ⚠ LIVE-OR-COLD, READ THE WAY `thread-read.ts` READS: peek, read the file if not live, re-peek —
- * a thread built during the read is answered from pi's memory, which is fresher than the file.
- * Neither live nor stored is `undefined`, the route's 404. Looking builds nothing (#86).
+ * ⚠ LIVE-OR-COLD (`live-or-stored.ts`): pi's memory for a live thread, the file otherwise.
  *
  * ⚠ EACH DAY IS FOLDED ON ITS OWN, then merged. `dayStats` joins a run by `threadId#generation`,
  * and the generation restarts with the server: two days concatenated could join Monday's run 3
@@ -48,12 +45,6 @@ export interface ThreadStatsRouteDeps {
   readonly logsDir: string
   /** ⓘ Injectable so a test names its day. */
   readonly now?: () => Date
-}
-
-interface ThreadSource {
-  readonly live: boolean
-  readonly usage: EnsoSessionUsage
-  readonly branch: BranchStats
 }
 
 /** The day files present, oldest first — whatever the 14-day prune left. A missing directory has none. */
@@ -133,18 +124,13 @@ export function createThreadStatsRoute(
   const now = deps.now ?? ((): Date => new Date())
   const pastDays = createPastDays(deps.logsDir)
 
-  async function sourceOf(threadId: string): Promise<ThreadSource | undefined> {
-    const stored =
-      deps.threads.peek(threadId) === undefined ? await deps.host.readStoredThreadStats(threadId) : undefined
-    const nowLive = deps.threads.peek(threadId)
-    if (nowLive !== undefined) {
-      return { live: true, usage: nowLive.hosted.runtime.sessionUsage(), branch: nowLive.hosted.branchStats() }
-    }
-    return stored === undefined ? undefined : { live: false, ...stored }
-  }
-
   return async (threadId: string): Promise<EnsoThreadStats | undefined> => {
-    const source = await sourceOf(threadId)
+    const source = await liveOrStored(
+      deps.threads,
+      threadId,
+      (view) => ({ usage: view.hosted.runtime.sessionUsage(), branch: view.hosted.branchStats() }),
+      () => deps.host.readStoredThreadStats(threadId),
+    )
     if (source === undefined) return undefined
     const { branch } = source
     // From the branch's first entry's day; a branch with none has only today to look in.

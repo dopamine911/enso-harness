@@ -15,6 +15,7 @@ import type {
   ThreadRuntime,
 } from '@enso/core'
 import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
+import type { BranchContext } from '../../host/branch-context.ts'
 import type { BranchStats } from '../../host/branch-stats.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
 import { decideHostCommand, HostCommandRefused, hostCommandRows } from '../../host/host-commands.ts'
@@ -114,6 +115,8 @@ export interface FakeHostedThreadOptions {
   readonly runtime?: (parts: FakeThreadParts) => Partial<ThreadRuntime>
   /** What `branchStats()` answers (#45 phase 2); an empty branch when absent. */
   readonly branch?: BranchStats
+  /** What `branchContext()` answers (#361); no request when absent. */
+  readonly context?: BranchContext
   readonly inspect?: Partial<HostedThreadInspection>
 }
 
@@ -268,6 +271,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     // The fake loads no extensions: every probe is the hook's silence.
     probeToolCall: async (): Promise<undefined> => undefined,
     branchStats: () => options.branch ?? FAKE_EMPTY_BRANCH,
+    branchContext: () => options.context ?? FAKE_EMPTY_CONTEXT,
   }
   return { hosted, record, emit, open }
 }
@@ -283,6 +287,8 @@ export interface FakeStoredThread {
   readonly usage?: EnsoSessionUsage
   /** The branch analysed (#45 phase 2); an empty branch when absent. */
   readonly branch?: BranchStats
+  /** The branch's context (#361); no request when absent. */
+  readonly context?: BranchContext
 }
 
 const FAKE_FRESH_MODE: EnsoPermissionModeState = { mode: 'default', available: ['default'] }
@@ -294,6 +300,12 @@ const FAKE_EMPTY_BRANCH: BranchStats = {
   promptStats: [],
   callStats: [],
   firstAt: undefined,
+}
+
+/** A branch with no request on it, and nothing in its context. */
+const FAKE_EMPTY_CONTEXT: BranchContext = {
+  next: { system: 0, tools: 0, user: 0, injected: 0, assistant: 0, toolResults: 0 },
+  requests: [],
 }
 
 /**
@@ -340,6 +352,14 @@ export function createFakeAgentHost(
         storedThread === undefined
           ? undefined
           : { usage: storedThread.usage ?? { ...FAKE_NO_USAGE }, branch: storedThread.branch ?? FAKE_EMPTY_BRANCH },
+      )
+    },
+    readStoredThreadContext: (threadId: string) => {
+      const storedThread = stored[threadId]
+      return Promise.resolve(
+        storedThread === undefined
+          ? undefined
+          : { usage: storedThread.usage ?? { ...FAKE_NO_USAGE }, context: storedThread.context ?? FAKE_EMPTY_CONTEXT },
       )
     },
   }

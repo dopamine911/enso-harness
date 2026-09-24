@@ -19,7 +19,7 @@ import {
   type LayoutProps,
   type MessageProps,
 } from '@tanstack/ai-react/ui'
-import { ArrowUpIcon, ChartColumnIcon, MessagesSquareIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
+import { ArrowUpIcon, ChartColumnIcon, LayersIcon, MessagesSquareIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { CommandPalette } from './command-palette.tsx'
@@ -71,6 +71,7 @@ import {
   fetchThreadHistory,
   storedThreadsNotOnThisPage,
 } from './stored-threads.ts'
+import { ThreadContextDrawer } from './thread-context.tsx'
 import { ThreadDebugDrawer } from './thread-debug.tsx'
 import { ThreadStatsDrawer } from './thread-stats.tsx'
 import { ThreadStatusBar } from './thread-status.tsx'
@@ -229,10 +230,10 @@ const DebugOpenContext = createContext(false)
  * The page's main views (#361): the transcript, or an analysis of the thread in its place. One
  * choice for the page — switching thread keeps it — rendered by the pane on screen.
  */
-export type ThreadView = 'chat' | 'stats'
+export type ThreadView = 'chat' | 'context' | 'stats'
 
 /** A tab's value back to a view: the only strings the tab list hands over are these. */
-const THREAD_VIEWS: Readonly<Record<string, ThreadView>> = { chat: 'chat', stats: 'stats' }
+const THREAD_VIEWS: Readonly<Record<string, ThreadView>> = { chat: 'chat', context: 'context', stats: 'stats' }
 
 /**
  * What THIS pane shows, and how to change the page's view. `shown` is undefined in a hidden
@@ -1182,6 +1183,14 @@ const chatComponents = {
               <PendingQueue />
               <Input />
             </div>
+            {/* The thread's context (#361): what each request was made of, in the transcript's place. */}
+            {shown === 'context' ? (
+              <div role="tabpanel" {...panelIds('context')} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+                <div className="mx-auto w-full max-w-6xl">
+                  <ThreadContextDrawer />
+                </div>
+              </div>
+            ) : null}
             {/* The thread's stats (#45 phase 2), in the transcript's place (#361). */}
             {shown === 'stats' ? (
               <div role="tabpanel" {...panelIds('stats')} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
@@ -1380,6 +1389,15 @@ function ViewTabs({ view, onView }: { view: ThreadView; onView: (view: ThreadVie
         <TabsTrigger value="chat" id="thread-view-chat-tab" aria-controls="thread-view-chat">
           <MessagesSquareIcon aria-hidden="true" />
           Chat
+        </TabsTrigger>
+        <TabsTrigger
+          value="context"
+          id="thread-view-context-tab"
+          aria-controls="thread-view-context"
+          title="what each model request was made of, and how the context grew"
+        >
+          <LayersIcon aria-hidden="true" />
+          Context
         </TabsTrigger>
         <TabsTrigger
           value="stats"
