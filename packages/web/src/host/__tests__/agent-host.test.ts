@@ -20,7 +20,7 @@ import {
   type HostedThread,
   MODEL_WATCH_EXTENSION_PATH,
   seedMultiAccountChildProxyOff,
-  stopRunThenSettleDialogs,
+  stopRunSettlingDialogs,
 } from '../agent-host.ts'
 import { readPiccPersistedMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
 
@@ -495,7 +495,7 @@ test("⚠ Stop stops: the run's abort settles a pending dialog as `aborted` — 
 // that throws, one layer down.
 test("⚠ a stop must stop: when the runtime's abort rejects, the dialogs still settle and the rejection still propagates", async () => {
   const order: string[] = []
-  const stopping = stopRunThenSettleDialogs(
+  const stopping = stopRunSettlingDialogs(
     async () => {
       order.push('runtime told')
       throw new Error('the runtime would not stop')
@@ -506,7 +506,7 @@ test("⚠ a stop must stop: when the runtime's abort rejects, the dialogs still 
   expect(order).toEqual(['runtime told', 'dialogs settled'])
   // and the ordinary order, for the record: runtime first, dialogs after
   order.length = 0
-  await stopRunThenSettleDialogs(
+  await stopRunSettlingDialogs(
     async () => {
       order.push('runtime told')
     },
@@ -894,35 +894,46 @@ test("⚠ a stored session's usage is pi's own getSessionStats total — every b
 
 // ── the agent asks (#12) ─────────────────────────────────────────────────────
 
+/** One question as the model writes it into an `ask_user` call. */
+interface AskUserQuestion {
+  header: string
+  tab: string
+  options: Array<{ label: string; description?: string }>
+  multiSelect?: boolean
+}
+
+const DATABASE_QUESTION: AskUserQuestion = {
+  header: 'Which database?',
+  tab: 'Database',
+  options: [
+    { label: 'Postgres', description: 'relational, a server' },
+    { label: 'SQLite', description: 'embedded, a file' },
+  ],
+}
+
+const CHECKS_QUESTION: AskUserQuestion = {
+  header: 'Which checks?',
+  tab: 'Checks',
+  multiSelect: true,
+  options: [{ label: 'lint' }, { label: 'types' }, { label: 'tests' }],
+}
+
 /** The option a test answers with — `ask_user` folds each description into the label it offers. */
 const POSTGRES_OPTION = 'Postgres — relational, a server'
 
 /**
- * A hosted session whose faux model calls `ask_user` with one single-choice question, prompted and
- * held at the question: the observations so far, the question as it arrived, and the run's settle.
+ * A hosted session whose faux model calls `ask_user` with `question`, prompted and held at its
+ * first dialog: the observations so far, that dialog as it arrived, and the run's settle.
  */
-async function askedOneQuestion(): Promise<{
+async function askedOneQuestion(question: AskUserQuestion): Promise<{
   hosted: HostedThread
   events: EnsoObservation[]
-  question: Extract<EnsoObservation, { kind: 'extension-ui-request' }>
+  first: Extract<EnsoObservation, { kind: 'extension-ui-request' }>
   settled: Promise<void>
 }> {
   const core = createFauxCore()
   core.setResponses([
-    faux.fauxAssistantMessage(
-      faux.fauxToolCall('ask_user', {
-        questions: [
-          {
-            header: 'Which database?',
-            tab: 'Database',
-            options: [
-              { label: 'Postgres', description: 'relational, a server' },
-              { label: 'SQLite', description: 'embedded, a file' },
-            ],
-          },
-        ],
-      }),
-    ),
+    faux.fauxAssistantMessage(faux.fauxToolCall('ask_user', { questions: [question] })),
     faux.fauxAssistantMessage('Understood.'),
   ])
   const hosted = await hostedSession([fauxModelExtension(core)])
@@ -933,12 +944,12 @@ async function askedOneQuestion(): Promise<{
   })
   const asked = untilObservation(
     hosted,
-    (observation) => observation.kind === 'extension-ui-request' && observation.method === 'select',
+    (observation) => observation.kind === 'extension-ui-request' && observation.blocking,
   )
   hosted.runtime.prompt({ message: 'set up storage' }, { onAccepted: () => undefined, onRejected: settled.reject })
-  const question = await asked
-  if (question.kind !== 'extension-ui-request') throw new Error('unreachable: matched on kind')
-  return { hosted, events, question, settled: settled.promise }
+  const first = await asked
+  if (first.kind !== 'extension-ui-request') throw new Error('unreachable: matched on kind')
+  return { hosted, events, first, settled: settled.promise }
 }
 
 /** The JSON `ask_user` returned to the model, once the run has settled. */
@@ -953,27 +964,79 @@ function askUserResult(events: EnsoObservation[]): unknown {
 // `@d3ara1n/pi-ask-user`), and the question must arrive as the same `select` dialog the web card
 // renders — the host binds `ctx.mode = 'rpc'`, so the tool takes its dialog path, not its terminal
 // panel (whose `custom` resolves `undefined` here, which would read as "the user cancelled"). The
-// answer then has to reach the model as the tool's result. A vendor bump that routes the rpc path
-// through `custom`, or renames the tool, fails here.
+// rows are pinned exactly: they are what the card shows, and what a vendor bump reorders or
+// relabels. The answer then has to reach the model as the tool's result.
 test('⚠⚠ the agent asks through ask_user: its question is a select dialog, and the answer is its tool result (#12)', async () => {
-  const { hosted, events, question, settled } = await askedOneQuestion()
-  expect(question.blocking).toBe(true)
-  expect(question.dialog).toMatchObject({ method: 'select', title: 'Which database?' })
-  if (question.dialog?.method !== 'select') throw new Error('not a select dialog')
-  expect(question.dialog.options).toContain(POSTGRES_OPTION)
-  expect(question.dialog.options).toContain('SQLite — embedded, a file')
+  const { hosted, events, first, settled } = await askedOneQuestion(DATABASE_QUESTION)
+  expect(first.blocking).toBe(true)
+  expect(first.dialog).toEqual({
+    method: 'select',
+    title: 'Which database?',
+    options: [POSTGRES_OPTION, 'SQLite — embedded, a file', '→ Skip this question', '✎ Type something…'],
+  })
 
-  hosted.runtime.answerDialog({ id: question.id, value: POSTGRES_OPTION })
+  hosted.runtime.answerDialog({ id: first.id, value: POSTGRES_OPTION })
   await settled
   expect(askUserResult(events)).toMatchObject({ cancelled: false, answers: [{ tab: 'Database', answer: 'Postgres' }] })
 })
 
-// The card's Cancel is `{ cancelled: true }` on the wire and pi's cancel value to the tool. The
-// seam page states what the model then reads; a vendor bump that threw, or waited, on a
-// dismissed question would leave the run hung or failed on the web, and fails here instead.
-test('a cancelled ask_user question returns { cancelled: true } to the model, and the run settles (#12)', async () => {
-  const { hosted, events, question, settled } = await askedOneQuestion()
-  hosted.runtime.answerDialog({ id: question.id, cancelled: true })
+// A SINGLE-choice question's Cancel: `{ cancelled: true }` on the wire is pi's cancel value for a
+// `select` (`undefined`), which the tool reports as a cancelled questionnaire. A vendor bump that
+// threw, or waited, on a dismissed question would leave a web run failed or hung, and fails here.
+test('a cancelled single-choice ask_user question returns { cancelled: true } to the model, and the run settles (#12)', async () => {
+  const { hosted, events, first, settled } = await askedOneQuestion(DATABASE_QUESTION)
+  hosted.runtime.answerDialog({ id: first.id, cancelled: true })
   await settled
   expect(askUserResult(events)).toMatchObject({ cancelled: true, answers: [] })
 })
+
+// ⚠ A MULTI-choice question has no cancel on the web, and this pins that it does not. The tool
+// asks one `confirm` per option; pi's cancel value for a confirm is `false`, which the tool reads
+// as "not this option" and asks the next. Declining every card is therefore an ANSWERED, empty
+// selection — the model cannot tell it from the user choosing nothing (seams/dialog.md says so).
+// A vendor bump that made dismissal a real cancel changes this result, and the page with it.
+test('⚠ declining every card of a multi-choice ask_user question is an answered empty selection, not a cancel (#12)', async () => {
+  const { hosted, events, first, settled } = await askedOneQuestion(CHECKS_QUESTION)
+  const declined: string[] = []
+  let question = first
+  for (const [index, option] of CHECKS_QUESTION.options.entries()) {
+    expect(question.dialog).toMatchObject({ method: 'confirm', title: `Which checks? — include "${option.label}"?` })
+    declined.push(question.id)
+    // Watch for the next card only when one is coming: a watcher left behind rejects at its
+    // deadline, and bun pins that on whichever test is running then.
+    const next =
+      index < CHECKS_QUESTION.options.length - 1
+        ? untilObservation(
+            hosted,
+            (observation) =>
+              observation.kind === 'extension-ui-request' && observation.blocking && !declined.includes(observation.id),
+          )
+        : undefined
+    hosted.runtime.answerDialog({ id: question.id, cancelled: true })
+    if (next === undefined) break
+    const asked = await next
+    if (asked.kind !== 'extension-ui-request') throw new Error('unreachable: matched on kind')
+    question = asked
+  }
+  await settled
+  expect(askUserResult(events)).toMatchObject({ cancelled: false, answers: [{ tab: 'Checks', answers: [] }] })
+})
+
+// ⚠⚠ If the user says stop, it's stop — also while the AGENT is asking. A question from a tool's
+// `execute` holds the run, and pi's abort waits for the run: before the stop settled dialogs as it
+// began (and refused new ones until it ended), both of these waited on the card for ever (#376
+// review). The multi-choice case is the harder one: the tool ignores the abort signal and asks the
+// next option, which must be refused rather than shown.
+for (const question of [DATABASE_QUESTION, CHECKS_QUESTION]) {
+  test(`⚠⚠ Stop while ask_user waits (${question.multiSelect === true ? 'multi' : 'single'}-choice) stops the run and leaves no question open (#12)`, async () => {
+    const { hosted, events, settled } = await askedOneQuestion(question)
+    await hosted.runtime.abort()
+    await settled
+    expect(hosted.runtime.openDialogs()).toEqual([])
+    const asked = events.filter((event) => event.kind === 'extension-ui-request' && event.blocking)
+    expect(asked).toHaveLength(1)
+    expect(events.filter((event) => event.kind === 'dialog-settled')).toEqual([
+      { kind: 'dialog-settled', id: asked[0]?.kind === 'extension-ui-request' ? asked[0].id : '', outcome: 'aborted' },
+    ])
+  })
+}

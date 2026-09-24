@@ -126,6 +126,14 @@ export interface EnsoExtensionUiContext {
    * until Stop was made to stop. The asking extension need not have passed a signal.
    */
   abortAllDialogs(): void
+  /**
+   * Refuse every question asked before `settled` settles: it resolves at once to its cancel
+   * value, outcome `aborted`, and no card is shown. For the window while a stopped run winds
+   * down — a tool that asks from its `execute` and ignores the abort signal (ask_user's
+   * multi-select loop asks the next option) would otherwise open a question after the stop,
+   * and the stop would wait on it (#376 review).
+   */
+  refuseDialogsUntil(settled: Promise<unknown>): void
   /** How many dialogs are blocked right now — observable state for tests and for the idle-timeout logic. */
   pendingDialogCount(): number
   /**
@@ -268,6 +276,8 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
     }
   }
   const pendingDialogs = new Map<string, PendingDialog>()
+  /** Open stop windows (`refuseDialogsUntil`); a count because two may overlap. */
+  let refusalWindows = 0
   let neutralTheme: PiTheme | undefined
 
   /**
@@ -288,6 +298,13 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
   ): Promise<T> {
     return new Promise<T>((resolve) => {
       const id = crypto.randomUUID()
+      if (refusalWindows > 0) {
+        // Asked while a stopped run winds down: refused like a pre-aborted signal below — no
+        // request was shown, so there is no card to settle.
+        hostLog.info('a question asked while the run stops is refused: {title}', { title: request.title })
+        resolve(cancelValue)
+        return
+      }
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined
       const finish = (value: T, outcome: EnsoDialogOutcome): void => {
         if (!pendingDialogs.delete(id)) return // already settled by another path
@@ -499,6 +516,14 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
     },
     abortAllDialogs(): void {
       for (const pending of [...pendingDialogs.values()]) pending.abort()
+    },
+    refuseDialogsUntil(settled: Promise<unknown>): void {
+      refusalWindows += 1
+      const close = (): void => {
+        refusalWindows -= 1
+      }
+      // Closed either way: a stop whose runtime rejects still ends its window.
+      settled.then(close, close)
     },
     pendingDialogCount(): number {
       return pendingDialogs.size
