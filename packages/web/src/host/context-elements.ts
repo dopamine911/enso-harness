@@ -1,5 +1,6 @@
 import { estimateTokens, type ProjectedSessionEntry } from '@earendil-works/pi-coding-agent'
 import {
+  base64DecodedBytes,
   ENSO_CONTEXT_IMAGE_PREVIEW_BYTES,
   type EnsoContextAddition,
   type EnsoContextBody,
@@ -214,7 +215,7 @@ function textAndImages(content: unknown): { text: string; images: EnsoContextIma
   for (const part of content as PiContentPart[]) {
     if (part.type === 'text' && typeof part.text === 'string') texts.push(part.text)
     if (part.type !== 'image' || typeof part.data !== 'string' || typeof part.mimeType !== 'string') continue
-    const bytes = Math.floor((part.data.length * 3) / 4)
+    const bytes = base64DecodedBytes(part.data)
     images.push({
       mimeType: part.mimeType,
       bytes,

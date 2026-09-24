@@ -105,3 +105,64 @@ test("a focus opens its element's category and row; the row shows the call's arg
   await flush(async () => root.unmount())
   container.remove()
 })
+
+// A live thread re-reads the detail on every usage move, and each read is a new payload: the
+// focus must stay the focus the reader already had — not re-open a row they closed, nor scroll.
+test('a re-read keeps the reader where they are: a focused row they closed stays closed, and nothing scrolls again', async () => {
+  const stores = mintThread()
+  const asked: string[] = []
+  globalThis.fetch = ((input: string | URL | Request): Promise<Response> => {
+    asked.push(String(input))
+    return Promise.resolve(Response.json({ ...DETAIL, threadId: stores.threadId }))
+  }) as typeof fetch
+  const scrolled: Element[] = []
+  const scrollIntoView = Element.prototype.scrollIntoView
+  Element.prototype.scrollIntoView = function recordScroll(this: Element): void {
+    scrolled.push(this)
+  }
+  try {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    await flush(async () => {
+      root.render(
+        <ThreadStoresContext.Provider value={stores}>
+          <ContextBrowser
+            requests={[REQUEST]}
+            next={MAKEUP}
+            request={2}
+            onRequest={(): void => undefined}
+            focus={{ request: 2, key: 'e4#0' }}
+          />
+        </ThreadStoresContext.Provider>,
+      )
+    })
+    const row = (): HTMLButtonElement | undefined =>
+      [...container.querySelectorAll<HTMLButtonElement>('li li button')].find((button) =>
+        button.textContent?.includes('bash ls -la'),
+      )
+    const until = async (ready: () => boolean): Promise<void> => {
+      const deadline = Date.now() + 2000
+      while (!ready() && Date.now() < deadline) await flush(() => new Promise((resolve) => setTimeout(resolve, 20)))
+    }
+    await until(() => row()?.getAttribute('aria-expanded') === 'true')
+    expect(scrolled).toHaveLength(1)
+    await flush(async () => {
+      row()?.click()
+    })
+    expect(row()?.getAttribute('aria-expanded')).toBe('false')
+    // A turn lands: the usage moves, the detail is read again.
+    await flush(async () => {
+      stores.usage.set({ cost: 0, input: 1, output: 1, cacheRead: 0, cacheWrite: 0, context: null })
+    })
+    await until(() => asked.length === 2)
+    await flush(() => new Promise((resolve) => setTimeout(resolve, 40)))
+    expect(asked).toHaveLength(2)
+    expect(row()?.getAttribute('aria-expanded')).toBe('false')
+    expect(scrolled).toHaveLength(1)
+    await flush(async () => root.unmount())
+    container.remove()
+  } finally {
+    Element.prototype.scrollIntoView = scrollIntoView
+  }
+})

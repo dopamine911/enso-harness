@@ -275,14 +275,18 @@ function useFocusedRows(focused: EnsoContextElement | undefined): {
     () => new Set(focused === undefined ? [] : [focused.key]),
   )
   const focusRow = useRef<HTMLLIElement | null>(null)
+  // ⚠ By KEY, not by element: each read of the detail is a new payload, so the element's identity
+  // moves on every usage move — keyed on it, a turn landing re-opened the row the reader had
+  // closed and scrolled back to it. A focus is the same focus until its key changes.
+  const focusedKey = focused?.key
   useEffect(() => {
-    if (focused === undefined) return
+    if (focusedKey === undefined) return
     setOpen(true)
-    setOpenKeys((keys) => new Set([...keys, focused.key]))
-  }, [focused])
+    setOpenKeys((keys) => new Set([...keys, focusedKey]))
+  }, [focusedKey])
   useEffect(() => {
-    if (focused !== undefined) focusRow.current?.scrollIntoView({ block: 'start' })
-  }, [focused])
+    if (focusedKey !== undefined) focusRow.current?.scrollIntoView({ block: 'start' })
+  }, [focusedKey])
   const toggle = (key: string): void => setOpenKeys((keys) => toggleMember(keys, key))
   return { open, setOpen, openKeys, toggle, focusRow }
 }

@@ -13,7 +13,7 @@ glossary domain are checked records keyed by defining module; a new or unknown m
 
 | Symbol | Kind | Entrypoint | Defining module | Glossary domain | Classification | web/host | web/server | web/browser | harness | scripts | Source declaration |
 |---|---|---|---|---|---|---:|---:|---:|---:|---:|---|
-| `base64DecodedBytes` | value | `@enso/core` | [`follow.ts`](../../packages/core/src/follow.ts) | [Control](../glossary.md#control), [Observation](../glossary.md#observation) | wire | 0 | 2 | 0 | 0 | 0 | [L215](../../packages/core/src/follow.ts#L215) |
+| `base64DecodedBytes` | value | `@enso/core` | [`follow.ts`](../../packages/core/src/follow.ts) | [Control](../glossary.md#control), [Observation](../glossary.md#observation) | wire | 1 | 2 | 0 | 0 | 0 | [L215](../../packages/core/src/follow.ts#L215) |
 | `browserSection` | value | `@enso/core` | [`log-bundle.ts`](../../packages/core/src/log-bundle.ts) | [Record](../glossary.md#record) | node-only utility | 0 | 0 | 1 | 0 | 0 | [L128](../../packages/core/src/log-bundle.ts#L128) |
 | `buildLogBundle` | value | `@enso/core` | [`log-bundle.ts`](../../packages/core/src/log-bundle.ts) | [Record](../glossary.md#record) | node-only utility | 0 | 1 | 0 | 0 | 0 | [L138](../../packages/core/src/log-bundle.ts#L138) |
 | `bundleRecordsText` | value | `@enso/core` | [`log-bundle.ts`](../../packages/core/src/log-bundle.ts) | [Record](../glossary.md#record) | node-only utility | 0 | 0 | 0 | 0 | 1 | [L91](../../packages/core/src/log-bundle.ts#L91) |
