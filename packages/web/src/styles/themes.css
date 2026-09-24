@@ -5,22 +5,34 @@
  * selector, not `html[…]`, so any element can wear one — the dialog's swatches draw each theme
  * in its own colours — and the blocks come after `.dark` so they win at equal specificity.
  *
- * Kanagawa (rebelot/kanagawa.nvim) mapped onto the shadcn token structure.
- * Hex values are verbatim from the upstream palette (lua/kanagawa/colors.lua,
- * fetched 2026-09-03) — the mapping onto shadcn ROLES is ours:
- *   :root  = Lotus (the light variant; no theme selects it today)
- *   .dark  = Wave  (the default — index.html keeps class="dark", matching kanagawa.nvim's
- *            own default)
- * Two deliberate legibility swaps, both still kanagawa colors:
- *   - wave muted-foreground is springViolet1 (#938AA9), not the comment color
- *     fujiGray (#727169) — fujiGray is ~3.9:1 on sumiInk3 and muted-foreground
- *     carries real UI text here (tool names, timestamps, the reasoning trigger)
- *   - wave destructive is peachRed (#FF5D62), not samuraiRed (#E82424) —
- *     samuraiRed is ~3.3:1 on sumiInk3 and destructive is TEXT in the Alert
+ * ⚠ EVERY VALUE IS UPSTREAM'S OWN ROLE COLOUR, not a palette colour placed by us. Each theme's
+ * editor theme assigns colours to UI roles; the variables take them by one rule, and the comment
+ * beside each value names the upstream role it came from:
  *
- * The other themes follow the same rule: muted-foreground and destructive carry text, so each
- * holds 4.5:1 on its background. Where a theme's own colour falls short it is LIFTED toward that
- * theme's foreground just far enough (≥4.6:1) — same hue, noted beside it.
+ *   background ← editor.background          foreground, card-/popover-foreground ← editor.foreground
+ *   card, muted ← editor.lineHighlightBackground, else dropdown.background
+ *   popover (-foreground) ← editorWidget.background (.foreground)
+ *   primary (-foreground) ← button.background (.foreground)
+ *   secondary (-foreground) ← list.hoverBackground (.hoverForeground) — the user bubble
+ *   accent (-foreground) ← list.activeSelectionBackground (.activeSelectionForeground)
+ *   muted-foreground ← descriptionForeground, else terminal.ansiBrightBlack
+ *   destructive ← errorForeground        ring ← focusBorder
+ *   border ← panel.border, else editorGroup.border        input ← input.border, else border
+ *   sidebar (-foreground, -border) ← sideBar.background (.foreground, .border)
+ *   chart-1…5 ← terminal blue, green, yellow, magenta, cyan
+ *   chart-6   ← the theme's orange (no terminal defines one)
+ *   — for any series, the next distinct colour upstream assigns where one repeats, or nearly
+ *     repeats, an earlier series; the comment says which and why
+ *
+ * Kanagawa has no VS Code theme of its own: kanagawa.nvim's `themes.lua` names the same roles
+ * (ui.bg, ui.float, ui.bg_visual, ui.fg_dim, diag.error, term), cited beside each value.
+ * A colour with alpha is composited over the theme's background. Two floors, the only values
+ * that are not upstream's own: text roles (muted-foreground, destructive) hold 4.5:1 on the
+ * background and the focus ring 3:1 (WCAG 1.4.11); one that falls short is LIFTED toward that
+ * theme's foreground just far enough, and says so. The derivation that wrote these blocks,
+ * with the upstream values it read, is recorded on the PR that introduced them.
+ *
+ * :root is Kanagawa Lotus, the light variant — no theme selects it today.
  */
 :root {
   --background: #f2ecbc; /* lotusWhite3 */
@@ -58,257 +70,269 @@
   --sidebar-ring: #4d699b; /* lotusBlue4 */
 }
 
+/*
+ * Kanagawa Wave — rebelot/kanagawa.nvim lua/kanagawa/themes.lua (wave) + colors.lua @ bb85e4b
+ */
 .dark,
 [data-theme="kanagawa-wave"] {
-  --background: #1f1f28; /* sumiInk3 — kanagawa's editor bg */
-  --foreground: #dcd7ba; /* fujiWhite */
-  --card: #2a2a37; /* sumiInk4 */
-  --card-foreground: #dcd7ba; /* fujiWhite */
-  --popover: #16161d; /* sumiInk0 — kanagawa floats */
-  --popover-foreground: #dcd7ba; /* fujiWhite */
-  --primary: #7e9cd8; /* crystalBlue */
-  --primary-foreground: #181820; /* sumiInk1 */
-  --secondary: #363646; /* sumiInk5 — the user bubble */
-  --secondary-foreground: #dcd7ba; /* fujiWhite */
-  --muted: #2a2a37; /* sumiInk4 */
-  --muted-foreground: #938aa9; /* springViolet1 — see header note */
-  --accent: #223249; /* waveBlue1 — kanagawa's selection */
-  --accent-foreground: #dcd7ba; /* fujiWhite */
-  --destructive: #ff5d62; /* peachRed — see header note */
-  --border: #363646; /* sumiInk5 */
-  --input: #363646; /* sumiInk5 */
-  --ring: #7e9cd8; /* crystalBlue */
-  --chart-1: #7e9cd8; /* crystalBlue */
-  --chart-2: #98bb6c; /* springGreen */
-  --chart-3: #e6c384; /* carpYellow */
-  --chart-4: #957fb8; /* oniViolet */
-  --chart-5: #7aa89f; /* waveAqua2 */
-  --chart-6: #ffa066; /* surimiOrange — the Context view's sixth category (#361) */
-  --sidebar: #16161d; /* sumiInk0 */
-  --sidebar-foreground: #dcd7ba; /* fujiWhite */
-  --sidebar-primary: #7e9cd8; /* crystalBlue */
-  --sidebar-primary-foreground: #181820;
-  --sidebar-accent: #223249; /* waveBlue1 */
-  --sidebar-accent-foreground: #dcd7ba;
-  --sidebar-border: #363646; /* sumiInk5 */
-  --sidebar-ring: #7e9cd8; /* crystalBlue */
-}
-
-/* Dracula — draculatheme.com/spec (bg, current line, foreground, comment, the six accents). */
-[data-theme="dracula"] {
-  --background: #282a36; /* background */
-  --foreground: #f8f8f2; /* foreground */
-  --card: #343746; /* the VS Code theme's lighter surface */
-  --card-foreground: #f8f8f2;
-  --popover: #21222c; /* the VS Code theme's darker surface */
-  --popover-foreground: #f8f8f2;
-  --primary: #bd93f9; /* purple */
-  --primary-foreground: #282a36;
-  --secondary: #44475a; /* current line — the user bubble */
-  --secondary-foreground: #f8f8f2;
-  --muted: #343746;
-  --muted-foreground: #8692b7; /* comment #6272a4 (3.0:1) lifted toward foreground, 4.6:1 */
-  --accent: #44475a; /* selection */
-  --accent-foreground: #f8f8f2;
-  --destructive: #ff5555; /* red */
-  --border: #44475a;
-  --input: #44475a;
-  --ring: #bd93f9;
-  --chart-1: #bd93f9; /* purple */
-  --chart-2: #50fa7b; /* green */
-  --chart-3: #f1fa8c; /* yellow */
-  --chart-4: #ff79c6; /* pink */
-  --chart-5: #8be9fd; /* cyan */
-  --chart-6: #ffb86c; /* orange */
-  --sidebar: #21222c;
-  --sidebar-foreground: #f8f8f2;
-  --sidebar-primary: #bd93f9;
-  --sidebar-primary-foreground: #282a36;
-  --sidebar-accent: #44475a;
-  --sidebar-accent-foreground: #f8f8f2;
-  --sidebar-border: #44475a;
-  --sidebar-ring: #bd93f9;
-}
-
-/* Nord — nordtheme.com (Polar Night nord0–3, Snow Storm nord4–6, Frost nord7–10, Aurora nord11–15). */
-[data-theme="nord"] {
-  --background: #2e3440; /* nord0 */
-  --foreground: #d8dee9; /* nord4 */
-  --card: #3b4252; /* nord1 */
-  --card-foreground: #d8dee9;
-  --popover: #3b4252; /* nord1 */
-  --popover-foreground: #d8dee9;
-  --primary: #88c0d0; /* nord8 */
-  --primary-foreground: #2e3440;
-  --secondary: #434c5e; /* nord2 — the user bubble */
-  --secondary-foreground: #eceff4; /* nord6 */
-  --muted: #3b4252; /* nord1 */
-  --muted-foreground: #949eb2; /* comment #616e88 (2.4:1) lifted toward nord4, 4.6:1 */
-  --accent: #434c5e; /* nord2 — the selection */
-  --accent-foreground: #eceff4;
-  --destructive: #cc8c93; /* nord11 #bf616a (3.1:1) lifted toward nord6, 4.6:1 */
-  --border: #434c5e; /* nord2 */
-  --input: #434c5e;
-  --ring: #88c0d0;
-  --chart-1: #81a1c1; /* nord9 */
-  --chart-2: #a3be8c; /* nord14 */
-  --chart-3: #ebcb8b; /* nord13 */
-  --chart-4: #b48ead; /* nord15 */
-  --chart-5: #8fbcbb; /* nord7 */
-  --chart-6: #d08770; /* nord12 */
-  --sidebar: #2e3440; /* nord0 — the rail keeps its border */
-  --sidebar-foreground: #d8dee9;
-  --sidebar-primary: #88c0d0;
-  --sidebar-primary-foreground: #2e3440;
-  --sidebar-accent: #434c5e;
-  --sidebar-accent-foreground: #eceff4;
-  --sidebar-border: #3b4252;
-  --sidebar-ring: #88c0d0;
-}
-
-/* One Dark — Atom's syntax and UI theme (the One Dark palette as the Atom packages define it). */
-[data-theme="one-dark"] {
-  --background: #282c34;
-  --foreground: #abb2bf;
-  --card: #2c313a;
-  --card-foreground: #abb2bf;
-  --popover: #21252b;
-  --popover-foreground: #abb2bf;
-  --primary: #61afef; /* blue */
-  --primary-foreground: #282c34;
-  --secondary: #3e4451; /* the selection — the user bubble */
-  --secondary-foreground: #d7dae0;
-  --muted: #2c313a;
-  --muted-foreground: #8f95a0; /* comment #7f848e (3.7:1) lifted toward foreground, 4.6:1 */
-  --accent: #3e4451;
-  --accent-foreground: #d7dae0;
-  --destructive: #d67982; /* red #e06c75 (4.4:1) lifted toward foreground, 4.6:1 */
-  --border: #3e4451;
-  --input: #3e4451;
-  --ring: #61afef;
-  --chart-1: #61afef; /* blue */
-  --chart-2: #98c379; /* green */
-  --chart-3: #e5c07b; /* yellow */
-  --chart-4: #c678dd; /* purple */
-  --chart-5: #56b6c2; /* cyan */
-  --chart-6: #d19a66; /* orange */
-  --sidebar: #21252b;
-  --sidebar-foreground: #abb2bf;
-  --sidebar-primary: #61afef;
-  --sidebar-primary-foreground: #282c34;
-  --sidebar-accent: #3e4451;
-  --sidebar-accent-foreground: #d7dae0;
-  --sidebar-border: #3e4451;
-  --sidebar-ring: #61afef;
-}
-
-/* Catppuccin Mocha — catppuccin.com/palette (base, mantle, crust, surfaces, overlays, text, accents). */
-[data-theme="catppuccin-mocha"] {
-  --background: #1e1e2e; /* base */
-  --foreground: #cdd6f4; /* text */
-  --card: #181825; /* mantle */
-  --card-foreground: #cdd6f4;
-  --popover: #11111b; /* crust */
-  --popover-foreground: #cdd6f4;
-  --primary: #cba6f7; /* mauve — Catppuccin's default accent */
-  --primary-foreground: #1e1e2e;
-  --secondary: #313244; /* surface0 — the user bubble */
-  --secondary-foreground: #cdd6f4;
-  --muted: #181825; /* mantle */
-  --muted-foreground: #9399b2; /* overlay2 */
-  --accent: #45475a; /* surface1 */
-  --accent-foreground: #cdd6f4;
-  --destructive: #f38ba8; /* red */
-  --border: #313244; /* surface0 */
-  --input: #45475a; /* surface1 */
-  --ring: #cba6f7;
-  --chart-1: #89b4fa; /* blue */
-  --chart-2: #a6e3a1; /* green */
-  --chart-3: #f9e2af; /* yellow */
-  --chart-4: #cba6f7; /* mauve */
-  --chart-5: #94e2d5; /* teal */
-  --chart-6: #fab387; /* peach */
-  --sidebar: #181825; /* mantle */
-  --sidebar-foreground: #cdd6f4;
-  --sidebar-primary: #cba6f7;
-  --sidebar-primary-foreground: #1e1e2e;
-  --sidebar-accent: #313244;
-  --sidebar-accent-foreground: #cdd6f4;
-  --sidebar-border: #313244;
-  --sidebar-ring: #cba6f7;
+  --background: #1f1f28; /* ui.bg sumiInk3 (Normal) */
+  --foreground: #dcd7ba; /* ui.fg fujiWhite (Normal) */
+  --card: #2a2a37; /* ui.bg_p1 sumiInk4 (Folded, TabLineSel) */
+  --card-foreground: #dcd7ba; /* ui.fg fujiWhite */
+  --popover: #16161d; /* ui.float.bg sumiInk0 (NormalFloat) */
+  --popover-foreground: #c8c093; /* ui.float.fg oldWhite (NormalFloat) */
+  --primary: #7e9cd8; /* syn.fun crystalBlue (Title, Directory) */
+  --primary-foreground: #1f1f28; /* ui.bg sumiInk3 */
+  --secondary: #363646; /* ui.bg_p2 sumiInk5 (CursorLine) */
+  --secondary-foreground: #dcd7ba; /* ui.fg fujiWhite */
+  --muted: #2a2a37; /* ui.bg_p1 sumiInk4 */
+  --muted-foreground: #c8c093; /* ui.fg_dim oldWhite (StatusLine, MsgArea) */
+  --accent: #223249; /* ui.bg_visual waveBlue1 (Visual) */
+  --accent-foreground: #dcd7ba; /* ui.fg fujiWhite */
+  --destructive: #e45b52; /* diag.error samuraiRed (ErrorMsg, DiagnosticError) (3.66:1) lifted toward the foreground, 4.61:1 */
+  --border: #54546d; /* ui.float.fg_border sumiInk6 (FloatBorder) */
+  --input: #54546d; /* ui.float.fg_border sumiInk6 (FloatBorder) */
+  --ring: #7e9cd8; /* syn.fun crystalBlue */
+  --chart-1: #7e9cd8; /* term blue crystalBlue */
+  --chart-2: #76946a; /* term green autumnGreen */
+  --chart-3: #c0a36e; /* term yellow boatYellow2 */
+  --chart-4: #957fb8; /* term magenta oniViolet */
+  --chart-5: #6a9589; /* term cyan waveAqua1 */
+  --chart-6: #ffa066; /* term extended colour 1 surimiOrange */
+  --sidebar: #16161d; /* ui.bg_m3 sumiInk0 (StatusLine, TabLine) */
+  --sidebar-foreground: #c8c093; /* ui.fg_dim oldWhite (StatusLine) */
+  --sidebar-primary: #7e9cd8; /* = primary */
+  --sidebar-primary-foreground: #1f1f28; /* = primary-foreground */
+  --sidebar-accent: #223249; /* = accent */
+  --sidebar-accent-foreground: #dcd7ba; /* = accent-foreground */
+  --sidebar-border: #16161d; /* ui.bg_m3 sumiInk0 (WinSeparator) */
+  --sidebar-ring: #7e9cd8; /* = ring */
 }
 
 /*
- * SynthWave '84 — robb0wen/synthwave-vscode, themes/synthwave-color-theme.json (fetched
- * 2026-09-24): the workbench colours for the surfaces, the syntax colours for the accents.
+ * Dracula — dracula/visual-studio-code src/dracula.yml @ a08a206
+ */
+[data-theme="dracula"] {
+  --background: #282a36; /* editor.background */
+  --foreground: #f8f8f2; /* editor.foreground */
+  --card: #343746; /* dropdown.background (no editor.lineHighlightBackground) */
+  --card-foreground: #f8f8f2; /* editor.foreground */
+  --popover: #21222c; /* editorWidget.background */
+  --popover-foreground: #f8f8f2; /* editor.foreground (no editorWidget.foreground) */
+  --primary: #44475a; /* button.background */
+  --primary-foreground: #f8f8f2; /* button.foreground */
+  --secondary: #353747; /* list.hoverBackground #44475a75 over the background */
+  --secondary-foreground: #f8f8f2; /* editor.foreground (no list.hoverForeground) */
+  --muted: #343746; /* dropdown.background (no editor.lineHighlightBackground) */
+  --muted-foreground: #8692b7; /* terminal.ansiBrightBlack (no descriptionForeground) (3.03:1) lifted toward the foreground, 4.62:1 */
+  --accent: #44475a; /* list.activeSelectionBackground */
+  --accent-foreground: #f8f8f2; /* list.activeSelectionForeground */
+  --destructive: #ff5555; /* errorForeground */
+  --border: #bd93f9; /* panel.border */
+  --input: #191a21; /* input.border */
+  --ring: #6272a4; /* focusBorder */
+  --chart-1: #bd93f9; /* terminal.ansiBlue */
+  --chart-2: #50fa7b; /* terminal.ansiGreen */
+  --chart-3: #f1fa8c; /* terminal.ansiYellow */
+  --chart-4: #ff79c6; /* terminal.ansiMagenta */
+  --chart-5: #8be9fd; /* terminal.ansiCyan */
+  --chart-6: #ffb86c; /* the theme's orange, ORANGE (no orange in the terminal) */
+  --sidebar: #21222c; /* sideBar.background */
+  --sidebar-foreground: #f8f8f2; /* editor.foreground (no sideBar.foreground) */
+  --sidebar-primary: #44475a; /* = primary */
+  --sidebar-primary-foreground: #f8f8f2; /* = primary-foreground */
+  --sidebar-accent: #44475a; /* = accent */
+  --sidebar-accent-foreground: #f8f8f2; /* = accent-foreground */
+  --sidebar-border: #bd93f9; /* panel.border (no sideBar.border) */
+  --sidebar-ring: #6272a4; /* = ring */
+}
+
+/*
+ * Nord — nordtheme/visual-studio-code themes/nord-color-theme.json @ 69b80f5
+ */
+[data-theme="nord"] {
+  --background: #2e3440; /* editor.background */
+  --foreground: #d8dee9; /* editor.foreground */
+  --card: #3b4252; /* editor.lineHighlightBackground */
+  --card-foreground: #d8dee9; /* editor.foreground */
+  --popover: #2e3440; /* editorWidget.background */
+  --popover-foreground: #d8dee9; /* editor.foreground (no editorWidget.foreground) */
+  --primary: #82b7c6; /* button.background #88c0d0ee over the background */
+  --primary-foreground: #2e3440; /* button.foreground */
+  --secondary: #3b4252; /* list.hoverBackground */
+  --secondary-foreground: #eceff4; /* list.hoverForeground */
+  --muted: #3b4252; /* editor.lineHighlightBackground */
+  --muted-foreground: #c7cdd8; /* descriptionForeground #d8dee9e6 over the background */
+  --accent: #88c0d0; /* list.activeSelectionBackground */
+  --accent-foreground: #2e3440; /* list.activeSelectionForeground */
+  --destructive: #c88e98; /* errorForeground (3.05:1) lifted toward the foreground, 4.63:1 */
+  --border: #3b4252; /* panel.border */
+  --input: #3b4252; /* input.border */
+  --ring: #787f8d; /* focusBorder (1.24:1) lifted toward the foreground, 3.10:1 */
+  --chart-1: #81a1c1; /* terminal.ansiBlue */
+  --chart-2: #a3be8c; /* terminal.ansiGreen */
+  --chart-3: #ebcb8b; /* terminal.ansiYellow */
+  --chart-4: #b48ead; /* terminal.ansiMagenta */
+  --chart-5: #88c0d0; /* terminal.ansiCyan */
+  --chart-6: #d08770; /* the theme's orange, nord12 (no orange in the terminal) */
+  --sidebar: #2e3440; /* sideBar.background */
+  --sidebar-foreground: #d8dee9; /* sideBar.foreground */
+  --sidebar-primary: #82b7c6; /* = primary */
+  --sidebar-primary-foreground: #2e3440; /* = primary-foreground */
+  --sidebar-accent: #88c0d0; /* = accent */
+  --sidebar-accent-foreground: #2e3440; /* = accent-foreground */
+  --sidebar-border: #3b4252; /* sideBar.border */
+  --sidebar-ring: #787f8d; /* = ring */
+}
+
+/*
+ * One Dark — Binaryify/OneDark-Pro src/themes/data/oneDarkPro.ts @ 194ac08 (One Dark Pro)
+ */
+[data-theme="one-dark"] {
+  --background: #282c34; /* editor.background */
+  --foreground: #abb2bf; /* editor.foreground */
+  --card: #2c313c; /* editor.lineHighlightBackground */
+  --card-foreground: #abb2bf; /* editor.foreground */
+  --popover: #21252b; /* editorWidget.background */
+  --popover-foreground: #abb2bf; /* editor.foreground (no editorWidget.foreground) */
+  --primary: #404754; /* button.background */
+  --primary-foreground: #abb2bf; /* editor.foreground (no button.foreground) */
+  --secondary: #2c313a; /* list.hoverBackground */
+  --secondary-foreground: #abb2bf; /* list.hoverForeground */
+  --muted: #2c313c; /* editor.lineHighlightBackground */
+  --muted-foreground: #abb2bf; /* descriptionForeground */
+  --accent: #2c313a; /* list.activeSelectionBackground */
+  --accent-foreground: #d7dae0; /* list.activeSelectionForeground */
+  --destructive: #b38a90; /* errorForeground (2.72:1) lifted toward the foreground, 4.64:1 */
+  --border: #3e4452; /* panel.border */
+  --input: #3e4452; /* panel.border (no input.border) */
+  --ring: #707784; /* focusBorder (1.44:1) lifted toward the foreground, 3.11:1 */
+  --chart-1: #4aa5f0; /* terminal.ansiBlue */
+  --chart-2: #8cc265; /* terminal.ansiGreen */
+  --chart-3: #d18f52; /* terminal.ansiYellow */
+  --chart-4: #c162de; /* terminal.ansiMagenta */
+  --chart-5: #42b3c2; /* terminal.ansiCyan */
+  --chart-6: #e05561; /* terminal.ansiRed (the theme's orange, the syntax orange #d19a66 is too near chart-3) */
+  --sidebar: #21252b; /* sideBar.background */
+  --sidebar-foreground: #abb2bf; /* sideBar.foreground */
+  --sidebar-primary: #404754; /* = primary */
+  --sidebar-primary-foreground: #abb2bf; /* = primary-foreground */
+  --sidebar-accent: #2c313a; /* = accent */
+  --sidebar-accent-foreground: #d7dae0; /* = accent-foreground */
+  --sidebar-border: #3e4452; /* panel.border (no sideBar.border) */
+  --sidebar-ring: #707784; /* = ring */
+}
+
+/*
+ * Catppuccin Mocha — catppuccin/vscode packages/catppuccin-vsc/src/theme/uiColors.ts (Mocha, default accent mauve)
+ */
+[data-theme="catppuccin-mocha"] {
+  --background: #1e1e2e; /* editor.background */
+  --foreground: #cdd6f4; /* editor.foreground */
+  --card: #2a2b3c; /* editor.lineHighlightBackground #cdd6f412 over the background */
+  --card-foreground: #cdd6f4; /* editor.foreground */
+  --popover: #181825; /* editorWidget.background */
+  --popover-foreground: #cdd6f4; /* editorWidget.foreground */
+  --primary: #cba6f7; /* button.background */
+  --primary-foreground: #11111b; /* button.foreground */
+  --secondary: #282839; /* list.hoverBackground #31324480 over the background */
+  --secondary-foreground: #cdd6f4; /* list.hoverForeground */
+  --muted: #2a2b3c; /* editor.lineHighlightBackground #cdd6f412 over the background */
+  --muted-foreground: #cdd6f4; /* descriptionForeground */
+  --accent: #313244; /* list.activeSelectionBackground */
+  --accent-foreground: #cdd6f4; /* list.activeSelectionForeground */
+  --destructive: #f38ba8; /* errorForeground */
+  --border: #585b70; /* panel.border */
+  --input: #585b70; /* panel.border (no input.border) */
+  --ring: #cba6f7; /* focusBorder */
+  --chart-1: #89b4fa; /* terminal.ansiBlue */
+  --chart-2: #a6e3a1; /* terminal.ansiGreen */
+  --chart-3: #f9e2af; /* terminal.ansiYellow */
+  --chart-4: #cba6f7; /* terminal.ansiMagenta */
+  --chart-5: #94e2d5; /* terminal.ansiCyan */
+  --chart-6: #fab387; /* the theme's orange, peach (no orange in the terminal) */
+  --sidebar: #181825; /* sideBar.background */
+  --sidebar-foreground: #cdd6f4; /* sideBar.foreground */
+  --sidebar-primary: #cba6f7; /* = primary */
+  --sidebar-primary-foreground: #11111b; /* = primary-foreground */
+  --sidebar-accent: #313244; /* = accent */
+  --sidebar-accent-foreground: #cdd6f4; /* = accent-foreground */
+  --sidebar-border: #585b70; /* panel.border (no sideBar.border) */
+  --sidebar-ring: #cba6f7; /* = ring */
+}
+
+/*
+ * SynthWave '84 — robb0wen/synthwave-vscode themes/synthwave-color-theme.json @ ecfa2fe
  */
 [data-theme="synthwave-84"] {
   --background: #262335; /* editor.background */
-  --foreground: #ffffff; /* foreground */
-  --card: #2a2139; /* input.background */
-  --card-foreground: #ffffff;
-  --popover: #171520; /* activityBar.background */
-  --popover-foreground: #ffffff;
-  --primary: #ff7edb; /* the pink */
-  --primary-foreground: #262335;
-  --secondary: #37294d; /* list.hoverBackground, opaque — the user bubble */
-  --secondary-foreground: #ffffff;
-  --muted: #2a2139;
-  --muted-foreground: #848bbd; /* the comment colour, 4.7:1 */
-  --accent: #37294d;
-  --accent-foreground: #ffffff;
-  --destructive: #fe4450; /* errorForeground */
-  --border: #444251; /* editorIndentGuide.background */
-  --input: #444251;
-  --ring: #ff7edb;
-  --chart-1: #36f9f6; /* cyan */
-  --chart-2: #72f1b8; /* green */
-  --chart-3: #fede5d; /* yellow */
-  --chart-4: #ff7edb; /* pink */
-  --chart-5: #9d8bca; /* scrollbarSlider.background, opaque */
-  --chart-6: #ff8b39; /* orange */
+  --foreground: #ffffff; /* foreground (no editor.foreground) */
+  --card: #232530; /* dropdown.background (no editor.lineHighlightBackground) */
+  --card-foreground: #ffffff; /* foreground (no editor.foreground) */
+  --popover: #191723; /* editorWidget.background #171520dc over the background */
+  --popover-foreground: #ffffff; /* foreground (no editorWidget.foreground / editor.foreground) */
+  --primary: #614d85; /* button.background */
+  --primary-foreground: #ffffff; /* foreground (no button.foreground / editor.foreground) */
+  --secondary: #302743; /* list.hoverBackground #37294d99 over the background */
+  --secondary-foreground: #ffffff; /* list.hoverForeground */
+  --muted: #232530; /* dropdown.background (no editor.lineHighlightBackground) */
+  --muted-foreground: #848bbd; /* the syntax comment colour (no descriptionForeground / terminal.ansiBrightBlack) */
+  --accent: #413f4e; /* list.activeSelectionBackground #ffffff20 over the background */
+  --accent-foreground: #ffffff; /* list.activeSelectionForeground */
+  --destructive: #fe4a55; /* errorForeground (4.48:1) lifted toward the foreground, 4.60:1 */
+  --border: #495495; /* editorGroup.border (no panel.border) */
+  --input: #495495; /* editorGroup.border (no input.border / panel.border) */
+  --ring: #707177; /* focusBorder (1.05:1) lifted toward the foreground, 3.14:1 */
+  --chart-1: #03edf9; /* terminal.ansiBlue */
+  --chart-2: #72f1b8; /* terminal.ansiGreen */
+  --chart-3: #f3e70f; /* terminal.ansiYellow */
+  --chart-4: #ff7edb; /* terminal.ansiMagenta */
+  --chart-5: #36f9f6; /* the syntax cyan (terminal.ansiCyan is terminal.ansiBlue, #03edf9, bright variant too) (terminal.ansiCyan #03edf9 is too near chart-1) */
+  --chart-6: #ff8b39; /* the theme's orange, the syntax orange (no orange in the terminal) */
   --sidebar: #241b2f; /* sideBar.background */
-  --sidebar-foreground: #ffffff;
-  --sidebar-primary: #ff7edb;
-  --sidebar-primary-foreground: #262335;
-  --sidebar-accent: #37294d;
-  --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #444251;
-  --sidebar-ring: #ff7edb;
+  --sidebar-foreground: #a8a7ae; /* sideBar.foreground #ffffff99 over the background */
+  --sidebar-primary: #614d85; /* = primary */
+  --sidebar-primary-foreground: #ffffff; /* = primary-foreground */
+  --sidebar-accent: #413f4e; /* = accent */
+  --sidebar-accent-foreground: #ffffff; /* = accent-foreground */
+  --sidebar-border: #495495; /* editorGroup.border (no sideBar.border / panel.border) */
+  --sidebar-ring: #707177; /* = ring */
 }
 
-/* Gruvbox Dark — morhetz/gruvbox, the dark palette at medium contrast (bg0, bg0_h, bg1–4, fg, fg4). */
+/*
+ * Gruvbox Dark — jdinhify/vscode-theme-gruvbox src/colors/base.ts @ ca3b8ad (Dark Medium)
+ */
 [data-theme="gruvbox-dark"] {
-  --background: #282828; /* bg0 */
-  --foreground: #ebdbb2; /* fg */
-  --card: #3c3836; /* bg1 */
-  --card-foreground: #ebdbb2;
-  --popover: #1d2021; /* bg0_h */
-  --popover-foreground: #ebdbb2;
-  --primary: #fabd2f; /* bright yellow */
-  --primary-foreground: #282828;
-  --secondary: #504945; /* bg2 — the user bubble */
-  --secondary-foreground: #ebdbb2;
-  --muted: #3c3836; /* bg1 */
-  --muted-foreground: #a89984; /* fg4 */
-  --accent: #504945; /* bg2 */
-  --accent-foreground: #ebdbb2;
-  --destructive: #f95b43; /* bright red #fb4934 (4.3:1) lifted toward fg, 4.6:1 */
-  --border: #504945; /* bg2 */
-  --input: #504945;
-  --ring: #fabd2f;
-  --chart-1: #83a598; /* bright blue */
-  --chart-2: #b8bb26; /* bright green */
-  --chart-3: #fabd2f; /* bright yellow */
-  --chart-4: #d3869b; /* bright purple */
-  --chart-5: #8ec07c; /* bright aqua */
-  --chart-6: #fe8019; /* bright orange */
-  --sidebar: #1d2021; /* bg0_h */
-  --sidebar-foreground: #ebdbb2;
-  --sidebar-primary: #fabd2f;
-  --sidebar-primary-foreground: #282828;
-  --sidebar-accent: #504945;
-  --sidebar-accent-foreground: #ebdbb2;
-  --sidebar-border: #3c3836;
-  --sidebar-ring: #fabd2f;
+  --background: #282828; /* editor.background */
+  --foreground: #ebdbb2; /* editor.foreground */
+  --card: #302e2d; /* editor.lineHighlightBackground #3c383660 over the background */
+  --card-foreground: #ebdbb2; /* editor.foreground */
+  --popover: #282828; /* editorWidget.background */
+  --popover-foreground: #ebdbb2; /* editor.foreground (no editorWidget.foreground) */
+  --primary: #375758; /* button.background #45858880 over the background */
+  --primary-foreground: #ebdbb2; /* button.foreground */
+  --secondary: #32302f; /* list.hoverBackground #3c383680 over the background */
+  --secondary-foreground: #d5c4a1; /* list.hoverForeground */
+  --muted: #302e2d; /* editor.lineHighlightBackground #3c383660 over the background */
+  --muted-foreground: #9d8e7b; /* terminal.ansiBrightBlack (no descriptionForeground) (4.02:1) lifted toward the foreground, 4.63:1 */
+  --accent: #32302f; /* list.activeSelectionBackground #3c383680 over the background */
+  --accent-foreground: #8ec07c; /* list.activeSelectionForeground */
+  --destructive: #f95b43; /* errorForeground (4.29:1) lifted toward the foreground, 4.64:1 */
+  --border: #3c3836; /* panel.border */
+  --input: #3c3836; /* input.border */
+  --ring: #7b7363; /* focusBorder (1.27:1) lifted toward the foreground, 3.14:1 */
+  --chart-1: #458588; /* terminal.ansiBlue */
+  --chart-2: #98971a; /* terminal.ansiGreen */
+  --chart-3: #d79921; /* terminal.ansiYellow */
+  --chart-4: #b16286; /* terminal.ansiMagenta */
+  --chart-5: #689d6a; /* terminal.ansiCyan */
+  --chart-6: #d65d0e; /* the theme's orange, orange1, the tier its terminal uses (no orange in the terminal) */
+  --sidebar: #282828; /* sideBar.background */
+  --sidebar-foreground: #d5c4a1; /* sideBar.foreground */
+  --sidebar-primary: #375758; /* = primary */
+  --sidebar-primary-foreground: #ebdbb2; /* = primary-foreground */
+  --sidebar-accent: #32302f; /* = accent */
+  --sidebar-accent-foreground: #8ec07c; /* = accent-foreground */
+  --sidebar-border: #3c3836; /* sideBar.border */
+  --sidebar-ring: #7b7363; /* = ring */
 }

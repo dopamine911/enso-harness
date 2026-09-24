@@ -136,7 +136,9 @@ export function Choice<Value extends string>({
           type="button"
           aria-pressed={option === value}
           className={
-            option === value ? 'rounded bg-background px-2 py-0.5 text-foreground' : 'px-2 py-0.5 text-muted-foreground'
+            option === value
+              ? 'rounded bg-background px-2 py-0.5 text-foreground ring-1 ring-border'
+              : 'px-2 py-0.5 text-muted-foreground'
           }
           onClick={() => onChange(option)}
         >
