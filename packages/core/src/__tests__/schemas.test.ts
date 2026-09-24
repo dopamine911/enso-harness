@@ -8,7 +8,7 @@ import {
   EnsoUsage,
   isEnsoToolResultDescriptor,
   PromptImageContent,
-  repeatedOptionLabel,
+  questionnaireRepeat,
   validateDialogAnswer,
 } from '../index.ts'
 
@@ -134,17 +134,26 @@ test('validateDialogAnswer holds a questionnaire answer to what each question of
   expect(refusal([{ selected: [], other: 'DuckDB' }, { selected: ['tests'] }])).toBeUndefined()
 })
 
-// A label listed twice cannot be told apart anywhere downstream (the card, a prompt, the answer),
-// so the tool and the host both refuse it — and must be told WHICH question and label to name.
-test('repeatedOptionLabel names the first question that lists a label twice, and nothing when all are distinct', () => {
-  const question = (labels: string[]): EnsoQuestion => ({
-    header: 'H',
+// A repeated header or label cannot be told apart anywhere downstream (the card's tabs and rows, a
+// prompt, the answer), so the tool and the host both refuse it — and must be told WHICH to name.
+test('questionnaireRepeat names the first repeated header or label, and nothing when both are distinct', () => {
+  const question = (header: string, labels: string[]): EnsoQuestion => ({
+    header,
     question: 'Q?',
     options: labels.map((label) => ({ label })),
     multiSelect: false,
   })
-  expect(repeatedOptionLabel([question(['a', 'b']), question(['c', 'd'])])).toBeUndefined()
-  expect(repeatedOptionLabel([question(['a', 'b']), question(['c', 'd', 'c'])])).toEqual({ question: 2, label: 'c' })
-  // the same label in two DIFFERENT questions is fine: each question is asked on its own
-  expect(repeatedOptionLabel([question(['a', 'b']), question(['a', 'b'])])).toBeUndefined()
+  expect(questionnaireRepeat([question('A', ['a', 'b']), question('B', ['c', 'd'])])).toBeUndefined()
+  expect(questionnaireRepeat([question('A', ['a', 'b']), question('B', ['c', 'd', 'c'])])).toEqual({
+    kind: 'label',
+    question: 2,
+    label: 'c',
+  })
+  expect(questionnaireRepeat([question('A', ['a', 'b']), question('A', ['c', 'd'])])).toEqual({
+    kind: 'header',
+    question: 2,
+    header: 'A',
+  })
+  // the same label in two DIFFERENT questions is fine: each question is answered on its own
+  expect(questionnaireRepeat([question('A', ['a', 'b']), question('B', ['a', 'b'])])).toBeUndefined()
 })

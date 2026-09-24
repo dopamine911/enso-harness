@@ -10,7 +10,7 @@ import {
   type SessionEntry,
   SessionManager,
 } from '@earendil-works/pi-coding-agent'
-import type { EnsoObservation } from '@enso/core'
+import { ASK_USER_TOOL_NAME, type EnsoObservation } from '@enso/core'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { findRepoRoot, harnessPackageDir } from '@enso/core/paths'
 import type { LogRecorder } from '@logtape/testing/recorder'
@@ -927,7 +927,7 @@ async function askedQuestionnaire(questions: readonly unknown[]): Promise<{
 }> {
   const core = createFauxCore()
   core.setResponses([
-    faux.fauxAssistantMessage(faux.fauxToolCall('ask_user', { questions })),
+    faux.fauxAssistantMessage(faux.fauxToolCall(ASK_USER_TOOL_NAME, { questions })),
     faux.fauxAssistantMessage('Understood.'),
   ])
   const hosted = await hostedSession([fauxModelExtension(core)])
@@ -948,7 +948,7 @@ async function askedQuestionnaire(questions: readonly unknown[]): Promise<{
 
 /** What `ask_user` returned to the model, once the run has settled. */
 function askUserText(events: EnsoObservation[]): string {
-  const result = events.find((event) => event.kind === 'tool-result' && event.toolName === 'ask_user')
+  const result = events.find((event) => event.kind === 'tool-result' && event.toolName === ASK_USER_TOOL_NAME)
   if (result?.kind !== 'tool-result') throw new Error(`no ask_user result: ${events.map((event) => event.kind)}`)
   expect(result.isError).toBe(false)
   return result.text

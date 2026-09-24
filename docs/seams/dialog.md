@@ -274,9 +274,9 @@ choosing it means) and `multiSelect`. The whole set is asked as ONE question of 
 - **The host** lifts it (`host/questionnaire-dialog.ts#liftQuestionnaire`): the carried value is
   validated against `EnsoDialogSpec` and rebuilt from the schema's own fields, at every level, so
   nothing else it carried reaches a follower. A malformed one is no dialog at all, and `custom`
-  resolves `undefined`. So is one that lists an option label twice in a question
-  (`dialog.ts#repeatedOptionLabel`): its rows could not be told apart. The tool refuses such a call
-  itself before asking, with an error naming the question and label so the model can re-ask.
+  resolves `undefined`. So is one that repeats a question's header, or an option label within
+  a question (`dialog.ts#questionnaireRepeat`): its tabs or rows could not be told apart. The tool
+  refuses such a call itself before asking, with an error naming what repeated so the model can re-ask.
 - **The card** (`questionnaire-card.tsx#QuestionnaireControls`) shows a tab per question; a radio or
   checkbox row per option, with its label and description; an "Other" row taking the user's own
   words; and one "Submit answers", enabled once every question is answered. Picking a single choice

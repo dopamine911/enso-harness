@@ -152,10 +152,13 @@ test('plain prompts: dismissing any prompt declines the whole questionnaire, eve
   expect(await run([DATABASE, CHECKS], scripted.context)).toBe('The user declined to answer and chose nothing.')
 })
 
-test('a question listing the same label twice is refused before anything is asked, naming what to fix', async () => {
+test('a repeated label or header is refused before anything is asked, naming what to fix', async () => {
   const scripted = scriptedContext({ mode: 'rpc', card: { answers: [] } })
   const twice: EnsoQuestion = { ...DATABASE, options: [...DATABASE.options, { label: 'SQLite', description: 'again' }] }
-  await expect(run([DATABASE, twice], scripted.context)).rejects.toThrow('question 2 lists the option "SQLite" twice')
+  await expect(run([CHECKS, twice], scripted.context)).rejects.toThrow('question 2 lists the option "SQLite" twice')
+  await expect(run([DATABASE, { ...CHECKS, header: 'Database' }], scripted.context)).rejects.toThrow(
+    'question 2 repeats the header "Database"',
+  )
   expect(scripted.cards).toEqual([])
   expect(scripted.asked).toEqual([])
 })

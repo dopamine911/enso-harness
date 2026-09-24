@@ -51,22 +51,34 @@ export const EnsoQuestion = Type.Object({
 export type EnsoQuestion = Static<typeof EnsoQuestion>
 
 /**
- * The first option label a question lists twice, and which question — or `undefined` when every
- * question's labels are distinct. The schema cannot say "unique by label", and a repeated label
- * breaks everything downstream: the card's two rows share one radio value, a plain prompt can
- * only ever pick the first, and the answer cannot say which of the two the user meant. So the
- * tool refuses such a call, and the host refuses to lift one.
+ * What a questionnaire repeats that must be distinct: a question's tab `header` (two tabs of one
+ * name cannot be told apart, and the card keys its tabs by it), or an option `label` within one
+ * question. The same label in two DIFFERENT questions is fine — each question is answered alone.
  *
  * @group Dialogs
  */
-export function repeatedOptionLabel(
-  questions: readonly EnsoQuestion[],
-): { readonly question: number; readonly label: string } | undefined {
+export type QuestionnaireRepeat =
+  | { readonly kind: 'header'; readonly question: number; readonly header: string }
+  | { readonly kind: 'label'; readonly question: number; readonly label: string }
+
+/**
+ * The first repeat a questionnaire carries, numbered by the question it is found in — or
+ * `undefined` when headers and labels are distinct. The schema cannot say "unique by field", and a
+ * repeat breaks everything downstream: the card's two tabs or rows collide, a plain prompt can only
+ * ever pick the first, and the answer cannot say which was meant. So the tool refuses such a call,
+ * and the host refuses to lift one.
+ *
+ * @group Dialogs
+ */
+export function questionnaireRepeat(questions: readonly EnsoQuestion[]): QuestionnaireRepeat | undefined {
+  const headers = new Set<string>()
   for (const [questionIndex, question] of questions.entries()) {
-    const seen = new Set<string>()
+    if (headers.has(question.header)) return { kind: 'header', question: questionIndex + 1, header: question.header }
+    headers.add(question.header)
+    const labels = new Set<string>()
     for (const { label } of question.options) {
-      if (seen.has(label)) return { question: questionIndex + 1, label }
-      seen.add(label)
+      if (labels.has(label)) return { kind: 'label', question: questionIndex + 1, label }
+      labels.add(label)
     }
   }
   return undefined

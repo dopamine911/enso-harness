@@ -36,7 +36,8 @@ export {
   type EnsoQuestionnaireResult,
   isEnsoDialogSpec,
   QUESTIONNAIRE_COMPONENT_KEY,
-  repeatedOptionLabel,
+  type QuestionnaireRepeat,
+  questionnaireRepeat,
   validateDialogAnswer,
 } from './dialog.ts'
 export {

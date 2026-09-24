@@ -480,7 +480,7 @@ cc-safety-net, the command analyzer the bash guard wires as a library. *log subs
 | dialog / dialog kind | `extension_ui_request`; `ctx.ui.select / confirm / input / editor` | approval `request()` inside a turn | — | mode extension's `FilePermissionDialog`, lifted to `select`; `ask_user`'s questionnaire component, lifted to `questionnaire` (ours) |
 | notify | `ctx.ui.notify`; `setStatus` is dropped | — | — | — |
 | permission mode | — | `permission/preset` + knobs; `custom` derived | — | mode extension's modes (`default`, `acceptEdits`, `plan`, `bypassPermissions`), persisted as `customType: "modes"` |
-| (no word) — the runtime's interface setting | `ctx.mode`: `interactive` / `rpc` / `print` | — | — | — |
+| (no word) — the runtime's interface setting | `ctx.mode`: `tui` / `rpc` / `json` / `print` | — | — | — |
 | verdict | `ToolCallEventResult`: `{ block, reason }` or `undefined` | — | — | analyzer `checkCommand` → `kind` `allow` or `deny`, with `ruleId`; a throw is a deny |
 | participant / arbiter | `pi.on("tool_call")`, additive: every handler runs, the first block ends the call | — | — | — |
 | tool identity | tool names `bash`, `write`, `edit`, `read` | — | — | the `picc-*` packages register `Bash` / `Edit` |

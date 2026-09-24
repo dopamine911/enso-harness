@@ -3,7 +3,7 @@ import {
   ensoLogger,
   isEnsoDialogSpec,
   QUESTIONNAIRE_COMPONENT_KEY,
-  repeatedOptionLabel,
+  questionnaireRepeat,
 } from '@enso/core'
 
 /**
@@ -42,11 +42,11 @@ export function liftQuestionnaire(
     log.warn('a questionnaire component carried no valid questionnaire — not asked: {carried}', { carried })
     return undefined
   }
-  // The tool refuses a repeated label before it asks; this is the host's own fence, because two
-  // rows sharing one value would render as one choice and the answer could not say which.
-  const repeated = repeatedOptionLabel(candidate.questions)
+  // The tool refuses a repeated header or label before it asks; this is the host's own fence,
+  // because two tabs or rows of one name render as one and the answer could not say which.
+  const repeated = questionnaireRepeat(candidate.questions)
   if (repeated !== undefined) {
-    log.warn('a questionnaire repeats option {label} in question {question} — not asked', repeated)
+    log.warn('a questionnaire repeats a {kind} in question {question} — not asked', repeated)
     return undefined
   }
   return {

@@ -15,7 +15,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs.t
  * declines the whole questionnaire — a real decline, whatever kind the questions are.
  *
  * The answer is `{ answers }`, one entry per question in order — the shape `validateDialogAnswer`
- * holds it to on the server, which refuses a label the question never offered.
+ * holds it to on the server, which refuses a label the question never offered. Headers and each
+ * question's labels are distinct by the time a card is shown (`questionnaireRepeat`: the tool and
+ * the host both refuse a repeat), so they are the keys.
  */
 
 type Questionnaire = Extract<EnsoDialogSpec, { method: 'questionnaire' }>
@@ -232,18 +234,14 @@ export function QuestionnaireControls({
       <Tabs value={active} onValueChange={setActive}>
         <TabsList>
           {dialog.questions.map((question, index) => (
-            <TabsTrigger key={`${question.header}\u0000${question.question}`} value={String(index)}>
+            <TabsTrigger key={question.header} value={String(index)}>
               {isAnswered(draftAt(index)) ? <CheckIcon aria-label="answered" /> : null}
               {question.header}
             </TabsTrigger>
           ))}
         </TabsList>
         {dialog.questions.map((question, index) => (
-          <TabsContent
-            key={`${question.header}\u0000${question.question}`}
-            value={String(index)}
-            className="flex flex-col gap-3 pt-2"
-          >
+          <TabsContent key={question.header} value={String(index)} className="flex flex-col gap-3 pt-2">
             <p className="font-medium text-sm">{question.question}</p>
             {question.multiSelect ? (
               <MultiChoice
