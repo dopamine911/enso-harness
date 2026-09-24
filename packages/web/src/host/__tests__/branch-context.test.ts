@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { tmpdir } from 'node:os'
 import { type SessionEntry, SessionManager } from '@earendil-works/pi-coding-agent'
-import { branchContext } from '../branch-context.ts'
+import { branchContext, branchRequestDetail } from '../branch-context.ts'
 import { branchStats } from '../branch-stats.ts'
 
 /**
@@ -73,14 +73,14 @@ test("a request's makeup: pi's own sections are the system prompt, a project fil
   const [first] = branchContext(threadWithACompaction().getBranch()).requests
   expect(first?.estimated).toEqual({
     system: tokens(80),
-    tools: tokens(JSON.stringify([TOOL]).length),
+    tools: tokens(JSON.stringify(TOOL).length),
     user: tokens('list files'.length),
     injected: tokens(80),
     assistant: 0,
     toolResults: 0,
   })
   expect(first?.actual).toEqual({ prompt: 153, output: 7, cacheRead: 50 })
-  expect(first?.brief).toEqual({
+  expect(first?.brief).toMatchObject({
     prompt: 'list files',
     added: [
       { category: 'system', label: 'system prompt' },
@@ -94,7 +94,7 @@ test("a request's makeup: pi's own sections are the system prompt, a project fil
 
 test('the brief names what entered since the previous request: a result by its call, a custom message by its type', () => {
   const [, second] = branchContext(threadWithACompaction().getBranch()).requests
-  expect(second?.brief.added).toEqual([
+  expect(second?.brief.added).toMatchObject([
     { category: 'toolResults', label: 'bash ls -la' },
     { category: 'injected', label: 'reminder' },
   ])
@@ -112,7 +112,7 @@ test("after a compaction a request holds the re-issued prompt, the summary and t
   expect(third?.compaction).toEqual({ tokensBefore: 9000 })
   expect(third?.estimated).toEqual({
     system: tokens(80),
-    tools: tokens(JSON.stringify([TOOL]).length),
+    tools: tokens(JSON.stringify(TOOL).length),
     user: tokens('again'.length),
     injected: tokens(80) + tokens(20),
     assistant: 0,
@@ -146,4 +146,54 @@ test('a tool result an extension pruned no longer counts in the requests after t
   session.appendMessage(assistant([{ type: 'text', text: 'ok' }]))
   const { requests } = branchContext(session.getBranch())
   expect(requests.map((request) => request.estimated.toolResults)).toEqual([0, tokens(400), 0])
+})
+
+// #361 phase 3: the browser's rows are the bars' makeup, split — the two are one computation.
+test("a request's elements sum to its bar's makeup, each entered since the request before marked", () => {
+  const branch = threadWithACompaction().getBranch()
+  const { requests } = branchContext(branch)
+  for (const request of requests) {
+    const summed = { system: 0, tools: 0, user: 0, injected: 0, assistant: 0, toolResults: 0 }
+    for (const element of branchRequestDetail(branch, request.turn)?.elements ?? [])
+      summed[element.category] += element.tokens
+    expect(summed).toEqual(request.estimated)
+  }
+  const first = branchRequestDetail(branch, 1)
+  expect(first?.elements.map((element) => [element.category, element.label, element.entered])).toEqual([
+    ['system', 'preamble', true],
+    ['system', 'tools', true],
+    ['injected', 'project_context', true],
+    ['tools', 'bash', true],
+    ['user', 'list files', true],
+  ])
+  const second = branchRequestDetail(branch, 2)
+  const result = second?.elements.find((element) => element.category === 'toolResults')
+  expect(result).toMatchObject({ label: 'bash ls -la', entered: true })
+  expect(result?.body).toEqual({
+    kind: 'toolResult',
+    toolName: 'bash',
+    arguments: { command: 'ls -la' },
+    isError: false,
+    text: 'a b',
+    images: [],
+  })
+  expect(second?.elements.find((element) => element.label === 'list files')?.entered).toBe(false)
+})
+
+// `left` is against the request before — which held neither its own reply nor anything after it.
+test('after a compaction, what the summary replaced is listed as left; a turn the branch lacks has no detail', () => {
+  const branch = threadWithACompaction().getBranch()
+  expect(branchRequestDetail(branch, 3)?.left.map((gone) => gone.label)).toEqual([
+    'system prompt',
+    'list files',
+    'calls bash',
+    'bash ls -la',
+    'reminder',
+  ])
+  expect(
+    branchRequestDetail(branch, 'next')
+      ?.elements.filter((element) => element.entered)
+      .map((element) => element.label),
+  ).toEqual(['done'])
+  expect(branchRequestDetail(branch, 9)).toBeUndefined()
 })

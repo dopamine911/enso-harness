@@ -64,15 +64,18 @@ export const EnsoContextMakeup = Type.Object(
 export type EnsoContextMakeup = Static<typeof EnsoContextMakeup>
 
 /**
- * One thing that entered the context since the previous request — dsh's step brief "In" row.
+ * One thing that entered the context since the previous request — dsh's step brief "In" row — or,
+ * in a request's detail, one that left it.
  *
  * @group Thread context
  */
 export const EnsoContextAddition = Type.Object(
   {
     category: EnsoContextCategory,
-    /** One line: a tool's name and its result's first line, a custom message's type, a summary. */
+    /** One line: a tool's name and its call's subject, a custom message's type, a summary. */
     label: Type.String(),
+    /** The Context Browser element it is (`EnsoContextElement.key`), or the prefix of its elements. */
+    key: Type.String(),
   },
   { additionalProperties: false },
 )
@@ -158,3 +161,131 @@ export const EnsoThreadContext = Type.Object(
 )
 /** @group Thread context */
 export type EnsoThreadContext = Static<typeof EnsoThreadContext>
+
+/**
+ * An image in a context element: its kind and size, and its bytes when small enough to preview.
+ *
+ * @group Thread context
+ */
+export const EnsoContextImage = Type.Object(
+  {
+    mimeType: Type.String(),
+    /** The decoded size. */
+    bytes: Type.Integer({ minimum: 0 }),
+    /** Base64, present only up to `ENSO_CONTEXT_IMAGE_PREVIEW_BYTES`. */
+    data: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread context */
+export type EnsoContextImage = Static<typeof EnsoContextImage>
+
+/**
+ * Past this size an image is described, not carried: a request's detail is read whole, and a
+ * screenshot's bytes would be most of it.
+ *
+ * @group Thread context
+ */
+export const ENSO_CONTEXT_IMAGE_PREVIEW_BYTES = 512 * 1024
+
+/**
+ * What a context element holds, as the browser draws it.
+ * - `text`: a prompt section, a user or custom message, a summary — its text and any images;
+ * - `tool`: one tool definition as the provider receives it;
+ * - `reply`: an assistant message's parts in order — text, thinking, tool calls with arguments;
+ * - `toolResult`: a result with the call's arguments beside it, and whether it failed.
+ *
+ * @group Thread context
+ */
+export const EnsoContextBody = Type.Union([
+  Type.Object(
+    { kind: Type.Literal('text'), text: Type.String(), images: Type.Array(EnsoContextImage) },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal('tool'),
+      name: Type.String(),
+      description: Type.String(),
+      parameters: Type.Unknown(),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal('reply'),
+      parts: Type.Array(
+        Type.Union([
+          Type.Object({ type: Type.Literal('text'), text: Type.String() }, { additionalProperties: false }),
+          Type.Object({ type: Type.Literal('thinking'), text: Type.String() }, { additionalProperties: false }),
+          Type.Object(
+            { type: Type.Literal('toolCall'), name: Type.String(), arguments: Type.Unknown() },
+            { additionalProperties: false },
+          ),
+        ]),
+      ),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal('toolResult'),
+      toolName: Type.String(),
+      /** The call's arguments; absent when the call is not in the context (compacted away). */
+      arguments: Type.Optional(Type.Unknown()),
+      isError: Type.Boolean(),
+      text: Type.String(),
+      images: Type.Array(EnsoContextImage),
+    },
+    { additionalProperties: false },
+  ),
+])
+/** @group Thread context */
+export type EnsoContextBody = Static<typeof EnsoContextBody>
+
+/**
+ * One element of a request's context — dsh's browser row: a prompt section, a tool definition,
+ * a message, a tool result.
+ *
+ * @group Thread context
+ */
+export const EnsoContextElement = Type.Object(
+  {
+    /** Stable across requests: the entry id, the message's place in it, and the section or tool. */
+    key: Type.String(),
+    category: EnsoContextCategory,
+    /** One line naming it. */
+    label: Type.String(),
+    /** When its entry was stored, ISO; absent for what pi does not stamp. */
+    at: Type.Optional(Type.String()),
+    /** pi's estimate, as the makeup counts it. */
+    tokens: Type.Integer({ minimum: 0 }),
+    /** Not in the previous request's context: it entered since. */
+    entered: Type.Boolean(),
+    body: EnsoContextBody,
+  },
+  { additionalProperties: false },
+)
+/** @group Thread context */
+export type EnsoContextElement = Static<typeof EnsoContextElement>
+
+/**
+ * One request's context, element by element — what `GET /api/threads/:threadId/context/:request`
+ * answers, read when the Context Browser opens a request rather than with the whole trend.
+ *
+ * @group Thread context
+ */
+export const EnsoContextRequestDetail = Type.Object(
+  {
+    threadId: Type.String(),
+    /** The request's turn, or `next`: what the next request would be assembled from, now. */
+    request: Type.Union([Type.Integer({ minimum: 1 }), Type.Literal('next')]),
+    /** In context order. */
+    elements: Type.Array(EnsoContextElement),
+    /** What the previous request held that this one does not — a compaction's work, mostly. */
+    left: Type.Array(EnsoContextAddition),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread context */
+export type EnsoContextRequestDetail = Static<typeof EnsoContextRequestDetail>

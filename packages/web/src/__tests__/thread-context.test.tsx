@@ -1,8 +1,12 @@
-import { expect, test } from 'bun:test'
+import { afterEach, expect, test } from 'bun:test'
 import type { EnsoContextRequest, EnsoThreadContext } from '@enso/core'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { ThreadStoresContext } from '../store.ts'
 import { ThreadContextView } from '../thread-context.tsx'
 import { changeOf, lastRequestPerPrompt, totalOf } from '../thread-context-analysis.ts'
+import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
+
+afterEach(() => clearThreadsForTest())
 
 /**
  * #361: the Context view — its derivations as pure functions, and a static render of what it
@@ -38,7 +42,12 @@ test("prompt granularity is each prompt's last request; a delta is the signed ch
 })
 
 const text = (context: EnsoThreadContext): string =>
-  renderToStaticMarkup(<ThreadContextView outcome={{ kind: 'read', payload: context }} />)
+  // The browser reads its request through the thread's stores; a static render runs no effect, so reads nothing.
+  renderToStaticMarkup(
+    <ThreadStoresContext.Provider value={mintThread()}>
+      <ThreadContextView outcome={{ kind: 'read', payload: context }} />
+    </ThreadStoresContext.Provider>,
+  )
     .replace(/<[^>]*>/g, ' ')
     .replaceAll('&#x27;', "'")
 

@@ -1,4 +1,4 @@
-import type { EnsoThreadContext } from '@enso/core'
+import type { EnsoContextRequestDetail, EnsoThreadContext } from '@enso/core'
 import type { AgentHost, StoredThreadContext } from '../host/agent-host.ts'
 import { liveOrStored } from './live-or-stored.ts'
 import type { ThreadRegistry, ThreadView } from './thread-registry.ts'
@@ -13,7 +13,7 @@ import type { ThreadRegistry, ThreadView } from './thread-registry.ts'
 export interface ThreadContextRouteDeps {
   /** Only the peek: the route reads a live thread and never builds one (#86). */
   readonly threads: Pick<ThreadRegistry, 'peek'>
-  readonly host: Pick<AgentHost, 'readStoredThreadContext'>
+  readonly host: Pick<AgentHost, 'readStoredThreadContext' | 'readStoredRequestDetail'>
 }
 
 /** A live thread's half, from pi's memory: its meter and its branch walked. */
@@ -31,5 +31,26 @@ export function createThreadContextRoute(
     if (read === undefined) return undefined
     const { usage, context, live } = read
     return { threadId, live, usage: usage.context, next: context.next, requests: context.requests }
+  }
+}
+
+/**
+ * `GET /api/threads/:threadId/context/:request` (#361 phase 3): one request's context, element by
+ * element — a turn's number, or `next`. Read when the Context Browser opens a request, so the
+ * trend's read stays small. Undefined — the route's 404 — for a thread held nowhere or a turn
+ * its branch does not have.
+ */
+export function createContextRequestRoute(
+  deps: ThreadContextRouteDeps,
+): (threadId: string, request: number | 'next') => Promise<EnsoContextRequestDetail | undefined> {
+  return async (threadId: string, request: number | 'next'): Promise<EnsoContextRequestDetail | undefined> => {
+    const read = await liveOrStored(
+      deps.threads,
+      threadId,
+      (view) => ({ detail: view.hosted.branchRequestDetail(request) }),
+      async () => ({ detail: await deps.host.readStoredRequestDetail(threadId, request) }),
+    )
+    if (read?.detail === undefined) return undefined
+    return { threadId, request, ...read.detail }
   }
 }

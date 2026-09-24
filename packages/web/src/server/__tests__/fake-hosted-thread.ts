@@ -15,7 +15,7 @@ import type {
   ThreadRuntime,
 } from '@enso/core'
 import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host/agent-host.ts'
-import type { BranchContext } from '../../host/branch-context.ts'
+import type { BranchContext, BranchRequestDetail } from '../../host/branch-context.ts'
 import type { BranchStats } from '../../host/branch-stats.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
 import { decideHostCommand, HostCommandRefused, hostCommandRows } from '../../host/host-commands.ts'
@@ -117,6 +117,8 @@ export interface FakeHostedThreadOptions {
   readonly branch?: BranchStats
   /** What `branchContext()` answers (#361); no request when absent. */
   readonly context?: BranchContext
+  /** What `branchRequestDetail(request)` answers, by `String(request)`; undefined when absent. */
+  readonly details?: Readonly<Record<string, BranchRequestDetail>>
   readonly inspect?: Partial<HostedThreadInspection>
 }
 
@@ -272,6 +274,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     probeToolCall: async (): Promise<undefined> => undefined,
     branchStats: () => options.branch ?? FAKE_EMPTY_BRANCH,
     branchContext: () => options.context ?? FAKE_EMPTY_CONTEXT,
+    branchRequestDetail: (request: number | 'next') => options.details?.[String(request)],
   }
   return { hosted, record, emit, open }
 }
@@ -289,6 +292,8 @@ export interface FakeStoredThread {
   readonly branch?: BranchStats
   /** The branch's context (#361); no request when absent. */
   readonly context?: BranchContext
+  /** Its requests' details, by `String(request)`. */
+  readonly details?: Readonly<Record<string, BranchRequestDetail>>
 }
 
 const FAKE_FRESH_MODE: EnsoPermissionModeState = { mode: 'default', available: ['default'] }
@@ -354,6 +359,8 @@ export function createFakeAgentHost(
           : { usage: storedThread.usage ?? { ...FAKE_NO_USAGE }, branch: storedThread.branch ?? FAKE_EMPTY_BRANCH },
       )
     },
+    readStoredRequestDetail: (threadId: string, request: number | 'next') =>
+      Promise.resolve(stored[threadId]?.details?.[String(request)]),
     readStoredThreadContext: (threadId: string) => {
       const storedThread = stored[threadId]
       return Promise.resolve(
