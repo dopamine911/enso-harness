@@ -238,11 +238,18 @@ export const RuntimeCommand = Type.Object({
    * chosen in place (`/thinking`); `flow` — chosen like a `select`, but the choice STARTS
    * something rather than applying it: `/login` and `/logout` (slice 3) run as dialog flows,
    * their questions and progress arriving on the feed, the route answering 202 when the flow has
-   * begun; `action` — runs with no value (`/compact`, slice 4). The palette renders by kind;
-   * nothing is per-command UI.
+   * begun; `action` — runs with no value (`/compact`, slice 4); `view` — runs nothing: the page
+   * opens what the row names over the chat (`/context`, #361), and nothing is posted. The palette
+   * renders by kind; nothing is per-command UI.
    */
   kind: Type.Optional(
-    Type.Union([Type.Literal('select'), Type.Literal('level'), Type.Literal('flow'), Type.Literal('action')]),
+    Type.Union([
+      Type.Literal('select'),
+      Type.Literal('level'),
+      Type.Literal('flow'),
+      Type.Literal('action'),
+      Type.Literal('view'),
+    ]),
   ),
   /** `host` rows: the current choice, as an `options[].id`. Absent when the list is `remembered` — a thread with no live session has no current value to show. */
   value: Type.Optional(Type.String()),
@@ -330,9 +337,11 @@ on purpose, so the rename preserves the capability and leaves that decision open
 **`listCommands` returns the runtime's command entries** (`RuntimeCommand`: name, source,
 description). The shape is ours by declaration; its `source` values are the runtime's categories
 carried as strings — plus `host`, which is not the runtime's at all (#338 slice 2): the host appends
-its own rows, `/model` and `/thinking`, each declaring a **kind** (`select`, `level`, `action`), its
-current `value` and its `options`, so the palette renders them by kind with no per-command UI. Small,
-stated.
+its own rows — `/model`, `/thinking`, `/login`, `/logout`, `/compact`, `/context` — each declaring a
+**kind** (`select`, `level`, `flow`, `action`, `view`), its current `value` and its `options`, so the
+palette renders them by kind with no
+per-command UI. A `view` (`/context`, #361) is the one kind the host never runs: the page opens the
+view it names, and a run of it is refused as 422. Small, stated.
 
 **`modelState` and `runHostCommand` are the control half of #44** (#338 slice 2). The state is what
 the session runs with now — model, thinking level, the levels that model offers — on the snapshot

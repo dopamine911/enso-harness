@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 252.**
+**Decision headers: 253.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -92,6 +92,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/command-palette.test.tsx` | `#338` | ⚠ A DOM before react-dom/client evaluates, and again if another mounting file has already released the one this module registered; `dom-environment.ts` has the measurement. |
 | `packages/web/src/__tests__/commands-connection.test.ts` | `#338` | The palette's read (#338): the route's answer validated, a non-2xx said with its status and body, a payload the schema refuses said as such. |
 | `packages/web/src/__tests__/context-browser.test.tsx` | `#361` | #361 phase 3: the Context Browser, mounted — it reads the request it is asked for, and a focus (a brief's line) opens that element's category and row, where its content is. |
+| `packages/web/src/__tests__/context-dialog.test.tsx` | `#361` | #361 phase 5: `/context`'s dialog, mounted — it reads nothing while closed, and once open shows the composition and the browser, not the tab's other cards (those stay on the Context tab). |
 | `packages/web/src/__tests__/custom-event-router.test.ts` | `#53`, `#90`, `#162` | #53 S1.3: the CUSTOM-chunk router was an inline closure no test reached — renaming a chunk, dropping the notify-type allowlist, or swapping the two `apply*` calls all left the suite green. |
 | `packages/web/src/__tests__/dom-environment.ts` | `#118` | A browser DOM for the tests that MOUNT React (#118) — the mounted-pane tests, which need effects, `useSyncExternalStore` subscriptions and TanStack's `useChat` to actually run. |
 | `packages/web/src/__tests__/fixture-conversation.test.ts` | `#27`, `#218` | The compatibility probe that used to live in a PR body (#218). |
@@ -114,7 +115,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/threads-rail.test.tsx` | `#90` | #90 PR 3: the sessions rail and the page's thread list behind it. |
 | `packages/web/src/__tests__/transcript-reveal.test.ts` | `#359` | #359: a stats target → the transcript row it names. |
 | `packages/web/src/browser-logging.ts` | `#86`, `#132` | The browser's logging (#132 slice 3). |
-| `packages/web/src/command-palette.tsx` | `#31`, `#338`, `#341`, `#343` | The `/` command palette (#338, slice 1): Claude Code's `/` button in VS Code, as a popup over the composer — a filter box, rows grouped by where the command came from, a description on each row. |
+| `packages/web/src/command-palette.tsx` | `#31`, `#338`, `#341`, `#343`, `#361` | The `/` command palette (#338, slice 1): Claude Code's `/` button in VS Code, as a popup over the composer — a filter box, rows grouped by where the command came from, a description on each row. |
 | `packages/web/src/commands-connection.ts` | `#144`, `#338`, `#344` | The `/` palette's one read (#338, slice 1): `GET /api/threads/:id/commands` — the slash commands the thread's session registers, grouped by the server into extension commands, prompt templates and skills, with a `source` that says whose list it is (`live`: this thread's session; `remembered`: the last built session's, because every session builds it from the same sources under the same configuration and this thread has no live session — never ran, or ran and idled out; the server cannot tell; `none`: no session has been built in this process). |
 | `packages/web/src/context-activity.tsx` | `#361` | The Context view's last two cards (#361 phase 4) — dsh-context's Context Events (when and why the window changed) and File Activity (what the agent did to files, up to the trend's picked request). |
 | `packages/web/src/context-browser.tsx` | `#361` | The Context Browser (#361 phase 3) — dsh-context's "open the box of any request": pick the next request or any past one, and see what it was assembled from — six categories, each expanding into one row per element with its estimate, each row into the element itself: a prompt section, a tool's schema, a message, a reply's parts, a tool result beside its call's arguments. |

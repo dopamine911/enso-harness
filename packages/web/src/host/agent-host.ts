@@ -35,7 +35,7 @@ import { type BranchContext, type BranchRequestDetail, branchContext, branchRequ
 import { type BranchStats, branchStats } from './branch-stats.ts'
 import { createEventTail, describeObservation } from './event-tail.ts'
 import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
-import { decideHostCommand, HostCommandRefused, hostCommandRows } from './host-commands.ts'
+import { decideHostCommand, HOST_VIEW_ROWS, HostCommandRefused, hostCommandRows } from './host-commands.ts'
 import {
   authEventText,
   compactDoneText,
@@ -936,6 +936,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         }
         commands.push(...hostCommandRows(currentModelState(), session.modelRuntime.getAvailableSnapshot()))
         commands.push(...hostFlowRows(currentLoginOptions(), logoutOptions(storedCredentials)))
+        commands.push(...HOST_VIEW_ROWS)
         return commands
       },
       startHostFlow(run: EnsoHostCommandRun, outcome: HostFlowOutcome): void {
