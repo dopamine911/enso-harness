@@ -480,7 +480,7 @@ test('a questionnaire component is asked as one questionnaire dialog of exactly 
 
 // `undefined` is the tool's signal that this host could not show the card — so a decline must be
 // the explicit `{ cancelled: true }`, and a malformed questionnaire must be no dialog at all.
-test('a declined questionnaire resolves { cancelled: true }; a malformed one is never asked and resolves undefined', async () => {
+test('a declined questionnaire resolves { cancelled: true }; a malformed one, or one repeating a label, is never asked and resolves undefined', async () => {
   const { uiContext, answerDialog, requests } = contextUnderTest()
   const declined = uiContext.custom<EnsoQuestionnaireResult>(
     questionnaireComponent({ title: 'Q', questions: [ONE_QUESTION] }) as never,
@@ -493,5 +493,11 @@ test('a declined questionnaire resolves { cancelled: true }; a malformed one is 
     questionnaireComponent({ title: 'Q', questions: [] }) as never,
   )
   expect(await malformed).toBeUndefined()
+  // A label listed twice is refused too: two rows sharing one value would render as one choice.
+  const repeated = { ...ONE_QUESTION, options: [...ONE_QUESTION.options, { label: 'SQLite' }] }
+  const twice = uiContext.custom<EnsoQuestionnaireResult>(
+    questionnaireComponent({ title: 'Q', questions: [repeated] }) as never,
+  )
+  expect(await twice).toBeUndefined()
   expect(requests).toHaveLength(1)
 })

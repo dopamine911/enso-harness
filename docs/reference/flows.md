@@ -28,10 +28,10 @@ flowchart LR
 
 | Node | Contract | Input | Source |
 |---|---|---|---|
-| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:64`](../../packages/web/src/server/index.ts#L64)<br>[`packages/web/src/server/follow.ts:564`](../../packages/web/src/server/follow.ts#L564) |
+| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:64`](../../packages/web/src/server/index.ts#L64)<br>[`packages/web/src/server/follow.ts:563`](../../packages/web/src/server/follow.ts#L563) |
 | `respondToHostCommand → runHostCommand` | [`POST /api/threads/:threadId/command`](./routes.md) | path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`) is the page's to open, never run | [`packages/web/src/server/index.ts:68`](../../packages/web/src/server/index.ts#L68) |
-| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:63`](../../packages/web/src/server/index.ts#L63)<br>[`packages/web/src/server/follow.ts:364`](../../packages/web/src/server/follow.ts#L364) |
-| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:66`](../../packages/web/src/server/index.ts#L66)<br>[`packages/web/src/server/follow.ts:400`](../../packages/web/src/server/follow.ts#L400) |
+| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:63`](../../packages/web/src/server/index.ts#L63)<br>[`packages/web/src/server/follow.ts:363`](../../packages/web/src/server/follow.ts#L363) |
+| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:66`](../../packages/web/src/server/index.ts#L66)<br>[`packages/web/src/server/follow.ts:399`](../../packages/web/src/server/follow.ts#L399) |
 | `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:62`](../../packages/web/src/server/index.ts#L62)<br>[`packages/web/src/server/follow.ts:265`](../../packages/web/src/server/follow.ts#L265) |
 
 ## Observation pipeline

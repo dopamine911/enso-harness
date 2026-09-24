@@ -3,10 +3,12 @@ import { Check } from 'typebox/value'
 import {
   type EnsoDialogSpec,
   EnsoObservation,
+  type EnsoQuestion,
   EnsoToolResultDescriptor,
   EnsoUsage,
   isEnsoToolResultDescriptor,
   PromptImageContent,
+  repeatedOptionLabel,
   validateDialogAnswer,
 } from '../index.ts'
 
@@ -130,4 +132,19 @@ test('validateDialogAnswer holds a questionnaire answer to what each question of
   // and the answers that are exactly what was asked: a pick or "Other" for the single, several for the multi
   expect(refusal([{ selected: ['SQLite'] }, { selected: ['lint', 'tests'], other: 'e2e' }])).toBeUndefined()
   expect(refusal([{ selected: [], other: 'DuckDB' }, { selected: ['tests'] }])).toBeUndefined()
+})
+
+// A label listed twice cannot be told apart anywhere downstream (the card, a prompt, the answer),
+// so the tool and the host both refuse it — and must be told WHICH question and label to name.
+test('repeatedOptionLabel names the first question that lists a label twice, and nothing when all are distinct', () => {
+  const question = (labels: string[]): EnsoQuestion => ({
+    header: 'H',
+    question: 'Q?',
+    options: labels.map((label) => ({ label })),
+    multiSelect: false,
+  })
+  expect(repeatedOptionLabel([question(['a', 'b']), question(['c', 'd'])])).toBeUndefined()
+  expect(repeatedOptionLabel([question(['a', 'b']), question(['c', 'd', 'c'])])).toEqual({ question: 2, label: 'c' })
+  // the same label in two DIFFERENT questions is fine: each question is asked on its own
+  expect(repeatedOptionLabel([question(['a', 'b']), question(['a', 'b'])])).toBeUndefined()
 })

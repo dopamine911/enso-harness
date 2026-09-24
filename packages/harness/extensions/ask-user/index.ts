@@ -12,6 +12,7 @@ import {
   type EnsoQuestionAnswer,
   type EnsoQuestionnaireResult,
   QUESTIONNAIRE_COMPONENT_KEY,
+  repeatedOptionLabel,
 } from '@enso/core'
 
 /**
@@ -203,6 +204,15 @@ type AskUserExecuteArguments = [
 async function execute(...executeArguments: AskUserExecuteArguments): Promise<AgentToolResult<undefined>> {
   const [, params, signal, , extensionContext] = executeArguments
   const questions: EnsoQuestion[] = params.questions
+  // Refused before anything is asked: a label listed twice cannot be told apart by the card, a
+  // prompt, or the answer. Thrown, so pi marks the result an error the model can correct.
+  const repeated = repeatedOptionLabel(questions)
+  if (repeated !== undefined) {
+    throw new Error(
+      `Nothing was asked: question ${repeated.question} lists the option "${repeated.label}" twice. ` +
+        'Give every option in a question a distinct label, and ask again.',
+    )
+  }
   if (!extensionContext.hasUI) return textResult(toolResultText(questions, 'no-ui'))
   const asCard =
     extensionContext.mode === 'tui'

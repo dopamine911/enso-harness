@@ -4,13 +4,13 @@ import {
   type DialogAnswer,
   ENSO_IMAGE_MAX_BYTES,
   type EnsoAbortReceipt,
-  EnsoDialogAnswer,
   type EnsoFollowFrame,
   EnsoHostCommandRun,
   EnsoPermissionModeChange,
   type EnsoPromptAdmission,
   EnsoPromptBody,
   type EnsoPromptReceipt,
+  EnsoQuestionAnswers,
   ensoLogger,
   isWholeBase64,
   type PromptImageContent,
@@ -339,11 +339,10 @@ export function readDialogBody(raw: string): DialogAnswer {
   // A questionnaire's answers (#12): the shape is checked here, where the body is read; whether
   // they answer THIS question is `validateDialogAnswer`'s, against the open dialog.
   if (body.answers !== undefined) {
-    const answers = { answers: body.answers }
-    if (!(Check(EnsoDialogAnswer, answers) && 'answers' in answers)) {
+    if (!Check(EnsoQuestionAnswers, body.answers)) {
       throw new Error('dialog body answers must be [{ selected: string[], other?: string }]')
     }
-    return { id: body.id, answers: answers.answers }
+    return { id: body.id, answers: body.answers }
   }
   throw new Error('dialog body needs cancelled, value, confirmed, or answers')
 }

@@ -1,4 +1,10 @@
-import { type EnsoDialogSpec, ensoLogger, isEnsoDialogSpec, QUESTIONNAIRE_COMPONENT_KEY } from '@enso/core'
+import {
+  type EnsoDialogSpec,
+  ensoLogger,
+  isEnsoDialogSpec,
+  QUESTIONNAIRE_COMPONENT_KEY,
+  repeatedOptionLabel,
+} from '@enso/core'
 
 /**
  * The agent's `ask_user` questionnaire, lifted to a dialog the web card asks as one (#12).
@@ -34,6 +40,13 @@ export function liftQuestionnaire(
   const candidate = { method: 'questionnaire', title, questions }
   if (!isEnsoDialogSpec(candidate) || candidate.method !== 'questionnaire') {
     log.warn('a questionnaire component carried no valid questionnaire — not asked: {carried}', { carried })
+    return undefined
+  }
+  // The tool refuses a repeated label before it asks; this is the host's own fence, because two
+  // rows sharing one value would render as one choice and the answer could not say which.
+  const repeated = repeatedOptionLabel(candidate.questions)
+  if (repeated !== undefined) {
+    log.warn('a questionnaire repeats option {label} in question {question} — not asked', repeated)
     return undefined
   }
   return {

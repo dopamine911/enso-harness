@@ -32,9 +32,11 @@ export {
   EnsoOpenDialog,
   EnsoQuestion,
   EnsoQuestionAnswer,
+  EnsoQuestionAnswers,
   type EnsoQuestionnaireResult,
   isEnsoDialogSpec,
   QUESTIONNAIRE_COMPONENT_KEY,
+  repeatedOptionLabel,
   validateDialogAnswer,
 } from './dialog.ts'
 export {

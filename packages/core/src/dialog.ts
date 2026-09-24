@@ -51,6 +51,28 @@ export const EnsoQuestion = Type.Object({
 export type EnsoQuestion = Static<typeof EnsoQuestion>
 
 /**
+ * The first option label a question lists twice, and which question — or `undefined` when every
+ * question's labels are distinct. The schema cannot say "unique by label", and a repeated label
+ * breaks everything downstream: the card's two rows share one radio value, a plain prompt can
+ * only ever pick the first, and the answer cannot say which of the two the user meant. So the
+ * tool refuses such a call, and the host refuses to lift one.
+ *
+ * @group Dialogs
+ */
+export function repeatedOptionLabel(
+  questions: readonly EnsoQuestion[],
+): { readonly question: number; readonly label: string } | undefined {
+  for (const [questionIndex, question] of questions.entries()) {
+    const seen = new Set<string>()
+    for (const { label } of question.options) {
+      if (seen.has(label)) return { question: questionIndex + 1, label }
+      seen.add(label)
+    }
+  }
+  return undefined
+}
+
+/**
  * How one question was answered: the labels chosen, and the free text when "Other" was used.
  *
  * @group Dialogs
@@ -61,6 +83,13 @@ export const EnsoQuestionAnswer = Type.Object({
 })
 /** @group Dialogs */
 export type EnsoQuestionAnswer = Static<typeof EnsoQuestionAnswer>
+
+/**
+ * A questionnaire's answers: one per question, in order — what the dialog body carries.
+ *
+ * @group Dialogs
+ */
+export const EnsoQuestionAnswers = Type.Array(EnsoQuestionAnswer)
 
 /**
  * Where a questionnaire component carries its question for the host to read — a registered
@@ -143,7 +172,7 @@ export type EnsoDialogSpec = Static<typeof EnsoDialogSpec>
 export const EnsoDialogAnswer = Type.Union([
   Type.Object({ value: Type.String() }),
   Type.Object({ confirmed: Type.Boolean() }),
-  Type.Object({ answers: Type.Array(EnsoQuestionAnswer) }),
+  Type.Object({ answers: EnsoQuestionAnswers }),
 ])
 /** @group Dialogs */
 export type EnsoDialogAnswer = Static<typeof EnsoDialogAnswer>
