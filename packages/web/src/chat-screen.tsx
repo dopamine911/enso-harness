@@ -769,7 +769,7 @@ function PendingQueue(): React.ReactNode {
     return { text: queuedPrompt, key: `${queuedPrompt}\u0000${occurrence}` }
   })
   return (
-    <QueueShell aria-label="queued prompts" className="mx-4 mb-2">
+    <QueueShell aria-label="queued prompts" className="mx-6 mb-2">
       <QueueSection>
         <QueueSectionTrigger>
           <QueueSectionLabel count={queued.length} label={queued.length === 1 ? 'prompt queued' : 'prompts queued'} />
@@ -1042,7 +1042,7 @@ const chatComponents = {
 
       return (
         <PromptInput
-          className="w-full px-4 pb-4"
+          className="w-full px-6 pb-4"
           accept={ENSO_IMAGE_MIME_TYPES.join(',')}
           multiple
           maxFiles={ENSO_PROMPT_MAX_IMAGES}
@@ -1179,7 +1179,7 @@ const chatComponents = {
               >
                 <Conversation>
                   <TranscriptRevealBridge into={scroller} />
-                  <ConversationContent className="w-full">
+                  <ConversationContent className="w-full px-6">
                     {chat.messages.length === 0 ? (
                       <ConversationEmptyState
                         icon={<img src="/logo-full.png" alt="Enso" className="w-44" />}
