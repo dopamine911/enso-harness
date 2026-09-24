@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from 'bun:test'
-import type { EnsoContextRequest, EnsoThreadContext } from '@enso/core'
+import type { EnsoContextRequest, EnsoFileOperation, EnsoThreadContext } from '@enso/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ThreadStoresContext } from '../store.ts'
 import { ThreadContextView } from '../thread-context.tsx'
-import { changeOf, lastRequestPerPrompt, totalOf } from '../thread-context-analysis.ts'
+import { changeOf, displayPath, filesUpTo, lastRequestPerPrompt, totalOf } from '../thread-context-analysis.ts'
 import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 
 afterEach(() => clearThreadsForTest())
@@ -56,6 +56,8 @@ const STORED: EnsoThreadContext = {
   live: false,
   usage: null,
   next: makeup(2000),
+  events: [],
+  files: [],
   requests: [
     request(1, 1),
     request(2, 1, {
@@ -76,4 +78,41 @@ test('estimates are written ≈, the provider count is named, and what is not kn
   const live = text({ ...STORED, live: true, usage: { tokens: 4100, window: 200_000, percent: 2 } })
   expect(live).toContain('/ 200K window')
   expect(live).toContain('last request, by the provider:')
+})
+
+const operation = (turn: number, overrides: Partial<EnsoFileOperation>): EnsoFileOperation => ({
+  key: `e${turn}#0.0`,
+  path: 'src/a.ts',
+  kind: 'read',
+  tool: 'read',
+  subject: '',
+  added: 0,
+  removed: 0,
+  hits: 0,
+  image: false,
+  isError: false,
+  turn,
+  at: `2026-09-24T10:00:0${turn}.000Z`,
+  ...overrides,
+})
+
+// #361 phase 4: the card counts what the agent had done BY the trend's picked request.
+test("file activity sums each file's operations up to the picked request, newest first", () => {
+  const operations = [
+    operation(1, {}),
+    operation(2, { kind: 'write', tool: 'edit', added: 3, removed: 1 }),
+    operation(2, { path: 'shot.png', image: true }),
+    operation(4, { kind: 'search', tool: 'grep', hits: 2 }),
+  ]
+  const [aFile, shot] = filesUpTo(operations, 2)
+  expect(aFile).toMatchObject({ path: 'src/a.ts', reads: 1, writes: 1, searches: 0, added: 3, removed: 1 })
+  expect(aFile?.operations.map((each) => each.turn)).toEqual([2, 1])
+  expect(shot).toMatchObject({ images: 1 })
+  expect(filesUpTo(operations, undefined)[0]?.searches).toBe(1)
+})
+
+test('a path under the thread tree reads ./-relative; one outside it as given', () => {
+  expect(displayPath('/home/me/repo/src/a.ts', '/home/me/repo')).toBe('./src/a.ts')
+  expect(displayPath('src/a.ts', '/home/me/repo')).toBe('./src/a.ts')
+  expect(displayPath('/etc/hosts', '/home/me/repo')).toBe('/etc/hosts')
 })

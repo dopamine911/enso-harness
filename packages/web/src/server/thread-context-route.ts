@@ -30,7 +30,15 @@ export function createThreadContextRoute(
     )
     if (read === undefined) return undefined
     const { usage, context, live } = read
-    return { threadId, live, usage: usage.context, next: context.next, requests: context.requests }
+    return {
+      threadId,
+      live,
+      usage: usage.context,
+      next: context.next,
+      requests: context.requests,
+      events: context.events,
+      files: context.files,
+    }
   }
 }
 

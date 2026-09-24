@@ -156,9 +156,11 @@ what the act caused arrives on the follow, for every follower alike. Nothing her
   `level` (one of a few, chosen in place: `/thinking`), `flow` (chosen like a select, but the choice
   STARTS something: `/login`, `/logout` — the route answers 202 and the flow's questions arrive as
   dialogs, its progress as notify lines, its end as a `model` observation), `action` (runs with no
-  value: `/compact`, a model call that starts like a flow and ends with a notify line). The palette
-  renders by kind; nothing is per-command UI. Running one builds the thread if it has no session:
-  choosing the model BEFORE the first prompt is the point (#341, the control half of #44).
+  value: `/compact`, a model call that starts like a flow and ends with a notify line), `view`
+  (runs nothing: the page opens what it names over the chat — `/context`, #361 — and nothing is
+  posted). The palette renders by kind; nothing is per-command UI. Running one builds the thread if
+  it has no session: choosing the model BEFORE the first prompt is the point (#341, the control half
+  of #44).
 - **model state** — `EnsoModelState`: the session's model (`provider`, `id`, `name`; `null` when
   the runtime has none it can run), its thinking level and the levels the model offers. On the
   snapshot frame at run start and as the `model` observation whenever it changes — by the palette,

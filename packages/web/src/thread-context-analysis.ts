@@ -1,4 +1,4 @@
-import type { EnsoContextCategory, EnsoContextMakeup, EnsoContextRequest } from '@enso/core'
+import type { EnsoContextCategory, EnsoContextMakeup, EnsoContextRequest, EnsoFileOperation } from '@enso/core'
 
 /**
  * What the Context view derives from `EnsoThreadContext` before it draws (#361): the category
@@ -69,4 +69,62 @@ export function changeOf(current: EnsoContextMakeup, previous: EnsoContextMakeup
  */
 export function shareOf(part: number, whole: number): number {
   return whole > 0 ? part / whole : 0
+}
+
+/** One file's activity up to a request — dsh-context's File Activity row. */
+export interface FileSummary {
+  readonly path: string
+  readonly reads: number
+  readonly writes: number
+  readonly searches: number
+  readonly images: number
+  readonly added: number
+  readonly removed: number
+  /** The latest operation's time, ISO. */
+  readonly lastAt: string
+  /** Newest first. */
+  readonly operations: readonly EnsoFileOperation[]
+}
+
+type MutableSummary = { -readonly [Key in keyof FileSummary]: FileSummary[Key] } & { operations: EnsoFileOperation[] }
+
+/**
+ * Each file's operations up to `turn` (every one when undefined) — the trend's picked request, so
+ * the card says what the agent had done to its files by then. A search's own path and each file
+ * it matched are rows of their own, as dsh draws them.
+ */
+export function filesUpTo(operations: readonly EnsoFileOperation[], turn: number | undefined): FileSummary[] {
+  const byPath = new Map<string, MutableSummary>()
+  for (const operation of operations) {
+    if (turn !== undefined && operation.turn > turn) continue
+    const summary = byPath.get(operation.path) ?? {
+      path: operation.path,
+      reads: 0,
+      writes: 0,
+      searches: 0,
+      images: 0,
+      added: 0,
+      removed: 0,
+      lastAt: operation.at,
+      operations: [],
+    }
+    if (operation.kind === 'read') summary.reads += 1
+    else if (operation.kind === 'write') summary.writes += 1
+    else summary.searches += 1
+    if (operation.image) summary.images += 1
+    summary.added += operation.added
+    summary.removed += operation.removed
+    summary.lastAt = operation.at > summary.lastAt ? operation.at : summary.lastAt
+    summary.operations.unshift(operation)
+    byPath.set(operation.path, summary)
+  }
+  return [...byPath.values()]
+}
+
+/** A path as the card shows it: under the thread's tree, `./`-relative; elsewhere, as given. */
+export function displayPath(path: string, cwd: string | undefined): string {
+  if (cwd === undefined) return path
+  const root = cwd.endsWith('/') ? cwd : `${cwd}/`
+  if (path.startsWith(root)) return `./${path.slice(root.length)}`
+  return path.startsWith('/') || path.startsWith('./') || path.startsWith('~') ? path : `./${path}`
 }

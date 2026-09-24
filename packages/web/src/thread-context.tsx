@@ -1,13 +1,16 @@
 import { type EnsoContextCategory, type EnsoContextRequest, EnsoThreadContext } from '@enso/core'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Cell, type MouseHandlerDataParam, ReferenceLine, XAxis, YAxis } from 'recharts'
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from './components/ui/chart.tsx'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
+import { ContextEvents, FileActivity } from './context-activity.tsx'
 import { ContextBrowser, type ContextBrowserFocus, type ContextBrowserRequest } from './context-browser.tsx'
 import { Card, COMPACT, estimateText, MakeupBar, MakeupLegend, PERCENT, timeText } from './context-parts.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
 import { countText } from './stats-table.tsx'
+import { useStore, useThreadStores } from './store.ts'
 import {
   CATEGORY_COLOR,
   CATEGORY_LABEL,
@@ -386,47 +389,127 @@ function ContextTrend({
 
 /**
  * The cards, and what joins them: the Context Browser opens the request the trend's bar picks
- * (dsh's linkage), and a brief's line opens its element there.
+ * (dsh's linkage), File Activity counts up to it, and a brief's line, an event or a file
+ * operation opens its request — and its element — in the browser.
  */
 function ContextCards({ context }: { context: EnsoThreadContext }): React.ReactNode {
+  const stores = useThreadStores()
+  const cwd = useStore(stores.cwd)
   const [browserRequest, setBrowserRequest] = useState<ContextBrowserRequest>('next')
+  const [trendTurn, setTrendTurn] = useState<number | undefined>(undefined)
   const [focus, setFocus] = useState<ContextBrowserFocus | undefined>(undefined)
+  const browser = useRef<HTMLDivElement | null>(null)
+  const openInBrowser = (request: ContextBrowserRequest, focusOn?: ContextBrowserFocus): void => {
+    setBrowserRequest(request)
+    setFocus(focusOn)
+    browser.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+  const requestCount = context.requests.length
   return (
     <div className="grid grid-cols-1 gap-4 p-4">
       <p className="text-muted-foreground text-xs">
-        {context.live ? 'live' : 'from the file'} · {countText(context.requests.length)} model requests · every category
-        is pi's estimate (≈); the provider's own counts are named as such
+        {context.live ? 'live' : 'from the file'} · {countText(requestCount)} model requests · every category is pi's
+        estimate (≈); the provider's own counts are named as such
       </p>
       <CurrentContext context={context} />
       <ContextTrend
         requests={context.requests}
-        onPick={setBrowserRequest}
+        onPick={(turn: number) => {
+          setTrendTurn(turn)
+          setBrowserRequest(turn)
+        }}
         onOpen={(turn: number, key: string) => {
           setBrowserRequest(turn)
           setFocus({ request: turn, key })
         }}
       />
-      <ContextBrowser
-        requests={context.requests}
-        next={context.next}
-        request={browserRequest}
-        onRequest={setBrowserRequest}
-        focus={focus}
-      />
+      <div ref={browser} className="min-w-0">
+        <ContextBrowser
+          requests={context.requests}
+          next={context.next}
+          request={browserRequest}
+          onRequest={setBrowserRequest}
+          focus={focus}
+        />
+      </div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <ContextEvents events={context.events} requestCount={requestCount} onOpen={openInBrowser} />
+        <FileActivity
+          operations={context.files}
+          upToTurn={trendTurn}
+          cwd={cwd}
+          requestCount={requestCount}
+          onOpen={openInBrowser}
+        />
+      </div>
     </div>
   )
 }
 
-/** Pure view — the data arrives as props; the cards' choices are their own state. */
-export function ThreadContextView({ outcome }: { readonly outcome: ContextOutcome }): React.ReactNode {
+/** What a read of the context shows before it has one: reading, or why there is none. */
+function whenRead(outcome: ContextOutcome, show: (context: EnsoThreadContext) => React.ReactNode): React.ReactNode {
   if (outcome.kind === 'reading')
     return <p className="p-4 text-muted-foreground text-xs">reading the thread's context…</p>
   if (outcome.kind === 'failed')
     return <p className="p-4 text-muted-foreground text-xs">no context: {outcome.problem}</p>
-  return <ContextCards context={outcome.payload} />
+  return show(outcome.payload)
+}
+
+/** Pure view — the data arrives as props; the cards' choices are their own state. */
+export function ThreadContextView({ outcome }: { readonly outcome: ContextOutcome }): React.ReactNode {
+  return whenRead(outcome, (context: EnsoThreadContext) => <ContextCards context={context} />)
 }
 
 /** The Context view wired to its thread: read on open and whenever the thread's usage moves. */
 export function ThreadContextDrawer(): React.ReactNode {
   return <ThreadContextView outcome={useReadOnUsage<ContextOutcome>(readThreadContext, ANALYSIS_READING)} />
+}
+
+/** `/context`'s two cards: what the next request holds, and every request's elements. */
+function ContextComposition({ context }: { context: EnsoThreadContext }): React.ReactNode {
+  const [browserRequest, setBrowserRequest] = useState<ContextBrowserRequest>('next')
+  return (
+    <div className="grid min-w-0 grid-cols-1 gap-4">
+      <CurrentContext context={context} />
+      <ContextBrowser
+        requests={context.requests}
+        next={context.next}
+        request={browserRequest}
+        onRequest={setBrowserRequest}
+        focus={undefined}
+      />
+    </div>
+  )
+}
+
+/** The dialog's body: mounted only while the dialog is open, so the read happens then. */
+function ContextDialogBody(): React.ReactNode {
+  const outcome = useReadOnUsage<ContextOutcome>(readThreadContext, ANALYSIS_READING)
+  return whenRead(outcome, (context: EnsoThreadContext) => <ContextComposition context={context} />)
+}
+
+/**
+ * `/context` (#361 phase 5): the composition and the browser over the chat, where the question
+ * was asked — the Context tab holds the rest (trend, events, files). Same reads, same cards; the
+ * dialog adds nothing of its own.
+ */
+export function ThreadContextDialog({ open, onClose }: { open: boolean; onClose: () => void }): React.ReactNode {
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next: boolean): void => {
+        if (!next) onClose()
+      }}
+    >
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>Context</DialogTitle>
+          <DialogDescription>
+            what the next request is made of, and every request's elements · the Context tab has the rest
+          </DialogDescription>
+        </DialogHeader>
+        <ContextDialogBody />
+      </DialogContent>
+    </Dialog>
+  )
 }

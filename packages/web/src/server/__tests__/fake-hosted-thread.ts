@@ -18,7 +18,7 @@ import type { AgentHost, HostedThread, HostedThreadInspection } from '../../host
 import type { BranchContext, BranchRequestDetail } from '../../host/branch-context.ts'
 import type { BranchStats } from '../../host/branch-stats.ts'
 import { createEventTail, describeObservation } from '../../host/event-tail.ts'
-import { decideHostCommand, HostCommandRefused, hostCommandRows } from '../../host/host-commands.ts'
+import { decideHostCommand, HOST_VIEW_ROWS, HostCommandRefused, hostCommandRows } from '../../host/host-commands.ts'
 import { compactDoneText, decideHostFlow, hostFlowRows, loginDoneText, logoutDoneText } from '../../host/host-flows.ts'
 
 /**
@@ -46,9 +46,13 @@ const FAKE_LOGIN_OPTIONS = [
 ]
 const FAKE_LOGOUT_OPTIONS = [{ id: 'fake', label: 'Fake', detail: 'stored subscription' }]
 
-/** The fake's host rows — `/model`, `/thinking`, `/login`, `/logout` — in the real host's order; a test that replaces `listCommands` puts pi's rows before these. */
+/** The fake's host rows — `/model`, `/thinking`, `/login`, `/logout`, `/compact`, `/context` — in the real host's order; a test that replaces `listCommands` puts pi's rows before these. */
 export function fakeHostRows(record: Pick<FakeThreadRecord, 'modelState'>): RuntimeCommand[] {
-  return [...hostCommandRows(record.modelState, FAKE_MODELS), ...hostFlowRows(FAKE_LOGIN_OPTIONS, FAKE_LOGOUT_OPTIONS)]
+  return [
+    ...hostCommandRows(record.modelState, FAKE_MODELS),
+    ...hostFlowRows(FAKE_LOGIN_OPTIONS, FAKE_LOGOUT_OPTIONS),
+    ...HOST_VIEW_ROWS,
+  ]
 }
 
 /** The sentence the fake's flow says when a test settles it — the real host's words, by flow. */
@@ -311,6 +315,8 @@ const FAKE_EMPTY_BRANCH: BranchStats = {
 const FAKE_EMPTY_CONTEXT: BranchContext = {
   next: { system: 0, tools: 0, user: 0, injected: 0, assistant: 0, toolResults: 0 },
   requests: [],
+  events: [],
+  files: [],
 }
 
 /**

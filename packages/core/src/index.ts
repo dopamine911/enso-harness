@@ -134,15 +134,19 @@ export {
 export { EnsoPermissionModeChange, EnsoPermissionModeState } from './permission-mode.ts'
 export {
   ENSO_CONTEXT_ADDITIONS_SHOWN,
+  ENSO_CONTEXT_COMMAND,
   ENSO_CONTEXT_IMAGE_PREVIEW_BYTES,
   EnsoContextAddition,
   EnsoContextBody,
   EnsoContextCategory,
   EnsoContextElement,
+  EnsoContextEvent,
+  EnsoContextEventKind,
   EnsoContextImage,
   EnsoContextMakeup,
   EnsoContextRequest,
   EnsoContextRequestDetail,
+  EnsoFileOperation,
   EnsoThreadContext,
 } from './thread-context.ts'
 export {

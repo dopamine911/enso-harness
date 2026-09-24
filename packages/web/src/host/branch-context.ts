@@ -3,8 +3,10 @@ import {
   ENSO_CONTEXT_ADDITIONS_SHOWN,
   type EnsoContextAddition,
   type EnsoContextElement,
+  type EnsoContextEvent,
   type EnsoContextMakeup,
   type EnsoContextRequest,
+  type EnsoFileOperation,
 } from '@enso/core'
 import { promptText } from './branch-stats.ts'
 import {
@@ -19,6 +21,7 @@ import {
   messageLine,
   noteCalls,
 } from './context-elements.ts'
+import { contextEvents, fileOperations, totalOfItems } from './context-history.ts'
 
 /**
  * A thread's context, request by request (#361) — the host half of `EnsoThreadContext` and of
@@ -38,6 +41,10 @@ export interface BranchContext {
   /** What the next request would be assembled from: the branch up to its leaf. */
   readonly next: EnsoContextMakeup
   readonly requests: EnsoContextRequest[]
+  /** When and why the context changed (`context-history.ts`). */
+  readonly events: EnsoContextEvent[]
+  /** What the file tools did (`context-history.ts`). */
+  readonly files: EnsoFileOperation[]
 }
 
 /** One request's context, element by element, and what left it since the request before. */
@@ -170,7 +177,12 @@ export function branchContext(branch: readonly SessionEntry[]): BranchContext {
     previous = context
   }
   const last = branch.at(-1)
-  return { next: last === undefined ? emptyMakeup() : makeupOf(contextAt(last.id).items.flat()), requests }
+  return {
+    next: last === undefined ? emptyMakeup() : makeupOf(contextAt(last.id).items.flat()),
+    requests,
+    events: contextEvents(branch, (leafId) => totalOfItems(contextAt(leafId).items.flat())),
+    files: fileOperations(branch),
+  }
 }
 
 /**
