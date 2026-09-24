@@ -134,6 +134,8 @@ export interface ThreadStatusViewProps {
   readonly usage?: EnsoSessionUsage | undefined
   /** The tree pi runs this thread in (#44); undefined until the follow's first snapshot. */
   readonly cwd?: string | undefined
+  /** A question from pi is open for this thread — said here too, since only the transcript shows it. */
+  readonly questionWaiting?: boolean
 }
 
 const COMPACT_TOKENS = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
@@ -184,7 +186,13 @@ function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof 
 }
 
 /** Pure view — everything it shows arrives as props, so a static render pins the wording. */
-export function ThreadStatusView({ activity, counts, usage, cwd }: ThreadStatusViewProps): React.ReactNode {
+export function ThreadStatusView({
+  activity,
+  counts,
+  usage,
+  cwd,
+  questionWaiting,
+}: ThreadStatusViewProps): React.ReactNode {
   const dotClass = activityDotClass(activity)
   const context = usage?.context ?? null
   return (
@@ -203,6 +211,12 @@ export function ThreadStatusView({ activity, counts, usage, cwd }: ThreadStatusV
         <span aria-hidden="true" className={dotClass} />
         {activityLabel(activity)}
       </span>
+      {/* Seen from every view: the question itself is in the transcript (#362 review). */}
+      {questionWaiting ? (
+        <span role="status" className="text-destructive" title="pi is waiting for your answer — it is in the Chat view">
+          a question is waiting
+        </span>
+      ) : null}
       <span title="user messages in this transcript">
         {counts.prompts} {counts.prompts === 1 ? 'prompt' : 'prompts'}
       </span>
@@ -242,12 +256,14 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
   const usage = useStore(stores.usage)
   const disconnected = useStore(stores.disconnected)
   const cwd = useStore(stores.cwd)
+  const questionWaiting = useStore(stores.dialog) !== undefined
   return (
     <ThreadStatusView
       activity={describeActivity(messages, generating, disconnected)}
       counts={countThread(messages)}
       usage={usage}
       cwd={cwd}
+      questionWaiting={questionWaiting}
     />
   )
 }

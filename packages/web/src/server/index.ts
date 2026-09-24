@@ -38,6 +38,7 @@ import { createLogStatsRoute } from './logs-stats-route.ts'
 import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
 import { noteRunAdmitted } from './run-timing.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
+import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
 import { createThreadStatsRoute } from './thread-stats-route.ts'
@@ -52,6 +53,10 @@ const THREAD_HISTORY_ROUTE = /^\/api\/threads\/([^/?#]+)\/history$/
 const THREAD_COMMANDS_ROUTE = /^\/api\/threads\/([^/?#]+)\/commands$/
 /** `GET /api/threads/<threadId>/stats` — the thread analysed: per prompt, turn and tool (#45). */
 const THREAD_STATS_ROUTE = /^\/api\/threads\/([^/?#]+)\/stats$/
+/** `GET /api/threads/<threadId>/context` — the thread's context, request by request (#361). */
+const THREAD_CONTEXT_ROUTE = /^\/api\/threads\/([^/?#]+)\/context$/
+/** `GET /api/threads/<threadId>/context/<turn|next>` — one request's context, element by element (#361). */
+const THREAD_CONTEXT_REQUEST_ROUTE = /^\/api\/threads\/([^/?#]+)\/context\/([1-9]\d*|next)$/
 /** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
 const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/
 const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/
@@ -510,22 +515,50 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const stats = createLogStatsRoute({ logsDir: options.logsDir })
   // One thread, analysed (#45 phase 2): pi's session for the numbers, the day files for the times.
   const threadStats = createThreadStatsRoute({ threads, host, logsDir: options.logsDir })
+  // One thread's context (#361): pi's branch, request by request; no log is read.
+  const threadContext = createThreadContextRoute({ threads, host })
+  const contextRequest = createContextRequestRoute({ threads, host })
 
   /**
-   * The thread's stats, or 404 for a thread the server holds neither live nor on disk. Built
-   * before the head, as `respondWithStats` is: a day file that fails to read is the 500
-   * `answerOrFail` writes, never a throw after a committed 200.
+   * A thread analysis — stats (#45), context (#361) — or 404 for a thread the server holds neither
+   * live nor on disk. The payload is built before the head, as `respondWithStats` builds it: a
+   * day file that fails to read is the 500 `answerOrFail` writes, never a throw after a committed 200.
    */
-  async function respondWithThreadStats(threadId: string, response: ServerResponse): Promise<void> {
-    const payload = await threadStats(threadId)
-    if (payload === undefined) {
-      response.writeHead(404, { 'Content-Type': 'text/plain' })
-      response.end(`no session for thread ${threadId}`)
-      return
+  function analysisResponder(
+    read: (threadId: string) => Promise<object | undefined>,
+    absent: (threadId: string) => string = (threadId: string): string => `no session for thread ${threadId}`,
+  ): (threadId: string, response: ServerResponse) => Promise<void> {
+    return async (threadId: string, response: ServerResponse): Promise<void> => {
+      const payload = await read(threadId)
+      if (payload === undefined) {
+        response.writeHead(404, { 'Content-Type': 'text/plain' })
+        response.end(absent(threadId))
+        return
+      }
+      const body = JSON.stringify(payload)
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end(body)
     }
-    const body = JSON.stringify(payload)
-    response.writeHead(200, { 'Content-Type': 'application/json' })
-    response.end(body)
+  }
+  const respondWithThreadStats = analysisResponder(threadStats)
+  const respondWithThreadContext = analysisResponder(threadContext)
+  /**
+   * One request's context; the request is the route's second capture, a turn or `next` — the
+   * dispatcher's own match, so the url is read once. A turn the thread lacks, or a thread held
+   * nowhere, is the 404 that names the request.
+   */
+  function respondWithContextRequest(
+    threadId: string,
+    _request: IncomingMessage,
+    response: ServerResponse,
+    match: RegExpExecArray,
+  ): Promise<void> {
+    const segment = match[2]
+    const which: number | 'next' = segment === 'next' ? 'next' : Number(segment)
+    return analysisResponder(
+      (id: string) => contextRequest(id, which),
+      (id: string) => `no request ${segment} on thread ${id}`,
+    )(threadId, response)
   }
 
   /**
@@ -567,6 +600,8 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     threadId: string,
     request: IncomingMessage,
     response: ServerResponse,
+    /** The row's own match: its first capture is the id, any further ones the route's to read. */
+    match: RegExpExecArray,
   ) => void | Promise<void>
   interface ThreadRoute {
     readonly method: 'GET' | 'POST'
@@ -600,6 +635,16 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     },
     {
       method: 'GET',
+      route: THREAD_CONTEXT_ROUTE,
+      respond: idOnly(respondWithThreadContext),
+    },
+    {
+      method: 'GET',
+      route: THREAD_CONTEXT_REQUEST_ROUTE,
+      respond: respondWithContextRequest,
+    },
+    {
+      method: 'GET',
       route: THREAD_ROUTE,
       respond: idOnly(respondWithThread),
     },
@@ -624,12 +669,13 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     const url = request.url ?? ''
     for (const { method, route, respond } of THREAD_ROUTES) {
       if (request.method !== method) continue
-      const segment = route.exec(url)?.[1]
-      if (segment === undefined) continue
+      const match = route.exec(url)
+      const segment = match?.[1]
+      if (match === null || segment === undefined) continue
       const threadId = decodeThreadId(segment, response)
       if (threadId !== undefined) {
         withEnsoLogContext({ threadId }, () => {
-          const work = respond(threadId, request, response)
+          const work = respond(threadId, request, response, match)
           if (work !== undefined) answerOrFail(work, response)
         })
       }

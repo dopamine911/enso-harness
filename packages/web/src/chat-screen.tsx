@@ -1,5 +1,6 @@
 import {
   type DialogAnswer,
+  ENSO_CONTEXT_COMMAND,
   ENSO_IMAGE_MAX_BYTES,
   ENSO_IMAGE_MIME_TYPES,
   ENSO_PROMPT_MAX_IMAGES,
@@ -19,7 +20,7 @@ import {
   type LayoutProps,
   type MessageProps,
 } from '@tanstack/ai-react/ui'
-import { ArrowUpIcon, ChartColumnIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
+import { ArrowUpIcon, ChartColumnIcon, LayersIcon, MessagesSquareIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { CommandPalette } from './command-palette.tsx'
@@ -54,6 +55,7 @@ import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.tsx'
 import { Button } from './components/ui/button.tsx'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './components/ui/card.tsx'
 import { Input } from './components/ui/input.tsx'
+import { Tabs, TabsList, TabsTrigger } from './components/ui/tabs.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
 import { routeEnsoCustomEvent } from './custom-event-router.ts'
 import type { EnsoRendererMap } from './EnsoToolResult.tsx'
@@ -70,6 +72,7 @@ import {
   fetchThreadHistory,
   storedThreadsNotOnThisPage,
 } from './stored-threads.ts'
+import { ThreadContextDialog, ThreadContextDrawer } from './thread-context.tsx'
 import { ThreadDebugDrawer } from './thread-debug.tsx'
 import { ThreadStatsDrawer } from './thread-stats.tsx'
 import { ThreadStatusBar } from './thread-status.tsx'
@@ -225,12 +228,26 @@ function createThreadChatHook(stores: ThreadStores): ThreadChatHook {
 const DebugOpenContext = createContext(false)
 
 /**
- * Whether THIS pane shows the stats drawer (#45 phase 2) — `statsOpen && active`, for the same
- * reason as above (PR #358 review): the drawer's fixed `id`, its fetches and its `stores.usage`
- * subscription exist once, in the pane on screen. The switch is the page's, beside debug's, so
- * it is found where the page's other switches are (#359: in the status bar, it was not).
+ * The page's main views (#361): the transcript, or an analysis of the thread in its place. One
+ * choice for the page — switching thread keeps it — rendered by the pane on screen.
  */
-const StatsOpenContext = createContext(false)
+export type ThreadView = 'chat' | 'context' | 'stats'
+
+/** A tab's value back to a view: the only strings the tab list hands over are these. */
+const THREAD_VIEWS: Readonly<Record<string, ThreadView>> = { chat: 'chat', context: 'context', stats: 'stats' }
+
+/**
+ * What THIS pane shows, and how to change the page's view. `shown` is undefined in a hidden
+ * pane, which then draws its transcript and nothing else: the stats view — its fetches, its
+ * `stores.usage` subscription, its panel `id`s — exists once, in the pane on screen, the debug
+ * column's rule above (PR #358 review).
+ */
+interface PaneView {
+  readonly shown: ThreadView | undefined
+  readonly open: (view: ThreadView) => void
+}
+
+const PaneViewContext = createContext<PaneView>({ shown: undefined, open: (): void => undefined })
 
 /** What `TranscriptRevealBridge` hands the layout: the pane's transcript and its scroll lock. */
 interface TranscriptScroller {
@@ -376,6 +393,8 @@ interface HostCommandHandlers {
   readonly onHost: (commandName: string, optionId?: string) => void
   /** Open the dialog for a `select` host command, by name. */
   readonly onOpenModelDialog: (commandName: string) => void
+  /** Open the view a `view` host command names (`/context`, #361), by name. */
+  readonly onOpenView: (commandName: string) => void
 }
 
 /*
@@ -688,6 +707,7 @@ function ComposerBody({
           onInsert={onInsertCommand}
           onHost={host.onHost}
           onOpenModelDialog={(command: RuntimeCommand): void => host.onOpenModelDialog(command.name)}
+          onOpenView={(command: RuntimeCommand): void => host.onOpenView(command.name)}
         />
         {/* Attach (#68): the same file dialog a paste or a drop bypasses. */}
         <PromptInputButton
@@ -997,6 +1017,9 @@ const chatComponents = {
       // The `select` host command whose dialog is open (`model`); undefined while closed. The
       // dialog is rendered ONCE here, for the chip and the palette's `/model` row alike (#338 slice 2).
       const [modelDialog, setModelDialog] = useState<string | undefined>(undefined)
+      // `/context` (#361 phase 5): the one `view` this page draws. A view a newer host declares
+      // and this page does not know is said, not silently dropped.
+      const [contextOpen, setContextOpen] = useState(false)
       // A `host` command runs through its own route, never as a prompt: `POST …/command`, a
       // control like the mode select's — on the SAME connection, so a 409 (running) or a 422
       // (the host's reason) is recorded and said the one way a refused mode change is (PR #344
@@ -1010,6 +1033,10 @@ const chatComponents = {
           })
         },
         onOpenModelDialog: setModelDialog,
+        onOpenView: (commandName: string): void => {
+          if (commandName === ENSO_CONTEXT_COMMAND) setContextOpen(true)
+          else stores.notifications.push(`/${commandName} opens a view this page does not have`, 'warning', 'run')
+        },
       }
 
       return (
@@ -1064,6 +1091,7 @@ const chatComponents = {
             onClose={(): void => setModelDialog(undefined)}
             onPick={host.onHost}
           />
+          <ThreadContextDialog open={contextOpen} onClose={(): void => setContextOpen(false)} />
           <ComposerBody
             draft={draft}
             setDraft={setDraft}
@@ -1093,16 +1121,30 @@ const chatComponents = {
     layout: function ChatLayout({ Messages, Input }: LayoutProps<ThreadChatOptions>): React.ReactNode {
       const chat = useChatContext()
       const debugOpen = useContext(DebugOpenContext)
-      const statsOpen = useContext(StatsOpenContext)
+      const { shown, open } = useContext(PaneViewContext)
       const scroller = useRef<TranscriptScroller | null>(null)
-      const revealInTranscript = useCallback<RevealStatsTarget>((target, stats) => {
-        const content = scroller.current?.content() ?? null
-        const element = content === null ? undefined : locateStatsTarget(content, stats, target)
-        if (element === undefined || scroller.current === null) return false
-        scroller.current.stopScroll()
-        revealElement(element)
-        return true
-      }, [])
+      const revealInTranscript = useCallback<RevealStatsTarget>(
+        (target, stats) => {
+          const bridge = scroller.current
+          const content = bridge?.content() ?? null
+          const element = content === null ? undefined : locateStatsTarget(content, stats, target)
+          if (element === undefined || bridge === null) return false
+          // Found in the transcript the Stats view hides (still mounted, so it can be searched):
+          // show it, then scroll once it has a layout to scroll in.
+          open('chat')
+          requestAnimationFrame(() => {
+            bridge.stopScroll()
+            revealElement(element)
+          })
+          return true
+        },
+        [open],
+      )
+      /** Whether the transcript is the view shown — a pane off screen keeps its chat. */
+      const onChat = (shown ?? 'chat') === 'chat'
+      /** A panel's `id`s, in the pane on screen only — a hidden pane's would duplicate them. */
+      const panelIds = (view: ThreadView): { id?: string; 'aria-labelledby'?: string } =>
+        shown === undefined ? {} : { id: `thread-view-${view}`, 'aria-labelledby': `thread-view-${view}-tab` }
       // The one place the transcript is selected (#280): here, where the chat is already read,
       // once per chunk instead of once per row.
       const selection = useMemo<TranscriptSelection>(() => {
@@ -1118,44 +1160,69 @@ const chatComponents = {
       return (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <Conversation>
-                <TranscriptRevealBridge into={scroller} />
-                <ConversationContent className="mx-auto w-full max-w-3xl">
-                  {chat.messages.length === 0 ? (
-                    <ConversationEmptyState
-                      icon={<img src="/logo-full.png" alt="Enso" className="w-44" />}
-                      title=""
-                      description="ask pi something to get started"
-                    />
-                  ) : (
-                    <TranscriptSelectionContext.Provider value={selection}>
-                      <Messages />
-                    </TranscriptSelectionContext.Provider>
-                  )}
-                  {/* pi's notify lines (#29) — the transcript tail, above the question,
-									    so "Mode set to X" reads next to the run it belongs to. */}
-                  <ThreadNotifications />
-                  {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
-									    `ask` verdict reaches the browser, and an unmounted slot is precisely
-									    why an approval would silently never appear. */}
-                  <PendingDialog />
-                  <RunProblem />
-                </ConversationContent>
-                <ConversationScrollButton />
-              </Conversation>
-              {/* pi's queue, not TanStack's `Queue` slot (#75): a prompt sent during a run goes to
-							    pi and is listed here for every follower; TanStack's own queue is bypassed. */}
-              <PendingQueue />
-              <Input />
-            </div>
-            {/* The thread's stats (#45 phase 2): per prompt, turn and tool — beside the
-						    transcript it describes, scrolling on its own like the debug pane. */}
-            {statsOpen ? (
-              <div id="thread-stats-pane" className="w-[28rem] shrink-0 overflow-y-auto border-l">
-                <ThreadStatsDrawer onNavigate={revealInTranscript} />
+            {/* The views share one box: the transcript keeps its size under every view, and the
+						    others are drawn over it. */}
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              {/* The transcript stays mounted AND LAID OUT under every view — `invisible` and
+							    `inert`, never `hidden` (#362 review): a `display: none` box comes back resized,
+							    and the stick-to-bottom scroller re-pins a reader who had scrolled up. Kept at
+							    its size, its scroll, its lock and its bubbles (the stats rows' targets)
+							    survive a trip to Context or Stats. */}
+              <div
+                role="tabpanel"
+                {...panelIds('chat')}
+                inert={!onChat}
+                className={
+                  onChat ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'invisible flex min-h-0 min-w-0 flex-1 flex-col'
+                }
+              >
+                <Conversation>
+                  <TranscriptRevealBridge into={scroller} />
+                  <ConversationContent className="mx-auto w-full max-w-3xl">
+                    {chat.messages.length === 0 ? (
+                      <ConversationEmptyState
+                        icon={<img src="/logo-full.png" alt="Enso" className="w-44" />}
+                        title=""
+                        description="ask pi something to get started"
+                      />
+                    ) : (
+                      <TranscriptSelectionContext.Provider value={selection}>
+                        <Messages />
+                      </TranscriptSelectionContext.Provider>
+                    )}
+                    {/* pi's notify lines (#29) — the transcript tail, above the question,
+										    so "Mode set to X" reads next to the run it belongs to. */}
+                    <ThreadNotifications />
+                    {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
+										    `ask` verdict reaches the browser, and an unmounted slot is precisely
+										    why an approval would silently never appear. */}
+                    <PendingDialog />
+                    <RunProblem />
+                  </ConversationContent>
+                  <ConversationScrollButton />
+                </Conversation>
+                {/* pi's queue, not TanStack's `Queue` slot (#75): a prompt sent during a run goes to
+								    pi and is listed here for every follower; TanStack's own queue is bypassed. */}
+                <PendingQueue />
+                <Input />
               </div>
-            ) : null}
+              {/* The thread's context (#361): what each request was made of, over the transcript. */}
+              {shown === 'context' ? (
+                <div role="tabpanel" {...panelIds('context')} className="absolute inset-0 overflow-y-auto">
+                  <div className="mx-auto w-full max-w-6xl">
+                    <ThreadContextDrawer />
+                  </div>
+                </div>
+              ) : null}
+              {/* The thread's stats (#45 phase 2), over the transcript (#361). */}
+              {shown === 'stats' ? (
+                <div role="tabpanel" {...panelIds('stats')} className="absolute inset-0 overflow-y-auto">
+                  <div className="mx-auto w-full max-w-4xl">
+                    <ThreadStatsDrawer onNavigate={revealInTranscript} />
+                  </div>
+                </div>
+              ) : null}
+            </div>
             {/* The session debug pane (#86): what the browser believes beside what pi's
 						    session holds, for THIS thread. Scrolls on its own so a long branch never
 						    moves the composer. */}
@@ -1210,6 +1277,9 @@ const chatComponents = {
   // (#112) — they arrive as blocking `extension-ui-request` chunks and render through `PendingDialog` above.
 }
 
+/** A pane mounted without a page has no view to change. */
+const KEEP_VIEW = (): void => undefined
+
 /**
  * One thread's pane: its chat factory, its stores in context, its summary kept current for
  * the rail.
@@ -1224,14 +1294,17 @@ export function ThreadPane({
   threadId,
   active,
   debugOpen,
-  statsOpen = false,
+  view = 'chat',
+  onView = KEEP_VIEW,
 }: {
   threadId: string
   active: boolean
   /** The page's `?debug` switch; the column itself opens only in the active pane. */
   debugOpen: boolean
-  /** The page's stats switch; the drawer, likewise, only in the active pane. */
-  statsOpen?: boolean
+  /** The page's view (#361); shown only in the active pane. Mounted alone (a test), the chat. */
+  view?: ThreadView
+  /** Changes the page's view. Mounted alone there is no page, so the view stays as it is. */
+  onView?: (view: ThreadView) => void
 }): React.ReactNode {
   const stores = getThreadStores(threadId)
   const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores])
@@ -1248,13 +1321,14 @@ export function ThreadPane({
   useEffect(() => {
     updateThreadSummary(threadId, { title, busy: chat.sessionGenerating })
   }, [threadId, title, chat.sessionGenerating])
+  const paneView = useMemo<PaneView>(() => ({ shown: active ? view : undefined, open: onView }), [active, view, onView])
   return (
     <div className={active ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
       <ThreadStoresContext.Provider value={stores}>
         <DebugOpenContext.Provider value={debugOpen && active}>
-          <StatsOpenContext.Provider value={statsOpen && active}>
+          <PaneViewContext.Provider value={paneView}>
             <chat.AppChat />
-          </StatsOpenContext.Provider>
+          </PaneViewContext.Provider>
         </DebugOpenContext.Provider>
       </ThreadStoresContext.Provider>
     </div>
@@ -1303,7 +1377,7 @@ interface PaneSwitchProps {
   readonly children?: React.ReactNode
 }
 
-/** A header switch for a right-hand pane — debug (#86), stats (#359): its state said, its pane named. */
+/** A header switch for a right-hand pane — the `?debug` column (#86): its state said, its pane named. */
 function PaneSwitch({ open, pane, labels, title, onToggle, children }: PaneSwitchProps): React.ReactNode {
   return (
     <Button
@@ -1318,6 +1392,77 @@ function PaneSwitch({ open, pane, labels, title, onToggle, children }: PaneSwitc
       {children}
       {open ? labels[1] : labels[0]}
     </Button>
+  )
+}
+
+/**
+ * The page's views as tabs (#361): Radix's tab list, for its keyboard (arrows move between tabs)
+ * and its roles. The panels are the active pane's own (`ChatLayout`), so each trigger names its
+ * panel by id rather than through Radix's `TabsContent`, which would unmount the transcript.
+ */
+/**
+ * A question from pi waits in the transcript while another view is shown (#362 review): the Chat
+ * tab says so, and the status bar beside it. Nothing moves the reader — they switch when ready;
+ * the run waits for the answer either way.
+ */
+function QuestionWaiting({ threadId }: { threadId: string }): React.ReactNode {
+  const pending = useStore(getThreadStores(threadId).dialog)
+  if (pending === undefined) return null
+  return (
+    <>
+      <span aria-hidden="true" className="size-2 rounded-full bg-destructive" />
+      <span className="sr-only">, a question is waiting</span>
+    </>
+  )
+}
+
+function ViewTabs({
+  view,
+  onView,
+  threadId,
+}: {
+  view: ThreadView
+  onView: (view: ThreadView) => void
+  /** The thread on screen, whose waiting question the Chat tab shows; none while resuming. */
+  threadId: string | undefined
+}): React.ReactNode {
+  // Only the shown view's panel is in the page, so only its tab names one (#362 review): a
+  // reference to a panel that is not there is one a screen reader cannot follow.
+  const controls = (tab: ThreadView): string | undefined => (tab === view ? `thread-view-${tab}` : undefined)
+  return (
+    <Tabs
+      value={view}
+      onValueChange={(value: string): void => {
+        const chosen = THREAD_VIEWS[value]
+        if (chosen !== undefined) onView(chosen)
+      }}
+    >
+      <TabsList aria-label="what the thread view shows">
+        <TabsTrigger value="chat" id="thread-view-chat-tab" aria-controls={controls('chat')}>
+          <MessagesSquareIcon aria-hidden="true" />
+          Chat
+          {view === 'chat' || threadId === undefined ? null : <QuestionWaiting threadId={threadId} />}
+        </TabsTrigger>
+        <TabsTrigger
+          value="context"
+          id="thread-view-context-tab"
+          aria-controls={controls('context')}
+          title="what each model request was made of, and how the context grew"
+        >
+          <LayersIcon aria-hidden="true" />
+          Context
+        </TabsTrigger>
+        <TabsTrigger
+          value="stats"
+          id="thread-view-stats-tab"
+          aria-controls={controls('stats')}
+          title="per prompt, turn and tool: what this thread spent, and on what"
+        >
+          <ChartColumnIcon aria-hidden="true" />
+          Stats
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
   )
 }
 
@@ -1406,7 +1551,7 @@ export function ChatScreen(): React.ReactNode {
   // exists to explain. Opt-in by `?debug`; open by default when it is, and collapsible
   // from the header so it can get out of the way without a reload.
   const [debugOpen, setDebugOpen] = useState(isDebugMode)
-  const [statsOpen, setStatsOpen] = useState(false)
+  const [view, setView] = useState<ThreadView>('chat')
   const active = threads.find((thread) => thread.threadId === activeThreadId)
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">
@@ -1422,15 +1567,7 @@ export function ChatScreen(): React.ReactNode {
         <span className="min-w-0 flex-1 truncate text-sm" title={activeThreadId ?? ''}>
           {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
         </span>
-        <PaneSwitch
-          open={statsOpen}
-          pane="thread-stats-pane"
-          labels={['stats', 'hide stats']}
-          title="per prompt, turn and tool: what this thread spent, and on what"
-          onToggle={() => setStatsOpen((open) => !open)}
-        >
-          <ChartColumnIcon aria-hidden="true" />
-        </PaneSwitch>
+        <ViewTabs view={view} onView={setView} threadId={active?.threadId} />
         {isDebugMode ? (
           <PaneSwitch
             open={debugOpen}
@@ -1457,7 +1594,8 @@ export function ChatScreen(): React.ReactNode {
             threadId={thread.threadId}
             active={thread.threadId === activeThreadId}
             debugOpen={isDebugMode && debugOpen}
-            statsOpen={statsOpen}
+            view={view}
+            onView={setView}
           />
         ))}
       </div>

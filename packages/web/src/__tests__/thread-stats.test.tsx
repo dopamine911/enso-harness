@@ -67,7 +67,7 @@ const STATS: EnsoThreadStats = {
 }
 
 const text = (stats: EnsoThreadStats): string =>
-  renderToStaticMarkup(<ThreadStatsView outcome={{ kind: 'read', stats }} />).replace(/<[^>]*>/g, ' ')
+  renderToStaticMarkup(<ThreadStatsView outcome={{ kind: 'read', payload: stats }} />).replace(/<[^>]*>/g, ' ')
 
 test("the headline is livecraft's cards: mean and median cost per turn, tools per turn, failures over calls", () => {
   expect(headlineOf(STATS)).toEqual({

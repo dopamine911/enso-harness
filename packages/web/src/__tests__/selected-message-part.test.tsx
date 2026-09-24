@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test'
+import { summarizeToolInput } from '@enso/core'
 import type { MessagePart, ToolCallPart, ToolResultPart } from '@tanstack/ai'
 import type { ChatUISelectedPart } from '@tanstack/ai-client/ui'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { SelectedMessagePart, summarizeToolInput } from '../selected-message-part.tsx'
+import { SelectedMessagePart } from '../selected-message-part.tsx'
 
 /**
  * The dispatch this file guards was DEAD for its whole prior life: TanStack routes tool

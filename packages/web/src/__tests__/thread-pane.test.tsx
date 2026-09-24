@@ -2,8 +2,14 @@ import { afterAll, afterEach, expect, test } from 'bun:test'
 import type { EnsoThreadStats } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
-import { ChatScreen, ThreadPane } from '../chat-screen.tsx'
-import { clearThreadsForTest, mintThread, type ThreadStores, threadListStore } from '../thread-stores.ts'
+import { ChatScreen, ThreadPane, type ThreadView } from '../chat-screen.tsx'
+import {
+  clearThreadsForTest,
+  getThreadStores,
+  mintThread,
+  type ThreadStores,
+  threadListStore,
+} from '../thread-stores.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
 import { createScriptedFetch, type ScriptedFetch, type ScriptedFetchOptions, SNAPSHOT_IDLE } from './scripted-server.ts'
 
@@ -84,10 +90,12 @@ interface MountedPane {
   readonly sendButton: () => HTMLButtonElement
   readonly modeSelect: () => HTMLSelectElement
   readonly composer: () => HTMLTextAreaElement
+  /** The views the pane asked the page for, in order (#361) — the page is not mounted here. */
+  readonly requestedViews: ThreadView[]
 }
 
 async function mountPane(
-  options: { active?: boolean; debugOpen?: boolean; statsOpen?: boolean; server?: ScriptedFetchOptions } = {},
+  options: { active?: boolean; debugOpen?: boolean; view?: ThreadView; server?: ScriptedFetchOptions } = {},
 ): Promise<MountedPane> {
   const server = createScriptedFetch(options.server ?? {})
   // The composer's mode control seeds from the page's own `fetch("/api/mode")`.
@@ -96,13 +104,17 @@ async function mountPane(
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
+  const requestedViews: ThreadView[] = []
   const render = (active: boolean): void =>
     root.render(
       <ThreadPane
         threadId={stores.threadId}
         active={active}
         debugOpen={options.debugOpen ?? false}
-        statsOpen={options.statsOpen ?? false}
+        view={options.view ?? 'chat'}
+        onView={(view: ThreadView): void => {
+          requestedViews.push(view)
+        }}
       />,
     )
   await flush(async () => {
@@ -139,6 +151,7 @@ async function mountPane(
     sendButton: () => one<HTMLButtonElement>('button[aria-label="send message"]'),
     modeSelect: () => one<HTMLSelectElement>('select'),
     composer: () => one<HTMLTextAreaElement>('textarea[name="message"]'),
+    requestedViews,
   }
 }
 
@@ -1124,17 +1137,19 @@ test("⚠ a frame on one thread's follow changes that pane and no other — cost
   await bravo.unmount()
 })
 
-// PR #358 review: every live pane stays mounted under `hidden`, so the stats drawer — its fixed
+// PR #358 review: every live pane stays mounted under `hidden`, so the stats view — its panel
 // `id`, its fetches, its `stores.usage` subscription — must exist only in the pane on screen
 // (the debug column's rule, PR #94), and be back when the thread is shown again.
-test('⚠ the stats drawer exists only while its pane is shown, and is back open when the pane is', async () => {
-  const pane = await mountPane({ active: true, statsOpen: true })
-  const drawers = (): number => pane.container.querySelectorAll('#thread-stats-pane').length
-  await eventually(() => expect(drawers()).toBe(1))
+test('⚠ the stats view exists only while its pane is shown, and is back when the pane is', async () => {
+  const pane = await mountPane({ active: true, view: 'stats' })
+  const views = (): number => pane.container.querySelectorAll('#thread-view-stats').length
+  await eventually(() => expect(views()).toBe(1))
   await pane.setActive(false)
-  expect(drawers()).toBe(0)
+  expect(views()).toBe(0)
+  // A hidden pane still draws its transcript, but names no panel: the ids are the shown pane's.
+  expect(pane.container.querySelectorAll('[id^="thread-view-"]')).toHaveLength(0)
   await pane.setActive(true)
-  expect(drawers()).toBe(1)
+  expect(views()).toBe(1)
   await pane.unmount()
 })
 
@@ -1173,17 +1188,19 @@ const TWO_CALL_STATS: Omit<EnsoThreadStats, 'threadId'> = {
   logDays: [],
 }
 
-// #359: a drawer row is a way into THIS pane's transcript — through the bridge inside
-// `<Conversation>`, the layout's reveal, and the step row's `data-tool-call-id` — and a target
-// the transcript does not draw is said, not silently ignored.
-test('⚠ a costliest-calls row scrolls to its call in the transcript; a call not drawn there is said (#359)', async () => {
+// #359, #361: a stats row is a way into THIS pane's transcript — through the bridge inside
+// `<Conversation>`, the layout's reveal, and the step row's `data-tool-call-id`. The transcript
+// is under the Stats view, still mounted: the row finds its call there, asks the page for the
+// Chat view, and scrolls once shown. A target the transcript does not draw is said, and the
+// view stays where it is.
+test('⚠ a costliest-calls row opens Chat at its call; a call not drawn there is said and Stats stays (#359, #361)', async () => {
   const scrolled: Element[] = []
   const scrollIntoView = Element.prototype.scrollIntoView
   Element.prototype.scrollIntoView = function record(this: Element): void {
     scrolled.push(this)
   }
   try {
-    const pane = await mountPane({ statsOpen: true, server: { stats: TWO_CALL_STATS } })
+    const pane = await mountPane({ view: 'stats', server: { stats: TWO_CALL_STATS } })
     await pane.settle(SNAPSHOT_IDLE)
     await flush(async () => {
       typeInto(pane.composer(), 'run it')
@@ -1195,15 +1212,18 @@ test('⚠ a costliest-calls row scrolls to its call in the transcript; a call no
       { type: 'observation', seq: 2, observation: { kind: 'tool-call', toolCallId: 'c1', toolName: 'bash', args: {} } },
     )
     const rows = await eventually(() => {
-      const found = [...pane.container.querySelectorAll<HTMLButtonElement>('#thread-stats-pane li button')]
+      const found = [...pane.container.querySelectorAll<HTMLButtonElement>('#thread-view-stats li button')]
       expect(found).toHaveLength(2)
       return found
     })
-    await flush(async () => rows[0]?.click())
-    expect(scrolled).toEqual([pane.container.querySelector('[data-tool-call-id="c1"]') as Element])
     await flush(async () => rows[1]?.click())
-    expect(scrolled).toHaveLength(1)
     await eventually(() => expect(pane.container.textContent).toContain('that call is not in the transcript on screen'))
+    expect(pane.requestedViews).toEqual([])
+    await flush(async () => rows[0]?.click())
+    expect(pane.requestedViews).toEqual(['chat'])
+    await eventually(() =>
+      expect(scrolled).toEqual([pane.container.querySelector('[data-tool-call-id="c1"]') as Element]),
+    )
     await pane.unmount()
   } finally {
     Element.prototype.scrollIntoView = scrollIntoView
@@ -1256,36 +1276,100 @@ async function mountPage(options: ScriptedFetchOptions = {}): Promise<MountedPag
   }
 }
 
-// #359: the stats switch is the page header's, beside debug's — in the status bar it was not
-// found. One switch, and the drawer it opens is the ACTIVE thread's, following a switch of thread.
-test('the header stats switch opens the drawer in the thread on screen, and it follows a switch of thread', async () => {
+// #361: Chat and Stats are the page's views, as tabs in the header. One choice for the page:
+// the view shown is the ACTIVE thread's, and it follows a switch of thread.
+test('the Stats tab replaces the transcript in the thread on screen, and follows a switch of thread', async () => {
   const page = await mountPage()
   const byText = (text: string): HTMLButtonElement => {
     const found = [...page.container.querySelectorAll('button')].find((button) => button.textContent === text)
     if (found === undefined) throw new Error(`expected a ${text} button`)
     return found
   }
+  const tab = (name: string): HTMLButtonElement => {
+    const found = page.container.querySelector<HTMLButtonElement>(`header [role="tab"]#thread-view-${name}-tab`)
+    if (found === null) throw new Error(`expected the ${name} tab in the header`)
+    return found
+  }
+  // Radix activates a tab on mousedown, as a pointer does; a bare click event would not.
+  const choose = async (name: string): Promise<void> => {
+    await flush(async () => {
+      tab(name).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+      await tick()
+    })
+  }
   await page.click(byText('New Thread'))
   await page.click(byText('New Thread'))
-  const toggle = page.container.querySelector<HTMLButtonElement>('header button[aria-controls="thread-stats-pane"]')
-  if (toggle === null) throw new Error('expected the stats switch in the header')
-  expect(toggle.getAttribute('aria-expanded')).toBe('false')
-  await page.click(toggle)
-  const drawer = (): HTMLElement[] => [...page.container.querySelectorAll<HTMLElement>('#thread-stats-pane')]
+  expect(tab('chat').getAttribute('aria-selected')).toBe('true')
+  // Shown: in the pane on screen, and not the transcript kept laid out but `inert` under another view.
+  const shown = (id: string): HTMLElement[] =>
+    [...page.container.querySelectorAll<HTMLElement>(`#${id}`)].filter(
+      (panel) => panel.closest('.hidden') === null && panel.closest('[inert]') === null,
+    )
+  expect(shown('thread-view-chat')).toHaveLength(1)
+  // Every tab's `aria-controls` names a panel that is in the page (#362 review): only the shown one has one.
+  const dangling = (): string[] =>
+    [...page.container.querySelectorAll<HTMLElement>('header [role="tab"][aria-controls]')]
+      .map((trigger) => trigger.getAttribute('aria-controls') ?? '')
+      .filter((panelId) => page.container.querySelector(`#${panelId}`) === null)
+  expect(dangling()).toEqual([])
+  await choose('stats')
   await eventually(() => {
-    expect(toggle.getAttribute('aria-expanded')).toBe('true')
-    expect(drawer()).toHaveLength(1)
-    expect(drawer()[0]?.closest('.hidden')).toBeNull()
+    expect(tab('stats').getAttribute('aria-selected')).toBe('true')
+    expect(shown('thread-view-stats')).toHaveLength(1)
+    expect(shown('thread-view-chat')).toHaveLength(0)
   })
+  expect(dangling()).toEqual([])
   const older = page.activeRows()[1]
   if (older === undefined) throw new Error('expected two rows')
   await page.click(older)
+  await eventually(() => expect(shown('thread-view-stats')).toHaveLength(1))
+  await choose('chat')
   await eventually(() => {
-    expect(drawer()).toHaveLength(1)
-    expect(drawer()[0]?.closest('.hidden')).toBeNull()
+    expect(page.container.querySelectorAll('#thread-view-stats')).toHaveLength(0)
+    expect(shown('thread-view-chat')).toHaveLength(1)
   })
-  await page.click(toggle)
-  await eventually(() => expect(drawer()).toHaveLength(0))
+  await page.unmount()
+})
+
+// A question from pi waits in the transcript; on another view the Chat tab and the status bar say
+// so, and nothing moves the reader (#362 review) — they switch when ready.
+test('a question waiting while Stats is shown is said on the Chat tab and in the status bar; the view stays', async () => {
+  const page = await mountPage()
+  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
+  if (newThread === undefined) throw new Error('expected a New Thread button')
+  await page.click(newThread)
+  const tab = (name: string): HTMLElement => {
+    const found = page.container.querySelector<HTMLElement>(`header [role="tab"]#thread-view-${name}-tab`)
+    if (found === null) throw new Error(`expected the ${name} tab`)
+    return found
+  }
+  const statusBar = (): string => page.visiblePanes()[0]?.textContent ?? ''
+  await flush(async () => {
+    tab('stats').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+    await tick()
+  })
+  const threadId = new URLSearchParams(window.location.search).get('thread')
+  if (threadId === null) throw new Error('expected the thread in the url')
+  expect(tab('chat').textContent).not.toContain('a question is waiting')
+  await flush(async () => {
+    getThreadStores(threadId).dialog.set({ id: 'd1', dialog: { method: 'confirm', title: 'Proceed?', message: '' } })
+    await tick()
+  })
+  expect(tab('stats').getAttribute('aria-selected')).toBe('true')
+  expect(tab('chat').textContent).toContain('a question is waiting')
+  expect(statusBar()).toContain('a question is waiting')
+  // On Chat the question is in view: the tab no longer flags it; the bar still says it waits.
+  await flush(async () => {
+    tab('chat').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+    await tick()
+  })
+  expect(tab('chat').textContent).not.toContain('a question is waiting')
+  expect(statusBar()).toContain('a question is waiting')
+  await flush(async () => {
+    getThreadStores(threadId).dialog.set(undefined)
+    await tick()
+  })
+  expect(statusBar()).not.toContain('a question is waiting')
   await page.unmount()
 })
 

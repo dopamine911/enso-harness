@@ -31,10 +31,13 @@ interface RouteMetadata {
 }
 
 /**
- * A GET that reads one thread and builds nothing — six rows share everything but these four
- * facts (and the follow's factory), so they are stated once (#45 phase 2 added the sixth).
+ * A GET that reads one thread and builds nothing — these rows share everything but these four
+ * facts (and the follow's factory, and an input beyond the thread id), so they are stated once.
  */
-function threadRead(facts: Pick<RouteMetadata, 'path' | 'handler' | 'success' | 'errors' | 'factory'>): RouteMetadata {
+function threadRead(
+  facts: Pick<RouteMetadata, 'path' | 'handler' | 'success' | 'errors' | 'factory'> &
+    Partial<Pick<RouteMetadata, 'input'>>,
+): RouteMetadata {
   return { method: 'GET', input: 'path: `threadId`', routeClass: 'observation', builds: 'no', logs: 'no', ...facts }
 }
 
@@ -62,6 +65,19 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     handler: 'respondWithThreadStats',
     success: "200 `EnsoThreadStats` JSON — pi's session for the numbers, the log's day files for the times",
     errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
+  }),
+  THREAD_CONTEXT_ROUTE: threadRead({
+    path: '/api/threads/:threadId/context',
+    handler: 'respondWithThreadContext',
+    success: "200 `EnsoThreadContext` JSON — pi's branch, request by request, and its context meter",
+    errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
+  }),
+  THREAD_CONTEXT_REQUEST_ROUTE: threadRead({
+    path: '/api/threads/:threadId/context/:request',
+    input: 'path: `threadId`, `request` (a turn number or `next`)',
+    handler: 'respondWithContextRequest',
+    success: "200 `EnsoContextRequestDetail` JSON — one request's context, element by element",
+    errors: '400 malformed thread id; 403 untrusted origin; 404 no session or no such turn; 500 handler failure',
   }),
   THREAD_HISTORY_ROUTE: threadRead({
     path: '/api/threads/:threadId/history',
@@ -119,11 +135,11 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     path: '/api/threads/:threadId/command',
     handler: 'respondToHostCommand → runHostCommand',
     input:
-      'path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing',
+      "path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`) is the page's to open, never run",
     success:
       '204 empty for a setting (the change arrives on the follow as `model`); 202 empty for a flow or action (`login`, `logout`, `compact`) — started, its questions and progress arrive on the follow as dialogs and `notify` lines',
     errors:
-      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 unknown command, model or level, or a provider without credentials; 500 handler failure',
+      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 unknown command, model or level, a provider without credentials, or a `view` (`/context`) the page opens itself; 500 handler failure',
     routeClass: 'control',
     builds: 'yes',
     logs: 'yes',

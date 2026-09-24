@@ -1,47 +1,13 @@
+import { summarizeToolInput } from '@enso/core'
 // ⚠ Only `TextPart` crosses from the package's renderers. `ThinkingPart` looked like its
 // sibling but renders PLAIN text inside hardcoded off-theme chrome — the Reasoning shell
 // in `ai-elements/reasoning.tsx` replaces it (see that file's header).
 
 import type { ChatUISelectedPart, ChatUISelectedToolPart } from '@tanstack/ai-client/ui'
-import { TextPart, type TextPartProps } from '@tanstack/ai-react/ui'
+import { TextPart } from '@tanstack/ai-react/ui'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from './components/ai-elements/reasoning.tsx'
 import { type EnsoRendererMap, EnsoToolResult, type ToolResultState, toolResultState } from './EnsoToolResult.tsx'
-import { MarkdownImage } from './markdown-image.tsx'
-
-/** The intrinsic elements `TextPart` renders through ours — a remote image waits for a click (`markdown-image.tsx`). */
-const TEXT_PART_COMPONENTS: NonNullable<TextPartProps['components']> = { img: MarkdownImage }
-
-/**
- * The argument a step row is summarised by, in precedence. Each of pi's built-ins and the
- * harness tools names its subject one of these ways: bash `command`, grep/find `pattern`,
- * read/write/edit/ls `path`, web_search `query`, web_fetch `url`. `pattern` precedes `path`
- * because grep and find carry both and the pattern is what you would ask about. A tool
- * that names its subject some other way (an MCP tool, say) falls back to its first string
- * argument — a guess, but a visible one, better than a bare name.
- */
-const SUMMARY_KEYS = ['command', 'pattern', 'path', 'query', 'url'] as const
-/** One line of a step row; a multi-line bash command shows its first line and an ellipsis. */
-const SUMMARY_MAX_CHARS = 80
-
-/** The head of the first line; an ellipsis whenever that is less than the whole value. */
-function clipToOneLine(value: string): string {
-  const head = (value.split('\n', 1)[0] ?? '').slice(0, SUMMARY_MAX_CHARS)
-  return head.length < value.length ? `${head}…` : head
-}
-
-/** The one-line subject of a tool call, or undefined when its input names nothing usable. */
-export function summarizeToolInput(input: unknown): string | undefined {
-  if (typeof input !== 'object' || input === null) return undefined
-  const record = input as Record<string, unknown>
-  for (const key of SUMMARY_KEYS) {
-    const candidate = record[key]
-    if (typeof candidate === 'string' && candidate.length > 0) return clipToOneLine(candidate)
-  }
-  for (const candidate of Object.values(record)) {
-    if (typeof candidate === 'string' && candidate.length > 0) return clipToOneLine(candidate)
-  }
-  return undefined
-}
+import { TEXT_PART_COMPONENTS } from './markdown-image.tsx'
 
 /**
  * The call's input as an object. TanStack parses it onto the selected part once the
