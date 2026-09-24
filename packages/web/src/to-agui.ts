@@ -245,6 +245,10 @@ export function observationToAguiEvents(observation: EnsoObservation, ids: AguiI
       // pi is retrying the refused request (#340). CUSTOM: the router writes the warning line.
       return [custom(observation)]
 
+    case 'provider-retry-ended':
+      // pi stopped retrying (#380 review). CUSTOM: the router says when no reply is coming.
+      return [custom(observation)]
+
     case 'prompt-rejected':
       // pi refused the prompt at preflight (#112) — the run the client thinks it started never
       // did. A run error, so the client shows why instead of a spinner that never ends.

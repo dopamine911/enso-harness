@@ -10,7 +10,7 @@ import { type Static, Type } from 'typebox'
  * pi marks the failed attempt on the assistant message it could not produce (`stopReason:
  * "error"`, `errorMessage`); the host says it as `provider_refused` beside that message's own
  * `message_end`, which keeps its accounting role unchanged. pi's retry (`auto_retry_start`) is
- * the separate `EnsoProviderRetry`.
+ * the separate `EnsoProviderRetry`, and its end (`auto_retry_end`) `EnsoProviderRetryEnd`.
  *
  * ⚠ CLASSIFIED BY STATUS, NOT PARSED FROM PROSE. The one structured part of the message is the
  * HTTP status pi's providers put in front of it; the class word comes from that, and the
@@ -45,19 +45,34 @@ export const EnsoProviderRetry = Type.Object({
 })
 
 /**
+ * pi stopped retrying (#380 review) — pi's `auto_retry_end`: whether a retry got through, how many
+ * retries it made, and — when none did — the last error, or `Retry cancelled` when a Stop ended
+ * the wait. Without it a transcript that ran out of retries ends on `retrying in …`, as if one
+ * were still coming.
+ *
+ * @group Thread runtime
+ */
+export const EnsoProviderRetryEnd = Type.Object({
+  success: Type.Boolean(),
+  attempt: Type.Integer({ minimum: 1 }),
+  finalError: Type.Optional(Type.String()),
+})
+
+/**
  * The HTTP status a provider error message carries, where pi's providers put it: at the start
  * (`429 {"type":"error",…}` — the Anthropic SDK's message; `429: <body>` — pi's generic
- * `formatProviderError`) or in a named prefix (`OpenAI API error (429): …`). `undefined` when it
- * carries none — a network failure, an unknown shape.
+ * `formatProviderError`), in a named prefix (`OpenAI API error (429): …`), or as the numeric
+ * `error.code` of a bare JSON body (`{"error":{"code":429,…}}` — `@google/genai`, which pi's
+ * Gemini and Vertex providers pass through unprefixed). `undefined` when it carries none — a
+ * network failure, an unknown shape.
  *
  * @group Thread runtime
  */
 export function providerStatusOf(message: string): number | undefined {
   const found = /^(\d{3})\b|^[^():\n]{1,80}\((\d{3})\):/.exec(message)
   const digits = found?.[1] ?? found?.[2]
-  if (digits === undefined) return undefined
-  const status = Number(digits)
-  return status >= 100 && status <= 599 ? status : undefined
+  const status = digits === undefined ? jsonErrorBodyOf(message)?.code : Number(digits)
+  return status !== undefined && Number.isInteger(status) && status >= 100 && status <= 599 ? status : undefined
 }
 
 /**
@@ -90,13 +105,20 @@ export function providerRefusalClass(status: number | undefined): ProviderRefusa
 /** The longest reason a line or a record carries — a 4 000-character error page is not a reason. */
 const PROVIDER_REASON_MAX_CHARS = 300
 
-/** What a JSON error body says for itself: `error.message` (Anthropic, OpenAI) or `message`. */
-function jsonMessageOf(text: string): string | undefined {
+/**
+ * What a JSON error body says for itself: its sentence — `error.message` (Anthropic, OpenAI,
+ * Gemini) or `message` — and, when numeric, `error.code` (Gemini's HTTP status; OpenAI's codes
+ * are words, and are not a status).
+ */
+function jsonErrorBodyOf(text: string): { readonly message?: string; readonly code?: number } | undefined {
   if (!text.startsWith('{')) return undefined
   try {
-    const body = JSON.parse(text) as { message?: unknown; error?: { message?: unknown } }
-    if (typeof body.error?.message === 'string') return body.error.message
-    return typeof body.message === 'string' ? body.message : undefined
+    const body = JSON.parse(text) as { message?: unknown; error?: { message?: unknown; code?: unknown } }
+    const message = typeof body.error?.message === 'string' ? body.error.message : body.message
+    return {
+      ...(typeof message === 'string' ? { message } : {}),
+      ...(typeof body.error?.code === 'number' ? { code: body.error.code } : {}),
+    }
   } catch {
     return undefined
   }
@@ -111,10 +133,10 @@ function jsonMessageOf(text: string): string | undefined {
  */
 export function providerReasonOf(message: string): string {
   const withoutStatus = message
-    .replace(/^\d{3}:?\s*/, '')
+    .replace(/^\d{3}\b:?\s*/, '')
     .replace(/^[^():\n]{1,80}\(\d{3}\):\s*/, '')
     .trim()
-  const said = jsonMessageOf(withoutStatus) ?? withoutStatus
+  const said = jsonErrorBodyOf(withoutStatus)?.message ?? withoutStatus
   const [firstLine = ''] = said.split('\n', 1)
   const line = firstLine.trim()
   if (line.length === 0) return 'no reason given'

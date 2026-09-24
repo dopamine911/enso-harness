@@ -34,10 +34,12 @@ const SPINE: Readonly<Record<string, true>> = {
   'extension-error': true,
   'run-ended': true,
   settled: true,
-  // A provider's refusal and pi's retry (#340): the outcome of a request, not a boundary — two
-  // hours of 429s were once only the SHAPE of a failure here (`run-ended`, no tokens).
+  // A provider's refusal, pi's retry, and its end (#340, #380 review): the outcome of a request,
+  // not a boundary — two hours of 429s were once only the SHAPE of a failure here (`run-ended`,
+  // no tokens).
   'provider-refused': true,
   'provider-retry': true,
+  'provider-retry-ended': true,
 }
 
 /**
@@ -110,6 +112,12 @@ function compactOf(observation: EnsoObservation): EnsoLogProperties {
       }
     case 'provider-retry':
       return { attempt: observation.attempt, maxAttempts: observation.maxAttempts, delayMs: observation.delayMs }
+    case 'provider-retry-ended':
+      return {
+        success: observation.success,
+        attempt: observation.attempt,
+        ...(observation.finalError === undefined ? {} : { reason: providerReasonOf(observation.finalError) }),
+      }
     case 'turn-start':
       return {}
     case 'turn-end':

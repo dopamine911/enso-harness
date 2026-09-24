@@ -8,6 +8,7 @@ import {
   EnsoPermissionModeState,
   EnsoProviderRefusal,
   EnsoProviderRetry,
+  EnsoProviderRetryEnd,
   EnsoSessionUsage,
   type EnsoToolResultDescriptor,
   type EnsoUsage,
@@ -247,6 +248,19 @@ function mapRetryStart(event: RuntimeEvent): EnsoObservation {
 }
 
 /**
+ * pi stopped retrying (#380 review): picked like the start. `finalError` only when pi gave one —
+ * it does on running out and on a cancel, not on a success.
+ */
+function mapRetryEnd(event: RuntimeEvent): EnsoObservation {
+  const end = {
+    success: event.success,
+    attempt: event.attempt,
+    ...(event.finalError === undefined ? {} : { finalError: event.finalError }),
+  }
+  return Check(EnsoProviderRetryEnd, end) ? { kind: 'provider-retry-ended', ...end } : { kind: 'unmapped', event }
+}
+
+/**
  * Map one pi rpc event. Never returns undefined — see the design rule above.
  *
  * `delivery` is how the host handed the event over (#96): `replayed` from its held buffer —
@@ -362,6 +376,9 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
 
     case 'auto_retry_start':
       return mapRetryStart(event)
+
+    case 'auto_retry_end':
+      return mapRetryEnd(event)
 
     case 'entry_appended': {
       // ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via

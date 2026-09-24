@@ -43,12 +43,6 @@ import { createStore, type Store, type WritableStore } from './store.ts'
  * the server's, not the page's, so a dropped thread comes back through Previous Threads —
  * the rail and `popstate` already resume a thread this page does not hold.
  */
-/** A refusal the status bar shows — see {@link ThreadStores.refusal}. */
-export interface ProviderRefusalMark {
-  readonly refusalClass: ProviderRefusalClass
-  readonly outputAtRefusal: number
-}
-
 export interface ThreadStores {
   readonly threadId: string
   /**
@@ -116,6 +110,12 @@ export interface ThreadStores {
   readonly refusal: WritableStore<ProviderRefusalMark | undefined>
   /** The thread's transport: TanStack's connection over prompt/follow, and the dialog answer beside it. */
   readonly connection: FollowConnection
+}
+
+/** A refusal the status bar shows — see {@link ThreadStores.refusal}. */
+export interface ProviderRefusalMark {
+  readonly refusalClass: ProviderRefusalClass
+  readonly outputAtRefusal: number
 }
 
 export interface EnsoPendingDialog {

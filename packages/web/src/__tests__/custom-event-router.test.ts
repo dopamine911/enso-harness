@@ -439,6 +439,25 @@ test('pi’s retry is its own line: when, and which attempt of how many', () => 
   expect(notificationMessages()).toEqual(['retrying in 4 s — attempt 2 of 4', 'retrying in 500 ms — attempt 1 of 3'])
 })
 
+// #380 review: without an end line, a thread that ran out of retries ends on `retrying in …`, as
+// if one were still coming — the two-hour case ends exactly there. A retry that got through adds
+// nothing: the reply is the evidence.
+test('pi giving up is said, with its last error; a retry that got through adds no line', () => {
+  observe({ kind: 'provider-retry-ended', success: true, attempt: 1 })
+  observe({
+    kind: 'provider-retry-ended',
+    success: false,
+    attempt: 4,
+    finalError: '429 {"error":{"message":"slow down"}}',
+  })
+  observe({ kind: 'provider-retry-ended', success: false, attempt: 1, finalError: 'Retry cancelled' })
+  expect(notificationMessages()).toEqual([
+    'no reply after 4 retries — slow down',
+    'no reply after 1 retry — Retry cancelled',
+  ])
+  expect(stores.notifications.get().map((line) => line.notifyType)).toEqual(['error', 'error'])
+})
+
 // "Nothing ran" must not read as "free" (`$0.0000` beside `idle`) — so the word stays through
 // usage that does not grow (a failed turn still announces usage), and goes once a reply's output
 // has, which is pi's own accounting saying something got through.

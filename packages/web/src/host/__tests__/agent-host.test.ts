@@ -1059,4 +1059,45 @@ test('⚠ a provider refusal is on the feed: the failed attempt, pi’s retry, t
   expect(kinds.indexOf('provider-retry')).toBeLessThan(firstText)
   // and the failed message still ended as a message — its accounting role is unchanged
   expect(kinds.slice(0, kinds.indexOf('provider-refused')).at(-1)).toBe('message-end')
+  // and pi's end of the retry says it got through (#380 review)
+  expect(events.find((event) => event.kind === 'provider-retry-ended')).toEqual({
+    kind: 'provider-retry-ended',
+    success: true,
+    attempt: 1,
+  })
+})
+
+// #380 review: the two-hour case ENDS with pi giving up — and before, the feed's last word was the
+// retry, so the page read as if one were still coming. The end must be on the feed, with the error.
+test('⚠ a run that runs out of retries ends with pi giving up, and its last error, on the feed', async () => {
+  const core = createFauxCore()
+  const refused = (): ReturnType<typeof faux.fauxAssistantMessage> =>
+    faux.fauxAssistantMessage('', { stopReason: 'error', errorMessage: RATE_LIMITED })
+  core.setResponses([refused(), refused()])
+  const retryAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-retry-'))
+  writeFileSync(join(retryAgentDir, 'settings.json'), JSON.stringify({ retry: { baseDelayMs: 1, maxRetries: 1 } }))
+  const host = createAgentHost({
+    cwd: repoRoot,
+    agentDir: retryAgentDir,
+    harnessPackageDir: harnessDir,
+    extensionFactories: [fauxModelExtension(core)],
+  })
+  const hosted = await host.createSession(crypto.randomUUID())
+  openSessions.push(hosted)
+  const events = collectEvents(hosted)
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.subscribe((observation) => {
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  hosted.runtime.prompt({ message: 'hi' }, { onAccepted: () => undefined, onRejected: settled.reject })
+  await settled.promise
+
+  const kinds = events.map((event) => event.kind).filter((kind) => kind.startsWith('provider-'))
+  expect(kinds).toEqual(['provider-refused', 'provider-retry', 'provider-refused', 'provider-retry-ended'])
+  expect(events.find((event) => event.kind === 'provider-retry-ended')).toEqual({
+    kind: 'provider-retry-ended',
+    success: false,
+    attempt: 1,
+    finalError: RATE_LIMITED,
+  })
 })

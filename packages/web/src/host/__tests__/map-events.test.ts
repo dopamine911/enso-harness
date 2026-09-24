@@ -479,4 +479,16 @@ test('a provider refusal maps whole; a malformed one is unmapped; a retry carrie
   expect(
     mapPiEvent({ type: 'auto_retry_start', attempt: 2, maxAttempts: 3, delayMs: 4000, errorMessage: '429 {}' }),
   ).toEqual({ kind: 'provider-retry', attempt: 2, maxAttempts: 3, delayMs: 4000 })
+  // #380 review: the end, picked too — a success carries no error, running out does.
+  expect(mapPiEvent({ type: 'auto_retry_end', success: true, attempt: 1 })).toEqual({
+    kind: 'provider-retry-ended',
+    success: true,
+    attempt: 1,
+  })
+  expect(mapPiEvent({ type: 'auto_retry_end', success: false, attempt: 3, finalError: '429 {}' })).toEqual({
+    kind: 'provider-retry-ended',
+    success: false,
+    attempt: 3,
+    finalError: '429 {}',
+  })
 })

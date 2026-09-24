@@ -10,7 +10,8 @@ import {
  * A provider's refusal, read the way pi's providers write it (#340): the status pi puts in front,
  * the class word a person glances at, and the provider's own sentence out of its JSON. Each row is
  * a real shape — the Anthropic SDK's `<status> <json>`, pi's generic `<status>: <body>`, a named
- * prefix `<Name> (<status>): <body>`, and a failure with no status at all.
+ * prefix `<Name> (<status>): <body>`, Gemini's bare `{"error":{"code":…}}`, and a failure with no
+ * status at all.
  */
 
 const ROWS: ReadonlyArray<{
@@ -49,6 +50,23 @@ const ROWS: ReadonlyArray<{
     reason: 'No Cursor account is logged in for this request. Run /login and pick a cursor slot.',
   },
   { message: '503: upstream unavailable', status: 503, refusalClass: 'provider error', reason: 'upstream unavailable' },
+  {
+    // #380 review: `@google/genai` puts the whole body in the message and pi's Gemini provider adds
+    // no prefix — the status is the body's numeric `code`, or a Gemini rate limit reads as a
+    // network failure.
+    message:
+      '{"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}',
+    status: 429,
+    refusalClass: 'rate-limited',
+    reason: 'Resource has been exhausted (e.g. check quota).',
+  },
+  {
+    // OpenAI's `code` is a word, not a status: the class stays unknown rather than borrowing it.
+    message: '{"error":{"code":"rate_limit_exceeded","message":"Rate limit reached"}}',
+    status: undefined,
+    refusalClass: 'request failed',
+    reason: 'Rate limit reached',
+  },
   { message: 'fetch failed', status: undefined, refusalClass: 'request failed', reason: 'fetch failed' },
 ]
 
@@ -66,6 +84,9 @@ test('each real shape of a provider error reads as its status, its class word an
 // a request id's digits would classify a refusal.
 test('a number inside the message is not a status, and a long or multi-line reason is cut to its first line', () => {
   expect(providerStatusOf('request req_429abc was cancelled after 500 ms')).toBeUndefined()
+  // Four leading digits are not a status — and the reason keeps them whole, in step (#380 review).
+  expect(providerStatusOf('5000 tokens exceeded the limit')).toBeUndefined()
+  expect(providerReasonOf('5000 tokens exceeded the limit')).toBe('5000 tokens exceeded the limit')
   const long = `503: ${'x'.repeat(1000)}\nsecond line`
   expect(providerReasonOf(long)).toHaveLength(301)
   expect(providerReasonOf('502: <html>\n<body>bad gateway</body>')).toBe('<html>')

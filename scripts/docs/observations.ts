@@ -48,6 +48,10 @@ const CUSTOM_METADATA: Record<string, CustomMetadata> = {
     routerBranch: true,
   },
   'provider-retry': { consumer: '`recentChunks`; `notifications` (a warning, #340)', routerBranch: true },
+  'provider-retry-ended': {
+    consumer: '`recentChunks`; `notifications` (an error, when no retry got through — #380 review)',
+    routerBranch: true,
+  },
   model: {
     consumer: '`recentChunks`; `model` (the composer chip and thinking level, #338 slice 2)',
     routerBranch: true,

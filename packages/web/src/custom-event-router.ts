@@ -5,6 +5,7 @@ import {
   EnsoOpenDialog,
   type EnsoPermissionModeState,
   type EnsoProviderRefused,
+  type EnsoProviderRetryEnded,
   type EnsoProviderRetrying,
   providerReasonOf,
   providerRefusalClass,
@@ -144,6 +145,18 @@ function applyRetry(stores: ThreadStores, retry: EnsoProviderRetrying): void {
   stores.notifications.push(`retrying in ${delay} — attempt ${retry.attempt} of ${retry.maxAttempts}`, 'warning', 'run')
 }
 
+/**
+ * pi stopped retrying (#380 review). When a retry got through the reply says so, and nothing is
+ * added; when none did — the retries ran out, or a Stop cancelled the wait — the transcript would
+ * otherwise end on `retrying in …`, so it says there will be no reply, and pi's last error.
+ */
+function applyRetryEnd(stores: ThreadStores, end: EnsoProviderRetryEnded): void {
+  if (end.success) return
+  const retries = end.attempt === 1 ? '1 retry' : `${end.attempt} retries`
+  const reason = end.finalError === undefined ? '' : ` — ${providerReasonOf(end.finalError)}`
+  stores.notifications.push(`no reply after ${retries}${reason}`, 'error', 'run')
+}
+
 /** One receipt, two views (#84, L3): the current-mode store (state) and the transcript line (history). */
 function applyPermissionMode(stores: ThreadStores, state: EnsoPermissionModeState): void {
   stores.permissionMode.applyReceipt(state)
@@ -196,6 +209,9 @@ function routeObservation(stores: ThreadStores, observation: EnsoObservation): v
       return
     case 'provider-retry':
       applyRetry(stores, observation)
+      return
+    case 'provider-retry-ended':
+      applyRetryEnd(stores, observation)
       return
     case 'queue':
       // The whole queue (#75): what cuts in first, then what waits its turn.

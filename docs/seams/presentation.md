@@ -110,6 +110,33 @@ thread on the page gets its own:
 
 <!-- source: packages/web/src/thread-stores.ts#ThreadStores -->
 ```ts
+/**
+ * Everything the browser knows about one thread beyond its messages (#90 PR 3).
+ *
+ * ⚠ WHY INSTANCES, NOT MODULE STATE. Until this, every store was a module singleton — one
+ * mode, one cost, one notification list per PAGE — which was correct only while a page
+ * held exactly one thread. The sessions rail holds several and switches between them; a
+ * run in one keeps streaming while another is on screen, and its `session-usage` must land in
+ * ITS cost, not the visible thread's. So each thread gets its own set, created here, and
+ * the pane that renders a thread provides them through `ThreadStoresContext`.
+ *
+ * ⚠ THE PAGE OWNS ITS LIVE LIST. The rail's first section is the threads this page minted
+ * or resumed — only those chat instances can be switched to. Stored sessions appear in the
+ * second section and become page-owned only after `/history` succeeds. A session another tab
+ * is running is refused by both the rail and the server; two pages never drive one pi session.
+ *
+ * ⚠ AND IT IS BOUNDED (#272). A live thread holds a follow — one SSE connection — for as
+ * long as its pane is mounted, and a browser gives an origin six HTTP/1.1 connections; the
+ * server is plain `Bun.serve` over loopback, so there is no h2 multiplexing to hide behind.
+ * Past the budget the newest follow AND every unary `/api` call the page makes (`prompt`,
+ * `/history`, `/api/mode`) queue behind the open streams, silently. So the page holds at
+ * most `MAX_LIVE_THREADS`: minting or adopting past it drops the least recently active idle
+ * thread, which closes its follow. Neither a thread with a run in flight nor the one ON
+ * SCREEN is ever the victim — a follow the page is showing or streaming is not spare
+ * capacity — so a page made only of those goes over budget and records it. The session is
+ * the server's, not the page's, so a dropped thread comes back through Previous Threads —
+ * the rail and `popstate` already resume a thread this page does not hold.
+ */
 export interface ThreadStores {
   readonly threadId: string
   /**

@@ -126,6 +126,7 @@ export {
   EnsoPermissionModeRejected,
   EnsoPromptRejected,
   EnsoProviderRefused,
+  EnsoProviderRetryEnded,
   EnsoProviderRetrying,
   EnsoQueue,
   EnsoRunEnded,
@@ -145,6 +146,7 @@ export { EnsoPermissionModeChange, EnsoPermissionModeState } from './permission-
 export {
   EnsoProviderRefusal,
   EnsoProviderRetry,
+  EnsoProviderRetryEnd,
   type ProviderRefusalClass,
   providerReasonOf,
   providerRefusalClass,
