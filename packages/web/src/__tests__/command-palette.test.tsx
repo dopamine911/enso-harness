@@ -98,6 +98,8 @@ interface MountedPalette {
   readonly hosts: Array<[string, string | undefined]>
   /** Every `onOpenModelDialog` call's row. */
   readonly dialogs: RuntimeCommand[]
+  /** Every `onOpenView` call's row. */
+  readonly views: RuntimeCommand[]
   readonly trigger: () => HTMLButtonElement
   readonly open: () => Promise<void>
   readonly close: () => Promise<void>
@@ -116,6 +118,7 @@ async function mountPalette(respond: () => Response): Promise<MountedPalette> {
   const inserts: string[] = []
   const hosts: Array<[string, string | undefined]> = []
   const dialogs: RuntimeCommand[] = []
+  const views: RuntimeCommand[] = []
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
@@ -139,6 +142,9 @@ async function mountPalette(respond: () => Response): Promise<MountedPalette> {
         onOpenModelDialog={(command: RuntimeCommand): void => {
           dialogs.push(command)
         }}
+        onOpenView={(command: RuntimeCommand): void => {
+          views.push(command)
+        }}
       />,
     )
   })
@@ -158,6 +164,7 @@ async function mountPalette(respond: () => Response): Promise<MountedPalette> {
     inserts,
     hosts,
     dialogs,
+    views,
     trigger,
     palette,
     // Radix opens its trigger on a primary-button pointerdown, not on click.
@@ -452,6 +459,25 @@ test('a flow row opens the options dialog exactly as a select row does, with no 
   })
   await eventually(() => expect(mounted.dialogs.map((chosen) => chosen.name)).toEqual(['login']))
   expect(mounted.hosts).toEqual([])
+  await mounted.unmount()
+})
+
+// `/context` (#361 phase 5): a view opens in the page — no dialog step, no post.
+test('a view row closes the palette and hands the row to `onOpenView`; nothing is posted', async () => {
+  const contextRow: RuntimeCommand = { name: 'context', source: 'host', kind: 'view', description: 'show the context' }
+  const mounted = await mountPalette(() => Response.json({ ...LIVE, commands: [...LIVE.commands, contextRow] }))
+  await mounted.open()
+  const row = await eventually(() => mounted.row('/context'))
+  await flush(async () => {
+    row.click()
+    await tick()
+  })
+  await eventually(() => {
+    expect(mounted.views.map((chosen) => chosen.name)).toEqual(['context'])
+    expect(document.querySelector('[cmdk-root]')).toBeNull()
+  })
+  expect(mounted.hosts).toEqual([])
+  expect(mounted.dialogs).toEqual([])
   await mounted.unmount()
 })
 

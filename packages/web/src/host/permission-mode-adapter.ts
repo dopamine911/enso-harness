@@ -16,7 +16,7 @@ import type { EnsoPermissionModeState, EnsoTranscriptEntry } from '@enso/core'
  */
 
 /** The `customType` picc persists its state under. */
-const PICC_MODES_CUSTOM_TYPE = 'modes'
+export const PICC_MODES_CUSTOM_TYPE = 'modes'
 
 /** picc's initial mode — a fresh session with no `modes` entry is in this mode by construction. */
 const PICC_DEFAULT_PERMISSION_MODE = 'default'

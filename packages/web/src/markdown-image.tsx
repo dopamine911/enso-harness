@@ -1,3 +1,4 @@
+import type { TextPartProps } from '@tanstack/ai-react/ui'
 import { type ComponentPropsWithoutRef, useState } from 'react'
 
 /**
@@ -64,3 +65,6 @@ export function MarkdownImage(props: ComponentPropsWithoutRef<'img'>): React.Rea
     </button>
   )
 }
+
+/** The intrinsic elements `TextPart` renders through ours — a remote image waits for a click. */
+export const TEXT_PART_COMPONENTS: NonNullable<TextPartProps['components']> = { img: MarkdownImage }

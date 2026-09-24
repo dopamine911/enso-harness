@@ -39,7 +39,7 @@ export interface BranchStats {
 /** A prompt as a row names it: whitespace folded, at most this many characters. */
 const REQUEST_TEXT_MAX = 120
 
-function promptText(content: unknown): string {
+export function promptText(content: unknown): string {
   const folded = contentToText(content).replace(/\s+/g, ' ').trim()
   return folded.length > REQUEST_TEXT_MAX ? `${folded.slice(0, REQUEST_TEXT_MAX - 1)}…` : folded
 }

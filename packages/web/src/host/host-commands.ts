@@ -1,4 +1,10 @@
-import type { EnsoHostCommandRun, EnsoModelChoice, EnsoModelState, RuntimeCommand } from '@enso/core'
+import {
+  ENSO_CONTEXT_COMMAND,
+  type EnsoHostCommandRun,
+  type EnsoModelChoice,
+  type EnsoModelState,
+  type RuntimeCommand,
+} from '@enso/core'
 
 /**
  * The `host` command source (#338 slice 2) — the rows the host appends to `listCommands()` and
@@ -77,6 +83,15 @@ export function withoutHostValues(commands: readonly RuntimeCommand[]): RuntimeC
   })
 }
 
+/**
+ * The `view` rows, last in the list (#361 phase 5): `/context` opens the Context view over the
+ * chat. A view reads what the routes already serve, so the row carries no options and no value,
+ * and a run of it — the palette never sends one — is refused below.
+ */
+export const HOST_VIEW_ROWS: readonly RuntimeCommand[] = [
+  { name: ENSO_CONTEXT_COMMAND, source: 'host', kind: 'view', description: 'show what the context is made of' },
+]
+
 /** What a run asks for once checked: the model to set, the level to set, or why neither. */
 export type HostCommandDecision<Model extends EnsoModelChoice> =
   | { readonly kind: 'model'; readonly model: Model }
@@ -112,6 +127,8 @@ export function decideHostCommand<Model extends EnsoModelChoice>(
       }
       return { kind: 'thinking', level: run.value }
     }
+    case ENSO_CONTEXT_COMMAND:
+      return { kind: 'refused', reason: `/${run.name} opens in the page; there is nothing for the host to run` }
     default:
       return { kind: 'refused', reason: `no host command named ${run.name}` }
   }

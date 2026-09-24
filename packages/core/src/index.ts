@@ -133,6 +133,23 @@ export {
 } from './observation.ts'
 export { EnsoPermissionModeChange, EnsoPermissionModeState } from './permission-mode.ts'
 export {
+  ENSO_CONTEXT_ADDITIONS_SHOWN,
+  ENSO_CONTEXT_COMMAND,
+  ENSO_CONTEXT_IMAGE_PREVIEW_BYTES,
+  EnsoContextAddition,
+  EnsoContextBody,
+  EnsoContextCategory,
+  EnsoContextElement,
+  EnsoContextEvent,
+  EnsoContextEventKind,
+  EnsoContextImage,
+  EnsoContextMakeup,
+  EnsoContextRequest,
+  EnsoContextRequestDetail,
+  EnsoFileOperation,
+  EnsoThreadContext,
+} from './thread-context.ts'
+export {
   describeThreadEvent,
   EnsoEventProvenance,
   EnsoInterruptedTail,
@@ -166,6 +183,7 @@ export {
 } from './thread-runtime.ts'
 export { EnsoPromptStats, EnsoThreadStats, EnsoToolCallStats, EnsoTurnStats } from './thread-stats.ts'
 export { type EnsoTimelineEntry, threadTimeline, timelineJoinKeys } from './thread-timeline.ts'
+export { summarizeToolInput } from './tool-input.ts'
 export {
   ENSO_TOOL_RESULT_KEY,
   EnsoToolResultDescriptor,

@@ -287,8 +287,8 @@ test('⚠ GET …/commands says where its list came from: none before any sessio
   await prompt(url, 'ran', 'hello')
   const live = (await commandsOf('ran')) as EnsoThreadCommands
   expect(live).toMatchObject({ threadId: 'ran', source: 'live' })
-  // pi's row first, then the host's (#338 slices 2 and 3) — the settings with their CURRENT value
-  // on a live thread, the flows with none (there is no "current" login).
+  // pi's row first, then the host's (#338 slices 2 and 3, #361) — the settings with their CURRENT
+  // value on a live thread, the flows with none (there is no "current" login), the view last.
   expect(live.commands.map((command) => [command.name, command.source])).toEqual([
     ['mode', 'extension'],
     ['model', 'host'],
@@ -296,6 +296,7 @@ test('⚠ GET …/commands says where its list came from: none before any sessio
     ['login', 'host'],
     ['logout', 'host'],
     ['compact', 'host'],
+    ['context', 'host'],
   ])
   expect(live.commands[3]).toMatchObject({ kind: 'flow', options: [{ id: 'fake/oauth' }, { id: 'fake/api_key' }] })
   expect(live.commands[3]?.value).toBeUndefined()
@@ -319,11 +320,12 @@ test('⚠ GET …/commands says where its list came from: none before any sessio
     'login',
     'logout',
     'compact',
+    'context',
   ])
   const rememberedHostRows = remembered.commands.filter((command) => command.source === 'host')
   expect(rememberedHostRows.every((hostRow) => hostRow.value === undefined)).toBe(true)
-  // An `action` row has no options to keep; every other host row keeps its.
-  const withOptions = rememberedHostRows.filter((hostRow) => hostRow.kind !== 'action')
+  // An `action` or a `view` row has no options to keep; every other host row keeps its.
+  const withOptions = rememberedHostRows.filter((hostRow) => hostRow.kind !== 'action' && hostRow.kind !== 'view')
   expect(withOptions.map((hostRow) => hostRow.options?.length ?? 0).every((length) => length > 0)).toBe(true)
   expect(withOptions).toHaveLength(4)
   expect(built).toHaveLength(1)
@@ -371,6 +373,11 @@ test('⚠ POST …/command sets the thinking level on a thread that never ran: 2
   const unknown = await run('fresh', { name: 'reload' })
   expect(unknown.status).toBe(422)
   expect(await unknown.text()).toBe('no host command named reload')
+  // A view (#361) is the page's to open; a run of one — the palette never sends it — is the
+  // host's refusal, not a 500 and not a silent 204.
+  const viewRun = await run('fresh', { name: 'context' })
+  expect(viewRun.status).toBe(422)
+  expect(await viewRun.text()).toBe('/context opens in the page; there is nothing for the host to run')
   // `/compact` (slice 4) is an ACTION: it starts like a flow (202) but HOLDS the lease until it
   // settles — a compaction rewrites the branch, so the thread is busy until then: a setting is 409
   // (a prompt would be queued behind the lease, #75, and pi refuses it with its own reason).
@@ -868,4 +875,32 @@ test('the dev page and the header-less CLIs are unaffected', async () => {
   }
   // `enso-thread.ts` and `curl` send no Origin at all.
   expect((await fetch(`${url}/api/about`)).status).toBe(200)
+})
+
+// #361 phase 3: the one thread route with a second path parameter. Only a turn number or `next`
+// matches it; a turn the branch lacks is a 404 that names the request.
+test('GET …/context/:request reads a turn or `next`; any other segment, or a turn not there, is a 404', async () => {
+  const detail = { elements: [], left: [] }
+  const { url, built } = await startWith(settlesAtOnce, {
+    s1: {
+      transcript: [],
+      modified: new Date('2026-09-24T10:00:00.000Z'),
+      firstMessage: 'one',
+      details: { '2': detail, next: detail },
+    },
+  })
+  const read = async (segment: string): Promise<{ status: number; body: string }> => {
+    const response = await fetch(`${url}/api/threads/s1/context/${segment}`)
+    return { status: response.status, body: await response.text() }
+  }
+  const turn = await read('2')
+  expect(turn.status).toBe(200)
+  expect(JSON.parse(turn.body)).toMatchObject({ threadId: 's1', request: 2 })
+  const next = await read('next')
+  expect(next.status).toBe(200)
+  expect(JSON.parse(next.body)).toMatchObject({ request: 'next' })
+  expect(await read('7')).toEqual({ status: 404, body: 'no request 7 on thread s1' })
+  for (const segment of ['0', '01', 'x', '-1']) expect((await read(segment)).status).toBe(404)
+  // Looking builds nothing (#86).
+  expect(built).toHaveLength(0)
 })

@@ -65,8 +65,11 @@ export const TOTAL_FUNCTION_COVERAGE_FLOOR = 0.89
  * Re-measured 2026-09-23 (#45: session usage, branch stats, the thread stats route, the drawer
  * and the stats table it shares with the day's page — about 110 owned sources): the 80% bound
  * asks for 88, and ~10% under gives 99.
+ *
+ * Re-measured 2026-09-24 (#361: the Context view's host walk, its elements, its routes, its
+ * browser — 125 owned sources): the 80% bound asks for 100, and ~10% under gives 112.
  */
-export const MINIMUM_REPORTED_FILES = 99
+export const MINIMUM_REPORTED_FILES = 112
 
 const LCOV_PATH = join(findRepoRoot(import.meta.url), 'coverage', 'lcov.info')
 
