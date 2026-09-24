@@ -80,6 +80,28 @@ test('estimates are written ≈, the provider count is named, and what is not kn
   expect(live).toContain('last request, by the provider:')
 })
 
+// A full bar alone reads the same at 100% and at 140% of the window: past it, the text says so
+// and what lies past the window's edge is tinted — on the Current Context only, the one bar scaled to it.
+test('a next request past the window is said, and its bar marks the window edge', () => {
+  const markup = (window: number): string =>
+    renderToStaticMarkup(
+      <ThreadStoresContext.Provider value={mintThread()}>
+        <ThreadContextView
+          outcome={{ kind: 'read', payload: { ...STORED, live: true, usage: { tokens: 4100, window, percent: 100 } } }}
+        />
+      </ThreadStoresContext.Provider>,
+    )
+  const edges = (html: string): number => html.split('data-slot="scale-edge"').length - 1
+  // ≈5.6K against a 4K window.
+  const over = markup(4000)
+  expect(over).toContain('140% of the window, estimated — over it')
+  expect(over).toContain('over the 4K window')
+  expect(edges(over)).toBe(1)
+  const under = markup(200_000)
+  expect(under).not.toContain('over it')
+  expect(edges(under)).toBe(0)
+})
+
 const operation = (turn: number, overrides: Partial<EnsoFileOperation>): EnsoFileOperation => ({
   key: `e${turn}#0.0`,
   path: 'src/a.ts',

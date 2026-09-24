@@ -50,7 +50,8 @@ export function Card({
 /**
  * The six categories as one bar. `scale` is what the full width means — the model's window for
  * the Current Context, the request's own total in the trend's detail; what the makeup leaves of
- * it is hatched (dsh's free headroom).
+ * it is hatched (dsh's free headroom). A makeup past its scale fills the bar, and what lies past
+ * the scale's edge is tinted — past the window, which the full bar alone would not say.
  */
 export function MakeupBar({
   makeup,
@@ -67,7 +68,7 @@ export function MakeupBar({
     <div
       role="img"
       aria-label={label}
-      className="flex h-3 w-full overflow-hidden rounded-sm bg-[repeating-linear-gradient(135deg,var(--muted)_0_4px,transparent_4px_8px)]"
+      className="relative flex h-3 w-full overflow-hidden rounded-sm bg-[repeating-linear-gradient(135deg,var(--muted)_0_4px,transparent_4px_8px)]"
     >
       {CONTEXT_CATEGORIES.map((category) => (
         <span
@@ -76,6 +77,13 @@ export function MakeupBar({
           style={{ width: `${shareOf(makeup[category], width) * 100}%`, background: CATEGORY_COLOR[category] }}
         />
       ))}
+      {total > scale && scale > 0 ? (
+        <span
+          data-slot="scale-edge"
+          className="absolute inset-y-0 right-0 border-destructive border-l-2 bg-destructive/35"
+          style={{ left: `${shareOf(scale, width) * 100}%` }}
+        />
+      ) : null}
     </div>
   )
 }

@@ -45,6 +45,8 @@ function CurrentContext({ context }: { context: EnsoThreadContext }): React.Reac
   const total = totalOf(context.next)
   const window = context.usage?.window ?? null
   const meter = context.usage?.tokens ?? null
+  // The window the estimate is past, when it is: said in the text and marked on the bar.
+  const overWindow = window !== null && total > window ? window : undefined
   return (
     <Card title="Current Context" aside="what the next request is made of — pi's estimate, by category">
       <p className="mb-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
@@ -55,8 +57,9 @@ function CurrentContext({ context }: { context: EnsoThreadContext }): React.Reac
         {window === null ? (
           <span className="text-muted-foreground">the model's window is known once the thread is live</span>
         ) : (
-          <span className="text-muted-foreground">
+          <span className={overWindow === undefined ? 'text-muted-foreground' : 'text-destructive'}>
             {PERCENT.format(shareOf(total, window))} of the window, estimated
+            {overWindow === undefined ? '' : ' — over it'}
           </span>
         )}
         {meter === null ? null : (
@@ -68,7 +71,7 @@ function CurrentContext({ context }: { context: EnsoThreadContext }): React.Reac
       <MakeupBar
         makeup={context.next}
         scale={window ?? total}
-        label={`next request ${estimateText(total)} tokens, estimated`}
+        label={`next request ${estimateText(total)} tokens, estimated${overWindow === undefined ? '' : `, over the ${COMPACT.format(overWindow)} window`}`}
       />
       <MakeupLegend makeup={context.next} />
     </Card>
