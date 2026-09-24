@@ -4,7 +4,7 @@ import { codeOffenders } from './gate-support.ts'
 /**
  * The pages size and colour themselves with TOKENS, never literals: a colour is a theme
  * variable (`text-chart-2`, `bg-primary`), a size a Tailwind variable — the spacing scale, or a
- * named measure in `styles/global.css`'s `@theme` (`max-w-transcript`, `w-debug-pane`). A literal
+ * named measure in `styles/global.css`'s `@theme` (`max-w-context-view`, `w-debug-pane`). A literal
  * cannot follow a theme or a token change; that is the whole of the rule.
  *
  * ⚠ Enforcement, not a unit test — the shape of `vendor-gate.test.ts`: a line scan over our own
@@ -91,7 +91,7 @@ test('the matchers catch the literals and pass the tokens', () => {
     expect(colourOrArbitrary(literal)).toBe(true)
   for (const token of [
     'className="w-debug-pane shrink-0 text-chart-2"',
-    'className="[&_svg]:size-4 max-w-transcript"',
+    'className="[&_svg]:size-4 max-w-context-view"',
     'className="data-[state=open]:bg-accent aria-[expanded=true]:text-foreground has-[>svg]:px-2"',
     "entry.id + '#0'",
     "'PR #361 review'",
