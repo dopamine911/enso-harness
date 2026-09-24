@@ -199,9 +199,10 @@ A human's answer to a question the runtime is blocked on:
  * With the arms disjoint, `answer.cancelled === true` narrows, so every reader tests the VALUE.
  */
 export type DialogAnswer = { id: string } & (
-  | { cancelled: true; value?: never; confirmed?: never }
-  | { value: string; cancelled?: never; confirmed?: never }
-  | { confirmed: boolean; cancelled?: never; value?: never }
+  | { cancelled: true; value?: never; confirmed?: never; answers?: never }
+  | { value: string; cancelled?: never; confirmed?: never; answers?: never }
+  | { confirmed: boolean; cancelled?: never; value?: never; answers?: never }
+  | { answers: EnsoQuestionAnswer[]; cancelled?: never; value?: never; confirmed?: never }
 )
 ```
 

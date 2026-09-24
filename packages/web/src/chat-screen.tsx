@@ -4,6 +4,7 @@ import {
   ENSO_IMAGE_MAX_BYTES,
   ENSO_IMAGE_MIME_TYPES,
   ENSO_PROMPT_MAX_IMAGES,
+  type EnsoDialogAnswer,
   type EnsoDialogSpec,
   type EnsoPromptImage,
   isEnsoImageMimeType,
@@ -64,6 +65,7 @@ import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.
 import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState } from './model-state.tsx'
 import { ThreadNotifications } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
+import { QuestionnaireControls } from './questionnaire-card.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
 import { SettingsDialog } from './settings-dialog.tsx'
 import { ThreadStoresContext, useStore, useThreadStores } from './store.ts'
@@ -415,7 +417,8 @@ interface HostCommandHandlers {
  * ⚠ The payloads handed to `answer` are EXACTLY pi's wire shapes minus the envelope
  * (`{value}` / `{confirmed}`) — the server validates them against the question
  * (`validateDialogAnswer`) and forwards them verbatim, so inventing a richer shape here
- * would be refused there. Cancel is pi's `{cancelled: true}`.
+ * would be refused there. The one shape that is not pi's is the questionnaire's `{answers}`
+ * (#12), which the host hands to the asking tool. Cancel is pi's `{cancelled: true}`.
  */
 /**
  * The per-method answer controls, one early return per dialog method — extracted from a
@@ -429,10 +432,13 @@ export function DialogAnswerControls({
   disabled,
 }: {
   dialog: EnsoDialogSpec
-  answer: (payload: { value: string } | { confirmed: boolean }) => void
+  answer: (payload: EnsoDialogAnswer) => void
   /** An answer is already in flight: every control refuses a second one — see {@link OpenQuestion} (#275). */
   disabled: boolean
 }): React.ReactNode {
+  if (dialog.method === 'questionnaire') {
+    return <QuestionnaireControls dialog={dialog} answer={answer} disabled={disabled} />
+  }
   if (dialog.method === 'confirm') {
     return (
       <div className="flex flex-col gap-3">
@@ -527,7 +533,7 @@ export function EnsoDialogCard({
   /** The open question's id — unique per question, so the `aria-labelledby` target is too. */
   dialogId: string
   dialog: EnsoDialogSpec
-  answer: (payload: { value: string } | { confirmed: boolean }) => void
+  answer: (payload: EnsoDialogAnswer) => void
   cancel: () => void
   disabled: boolean
   ref?: React.Ref<HTMLDivElement>
@@ -622,7 +628,7 @@ function OpenQuestion({ id, dialog }: { id: string; dialog: EnsoDialogSpec }): R
       dialogId={id}
       dialog={dialog}
       disabled={settling}
-      answer={(payload: { value: string } | { confirmed: boolean }) => settle({ id, ...payload })}
+      answer={(payload: EnsoDialogAnswer) => settle({ id, ...payload })}
       cancel={() => settle({ id, cancelled: true })}
     />
   )

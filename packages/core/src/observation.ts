@@ -100,7 +100,8 @@ export const EnsoToolResultObservation = Type.Object({
  * that cannot do that has to fail loudly instead of waiting forever — which is why this is
  * a distinct observation rather than folded into `unmapped`.
  *
- * `dialog` carries the question itself for the four blocking methods. It is optional
+ * `dialog` carries the question itself for the five blocking methods (pi's four and the
+ * questionnaire, #12). It is optional
  * because the mapper reads it defensively off the wire: a blocking request whose fields do
  * not form a well-shaped question still surfaces as blocking, and the session layer's
  * answer to an unreadable question is to decline it — the pre-#27 behaviour, kept as the

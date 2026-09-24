@@ -617,6 +617,47 @@ test('a confirm dialog round-trips through /dialog; a value answer to it is refu
   follow.close()
 })
 
+// The questionnaire's `{ answers }` over the HTTP route the card posts to (#12): the shape is read
+// here (400 before the question is consulted), then held to THIS question — a label it never
+// offered is the select-injection seam again, with a second door (422, the question stays open).
+test('a questionnaire round-trips { answers } through /dialog; a malformed body is 400, an unoffered label 422', async () => {
+  const fake = fakeHost()
+  const url = await startWith(fake)
+  const follow = await openFollow(url, 't1')
+  await prompt(url, 't1', 'set up storage')
+  fake.emit({
+    kind: 'extension-ui-request',
+    id: 'q1',
+    method: 'questionnaire',
+    blocking: true,
+    dialog: {
+      method: 'questionnaire',
+      title: 'Which database?',
+      questions: [
+        {
+          header: 'Database',
+          question: 'Which database?',
+          options: [{ label: 'Postgres' }, { label: 'SQLite' }],
+          multiSelect: false,
+        },
+      ],
+    },
+    origin: 'run',
+  })
+  await follow.untilFrames(4)
+  const answerWith = (body: Record<string, unknown>): Promise<Response> =>
+    fetch(`${url}/api/threads/t1/dialog`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  expect((await answerWith({ id: 'q1', answers: 'Postgres' })).status).toBe(400)
+  expect((await answerWith({ id: 'q1', answers: [{ selected: ['MySQL'] }] })).status).toBe(422)
+  expect((await answerWith({ id: 'q1', answers: [{ selected: ['SQLite'] }] })).status).toBe(204)
+  expect(fake.built[0]?.answers).toEqual([{ id: 'q1', answers: [{ selected: ['SQLite'] }] }])
+  follow.close()
+})
+
 /**
  * ⚠ `answerThreadDialog` decides "is this a cancellation?" by the VALUE of `cancelled`, never by
  * the key being present. Before #225 `DialogAnswer`'s three arms overlapped, the guard read

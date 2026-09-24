@@ -83,23 +83,20 @@ sequenceDiagram
  */
 export function validateDialogAnswer(spec: EnsoDialogSpec, payload: unknown): string | undefined {
   if (!dialogAnswerValidator.Check(payload)) {
-    return `the payload is not a dialog answer ({ value: string } or { confirmed: boolean })`
+    return `the payload is not a dialog answer ({ value: string }, { confirmed: boolean } or { answers: [...] })`
   }
   switch (spec.method) {
     case 'confirm':
-      return 'confirmed' in payload
-        ? undefined
-        : `a 'confirm' dialog takes { confirmed: boolean }, got a 'value' answer`
+      return 'confirmed' in payload ? undefined : `a 'confirm' dialog takes { confirmed: boolean }`
     case 'select':
-      if (!('value' in payload)) {
-        return `a 'select' dialog takes { value: string }, got a 'confirmed' answer`
-      }
+      if (!('value' in payload)) return `a 'select' dialog takes { value: string }`
       return spec.options.includes(payload.value) ? undefined : `'${payload.value}' is not one of the offered options`
     case 'input':
     case 'editor':
-      return 'value' in payload
-        ? undefined
-        : `an '${spec.method}' dialog takes { value: string }, got a 'confirmed' answer`
+      return 'value' in payload ? undefined : `an '${spec.method}' dialog takes { value: string }`
+    case 'questionnaire':
+      if (!('answers' in payload)) return `a 'questionnaire' dialog takes { answers: [...] }`
+      return questionnaireRefusal(spec.questions, payload.answers)
   }
 }
 ```

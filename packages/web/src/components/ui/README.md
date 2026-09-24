@@ -11,6 +11,9 @@ Chat | Stats views, by the same CLI and style; it needs nothing `radix-ui` does 
 `field.tsx`, with the `label.tsx` and `separator.tsx` it composes, for the settings dialog's theme
 field, by the same CLI and style; the CLI's `cn` package and its re-escaped `package.json`
 description were reverted, per the local changes below.
+`radio-group.tsx` and `checkbox.tsx` for the `ask_user` questionnaire card (#12), by the same CLI
+and style; they need nothing `radix-ui` and `lucide-react` do not already carry, and the CLI's `cn`
+package and `package.json` edits were reverted the same way.
 **License:** MIT (the shadcn/ui project's licence, as published with the CLI).
 **Issue:** #31, fenced by `test/presentation-gate.test.ts` since #253.
 

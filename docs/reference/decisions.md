@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 256.**
+**Decision headers: 262.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -22,8 +22,9 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/__tests__/secrets.test.ts` | `#89` | #89: secrets stay out of the environment the model's tools inherit. |
 | `packages/core/src/__tests__/thread-inspection.test.ts` | `#86`, `#100` | The row formats are shared by the `?debug` drawer and `enso-thread.ts` (PR #100 review: one definition, after the #86 pair had drifted). |
 | `packages/core/src/__tests__/thread-timeline.test.ts` | `#144` | One thread, one ordering (#144 slice 3): the two tails and the log, by time, with the arrival order kept inside a tie and an unreadable stamp kept rather than dropped. |
+| `packages/core/src/ask-user.ts` | `#12` | The agent's `ask_user` tool (#12): what the model writes when it has a question only the user can answer. |
 | `packages/core/src/config.ts` | `#59` | Enso's ONE committed config file (#59): `enso.config.json` at the repository root. |
-| `packages/core/src/dialog.ts` | `#27`, `#112` | pi's blocking extension dialogs, as data (#27, #112). |
+| `packages/core/src/dialog.ts` | `#12`, `#27`, `#112` | pi's blocking extension dialogs, as data (#27, #112). |
 | `packages/core/src/follow.ts` | `#112` | The server↔browser wire (#112): a thread's feed, as the follow route serves it. |
 | `packages/core/src/log-bundle.ts` | `#132` | The bundle (#132 item 5): ONE plaintext file a user attaches to an issue, built from things that already exist — the day's records, the live threads' inspections, the versions, and what the browser logged — with a manifest of what was redacted so the reader knows what is missing rather than wondering. |
 | `packages/core/src/log-process.ts` | `#132` | A process's sink (#132 item 2): ONE log for the harness — `.enso/logs/enso-YYYY-MM-DD.jsonl`, every process appending to the same day's file, every record redacted by field name before it is written, and — for a terminal — a pretty console sink beside it at its own level. |
@@ -76,6 +77,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/core/web-search/vocabulary.ts` | `#56`, `#63` | The web_search vocabulary (#63): provider ids, the outcome union, and the request shapes every provider module accepts. |
 | `packages/harness/core/web-search/wire-json.ts` | `#63`, `#64` | Tiny helpers every provider wire shares (#63, PR #64 review): narrowing for unknown JSON wire payloads, and base-URL hygiene. |
 | `packages/harness/extensions/__tests__/tool-call-participants.test.ts` | `#4`, `#20`, `#62` | THE #4 TRIPWIRE — the arbiter trigger, made structural. |
+| `packages/harness/extensions/ask-user/__tests__/ask-user.test.ts` | `#12` | The ask_user extension (#12) against a scripted UI: which way it asks on which surface, and what the plain-prompt path does with each answer — the path every surface can render, and the one a terminal user answers with the keyboard. |
+| `packages/harness/extensions/ask-user/index.ts` | `#12` | The agent's `ask_user` tool (#12): the model asks the user one to four questions, and the answers come back as the tool's result. |
 | `packages/harness/extensions/guards/__tests__/cc-safety-net-contract.test.ts` | `#4`, `#9`, `#238` | The cc-safety-net CONTRACT TEST (#9) — the condition #4's comments set for adopting a vendor as a library: exact pin + a fixed command set asserted verdict-by-verdict, so a vendor bump that shifts the boundary goes red here instead of silently moving it. |
 | `packages/harness/extensions/guards/index.ts` | `#4`, `#9`, `#20`, `#21`, `#69` | Tier 0 guards — see `docs/concepts/pi-immediate-needs.md`. |
 | `packages/harness/extensions/logging/__tests__/logging.test.ts` | `#132` | The extension's two branches (#132): pi as a CHILD configures its own sink; pi IN-PROCESS leaves the server's alone. |
@@ -105,6 +108,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/page-scoped-stores.test.ts` | `#103`, `#125` | The anchor for #125 item 3 / #103 invariant 2 (switching threads leaks no state): every store that holds a THREAD's state is created inside `createThreadStores` (thread-stores.ts), so a second thread on the page gets its own. |
 | `packages/web/src/__tests__/permission-mode.test.tsx` | `#84`, `#90` | #84's browser half: the CURRENT permission mode as state, and the control that changes it. |
 | `packages/web/src/__tests__/prompt-input.test.ts` | `#141` | ⚠ Upstream reported a refusal only when the WHOLE batch failed; a mixed drop lost files silently (PR #141 review). |
+| `packages/web/src/__tests__/questionnaire-card.test.tsx` | `#12` | The `ask_user` card (#12), mounted: what it sends is what the server holds to the question and the tool reads back as the user's words — one answer per question, in order — and it sends nothing until every question has one. |
 | `packages/web/src/__tests__/radix-preload.ts` | `#338` | `bun test` preload (bunfig.toml): evaluate the modules that DECIDE BY `document` AT MODULE EVALUATION while a document exists, then take the document away again (#338). |
 | `packages/web/src/__tests__/scripted-server.ts` | `#112`, `#118` | A scripted server behind `fetch` (#112, #118): one follow body the test writes SSE frames into, and unary routes the test scripts the answers of. |
 | `packages/web/src/__tests__/static-markup.ts` | `#236` | What a `<select>` in a `renderToStaticMarkup` string offers, read through a DOM (#236). |
@@ -157,6 +161,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/map-events.ts` | `#24` | pi rpc events → the observations a surface renders (#24). |
 | `packages/web/src/host/permission-dialog.ts` | `#27`, `#69`, `#73` | picc's permission prompt, lifted to a question the web surface can ask (#73). |
 | `packages/web/src/host/permission-mode-adapter.ts` | `#84`, `#162` | picc-permission-modes' PERSISTED MODE, as the host reads it (#84; below the seam since #162 workstream 4, L3). |
+| `packages/web/src/host/questionnaire-dialog.ts` | `#12` | The agent's `ask_user` questionnaire, lifted to a dialog the web card asks as one (#12). |
 | `packages/web/src/host/runtime-event.ts` | `#69`, `#162` | The runtime's event, as the host receives it — BELOW the thread-runtime seam since #162 workstream 4 (L2). |
 | `packages/web/src/host/session-events.ts` | `#69` | `AgentSessionEvent` → the rpc WIRE shape (#69). |
 | `packages/web/src/host/session-usage.ts` | `#45`, `#86` | A thread's spend and context, as pi reckons them (#45) — the two halves of `EnsoSessionUsage`. |
@@ -168,6 +173,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/option-select.tsx` | `#45` | A closed vocabulary as a control (#45 phase 2 folded the log level's and the stats drawer's copies): a native `<select>` — keyboard- and screen-reader-complete without a dependency, the reasoning the permission-mode control gives — that only ever hands back one of its options. |
 | `packages/web/src/page-clock.ts` | `#278` | The page's clock as a store (#278): the one value that changes with no input. |
 | `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |
+| `packages/web/src/questionnaire-card.tsx` | `#12` | The agent's `ask_user` questionnaire as one card (#12): a tab per question, each option a row with its label and what choosing it means, an "Other" row for an answer in the user's own words, and one "Submit answers" once every question has one. |
 | `packages/web/src/read-on-usage.ts` | `#45`, `#361`, `#362` | A thread's route, read on mount and again whenever the thread's usage moves (#45, #361) — the Stats and Context views' one refresh rule. |
 | `packages/web/src/route-read.ts` | `#45` | One GET of a JSON route whose answer has a schema, in the three ways it can go — a failure is words, never a throw (#45 phase 2 folded the thread timeline's and the stats drawer's copies). |
 | `packages/web/src/server/__tests__/bun-plugin-strict-binding-workaround.test.ts` | `#237` | The dev bundle's one source rewrite, executed (#237). |

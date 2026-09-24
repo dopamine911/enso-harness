@@ -31,8 +31,11 @@ import type { EventDelivery, RuntimeEvent } from './runtime-event.ts'
  * function cannot return undefined.
  */
 
-/** Methods that block pi until a response arrives — see the `extension_ui_request` case. */
-const DIALOG_UI_METHODS = new Set(['select', 'confirm', 'input', 'editor'])
+/**
+ * Methods that block pi until a response arrives — see the `extension_ui_request` case. The
+ * last is ours, not pi's: the questionnaire the host lifts from `ask_user`'s component (#12).
+ */
+const DIALOG_UI_METHODS = new Set(['select', 'confirm', 'input', 'editor', 'questionnaire'])
 
 interface PiContentPart {
   type?: string
@@ -128,7 +131,7 @@ function mapExtensionUiRequest(event: RuntimeEvent, delivery: EventDelivery): En
   // which is the bug this observation kind exists to make inexpressible.
   const method = String(event.method ?? 'unknown')
   const dialogCandidate: Record<string, unknown> = { method }
-  for (const field of ['title', 'options', 'message', 'placeholder', 'prefill', 'secret', 'timeout']) {
+  for (const field of ['title', 'options', 'message', 'placeholder', 'prefill', 'secret', 'timeout', 'questions']) {
     if (event[field] !== undefined) dialogCandidate[field] = event[field]
   }
   const dialog: EnsoDialogSpec | undefined = isEnsoDialogSpec(dialogCandidate) ? dialogCandidate : undefined

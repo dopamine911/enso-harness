@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
+import { type EnsoQuestionnaireResult, QUESTIONNAIRE_COMPONENT_KEY } from '@enso/core'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
@@ -432,4 +433,71 @@ test('a component that arrives after the build budget is disposed on arrival, si
   await late.promise // the disposal is chained on this same promise, so it has run once this settles
   await Promise.resolve()
   expect(disposed).toBe(1)
+})
+
+// ── the ask_user questionnaire, lifted (#12) ─────────────────────────────────
+
+/** A component as `ask_user` builds it: the questionnaire under the registered key, and whatever else it carries. */
+function questionnaireComponent(carried: unknown): () => unknown {
+  return () => ({
+    [QUESTIONNAIRE_COMPONENT_KEY]: carried,
+    render: (): string[] => [],
+    invalidate: (): void => undefined,
+  })
+}
+
+const ONE_QUESTION = {
+  header: 'Database',
+  question: 'Which database?',
+  options: [{ label: 'Postgres', description: 'relational' }, { label: 'SQLite' }],
+  multiSelect: false,
+}
+
+// What the component carries rides to every follower as the question, so the lift takes the
+// schema's fields and nothing else — at every level — and answers the tool with the answers.
+test('a questionnaire component is asked as one questionnaire dialog of exactly its schema fields, and answered with the answers', async () => {
+  const { uiContext, answerDialog, requests } = contextUnderTest()
+  const carried = {
+    title: 'Which database?',
+    questions: [
+      {
+        ...ONE_QUESTION,
+        stray: 'dropped',
+        options: [{ label: 'Postgres', description: 'relational', stray: 1 }, { label: 'SQLite' }],
+      },
+    ],
+    stray: 'dropped too',
+  }
+  const pending = uiContext.custom<EnsoQuestionnaireResult>(questionnaireComponent(carried) as never)
+  await untilEmitted(requests, 1)
+  const request = requests[0]
+  if (request === undefined) throw new Error('no questionnaire was asked')
+  const { id, type: _type, ...asked } = request
+  expect(asked).toEqual({ method: 'questionnaire', title: 'Which database?', questions: [ONE_QUESTION] })
+  answerDialog({ id: String(id), answers: [{ selected: ['SQLite'] }] })
+  expect(await pending).toEqual({ answers: [{ selected: ['SQLite'] }] })
+})
+
+// `undefined` is the tool's signal that this host could not show the card — so a decline must be
+// the explicit `{ cancelled: true }`, and a malformed questionnaire must be no dialog at all.
+test('a declined questionnaire resolves { cancelled: true }; a malformed one, or one repeating a label, is never asked and resolves undefined', async () => {
+  const { uiContext, answerDialog, requests } = contextUnderTest()
+  const declined = uiContext.custom<EnsoQuestionnaireResult>(
+    questionnaireComponent({ title: 'Q', questions: [ONE_QUESTION] }) as never,
+  )
+  await untilEmitted(requests, 1)
+  answerDialog({ id: String(requests[0]?.id), cancelled: true })
+  expect(await declined).toEqual({ cancelled: true })
+
+  const malformed = uiContext.custom<EnsoQuestionnaireResult>(
+    questionnaireComponent({ title: 'Q', questions: [] }) as never,
+  )
+  expect(await malformed).toBeUndefined()
+  // A label listed twice is refused too: two rows sharing one value would render as one choice.
+  const repeated = { ...ONE_QUESTION, options: [...ONE_QUESTION.options, { label: 'SQLite' }] }
+  const twice = uiContext.custom<EnsoQuestionnaireResult>(
+    questionnaireComponent({ title: 'Q', questions: [repeated] }) as never,
+  )
+  expect(await twice).toBeUndefined()
+  expect(requests).toHaveLength(1)
 })

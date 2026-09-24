@@ -42,6 +42,7 @@ const REGIONS: readonly Region[] = ['web/host', 'web/server', 'web/browser', 'ha
  * accident, and a row for a module that exports nothing is refused.
  */
 const MODULE_FACTS: Readonly<Record<string, readonly [classification: Classification, domain: string]>> = {
+  'ask-user.ts': ['wire', 'Control'],
   'config.ts': ['config/policy', 'Record, Permission'],
   'dialog.ts': ['wire', 'Control'],
   'follow.ts': ['wire', 'Control, Observation'],
