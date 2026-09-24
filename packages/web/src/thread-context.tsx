@@ -1,13 +1,15 @@
 import { type EnsoContextCategory, type EnsoContextRequest, EnsoThreadContext } from '@enso/core'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Cell, type MouseHandlerDataParam, ReferenceLine, XAxis, YAxis } from 'recharts'
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from './components/ui/chart.tsx'
+import { ContextEvents, FileActivity } from './context-activity.tsx'
 import { ContextBrowser, type ContextBrowserFocus, type ContextBrowserRequest } from './context-browser.tsx'
 import { Card, COMPACT, estimateText, MakeupBar, MakeupLegend, PERCENT, timeText } from './context-parts.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
 import { countText } from './stats-table.tsx'
+import { useStore, useThreadStores } from './store.ts'
 import {
   CATEGORY_COLOR,
   CATEGORY_LABEL,
@@ -386,33 +388,59 @@ function ContextTrend({
 
 /**
  * The cards, and what joins them: the Context Browser opens the request the trend's bar picks
- * (dsh's linkage), and a brief's line opens its element there.
+ * (dsh's linkage), File Activity counts up to it, and a brief's line, an event or a file
+ * operation opens its request — and its element — in the browser.
  */
 function ContextCards({ context }: { context: EnsoThreadContext }): React.ReactNode {
+  const stores = useThreadStores()
+  const cwd = useStore(stores.cwd)
   const [browserRequest, setBrowserRequest] = useState<ContextBrowserRequest>('next')
+  const [trendTurn, setTrendTurn] = useState<number | undefined>(undefined)
   const [focus, setFocus] = useState<ContextBrowserFocus | undefined>(undefined)
+  const browser = useRef<HTMLDivElement | null>(null)
+  const openInBrowser = (request: ContextBrowserRequest, focusOn?: ContextBrowserFocus): void => {
+    setBrowserRequest(request)
+    setFocus(focusOn)
+    browser.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+  const requestCount = context.requests.length
   return (
     <div className="grid grid-cols-1 gap-4 p-4">
       <p className="text-muted-foreground text-xs">
-        {context.live ? 'live' : 'from the file'} · {countText(context.requests.length)} model requests · every category
-        is pi's estimate (≈); the provider's own counts are named as such
+        {context.live ? 'live' : 'from the file'} · {countText(requestCount)} model requests · every category is pi's
+        estimate (≈); the provider's own counts are named as such
       </p>
       <CurrentContext context={context} />
       <ContextTrend
         requests={context.requests}
-        onPick={setBrowserRequest}
+        onPick={(turn: number) => {
+          setTrendTurn(turn)
+          setBrowserRequest(turn)
+        }}
         onOpen={(turn: number, key: string) => {
           setBrowserRequest(turn)
           setFocus({ request: turn, key })
         }}
       />
-      <ContextBrowser
-        requests={context.requests}
-        next={context.next}
-        request={browserRequest}
-        onRequest={setBrowserRequest}
-        focus={focus}
-      />
+      <div ref={browser} className="min-w-0">
+        <ContextBrowser
+          requests={context.requests}
+          next={context.next}
+          request={browserRequest}
+          onRequest={setBrowserRequest}
+          focus={focus}
+        />
+      </div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <ContextEvents events={context.events} requestCount={requestCount} onOpen={openInBrowser} />
+        <FileActivity
+          operations={context.files}
+          upToTurn={trendTurn}
+          cwd={cwd}
+          requestCount={requestCount}
+          onOpen={openInBrowser}
+        />
+      </div>
     </div>
   )
 }

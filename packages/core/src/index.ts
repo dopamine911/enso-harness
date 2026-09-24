@@ -139,10 +139,13 @@ export {
   EnsoContextBody,
   EnsoContextCategory,
   EnsoContextElement,
+  EnsoContextEvent,
+  EnsoContextEventKind,
   EnsoContextImage,
   EnsoContextMakeup,
   EnsoContextRequest,
   EnsoContextRequestDetail,
+  EnsoFileOperation,
   EnsoThreadContext,
 } from './thread-context.ts'
 export {

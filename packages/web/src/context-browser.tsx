@@ -23,6 +23,7 @@ import {
   shareOf,
   totalOf,
 } from './thread-context-analysis.ts'
+import { toggleMember } from './toggle-member.ts'
 
 /**
  * The Context Browser (#361 phase 3) — dsh-context's "open the box of any request": pick the next
@@ -282,12 +283,7 @@ function useFocusedRows(focused: EnsoContextElement | undefined): {
   useEffect(() => {
     if (focused !== undefined) focusRow.current?.scrollIntoView({ block: 'start' })
   }, [focused])
-  const toggle = (key: string): void =>
-    setOpenKeys((keys) => {
-      const next = new Set(keys)
-      if (!next.delete(key)) next.add(key)
-      return next
-    })
+  const toggle = (key: string): void => setOpenKeys((keys) => toggleMember(keys, key))
   return { open, setOpen, openKeys, toggle, focusRow }
 }
 

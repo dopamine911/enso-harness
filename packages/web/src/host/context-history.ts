@@ -1,0 +1,310 @@
+import { posix } from 'node:path'
+import type { SessionEntry } from '@earendil-works/pi-coding-agent'
+import type { EnsoContextEvent, EnsoFileOperation } from '@enso/core'
+import { type ContextItem, contextItems, makeupOf } from './context-elements.ts'
+import { contentToText } from './map-events.ts'
+import { PICC_MODES_CUSTOM_TYPE } from './permission-mode-adapter.ts'
+
+/**
+ * What happened to a thread's context, and to its files (#361 phase 4) — dsh-context's Context
+ * Events and File Activity, read off pi's own entries along the branch.
+ *
+ * ⚠ AN EVENT'S TOKENS ARE THE CONTEXT'S CHANGE, measured the one way the trend measures: the
+ * estimate of the context at the entry, less the estimate just before it (pi's projection both
+ * times). So a compaction's figure is what it reclaimed and a prune's what it removed, by the
+ * same rule as every bar — not pi's `tokensBefore`, which is a figure of pi's own making.
+ */
+
+/** A context's estimated total at a leaf — `branch-context.ts` builds it with pi's projection. */
+export type ContextTotalAt = (leafId: string | null) => number
+
+/** pi's own sections of a leading prompt; any other is an injection (`context-elements.ts`). */
+const BASE_SECTIONS: Readonly<Record<string, true>> = Object.fromEntries(
+  ['preamble', 'tools', 'rules', 'docs', 'cwd'].map((sectionName) => [sectionName, true]),
+)
+
+interface EventWalk {
+  readonly events: EnsoContextEvent[]
+  readonly totalAt: ContextTotalAt
+  readonly byId: ReadonlyMap<string, SessionEntry>
+  /** The request an entry first reaches: the replies so far, plus one. */
+  turn: number
+  sawPrompt: boolean
+  model: string | undefined
+  thinking: string | undefined
+  mode: unknown
+}
+
+function push(
+  walk: EventWalk,
+  sessionEntry: SessionEntry,
+  event: Pick<EnsoContextEvent, 'kind' | 'label' | 'tokens'>,
+): void {
+  walk.events.push({ ...event, turn: walk.turn, at: sessionEntry.timestamp })
+}
+
+/** The change an entry made to the context: its estimate at the entry, less just before. */
+const changeAt = (walk: EventWalk, sessionEntry: SessionEntry): number =>
+  walk.totalAt(sessionEntry.id) - walk.totalAt(sessionEntry.parentId)
+
+/** A system message: the prompt's injected sections, once; a later one as the change it made. */
+function systemEvents(walk: EventWalk, sessionEntry: Extract<SessionEntry, { type: 'message' }>): void {
+  if (sessionEntry.message.role !== 'system') return
+  if (walk.sawPrompt) {
+    const sections = Object.keys(sessionEntry.message.sections ?? {})
+    push(walk, sessionEntry, {
+      kind: 'inject',
+      label: `system: ${sections.join(', ') || 'instructions'}`,
+      tokens: changeAt(walk, sessionEntry),
+    })
+    return
+  }
+  walk.sawPrompt = true
+  for (const promptItem of contextItems({ sourceEntry: sessionEntry, messages: [sessionEntry.message] }, true)) {
+    const sectionName = promptItem.key.split(':section:')[1]
+    if (sectionName !== undefined && BASE_SECTIONS[sectionName] !== true) {
+      push(walk, sessionEntry, { kind: 'inject', label: sectionName, tokens: promptItem.tokens })
+    }
+  }
+}
+
+/** What a context edit touched, as a line: the tool whose result it was, or the message's role. */
+function editedLabel(walk: EventWalk, targetId: string): string {
+  const target = walk.byId.get(targetId)
+  if (target?.type !== 'message') return 'an entry'
+  return target.message.role === 'toolResult' ? `${target.message.toolName} result` : `a ${target.message.role} message`
+}
+
+/**
+ * A switch of model, thinking level or mode. Whatever is set before the first request is where
+ * the thread began — the host sets the model and pi the level as a session opens — not a switch.
+ */
+function settingEvents(walk: EventWalk, sessionEntry: SessionEntry): void {
+  const began = walk.turn === 1
+  if (sessionEntry.type === 'model_change') {
+    const model = `${sessionEntry.provider}/${sessionEntry.modelId}`
+    if (!began && walk.model !== model) push(walk, sessionEntry, { kind: 'switch', label: `model ${model}`, tokens: 0 })
+    walk.model = model
+  } else if (sessionEntry.type === 'thinking_level_change') {
+    const level = sessionEntry.thinkingLevel
+    if (!began && walk.thinking !== level)
+      push(walk, sessionEntry, { kind: 'switch', label: `thinking ${level}`, tokens: 0 })
+    walk.thinking = level
+  } else if (sessionEntry.type === 'custom' && sessionEntry.customType === PICC_MODES_CUSTOM_TYPE) {
+    const mode = (sessionEntry.data as { mode?: unknown } | undefined)?.mode
+    if (!began && walk.mode !== mode)
+      push(walk, sessionEntry, { kind: 'mode', label: `mode ${String(mode)}`, tokens: 0 })
+    walk.mode = mode
+  }
+}
+
+function entryEvents(walk: EventWalk, sessionEntry: SessionEntry): void {
+  switch (sessionEntry.type) {
+    case 'message':
+      systemEvents(walk, sessionEntry)
+      if (sessionEntry.message.role === 'assistant') walk.turn += 1
+      return
+    case 'custom_message':
+      push(walk, sessionEntry, { kind: 'inject', label: sessionEntry.customType, tokens: changeAt(walk, sessionEntry) })
+      return
+    case 'branch_summary':
+      push(walk, sessionEntry, { kind: 'inject', label: 'branch summary', tokens: changeAt(walk, sessionEntry) })
+      return
+    case 'compaction':
+      push(walk, sessionEntry, {
+        kind: 'compact',
+        label: 'compacted: a summary replaced the context before it',
+        tokens: changeAt(walk, sessionEntry),
+      })
+      return
+    case 'context_edit': {
+      const verb = sessionEntry.replacement === null ? 'pruned' : 'replaced'
+      push(walk, sessionEntry, {
+        kind: 'prune',
+        label: `${verb} ${editedLabel(walk, sessionEntry.targetId)}`,
+        tokens: changeAt(walk, sessionEntry),
+      })
+      return
+    }
+    default:
+      settingEvents(walk, sessionEntry)
+  }
+}
+
+/** Every context event on the branch, oldest first. */
+export function contextEvents(branch: readonly SessionEntry[], totalAt: ContextTotalAt): EnsoContextEvent[] {
+  const walk: EventWalk = {
+    events: [],
+    totalAt,
+    byId: new Map(branch.map((branchEntry) => [branchEntry.id, branchEntry])),
+    turn: 1,
+    sawPrompt: false,
+    model: undefined,
+    thinking: undefined,
+    mode: undefined,
+  }
+  for (const sessionEntry of branch) entryEvents(walk, sessionEntry)
+  return walk.events
+}
+
+// ── file activity ────────────────────────────────────────────────────────────────────────────
+
+const IMAGE_EXTENSIONS: Readonly<Record<string, true>> = Object.fromEntries(
+  ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico', '.avif'].map((extension) => [extension, true]),
+)
+
+/** Lines a text is — a trailing newline closes its last line, it does not open another. */
+function linesOf(text: string): number {
+  if (text === '') return 0
+  const lines = text.split('\n').length
+  return text.endsWith('\n') ? lines - 1 : lines
+}
+
+const stringArgument = (input: Record<string, unknown>, name: string): string | undefined =>
+  typeof input[name] === 'string' ? input[name] : undefined
+
+interface ToolResultFacts {
+  readonly text: string
+  readonly isError: boolean
+  readonly key: string
+}
+
+interface CallFacts {
+  readonly tool: string
+  readonly input: Record<string, unknown>
+  readonly turn: number
+  readonly at: string
+  readonly result: ToolResultFacts | undefined
+}
+
+type Operation = Omit<EnsoFileOperation, 'tool' | 'turn' | 'at' | 'isError' | 'resultKey'>
+
+const blank = { subject: '', added: 0, removed: 0, hits: 0, image: false }
+
+function readOperation(input: Record<string, unknown>): Operation[] {
+  const path = stringArgument(input, 'path')
+  if (path === undefined) return []
+  const offset = typeof input.offset === 'number' ? input.offset : undefined
+  const limit = typeof input.limit === 'number' ? input.limit : undefined
+  const subject =
+    offset === undefined && limit === undefined
+      ? ''
+      : `lines ${offset ?? 1}${limit === undefined ? '' : `–${(offset ?? 1) + limit - 1}`}`
+  return [
+    { ...blank, path, kind: 'read', subject, image: IMAGE_EXTENSIONS[posix.extname(path).toLowerCase()] === true },
+  ]
+}
+
+function writeOperation(tool: string, input: Record<string, unknown>): Operation[] {
+  const path = stringArgument(input, 'path')
+  if (path === undefined) return []
+  if (tool === 'write')
+    return [{ ...blank, path, kind: 'write', added: linesOf(stringArgument(input, 'content') ?? '') }]
+  const edits = Array.isArray(input.edits) ? (input.edits as Array<{ oldText?: unknown; newText?: unknown }>) : []
+  let added = 0
+  let removed = 0
+  for (const edit of edits) {
+    added += typeof edit.newText === 'string' ? linesOf(edit.newText) : 0
+    removed += typeof edit.oldText === 'string' ? linesOf(edit.oldText) : 0
+  }
+  return [{ ...blank, path, kind: 'write', added, removed }]
+}
+
+/**
+ * Each file a search's result names, with its matches. pi's grep writes a match as
+ * `file:line: text` and find a path per line, both relative to the searched directory
+ * (`tools/grep.js`, `tools/find.js`); a notice line (`[…]`) is not a file. `ls` lists, and names
+ * nothing it matched.
+ */
+function searchHits(tool: string, result: ToolResultFacts | undefined): Map<string, number> {
+  const hits = new Map<string, number>()
+  if (result === undefined || result.isError || tool === 'ls') return hits
+  for (const line of result.text.split('\n')) {
+    if (line.trim() === '' || line.startsWith('[')) continue
+    const file = tool === 'grep' ? /^(.+?):\d+:/.exec(line)?.[1] : line.trim()
+    if (file !== undefined) hits.set(file, (hits.get(file) ?? 0) + 1)
+  }
+  return hits
+}
+
+/** A search: the searched path, and each file it matched with its hits. */
+function searchOperations(
+  tool: string,
+  input: Record<string, unknown>,
+  result: ToolResultFacts | undefined,
+): Operation[] {
+  const searched = stringArgument(input, 'path') ?? '.'
+  const subject = stringArgument(input, 'pattern') ?? (tool === 'ls' ? 'list' : '')
+  const hits = searchHits(tool, result)
+  const total = [...hits.values()].reduce((allHits, fileHits) => allHits + fileHits, 0)
+  return [
+    { ...blank, path: searched, kind: 'search', subject, hits: total },
+    ...[...hits].map(([file, count]) => ({
+      ...blank,
+      path: posix.join(searched, file),
+      kind: 'search' as const,
+      subject,
+      hits: count,
+    })),
+  ]
+}
+
+function operationsOf(call: CallFacts): Operation[] {
+  if (call.tool === 'read') return readOperation(call.input)
+  if (call.tool === 'write' || call.tool === 'edit') return writeOperation(call.tool, call.input)
+  if (call.tool === 'grep' || call.tool === 'find' || call.tool === 'ls')
+    return searchOperations(call.tool, call.input, call.result)
+  return []
+}
+
+/** Every result on the branch, by the call it answers. */
+function resultsOf(branch: readonly SessionEntry[]): Map<string, ToolResultFacts> {
+  const results = new Map<string, ToolResultFacts>()
+  for (const sessionEntry of branch) {
+    if (sessionEntry.type !== 'message' || sessionEntry.message.role !== 'toolResult') continue
+    const { message } = sessionEntry
+    results.set(message.toolCallId, {
+      text: contentToText(message.content),
+      isError: message.isError,
+      key: `${sessionEntry.id}#0`,
+    })
+  }
+  return results
+}
+
+/** Every call on the branch with its turn and, when it has landed, its result. */
+function callsOf(branch: readonly SessionEntry[]): CallFacts[] {
+  const results = resultsOf(branch)
+  const calls: CallFacts[] = []
+  let turn = 0
+  for (const sessionEntry of branch) {
+    if (sessionEntry.type !== 'message' || sessionEntry.message.role !== 'assistant') continue
+    turn += 1
+    for (const part of sessionEntry.message.content) {
+      if (part.type !== 'toolCall') continue
+      const input = typeof part.arguments === 'object' && part.arguments !== null ? part.arguments : {}
+      calls.push({ tool: part.name, input, turn, at: sessionEntry.timestamp, result: results.get(part.id) })
+    }
+  }
+  return calls
+}
+
+/** Every file operation on the branch, oldest first. */
+export function fileOperations(branch: readonly SessionEntry[]): EnsoFileOperation[] {
+  return callsOf(branch).flatMap((call) =>
+    operationsOf(call).map((fileOperation) => ({
+      ...fileOperation,
+      tool: call.tool,
+      turn: call.turn,
+      at: call.at,
+      isError: call.result?.isError === true,
+      ...(call.result === undefined ? {} : { resultKey: call.result.key }),
+    })),
+  )
+}
+
+/** Estimated total of a context's elements — the total a bar draws. */
+export function totalOfItems(items: Iterable<ContextItem>): number {
+  const makeup = makeupOf(items)
+  return makeup.system + makeup.tools + makeup.user + makeup.injected + makeup.assistant + makeup.toolResults
+}

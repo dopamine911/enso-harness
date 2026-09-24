@@ -311,6 +311,8 @@ const FAKE_EMPTY_BRANCH: BranchStats = {
 const FAKE_EMPTY_CONTEXT: BranchContext = {
   next: { system: 0, tools: 0, user: 0, injected: 0, assistant: 0, toolResults: 0 },
   requests: [],
+  events: [],
+  files: [],
 }
 
 /**

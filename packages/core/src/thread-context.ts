@@ -141,6 +141,84 @@ export type EnsoContextRequest = Static<typeof EnsoContextRequest>
 export const ENSO_CONTEXT_ADDITIONS_SHOWN = 6
 
 /**
+ * dsh-context's event kinds, over pi's entries:
+ * - `inject`: context the harness added — an injected prompt section at the start, a later
+ *   system message, an extension's custom message, a branch summary;
+ * - `compact`: a compaction — its summary in place of what it replaced;
+ * - `prune`: an extension's `context_edit` — a message removed or replaced in later requests;
+ * - `switch`: the model or the thinking level changed;
+ * - `mode`: the permission mode changed (picc's `modes` entry).
+ *
+ * @group Thread context
+ */
+export const EnsoContextEventKind = Type.Union([
+  Type.Literal('inject'),
+  Type.Literal('compact'),
+  Type.Literal('prune'),
+  Type.Literal('switch'),
+  Type.Literal('mode'),
+])
+/** @group Thread context */
+export type EnsoContextEventKind = Static<typeof EnsoContextEventKind>
+
+/**
+ * When and why the context changed — one row of dsh-context's Context Events.
+ *
+ * @group Thread context
+ */
+export const EnsoContextEvent = Type.Object(
+  {
+    kind: EnsoContextEventKind,
+    /** One line: the section, the custom message's type, what the summary replaced, the new model. */
+    label: Type.String(),
+    /** The first request it reached; one past the last request when it reaches only the next. */
+    turn: Type.Integer({ minimum: 1 }),
+    /** When its entry was stored, ISO. */
+    at: Type.String(),
+    /** How it changed the context's estimate, signed; zero for a switch or a mode. */
+    tokens: Type.Integer(),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread context */
+export type EnsoContextEvent = Static<typeof EnsoContextEvent>
+
+/**
+ * One thing a tool call did to a file — dsh-context's File Activity, from pi's own file tools:
+ * `read` reads; `write` and `edit` write, with their line footprint; `grep`, `find` and `ls`
+ * search — the searched path, and each file a search matched, with its hits. A `bash` command
+ * names no file it touched, so it is not here.
+ *
+ * @group Thread context
+ */
+export const EnsoFileOperation = Type.Object(
+  {
+    /** As the call named it — relative to the thread's tree, or absolute. */
+    path: Type.String(),
+    kind: Type.Union([Type.Literal('read'), Type.Literal('write'), Type.Literal('search')]),
+    /** The tool that did it. */
+    tool: Type.String(),
+    /** What it asked: a read's line range, a search's pattern; empty when nothing narrower. */
+    subject: Type.String(),
+    /** A write's estimated footprint: lines it wrote, lines it replaced. */
+    added: Type.Integer({ minimum: 0 }),
+    removed: Type.Integer({ minimum: 0 }),
+    /** A search's matches in this file. */
+    hits: Type.Integer({ minimum: 0 }),
+    /** A read of an image file. */
+    image: Type.Boolean(),
+    isError: Type.Boolean(),
+    /** The turn whose reply made the call. */
+    turn: Type.Integer({ minimum: 1 }),
+    at: Type.String(),
+    /** The call's result in the Context Browser: its element key, in request `turn + 1` or the next. */
+    resultKey: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread context */
+export type EnsoFileOperation = Static<typeof EnsoFileOperation>
+/**
  * The thread's context: now, and at every request on its branch.
  *
  * @group Thread context
@@ -156,6 +234,10 @@ export const EnsoThreadContext = Type.Object(
     next: EnsoContextMakeup,
     /** Every request on the branch, oldest first. */
     requests: Type.Array(EnsoContextRequest),
+    /** Every context event on the branch, oldest first. */
+    events: Type.Array(EnsoContextEvent),
+    /** Every file operation on the branch, oldest first. */
+    files: Type.Array(EnsoFileOperation),
   },
   { additionalProperties: false },
 )

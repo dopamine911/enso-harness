@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 249.**
+**Decision headers: 252.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -116,6 +116,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/browser-logging.ts` | `#86`, `#132` | The browser's logging (#132 slice 3). |
 | `packages/web/src/command-palette.tsx` | `#31`, `#338`, `#341`, `#343` | The `/` command palette (#338, slice 1): Claude Code's `/` button in VS Code, as a popup over the composer — a filter box, rows grouped by where the command came from, a description on each row. |
 | `packages/web/src/commands-connection.ts` | `#144`, `#338`, `#344` | The `/` palette's one read (#338, slice 1): `GET /api/threads/:id/commands` — the slash commands the thread's session registers, grouped by the server into extension commands, prompt templates and skills, with a `source` that says whose list it is (`live`: this thread's session; `remembered`: the last built session's, because every session builds it from the same sources under the same configuration and this thread has no live session — never ran, or ran and idled out; the server cannot tell; `none`: no session has been built in this process). |
+| `packages/web/src/context-activity.tsx` | `#361` | The Context view's last two cards (#361 phase 4) — dsh-context's Context Events (when and why the window changed) and File Activity (what the agent did to files, up to the trend's picked request). |
 | `packages/web/src/context-browser.tsx` | `#361` | The Context Browser (#361 phase 3) — dsh-context's "open the box of any request": pick the next request or any past one, and see what it was assembled from — six categories, each expanding into one row per element with its estimate, each row into the element itself: a prompt section, a tool's schema, a message, a reply's parts, a tool result beside its call's arguments. |
 | `packages/web/src/context-parts.tsx` | `#361` | The Context view's shared pieces (#361): its number formats, its card, and the six-category bar and legend — drawn by the Current Context, the trend's detail and the Context Browser alike. |
 | `packages/web/src/custom-event-router.ts` | `#103` | The one chunk that is neither an observation nor a frame: the follow ended without this page leaving it (#103 receipt) — the server closed, restarted, or dropped the connection. |
@@ -134,6 +135,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/agent-loop-contract.test.ts` | `#130` | A CONTRACT TEST on the runtime's loop, the shape of `cc-safety-net-contract.test.ts`: the wire shape of a refused tool call is the vendor's doing — a guard's `{ block, reason }` becomes an error result with the reason as its content, `isError: true` — and `map-events.ts` relies on it (the `tool_execution_end` case, "isError is the only signal a refused call has"). |
 | `packages/web/src/host/__tests__/branch-context.test.ts` | `#361` | #361: a thread's context, request by request, off pi's own entries — built here with pi's real session manager, so the entries read are the ones pi writes and the assembly is pi's own (`buildContextEntries`, compaction included). |
 | `packages/web/src/host/__tests__/branch-stats.test.ts` | `#45` | #45 phase 2: the branch, analysed off pi's own entries — built here with pi's real session manager, so the shapes read are the ones pi writes. |
+| `packages/web/src/host/__tests__/context-history.test.ts` | `#361` | #361 phase 4: Context Events and File Activity, off pi's own entries — built with pi's real session manager, so every entry kind is one pi writes. |
 | `packages/web/src/host/__tests__/event-tail.test.ts` | `#97` | #97's tail is a debugging surface: what it must not do is lie by omission. |
 | `packages/web/src/host/__tests__/extension-ui-context.test.ts` | `#69` | The `ExtensionUIContext` the host binds (#69), driven directly: the blocking methods become `extension_ui_request` records and resolve on an answer, a cancel, an abort signal or a timeout; the fire-and-forget methods emit and return; the terminal-only surface is inert — pi's rpc mode's behaviour, which extensions already tolerate. |
 | `packages/web/src/host/__tests__/host-flows.test.ts` | `#338` | The flow decisions (#338 slice 3), as the fake and the real host share them: what `/login` and `/logout` offer, what a run must name, and the words the flow says. |
@@ -145,6 +147,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/branch-context.ts` | `#361` | A thread's context, request by request (#361) — the host half of `EnsoThreadContext` and of `EnsoContextRequestDetail`, read off pi's own entries for a live session and a stored file alike. |
 | `packages/web/src/host/branch-stats.ts` | `#45`, `#359` | A thread's branch, analysed (#45 phase 2): per prompt, per turn, per tool — the session half of `EnsoThreadStats`. |
 | `packages/web/src/host/context-elements.ts` | `#361` | A request's context as ELEMENTS (#361) — dsh-context's browser rows: a prompt section, a tool definition, a message, a tool result — and the prices the makeup sums, so the trend's bars and the browser's rows are one computation, not two that could drift. |
+| `packages/web/src/host/context-history.ts` | `#361` | What happened to a thread's context, and to its files (#361 phase 4) — dsh-context's Context Events and File Activity, read off pi's own entries along the branch. |
 | `packages/web/src/host/event-tail.ts` | `#69`, `#84`, `#86`, `#88`, `#97` | A thread's event tail (#97): the last N events through one funnel, with provenance. |
 | `packages/web/src/host/host-commands.ts` | `#338`, `#341` | The `host` command source (#338 slice 2) — the rows the host appends to `listCommands()` and the decision behind `runHostCommand`, as PURE functions over a model state and a model list. |
 | `packages/web/src/host/host-flows.ts` | `#338` | The `flow` host commands (#338 slice 3): `/login` and `/logout`, as PURE decisions over what the model runtime reports — the rows the host appends to `listCommands()`, the check a run passes before anything starts, and the sentences the flow says as it goes. |
