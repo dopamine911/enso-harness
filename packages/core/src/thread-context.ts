@@ -176,6 +176,11 @@ export type EnsoContextEventKind = Static<typeof EnsoContextEventKind>
  */
 export const EnsoContextEvent = Type.Object(
   {
+    /**
+     * This event, unique on the branch: its entry's id — or, for a section the leading prompt
+     * injected, that section's element key (one entry holds every section).
+     */
+    key: Type.String(),
     kind: EnsoContextEventKind,
     /** One line: the section, the custom message's type, what the summary replaced, the new model. */
     label: Type.String(),

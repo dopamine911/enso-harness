@@ -61,6 +61,7 @@ const buttonWith =
     [...container.querySelectorAll<HTMLButtonElement>(selector)].find((button) => button.textContent?.includes(text))
 
 const event = (turn: number, label: string): EnsoContextEvent => ({
+  key: `entry-${turn}`,
   kind: 'switch',
   label,
   turn,

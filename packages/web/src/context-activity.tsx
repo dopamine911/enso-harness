@@ -5,6 +5,7 @@ import type { ContextBrowserFocus, ContextBrowserRequest } from './context-brows
 import { Card, changeText, timeText } from './context-parts.tsx'
 import { OptionSelect } from './option-select.tsx'
 import { displayPath, type FileSummary, filesUpTo } from './thread-context-analysis.ts'
+import { toggleMember } from './toggle-member.ts'
 
 /**
  * The Context view's last two cards (#361 phase 4) — dsh-context's Context Events (when and why
@@ -48,8 +49,8 @@ export function ContextEvents({
   requestCount: number
   onOpen: OpenInBrowser
 }): React.ReactNode {
-  const [hidden, setHidden] = useState<Readonly<Partial<Record<EnsoContextEventKind, true>>>>({})
-  const shown = [...events].reverse().filter((event) => hidden[event.kind] !== true)
+  const [hidden, setHidden] = useState<ReadonlySet<EnsoContextEventKind>>(() => new Set())
+  const shown = [...events].reverse().filter((event) => !hidden.has(event.kind))
   const countOf = (kind: EnsoContextEventKind): number => events.filter((event) => event.kind === kind).length
   return (
     <Card
@@ -60,11 +61,9 @@ export function ContextEvents({
             <button
               key={kind}
               type="button"
-              aria-pressed={hidden[kind] !== true}
-              className={`rounded px-1.5 py-0.5 ${hidden[kind] === true ? 'text-muted-foreground line-through' : 'bg-muted text-foreground'}`}
-              onClick={() =>
-                setHidden((current) => ({ ...current, [kind]: current[kind] === true ? undefined : true }))
-              }
+              aria-pressed={!hidden.has(kind)}
+              className={`rounded px-1.5 py-0.5 ${hidden.has(kind) ? 'text-muted-foreground line-through' : 'bg-muted text-foreground'}`}
+              onClick={() => setHidden((current) => toggleMember(current, kind))}
             >
               {label} {countOf(kind)}
             </button>
@@ -81,7 +80,7 @@ export function ContextEvents({
       ) : (
         <ol className="grid grid-cols-1 gap-0.5 text-xs">
           {shown.map((event) => (
-            <li key={`${event.at}-${event.kind}-${event.label}`}>
+            <li key={event.key}>
               <button
                 type="button"
                 className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-muted/50"

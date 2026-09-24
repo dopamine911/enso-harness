@@ -178,3 +178,69 @@ test('files: reads with their range, writes and edits with their footprint, sear
   expect(first?.key).not.toBe(second?.key)
   expect(new Set(files.map((operation) => operation.key)).size).toBe(files.length)
 })
+
+// pi normalises an edit's arguments only when it runs the call (`prepareEditArguments`); the
+// branch keeps what the model sent.
+test('an edit counts its footprint in every argument shape pi runs', () => {
+  const session = SessionManager.inMemory(tmpdir())
+  session.appendMessage({ role: 'user', content: 'edit', timestamp: now() })
+  const replacement = { oldText: 'x', newText: 'y\nz' }
+  session.appendMessage(
+    assistant([
+      call('s1', 'edit', { path: 'as-text.ts', edits: JSON.stringify([replacement]) }),
+      call('s2', 'edit', { path: 'one-object.ts', edits: replacement }),
+      call('s3', 'edit', { path: 'legacy.ts', ...replacement }),
+      call('s4', 'edit', { path: 'both.ts', edits: [replacement], ...replacement }),
+      call('s5', 'edit', { path: 'not-json.ts', edits: '[{' }),
+    ]),
+  )
+  const { files } = branchContext(session.getBranch())
+  expect(files.map((operation) => [operation.path, operation.added, operation.removed])).toEqual([
+    ['as-text.ts', 2, 1],
+    ['one-object.ts', 2, 1],
+    ['legacy.ts', 2, 1],
+    ['both.ts', 4, 2],
+    ['not-json.ts', 0, 0],
+  ])
+})
+
+test("a grep's hits: a file as the searched path is that file; a context line is not a match; a path may hold spaces", () => {
+  const session = SessionManager.inMemory(tmpdir())
+  session.appendMessage({ role: 'user', content: 'search', timestamp: now() })
+  session.appendMessage(
+    assistant([
+      call('f1', 'grep', { pattern: 'TODO', path: 'src/foo.ts' }),
+      call('c1', 'grep', { pattern: 'TODO', path: 'src', context: 1 }),
+    ]),
+  )
+  // pi names a match by its basename when the searched path is a file (grep.js `formatPath`).
+  result(session, { toolCallId: 'f1', toolName: 'grep', text: 'foo.ts:3: TODO one\nfoo.ts:9: TODO two' })
+  result(session, {
+    toolCallId: 'c1',
+    toolName: 'grep',
+    text: 'a.ts-2- const url = "host:8080: up"\na.ts:3: TODO\n--\nmy dir/b.ts:4: TODO: see a.ts-1- x',
+  })
+  const { files } = branchContext(session.getBranch())
+  expect(files.map((operation) => [operation.path, operation.hits])).toEqual([
+    ['src/foo.ts', 2],
+    ['src', 2],
+    ['src/a.ts', 1],
+    ['src/my dir/b.ts', 1],
+  ])
+})
+
+test('every event has its own key — two alike in one moment, and each section of one prompt', () => {
+  const session = SessionManager.inMemory(tmpdir())
+  session.appendMessage({
+    role: 'system',
+    content: '',
+    sections: { preamble: 'p', project_context: 'a', memory: 'm' },
+    timestamp: now(),
+  } as never)
+  session.appendMessage({ role: 'user', content: 'go', timestamp: now() })
+  session.appendCustomMessageEntry('reminder', 'first', false)
+  session.appendCustomMessageEntry('reminder', 'second', false)
+  const { events } = branchContext(session.getBranch())
+  expect(events.map((event) => event.label)).toEqual(['project_context', 'memory', 'reminder', 'reminder'])
+  expect(new Set(events.map((event) => event.key)).size).toBe(events.length)
+})

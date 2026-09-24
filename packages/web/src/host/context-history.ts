@@ -35,12 +35,14 @@ interface EventWalk {
   mode: string | undefined
 }
 
+/** Records an event at its entry; `key` defaults to the entry's id — one event per entry, but for a prompt's sections. */
 function push(
   walk: EventWalk,
   sessionEntry: SessionEntry,
   event: Pick<EnsoContextEvent, 'kind' | 'label' | 'tokens'>,
+  key: string = sessionEntry.id,
 ): void {
-  walk.events.push({ ...event, turn: walk.turn, at: sessionEntry.timestamp })
+  walk.events.push({ key, ...event, turn: walk.turn, at: sessionEntry.timestamp })
 }
 
 /** The change an entry made to the context: its estimate at the entry, less just before. */
@@ -63,7 +65,7 @@ function systemEvents(walk: EventWalk, sessionEntry: Extract<SessionEntry, { typ
   for (const promptItem of contextItems({ sourceEntry: sessionEntry, messages: [sessionEntry.message] }, true)) {
     const sectionName = promptItem.key.split(':section:')[1]
     if (sectionName !== undefined && BASE_SECTIONS[sectionName] !== true) {
-      push(walk, sessionEntry, { kind: 'inject', label: sectionName, tokens: promptItem.tokens })
+      push(walk, sessionEntry, { kind: 'inject', label: sectionName, tokens: promptItem.tokens }, promptItem.key)
     }
   }
 }
@@ -198,33 +200,79 @@ function readOperation(input: Record<string, unknown>): Operation[] {
   ]
 }
 
+interface EditFacts {
+  readonly oldText: string
+  readonly newText: string
+}
+
+/** pi's `isSingleEditInput` (`tools/edit.js`): one replacement, both texts strings. */
+function isEdit(value: unknown): value is EditFacts {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const { oldText, newText } = value as Partial<Record<keyof EditFacts, unknown>>
+  return typeof oldText === 'string' && typeof newText === 'string'
+}
+
+/** `edits` sent as JSON text, the way some models send it: parsed, or none when it is not JSON. */
+function parsedEdits(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * An edit call's replacements as pi runs them. The branch stores what the model SENT, and pi
+ * normalises only at execution (`prepareEditArguments`, `tools/edit.js`): `edits` as JSON text
+ * (its comment names Opus 4.6), one replacement in place of the array, the legacy top-level
+ * `oldText`/`newText` pair appended. Read raw, all three would count nothing.
+ */
+function editsOf(input: Record<string, unknown>): EditFacts[] {
+  const sent = typeof input.edits === 'string' ? parsedEdits(input.edits) : input.edits
+  const edits: unknown[] = Array.isArray(sent) ? [...sent] : [sent]
+  if (isEdit(input)) edits.push({ oldText: input.oldText, newText: input.newText })
+  return edits.filter(isEdit)
+}
+
 function writeOperation(tool: string, input: Record<string, unknown>): Operation[] {
   const path = stringArgument(input, 'path')
   if (path === undefined) return []
   if (tool === 'write')
     return [{ ...blank, path, kind: 'write', added: linesOf(stringArgument(input, 'content') ?? '') }]
-  const edits = Array.isArray(input.edits) ? (input.edits as Array<{ oldText?: unknown; newText?: unknown }>) : []
   let added = 0
   let removed = 0
-  for (const edit of edits) {
-    added += typeof edit.newText === 'string' ? linesOf(edit.newText) : 0
-    removed += typeof edit.oldText === 'string' ? linesOf(edit.oldText) : 0
+  for (const edit of editsOf(input)) {
+    added += linesOf(edit.newText)
+    removed += linesOf(edit.oldText)
   }
   return [{ ...blank, path, kind: 'write', added, removed }]
 }
 
 /**
- * Each file a search's result names, with its matches. pi's grep writes a match as
- * `file:line: text` and find a path per line, both relative to the searched directory
- * (`tools/grep.js`, `tools/find.js`); a notice line (`[…]`) is not a file. `ls` lists, and names
- * nothing it matched.
+ * The file a grep line names, or undefined for a line that is not a match. pi writes a match as
+ * `file:N: text` and, with `context`, a line around it as `file-N- text` (`tools/grep.js`). A
+ * path may hold spaces and a text may hold `:8080:`, so neither pattern alone decides: the
+ * separator that comes FIRST does — a context line's `-N- ` sits before any `:N: ` in its text.
+ */
+function grepFile(line: string): string | undefined {
+  const match = /^(.+?):\d+: /.exec(line)
+  if (match?.[1] === undefined) return undefined
+  const context = /^(.+?)-\d+- /.exec(line)
+  return context?.[1] !== undefined && context[1].length < match[1].length ? undefined : match[1]
+}
+
+/**
+ * Each file a search's result names, with its matches: a grep's match lines (`grepFile`), a
+ * find's path per line — both relative to the searched directory (`tools/grep.js`,
+ * `tools/find.js`); a notice line (`[…]`) is not a file. `ls` lists, and names nothing it
+ * matched.
  */
 function searchHits(tool: string, result: ToolResultFacts | undefined): Map<string, number> {
   const hits = new Map<string, number>()
   if (result === undefined || result.isError || tool === 'ls') return hits
   for (const line of result.text.split('\n')) {
     if (line.trim() === '' || line.startsWith('[')) continue
-    const file = tool === 'grep' ? /^(.+?):\d+:/.exec(line)?.[1] : line.trim()
+    const file = tool === 'grep' ? grepFile(line) : line.trim()
     if (file !== undefined) hits.set(file, (hits.get(file) ?? 0) + 1)
   }
   return hits
@@ -240,15 +288,20 @@ function searchOperations(
   const subject = stringArgument(input, 'pattern') ?? (tool === 'ls' ? 'list' : '')
   const hits = searchHits(tool, result)
   const total = [...hits.values()].reduce((allHits, fileHits) => allHits + fileHits, 0)
+  // ⚠ pi names a match by its basename when the searched path is itself a file (grep.js
+  // `formatPath`): that one file IS the searched path — the row above — not a file under it.
+  const ownFile = hits.size === 1 && hits.has(posix.basename(searched))
   return [
     { ...blank, path: searched, kind: 'search', subject, hits: total },
-    ...[...hits].map(([file, count]) => ({
-      ...blank,
-      path: posix.join(searched, file),
-      kind: 'search' as const,
-      subject,
-      hits: count,
-    })),
+    ...(ownFile
+      ? []
+      : [...hits].map(([file, count]) => ({
+          ...blank,
+          path: posix.join(searched, file),
+          kind: 'search' as const,
+          subject,
+          hits: count,
+        }))),
   ]
 }
 
