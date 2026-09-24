@@ -165,6 +165,9 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // One test name says whose the permission modes are to declare. Prose, but in a string
   // literal, which this gate correctly refuses to treat as a comment.
   'packages/web/src/__tests__/permission-mode.test.tsx',
+  // The env reference lists the switch the host sets for pi-multi-account (#351): the
+  // variable's own name is the vendor's. Leaves when that extension leaves the manifest.
+  'scripts/docs/env-and-config.ts',
 ]
 
 function offendersMatching(lineMatches: (line: string) => boolean, allowed: readonly string[]): string[] {

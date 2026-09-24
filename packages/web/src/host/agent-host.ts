@@ -101,23 +101,19 @@ const log = ensoLogger('host')
  * spawns none. Read-merge-write: multi-account writes its defaults only when the file is
  * absent, and its user-facing commands read-merge-write the same file.
  *
- * ⚠⚠ EVERY THREAD IS A MULTI-ACCOUNT ROOT: THE HOST HOLDS ITS LEASE SLOT EMPTY (#351).
- * pi-multi-account ≥1.22 keeps ONE root session per process — `globalThis[Symbol.for('pi-multi-
- * account:active-root-session')]`, taken at `session_start`, released at `session_shutdown` —
- * and a session that starts while it is held goes passive for its WHOLE life (the flag is never
- * reset): accounts register, automatic failover is off. Built upstream for in-process subagents.
- * Here every thread is a session in this one process and an idle one stays live for 30 minutes
- * (`thread-registry.ts`), so the thread in use was usually the passive one. At host creation the
- * slot becomes an accessor that always reads `undefined` and ignores writes
- * (`holdMultiAccountLeaseEmpty`), so every `session_start` finds no root and becomes one — 1.21's
- * behaviour, including what 1.21 already did: concurrent roots write the same `auth.json` and
- * state file. Installed ONCE rather than cleared per session: a per-session delete raced at
- * microtask granularity — `session_start` handlers are awaited in turn, so a second thread's
- * build could interleave between one thread's delete and its acquire. The release cannot remove
- * the accessor: it deletes only when the slot holds its own owner (`index.ts:11361`), which the
- * getter never returns. Coupled to an upstream private symbol until Sarrius/pi-multi-account#73
- * ships a switch; `__tests__/agent-host.test.ts` goes red on a rename (a concurrent thread would
- * start passive again).
+ * ⚠⚠ EVERY THREAD IS A MULTI-ACCOUNT ROOT: `PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS=1` (#351).
+ * pi-multi-account keeps ONE root session per process for terminal pi — a lease on
+ * `globalThis[Symbol.for('pi-multi-account:active-root-session')]` — and a session that starts
+ * while it is held goes passive: accounts register, automatic failover is off. Here every thread
+ * is a session in this one process and an idle one stays live for 30 minutes
+ * (`thread-registry.ts`), so the thread in use would usually be the passive one. Since 1.23.2 the
+ * extension skips the lease for a multi-session host that says so (Sarrius/pi-multi-account#73,
+ * asked for from here): the host sets the switch before the first session, and every
+ * `session_start` becomes an independent root with its own failover. Not `PI_WEB_SESSION`,
+ * pi-web's own marker — other extensions read it to mean pi-web. The switch is read per session
+ * (the extension's factory), so it stays set; every `bash` child inherits it, which is harmless —
+ * a terminal pi started from a tool would treat its own in-process sessions as roots too.
+ * `__tests__/agent-host.test.ts` builds two concurrent threads and goes red if either is passive.
  *
  * ⚠ `bindExtensions` IS CALLED EXACTLY ONCE PER SESSION. Every call emits `session_start`
  * (the guards reset their read tracker on it; multi-account resets thirteen failover
@@ -148,8 +144,6 @@ const log = ensoLogger('host')
 /** The agent dir's multi-account config file, and the one key this host must pin in it. */
 const MULTI_ACCOUNT_CONFIG_FILENAME = 'provider-failover.json'
 const MULTI_ACCOUNT_CHILD_PROXY_KEY = 'childProxy'
-/** pi-multi-account's per-process root lease — held empty from host creation (module header). */
-const MULTI_ACCOUNT_ROOT_LEASE = Symbol.for('pi-multi-account:active-root-session')
 
 /**
  * The host's own extension (see the module header): named so `loadedExtensionPaths` says what
@@ -385,18 +379,6 @@ export function seedMultiAccountChildProxyOff(agentDir: string): void {
   writeFileSync(configPath, `${JSON.stringify({ ...existing, [MULTI_ACCOUNT_CHILD_PROXY_KEY]: false }, null, '\t')}\n`)
 }
 
-/**
- * Make multi-account's root-lease slot a permanent vacancy — see the module header. Idempotent:
- * `configurable`, so a second host in the process redefines it to the same thing.
- */
-function holdMultiAccountLeaseEmpty(): void {
-  Object.defineProperty(globalThis, MULTI_ACCOUNT_ROOT_LEASE, {
-    configurable: true,
-    get: (): undefined => undefined,
-    set: (): void => undefined,
-  })
-}
-
 /** `RuntimeCommand` with `description` present only when pi supplied one (`exactOptionalPropertyTypes`). */
 function describeCommand(
   name: string,
@@ -410,11 +392,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   const { cwd, agentDir, harnessPackageDir } = options
 
   // Order matters, and it is the module header's ⚠⚠ items: env before any pi module can
-  // be imported by the loader, the proxy pin and the empty lease slot before the first
+  // be imported by the loader, the proxy pin and the independent-roots switch before the first
   // session_start, and the secrets out of the environment before anything can inherit it (#89).
   process.env.PI_CODING_AGENT_DIR = agentDir
+  process.env.PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS = '1'
   seedMultiAccountChildProxyOff(agentDir)
-  holdMultiAccountLeaseEmpty()
   // The secrets file is a fact about THIS checkout (the harness), not about the tree pi
   // operates on — `cwd` may be anywhere, a tmpdir in tests — so it resolves from here.
   const quarantine = quarantineSecrets(options.environment ?? process.env, findRepoRoot(import.meta.url))
