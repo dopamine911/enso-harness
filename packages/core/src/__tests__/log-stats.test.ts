@@ -272,3 +272,41 @@ test('a result without a tool name is counted under the name its call carried', 
     },
   ])
 })
+
+// A day counts refusals by provider and status (#340), from the compact `info` line the server
+// writes for each — so "how often did the provider refuse today, and why" is a fold, not a grep.
+test('provider refusals count by provider and status; one with no provider or status is not dropped', () => {
+  const lines = [
+    ...aRun(),
+    observation(at(6), {
+      threadId: THREAD,
+      generation: 1,
+      kind: 'provider-refused',
+      provider: 'anthropic',
+      status: 429,
+    }),
+    observation(at(7), {
+      threadId: THREAD,
+      generation: 1,
+      kind: 'provider-refused',
+      provider: 'anthropic',
+      status: 429,
+    }),
+    observation(at(8), {
+      threadId: THREAD,
+      generation: 1,
+      kind: 'provider-refused',
+      provider: 'anthropic',
+      status: 400,
+    }),
+    observation(at(9), { threadId: OTHER, generation: 1, kind: 'provider-refused' }),
+  ]
+  const stats = dayStats('2026-09-22', lines, 0)
+  expect(Check(EnsoDayStats, stats)).toBe(true)
+  expect(stats.refusals).toEqual([
+    { provider: 'anthropic', status: 429, count: 2 },
+    { provider: 'anthropic', status: 400, count: 1 },
+    { provider: '(unknown)', count: 1 },
+  ])
+  expect(stats.totals.refusals).toBe(4)
+})

@@ -36,12 +36,12 @@ flowchart LR
 
 ## Observation pipeline
 
-One pi event becomes one observation and crosses six stages to reach the browser store. The union declares 21 kinds; the mapper produces 19 of them, and the rest are produced by the prompt route (see [Observations](./observations.md) for the per-kind producer, carrier and consumer).
+One pi event becomes one observation and crosses six stages to reach the browser store. The union declares 23 kinds; the mapper produces 21 of them, and the rest are produced by the prompt route (see [Observations](./observations.md) for the per-kind producer, carrier and consumer).
 
 ```mermaid
 flowchart LR
   Pi["pi runtime event"]
-  Pi --> Mapper["mapPiEvent (19 kinds)"]
+  Pi --> Mapper["mapPiEvent (21 kinds)"]
   Mapper --> Schema["EnsoObservation"]
   Schema --> Frame["observation frame"]
   Frame --> Connection["follow connection"]
@@ -52,11 +52,11 @@ flowchart LR
 
 | Stage | Contract | Source |
 |---|---|---|
-| `mapPiEvent (19 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:245`](../../packages/web/src/host/map-events.ts#L245) |
-| `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:514`](../../packages/core/src/observation.ts#L514) |
+| `mapPiEvent (21 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:256`](../../packages/web/src/host/map-events.ts#L256) |
+| `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:550`](../../packages/core/src/observation.ts#L550) |
 | `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:179`](../../packages/web/src/server/follow.ts#L179) |
 | `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:427`](../../packages/web/src/follow-connection.ts#L427) |
 | `to-agui chunk` | [Observations](./observations.md) | [`packages/web/src/to-agui.ts:76`](../../packages/web/src/to-agui.ts#L76) |
-| `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:130`](../../packages/web/src/custom-event-router.ts#L130) |
+| `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:160`](../../packages/web/src/custom-event-router.ts#L160) |
 
-Kinds, in the union's order of declaration: `text-delta`, `thinking-delta`, `tool-call`, `tool-result`, `custom-entry`, `permission-mode`, `permission-mode-rejected`, `model`, `message-start`, `message-end`, `session-usage`, `turn-start`, `turn-end`, `queue`, `prompt-rejected`, `extension-error`, `extension-ui-request`, `dialog-settled`, `run-ended`, `settled`, `unmapped`.
+Kinds, in the union's order of declaration: `text-delta`, `thinking-delta`, `tool-call`, `tool-result`, `custom-entry`, `permission-mode`, `permission-mode-rejected`, `model`, `message-start`, `message-end`, `session-usage`, `turn-start`, `turn-end`, `provider-refused`, `provider-retry`, `queue`, `prompt-rejected`, `extension-error`, `extension-ui-request`, `dialog-settled`, `run-ended`, `settled`, `unmapped`.

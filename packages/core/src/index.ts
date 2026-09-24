@@ -125,6 +125,8 @@ export {
   EnsoPermissionMode,
   EnsoPermissionModeRejected,
   EnsoPromptRejected,
+  EnsoProviderRefused,
+  EnsoProviderRetrying,
   EnsoQueue,
   EnsoRunEnded,
   EnsoSessionUsageObservation,
@@ -140,6 +142,14 @@ export {
   EnsoUsage,
 } from './observation.ts'
 export { EnsoPermissionModeChange, EnsoPermissionModeState } from './permission-mode.ts'
+export {
+  EnsoProviderRefusal,
+  EnsoProviderRetry,
+  type ProviderRefusalClass,
+  providerReasonOf,
+  providerRefusalClass,
+  providerStatusOf,
+} from './provider-refusal.ts'
 export {
   ENSO_CONTEXT_ADDITIONS_SHOWN,
   ENSO_CONTEXT_COMMAND,

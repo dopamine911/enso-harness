@@ -129,12 +129,14 @@ const DAY: EnsoDayStats = {
     },
   ],
   denials: [{ rule: 'no-shell-grep', count: 4 }],
+  refusals: [{ provider: 'anthropic', status: 429, count: 3 }],
   totals: {
     runs: 2,
     prompts: { count: 1, minMs: 11_000, maxMs: 11_000, meanMs: 11_000, totalMs: 11_000 },
     firstDelta: { count: 1, minMs: 800, maxMs: 800, meanMs: 800, totalMs: 800 },
     toolCalls: 4,
     denials: 4,
+    refusals: 3,
     input: 1000,
     output: 200,
     cacheRead: 50,
@@ -236,7 +238,7 @@ test('the totals line says the day, its counts and its cost, and the summaries r
   await eventually(() => {
     const shown = page.container.textContent ?? ''
     expect(shown).toContain(
-      '2026-09-22 · 12,345 records (2 malformed) · 2 runs · 4 tool calls · 4 denials · cost $0.0123 · 1,000 in / 200 out',
+      '2026-09-22 · 12,345 records (2 malformed) · 2 runs · 4 tool calls · 4 denials · 3 provider refusals · cost $0.0123 · 1,000 in / 200 out',
     )
     expect(shown).toContain('prompts: 1, 11,000/11,000/11,000 ms')
     expect(shown).toContain('first token: 1, 800/800/800 ms')

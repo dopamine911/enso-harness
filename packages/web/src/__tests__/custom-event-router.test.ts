@@ -396,3 +396,57 @@ test("⚠ a chunk routed to one thread never touches another thread's stores", (
   expect(other.permissionMode.get().mode).toBeUndefined()
   expect(other.recentChunks.get()).toEqual([])
 })
+
+// ── a provider's refusal (#340) ──────────────────────────────────────────────
+
+const refusal = (status: number | undefined, message: string): EnsoObservation => ({
+  kind: 'provider-refused',
+  provider: 'anthropic',
+  model: 'claude-sonnet-4-5',
+  ...(status === undefined ? {} : { status }),
+  message,
+})
+
+// The acceptance's three: a 429, a 401 and a 400 must read as three different things — what to do
+// about each differs (wait, log in, change the model), so a person must be able to tell them apart.
+test('a 429, a 401 and a 400 are three distinct transcript lines and status words, each with the provider’s sentence', () => {
+  const seen: Array<{ line: string | undefined; word: string | undefined }> = []
+  for (const [status, message] of [
+    [429, '429 {"type":"error","error":{"type":"rate_limit_error","message":"rate limit exceeded"}}'],
+    [401, '401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}'],
+    [
+      400,
+      '400 {"type":"error","error":{"type":"invalid_request_error","message":"Claude Code 2.1.259 does not support this model"}}',
+    ],
+  ] as const) {
+    observe(refusal(status, message))
+    seen.push({ line: notificationMessages().at(-1), word: stores.refusal.get()?.refusalClass })
+  }
+  expect(seen).toEqual([
+    { line: 'anthropic/claude-sonnet-4-5 refused: rate-limited (429) — rate limit exceeded', word: 'rate-limited' },
+    { line: 'anthropic/claude-sonnet-4-5 refused: not logged in (401) — invalid x-api-key', word: 'not logged in' },
+    {
+      line: 'anthropic/claude-sonnet-4-5 refused: model refused (400) — Claude Code 2.1.259 does not support this model',
+      word: 'model refused',
+    },
+  ])
+  expect(stores.notifications.get().at(-1)).toMatchObject({ notifyType: 'error', origin: 'run' })
+})
+
+test('pi’s retry is its own line: when, and which attempt of how many', () => {
+  observe({ kind: 'provider-retry', attempt: 2, maxAttempts: 4, delayMs: 4000 })
+  observe({ kind: 'provider-retry', attempt: 1, maxAttempts: 3, delayMs: 500 })
+  expect(notificationMessages()).toEqual(['retrying in 4 s — attempt 2 of 4', 'retrying in 500 ms — attempt 1 of 3'])
+})
+
+// "Nothing ran" must not read as "free" (`$0.0000` beside `idle`) — so the word stays through
+// usage that does not grow (a failed turn still announces usage), and goes once a reply's output
+// has, which is pi's own accounting saying something got through.
+test('the status word stays while nothing got through, and clears once output grows past the refusal', () => {
+  observe({ kind: 'session-usage', ...SPENT })
+  observe(refusal(429, '429 rate limited'))
+  observe({ kind: 'session-usage', ...SPENT })
+  expect(stores.refusal.get()).toEqual({ refusalClass: 'rate-limited', outputAtRefusal: SPENT.output })
+  observe({ kind: 'session-usage', ...SPENT, output: SPENT.output + 12 })
+  expect(stores.refusal.get()).toBeUndefined()
+})

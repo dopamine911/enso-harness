@@ -1,4 +1,4 @@
-import type { EnsoContextUsage, EnsoSessionUsage } from '@enso/core'
+import type { EnsoContextUsage, EnsoSessionUsage, ProviderRefusalClass } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { automaticPartsForMessage, selectMessageUI } from '@tanstack/ai-client/ui'
 import { toolResultState } from './EnsoToolResult.tsx'
@@ -136,6 +136,8 @@ export interface ThreadStatusViewProps {
   readonly cwd?: string | undefined
   /** A question from pi is open for this thread — said here too, since only the transcript shows it. */
   readonly questionWaiting?: boolean
+  /** The provider's last refusal while no reply has got through since (#340) — its class word. */
+  readonly refusal?: ProviderRefusalClass | undefined
 }
 
 const COMPACT_TOKENS = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
@@ -192,6 +194,7 @@ export function ThreadStatusView({
   usage,
   cwd,
   questionWaiting,
+  refusal,
 }: ThreadStatusViewProps): React.ReactNode {
   const dotClass = activityDotClass(activity)
   const context = usage?.context ?? null
@@ -217,6 +220,13 @@ export function ThreadStatusView({
           a question is waiting
         </span>
       ) : null}
+      {/* #340: `$0.0000` beside `idle` means "nothing ran" here, not "free" — the line in the
+			    transcript says who refused and why. */}
+      {refusal === undefined ? null : (
+        <span className="text-destructive" title="the provider refused the last request — the transcript says why">
+          {refusal}
+        </span>
+      )}
       <span title="user messages in this transcript">
         {counts.prompts} {counts.prompts === 1 ? 'prompt' : 'prompts'}
       </span>
@@ -257,6 +267,7 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
   const disconnected = useStore(stores.disconnected)
   const cwd = useStore(stores.cwd)
   const questionWaiting = useStore(stores.dialog) !== undefined
+  const refusal = useStore(stores.refusal)
   return (
     <ThreadStatusView
       activity={describeActivity(messages, generating, disconnected)}
@@ -264,6 +275,7 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
       usage={usage}
       cwd={cwd}
       questionWaiting={questionWaiting}
+      refusal={refusal?.refusalClass}
     />
   )
 }

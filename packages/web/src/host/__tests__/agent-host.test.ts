@@ -754,7 +754,7 @@ interface FauxModule {
     getModel(): Parameters<ExtensionAPI['setModel']>[0]
     setResponses(responses: unknown[]): void
   }
-  fauxAssistantMessage(content: unknown): unknown
+  fauxAssistantMessage(content: unknown, options?: { stopReason?: string; errorMessage?: string }): unknown
   fauxToolCall(name: string, arguments_: Record<string, unknown>): unknown
 }
 const piCodingAgentDir = dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent')))
@@ -1003,4 +1003,60 @@ test('⚠⚠ Stop while ask_user waits stops the run and leaves no question open
   expect(events.filter((event) => event.kind === 'dialog-settled')).toEqual([
     { kind: 'dialog-settled', id: question.id, outcome: 'aborted' },
   ])
+})
+
+// ── a provider's refusal (#340) ──────────────────────────────────────────────
+
+/** The body the Anthropic SDK puts in `errorMessage` for a 429 — pi's providers keep it verbatim. */
+const RATE_LIMITED =
+  '429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account\'s rate limit."}}'
+
+// ⚠ Before #340 a refused request reached the feed as its SHAPE only — a `run-ended` that will
+// retry, no tokens — and the page read `idle · $0.0000` for two hours. The fact must be on the
+// feed: the failed attempt as `provider-refused` (status, provider, model, the provider's own
+// message), pi's retry as `provider-retry`, and the reply that follows must still arrive — the
+// refusal is said BESIDE the failed message's `message-end`, never instead of it.
+test('⚠ a provider refusal is on the feed: the failed attempt, pi’s retry, then the reply that got through (#340)', async () => {
+  const core = createFauxCore()
+  core.setResponses([
+    faux.fauxAssistantMessage('', { stopReason: 'error', errorMessage: RATE_LIMITED }),
+    faux.fauxAssistantMessage('hello after the retry'),
+  ])
+  // Its own agent dir: pi's retry waits `baseDelayMs` first, and one millisecond keeps the suite fast
+  // without touching the settings the other tests share.
+  const retryAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-retry-'))
+  writeFileSync(join(retryAgentDir, 'settings.json'), JSON.stringify({ retry: { baseDelayMs: 1 } }))
+  const host = createAgentHost({
+    cwd: repoRoot,
+    agentDir: retryAgentDir,
+    harnessPackageDir: harnessDir,
+    extensionFactories: [fauxModelExtension(core)],
+  })
+  const hosted = await host.createSession(crypto.randomUUID())
+  openSessions.push(hosted)
+  const events = collectEvents(hosted)
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.subscribe((observation) => {
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  hosted.runtime.prompt({ message: 'hi' }, { onAccepted: () => undefined, onRejected: settled.reject })
+  await settled.promise
+
+  const kinds = events.map((event) => event.kind)
+  const refused = events.find((event) => event.kind === 'provider-refused')
+  expect(refused).toEqual({
+    kind: 'provider-refused',
+    provider: 'enso-faux',
+    model: 'faux-1',
+    status: 429,
+    message: RATE_LIMITED,
+  })
+  expect(events.find((event) => event.kind === 'provider-retry')).toMatchObject({ attempt: 1, delayMs: 1 })
+  // in order: the refusal, then pi's retry, then the reply's text (the failed attempt streams an
+  // empty delta of its own, which is not the reply)
+  const firstText = events.findIndex((event) => event.kind === 'text-delta' && event.delta.length > 0)
+  expect(kinds.indexOf('provider-refused')).toBeLessThan(kinds.indexOf('provider-retry'))
+  expect(kinds.indexOf('provider-retry')).toBeLessThan(firstText)
+  // and the failed message still ended as a message — its accounting role is unchanged
+  expect(kinds.slice(0, kinds.indexOf('provider-refused')).at(-1)).toBe('message-end')
 })

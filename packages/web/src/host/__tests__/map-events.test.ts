@@ -463,3 +463,20 @@ test('extra fields are accepted, so a newer pi does not break the host', () => {
   expect(Check(RuntimeEventSchema, { type: '' })).toBe(false)
   expect(Check(RuntimeEventSchema, { delta: 'x' })).toBe(false)
 })
+
+// #340: the host's `provider_refused` is checked like every host event — a malformed one is carried
+// as unmapped, never dropped — and pi's retry keeps exactly its three fields, not the error again.
+test('a provider refusal maps whole; a malformed one is unmapped; a retry carries only attempt, maximum and delay', () => {
+  const refused = { type: 'provider_refused', provider: 'anthropic', status: 429, message: '429 {}' }
+  expect(mapPiEvent(refused)).toEqual({
+    kind: 'provider-refused',
+    provider: 'anthropic',
+    status: 429,
+    message: '429 {}',
+  })
+  const malformed = { type: 'provider_refused', status: 999, message: 'x' }
+  expect(mapPiEvent(malformed)).toEqual({ kind: 'unmapped', event: malformed })
+  expect(
+    mapPiEvent({ type: 'auto_retry_start', attempt: 2, maxAttempts: 3, delayMs: 4000, errorMessage: '429 {}' }),
+  ).toEqual({ kind: 'provider-retry', attempt: 2, maxAttempts: 3, delayMs: 4000 })
+})

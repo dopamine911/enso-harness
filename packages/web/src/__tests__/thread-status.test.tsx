@@ -132,6 +132,7 @@ const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string 
       counts={props.counts ?? { prompts: 0, toolCalls: 0 }}
       usage={'usage' in props ? props.usage : NO_USAGE}
       cwd={props.cwd}
+      refusal={props.refusal}
     />,
   )
 
@@ -203,4 +204,13 @@ test('the project is the directory name with the full path in its title; absent 
   expect(rendered).toContain(
     'title="the tree pi reads and writes for this thread: /home/dev/work/zen-harness-foundation/"',
   )
+})
+
+// #340: beside `idle · $0.0000` the bar says a refusal's class while nothing has got through —
+// "nothing ran", not "free" — and says nothing when there is none.
+test('a refusal renders its class word beside the activity; none renders nothing extra', () => {
+  const refused = render({ refusal: 'rate-limited' })
+  expect(refused).toContain('>rate-limited<')
+  expect(refused).toContain('the provider refused the last request')
+  expect(render({})).not.toContain('refused the last request')
 })

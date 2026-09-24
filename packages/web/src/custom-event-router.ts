@@ -4,6 +4,10 @@ import {
   EnsoObservation,
   EnsoOpenDialog,
   type EnsoPermissionModeState,
+  type EnsoProviderRefused,
+  type EnsoProviderRetrying,
+  providerReasonOf,
+  providerRefusalClass,
 } from '@enso/core'
 import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
@@ -114,6 +118,32 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
   routeObservation(stores, data)
 }
 
+/**
+ * The provider refused a request (#340): a line in the transcript where the reply would have been,
+ * and the status bar's class word until a reply gets through. The class comes from the status;
+ * the provider's own sentence follows it, verbatim but for the JSON around it.
+ */
+function applyRefusal(stores: ThreadStores, refusal: EnsoProviderRefused): void {
+  const refusalClass = providerRefusalClass(refusal.status)
+  const who =
+    refusal.provider !== undefined && refusal.model !== undefined
+      ? `${refusal.provider}/${refusal.model}`
+      : (refusal.provider ?? refusal.model ?? 'the provider')
+  const status = refusal.status === undefined ? '' : ` (${refusal.status})`
+  stores.notifications.push(
+    `${who} refused: ${refusalClass}${status} — ${providerReasonOf(refusal.message)}`,
+    'error',
+    'run',
+  )
+  stores.refusal.set({ refusalClass, outputAtRefusal: stores.usage.get()?.output ?? 0 })
+}
+
+/** pi is retrying (#340): when, and which attempt of how many — a warning, since a reply may still come. */
+function applyRetry(stores: ThreadStores, retry: EnsoProviderRetrying): void {
+  const delay = retry.delayMs < 1000 ? `${Math.round(retry.delayMs)} ms` : `${Math.round(retry.delayMs / 1000)} s`
+  stores.notifications.push(`retrying in ${delay} — attempt ${retry.attempt} of ${retry.maxAttempts}`, 'warning', 'run')
+}
+
 /** One receipt, two views (#84, L3): the current-mode store (state) and the transcript line (history). */
 function applyPermissionMode(stores: ThreadStores, state: EnsoPermissionModeState): void {
   stores.permissionMode.applyReceipt(state)
@@ -156,8 +186,17 @@ function routeObservation(stores: ThreadStores, observation: EnsoObservation): v
       // The session's totals and context now (#45) — whole, so the latest replaces.
       const { kind: _kind, ...usage } = observation
       stores.usage.set(usage)
+      // Output grew past the refusal: a reply got through, and the status bar stops saying it (#340).
+      const refusal = stores.refusal.get()
+      if (refusal !== undefined && usage.output > refusal.outputAtRefusal) stores.refusal.set(undefined)
       return
     }
+    case 'provider-refused':
+      applyRefusal(stores, observation)
+      return
+    case 'provider-retry':
+      applyRetry(stores, observation)
+      return
     case 'queue':
       // The whole queue (#75): what cuts in first, then what waits its turn.
       stores.queue.set([...observation.interrupting, ...observation.enqueued])

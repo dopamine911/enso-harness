@@ -209,6 +209,8 @@ test('nothing is silently dropped: every kind except an in-flight result and a b
     { kind: 'turn-end', toolResults: 1 },
     { kind: 'queue', interrupting: [], enqueued: ['later'] },
     { kind: 'prompt-rejected', messageId: 'm', reason: 'Agent is already processing' },
+    { kind: 'provider-refused', provider: 'anthropic', status: 429, message: '429 rate limited' },
+    { kind: 'provider-retry', attempt: 1, maxAttempts: 3, delayMs: 2000 },
     { kind: 'dialog-settled', id: 'd1', outcome: 'answered' },
     { kind: 'run-ended', willRetry: false },
     { kind: 'settled' },

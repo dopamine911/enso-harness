@@ -37,6 +37,8 @@ export const EnsoObservation = Type.Union([
   EnsoSessionUsageObservation,
   EnsoTurnStart,
   EnsoTurnEnd,
+  EnsoProviderRefused,
+  EnsoProviderRetrying,
   EnsoQueue,
   EnsoPromptRejected,
   EnsoExtensionError,

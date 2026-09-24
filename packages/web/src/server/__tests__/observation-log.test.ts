@@ -76,3 +76,31 @@ test('⚠ a message-end with usage is one info record with the tokens, the cost 
   const boundary = logs.records.filter((record) => record.rawMessage === '{kind}' && record.properties?.seq === 31)
   expect(boundary.map((record) => record.level)).toEqual(['debug'])
 })
+
+// ⚠ THE FACT, not the shape (#340): two hours of 429s were once only `run-ended` records with no
+// tokens. A refusal is one `info` line with the provider, the model, the status and the provider's
+// own sentence — out of its JSON, capped — and pi's retry is another.
+test('⚠ a provider refusal and pi’s retry are info records with the provider, the status and the provider’s sentence', async () => {
+  const logs = await recordEnsoLogs()
+  recordObservation('obs-t4', 3, 40, {
+    kind: 'provider-refused',
+    provider: 'anthropic',
+    model: 'claude-sonnet-4-5',
+    status: 429,
+    message:
+      '429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account\'s rate limit."}}',
+  })
+  recordObservation('obs-t4', 3, 41, { kind: 'provider-retry', attempt: 1, maxAttempts: 3, delayMs: 2000 })
+  const compact = logs.records.filter((record) => record.rawMessage === '{kind}')
+  expect(compact.map((record) => [record.level, record.properties?.kind])).toEqual([
+    ['info', 'provider-refused'],
+    ['info', 'provider-retry'],
+  ])
+  expect(compact[0]?.properties).toMatchObject({
+    provider: 'anthropic',
+    model: 'claude-sonnet-4-5',
+    status: 429,
+    reason: "This request would exceed your account's rate limit.",
+  })
+  expect(compact[1]?.properties).toMatchObject({ attempt: 1, maxAttempts: 3, delayMs: 2000 })
+})

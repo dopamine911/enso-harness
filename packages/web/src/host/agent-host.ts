@@ -62,6 +62,7 @@ import {
   readPiccPersistedMode,
   storedPermissionModeState,
 } from './permission-mode-adapter.ts'
+import { providerRefusalOf } from './provider-refusal.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
 import { growsSessionSpend, liveSessionUsage, storedSessionUsage } from './session-usage.ts'
@@ -847,6 +848,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // The thinking half of the model state — the module header says why the model half
         // arrives through the watcher extension instead.
         if (wire.type === 'thinking_level_changed') announceModelState()
+        // #340: the provider refused the request — said beside the failed message's own
+        // `message_end`, which stays the accounting boundary it always was.
+        const refusal = providerRefusalOf(event)
+        if (refusal !== undefined) emit({ type: 'provider_refused', ...refusal })
         if (growsSessionSpend(event)) announceSessionUsage()
       } catch (error) {
         log.error('a session event could not be emitted: {error}', { threadId, error })
