@@ -1,16 +1,16 @@
-import {
-  type EnsoContextCategory,
-  type EnsoContextMakeup,
-  type EnsoContextRequest,
-  EnsoThreadContext,
-} from '@enso/core'
+import { type EnsoContextCategory, type EnsoContextRequest, EnsoThreadContext } from '@enso/core'
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Cell, type MouseHandlerDataParam, ReferenceLine, XAxis, YAxis } from 'recharts'
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from './components/ui/chart.tsx'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
+import { ContextEvents, FileActivity } from './context-activity.tsx'
+import { ContextBrowser, type ContextBrowserFocus, type ContextBrowserRequest } from './context-browser.tsx'
+import { Card, COMPACT, estimateText, MakeupBar, MakeupLegend, PERCENT, timeText } from './context-parts.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
 import { countText } from './stats-table.tsx'
+import { useStore, useThreadStores } from './store.ts'
 import {
   CATEGORY_COLOR,
   CATEGORY_LABEL,
@@ -38,112 +38,6 @@ export type ContextOutcome = AnalysisOutcome<EnsoThreadContext>
 /** The thread's context (stable, module-level: `useReadOnUsage` subscribes with it). */
 const readThreadContext = (threadId: string): Promise<ContextOutcome> =>
   readThreadAnalysis(threadId, 'context', EnsoThreadContext)
-
-// ── formats ──────────────────────────────────────────────────────────────────────────────────
-
-const COMPACT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
-const PERCENT = new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 0 })
-
-/** An estimate: `≈15.9k`. */
-const estimateText = (tokens: number): string => `≈${COMPACT.format(tokens)}`
-
-/** A signed change: `+1.2k`, `−5k`, `±0`. */
-function changeText(tokens: number): string {
-  if (tokens === 0) return '±0'
-  return tokens > 0 ? `+${COMPACT.format(tokens)}` : `−${COMPACT.format(-tokens)}`
-}
-
-function timeText(at: string): string {
-  const moment = new Date(at)
-  return Number.isNaN(moment.getTime()) ? '' : moment.toLocaleTimeString([], { hour12: false })
-}
-
-// ── building blocks ──────────────────────────────────────────────────────────────────────────
-
-function Card({
-  title,
-  aside,
-  children,
-}: {
-  title: string
-  aside?: React.ReactNode
-  children: React.ReactNode
-}): React.ReactNode {
-  return (
-    <section aria-label={title} className="min-w-0 rounded-lg border bg-card p-4">
-      <header className="mb-3 flex items-baseline justify-between gap-3">
-        <h2 className="font-semibold text-foreground text-sm">{title}</h2>
-        {aside === undefined ? null : <div className="text-muted-foreground text-xs">{aside}</div>}
-      </header>
-      {children}
-    </section>
-  )
-}
-
-/**
- * The six categories as one bar. `scale` is what the full width means — the model's window for
- * the Current Context, the request's own total in the trend's detail; what the makeup leaves of
- * it is hatched (dsh's free headroom).
- */
-function MakeupBar({
-  makeup,
-  scale,
-  label,
-}: {
-  makeup: EnsoContextMakeup
-  scale: number
-  label: string
-}): React.ReactNode {
-  const total = totalOf(makeup)
-  const width = Math.max(scale, total)
-  return (
-    <div
-      role="img"
-      aria-label={label}
-      className="flex h-3 w-full overflow-hidden rounded-sm bg-[repeating-linear-gradient(135deg,var(--muted)_0_4px,transparent_4px_8px)]"
-    >
-      {CONTEXT_CATEGORIES.map((category) => (
-        <span
-          key={category}
-          className="h-full"
-          style={{ width: `${shareOf(makeup[category], width) * 100}%`, background: CATEGORY_COLOR[category] }}
-        />
-      ))}
-    </div>
-  )
-}
-
-/** Each category's estimate and share of the makeup, dsh's legend row. */
-function MakeupLegend({
-  makeup,
-  change,
-}: {
-  makeup: EnsoContextMakeup
-  change?: EnsoContextMakeup | undefined
-}): React.ReactNode {
-  const total = totalOf(makeup)
-  return (
-    <dl className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-x-4 gap-y-1 text-xs">
-      {CONTEXT_CATEGORIES.map((category) => (
-        <div key={category} className="flex items-center gap-2">
-          <span
-            aria-hidden="true"
-            className="size-2 shrink-0 rounded-sm"
-            style={{ background: CATEGORY_COLOR[category] }}
-          />
-          <dt className="min-w-0 flex-1 truncate text-muted-foreground">{CATEGORY_LABEL[category]}</dt>
-          {change === undefined || change[category] === 0 ? null : (
-            <span className="font-mono text-muted-foreground tabular-nums">{changeText(change[category])}</span>
-          )}
-          <dd className="font-mono tabular-nums">{estimateText(makeup[category])}</dd>
-          <span className="w-9 text-right font-mono text-muted-foreground tabular-nums">
-            {PERCENT.format(shareOf(makeup[category], total))}
-          </span>
-        </div>
-      ))}
-    </dl>
-  )
-}
 
 // ── Current Context ──────────────────────────────────────────────────────────────────────────
 
@@ -261,9 +155,12 @@ function BriefRow({ name, children }: { name: string; children: React.ReactNode 
 function RequestDetail({
   request,
   previous,
+  onOpen,
 }: {
   request: EnsoContextRequest
   previous: EnsoContextRequest | undefined
+  /** Opens an element of this request in the Context Browser. */
+  onOpen: (key: string) => void
 }): React.ReactNode {
   const estimated = totalOf(request.estimated)
   const { actual, brief } = request
@@ -309,14 +206,20 @@ function RequestDetail({
           {brief.added.length === 0
             ? 'nothing new since the previous request'
             : brief.added.map((addition) => (
-                <span key={`${addition.category}-${addition.label}`} className="mr-3">
+                <button
+                  key={addition.key}
+                  type="button"
+                  className="mr-3 underline-offset-2 hover:underline"
+                  title="open it in the Context Browser"
+                  onClick={() => onOpen(addition.key)}
+                >
                   <span
                     aria-hidden="true"
                     className="mr-1 inline-block size-2 rounded-sm"
                     style={{ background: CATEGORY_COLOR[addition.category] }}
                   />
                   {addition.label}
-                </span>
+                </button>
               ))}
           {brief.moreAdded > 0 ? <span className="text-muted-foreground">and {brief.moreAdded} more</span> : null}
         </BriefRow>
@@ -341,7 +244,16 @@ function RequestDetail({
 /** The narrowest a bar may draw: past this many bars, the chart scrolls sideways (dsh does). */
 const BAR_MIN_PX = 10
 
-function ContextTrend({ requests }: { requests: readonly EnsoContextRequest[] }): React.ReactNode {
+function ContextTrend({
+  requests,
+  onPick,
+  onOpen,
+}: {
+  requests: readonly EnsoContextRequest[]
+  /** The picked bar's request, for the Context Browser to follow. */
+  onPick: (turn: number) => void
+  onOpen: (turn: number, key: string) => void
+}): React.ReactNode {
   const [granularity, setGranularity] = useState<TrendGranularity>('turn')
   const [mode, setMode] = useState<TrendMode>('total')
   // The picked request by its turn — stable across a refresh and a change of granularity. None: the latest.
@@ -359,7 +271,9 @@ function ContextTrend({ requests }: { requests: readonly EnsoContextRequest[] })
   const picked = bars[pickedIndex]
   const pick = (index: number): void => {
     const bar = bars[index]
-    if (bar !== undefined) setPickedTurn(bar.turn)
+    if (bar === undefined) return
+    setPickedTurn(bar.turn)
+    onPick(bar.turn)
   }
   const compacted = points.filter((point) => {
     const first = point.request
@@ -458,7 +372,13 @@ function ContextTrend({ requests }: { requests: readonly EnsoContextRequest[] })
               <ChevronRightIcon className="size-4" />
             </button>
           </div>
-          {picked === undefined ? null : <RequestDetail request={picked} previous={bars[pickedIndex - 1]} />}
+          {picked === undefined ? null : (
+            <RequestDetail
+              request={picked}
+              previous={bars[pickedIndex - 1]}
+              onOpen={(key: string) => onOpen(picked.turn, key)}
+            />
+          )}
         </>
       )}
     </Card>
@@ -467,26 +387,129 @@ function ContextTrend({ requests }: { requests: readonly EnsoContextRequest[] })
 
 // ── the view ─────────────────────────────────────────────────────────────────────────────────
 
-/** Pure view — the data arrives as props; the trend's choices are its own state. */
-export function ThreadContextView({ outcome }: { readonly outcome: ContextOutcome }): React.ReactNode {
+/**
+ * The cards, and what joins them: the Context Browser opens the request the trend's bar picks
+ * (dsh's linkage), File Activity counts up to it, and a brief's line, an event or a file
+ * operation opens its request — and its element — in the browser.
+ */
+function ContextCards({ context }: { context: EnsoThreadContext }): React.ReactNode {
+  const stores = useThreadStores()
+  const cwd = useStore(stores.cwd)
+  const [browserRequest, setBrowserRequest] = useState<ContextBrowserRequest>('next')
+  const [trendTurn, setTrendTurn] = useState<number | undefined>(undefined)
+  const [focus, setFocus] = useState<ContextBrowserFocus | undefined>(undefined)
+  const browser = useRef<HTMLDivElement | null>(null)
+  const openInBrowser = (request: ContextBrowserRequest, focusOn?: ContextBrowserFocus): void => {
+    setBrowserRequest(request)
+    setFocus(focusOn)
+    browser.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+  const requestCount = context.requests.length
+  return (
+    <div className="grid grid-cols-1 gap-4 p-4">
+      <p className="text-muted-foreground text-xs">
+        {context.live ? 'live' : 'from the file'} · {countText(requestCount)} model requests · every category is pi's
+        estimate (≈); the provider's own counts are named as such
+      </p>
+      <CurrentContext context={context} />
+      <ContextTrend
+        requests={context.requests}
+        onPick={(turn: number) => {
+          setTrendTurn(turn)
+          setBrowserRequest(turn)
+        }}
+        onOpen={(turn: number, key: string) => {
+          setBrowserRequest(turn)
+          setFocus({ request: turn, key })
+        }}
+      />
+      <div ref={browser} className="min-w-0">
+        <ContextBrowser
+          requests={context.requests}
+          next={context.next}
+          request={browserRequest}
+          onRequest={setBrowserRequest}
+          focus={focus}
+        />
+      </div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <ContextEvents events={context.events} requestCount={requestCount} onOpen={openInBrowser} />
+        <FileActivity
+          operations={context.files}
+          upToTurn={trendTurn}
+          cwd={cwd}
+          requestCount={requestCount}
+          onOpen={openInBrowser}
+        />
+      </div>
+    </div>
+  )
+}
+
+/** What a read of the context shows before it has one: reading, or why there is none. */
+function whenRead(outcome: ContextOutcome, show: (context: EnsoThreadContext) => React.ReactNode): React.ReactNode {
   if (outcome.kind === 'reading')
     return <p className="p-4 text-muted-foreground text-xs">reading the thread's context…</p>
   if (outcome.kind === 'failed')
     return <p className="p-4 text-muted-foreground text-xs">no context: {outcome.problem}</p>
-  const context = outcome.payload
-  return (
-    <div className="grid grid-cols-1 gap-4 p-4">
-      <p className="text-muted-foreground text-xs">
-        {context.live ? 'live' : 'from the file'} · {countText(context.requests.length)} model requests · every category
-        is pi's estimate (≈); the provider's own counts are named as such
-      </p>
-      <CurrentContext context={context} />
-      <ContextTrend requests={context.requests} />
-    </div>
-  )
+  return show(outcome.payload)
+}
+
+/** Pure view — the data arrives as props; the cards' choices are their own state. */
+export function ThreadContextView({ outcome }: { readonly outcome: ContextOutcome }): React.ReactNode {
+  return whenRead(outcome, (context: EnsoThreadContext) => <ContextCards context={context} />)
 }
 
 /** The Context view wired to its thread: read on open and whenever the thread's usage moves. */
 export function ThreadContextDrawer(): React.ReactNode {
   return <ThreadContextView outcome={useReadOnUsage<ContextOutcome>(readThreadContext, ANALYSIS_READING)} />
+}
+
+/** `/context`'s two cards: what the next request holds, and every request's elements. */
+function ContextComposition({ context }: { context: EnsoThreadContext }): React.ReactNode {
+  const [browserRequest, setBrowserRequest] = useState<ContextBrowserRequest>('next')
+  return (
+    <div className="grid min-w-0 grid-cols-1 gap-4">
+      <CurrentContext context={context} />
+      <ContextBrowser
+        requests={context.requests}
+        next={context.next}
+        request={browserRequest}
+        onRequest={setBrowserRequest}
+        focus={undefined}
+      />
+    </div>
+  )
+}
+
+/** The dialog's body: mounted only while the dialog is open, so the read happens then. */
+function ContextDialogBody(): React.ReactNode {
+  const outcome = useReadOnUsage<ContextOutcome>(readThreadContext, ANALYSIS_READING)
+  return whenRead(outcome, (context: EnsoThreadContext) => <ContextComposition context={context} />)
+}
+
+/**
+ * `/context` (#361 phase 5): the composition and the browser over the chat, where the question
+ * was asked — the Context tab holds the rest (trend, events, files). Same reads, same cards; the
+ * dialog adds nothing of its own.
+ */
+export function ThreadContextDialog({ open, onClose }: { open: boolean; onClose: () => void }): React.ReactNode {
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next: boolean): void => {
+        if (!next) onClose()
+      }}
+    >
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>Context</DialogTitle>
+          <DialogDescription>
+            what the next request is made of, and every request's elements · the Context tab has the rest
+          </DialogDescription>
+        </DialogHeader>
+        <ContextDialogBody />
+      </DialogContent>
+    </Dialog>
+  )
 }

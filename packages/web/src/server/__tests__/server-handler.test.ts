@@ -287,8 +287,8 @@ test('⚠ GET …/commands says where its list came from: none before any sessio
   await prompt(url, 'ran', 'hello')
   const live = (await commandsOf('ran')) as EnsoThreadCommands
   expect(live).toMatchObject({ threadId: 'ran', source: 'live' })
-  // pi's row first, then the host's (#338 slices 2 and 3) — the settings with their CURRENT value
-  // on a live thread, the flows with none (there is no "current" login).
+  // pi's row first, then the host's (#338 slices 2 and 3, #361) — the settings with their CURRENT
+  // value on a live thread, the flows with none (there is no "current" login), the view last.
   expect(live.commands.map((command) => [command.name, command.source])).toEqual([
     ['mode', 'extension'],
     ['model', 'host'],
@@ -296,6 +296,7 @@ test('⚠ GET …/commands says where its list came from: none before any sessio
     ['login', 'host'],
     ['logout', 'host'],
     ['compact', 'host'],
+    ['context', 'host'],
   ])
   expect(live.commands[3]).toMatchObject({ kind: 'flow', options: [{ id: 'fake/oauth' }, { id: 'fake/api_key' }] })
   expect(live.commands[3]?.value).toBeUndefined()
@@ -319,11 +320,12 @@ test('⚠ GET …/commands says where its list came from: none before any sessio
     'login',
     'logout',
     'compact',
+    'context',
   ])
   const rememberedHostRows = remembered.commands.filter((command) => command.source === 'host')
   expect(rememberedHostRows.every((hostRow) => hostRow.value === undefined)).toBe(true)
-  // An `action` row has no options to keep; every other host row keeps its.
-  const withOptions = rememberedHostRows.filter((hostRow) => hostRow.kind !== 'action')
+  // An `action` or a `view` row has no options to keep; every other host row keeps its.
+  const withOptions = rememberedHostRows.filter((hostRow) => hostRow.kind !== 'action' && hostRow.kind !== 'view')
   expect(withOptions.map((hostRow) => hostRow.options?.length ?? 0).every((length) => length > 0)).toBe(true)
   expect(withOptions).toHaveLength(4)
   expect(built).toHaveLength(1)
@@ -371,6 +373,11 @@ test('⚠ POST …/command sets the thinking level on a thread that never ran: 2
   const unknown = await run('fresh', { name: 'reload' })
   expect(unknown.status).toBe(422)
   expect(await unknown.text()).toBe('no host command named reload')
+  // A view (#361) is the page's to open; a run of one — the palette never sends it — is the
+  // host's refusal, not a 500 and not a silent 204.
+  const viewRun = await run('fresh', { name: 'context' })
+  expect(viewRun.status).toBe(422)
+  expect(await viewRun.text()).toBe('/context opens in the page; there is nothing for the host to run')
   // `/compact` (slice 4) is an ACTION: it starts like a flow (202) but HOLDS the lease until it
   // settles — a compaction rewrites the branch, so the thread is busy until then: a setting is 409
   // (a prompt would be queued behind the lease, #75, and pi refuses it with its own reason).

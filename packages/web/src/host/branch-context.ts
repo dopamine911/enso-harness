@@ -1,31 +1,37 @@
-import {
-  buildSessionProjection,
-  estimateTokens,
-  type ProjectedSessionEntry,
-  type SessionEntry,
-} from '@earendil-works/pi-coding-agent'
+import { buildSessionProjection, type ProjectedSessionEntry, type SessionEntry } from '@earendil-works/pi-coding-agent'
 import {
   ENSO_CONTEXT_ADDITIONS_SHOWN,
   type EnsoContextAddition,
-  type EnsoContextCategory,
+  type EnsoContextElement,
+  type EnsoContextEvent,
   type EnsoContextMakeup,
   type EnsoContextRequest,
-  summarizeToolInput,
+  type EnsoFileOperation,
 } from '@enso/core'
 import { promptText } from './branch-stats.ts'
-import { contentToText } from './map-events.ts'
+import {
+  type CallIndex,
+  type ContextItem,
+  contextItems,
+  describeItem,
+  emptyCallIndex,
+  emptyMakeup,
+  firstLine,
+  makeupOf,
+  messageLine,
+  noteCalls,
+} from './context-elements.ts'
+import { contextEvents, fileOperations, totalOfItems } from './context-history.ts'
 
 /**
- * A thread's context, request by request (#361) — the host half of `EnsoThreadContext`, read off
- * pi's own entries for a live session and a stored file alike.
+ * A thread's context, request by request (#361) — the host half of `EnsoThreadContext` and of
+ * `EnsoContextRequestDetail`, read off pi's own entries for a live session and a stored file alike.
  *
  * ⚠ pi's assembly, not a copy of it. A request's context is `buildSessionProjection` over the
  * branch up to the reply's parent — the function pi's own session builds every request with
  * (`agent-session.js`): the latest compaction's summary and the prompt it re-issues, the kept
  * entries, everything after, and every `context_edit` an extension made (a tool result pruned or
- * replaced) applied. Each message is priced by pi's `estimateTokens` — except a system message,
- * which carries three categories at once and is split here by the same rule (characters over
- * four, rounded up).
+ * replaced) applied. `context-elements.ts` splits it into elements and prices them.
  *
  * Numbering follows `branch-stats.ts`: a turn is an assistant message, a prompt a user message,
  * both counted along the branch — so `turn` here is `EnsoTurnStats.turn` there.
@@ -35,210 +41,105 @@ export interface BranchContext {
   /** What the next request would be assembled from: the branch up to its leaf. */
   readonly next: EnsoContextMakeup
   readonly requests: EnsoContextRequest[]
+  /** When and why the context changed (`context-history.ts`). */
+  readonly events: EnsoContextEvent[]
+  /** What the file tools did (`context-history.ts`). */
+  readonly files: EnsoFileOperation[]
 }
 
-type ContextMessage = ProjectedSessionEntry['messages'][number]
-type SystemMessage = Extract<ContextMessage, { role: 'system' }>
+/** One request's context, element by element, and what left it since the request before. */
+export interface BranchRequestDetail {
+  readonly elements: EnsoContextElement[]
+  readonly left: EnsoContextAddition[]
+}
+
 type MessageEntry = Extract<SessionEntry, { type: 'message' }>
 type AssistantMessage = Extract<MessageEntry['message'], { role: 'assistant' }>
 
-/** The sections pi writes for every thread — `buildSystemPromptSections`. Any other is injected. */
-const BASE_SECTIONS: Readonly<Record<string, true>> = Object.fromEntries(
-  ['preamble', 'tools', 'rules', 'docs', 'cwd'].map((sectionName) => [sectionName, true]),
-)
-
-/** The category of every message role but `system`, which is split (see the header). */
-const CATEGORY_OF_ROLE: Readonly<Record<string, EnsoContextCategory>> = {
-  user: 'user',
-  bashExecution: 'user',
-  assistant: 'assistant',
-  toolResult: 'toolResults',
-  custom: 'injected',
-  branchSummary: 'injected',
-  compactionSummary: 'injected',
-}
-
-const LABEL_MAX = 80
-const REPLY_MAX = 120
-
-function emptyMakeup(): EnsoContextMakeup {
-  return { system: 0, tools: 0, user: 0, injected: 0, assistant: 0, toolResults: 0 }
-}
-
-function addMakeup(into: EnsoContextMakeup, from: EnsoContextMakeup): EnsoContextMakeup {
-  return {
-    system: into.system + from.system,
-    tools: into.tools + from.tools,
-    user: into.user + from.user,
-    injected: into.injected + from.injected,
-    assistant: into.assistant + from.assistant,
-    toolResults: into.toolResults + from.toolResults,
-  }
-}
-
-const tokensOf = (characters: number): number => Math.ceil(characters / 4)
-
-/** The first line of `text`, clipped — a brief row is one line. */
-function firstLine(text: string, maximum: number): string {
-  const line = (text.split('\n').find((candidate) => candidate.trim().length > 0) ?? '').trim()
-  return line.length > maximum ? `${line.slice(0, maximum - 1)}…` : line
-}
-
-/**
- * A system message's three categories. The LEADING one is the prompt: its instructions and pi's
- * own sections are `system`, every other section `injected`. A later one changes the prompt from
- * that point on, so all of its text is `injected`. Its tool definitions are `tools` either way.
- */
-function systemMakeup(message: SystemMessage, leading: boolean): EnsoContextMakeup {
-  const makeup = emptyMakeup()
-  const instructions = contentToText(message.content).length
-  let own = leading ? instructions : 0
-  let added = leading ? 0 : instructions
-  for (const [sectionName, section] of Object.entries(message.sections ?? {})) {
-    if (section === null) continue
-    if (leading && BASE_SECTIONS[sectionName] === true) own += section.length
-    else added += section.length
-  }
-  makeup.system = tokensOf(own)
-  makeup.injected = tokensOf(added)
-  makeup.tools = message.toolsAdded === undefined ? 0 : tokensOf(JSON.stringify(message.toolsAdded).length)
-  return makeup
-}
-
-function messageMakeup(message: ContextMessage, leading: boolean): EnsoContextMakeup {
-  if (message.role === 'system') return systemMakeup(message, leading)
-  const makeup = emptyMakeup()
-  const category = CATEGORY_OF_ROLE[message.role]
-  if (category !== undefined) makeup[category] = estimateTokens(message)
-  return makeup
-}
-
-/**
- * One line naming what a message is, for the brief's "In" row. A tool result is named by its
- * call's subject (`bash ls -la`), as the transcript's step row names it; `callSubjects` holds the
- * subject of every call the context has made so far.
- */
-function additionOf(
-  message: ContextMessage,
-  leading: boolean,
-  callSubjects: ReadonlyMap<string, string>,
-): EnsoContextAddition | undefined {
-  switch (message.role) {
-    case 'system': {
-      const sections = Object.keys(message.sections ?? {})
-      const label = leading ? 'system prompt' : `system: ${sections.join(', ') || 'instructions'}`
-      return { category: leading ? 'system' : 'injected', label }
-    }
-    case 'user':
-      return { category: 'user', label: firstLine(contentToText(message.content), LABEL_MAX) }
-    case 'bashExecution':
-      return { category: 'user', label: firstLine(`!${message.command}`, LABEL_MAX) }
-    case 'toolResult':
-      return {
-        category: 'toolResults',
-        label: firstLine(
-          `${message.toolName} ${callSubjects.get(message.toolCallId) ?? contentToText(message.content)}`,
-          LABEL_MAX,
-        ),
-      }
-    case 'custom':
-      return { category: 'injected', label: message.customType }
-    case 'compactionSummary':
-      return { category: 'injected', label: 'compaction summary' }
-    case 'branchSummary':
-      return { category: 'injected', label: 'branch summary' }
-    default:
-      // A reply entering the next request's context is the previous request's own output.
-      return undefined
-  }
-}
-
-/** A context's makeup and the entry ids it holds, with each entry priced once per walk. */
-interface PricedContext {
-  readonly makeup: EnsoContextMakeup
-  readonly entryIds: ReadonlySet<string>
+/** A request's context: pi's projection, its elements priced, and the entry ids it holds. */
+interface ProjectedContext {
   readonly entries: readonly ProjectedSessionEntry[]
+  /** Per entry, its elements, in order. */
+  readonly items: readonly (readonly ContextItem[])[]
+  readonly entryIds: ReadonlySet<string>
 }
 
-/** An entry's messages priced, the first system message among them as the leading one if `leading`. */
-function projectedMakeup(projected: ProjectedSessionEntry, leading: boolean): EnsoContextMakeup {
-  let makeup = emptyMakeup()
-  let first = leading
-  for (const message of projected.messages) {
-    makeup = addMakeup(makeup, messageMakeup(message, first && message.role === 'system'))
-    if (message.role === 'system') first = false
-  }
-  return makeup
-}
+const EMPTY_CONTEXT: ProjectedContext = { entries: [], items: [], entryIds: new Set() }
 
-function createPricer(branch: readonly SessionEntry[]): (leafId: string | null) => PricedContext {
+/**
+ * The context at a leaf, with every entry's elements computed once per walk: an entry prices the
+ * same in every request it is in — unless it leads the prompt in one and not another, or an edit
+ * reached it in between; both are in the key.
+ */
+function createProjector(branch: readonly SessionEntry[]): (leafId: string | null) => ProjectedContext {
   const byId = new Map(branch.map((branchEntry) => [branchEntry.id, branchEntry]))
-  // An entry prices the same in every request it is in — unless it leads the prompt in one and
-  // not another, or an edit reached it in between: both are in the key.
-  const priced = new Map<string, EnsoContextMakeup>()
-  return (leafId: string | null): PricedContext => {
-    if (leafId === null) return { makeup: emptyMakeup(), entryIds: new Set(), entries: [] }
+  const itemsByKey = new Map<string, ContextItem[]>()
+  return (leafId: string | null): ProjectedContext => {
+    if (leafId === null) return EMPTY_CONTEXT
     const { entries } = buildSessionProjection([...branch], leafId, byId)
     const editOf = new Map<string, string>()
     for (const { sourceEntry } of entries) {
       if (sourceEntry.type === 'context_edit') editOf.set(sourceEntry.targetId, sourceEntry.id)
     }
-    let makeup = emptyMakeup()
     let sawSystem = false
-    for (const projected of entries) {
+    const items = entries.map((projected) => {
       const { id } = projected.sourceEntry
       const key = `${sawSystem ? 'then' : 'lead'} ${id} ${editOf.get(id) ?? ''}`
-      const entryMakeup = priced.get(key) ?? projectedMakeup(projected, !sawSystem)
-      priced.set(key, entryMakeup)
-      makeup = addMakeup(makeup, entryMakeup)
+      const entryItems = itemsByKey.get(key) ?? contextItems(projected, !sawSystem)
+      itemsByKey.set(key, entryItems)
       sawSystem ||= projected.messages.some((message) => message.role === 'system')
-    }
-    return { makeup, entryIds: new Set(entries.map((projected) => projected.sourceEntry.id)), entries }
+      return entryItems
+    })
+    return { entries, items, entryIds: new Set(entries.map((projected) => projected.sourceEntry.id)) }
   }
 }
 
-/** Note each call a reply makes by its subject, so its result can be named by it later. */
-function noteCallSubjects(message: ContextMessage, callSubjects: Map<string, string>): void {
-  if (message.role !== 'assistant') return
-  for (const part of message.content) {
-    if (part.type !== 'toolCall') continue
-    const subject = summarizeToolInput(part.arguments)
-    if (subject !== undefined) callSubjects.set(part.id, subject)
-  }
-}
-
-/** What entered `current` that `previous` did not hold, one line each, in context order. */
-function additionsSince(previous: PricedContext, current: PricedContext): EnsoContextAddition[] {
-  const additions: EnsoContextAddition[] = []
-  const callSubjects = new Map<string, string>()
+/**
+ * Walk a context's messages in order with the calls made so far, and whether each message's
+ * system role leads — the one traversal the brief and the detail both need.
+ */
+function eachMessage(
+  context: ProjectedContext,
+  visit: (projected: ProjectedSessionEntry, messageIndex: number, leading: boolean, calls: CallIndex) => void,
+): CallIndex {
+  const calls = emptyCallIndex()
   let sawSystem = false
-  for (const projected of current.entries) {
-    const isNew = !previous.entryIds.has(projected.sourceEntry.id)
-    for (const message of projected.messages) {
+  for (const projected of context.entries) {
+    for (const [messageIndex, message] of projected.messages.entries()) {
       const leading = message.role === 'system' && !sawSystem
       if (message.role === 'system') sawSystem = true
-      noteCallSubjects(message, callSubjects)
-      const addition = isNew ? additionOf(message, leading, callSubjects) : undefined
-      if (addition !== undefined) additions.push(addition)
+      noteCalls(message, calls)
+      visit(projected, messageIndex, leading, calls)
     }
   }
+  return calls
+}
+
+/** What entered `current` that `previous` did not hold — the brief's "In" row; a reply is the previous request's own output. */
+function additionsSince(previous: ProjectedContext, current: ProjectedContext): EnsoContextAddition[] {
+  const additions: EnsoContextAddition[] = []
+  eachMessage(current, (projected, messageIndex, leading, calls) => {
+    const message = projected.messages[messageIndex]
+    if (message === undefined || message.role === 'assistant' || previous.entryIds.has(projected.sourceEntry.id)) return
+    additions.push(messageLine(message, leading, calls, `${projected.sourceEntry.id}#${messageIndex}`))
+  })
   return additions
 }
 
 function replyOf(message: AssistantMessage): { reply: string; toolCalls: string[] } {
   const text = message.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n')
   const toolCalls = message.content.flatMap((part) => (part.type === 'toolCall' ? [part.name] : []))
-  return { reply: firstLine(text, REPLY_MAX), toolCalls }
+  return { reply: firstLine(text, 120), toolCalls }
 }
 
 /** Walk one branch, root to leaf. */
 export function branchContext(branch: readonly SessionEntry[]): BranchContext {
-  const contextAt = createPricer(branch)
+  const contextAt = createProjector(branch)
   const requests: EnsoContextRequest[] = []
   let prompt = 0
   let promptTextNow = ''
   let turn = 0
-  let previous = contextAt(null)
+  let previous = EMPTY_CONTEXT
   let compaction: { tokensBefore: number } | undefined
   for (const sessionEntry of branch) {
     if (sessionEntry.type === 'compaction') compaction = { tokensBefore: sessionEntry.tokensBefore }
@@ -258,7 +159,7 @@ export function branchContext(branch: readonly SessionEntry[]): BranchContext {
       prompt,
       at: sessionEntry.timestamp,
       model: message.model,
-      estimated: context.makeup,
+      estimated: makeupOf(context.items.flat()),
       actual: {
         prompt: usage.input + usage.cacheRead + usage.cacheWrite,
         output: usage.output,
@@ -273,7 +174,58 @@ export function branchContext(branch: readonly SessionEntry[]): BranchContext {
       },
     })
     compaction = undefined
-    previous = contextAt(sessionEntry.id)
+    previous = context
   }
-  return { next: contextAt(branch.at(-1)?.id ?? null).makeup, requests }
+  const last = branch.at(-1)
+  return {
+    next: last === undefined ? emptyMakeup() : makeupOf(contextAt(last.id).items.flat()),
+    requests,
+    events: contextEvents(branch, (leafId) => totalOfItems(contextAt(leafId).items.flat())),
+    files: fileOperations(branch),
+  }
+}
+
+/**
+ * The leaves a request is read at: its own context (the reply's parent) and the request before's.
+ * `next` is the branch's leaf, and the request before it the last one made. Undefined for a turn
+ * the branch does not have.
+ */
+function leavesOf(
+  branch: readonly SessionEntry[],
+  request: number | 'next',
+): { leaf: string | null; before: string | null } | undefined {
+  const replies = branch.filter(
+    (branchEntry) => branchEntry.type === 'message' && branchEntry.message.role === 'assistant',
+  )
+  if (request === 'next') return { leaf: branch.at(-1)?.id ?? null, before: replies.at(-1)?.parentId ?? null }
+  const reply = replies[request - 1]
+  if (reply === undefined) return undefined
+  return { leaf: reply.parentId, before: replies[request - 2]?.parentId ?? null }
+}
+
+/** One request's context, element by element (#361 phase 3) — the Context Browser's rows. */
+export function branchRequestDetail(
+  branch: readonly SessionEntry[],
+  request: number | 'next',
+): BranchRequestDetail | undefined {
+  const leaves = leavesOf(branch, request)
+  if (leaves === undefined) return undefined
+  const contextAt = createProjector(branch)
+  const current = contextAt(leaves.leaf)
+  const before = contextAt(leaves.before)
+  const elements: EnsoContextElement[] = []
+  const calls = eachMessage(current, () => undefined)
+  for (const [entryIndex, projected] of current.entries.entries()) {
+    const entered = !before.entryIds.has(projected.sourceEntry.id)
+    const at = projected.sourceEntry.timestamp
+    for (const contextItem of current.items[entryIndex] ?? [])
+      elements.push({ ...describeItem(contextItem, calls), at, entered })
+  }
+  const left: EnsoContextAddition[] = []
+  eachMessage(before, (projected, messageIndex, leading, beforeCalls) => {
+    const message = projected.messages[messageIndex]
+    if (message === undefined || current.entryIds.has(projected.sourceEntry.id)) return
+    left.push(messageLine(message, leading, beforeCalls, `${projected.sourceEntry.id}#${messageIndex}`))
+  })
+  return { elements, left }
 }

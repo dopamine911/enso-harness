@@ -44,6 +44,8 @@ export interface AgentHost {
   readStoredThreadStats(threadId: string): Promise<StoredThreadStats | undefined>
   /** A stored thread's context, request by request (#361) — one open, nothing built (#86). */
   readStoredThreadContext(threadId: string): Promise<StoredThreadContext | undefined>
+  /** One request of a stored thread, element by element (#361 phase 3); undefined for no file or no such turn. */
+  readStoredRequestDetail(threadId: string, request: number | 'next'): Promise<BranchRequestDetail | undefined>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
@@ -71,6 +73,8 @@ export interface HostedThread {
   branchStats(): BranchStats
   /** The branch's context, request by request (#361): what each was assembled from, by pi's own assembly. */
   branchContext(): BranchContext
+  /** One request's context, element by element (#361 phase 3); undefined for a turn the branch does not have. */
+  branchRequestDetail(request: number | 'next'): BranchRequestDetail | undefined
   /**
    * What the loaded extensions would say about a tool call, through the runtime's own hook
    * runner — the verdict a model's call would meet, without a model. Inspection, like the

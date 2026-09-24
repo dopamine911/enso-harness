@@ -1,5 +1,6 @@
 import {
   type DialogAnswer,
+  ENSO_CONTEXT_COMMAND,
   ENSO_IMAGE_MAX_BYTES,
   ENSO_IMAGE_MIME_TYPES,
   ENSO_PROMPT_MAX_IMAGES,
@@ -71,7 +72,7 @@ import {
   fetchThreadHistory,
   storedThreadsNotOnThisPage,
 } from './stored-threads.ts'
-import { ThreadContextDrawer } from './thread-context.tsx'
+import { ThreadContextDialog, ThreadContextDrawer } from './thread-context.tsx'
 import { ThreadDebugDrawer } from './thread-debug.tsx'
 import { ThreadStatsDrawer } from './thread-stats.tsx'
 import { ThreadStatusBar } from './thread-status.tsx'
@@ -392,6 +393,8 @@ interface HostCommandHandlers {
   readonly onHost: (commandName: string, optionId?: string) => void
   /** Open the dialog for a `select` host command, by name. */
   readonly onOpenModelDialog: (commandName: string) => void
+  /** Open the view a `view` host command names (`/context`, #361), by name. */
+  readonly onOpenView: (commandName: string) => void
 }
 
 /*
@@ -704,6 +707,7 @@ function ComposerBody({
           onInsert={onInsertCommand}
           onHost={host.onHost}
           onOpenModelDialog={(command: RuntimeCommand): void => host.onOpenModelDialog(command.name)}
+          onOpenView={(command: RuntimeCommand): void => host.onOpenView(command.name)}
         />
         {/* Attach (#68): the same file dialog a paste or a drop bypasses. */}
         <PromptInputButton
@@ -1013,6 +1017,9 @@ const chatComponents = {
       // The `select` host command whose dialog is open (`model`); undefined while closed. The
       // dialog is rendered ONCE here, for the chip and the palette's `/model` row alike (#338 slice 2).
       const [modelDialog, setModelDialog] = useState<string | undefined>(undefined)
+      // `/context` (#361 phase 5): the one `view` this page draws. A view a newer host declares
+      // and this page does not know is said, not silently dropped.
+      const [contextOpen, setContextOpen] = useState(false)
       // A `host` command runs through its own route, never as a prompt: `POST …/command`, a
       // control like the mode select's — on the SAME connection, so a 409 (running) or a 422
       // (the host's reason) is recorded and said the one way a refused mode change is (PR #344
@@ -1026,6 +1033,10 @@ const chatComponents = {
           })
         },
         onOpenModelDialog: setModelDialog,
+        onOpenView: (commandName: string): void => {
+          if (commandName === ENSO_CONTEXT_COMMAND) setContextOpen(true)
+          else stores.notifications.push(`/${commandName} opens a view this page does not have`, 'warning', 'run')
+        },
       }
 
       return (
@@ -1080,6 +1091,7 @@ const chatComponents = {
             onClose={(): void => setModelDialog(undefined)}
             onPick={host.onHost}
           />
+          <ThreadContextDialog open={contextOpen} onClose={(): void => setContextOpen(false)} />
           <ComposerBody
             draft={draft}
             setDraft={setDraft}

@@ -38,7 +38,7 @@ import { createLogStatsRoute } from './logs-stats-route.ts'
 import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
 import { noteRunAdmitted } from './run-timing.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
-import { createThreadContextRoute } from './thread-context-route.ts'
+import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
 import { createThreadStatsRoute } from './thread-stats-route.ts'
@@ -55,6 +55,8 @@ const THREAD_COMMANDS_ROUTE = /^\/api\/threads\/([^/?#]+)\/commands$/
 const THREAD_STATS_ROUTE = /^\/api\/threads\/([^/?#]+)\/stats$/
 /** `GET /api/threads/<threadId>/context` — the thread's context, request by request (#361). */
 const THREAD_CONTEXT_ROUTE = /^\/api\/threads\/([^/?#]+)\/context$/
+/** `GET /api/threads/<threadId>/context/<turn|next>` — one request's context, element by element (#361). */
+const THREAD_CONTEXT_REQUEST_ROUTE = /^\/api\/threads\/([^/?#]+)\/context\/([1-9]\d*|next)$/
 /** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
 const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/
 const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/
@@ -515,6 +517,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const threadStats = createThreadStatsRoute({ threads, host, logsDir: options.logsDir })
   // One thread's context (#361): pi's branch, request by request; no log is read.
   const threadContext = createThreadContextRoute({ threads, host })
+  const contextRequest = createContextRequestRoute({ threads, host })
 
   /**
    * A thread analysis — stats (#45), context (#361) — or 404 for a thread the server holds neither
@@ -538,6 +541,16 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
   const respondWithThreadStats = analysisResponder(threadStats)
   const respondWithThreadContext = analysisResponder(threadContext)
+  /** One request's context; the request is the route's second segment, a turn or `next`. */
+  function respondWithContextRequest(
+    threadId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const segment = THREAD_CONTEXT_REQUEST_ROUTE.exec(request.url ?? '')?.[2]
+    const which: number | 'next' = segment === 'next' || segment === undefined ? 'next' : Number(segment)
+    return analysisResponder((id: string) => contextRequest(id, which))(threadId, response)
+  }
 
   /**
    * The payload before the head (PR #336 review): the fold reads the file synchronously and
@@ -613,6 +626,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       method: 'GET',
       route: THREAD_CONTEXT_ROUTE,
       respond: idOnly(respondWithThreadContext),
+    },
+    {
+      method: 'GET',
+      route: THREAD_CONTEXT_REQUEST_ROUTE,
+      respond: respondWithContextRequest,
     },
     {
       method: 'GET',

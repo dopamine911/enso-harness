@@ -27,6 +27,7 @@ import {
   toolSummaries,
   toolUsageValue,
 } from './thread-stats-analysis.ts'
+import { toggleMember } from './toggle-member.ts'
 import type { RevealStatsTarget, StatsTarget } from './transcript-reveal.ts'
 
 /**
@@ -222,12 +223,7 @@ function TokenChart({
 }): React.ReactNode {
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set())
   const series = Object.entries(TOKEN_SERIES)
-  const toggle = (key: string): void =>
-    setHidden((current) => {
-      const next = new Set(current)
-      if (!next.delete(key)) next.add(key)
-      return next
-    })
+  const toggle = (key: string): void => setHidden((current) => toggleMember(current, key))
   return (
     <>
       <fieldset aria-label="token series shown" className="mb-1 flex gap-3">
