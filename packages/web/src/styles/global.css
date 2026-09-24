@@ -59,7 +59,6 @@
  * and pixels in them. The widths are the `--container-*` scale, so both `max-w-*` and `w-*` exist.
  */
 @theme {
-  --container-transcript: 48rem; /* the chat column, and the composer and queue under it */
   --container-context-view: 72rem; /* the Context tab */
   --container-stats-view: 56rem; /* the Stats tab */
   --container-context-dialog: 64rem; /* /context's dialog */
