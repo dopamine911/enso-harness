@@ -33,7 +33,9 @@
  *   accent (-foreground) ← Visual (.fg, else Normal.fg)
  *   muted-foreground ← StatusLine.fg, else Comment.fg — never Normal.fg itself
  *   destructive ← DiagnosticError.fg, else ErrorMsg.fg
- *   border, input ← FloatBorder.fg        sidebar ← StatusLine        sidebar-border ← WinSeparator
+ *   border, input ← FloatBorder.fg — unless that is the primary: then the theme's own neutral float
+ *     border (Catppuccin: FloatBorder under float.solid + float.transparent, surface2)
+ *   sidebar ← StatusLine        sidebar-border ← WinSeparator
  *
  * Both kinds:
  *
@@ -356,8 +358,8 @@
   --accent: #bcc0cc; /* Visual.bg surface1 */
   --accent-foreground: #494c66; /* Normal.fg text (no Visual.fg) — lightness adjusted (4.39:1 → 4.60:1 on accent), hue kept */
   --destructive: #d20f39; /* DiagnosticError.fg red */
-  --border: #1e66f5; /* FloatBorder.fg blue */
-  --input: #1e66f5; /* FloatBorder.fg blue */
+  --border: #acb0be; /* FloatBorder.fg under float.solid + float.transparent surface2 (FloatBorder.fg is primary) */
+  --input: #acb0be; /* FloatBorder.fg under float.solid + float.transparent surface2 (FloatBorder.fg is primary) */
   --ring: #1e66f5; /* Title.fg blue */
   --chart-1: #1e66f5; /* terminal_color_4 (blue) blue */
   --chart-2: #40a02b; /* terminal_color_2 (green) green */
@@ -395,8 +397,8 @@
   --accent: #51576d; /* Visual.bg surface1 */
   --accent-foreground: #c6d0f5; /* Normal.fg text (no Visual.fg) */
   --destructive: #f79092; /* DiagnosticError.fg red — lightness adjusted (3.93:1 → 4.64:1 on background / card), hue kept */
-  --border: #8caaee; /* FloatBorder.fg blue */
-  --input: #8caaee; /* FloatBorder.fg blue */
+  --border: #626880; /* FloatBorder.fg under float.solid + float.transparent surface2 (FloatBorder.fg is primary) */
+  --input: #626880; /* FloatBorder.fg under float.solid + float.transparent surface2 (FloatBorder.fg is primary) */
   --ring: #8caaee; /* Title.fg blue */
   --chart-1: #8caaee; /* terminal_color_4 (blue) blue */
   --chart-2: #a6d189; /* terminal_color_2 (green) green */
@@ -434,8 +436,8 @@
   --accent: #494d64; /* Visual.bg surface1 */
   --accent-foreground: #cad3f5; /* Normal.fg text (no Visual.fg) */
   --destructive: #ed8796; /* DiagnosticError.fg red */
-  --border: #8aadf4; /* FloatBorder.fg blue */
-  --input: #8aadf4; /* FloatBorder.fg blue */
+  --border: #5b6078; /* FloatBorder.fg under float.solid + float.transparent surface2 (FloatBorder.fg is primary) */
+  --input: #5b6078; /* FloatBorder.fg under float.solid + float.transparent surface2 (FloatBorder.fg is primary) */
   --ring: #8aadf4; /* Title.fg blue */
   --chart-1: #8aadf4; /* terminal_color_4 (blue) blue */
   --chart-2: #a6da95; /* terminal_color_2 (green) green */
@@ -473,8 +475,8 @@
   --accent: #45475a; /* Visual.bg surface1 */
   --accent-foreground: #cdd6f4; /* Normal.fg text (no Visual.fg) */
   --destructive: #f38ba8; /* DiagnosticError.fg red */
-  --border: #89b4fa; /* FloatBorder.fg blue */
-  --input: #89b4fa; /* FloatBorder.fg blue */
+  --border: #585b70; /* FloatBorder.fg under float.solid + float.transparent surface2 (FloatBorder.fg is primary) */
+  --input: #585b70; /* FloatBorder.fg under float.solid + float.transparent surface2 (FloatBorder.fg is primary) */
   --ring: #89b4fa; /* Title.fg blue */
   --chart-1: #89b4fa; /* terminal_color_4 (blue) blue */
   --chart-2: #a6e3a1; /* terminal_color_2 (green) green */
