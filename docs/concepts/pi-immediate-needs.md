@@ -1,6 +1,9 @@
 # pi — immediate needs
 
-> **Status (#167, #162 workstream 11):** a triage inventory, kept live. Landed: the guard suite (path confinement, bash timeout, secret denial, network egress — `docs/seams/guards.md`), `web_fetch`/`web_search` behind one provider seam (`docs/seams/web-providers.md`), the log (`docs/seams/logging.md`), the permission mode as our seam. Deferred, deliberately: see `architecture.md` → *Deferred*. Items here are not re-triaged; the seam pages are the current statement.
+> **Status (re-checked 2026-09-24 against the code):** Tier 0 and Tier 1 have landed; the escalation
+> tool (item 8) and recoverability (items 10 and 11) are open. The per-item state, with the seam page
+> or issue that is the current statement, is the **Status** column of [the table at the end](#the-order-in-one-table).
+> The item bodies below are the analysis as written on 2026-09-02 and are not re-triaged.
 
 **Written** 2026-09-02 by Claude (Opus 5) at Daniel's request, for the Enso project.
 
@@ -228,18 +231,20 @@ Start deny-by-default with a narrow allow set and let it accrete.
 
 ## The order, in one table
 
-| # | Need | Seam | Effort |
-|---|---|---|---|
-| 1 | Workspace confinement for writes | `tool_call` block | Small — **do first** |
-| 2 | Default bash timeout | tool override or clamp | Trivial |
-| 3 | Secret-path denial, read and write | tool override (omp example) | Small |
-| 4 | Egress policy decision | `tool_call` on bash | Medium, mostly deciding |
-| 5 | `write` requires prior read or a non-existent path | `tool_call` precondition | Small |
-| 6 | Stale-write detection | port omp `conflict-detect.ts` | Small port |
-| 8 | An ask tool, so halting is possible | `registerTool` | Small |
-| 10 | Filesystem snapshot keyed to the session entry id | build — pi's `/tree` covers conversation rewind, neither harness covers the tree | Moderate |
-| 11 | Worktree isolation | harness-level (omp's is Rust-bound, read only for shape) | Moderate |
-| — | Command classification | build and accrete | Last |
+| # | Need | Seam | Effort | Status (2026-09-24) |
+|---|---|---|---|---|
+| 1 | Workspace confinement for writes | `tool_call` block | Small — **do first** | **Landed** — the guards ([`seams/guards.md`](../seams/guards.md)) |
+| 2 | Default bash timeout | tool override or clamp | Trivial | **Landed** — the guard patches `timeout` in when absent ([`seams/guards.md`](../seams/guards.md)) |
+| 3 | Secret-path denial, read and write | tool override (omp example) | Small | **Landed** — `secret-read`, and on the bash route (#204); `grep`/`find`/`ls` too (#8) |
+| 4 | Egress policy decision | `tool_call` on bash | Medium, mostly deciding | **Landed as a bar, not a boundary** (#9) — ad-hoc network clients denied, `web_fetch`/`web_search` the sanctioned route ([`seams/web-providers.md`](../seams/web-providers.md)); git remotes and interpreters stay open by statement. #160 (the deny is closed by spelling, not by class) is open |
+| 5 | `write` requires prior read or a non-existent path | `tool_call` precondition | Small | **Landed** — `read-before-write` (#10) |
+| 6 | Stale-write detection | port omp `conflict-detect.ts` | Small port | **Landed** — `stale-write`, built rather than ported: the stamp is pi's own `ino:size:mtimeNs:ctimeNs` (#11) |
+| 7 | `write` overwrites without any signal | 5 and 6 together | — | **Landed** with 5 and 6 |
+| 8 | An ask tool, so halting is possible | `registerTool` | Small | **Half landed.** The extension → user channel exists on both surfaces ([`seams/dialog.md`](../seams/dialog.md)); the tool the *agent* calls to reach it does not — **#12, open** |
+| 9 | Modes | picc's permission modes | — | **Landed by adoption** (#13) — [`seams/permission-mode.md`](../seams/permission-mode.md). Prompt, tools and policy as one named artifact is Expansion-phase work |
+| 10 | Filesystem snapshot keyed to the session entry id | build — pi's `/tree` covers conversation rewind, neither harness covers the tree | Moderate | **Open** — #146 (supersedes #14): two published candidates to source-read first |
+| 11 | Worktree isolation | harness-level (omp's is Rust-bound, read only for shape) | Moderate | **Open** — #147 (supersedes #15): five published candidates to source-read first |
+| — | Command classification | build and accrete | Last | **Deferred** — `architecture.md` → *Deferred, deliberately* |
 
 Items 1, 2, 3 and 8 together are perhaps a day's work and they move pi from *unsafe to leave alone* to
 *safe to leave alone within a workspace*. That is the whole Tier 0 argument: the gap between pi and a
