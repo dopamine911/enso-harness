@@ -35,13 +35,23 @@ const CUSTOM_METADATA: Record<string, CustomMetadata> = {
     routerBranch: true,
   },
   'session-usage': {
-    consumer: "`recentChunks`; `usage` (the status bar's cost and context meter, #45)",
+    consumer:
+      "`recentChunks`; `usage` (the status bar's cost and context meter, #45); clears `refusal` once output grows (#340)",
     routerBranch: true,
   },
   queue: { consumer: '`recentChunks`; `queue`', routerBranch: true },
   'dialog-settled': { consumer: '`recentChunks`; `dialog`', routerBranch: true },
   'permission-mode': { consumer: '`recentChunks`; `permissionMode`; `modeLines`', routerBranch: true },
   'permission-mode-rejected': { consumer: '`recentChunks`; `notifications` (a warning)', routerBranch: true },
+  'provider-refused': {
+    consumer: "`recentChunks`; `notifications` (an error); `refusal` (the status bar's class word, #340)",
+    routerBranch: true,
+  },
+  'provider-retry': { consumer: '`recentChunks`; `notifications` (a warning, #340)', routerBranch: true },
+  'provider-retry-ended': {
+    consumer: '`recentChunks`; `notifications` (an error, when no retry got through — #380 review)',
+    routerBranch: true,
+  },
   model: {
     consumer: '`recentChunks`; `model` (the composer chip and thinking level, #338 slice 2)',
     routerBranch: true,

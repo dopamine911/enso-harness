@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 262.**
+**Decision headers: 265.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -19,6 +19,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/__tests__/observation-kinds.ts` | `#53` | The oracle both "every observation" sweeps compare against (#53 S1.4): every `kind` literal the EnsoObservation union declares, sorted. |
 | `packages/core/src/__tests__/pi-manifest.test.ts` | `#221` | pi's manifest-resource layout, now owned in one place (#221 — it was implemented three times: the terminal launcher, the postinstall linker, and the server's `assertVendorLinks`). |
 | `packages/core/src/__tests__/picc-corpus-contract.test.ts` | `#7`, `#20`, `#222` | The picc CORPUS CONTRACT TEST (#222), the shape of `cc-safety-net-contract.test.ts` and `agent-loop-contract.test.ts`: read the installed vendor, assert the shape we copied. |
+| `packages/core/src/__tests__/provider-refusal.test.ts` | `#340` | A provider's refusal, read the way pi's providers write it (#340): the status pi puts in front, the class word a person glances at, and the provider's own sentence out of its JSON. |
 | `packages/core/src/__tests__/secrets.test.ts` | `#89` | #89: secrets stay out of the environment the model's tools inherit. |
 | `packages/core/src/__tests__/thread-inspection.test.ts` | `#86`, `#100` | The row formats are shared by the `?debug` drawer and `enso-thread.ts` (PR #100 review: one definition, after the #86 pair had drifted). |
 | `packages/core/src/__tests__/thread-timeline.test.ts` | `#144` | One thread, one ordering (#144 slice 3): the two tails and the log, by time, with the arrival order kept inside a tie and an unreadable stamp kept rather than dropped. |
@@ -34,6 +35,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/paths.ts` | `#58`, `#59` | The workspace path helpers (#59) — THE one place that walks the filesystem for roots. |
 | `packages/core/src/permission-mode.ts` | `#84`, `#162` | The permission mode's shape on the wire (#84; #162 workstream 4, L3): what a run starts in and what it may switch to. |
 | `packages/core/src/pi-manifest.ts` | `#211`, `#221` | What a pi package's manifest declares, and where pi will look for it (#221) — THE one place that knows pi's manifest-resource layout. |
+| `packages/core/src/provider-refusal.ts` | `#340` | A model provider refused a request (#340): the fact the page and the log were missing. |
 | `packages/core/src/secrets.ts` | `#7`, `#89`, `#98` | Secrets stay OUT of the environment the model's tools inherit (#89). |
 | `packages/core/src/thread-context.ts` | `#361` | One thread's context, request by request (#361): what `GET /api/threads/:threadId/context` answers and the Context view draws — dsh-context's composition and trend, over pi. |
 | `packages/core/src/thread-inspection.ts` | `#86` | What a live thread's session ACTUALLY contains, as the server reports it (#86). |
@@ -80,7 +82,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/extensions/ask-user/__tests__/ask-user.test.ts` | `#12` | The ask_user extension (#12) against a scripted UI: which way it asks on which surface, and what the plain-prompt path does with each answer — the path every surface can render, and the one a terminal user answers with the keyboard. |
 | `packages/harness/extensions/ask-user/index.ts` | `#12` | The agent's `ask_user` tool (#12): the model asks the user one to four questions, and the answers come back as the tool's result. |
 | `packages/harness/extensions/guards/__tests__/cc-safety-net-contract.test.ts` | `#4`, `#9`, `#238` | The cc-safety-net CONTRACT TEST (#9) — the condition #4's comments set for adopting a vendor as a library: exact pin + a fixed command set asserted verdict-by-verdict, so a vendor bump that shifts the boundary goes red here instead of silently moving it. |
-| `packages/harness/extensions/guards/index.ts` | `#4`, `#9`, `#20`, `#21`, `#69` | Tier 0 guards — see `docs/concepts/pi-immediate-needs.md`. |
+| `packages/harness/extensions/guards/index.ts` | `#4`, `#9`, `#10`, `#11`, `#20`, `#21`, `#69` | Tier 0 guards — see `docs/concepts/pi-immediate-needs.md`. |
 | `packages/harness/extensions/logging/__tests__/logging.test.ts` | `#132` | The extension's two branches (#132): pi as a CHILD configures its own sink; pi IN-PROCESS leaves the server's alone. |
 | `packages/harness/extensions/logging/index.ts` | `#132`, `#144`, `#167` | The extension process's logging (#132), and the one record only an extension can write: the provider's own request id (#144). |
 | `packages/harness/extensions/web-fetch/__tests__/web-fetch.test.ts` | `#54` | The web_fetch extension (#54), against injected IO seams — no test here touches the network, DNS, or the committed config file (one shape-pin at the bottom reads the real `enso.config.json`, read-only). |
@@ -150,7 +152,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/permission-mode-adapter.test.ts` | `#95` | picc's own restore rule, applied to the raw branch, below the seam (L3 step A). |
 | `packages/web/src/host/__tests__/session-events.test.ts` | `#69` | The replica of pi's unexported `toJsonEvent` (#69): what `map-events.ts` consumes must be byte-for-byte the rpc wire shape. |
 | `packages/web/src/host/__tests__/session-usage.test.ts` | `#45` | #45: which session events make the host re-read pi's totals. |
-| `packages/web/src/host/agent-host.ts` | `#27`, `#69` | pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning `pi --mode rpc` per prompt. |
+| `packages/web/src/host/agent-host.ts` | `#27`, `#69`, `#73`, `#89`, `#338`, `#351` | pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning `pi --mode rpc` per prompt. |
 | `packages/web/src/host/branch-context.ts` | `#361` | A thread's context, request by request (#361) — the host half of `EnsoThreadContext` and of `EnsoContextRequestDetail`, read off pi's own entries for a live session and a stored file alike. |
 | `packages/web/src/host/branch-stats.ts` | `#45`, `#359` | A thread's branch, analysed (#45 phase 2): per prompt, per turn, per tool — the session half of `EnsoThreadStats`. |
 | `packages/web/src/host/context-elements.ts` | `#361` | A request's context as ELEMENTS (#361) — dsh-context's browser rows: a prompt section, a tool definition, a message, a tool result — and the prices the makeup sums, so the trend's bars and the browser's rows are one computation, not two that could drift. |
@@ -161,6 +163,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/map-events.ts` | `#24` | pi rpc events → the observations a surface renders (#24). |
 | `packages/web/src/host/permission-dialog.ts` | `#27`, `#69`, `#73` | picc's permission prompt, lifted to a question the web surface can ask (#73). |
 | `packages/web/src/host/permission-mode-adapter.ts` | `#84`, `#162` | picc-permission-modes' PERSISTED MODE, as the host reads it (#84; below the seam since #162 workstream 4, L3). |
+| `packages/web/src/host/provider-refusal.ts` | `#340` | The refusal an assistant `message_end` records, or nothing (#340). |
 | `packages/web/src/host/questionnaire-dialog.ts` | `#12` | The agent's `ask_user` questionnaire, lifted to a dialog the web card asks as one (#12). |
 | `packages/web/src/host/runtime-event.ts` | `#69`, `#162` | The runtime's event, as the host receives it — BELOW the thread-runtime seam since #162 workstream 4 (L2). |
 | `packages/web/src/host/session-events.ts` | `#69` | `AgentSessionEvent` → the rpc WIRE shape (#69). |

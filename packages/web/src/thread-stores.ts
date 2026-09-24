@@ -4,6 +4,7 @@ import {
   type EnsoSessionUsage,
   type EnsoThreadHistory,
   ensoLogger,
+  type ProviderRefusalClass,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import type { BrowserLogging } from './browser-logging.ts'
@@ -100,8 +101,21 @@ export interface ThreadStores {
    * empties this can beat the receipt).
    */
   readonly queue: WritableStore<readonly string[]>
+  /**
+   * The provider's last refusal (#340) while nothing has succeeded since: its class word, and the
+   * session's output tokens when it came. A `session-usage` whose output has grown past that clears
+   * it — pi's own accounting is what says a reply got through. The status bar reads it, so `$0.0000`
+   * next to `idle` is never read as "free" when it means "nothing ran".
+   */
+  readonly refusal: WritableStore<ProviderRefusalMark | undefined>
   /** The thread's transport: TanStack's connection over prompt/follow, and the dialog answer beside it. */
   readonly connection: FollowConnection
+}
+
+/** A refusal the status bar shows — see {@link ThreadStores.refusal}. */
+export interface ProviderRefusalMark {
+  readonly refusalClass: ProviderRefusalClass
+  readonly outputAtRefusal: number
 }
 
 export interface EnsoPendingDialog {
@@ -129,6 +143,7 @@ function createThreadStores(threadId: string, history: readonly UIMessage[], fet
     dialog: createStore<EnsoPendingDialog | undefined>(undefined),
     disconnected: createStore(false),
     queue: createStore<readonly string[]>([]),
+    refusal: createStore<ProviderRefusalMark | undefined>(undefined),
     connection: createFollowConnection({
       threadId,
       ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),

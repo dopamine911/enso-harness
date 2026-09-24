@@ -235,6 +235,20 @@ export function observationToAguiEvents(observation: EnsoObservation, ids: AguiI
       // Queue depth (#75). CUSTOM: AG-UI has no queue vocabulary.
       return [custom(observation)]
 
+    case 'provider-refused':
+      // The provider refused a request (#340). CUSTOM, and NOT a run error: pi may still succeed
+      // on a retry, and the run's own end says whether it did. The router writes the transcript
+      // line and the status bar's class word.
+      return [custom(observation)]
+
+    case 'provider-retry':
+      // pi is retrying the refused request (#340). CUSTOM: the router writes the warning line.
+      return [custom(observation)]
+
+    case 'provider-retry-ended':
+      // pi stopped retrying (#380 review). CUSTOM: the router says when no reply is coming.
+      return [custom(observation)]
+
     case 'prompt-rejected':
       // pi refused the prompt at preflight (#112) — the run the client thinks it started never
       // did. A run error, so the client shows why instead of a spinner that never ends.

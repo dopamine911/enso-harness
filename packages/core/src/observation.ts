@@ -1,6 +1,7 @@
 import { type Static, Type } from 'typebox'
 import { EnsoDialogSpec } from './dialog.ts'
 import { EnsoPermissionModeState } from './permission-mode.ts'
+import { EnsoProviderRefusal, EnsoProviderRetry, EnsoProviderRetryEnd } from './provider-refusal.ts'
 import { EnsoModelState, EnsoSessionUsage } from './thread-runtime.ts'
 import { EnsoToolResultDescriptor } from './tool-result.ts'
 
@@ -440,6 +441,58 @@ export const EnsoQueue = Type.Object({
 export type EnsoQueue = Static<typeof EnsoQueue>
 
 /**
+ * The model provider refused a request (#340) — a 429, a missing login, a model the account may
+ * not use — said by the host beside the failed assistant message's own `message-end`. The page
+ * shows it where the reply would have been; the log keeps it at `info`, so a day counts them.
+ *
+ * @group Observations
+ * @category Turns and cost
+ */
+export const EnsoProviderRefused = Type.Object({
+  kind: Type.Literal('provider-refused'),
+  ...EnsoProviderRefusal.properties,
+})
+/**
+ * @group Observations
+ * @category Turns and cost
+ */
+export type EnsoProviderRefused = Static<typeof EnsoProviderRefused>
+
+/**
+ * pi is retrying the refused request (#340) — pi's `auto_retry_start`: the attempt it will make,
+ * of how many, after how long.
+ *
+ * @group Observations
+ * @category Turns and cost
+ */
+export const EnsoProviderRetrying = Type.Object({
+  kind: Type.Literal('provider-retry'),
+  ...EnsoProviderRetry.properties,
+})
+/**
+ * @group Observations
+ * @category Turns and cost
+ */
+export type EnsoProviderRetrying = Static<typeof EnsoProviderRetrying>
+
+/**
+ * pi stopped retrying (#380 review) — pi's `auto_retry_end`: `success` when a retry got through;
+ * otherwise the retries ran out, or a Stop cancelled the wait, and `finalError` says which.
+ *
+ * @group Observations
+ * @category Turns and cost
+ */
+export const EnsoProviderRetryEnded = Type.Object({
+  kind: Type.Literal('provider-retry-ended'),
+  ...EnsoProviderRetryEnd.properties,
+})
+/**
+ * @group Observations
+ * @category Turns and cost
+ */
+export type EnsoProviderRetryEnded = Static<typeof EnsoProviderRetryEnded>
+
+/**
  * pi refused a prompt at preflight (#112) — the one observation the SERVER synthesises,
  * because the refusal arrives on the prompt's callback, after `POST …/prompt` has already
  * answered 202: the follow is the only place a client can learn of it.
@@ -525,6 +578,9 @@ export const EnsoObservation = Type.Union([
   EnsoSessionUsageObservation,
   EnsoTurnStart,
   EnsoTurnEnd,
+  EnsoProviderRefused,
+  EnsoProviderRetrying,
+  EnsoProviderRetryEnded,
   EnsoQueue,
   EnsoPromptRejected,
   EnsoExtensionError,

@@ -128,6 +128,7 @@ function describeTotals(stats: EnsoDayStats): string {
     `${countText(totals.runs)} runs`,
     `${countText(totals.toolCalls)} tool calls`,
     `${countText(totals.denials)} denials`,
+    `${countText(totals.refusals)} provider refusals`,
     `cost ${costText(totals.cost)}`,
     `${countText(totals.input)} in / ${countText(totals.output)} out`,
   ].join(' · ')
@@ -329,6 +330,19 @@ function DaySections({ view }: { view: DayView }): React.ReactNode {
         rows={stats.denials.map((denial) => ({
           key: denial.rule,
           cells: [denial.rule, countText(denial.count)],
+        }))}
+      />
+      <StatsTable
+        caption="provider refusals by provider and status (#340)"
+        empty="no provider refusal today"
+        columns={[{ heading: 'provider' }, { heading: 'status' }, { heading: 'count', numeric: true }]}
+        rows={stats.refusals.map((refusal) => ({
+          key: `${refusal.provider}|${refusal.status ?? ''}`,
+          cells: [
+            refusal.provider,
+            refusal.status === undefined ? ABSENT : String(refusal.status),
+            countText(refusal.count),
+          ],
         }))}
       />
     </>

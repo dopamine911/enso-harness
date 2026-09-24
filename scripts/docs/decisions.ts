@@ -38,9 +38,10 @@ function sourceFiles(directory: string): string[] {
   })
 }
 
+/** The first comment block or run of line comments that STARTS within the limit, read to its end wherever that is. */
 function leadingHeader(source: string): Header | undefined {
-  const lines = source.split('\n').slice(0, HEADER_LINE_LIMIT)
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+  const lines = source.split('\n')
+  for (let lineIndex = 0; lineIndex < Math.min(lines.length, HEADER_LINE_LIMIT); lineIndex += 1) {
     const trimmed = (lines[lineIndex] ?? '').trimStart()
     if (trimmed.startsWith('/*')) {
       const headerLines = [lines[lineIndex] ?? '']

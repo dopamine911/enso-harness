@@ -195,6 +195,13 @@ export interface ThreadStores {
    * empties this can beat the receipt).
    */
   readonly queue: WritableStore<readonly string[]>
+  /**
+   * The provider's last refusal (#340) while nothing has succeeded since: its class word, and the
+   * session's output tokens when it came. A `session-usage` whose output has grown past that clears
+   * it — pi's own accounting is what says a reply got through. The status bar reads it, so `$0.0000`
+   * next to `idle` is never read as "free" when it means "nothing ran".
+   */
+  readonly refusal: WritableStore<ProviderRefusalMark | undefined>
   /** The thread's transport: TanStack's connection over prompt/follow, and the dialog answer beside it. */
   readonly connection: FollowConnection
 }

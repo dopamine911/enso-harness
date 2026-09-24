@@ -157,6 +157,21 @@ export const EnsoDayStats = Type.Object(
     denials: Type.Array(
       Type.Object({ rule: Type.String(), count: Type.Integer({ minimum: 0 }) }, { additionalProperties: false }),
     ),
+    /**
+     * Model-provider refusals by provider and HTTP status (#340) — a 429, a missing login, a model
+     * the account may not use. `(unknown)` when the refusal named no provider; no `status` when
+     * the provider's message carried none.
+     */
+    refusals: Type.Array(
+      Type.Object(
+        {
+          provider: Type.String(),
+          status: Type.Optional(Type.Integer({ minimum: 100, maximum: 599 })),
+          count: Type.Integer({ minimum: 0 }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
     totals: Type.Object(
       {
         runs: Type.Integer({ minimum: 0 }),
@@ -164,6 +179,7 @@ export const EnsoDayStats = Type.Object(
         firstDelta: EnsoDurationSummary,
         toolCalls: Type.Integer({ minimum: 0 }),
         denials: Type.Integer({ minimum: 0 }),
+        refusals: Type.Integer({ minimum: 0 }),
         ...Spend,
       },
       { additionalProperties: false },
@@ -282,6 +298,8 @@ interface Fold {
   readonly callDurations: Map<string, number>
   readonly models: Map<string, SpendTotals>
   readonly denials: Map<string, number>
+  /** Provider refusals (#340), keyed `provider|status`. */
+  readonly refusals: Map<string, { readonly provider: string; readonly status: number | undefined; count: number }>
 }
 
 function foldOf(lines: readonly EnsoLogLine[]): Fold {
@@ -293,6 +311,7 @@ function foldOf(lines: readonly EnsoLogLine[]): Fold {
     callDurations: new Map(),
     models: new Map(),
     denials: new Map(),
+    refusals: new Map(),
   }
   for (const line of lines) foldLine(fold, line)
   return fold
@@ -379,13 +398,24 @@ function foldTool(fold: Fold, kind: 'tool-call' | 'tool-result', properties: Pro
   }
 }
 
-/** The compact observation line: the run's settle, or a tool's call or result. */
+/** A provider's refusal (#340), counted by provider and status. */
+function foldRefusal(fold: Fold, properties: Properties): void {
+  const provider = stringOf(properties.provider) ?? '(unknown)'
+  const status = numberOf(properties.status)
+  const key = `${provider}|${status ?? ''}`
+  const known = fold.refusals.get(key)
+  if (known !== undefined) known.count += 1
+  else fold.refusals.set(key, { provider, status, count: 1 })
+}
+
+/** The compact observation line: the run's settle, a tool's call or result, or a provider's refusal. */
 function foldObservation(fold: Fold, properties: Properties, instant: number): void {
   const kind = properties.kind
   if (kind === 'settled') {
     const run = runOf(fold, properties)
     if (run !== undefined && run.settledAt === undefined) run.settledAt = instant
   } else if (kind === 'tool-call' || kind === 'tool-result') foldTool(fold, kind, properties, instant)
+  else if (kind === 'provider-refused') foldRefusal(fold, properties)
 }
 
 /**
@@ -536,7 +566,9 @@ function statsOf(day: string, fold: Fold, records: number, malformed: number): E
   let toolCalls = 0
   for (const tool of fold.tools.values()) toolCalls += tool.calls
   let deniedCalls = 0
-  for (const refusals of fold.denials.values()) deniedCalls += refusals
+  for (const ruleDenials of fold.denials.values()) deniedCalls += ruleDenials
+  let refusedRequests = 0
+  for (const refusal of fold.refusals.values()) refusedRequests += refusal.count
 
   return {
     day,
@@ -553,13 +585,17 @@ function statsOf(day: string, fold: Fold, records: number, malformed: number): E
       errors: tool.errors,
       durations: summarise(tool.durations),
     })),
-    denials: [...fold.denials.entries()].map(([rule, refusals]) => ({ rule, count: refusals })),
+    denials: [...fold.denials.entries()].map(([rule, count]) => ({ rule, count })),
+    refusals: [...fold.refusals.values()].map(({ provider, status, count }) =>
+      status === undefined ? { provider, count } : { provider, status, count },
+    ),
     totals: {
       runs: runRows.length,
       prompts: summarise(runRows.flatMap((run) => (run.promptMs === undefined ? [] : [run.promptMs]))),
       firstDelta: summarise(runRows.flatMap((run) => (run.firstDeltaMs === undefined ? [] : [run.firstDeltaMs]))),
       toolCalls,
       denials: deniedCalls,
+      refusals: refusedRequests,
       ...totalSpend,
     },
   }

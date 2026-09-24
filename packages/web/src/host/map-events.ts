@@ -6,6 +6,9 @@ import {
   EnsoNotifyType,
   type EnsoObservation,
   EnsoPermissionModeState,
+  EnsoProviderRefusal,
+  EnsoProviderRetry,
+  EnsoProviderRetryEnd,
   EnsoSessionUsage,
   type EnsoToolResultDescriptor,
   type EnsoUsage,
@@ -236,6 +239,28 @@ function mapMessageEnd(event: RuntimeEvent): EnsoObservation {
 }
 
 /**
+ * pi retries the refused request (#340). The three fields, picked rather than spread: pi's event
+ * also carries the error again, which the refusal before it already said.
+ */
+function mapRetryStart(event: RuntimeEvent): EnsoObservation {
+  const retry = { attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs }
+  return Check(EnsoProviderRetry, retry) ? { kind: 'provider-retry', ...retry } : { kind: 'unmapped', event }
+}
+
+/**
+ * pi stopped retrying (#380 review): picked like the start. `finalError` only when pi gave one —
+ * it does on running out and on a cancel, not on a success.
+ */
+function mapRetryEnd(event: RuntimeEvent): EnsoObservation {
+  const end = {
+    success: event.success,
+    attempt: event.attempt,
+    ...(event.finalError === undefined ? {} : { finalError: event.finalError }),
+  }
+  return Check(EnsoProviderRetryEnd, end) ? { kind: 'provider-retry-ended', ...end } : { kind: 'unmapped', event }
+}
+
+/**
  * Map one pi rpc event. Never returns undefined — see the design rule above.
  *
  * `delivery` is how the host handed the event over (#96): `replayed` from its held buffer —
@@ -344,6 +369,16 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
 
     case 'session_usage':
       return hostState(event, EnsoSessionUsage, (usage) => ({ kind: 'session-usage', ...usage }))
+
+    case 'provider_refused':
+      // The host's own event (#340): the provider refused the request pi just made.
+      return hostState(event, EnsoProviderRefusal, (refusal) => ({ kind: 'provider-refused', ...refusal }))
+
+    case 'auto_retry_start':
+      return mapRetryStart(event)
+
+    case 'auto_retry_end':
+      return mapRetryEnd(event)
 
     case 'entry_appended': {
       // ⚠ Only CUSTOM entries are promoted (#29): an extension persisting state via

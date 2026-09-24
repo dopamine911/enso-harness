@@ -1,4 +1,4 @@
-import { ENSO_LOG_EVENTS, type EnsoLogProperties, type EnsoObservation, ensoLogger } from '@enso/core'
+import { ENSO_LOG_EVENTS, type EnsoLogProperties, type EnsoObservation, ensoLogger, providerReasonOf } from '@enso/core'
 import { forgetRun, takeFirstDeltaMs } from './run-timing.ts'
 
 /**
@@ -34,6 +34,12 @@ const SPINE: Readonly<Record<string, true>> = {
   'extension-error': true,
   'run-ended': true,
   settled: true,
+  // A provider's refusal, pi's retry, and its end (#340, #380 review): the outcome of a request,
+  // not a boundary — two hours of 429s were once only the SHAPE of a failure here (`run-ended`,
+  // no tokens).
+  'provider-refused': true,
+  'provider-retry': true,
+  'provider-retry-ended': true,
 }
 
 /**
@@ -96,6 +102,22 @@ function compactOf(observation: EnsoObservation): EnsoLogProperties {
       return { extensionPath: observation.extensionPath, event: observation.event }
     case 'run-ended':
       return { willRetry: observation.willRetry }
+    case 'provider-refused':
+      return {
+        ...(observation.provider === undefined ? {} : { provider: observation.provider }),
+        ...(observation.model === undefined ? {} : { model: observation.model }),
+        ...(observation.status === undefined ? {} : { status: observation.status }),
+        // The provider's own sentence (#340) — the fact, not transcript text; the whole message is on `trace`.
+        reason: providerReasonOf(observation.message),
+      }
+    case 'provider-retry':
+      return { attempt: observation.attempt, maxAttempts: observation.maxAttempts, delayMs: observation.delayMs }
+    case 'provider-retry-ended':
+      return {
+        success: observation.success,
+        attempt: observation.attempt,
+        ...(observation.finalError === undefined ? {} : { reason: providerReasonOf(observation.finalError) }),
+      }
     case 'turn-start':
       return {}
     case 'turn-end':
