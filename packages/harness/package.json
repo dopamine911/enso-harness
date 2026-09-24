@@ -33,7 +33,7 @@
     "@mammothb/pi-tokyonight-storm": "0.2.1",
     "@enso/core": "*",
     "cc-safety-net": "2.4.6",
-    "pi-multi-account": "1.23.0"
+    "pi-multi-account": "1.23.2"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^0.87.1"

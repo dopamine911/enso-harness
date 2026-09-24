@@ -24,6 +24,7 @@ grounded `environment.KEY` seams, and keys explicitly written beside a process-e
 | `FORCE_COLOR` | `scripts/gate.ts#runGate` (child environment write) | Optional; set to `1` only when both gate output streams are TTYs, otherwise not overridden. | per-call |
 | `PI_CODING_AGENT_DIR` | `packages/web/src/host/agent-host.ts#createAgentHost` (process write) | Required pin to the supplied scratch agent directory before pi loads; no fallback at this boundary. | boot |
 | `PI_CODING_AGENT_DIR` | `scripts/enso.ts` (pi child environment write) | Required pin to the selected agent directory in the spawned pi process. | boot |
+| `PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS` | `packages/web/src/host/agent-host.ts#createAgentHost` (process write) | Always `1` in the server: pi-multi-account (≥1.23.2) makes every in-process session an independent root with its own failover, instead of passive after the first (#351). Stays set — the extension reads it per session. | boot |
 | `npm_config_user_agent` | `scripts/gate.ts#detectPackageManager` | Optional package-manager identity; falls back to Bun detection, then `npm`. | boot |
 
 **Parser limit.** Only literal keys in the source shapes named above become rows. Computed names and

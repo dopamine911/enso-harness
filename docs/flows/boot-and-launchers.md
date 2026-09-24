@@ -22,7 +22,7 @@ sequenceDiagram
   Z->>Z: isPrintRun (-p · --print · stdin not a TTY) → buildPrintManifest + materializePrintHarness → .enso/print-harness
   Z->>Z: pi --version — inside the range the guard corpus was run against, or refuse (exit 1, naming both bounds)
   Z->>R: quarantineSecrets, then spawn pi --no-extensions --no-skills -e the package dir · env PI_CODING_AGENT_DIR = the agent dir
-  S->>S: process.env.PI_CODING_AGENT_DIR = agentDir → childProxy pinned off → quarantineSecrets
+  S->>S: process.env.PI_CODING_AGENT_DIR = agentDir · PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS = 1 → childProxy pinned off → quarantineSecrets
   S->>R: per thread — createAgentSessionServices { noExtensions, noSkills, additionalExtensionPaths: [harness] }
   R->>R: extensions in manifest order — logging → guards → web-fetch → web-search → mode extension → multi-account
 ```

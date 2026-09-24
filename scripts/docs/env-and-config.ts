@@ -81,6 +81,14 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'boot',
   },
   {
+    key: 'PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS',
+    source: 'packages/web/src/host/agent-host.ts',
+    reader: '`packages/web/src/host/agent-host.ts#createAgentHost` (process write)',
+    purposeAndDefault:
+      'Always `1` in the server: pi-multi-account (≥1.23.2) makes every in-process session an independent root with its own failover, instead of passive after the first (#351). Stays set — the extension reads it per session.',
+    phase: 'boot',
+  },
+  {
     key: 'PI_CODING_AGENT_DIR',
     source: 'scripts/enso.ts',
     reader: '`scripts/enso.ts` (pi child environment write)',
