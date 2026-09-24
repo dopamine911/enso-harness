@@ -213,8 +213,8 @@ function RequestDetail({
   )
 }
 
-/** The narrowest a bar may draw: past this many bars, the chart scrolls sideways (dsh does). */
-const BAR_MIN_PX = 10
+/** The narrowest a bar may draw, in spacing units: past this many bars, the chart scrolls sideways (dsh does). */
+const BAR_MIN_SPACING = 2.5
 
 /** A granularity's bars: one per request, or each prompt's last. */
 const barsOf = (requests: readonly EnsoContextRequest[], granularity: TrendGranularity): EnsoContextRequest[] =>
@@ -295,7 +295,7 @@ function ContextTrend({
             <ChartContainer
               config={SERIES}
               className="aspect-auto h-56"
-              style={{ minWidth: `${points.length * BAR_MIN_PX}px`, width: '100%' }}
+              style={{ minWidth: `calc(var(--spacing) * ${points.length * BAR_MIN_SPACING})`, width: '100%' }}
             >
               <BarChart
                 data={points}
@@ -494,7 +494,7 @@ export function ThreadContextDialog({ open, onClose }: { open: boolean; onClose:
         if (!next) onClose()
       }}
     >
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-5xl">
+      <DialogContent className="max-h-dialog overflow-y-auto sm:max-w-context-dialog">
         <DialogHeader>
           <DialogTitle>Context</DialogTitle>
           <DialogDescription>

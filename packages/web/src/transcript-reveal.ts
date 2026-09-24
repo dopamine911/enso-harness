@@ -139,8 +139,11 @@ export function locateStatsTarget(root: ParentNode, stats: EnsoThreadStats, targ
 
 /** A ring and a tint that fade: the row the eye just landed on, then the transcript as it was. */
 const HIGHLIGHT: Keyframe[] = [
-  { boxShadow: '0 0 0 2px currentColor', backgroundColor: 'color-mix(in oklab, currentColor 18%, transparent)' },
-  { boxShadow: '0 0 0 2px transparent', backgroundColor: 'transparent' },
+  {
+    boxShadow: '0 0 0 calc(var(--spacing) / 2) currentColor',
+    backgroundColor: 'color-mix(in oklab, currentColor 18%, transparent)',
+  },
+  { boxShadow: '0 0 0 calc(var(--spacing) / 2) transparent', backgroundColor: 'transparent' },
 ]
 const HIGHLIGHT_MS = 2000
 

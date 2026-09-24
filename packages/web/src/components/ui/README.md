@@ -8,6 +8,9 @@ the `style` field of [`packages/web/components.json`](../../../components.json),
 `chart.tsx` later, by the same CLI and style, for #45's stats drawer — it brought `recharts`
 (pinned at the `3.8.0` the CLI chose) and no other dependency. `tabs.tsx` for #361's
 Chat | Stats views, by the same CLI and style; it needs nothing `radix-ui` does not already carry.
+`field.tsx`, with the `label.tsx` and `separator.tsx` it composes, for the settings dialog's theme
+field, by the same CLI and style; the CLI's `cn` package and its re-escaped `package.json`
+description were reverted, per the local changes below.
 **License:** MIT (the shadcn/ui project's licence, as published with the CLI).
 **Issue:** #31, fenced by `test/presentation-gate.test.ts` since #253.
 

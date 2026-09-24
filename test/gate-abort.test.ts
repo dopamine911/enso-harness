@@ -291,7 +291,8 @@ test('⚠ a banner quoted on stdout is a tool reporting, not a tool dying', () =
  *     is about.
  */
 const GATE_STEP_ROW = /^\| (\d+) \| `([a-z-]+)` \|/gm
-const STATED_GATE_COUNT = /^([A-Z][a-z]+) of those tests are \*\*gates\*\*/m
+// One word or a hyphenated pair: the count passed twenty with the style-tokens gate.
+const STATED_GATE_COUNT = /^([A-Z][a-z]+(?:-[a-z]+)?) of those tests are \*\*gates\*\*/m
 
 test('⚠ the README names the gate steps the file runs, and counts the gates the inventory lists (#335)', async () => {
   const readme = await Bun.file(join(import.meta.dir, '..', 'README.md')).text()

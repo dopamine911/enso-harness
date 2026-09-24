@@ -65,6 +65,7 @@ import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState } from
 import { ThreadNotifications } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
+import { SettingsDialog } from './settings-dialog.tsx'
 import { ThreadStoresContext, useStore, useThreadStores } from './store.ts'
 import {
   createResumeRequests,
@@ -768,7 +769,7 @@ function PendingQueue(): React.ReactNode {
     return { text: queuedPrompt, key: `${queuedPrompt}\u0000${occurrence}` }
   })
   return (
-    <QueueShell aria-label="queued prompts" className="mx-auto mb-2 w-full max-w-3xl">
+    <QueueShell aria-label="queued prompts" className="mx-auto mb-2 w-full max-w-transcript">
       <QueueSection>
         <QueueSectionTrigger>
           <QueueSectionLabel count={queued.length} label={queued.length === 1 ? 'prompt queued' : 'prompts queued'} />
@@ -1041,7 +1042,7 @@ const chatComponents = {
 
       return (
         <PromptInput
-          className="mx-auto w-full max-w-3xl px-4 pb-4"
+          className="mx-auto w-full max-w-transcript px-4 pb-4"
           accept={ENSO_IMAGE_MIME_TYPES.join(',')}
           multiple
           maxFiles={ENSO_PROMPT_MAX_IMAGES}
@@ -1178,7 +1179,7 @@ const chatComponents = {
               >
                 <Conversation>
                   <TranscriptRevealBridge into={scroller} />
-                  <ConversationContent className="mx-auto w-full max-w-3xl">
+                  <ConversationContent className="mx-auto w-full max-w-transcript">
                     {chat.messages.length === 0 ? (
                       <ConversationEmptyState
                         icon={<img src="/logo-full.png" alt="Enso" className="w-44" />}
@@ -1209,7 +1210,7 @@ const chatComponents = {
               {/* The thread's context (#361): what each request was made of, over the transcript. */}
               {shown === 'context' ? (
                 <div role="tabpanel" {...panelIds('context')} className="absolute inset-0 overflow-y-auto">
-                  <div className="mx-auto w-full max-w-6xl">
+                  <div className="mx-auto w-full max-w-context-view">
                     <ThreadContextDrawer />
                   </div>
                 </div>
@@ -1217,7 +1218,7 @@ const chatComponents = {
               {/* The thread's stats (#45 phase 2), over the transcript (#361). */}
               {shown === 'stats' ? (
                 <div role="tabpanel" {...panelIds('stats')} className="absolute inset-0 overflow-y-auto">
-                  <div className="mx-auto w-full max-w-4xl">
+                  <div className="mx-auto w-full max-w-stats-view">
                     <ThreadStatsDrawer onNavigate={revealInTranscript} />
                   </div>
                 </div>
@@ -1227,7 +1228,7 @@ const chatComponents = {
 						    session holds, for THIS thread. Scrolls on its own so a long branch never
 						    moves the composer. */}
             {debugOpen ? (
-              <div id="thread-debug-pane" className="w-[30rem] shrink-0 overflow-y-auto border-l">
+              <div id="thread-debug-pane" className="w-debug-pane shrink-0 overflow-y-auto border-l">
                 <ThreadDebugDrawer />
               </div>
             ) : null}
@@ -1568,6 +1569,7 @@ export function ChatScreen(): React.ReactNode {
           {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
         </span>
         <ViewTabs view={view} onView={setView} threadId={active?.threadId} />
+        <SettingsDialog />
         {isDebugMode ? (
           <PaneSwitch
             open={debugOpen}

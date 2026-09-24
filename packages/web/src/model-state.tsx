@@ -162,7 +162,7 @@ export function ModelChip({ state, onOpen }: ModelChipProps): React.ReactNode {
     >
       {model === null ? null : <span>model</span>}
       <span className={model === null ? undefined : 'text-foreground'}>{label}</span>
-      {model === null ? null : <span className="max-w-[16ch] truncate">· {model.provider}</span>}
+      {model === null ? null : <span className="max-w-provider-label truncate">· {model.provider}</span>}
     </button>
   )
 }

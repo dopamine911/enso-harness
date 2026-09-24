@@ -65,11 +65,7 @@ export function MakeupBar({
   const total = totalOf(makeup)
   const width = Math.max(scale, total)
   return (
-    <div
-      role="img"
-      aria-label={label}
-      className="relative flex h-3 w-full overflow-hidden rounded-sm bg-[repeating-linear-gradient(135deg,var(--muted)_0_4px,transparent_4px_8px)]"
-    >
+    <div role="img" aria-label={label} className="relative flex h-3 w-full overflow-hidden rounded-sm bg-hatch">
       {CONTEXT_CATEGORIES.map((category) => (
         <span
           key={category}
@@ -98,7 +94,7 @@ export function MakeupLegend({
 }): React.ReactNode {
   const total = totalOf(makeup)
   return (
-    <dl className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-x-4 gap-y-1 text-xs">
+    <dl className="mt-2 grid grid-cols-legend gap-x-4 gap-y-1 text-xs">
       {CONTEXT_CATEGORIES.map((category) => (
         <div key={category} className="flex items-center gap-2">
           <span
@@ -139,8 +135,11 @@ export function Choice<Value extends string>({
           key={option}
           type="button"
           aria-pressed={option === value}
+          // The ring keeps the pressed option visible in a theme whose background is near its muted (Nord, Gruvbox).
           className={
-            option === value ? 'rounded bg-background px-2 py-0.5 text-foreground' : 'px-2 py-0.5 text-muted-foreground'
+            option === value
+              ? 'rounded bg-background px-2 py-0.5 text-foreground ring-1 ring-border'
+              : 'px-2 py-0.5 text-muted-foreground'
           }
           onClick={() => onChange(option)}
         >

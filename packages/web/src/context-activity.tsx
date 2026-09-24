@@ -34,7 +34,7 @@ const EVENT_KINDS: ReadonlyArray<readonly [EnsoContextEventKind, string]> = [
 function DeltaText({ tokens }: { tokens: number }): React.ReactNode {
   if (tokens === 0) return null
   return (
-    <span className={`font-mono tabular-nums ${tokens > 0 ? 'text-[var(--chart-6)]' : 'text-[var(--chart-2)]'}`}>
+    <span className={`font-mono tabular-nums ${tokens > 0 ? 'text-chart-6' : 'text-chart-2'}`}>
       {changeText(tokens)}
     </span>
   )
@@ -205,12 +205,12 @@ function FileRow({
         <PathText path={displayPath(summary.path, cwd)} />
         {summary.reads > 0 ? <span className="rounded bg-muted px-1 font-mono">read {summary.reads}</span> : null}
         {summary.writes > 0 ? (
-          <span className="rounded bg-muted px-1 font-mono text-[var(--chart-2)]">
+          <span className="rounded bg-muted px-1 font-mono text-chart-2">
             +{summary.added} −{summary.removed}
           </span>
         ) : null}
         {summary.searches > 0 ? (
-          <span className="rounded bg-muted px-1 font-mono text-[var(--chart-3)]">searched {summary.searches}</span>
+          <span className="rounded bg-muted px-1 font-mono text-chart-3">searched {summary.searches}</span>
         ) : null}
         <span className="text-muted-foreground">{timeText(summary.lastAt)}</span>
       </button>
