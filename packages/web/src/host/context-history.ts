@@ -44,6 +44,25 @@ function push(
 const changeAt = (walk: EventWalk, sessionEntry: SessionEntry): number =>
   walk.totalAt(sessionEntry.id) - walk.totalAt(sessionEntry.parentId)
 
+type SystemMessage = Extract<Extract<SessionEntry, { type: 'message' }>['message'], { role: 'system' }>
+
+/**
+ * What a later system message changed, as one line: its sections by name, its tools (`tools
+ * +grep −bash` — pi-agent-core writes a tools-only one whenever the tools it can run differ from
+ * the ones the transcript declared, `declareToolChanges`), and its instructions only when it
+ * carries text.
+ */
+function deltaLabel(message: SystemMessage): string {
+  const parts = Object.keys(message.sections ?? {})
+  const tools = [
+    ...(message.toolsAdded ?? []).map((tool) => `+${tool.name}`),
+    ...(message.toolsRemoved ?? []).map((tool) => `−${tool.name}`),
+  ]
+  if (tools.length > 0) parts.push(`tools ${tools.join(' ')}`)
+  if (contentToText(message.content).length > 0) parts.push('instructions')
+  return `system: ${parts.join(', ') || 'no change'}`
+}
+
 /**
  * A system message: the prompt's injected sections, once; a later one as the change it made —
  * signed, because a later system message is a delta pi folds into the prompt
@@ -53,12 +72,7 @@ function systemEvents(walk: EventWalk, sessionEntry: Extract<SessionEntry, { typ
   const { message } = sessionEntry
   if (message.role !== 'system') return
   if (walk.sawPrompt) {
-    const sections = Object.keys(message.sections ?? {})
-    push(walk, sessionEntry, {
-      kind: 'inject',
-      label: `system: ${sections.join(', ') || 'instructions'}`,
-      tokens: changeAt(walk, sessionEntry),
-    })
+    push(walk, sessionEntry, { kind: 'inject', label: deltaLabel(message), tokens: changeAt(walk, sessionEntry) })
     return
   }
   walk.sawPrompt = true

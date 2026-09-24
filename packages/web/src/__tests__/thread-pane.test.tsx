@@ -1280,9 +1280,7 @@ test('the Stats tab replaces the transcript in the thread on screen, and follows
     return found
   }
   const tab = (name: string): HTMLButtonElement => {
-    const found = page.container.querySelector<HTMLButtonElement>(
-      `header [role="tab"][aria-controls="thread-view-${name}"]`,
-    )
+    const found = page.container.querySelector<HTMLButtonElement>(`header [role="tab"]#thread-view-${name}-tab`)
     if (found === null) throw new Error(`expected the ${name} tab in the header`)
     return found
   }
@@ -1296,15 +1294,25 @@ test('the Stats tab replaces the transcript in the thread on screen, and follows
   await page.click(byText('New Thread'))
   await page.click(byText('New Thread'))
   expect(tab('chat').getAttribute('aria-selected')).toBe('true')
+  // Shown: in the pane on screen, and not the transcript kept laid out but `inert` under another view.
   const shown = (id: string): HTMLElement[] =>
-    [...page.container.querySelectorAll<HTMLElement>(`#${id}`)].filter((panel) => panel.closest('.hidden') === null)
+    [...page.container.querySelectorAll<HTMLElement>(`#${id}`)].filter(
+      (panel) => panel.closest('.hidden') === null && panel.closest('[inert]') === null,
+    )
   expect(shown('thread-view-chat')).toHaveLength(1)
+  // Every tab's `aria-controls` names a panel that is in the page (#362 review): only the shown one has one.
+  const dangling = (): string[] =>
+    [...page.container.querySelectorAll<HTMLElement>('header [role="tab"][aria-controls]')]
+      .map((trigger) => trigger.getAttribute('aria-controls') ?? '')
+      .filter((panelId) => page.container.querySelector(`#${panelId}`) === null)
+  expect(dangling()).toEqual([])
   await choose('stats')
   await eventually(() => {
     expect(tab('stats').getAttribute('aria-selected')).toBe('true')
     expect(shown('thread-view-stats')).toHaveLength(1)
     expect(shown('thread-view-chat')).toHaveLength(0)
   })
+  expect(dangling()).toEqual([])
   const older = page.activeRows()[1]
   if (older === undefined) throw new Error('expected two rows')
   await page.click(older)

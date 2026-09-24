@@ -103,6 +103,32 @@ test('events: an injected prompt section, a custom message, a prune and a compac
   expect(compaction?.tokens).toBe(tokens(20) - replaced)
 })
 
+// pi-agent-core writes a tools-only system message whenever the tools it can run differ from the
+// ones the transcript declared (`declareToolChanges`): it changes tools, not instructions.
+test('a later system message is named by what it changed: its sections, its tools, its instructions', () => {
+  const session = SessionManager.inMemory(tmpdir())
+  const tool = (name: string): unknown => ({ name, description: name, parameters: { type: 'object', properties: {} } })
+  session.appendMessage({
+    role: 'system',
+    content: '',
+    sections: { preamble: 'p' },
+    toolsAdded: [tool('bash')],
+    timestamp: now(),
+  } as never)
+  session.appendMessage({ role: 'user', content: 'go', timestamp: now() })
+  session.appendMessage(assistant([{ type: 'text', text: 'ok' }]))
+  session.appendMessage({
+    role: 'system',
+    content: '',
+    toolsAdded: [tool('grep')],
+    toolsRemoved: [{ name: 'bash' }],
+    timestamp: now(),
+  } as never)
+  session.appendMessage({ role: 'system', content: 'be brief', sections: { docs: 'd' }, timestamp: now() } as never)
+  const { events } = branchContext(session.getBranch())
+  expect(events.map((event) => event.label)).toEqual(['system: tools +grep −bash', 'system: docs, instructions'])
+})
+
 test('settings: a thinking level or mode set after the first request is a switch; a malformed mode entry is no event', () => {
   const session = SessionManager.inMemory(tmpdir())
   // Where the thread began: set before the first request, so not events.

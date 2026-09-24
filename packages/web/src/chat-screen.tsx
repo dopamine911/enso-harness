@@ -1140,6 +1140,8 @@ const chatComponents = {
         },
         [open],
       )
+      /** Whether the transcript is the view shown — a pane off screen keeps its chat. */
+      const onChat = (shown ?? 'chat') === 'chat'
       /** A panel's `id`s, in the pane on screen only — a hidden pane's would duplicate them. */
       const panelIds = (view: ThreadView): { id?: string; 'aria-labelledby'?: string } =>
         shown === undefined ? {} : { id: `thread-view-${view}`, 'aria-labelledby': `thread-view-${view}-tab` }
@@ -1158,59 +1160,69 @@ const chatComponents = {
       return (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1">
-            {/* The transcript stays mounted under every view: its scroll, its stick-to-bottom
-						    lock and its bubbles (the stats rows' targets) survive a trip to Stats. */}
-            <div
-              role="tabpanel"
-              {...panelIds('chat')}
-              className={(shown ?? 'chat') === 'chat' ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}
-            >
-              <Conversation>
-                <TranscriptRevealBridge into={scroller} />
-                <ConversationContent className="mx-auto w-full max-w-3xl">
-                  {chat.messages.length === 0 ? (
-                    <ConversationEmptyState
-                      icon={<img src="/logo-full.png" alt="Enso" className="w-44" />}
-                      title=""
-                      description="ask pi something to get started"
-                    />
-                  ) : (
-                    <TranscriptSelectionContext.Provider value={selection}>
-                      <Messages />
-                    </TranscriptSelectionContext.Provider>
-                  )}
-                  {/* pi's notify lines (#29) — the transcript tail, above the question,
-									    so "Mode set to X" reads next to the run it belongs to. */}
-                  <ThreadNotifications />
-                  {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
-									    `ask` verdict reaches the browser, and an unmounted slot is precisely
-									    why an approval would silently never appear. */}
-                  <PendingDialog />
-                  <RunProblem />
-                </ConversationContent>
-                <ConversationScrollButton />
-              </Conversation>
-              {/* pi's queue, not TanStack's `Queue` slot (#75): a prompt sent during a run goes to
-							    pi and is listed here for every follower; TanStack's own queue is bypassed. */}
-              <PendingQueue />
-              <Input />
+            {/* The views share one box: the transcript keeps its size under every view, and the
+						    others are drawn over it. */}
+            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              {/* The transcript stays mounted AND LAID OUT under every view — `invisible` and
+							    `inert`, never `hidden` (#362 review): a `display: none` box comes back resized,
+							    and the stick-to-bottom scroller re-pins a reader who had scrolled up. Kept at
+							    its size, its scroll, its lock and its bubbles (the stats rows' targets)
+							    survive a trip to Context or Stats. */}
+              <div
+                role="tabpanel"
+                {...panelIds('chat')}
+                inert={!onChat}
+                className={
+                  onChat ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'invisible flex min-h-0 min-w-0 flex-1 flex-col'
+                }
+              >
+                <Conversation>
+                  <TranscriptRevealBridge into={scroller} />
+                  <ConversationContent className="mx-auto w-full max-w-3xl">
+                    {chat.messages.length === 0 ? (
+                      <ConversationEmptyState
+                        icon={<img src="/logo-full.png" alt="Enso" className="w-44" />}
+                        title=""
+                        description="ask pi something to get started"
+                      />
+                    ) : (
+                      <TranscriptSelectionContext.Provider value={selection}>
+                        <Messages />
+                      </TranscriptSelectionContext.Provider>
+                    )}
+                    {/* pi's notify lines (#29) — the transcript tail, above the question,
+										    so "Mode set to X" reads next to the run it belongs to. */}
+                    <ThreadNotifications />
+                    {/* ⚠ Mounted before anything opens one, deliberately. This is where #4's
+										    `ask` verdict reaches the browser, and an unmounted slot is precisely
+										    why an approval would silently never appear. */}
+                    <PendingDialog />
+                    <RunProblem />
+                  </ConversationContent>
+                  <ConversationScrollButton />
+                </Conversation>
+                {/* pi's queue, not TanStack's `Queue` slot (#75): a prompt sent during a run goes to
+								    pi and is listed here for every follower; TanStack's own queue is bypassed. */}
+                <PendingQueue />
+                <Input />
+              </div>
+              {/* The thread's context (#361): what each request was made of, over the transcript. */}
+              {shown === 'context' ? (
+                <div role="tabpanel" {...panelIds('context')} className="absolute inset-0 overflow-y-auto">
+                  <div className="mx-auto w-full max-w-6xl">
+                    <ThreadContextDrawer />
+                  </div>
+                </div>
+              ) : null}
+              {/* The thread's stats (#45 phase 2), over the transcript (#361). */}
+              {shown === 'stats' ? (
+                <div role="tabpanel" {...panelIds('stats')} className="absolute inset-0 overflow-y-auto">
+                  <div className="mx-auto w-full max-w-4xl">
+                    <ThreadStatsDrawer onNavigate={revealInTranscript} />
+                  </div>
+                </div>
+              ) : null}
             </div>
-            {/* The thread's context (#361): what each request was made of, in the transcript's place. */}
-            {shown === 'context' ? (
-              <div role="tabpanel" {...panelIds('context')} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-                <div className="mx-auto w-full max-w-6xl">
-                  <ThreadContextDrawer />
-                </div>
-              </div>
-            ) : null}
-            {/* The thread's stats (#45 phase 2), in the transcript's place (#361). */}
-            {shown === 'stats' ? (
-              <div role="tabpanel" {...panelIds('stats')} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-                <div className="mx-auto w-full max-w-4xl">
-                  <ThreadStatsDrawer onNavigate={revealInTranscript} />
-                </div>
-              </div>
-            ) : null}
             {/* The session debug pane (#86): what the browser believes beside what pi's
 						    session holds, for THIS thread. Scrolls on its own so a long branch never
 						    moves the composer. */}
@@ -1389,6 +1401,9 @@ function PaneSwitch({ open, pane, labels, title, onToggle, children }: PaneSwitc
  * panel by id rather than through Radix's `TabsContent`, which would unmount the transcript.
  */
 function ViewTabs({ view, onView }: { view: ThreadView; onView: (view: ThreadView) => void }): React.ReactNode {
+  // Only the shown view's panel is in the page, so only its tab names one (#362 review): a
+  // reference to a panel that is not there is one a screen reader cannot follow.
+  const controls = (tab: ThreadView): string | undefined => (tab === view ? `thread-view-${tab}` : undefined)
   return (
     <Tabs
       value={view}
@@ -1398,14 +1413,14 @@ function ViewTabs({ view, onView }: { view: ThreadView; onView: (view: ThreadVie
       }}
     >
       <TabsList aria-label="what the thread view shows">
-        <TabsTrigger value="chat" id="thread-view-chat-tab" aria-controls="thread-view-chat">
+        <TabsTrigger value="chat" id="thread-view-chat-tab" aria-controls={controls('chat')}>
           <MessagesSquareIcon aria-hidden="true" />
           Chat
         </TabsTrigger>
         <TabsTrigger
           value="context"
           id="thread-view-context-tab"
-          aria-controls="thread-view-context"
+          aria-controls={controls('context')}
           title="what each model request was made of, and how the context grew"
         >
           <LayersIcon aria-hidden="true" />
@@ -1414,7 +1429,7 @@ function ViewTabs({ view, onView }: { view: ThreadView; onView: (view: ThreadVie
         <TabsTrigger
           value="stats"
           id="thread-view-stats-tab"
-          aria-controls="thread-view-stats"
+          aria-controls={controls('stats')}
           title="per prompt, turn and tool: what this thread spent, and on what"
         >
           <ChartColumnIcon aria-hidden="true" />
