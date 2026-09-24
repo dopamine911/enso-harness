@@ -19,7 +19,7 @@ import {
   type LayoutProps,
   type MessageProps,
 } from '@tanstack/ai-react/ui'
-import { ArrowUpIcon, ChartColumnIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
+import { ArrowUpIcon, ChartColumnIcon, MessagesSquareIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { CommandPalette } from './command-palette.tsx'
@@ -54,6 +54,7 @@ import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.tsx'
 import { Button } from './components/ui/button.tsx'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './components/ui/card.tsx'
 import { Input } from './components/ui/input.tsx'
+import { Tabs, TabsList, TabsTrigger } from './components/ui/tabs.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
 import { routeEnsoCustomEvent } from './custom-event-router.ts'
 import type { EnsoRendererMap } from './EnsoToolResult.tsx'
@@ -225,12 +226,26 @@ function createThreadChatHook(stores: ThreadStores): ThreadChatHook {
 const DebugOpenContext = createContext(false)
 
 /**
- * Whether THIS pane shows the stats drawer (#45 phase 2) — `statsOpen && active`, for the same
- * reason as above (PR #358 review): the drawer's fixed `id`, its fetches and its `stores.usage`
- * subscription exist once, in the pane on screen. The switch is the page's, beside debug's, so
- * it is found where the page's other switches are (#359: in the status bar, it was not).
+ * The page's main views (#361): the transcript, or an analysis of the thread in its place. One
+ * choice for the page — switching thread keeps it — rendered by the pane on screen.
  */
-const StatsOpenContext = createContext(false)
+export type ThreadView = 'chat' | 'stats'
+
+/** A tab's value back to a view: the only strings the tab list hands over are these. */
+const THREAD_VIEWS: Readonly<Record<string, ThreadView>> = { chat: 'chat', stats: 'stats' }
+
+/**
+ * What THIS pane shows, and how to change the page's view. `shown` is undefined in a hidden
+ * pane, which then draws its transcript and nothing else: the stats view — its fetches, its
+ * `stores.usage` subscription, its panel `id`s — exists once, in the pane on screen, the debug
+ * column's rule above (PR #358 review).
+ */
+interface PaneView {
+  readonly shown: ThreadView | undefined
+  readonly open: (view: ThreadView) => void
+}
+
+const PaneViewContext = createContext<PaneView>({ shown: undefined, open: (): void => undefined })
 
 /** What `TranscriptRevealBridge` hands the layout: the pane's transcript and its scroll lock. */
 interface TranscriptScroller {
@@ -1093,16 +1108,28 @@ const chatComponents = {
     layout: function ChatLayout({ Messages, Input }: LayoutProps<ThreadChatOptions>): React.ReactNode {
       const chat = useChatContext()
       const debugOpen = useContext(DebugOpenContext)
-      const statsOpen = useContext(StatsOpenContext)
+      const { shown, open } = useContext(PaneViewContext)
       const scroller = useRef<TranscriptScroller | null>(null)
-      const revealInTranscript = useCallback<RevealStatsTarget>((target, stats) => {
-        const content = scroller.current?.content() ?? null
-        const element = content === null ? undefined : locateStatsTarget(content, stats, target)
-        if (element === undefined || scroller.current === null) return false
-        scroller.current.stopScroll()
-        revealElement(element)
-        return true
-      }, [])
+      const revealInTranscript = useCallback<RevealStatsTarget>(
+        (target, stats) => {
+          const bridge = scroller.current
+          const content = bridge?.content() ?? null
+          const element = content === null ? undefined : locateStatsTarget(content, stats, target)
+          if (element === undefined || bridge === null) return false
+          // Found in the transcript the Stats view hides (still mounted, so it can be searched):
+          // show it, then scroll once it has a layout to scroll in.
+          open('chat')
+          requestAnimationFrame(() => {
+            bridge.stopScroll()
+            revealElement(element)
+          })
+          return true
+        },
+        [open],
+      )
+      /** A panel's `id`s, in the pane on screen only — a hidden pane's would duplicate them. */
+      const panelIds = (view: ThreadView): { id?: string; 'aria-labelledby'?: string } =>
+        shown === undefined ? {} : { id: `thread-view-${view}`, 'aria-labelledby': `thread-view-${view}-tab` }
       // The one place the transcript is selected (#280): here, where the chat is already read,
       // once per chunk instead of once per row.
       const selection = useMemo<TranscriptSelection>(() => {
@@ -1118,7 +1145,13 @@ const chatComponents = {
       return (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {/* The transcript stays mounted under every view: its scroll, its stick-to-bottom
+						    lock and its bubbles (the stats rows' targets) survive a trip to Stats. */}
+            <div
+              role="tabpanel"
+              {...panelIds('chat')}
+              className={(shown ?? 'chat') === 'chat' ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}
+            >
               <Conversation>
                 <TranscriptRevealBridge into={scroller} />
                 <ConversationContent className="mx-auto w-full max-w-3xl">
@@ -1149,11 +1182,12 @@ const chatComponents = {
               <PendingQueue />
               <Input />
             </div>
-            {/* The thread's stats (#45 phase 2): per prompt, turn and tool — beside the
-						    transcript it describes, scrolling on its own like the debug pane. */}
-            {statsOpen ? (
-              <div id="thread-stats-pane" className="w-[28rem] shrink-0 overflow-y-auto border-l">
-                <ThreadStatsDrawer onNavigate={revealInTranscript} />
+            {/* The thread's stats (#45 phase 2), in the transcript's place (#361). */}
+            {shown === 'stats' ? (
+              <div role="tabpanel" {...panelIds('stats')} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+                <div className="mx-auto w-full max-w-4xl">
+                  <ThreadStatsDrawer onNavigate={revealInTranscript} />
+                </div>
               </div>
             ) : null}
             {/* The session debug pane (#86): what the browser believes beside what pi's
@@ -1210,6 +1244,9 @@ const chatComponents = {
   // (#112) — they arrive as blocking `extension-ui-request` chunks and render through `PendingDialog` above.
 }
 
+/** A pane mounted without a page has no view to change. */
+const KEEP_VIEW = (): void => undefined
+
 /**
  * One thread's pane: its chat factory, its stores in context, its summary kept current for
  * the rail.
@@ -1224,14 +1261,17 @@ export function ThreadPane({
   threadId,
   active,
   debugOpen,
-  statsOpen = false,
+  view = 'chat',
+  onView = KEEP_VIEW,
 }: {
   threadId: string
   active: boolean
   /** The page's `?debug` switch; the column itself opens only in the active pane. */
   debugOpen: boolean
-  /** The page's stats switch; the drawer, likewise, only in the active pane. */
-  statsOpen?: boolean
+  /** The page's view (#361); shown only in the active pane. Mounted alone (a test), the chat. */
+  view?: ThreadView
+  /** Changes the page's view. Mounted alone there is no page, so the view stays as it is. */
+  onView?: (view: ThreadView) => void
 }): React.ReactNode {
   const stores = getThreadStores(threadId)
   const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores])
@@ -1248,13 +1288,14 @@ export function ThreadPane({
   useEffect(() => {
     updateThreadSummary(threadId, { title, busy: chat.sessionGenerating })
   }, [threadId, title, chat.sessionGenerating])
+  const paneView = useMemo<PaneView>(() => ({ shown: active ? view : undefined, open: onView }), [active, view, onView])
   return (
     <div className={active ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
       <ThreadStoresContext.Provider value={stores}>
         <DebugOpenContext.Provider value={debugOpen && active}>
-          <StatsOpenContext.Provider value={statsOpen && active}>
+          <PaneViewContext.Provider value={paneView}>
             <chat.AppChat />
-          </StatsOpenContext.Provider>
+          </PaneViewContext.Provider>
         </DebugOpenContext.Provider>
       </ThreadStoresContext.Provider>
     </div>
@@ -1303,7 +1344,7 @@ interface PaneSwitchProps {
   readonly children?: React.ReactNode
 }
 
-/** A header switch for a right-hand pane — debug (#86), stats (#359): its state said, its pane named. */
+/** A header switch for a right-hand pane — the `?debug` column (#86): its state said, its pane named. */
 function PaneSwitch({ open, pane, labels, title, onToggle, children }: PaneSwitchProps): React.ReactNode {
   return (
     <Button
@@ -1318,6 +1359,39 @@ function PaneSwitch({ open, pane, labels, title, onToggle, children }: PaneSwitc
       {children}
       {open ? labels[1] : labels[0]}
     </Button>
+  )
+}
+
+/**
+ * The page's views as tabs (#361): Radix's tab list, for its keyboard (arrows move between tabs)
+ * and its roles. The panels are the active pane's own (`ChatLayout`), so each trigger names its
+ * panel by id rather than through Radix's `TabsContent`, which would unmount the transcript.
+ */
+function ViewTabs({ view, onView }: { view: ThreadView; onView: (view: ThreadView) => void }): React.ReactNode {
+  return (
+    <Tabs
+      value={view}
+      onValueChange={(value: string): void => {
+        const chosen = THREAD_VIEWS[value]
+        if (chosen !== undefined) onView(chosen)
+      }}
+    >
+      <TabsList aria-label="what the thread view shows">
+        <TabsTrigger value="chat" id="thread-view-chat-tab" aria-controls="thread-view-chat">
+          <MessagesSquareIcon aria-hidden="true" />
+          Chat
+        </TabsTrigger>
+        <TabsTrigger
+          value="stats"
+          id="thread-view-stats-tab"
+          aria-controls="thread-view-stats"
+          title="per prompt, turn and tool: what this thread spent, and on what"
+        >
+          <ChartColumnIcon aria-hidden="true" />
+          Stats
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
   )
 }
 
@@ -1406,7 +1480,7 @@ export function ChatScreen(): React.ReactNode {
   // exists to explain. Opt-in by `?debug`; open by default when it is, and collapsible
   // from the header so it can get out of the way without a reload.
   const [debugOpen, setDebugOpen] = useState(isDebugMode)
-  const [statsOpen, setStatsOpen] = useState(false)
+  const [view, setView] = useState<ThreadView>('chat')
   const active = threads.find((thread) => thread.threadId === activeThreadId)
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">
@@ -1422,15 +1496,7 @@ export function ChatScreen(): React.ReactNode {
         <span className="min-w-0 flex-1 truncate text-sm" title={activeThreadId ?? ''}>
           {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
         </span>
-        <PaneSwitch
-          open={statsOpen}
-          pane="thread-stats-pane"
-          labels={['stats', 'hide stats']}
-          title="per prompt, turn and tool: what this thread spent, and on what"
-          onToggle={() => setStatsOpen((open) => !open)}
-        >
-          <ChartColumnIcon aria-hidden="true" />
-        </PaneSwitch>
+        <ViewTabs view={view} onView={setView} />
         {isDebugMode ? (
           <PaneSwitch
             open={debugOpen}
@@ -1457,7 +1523,8 @@ export function ChatScreen(): React.ReactNode {
             threadId={thread.threadId}
             active={thread.threadId === activeThreadId}
             debugOpen={isDebugMode && debugOpen}
-            statsOpen={statsOpen}
+            view={view}
+            onView={setView}
           />
         ))}
       </div>
