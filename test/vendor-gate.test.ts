@@ -10,9 +10,9 @@ import { codeOffenders, hasWordSequence, wordsOf } from './gate-support.ts'
  *   1. `@earendil-works/*` is imported only under `VENDOR_ROOTS`. Everything else — `@enso/core`,
  *      the server, the browser — talks our shapes, so a pi replacement is a rewrite of two
  *      directories rather than of the product (#69 is the pivot this survived once).
- *   2. A vendor extension's name (`picc`, `pi-multi-account`, `cc-safety-net`) appears in code
- *      only there. Prose may name them — a comment says why a guard exists; an identifier or a
- *      string literal is a dependency.
+ *   2. A vendor extension's name (`picc`, `pi-multi-account`, `cc-safety-net`, `pi-ask-user`)
+ *      appears in code only there. Prose may name them — a comment says why a guard exists; an
+ *      identifier or a string literal is a dependency.
  *
  * The allowlist IS the leak inventory (`.local/refactor/goals.md` §2 has the table): each entry
  * names one site, its reason, and the leak it maps to. Fixing a leak deletes a line; a new
@@ -73,6 +73,7 @@ const VENDOR_WORD = 'picc'
 const VENDOR_WORD_SEQUENCES = [
   ['cc', 'safety', 'net'],
   ['pi', 'multi', 'account'],
+  ['pi', 'ask', 'user'],
 ] as const
 
 function namesVendor(line: string): boolean {

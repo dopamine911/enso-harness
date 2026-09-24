@@ -20,7 +20,7 @@ import {
   type HostedThread,
   MODEL_WATCH_EXTENSION_PATH,
   seedMultiAccountChildProxyOff,
-  stopRunThenSettleDialogs,
+  stopRunSettlingDialogs,
 } from '../agent-host.ts'
 import { readPiccPersistedMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
 
@@ -33,7 +33,7 @@ import { readPiccPersistedMode, storedPermissionModeState } from '../permission-
  *   - the isolation env is set before the first services (else multi-account reads ~/.pi/agent) —
  *     proven by WHERE multi-account resolved its config, not by reading the env back
  *   - `childProxy: false` is seeded (else the second session in a process hangs under Bun)
- *   - exactly the manifest's six extensions load, with no load errors
+ *   - exactly the manifest's extensions load, in order, with no load errors
  *   - `session_start` fires exactly once per session, and two sessions do not share closures
  *   - a dialog an extension opens reaches a subscriber as an `extension-ui-request` observation and its
  *     answer resolves the extension's promise — the #27 round trip without a wire
@@ -54,7 +54,7 @@ afterAll(async () => {
   await releaseEnsoLogs()
 })
 
-/** The five extension path suffixes the harness manifest declares, in load order. */
+/** The extension path suffixes the harness manifest declares, in load order. */
 const MANIFEST_EXTENSION_MARKERS = [
   'extensions/logging/index.ts',
   'extensions/guards/index.ts',
@@ -62,6 +62,7 @@ const MANIFEST_EXTENSION_MARKERS = [
   'extensions/web-search/index.ts',
   'picc-permission-modes/index.ts',
   'pi-multi-account/index.ts',
+  'pi-ask-user/src/index.ts',
 ]
 
 /** Collect every event a session emits, from its first subscriber on (the host replays what came before). */
@@ -208,10 +209,10 @@ test('a new session says the model it starts with, as its own `model` observatio
   expect(opening).toEqual({ kind: 'model', ...hosted.runtime.modelState() })
 })
 
-test("exactly the manifest's six extensions load, in order, then the host's own model watcher, with no load errors", async () => {
+test("exactly the manifest's extensions load, in order, then the host's own model watcher, with no load errors", async () => {
   const hosted = await hostedSession()
   const loaded = hosted.loadedExtensionPaths
-  // The seventh is not the manifest's: it is the host's listener for pi's `model_select`, the
+  // The last is not the manifest's: it is the host's listener for pi's `model_select`, the
   // only place a model swap is announced (#338 slice 2; `agent-host.ts` header). Listed, not hidden.
   expect(loaded).toHaveLength(MANIFEST_EXTENSION_MARKERS.length + 1)
   MANIFEST_EXTENSION_MARKERS.forEach((marker, index) => {
@@ -494,7 +495,7 @@ test("⚠ Stop stops: the run's abort settles a pending dialog as `aborted` — 
 // that throws, one layer down.
 test("⚠ a stop must stop: when the runtime's abort rejects, the dialogs still settle and the rejection still propagates", async () => {
   const order: string[] = []
-  const stopping = stopRunThenSettleDialogs(
+  const stopping = stopRunSettlingDialogs(
     async () => {
       order.push('runtime told')
       throw new Error('the runtime would not stop')
@@ -505,7 +506,7 @@ test("⚠ a stop must stop: when the runtime's abort rejects, the dialogs still 
   expect(order).toEqual(['runtime told', 'dialogs settled'])
   // and the ordinary order, for the record: runtime first, dialogs after
   order.length = 0
-  await stopRunThenSettleDialogs(
+  await stopRunSettlingDialogs(
     async () => {
       order.push('runtime told')
     },
@@ -753,23 +754,26 @@ interface FauxModule {
     getModel(): Parameters<ExtensionAPI['setModel']>[0]
     setResponses(responses: unknown[]): void
   }
-  fauxAssistantMessage(text: string): unknown
+  fauxAssistantMessage(content: unknown): unknown
+  fauxToolCall(name: string, arguments_: Record<string, unknown>): unknown
 }
 const piCodingAgentDir = dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent')))
 const faux: FauxModule = await import(Bun.resolveSync('@earendil-works/pi-ai', piCodingAgentDir))
 
-// ⚠ THE ORDER IS pi's, AND IT IS THE BUG THIS PINS. pi hands `message_end` to listeners BEFORE it
-// appends the message to the session (`agent-session.js` `_handleAgentEvent`), so usage read at
-// `message_end` is one message short. The host says it at `turn_end` instead; a pi bump that moves
-// the append after `turn_end` would show every tab a total one request behind, and fails here.
-test("⚠ after a turn the host says the session's usage WITH that turn's spend in it, and pi's window (#45)", async () => {
-  const core = faux.createFauxCore({
+type FauxCore = ReturnType<FauxModule['createFauxCore']>
+
+/** pi's scripted provider with one model and a 50k window — what a test scripts with `setResponses`. */
+function createFauxCore(): FauxCore {
+  return faux.createFauxCore({
     provider: 'enso-faux',
     api: 'enso-faux',
     models: [{ id: 'faux-1', contextWindow: 50_000 }],
   })
-  core.setResponses([faux.fauxAssistantMessage('hello there')])
-  const fauxModel: InlineExtension = {
+}
+
+/** An inline extension that registers `core` as a provider and selects its model at session start. */
+function fauxModelExtension(core: FauxCore): InlineExtension {
+  return {
     name: 'enso-host-faux-model',
     factory: (pi: ExtensionAPI) => {
       // The CONFIG form with a literal key: pi marks the provider configured synchronously, so
@@ -797,6 +801,16 @@ test("⚠ after a turn the host says the session's usage WITH that turn's spend 
       })
     },
   }
+}
+
+// ⚠ THE ORDER IS pi's, AND IT IS THE BUG THIS PINS. pi hands `message_end` to listeners BEFORE it
+// appends the message to the session (`agent-session.js` `_handleAgentEvent`), so usage read at
+// `message_end` is one message short. The host says it at `turn_end` instead; a pi bump that moves
+// the append after `turn_end` would show every tab a total one request behind, and fails here.
+test("⚠ after a turn the host says the session's usage WITH that turn's spend in it, and pi's window (#45)", async () => {
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('hello there')])
+  const fauxModel = fauxModelExtension(core)
   const hosted = await hostedSession([fauxModel])
   const seen: EnsoObservation[] = []
   const settled = Promise.withResolvers<void>()
@@ -877,3 +891,152 @@ test("⚠ a stored session's usage is pi's own getSessionStats total — every b
   // A file does not say which model pi would run, so it does not say the window.
   expect(storedContext).toBeNull()
 })
+
+// ── the agent asks (#12) ─────────────────────────────────────────────────────
+
+/** One question as the model writes it into an `ask_user` call. */
+interface AskUserQuestion {
+  header: string
+  tab: string
+  options: Array<{ label: string; description?: string }>
+  multiSelect?: boolean
+}
+
+const DATABASE_QUESTION: AskUserQuestion = {
+  header: 'Which database?',
+  tab: 'Database',
+  options: [
+    { label: 'Postgres', description: 'relational, a server' },
+    { label: 'SQLite', description: 'embedded, a file' },
+  ],
+}
+
+const CHECKS_QUESTION: AskUserQuestion = {
+  header: 'Which checks?',
+  tab: 'Checks',
+  multiSelect: true,
+  options: [{ label: 'lint' }, { label: 'types' }, { label: 'tests' }],
+}
+
+/** The option a test answers with — `ask_user` folds each description into the label it offers. */
+const POSTGRES_OPTION = 'Postgres — relational, a server'
+
+/**
+ * A hosted session whose faux model calls `ask_user` with `question`, prompted and held at its
+ * first dialog: the observations so far, that dialog as it arrived, and the run's settle.
+ */
+async function askedOneQuestion(question: AskUserQuestion): Promise<{
+  hosted: HostedThread
+  events: EnsoObservation[]
+  first: Extract<EnsoObservation, { kind: 'extension-ui-request' }>
+  settled: Promise<void>
+}> {
+  const core = createFauxCore()
+  core.setResponses([
+    faux.fauxAssistantMessage(faux.fauxToolCall('ask_user', { questions: [question] })),
+    faux.fauxAssistantMessage('Understood.'),
+  ])
+  const hosted = await hostedSession([fauxModelExtension(core)])
+  const events = collectEvents(hosted)
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.subscribe((observation) => {
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  const asked = untilObservation(
+    hosted,
+    (observation) => observation.kind === 'extension-ui-request' && observation.blocking,
+  )
+  hosted.runtime.prompt({ message: 'set up storage' }, { onAccepted: () => undefined, onRejected: settled.reject })
+  const first = await asked
+  if (first.kind !== 'extension-ui-request') throw new Error('unreachable: matched on kind')
+  return { hosted, events, first, settled: settled.promise }
+}
+
+/** The JSON `ask_user` returned to the model, once the run has settled. */
+function askUserResult(events: EnsoObservation[]): unknown {
+  const result = events.find((event) => event.kind === 'tool-result' && event.toolName === 'ask_user')
+  if (result?.kind !== 'tool-result') throw new Error(`no ask_user result: ${events.map((event) => event.kind)}`)
+  expect(result.isError).toBe(false)
+  return JSON.parse(result.text)
+}
+
+// ⚠⚠ The escalation channel end to end, without a wire: the MODEL calls `ask_user` (the adopted
+// `@d3ara1n/pi-ask-user`), and the question must arrive as the same `select` dialog the web card
+// renders — the host binds `ctx.mode = 'rpc'`, so the tool takes its dialog path, not its terminal
+// panel (whose `custom` resolves `undefined` here, which would read as "the user cancelled"). The
+// rows are pinned exactly: they are what the card shows, and what a vendor bump reorders or
+// relabels. The answer then has to reach the model as the tool's result.
+test('⚠⚠ the agent asks through ask_user: its question is a select dialog, and the answer is its tool result (#12)', async () => {
+  const { hosted, events, first, settled } = await askedOneQuestion(DATABASE_QUESTION)
+  expect(first.blocking).toBe(true)
+  expect(first.dialog).toEqual({
+    method: 'select',
+    title: 'Which database?',
+    options: [POSTGRES_OPTION, 'SQLite — embedded, a file', '→ Skip this question', '✎ Type something…'],
+  })
+
+  hosted.runtime.answerDialog({ id: first.id, value: POSTGRES_OPTION })
+  await settled
+  expect(askUserResult(events)).toMatchObject({ cancelled: false, answers: [{ tab: 'Database', answer: 'Postgres' }] })
+})
+
+// A SINGLE-choice question's Cancel: `{ cancelled: true }` on the wire is pi's cancel value for a
+// `select` (`undefined`), which the tool reports as a cancelled questionnaire. A vendor bump that
+// threw, or waited, on a dismissed question would leave a web run failed or hung, and fails here.
+test('a cancelled single-choice ask_user question returns { cancelled: true } to the model, and the run settles (#12)', async () => {
+  const { hosted, events, first, settled } = await askedOneQuestion(DATABASE_QUESTION)
+  hosted.runtime.answerDialog({ id: first.id, cancelled: true })
+  await settled
+  expect(askUserResult(events)).toMatchObject({ cancelled: true, answers: [] })
+})
+
+// ⚠ A MULTI-choice question has no cancel on the web, and this pins that it does not. The tool
+// asks one `confirm` per option; pi's cancel value for a confirm is `false`, which the tool reads
+// as "not this option" and asks the next. Declining every card is therefore an ANSWERED, empty
+// selection — the model cannot tell it from the user choosing nothing (seams/dialog.md says so).
+// A vendor bump that made dismissal a real cancel changes this result, and the page with it.
+test('⚠ declining every card of a multi-choice ask_user question is an answered empty selection, not a cancel (#12)', async () => {
+  const { hosted, events, first, settled } = await askedOneQuestion(CHECKS_QUESTION)
+  const declined: string[] = []
+  let question = first
+  for (const [index, option] of CHECKS_QUESTION.options.entries()) {
+    expect(question.dialog).toMatchObject({ method: 'confirm', title: `Which checks? — include "${option.label}"?` })
+    declined.push(question.id)
+    // Watch for the next card only when one is coming: a watcher left behind rejects at its
+    // deadline, and bun pins that on whichever test is running then.
+    const next =
+      index < CHECKS_QUESTION.options.length - 1
+        ? untilObservation(
+            hosted,
+            (observation) =>
+              observation.kind === 'extension-ui-request' && observation.blocking && !declined.includes(observation.id),
+          )
+        : undefined
+    hosted.runtime.answerDialog({ id: question.id, cancelled: true })
+    if (next === undefined) break
+    const asked = await next
+    if (asked.kind !== 'extension-ui-request') throw new Error('unreachable: matched on kind')
+    question = asked
+  }
+  await settled
+  expect(askUserResult(events)).toMatchObject({ cancelled: false, answers: [{ tab: 'Checks', answers: [] }] })
+})
+
+// ⚠⚠ If the user says stop, it's stop — also while the AGENT is asking. A question from a tool's
+// `execute` holds the run, and pi's abort waits for the run: before the stop settled dialogs as it
+// began (and refused new ones until it ended), both of these waited on the card for ever (#376
+// review). The multi-choice case is the harder one: the tool ignores the abort signal and asks the
+// next option, which must be refused rather than shown.
+for (const question of [DATABASE_QUESTION, CHECKS_QUESTION]) {
+  test(`⚠⚠ Stop while ask_user waits (${question.multiSelect === true ? 'multi' : 'single'}-choice) stops the run and leaves no question open (#12)`, async () => {
+    const { hosted, events, settled } = await askedOneQuestion(question)
+    await hosted.runtime.abort()
+    await settled
+    expect(hosted.runtime.openDialogs()).toEqual([])
+    const asked = events.filter((event) => event.kind === 'extension-ui-request' && event.blocking)
+    expect(asked).toHaveLength(1)
+    expect(events.filter((event) => event.kind === 'dialog-settled')).toEqual([
+      { kind: 'dialog-settled', id: asked[0]?.kind === 'extension-ui-request' ? asked[0].id : '', outcome: 'aborted' },
+    ])
+  })
+}

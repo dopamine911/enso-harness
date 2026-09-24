@@ -58,11 +58,15 @@ sequenceDiagram
    clears one.
 6. **Stop stops: the run's abort settles every pending dialog as `aborted`.** `agent-host.ts#abort`
    tells the runtime first — so its loop holds the abort signal when a blocked `tool_call` handler
-   returns — then `abortAllDialogs()` resolves each pending question to its cancel value with the
-   glossary's outcome for exactly this, `aborted`, and every follower hears `dialog-settled`. Before
-   2026-09-16 the host settled nothing on abort, and the vendor's permission prompt passes no signal
-   of its own, so Stop during a permission question waited on the card until a human answered it
-   (decided: *if the user says stop, it's stop*).
+   returns; pi raises it synchronously, before its first `await` — then, while the runtime winds
+   down, `abortAllDialogs()` resolves each pending question to its cancel value with the glossary's
+   outcome for exactly this, `aborted`, and every follower hears `dialog-settled`; and
+   `refuseDialogsUntil` answers any question asked before the stop finishes with its cancel value,
+   showing nothing. Before 2026-09-16 the host settled nothing on abort, and the vendor's permission
+   prompt passes no signal of its own, so Stop during a permission question waited on the card until
+   a human answered it (decided: *if the user says stop, it's stop*). Until the #376 review the
+   settle came only AFTER the runtime's abort resolved — which never happens while a tool's
+   `execute` is blocked on a question (`ask_user`), so Stop waited on that card for ever.
 
 ## The validation contract
 

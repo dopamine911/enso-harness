@@ -270,28 +270,31 @@ export interface StoredThread {
 }
 
 /**
- * Stop: the runtime FIRST, so its loop holds the abort signal when a blocked `tool_call`
- * handler returns — then every pending question settles as `aborted`, and the handler DOES
- * return.
+ * Stop: tell the runtime, then settle every pending question as `aborted` WHILE it stops, and
+ * refuse any question asked before it has — then wait for it.
  *
- * Before this, Stop during a permission question waited on the card: the loop awaited the
- * handler, the handler awaited the human. If the user says stop, it's stop (Daniel,
- * 2026-09-16); the card drops, the run ends.
+ * The runtime is told FIRST because its loop must hold the abort signal when a blocked
+ * `tool_call` handler returns (picc's permission prompt): pi's `abort()` raises the signal
+ * synchronously, before its first `await` (`agent-session.js` `abort` → `agent.abort()`), so
+ * the dialogs can settle as soon as the call has begun. They must not wait for it to finish:
+ * a question asked from a tool's `execute` (ask_user) holds the run, pi's `abort()` waits for
+ * the run to go idle, and a stop that settled dialogs only afterwards waited on the card for
+ * ever (#376 review, reproduced: single-choice and multi-select both). The refusal covers the
+ * tool that ignores the signal and asks again — ask_user's multi-select loop asks the next
+ * option — which would otherwise open a fresh question the stop then waits on.
  *
- * A stop must stop (thread-registry.test.ts's rule, one layer down): the dialogs settle even
- * if the runtime's abort rejects — the rejection still propagates, the cards still drop.
- * Exported so that path is pinned against a stop that rejects, which the real runtime's is
- * not made to do.
+ * If the user says stop, it's stop (Daniel, 2026-09-16); the cards drop, the run ends. A stop
+ * must stop (thread-registry.test.ts's rule, one layer down): the dialogs settle even if the
+ * runtime's abort rejects — the rejection still propagates, the cards still drop. Exported so
+ * that path is pinned against a stop that rejects, which the real runtime's is not made to do.
  */
-export async function stopRunThenSettleDialogs(
+export async function stopRunSettlingDialogs(
   stopRuntime: () => Promise<void>,
-  settleDialogs: () => void,
+  settleDialogs: (stopping: Promise<void>) => void,
 ): Promise<void> {
-  try {
-    await stopRuntime()
-  } finally {
-    settleDialogs()
-  }
+  const stopping = stopRuntime()
+  settleDialogs(stopping)
+  await stopping
 }
 
 export interface AgentHost {
@@ -1007,9 +1010,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // A compaction in flight is the run Stop is stopping (#338 slice 4): pi's `abort()` does
         // not cancel it — `abortCompaction()` does, and is a no-op when none is running.
         session.abortCompaction()
-        return stopRunThenSettleDialogs(
+        return stopRunSettlingDialogs(
           () => session.abort(),
-          () => ui.abortAllDialogs(),
+          (stopping) => {
+            ui.refuseDialogsUntil(stopping)
+            ui.abortAllDialogs()
+          },
         )
       },
       clearQueue(): { interrupting: string[]; enqueued: string[] } {

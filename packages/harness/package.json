@@ -14,7 +14,8 @@
       "./extensions/web-fetch/index.ts",
       "./extensions/web-search/index.ts",
       "node_modules/@ladbabynpm/picc-permission-modes/index.ts",
-      "node_modules/pi-multi-account/index.ts"
+      "node_modules/pi-multi-account/index.ts",
+      "node_modules/@d3ara1n/pi-ask-user/src/index.ts"
     ],
     "skills": [
       "./skills"
@@ -28,10 +29,11 @@
     ]
   },
   "dependencies": {
+    "@d3ara1n/pi-ask-user": "2.5.0",
+    "@enso/core": "*",
     "@ladbabynpm/picc-permission-modes": "0.1.2",
     "@logtape/logtape": "2.3.7",
     "@mammothb/pi-tokyonight-storm": "0.2.1",
-    "@enso/core": "*",
     "cc-safety-net": "2.4.6",
     "pi-multi-account": "1.23.2"
   },

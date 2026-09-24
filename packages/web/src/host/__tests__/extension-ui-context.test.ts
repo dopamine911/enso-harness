@@ -172,6 +172,26 @@ test('abortAllDialogs settles every pending dialog as aborted, each blocked call
   expect(settles(events)).toHaveLength(3)
 })
 
+// The stop's window (#376 review): a question asked while a stopped run winds down resolves to its
+// cancel value at once and shows nothing — a tool that ignores the abort and asks again must not
+// open a card the stop then waits on. The window closes when the stop settles, rejected or not.
+test('refuseDialogsUntil refuses questions until the stop settles — cancel value, no request, no settle — then asks again', async () => {
+  const { uiContext, refuseDialogsUntil, events, requests, pendingDialogCount } = contextUnderTest()
+  const stopping = Promise.withResolvers<void>()
+  refuseDialogsUntil(stopping.promise)
+  expect(await uiContext.confirm('Include lint?', '')).toBe(false)
+  expect(await uiContext.select('Pick', ['a', 'b'])).toBeUndefined()
+  expect(events).toEqual([])
+  expect(pendingDialogCount()).toBe(0)
+
+  stopping.reject(new Error('the runtime would not stop'))
+  await Promise.resolve()
+  void uiContext.confirm('Next run?', '')
+  await untilEmitted(requests, 1)
+  expect(requests).toHaveLength(1)
+  expect(pendingDialogCount()).toBe(1)
+})
+
 // A dialog whose extension passed its OWN signal, already fired, is settled by that signal
 // (`aborted`, once) and is not on the pending map when the run's abort sweeps — never twice.
 test('a dialog already settled by its own abort signal is skipped by abortAllDialogs, not settled again', async () => {
