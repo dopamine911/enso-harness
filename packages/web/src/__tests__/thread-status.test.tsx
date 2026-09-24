@@ -204,28 +204,3 @@ test('the project is the directory name with the full path in its title; absent 
     'title="the tree pi reads and writes for this thread: /home/dev/work/zen-harness-foundation/"',
   )
 })
-
-// #45 phase 2: the stats drawer opens from the bar. The toggle says its state to assistive tech,
-// and a bar with nowhere to open it (a static render) draws none.
-test('the stats toggle is drawn only when there is a drawer to open, and says whether it is open', () => {
-  expect(render({})).not.toContain('thread-stats-pane')
-  const closed = renderToStaticMarkup(
-    <ThreadStatusView
-      activity={{ kind: 'idle' }}
-      counts={{ prompts: 0, toolCalls: 0 }}
-      onToggleStats={(): void => undefined}
-    />,
-  )
-  expect(closed).toContain('aria-expanded="false"')
-  expect(closed).toContain('>stats<')
-  const open = renderToStaticMarkup(
-    <ThreadStatusView
-      activity={{ kind: 'idle' }}
-      counts={{ prompts: 0, toolCalls: 0 }}
-      statsOpen
-      onToggleStats={(): void => undefined}
-    />,
-  )
-  expect(open).toContain('aria-expanded="true"')
-  expect(open).toContain('>hide stats<')
-})

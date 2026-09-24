@@ -225,6 +225,18 @@
           }
         }
       }
+    },
+    {
+      // The stats drawer's cost points (#359) are controls: focusable, and Enter
+      // or Space opens their turn in the transcript, as livecraft's points do. An
+      // SVG `<circle>` cannot be a `<button>`, so it carries `role="button"`; the
+      // rule's suggested element does not exist inside an `<svg>`.
+      "includes": ["packages/web/src/thread-stats.tsx"],
+      "linter": {
+        "rules": {
+          "a11y": { "useSemanticElements": "off" }
+        }
+      }
     }
   ],
   "assist": {

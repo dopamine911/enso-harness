@@ -12,8 +12,11 @@ import { EnsoSessionUsage } from './thread-runtime.ts'
  *     session TOTAL (`getSessionStats`), the authoritative figure.
  *   - The LOG holds how long things took, and only for what was observed and not yet pruned (the
  *     directory keeps 14 days): tool durations joined by `toolCallId`, a run's prompt → settle
- *     and its first token. Folded by `dayStats`, the same fold `/debug?stats` reads, so the two
+ *     and its first token. Folded by `foldDay`, the same fold `/debug?stats` reads, so the two
  *     surfaces cannot disagree about a duration.
+ *   - One duration is the SESSION's (#359): a prompt's own, from the timestamps pi stamps on each
+ *     entry as it appends it. The log cannot say it: a run's settle closes every prompt queued
+ *     into that run at once, and its records are pruned after 14 days; the entries are neither.
  *
  * ⚠ THE BRANCH IS NOT THE SESSION. `turnStats` and `promptStats` walk the current branch; `usage` sums
  * every entry pi recorded. The difference — an abandoned branch, a compaction's or a branch
@@ -63,6 +66,11 @@ export const EnsoPromptStats = Type.Object(
     cost: Type.Number({ minimum: 0 }),
     toolCalls: Type.Integer({ minimum: 0 }),
     failedToolCalls: Type.Integer({ minimum: 0 }),
+    /**
+     * The prompt's entry → the last message entry answering it (a reply or a tool result), from
+     * pi's own entry timestamps. Absent before the first reply, and for the turns before any prompt.
+     */
+    durationMs: Type.Optional(Type.Number({ minimum: 0 })),
   },
   { additionalProperties: false },
 )

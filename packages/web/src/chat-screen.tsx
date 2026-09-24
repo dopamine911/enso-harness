@@ -19,8 +19,9 @@ import {
   type LayoutProps,
   type MessageProps,
 } from '@tanstack/ai-react/ui'
-import { ArrowUpIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
+import { ArrowUpIcon, ChartColumnIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { CommandPalette } from './command-palette.tsx'
 import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from './components/ai-elements/attachments.tsx'
 import {
@@ -84,6 +85,7 @@ import {
 } from './thread-stores.ts'
 import { readThreadUrl, type ThreadUrl, urlForThread } from './thread-url.ts'
 import { ThreadsRail, UNTITLED_THREAD } from './threads-rail.tsx'
+import { locateStatsTarget, type RevealStatsTarget, revealElement } from './transcript-reveal.ts'
 
 /**
  * The enso web surface (#24, #17) — every component and the chat wiring, importable with
@@ -223,12 +225,35 @@ function createThreadChatHook(stores: ThreadStores): ThreadChatHook {
 const DebugOpenContext = createContext(false)
 
 /**
- * Whether THIS pane is the one on screen — the same reason as above, for the stats drawer
- * (#45 phase 2, PR #358 review): its open/closed choice is the pane's own state and survives a
- * switch away, but the drawer itself — its fixed `id`, its fetches, its `stores.usage`
- * subscription — exists only while the pane is shown.
+ * Whether THIS pane shows the stats drawer (#45 phase 2) — `statsOpen && active`, for the same
+ * reason as above (PR #358 review): the drawer's fixed `id`, its fetches and its `stores.usage`
+ * subscription exist once, in the pane on screen. The switch is the page's, beside debug's, so
+ * it is found where the page's other switches are (#359: in the status bar, it was not).
  */
-const PaneActiveContext = createContext(true)
+const StatsOpenContext = createContext(false)
+
+/** What `TranscriptRevealBridge` hands the layout: the pane's transcript and its scroll lock. */
+interface TranscriptScroller {
+  readonly content: () => HTMLElement | null
+  readonly stopScroll: () => void
+}
+
+/**
+ * Lends the layout what only `<Conversation>`'s children can reach (#359): its content element,
+ * the root a stats target is looked for under (one pane's, never a hidden pane's), and
+ * `stopScroll`. Stick-to-bottom pulls a streaming transcript back down on every resize; a jump to
+ * turn 3 has to let go of that lock first, or the next token undoes it.
+ */
+function TranscriptRevealBridge({ into }: { into: React.RefObject<TranscriptScroller | null> }): null {
+  const { contentRef, stopScroll } = useStickToBottomContext()
+  useEffect(() => {
+    into.current = { content: () => contentRef.current, stopScroll }
+    return () => {
+      into.current = null
+    }
+  }, [into, contentRef, stopScroll])
+  return null
+}
 
 /** One selected part paired with the React key that identifies it. */
 export interface KeyedPart {
@@ -1068,10 +1093,16 @@ const chatComponents = {
     layout: function ChatLayout({ Messages, Input }: LayoutProps<ThreadChatOptions>): React.ReactNode {
       const chat = useChatContext()
       const debugOpen = useContext(DebugOpenContext)
-      // The thread's stats drawer (#45 phase 2), opened from the status bar; per pane, like its thread.
-      const [statsOpen, setStatsOpen] = useState(false)
-      const active = useContext(PaneActiveContext)
-      const toggleStats = useCallback((): void => setStatsOpen((open) => !open), [])
+      const statsOpen = useContext(StatsOpenContext)
+      const scroller = useRef<TranscriptScroller | null>(null)
+      const revealInTranscript = useCallback<RevealStatsTarget>((target, stats) => {
+        const content = scroller.current?.content() ?? null
+        const element = content === null ? undefined : locateStatsTarget(content, stats, target)
+        if (element === undefined || scroller.current === null) return false
+        scroller.current.stopScroll()
+        revealElement(element)
+        return true
+      }, [])
       // The one place the transcript is selected (#280): here, where the chat is already read,
       // once per chunk instead of once per row.
       const selection = useMemo<TranscriptSelection>(() => {
@@ -1089,6 +1120,7 @@ const chatComponents = {
           <div className="flex min-h-0 flex-1">
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               <Conversation>
+                <TranscriptRevealBridge into={scroller} />
                 <ConversationContent className="mx-auto w-full max-w-3xl">
                   {chat.messages.length === 0 ? (
                     <ConversationEmptyState
@@ -1119,9 +1151,9 @@ const chatComponents = {
             </div>
             {/* The thread's stats (#45 phase 2): per prompt, turn and tool — beside the
 						    transcript it describes, scrolling on its own like the debug pane. */}
-            {statsOpen && active ? (
+            {statsOpen ? (
               <div id="thread-stats-pane" className="w-[28rem] shrink-0 overflow-y-auto border-l">
-                <ThreadStatsDrawer />
+                <ThreadStatsDrawer onNavigate={revealInTranscript} />
               </div>
             ) : null}
             {/* The session debug pane (#86): what the browser believes beside what pi's
@@ -1135,12 +1167,7 @@ const chatComponents = {
           </div>
           {/* The status bar (#90): activity, prompts, tool calls, cost — always visible, full
 					    width under transcript AND debug pane, so it is the one place to look. */}
-          <ThreadStatusBar
-            messages={chat.messages}
-            generating={chat.sessionGenerating}
-            statsOpen={statsOpen}
-            onToggleStats={toggleStats}
-          />
+          <ThreadStatusBar messages={chat.messages} generating={chat.sessionGenerating} />
         </div>
       )
     },
@@ -1197,11 +1224,14 @@ export function ThreadPane({
   threadId,
   active,
   debugOpen,
+  statsOpen = false,
 }: {
   threadId: string
   active: boolean
   /** The page's `?debug` switch; the column itself opens only in the active pane. */
   debugOpen: boolean
+  /** The page's stats switch; the drawer, likewise, only in the active pane. */
+  statsOpen?: boolean
 }): React.ReactNode {
   const stores = getThreadStores(threadId)
   const { useAppChat } = useMemo(() => createThreadChatHook(stores), [stores])
@@ -1222,9 +1252,9 @@ export function ThreadPane({
     <div className={active ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
       <ThreadStoresContext.Provider value={stores}>
         <DebugOpenContext.Provider value={debugOpen && active}>
-          <PaneActiveContext.Provider value={active}>
+          <StatsOpenContext.Provider value={statsOpen && active}>
             <chat.AppChat />
-          </PaneActiveContext.Provider>
+          </StatsOpenContext.Provider>
         </DebugOpenContext.Provider>
       </ThreadStoresContext.Provider>
     </div>
@@ -1260,6 +1290,36 @@ type ThreadNavigation =
  * whenever a run settles — the moments a session file appears or grows.
  */
 const storedThreads = createStoredThreadsStore()
+
+interface PaneSwitchProps {
+  readonly open: boolean
+  /** The pane's element id — what `aria-controls` names. */
+  readonly pane: string
+  /** What the switch says while the pane is closed, then while it is open. */
+  readonly labels: readonly [string, string]
+  readonly title: string
+  readonly onToggle: () => void
+  /** An icon ahead of the label. */
+  readonly children?: React.ReactNode
+}
+
+/** A header switch for a right-hand pane — debug (#86), stats (#359): its state said, its pane named. */
+function PaneSwitch({ open, pane, labels, title, onToggle, children }: PaneSwitchProps): React.ReactNode {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={open ? 'secondary' : 'outline'}
+      aria-expanded={open}
+      aria-controls={pane}
+      title={title}
+      onClick={onToggle}
+    >
+      {children}
+      {open ? labels[1] : labels[0]}
+    </Button>
+  )
+}
 
 /** The page (#90): header, the sessions rail, and one mounted pane per live thread. */
 export function ChatScreen(): React.ReactNode {
@@ -1346,6 +1406,7 @@ export function ChatScreen(): React.ReactNode {
   // exists to explain. Opt-in by `?debug`; open by default when it is, and collapsible
   // from the header so it can get out of the way without a reload.
   const [debugOpen, setDebugOpen] = useState(isDebugMode)
+  const [statsOpen, setStatsOpen] = useState(false)
   const active = threads.find((thread) => thread.threadId === activeThreadId)
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">
@@ -1361,17 +1422,23 @@ export function ChatScreen(): React.ReactNode {
         <span className="min-w-0 flex-1 truncate text-sm" title={activeThreadId ?? ''}>
           {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
         </span>
+        <PaneSwitch
+          open={statsOpen}
+          pane="thread-stats-pane"
+          labels={['stats', 'hide stats']}
+          title="per prompt, turn and tool: what this thread spent, and on what"
+          onToggle={() => setStatsOpen((open) => !open)}
+        >
+          <ChartColumnIcon aria-hidden="true" />
+        </PaneSwitch>
         {isDebugMode ? (
-          <Button
-            type="button"
-            size="sm"
-            variant={debugOpen ? 'secondary' : 'outline'}
-            aria-expanded={debugOpen}
-            aria-controls="thread-debug-pane"
-            onClick={() => setDebugOpen((open) => !open)}
-          >
-            {debugOpen ? 'hide debug' : 'show debug'}
-          </Button>
+          <PaneSwitch
+            open={debugOpen}
+            pane="thread-debug-pane"
+            labels={['show debug', 'hide debug']}
+            title="what the page believes beside what pi's session holds"
+            onToggle={() => setDebugOpen((open) => !open)}
+          />
         ) : null}
       </header>
       <div className="flex min-h-0 flex-1">
@@ -1390,6 +1457,7 @@ export function ChatScreen(): React.ReactNode {
             threadId={thread.threadId}
             active={thread.threadId === activeThreadId}
             debugOpen={isDebugMode && debugOpen}
+            statsOpen={statsOpen}
           />
         ))}
       </div>

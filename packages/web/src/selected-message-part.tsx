@@ -87,7 +87,14 @@ function ToolCallRow({
     // Only an error opens itself: its body is a reason the reader needs (the guard's refusal,
     // the command's stderr). `aborted` has nothing more inside — its whole story is the one
     // word on the row (the run ended first), so opening it would show a static line.
-    <details data-enso-tool-call={status} open={status === 'error'} className="group my-1">
+    // `data-tool-call-id`: where the stats drawer's rows land (#359) — the one key a live run's
+    // bubble and a resumed thread's share (`transcript-reveal.ts`).
+    <details
+      data-enso-tool-call={status}
+      data-tool-call-id={selected.part.id}
+      open={status === 'error'}
+      className="group my-1"
+    >
       <summary className="flex cursor-pointer list-none items-center gap-2 font-mono text-muted-foreground text-xs marker:hidden">
         <span aria-hidden="true" className={STEP_DOT[status]} />
         <span className="text-foreground">{selected.part.name}</span>

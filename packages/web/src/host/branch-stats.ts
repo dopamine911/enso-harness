@@ -16,6 +16,10 @@ import { contentToText } from './map-events.ts'
  *
  * ⚠ A failure is `isError === true` and nothing else — pi's own signal, the one a guard's refusal
  * also carries (map-events.ts). An error turn (`stopReason: 'error'`) is a turn, with its cost.
+ *
+ * ⓘ A prompt's duration is the one duration read here (#359): its entry's timestamp to the last
+ * message entry that answers it. pi stamps an entry as it appends it — a reply at its end — so the
+ * span is the prompt's wall time to its last word, for a thread of any age.
  */
 
 /** One call before the log's duration is joined. */
@@ -47,13 +51,28 @@ function freshPrompt(prompt: number, text: string): MutablePrompt {
   return { prompt, text, turnCount: 0, cost: 0, toolCalls: 0, failedToolCalls: 0 }
 }
 
+/** A prompt's first and last entry instants, epoch ms; `last` stays undefined until something answers. */
+interface PromptSpan {
+  readonly first: number
+  last: number | undefined
+}
+
 /** The walk's state: the prompt being answered, and each call by id so its result lands on it. */
 interface Walk {
   readonly prompts: MutablePrompt[]
+  /** By prompt number; prompt 0 has none — nothing opened it. */
+  readonly spans: Map<number, PromptSpan>
   readonly turnStats: EnsoTurnStats[]
   readonly calls: MutableCall[]
   readonly callById: Map<string, MutableCall>
   branchCost: number
+}
+
+/** A span's length in ms, or undefined: nothing answered its prompt, or the clocks disagree. */
+function spanMs(span: PromptSpan | undefined): number | undefined {
+  if (span?.last === undefined || Number.isNaN(span.first) || Number.isNaN(span.last)) return undefined
+  const elapsed = span.last - span.first
+  return elapsed >= 0 ? elapsed : undefined
 }
 
 function currentPrompt(walk: Walk): MutablePrompt {
@@ -61,7 +80,8 @@ function currentPrompt(walk: Walk): MutablePrompt {
   return walk.prompts[walk.prompts.length - 1] ?? freshPrompt(0, '')
 }
 
-type Message = Extract<SessionEntry, { type: 'message' }>['message']
+type MessageEntry = Extract<SessionEntry, { type: 'message' }>
+type Message = MessageEntry['message']
 type AssistantMessage = Extract<Message, { role: 'assistant' }>
 type ToolResultMessage = Extract<Message, { role: 'toolResult' }>
 
@@ -121,21 +141,36 @@ function walkToolResult(walk: Walk, message: ToolResultMessage): void {
   }
 }
 
+/** One message entry into the walk: a prompt opens a span; a reply or a result moves its end. */
+function walkMessage(walk: Walk, sessionEntry: MessageEntry): void {
+  const { message } = sessionEntry
+  const instant = Date.parse(sessionEntry.timestamp)
+  if (message.role === 'user') {
+    walk.spans.set(walk.prompts.length, { first: instant, last: undefined })
+    walk.prompts.push(freshPrompt(walk.prompts.length, promptText(message.content)))
+    return
+  }
+  if (message.role === 'assistant') walkAssistant(walk, message)
+  else if (message.role === 'toolResult') walkToolResult(walk, message)
+  else return
+  const span = walk.spans.get(currentPrompt(walk).prompt)
+  if (span !== undefined) span.last = instant
+}
+
 /** Walk one branch, root to leaf. */
 export function branchStats(branch: readonly SessionEntry[]): BranchStats {
   const walk: Walk = {
     prompts: [freshPrompt(0, '')],
+    spans: new Map(),
     turnStats: [],
     calls: [],
     callById: new Map(),
     branchCost: 0,
   }
-  for (const sessionEntry of branch) {
-    if (sessionEntry.type !== 'message') continue
-    const { message } = sessionEntry
-    if (message.role === 'user') walk.prompts.push(freshPrompt(walk.prompts.length, promptText(message.content)))
-    else if (message.role === 'assistant') walkAssistant(walk, message)
-    else if (message.role === 'toolResult') walkToolResult(walk, message)
+  for (const sessionEntry of branch) if (sessionEntry.type === 'message') walkMessage(walk, sessionEntry)
+  for (const prompt of walk.prompts) {
+    const durationMs = spanMs(walk.spans.get(prompt.prompt))
+    if (durationMs !== undefined) prompt.durationMs = durationMs
   }
   // Prompt 0 collects what came before the first prompt; with nothing in it, it is not a row.
   const [beforeFirstPrompt, ...prompted] = walk.prompts

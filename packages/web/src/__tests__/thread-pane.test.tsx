@@ -1,4 +1,5 @@
 import { afterAll, afterEach, expect, test } from 'bun:test'
+import type { EnsoThreadStats } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import { ChatScreen, ThreadPane } from '../chat-screen.tsx'
@@ -86,7 +87,7 @@ interface MountedPane {
 }
 
 async function mountPane(
-  options: { active?: boolean; debugOpen?: boolean; server?: ScriptedFetchOptions } = {},
+  options: { active?: boolean; debugOpen?: boolean; statsOpen?: boolean; server?: ScriptedFetchOptions } = {},
 ): Promise<MountedPane> {
   const server = createScriptedFetch(options.server ?? {})
   // The composer's mode control seeds from the page's own `fetch("/api/mode")`.
@@ -96,7 +97,14 @@ async function mountPane(
   document.body.appendChild(container)
   const root: Root = createRoot(container)
   const render = (active: boolean): void =>
-    root.render(<ThreadPane threadId={stores.threadId} active={active} debugOpen={options.debugOpen ?? false} />)
+    root.render(
+      <ThreadPane
+        threadId={stores.threadId}
+        active={active}
+        debugOpen={options.debugOpen ?? false}
+        statsOpen={options.statsOpen ?? false}
+      />,
+    )
   await flush(async () => {
     render(options.active ?? true)
   })
@@ -1118,15 +1126,9 @@ test("⚠ a frame on one thread's follow changes that pane and no other — cost
 
 // PR #358 review: every live pane stays mounted under `hidden`, so the stats drawer — its fixed
 // `id`, its fetches, its `stores.usage` subscription — must exist only in the pane on screen
-// (the debug column's rule, PR #94), and be open again when the thread is shown again.
+// (the debug column's rule, PR #94), and be back when the thread is shown again.
 test('⚠ the stats drawer exists only while its pane is shown, and is back open when the pane is', async () => {
-  const pane = await mountPane({ active: true })
-  const toggle = pane.container.querySelector<HTMLButtonElement>('button[aria-controls="thread-stats-pane"]')
-  if (toggle === null) throw new Error('no stats toggle in the status bar')
-  await flush(async () => {
-    toggle.click()
-    await tick()
-  })
+  const pane = await mountPane({ active: true, statsOpen: true })
   const drawers = (): number => pane.container.querySelectorAll('#thread-stats-pane').length
   await eventually(() => expect(drawers()).toBe(1))
   await pane.setActive(false)
@@ -1134,6 +1136,78 @@ test('⚠ the stats drawer exists only while its pane is shown, and is back open
   await pane.setActive(true)
   expect(drawers()).toBe(1)
   await pane.unmount()
+})
+
+const NO_DURATIONS = { count: 0, minMs: 0, maxMs: 0, meanMs: 0, totalMs: 0 }
+
+/** Two calls: `c1`, which the transcript below draws, and `c-gone`, which it does not. */
+const TWO_CALL_STATS: Omit<EnsoThreadStats, 'threadId'> = {
+  live: true,
+  usage: { cost: 0.01, input: 10, output: 10, cacheRead: 0, cacheWrite: 0, context: null },
+  branchCost: 0.01,
+  turnStats: [],
+  promptStats: [],
+  callStats: [
+    {
+      toolCallId: 'c1',
+      toolName: 'bash',
+      turn: 1,
+      prompt: 1,
+      inputChars: 50,
+      outputChars: 0,
+      isError: false,
+      pending: true,
+    },
+    {
+      toolCallId: 'c-gone',
+      toolName: 'read',
+      turn: 1,
+      prompt: 1,
+      inputChars: 10,
+      outputChars: 0,
+      isError: false,
+      pending: false,
+    },
+  ],
+  latency: { prompts: NO_DURATIONS, firstDelta: NO_DURATIONS },
+  logDays: [],
+}
+
+// #359: a drawer row is a way into THIS pane's transcript — through the bridge inside
+// `<Conversation>`, the layout's reveal, and the step row's `data-tool-call-id` — and a target
+// the transcript does not draw is said, not silently ignored.
+test('⚠ a costliest-calls row scrolls to its call in the transcript; a call not drawn there is said (#359)', async () => {
+  const scrolled: Element[] = []
+  const scrollIntoView = Element.prototype.scrollIntoView
+  Element.prototype.scrollIntoView = function record(this: Element): void {
+    scrolled.push(this)
+  }
+  try {
+    const pane = await mountPane({ statsOpen: true, server: { stats: TWO_CALL_STATS } })
+    await pane.settle(SNAPSHOT_IDLE)
+    await flush(async () => {
+      typeInto(pane.composer(), 'run it')
+      pressEnter(pane.composer())
+      await tick()
+    })
+    await pane.settle(
+      { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+      { type: 'observation', seq: 2, observation: { kind: 'tool-call', toolCallId: 'c1', toolName: 'bash', args: {} } },
+    )
+    const rows = await eventually(() => {
+      const found = [...pane.container.querySelectorAll<HTMLButtonElement>('#thread-stats-pane li button')]
+      expect(found).toHaveLength(2)
+      return found
+    })
+    await flush(async () => rows[0]?.click())
+    expect(scrolled).toEqual([pane.container.querySelector('[data-tool-call-id="c1"]') as Element])
+    await flush(async () => rows[1]?.click())
+    expect(scrolled).toHaveLength(1)
+    await eventually(() => expect(pane.container.textContent).toContain('that call is not in the transcript on screen'))
+    await pane.unmount()
+  } finally {
+    Element.prototype.scrollIntoView = scrollIntoView
+  }
 })
 
 // ── the page (#90): the rail, New Thread, switching, Previous Threads, resume (#95) ───────
@@ -1181,6 +1255,39 @@ async function mountPage(options: ScriptedFetchOptions = {}): Promise<MountedPag
       [...container.querySelectorAll<HTMLElement>('#thread-status')].filter((bar) => bar.closest('.hidden') === null),
   }
 }
+
+// #359: the stats switch is the page header's, beside debug's — in the status bar it was not
+// found. One switch, and the drawer it opens is the ACTIVE thread's, following a switch of thread.
+test('the header stats switch opens the drawer in the thread on screen, and it follows a switch of thread', async () => {
+  const page = await mountPage()
+  const byText = (text: string): HTMLButtonElement => {
+    const found = [...page.container.querySelectorAll('button')].find((button) => button.textContent === text)
+    if (found === undefined) throw new Error(`expected a ${text} button`)
+    return found
+  }
+  await page.click(byText('New Thread'))
+  await page.click(byText('New Thread'))
+  const toggle = page.container.querySelector<HTMLButtonElement>('header button[aria-controls="thread-stats-pane"]')
+  if (toggle === null) throw new Error('expected the stats switch in the header')
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  await page.click(toggle)
+  const drawer = (): HTMLElement[] => [...page.container.querySelectorAll<HTMLElement>('#thread-stats-pane')]
+  await eventually(() => {
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(drawer()).toHaveLength(1)
+    expect(drawer()[0]?.closest('.hidden')).toBeNull()
+  })
+  const older = page.activeRows()[1]
+  if (older === undefined) throw new Error('expected two rows')
+  await page.click(older)
+  await eventually(() => {
+    expect(drawer()).toHaveLength(1)
+    expect(drawer()[0]?.closest('.hidden')).toBeNull()
+  })
+  await page.click(toggle)
+  await eventually(() => expect(drawer()).toHaveLength(0))
+  await page.unmount()
+})
 
 test('New Thread mints a thread, lists it in the rail as current, and shows exactly its pane', async () => {
   // `afterEach` cleared the module's first thread, so the page starts with none: header only.

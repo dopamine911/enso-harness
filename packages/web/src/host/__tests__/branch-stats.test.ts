@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, setSystemTime, test } from 'bun:test'
 import { tmpdir } from 'node:os'
 import { type SessionEntry, SessionManager } from '@earendil-works/pi-coding-agent'
 import { branchStats } from '../branch-stats.ts'
@@ -86,7 +86,8 @@ test("turn, prompt and call stats follow the branch; a failure is pi's isError; 
     [2, 1, 0.125, 0, 'stop'],
     [3, 2, 0.0625, 1, 'error'],
   ])
-  expect(stats.promptStats).toEqual([
+  // `toMatchObject`: each prompt's `durationMs` is the clock's (pinned in its own test below).
+  expect(stats.promptStats).toMatchObject([
     { prompt: 1, text: 'first question', turnCount: 2, cost: 0.875, toolCalls: 2, failedToolCalls: 1 },
     { prompt: 2, text: 'second question here', turnCount: 1, cost: 0.0625, toolCalls: 1, failedToolCalls: 0 },
   ])
@@ -138,4 +139,31 @@ test('a turn before the first prompt is prompt 0 — a row only when there is on
   const prompted = SessionManager.inMemory(tmpdir())
   prompted.appendMessage({ role: 'user', content: 'a question', timestamp: Date.now() })
   expect(branchStats(prompted.getBranch()).promptStats.map((prompt) => prompt.prompt)).toEqual([1])
+})
+
+// #359: a prompt's own duration, off the stamps pi puts on each entry as it appends it — so a
+// thread of any age has one, which the 14-day log cannot promise. The clock is pinned per entry.
+test("a prompt's duration runs from its entry to the last entry answering it; an unanswered one has none", () => {
+  const session = SessionManager.inMemory(tmpdir())
+  const at = (instant: string): void => {
+    setSystemTime(new Date(instant))
+  }
+  try {
+    at('2026-09-23T10:00:00.000Z')
+    session.appendMessage({ role: 'user', content: 'list them', timestamp: Date.now() })
+    at('2026-09-23T10:00:04.000Z')
+    session.appendMessage(assistant([call('c1', 'bash', { command: 'ls' })], 0.1))
+    at('2026-09-23T10:00:05.500Z')
+    session.appendMessage(toolResult({ toolCallId: 'c1', toolName: 'bash', text: 'a b', isError: false }))
+    at('2026-09-23T10:00:09.000Z')
+    session.appendMessage(assistant([{ type: 'text', text: 'two files' }], 0.1))
+    at('2026-09-23T10:01:00.000Z')
+    session.appendMessage({ role: 'user', content: 'and now?', timestamp: Date.now() })
+  } finally {
+    setSystemTime()
+  }
+  expect(branchStats(session.getBranch()).promptStats.map((prompt) => [prompt.prompt, prompt.durationMs])).toEqual([
+    [1, 9000],
+    [2, undefined],
+  ])
 })
