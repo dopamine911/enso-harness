@@ -1,6 +1,7 @@
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  type EnsoDurationSummary,
   type EnsoLogLine,
   type EnsoSessionUsage,
   type EnsoThreadStats,
@@ -29,14 +30,14 @@ import type { ThreadRegistry } from './thread-registry.ts'
  *
  * ⚠ WRITES NO RECORD — the log-stats route's rule: a read of the trace must not appear in it.
  *
- * ⚠ THE COST, STATED (PR #358 review). With the drawer open this runs once per `session-usage` —
- * each turn, run, compaction, model change or cache warm — and each run reads every day file
- * since the branch began (up to the 14 the prune leaves), synchronously, as the day's stats route
- * does; each day is folded once. At `info` a day file is a few hundred kilobytes and this is not
- * felt; at `trace` on a long thread it would be. The fix is not written yet, and is a design, not
- * a line: a day before today no longer changes once the rotation moves on, so it could be read
- * once per thread — but that cache must forget a day the prune deletes, and must be bounded, or
- * it grows with every thread this server has served.
+ * ⚠ A DAY BEFORE TODAY IS READ ONCE PER THREAD (#359). With the drawer open this runs once per
+ * `session-usage` — each turn, run, compaction, model change or cache warm — and it used to read
+ * every day file since the branch began, synchronously, each time (PR #358 review). A past day
+ * no longer changes once the rotation has moved on, so its fold is kept; today's is read fresh.
+ * The keep is bounded two ways: a day the prune deleted is forgotten on the next read (it is no
+ * longer on disk, so it is no longer asked for), and at most `PAST_DAYS_HELD` thread-days are
+ * held, the least recently read going first — without both it would grow with every thread this
+ * server ever served.
  */
 
 export interface ThreadStatsRouteDeps {
@@ -78,10 +79,59 @@ function threadLines(logsDir: string, day: string, threadId: string): EnsoLogLin
   return lines.filter((line) => line.properties?.threadId === threadId)
 }
 
+/** What one day adds to a thread's stats — all the route keeps of it. */
+interface DayFold {
+  readonly prompts: EnsoDurationSummary
+  readonly firstDelta: EnsoDurationSummary
+  readonly callDurations: ReadonlyMap<string, number>
+}
+
+function dayFoldOf(logsDir: string, day: string, threadId: string): DayFold {
+  const { stats, callDurations } = foldDay(day, threadLines(logsDir, day, threadId), 0)
+  return { prompts: stats.totals.prompts, firstDelta: stats.totals.firstDelta, callDurations }
+}
+
+/**
+ * Thread-days kept (see the header). A day's fold is two summaries and the thread's call
+ * durations that day — small; the bound is against a server that lives for months.
+ */
+const PAST_DAYS_HELD = 256
+
+interface PastDays {
+  /** Forget every kept day that is no longer on disk — the prune's deletions. */
+  readonly keepOnly: (daysOnDisk: readonly string[]) => void
+  /** The thread's fold of each day: kept for a day before `today`, read fresh otherwise. */
+  readonly foldsOf: (days: readonly string[], today: string, threadId: string) => DayFold[]
+}
+
+/** The kept folds of days before today, least recently read first. */
+function createPastDays(logsDir: string): PastDays {
+  const held = new Map<string, { readonly day: string; readonly fold: DayFold }>()
+  return {
+    keepOnly: (daysOnDisk: readonly string[]): void => {
+      const onDisk = new Set(daysOnDisk)
+      for (const [key, kept] of held) if (!onDisk.has(kept.day)) held.delete(key)
+    },
+    foldsOf: (days: readonly string[], today: string, threadId: string): DayFold[] =>
+      days.map((day) => {
+        if (day >= today) return dayFoldOf(logsDir, day, threadId)
+        const key = `${day} ${threadId}`
+        const fold = held.get(key)?.fold ?? dayFoldOf(logsDir, day, threadId)
+        // Re-inserted, so it is the most recently read; the oldest goes past the bound.
+        held.delete(key)
+        held.set(key, { day, fold })
+        const oldest = held.keys().next()
+        if (held.size > PAST_DAYS_HELD && oldest.done !== true) held.delete(oldest.value)
+        return fold
+      }),
+  }
+}
+
 export function createThreadStatsRoute(
   deps: ThreadStatsRouteDeps,
 ): (threadId: string) => Promise<EnsoThreadStats | undefined> {
   const now = deps.now ?? ((): Date => new Date())
+  const pastDays = createPastDays(deps.logsDir)
 
   async function sourceOf(threadId: string): Promise<ThreadSource | undefined> {
     const stored =
@@ -99,9 +149,11 @@ export function createThreadStatsRoute(
     const { branch } = source
     // From the branch's first entry's day; a branch with none has only today to look in.
     const firstDay = localDayOf(branch.firstAt === undefined ? now() : new Date(branch.firstAt))
-    const days = logDaysOnDisk(deps.logsDir).filter((day) => day >= firstDay)
-    // ONE fold per day, for both halves (PR #358 review).
-    const folded = days.map((day) => foldDay(day, threadLines(deps.logsDir, day, threadId), 0))
+    const daysOnDisk = logDaysOnDisk(deps.logsDir)
+    pastDays.keepOnly(daysOnDisk)
+    const days = daysOnDisk.filter((day) => day >= firstDay)
+    // ONE fold per day, for both halves (PR #358 review); a past day's is kept (the header).
+    const folded = pastDays.foldsOf(days, localDayOf(now()), threadId)
     // A toolCallId is unique across the thread, so the days' per-call maps merge without a clash.
     const durationOf = new Map(folded.flatMap((fold) => [...fold.callDurations]))
     return {
@@ -116,8 +168,8 @@ export function createThreadStatsRoute(
         return durationMs === undefined ? call : { ...call, durationMs }
       }),
       latency: {
-        prompts: mergeDurationSummaries(folded.map((fold) => fold.stats.totals.prompts)),
-        firstDelta: mergeDurationSummaries(folded.map((fold) => fold.stats.totals.firstDelta)),
+        prompts: mergeDurationSummaries(folded.map((fold) => fold.prompts)),
+        firstDelta: mergeDurationSummaries(folded.map((fold) => fold.firstDelta)),
       },
       logDays: days,
     }

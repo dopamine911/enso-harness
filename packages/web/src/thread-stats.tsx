@@ -1,6 +1,16 @@
 import { EnsoThreadStats, type EnsoToolCallStats, type EnsoTurnStats } from '@enso/core'
 import { useEffect, useState } from 'react'
-import { Area, AreaChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  type DotItemDotProps,
+  Line,
+  LineChart,
+  type MouseHandlerDataParam,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import type { FetchLike } from './browser-logging.ts'
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from './components/ui/chart.tsx'
 import { OptionSelect } from './option-select.tsx'
@@ -19,13 +29,18 @@ import {
   toolSummaries,
   toolUsageValue,
 } from './thread-stats-analysis.ts'
+import type { RevealStatsTarget, StatsTarget } from './transcript-reveal.ts'
 
 /**
  * The thread's stats drawer (#45 phase 2) — pi-livecraft's session analysis widget
  * (`.inspiration/pi-extensions/pi-livecraft/src/features/session-analysis/`), section for
  * section, over our wire: summary cards, context and tokens per turn, cost per turn, cumulative
  * usage by tool, costliest calls, distribution, costliest prompts. Left out, by decision: the
- * "interpret session" model call; click-to-navigate is its own PR.
+ * "interpret session" model call.
+ *
+ * A chart point, a costliest call and a costliest prompt are each a way into the transcript
+ * (#359, livecraft's `onNavigate`): a click, or Enter on the focused point or row, scrolls the
+ * pane to that turn, call or prompt and rings it (`transcript-reveal.ts` says how each is found).
  *
  * Reads `GET /api/threads/:threadId/stats` on open and again whenever the thread's usage moves
  * (`stores.usage`, #45 PR 1): the status bar's `session-usage` is the one signal that a turn,
@@ -132,6 +147,62 @@ function turnAxes(tick: (value: number) => string, width: number): React.ReactNo
 
 type TurnPoint = EnsoTurnStats & { readonly label: string }
 
+/** Opens a turn in the transcript; absent where there is nowhere to go (a static render). */
+type OnTurn = ((turn: number) => void) | undefined
+
+/** A chart's click props: a click → the turn under the pointer, or none without somewhere to go. */
+type ChartClick = { onClick: (state: MouseHandlerDataParam) => void; className: string } | Record<never, never>
+
+/**
+ * The chart's click → the turn under the pointer. Recharts reports the hovered point's index,
+ * which is the one its tooltip shows, so a click anywhere in the column goes where the tooltip says.
+ */
+function turnClick(data: readonly TurnPoint[], onTurn: OnTurn): ChartClick {
+  if (onTurn === undefined) return {}
+  return {
+    className: 'cursor-pointer',
+    onClick: (state: MouseHandlerDataParam): void => {
+      const index = state.activeTooltipIndex
+      if (index === undefined || index === null) return
+      const point = data[Number(index)]
+      if (point !== undefined) onTurn(point.turn)
+    },
+  }
+}
+
+/**
+ * A cost point as a control (livecraft's `role="button"` points): focusable, and Enter or Space
+ * opens its turn — the keyboard's way in, where the click above is the pointer's.
+ */
+function turnDot(onTurn: OnTurn): ((props: DotItemDotProps) => React.ReactNode) | boolean {
+  if (onTurn === undefined) return true
+  return function TurnDot(dot: DotItemDotProps): React.ReactNode {
+    const point = dot.payload as TurnPoint
+    const open = (): void => onTurn(point.turn)
+    return (
+      <circle
+        key={`turn-${dot.index}`}
+        cx={dot.cx}
+        cy={dot.cy}
+        r={3}
+        fill="var(--background)"
+        stroke={dot.stroke}
+        strokeWidth={2}
+        role="button"
+        tabIndex={0}
+        aria-label={`turn ${point.turn}, ${costText(point.cost)} — show it in the transcript`}
+        className="cursor-pointer outline-none focus-visible:stroke-foreground"
+        onClick={open}
+        onKeyDown={(event: React.KeyboardEvent<SVGCircleElement>): void => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          open()
+        }}
+      />
+    )
+  }
+}
+
 // ── context and tokens ───────────────────────────────────────────────────────────────────────
 
 /**
@@ -151,7 +222,13 @@ const TOKEN_SERIES: Readonly<Record<TokenSeries, { readonly label: string; reado
  * any chart here: the drawer refetches after each turn, and a chart re-drawing from zero every
  * time would replay the thread's history as if it were happening again.
  */
-function TokenChart({ data }: { readonly data: readonly TurnPoint[] }): React.ReactNode {
+function TokenChart({
+  data,
+  onTurn,
+}: {
+  readonly data: readonly TurnPoint[]
+  readonly onTurn: OnTurn
+}): React.ReactNode {
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set())
   const series = Object.entries(TOKEN_SERIES)
   const toggle = (key: string): void =>
@@ -177,7 +254,7 @@ function TokenChart({ data }: { readonly data: readonly TurnPoint[] }): React.Re
         ))}
       </fieldset>
       <ChartContainer config={TOKEN_SERIES} className="aspect-auto h-36 w-full">
-        <LineChart data={[...data]} accessibilityLayer>
+        <LineChart data={[...data]} accessibilityLayer {...turnClick(data, onTurn)}>
           {turnAxes(tokenTick, 40)}
           {series
             .filter(([key]) => !hidden.has(key))
@@ -198,7 +275,15 @@ function TokenChart({ data }: { readonly data: readonly TurnPoint[] }): React.Re
   )
 }
 
-function ContextSection({ stats, data }: { stats: EnsoThreadStats; data: readonly TurnPoint[] }): React.ReactNode {
+function ContextSection({
+  stats,
+  data,
+  onTurn,
+}: {
+  stats: EnsoThreadStats
+  data: readonly TurnPoint[]
+  onTurn: OnTurn
+}): React.ReactNode {
   const { usage } = stats
   const context = usage.context
   const percent = context?.percent ?? null
@@ -228,7 +313,11 @@ function ContextSection({ stats, data }: { stats: EnsoThreadStats; data: readonl
           </div>
         ))}
       </dl>
-      {data.length === 0 ? <Empty>tokens appear after the first response</Empty> : <TokenChart data={data} />}
+      {data.length === 0 ? (
+        <Empty>tokens appear after the first response</Empty>
+      ) : (
+        <TokenChart data={data} onTurn={onTurn} />
+      )}
     </Section>
   )
 }
@@ -237,10 +326,16 @@ function ContextSection({ stats, data }: { stats: EnsoThreadStats; data: readonl
 
 const COST_SERIES: ChartConfig = { cost: { label: 'cost ($)', color: 'var(--chart-1)' } }
 
-function CostChart({ data }: { readonly data: readonly TurnPoint[] }): React.ReactNode {
+function CostChart({
+  data,
+  onTurn,
+}: {
+  readonly data: readonly TurnPoint[]
+  readonly onTurn: OnTurn
+}): React.ReactNode {
   return (
     <ChartContainer config={COST_SERIES} className="aspect-auto h-36 w-full">
-      <AreaChart data={[...data]} accessibilityLayer>
+      <AreaChart data={[...data]} accessibilityLayer {...turnClick(data, onTurn)}>
         {turnAxes(dollarTick, 48)}
         <Area
           dataKey="cost"
@@ -249,7 +344,7 @@ function CostChart({ data }: { readonly data: readonly TurnPoint[] }): React.Rea
           fill="var(--color-cost)"
           fillOpacity={0.2}
           strokeWidth={2}
-          dot
+          dot={turnDot(onTurn)}
           isAnimationActive={false}
         />
       </AreaChart>
@@ -340,7 +435,47 @@ function callMetricText(call: EnsoToolCallStats, metric: CallMetric): string {
   return charsText(callValue(call, metric))
 }
 
-function CostliestCalls({ calls }: { calls: readonly EnsoToolCallStats[] }): React.ReactNode {
+/** Opens a target in the transcript; absent where there is nowhere to go (a static render). */
+type Navigate = ((target: StatsTarget) => void) | undefined
+
+/**
+ * A ranked row that opens what it ranks — a real `<button>`, so a keyboard reaches it and Enter
+ * or Space opens it. Without somewhere to go (a static render) it is plain content.
+ */
+function RankedRow({
+  target,
+  onNavigate,
+  children,
+}: {
+  target: StatsTarget
+  onNavigate: Navigate
+  children: React.ReactNode
+}): React.ReactNode {
+  const layout = 'flex w-full items-start justify-between gap-2 pb-1 text-left'
+  return (
+    <li className="mb-1 border-b border-dashed">
+      {onNavigate === undefined ? (
+        <div className={layout}>{children}</div>
+      ) : (
+        <button
+          type="button"
+          className={`${layout} cursor-pointer rounded-sm hover:bg-muted/50 focus-visible:outline-1 focus-visible:outline-ring`}
+          onClick={() => onNavigate(target)}
+        >
+          {children}
+        </button>
+      )}
+    </li>
+  )
+}
+
+function CostliestCalls({
+  calls,
+  onNavigate,
+}: {
+  calls: readonly EnsoToolCallStats[]
+  onNavigate: Navigate
+}): React.ReactNode {
   const [metric, setMetric] = useState<CallMetric>('input')
   const ranked = rankCalls(calls, metric)
   const empty: Record<CallMetric, string> = {
@@ -359,9 +494,10 @@ function CostliestCalls({ calls }: { calls: readonly EnsoToolCallStats[] }): Rea
       ) : (
         <ol>
           {ranked.map((call) => (
-            <li
+            <RankedRow
               key={call.toolCallId}
-              className="mb-1 flex items-start justify-between gap-2 border-b border-dashed pb-1"
+              target={{ kind: 'tool-call', toolCallId: call.toolCallId }}
+              onNavigate={onNavigate}
             >
               <span>
                 <code>{call.toolName}</code>
@@ -372,7 +508,7 @@ function CostliestCalls({ calls }: { calls: readonly EnsoToolCallStats[] }): Rea
                 </small>
               </span>
               <b className="shrink-0 font-normal tabular-nums">{callMetricText(call, metric)}</b>
-            </li>
+            </RankedRow>
           ))}
         </ol>
       )}
@@ -385,8 +521,26 @@ function CostliestCalls({ calls }: { calls: readonly EnsoToolCallStats[] }): Rea
 /** livecraft shows the five prompts that cost the most. */
 const COSTLIEST_PROMPTS = 5
 
-/** Pure view — the data arrives as props; only the rankings' choices are its own state. */
-export function ThreadStatsView({ outcome }: { readonly outcome: StatsOutcome }): React.ReactNode {
+/** The drawer's word for a target the transcript on screen does not have (`transcript-reveal.ts`). */
+function missedText(target: StatsTarget): string {
+  if (target.kind === 'turn') return `turn ${target.turn} is not in the transcript on screen`
+  if (target.kind === 'prompt') return 'that prompt is not in the transcript on screen'
+  return 'that call is not in the transcript on screen'
+}
+
+/**
+ * Pure view — the data arrives as props; only the rankings' choices are its own state. `onNavigate`
+ * opens a target in the transcript; `missed` says the last one could not be found.
+ */
+export function ThreadStatsView({
+  outcome,
+  onNavigate,
+  missed,
+}: {
+  readonly outcome: StatsOutcome
+  readonly onNavigate?: ((target: StatsTarget) => void) | undefined
+  readonly missed?: string | undefined
+}): React.ReactNode {
   if (outcome.kind === 'reading')
     return <p className="p-3 text-muted-foreground text-xs">reading the thread's stats…</p>
   if (outcome.kind === 'failed') return <p className="p-3 text-muted-foreground text-xs">no stats: {outcome.problem}</p>
@@ -399,6 +553,7 @@ export function ThreadStatsView({ outcome }: { readonly outcome: StatsOutcome })
     .sort((first, second) => second.cost - first.cost)
     .slice(0, COSTLIEST_PROMPTS)
   const noTurn = headline.turnCount === 0
+  const onTurn = onNavigate === undefined ? undefined : (turn: number): void => onNavigate({ kind: 'turn', turn })
   return (
     <section aria-label="thread stats" className="p-3 font-mono text-xs">
       <h2 className="pb-2 font-semibold text-foreground">
@@ -407,6 +562,11 @@ export function ThreadStatsView({ outcome }: { readonly outcome: StatsOutcome })
           · {plural(stats.promptStats.length, 'prompt')} analysed · {stats.live ? 'live' : 'from the file'}
         </span>
       </h2>
+      {missed === undefined ? null : (
+        <p role="status" className="mb-3 text-muted-foreground">
+          {missed}
+        </p>
+      )}
       <dl className="mb-5 grid grid-cols-2 gap-1.5">
         <Metric label="total cost" value={costText(stats.usage.cost)} />
         <Metric label="average cost / turn" value={noTurn ? '—' : costText(headline.averageTurnCost)} />
@@ -419,17 +579,17 @@ export function ThreadStatsView({ outcome }: { readonly outcome: StatsOutcome })
           danger={headline.failedToolCalls > 0}
         />
       </dl>
-      <ContextSection stats={stats} data={data} />
+      <ContextSection stats={stats} data={data} onTurn={onTurn} />
       {headline.offBranchCost > 0 ? (
         <p className="mb-5" title="compactions, branch summaries, cache warms and abandoned branches">
           <b>{costText(headline.offBranchCost)}</b> not attributed to a turn on this branch.
         </p>
       ) : null}
       <Section title="cost per turn" aside={noTurn ? undefined : `median ${costText(headline.medianTurnCost)}`}>
-        {noTurn ? <Empty>costs appear after the first response</Empty> : <CostChart data={data} />}
+        {noTurn ? <Empty>costs appear after the first response</Empty> : <CostChart data={data} onTurn={onTurn} />}
       </Section>
       <ToolUsage tools={tools} />
-      <CostliestCalls calls={stats.callStats} />
+      <CostliestCalls calls={stats.callStats} onNavigate={onNavigate} />
       {tools.length === 0 ? null : (
         <Section title="distribution" aside="calls · failures">
           <ul>
@@ -451,20 +611,23 @@ export function ThreadStatsView({ outcome }: { readonly outcome: StatsOutcome })
         ) : (
           <ol>
             {costliest.map((prompt) => (
-              <li
-                key={prompt.prompt}
-                className="mb-1 flex items-start justify-between gap-2 border-b border-dashed pb-1"
-              >
+              <RankedRow key={prompt.prompt} target={{ kind: 'prompt', prompt: prompt.prompt }} onNavigate={onNavigate}>
                 <span className="min-w-0">
                   <strong className="block truncate font-normal text-foreground" title={prompt.text}>
                     {prompt.text || '(before the first prompt)'}
                   </strong>
                   <small className="text-muted-foreground">
                     {plural(prompt.turnCount, 'model call')} · {plural(prompt.toolCalls, 'tool')}
+                    {prompt.durationMs === undefined ? null : (
+                      <span title="the prompt to the last reply entry, as pi stamped them">
+                        {' '}
+                        · {durationText(prompt.durationMs)}
+                      </span>
+                    )}
                   </small>
                 </span>
                 <b className="shrink-0 font-normal tabular-nums">{costText(prompt.cost)}</b>
-              </li>
+              </RankedRow>
             ))}
           </ol>
         )}
@@ -490,10 +653,14 @@ export function ThreadStatsView({ outcome }: { readonly outcome: StatsOutcome })
  * The drawer wired to its thread: read on open, and again whenever the thread's usage moves —
  * a SUBSCRIPTION, not a render dependency, as the debug drawer reads its chunks. Two reads can be
  * in flight (a turn lands while the first is out); only the latest one issued is shown.
+ *
+ * `onNavigate` is the pane's (`chat-screen.tsx`): it finds the target in that pane's transcript
+ * and says whether it could.
  */
-export function ThreadStatsDrawer(): React.ReactNode {
+export function ThreadStatsDrawer({ onNavigate }: { readonly onNavigate?: RevealStatsTarget }): React.ReactNode {
   const stores = useThreadStores()
   const [outcome, setOutcome] = useState<StatsOutcome>({ kind: 'reading' })
+  const [missed, setMissed] = useState<string | undefined>(undefined)
   useEffect(() => {
     let mounted = true
     const readLatest = latestWins(() => fetchThreadStats(stores.threadId))
@@ -509,5 +676,9 @@ export function ThreadStatsDrawer(): React.ReactNode {
       unsubscribe()
     }
   }, [stores])
-  return <ThreadStatsView outcome={outcome} />
+  const navigate =
+    onNavigate === undefined || outcome.kind !== 'read'
+      ? undefined
+      : (target: StatsTarget): void => setMissed(onNavigate(target, outcome.stats) ? undefined : missedText(target))
+  return <ThreadStatsView outcome={outcome} onNavigate={navigate} missed={missed} />
 }

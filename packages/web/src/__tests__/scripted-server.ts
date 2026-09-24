@@ -5,6 +5,7 @@ import type {
   EnsoThreadEvents,
   EnsoThreadHistory,
   EnsoThreadInspection,
+  EnsoThreadStats,
   RuntimeCommand,
 } from '@enso/core'
 
@@ -74,6 +75,8 @@ export interface ScriptedFetchOptions {
   readonly events?: Omit<EnsoThreadEvents, 'threadId'>
   /** The `/` palette's list (#338); `source: 'live'`. Absent: a live thread registering nothing. */
   readonly commands?: readonly RuntimeCommand[]
+  /** What the stats drawer's read answers (#45 phase 2); 404 when absent, the drawer's "no stats". */
+  readonly stats?: Omit<EnsoThreadStats, 'threadId'>
 }
 
 export function createScriptedFetch(options: ScriptedFetchOptions = {}): ScriptedFetch {
@@ -126,6 +129,11 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     if (commands?.[1] !== undefined) {
       const threadId = decodeURIComponent(commands[1])
       return Response.json({ threadId, commands: options.commands ?? [], source: 'live' })
+    }
+    const stats = /^\/api\/threads\/([^/]+)\/stats$/.exec(path)
+    if (stats?.[1] !== undefined) {
+      if (options.stats === undefined) return new Response('nothing has run in this thread', { status: 404 })
+      return Response.json({ threadId: decodeURIComponent(stats[1]), ...options.stats })
     }
     const inspection = /^\/api\/threads\/([^/]+)$/.exec(path)
     if (inspection?.[1] !== undefined) {
