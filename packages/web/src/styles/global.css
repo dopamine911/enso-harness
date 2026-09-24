@@ -18,6 +18,7 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  --color-chart-6: var(--chart-6);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -88,6 +89,7 @@
   --chart-3: #de9800; /* lotusYellow3 */
   --chart-4: #624c83; /* lotusViolet4 */
   --chart-5: #5e857a; /* lotusAqua2 */
+  --chart-6: #cc6d00; /* lotusOrange — the Context view's sixth category (#361) */
   --radius: 0.625rem;
   --sidebar: #e5ddb0; /* lotusWhite2 */
   --sidebar-foreground: #545464; /* lotusInk1 */
@@ -123,6 +125,7 @@
   --chart-3: #e6c384; /* carpYellow */
   --chart-4: #957fb8; /* oniViolet */
   --chart-5: #7aa89f; /* waveAqua2 */
+  --chart-6: #ffa066; /* surimiOrange — the Context view's sixth category (#361) */
   --sidebar: #16161d; /* sumiInk0 */
   --sidebar-foreground: #dcd7ba; /* fujiWhite */
   --sidebar-primary: #7e9cd8; /* crystalBlue */

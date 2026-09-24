@@ -31,10 +31,11 @@ import {
 } from '@enso/core'
 import { findRepoRoot } from '@enso/core/paths'
 import { quarantineSecrets } from '@enso/core/secrets'
+import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
 import { type BranchStats, branchStats } from './branch-stats.ts'
 import { createEventTail, describeObservation } from './event-tail.ts'
 import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
-import { decideHostCommand, HostCommandRefused, hostCommandRows } from './host-commands.ts'
+import { decideHostCommand, HOST_VIEW_ROWS, HostCommandRefused, hostCommandRows } from './host-commands.ts'
 import {
   authEventText,
   compactDoneText,
@@ -242,6 +243,10 @@ export interface HostedThread {
   emittedEvents(): EnsoThreadEvent[]
   /** The branch analysed (#45 phase 2): per request, per turn, per tool, off pi's own entries. */
   branchStats(): BranchStats
+  /** The branch's context, request by request (#361): what each was assembled from, by pi's own assembly. */
+  branchContext(): BranchContext
+  /** One request's context, element by element (#361 phase 3); undefined for a turn the branch does not have. */
+  branchRequestDetail(request: number | 'next'): BranchRequestDetail | undefined
   /**
    * What the loaded extensions would say about a tool call, through the runtime's own hook
    * runner — the verdict a model's call would meet, without a model. Inspection, like the
@@ -321,6 +326,10 @@ export interface AgentHost {
    * per-turn stats, from one open, building nothing (#86). `undefined` when no file has that id.
    */
   readStoredThreadStats(threadId: string): Promise<StoredThreadStats | undefined>
+  /** A stored thread's context, request by request (#361) — one open, nothing built (#86). */
+  readStoredThreadContext(threadId: string): Promise<StoredThreadContext | undefined>
+  /** One request of a stored thread, element by element (#361 phase 3); undefined for no file or no such turn. */
+  readStoredRequestDetail(threadId: string, request: number | 'next'): Promise<BranchRequestDetail | undefined>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
@@ -339,6 +348,12 @@ export interface StoredThreadRead {
 export interface StoredThreadStats {
   readonly usage: EnsoSessionUsage
   readonly branch: BranchStats
+}
+
+/** A stored thread as `readStoredThreadContext` reads it. */
+export interface StoredThreadContext {
+  readonly usage: EnsoSessionUsage
+  readonly context: BranchContext
 }
 
 /**
@@ -452,6 +467,21 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     if (path === undefined) return undefined
     const stored = SessionManager.open(path)
     return { usage: storedSessionUsage(stored.getEntries()), branch: branchStats(stored.getBranch()) }
+  }
+
+  async function readStoredThreadContext(threadId: string): Promise<StoredThreadContext | undefined> {
+    const path = await storedSessionPath(threadId)
+    if (path === undefined) return undefined
+    const stored = SessionManager.open(path)
+    return { usage: storedSessionUsage(stored.getEntries()), context: branchContext(stored.getBranch()) }
+  }
+
+  async function readStoredRequestDetail(
+    threadId: string,
+    request: number | 'next',
+  ): Promise<BranchRequestDetail | undefined> {
+    const path = await storedSessionPath(threadId)
+    return path === undefined ? undefined : branchRequestDetail(SessionManager.open(path).getBranch(), request)
   }
 
   async function createSession(threadId: string): Promise<HostedThread> {
@@ -906,6 +936,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         }
         commands.push(...hostCommandRows(currentModelState(), session.modelRuntime.getAvailableSnapshot()))
         commands.push(...hostFlowRows(currentLoginOptions(), logoutOptions(storedCredentials)))
+        commands.push(...HOST_VIEW_ROWS)
         return commands
       },
       startHostFlow(run: EnsoHostCommandRun, outcome: HostFlowOutcome): void {
@@ -1036,6 +1067,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         return { block: result.block === true, reason: result.reason }
       },
       branchStats: () => branchStats(sessionManager.getBranch()),
+      branchContext: () => branchContext(sessionManager.getBranch()),
+      branchRequestDetail: (request: number | 'next') => branchRequestDetail(sessionManager.getBranch(), request),
       inspect(): HostedThreadInspection {
         // ⚠ `getSessionFile()` names the path pi WILL write, from creation — but pi flushes
         // lazily, holding every entry until the first assistant message. So the path is
@@ -1059,6 +1092,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     listSessions,
     readStoredThread,
     readStoredThreadStats,
+    readStoredThreadContext,
+    readStoredRequestDetail,
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,
   }

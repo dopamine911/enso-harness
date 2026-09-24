@@ -1,5 +1,6 @@
 import {
   type DialogAnswer,
+  ENSO_CONTEXT_COMMAND,
   ENSO_IMAGE_MAX_BYTES,
   ENSO_IMAGE_MIME_TYPES,
   ENSO_PROMPT_MAX_IMAGES,
@@ -19,7 +20,7 @@ import {
   type LayoutProps,
   type MessageProps,
 } from '@tanstack/ai-react/ui'
-import { ArrowUpIcon, ChartColumnIcon, MessagesSquareIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
+import { ArrowUpIcon, ChartColumnIcon, LayersIcon, MessagesSquareIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { CommandPalette } from './command-palette.tsx'
@@ -71,6 +72,7 @@ import {
   fetchThreadHistory,
   storedThreadsNotOnThisPage,
 } from './stored-threads.ts'
+import { ThreadContextDialog, ThreadContextDrawer } from './thread-context.tsx'
 import { ThreadDebugDrawer } from './thread-debug.tsx'
 import { ThreadStatsDrawer } from './thread-stats.tsx'
 import { ThreadStatusBar } from './thread-status.tsx'
@@ -229,10 +231,10 @@ const DebugOpenContext = createContext(false)
  * The page's main views (#361): the transcript, or an analysis of the thread in its place. One
  * choice for the page — switching thread keeps it — rendered by the pane on screen.
  */
-export type ThreadView = 'chat' | 'stats'
+export type ThreadView = 'chat' | 'context' | 'stats'
 
 /** A tab's value back to a view: the only strings the tab list hands over are these. */
-const THREAD_VIEWS: Readonly<Record<string, ThreadView>> = { chat: 'chat', stats: 'stats' }
+const THREAD_VIEWS: Readonly<Record<string, ThreadView>> = { chat: 'chat', context: 'context', stats: 'stats' }
 
 /**
  * What THIS pane shows, and how to change the page's view. `shown` is undefined in a hidden
@@ -391,6 +393,8 @@ interface HostCommandHandlers {
   readonly onHost: (commandName: string, optionId?: string) => void
   /** Open the dialog for a `select` host command, by name. */
   readonly onOpenModelDialog: (commandName: string) => void
+  /** Open the view a `view` host command names (`/context`, #361), by name. */
+  readonly onOpenView: (commandName: string) => void
 }
 
 /*
@@ -703,6 +707,7 @@ function ComposerBody({
           onInsert={onInsertCommand}
           onHost={host.onHost}
           onOpenModelDialog={(command: RuntimeCommand): void => host.onOpenModelDialog(command.name)}
+          onOpenView={(command: RuntimeCommand): void => host.onOpenView(command.name)}
         />
         {/* Attach (#68): the same file dialog a paste or a drop bypasses. */}
         <PromptInputButton
@@ -1012,6 +1017,9 @@ const chatComponents = {
       // The `select` host command whose dialog is open (`model`); undefined while closed. The
       // dialog is rendered ONCE here, for the chip and the palette's `/model` row alike (#338 slice 2).
       const [modelDialog, setModelDialog] = useState<string | undefined>(undefined)
+      // `/context` (#361 phase 5): the one `view` this page draws. A view a newer host declares
+      // and this page does not know is said, not silently dropped.
+      const [contextOpen, setContextOpen] = useState(false)
       // A `host` command runs through its own route, never as a prompt: `POST …/command`, a
       // control like the mode select's — on the SAME connection, so a 409 (running) or a 422
       // (the host's reason) is recorded and said the one way a refused mode change is (PR #344
@@ -1025,6 +1033,10 @@ const chatComponents = {
           })
         },
         onOpenModelDialog: setModelDialog,
+        onOpenView: (commandName: string): void => {
+          if (commandName === ENSO_CONTEXT_COMMAND) setContextOpen(true)
+          else stores.notifications.push(`/${commandName} opens a view this page does not have`, 'warning', 'run')
+        },
       }
 
       return (
@@ -1079,6 +1091,7 @@ const chatComponents = {
             onClose={(): void => setModelDialog(undefined)}
             onPick={host.onHost}
           />
+          <ThreadContextDialog open={contextOpen} onClose={(): void => setContextOpen(false)} />
           <ComposerBody
             draft={draft}
             setDraft={setDraft}
@@ -1182,6 +1195,14 @@ const chatComponents = {
               <PendingQueue />
               <Input />
             </div>
+            {/* The thread's context (#361): what each request was made of, in the transcript's place. */}
+            {shown === 'context' ? (
+              <div role="tabpanel" {...panelIds('context')} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+                <div className="mx-auto w-full max-w-6xl">
+                  <ThreadContextDrawer />
+                </div>
+              </div>
+            ) : null}
             {/* The thread's stats (#45 phase 2), in the transcript's place (#361). */}
             {shown === 'stats' ? (
               <div role="tabpanel" {...panelIds('stats')} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
@@ -1380,6 +1401,15 @@ function ViewTabs({ view, onView }: { view: ThreadView; onView: (view: ThreadVie
         <TabsTrigger value="chat" id="thread-view-chat-tab" aria-controls="thread-view-chat">
           <MessagesSquareIcon aria-hidden="true" />
           Chat
+        </TabsTrigger>
+        <TabsTrigger
+          value="context"
+          id="thread-view-context-tab"
+          aria-controls="thread-view-context"
+          title="what each model request was made of, and how the context grew"
+        >
+          <LayersIcon aria-hidden="true" />
+          Context
         </TabsTrigger>
         <TabsTrigger
           value="stats"

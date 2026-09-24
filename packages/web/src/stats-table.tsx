@@ -14,6 +14,9 @@ export function costText(cost: number): string {
   return `$${cost.toFixed(4)}`
 }
 
+/** A count as a short number — `5.4K`, `200K`: the charts' ticks and the context's figures. */
+export const COMPACT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
+
 /** A count with thousands separators — a `trace` day's record count is six digits. */
 export function countText(quantity: number): string {
   return quantity.toLocaleString('en-US')
