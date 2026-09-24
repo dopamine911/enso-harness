@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 252.**
+**Decision headers: 253.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -92,6 +92,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/command-palette.test.tsx` | `#338` | ⚠ A DOM before react-dom/client evaluates, and again if another mounting file has already released the one this module registered; `dom-environment.ts` has the measurement. |
 | `packages/web/src/__tests__/commands-connection.test.ts` | `#338` | The palette's read (#338): the route's answer validated, a non-2xx said with its status and body, a payload the schema refuses said as such. |
 | `packages/web/src/__tests__/context-browser.test.tsx` | `#361` | #361 phase 3: the Context Browser, mounted — it reads the request it is asked for, and a focus (a brief's line) opens that element's category and row, where its content is. |
+| `packages/web/src/__tests__/context-dialog.test.tsx` | `#361` | #361 phase 5: `/context`'s dialog, mounted — it reads nothing while closed, and once open shows the composition and the browser, not the tab's other cards (those stay on the Context tab). |
 | `packages/web/src/__tests__/custom-event-router.test.ts` | `#53`, `#90`, `#162` | #53 S1.3: the CUSTOM-chunk router was an inline closure no test reached — renaming a chunk, dropping the notify-type allowlist, or swapping the two `apply*` calls all left the suite green. |
 | `packages/web/src/__tests__/dom-environment.ts` | `#118` | A browser DOM for the tests that MOUNT React (#118) — the mounted-pane tests, which need effects, `useSyncExternalStore` subscriptions and TanStack's `useChat` to actually run. |
 | `packages/web/src/__tests__/fixture-conversation.test.ts` | `#27`, `#218` | The compatibility probe that used to live in a PR body (#218). |

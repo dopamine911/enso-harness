@@ -46,7 +46,7 @@ const FAKE_LOGIN_OPTIONS = [
 ]
 const FAKE_LOGOUT_OPTIONS = [{ id: 'fake', label: 'Fake', detail: 'stored subscription' }]
 
-/** The fake's host rows — `/model`, `/thinking`, `/login`, `/logout` — in the real host's order; a test that replaces `listCommands` puts pi's rows before these. */
+/** The fake's host rows — `/model`, `/thinking`, `/login`, `/logout`, `/compact`, `/context` — in the real host's order; a test that replaces `listCommands` puts pi's rows before these. */
 export function fakeHostRows(record: Pick<FakeThreadRecord, 'modelState'>): RuntimeCommand[] {
   return [
     ...hostCommandRows(record.modelState, FAKE_MODELS),

@@ -337,8 +337,9 @@ on purpose, so the rename preserves the capability and leaves that decision open
 **`listCommands` returns the runtime's command entries** (`RuntimeCommand`: name, source,
 description). The shape is ours by declaration; its `source` values are the runtime's categories
 carried as strings — plus `host`, which is not the runtime's at all (#338 slice 2): the host appends
-its own rows, `/model` and `/thinking`, each declaring a **kind** (`select`, `level`, `action`,
-`view`), its current `value` and its `options`, so the palette renders them by kind with no
+its own rows — `/model`, `/thinking`, `/login`, `/logout`, `/compact`, `/context` — each declaring a
+**kind** (`select`, `level`, `flow`, `action`, `view`), its current `value` and its `options`, so the
+palette renders them by kind with no
 per-command UI. A `view` (`/context`, #361) is the one kind the host never runs: the page opens the
 view it names, and a run of it is refused as 422. Small, stated.
 
