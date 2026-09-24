@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from './components/ui/select.tsx'
-import { applyTheme, isThemeId, readSavedTheme, saveTheme, type ThemeId, themesByFamily } from './theme.ts'
+import { applyTheme, isThemeId, pageStorage, readSavedTheme, saveTheme, THEME_FAMILIES, type ThemeId } from './theme.ts'
 
 /**
  * The page's settings (the header's gear): today its colour theme. A choice applies at once and
@@ -40,12 +40,12 @@ function ThemeSwatch({ theme }: { theme: ThemeId }): React.ReactNode {
 }
 
 export function SettingsDialog(): React.ReactNode {
-  const [theme, setTheme] = useState<ThemeId>(() => readSavedTheme(localStorage))
+  const [theme, setTheme] = useState<ThemeId>(() => readSavedTheme(pageStorage()))
   const choose = (value: string): void => {
     if (!isThemeId(value)) return
     setTheme(value)
     applyTheme(value, document.documentElement)
-    saveTheme(value, localStorage)
+    saveTheme(value, pageStorage())
   }
   return (
     <Dialog>
@@ -67,7 +67,7 @@ export function SettingsDialog(): React.ReactNode {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {themesByFamily().map(({ family, themes }) => (
+                {THEME_FAMILIES.map(({ family, themes }) => (
                   <SelectGroup key={family}>
                     <SelectLabel>{family}</SelectLabel>
                     {themes.map((option) => (

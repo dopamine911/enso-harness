@@ -135,6 +135,7 @@ export function Choice<Value extends string>({
           key={option}
           type="button"
           aria-pressed={option === value}
+          // The ring keeps the pressed option visible in a theme whose background is near its muted (Nord, Gruvbox).
           className={
             option === value
               ? 'rounded bg-background px-2 py-0.5 text-foreground ring-1 ring-border'

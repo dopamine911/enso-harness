@@ -51,42 +51,54 @@
  * The derivation that wrote these blocks, with the upstream values it read, is recorded on the
  * PR that introduced them.
  *
- * :root is Kanagawa Lotus, the light variant — no theme selects it today.
+ * Kanagawa Lotus is Wave's roles read from the lotus theme, and it is also `:root`: the first
+ * block, so `.dark` (Wave) and every theme after it win at equal specificity, and what <html>
+ * shows only when nothing else matches — a saved light id this page no longer offers.
  */
 :root {
-  --background: #f2ecbc; /* lotusWhite3 */
-  --foreground: #545464; /* lotusInk1 */
-  --card: #e5ddb0; /* lotusWhite2 */
-  --card-foreground: #545464; /* lotusInk1 */
-  --popover: #dcd5ac; /* lotusWhite1 */
-  --popover-foreground: #545464; /* lotusInk1 */
-  --primary: #4d699b; /* lotusBlue4 */
-  --primary-foreground: #f2ecbc; /* lotusWhite3 */
-  --secondary: #d5cea3; /* lotusWhite0 — the user bubble */
-  --secondary-foreground: #545464; /* lotusInk1 */
-  --muted: #e7dba0; /* lotusWhite4 */
-  --muted-foreground: #716e61; /* lotusGray2 */
-  --accent: #c7d7e0; /* lotusBlue1 — hover/selection wash */
-  --accent-foreground: #545464; /* lotusInk1 */
-  --destructive: #c84053; /* lotusRed */
-  --border: #d5cea3; /* lotusWhite0 */
-  --input: #d5cea3; /* lotusWhite0 */
-  --ring: #4d699b; /* lotusBlue4 */
-  --chart-1: #4d699b; /* lotusBlue4 */
-  --chart-2: #6f894e; /* lotusGreen */
-  --chart-3: #de9800; /* lotusYellow3 */
-  --chart-4: #624c83; /* lotusViolet4 */
-  --chart-5: #5e857a; /* lotusAqua2 */
-  --chart-6: #cc6d00; /* lotusOrange — the Context view's sixth category (#361) */
   --radius: 0.625rem;
-  --sidebar: #e5ddb0; /* lotusWhite2 */
-  --sidebar-foreground: #545464; /* lotusInk1 */
-  --sidebar-primary: #4d699b; /* lotusBlue4 */
-  --sidebar-primary-foreground: #f2ecbc;
-  --sidebar-accent: #c7d7e0; /* lotusBlue1 */
-  --sidebar-accent-foreground: #545464;
-  --sidebar-border: #d5cea3; /* lotusWhite0 */
-  --sidebar-ring: #4d699b; /* lotusBlue4 */
+}
+
+/*
+ * Kanagawa Lotus — rebelot/kanagawa.nvim lua/kanagawa/themes.lua (lotus) + colors.lua @ bb85e4b — the roles Wave reads
+ */
+:root,
+[data-theme="kanagawa-lotus"] {
+  /* :root too — before `.dark` and every theme, which override it: what <html> shows when nothing
+     else matches (a light id this page no longer offers) */
+  color-scheme: light;
+  --background: #f2ecbc; /* ui.bg lotusWhite3 (Normal) */
+  --foreground: #545464; /* ui.fg lotusInk1 (Normal) */
+  --card: #e7dba0; /* ui.bg_p1 lotusWhite4 (Folded, TabLineSel) */
+  --card-foreground: #545464; /* ui.fg lotusInk1 */
+  --popover: #d5cea3; /* ui.float.bg lotusWhite0 (NormalFloat) */
+  --popover-foreground: #43436c; /* ui.float.fg lotusInk2 (NormalFloat) */
+  --primary: #4d699b; /* syn.fun lotusBlue4 (Title, Directory) */
+  --primary-foreground: #f2ecbc; /* ui.bg lotusWhite3 */
+  --secondary: #e4d794; /* ui.bg_p2 lotusWhite5 (CursorLine) */
+  --secondary-foreground: #545464; /* ui.fg lotusInk1 */
+  --muted: #e7dba0; /* ui.bg_p1 lotusWhite4 */
+  --muted-foreground: #43436c; /* ui.fg_dim lotusInk2 (StatusLine, MsgArea) */
+  --accent: #c9cbd1; /* ui.bg_visual lotusViolet3 (Visual) */
+  --accent-foreground: #545464; /* ui.fg lotusInk1 */
+  --destructive: #c10000; /* diag.error lotusRed3 (ErrorMsg, DiagnosticError) — lightness adjusted (3.19:1 → 4.60:1 on background / card), hue kept */
+  --border: #716e61; /* ui.float.fg_border lotusGray2 (FloatBorder) */
+  --input: #716e61; /* ui.float.fg_border lotusGray2 (FloatBorder) */
+  --ring: #4d699b; /* syn.fun lotusBlue4 */
+  --chart-1: #4d699b; /* term blue lotusBlue4 */
+  --chart-2: #6f894e; /* term green lotusGreen */
+  --chart-3: #77713f; /* term yellow lotusYellow */
+  --chart-4: #b35b79; /* term magenta lotusPink */
+  --chart-5: #597b75; /* term cyan lotusAqua */
+  --chart-6: #e98a00; /* term extended colour 1 lotusOrange2 */
+  --sidebar: #d5cea3; /* ui.bg_m3 lotusWhite0 (StatusLine, TabLine) */
+  --sidebar-foreground: #43436c; /* ui.fg_dim lotusInk2 (StatusLine) */
+  --sidebar-primary: #4d699b; /* = primary */
+  --sidebar-primary-foreground: #f2ecbc; /* = primary-foreground */
+  --sidebar-accent: #c9cbd1; /* = accent */
+  --sidebar-accent-foreground: #545464; /* = accent-foreground */
+  --sidebar-border: #d5cea3; /* ui.bg_m3 lotusWhite0 (WinSeparator) */
+  --sidebar-ring: #4d699b; /* = ring */
 }
 
 /*

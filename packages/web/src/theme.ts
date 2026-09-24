@@ -21,7 +21,7 @@ export interface ThemeOption {
 
 /** The themes as the dialog lists them: family → id → label. Every theme is dark unless it is in `LIGHT_THEMES`. */
 const FAMILIES = {
-  Kanagawa: { 'kanagawa-wave': 'Kanagawa Wave' },
+  Kanagawa: { 'kanagawa-wave': 'Kanagawa Wave', 'kanagawa-lotus': 'Kanagawa Lotus' },
   Catppuccin: {
     'catppuccin-latte': 'Catppuccin Latte',
     'catppuccin-frappe': 'Catppuccin Frappé',
@@ -53,6 +53,7 @@ type Families = typeof FAMILIES
 export type ThemeId = { [Family in keyof Families]: keyof Families[Family] }[keyof Families]
 
 const LIGHT_THEMES: ReadonlySet<ThemeId> = new Set<ThemeId>([
+  'kanagawa-lotus',
   'catppuccin-latte',
   'everforest-light-hard',
   'everforest-light-medium',
@@ -60,12 +61,21 @@ const LIGHT_THEMES: ReadonlySet<ThemeId> = new Set<ThemeId>([
   'rose-pine-dawn',
 ])
 
-export const THEMES: readonly ThemeOption[] = Object.entries(FAMILIES).flatMap(([family, members]) =>
+export interface ThemeFamily {
+  readonly family: string
+  readonly themes: readonly ThemeOption[]
+}
+
+/** The dialog's groups, in the list's order; `THEMES` is the same themes, flat. */
+export const THEME_FAMILIES: readonly ThemeFamily[] = Object.entries(FAMILIES).map(([family, members]) => ({
+  family,
   // `Object.entries` widens the keys to `string`; they are the ids `ThemeId` is built from.
-  (Object.entries(members) as Array<[ThemeId, string]>).map(
+  themes: (Object.entries(members) as Array<[ThemeId, string]>).map(
     ([id, label]): ThemeOption => ({ id, label, family, scheme: LIGHT_THEMES.has(id) ? 'light' : 'dark' }),
   ),
-)
+}))
+
+export const THEMES: readonly ThemeOption[] = THEME_FAMILIES.flatMap((group) => group.themes)
 
 /** What a browser with nothing saved shows — the theme the page has always had. */
 export const DEFAULT_THEME: ThemeId = 'kanagawa-wave'
@@ -82,21 +92,24 @@ function schemeOf(theme: ThemeId): ThemeScheme {
   return LIGHT_THEMES.has(theme) ? 'light' : 'dark'
 }
 
-/** The themes by family, in the list's order — the dialog's groups. */
-export function themesByFamily(): Array<{ family: string; themes: ThemeOption[] }> {
-  const families: Array<{ family: string; themes: ThemeOption[] }> = []
-  for (const theme of THEMES) {
-    const group = families.find((candidate) => candidate.family === theme.family)
-    if (group === undefined) families.push({ family: theme.family, themes: [theme] })
-    else group.themes.push(theme)
+/**
+ * The page's localStorage, or undefined where the page may not have one. Reading the PROPERTY
+ * throws, not only its methods: Chromium raises SecurityError on `localStorage` itself when site
+ * data is blocked or the frame is sandboxed without `allow-same-origin` — outside any try around
+ * `getItem`, that took the page down before it booted.
+ */
+export function pageStorage(): Storage | undefined {
+  try {
+    return globalThis.localStorage
+  } catch {
+    return undefined
   }
-  return families
 }
 
-/** The saved theme, or the default — for nothing saved, an id this page no longer offers, or storage that refuses to be read. */
-export function readSavedTheme(storage: Pick<Storage, 'getItem'>): ThemeId {
+/** The saved theme, or the default — for nothing saved, an id this page no longer offers, or storage that is absent or refuses to be read. */
+export function readSavedTheme(storage: Pick<Storage, 'getItem'> | undefined): ThemeId {
   try {
-    const saved = storage.getItem(THEME_STORAGE_KEY)
+    const saved = storage?.getItem(THEME_STORAGE_KEY)
     return isThemeId(saved) ? saved : DEFAULT_THEME
   } catch {
     return DEFAULT_THEME
@@ -110,10 +123,10 @@ export function applyTheme(theme: ThemeId, root: HTMLElement): void {
 }
 
 /** Keep `theme` for the next load; a storage that refuses (private mode, quota) keeps it for this page only. */
-export function saveTheme(theme: ThemeId, storage: Pick<Storage, 'setItem'>): void {
+export function saveTheme(theme: ThemeId, storage: Pick<Storage, 'setItem'> | undefined): void {
   try {
-    storage.setItem(THEME_STORAGE_KEY, theme)
-    storage.setItem(THEME_SCHEME_STORAGE_KEY, schemeOf(theme))
+    storage?.setItem(THEME_STORAGE_KEY, theme)
+    storage?.setItem(THEME_SCHEME_STORAGE_KEY, schemeOf(theme))
   } catch {
     // The theme still applies to this page; it just will not survive a reload.
   }

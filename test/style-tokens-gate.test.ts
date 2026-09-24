@@ -41,8 +41,13 @@ const PIXELS_ALLOWED = [
   'packages/web/src/debug/thread-timeline-screen.tsx',
 ]
 
-/** `w-[30rem]`, `sm:max-w-[16ch]`, `text-[var(--x)]`: a utility with a bracketed value. An arbitrary VARIANT (`[&_svg]:…`) is a selector, and passes. */
-const ARBITRARY_VALUE = /(?:^|[\s"'`{:])-?[a-z][a-z0-9-]*-\[[^\]\s]+\]/
+/**
+ * `w-[30rem]`, `sm:max-w-[16ch]`, `text-[var(--x)]`: a utility with a bracketed value. An arbitrary
+ * VARIANT (`[&_svg]:…`, `data-[state=open]:…`, `aria-[…]:`, `has-[…]:`) is a selector, and passes —
+ * a `]` before `:` is a variant, since the value comes last. Except `min-[…]:` / `max-[…]:`: an
+ * arbitrary breakpoint is a literal size in a media query, the thing this gate refuses.
+ */
+const ARBITRARY_VALUE = /(?:^|[\s"'`{:])-?(?:(?:min|max)-\[[^\]\s]+\]|[a-z][a-z0-9-]*-\[[^\]\s]+\](?!:))/
 /** Six- or eight-digit hex, or three/four digits with a letter among them — so `#361`, an issue, is not a colour. */
 const HEX_COLOUR = /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|(?=[0-9a-fA-F]{0,3}[a-fA-F])[0-9a-fA-F]{3,4})\b/
 const COLOUR_FUNCTION = /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/
@@ -80,11 +85,14 @@ test('the matchers catch the literals and pass the tokens', () => {
     "color: 'rgb(40, 42, 54)'",
     'className="text-red-500"',
     'className="bg-black/50"',
+    'className="max-[40rem]:hidden"',
+    'className="data-[state=open]:w-[30rem]"',
   ])
     expect(colourOrArbitrary(literal)).toBe(true)
   for (const token of [
     'className="w-debug-pane shrink-0 text-chart-2"',
     'className="[&_svg]:size-4 max-w-transcript"',
+    'className="data-[state=open]:bg-accent aria-[expanded=true]:text-foreground has-[>svg]:px-2"',
     "entry.id + '#0'",
     "'PR #361 review'",
     "backgroundColor: 'color-mix(in oklab, currentColor 18%, transparent)'",

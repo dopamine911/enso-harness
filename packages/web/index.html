@@ -16,8 +16,8 @@
 		<!-- The saved colour theme (src/theme.ts) on <html> before the first paint. INLINE on
 		     purpose: bun bundles every <script src> into the app's deferred module, which would
 		     run after a paint in the default theme. It copies the saved id, and drops the `dark`
-		     class for a light theme; an id no theme block matches falls back to the default, and
-		     main.tsx normalises it. The keys are THEME_STORAGE_KEY and THEME_SCHEME_STORAGE_KEY —
+		     class for a light theme. An id no theme block matches paints `.dark` (Kanagawa Wave),
+		     or `:root` (Kanagawa Lotus) if its saved scheme was light, until main.tsx normalises it. The keys are THEME_STORAGE_KEY and THEME_SCHEME_STORAGE_KEY —
 		     pinned by __tests__/theme.test.ts. -->
 		<script>
 			try {

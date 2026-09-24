@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import {
   applyTheme,
   DEFAULT_THEME,
+  pageStorage,
   readSavedTheme,
   saveTheme,
   THEME_SCHEME_STORAGE_KEY,
@@ -44,6 +45,25 @@ test('a saved theme is shown; nothing saved, one no longer offered, or storage t
       },
     }),
   ).toBe(DEFAULT_THEME)
+})
+
+// Where site data is blocked, reading the `localStorage` PROPERTY throws before any method is
+// reached — the page must still boot, on the default.
+test('a page whose localStorage property throws has no storage, and shows the default', () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    get: () => {
+      throw new DOMException('Access is denied for this document.', 'SecurityError')
+    },
+  })
+  try {
+    expect(pageStorage()).toBeUndefined()
+    expect(readSavedTheme(pageStorage())).toBe(DEFAULT_THEME)
+  } finally {
+    if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage')
+    else Object.defineProperty(globalThis, 'localStorage', original)
+  }
 })
 
 // A theme without a block would show the default under its own name; a block missing a
