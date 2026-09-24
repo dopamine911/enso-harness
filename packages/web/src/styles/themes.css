@@ -1,13 +1,16 @@
 /*
  * THE COLOUR THEMES (src/theme.ts). Each is the shadcn token set, chosen by `data-theme` on
- * <html>; the settings dialog sets it and this browser keeps it. Every theme is dark, so the
- * `dark` class stays on <html> and `dark:` variants follow it. A theme block is an ATTRIBUTE
+ * <html>; the settings dialog sets it and this browser keeps it. Each block states its
+ * `color-scheme`, and the page keeps the `dark` class on <html> only for a dark theme, so
+ * `dark:` variants and native controls follow the scheme. A theme block is an ATTRIBUTE
  * selector, not `html[…]`, so any element can wear one — the dialog's swatches draw each theme
  * in its own colours — and the blocks come after `.dark` so they win at equal specificity.
  *
  * ⚠ EVERY VALUE IS UPSTREAM'S OWN ROLE COLOUR, not a palette colour placed by us. Each theme's
- * editor theme assigns colours to UI roles; the variables take them by one rule, and the comment
- * beside each value names the upstream role it came from:
+ * editor theme assigns colours to UI roles; the variables take them by one rule per kind of
+ * upstream, and the comment beside each value names the upstream role it came from.
+ *
+ * A VS Code theme (Dracula, Nord, One Dark, SynthWave '84, Gruvbox) — its workbench keys:
  *
  *   background ← editor.background          foreground, card-/popover-foreground ← editor.foreground
  *   card, muted ← editor.lineHighlightBackground, else dropdown.background
@@ -19,18 +22,34 @@
  *   destructive ← errorForeground        ring ← focusBorder
  *   border ← panel.border, else editorGroup.border        input ← input.border, else border
  *   sidebar (-foreground, -border) ← sideBar.background (.foreground, .border)
+ *
+ * A Neovim theme (Catppuccin, Everforest, Rosé Pine, Tokyo Dark) — its highlight groups, as the
+ * theme resolves them under its default options (blends computed with the theme's own function):
+ *
+ *   background, foreground ← Normal     card-, secondary-foreground ← Normal.fg
+ *   popover (-foreground) ← NormalFloat, else Normal
+ *   card, muted ← CursorLine.bg, else Folded.bg        secondary ← CursorLine.bg — the user bubble
+ *   primary, ring ← Title.fg, else Function.fg        primary-foreground ← Normal.bg
+ *   accent (-foreground) ← Visual (.fg, else Normal.fg)
+ *   muted-foreground ← StatusLine.fg, else Comment.fg — never Normal.fg itself
+ *   destructive ← DiagnosticError.fg, else ErrorMsg.fg
+ *   border, input ← FloatBorder.fg        sidebar ← StatusLine        sidebar-border ← WinSeparator
+ *
+ * Both kinds:
+ *
  *   chart-1…5 ← terminal blue, green, yellow, magenta, cyan
- *   chart-6   ← the theme's orange (no terminal defines one)
+ *   chart-6   ← the theme's orange (no terminal defines one), else terminal red
  *   — for any series, the next distinct colour upstream assigns where one repeats, or nearly
  *     repeats, an earlier series; the comment says which and why
  *
  * Kanagawa has no VS Code theme of its own: kanagawa.nvim's `themes.lua` names the same roles
  * (ui.bg, ui.float, ui.bg_visual, ui.fg_dim, diag.error, term), cited beside each value.
- * A colour with alpha is composited over the theme's background. Two floors, the only values
- * that are not upstream's own: text roles (muted-foreground, destructive) hold 4.5:1 on the
- * background and the focus ring 3:1 (WCAG 1.4.11); one that falls short is LIFTED toward that
- * theme's foreground just far enough, and says so. The derivation that wrote these blocks,
- * with the upstream values it read, is recorded on the PR that introduced them.
+ * A colour with alpha is composited over the theme's background. Floors are the only values
+ * that are not upstream's own: every text role holds 4.5:1 on each surface it is drawn on, and
+ * the focus ring 3:1 on the background (WCAG 1.4.11). One that falls short has only its OKLab
+ * LIGHTNESS moved — away from the surface, hue and chroma kept — just far enough, and says so.
+ * The derivation that wrote these blocks, with the upstream values it read, is recorded on the
+ * PR that introduced them.
  *
  * :root is Kanagawa Lotus, the light variant — no theme selects it today.
  */
@@ -75,6 +94,7 @@
  */
 .dark,
 [data-theme="kanagawa-wave"] {
+  color-scheme: dark;
   --background: #1f1f28; /* ui.bg sumiInk3 (Normal) */
   --foreground: #dcd7ba; /* ui.fg fujiWhite (Normal) */
   --card: #2a2a37; /* ui.bg_p1 sumiInk4 (Folded, TabLineSel) */
@@ -89,7 +109,7 @@
   --muted-foreground: #c8c093; /* ui.fg_dim oldWhite (StatusLine, MsgArea) */
   --accent: #223249; /* ui.bg_visual waveBlue1 (Visual) */
   --accent-foreground: #dcd7ba; /* ui.fg fujiWhite */
-  --destructive: #e45b52; /* diag.error samuraiRed (ErrorMsg, DiagnosticError) (3.66:1) lifted toward the foreground, 4.61:1 */
+  --destructive: #ff5b4f; /* diag.error samuraiRed (ErrorMsg, DiagnosticError) — lightness adjusted (3.17:1 → 4.62:1 on background / card), hue kept */
   --border: #54546d; /* ui.float.fg_border sumiInk6 (FloatBorder) */
   --input: #54546d; /* ui.float.fg_border sumiInk6 (FloatBorder) */
   --ring: #7e9cd8; /* syn.fun crystalBlue */
@@ -113,6 +133,7 @@
  * Dracula — dracula/visual-studio-code src/dracula.yml @ a08a206
  */
 [data-theme="dracula"] {
+  color-scheme: dark;
   --background: #282a36; /* editor.background */
   --foreground: #f8f8f2; /* editor.foreground */
   --card: #343746; /* dropdown.background (no editor.lineHighlightBackground) */
@@ -124,10 +145,10 @@
   --secondary: #353747; /* list.hoverBackground #44475a75 over the background */
   --secondary-foreground: #f8f8f2; /* editor.foreground (no list.hoverForeground) */
   --muted: #343746; /* dropdown.background (no editor.lineHighlightBackground) */
-  --muted-foreground: #8692b7; /* terminal.ansiBrightBlack (no descriptionForeground) (3.03:1) lifted toward the foreground, 4.62:1 */
+  --muted-foreground: #8fa1d6; /* terminal.ansiBrightBlack (no descriptionForeground) — lightness adjusted (2.51:1 → 4.63:1 on background / card / muted), hue kept */
   --accent: #44475a; /* list.activeSelectionBackground */
   --accent-foreground: #f8f8f2; /* list.activeSelectionForeground */
-  --destructive: #ff5555; /* errorForeground */
+  --destructive: #ff7975; /* errorForeground — lightness adjusted (3.75:1 → 4.63:1 on background / card), hue kept */
   --border: #bd93f9; /* panel.border */
   --input: #191a21; /* input.border */
   --ring: #6272a4; /* focusBorder */
@@ -151,6 +172,7 @@
  * Nord — nordtheme/visual-studio-code themes/nord-color-theme.json @ 69b80f5
  */
 [data-theme="nord"] {
+  color-scheme: dark;
   --background: #2e3440; /* editor.background */
   --foreground: #d8dee9; /* editor.foreground */
   --card: #3b4252; /* editor.lineHighlightBackground */
@@ -165,10 +187,10 @@
   --muted-foreground: #c7cdd8; /* descriptionForeground #d8dee9e6 over the background */
   --accent: #88c0d0; /* list.activeSelectionBackground */
   --accent-foreground: #2e3440; /* list.activeSelectionForeground */
-  --destructive: #c88e98; /* errorForeground (3.05:1) lifted toward the foreground, 4.63:1 */
+  --destructive: #f7949b; /* errorForeground — lightness adjusted (2.46:1 → 4.63:1 on background / card), hue kept */
   --border: #3b4252; /* panel.border */
   --input: #3b4252; /* input.border */
-  --ring: #787f8d; /* focusBorder (1.24:1) lifted toward the foreground, 3.10:1 */
+  --ring: #788092; /* focusBorder — lightness adjusted (1.24:1 → 3.15:1 on background), hue kept */
   --chart-1: #81a1c1; /* terminal.ansiBlue */
   --chart-2: #a3be8c; /* terminal.ansiGreen */
   --chart-3: #ebcb8b; /* terminal.ansiYellow */
@@ -182,13 +204,14 @@
   --sidebar-accent: #88c0d0; /* = accent */
   --sidebar-accent-foreground: #2e3440; /* = accent-foreground */
   --sidebar-border: #3b4252; /* sideBar.border */
-  --sidebar-ring: #787f8d; /* = ring */
+  --sidebar-ring: #788092; /* = ring */
 }
 
 /*
  * One Dark — Binaryify/OneDark-Pro src/themes/data/oneDarkPro.ts @ 194ac08 (One Dark Pro)
  */
 [data-theme="one-dark"] {
+  color-scheme: dark;
   --background: #282c34; /* editor.background */
   --foreground: #abb2bf; /* editor.foreground */
   --card: #2c313c; /* editor.lineHighlightBackground */
@@ -196,17 +219,17 @@
   --popover: #21252b; /* editorWidget.background */
   --popover-foreground: #abb2bf; /* editor.foreground (no editorWidget.foreground) */
   --primary: #404754; /* button.background */
-  --primary-foreground: #abb2bf; /* editor.foreground (no button.foreground) */
+  --primary-foreground: #b0b7c4; /* editor.foreground (no button.foreground) — lightness adjusted (4.38:1 → 4.64:1 on primary), hue kept */
   --secondary: #2c313a; /* list.hoverBackground */
   --secondary-foreground: #abb2bf; /* list.hoverForeground */
   --muted: #2c313c; /* editor.lineHighlightBackground */
   --muted-foreground: #abb2bf; /* descriptionForeground */
   --accent: #2c313a; /* list.activeSelectionBackground */
   --accent-foreground: #d7dae0; /* list.activeSelectionForeground */
-  --destructive: #b38a90; /* errorForeground (2.72:1) lifted toward the foreground, 4.64:1 */
+  --destructive: #f77064; /* errorForeground — lightness adjusted (2.53:1 → 4.63:1 on background / card), hue kept */
   --border: #3e4452; /* panel.border */
   --input: #3e4452; /* panel.border (no input.border) */
-  --ring: #707784; /* focusBorder (1.44:1) lifted toward the foreground, 3.11:1 */
+  --ring: #717887; /* focusBorder — lightness adjusted (1.44:1 → 3.16:1 on background), hue kept */
   --chart-1: #4aa5f0; /* terminal.ansiBlue */
   --chart-2: #8cc265; /* terminal.ansiGreen */
   --chart-3: #d18f52; /* terminal.ansiYellow */
@@ -216,55 +239,18 @@
   --sidebar: #21252b; /* sideBar.background */
   --sidebar-foreground: #abb2bf; /* sideBar.foreground */
   --sidebar-primary: #404754; /* = primary */
-  --sidebar-primary-foreground: #abb2bf; /* = primary-foreground */
+  --sidebar-primary-foreground: #b0b7c4; /* = primary-foreground */
   --sidebar-accent: #2c313a; /* = accent */
   --sidebar-accent-foreground: #d7dae0; /* = accent-foreground */
   --sidebar-border: #3e4452; /* panel.border (no sideBar.border) */
-  --sidebar-ring: #707784; /* = ring */
-}
-
-/*
- * Catppuccin Mocha — catppuccin/vscode packages/catppuccin-vsc/src/theme/uiColors.ts (Mocha, default accent mauve)
- */
-[data-theme="catppuccin-mocha"] {
-  --background: #1e1e2e; /* editor.background */
-  --foreground: #cdd6f4; /* editor.foreground */
-  --card: #2a2b3c; /* editor.lineHighlightBackground #cdd6f412 over the background */
-  --card-foreground: #cdd6f4; /* editor.foreground */
-  --popover: #181825; /* editorWidget.background */
-  --popover-foreground: #cdd6f4; /* editorWidget.foreground */
-  --primary: #cba6f7; /* button.background */
-  --primary-foreground: #11111b; /* button.foreground */
-  --secondary: #282839; /* list.hoverBackground #31324480 over the background */
-  --secondary-foreground: #cdd6f4; /* list.hoverForeground */
-  --muted: #2a2b3c; /* editor.lineHighlightBackground #cdd6f412 over the background */
-  --muted-foreground: #cdd6f4; /* descriptionForeground */
-  --accent: #313244; /* list.activeSelectionBackground */
-  --accent-foreground: #cdd6f4; /* list.activeSelectionForeground */
-  --destructive: #f38ba8; /* errorForeground */
-  --border: #585b70; /* panel.border */
-  --input: #585b70; /* panel.border (no input.border) */
-  --ring: #cba6f7; /* focusBorder */
-  --chart-1: #89b4fa; /* terminal.ansiBlue */
-  --chart-2: #a6e3a1; /* terminal.ansiGreen */
-  --chart-3: #f9e2af; /* terminal.ansiYellow */
-  --chart-4: #cba6f7; /* terminal.ansiMagenta */
-  --chart-5: #94e2d5; /* terminal.ansiCyan */
-  --chart-6: #fab387; /* the theme's orange, peach (no orange in the terminal) */
-  --sidebar: #181825; /* sideBar.background */
-  --sidebar-foreground: #cdd6f4; /* sideBar.foreground */
-  --sidebar-primary: #cba6f7; /* = primary */
-  --sidebar-primary-foreground: #11111b; /* = primary-foreground */
-  --sidebar-accent: #313244; /* = accent */
-  --sidebar-accent-foreground: #cdd6f4; /* = accent-foreground */
-  --sidebar-border: #585b70; /* panel.border (no sideBar.border) */
-  --sidebar-ring: #cba6f7; /* = ring */
+  --sidebar-ring: #717887; /* = ring */
 }
 
 /*
  * SynthWave '84 — robb0wen/synthwave-vscode themes/synthwave-color-theme.json @ ecfa2fe
  */
 [data-theme="synthwave-84"] {
+  color-scheme: dark;
   --background: #262335; /* editor.background */
   --foreground: #ffffff; /* foreground (no editor.foreground) */
   --card: #232530; /* dropdown.background (no editor.lineHighlightBackground) */
@@ -279,10 +265,10 @@
   --muted-foreground: #848bbd; /* the syntax comment colour (no descriptionForeground / terminal.ansiBrightBlack) */
   --accent: #413f4e; /* list.activeSelectionBackground #ffffff20 over the background */
   --accent-foreground: #ffffff; /* list.activeSelectionForeground */
-  --destructive: #fe4a55; /* errorForeground (4.48:1) lifted toward the foreground, 4.60:1 */
+  --destructive: #ff4a54; /* errorForeground — lightness adjusted (4.47:1 → 4.61:1 on background / card), hue kept */
   --border: #495495; /* editorGroup.border (no panel.border) */
   --input: #495495; /* editorGroup.border (no input.border / panel.border) */
-  --ring: #707177; /* focusBorder (1.05:1) lifted toward the foreground, 3.14:1 */
+  --ring: #6e717d; /* focusBorder — lightness adjusted (1.05:1 → 3.14:1 on background), hue kept */
   --chart-1: #03edf9; /* terminal.ansiBlue */
   --chart-2: #72f1b8; /* terminal.ansiGreen */
   --chart-3: #f3e70f; /* terminal.ansiYellow */
@@ -296,13 +282,14 @@
   --sidebar-accent: #413f4e; /* = accent */
   --sidebar-accent-foreground: #ffffff; /* = accent-foreground */
   --sidebar-border: #495495; /* editorGroup.border (no sideBar.border / panel.border) */
-  --sidebar-ring: #707177; /* = ring */
+  --sidebar-ring: #6e717d; /* = ring */
 }
 
 /*
  * Gruvbox Dark — jdinhify/vscode-theme-gruvbox src/colors/base.ts @ ca3b8ad (Dark Medium)
  */
 [data-theme="gruvbox-dark"] {
+  color-scheme: dark;
   --background: #282828; /* editor.background */
   --foreground: #ebdbb2; /* editor.foreground */
   --card: #302e2d; /* editor.lineHighlightBackground #3c383660 over the background */
@@ -314,13 +301,13 @@
   --secondary: #32302f; /* list.hoverBackground #3c383680 over the background */
   --secondary-foreground: #d5c4a1; /* list.hoverForeground */
   --muted: #302e2d; /* editor.lineHighlightBackground #3c383660 over the background */
-  --muted-foreground: #9d8e7b; /* terminal.ansiBrightBlack (no descriptionForeground) (4.02:1) lifted toward the foreground, 4.63:1 */
+  --muted-foreground: #a49586; /* terminal.ansiBrightBlack (no descriptionForeground) — lightness adjusted (3.68:1 → 4.65:1 on background / card / muted), hue kept */
   --accent: #32302f; /* list.activeSelectionBackground #3c383680 over the background */
   --accent-foreground: #8ec07c; /* list.activeSelectionForeground */
-  --destructive: #f95b43; /* errorForeground (4.29:1) lifted toward the foreground, 4.64:1 */
+  --destructive: #ff644d; /* errorForeground — lightness adjusted (3.93:1 → 4.62:1 on background / card), hue kept */
   --border: #3c3836; /* panel.border */
   --input: #3c3836; /* input.border */
-  --ring: #7b7363; /* focusBorder (1.27:1) lifted toward the foreground, 3.14:1 */
+  --ring: #787371; /* focusBorder — lightness adjusted (1.27:1 → 3.15:1 on background), hue kept */
   --chart-1: #458588; /* terminal.ansiBlue */
   --chart-2: #98971a; /* terminal.ansiGreen */
   --chart-3: #d79921; /* terminal.ansiYellow */
@@ -334,5 +321,551 @@
   --sidebar-accent: #32302f; /* = accent */
   --sidebar-accent-foreground: #8ec07c; /* = accent-foreground */
   --sidebar-border: #3c3836; /* sideBar.border */
-  --sidebar-ring: #7b7363; /* = ring */
+  --sidebar-ring: #787371; /* = ring */
+}
+
+/*
+ * Catppuccin Latte — catppuccin/nvim @ edefef7 (lua/catppuccin/palettes/latte.lua, lua/catppuccin/groups/editor.lua, lua/catppuccin/groups/syntax.lua, lua/catppuccin/groups/terminal.lua, lua/catppuccin/init.lua)
+ */
+[data-theme="catppuccin-latte"] {
+  color-scheme: light;
+  --background: #eff1f5; /* Normal.bg base */
+  --foreground: #4c4f69; /* Normal.fg text */
+  --card: #e9ebf1; /* CursorLine.bg */
+  --card-foreground: #4c4f69; /* Normal.fg text */
+  --popover: #e6e9ef; /* NormalFloat.bg mantle */
+  --popover-foreground: #4c4f69; /* NormalFloat.fg text */
+  --primary: #1e66f5; /* Title.fg blue */
+  --primary-foreground: #f6f8fc; /* Normal.bg base — lightness adjusted (4.34:1 → 4.62:1 on primary), hue kept */
+  --secondary: #e9ebf1; /* CursorLine.bg */
+  --secondary-foreground: #4c4f69; /* Normal.fg text */
+  --muted: #e9ebf1; /* CursorLine.bg */
+  --muted-foreground: #65687b; /* Comment.fg overlay2 (StatusLine.fg is foreground) — lightness adjusted (3.32:1 → 4.61:1 on background / card / muted), hue kept */
+  --accent: #bcc0cc; /* Visual.bg surface1 */
+  --accent-foreground: #494c66; /* Normal.fg text (no Visual.fg) — lightness adjusted (4.39:1 → 4.60:1 on accent), hue kept */
+  --destructive: #d20f39; /* DiagnosticError.fg red */
+  --border: #1e66f5; /* FloatBorder.fg blue */
+  --input: #1e66f5; /* FloatBorder.fg blue */
+  --ring: #1e66f5; /* Title.fg blue */
+  --chart-1: #1e66f5; /* terminal_color_4 (blue) blue */
+  --chart-2: #40a02b; /* terminal_color_2 (green) green */
+  --chart-3: #df8e1d; /* terminal_color_3 (yellow) yellow */
+  --chart-4: #ea76cb; /* terminal_color_5 (magenta) pink */
+  --chart-5: #04a5e5; /* terminal_color_6 (cyan) sky */
+  --chart-6: #fe640b; /* the theme's orange, peach (no orange in the terminal) */
+  --sidebar: #e6e9ef; /* StatusLine.bg mantle */
+  --sidebar-foreground: #4c4f69; /* StatusLine.fg text */
+  --sidebar-primary: #1e66f5; /* = primary */
+  --sidebar-primary-foreground: #f6f8fc; /* = primary-foreground */
+  --sidebar-accent: #bcc0cc; /* = accent */
+  --sidebar-accent-foreground: #494c66; /* = accent-foreground */
+  --sidebar-border: #dce0e8; /* WinSeparator.fg crust */
+  --sidebar-ring: #1e66f5; /* = ring */
+}
+
+/*
+ * Catppuccin Frappé — catppuccin/nvim @ edefef7 (lua/catppuccin/palettes/frappe.lua, lua/catppuccin/groups/editor.lua, lua/catppuccin/groups/syntax.lua, lua/catppuccin/groups/terminal.lua, lua/catppuccin/init.lua)
+ */
+[data-theme="catppuccin-frappe"] {
+  color-scheme: dark;
+  --background: #303446; /* Normal.bg base */
+  --foreground: #c6d0f5; /* Normal.fg text */
+  --card: #3b3f52; /* CursorLine.bg */
+  --card-foreground: #c6d0f5; /* Normal.fg text */
+  --popover: #292c3c; /* NormalFloat.bg mantle */
+  --popover-foreground: #c6d0f5; /* NormalFloat.fg text */
+  --primary: #8caaee; /* Title.fg blue */
+  --primary-foreground: #303446; /* Normal.bg base */
+  --secondary: #3b3f52; /* CursorLine.bg */
+  --secondary-foreground: #c6d0f5; /* Normal.fg text */
+  --muted: #3b3f52; /* CursorLine.bg */
+  --muted-foreground: #a3accb; /* Comment.fg overlay2 (StatusLine.fg is foreground) — lightness adjusted (3.83:1 → 4.62:1 on background / card / muted), hue kept */
+  --accent: #51576d; /* Visual.bg surface1 */
+  --accent-foreground: #c6d0f5; /* Normal.fg text (no Visual.fg) */
+  --destructive: #f79092; /* DiagnosticError.fg red — lightness adjusted (3.93:1 → 4.64:1 on background / card), hue kept */
+  --border: #8caaee; /* FloatBorder.fg blue */
+  --input: #8caaee; /* FloatBorder.fg blue */
+  --ring: #8caaee; /* Title.fg blue */
+  --chart-1: #8caaee; /* terminal_color_4 (blue) blue */
+  --chart-2: #a6d189; /* terminal_color_2 (green) green */
+  --chart-3: #e5c890; /* terminal_color_3 (yellow) yellow */
+  --chart-4: #f4b8e4; /* terminal_color_5 (magenta) pink */
+  --chart-5: #99d1db; /* terminal_color_6 (cyan) sky */
+  --chart-6: #ef9f76; /* the theme's orange, peach (no orange in the terminal) */
+  --sidebar: #292c3c; /* StatusLine.bg mantle */
+  --sidebar-foreground: #c6d0f5; /* StatusLine.fg text */
+  --sidebar-primary: #8caaee; /* = primary */
+  --sidebar-primary-foreground: #303446; /* = primary-foreground */
+  --sidebar-accent: #51576d; /* = accent */
+  --sidebar-accent-foreground: #c6d0f5; /* = accent-foreground */
+  --sidebar-border: #232634; /* WinSeparator.fg crust */
+  --sidebar-ring: #8caaee; /* = ring */
+}
+
+/*
+ * Catppuccin Macchiato — catppuccin/nvim @ edefef7 (lua/catppuccin/palettes/macchiato.lua, lua/catppuccin/groups/editor.lua, lua/catppuccin/groups/syntax.lua, lua/catppuccin/groups/terminal.lua, lua/catppuccin/init.lua)
+ */
+[data-theme="catppuccin-macchiato"] {
+  color-scheme: dark;
+  --background: #24273a; /* Normal.bg base */
+  --foreground: #cad3f5; /* Normal.fg text */
+  --card: #303347; /* CursorLine.bg */
+  --card-foreground: #cad3f5; /* Normal.fg text */
+  --popover: #1e2030; /* NormalFloat.bg mantle */
+  --popover-foreground: #cad3f5; /* NormalFloat.fg text */
+  --primary: #8aadf4; /* Title.fg blue */
+  --primary-foreground: #24273a; /* Normal.bg base */
+  --secondary: #303347; /* CursorLine.bg */
+  --secondary-foreground: #cad3f5; /* Normal.fg text */
+  --muted: #303347; /* CursorLine.bg */
+  --muted-foreground: #969dba; /* Comment.fg overlay2 (StatusLine.fg is foreground) — lightness adjusted (4.46:1 → 4.63:1 on background / card / muted), hue kept */
+  --accent: #494d64; /* Visual.bg surface1 */
+  --accent-foreground: #cad3f5; /* Normal.fg text (no Visual.fg) */
+  --destructive: #ed8796; /* DiagnosticError.fg red */
+  --border: #8aadf4; /* FloatBorder.fg blue */
+  --input: #8aadf4; /* FloatBorder.fg blue */
+  --ring: #8aadf4; /* Title.fg blue */
+  --chart-1: #8aadf4; /* terminal_color_4 (blue) blue */
+  --chart-2: #a6da95; /* terminal_color_2 (green) green */
+  --chart-3: #eed49f; /* terminal_color_3 (yellow) yellow */
+  --chart-4: #f5bde6; /* terminal_color_5 (magenta) pink */
+  --chart-5: #91d7e3; /* terminal_color_6 (cyan) sky */
+  --chart-6: #f5a97f; /* the theme's orange, peach (no orange in the terminal) */
+  --sidebar: #1e2030; /* StatusLine.bg mantle */
+  --sidebar-foreground: #cad3f5; /* StatusLine.fg text */
+  --sidebar-primary: #8aadf4; /* = primary */
+  --sidebar-primary-foreground: #24273a; /* = primary-foreground */
+  --sidebar-accent: #494d64; /* = accent */
+  --sidebar-accent-foreground: #cad3f5; /* = accent-foreground */
+  --sidebar-border: #181926; /* WinSeparator.fg crust */
+  --sidebar-ring: #8aadf4; /* = ring */
+}
+
+/*
+ * Catppuccin Mocha — catppuccin/nvim @ edefef7 (lua/catppuccin/palettes/mocha.lua, lua/catppuccin/groups/editor.lua, lua/catppuccin/groups/syntax.lua, lua/catppuccin/groups/terminal.lua, lua/catppuccin/init.lua)
+ */
+[data-theme="catppuccin-mocha"] {
+  color-scheme: dark;
+  --background: #1e1e2e; /* Normal.bg base */
+  --foreground: #cdd6f4; /* Normal.fg text */
+  --card: #2a2b3c; /* CursorLine.bg */
+  --card-foreground: #cdd6f4; /* Normal.fg text */
+  --popover: #181825; /* NormalFloat.bg mantle */
+  --popover-foreground: #cdd6f4; /* NormalFloat.fg text */
+  --primary: #89b4fa; /* Title.fg blue */
+  --primary-foreground: #1e1e2e; /* Normal.bg base */
+  --secondary: #2a2b3c; /* CursorLine.bg */
+  --secondary-foreground: #cdd6f4; /* Normal.fg text */
+  --muted: #2a2b3c; /* CursorLine.bg */
+  --muted-foreground: #9399b2; /* Comment.fg overlay2 (StatusLine.fg is foreground) */
+  --accent: #45475a; /* Visual.bg surface1 */
+  --accent-foreground: #cdd6f4; /* Normal.fg text (no Visual.fg) */
+  --destructive: #f38ba8; /* DiagnosticError.fg red */
+  --border: #89b4fa; /* FloatBorder.fg blue */
+  --input: #89b4fa; /* FloatBorder.fg blue */
+  --ring: #89b4fa; /* Title.fg blue */
+  --chart-1: #89b4fa; /* terminal_color_4 (blue) blue */
+  --chart-2: #a6e3a1; /* terminal_color_2 (green) green */
+  --chart-3: #f9e2af; /* terminal_color_3 (yellow) yellow */
+  --chart-4: #f5c2e7; /* terminal_color_5 (magenta) pink */
+  --chart-5: #89dceb; /* terminal_color_6 (cyan) sky */
+  --chart-6: #fab387; /* the theme's orange, peach (no orange in the terminal) */
+  --sidebar: #181825; /* StatusLine.bg mantle */
+  --sidebar-foreground: #cdd6f4; /* StatusLine.fg text */
+  --sidebar-primary: #89b4fa; /* = primary */
+  --sidebar-primary-foreground: #1e1e2e; /* = primary-foreground */
+  --sidebar-accent: #45475a; /* = accent */
+  --sidebar-accent-foreground: #cdd6f4; /* = accent-foreground */
+  --sidebar-border: #11111b; /* WinSeparator.fg crust */
+  --sidebar-ring: #89b4fa; /* = ring */
+}
+
+/*
+ * Everforest Dark Hard — sainnhe/everforest @ 85a86eb (autoload/everforest.vim, colors/everforest.vim)
+ */
+[data-theme="everforest-dark-hard"] {
+  color-scheme: dark;
+  --background: #272e33; /* Normal.bg */
+  --foreground: #d3c6aa; /* Normal.fg fg */
+  --card: #2e383c; /* CursorLine.bg */
+  --card-foreground: #d3c6aa; /* Normal.fg fg */
+  --popover: #374145; /* NormalFloat.bg */
+  --popover-foreground: #d3c6aa; /* NormalFloat.fg fg */
+  --primary: #e69875; /* Title.fg orange */
+  --primary-foreground: #272e33; /* Normal.bg */
+  --secondary: #2e383c; /* CursorLine.bg */
+  --secondary-foreground: #d3c6aa; /* Normal.fg fg */
+  --muted: #2e383c; /* CursorLine.bg */
+  --muted-foreground: #97a49b; /* StatusLine.fg grey1 — lightness adjusted (3.70:1 → 4.64:1 on background / card / muted), hue kept */
+  --accent: #4c3743; /* Visual.bg */
+  --accent-foreground: #d3c6aa; /* Normal.fg fg (no Visual.fg) */
+  --destructive: #eb8384; /* DiagnosticError.fg red — lightness adjusted (4.38:1 → 4.64:1 on background / card), hue kept */
+  --border: #859289; /* FloatBorder.fg grey1 */
+  --input: #859289; /* FloatBorder.fg grey1 */
+  --ring: #e69875; /* Title.fg orange */
+  --chart-1: #7fbbb3; /* terminal_color_4 (blue) blue */
+  --chart-2: #a7c080; /* terminal_color_2 (green) green */
+  --chart-3: #dbbc7f; /* terminal_color_3 (yellow) yellow */
+  --chart-4: #d699b6; /* terminal_color_5 (magenta) purple */
+  --chart-5: #83c092; /* terminal_color_6 (cyan) aqua */
+  --chart-6: #e69875; /* the theme's orange, orange (no orange in the terminal) */
+  --sidebar: #374145; /* StatusLine.bg */
+  --sidebar-foreground: #a3b1a8; /* StatusLine.fg grey1 — lightness adjusted (3.23:1 → 4.70:1 on sidebar), hue kept */
+  --sidebar-primary: #e69875; /* = primary */
+  --sidebar-primary-foreground: #272e33; /* = primary-foreground */
+  --sidebar-accent: #4c3743; /* = accent */
+  --sidebar-accent-foreground: #d3c6aa; /* = accent-foreground */
+  --sidebar-border: #495156; /* WinSeparator.fg */
+  --sidebar-ring: #e69875; /* = ring */
+}
+
+/*
+ * Everforest Dark Medium — sainnhe/everforest @ 85a86eb (autoload/everforest.vim, colors/everforest.vim)
+ */
+[data-theme="everforest-dark-medium"] {
+  color-scheme: dark;
+  --background: #2d353b; /* Normal.bg */
+  --foreground: #d3c6aa; /* Normal.fg fg */
+  --card: #343f44; /* CursorLine.bg */
+  --card-foreground: #d3c6aa; /* Normal.fg fg */
+  --popover: #3d484d; /* NormalFloat.bg */
+  --popover-foreground: #d3c6aa; /* NormalFloat.fg fg */
+  --primary: #e69875; /* Title.fg orange */
+  --primary-foreground: #2d353b; /* Normal.bg */
+  --secondary: #343f44; /* CursorLine.bg */
+  --secondary-foreground: #d3c6aa; /* Normal.fg fg */
+  --muted: #343f44; /* CursorLine.bg */
+  --muted-foreground: #a0aea4; /* StatusLine.fg grey1 — lightness adjusted (3.33:1 → 4.68:1 on background / card / muted), hue kept */
+  --accent: #543a48; /* Visual.bg */
+  --accent-foreground: #d3c6aa; /* Normal.fg fg (no Visual.fg) */
+  --destructive: #f68c8e; /* DiagnosticError.fg red — lightness adjusted (3.95:1 → 4.67:1 on background / card), hue kept */
+  --border: #859289; /* FloatBorder.fg grey1 */
+  --input: #859289; /* FloatBorder.fg grey1 */
+  --ring: #e69875; /* Title.fg orange */
+  --chart-1: #7fbbb3; /* terminal_color_4 (blue) blue */
+  --chart-2: #a7c080; /* terminal_color_2 (green) green */
+  --chart-3: #dbbc7f; /* terminal_color_3 (yellow) yellow */
+  --chart-4: #d699b6; /* terminal_color_5 (magenta) purple */
+  --chart-5: #83c092; /* terminal_color_6 (cyan) aqua */
+  --chart-6: #e69875; /* the theme's orange, orange (no orange in the terminal) */
+  --sidebar: #3d484d; /* StatusLine.bg */
+  --sidebar-foreground: #abb9af; /* StatusLine.fg grey1 — lightness adjusted (2.90:1 → 4.61:1 on sidebar), hue kept */
+  --sidebar-primary: #e69875; /* = primary */
+  --sidebar-primary-foreground: #2d353b; /* = primary-foreground */
+  --sidebar-accent: #543a48; /* = accent */
+  --sidebar-accent-foreground: #d3c6aa; /* = accent-foreground */
+  --sidebar-border: #4f585e; /* WinSeparator.fg */
+  --sidebar-ring: #e69875; /* = ring */
+}
+
+/*
+ * Everforest Dark Soft — sainnhe/everforest @ 85a86eb (autoload/everforest.vim, colors/everforest.vim)
+ */
+[data-theme="everforest-dark-soft"] {
+  color-scheme: dark;
+  --background: #333c43; /* Normal.bg */
+  --foreground: #d3c6aa; /* Normal.fg fg */
+  --card: #3a464c; /* CursorLine.bg */
+  --card-foreground: #d3c6aa; /* Normal.fg fg */
+  --popover: #434f55; /* NormalFloat.bg */
+  --popover-foreground: #d3c6aa; /* NormalFloat.fg fg */
+  --primary: #e69875; /* Title.fg orange */
+  --primary-foreground: #333c43; /* Normal.bg */
+  --secondary: #3a464c; /* CursorLine.bg */
+  --secondary-foreground: #d3c6aa; /* Normal.fg fg */
+  --muted: #3a464c; /* CursorLine.bg */
+  --muted-foreground: #a8b6ac; /* StatusLine.fg grey1 — lightness adjusted (2.99:1 → 4.61:1 on background / card / muted), hue kept */
+  --accent: #5c3f4f; /* Visual.bg */
+  --accent-foreground: #d3c6aa; /* Normal.fg fg (no Visual.fg) */
+  --destructive: #ff9597; /* DiagnosticError.fg red — lightness adjusted (3.55:1 → 4.63:1 on background / card), hue kept */
+  --border: #859289; /* FloatBorder.fg grey1 */
+  --input: #859289; /* FloatBorder.fg grey1 */
+  --ring: #e69875; /* Title.fg orange */
+  --chart-1: #7fbbb3; /* terminal_color_4 (blue) blue */
+  --chart-2: #a7c080; /* terminal_color_2 (green) green */
+  --chart-3: #dbbc7f; /* terminal_color_3 (yellow) yellow */
+  --chart-4: #d699b6; /* terminal_color_5 (magenta) purple */
+  --chart-5: #83c092; /* terminal_color_6 (cyan) aqua */
+  --chart-6: #e69875; /* the theme's orange, orange (no orange in the terminal) */
+  --sidebar: #434f55; /* StatusLine.bg */
+  --sidebar-foreground: #b6c4ba; /* StatusLine.fg grey1 — lightness adjusted (2.60:1 → 4.66:1 on sidebar), hue kept */
+  --sidebar-primary: #e69875; /* = primary */
+  --sidebar-primary-foreground: #333c43; /* = primary-foreground */
+  --sidebar-accent: #5c3f4f; /* = accent */
+  --sidebar-accent-foreground: #d3c6aa; /* = accent-foreground */
+  --sidebar-border: #555f66; /* WinSeparator.fg */
+  --sidebar-ring: #e69875; /* = ring */
+}
+
+/*
+ * Everforest Light Hard — sainnhe/everforest @ 85a86eb (autoload/everforest.vim, colors/everforest.vim)
+ */
+[data-theme="everforest-light-hard"] {
+  color-scheme: light;
+  --background: #fffbef; /* Normal.bg */
+  --foreground: #5c6a72; /* Normal.fg fg */
+  --card: #f8f5e4; /* CursorLine.bg */
+  --card-foreground: #5c6a72; /* Normal.fg fg */
+  --popover: #f2efdf; /* NormalFloat.bg */
+  --popover-foreground: #5c6a72; /* NormalFloat.fg fg */
+  --primary: #f57d26; /* Title.fg orange */
+  --primary-foreground: #37332a; /* Normal.bg — lightness adjusted (2.59:1 → 4.70:1 on primary), hue kept */
+  --secondary: #f8f5e4; /* CursorLine.bg */
+  --secondary-foreground: #5c6a72; /* Normal.fg fg */
+  --muted: #f8f5e4; /* CursorLine.bg */
+  --muted-foreground: #657163; /* StatusLine.fg grey1 — lightness adjusted (2.52:1 → 4.68:1 on background / card / muted), hue kept */
+  --accent: #f0f2d4; /* Visual.bg */
+  --accent-foreground: #5c6a72; /* Normal.fg fg (no Visual.fg) */
+  --destructive: #d02c31; /* DiagnosticError.fg red — lightness adjusted (2.99:1 → 4.69:1 on background / card), hue kept */
+  --border: #939f91; /* FloatBorder.fg grey1 */
+  --input: #939f91; /* FloatBorder.fg grey1 */
+  --ring: #e36d04; /* Title.fg orange — lightness adjusted (2.59:1 → 3.14:1 on background), hue kept */
+  --chart-1: #3a94c5; /* terminal_color_4 (blue) blue */
+  --chart-2: #8da101; /* terminal_color_2 (green) green */
+  --chart-3: #dfa000; /* terminal_color_3 (yellow) yellow */
+  --chart-4: #df69ba; /* terminal_color_5 (magenta) purple */
+  --chart-5: #35a77c; /* terminal_color_6 (cyan) aqua */
+  --chart-6: #f57d26; /* the theme's orange, orange (no orange in the terminal) */
+  --sidebar: #f2efdf; /* StatusLine.bg */
+  --sidebar-foreground: #636e61; /* StatusLine.fg grey1 — lightness adjusted (2.39:1 → 4.62:1 on sidebar), hue kept */
+  --sidebar-primary: #f57d26; /* = primary */
+  --sidebar-primary-foreground: #37332a; /* = primary-foreground */
+  --sidebar-accent: #f0f2d4; /* = accent */
+  --sidebar-accent-foreground: #5c6a72; /* = accent-foreground */
+  --sidebar-border: #e8e5d5; /* WinSeparator.fg */
+  --sidebar-ring: #e36d04; /* = ring */
+}
+
+/*
+ * Everforest Light Medium — sainnhe/everforest @ 85a86eb (autoload/everforest.vim, colors/everforest.vim)
+ */
+[data-theme="everforest-light-medium"] {
+  color-scheme: light;
+  --background: #fdf6e3; /* Normal.bg */
+  --foreground: #5c6a72; /* Normal.fg fg */
+  --card: #f4f0d9; /* CursorLine.bg */
+  --card-foreground: #5c6a72; /* Normal.fg fg */
+  --popover: #efebd4; /* NormalFloat.bg */
+  --popover-foreground: #5c6a72; /* NormalFloat.fg fg */
+  --primary: #f57d26; /* Title.fg orange */
+  --primary-foreground: #393324; /* Normal.bg — lightness adjusted (2.48:1 → 4.69:1 on primary), hue kept */
+  --secondary: #f4f0d9; /* CursorLine.bg */
+  --secondary-foreground: #5c6a72; /* Normal.fg fg */
+  --muted: #f4f0d9; /* CursorLine.bg */
+  --muted-foreground: #636e61; /* StatusLine.fg grey1 — lightness adjusted (2.41:1 → 4.66:1 on background / card / muted), hue kept */
+  --accent: #eaedc8; /* Visual.bg */
+  --accent-foreground: #5c6a72; /* Normal.fg fg (no Visual.fg) */
+  --destructive: #cd272e; /* DiagnosticError.fg red — lightness adjusted (2.86:1 → 4.67:1 on background / card), hue kept */
+  --border: #939f91; /* FloatBorder.fg grey1 */
+  --input: #939f91; /* FloatBorder.fg grey1 */
+  --ring: #e06a00; /* Title.fg orange — lightness adjusted (2.48:1 → 3.12:1 on background), hue kept */
+  --chart-1: #3a94c5; /* terminal_color_4 (blue) blue */
+  --chart-2: #8da101; /* terminal_color_2 (green) green */
+  --chart-3: #dfa000; /* terminal_color_3 (yellow) yellow */
+  --chart-4: #df69ba; /* terminal_color_5 (magenta) purple */
+  --chart-5: #35a77c; /* terminal_color_6 (cyan) aqua */
+  --chart-6: #f57d26; /* the theme's orange, orange (no orange in the terminal) */
+  --sidebar: #efebd4; /* StatusLine.bg */
+  --sidebar-foreground: #606b5e; /* StatusLine.fg grey1 — lightness adjusted (2.30:1 → 4.65:1 on sidebar), hue kept */
+  --sidebar-primary: #f57d26; /* = primary */
+  --sidebar-primary-foreground: #393324; /* = primary-foreground */
+  --sidebar-accent: #eaedc8; /* = accent */
+  --sidebar-accent-foreground: #5c6a72; /* = accent-foreground */
+  --sidebar-border: #e0dcc7; /* WinSeparator.fg */
+  --sidebar-ring: #e06a00; /* = ring */
+}
+
+/*
+ * Everforest Light Soft — sainnhe/everforest @ 85a86eb (autoload/everforest.vim, colors/everforest.vim)
+ */
+[data-theme="everforest-light-soft"] {
+  color-scheme: light;
+  --background: #f3ead3; /* Normal.bg */
+  --foreground: #58666e; /* Normal.fg fg — lightness adjusted (4.38:1 → 4.65:1 on background / card / muted), hue kept */
+  --card: #eae4ca; /* CursorLine.bg */
+  --card-foreground: #58666e; /* Normal.fg fg — lightness adjusted (4.38:1 → 4.65:1 on card), hue kept */
+  --popover: #e5dfc5; /* NormalFloat.bg */
+  --popover-foreground: #55636b; /* NormalFloat.fg fg — lightness adjusted (4.17:1 → 4.64:1 on popover), hue kept */
+  --primary: #f57d26; /* Title.fg orange */
+  --primary-foreground: #3b3422; /* Normal.bg — lightness adjusted (2.23:1 → 4.61:1 on primary), hue kept */
+  --secondary: #eae4ca; /* CursorLine.bg */
+  --secondary-foreground: #58666e; /* Normal.fg fg — lightness adjusted (4.38:1 → 4.65:1 on secondary), hue kept */
+  --muted: #eae4ca; /* CursorLine.bg */
+  --muted-foreground: #5b675a; /* StatusLine.fg grey1 — lightness adjusted (2.16:1 → 4.66:1 on background / card / muted), hue kept */
+  --accent: #e1e4bd; /* Visual.bg */
+  --accent-foreground: #56646c; /* Normal.fg fg (no Visual.fg) — lightness adjusted (4.26:1 → 4.67:1 on accent), hue kept */
+  --destructive: #c41b26; /* DiagnosticError.fg red — lightness adjusted (2.57:1 → 4.66:1 on background / card), hue kept */
+  --border: #939f91; /* FloatBorder.fg grey1 */
+  --input: #939f91; /* FloatBorder.fg grey1 */
+  --ring: #d76200; /* Title.fg orange — lightness adjusted (2.23:1 → 3.11:1 on background), hue kept */
+  --chart-1: #3a94c5; /* terminal_color_4 (blue) blue */
+  --chart-2: #8da101; /* terminal_color_2 (green) green */
+  --chart-3: #dfa000; /* terminal_color_3 (yellow) yellow */
+  --chart-4: #df69ba; /* terminal_color_5 (magenta) purple */
+  --chart-5: #35a77c; /* terminal_color_6 (cyan) aqua */
+  --chart-6: #f57d26; /* the theme's orange, orange (no orange in the terminal) */
+  --sidebar: #e5dfc5; /* StatusLine.bg */
+  --sidebar-foreground: #596457; /* StatusLine.fg grey1 — lightness adjusted (2.06:1 → 4.64:1 on sidebar), hue kept */
+  --sidebar-primary: #f57d26; /* = primary */
+  --sidebar-primary-foreground: #3b3422; /* = primary-foreground */
+  --sidebar-accent: #e1e4bd; /* = accent */
+  --sidebar-accent-foreground: #56646c; /* = accent-foreground */
+  --sidebar-border: #d8d3ba; /* WinSeparator.fg */
+  --sidebar-ring: #d76200; /* = ring */
+}
+
+/*
+ * Rosé Pine — rose-pine/neovim @ ff48305 (lua/rose-pine/palette.lua, lua/rose-pine.lua, lua/rose-pine/config.lua, lua/rose-pine/utilities.lua)
+ */
+[data-theme="rose-pine-main"] {
+  color-scheme: dark;
+  --background: #191724; /* Normal.bg base */
+  --foreground: #e0def4; /* Normal.fg text */
+  --card: #26233a; /* CursorLine.bg overlay */
+  --card-foreground: #e0def4; /* Normal.fg text */
+  --popover: #1f1d2e; /* NormalFloat.bg surface */
+  --popover-foreground: #e0def4; /* Normal.fg text (no NormalFloat.fg) */
+  --primary: #9ccfd8; /* Title.fg foam */
+  --primary-foreground: #191724; /* Normal.bg base */
+  --secondary: #26233a; /* CursorLine.bg overlay */
+  --secondary-foreground: #e0def4; /* Normal.fg text */
+  --muted: #26233a; /* CursorLine.bg overlay */
+  --muted-foreground: #908caa; /* StatusLine.fg subtle */
+  --accent: #332d41; /* Visual.bg iris 15% over base */
+  --accent-foreground: #e0def4; /* Normal.fg text (no Visual.fg) */
+  --destructive: #eb6f92; /* DiagnosticError.fg love */
+  --border: #6e6a86; /* FloatBorder.fg muted */
+  --input: #6e6a86; /* FloatBorder.fg muted */
+  --ring: #9ccfd8; /* Title.fg foam */
+  --chart-1: #9ccfd8; /* terminal_color_4 (blue) foam */
+  --chart-2: #31748f; /* terminal_color_2 (green) pine */
+  --chart-3: #f6c177; /* terminal_color_3 (yellow) gold */
+  --chart-4: #c4a7e7; /* terminal_color_5 (magenta) iris */
+  --chart-5: #ebbcba; /* terminal_color_6 (cyan) rose */
+  --chart-6: #eb6f92; /* terminal_color_1 (red) love (the theme has no orange) */
+  --sidebar: #1f1d2e; /* StatusLine.bg surface */
+  --sidebar-foreground: #908caa; /* StatusLine.fg subtle */
+  --sidebar-primary: #9ccfd8; /* = primary */
+  --sidebar-primary-foreground: #191724; /* = primary-foreground */
+  --sidebar-accent: #332d41; /* = accent */
+  --sidebar-accent-foreground: #e0def4; /* = accent-foreground */
+  --sidebar-border: #6e6a86; /* WinSeparator.fg muted */
+  --sidebar-ring: #9ccfd8; /* = ring */
+}
+
+/*
+ * Rosé Pine Moon — rose-pine/neovim @ ff48305 (lua/rose-pine/palette.lua, lua/rose-pine.lua, lua/rose-pine/config.lua, lua/rose-pine/utilities.lua)
+ */
+[data-theme="rose-pine-moon"] {
+  color-scheme: dark;
+  --background: #232136; /* Normal.bg base */
+  --foreground: #e0def4; /* Normal.fg text */
+  --card: #393552; /* CursorLine.bg overlay */
+  --card-foreground: #e0def4; /* Normal.fg text */
+  --popover: #2a273f; /* NormalFloat.bg surface */
+  --popover-foreground: #e0def4; /* Normal.fg text (no NormalFloat.fg) */
+  --primary: #9ccfd8; /* Title.fg foam */
+  --primary-foreground: #232136; /* Normal.bg base */
+  --secondary: #393552; /* CursorLine.bg overlay */
+  --secondary-foreground: #e0def4; /* Normal.fg text */
+  --muted: #393552; /* CursorLine.bg overlay */
+  --muted-foreground: #a4a0bf; /* StatusLine.fg subtle — lightness adjusted (3.61:1 → 4.63:1 on background / card / muted), hue kept */
+  --accent: #3b3551; /* Visual.bg iris 15% over base */
+  --accent-foreground: #e0def4; /* Normal.fg text (no Visual.fg) */
+  --destructive: #f97c9e; /* DiagnosticError.fg love — lightness adjusted (4.00:1 → 4.66:1 on background / card), hue kept */
+  --border: #6e6a86; /* FloatBorder.fg muted */
+  --input: #6e6a86; /* FloatBorder.fg muted */
+  --ring: #9ccfd8; /* Title.fg foam */
+  --chart-1: #9ccfd8; /* terminal_color_4 (blue) foam */
+  --chart-2: #3e8fb0; /* terminal_color_2 (green) pine */
+  --chart-3: #f6c177; /* terminal_color_3 (yellow) gold */
+  --chart-4: #c4a7e7; /* terminal_color_5 (magenta) iris */
+  --chart-5: #ea9a97; /* terminal_color_6 (cyan) rose */
+  --chart-6: #eb6f92; /* terminal_color_1 (red) love (the theme has no orange) */
+  --sidebar: #2a273f; /* StatusLine.bg surface */
+  --sidebar-foreground: #938fad; /* StatusLine.fg subtle — lightness adjusted (4.46:1 → 4.64:1 on sidebar), hue kept */
+  --sidebar-primary: #9ccfd8; /* = primary */
+  --sidebar-primary-foreground: #232136; /* = primary-foreground */
+  --sidebar-accent: #3b3551; /* = accent */
+  --sidebar-accent-foreground: #e0def4; /* = accent-foreground */
+  --sidebar-border: #6e6a86; /* WinSeparator.fg muted */
+  --sidebar-ring: #9ccfd8; /* = ring */
+}
+
+/*
+ * Rosé Pine Dawn — rose-pine/neovim @ ff48305 (lua/rose-pine/palette.lua, lua/rose-pine.lua, lua/rose-pine/config.lua, lua/rose-pine/utilities.lua)
+ */
+[data-theme="rose-pine-dawn"] {
+  color-scheme: light;
+  --background: #faf4ed; /* Normal.bg base */
+  --foreground: #464261; /* Normal.fg text */
+  --card: #f2e9e1; /* CursorLine.bg overlay */
+  --card-foreground: #464261; /* Normal.fg text */
+  --popover: #fffaf3; /* NormalFloat.bg surface */
+  --popover-foreground: #464261; /* Normal.fg text (no NormalFloat.fg) */
+  --primary: #56949f; /* Title.fg foam */
+  --primary-foreground: #26221d; /* Normal.bg base — lightness adjusted (3.14:1 → 4.61:1 on primary), hue kept */
+  --secondary: #f2e9e1; /* CursorLine.bg overlay */
+  --secondary-foreground: #464261; /* Normal.fg text */
+  --muted: #f2e9e1; /* CursorLine.bg overlay */
+  --muted-foreground: #696582; /* StatusLine.fg subtle — lightness adjusted (3.67:1 → 4.63:1 on background / card / muted), hue kept */
+  --accent: #eae2e3; /* Visual.bg iris 15% over base */
+  --accent-foreground: #464261; /* Normal.fg text (no Visual.fg) */
+  --destructive: #9d4f66; /* DiagnosticError.fg love — lightness adjusted (3.50:1 → 4.68:1 on background / card), hue kept */
+  --border: #9893a5; /* FloatBorder.fg muted */
+  --input: #9893a5; /* FloatBorder.fg muted */
+  --ring: #56949f; /* Title.fg foam */
+  --chart-1: #56949f; /* terminal_color_4 (blue) foam */
+  --chart-2: #286983; /* terminal_color_2 (green) pine */
+  --chart-3: #ea9d34; /* terminal_color_3 (yellow) gold */
+  --chart-4: #907aa9; /* terminal_color_5 (magenta) iris */
+  --chart-5: #d7827e; /* terminal_color_6 (cyan) rose */
+  --chart-6: #b4637a; /* terminal_color_1 (red) love (the theme has no orange) */
+  --sidebar: #fffaf3; /* StatusLine.bg surface */
+  --sidebar-foreground: #736f8d; /* StatusLine.fg subtle — lightness adjusted (4.23:1 → 4.61:1 on sidebar), hue kept */
+  --sidebar-primary: #56949f; /* = primary */
+  --sidebar-primary-foreground: #26221d; /* = primary-foreground */
+  --sidebar-accent: #eae2e3; /* = accent */
+  --sidebar-accent-foreground: #464261; /* = accent-foreground */
+  --sidebar-border: #9893a5; /* WinSeparator.fg muted */
+  --sidebar-ring: #56949f; /* = ring */
+}
+
+/*
+ * Tokyo Dark — tiagovla/tokyodark.nvim @ 659aff3 (lua/tokyodark/palette.lua, lua/tokyodark/highlights.lua, lua/tokyodark/terminal.lua)
+ */
+[data-theme="tokyodark"] {
+  color-scheme: dark;
+  --background: #11121d; /* Normal.bg bg0 */
+  --foreground: #a0a8cd; /* Normal.fg fg */
+  --card: #1a1b2a; /* CursorLine.bg bg1 */
+  --card-foreground: #a0a8cd; /* Normal.fg fg */
+  --popover: #11121d; /* NormalFloat.bg bg0 */
+  --popover-foreground: #a0a8cd; /* NormalFloat.fg fg */
+  --primary: #d7a65f; /* Title.fg yellow */
+  --primary-foreground: #11121d; /* Normal.bg bg0 */
+  --secondary: #1a1b2a; /* CursorLine.bg bg1 */
+  --secondary-foreground: #a0a8cd; /* Normal.fg fg */
+  --muted: #1a1b2a; /* CursorLine.bg bg1 */
+  --muted-foreground: #80868e; /* Comment.fg bg4/grey (StatusLine.fg is foreground) — lightness adjusted (2.09:1 → 4.63:1 on background / card / muted), hue kept */
+  --accent: #212234; /* Visual.bg bg2 */
+  --accent-foreground: #a0a8cd; /* Normal.fg fg (no Visual.fg) */
+  --destructive: #ee6d85; /* ErrorMsg.fg red (no DiagnosticError.fg) */
+  --border: #4a5057; /* FloatBorder.fg bg4/grey */
+  --input: #4a5057; /* FloatBorder.fg bg4/grey */
+  --ring: #d7a65f; /* Title.fg yellow */
+  --chart-1: #7199ee; /* terminal_color_4 (blue) blue */
+  --chart-2: #95c561; /* terminal_color_2 (green) green */
+  --chart-3: #d7a65f; /* terminal_color_3 (yellow) yellow */
+  --chart-4: #a485dd; /* terminal_color_5 (magenta) purple */
+  --chart-5: #38a89d; /* terminal_color_6 (cyan) cyan */
+  --chart-6: #f6955b; /* the theme's orange, orange (no orange in the terminal) */
+  --sidebar: #212234; /* StatusLine.bg bg2 */
+  --sidebar-foreground: #a0a8cd; /* StatusLine.fg fg */
+  --sidebar-primary: #d7a65f; /* = primary */
+  --sidebar-primary-foreground: #11121d; /* = primary-foreground */
+  --sidebar-accent: #212234; /* = accent */
+  --sidebar-accent-foreground: #a0a8cd; /* = accent-foreground */
+  --sidebar-border: #282c34; /* WinSeparator.fg bg5 */
+  --sidebar-ring: #d7a65f; /* = ring */
 }

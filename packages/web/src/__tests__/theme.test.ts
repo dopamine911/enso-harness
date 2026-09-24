@@ -1,7 +1,15 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { DEFAULT_THEME, readSavedTheme, THEME_STORAGE_KEY, THEMES } from '../theme.ts'
+import {
+  applyTheme,
+  DEFAULT_THEME,
+  readSavedTheme,
+  saveTheme,
+  THEME_SCHEME_STORAGE_KEY,
+  THEME_STORAGE_KEY,
+  THEMES,
+} from '../theme.ts'
 
 /**
  * The colour themes (`theme.ts`): what a browser shows for what it saved, and the three places
@@ -51,8 +59,40 @@ test('every theme has a stylesheet block, and each defines every variable the de
   expect(new Set(blocks)).toEqual(new Set(THEMES.map((theme) => theme.id)))
 })
 
-// The pre-paint script is inline, so it cannot import the key: it spells it, and this holds the spelling.
-test("index.html's pre-paint script reads the key the settings dialog saves under", () => {
+// A light theme's block must say `color-scheme: light` (native controls, scrollbars), and the
+// page must drop the `dark` class for it — or every `dark:` variant paints a light theme dark.
+test("every theme block states its theme's colour scheme", () => {
+  for (const theme of THEMES)
+    expect({
+      theme: theme.id,
+      scheme: /color-scheme:\s*(\w+)/.exec(blockOf(`[data-theme="${theme.id}"]`))?.[1],
+    }).toEqual({
+      theme: theme.id,
+      scheme: theme.scheme,
+    })
+})
+
+test('applying a theme sets data-theme and the `dark` class by its scheme; saving keeps the scheme beside it', () => {
+  const classes = new Set(['dark'])
+  const root = {
+    dataset: {} as DOMStringMap,
+    classList: { toggle: (name: string, on: boolean) => (on ? classes.add(name) : classes.delete(name)) },
+  } as unknown as HTMLElement
+  applyTheme('catppuccin-latte', root)
+  expect([root.dataset.theme, classes.has('dark')]).toEqual(['catppuccin-latte', false])
+  applyTheme('nord', root)
+  expect([root.dataset.theme, classes.has('dark')]).toEqual(['nord', true])
+  const saved = new Map<string, string>()
+  saveTheme('rose-pine-dawn', { setItem: (key: string, value: string) => saved.set(key, value) })
+  expect(Object.fromEntries(saved)).toEqual({
+    [THEME_STORAGE_KEY]: 'rose-pine-dawn',
+    [THEME_SCHEME_STORAGE_KEY]: 'light',
+  })
+})
+
+// The pre-paint script is inline, so it cannot import the keys: it spells them, and this holds the spelling.
+test("index.html's pre-paint script reads the keys the settings dialog saves under", () => {
   const html = readFileSync(join(WEB, 'index.html'), 'utf8')
   expect(html).toContain(`localStorage.getItem('${THEME_STORAGE_KEY}')`)
+  expect(html).toContain(`localStorage.getItem('${THEME_SCHEME_STORAGE_KEY}') === 'light'`)
 })

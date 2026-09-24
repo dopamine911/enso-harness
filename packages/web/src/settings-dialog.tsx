@@ -10,8 +10,16 @@ import {
   DialogTrigger,
 } from './components/ui/dialog.tsx'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from './components/ui/field.tsx'
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from './components/ui/select.tsx'
-import { applyTheme, isThemeId, readSavedTheme, saveTheme, THEMES, type ThemeId } from './theme.ts'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from './components/ui/select.tsx'
+import { applyTheme, isThemeId, readSavedTheme, saveTheme, type ThemeId, themesByFamily } from './theme.ts'
 
 /**
  * The page's settings (the header's gear): today its colour theme. A choice applies at once and
@@ -59,14 +67,17 @@ export function SettingsDialog(): React.ReactNode {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectGroup>
-                  {THEMES.map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      <ThemeSwatch theme={option.id} />
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
+                {themesByFamily().map(({ family, themes }) => (
+                  <SelectGroup key={family}>
+                    <SelectLabel>{family}</SelectLabel>
+                    {themes.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        <ThemeSwatch theme={option.id} />
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                ))}
               </SelectContent>
             </Select>
             <FieldDescription>applies at once, to every thread on this page</FieldDescription>
