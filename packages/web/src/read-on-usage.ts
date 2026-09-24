@@ -10,12 +10,16 @@ import { latestWins } from './thread-debug.tsx'
  * dependency. Two reads can be in flight (a turn lands while the first is out); only the latest
  * one issued is shown.
  *
- * `read` must be stable — a module-level function — or every render would subscribe again.
+ * `read` must be stable — a module-level function, or memoised — or every render would subscribe
+ * again. A CHANGE of `read` is a new question (the Context Browser asks for another request): the
+ * outcome goes back to `reading` until it is answered, so a failure of the last question is not
+ * shown as this one's.
  */
 export function useReadOnUsage<Outcome>(read: (threadId: string) => Promise<Outcome>, reading: Outcome): Outcome {
   const stores = useThreadStores()
   const [outcome, setOutcome] = useState<Outcome>(reading)
   useEffect(() => {
+    setOutcome(reading)
     let mounted = true
     const readLatest = latestWins(() => read(stores.threadId))
     const refresh = (): void => {
@@ -29,6 +33,6 @@ export function useReadOnUsage<Outcome>(read: (threadId: string) => Promise<Outc
       mounted = false
       unsubscribe()
     }
-  }, [stores, read])
+  }, [stores, read, reading])
   return outcome
 }

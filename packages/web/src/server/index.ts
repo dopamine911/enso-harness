@@ -548,7 +548,10 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     response: ServerResponse,
   ): Promise<void> {
     const segment = THREAD_CONTEXT_REQUEST_ROUTE.exec(request.url ?? '')?.[2]
-    const which: number | 'next' = segment === 'next' || segment === undefined ? 'next' : Number(segment)
+    // The dispatcher matched this same url, so a segment is always here — and were it not, the
+    // answer is "no such request", never the next one in its place.
+    if (segment === undefined) return analysisResponder(async () => undefined)(threadId, response)
+    const which: number | 'next' = segment === 'next' ? 'next' : Number(segment)
     return analysisResponder((id: string) => contextRequest(id, which))(threadId, response)
   }
 

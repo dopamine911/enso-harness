@@ -24,8 +24,9 @@ import { EnsoContextUsage } from './thread-runtime.ts'
  * - `tools`: the tool definitions the system messages declare;
  * - `user`: prompts, and a user's `!` command with its output;
  * - `injected`: what the harness added beyond the conversation — the sections `project_context`,
- *   `skills`, `addendum` and any an extension declares, later system messages, an extension's
- *   custom messages, compaction and branch summaries;
+ *   `skills`, `addendum` and any an extension declares (in the leading prompt or patched in by a
+ *   later system message, which pi folds into the one prompt it sends), an extension's custom
+ *   messages, compaction and branch summaries;
  * - `assistant`: replies — text, thinking, tool calls;
  * - `toolResults`: what the tools returned.
  *
@@ -133,8 +134,8 @@ export const EnsoContextRequest = Type.Object(
 export type EnsoContextRequest = Static<typeof EnsoContextRequest>
 
 /**
- * How many additions a brief lists before it counts the rest — a compaction makes every kept
- * entry new again, and the brief is three lines, not a transcript.
+ * How many additions a brief lists before it counts the rest — the brief is three lines, not a
+ * transcript.
  *
  * @group Thread context
  */
@@ -178,7 +179,7 @@ export const EnsoContextEvent = Type.Object(
   {
     /**
      * This event, unique on the branch: its entry's id — or, for a section the leading prompt
-     * injected, that section's element key (one entry holds every section).
+     * injected, that id with the section's element key (one entry holds every section).
      */
     key: Type.String(),
     kind: EnsoContextEventKind,

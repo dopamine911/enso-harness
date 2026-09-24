@@ -1,4 +1,5 @@
 import type { EnsoContextMakeup } from '@enso/core'
+import { COMPACT } from './stats-table.tsx'
 import { CATEGORY_COLOR, CATEGORY_LABEL, CONTEXT_CATEGORIES, shareOf, totalOf } from './thread-context-analysis.ts'
 
 /**
@@ -8,7 +9,6 @@ import { CATEGORY_COLOR, CATEGORY_LABEL, CONTEXT_CATEGORIES, shareOf, totalOf } 
 
 // ── formats ──────────────────────────────────────────────────────────────────────────────────
 
-export const COMPACT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
 export const PERCENT = new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 0 })
 
 /** An estimate: `≈15.9k`. */
@@ -117,5 +117,36 @@ export function MakeupLegend({
         </div>
       ))}
     </dl>
+  )
+}
+
+/** One of a few, as pressed buttons — dsh's `Step | Turn` and `Total | Delta` pills; every card's toggle. */
+export function Choice<Value extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string
+  value: Value
+  options: ReadonlyArray<readonly [Value, string]>
+  onChange: (value: Value) => void
+}): React.ReactNode {
+  return (
+    <fieldset aria-label={label} className="inline-flex rounded-md bg-muted p-0.5 text-xs">
+      {options.map(([option, text]) => (
+        <button
+          key={option}
+          type="button"
+          aria-pressed={option === value}
+          className={
+            option === value ? 'rounded bg-background px-2 py-0.5 text-foreground' : 'px-2 py-0.5 text-muted-foreground'
+          }
+          onClick={() => onChange(option)}
+        >
+          {text}
+        </button>
+      ))}
+    </fieldset>
   )
 }

@@ -17,12 +17,22 @@ import { contentToText } from './map-events.ts'
  * definition, a message, a tool result — and the prices the makeup sums, so the trend's bars and
  * the browser's rows are one computation, not two that could drift.
  *
- * A system message is several elements: its instructions, each section, each tool it declares.
- * The LEADING one is the prompt — its instructions and pi's own sections (`preamble`, `tools`,
- * `rules`, `docs`, `cwd`, pi's `buildSystemPromptSections`) are `system`, every other section
- * `injected`; a later one changes the prompt from that point on, so all of its text is `injected`.
- * Tool definitions are `tools` either way. Each element is priced as pi prices text, characters
- * over four rounded up; every other message is ONE element, priced by pi's `estimateTokens`.
+ * ⚠ THE SYSTEM PROMPT IS WHAT pi SENDS, FOLDED. A later system message is a DELTA, not an
+ * addition: pi writes one whenever the prompt changes (`agent-session.js`
+ * `_preparePromptAndToolLoadout` → `diffSystemPromptSections`), and pi-ai replays every system
+ * message into ONE head before the request (`getCurrentSystemMessage`, `utils/transcript.js`):
+ * content appended, a section patched by name (`null` deletes it), `toolsRemoved` then
+ * `toolsAdded` by name. That head is what every model here receives — mid-conversation system
+ * messages are off unless a model's compat says otherwise (`supportsMidConvoSystemMessages`,
+ * default false; none of ours sets it). So `foldSystem` makes the same head, and its elements
+ * are keyed by NAME (`system:section:<name>`), never by the entry that carried them: a
+ * compaction re-issues the folded prompt under its own entry (`session-manager.js`
+ * `appendCompaction`), and a prompt that did not move must not read as entered and left.
+ *
+ * The head's elements: its instructions (`system`), each section — pi's own (`preamble`,
+ * `tools`, `rules`, `docs`, `cwd`, `buildSystemPromptSections`) `system`, any other `injected` —
+ * and each tool definition (`tools`). Each is priced as pi prices text, characters over four
+ * rounded up; every other message is ONE element, priced by pi's `estimateTokens`.
  */
 
 // pi-coding-agent does not re-export pi-agent-core's `AgentMessage`; the projection's entry type,
@@ -34,8 +44,8 @@ type SystemTool = NonNullable<SystemMessage['toolsAdded']>[number]
 /** What an element is made of, before it is described. */
 type ItemSource =
   | { readonly kind: 'message'; readonly message: ContextMessage }
-  | { readonly kind: 'instructions'; readonly text: string; readonly later: boolean }
-  | { readonly kind: 'section'; readonly name: string; readonly text: string; readonly later: boolean }
+  | { readonly kind: 'instructions'; readonly text: string }
+  | { readonly kind: 'section'; readonly name: string; readonly text: string }
   | { readonly kind: 'tool'; readonly tool: SystemTool }
 
 /** One element, priced: enough for the makeup; `describeItem` makes it a browser row. */
@@ -67,56 +77,122 @@ const REPLY_MAX = 120
 const tokensOf = (characters: number): number => Math.ceil(characters / 4)
 
 /** The first line of `text`, clipped — a row and a brief line are one line. */
-export function firstLine(text: string, maximum: number = LABEL_MAX): string {
+function firstLine(text: string, maximum: number = LABEL_MAX): string {
   const line = (text.split('\n').find((candidate) => candidate.trim().length > 0) ?? '').trim()
   return line.length > maximum ? `${line.slice(0, maximum - 1)}…` : line
 }
 
-function systemItems(message: SystemMessage, leading: boolean, key: string): ContextItem[] {
-  const items: ContextItem[] = []
-  const instructions = contentToText(message.content)
-  if (instructions.length > 0) {
-    items.push({
-      key: `${key}:instructions`,
-      category: leading ? 'system' : 'injected',
-      tokens: tokensOf(instructions.length),
-      source: { kind: 'instructions', text: instructions, later: !leading },
-    })
+/** The key every element of the folded system prompt starts with — the brief's "system prompt" line opens them all. */
+export const SYSTEM_KEY = 'system'
+
+/** A system message as the fold reads it: the message, and when its entry was stored. */
+export interface SystemSource {
+  readonly message: SystemMessage
+  readonly at: string
+}
+
+/** A folded element, and when the message that last set it was stored. */
+export interface SystemItem {
+  readonly item: ContextItem
+  readonly at: string
+}
+
+/** The system messages of a projection's entries, in order — the fold's input. */
+export function systemSources(entries: readonly ProjectedSessionEntry[]): SystemSource[] {
+  return entries.flatMap(({ sourceEntry, messages }) =>
+    messages.flatMap((message) => (message.role === 'system' ? [{ message, at: sourceEntry.timestamp }] : [])),
+  )
+}
+
+/** The head pi sends, replayed: every text it appends, each section and tool by name, with when each was last set. */
+interface ReplayedSystem {
+  readonly instructions: string[]
+  instructionsAt: string
+  readonly sections: Map<string, { text: string; at: string }>
+  readonly tools: Map<string, { tool: SystemTool; at: string }>
+}
+
+/** One system message applied to the replay, as `getCurrentSystemMessage` applies it. */
+function replay(replayed: ReplayedSystem, { message, at }: SystemSource): void {
+  const text = contentToText(message.content)
+  if (text.length > 0) {
+    replayed.instructions.push(text)
+    replayed.instructionsAt = at
   }
   for (const [sectionName, section] of Object.entries(message.sections ?? {})) {
-    if (section === null) continue
-    items.push({
-      key: `${key}:section:${sectionName}`,
-      category: leading && BASE_SECTIONS[sectionName] === true ? 'system' : 'injected',
-      tokens: tokensOf(section.length),
-      source: { kind: 'section', name: sectionName, text: section, later: !leading },
+    if (section === null) replayed.sections.delete(sectionName)
+    else replayed.sections.set(sectionName, { text: section, at })
+  }
+  for (const tool of message.toolsRemoved ?? []) replayed.tools.delete(tool.name)
+  for (const tool of message.toolsAdded ?? []) replayed.tools.set(tool.name, { tool, at })
+}
+
+/** A folded text element: priced as pi prices text. */
+function textItem(key: string, category: EnsoContextCategory, source: ItemSource & { text: string }): ContextItem {
+  return { key: `${SYSTEM_KEY}:${key}`, category, tokens: tokensOf(source.text.length), source }
+}
+
+/**
+ * Every system message replayed into the one head pi sends (header): content appended, a section
+ * set or deleted by name, a tool removed or set by name — each element keyed by what it is.
+ */
+export function foldSystem(sources: readonly SystemSource[]): SystemItem[] {
+  const replayed: ReplayedSystem = { instructions: [], instructionsAt: '', sections: new Map(), tools: new Map() }
+  for (const source of sources) replay(replayed, source)
+  const folded: SystemItem[] = []
+  if (replayed.instructions.length > 0) {
+    const text = replayed.instructions.join('\n\n')
+    folded.push({
+      item: textItem('instructions', 'system', { kind: 'instructions', text }),
+      at: replayed.instructionsAt,
     })
   }
-  for (const tool of message.toolsAdded ?? []) {
-    items.push({
-      key: `${key}:tool:${tool.name}`,
+  for (const [sectionName, { text, at }] of replayed.sections) {
+    const category = BASE_SECTIONS[sectionName] === true ? 'system' : 'injected'
+    folded.push({
+      item: textItem(`section:${sectionName}`, category, { kind: 'section', name: sectionName, text }),
+      at,
+    })
+  }
+  for (const [toolName, { tool, at }] of replayed.tools) {
+    const item: ContextItem = {
+      key: `${SYSTEM_KEY}:tool:${toolName}`,
       category: 'tools',
       tokens: tokensOf(JSON.stringify(tool).length),
       source: { kind: 'tool', tool },
-    })
+    }
+    folded.push({ item, at })
   }
-  return items
+  return folded
 }
 
-/** An entry's elements, in order; the first system message among them leads when `leading`. */
-export function contextItems(projected: ProjectedSessionEntry, leading: boolean): ContextItem[] {
+/** A folded element's content, to tell one that changed from one that stayed. */
+function systemText(source: ItemSource): string {
+  if (source.kind === 'tool') return JSON.stringify(source.tool)
+  return source.kind === 'message' ? '' : source.text
+}
+
+/** Whether `folded` holds this element unchanged — the same key, the same content. */
+export function heldUnchanged(folded: readonly SystemItem[], contextItem: ContextItem): boolean {
+  const held = folded.find((candidate) => candidate.item.key === contextItem.key)
+  return held !== undefined && systemText(held.item.source) === systemText(contextItem.source)
+}
+
+/** A folded element as one line: the brief's "In" row, a request's "left" list. */
+export function systemLine(contextItem: ContextItem): EnsoContextAddition {
+  const { key, category, source } = contextItem
+  if (source.kind === 'tool') return { category, label: `tool ${source.tool.name}`, key }
+  return { category, label: source.kind === 'section' ? `system: ${source.name}` : 'system: instructions', key }
+}
+
+/** An entry's elements but its system messages, in order — those are the fold's (header). */
+export function contextItems(projected: ProjectedSessionEntry): ContextItem[] {
   const items: ContextItem[] = []
-  let first = leading
   for (const [messageIndex, message] of projected.messages.entries()) {
-    const key = `${projected.sourceEntry.id}#${messageIndex}`
-    if (message.role === 'system') {
-      items.push(...systemItems(message, first, key))
-      first = false
-      continue
-    }
     const category = CATEGORY_OF_ROLE[message.role]
-    if (category !== undefined)
-      items.push({ key, category, tokens: estimateTokens(message), source: { kind: 'message', message } })
+    if (category === undefined) continue
+    const key = `${projected.sourceEntry.id}#${messageIndex}`
+    items.push({ key, category, tokens: estimateTokens(message), source: { kind: 'message', message } })
   }
   return items
 }
@@ -152,10 +228,15 @@ export function noteCalls(message: ContextMessage, calls: CallIndex): void {
   }
 }
 
+/** A reply's first line of text, clipped; empty when it wrote none — the brief's "Reply" row. */
+export function replyText(message: Extract<ContextMessage, { role: 'assistant' }>): string {
+  const text = message.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n')
+  return firstLine(text, REPLY_MAX)
+}
+
 /** A reply's first line of text; failing that, the tools it called. */
 function replyLine(message: Extract<ContextMessage, { role: 'assistant' }>): string {
-  const text = message.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n')
-  const line = firstLine(text, REPLY_MAX)
+  const line = replyText(message)
   if (line !== '') return line
   const calls = message.content.flatMap((part) => (part.type === 'toolCall' ? [part.name] : []))
   return calls.length === 0 ? '(thinking)' : `calls ${calls.join(', ')}`
@@ -166,18 +247,11 @@ function replyLine(message: Extract<ContextMessage, { role: 'assistant' }>): str
  * request's "left" list. A tool result is named by its call's subject (`bash ls -la`), as the
  * transcript's step row names it.
  */
-export function messageLine(
-  message: ContextMessage,
-  leading: boolean,
-  calls: CallIndex,
-  key: string,
-): EnsoContextAddition {
+export function messageLine(message: ContextMessage, calls: CallIndex, key: string): EnsoContextAddition {
   switch (message.role) {
-    case 'system': {
-      const sections = Object.keys(message.sections ?? {})
-      const label = leading ? 'system prompt' : `system: ${sections.join(', ') || 'instructions'}`
-      return { category: leading ? 'system' : 'injected', label, key }
-    }
+    // A system message is the fold's (header), never a line of its own; named for completeness.
+    case 'system':
+      return { category: 'system', label: 'system prompt', key }
     case 'user':
       return { category: 'user', label: firstLine(contentToText(message.content)), key }
     case 'bashExecution':
@@ -252,8 +326,6 @@ function messageBody(message: ContextMessage, calls: CallIndex): EnsoContextBody
     case 'compactionSummary':
     case 'branchSummary':
       return { kind: 'text', text: message.summary, images: [] }
-    case 'system':
-      return { kind: 'text', text: contentToText(message.content), images: [] }
     default:
       return { kind: 'text', ...textAndImages(message.content) }
   }
@@ -268,7 +340,7 @@ export function describeItem(item: ContextItem, calls: CallIndex): Omit<EnsoCont
         key,
         category,
         tokens,
-        label: source.later ? 'system: instructions' : 'instructions',
+        label: 'instructions',
         body: { kind: 'text', text: source.text, images: [] },
       }
     case 'section':
@@ -276,7 +348,7 @@ export function describeItem(item: ContextItem, calls: CallIndex): Omit<EnsoCont
         key,
         category,
         tokens,
-        label: source.later ? `system: ${source.name}` : source.name,
+        label: source.name,
         body: { kind: 'text', text: source.text, images: [] },
       }
     case 'tool':
@@ -297,7 +369,7 @@ export function describeItem(item: ContextItem, calls: CallIndex): Omit<EnsoCont
         key,
         category,
         tokens,
-        label: messageLine(source.message, false, calls, key).label,
+        label: messageLine(source.message, calls, key).label,
         body: messageBody(source.message, calls),
       }
   }

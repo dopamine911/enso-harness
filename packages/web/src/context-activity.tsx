@@ -2,7 +2,7 @@ import type { EnsoContextEvent, EnsoContextEventKind, EnsoFileOperation } from '
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
 import { useState } from 'react'
 import type { ContextBrowserFocus, ContextBrowserRequest } from './context-browser.tsx'
-import { Card, changeText, timeText } from './context-parts.tsx'
+import { Card, Choice, changeText, timeText } from './context-parts.tsx'
 import { OptionSelect } from './option-select.tsx'
 import { displayPath, type FileSummary, filesUpTo } from './thread-context-analysis.ts'
 import { toggleMember } from './toggle-member.ts'
@@ -269,19 +269,7 @@ export function FileActivity({
       }
     >
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-        <fieldset aria-label="files shown" className="inline-flex gap-1">
-          {filters.map(([kind, label]) => (
-            <button
-              key={kind}
-              type="button"
-              aria-pressed={filter === kind}
-              className={`rounded px-1.5 py-0.5 ${filter === kind ? 'bg-muted text-foreground' : 'text-muted-foreground'}`}
-              onClick={() => setFilter(kind)}
-            >
-              {label}
-            </button>
-          ))}
-        </fieldset>
+        <Choice label="files shown" value={filter} options={filters} onChange={setFilter} />
         <input
           type="search"
           aria-label="filter files by path"

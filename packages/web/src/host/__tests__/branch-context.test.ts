@@ -181,14 +181,24 @@ test("a request's elements sum to its bar's makeup, each entered since the reque
 })
 
 // `left` is against the request before — which held neither its own reply nor anything after it.
-test('after a compaction, what the summary replaced is listed as left; a turn the branch lacks has no detail', () => {
+// A compaction re-issues the SAME folded prompt under its own entry: not entered, not left.
+test('after a compaction, what the summary replaced is listed as left and the re-issued prompt is neither', () => {
   const branch = threadWithACompaction().getBranch()
-  expect(branchRequestDetail(branch, 3)?.left.map((gone) => gone.label)).toEqual([
-    'system prompt',
-    'list files',
-    'calls bash',
-    'bash ls -la',
-    'reminder',
+  const third = branchRequestDetail(branch, 3)
+  expect(third?.left.map((gone) => gone.label)).toEqual(['list files', 'calls bash', 'bash ls -la', 'reminder'])
+  expect(
+    third?.elements
+      .filter((element) => ['system', 'tools'].includes(element.category) || element.label === 'project_context')
+      .map((element) => [element.label, element.entered]),
+  ).toEqual([
+    ['preamble', false],
+    ['tools', false],
+    ['project_context', false],
+    ['bash', false],
+  ])
+  expect(branchContext(branch).requests[2]?.brief.added.map((addition) => addition.label)).toEqual([
+    'compaction summary',
+    'again',
   ])
   expect(
     branchRequestDetail(branch, 'next')
@@ -196,4 +206,40 @@ test('after a compaction, what the summary replaced is listed as left; a turn th
       .map((element) => element.label),
   ).toEqual(['done'])
   expect(branchRequestDetail(branch, 9)).toBeUndefined()
+})
+
+// A later system message is a DELTA pi folds into one head (pi-ai `getCurrentSystemMessage`):
+// a section replaced by name, one deleted by `null`, a tool removed — counted as pi sends them.
+test('a later system message patches the prompt: a section replaced counts once, a deleted one and a removed tool retire', () => {
+  const session = SessionManager.inMemory(tmpdir())
+  session.appendMessage(systemPrompt())
+  session.appendMessage({ role: 'user', content: 'go', timestamp: Date.now() })
+  session.appendMessage(assistant([{ type: 'text', text: 'ok' }]))
+  session.appendMessage({
+    role: 'system',
+    content: '',
+    sections: { project_context: 'b'.repeat(20), tools: null },
+    toolsRemoved: [{ name: 'bash' }],
+    timestamp: Date.now(),
+  } as never)
+  session.appendMessage({ role: 'user', content: 'again', timestamp: Date.now() })
+  session.appendMessage(assistant([{ type: 'text', text: 'done' }]))
+  const branch = session.getBranch()
+  const { requests, events } = branchContext(branch)
+  expect(requests[1]?.estimated).toMatchObject({ system: tokens(40), tools: 0, injected: tokens(20) })
+  // The brief names what changed in the prompt, not the delta's entry.
+  expect(requests[1]?.brief.added.map((addition) => addition.label)).toEqual(['system: project_context', 'again'])
+  const second = branchRequestDetail(branch, 2)
+  expect(
+    second?.elements
+      .filter((element) => element.key.startsWith('system:'))
+      .map((element) => [element.label, element.entered]),
+  ).toEqual([
+    ['preamble', false],
+    ['project_context', true],
+  ])
+  expect(second?.left.map((gone) => gone.label)).toEqual(['system: tools', 'tool bash'])
+  // The delta shrank the prompt: its event says so, signed.
+  const delta = events.find((event) => event.label.startsWith('system:'))
+  expect(delta?.tokens).toBe(tokens(20) - tokens(80) - tokens(40) - tokens(JSON.stringify(TOOL).length))
 })

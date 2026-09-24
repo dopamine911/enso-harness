@@ -2,7 +2,7 @@ import { afterAll, afterEach, expect, test } from 'bun:test'
 import type { EnsoContextRequest, EnsoContextRequestDetail } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot } from 'react-dom/client'
-import { ContextBrowser } from '../context-browser.tsx'
+import { ContextBrowser, type ContextBrowserFocus, type ContextBrowserRequest } from '../context-browser.tsx'
 import { ThreadStoresContext } from '../store.ts'
 import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
@@ -165,4 +165,93 @@ test('a re-read keeps the reader where they are: a focused row they closed stays
   } finally {
     Element.prototype.scrollIntoView = scrollIntoView
   }
+})
+
+const waitUntil = async (ready: () => boolean): Promise<void> => {
+  const deadline = Date.now() + 2000
+  while (!ready() && Date.now() < deadline) await flush(() => new Promise((resolve) => setTimeout(resolve, 20)))
+}
+
+// The trend picks a turn — every category closed — and then a file operation focuses a row of
+// that same turn: the row mounts a render after the focus arrives, and must still be scrolled to.
+test('a focus that arrives on an open request whose category is closed opens it and scrolls to the row', async () => {
+  const stores = mintThread()
+  globalThis.fetch = ((_input: string | URL | Request): Promise<Response> =>
+    Promise.resolve(Response.json({ ...DETAIL, threadId: stores.threadId }))) as typeof fetch
+  const scrolled: Element[] = []
+  const scrollIntoView = Element.prototype.scrollIntoView
+  Element.prototype.scrollIntoView = function recordScroll(this: Element): void {
+    scrolled.push(this)
+  }
+  try {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    const render = (focus: ContextBrowserFocus | undefined): Promise<void> =>
+      flush(async () => {
+        root.render(
+          <ThreadStoresContext.Provider value={stores}>
+            <ContextBrowser
+              requests={[REQUEST]}
+              next={MAKEUP}
+              request={2}
+              onRequest={(): void => undefined}
+              focus={focus}
+            />
+          </ThreadStoresContext.Provider>,
+        )
+      })
+    const category = (): HTMLButtonElement | undefined =>
+      [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')].find((button) =>
+        button.textContent?.includes('tool results'),
+      )
+    await render(undefined)
+    await waitUntil(() => category() !== undefined)
+    expect(category()?.getAttribute('aria-expanded')).toBe('false')
+    await render({ request: 2, key: 'e4#0' })
+    await waitUntil(() => scrolled.length > 0)
+    expect(category()?.getAttribute('aria-expanded')).toBe('true')
+    expect(scrolled).toHaveLength(1)
+    expect(scrolled[0]?.textContent).toContain('bash ls -la')
+    await flush(async () => root.unmount())
+    container.remove()
+  } finally {
+    Element.prototype.scrollIntoView = scrollIntoView
+  }
+})
+
+// A read that failed is that request's answer, not the next one's: asking for another request
+// reads again, and says so, until it is answered.
+test("a failed read is not shown as another request's while that one is read", async () => {
+  const stores = mintThread()
+  const pending = Promise.withResolvers<Response>()
+  globalThis.fetch = ((input: string | URL | Request): Promise<Response> =>
+    String(input).endsWith('/context/2')
+      ? Promise.resolve(new Response('boom', { status: 500 }))
+      : pending.promise) as typeof fetch
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  const render = (request: ContextBrowserRequest): Promise<void> =>
+    flush(async () => {
+      root.render(
+        <ThreadStoresContext.Provider value={stores}>
+          <ContextBrowser
+            requests={[REQUEST]}
+            next={MAKEUP}
+            request={request}
+            onRequest={(): void => undefined}
+            focus={undefined}
+          />
+        </ThreadStoresContext.Provider>,
+      )
+    })
+  await render(2)
+  await waitUntil(() => container.textContent?.includes('no detail') === true)
+  await render('next')
+  expect(container.textContent).not.toContain('no detail')
+  expect(container.textContent).toContain("reading the request's context…")
+  pending.resolve(Response.json({ ...DETAIL, request: 'next', threadId: stores.threadId }))
+  await flush(async () => root.unmount())
+  container.remove()
 })

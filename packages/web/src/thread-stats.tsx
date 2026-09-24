@@ -15,7 +15,7 @@ import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } f
 import { OptionSelect } from './option-select.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
-import { costText, countText, durationsText } from './stats-table.tsx'
+import { COMPACT, costText, countText, durationsText } from './stats-table.tsx'
 import {
   type CallMetric,
   callValue,
@@ -62,7 +62,6 @@ const readThreadStats = (threadId: string): Promise<StatsOutcome> =>
 
 const PERCENT = new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 1 })
 const ONE_DECIMAL = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 })
-const COMPACT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
 
 /** Characters, not tokens: `1.2k chars`. */
 function charsText(characters: number): string {

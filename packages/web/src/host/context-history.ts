@@ -1,7 +1,7 @@
 import { posix } from 'node:path'
 import type { SessionEntry } from '@earendil-works/pi-coding-agent'
 import type { EnsoContextEvent, EnsoFileOperation } from '@enso/core'
-import { type ContextItem, contextItems, makeupOf } from './context-elements.ts'
+import { type ContextItem, foldSystem, makeupOf } from './context-elements.ts'
 import { contentToText } from './map-events.ts'
 import { PICC_MODES_CUSTOM_TYPE, readPiccPersistedMode } from './permission-mode-adapter.ts'
 
@@ -17,11 +17,6 @@ import { PICC_MODES_CUSTOM_TYPE, readPiccPersistedMode } from './permission-mode
 
 /** A context's estimated total at a leaf — `branch-context.ts` builds it with pi's projection. */
 export type ContextTotalAt = (leafId: string | null) => number
-
-/** pi's own sections of a leading prompt; any other is an injection (`context-elements.ts`). */
-const BASE_SECTIONS: Readonly<Record<string, true>> = Object.fromEntries(
-  ['preamble', 'tools', 'rules', 'docs', 'cwd'].map((sectionName) => [sectionName, true]),
-)
 
 interface EventWalk {
   readonly events: EnsoContextEvent[]
@@ -49,11 +44,16 @@ function push(
 const changeAt = (walk: EventWalk, sessionEntry: SessionEntry): number =>
   walk.totalAt(sessionEntry.id) - walk.totalAt(sessionEntry.parentId)
 
-/** A system message: the prompt's injected sections, once; a later one as the change it made. */
+/**
+ * A system message: the prompt's injected sections, once; a later one as the change it made —
+ * signed, because a later system message is a delta pi folds into the prompt
+ * (`context-elements.ts`), and one that deletes a section or removes a tool shrinks it.
+ */
 function systemEvents(walk: EventWalk, sessionEntry: Extract<SessionEntry, { type: 'message' }>): void {
-  if (sessionEntry.message.role !== 'system') return
+  const { message } = sessionEntry
+  if (message.role !== 'system') return
   if (walk.sawPrompt) {
-    const sections = Object.keys(sessionEntry.message.sections ?? {})
+    const sections = Object.keys(message.sections ?? {})
     push(walk, sessionEntry, {
       kind: 'inject',
       label: `system: ${sections.join(', ') || 'instructions'}`,
@@ -62,11 +62,15 @@ function systemEvents(walk: EventWalk, sessionEntry: Extract<SessionEntry, { typ
     return
   }
   walk.sawPrompt = true
-  for (const promptItem of contextItems({ sourceEntry: sessionEntry, messages: [sessionEntry.message] }, true)) {
-    const sectionName = promptItem.key.split(':section:')[1]
-    if (sectionName !== undefined && BASE_SECTIONS[sectionName] !== true) {
-      push(walk, sessionEntry, { kind: 'inject', label: sectionName, tokens: promptItem.tokens }, promptItem.key)
-    }
+  // The fold decides what a section is — pi's own, or injected — so this file does not again.
+  for (const { item } of foldSystem([{ message, at: sessionEntry.timestamp }])) {
+    if (item.source.kind !== 'section' || item.category !== 'injected') continue
+    push(
+      walk,
+      sessionEntry,
+      { kind: 'inject', label: item.source.name, tokens: item.tokens },
+      `${sessionEntry.id}:${item.key}`,
+    )
   }
 }
 
@@ -267,11 +271,14 @@ function grepFile(line: string): string | undefined {
  * `tools/find.js`); a notice line (`[…]`) is not a file. `ls` lists, and names nothing it
  * matched.
  */
+/** find's answer when nothing matched (`tools/find.js`) — a sentence, not a path; grep's fails `grepFile`. */
+const FIND_NO_MATCHES = 'No files found matching pattern'
+
 function searchHits(tool: string, result: ToolResultFacts | undefined): Map<string, number> {
   const hits = new Map<string, number>()
   if (result === undefined || result.isError || tool === 'ls') return hits
   for (const line of result.text.split('\n')) {
-    if (line.trim() === '' || line.startsWith('[')) continue
+    if (line.trim() === '' || line.startsWith('[') || line.trim() === FIND_NO_MATCHES) continue
     const file = tool === 'grep' ? grepFile(line) : line.trim()
     if (file !== undefined) hits.set(file, (hits.get(file) ?? 0) + 1)
   }

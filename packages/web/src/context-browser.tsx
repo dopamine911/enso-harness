@@ -10,11 +10,12 @@ import {
 import { TextPart, type TextPartProps } from '@tanstack/ai-react/ui'
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Card, COMPACT, changeText, estimateText, MakeupBar, PERCENT, timeText } from './context-parts.tsx'
+import { Card, Choice, changeText, estimateText, MakeupBar, PERCENT, timeText } from './context-parts.tsx'
 import { MarkdownImage } from './markdown-image.tsx'
 import { OptionSelect } from './option-select.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
+import { COMPACT } from './stats-table.tsx'
 import {
   CATEGORY_COLOR,
   CATEGORY_LABEL,
@@ -38,6 +39,12 @@ import { toggleMember } from './toggle-member.ts'
  */
 
 export type ContextBrowserRequest = number | 'next'
+
+type TextView = 'raw' | 'markdown'
+const TEXT_VIEWS: ReadonlyArray<readonly [TextView, string]> = [
+  ['raw', 'raw'],
+  ['markdown', 'markdown'],
+]
 
 /** A row to open on arrival: a request and an element key (or the prefix of an element's keys). */
 export interface ContextBrowserFocus {
@@ -96,19 +103,12 @@ function TextBlock({ text, muted = false }: { text: string; muted?: boolean }): 
     <div className="rounded-md border">
       <div className="flex items-center justify-between border-b px-2 py-1 text-muted-foreground">
         <span>{lines === 1 ? '1 line' : `${lines} lines`}</span>
-        <fieldset aria-label="show the text" className="inline-flex rounded bg-muted p-0.5">
-          {(['raw', 'markdown'] as const).map((choice) => (
-            <button
-              key={choice}
-              type="button"
-              aria-pressed={(choice === 'markdown') === markdown}
-              className={(choice === 'markdown') === markdown ? 'rounded bg-background px-1.5' : 'px-1.5'}
-              onClick={() => setMarkdown(choice === 'markdown')}
-            >
-              {choice}
-            </button>
-          ))}
-        </fieldset>
+        <Choice
+          label="show the text"
+          value={markdown ? 'markdown' : 'raw'}
+          options={TEXT_VIEWS}
+          onChange={(view: TextView) => setMarkdown(view === 'markdown')}
+        />
       </div>
       {markdown ? (
         <div className="prose prose-sm dark:prose-invert max-w-none p-2">
@@ -284,9 +284,17 @@ function useFocusedRows(focused: EnsoContextElement | undefined): {
     setOpen(true)
     setOpenKeys((keys) => new Set([...keys, focusedKey]))
   }, [focusedKey])
+  // The row is in the DOM only once its category is open, which a focus arriving on a closed
+  // category makes true a render LATER — so the scroll waits for the row, once per focus: a
+  // category the reader closes and reopens is not a new focus.
+  const scrolledFor = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (focusedKey !== undefined) focusRow.current?.scrollIntoView({ block: 'start' })
-  }, [focusedKey])
+    if (focusedKey === undefined || scrolledFor.current === focusedKey || !open) return
+    const row = focusRow.current
+    if (row === null) return
+    row.scrollIntoView({ block: 'start' })
+    scrolledFor.current = focusedKey
+  }, [focusedKey, open])
   const toggle = (key: string): void => setOpenKeys((keys) => toggleMember(keys, key))
   return { open, setOpen, openKeys, toggle, focusRow }
 }
@@ -519,7 +527,8 @@ export function ContextBrowser({
   )
   const outcome = useReadOnUsage<DetailOutcome>(read, ANALYSIS_READING)
   const { makeup, before, change } = openedMakeup(requests, next, request)
-  // The payload says which request it is; until the one asked for arrives, the last one shows.
+  // The payload says which request it is: until the one asked for arrives, none shows — the
+  // status says it is reading.
   const detail = outcome.kind === 'read' && outcome.payload.request === request ? outcome.payload : undefined
   return (
     <Card

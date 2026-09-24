@@ -204,13 +204,14 @@ test('an edit counts its footprint in every argument shape pi runs', () => {
   ])
 })
 
-test("a grep's hits: a file as the searched path is that file; a context line is not a match; a path may hold spaces", () => {
+test("a search's hits: a file as grep's path is that file; a context line is no match; a path may hold spaces; find's 'none' is none", () => {
   const session = SessionManager.inMemory(tmpdir())
   session.appendMessage({ role: 'user', content: 'search', timestamp: now() })
   session.appendMessage(
     assistant([
       call('f1', 'grep', { pattern: 'TODO', path: 'src/foo.ts' }),
       call('c1', 'grep', { pattern: 'TODO', path: 'src', context: 1 }),
+      call('n1', 'find', { pattern: '*.zig', path: 'src' }),
     ]),
   )
   // pi names a match by its basename when the searched path is a file (grep.js `formatPath`).
@@ -220,12 +221,15 @@ test("a grep's hits: a file as the searched path is that file; a context line is
     toolName: 'grep',
     text: 'a.ts-2- const url = "host:8080: up"\na.ts:3: TODO\n--\nmy dir/b.ts:4: TODO: see a.ts-1- x',
   })
+  // find answers "nothing" with a sentence (tools/find.js), not a file.
+  result(session, { toolCallId: 'n1', toolName: 'find', text: 'No files found matching pattern' })
   const { files } = branchContext(session.getBranch())
   expect(files.map((operation) => [operation.path, operation.hits])).toEqual([
     ['src/foo.ts', 2],
     ['src', 2],
     ['src/a.ts', 1],
     ['src/my dir/b.ts', 1],
+    ['src', 0],
   ])
 })
 

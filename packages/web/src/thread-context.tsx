@@ -6,10 +6,10 @@ import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } f
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
 import { ContextEvents, FileActivity } from './context-activity.tsx'
 import { ContextBrowser, type ContextBrowserFocus, type ContextBrowserRequest } from './context-browser.tsx'
-import { Card, COMPACT, estimateText, MakeupBar, MakeupLegend, PERCENT, timeText } from './context-parts.tsx'
+import { Card, Choice, estimateText, MakeupBar, MakeupLegend, PERCENT, timeText } from './context-parts.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
-import { countText } from './stats-table.tsx'
+import { COMPACT, countText } from './stats-table.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import {
   CATEGORY_COLOR,
@@ -103,37 +103,6 @@ function trendPoints(
     const values = mode === 'total' ? request.estimated : changeOf(request.estimated, bars[index - 1]?.estimated)
     return { ...values, label: barLabel(request, granularity), request }
   })
-}
-
-/** Two-way choice as pressed buttons, dsh's `Step | Turn` and `Total | Delta` pills. */
-function Choice<Value extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string
-  value: Value
-  options: ReadonlyArray<readonly [Value, string]>
-  onChange: (value: Value) => void
-}): React.ReactNode {
-  return (
-    <fieldset aria-label={label} className="inline-flex rounded-md bg-muted p-0.5 text-xs">
-      {options.map(([option, text]) => (
-        <button
-          key={option}
-          type="button"
-          aria-pressed={option === value}
-          className={
-            option === value ? 'rounded bg-background px-2 py-0.5 text-foreground' : 'px-2 py-0.5 text-muted-foreground'
-          }
-          onClick={() => onChange(option)}
-        >
-          {text}
-        </button>
-      ))}
-    </fieldset>
-  )
 }
 
 const GRANULARITIES: ReadonlyArray<readonly [TrendGranularity, string]> = [
