@@ -218,12 +218,7 @@ function FileRow({
       {open ? (
         <ol className="pb-1 pl-6">
           {summary.operations.map((operation) => (
-            <OperationRow
-              key={`${operation.resultKey ?? operation.at}-${operation.kind}-${operation.subject}`}
-              operation={operation}
-              requestCount={requestCount}
-              onOpen={onOpen}
-            />
+            <OperationRow key={operation.key} operation={operation} requestCount={requestCount} onOpen={onOpen} />
           ))}
         </ol>
       ) : null}

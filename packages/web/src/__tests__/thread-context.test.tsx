@@ -81,6 +81,7 @@ test('estimates are written ≈, the provider count is named, and what is not kn
 })
 
 const operation = (turn: number, overrides: Partial<EnsoFileOperation>): EnsoFileOperation => ({
+  key: `e${turn}#0.0`,
   path: 'src/a.ts',
   kind: 'read',
   tool: 'read',

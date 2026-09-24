@@ -3,7 +3,7 @@ import type { SessionEntry } from '@earendil-works/pi-coding-agent'
 import type { EnsoContextEvent, EnsoFileOperation } from '@enso/core'
 import { type ContextItem, contextItems, makeupOf } from './context-elements.ts'
 import { contentToText } from './map-events.ts'
-import { PICC_MODES_CUSTOM_TYPE } from './permission-mode-adapter.ts'
+import { PICC_MODES_CUSTOM_TYPE, readPiccPersistedMode } from './permission-mode-adapter.ts'
 
 /**
  * What happened to a thread's context, and to its files (#361 phase 4) — dsh-context's Context
@@ -32,7 +32,7 @@ interface EventWalk {
   sawPrompt: boolean
   model: string | undefined
   thinking: string | undefined
-  mode: unknown
+  mode: string | undefined
 }
 
 function push(
@@ -91,9 +91,10 @@ function settingEvents(walk: EventWalk, sessionEntry: SessionEntry): void {
       push(walk, sessionEntry, { kind: 'switch', label: `thinking ${level}`, tokens: 0 })
     walk.thinking = level
   } else if (sessionEntry.type === 'custom' && sessionEntry.customType === PICC_MODES_CUSTOM_TYPE) {
-    const mode = (sessionEntry.data as { mode?: unknown } | undefined)?.mode
-    if (!began && walk.mode !== mode)
-      push(walk, sessionEntry, { kind: 'mode', label: `mode ${String(mode)}`, tokens: 0 })
+    // picc's own reader: an entry of this type without a string mode names no mode, and is skipped.
+    const mode = readPiccPersistedMode(sessionEntry)
+    if (mode === undefined) return
+    if (!began && walk.mode !== mode) push(walk, sessionEntry, { kind: 'mode', label: `mode ${mode}`, tokens: 0 })
     walk.mode = mode
   }
 }
@@ -170,6 +171,8 @@ interface ToolResultFacts {
 }
 
 interface CallFacts {
+  /** The call's place: `<reply entry id>#<part>`. */
+  readonly key: string
   readonly tool: string
   readonly input: Record<string, unknown>
   readonly turn: number
@@ -177,7 +180,7 @@ interface CallFacts {
   readonly result: ToolResultFacts | undefined
 }
 
-type Operation = Omit<EnsoFileOperation, 'tool' | 'turn' | 'at' | 'isError' | 'resultKey'>
+type Operation = Omit<EnsoFileOperation, 'key' | 'tool' | 'turn' | 'at' | 'isError' | 'resultKey'>
 
 const blank = { subject: '', added: 0, removed: 0, hits: 0, image: false }
 
@@ -280,10 +283,17 @@ function callsOf(branch: readonly SessionEntry[]): CallFacts[] {
   for (const sessionEntry of branch) {
     if (sessionEntry.type !== 'message' || sessionEntry.message.role !== 'assistant') continue
     turn += 1
-    for (const part of sessionEntry.message.content) {
+    for (const [partIndex, part] of sessionEntry.message.content.entries()) {
       if (part.type !== 'toolCall') continue
       const input = typeof part.arguments === 'object' && part.arguments !== null ? part.arguments : {}
-      calls.push({ tool: part.name, input, turn, at: sessionEntry.timestamp, result: results.get(part.id) })
+      calls.push({
+        key: `${sessionEntry.id}#${partIndex}`,
+        tool: part.name,
+        input,
+        turn,
+        at: sessionEntry.timestamp,
+        result: results.get(part.id),
+      })
     }
   }
   return calls
@@ -292,7 +302,8 @@ function callsOf(branch: readonly SessionEntry[]): CallFacts[] {
 /** Every file operation on the branch, oldest first. */
 export function fileOperations(branch: readonly SessionEntry[]): EnsoFileOperation[] {
   return callsOf(branch).flatMap((call) =>
-    operationsOf(call).map((fileOperation) => ({
+    operationsOf(call).map((fileOperation, operationIndex) => ({
+      key: `${call.key}.${operationIndex}`,
       ...fileOperation,
       tool: call.tool,
       turn: call.turn,

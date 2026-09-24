@@ -103,6 +103,27 @@ test('events: an injected prompt section, a custom message, a prune and a compac
   expect(compaction?.tokens).toBe(tokens(20) - replaced)
 })
 
+test('settings: a thinking level or mode set after the first request is a switch; a malformed mode entry is no event', () => {
+  const session = SessionManager.inMemory(tmpdir())
+  // Where the thread began: set before the first request, so not events.
+  session.appendThinkingLevelChange('medium')
+  session.appendCustomEntry('modes', { mode: 'default' })
+  session.appendMessage({ role: 'user', content: 'go', timestamp: now() })
+  session.appendMessage(assistant([{ type: 'text', text: 'ok' }]))
+  session.appendThinkingLevelChange('high')
+  // The same level again changes nothing.
+  session.appendThinkingLevelChange('high')
+  session.appendCustomEntry('modes', { mode: 'plan' })
+  // `modes` written by something that is not picc's shape names no mode: skipped, not `mode [object Object]`.
+  session.appendCustomEntry('modes', { mode: { nested: true } })
+  session.appendCustomEntry('modes', { mode: 'plan' })
+  const { events } = branchContext(session.getBranch())
+  expect(events.map((event) => [event.kind, event.label, event.turn, event.tokens])).toEqual([
+    ['switch', 'thinking high', 2, 0],
+    ['mode', 'mode plan', 2, 0],
+  ])
+})
+
 test('files: reads with their range, writes and edits with their footprint, searches with each matched file', () => {
   const session = SessionManager.inMemory(tmpdir())
   session.appendMessage({ role: 'user', content: 'work', timestamp: now() })
@@ -114,6 +135,7 @@ test('files: reads with their range, writes and edits with their footprint, sear
       call('g1', 'grep', { pattern: 'TODO', path: 'src' }),
       call('b1', 'bash', { command: 'ls' }),
       call('i1', 'read', { path: 'shot.png' }),
+      call('i2', 'read', { path: 'shot.png' }),
     ]),
   )
   const read = result(session, { toolCallId: 'r1', toolName: 'read', text: 'text' })
@@ -145,8 +167,14 @@ test('files: reads with their range, writes and edits with their footprint, sear
     ['src/a.ts', 'search', 'TODO', 0, 0, 2, false, false],
     ['src/c.ts', 'search', 'TODO', 0, 0, 1, false, false],
     ['shot.png', 'read', '', 0, 0, 0, false, true],
+    ['shot.png', 'read', '', 0, 0, 0, false, true],
   ])
   expect(files[0]).toMatchObject({ tool: 'read', turn: 1, resultKey: `${read}#0` })
-  // The last read has no result yet: nothing to open in the browser.
+  // The last reads have no result yet: nothing to open in the browser.
   expect(files.at(-1)?.resultKey).toBeUndefined()
+  // Two identical calls in one reply, neither answered (an aborted run leaves them so): the same
+  // path, kind, subject and time — and still two operations, each its own key.
+  const [first, second] = files.slice(-2)
+  expect(first?.key).not.toBe(second?.key)
+  expect(new Set(files.map((operation) => operation.key)).size).toBe(files.length)
 })

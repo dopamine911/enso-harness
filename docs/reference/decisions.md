@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 253.**
+**Decision headers: 254.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -91,6 +91,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/chat-screen.test.tsx` | `#27`, `#49` | #49, first pass: the dialog components had live receipts (#27, the e2e smoke) and no unit render, so chat-screen.tsx sat at ~14% lines. |
 | `packages/web/src/__tests__/command-palette.test.tsx` | `#338` | ⚠ A DOM before react-dom/client evaluates, and again if another mounting file has already released the one this module registered; `dom-environment.ts` has the measurement. |
 | `packages/web/src/__tests__/commands-connection.test.ts` | `#338` | The palette's read (#338): the route's answer validated, a non-2xx said with its status and body, a payload the schema refuses said as such. |
+| `packages/web/src/__tests__/context-activity.test.tsx` | `#361` | #361 phase 4: where Context Events and File Activity send the reader — an event to the first request it reached, an operation to its tool result in the request after its turn, and either to the next request when the branch has none that far yet. |
 | `packages/web/src/__tests__/context-browser.test.tsx` | `#361` | #361 phase 3: the Context Browser, mounted — it reads the request it is asked for, and a focus (a brief's line) opens that element's category and row, where its content is. |
 | `packages/web/src/__tests__/context-dialog.test.tsx` | `#361` | #361 phase 5: `/context`'s dialog, mounted — it reads nothing while closed, and once open shows the composition and the browser, not the tab's other cards (those stay on the Context tab). |
 | `packages/web/src/__tests__/custom-event-router.test.ts` | `#53`, `#90`, `#162` | #53 S1.3: the CUSTOM-chunk router was an inline closure no test reached — renaming a chunk, dropping the notify-type allowlist, or swapping the two `apply*` calls all left the suite green. |

@@ -201,6 +201,12 @@ export type EnsoContextEvent = Static<typeof EnsoContextEvent>
  */
 export const EnsoFileOperation = Type.Object(
   {
+    /**
+     * This operation, unique on the branch: the call's place (`<reply entry id>#<part>`) and the
+     * operation's within the call (a search is one per matched file). Present with or without a
+     * result — a call an aborted run left unanswered still has one.
+     */
+    key: Type.String(),
     /** As the call named it — relative to the thread's tree, or absolute. */
     path: Type.String(),
     kind: Type.Union([Type.Literal('read'), Type.Literal('write'), Type.Literal('search')]),
