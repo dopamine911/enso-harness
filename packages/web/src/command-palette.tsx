@@ -44,7 +44,9 @@ import {
  * Escape or Backspace on an empty filter returns to the root — and picking one is
  * `onHost(name, optionId)`. A `select` row (`/model`) closes the palette and hands the row to
  * `onOpenModelDialog`: the owner renders the `ModelSelector` dialog (the second step Claude Code's
- * `Switch model…` opens), so the palette holds no dialog state. An `action` row — and any kind
+ * `Switch model…` opens), so the palette holds no dialog state. A `view` row (`/context`, #361)
+ * closes the palette and hands the row to `onOpenView`: the owner opens that view over the chat,
+ * and nothing is posted. An `action` row — and any kind
  * this palette does not know, since a newer host may declare one — is `onHost(name)`. Every
  * callback fires from the menu's `onCloseAutoFocus`, AFTER the menu has closed: the menu's focus
  * trap would otherwise pull focus straight back from the textarea the owner just focused, and
@@ -95,6 +97,8 @@ export interface CommandPaletteProps {
   readonly onHost: (commandName: string, optionId?: string) => void
   /** A `select` host row was chosen: the owner opens the model dialog for it; the palette has closed. */
   readonly onOpenModelDialog: (command: RuntimeCommand) => void
+  /** A `view` host row was chosen: the owner opens the view it names; the palette has closed. */
+  readonly onOpenView: (command: RuntimeCommand) => void
   /** The composer is not taking input (disconnected); the `/` button follows it. */
   readonly disabled?: boolean
 }
@@ -123,6 +127,7 @@ type Choice =
   | { readonly kind: 'insert'; readonly command: RuntimeCommand }
   | { readonly kind: 'host'; readonly command: RuntimeCommand; readonly optionId?: string }
   | { readonly kind: 'dialog'; readonly command: RuntimeCommand }
+  | { readonly kind: 'view'; readonly command: RuntimeCommand }
 
 /** The row's current option, by `value`, for the dim label on the right; the raw `value` if no option carries it. */
 function currentLabel(command: RuntimeCommand): string | undefined {
@@ -148,6 +153,47 @@ function emptyText(commands: EnsoThreadCommands): typeof NO_MATCH | typeof NO_TH
   return commands.source === 'none' ? NO_THREAD_YET : NO_COMMANDS
 }
 
+/** THE SELECTION RULE (header), as what the chosen row does once the menu has closed; undefined for a `level` row, which opens its page instead. */
+function choiceFor(command: RuntimeCommand): Choice | undefined {
+  if (command.source === 'extension') return { kind: 'run', command }
+  if (command.source !== 'host') return { kind: 'insert', command }
+  switch (command.kind) {
+    case 'level':
+      return undefined
+    case 'select':
+    case 'flow':
+      return { kind: 'dialog', command }
+    case 'view':
+      return { kind: 'view', command }
+    default:
+      return { kind: 'host', command }
+  }
+}
+
+type ChoiceHandlers = Pick<CommandPaletteProps, 'onRun' | 'onInsert' | 'onHost' | 'onOpenModelDialog' | 'onOpenView'>
+
+/** Hands a choice to the owner's callback for it. */
+function deliver(chosen: Choice, handlers: ChoiceHandlers): void {
+  switch (chosen.kind) {
+    case 'run':
+      handlers.onRun(chosen.command.name)
+      break
+    case 'insert':
+      handlers.onInsert(chosen.command.name)
+      break
+    case 'host':
+      if (chosen.optionId === undefined) handlers.onHost(chosen.command.name)
+      else handlers.onHost(chosen.command.name, chosen.optionId)
+      break
+    case 'dialog':
+      handlers.onOpenModelDialog(chosen.command)
+      break
+    case 'view':
+      handlers.onOpenView(chosen.command)
+      break
+  }
+}
+
 export function CommandPalette({
   threadId,
   fetch: fetchImpl,
@@ -155,6 +201,7 @@ export function CommandPalette({
   onInsert,
   onHost,
   onOpenModelDialog,
+  onOpenView,
   disabled = false,
 }: CommandPaletteProps): React.ReactNode {
   const [open, setOpen] = useState(false)
@@ -208,11 +255,9 @@ export function CommandPalette({
   }
 
   const choose = (command: RuntimeCommand): void => {
-    if (command.source === 'extension') finish({ kind: 'run', command })
-    else if (command.source !== 'host') finish({ kind: 'insert', command })
-    else if (command.kind === 'level') enterPage(command)
-    else if (command.kind === 'select' || command.kind === 'flow') finish({ kind: 'dialog', command })
-    else finish({ kind: 'host', command })
+    const choice = choiceFor(command)
+    if (choice === undefined) enterPage(command)
+    else finish(choice)
   }
 
   const deliverChoice = (event: Event): void => {
@@ -221,21 +266,7 @@ export function CommandPalette({
     pending.current = undefined
     // The owner decides where focus goes next, not the menu's return-to-trigger.
     event.preventDefault()
-    switch (chosen.kind) {
-      case 'run':
-        onRun(chosen.command.name)
-        break
-      case 'insert':
-        onInsert(chosen.command.name)
-        break
-      case 'host':
-        if (chosen.optionId === undefined) onHost(chosen.command.name)
-        else onHost(chosen.command.name, chosen.optionId)
-        break
-      case 'dialog':
-        onOpenModelDialog(chosen.command)
-        break
-    }
+    deliver(chosen, { onRun, onInsert, onHost, onOpenModelDialog, onOpenView })
   }
 
   // A page's way back (header): Escape stays inside the menu — prevented here, so the

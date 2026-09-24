@@ -3,6 +3,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Cell, type MouseHandlerDataParam, ReferenceLine, XAxis, YAxis } from 'recharts'
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from './components/ui/chart.tsx'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
 import { ContextEvents, FileActivity } from './context-activity.tsx'
 import { ContextBrowser, type ContextBrowserFocus, type ContextBrowserRequest } from './context-browser.tsx'
 import { Card, COMPACT, estimateText, MakeupBar, MakeupLegend, PERCENT, timeText } from './context-parts.tsx'
@@ -445,16 +446,70 @@ function ContextCards({ context }: { context: EnsoThreadContext }): React.ReactN
   )
 }
 
-/** Pure view — the data arrives as props; the cards' choices are their own state. */
-export function ThreadContextView({ outcome }: { readonly outcome: ContextOutcome }): React.ReactNode {
+/** What a read of the context shows before it has one: reading, or why there is none. */
+function whenRead(outcome: ContextOutcome, show: (context: EnsoThreadContext) => React.ReactNode): React.ReactNode {
   if (outcome.kind === 'reading')
     return <p className="p-4 text-muted-foreground text-xs">reading the thread's context…</p>
   if (outcome.kind === 'failed')
     return <p className="p-4 text-muted-foreground text-xs">no context: {outcome.problem}</p>
-  return <ContextCards context={outcome.payload} />
+  return show(outcome.payload)
+}
+
+/** Pure view — the data arrives as props; the cards' choices are their own state. */
+export function ThreadContextView({ outcome }: { readonly outcome: ContextOutcome }): React.ReactNode {
+  return whenRead(outcome, (context: EnsoThreadContext) => <ContextCards context={context} />)
 }
 
 /** The Context view wired to its thread: read on open and whenever the thread's usage moves. */
 export function ThreadContextDrawer(): React.ReactNode {
   return <ThreadContextView outcome={useReadOnUsage<ContextOutcome>(readThreadContext, ANALYSIS_READING)} />
+}
+
+/** `/context`'s two cards: what the next request holds, and every request's elements. */
+function ContextComposition({ context }: { context: EnsoThreadContext }): React.ReactNode {
+  const [browserRequest, setBrowserRequest] = useState<ContextBrowserRequest>('next')
+  return (
+    <div className="grid min-w-0 grid-cols-1 gap-4">
+      <CurrentContext context={context} />
+      <ContextBrowser
+        requests={context.requests}
+        next={context.next}
+        request={browserRequest}
+        onRequest={setBrowserRequest}
+        focus={undefined}
+      />
+    </div>
+  )
+}
+
+/** The dialog's body: mounted only while the dialog is open, so the read happens then. */
+function ContextDialogBody(): React.ReactNode {
+  const outcome = useReadOnUsage<ContextOutcome>(readThreadContext, ANALYSIS_READING)
+  return whenRead(outcome, (context: EnsoThreadContext) => <ContextComposition context={context} />)
+}
+
+/**
+ * `/context` (#361 phase 5): the composition and the browser over the chat, where the question
+ * was asked — the Context tab holds the rest (trend, events, files). Same reads, same cards; the
+ * dialog adds nothing of its own.
+ */
+export function ThreadContextDialog({ open, onClose }: { open: boolean; onClose: () => void }): React.ReactNode {
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next: boolean): void => {
+        if (!next) onClose()
+      }}
+    >
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>Context</DialogTitle>
+          <DialogDescription>
+            what the next request is made of, and every request's elements · the Context tab has the rest
+          </DialogDescription>
+        </DialogHeader>
+        <ContextDialogBody />
+      </DialogContent>
+    </Dialog>
+  )
 }

@@ -141,6 +141,14 @@ export type EnsoContextRequest = Static<typeof EnsoContextRequest>
 export const ENSO_CONTEXT_ADDITIONS_SHOWN = 6
 
 /**
+ * The `view` host row that opens the Context view over the chat (#361 phase 5). One spelling:
+ * the host declares it, the page opens it by it.
+ *
+ * @group Thread context
+ */
+export const ENSO_CONTEXT_COMMAND = 'context'
+
+/**
  * dsh-context's event kinds, over pi's entries:
  * - `inject`: context the harness added — an injected prompt section at the start, a later
  *   system message, an extension's custom message, a branch summary;
