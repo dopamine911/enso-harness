@@ -191,7 +191,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/thread-url.ts` | `#95`, `#142` | The thread a page URL names (#142): `?thread=<id>`. |
 | `packages/web/src/threads-rail.tsx` | `#90`, `#95`, `#104`, `#278` | The threads rail (#90 PR 3): which conversation am I in, what else is live on this page, how do I start over. |
 | `packages/web/src/to-agui.ts` | `#18`, `#24`, `#112` | `EnsoObservation` → AG-UI `StreamChunk` (#24, #112). |
-| `packages/web/src/transcript-reveal.ts` | `#359` | From a point or a row in the stats drawer to the transcript row it describes (#359) — pi-livecraft's `onNavigate({ kind: 'turn' \| 'message' \| 'tool' })`, over our transcript. |
+| `packages/web/src/transcript-reveal.ts` | `#359`, `#360` | From a point or a row in the stats drawer to the transcript row it describes (#359) — pi-livecraft's `onNavigate({ kind: 'turn' \| 'message' \| 'tool' })`, over our transcript. |
 | `scripts/__tests__/enso-launch.test.ts` | `#221` | The terminal launcher's decisions (docs/flows/boot-and-launchers.md, stated gap: `enso.ts` had no test of its own). |
 | `scripts/__tests__/enso-logs.test.ts` | `#132` | The reader's own logic (#132, `bun run logs`): the flags, and what a line must be to print. |
 | `scripts/__tests__/pi-version-parity.test.ts` | `#69`, `#217` | THE TWO PI RESOLUTIONS, HELD TOGETHER (#217). |

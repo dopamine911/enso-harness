@@ -1,4 +1,4 @@
-import type { EnsoPromptStats, EnsoThreadStats } from '@enso/core'
+import type { EnsoPromptStats, EnsoThreadStats, EnsoTurnStats } from '@enso/core'
 
 /**
  * From a point or a row in the stats drawer to the transcript row it describes (#359) —
@@ -11,8 +11,11 @@ import type { EnsoPromptStats, EnsoThreadStats } from '@enso/core'
  *   - a tool call by its `toolCallId`, which every step row carries (`data-tool-call-id`);
  *   - a prompt by its place among the user bubbles when their count is the branch's, and by its
  *     text otherwise (`promptBubbleIndex`);
- *   - a turn by its first tool call; a turn that made none is its prompt's reply — pi ends a run
- *     on the turn that calls no tool, so that turn is the answer, drawn last before the next prompt.
+ *   - a turn by its first tool call; a turn that made none by its prompt's assistant bubbles — the
+ *     one at its place among the prompt's turns when there is a bubble per turn (a resumed thread),
+ *     else the last (a live run's one bubble). NOT simply the last: a failed turn pi retries stays
+ *     on the branch with no call (`_prepareRetry` keeps it in raw history), and the retry that
+ *     follows under the same prompt is the last bubble (PR #360 review).
  * What cannot be found is said by the drawer, never guessed at.
  */
 
@@ -96,17 +99,26 @@ function toolCallRow(root: ParentNode, toolCallId: string): Element | undefined 
   return root.querySelector(`[data-tool-call-id="${CSS.escape(toolCallId)}"]`) ?? undefined
 }
 
-/** The last assistant bubble after `prompt`'s bubble (before any, for prompt 0) and before the next. */
-function replyOf(root: ParentNode, stats: EnsoThreadStats, prompt: number): Element | undefined {
+/** The assistant bubbles after `prompt`'s bubble (from the top, for prompt 0) and before the next user bubble. */
+function assistantBubblesOf(root: ParentNode, stats: EnsoThreadStats, prompt: number): Element[] | undefined {
   const bubbles = [...root.querySelectorAll(BUBBLES)]
   const opening = prompt === 0 ? undefined : userBubbleOf(root, stats, prompt)
   if (prompt !== 0 && opening === undefined) return undefined
-  let reply: Element | undefined
-  for (const bubble of bubbles.slice(opening === undefined ? 0 : bubbles.indexOf(opening) + 1)) {
-    if (bubble.getAttribute('data-role') === 'user') break
-    reply = bubble
-  }
-  return reply
+  const after = bubbles.slice(opening === undefined ? 0 : bubbles.indexOf(opening) + 1)
+  const nextPrompt = after.findIndex((bubble) => bubble.getAttribute('data-role') === 'user')
+  return nextPrompt === -1 ? after : after.slice(0, nextPrompt)
+}
+
+/**
+ * A turn that made no call: its own bubble when the prompt has one per turn (resumed), else the
+ * prompt's last (live: one bubble holds every turn of the run).
+ */
+function turnBubbleOf(root: ParentNode, stats: EnsoThreadStats, turn: EnsoTurnStats): Element | undefined {
+  const replies = assistantBubblesOf(root, stats, turn.prompt)
+  if (replies === undefined) return undefined
+  const modelCalls = stats.turnStats.filter((candidate) => candidate.prompt === turn.prompt)
+  if (replies.length === modelCalls.length) return replies[modelCalls.indexOf(turn)]
+  return replies.at(-1)
 }
 
 /** The transcript element a target names, under `root` (one pane's conversation), or undefined. */
@@ -120,7 +132,7 @@ export function locateStatsTarget(root: ParentNode, stats: EnsoThreadStats, targ
       const turn = stats.turnStats.find((candidate) => candidate.turn === target.turn)
       if (turn === undefined) return undefined
       const firstCall = stats.callStats.find((call) => call.turn === target.turn)
-      return firstCall === undefined ? replyOf(root, stats, turn.prompt) : toolCallRow(root, firstCall.toolCallId)
+      return firstCall === undefined ? turnBubbleOf(root, stats, turn) : toolCallRow(root, firstCall.toolCallId)
     }
   }
 }

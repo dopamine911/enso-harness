@@ -125,3 +125,27 @@ test('a target the transcript does not draw is undefined, not the nearest row', 
   expect(locateStatsTarget(root, STATS, { kind: 'tool-call', toolCallId: 'compacted-away' })).toBeUndefined()
   expect(locateStatsTarget(root, STATS, { kind: 'turn', turn: 9 })).toBeUndefined()
 })
+
+// PR #360 review: a failed turn pi retries stays on the branch with no call (`_prepareRetry`
+// keeps it in raw history), and the retry follows under the SAME prompt. Resumed, each has its
+// own bubble, and the error turn must land on its own — the one a reader goes looking for.
+test('a retried error turn lands on its own bubble when there is one per turn, on the run bubble live', () => {
+  const retried: EnsoThreadStats = {
+    ...STATS,
+    turnStats: [{ ...turn(1, 1), stopReason: 'error' }, turn(2, 1)],
+    promptStats: [prompt(1, 'list the files')],
+    callStats: [],
+  }
+  const resumed = document.createElement('div')
+  resumed.innerHTML = `
+    <div data-role="user">list the files</div>
+    <div data-role="assistant" id="failed"></div>
+    <div data-role="assistant" id="retry">three files</div>`
+  expect(locateStatsTarget(resumed, retried, { kind: 'turn', turn: 1 })?.id).toBe('failed')
+  expect(locateStatsTarget(resumed, retried, { kind: 'turn', turn: 2 })?.id).toBe('retry')
+  const live = document.createElement('div')
+  live.innerHTML = `
+    <div data-role="user">list the files</div>
+    <div data-role="assistant" id="run">three files</div>`
+  expect(locateStatsTarget(live, retried, { kind: 'turn', turn: 1 })?.id).toBe('run')
+})

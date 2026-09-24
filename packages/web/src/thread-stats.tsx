@@ -192,7 +192,12 @@ function turnDot(onTurn: OnTurn): ((props: DotItemDotProps) => React.ReactNode) 
         tabIndex={0}
         aria-label={`turn ${point.turn}, ${costText(point.cost)} — show it in the transcript`}
         className="cursor-pointer outline-none focus-visible:stroke-foreground"
-        onClick={open}
+        // The chart's own `onClick` (`turnClick`) sits on recharts' wrapper, above this point, and
+        // names the same hovered turn: bubbling would open it twice (PR #360 review).
+        onClick={(event: React.MouseEvent<SVGCircleElement>): void => {
+          event.stopPropagation()
+          open()
+        }}
         onKeyDown={(event: React.KeyboardEvent<SVGCircleElement>): void => {
           if (event.key !== 'Enter' && event.key !== ' ') return
           event.preventDefault()
