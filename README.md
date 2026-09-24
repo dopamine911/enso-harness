@@ -1,11 +1,10 @@
 # Enso
 
-**Enso makes it safe to let a coding agent loose on your machine.**
+**Give agents room to work. Keep the receipts.**
 
-It is a package for [pi](https://github.com/earendil-works/pi), a small, excellent coding agent. pi
-runs the conversation: it talks to the model, calls tools, keeps sessions. Enso adds the part pi
-deliberately leaves out — a floor of rules about what the agent may actually *do* — plus a web app and
-a terminal launcher to work with.
+**Enso is an evidence-driven control plane for coding agents.** Built around
+[pi](https://github.com/earendil-works/pi), it makes the system behind an agent's work visible: what it
+knew, what it did, what changed, what was refused, and what evidence remains afterward.
 
 New here? Read this page, then [the architecture](docs/architecture.md). Everything else is linked
 from those two, and the whole set is browsable at
