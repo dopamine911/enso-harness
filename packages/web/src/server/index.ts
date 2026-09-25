@@ -461,18 +461,27 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
 
   /**
-   * The slash commands a thread can run (#338). Live: its runtime's own list. Not live: the
-   * list the last built session registered, or none — said as `source`, because looking must
-   * not build (#86) and a palette that quietly showed a stale list would be a palette that lies.
-   * A remembered list's host rows lose their `value` (#338 slice 2): this thread has no session
-   * and so no current model; the options are every session's. No record: this is the palette
-   * OPENING, and a reader opening a menu is not an event.
+   * The slash commands a thread can run (#338), from ITS session — built here if it is not live
+   * (#390). This route is asked only on a person's explicit act (the `/` palette opening, the model
+   * picker, a typed bare command), so it is not the look #86 forbids to build: inspection keeps
+   * `peek`. Before #390 it answered an unbuilt thread with the last build's list, or nothing after a
+   * restart, and `/login` could not run until something had been prompted. A build that fails
+   * answers as before — the last build's list, host rows without their `value` (#338 slice 2), or
+   * none — said as `source`, so the palette never shows a stale list as live. No record: a reader
+   * opening a menu is not an event.
    */
-  function respondWithThreadCommands(threadId: string, response: ServerResponse): void {
-    const live = threads.peek(threadId)
+  async function respondWithThreadCommands(threadId: string, response: ServerResponse): Promise<void> {
+    // Only the BUILD is caught (#392 review): a live session whose listing throws is a fault, and
+    // rejects to `answerOrFail` (500, an error record) — not a failed build answered from memory.
+    let thread: Awaited<ReturnType<typeof threads.ensure>> | undefined
+    try {
+      thread = await threads.ensure(threadId)
+    } catch (error) {
+      log.warn('the session for {threadId} could not be built for its commands: {error}', { threadId, error })
+    }
     const remembered = threads.rememberedCommands()
     let payload: EnsoThreadCommands = { threadId, commands: [], source: 'none' }
-    if (live !== undefined) payload = { threadId, commands: live.hosted.runtime.listCommands(), source: 'live' }
+    if (thread !== undefined) payload = { threadId, commands: thread.hosted.runtime.listCommands(), source: 'live' }
     else if (remembered !== undefined) {
       payload = { threadId, commands: withoutHostValues(remembered), source: 'remembered' }
     }

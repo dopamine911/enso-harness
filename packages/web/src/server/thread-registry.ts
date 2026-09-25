@@ -145,6 +145,14 @@ export interface ThreadRegistry {
    */
   peek(threadId: string): ThreadView | undefined
   /**
+   * The thread's hosted session, BUILT if it is not live (#390) — for a person's explicit ask
+   * (the `/` palette, the model picker, a typed command), never for inspection: `peek` stays the
+   * look that builds nothing (#86). Takes no lease: it does not wait for a run, does not mark the
+   * thread busy, does not count a generation. A thread it built idles out like a released one.
+   * A build failure is thrown, and leaves no entry behind, as `acquire`'s does.
+   */
+  ensure(threadId: string): Promise<ThreadView>
+  /**
    * The thread's `sent` tail if it is live — the ONE field the follow writer needs, per
    * frame. `peek` builds a whole `ThreadView` to hand it over, which is an object per
    * token for a field read (#285); the routes that want the view keep using `peek`.
@@ -488,18 +496,25 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     }
   }
 
+  /**
+   * The thread's live entry, built if it has none — ONE build per thread however many callers ask
+   * at once (`building`), shared by `acquire` and `ensure`.
+   */
+  async function entryOf(threadId: string): Promise<ThreadEntry> {
+    if (shutDown) throw new Error(`thread ${threadId}: the server has shut down`)
+    const live = threads.get(threadId)
+    if (live !== undefined) return live
+    let build = building.get(threadId)
+    if (build === undefined) {
+      build = buildThread(threadId).finally(() => building.delete(threadId))
+      building.set(threadId, build)
+    }
+    return build
+  }
+
   return {
     async acquire(threadId: string): Promise<ThreadLease> {
-      if (shutDown) throw new Error(`thread ${threadId}: the server has shut down`)
-      let thread = threads.get(threadId)
-      if (thread === undefined) {
-        let build = building.get(threadId)
-        if (build === undefined) {
-          build = buildThread(threadId).finally(() => building.delete(threadId))
-          building.set(threadId, build)
-        }
-        thread = await build
-      }
+      const thread = await entryOf(threadId)
       thread.idleTimer?.cancel()
       thread.idleTimer = undefined
       if (thread.abortInFlight !== undefined) {
@@ -512,6 +527,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
       publishStatus(threadId, thread)
       log.info(ENSO_LOG_EVENTS.runAcquired, { threadId, generation: thread.generation })
       return leaseOf(threadId, thread)
+    },
+    async ensure(threadId: string): Promise<ThreadView> {
+      const thread = await entryOf(threadId)
+      // Built for a look, not a run: nothing holds it, so it idles out like a released thread. A
+      // run that acquired it meanwhile holds it (busy) and cancels any timer set here.
+      if (!thread.busy && thread.idleTimer === undefined) {
+        thread.idleTimer = scheduleIdleDisposal(() => disposeThread(threadId, `${idleTimeoutMs}ms idle`), idleTimeoutMs)
+      }
+      return viewOf(threadId, thread)
     },
     announce(threadId: string, observation: EnsoObservation): void {
       const feed = feeds.get(threadId)

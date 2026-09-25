@@ -1123,8 +1123,8 @@ const chatComponents = {
       // row, it does what choosing that row in the palette does — `/login` opens the provider
       // picker — instead of reaching the transcript as a user message the server then refuses
       // ("the run failed", which outlived the login started next). Anything else, or a list that
-      // cannot be read, is sent exactly as before. ⚠ A server where no thread has run yet lists
-      // nothing (`source: 'none'`), so there the refusal remains (#390).
+      // cannot be read, is sent exactly as before. The lookup builds the thread's session if it is
+      // not live (#390), so this works as the first thing typed after a server restart.
       // The draft clears BEFORE the lookup (#389 review): the composer stays live during it, and a
       // second Enter on a draft still holding `/word` would route or send it twice. A send the
       // fallback refuses (disconnected) gives the words back, as a refused submit keeps them.

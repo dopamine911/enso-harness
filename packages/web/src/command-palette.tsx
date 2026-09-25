@@ -62,14 +62,14 @@ import {
  * gesture; what differs is what the server does with it (202: started, and the flow's questions
  * arrive as dialog cards), and that is the route's business, not the palette's.
  *
- * Empty states say WHICH empty: `source: 'none'` (no session built in this process yet) reads
- * "no thread has run yet — commands appear after the first prompt"; a live or remembered list
- * with zero rows reads "this session registers no commands"; a filter that matches nothing
- * reads "no command matches". `remembered` is a small footer note — the list is right for this
- * thread (every session builds it from the same sources under the same configuration) but it is
- * the last session's, and the reader should know this thread has no live session. Not "has not
- * run": the server cannot tell a thread that never ran from one that ran and idled out
- * (PR #343 review), and a sentence the server cannot back is a sentence the palette must not say.
+ * Empty states say WHICH empty. The server builds the thread's session when the palette asks
+ * (#390), so `live` is the normal answer; `none` and `remembered` now mean that build FAILED —
+ * `none` (nothing built in this process to fall back on) reads "the session could not start — no
+ * commands to offer; the server log says why", and `remembered` shows the last session's rows
+ * with a footer note that this thread's session could not start. A live list with zero rows
+ * reads "this session registers no commands"; a filter that matches nothing reads "no command
+ * matches". A sentence the server cannot back is a sentence the palette must not say (PR #343
+ * review) — before #390 these two said "no thread has run yet", which a restart made routine.
  *
  * ⚠ NO RADIX MENU ITEM MAY LIVE INSIDE THIS CONTENT. The dropdown's content feeds every printable
  * key pressed anywhere inside it to its typeahead (`@radix-ui/react-menu`, `MenuContent.onKeyDown`)
@@ -108,10 +108,10 @@ type PaletteState =
   | { readonly kind: 'loaded'; readonly commands: EnsoThreadCommands }
   | { readonly kind: 'failed'; readonly detail: string }
 
-const NO_THREAD_YET = 'no thread has run yet — commands appear after the first prompt'
+const NO_SESSION = 'the session could not start — no commands to offer; the server log says why'
 const NO_COMMANDS = 'this session registers no commands'
 const NO_MATCH = 'no command matches'
-const REMEMBERED_NOTE = 'from the last session — this thread has no live session'
+const REMEMBERED_NOTE = "from the last session — this thread's session could not start"
 
 /** One cmdk group per source, in the order the palette shows them — ours first: it is short, and the settings are what a chip points at. */
 const GROUPS: ReadonlyArray<{ readonly source: RuntimeCommand['source']; readonly heading: string }> = [
@@ -148,9 +148,9 @@ export function rankCommand(rowValue: string, search: string, keywords?: readonl
 }
 
 /** The sentence cmdk shows when no row is visible — which depends on WHY there is none. */
-function emptyText(commands: EnsoThreadCommands): typeof NO_MATCH | typeof NO_THREAD_YET | typeof NO_COMMANDS {
+function emptyText(commands: EnsoThreadCommands): typeof NO_MATCH | typeof NO_SESSION | typeof NO_COMMANDS {
   if (commands.commands.length > 0) return NO_MATCH
-  return commands.source === 'none' ? NO_THREAD_YET : NO_COMMANDS
+  return commands.source === 'none' ? NO_SESSION : NO_COMMANDS
 }
 
 /** THE SELECTION RULE (header), as what the chosen row does once the menu has closed; undefined for a `level` row, which opens its page instead. */
