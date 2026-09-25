@@ -184,10 +184,14 @@ const STREAMING_BEHAVIOR_OF: Record<EnsoPromptAdmission, NonNullable<PromptOptio
 /** The `ExtensionMode` we bind — `ctx.mode` as extensions see it. rpc is the truthful one: no terminal, a remote surface. */
 const EXTENSION_MODE_RPC = 'rpc'
 
-/** A login while it runs (#388): whose, and the page its flow announced — the code prompt links to it. */
+/**
+ * A login while it runs (#388): whose, the page its flow announced (the code prompt links to it),
+ * and the end of its questions — see `runLogin`.
+ */
 interface LoginInProgress {
   readonly providerName: string
   authUrl: string | undefined
+  readonly questions: AbortController
 }
 
 export interface AgentHostOptions {
@@ -709,7 +713,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       prompt: Parameters<Parameters<typeof session.modelRuntime.login>[2]['prompt']>[0],
       login: LoginInProgress,
     ): Promise<string> {
-      const signal = prompt.signal
+      // pi's own signal when it passed one, AND the login's: a question outlives neither (#389).
+      const signal =
+        prompt.signal === undefined ? login.questions.signal : AbortSignal.any([prompt.signal, login.questions.signal])
       let answer: string | undefined
       switch (prompt.type) {
         case 'secret':
@@ -776,7 +782,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     async function runLogin(providerId: string, authType: HostAuthType): Promise<void> {
       const providerName = providerNameOf(providerId)
       // The page the flow announces (`auth_url`) is remembered for the code prompt that follows it.
-      const login: LoginInProgress = { providerName, authUrl: undefined }
+      // ⚠ A LOGIN'S QUESTIONS END WITH IT (#389). A browser login races its local callback server
+      // against the pasted code; when the callback wins, pi withdraws the code prompt through the
+      // prompt's signal — but an extension provider's prompt carries none: pi-multi-account's
+      // bridge drops it (`index.ts:263-264`) and pi's composer asks with none
+      // (`provider-composer.js:173`). The login finished and its card stayed open, "a question is
+      // waiting". So every question is tied to the login too, and withdrawn once it settles.
+      const login: LoginInProgress = { providerName, authUrl: undefined, questions: new AbortController() }
       try {
         await session.modelRuntime.login(providerId, authType, {
           signal: flowsAbort.signal,
@@ -786,6 +798,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
             ui.uiContext.notify(authEventText(event, providerName), 'info')
           },
         })
+        // The credential is stored: the card goes now, not after the catalog refresh below.
+        login.questions.abort()
         // The credential IS stored past this line (PR #346 review): what follows can fail —
         // pi refusing the model, the catalog not refreshing — and is said as a warning, never
         // as a failed login that `/logout` would then contradict by listing the credential.
@@ -805,6 +819,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           ui.uiContext.notify(`Failed to log in to ${providerName}: ${reason}`, 'error')
         }
       } finally {
+        login.questions.abort()
         await refreshStoredCredentials()
         announceModelState()
       }

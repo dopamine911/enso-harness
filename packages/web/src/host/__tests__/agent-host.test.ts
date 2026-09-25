@@ -1200,3 +1200,65 @@ test('⚠ a browser login from the web: the URL in our words, and a code questio
   await settled.promise
   expect(lines().some((line) => line.startsWith('Logged in to Faux OAuth.'))).toBe(true)
 })
+
+/**
+ * A browser login that finishes BY ITS CALLBACK while its code question is still open — the live
+ * case from #389: pi's Codex login races a local callback server against the pasted code, and
+ * pi-multi-account's bridge (`index.ts:263-264`) and pi's composer (`provider-composer.js:173`)
+ * both drop the prompt's abort signal, so nothing withdraws the question when the callback wins.
+ */
+const callbackWinsProvider: InlineExtension = {
+  name: 'enso-host-faux-oauth-callback',
+  factory: (pi: ExtensionAPI) => {
+    pi.registerProvider('faux-callback', {
+      api: 'enso-faux',
+      baseUrl: 'http://faux.invalid',
+      models: [
+        {
+          id: 'faux-callback-1',
+          name: 'Faux Callback One',
+          reasoning: false,
+          input: ['text'],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 50_000,
+          maxTokens: 1000,
+        },
+      ],
+      oauth: {
+        name: 'Faux Callback',
+        login: async (callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> => {
+          callbacks.onAuth({ url: LOGIN_PAGE })
+          // Asked and never awaited: the callback below wins the race, as the browser redirect does.
+          void callbacks.onManualCodeInput?.().catch((): undefined => undefined)
+          await new Promise<void>((resolve) => setTimeout(resolve, 50))
+          return { access: 'from-callback', refresh: 'refresh', expires: Date.now() + 3_600_000 }
+        },
+        refreshToken: async (credentials: OAuthCredentials): Promise<OAuthCredentials> => credentials,
+        getApiKey: (credentials: OAuthCredentials): string => credentials.access,
+      },
+    })
+  },
+}
+
+// ⚠ #389 live: the login finished ("Logged in to …") and its "Finish logging in" card stayed open,
+// with the status bar saying a question was waiting. A login's questions end with the login.
+test('⚠ a login that finishes by its callback withdraws the code question it left open (#389)', async () => {
+  const loginAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-login-callback-'))
+  const host = createAgentHost({
+    cwd: repoRoot,
+    agentDir: loginAgentDir,
+    harnessPackageDir: harnessDir,
+    extensionFactories: [callbackWinsProvider],
+  })
+  const hosted = await host.createSession(crypto.randomUUID())
+  openSessions.push(hosted)
+  const withdrawn = untilObservation(hosted, (event) => event.kind === 'dialog-settled')
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.startHostFlow(
+    { name: 'login', value: 'faux-callback/oauth' },
+    { onAccepted: (): void => undefined, onRejected: settled.reject, onSettled: settled.resolve },
+  )
+  await settled.promise
+  expect(await withdrawn).toMatchObject({ kind: 'dialog-settled', outcome: 'aborted' })
+  expect(hosted.runtime.openDialogs()).toEqual([])
+})
