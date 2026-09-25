@@ -235,18 +235,18 @@ export interface EnsoExtensionUiContext {
 ## Who implements it, who consumes it
 
 **Implemented once**, by `createEnsoExtensionUiContext` in `packages/web/src/host/extension-ui-context.ts`
-(line 235). The host is the UI: it implements the interface extensions call and turns each call into
+(line 250). The host is the UI: it implements the interface extensions call and turns each call into
 the same record the mapper already consumed over the old transport (header lines 38–40). The four
 blocking methods — `select`, `confirm`, `input`, `editor` (lines 362–408) — go through one
-`awaitDialog` (line 309): mint an id, park the request in a pending map, emit the request, and block
+`awaitDialog` (line 319): mint an id, park the request in a pending map, emit the request, and block
 until an answer, a cancel, the caller's abort signal or its own timeout. Every path that stops the wait
 goes through `finish` (line 335), which deletes the pending entry, emits the settle record with its
-outcome (line 324) and resolves the extension with its value — `undefined` for `select`/`input`/
-`editor`, `false` for `confirm`, on every non-answer outcome (lines 297–298). That is why the settle
-observation exists at all: the runtime has no event for a question ending (lines 301–302).
-`agent-host.ts` binds one context per session (line 569) and delegates the runtime contract's
+outcome (line 339) and resolves the extension with its value — `undefined` for `select`/`input`/
+`editor`, `false` for `confirm`, on every non-answer outcome (lines 312–313). That is why the settle
+observation exists at all: the runtime has no event for a question ending (lines 316–317).
+`agent-host.ts` binds one context per session (line 581) and delegates the runtime contract's
 `answerDialog` and `openDialogs` to it (lines 951–956); `cancelAllDialogs` cancels every pending
-question at session teardown (line 536, called from `agent-host.ts:1031`), so teardown is a settle
+question at session teardown (line 547, called from `agent-host.ts:1079`), so teardown is a settle
 path too.
 
 **Consumed by the server.** `answerThreadDialog` in `packages/web/src/server/follow.ts` (line 364)

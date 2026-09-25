@@ -1124,15 +1124,18 @@ const chatComponents = {
       // picker — instead of reaching the transcript as a user message the server then refuses
       // ("the run failed", which outlived the login started next). Anything else, or a list that
       // cannot be read, is sent exactly as before. ⚠ A server where no thread has run yet lists
-      // nothing (`source: 'none'`), so there the refusal remains (#388 PR notes).
+      // nothing (`source: 'none'`), so there the refusal remains (#390).
+      // The draft clears BEFORE the lookup (#389 review): the composer stays live during it, and a
+      // second Enter on a draft still holding `/word` would route or send it twice. A send the
+      // fallback refuses (disconnected) gives the words back, as a refused submit keeps them.
       const submitTypedCommand = async (commandName: string, text: string): Promise<void> => {
+        setDraft('')
         const listed = await fetchThreadCommands(stores.threadId).catch((): undefined => undefined)
         const row = listed?.commands.find((command) => command.source === 'host' && command.name === commandName)
         if (row === undefined) {
-          if (send(text, [])) setDraft('')
+          if (!send(text, [])) setDraft(text)
           return
         }
-        setDraft('')
         const opened = runTypedHostCommand(row, paletteHandlers(host, runCommand, insertCommand))
         if (!opened)
           stores.notifications.push(`/${row.name} is a setting: choose a value from the / palette`, 'info', 'run')
