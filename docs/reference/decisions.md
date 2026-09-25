@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 265.**
+**Decision headers: 266.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -178,6 +178,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |
 | `packages/web/src/questionnaire-card.tsx` | `#12` | The agent's `ask_user` questionnaire as one card (#12): a tab per question, each option a row with its label and what choosing it means, an "Other" row for an answer in the user's own words, and one "Submit answers" once every question has one. |
 | `packages/web/src/read-on-usage.ts` | `#45`, `#361`, `#362` | A thread's route, read on mount and again whenever the thread's usage moves (#45, #361) — the Stats and Context views' one refresh rule. |
+| `packages/web/src/refused-attempt.tsx` | `#340`, `#381` | A refused attempt, said (#340, #381): `<provider>/<model> refused: <class> (<status>) — <reason>`. |
 | `packages/web/src/route-read.ts` | `#45` | One GET of a JSON route whose answer has a schema, in the three ways it can go — a failure is words, never a throw (#45 phase 2 folded the thread timeline's and the stats drawer's copies). |
 | `packages/web/src/server/__tests__/bun-plugin-strict-binding-workaround.test.ts` | `#237` | The dev bundle's one source rewrite, executed (#237). |
 | `packages/web/src/server/__tests__/fake-hosted-thread.ts` | `#178` | The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a `ThreadRuntime` from plain closures that records every call, so the server, the registry and the routes are driven over it and asserted through what it recorded. |

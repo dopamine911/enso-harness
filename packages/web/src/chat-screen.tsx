@@ -7,6 +7,7 @@ import {
   type EnsoDialogAnswer,
   type EnsoDialogSpec,
   type EnsoPromptImage,
+  type EnsoProviderRefusal,
   isEnsoImageMimeType,
   type RuntimeCommand,
 } from '@enso/core'
@@ -66,6 +67,7 @@ import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState } from
 import { ThreadNotifications } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
 import { QuestionnaireControls } from './questionnaire-card.tsx'
+import { providerRefusalLine, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
 import { SettingsDialog } from './settings-dialog.tsx'
 import { ThreadStoresContext, useStore, useThreadStores } from './store.ts'
@@ -836,6 +838,8 @@ interface MessageBodyProps {
   readonly parts: KeyedPart[]
   /** This message's run is in flight: a tool call with no result reads `running…` (#130). */
   readonly runOpen: boolean
+  /** The provider refused this attempt (#381): said in the bubble, after whatever parts it has. */
+  readonly refusal: EnsoProviderRefusal | undefined
 }
 
 /**
@@ -853,7 +857,13 @@ interface MessageBodyProps {
  * nobody. Part identity is what decides the output, so that is what is compared — the same
  * rule the vendor applies one level down, per part (`selectedPartPropsEqual`).
  */
-const MessageBody = memo(function MessageBody({ messageId, role, parts, runOpen }: MessageBodyProps): React.ReactNode {
+const MessageBody = memo(function MessageBody({
+  messageId,
+  role,
+  parts,
+  runOpen,
+  refusal,
+}: MessageBodyProps): React.ReactNode {
   return (
     <Message from={role} data-role={role}>
       <MessageContent>
@@ -872,10 +882,19 @@ const MessageBody = memo(function MessageBody({ messageId, role, parts, runOpen 
             renderers={descriptorRenderers}
           />
         ))}
+        {/* A refused attempt (#381), from pi's stored message: without this a reload drew an
+				    empty bubble where the refusal had been said live. */}
+        {refusal === undefined ? null : <RefusedAttemptLine refusal={refusal} />}
       </MessageContent>
     </Message>
   )
 }, sameRenderedMessage)
+
+/** The same refusal line, whether or not the message object behind it was replaced. */
+function sameRefusal(before: EnsoProviderRefusal | undefined, after: EnsoProviderRefusal | undefined): boolean {
+  if (before === undefined || after === undefined) return before === after
+  return providerRefusalLine(before) === providerRefusalLine(after)
+}
 
 /**
  * Whether two renders of one row would draw the same thing. `messageId` and `role` are not
@@ -885,6 +904,7 @@ const MessageBody = memo(function MessageBody({ messageId, role, parts, runOpen 
  */
 function sameRenderedMessage(previous: MessageBodyProps, next: MessageBodyProps): boolean {
   if (previous.runOpen !== next.runOpen) return false
+  if (!sameRefusal(previous.refusal, next.refusal)) return false
   if (previous.parts.length !== next.parts.length) return false
   return previous.parts.every((part, index) => {
     const other = next.parts[index]
@@ -1271,6 +1291,7 @@ const chatComponents = {
           role={message.role}
           parts={partsByMessageId.get(message.id) ?? NO_PARTS}
           runOpen={openRunMessageId === message.id}
+          refusal={refusalOfMessage(message)}
         />
       )
     },

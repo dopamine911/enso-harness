@@ -57,6 +57,6 @@ flowchart LR
 | `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:179`](../../packages/web/src/server/follow.ts#L179) |
 | `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:427`](../../packages/web/src/follow-connection.ts#L427) |
 | `to-agui chunk` | [Observations](./observations.md) | [`packages/web/src/to-agui.ts:76`](../../packages/web/src/to-agui.ts#L76) |
-| `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:173`](../../packages/web/src/custom-event-router.ts#L173) |
+| `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:176`](../../packages/web/src/custom-event-router.ts#L176) |
 
 Kinds, in the union's order of declaration: `text-delta`, `thinking-delta`, `tool-call`, `tool-result`, `custom-entry`, `permission-mode`, `permission-mode-rejected`, `model`, `message-start`, `message-end`, `session-usage`, `turn-start`, `turn-end`, `provider-refused`, `provider-retry`, `provider-retry-ended`, `queue`, `prompt-rejected`, `extension-error`, `extension-ui-request`, `dialog-settled`, `run-ended`, `settled`, `unmapped`.

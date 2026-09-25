@@ -1,5 +1,5 @@
 import { afterAll, afterEach, expect, test } from 'bun:test'
-import type { EnsoThreadStats } from '@enso/core'
+import { ENSO_PROVIDER_REFUSAL_KEY, type EnsoThreadStats } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import { ChatScreen, ThreadPane, type ThreadView } from '../chat-screen.tsx'
@@ -1492,6 +1492,63 @@ test("a resumed thread's image renders as an <img> from the stored history, byte
     expect(image?.getAttribute('src')).toBe(`data:image/png;base64,${PNG}`)
     // and it is the user's, beside the text it was sent with
     expect(page.container.textContent).toContain('what does this say?')
+  })
+  await page.unmount()
+})
+
+// #381: a refused attempt reloaded as an EMPTY bubble — the refusal lived only in the live page's
+// notifications. From the stored history alone it must be said in the attempt's own place: after
+// the prompt, before the reply the retry got.
+test("a resumed thread's refused attempt says the refusal in its own bubble, before the reply (#381)", async () => {
+  const page = await mountPage({
+    storedThreads: [
+      {
+        threadId: 'stored-refused',
+        title: 'hi',
+        lastActivityAt: new Date().toISOString(),
+        messageCount: 3,
+        busy: false,
+      },
+    ],
+    histories: {
+      'stored-refused': {
+        threadId: 'stored-refused',
+        messages: [
+          { id: 'u1', role: 'user', parts: [{ type: 'text', content: 'hi' }] },
+          {
+            id: 'a1',
+            role: 'assistant',
+            parts: [],
+            metadata: {
+              [ENSO_PROVIDER_REFUSAL_KEY]: {
+                provider: 'anthropic',
+                model: 'claude-sonnet-4-5',
+                status: 429,
+                message: '429 {"type":"error","error":{"type":"rate_limit_error","message":"rate limit exceeded"}}',
+              },
+            },
+          },
+          { id: 'a2', role: 'assistant', parts: [{ type: 'text', content: 'hello after the retry' }] },
+        ],
+        permissionMode: { mode: 'default', available: ['default'] },
+      },
+    },
+  })
+  const row = await eventually(() => {
+    const found = page.previousRows()[0]
+    if (found === undefined) throw new Error('expected a stored row')
+    return found
+  })
+  await page.click(row)
+  await eventually(() => {
+    const lines = page.container.querySelectorAll('[data-enso-refused-attempt]')
+    expect([...lines].map((line) => line.textContent)).toEqual([
+      'anthropic/claude-sonnet-4-5 refused: rate-limited (429) — rate limit exceeded',
+    ])
+    // in the attempt's place: the bubble between the prompt and the reply
+    const text = page.container.textContent ?? ''
+    expect(text.indexOf('refused: rate-limited')).toBeGreaterThan(text.indexOf('hi'))
+    expect(text.indexOf('refused: rate-limited')).toBeLessThan(text.indexOf('hello after the retry'))
   })
   await page.unmount()
 })

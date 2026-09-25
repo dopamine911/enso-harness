@@ -12,6 +12,7 @@ import {
 } from '@enso/core'
 import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
+import { providerRefusalLine, trailingRefusalOf } from './refused-attempt.tsx'
 import { createStore, type Store } from './store.ts'
 import type { ThreadStores } from './thread-stores.ts'
 
@@ -103,6 +104,15 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     stores.model.apply(data.model)
     stores.cwd.set(data.cwd)
     stores.usage.set(data.usage)
+    // The status bar's refusal word, resynced (#381): set when the branch's last reply is a
+    // refused attempt — how a resumed thread still says it — and cleared when it is not. The
+    // snapshot's own output is the mark a later reply must grow past.
+    const trailing = trailingRefusalOf(data.messages)
+    stores.refusal.set(
+      trailing === undefined
+        ? undefined
+        : { refusalClass: providerRefusalClass(trailing.status), outputAtRefusal: data.usage.output },
+    )
     // The complete list, every snapshot (#114): a reconnect's snapshot is the resync, so an
     // empty list is a fact ("nothing is waiting") this page must apply too — it clears a
     // card for a question that settled while the page was away. One card at a time: a
@@ -125,18 +135,11 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
  * the provider's own sentence follows it, verbatim but for the JSON around it.
  */
 function applyRefusal(stores: ThreadStores, refusal: EnsoProviderRefused): void {
-  const refusalClass = providerRefusalClass(refusal.status)
-  const who =
-    refusal.provider !== undefined && refusal.model !== undefined
-      ? `${refusal.provider}/${refusal.model}`
-      : (refusal.provider ?? refusal.model ?? 'the provider')
-  const status = refusal.status === undefined ? '' : ` (${refusal.status})`
-  stores.notifications.push(
-    `${who} refused: ${refusalClass}${status} — ${providerReasonOf(refusal.message)}`,
-    'error',
-    'run',
-  )
-  stores.refusal.set({ refusalClass, outputAtRefusal: stores.usage.get()?.output ?? 0 })
+  stores.notifications.push(providerRefusalLine(refusal), 'error', 'run')
+  stores.refusal.set({
+    refusalClass: providerRefusalClass(refusal.status),
+    outputAtRefusal: stores.usage.get()?.output ?? 0,
+  })
 }
 
 /** pi is retrying (#340): when, and which attempt of how many — a warning, since a reply may still come. */

@@ -1,5 +1,6 @@
 import type { EnsoTranscriptEntry, EnsoTranscriptPart } from '@enso/core'
 import { contentToText, descriptorFrom } from './map-events.ts'
+import { providerRefusalOfMessage } from './provider-refusal.ts'
 
 /**
  * The runtime's session branch → the transcript of ours (#162 workstream 4, L2's persistence
@@ -70,7 +71,17 @@ function messageEntry(entry: PiSessionEntry, id: string): EnsoTranscriptEntry | 
   if (typeof entry.message !== 'object' || entry.message === null) return undefined
   const stored = entry.message as PiStoredMessage
   if (stored.role === 'user' || stored.role === 'assistant') {
-    return { kind: 'message', id, ...stampOf(entry), role: stored.role, parts: partsOf(stored.content) }
+    // A refused attempt (#381): pi keeps it on the branch, marked, and it is said as such — not
+    // as the empty reply its parts alone would read as.
+    const refusal = providerRefusalOfMessage(stored)
+    return {
+      kind: 'message',
+      id,
+      ...stampOf(entry),
+      role: stored.role,
+      parts: partsOf(stored.content),
+      ...(refusal === undefined ? {} : { refusal }),
+    }
   }
   if (stored.role === 'toolResult' && typeof stored.toolCallId === 'string') {
     const toolName = typeof stored.toolName === 'string' ? stored.toolName : 'unknown'

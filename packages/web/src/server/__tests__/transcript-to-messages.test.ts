@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { ENSO_TOOL_RESULT_KEY, type EnsoInterruptedTail } from '@enso/core'
+import { ENSO_PROVIDER_REFUSAL_KEY, ENSO_TOOL_RESULT_KEY, type EnsoInterruptedTail } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { transcriptOf } from '../../host/transcript.ts'
 import { interruptedTail, transcriptToMessages } from '../transcript-to-messages.ts'
@@ -216,4 +216,58 @@ test('a non-message entry logged after the last message does not hide the torn t
   expect(branchTail([call('a1'), modelChange])).toBe('tool-call-without-result')
   // …and a result that arrives after one still settles it.
   expect(branchTail([call('a1'), modelChange, result('r1')])).toBeUndefined()
+})
+
+// #381: pi keeps a refused attempt on the branch (`_omitRecoveryAttempt` keeps it in raw history)
+// with `stopReason: "error"` and the provider's message, and its content is empty. Mapped as
+// parts alone it mounted as an EMPTY assistant message — #340's silence again, for anyone who
+// reloaded. The refusal rides the message's own metadata; the reply after it carries none.
+test('a stored refused attempt, then the reply that got through: the refusal rides the attempt, not the reply (#381)', () => {
+  const rateLimited = '429 {"type":"error","error":{"type":"rate_limit_error","message":"rate limit exceeded"}}'
+  const messages = branchToMessages([
+    entry('u1', { role: 'user', content: 'hi', timestamp: 1 }),
+    entry('a1', {
+      role: 'assistant',
+      content: [],
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-5',
+      stopReason: 'error',
+      errorMessage: rateLimited,
+    }),
+    entry('a2', {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'hello after the retry' }],
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-5',
+      stopReason: 'stop',
+    }),
+  ])
+  expect(messages.map((message) => [message.id, message.metadata])).toEqual([
+    ['u1', undefined],
+    [
+      'a1',
+      {
+        [ENSO_PROVIDER_REFUSAL_KEY]: {
+          provider: 'anthropic',
+          model: 'claude-sonnet-4-5',
+          status: 429,
+          message: rateLimited,
+        },
+      },
+    ],
+    ['a2', undefined],
+  ])
+  expect(messages[1]?.parts).toEqual([])
+})
+
+// A stop the user made is `aborted`, not a refusal — the same line the live event draws.
+test('an aborted reply is not a refusal, and an error with no message still says one came (#381)', () => {
+  const messages = branchToMessages([
+    entry('a1', { role: 'assistant', content: [{ type: 'text', text: 'partial' }], stopReason: 'aborted' }),
+    entry('a2', { role: 'assistant', content: [], stopReason: 'error' }),
+  ])
+  expect(messages[0]?.metadata).toBeUndefined()
+  expect(messages[1]?.metadata).toEqual({
+    [ENSO_PROVIDER_REFUSAL_KEY]: { message: 'the provider returned an error without a message' },
+  })
 })

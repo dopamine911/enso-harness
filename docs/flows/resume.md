@@ -58,6 +58,9 @@ sequenceDiagram
    same order, an unmodelled kind is `other` with its `type`. Above it `transcriptToMessages` pairs a
    tool result into the assistant message holding its call, drops one whose call is not on the branch,
    skips `custom` and `other`; an image's bytes render as a data URL, never a fetch (`selected-message-part.tsx`).
+   A refused attempt (#381) — pi keeps it on the branch with `stopReason: "error"` — is a message
+   carrying its `refusal`, and its bubble says `<provider>/<model> refused: <class> (<status>) — <reason>`
+   where the reply would have been, not an empty bubble.
 6. **The URL names the thread; the latest navigation wins.** `readThreadUrl`: a thread id resumes,
    none is fresh, a malformed one is fresh *and said*; `urlForThread` keeps every other parameter.
    The boot resumes with `pop` (no history written), a rail click pushes, and two guards drop a late
@@ -118,13 +121,20 @@ that title, so a renamed or deleted pin fails this page.
 - **Invariant 6, the slow boot** — the late history changes nothing.
 
 **Where the messages come from.** The pane's messages come from `/history` (`adoptThread`); the snapshot
-carries the same `messages`, but `custom-event-router.ts` reads only mode, open dialogs and generation
-off it. The image's rendering from a resumed history is pinned at the page (below), beside the reader's
+carries the same `messages`, and `custom-event-router.ts` reads one fact off them: whether the last
+assistant message is a refused attempt, which sets the status bar's class word (#381) with the
+snapshot's output as the mark a later reply must grow past. The image's rendering from a resumed history is pinned at the page (below), beside the reader's
 pin. The host's name for the listing is `listSessions`; there is no `listThreads`.
 
 <!-- test: packages/web/src/__tests__/thread-pane.test.tsx#a resumed thread's image renders as an <img> from the stored history, bytes inline (#68, #95) -->
 - **The image, at the page** — [`thread-pane.test.tsx`](../../packages/web/src/__tests__/thread-pane.test.tsx):
   a resumed history's image is an `<img>` with the bytes inline.
+<!-- test: packages/web/src/server/__tests__/transcript-to-messages.test.ts#a stored refused attempt, then the reply that got through: the refusal rides the attempt, not the reply (#381) -->
+- **Invariant 5, a refused attempt** — the stored branch in, the refusal on the attempt's message, none on the reply.
+<!-- test: packages/web/src/__tests__/thread-pane.test.tsx#a resumed thread's refused attempt says the refusal in its own bubble, before the reply (#381) -->
+- **The refused attempt, at the page** — its line between the prompt and the reply.
+<!-- test: packages/web/src/__tests__/custom-event-router.test.ts#a snapshot whose last reply is a refused attempt shows the word; one with a reply after it clears it (#381) -->
+- **The status word on resume** — [`custom-event-router.test.ts`](../../packages/web/src/__tests__/custom-event-router.test.ts).
 
 ## Where it is stated
 

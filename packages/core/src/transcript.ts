@@ -1,4 +1,5 @@
 import { type Static, Type } from 'typebox'
+import { EnsoProviderRefusal } from './provider-refusal.ts'
 import { EnsoToolResultDescriptor } from './tool-result.ts'
 
 /**
@@ -53,6 +54,12 @@ export const EnsoTranscriptMessage = Type.Object({
   ...base,
   role: Type.Union([Type.Literal('user'), Type.Literal('assistant')]),
   parts: Type.Array(EnsoTranscriptPart),
+  /**
+   * The provider refused the request this reply was for (#381): an assistant message only. pi keeps
+   * the failed attempt on the branch (its parts usually empty) marked as an error, so a reload has the
+   * fact without anything new being persisted — without this it read as an empty reply.
+   */
+  refusal: Type.Optional(EnsoProviderRefusal),
 })
 /** @group Transcript */
 export type EnsoTranscriptMessage = Static<typeof EnsoTranscriptMessage>
