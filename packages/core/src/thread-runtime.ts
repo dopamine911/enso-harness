@@ -71,6 +71,13 @@ export const HostCommandOption = Type.Object({
   id: Type.String({ minLength: 1 }),
   label: Type.String(),
   detail: Type.Optional(Type.String()),
+  /**
+   * On a `/model` option only (#391): the thinking levels THAT model supports, as the runtime
+   * decides them — so a page can offer the effort for a model before switching to it (the
+   * Start-a-session dialog applies everything at once). The `thinking` row's own options are the
+   * CURRENT model's.
+   */
+  thinkingLevels: Type.Optional(Type.Array(Type.String())),
 })
 /** @group Thread runtime */
 export type HostCommandOption = Static<typeof HostCommandOption>
@@ -205,6 +212,39 @@ export const EnsoHostCommandRun = Type.Object(
 )
 /** @group Thread runtime */
 export type EnsoHostCommandRun = Static<typeof EnsoHostCommandRun>
+
+/**
+ * `POST /api/threads/:id/configure` (#391): a new session's settings, applied together — the
+ * Start-a-session dialog's Start. `model` is a `/model` option id, `thinking` a level THAT model
+ * supports, `mode` a permission mode the thread offers. The server applies them in this order
+ * under one lease (the effort a model allows depends on the model); a value equal to the current
+ * one is left alone. The first prompt is not part of it: it goes through the chat's own send.
+ *
+ * @group Thread runtime
+ */
+export const EnsoSessionConfiguration = Type.Object(
+  {
+    model: Type.Optional(Type.String({ minLength: 1 })),
+    thinking: Type.Optional(Type.String({ minLength: 1 })),
+    mode: Type.Optional(Type.String({ minLength: 1 })),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread runtime */
+export type EnsoSessionConfiguration = Static<typeof EnsoSessionConfiguration>
+
+/**
+ * Why a configuration was refused (#391): the STEP that refused and the runtime's reason. The
+ * steps before it applied; the ones after it did not run. Answered as a 422 body.
+ *
+ * @group Thread runtime
+ */
+export const EnsoConfigurationRefusal = Type.Object({
+  step: Type.Union([Type.Literal('model'), Type.Literal('thinking'), Type.Literal('mode')]),
+  reason: Type.String(),
+})
+/** @group Thread runtime */
+export type EnsoConfigurationRefusal = Static<typeof EnsoConfigurationRefusal>
 
 const commandValidator = Compile(RuntimeCommand)
 

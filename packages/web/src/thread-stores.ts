@@ -108,6 +108,12 @@ export interface ThreadStores {
    * next to `idle` is never read as "free" when it means "nothing ran".
    */
   readonly refusal: WritableStore<ProviderRefusalMark | undefined>
+  /**
+   * The Start-a-session dialog is open (#391). Raised when the page MINTS the thread — New Thread,
+   * a page with no thread in its URL — and lowered by Start or Escape; a thread adopted from
+   * history never raises it.
+   */
+  readonly startSession: WritableStore<boolean>
   /** The thread's transport: TanStack's connection over prompt/follow, and the dialog answer beside it. */
   readonly connection: FollowConnection
 }
@@ -144,6 +150,7 @@ function createThreadStores(threadId: string, history: readonly UIMessage[], fet
     disconnected: createStore(false),
     queue: createStore<readonly string[]>([]),
     refusal: createStore<ProviderRefusalMark | undefined>(undefined),
+    startSession: createStore(false),
     connection: createFollowConnection({
       threadId,
       ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
@@ -301,11 +308,14 @@ function makeRoomForOneMore(): void {
  * Mint a new thread on this page and return its stores.
  *
  * The rail lists it at once, untitled. Inside the page's follow budget: minting past it drops
- * an idle thread (#272). `fetch` is the #118 test seam.
+ * an idle thread (#272). `fetch` is the #118 test seam. A minted thread opens on the
+ * Start-a-session dialog (#391) — every way the page mints one is a new thread the person is about
+ * to start.
  */
 export function mintThread(fetchImpl?: typeof fetch): ThreadStores {
   makeRoomForOneMore()
   const stores = createThreadStores(crypto.randomUUID(), [], fetchImpl)
+  stores.startSession.set(true)
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {
     threadId: stores.threadId,

@@ -3,12 +3,14 @@ import {
   type DialogAnswer,
   ENSO_IMAGE_MIME_TYPES,
   EnsoAbortReceipt,
+  EnsoConfigurationRefusal,
   type EnsoFollowFrame,
   EnsoFollowFrame as EnsoFollowFrameSchema,
   type EnsoHostCommandRun,
   type EnsoPromptBody,
   type EnsoPromptImage,
   EnsoPromptReceipt,
+  type EnsoSessionConfiguration,
   ensoLogger,
   isEnsoImageMimeType,
 } from '@enso/core'
@@ -253,6 +255,12 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    */
   readonly runHostCommand: (run: EnsoHostCommandRun) => Promise<HostCommandOutcome>
   /**
+   * Apply a new session's model, effort and mode together (#391): `POST …/configure`, the
+   * Start-a-session dialog's Start. The server applies them in order under one lease; a refusal
+   * comes back with its step and reason for the dialog to show.
+   */
+  readonly configure: (configuration: EnsoSessionConfiguration) => Promise<ConfigureOutcome>
+  /**
    * Release the thread's follow (#272): the socket closes and nothing else opens one on
    * this connection. The page calls it when a thread leaves its live list — a thread whose
    * pane is gone must not keep a stream the browser counts against its six-per-origin
@@ -268,6 +276,19 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
 export type ModeChangeOutcome = 'told' | 'busy' | 'refused' | 'unreachable'
 /** What `runHostCommand` reports — the same four words as a mode change, for the same route shape. */
 export type HostCommandOutcome = ModeChangeOutcome
+/**
+ * What `configure` reports (#391): applied, or why not — WITH the reason, because the asking
+ * dialog shows it. `refused` is the server's 422, naming the step; `failed` is any other answer
+ * (a fault's 500, a body the server would not read), which is not a refusal and does not pretend
+ * to be one (PR #393 review). Not said on the transcript: the dialog is where the person is
+ * looking, and a second copy there would be a duplicate.
+ */
+export type ConfigureOutcome =
+  | { readonly outcome: 'told' }
+  | { readonly outcome: 'refused'; readonly step: EnsoConfigurationRefusal['step']; readonly reason: string }
+  | { readonly outcome: 'busy'; readonly reason: string }
+  | { readonly outcome: 'failed'; readonly status: number }
+  | { readonly outcome: 'unreachable' }
 
 export function createFollowConnection(options: FollowConnectionOptions): FollowConnection {
   const { threadId } = options
@@ -765,5 +786,26 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     released.abort()
   }
 
-  return { subscribe, send, answerDialog, abort, prompt, changeMode, runHostCommand, close }
+  async function configure(configuration: EnsoSessionConfiguration): Promise<ConfigureOutcome> {
+    const response = await post('configure', 'configure', {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(configuration),
+    })
+    if (response === undefined) return { outcome: 'unreachable' }
+    if (response.status === 204) return { outcome: 'told' }
+    const body = await response.text()
+    log.warn('configure not applied: {status} {body}', { status: response.status, body })
+    if (response.status === 409) return { outcome: 'busy', reason: body }
+    let refusal: unknown
+    try {
+      refusal = response.status === 422 ? JSON.parse(body) : undefined
+    } catch {
+      refusal = undefined
+    }
+    return Check(EnsoConfigurationRefusal, refusal)
+      ? { outcome: 'refused', step: refusal.step, reason: refusal.reason }
+      : { outcome: 'failed', status: response.status }
+  }
+
+  return { subscribe, send, answerDialog, abort, prompt, changeMode, runHostCommand, configure, close }
 }

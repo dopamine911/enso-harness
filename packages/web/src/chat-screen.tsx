@@ -79,6 +79,7 @@ import { QuestionnaireControls } from './questionnaire-card.tsx'
 import { providerRefusalLine, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
 import { SettingsDialog } from './settings-dialog.tsx'
+import { StartSessionDialog } from './start-session.tsx'
 import { ThreadStoresContext, useStore, useThreadStores } from './store.ts'
 import {
   createResumeRequests,
@@ -1073,6 +1074,10 @@ const chatComponents = {
           if (restored.length > 0) takeBack(restored)
         })
       }
+      // The Start-a-session dialog (#391): open on a minted thread; Start configures the session
+      // and sends the first prompt through THIS send, so the bubble and the run are the composer's.
+      const startSessionOpen = useStore(stores.startSession)
+      const permission = usePermissionMode()
       // The `/` palette's two outcomes (#338; the rule is in `command-palette.tsx`'s header).
       // ⚠ NEITHER TOUCHES WHAT THE USER HAS TYPED (PR #343 review). An extension command is a
       // prompt like any other — the same `send` the button uses, so it queues through pi mid-run
@@ -1196,6 +1201,15 @@ const chatComponents = {
             onPick={host.onHost}
           />
           <ThreadContextDialog open={contextOpen} onClose={(): void => setContextOpen(false)} />
+          <StartSessionDialog
+            threadId={stores.threadId}
+            open={startSessionOpen}
+            onClose={(): void => stores.startSession.set(false)}
+            mode={permission.mode}
+            modes={permission.available}
+            configure={stores.connection.configure}
+            send={(text: string): boolean => send(text, [])}
+          />
           <ComposerBody
             draft={draft}
             setDraft={setDraft}

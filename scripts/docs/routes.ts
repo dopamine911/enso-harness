@@ -144,6 +144,19 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     builds: 'yes',
     logs: 'yes',
   },
+  THREAD_CONFIGURE_ROUTE: {
+    method: 'POST',
+    path: '/api/threads/:threadId/configure',
+    handler: 'respondToConfigure → configureThread',
+    input:
+      'path: `threadId`; body: `EnsoSessionConfiguration` — optional `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone',
+    success: '204 empty — every step applied (the changes arrive on the follow as `model` and `permission-mode`)',
+    errors:
+      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 JSON `EnsoConfigurationRefusal` — the step that refused (`model`, `thinking`, `mode`) and the reason, the steps before it applied; 500 handler failure',
+    routeClass: 'control',
+    builds: 'yes',
+    logs: 'yes',
+  },
   THREAD_MODE_ROUTE: {
     method: 'POST',
     path: '/api/threads/:threadId/mode',

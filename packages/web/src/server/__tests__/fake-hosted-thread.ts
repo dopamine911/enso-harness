@@ -39,6 +39,11 @@ const FAKE_MODEL_ONE: EnsoModelChoice = { provider: 'fake', id: 'fake-1', name: 
 const FAKE_MODEL_TWO: EnsoModelChoice = { provider: 'fake', id: 'fake-2', name: 'Fake Two' }
 const FAKE_MODELS: readonly EnsoModelChoice[] = [FAKE_MODEL_ONE, FAKE_MODEL_TWO]
 
+/** The fake's per-model effort (#391): model one reasons, model two does not — as a real catalogue mixes them. */
+function fakeThinkingLevelsOf(model: EnsoModelChoice): readonly string[] {
+  return model.id === FAKE_MODEL_TWO.id ? ['off'] : ['off', 'low', 'medium', 'high']
+}
+
 /** The fake's ways in and its one stored credential (#338 slice 3). */
 const FAKE_LOGIN_OPTIONS = [
   { id: 'fake/oauth', label: 'Fake · subscription', detail: 'via stored' },
@@ -49,7 +54,7 @@ const FAKE_LOGOUT_OPTIONS = [{ id: 'fake', label: 'Fake', detail: 'stored subscr
 /** The fake's host rows — `/model`, `/thinking`, `/login`, `/logout`, `/compact`, `/context` — in the real host's order; a test that replaces `listCommands` puts pi's rows before these. */
 export function fakeHostRows(record: Pick<FakeThreadRecord, 'modelState'>): RuntimeCommand[] {
   return [
-    ...hostCommandRows(record.modelState, FAKE_MODELS),
+    ...hostCommandRows(record.modelState, FAKE_MODELS, fakeThinkingLevelsOf),
     ...hostFlowRows(FAKE_LOGIN_OPTIONS, FAKE_LOGOUT_OPTIONS),
     ...HOST_VIEW_ROWS,
   ]

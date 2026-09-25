@@ -24,9 +24,11 @@ import {
   abortThread,
   answerThreadDialog,
   changeThreadMode,
+  configureThread,
   type FollowRouteDeps,
   followThread,
   promptThread,
+  readConfigureBody,
   readDialogBody,
   readHostCommandBody,
   readModeChangeBody,
@@ -66,6 +68,8 @@ const THREAD_ABORT_ROUTE = /^\/api\/threads\/([^/?#]+)\/abort$/
 const THREAD_MODE_ROUTE = /^\/api\/threads\/([^/?#]+)\/mode$/
 /** `POST …/command` (#338 slice 2): run a `host` command — `/model`, `/thinking` — as a control route, not a prompt. */
 const THREAD_COMMAND_ROUTE = /^\/api\/threads\/([^/?#]+)\/command$/
+/** `POST …/configure` (#391): a new session's model, effort and mode, applied together — the Start-a-session dialog. */
+const THREAD_CONFIGURE_ROUTE = /^\/api\/threads\/([^/?#]+)\/configure$/
 
 /**
  * The dev backend: the thread routes the browser's `FollowConnection` talks to (#112), and
@@ -449,14 +453,15 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
 
   /**
    * ⚠ The dispatcher is synchronous and a throw in the request listener has nothing above
-   * it (PR #87). The two handlers that await the host run through here: a rejection is
-   * reported and answered as a 500, and the server stays up.
+   * it (PR #87). Every handler that awaits (the thread routes, the listing, the browser log) runs
+   * through here: a rejection is reported and answered as a 500 whose text names no route (it
+   * answers every one of them; PR #393 review), and the server stays up.
    */
   function answerOrFail(work: Promise<void>, response: ServerResponse): void {
     work.catch((error: unknown) => {
       log.error('a handler failed: {error}', { error })
       if (!response.headersSent) response.writeHead(500, { 'Content-Type': 'text/plain' })
-      response.end('the session listing failed — see the server log')
+      response.end('the request failed — see the server log')
     })
   }
 
@@ -666,6 +671,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_DIALOG_ROUTE, respond: respondToDialog },
     { method: 'POST', route: THREAD_MODE_ROUTE, respond: respondToModeChange },
     { method: 'POST', route: THREAD_COMMAND_ROUTE, respond: respondToHostCommand },
+    { method: 'POST', route: THREAD_CONFIGURE_ROUTE, respond: respondToConfigure },
     {
       method: 'POST',
       route: THREAD_ABORT_ROUTE,
@@ -854,6 +860,39 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       ...(run.value === undefined ? {} : { value: run.value }),
     })
     response.writeHead(outcome.status)
+    response.end()
+  }
+
+  /**
+   * `POST …/configure` (#391): a new session's model, effort and mode, applied together — the
+   * Start-a-session dialog's Start. A refused step answers 422 with its JSON refusal (the step and
+   * the reason), so the dialog can say which; a run in flight is the usual 409 text.
+   */
+  async function respondToConfigure(
+    threadId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const configuration = await readJsonBody(request, response, {
+      maxBytes: MAX_DIALOG_BODY_BYTES,
+      capText: `a session configuration is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+      parse: readConfigureBody,
+    })
+    if (configuration === undefined) return
+    const outcome = await configureThread(followDeps, threadId, configuration)
+    if (outcome.status === 409) {
+      log.warn('configure refused (409): {reason}', { threadId, reason: outcome.reason })
+      refuseWith(response, outcome)
+      return
+    }
+    if (outcome.status === 422) {
+      log.warn('configure refused at {step}: {reason}', { threadId, ...outcome.refusal })
+      response.writeHead(422, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify(outcome.refusal))
+      return
+    }
+    log.info('session configured', { threadId, ...configuration })
+    response.writeHead(204)
     response.end()
   }
 

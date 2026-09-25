@@ -114,7 +114,7 @@ test("a summary update reaches the list and moves the thread's activity clock; a
   expect(threadListStore.get()).toHaveLength(1)
 })
 
-test('adopting stored history restores dates, title and mode under the stored thread id exactly once', () => {
+test('adopting stored history restores dates, title and mode under the stored thread id exactly once, and never asks to start a session (#391)', () => {
   const history = {
     threadId: 'stored-1',
     messages: [
@@ -133,6 +133,8 @@ test('adopting stored history restores dates, title and mode under the stored th
   expect(adopted.history[0]?.createdAt).toBeInstanceOf(Date)
   expect(adopted.history[0]?.createdAt?.toISOString()).toBe('2026-09-08T10:00:00.000Z')
   expect(adopted.permissionMode.get()).toEqual({ mode: 'plan', available: ['default', 'plan'] })
+  // A resumed thread has its session's settings already; only a minted one opens the dialog.
+  expect(adopted.startSession.get()).toBe(false)
   expect(threadListStore.get()).toMatchObject([{ threadId: 'stored-1', title: 'resume this work', busy: false }])
   expect(adoptThread({ ...history, messages: [] })).toBe(adopted)
   expect(threadListStore.get()).toHaveLength(1)

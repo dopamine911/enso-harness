@@ -4,6 +4,7 @@ import {
   type DialogAnswer,
   ENSO_IMAGE_MAX_BYTES,
   type EnsoAbortReceipt,
+  type EnsoConfigurationRefusal,
   type EnsoFollowFrame,
   EnsoHostCommandRun,
   EnsoPermissionModeChange,
@@ -11,15 +12,17 @@ import {
   EnsoPromptBody,
   type EnsoPromptReceipt,
   EnsoQuestionAnswers,
+  EnsoSessionConfiguration,
   ensoLogger,
   isWholeBase64,
   type PromptImageContent,
   type ThreadRuntime,
   validateDialogAnswer,
 } from '@enso/core'
+import type { Static, TSchema } from 'typebox'
 import { Check, Errors } from 'typebox/value'
 import type { AgentHost } from '../host/agent-host.ts'
-import { HostCommandRefused } from '../host/host-commands.ts'
+import { HostCommandRefused, modelOptionId } from '../host/host-commands.ts'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
 import { readThreadMount } from './thread-read.ts'
 import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
@@ -402,9 +405,8 @@ export async function changeThreadMode(
   change: EnsoPermissionModeChange,
 ): Promise<ModeChangeOutcome> {
   const { threads } = deps
-  const live = threads.peek(threadId)
-  if (live?.busy === true)
-    return { status: 409, reason: `thread ${threadId} is running; change the mode when it settles` }
+  const running = runningRefusal(threads, threadId, 'change the mode')
+  if (running !== undefined) return running
   const lease = await threads.acquire(threadId)
   const { available } = lease.runtime.permissionModeState()
   if (!available.includes(change.mode)) {
@@ -428,14 +430,39 @@ export async function changeThreadMode(
 
 /** The mode-change body, checked against its schema — a control route takes exactly its shape. */
 export function readModeChangeBody(raw: string): EnsoPermissionModeChange {
+  return readClosedBody(raw, EnsoPermissionModeChange, 'mode', 'mode body needs a non-empty `mode`')
+}
+
+/**
+ * A control route's body: JSON, and exactly its closed schema — the shared half of every control
+ * reader (`mode`, `command`, `configure`). `name` says which body was malformed; `requirement` what
+ * a well-formed one holds.
+ */
+function readClosedBody<Schema extends TSchema>(
+  raw: string,
+  schema: Schema,
+  name: string,
+  requirement: string,
+): Static<Schema> {
   let body: unknown
   try {
     body = JSON.parse(raw)
   } catch (error) {
-    throw new Error(`malformed mode body: ${String(error)}`)
+    throw new Error(`malformed ${name} body: ${String(error)}`)
   }
-  if (!Check(EnsoPermissionModeChange, body)) throw new Error('mode body needs a non-empty `mode`')
+  if (!Check(schema, body)) throw new Error(requirement)
   return body
+}
+
+/** The 409 every control route answers while a run holds the thread (#75: never queued behind a run), or `undefined`. */
+function runningRefusal(
+  threads: ThreadRegistry,
+  threadId: string,
+  action: string,
+): { readonly status: 409; readonly reason: string } | undefined {
+  return threads.peek(threadId)?.busy === true
+    ? { status: 409, reason: `thread ${threadId} is running; ${action} when it settles` }
+    : undefined
 }
 
 export type HostCommandOutcome =
@@ -460,10 +487,8 @@ export async function runHostCommand(
   run: EnsoHostCommandRun,
 ): Promise<HostCommandOutcome> {
   const { threads } = deps
-  const live = threads.peek(threadId)
-  if (live?.busy === true) {
-    return { status: 409, reason: `thread ${threadId} is running; change ${run.name} when it settles` }
-  }
+  const running = runningRefusal(threads, threadId, `change ${run.name}`)
+  if (running !== undefined) return running
   const lease = await threads.acquire(threadId)
   // ⚠ A `flow` row STARTS and the route answers 202 (#338 slice 3), and so does an `action` (slice
   // 4: `/compact` is a model call, seconds to a minute): a login may wait minutes on a
@@ -537,16 +562,99 @@ export async function runHostCommand(
 
 /** The host-command body, checked against its closed schema — `name`, optionally `value`, nothing else. */
 export function readHostCommandBody(raw: string): EnsoHostCommandRun {
-  let body: unknown
+  return readClosedBody(
+    raw,
+    EnsoHostCommandRun,
+    'command',
+    'command body needs a non-empty `name` and at most a non-empty `value`',
+  )
+}
+
+export type ConfigureOutcome =
+  | { readonly status: 204 }
+  | { readonly status: 409; readonly reason: string }
+  | { readonly status: 422; readonly refusal: EnsoConfigurationRefusal }
+
+/**
+ * A new session's settings, applied together (#391): the Start-a-session dialog's Start. Refused
+ * while a run holds the thread (409), as every control route is; else ONE lease for all three, in
+ * the order that matters — the model first (the effort a model allows depends on it), then the
+ * effort, then the mode. A value equal to the current one is left alone, so choosing what the
+ * session already has says nothing on the feed. The first refusal stops it and is the 422, NAMING
+ * the step: the steps before it applied, the ones after it did not run. The mode is awaited to its
+ * acceptance (the mode route answers before it), so the prompt the page sends next cannot overtake
+ * it and a rejected mode is this response, not a later line.
+ */
+export async function configureThread(
+  deps: FollowRouteDeps,
+  threadId: string,
+  configuration: EnsoSessionConfiguration,
+): Promise<ConfigureOutcome> {
+  const { threads } = deps
+  const running = runningRefusal(threads, threadId, 'configure it')
+  if (running !== undefined) return running
+  const lease = await threads.acquire(threadId)
   try {
-    body = JSON.parse(raw)
+    const refusal = await applyConfiguration(lease.runtime, configuration)
+    return refusal === undefined ? { status: 204 } : { status: 422, refusal }
+  } finally {
+    lease.release()
+  }
+}
+
+/** The steps in order; the first refusal, or `undefined` when every step applied or was already so. */
+async function applyConfiguration(
+  runtime: ThreadRuntime,
+  configuration: EnsoSessionConfiguration,
+): Promise<EnsoConfigurationRefusal | undefined> {
+  const before = runtime.modelState()
+  const { model, thinking, mode } = configuration
+  if (model !== undefined && (before.model === null || model !== modelOptionId(before.model))) {
+    const reason = await hostRefusalOf(runtime, { name: 'model', value: model })
+    if (reason !== undefined) return { step: 'model', reason }
+  }
+  if (thinking !== undefined && thinking !== runtime.modelState().thinkingLevel) {
+    const reason = await hostRefusalOf(runtime, { name: 'thinking', value: thinking })
+    if (reason !== undefined) return { step: 'thinking', reason }
+  }
+  if (mode === undefined) return undefined
+  const permission = runtime.permissionModeState()
+  if (mode === permission.mode) return undefined
+  if (!permission.available.includes(mode)) {
+    const offered = permission.available.length === 0 ? 'none' : permission.available.join(', ')
+    return { step: 'mode', reason: `mode ${mode} is not offered here. Available: ${offered}` }
+  }
+  const rejected = await new Promise<string | undefined>((resolve) => {
+    runtime.setPermissionMode(mode, {
+      onAccepted: () => resolve(undefined),
+      onRejected: (reason: string) => resolve(reason),
+    })
+  })
+  return rejected === undefined ? undefined : { step: 'mode', reason: rejected }
+}
+
+/**
+ * The host's refusal of one host command, or `undefined` when it applied. Only a refusal the host
+ * DECIDED is a refusal (PR #344 review's rule): anything else is a fault and propagates to the 500.
+ */
+async function hostRefusalOf(runtime: ThreadRuntime, run: EnsoHostCommandRun): Promise<string | undefined> {
+  try {
+    await runtime.runHostCommand(run)
+    return undefined
   } catch (error) {
-    throw new Error(`malformed command body: ${String(error)}`)
+    if (error instanceof HostCommandRefused) return error.message
+    throw error
   }
-  if (!Check(EnsoHostCommandRun, body)) {
-    throw new Error('command body needs a non-empty `name` and at most a non-empty `value`')
-  }
-  return body
+}
+
+/** The configure body, checked against its closed schema — `model`, `thinking`, `mode`, each optional. */
+export function readConfigureBody(raw: string): EnsoSessionConfiguration {
+  return readClosedBody(
+    raw,
+    EnsoSessionConfiguration,
+    'configure',
+    'configure body takes only `model`, `thinking` and `mode`, each a non-empty string',
+  )
 }
 
 export type AbortRouteOutcome =

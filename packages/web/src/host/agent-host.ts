@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
@@ -967,7 +968,13 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         for (const skill of session.resourceLoader.getSkills().skills) {
           commands.push(describeCommand(`skill:${skill.name}`, 'skill', skill.description))
         }
-        commands.push(...hostCommandRows(currentModelState(), session.modelRuntime.getAvailableSnapshot()))
+        commands.push(
+          ...hostCommandRows(
+            currentModelState(),
+            session.modelRuntime.getAvailableSnapshot(),
+            getSupportedThinkingLevels,
+          ),
+        )
         commands.push(...hostFlowRows(currentLoginOptions(), logoutOptions(storedCredentials)))
         commands.push(...HOST_VIEW_ROWS)
         return commands

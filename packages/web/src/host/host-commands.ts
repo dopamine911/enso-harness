@@ -44,12 +44,20 @@ const HOST_COMMAND_MODEL = 'model'
 const HOST_COMMAND_THINKING = 'thinking'
 
 /** A model as its `HostCommandOption.id`. */
-function modelOptionId(model: Pick<EnsoModelChoice, 'provider' | 'id'>): string {
+export function modelOptionId(model: Pick<EnsoModelChoice, 'provider' | 'id'>): string {
   return `${model.provider}/${model.id}`
 }
 
-/** The two host rows, in the contract's order: `model`, then `thinking`. */
-export function hostCommandRows(state: EnsoModelState, models: readonly EnsoModelChoice[]): RuntimeCommand[] {
+/**
+ * The two host rows, in the contract's order: `model`, then `thinking`. Each `/model` option
+ * carries that model's thinking levels (#391), read by `thinkingLevelsOf` — the host passes the
+ * runtime's own rule, so this module stays free of the vendor's model type.
+ */
+export function hostCommandRows<Model extends EnsoModelChoice>(
+  state: EnsoModelState,
+  models: readonly Model[],
+  thinkingLevelsOf: (model: Model) => readonly string[],
+): RuntimeCommand[] {
   return [
     {
       name: HOST_COMMAND_MODEL,
@@ -57,7 +65,12 @@ export function hostCommandRows(state: EnsoModelState, models: readonly EnsoMode
       kind: 'select',
       description: 'switch the model',
       ...(state.model === null ? {} : { value: modelOptionId(state.model) }),
-      options: models.map((model) => ({ id: modelOptionId(model), label: model.name, detail: model.provider })),
+      options: models.map((model) => ({
+        id: modelOptionId(model),
+        label: model.name,
+        detail: model.provider,
+        thinkingLevels: [...thinkingLevelsOf(model)],
+      })),
     },
     {
       name: HOST_COMMAND_THINKING,

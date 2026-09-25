@@ -95,12 +95,22 @@ interface MountedPane {
 }
 
 async function mountPane(
-  options: { active?: boolean; debugOpen?: boolean; view?: ThreadView; server?: ScriptedFetchOptions } = {},
+  options: {
+    active?: boolean
+    debugOpen?: boolean
+    view?: ThreadView
+    server?: ScriptedFetchOptions
+    /** Leave the Start-a-session dialog open (#391); closed otherwise, as Escape would. */
+    startSession?: boolean
+  } = {},
 ): Promise<MountedPane> {
   const server = createScriptedFetch(options.server ?? {})
   // The composer's mode control seeds from the page's own `fetch("/api/mode")`.
   globalThis.fetch = server.fetch
   const stores = mintThread(server.fetch)
+  // A minted thread opens on the Start-a-session dialog (#391). These tests are about the pane
+  // behind it, so it is closed first — as the person pressing Escape would — unless one asks.
+  stores.startSession.set(options.startSession ?? false)
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)

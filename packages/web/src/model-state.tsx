@@ -167,6 +167,16 @@ export function ModelChip({ state, onOpen }: ModelChipProps): React.ReactNode {
   )
 }
 
+/** The words a `/model` option is found by: its label, and the provider its `detail` names. */
+export function optionKeywords(option: HostCommandOption): string[] {
+  return option.detail === undefined ? [option.label] : [option.label, option.detail]
+}
+
+/** A model option's provider, dim beside its name — the model picker's row and the Start-a-session dialog's (#391). */
+export function OptionDetail({ option }: { option: HostCommandOption }): React.ReactNode {
+  return option.detail === undefined ? null : <span className="text-muted-foreground text-xs">{option.detail}</span>
+}
+
 export interface ModelChoiceDialogProps {
   readonly threadId: string
   /** The `select` host command whose options the dialog lists (`model`), or undefined while closed. */
@@ -284,14 +294,12 @@ export function ModelChoiceDialog({
                   <ModelSelectorItem
                     key={option.id}
                     value={option.id}
-                    keywords={option.detail === undefined ? [option.label] : [option.label, option.detail]}
+                    keywords={optionKeywords(option)}
                     data-checked={option.id === state.row.value}
                     onSelect={(): void => pick(option)}
                   >
                     <ModelSelectorName>{option.label}</ModelSelectorName>
-                    {option.detail === undefined ? null : (
-                      <span className="text-muted-foreground text-xs">{option.detail}</span>
-                    )}
+                    <OptionDetail option={option} />
                   </ModelSelectorItem>
                 ))}
               </ModelSelectorGroup>
