@@ -471,17 +471,19 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    * opening a menu is not an event.
    */
   async function respondWithThreadCommands(threadId: string, response: ServerResponse): Promise<void> {
-    let payload: EnsoThreadCommands
+    // Only the BUILD is caught (#392 review): a live session whose listing throws is a fault, and
+    // rejects to `answerOrFail` (500, an error record) — not a failed build answered from memory.
+    let thread: Awaited<ReturnType<typeof threads.ensure>> | undefined
     try {
-      const thread = await threads.ensure(threadId)
-      payload = { threadId, commands: thread.hosted.runtime.listCommands(), source: 'live' }
+      thread = await threads.ensure(threadId)
     } catch (error) {
       log.warn('the session for {threadId} could not be built for its commands: {error}', { threadId, error })
-      const remembered = threads.rememberedCommands()
-      payload =
-        remembered === undefined
-          ? { threadId, commands: [], source: 'none' }
-          : { threadId, commands: withoutHostValues(remembered), source: 'remembered' }
+    }
+    const remembered = threads.rememberedCommands()
+    let payload: EnsoThreadCommands = { threadId, commands: [], source: 'none' }
+    if (thread !== undefined) payload = { threadId, commands: thread.hosted.runtime.listCommands(), source: 'live' }
+    else if (remembered !== undefined) {
+      payload = { threadId, commands: withoutHostValues(remembered), source: 'remembered' }
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify(payload))
