@@ -490,7 +490,7 @@ export function DialogAnswerControls({
         {/* The detail behind the question (#73): a file preview, a diff, a command. Preformatted,
 				    never markdown — model-chosen file content must not render as HTML. */}
         {dialog.message === undefined || dialog.message.length === 0 ? null : (
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/50 p-3 text-xs">
+          <pre className="max-h-80 overflow-auto rounded-md border bg-muted/50 p-3 text-xs whitespace-pre-wrap">
             {dialog.message}
           </pre>
         )}
@@ -558,7 +558,7 @@ function InputGuidance({ dialog }: { dialog: EnsoDialogSpec }): React.ReactNode 
   return (
     <>
       {message === undefined || message.length === 0 ? null : (
-        <p className="whitespace-pre-wrap text-muted-foreground text-sm">{message}</p>
+        <p className="text-sm whitespace-pre-wrap text-muted-foreground">{message}</p>
       )}
       {link === undefined || !/^https?:\/\//.test(link.url) ? null : (
         <Button asChild variant="outline" className="self-start">
@@ -603,7 +603,7 @@ export function EnsoDialogCard({
   return (
     <Card ref={ref} role="group" aria-labelledby={titleId} className="my-4">
       <CardHeader>
-        <CardDescription className="uppercase tracking-wide">pi is asking</CardDescription>
+        <CardDescription className="tracking-wide uppercase">pi is asking</CardDescription>
         <CardTitle id={titleId} role="heading" aria-level={2} className="text-base">
           {dialog.title}
         </CardTitle>
@@ -1678,9 +1678,9 @@ export function ChatScreen(): React.ReactNode {
         {/* The ensō mark, cropped from .local/logo.png into public/enso.png —
 				    kanagawa fujiWhite cream, so it reads on the Wave background. */}
         <img src="/enso.png" alt="" className="size-6" />
-        <h1 className="font-medium text-muted-foreground text-sm">Enso</h1>
+        <h1 className="text-sm font-medium text-muted-foreground">Enso</h1>
         {isFixtureMode ? (
-          <span className="rounded-full border px-2 py-0.5 text-muted-foreground text-xs">fixture</span>
+          <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
         ) : null}
         {/* Where you are: the active thread's title, the same one the rail shows. */}
         <span className="min-w-0 flex-1 truncate text-sm" title={activeThreadId ?? ''}>

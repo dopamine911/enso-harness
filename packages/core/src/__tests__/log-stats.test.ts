@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { Check } from 'typebox/value'
-import type { EnsoLogLine } from '../log.ts'
 import { dayStats, ENSO_LOG_EVENTS, EnsoDayStats } from '../log-stats.ts'
+import type { EnsoLogLine } from '../log.ts'
 
 /**
  * The day, derived (#144 slice 4): every number a fold over records that already exist, joined

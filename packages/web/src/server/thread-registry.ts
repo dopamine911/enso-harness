@@ -580,7 +580,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     },
     shutdown(): void {
       shutDown = true
-      for (const threadId of [...threads.keys()]) disposeThread(threadId, 'server shutdown')
+      for (const threadId of threads.keys()) disposeThread(threadId, 'server shutdown')
     },
     liveThreadCount(): number {
       return threads.size

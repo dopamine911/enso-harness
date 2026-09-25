@@ -8,25 +8,31 @@
  * the single source of what "green" means everywhere. Add a check here and every
  * caller inherits it.
  *
- * Ordering is cheap-first: a fast Biome failure surfaces before the slower
+ * Ordering is cheap-first: a fast format or lint failure surfaces before the slower
  * typecheck and test gates run.
  *
  * The checks, in the order GATES lists them:
- *   1. biome     — `biome check`: lint + format + import-organize (check-only, no writes). This
- *                  also enforces the discipline rules Biome can express, e.g.
- *                  `noTsIgnore` is set to error in biome.jsonc, so a banned
- *                  suppression directive fails the gate rather than merely warning.
- *   2. typecheck — `tsc -b --pretty false`: a project-reference BUILD, not `--noEmit`. The
+ *   1. format    — `bun --bun oxfmt --check`: formatting, import order and Tailwind class order
+ *                  (check-only, no writes). `.oxfmtrc.json` is the style; `bun run format` writes it.
+ *   2. lint      — `bun --bun oxlint`: the rules in `oxlint.config.ts`, type-aware, including the
+ *                  naming gate (the `enso` plugin, scripts/lint/). `--bun` runs oxlint's Node entry
+ *                  under Bun, which loads the TypeScript config and plugin without depending on
+ *                  the Node version a machine or CI runner happens to carry.
+ *   3. typecheck — `tsc -b --pretty false`: a project-reference BUILD, not `--noEmit`. The
  *                  blueprint's `--noEmit` is not available here and the difference is not
  *                  cosmetic: `composite` is required by project references, `composite` requires
  *                  declaration emit, and `tsc -b --noEmit` is refused outright — measured
  *                  2026-09-18, `error TS6310: Referenced project '…/packages/core' may not
  *                  disable emit`. So this gate WRITES: `emitDeclarationOnly` declarations into
  *                  each package's `dist-types/`, gitignored, and fallow skips them.
- *   3. dead-code — `fallow dead-code --quiet --baseline fallow-baseline.json`: fails on a finding
+ *   4. dead-code — `fallow dead-code --quiet --baseline fallow-baseline.json`: fails on a finding
  *                  that is not already in the committed identity baseline. After typecheck,
  *                  because fallow's graph is syntactic.
- *   4. react-doctor — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`:
+ *   5. complexity — `fallow health --complexity --max-cognitive 25 --max-cyclomatic 1000 --quiet`: every
+ *                  function under the cognitive ceiling of 25, or under its own per-function pin
+ *                  in `.fallowrc.jsonc` (`health.thresholdOverrides`). Cyclomatic is lifted out of
+ *                  reach on purpose: it is the advisory audit's signal, never a gate.
+ *   6. react-doctor — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`:
  *                  react-doctor's lint pass over the web surface, failing on an error-severity
  *                  finding (#342). Offline by construction: `--no-score` skips the score API, the
  *                  share URL and the crash trace, `--no-supply-chain` the Socket.dev lookups — a
@@ -37,17 +43,17 @@
  *                  `bun test`. The human-facing `doctor` script (`bunx react-doctor --verbose`) keeps
  *                  the score and the share URL because a developer reading a report wants them; it
  *                  runs the same pin, with a developer's ambient credentials, never in the gate.
- *   5. test      — `bun test`, not `vitest run`. bunfig keeps coverage always on, so this
- *                  writes `coverage/lcov.info` for gate 6.
- *   6. coverage  — `bun scripts/check-coverage.ts`: the TOTAL line and function floors over the
+ *   7. test      — `bun test`, not `vitest run`. bunfig keeps coverage always on, so this
+ *                  writes `coverage/lcov.info` for gate 8.
+ *   8. coverage  — `bun scripts/check-coverage.ts`: the TOTAL line and function floors over the
  *                  full denominator, which bun's own per-file `coverageThreshold` cannot express.
- *   7. api-docs  — `typedoc --emit none`: the owned contract surface across both barrels, with warnings
+ *   9. api-docs  — `typedoc --emit none`: the owned contract surface across both barrels, with warnings
  *                  FATAL. TypeDoc's warnings are documentation drift — a `{@link}` whose target
  *                  was renamed, a type a documented signature exposes but nothing exports — and
  *                  none of them is visible to `tsc`. `--emit none`: it VALIDATES, and the site
  *                  renders the same surface as native pages (`starlight-typedoc`), so the
  *                  contract is converted once for checking and once for reading (#188).
- *   8. site      — `bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts`:
+ *   10. site     — `bun scripts/docs/site-content.ts && bunx astro build --root site && bun scripts/docs/site-links.ts`:
  *                  projects `docs/` into the Starlight site, builds it, and
  *                  crawls every built page for dead internal links. The BUILD is not the check —
  *                  `astro build` reported success over 139 dead links, because a page's
@@ -129,8 +135,13 @@ interface Gate {
 /** Exported for `test/gate-abort.test.ts`, which holds the header above equal to this list (#257). */
 export const GATES: readonly Gate[] = [
   {
-    name: 'biome',
-    describe: 'lint + format + import-organize (check-only)',
+    name: 'format',
+    describe: 'oxfmt: formatting, import order, Tailwind class order (check-only)',
+    script: 'format:check',
+  },
+  {
+    name: 'lint',
+    describe: 'oxlint: the rules in oxlint.config.ts, type-aware, naming gate included',
     script: 'lint',
   },
   {
@@ -151,6 +162,15 @@ export const GATES: readonly Gate[] = [
     name: 'dead-code',
     describe: 'fallow: no dead-code finding beyond the committed baseline',
     script: 'deadcode:check',
+  },
+  {
+    // Beside dead-code: the same tool, syntactic. A per-function ceiling rather than the lint
+    // gate's per-file overrides — the pins in `.fallowrc.jsonc` name the FUNCTION, so a pinned
+    // file's other functions stay under 25. `test/complexity-ratchet.test.ts` holds each pin
+    // equal to its function's score, so a number may go down, never up.
+    name: 'complexity',
+    describe: 'fallow health: cognitive complexity under 25, or under its function pin',
+    script: 'complexity:check',
   },
   {
     // AFTER typecheck, as dead-code is: react-doctor's pass is syntactic (#342). Promoted from
@@ -227,9 +247,9 @@ export const GATES: readonly Gate[] = [
  * A tool that died mid-run and still exited 0 — the one failure a gate cannot see by
  * asking the exit code.
  *
- * Measured 2026-09-10: Biome 2.5.13 with any GritQL plugin loaded (ours is
- * `.biome/naming.grit`) overflows a worker thread's stack, prints
- * `fatal runtime error: stack overflow, aborting`, and **exits 0**. Whatever that worker
+ * Measured 2026-09-10: Biome 2.5.13 — this repo's linter until the oxlint migration — with a
+ * GritQL plugin loaded overflowed a worker thread's stack, printed
+ * `fatal runtime error: stack overflow, aborting`, and **exited 0**. Whatever that worker
  * held was never checked, and the gate reported green over it. Same silent-pass class this
  * repo keeps finding in its own matchers — a gate that cannot fail still reads as
  * protection — arriving from a dependency instead of from us.
@@ -259,8 +279,8 @@ const ABORT_SCAN_OVERLAP = 64
  * success, fails.
  *
  * Both streams are piped rather than one, because inheriting stdout while piping stderr
- * races a direct fd against one that round-trips our event loop: Biome writes diagnostics
- * to stdout and its summary to stderr, and the two spliced into each other mid-line.
+ * races a direct fd against one that round-trips our event loop: a linter writing diagnostics
+ * to stdout and its summary to stderr (Biome did) had the two spliced into each other mid-line.
  * Delaying both by the same path keeps the tool's own order.
  */
 function runGate(gate: Gate): Promise<number> {
@@ -278,7 +298,7 @@ function runGate(gate: Gate): Promise<number> {
     child.stdout.on('data', (chunk: string) => process.stdout.write(chunk))
 
     // Only stderr is scanned: an abort banner is a runtime's dying words, always on stderr,
-    // and a tool that quotes source on stdout (Biome prints this repo's own test file, which
+    // and a tool that quotes source on stdout (a linter printing this repo's own test file, which
     // names the banners) would otherwise take the gate down for reporting correctly.
     let aborted = false
     let carry = ''

@@ -486,7 +486,7 @@ test('the seams table has one row per page under docs/seams, the named non-seams
   const generated = seamsTableOver(() => undefined)
   expect(generated.stderr).toBe('')
   expect(generated.exitCode).toBe(0)
-  const listed = [...generated.stdout.matchAll(/]\(\.\/seams\/([^)]+)\)/g)].map((row) => row[1]).sort()
+  const listed = [...generated.stdout.matchAll(/]\(\.\/seams\/([^)]+)\)/g)].map((row) => row[1] ?? '').sort()
   const onDisk = readdirSync(join(DOCS_ROOT, 'seams'))
     .filter((file) => file.endsWith('.md') && file !== 'README.md' && file !== 'ported-provenance.md')
     .sort()

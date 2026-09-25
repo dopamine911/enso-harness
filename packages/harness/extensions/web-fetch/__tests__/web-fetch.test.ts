@@ -16,12 +16,15 @@ import { createWebFetch, type WebFetchDependencies, type WebFetchRequestInit } f
 interface CapturedTool {
   name: string
   description: string
+  /** pi's five positional execute arguments, named as a tuple — the gate caps declared parameters at four. */
   execute: (
-    toolCallId: string,
-    params: { url: string },
-    signal: AbortSignal | undefined,
-    onUpdate: undefined,
-    extensionContext: unknown,
+    ...executeArguments: [
+      toolCallId: string,
+      params: { url: string },
+      signal: AbortSignal | undefined,
+      onUpdate: undefined,
+      extensionContext: unknown,
+    ]
   ) => Promise<{ content: { type: string; text: string }[] }>
 }
 

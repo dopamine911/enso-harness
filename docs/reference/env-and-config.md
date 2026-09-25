@@ -1,13 +1,13 @@
 <!-- generated: scripts/docs/env-and-config.ts -->
 # Environment and configuration reference
 
-Generated from the owned source roots, `biome.jsonc`, the core config/path declarations,
+Generated from the owned source roots, `scripts/lint/process-environment.ts`, the core config/path declarations,
 `enso.config.json`, and `packages/harness/package.json`. No machine environment is read.
 
 ## Explicit environment keys
 
 The 10 files that directly touch the process environment exactly match the
-`noProcessEnv` exception list in `biome.jsonc`; generation fails if either side gains or loses a file.
+`node/no-process-env` exception list in `scripts/lint/process-environment.ts`; generation fails if either side gains or loses a file.
 Rows cover literal dot access, literal bracket access, destructuring, `node:process` `env` imports,
 grounded `environment.KEY` seams, and keys explicitly written beside a process-environment spread.
 

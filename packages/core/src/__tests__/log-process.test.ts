@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { reset } from '@logtape/logtape'
 import { Check } from 'typebox/value'
-import { ENSO_REDACTED, ENSO_REDACTED_VALUE, EnsoLogLine, ensoLogger, withEnsoLogContext } from '../log.ts'
 import { redactionManifest } from '../log-bundle.ts'
 import {
   configureProcessLogging,
@@ -16,6 +15,7 @@ import {
   parseEnsoLogLevels,
   retiredEnvironmentNames,
 } from '../log-process.ts'
+import { ENSO_REDACTED, ENSO_REDACTED_VALUE, EnsoLogLine, ensoLogger, withEnsoLogContext } from '../log.ts'
 import { ensoSecretsPath } from '../paths.ts'
 import { knownSecretValuesTracking, readSecret } from '../secrets.ts'
 

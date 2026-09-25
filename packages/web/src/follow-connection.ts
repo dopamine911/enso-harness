@@ -15,8 +15,8 @@ import {
   isEnsoImageMimeType,
 } from '@enso/core'
 import type { MessagePart, StreamChunk } from '@tanstack/ai'
-import type { ModelMessage, UIMessage } from '@tanstack/ai/client'
 import type { RunAgentInputContext, SubscribeConnectionAdapter } from '@tanstack/ai-client'
+import type { ModelMessage, UIMessage } from '@tanstack/ai/client'
 import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from './custom-event-router.ts'
@@ -408,7 +408,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
    * that one here would end it before it started.
    */
   function finishRunsThrough(generation: number): void {
-    for (const run of [...runs.values()]) {
+    for (const run of runs.values()) {
       if (run.generation === undefined || run.generation > generation) continue
       closeRun(run, { type: EventType.RUN_FINISHED, threadId, runId: run.runId })
     }
@@ -562,7 +562,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       } finally {
         ended = true
         // The follow closed under open runs: the client would otherwise wait forever.
-        for (const run of [...runs.values()]) {
+        for (const run of runs.values()) {
           closeRun(run, {
             type: EventType.RUN_ERROR,
             runId: run.runId,

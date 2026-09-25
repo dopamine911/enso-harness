@@ -72,7 +72,7 @@ export function ContextEvents({
       }
     >
       {shown.length === 0 ? (
-        <p className="text-muted-foreground text-xs">
+        <p className="text-xs text-muted-foreground">
           {events.length === 0
             ? 'nothing has changed the context but the conversation itself'
             : 'no event of the kinds shown'}
@@ -281,7 +281,7 @@ export function FileActivity({
         <OptionSelect label="order files" value={order} options={FILE_ORDERS} onChange={setOrder} />
       </div>
       {shown.length === 0 ? (
-        <p className="text-muted-foreground text-xs">
+        <p className="text-xs text-muted-foreground">
           {operations.length === 0
             ? 'no file tool has run in this thread — read, write, edit, grep, find, ls'
             : 'no file matches'}

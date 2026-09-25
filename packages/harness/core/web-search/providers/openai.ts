@@ -119,11 +119,11 @@ function buildRequestHeaders(
   credential: { apiKey?: string | undefined; headers?: Record<string, string> | undefined },
 ): Record<string, string> {
   const headers: Record<string, string> = {
-    ...(request.model.headers ?? {}),
-    ...(credential.headers ?? {}),
+    ...request.model.headers,
+    ...credential.headers,
   }
-  if (headers['Content-Type'] === undefined) headers['Content-Type'] = 'application/json'
-  if (headers.Accept === undefined) headers.Accept = 'text/event-stream'
+  headers['Content-Type'] ??= 'application/json'
+  headers.Accept ??= 'text/event-stream'
   if (credential.apiKey !== undefined && credential.apiKey.length > 0 && headers.Authorization === undefined) {
     headers.Authorization = `Bearer ${credential.apiKey}`
   }
@@ -143,7 +143,7 @@ function buildRequestHeaders(
       }
       headers['chatgpt-account-id'] = extractCodexAccountId(credential.apiKey)
     }
-    if (headers.originator === undefined) headers.originator = 'codex_cli_rs'
+    headers.originator ??= 'codex_cli_rs'
   }
   return headers
 }

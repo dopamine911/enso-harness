@@ -281,7 +281,7 @@ function ContextSection({
           min={0}
           max={100}
           value={Math.min(percent, 100)}
-          className="mb-2 h-1.5 w-full appearance-none overflow-hidden rounded-full bg-muted-foreground/25 [&::-moz-meter-bar]:bg-foreground/60 [&::-webkit-meter-bar]:border-0 [&::-webkit-meter-bar]:bg-none [&::-webkit-meter-bar]:bg-transparent [&::-webkit-meter-optimum-value]:bg-foreground/60 [&::-webkit-meter-optimum-value]:bg-none"
+          className="mb-2 h-1.5 w-full appearance-none overflow-hidden rounded-full bg-muted-foreground/25 [&::-moz-meter-bar]:bg-foreground/60 [&::-webkit-meter-bar]:border-0 [&::-webkit-meter-bar]:bg-transparent [&::-webkit-meter-bar]:bg-none [&::-webkit-meter-optimum-value]:bg-foreground/60 [&::-webkit-meter-optimum-value]:bg-none"
         />
       )}
       <dl className="mb-2 grid grid-cols-2 gap-x-3 gap-y-0.5">
@@ -528,8 +528,8 @@ export function ThreadStatsView({
   readonly missed?: string | undefined
 }): React.ReactNode {
   if (outcome.kind === 'reading')
-    return <p className="p-3 text-muted-foreground text-xs">reading the thread's stats…</p>
-  if (outcome.kind === 'failed') return <p className="p-3 text-muted-foreground text-xs">no stats: {outcome.problem}</p>
+    return <p className="p-3 text-xs text-muted-foreground">reading the thread's stats…</p>
+  if (outcome.kind === 'failed') return <p className="p-3 text-xs text-muted-foreground">no stats: {outcome.problem}</p>
   const stats = outcome.payload
   const headline = headlineOf(stats)
   const tools = toolSummaries(stats.callStats)

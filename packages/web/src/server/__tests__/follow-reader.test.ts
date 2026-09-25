@@ -15,8 +15,8 @@ import { openFollow, WireSchemaViolation } from './follow-reader.ts'
  */
 
 const servers: Array<Server<undefined>> = []
-afterEach(() => {
-  for (const server of servers.splice(0)) server.stop(true)
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((server) => server.stop(true)))
 })
 
 /**
@@ -70,7 +70,7 @@ test('a follow whose transport dies reports that error, not a schema violation',
   const follow = await openFollow(urlOf(server), 't1')
   await follow.untilFrames(1)
   // The server goes away under an open follow — the fault the bare `catch` used to hide.
-  server.stop(true)
+  await server.stop(true)
   await follow.ended()
   const failure = follow.failure()
   expect(failure).toBeDefined()

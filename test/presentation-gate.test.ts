@@ -31,7 +31,7 @@ import { filesUnder } from '../scripts/source-tree.ts'
  * the build instead of passing review.
  *
  * ⚠ The scan is the EXCLUSION BOUNDARY, recursively (#253). It read `components/ai-elements`
- * only, non-recursively, while three separate exclusions — `biome.jsonc` → `files.includes`,
+ * only, non-recursively, while three separate exclusions — the linter's (then Biome's `files.includes`),
  * `bunfig.toml` → `coveragePathIgnorePatterns`, `.fallowrc.jsonc` → `ignoreFindings` — are
  * all drawn at `components`. So the eight `ui/*.tsx` shadcn primitives were unlinted,
  * unmeasured, exempt from dead-code findings, carried no provenance, and were held to no

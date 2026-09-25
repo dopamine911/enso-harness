@@ -262,7 +262,7 @@ need none: an upstream re-port is the second implementation, and the gate is wha
 
 - **The presentation gate** (`test/presentation-gate.test.ts`, #121 item 4, #31, #253) holds three
   lines about all of `packages/web/src/components/` — the path at which three separate exclusions are
-  drawn (`biome.jsonc` → `files.includes`, `bunfig.toml` → `coveragePathIgnorePatterns`,
+  drawn (`oxlint.config.ts` → `ignorePatterns`, `bunfig.toml` → `coveragePathIgnorePatterns`,
   `.fallowrc.jsonc` → `ignoreFindings`), which is why the fence is that path and not a subdirectory
   of it. Until #253 it scanned `components/ai-elements` non-recursively, so the eight `ui/*.tsx`
   primitives were unlinted, unmeasured, exempt from dead-code findings, carried no provenance and were

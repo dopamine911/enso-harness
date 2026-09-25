@@ -242,7 +242,7 @@ export function QuestionnaireControls({
         </TabsList>
         {dialog.questions.map((question, index) => (
           <TabsContent key={question.header} value={String(index)} className="flex flex-col gap-3 pt-2">
-            <p className="font-medium text-sm">{question.question}</p>
+            <p className="text-sm font-medium">{question.question}</p>
             {question.multiSelect ? (
               <MultiChoice
                 idPrefix={`${baseId}-${index}`}
@@ -275,7 +275,7 @@ export function QuestionnaireControls({
           Submit answers
         </Button>
         {unanswered > 0 ? (
-          <span className="text-muted-foreground text-xs">
+          <span className="text-xs text-muted-foreground">
             {unanswered === 1 ? '1 question' : `${unanswered} questions`} still to answer
           </span>
         ) : null}

@@ -116,7 +116,8 @@ export function logLineMatches(filter: EnsoLogFilter, line: EnsoLogLine): boolea
   if (RANK_OF_LINE[line.level] < filter.levelRank) return false
   if (Date.parse(line['@timestamp']) < filter.notBefore) return false
   const properties = line.properties ?? {}
-  if (filter.thread !== undefined && !String(properties.threadId ?? '').startsWith(filter.thread)) return false
+  const threadId = typeof properties.threadId === 'string' ? properties.threadId : ''
+  if (filter.thread !== undefined && !threadId.startsWith(filter.thread)) return false
   if (filter.process !== undefined && properties.process !== filter.process) return false
   return true
 }

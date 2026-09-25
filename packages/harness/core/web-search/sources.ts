@@ -36,9 +36,11 @@ export function normalizeSearchUrl(url: string): string {
     const isYouTube = /(^|\.)youtube\.com$/i.test(parsed.hostname) || /(^|\.)youtu\.be$/i.test(parsed.hostname)
     if (!isYouTube) {
       for (const paramName of REMOVABLE_QUERY_PARAMS) parsed.searchParams.delete(paramName)
-      for (const paramName of [...parsed.searchParams.keys()]) {
-        if (paramName.toLowerCase().startsWith('utm_')) parsed.searchParams.delete(paramName)
-      }
+      // Collected before deleting: `searchParams.keys()` is live, so deleting mid-iteration skips entries.
+      const trackingParamNames = [...parsed.searchParams.keys()].filter((paramName) =>
+        paramName.toLowerCase().startsWith('utm_'),
+      )
+      for (const paramName of trackingParamNames) parsed.searchParams.delete(paramName)
     }
     const query = parsed.searchParams.toString()
     parsed.search = query.length > 0 ? `?${query}` : ''

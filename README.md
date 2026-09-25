@@ -313,18 +313,20 @@ choose whether and where to share the bundle.
 ## How this repo proves it works
 
 `bun run check:all` is the only definition of green. The pre-commit hook and CI both run exactly it —
-**seven steps, stopping at the first failure**:
+**ten steps, stopping at the first failure**:
 
 | # | Step | What it does |
 |---|---|---|
-| 1 | `biome` | lint, format, import order, and this repo's naming rules |
-| 2 | `typecheck` | `tsc -b` across every package |
-| 3 | `dead-code` | unused files, exports and dependencies, against a committed baseline |
-| 4 | `react-doctor` | react-doctor over the web surface, offline, failing on an error-severity finding |
-| 5 | `test` | the whole suite |
-| 6 | `coverage` | line and function floors over *every* source file, not just imported ones |
-| 7 | `api-docs` | TypeDoc over the public contracts, with warnings fatal |
-| 8 | `site` | builds the docs site and crawls every built page for dead links |
+| 1 | `format` | formatting, import order and Tailwind class order (oxfmt) |
+| 2 | `lint` | oxlint, type-aware, with this repo's naming rules |
+| 3 | `typecheck` | `tsc -b` across every package |
+| 4 | `dead-code` | unused files, exports and dependencies, against a committed baseline |
+| 5 | `complexity` | every function under a cognitive ceiling of 25, or under its own pin (fallow) |
+| 6 | `react-doctor` | react-doctor over the web surface, offline, failing on an error-severity finding |
+| 7 | `test` | the whole suite |
+| 8 | `coverage` | line and function floors over *every* source file, not just imported ones |
+| 9 | `api-docs` | TypeDoc over the public contracts, with warnings fatal |
+| 10 | `site` | builds the docs site and crawls every built page for dead links |
 
 Twenty-one of those tests are **gates**: tests about the source tree rather than about behaviour — "no
 production `console.*`", "every documented export is grouped", "every diagram parses". Each one names

@@ -86,7 +86,7 @@ function EarlierThreadRow({
         type="button"
         title={thread.busy ? 'running — resume to follow it' : at.toLocaleString()}
         onClick={() => onResume(thread.threadId)}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground text-xs hover:bg-muted"
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted"
       >
         {thread.busy ? (
           <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-foreground">
@@ -118,7 +118,7 @@ export function ThreadsRail({
       <Button type="button" size="sm" variant="outline" onClick={onNew}>
         New Thread
       </Button>
-      <h2 className="px-1 pt-1 font-medium text-muted-foreground text-xs">Active Threads</h2>
+      <h2 className="px-1 pt-1 text-xs font-medium text-muted-foreground">Active Threads</h2>
       <ol aria-label="Active Threads" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
         {threads.map((thread) => {
           const active = thread.threadId === activeThreadId
@@ -150,15 +150,15 @@ export function ThreadsRail({
           )
         })}
       </ol>
-      <h2 className="px-1 pt-1 font-medium text-muted-foreground text-xs">Previous Threads</h2>
+      <h2 className="px-1 pt-1 text-xs font-medium text-muted-foreground">Previous Threads</h2>
       {earlierError !== undefined ? (
-        <div role="alert" className="px-2 text-destructive text-xs">
+        <div role="alert" className="px-2 text-xs text-destructive">
           could not list previous threads: {earlierError}
         </div>
       ) : null}
       <ol aria-label="Previous Threads" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
         {earlier.length === 0 && earlierError === undefined ? (
-          <li className="px-2 py-1.5 text-muted-foreground text-xs italic">none yet</li>
+          <li className="px-2 py-1.5 text-xs text-muted-foreground italic">none yet</li>
         ) : null}
         {earlier.map((thread) => (
           <EarlierThreadRow key={thread.threadId} thread={thread} onResume={onResume} />

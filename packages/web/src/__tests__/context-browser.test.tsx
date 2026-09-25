@@ -1,4 +1,4 @@
-import { afterAll, afterEach, expect, test } from 'bun:test'
+import { afterAll, afterEach, expect, spyOn, test } from 'bun:test'
 import type { EnsoContextRequest, EnsoContextRequestDetail } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot } from 'react-dom/client'
@@ -6,6 +6,7 @@ import { ContextBrowser, type ContextBrowserFocus, type ContextBrowserRequest } 
 import { ThreadStoresContext } from '../store.ts'
 import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
+import { requestedUrl } from './scripted-server.ts'
 import { waitUntil } from './wait-until.ts'
 
 /**
@@ -68,7 +69,7 @@ test("a focus opens its element's category and row; the row shows the call's arg
   const stores = mintThread()
   const asked: string[] = []
   globalThis.fetch = ((input: string | URL | Request): Promise<Response> => {
-    asked.push(String(input))
+    asked.push(requestedUrl(input))
     return Promise.resolve(Response.json({ ...DETAIL, threadId: stores.threadId }))
   }) as typeof fetch
   const container = document.createElement('div')
@@ -111,14 +112,15 @@ test('a re-read keeps the reader where they are: a focused row they closed stays
   const stores = mintThread()
   const asked: string[] = []
   globalThis.fetch = ((input: string | URL | Request): Promise<Response> => {
-    asked.push(String(input))
+    asked.push(requestedUrl(input))
     return Promise.resolve(Response.json({ ...DETAIL, threadId: stores.threadId }))
   }) as typeof fetch
   const scrolled: Element[] = []
-  const scrollIntoView = Element.prototype.scrollIntoView
-  Element.prototype.scrollIntoView = function recordScroll(this: Element): void {
+  const scroll = spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function recordScroll(
+    this: Element,
+  ): void {
     scrolled.push(this)
-  }
+  })
   try {
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -158,7 +160,7 @@ test('a re-read keeps the reader where they are: a focused row they closed stays
     await flush(async () => root.unmount())
     container.remove()
   } finally {
-    Element.prototype.scrollIntoView = scrollIntoView
+    scroll.mockRestore()
   }
 })
 
@@ -169,10 +171,11 @@ test('a focus that arrives on an open request whose category is closed opens it 
   globalThis.fetch = ((_input: string | URL | Request): Promise<Response> =>
     Promise.resolve(Response.json({ ...DETAIL, threadId: stores.threadId }))) as typeof fetch
   const scrolled: Element[] = []
-  const scrollIntoView = Element.prototype.scrollIntoView
-  Element.prototype.scrollIntoView = function recordScroll(this: Element): void {
+  const scroll = spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function recordScroll(
+    this: Element,
+  ): void {
     scrolled.push(this)
-  }
+  })
   try {
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -206,7 +209,7 @@ test('a focus that arrives on an open request whose category is closed opens it 
     await flush(async () => root.unmount())
     container.remove()
   } finally {
-    Element.prototype.scrollIntoView = scrollIntoView
+    scroll.mockRestore()
   }
 })
 
@@ -216,7 +219,7 @@ test("a failed read is not shown as another request's while that one is read", a
   const stores = mintThread()
   const pending = Promise.withResolvers<Response>()
   globalThis.fetch = ((input: string | URL | Request): Promise<Response> =>
-    String(input).endsWith('/context/2')
+    requestedUrl(input).endsWith('/context/2')
       ? Promise.resolve(new Response('boom', { status: 500 }))
       : pending.promise) as typeof fetch
   const container = document.createElement('div')

@@ -1,4 +1,4 @@
-import { afterAll, afterEach, expect, test } from 'bun:test'
+import { afterAll, afterEach, expect, spyOn, test } from 'bun:test'
 import { ENSO_PROVIDER_REFUSAL_KEY, type EnsoThreadStats } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
@@ -11,7 +11,13 @@ import {
   threadListStore,
 } from '../thread-stores.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
-import { createScriptedFetch, type ScriptedFetch, type ScriptedFetchOptions, SNAPSHOT_IDLE } from './scripted-server.ts'
+import {
+  createScriptedFetch,
+  requestedUrl,
+  type ScriptedFetch,
+  type ScriptedFetchOptions,
+  SNAPSHOT_IDLE,
+} from './scripted-server.ts'
 
 // ⚠ Loaded HERE, not statically: react-dom/client probes the DOM when its module evaluates
 // (`"oninput" in document` decides whether `onChange` uses the input event or an IE-era
@@ -48,7 +54,7 @@ afterAll(releaseDom)
 
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20))
 
-/** React's `act` with async work — typed so its Promise overload is the one seen (biome's nursery `useAwaitThenable` reads the sync one). */
+/** React's `act` with async work — typed so its Promise overload is the one seen (a type-aware `await-thenable` reads the sync one). */
 const flush = (work: () => Promise<void>): Promise<void> => act(work)
 
 /**
@@ -171,9 +177,9 @@ async function mountPane(
  * to it), then one bubbling `input` event — what React 19 listens to for `onChange`.
  */
 function typeInto(field: HTMLTextAreaElement, text: string): void {
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-  if (setter === undefined) throw new Error('HTMLTextAreaElement.prototype.value has no setter')
-  setter.call(field, text)
+  if (!Reflect.set(HTMLTextAreaElement.prototype, 'value', text, field)) {
+    throw new Error('HTMLTextAreaElement.prototype.value has no setter')
+  }
   field.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
@@ -599,7 +605,7 @@ test('⚠ a queued prompt refused after a delay takes back only its own bubble; 
   let prompts = 0
   // The second `/prompt` (the queued one) is held, then refused with a 400.
   const gated = ((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const path = new URL(String(input), 'http://localhost').pathname
+    const path = new URL(requestedUrl(input), 'http://localhost').pathname
     if (path.endsWith('/prompt')) {
       prompts += 1
       if (prompts === 2) {
@@ -1205,10 +1211,9 @@ const TWO_CALL_STATS: Omit<EnsoThreadStats, 'threadId'> = {
 // view stays where it is.
 test('⚠ a costliest-calls row opens Chat at its call; a call not drawn there is said and Stats stays (#359, #361)', async () => {
   const scrolled: Element[] = []
-  const scrollIntoView = Element.prototype.scrollIntoView
-  Element.prototype.scrollIntoView = function record(this: Element): void {
+  const scroll = spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function record(this: Element): void {
     scrolled.push(this)
-  }
+  })
   try {
     const pane = await mountPane({ view: 'stats', server: { stats: TWO_CALL_STATS } })
     await pane.settle(SNAPSHOT_IDLE)
@@ -1236,7 +1241,7 @@ test('⚠ a costliest-calls row opens Chat at its call; a call not drawn there i
     )
     await pane.unmount()
   } finally {
-    Element.prototype.scrollIntoView = scrollIntoView
+    scroll.mockRestore()
   }
 })
 
@@ -1566,7 +1571,7 @@ test("a resumed thread's refused attempt says the refusal in its own bubble, bef
 test('a stored listing the server cannot serve is said in the rail, and the page still works', async () => {
   const server = createScriptedFetch()
   const failing = ((input: string | URL | Request, init?: RequestInit): Promise<Response> =>
-    String(input).endsWith('/api/stored-threads')
+    requestedUrl(input).endsWith('/api/stored-threads')
       ? Promise.resolve(new Response('<!doctype html>\n<html>boom</html>', { status: 500 }))
       : server.fetch(input, init)) as typeof fetch
   globalThis.fetch = failing

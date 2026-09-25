@@ -338,12 +338,12 @@ export function CommandPalette({
           />
           <PromptInputCommandList>
             {state.kind === 'loading' ? (
-              <div role="status" className="px-2 py-3 text-muted-foreground text-sm">
+              <div role="status" className="px-2 py-3 text-sm text-muted-foreground">
                 loading commands…
               </div>
             ) : null}
             {state.kind === 'failed' ? (
-              <div role="alert" className="px-2 py-3 text-destructive text-sm">
+              <div role="alert" className="px-2 py-3 text-sm text-destructive">
                 {state.detail}
               </div>
             ) : null}
@@ -385,12 +385,12 @@ export function CommandPalette({
                             keywords={command.description === undefined ? [] : [command.description]}
                             onSelect={(): void => choose(command)}
                           >
-                            <span className="whitespace-nowrap font-mono">/{command.name}</span>
+                            <span className="font-mono whitespace-nowrap">/{command.name}</span>
                             {command.description === undefined ? null : (
                               <span className="truncate text-muted-foreground">{command.description}</span>
                             )}
                             {label === undefined ? null : (
-                              <span className="ml-auto whitespace-nowrap pl-2 text-muted-foreground text-xs">
+                              <span className="ml-auto pl-2 text-xs whitespace-nowrap text-muted-foreground">
                                 {label}
                               </span>
                             )}
@@ -404,7 +404,7 @@ export function CommandPalette({
             ) : null}
           </PromptInputCommandList>
           {state.kind === 'loaded' && state.commands.source === 'remembered' ? (
-            <div className="border-t px-2 py-1.5 text-muted-foreground text-xs">{REMEMBERED_NOTE}</div>
+            <div className="border-t px-2 py-1.5 text-xs text-muted-foreground">{REMEMBERED_NOTE}</div>
           ) : null}
         </PromptInputCommand>
       </PromptInputActionMenuContent>

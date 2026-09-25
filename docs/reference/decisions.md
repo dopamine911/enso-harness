@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 267.**
+**Decision headers: 268.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -69,7 +69,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/core/web-search/auth.ts` | `#63` | Model-routed auth (#63): resolve one model's credentials THROUGH PI's model registry — the same identity the conversation bills, including the OAuth path — with the provider-env fallback pi 0.80.1+ made necessary. |
 | `packages/harness/core/web-search/citations.ts` | `#63` | Citation markers (#63): turn a provider's citation records into `[n]` markers inside the answer text plus the numbered source list those markers point at. |
 | `packages/harness/core/web-search/dispatch.ts` | `#174` | How every provider sends its request (#174): a JSON POST, and the two ways it fails — the request never left (`requestDispatched: false`, so the extension may fall through to the next provider) or the API answered but not OK (`requestDispatched: true`, the body quoted). |
-| `packages/harness/core/web-search/providers/anthropic.ts` | `#63` | The `anthropic` provider (#63): current-model routing onto the Anthropic Messages native `web_search` server tool ({@link ANTHROPIC_WEB_SEARCH_TOOL_TYPE}). |
+| `packages/harness/core/web-search/providers/anthropic.ts` | `#63` | The `anthropic` provider (#63): current-model routing onto the Anthropic Messages native `web_search` server tool (`ANTHROPIC_WEB_SEARCH_TOOL_TYPE` in `anthropic-wire.ts`). |
 | `packages/harness/core/web-search/providers/deepseek.ts` | `#63` | The `deepseek` provider (#63): the DEDICATED search backend, dsh's shape (`dsh-web-search-deepseek`, MIT — the spec this follows). |
 | `packages/harness/core/web-search/providers/google.ts` | `#63` | The `google` provider (#63): Gemini "Grounding with Google Search" over the `streamGenerateContent` SSE endpoint. |
 | `packages/harness/core/web-search/providers/openai.ts` | `#63` | The `openai` provider (#63): the Responses API `web_search` tool, serving three model APIs — `openai-responses`, `azure-openai-responses`, and `openai-codex-responses` (including GitHub Copilot credentials, whose resolved endpoint rides the credential object). |
@@ -249,6 +249,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `scripts/enso.ts` | `#20`, `#217` | Launch a VANILLA pi with only Enso loaded. |
 | `scripts/gate.ts` | `#188`, `#208`, `#257`, `#342` | Ported from slop-factory's bun example (examples/bun/scripts/gate.ts) — the shape is deliberately identical so improvements travel in either direction. |
 | `scripts/link-vendor-packages.ts` | `#30` | Ensure the vendor pi packages exist inside the harness package's own node_modules. |
+| `scripts/lint/process-environment.ts` | `#89` | The environment boundary (#89): every file allowed to read the real process environment. |
 | `scripts/print-harness.ts` | `#9`, `#13`, `#20` | The PRINT-MODE harness variant (#20): the Enso package minus picc-permission-modes. |
 | `scripts/source-tree.ts` | `#162`, `#174` | The one walk over the source tree (#174, #162 workstream 6: one walker per gate family). |
 | `test/api-group-gate.test.ts` | `#188` | THE API PAGE IS ORGANISED BY SEAM, AND THAT ORGANISATION IS HELD (#188). |

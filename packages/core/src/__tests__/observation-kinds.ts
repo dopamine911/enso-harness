@@ -10,6 +10,6 @@ import { EnsoObservation } from '../observation.ts'
  * test-only helper does not enter the denominator as an untested "library" file.
  */
 export function observationKindsDeclaredByTheUnion(): string[] {
-  const kinds: string[] = EnsoObservation.anyOf.map((member) => String(member.properties.kind.const))
+  const kinds: string[] = EnsoObservation.anyOf.map((member) => member.properties.kind.const)
   return kinds.sort()
 }

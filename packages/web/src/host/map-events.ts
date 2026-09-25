@@ -132,7 +132,7 @@ function mapExtensionUiRequest(event: RuntimeEvent, delivery: EventDelivery): En
   // The session layer declines those on the wire (the pre-#27 behaviour) —
   // mapping them as unmapped or non-blocking instead would hang pi silently,
   // which is the bug this observation kind exists to make inexpressible.
-  const method = String(event.method ?? 'unknown')
+  const method = textOr(event.method, 'unknown')
   const dialogCandidate: Record<string, unknown> = { method }
   for (const field of [
     'title',
@@ -158,7 +158,7 @@ function mapExtensionUiRequest(event: RuntimeEvent, delivery: EventDelivery): En
   // failure.
   const notifyFields: { message?: string; notifyType?: EnsoNotifyType } = {}
   if (method === 'notify') {
-    notifyFields.message = String(event.message ?? '')
+    notifyFields.message = textOr(event.message, '')
     // The declared values come from the schema, not a literal list — the browser
     // router (custom-event-router.ts) makes the same check the same way.
     const notifyTypeCandidate = event.notifyType
@@ -168,7 +168,7 @@ function mapExtensionUiRequest(event: RuntimeEvent, delivery: EventDelivery): En
   }
   return {
     kind: 'extension-ui-request',
-    id: String(event.id ?? ''),
+    id: textOr(event.id, ''),
     method,
     blocking: DIALOG_UI_METHODS.has(method),
     // Tagged from the host's delivery, never inferred from position (#96).
@@ -181,6 +181,11 @@ function mapExtensionUiRequest(event: RuntimeEvent, delivery: EventDelivery): En
 /** pi's message role off a `message_start` / `message_end`, or `unknown` when the record has none. */
 function roleOf(message: { role?: unknown } | undefined): string {
   return typeof message?.role === 'string' ? message.role : 'unknown'
+}
+
+/** A string field pi carries, or `fallback` when the record has none. */
+function textOr(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback
 }
 
 /** The length of an array field pi carries, or 0 — `toolResults`, `steering`, `followUp`. */
@@ -407,9 +412,9 @@ export function mapPiEvent(event: RuntimeEvent, delivery: EventDelivery = 'live'
     case 'extension_error':
       return {
         kind: 'extension-error',
-        extensionPath: String(event.extensionPath ?? 'unknown'),
-        event: String(event.event ?? 'unknown'),
-        error: String(event.error ?? 'unknown error'),
+        extensionPath: textOr(event.extensionPath, 'unknown'),
+        event: textOr(event.event, 'unknown'),
+        error: textOr(event.error, 'unknown error'),
       }
 
     case 'agent_end':

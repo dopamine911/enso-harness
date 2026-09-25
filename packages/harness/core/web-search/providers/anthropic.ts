@@ -1,11 +1,11 @@
-import { ANTHROPIC_WEB_SEARCH_TOOL_TYPE, runAnthropicWireSearch } from '../anthropic-wire.ts'
+import { runAnthropicWireSearch } from '../anthropic-wire.ts'
 import { resolveProviderCredential } from '../dispatch.ts'
 import type { ModelSearchRequest, WebSearchOutcome } from '../vocabulary.ts'
 import { trimTrailingSlash } from '../wire-json.ts'
 
 /**
  * The `anthropic` provider (#63): current-model routing onto the Anthropic Messages
- * native `web_search` server tool ({@link ANTHROPIC_WEB_SEARCH_TOOL_TYPE}). Auth comes
+ * native `web_search` server tool (`ANTHROPIC_WEB_SEARCH_TOOL_TYPE` in `anthropic-wire.ts`). Auth comes
  * from pi's model registry — API key or the Claude OAuth credential — so a search bills
  * the SAME identity the conversation does; that credential parity is why this code was
  * consumed rather than hand-rolled (#63).
@@ -52,8 +52,8 @@ export async function runAnthropicProviderSearch(request: ModelSearchRequest): P
     'Content-Type': 'application/json',
     Accept: 'text/event-stream',
     'anthropic-version': ANTHROPIC_API_VERSION,
-    ...(request.model.headers ?? {}),
-    ...(credential.headers ?? {}),
+    ...request.model.headers,
+    ...credential.headers,
   }
   let isOAuthCredential = false
   if (credential.apiKey !== undefined && credential.apiKey.length > 0) {

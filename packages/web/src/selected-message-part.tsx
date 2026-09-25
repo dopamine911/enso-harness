@@ -2,7 +2,6 @@ import { summarizeToolInput } from '@enso/core'
 // ⚠ Only `TextPart` crosses from the package's renderers. `ThinkingPart` looked like its
 // sibling but renders PLAIN text inside hardcoded off-theme chrome — the Reasoning shell
 // in `ai-elements/reasoning.tsx` replaces it (see that file's header).
-
 import type { ChatUISelectedPart, ChatUISelectedToolPart } from '@tanstack/ai-client/ui'
 import { TextPart } from '@tanstack/ai-react/ui'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from './components/ai-elements/reasoning.tsx'
@@ -61,7 +60,7 @@ function ToolCallRow({
       open={status === 'error'}
       className="group my-1"
     >
-      <summary className="flex cursor-pointer list-none items-center gap-2 font-mono text-muted-foreground text-xs marker:hidden">
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-mono text-xs text-muted-foreground marker:hidden">
         <span aria-hidden="true" className={STEP_DOT[status]} />
         <span className="text-foreground">{selected.part.name}</span>
         {/* `min-w-0`: a flex child's default `min-width: auto` never shrinks below its
@@ -72,11 +71,11 @@ function ToolCallRow({
         {status === 'error' ? <span className="text-destructive">error</span> : null}
       </summary>
       <div className="mt-1 ml-1 flex flex-col gap-1 border-l pl-3">
-        <div className="font-mono text-muted-foreground text-xs uppercase">in</div>
+        <div className="font-mono text-xs text-muted-foreground uppercase">in</div>
         <pre className="overflow-x-auto rounded-md bg-muted p-2 font-mono text-xs">
           {input === undefined ? selected.part.arguments : JSON.stringify(input, null, 2)}
         </pre>
-        <div className="font-mono text-muted-foreground text-xs uppercase">out</div>
+        <div className="font-mono text-xs text-muted-foreground uppercase">out</div>
         {/* ⚠ THE INTEGRATION POINT #18 EXISTS FOR. Every tool result renders through
 				    `EnsoToolResult`: the descriptor is read from the result's metadata, and an
 				    absent result (the call is still in flight) renders the visible pending state. */}
@@ -148,7 +147,7 @@ export function SelectedMessagePart({
   // the typography plugin is what styles it.
   if (selected.part.type === 'text') {
     return (
-      <div className="prose prose-sm dark:prose-invert max-w-none">
+      <div className="prose prose-sm max-w-none dark:prose-invert">
         <TextPart components={TEXT_PART_COMPONENTS} content={selected.part.content} />
       </div>
     )
@@ -173,7 +172,7 @@ export function SelectedMessagePart({
   // `document`, `structuredOutput` and `uiResource` are all in the vocabulary and it will
   // grow — and a silently skipped part is indistinguishable from one that was never sent.
   return (
-    <pre className="overflow-x-auto rounded-md border bg-muted/50 p-2 text-muted-foreground text-xs">
+    <pre className="overflow-x-auto rounded-md border bg-muted/50 p-2 text-xs text-muted-foreground">
       {selected.part.type}: {JSON.stringify(selected.part)}
     </pre>
   )

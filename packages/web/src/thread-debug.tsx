@@ -29,6 +29,12 @@ function useRing(ring: Store<readonly EnsoLogLine[]> | undefined): readonly Enso
   )
 }
 
+/** A ring line's React key: the page's own sequence number when it was stamped, else its instant. */
+function loggedLineKey(line: EnsoLogLine): string {
+  const pageSequence = line.properties?.pageSequence
+  return typeof pageSequence === 'number' ? String(pageSequence) : line['@timestamp']
+}
+
 /**
  * The session debug drawer (#86): what the BROWSER believes next to what pi's SESSION
  * actually contains, for the current thread, with any disagreement named.
@@ -154,7 +160,7 @@ function entryKey(entry: EnsoTranscriptEntry, position: number): string {
 function Mismatch({ when, says }: { when: boolean; says: string }): React.ReactNode {
   if (!when) return null
   return (
-    <span className="ml-2 rounded bg-destructive px-1 font-semibold text-destructive-foreground">MISMATCH: {says}</span>
+    <span className="text-destructive-foreground ml-2 rounded bg-destructive px-1 font-semibold">MISMATCH: {says}</span>
   )
 }
 
@@ -190,7 +196,7 @@ export function ThreadDebugView({
     describeGenerationDrift(browser.generation, session?.generation) ??
     describeLostSession(browser.generation, sessionMissing)
   return (
-    <aside aria-label="session debug" className="flex flex-col gap-3 p-3 font-mono text-muted-foreground text-xs">
+    <aside aria-label="session debug" className="flex flex-col gap-3 p-3 font-mono text-xs text-muted-foreground">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-semibold text-foreground">session debug</span>
         <span className="flex gap-1">
@@ -246,7 +252,7 @@ export function ThreadDebugView({
           <ol aria-label="browser log">
             {browser.logged.map((line) => (
               <li
-                key={String(line.properties?.pageSequence ?? line['@timestamp'])}
+                key={loggedLineKey(line)}
                 className={line.level === 'WARN' || line.level === 'ERROR' ? 'text-destructive' : ''}
               >
                 {line['@timestamp'].slice(11, 23)} {line.level.toLowerCase()}{' '}
@@ -369,13 +375,14 @@ export function latestWins<T>(issue: () => Promise<T>): () => Promise<T | undefi
   return async (): Promise<T | undefined> => {
     latest += 1
     const mine = latest
-    const outcome = await issue().then(
-      (value) => ({ value, failure: undefined }),
-      (failure: unknown) => ({ value: undefined, failure: failure ?? new Error('rejected without a reason') }),
-    )
-    if (mine !== latest) return undefined
-    if (outcome.failure !== undefined) throw outcome.failure
-    return outcome.value
+    try {
+      const value = await issue()
+      return mine === latest ? value : undefined
+    } catch (failure) {
+      if (mine !== latest) return undefined
+      if (failure === undefined || failure === null) throw new Error('rejected without a reason')
+      throw failure
+    }
   }
 }
 

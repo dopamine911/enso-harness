@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
 import type { EnsoThreadStats, EnsoToolCallStats } from '@enso/core'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { ThreadStatsView } from '../thread-stats.tsx'
 import { headlineOf, rankCalls, rankTools, toolSummaries } from '../thread-stats-analysis.ts'
+import { ThreadStatsView } from '../thread-stats.tsx'
 
 /**
  * #45 phase 2: the stats drawer, livecraft's session analysis over our wire — its derivations as
@@ -82,7 +82,7 @@ test("the headline is livecraft's cards: mean and median cost per turn, tools pe
   })
   // Spend the branch does not account for is its own figure — and float noise is not spend.
   expect(headlineOf({ ...STATS, usage: { ...STATS.usage, cost: 0.75 } }).offBranchCost).toBe(0.25)
-  expect(headlineOf({ ...STATS, usage: { ...STATS.usage, cost: 0.500_01 } }).offBranchCost).toBe(0)
+  expect(headlineOf({ ...STATS, usage: { ...STATS.usage, cost: 0.50001 } }).offBranchCost).toBe(0)
 })
 
 // ⚠ livecraft's rules: a duration ranking lists only what the log timed — an untimed call is not

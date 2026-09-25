@@ -1,6 +1,6 @@
 import starlight from '@astrojs/starlight'
-import { defineConfig } from 'astro/config'
 import mermaid from 'astro-mermaid'
+import { defineConfig } from 'astro/config'
 import starlightTypeDoc from 'starlight-typedoc'
 import { SITE_BASE, SITE_URL } from '../scripts/docs/site-base.ts'
 
