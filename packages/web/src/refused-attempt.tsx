@@ -1,5 +1,5 @@
 import { type EnsoProviderRefusal, providerReasonOf, providerRefusalClass, readEnsoProviderRefusal } from '@enso/core'
-import { OctagonAlertIcon } from 'lucide-react'
+import { TranscriptLine } from './notifications.tsx'
 
 /**
  * A refused attempt, said (#340, #381): `<provider>/<model> refused: <class> (<status>) — <reason>`.
@@ -41,18 +41,9 @@ export function trailingRefusalOf(messages: readonly unknown[]): EnsoProviderRef
 }
 
 /**
- * The refusal in the attempt's own bubble (#381), styled as the live line is (`NotificationLine`,
- * error) so a reloaded thread reads the way it did while it ran.
- *
- * ⚠ The markup is a deliberate copy of `NotificationLine`'s error row (PR #383 review): that
- * component takes a whole `EnsoNotification` — id, origin, time — and this line has none of them
- * to give. A style change to the error row lands in both; a third copy is the point to extract one.
+ * The refusal in the attempt's own bubble (#381): the same row the live line is (`TranscriptLine`,
+ * error), so a reloaded thread reads the way it did while it ran.
  */
 export function RefusedAttemptLine({ refusal }: { refusal: EnsoProviderRefusal }): React.ReactNode {
-  return (
-    <div role="status" data-enso-refused-attempt="" className="flex items-center gap-2 text-destructive text-xs">
-      <OctagonAlertIcon className="size-3.5 shrink-0" />
-      <span className="whitespace-pre-wrap">{providerRefusalLine(refusal)}</span>
-    </div>
-  )
+  return <TranscriptLine notifyType="error" message={providerRefusalLine(refusal)} data-enso-refused-attempt="" />
 }

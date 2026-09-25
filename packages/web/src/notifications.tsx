@@ -76,27 +76,49 @@ const NOTIFY_TYPE_ICONS = {
 } as const
 
 /**
- * One notification as a small transcript line. Presentational — takes the notification as
- * a prop so it is testable without the store.
+ * One line in the transcript's voice: an icon by `notifyType`, the text beside it (#383 review).
+ * Presentational, and the ONE definition of that row — a notification renders through it, and so
+ * does a refused attempt's bubble (`refused-attempt.tsx`), which has no notification to give.
  *
- * `notifyType` styling: error uses the destructive token; warning has no shadcn token, so
- * it stays muted with the triangle icon carrying the distinction; an absent type renders
- * as info. The full timestamp lives in `title` (hover) — the visible line stays short.
+ * `notifyType` styling: error uses the destructive token; warning has no shadcn token, so it stays
+ * muted with the triangle icon carrying the distinction; an absent type renders as info. Anything
+ * else — a `title`, a `data-*` marker — passes through to the row.
  */
-export function NotificationLine({ notification }: { notification: EnsoNotification }): React.ReactNode {
-  const Icon = NOTIFY_TYPE_ICONS[notification.notifyType ?? 'info']
+export function TranscriptLine({
+  notifyType,
+  message,
+  ...rest
+}: {
+  notifyType: EnsoNotifyType | undefined
+  message: string
+} & Omit<React.ComponentProps<'div'>, 'role' | 'className' | 'children'>): React.ReactNode {
+  const Icon = NOTIFY_TYPE_ICONS[notifyType ?? 'info']
   return (
     <div
       role="status"
-      title={notification.at.toLocaleString()}
+      {...rest}
       className={cn(
         'flex items-center gap-2 text-xs',
-        notification.notifyType === 'error' ? 'text-destructive' : 'text-muted-foreground',
+        notifyType === 'error' ? 'text-destructive' : 'text-muted-foreground',
       )}
     >
       <Icon className="size-3.5 shrink-0" />
-      <span className="whitespace-pre-wrap">{notification.message}</span>
+      <span className="whitespace-pre-wrap">{message}</span>
     </div>
+  )
+}
+
+/**
+ * One notification as a small transcript line. Takes the notification as a prop so it is testable
+ * without the store. The full timestamp lives in `title` (hover) — the visible line stays short.
+ */
+export function NotificationLine({ notification }: { notification: EnsoNotification }): React.ReactNode {
+  return (
+    <TranscriptLine
+      notifyType={notification.notifyType}
+      message={notification.message}
+      title={notification.at.toLocaleString()}
+    />
   )
 }
 
