@@ -104,9 +104,9 @@ export function effortFor(levels: readonly string[], wanted: string | undefined)
 function refusalText(outcome: Exclude<ConfigureOutcome, { outcome: 'told' }>): string {
   switch (outcome.outcome) {
     case 'refused':
-      return outcome.step === undefined
-        ? outcome.reason
-        : `the ${STEP_WORDS[outcome.step]} was refused: ${outcome.reason}`
+      return `the ${STEP_WORDS[outcome.step]} was refused: ${outcome.reason}`
+    case 'failed':
+      return `the server failed to apply the settings (${outcome.status}) — see the server log`
     case 'busy':
       return outcome.reason
     case 'unreachable':

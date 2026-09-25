@@ -390,6 +390,31 @@ test('a refused mode change names the outcome and is reported — busy is not a 
   expect(await refusedConnection.changeMode('nope')).toBe('refused')
 })
 
+// ── the configure route (#391) ──────────────────────────────────────────────────────
+test('configure: only the 422 naming its step is a refusal; a fault is `failed` with its status, never its body (PR #393 review)', async () => {
+  const answering = (status: number, body: string): FollowConnection =>
+    createFollowConnection({
+      threadId: 't1',
+      fetch: (() => Promise.resolve(new Response(body, { status }))) as unknown as typeof fetch,
+      onProblem: () => undefined,
+    })
+  const refusal = JSON.stringify({ step: 'thinking', reason: 'thinking level high is not offered' })
+  expect(await answering(422, refusal).configure({ thinking: 'high' })).toEqual({
+    outcome: 'refused',
+    step: 'thinking',
+    reason: 'thinking level high is not offered',
+  })
+  // The fault text answers every route; shown as a reason it read "the session listing failed".
+  expect(await answering(500, 'the request failed — see the server log').configure({ mode: 'plan' })).toEqual({
+    outcome: 'failed',
+    status: 500,
+  })
+  expect(await answering(400, 'configure body takes only …').configure({ mode: 'plan' })).toEqual({
+    outcome: 'failed',
+    status: 400,
+  })
+})
+
 // ── the host-command route (#338 slice 2) — the mode route's shape, the mode route's failure path ──
 test('runHostCommand is one JSON POST to …/command; told on 204; the store moves only when the feed says so', async () => {
   const server = scripted()

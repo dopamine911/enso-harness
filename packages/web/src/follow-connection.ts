@@ -278,13 +278,16 @@ export type ModeChangeOutcome = 'told' | 'busy' | 'refused' | 'unreachable'
 export type HostCommandOutcome = ModeChangeOutcome
 /**
  * What `configure` reports (#391): applied, or why not — WITH the reason, because the asking
- * dialog shows it (a `refused` names the step when the server did). Not said on the transcript:
- * the dialog is where the person is looking, and a second copy there would be a duplicate.
+ * dialog shows it. `refused` is the server's 422, naming the step; `failed` is any other answer
+ * (a fault's 500, a body the server would not read), which is not a refusal and does not pretend
+ * to be one (PR #393 review). Not said on the transcript: the dialog is where the person is
+ * looking, and a second copy there would be a duplicate.
  */
 export type ConfigureOutcome =
   | { readonly outcome: 'told' }
-  | { readonly outcome: 'refused'; readonly step?: EnsoConfigurationRefusal['step']; readonly reason: string }
+  | { readonly outcome: 'refused'; readonly step: EnsoConfigurationRefusal['step']; readonly reason: string }
   | { readonly outcome: 'busy'; readonly reason: string }
+  | { readonly outcome: 'failed'; readonly status: number }
   | { readonly outcome: 'unreachable' }
 
 export function createFollowConnection(options: FollowConnectionOptions): FollowConnection {
@@ -791,17 +794,17 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     if (response === undefined) return { outcome: 'unreachable' }
     if (response.status === 204) return { outcome: 'told' }
     const body = await response.text()
-    log.warn('configure refused: {status} {body}', { status: response.status, body })
+    log.warn('configure not applied: {status} {body}', { status: response.status, body })
     if (response.status === 409) return { outcome: 'busy', reason: body }
     let refusal: unknown
     try {
-      refusal = JSON.parse(body)
+      refusal = response.status === 422 ? JSON.parse(body) : undefined
     } catch {
       refusal = undefined
     }
     return Check(EnsoConfigurationRefusal, refusal)
       ? { outcome: 'refused', step: refusal.step, reason: refusal.reason }
-      : { outcome: 'refused', reason: body }
+      : { outcome: 'failed', status: response.status }
   }
 
   return { subscribe, send, answerDialog, abort, prompt, changeMode, runHostCommand, configure, close }

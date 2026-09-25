@@ -453,14 +453,15 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
 
   /**
    * ⚠ The dispatcher is synchronous and a throw in the request listener has nothing above
-   * it (PR #87). The two handlers that await the host run through here: a rejection is
-   * reported and answered as a 500, and the server stays up.
+   * it (PR #87). Every handler that awaits (the thread routes, the listing, the browser log) runs
+   * through here: a rejection is reported and answered as a 500 whose text names no route (it
+   * answers every one of them; PR #393 review), and the server stays up.
    */
   function answerOrFail(work: Promise<void>, response: ServerResponse): void {
     work.catch((error: unknown) => {
       log.error('a handler failed: {error}', { error })
       if (!response.headersSent) response.writeHead(500, { 'Content-Type': 'text/plain' })
-      response.end('the session listing failed — see the server log')
+      response.end('the request failed — see the server log')
     })
   }
 

@@ -108,9 +108,10 @@ that title, so a renamed or deleted pin fails this page.
   the file in, the parts out, an unknown kind a visible marker.
 <!-- test: packages/web/src/__tests__/thread-url.test.ts#a URL that names a thread id resumes it; none is a fresh page; one that cannot be a thread id is fresh AND said -->
 - **Invariant 6** — [`thread-url.test.ts`](../../packages/web/src/__tests__/thread-url.test.ts).
-<!-- test: packages/web/src/__tests__/threads-rail.test.tsx#adopting stored history restores dates, title and mode under the stored thread id exactly once -->
+<!-- test: packages/web/src/__tests__/threads-rail.test.tsx#adopting stored history restores dates, title and mode under the stored thread id exactly once, and never asks to start a session (#391) -->
 - **Invariant 1, in the browser** — [`threads-rail.test.tsx`](../../packages/web/src/__tests__/threads-rail.test.tsx):
-  adopted under the stored id; a second adoption returns the same stores.
+  adopted under the stored id; a second adoption returns the same stores; a resumed thread never opens
+  the Start-a-session dialog.
 <!-- test: packages/web/src/server/__tests__/follow.test.ts#prompt answers at admission with a message id; the run is released by pi's settle, no HTTP response in between -->
 - **Invariant 7** — [`follow.test.ts`](../../packages/web/src/server/__tests__/follow.test.ts): the
   empty cold snapshot, then the two status frames as the thread is built and taken.
