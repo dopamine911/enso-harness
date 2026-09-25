@@ -376,3 +376,48 @@ test('a dispose that throws is reported, not thrown', async () => {
       String(properties.error).includes('already gone'),
   })
 })
+
+// ⚠ #390: a person's explicit ask (the `/` palette, the model picker, a typed command) builds the
+// thread's session, but it is NOT a run: no generation counted, not busy, and a session nobody
+// prompts idles out like a released one. A later run reuses what the ask built.
+test('⚠ ensure builds a session without taking a run; it idles out, and a later acquire reuses it (#390)', async () => {
+  const { threads, built, clock } = fakeHost()
+  const view = await threads.ensure('t1')
+  expect(built).toHaveLength(1)
+  expect(view).toMatchObject({ threadId: 't1', busy: false, generation: 0 })
+  clock.advance(19)
+  const lease = await threads.acquire('t1')
+  expect(lease.runtime).toBe(view.hosted.runtime)
+  expect(lease.generation).toBe(1)
+  expect(built).toHaveLength(1)
+  lease.release()
+
+  const { threads: other, built: otherBuilt, clock: otherClock } = fakeHost()
+  await other.ensure('t2')
+  otherClock.advance(19)
+  expect(otherBuilt[0]?.record.disposed).toBe(0)
+  otherClock.advance(1)
+  expect(otherBuilt[0]?.record.disposed).toBe(1)
+  expect(other.liveThreadCount()).toBe(0)
+})
+
+// ⚠ Opening the palette while a run is stopping must answer at once: `ensure` never waits on the
+// run's abort, never marks the thread busy, never counts a generation, never arms the idle clock
+// under a held lease. An `ensure` that waited would hang here — nothing finishes the abort.
+test('⚠ ensure on a live thread whose run is stopping answers at once and touches nothing (#390)', async () => {
+  const { threads, clock } = fakeHost()
+  await threads.acquire('t1')
+  expect(threads.abort('t1')).toEqual({ outcome: 'aborted', restored: [] })
+  const view = await threads.ensure('t1')
+  expect(view).toMatchObject({ busy: true, generation: 1 })
+  expect(clock.pending()).toBe(0)
+})
+
+test('an ask and a run arriving together share ONE build, and the run holds it (#390)', async () => {
+  const { threads, built, clock } = fakeHost()
+  const [view, lease] = await Promise.all([threads.ensure('t1'), threads.acquire('t1')])
+  expect(built).toHaveLength(1)
+  expect(lease.runtime).toBe(view.hosted.runtime)
+  // The run holds the thread: no idle disposal is armed under its lease.
+  expect(clock.pending()).toBe(0)
+})

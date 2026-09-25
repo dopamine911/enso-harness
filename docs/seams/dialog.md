@@ -254,7 +254,7 @@ finds the open question by id on the live thread (line 367; 404 when the thread 
 question is spent, lines 366–373), validates a non-cancel answer against the question's kind
 (lines 374–377; 422 with the refusal, and the question stays open), then hands it to the runtime
 (line 378) and answers 204 (line 379). `server/index.ts` maps that outcome to the response (lines
-767–789). The follow's snapshot lists every open question, oldest first, so a reconnect renders the
+774–796). The follow's snapshot lists every open question, oldest first, so a reconnect renders the
 card at once (`follow.ts` line 200; `openDialogs` at extension-ui-context.ts line 526 checks each
 request with `isEnsoDialogSpec` rather than casting, line 532).
 

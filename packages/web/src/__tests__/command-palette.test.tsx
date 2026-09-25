@@ -543,12 +543,12 @@ test('an action row — or a host row with no kind — is `onHost(name)` bare', 
   await mounted.unmount()
 })
 
-test("`source: 'none'` says no thread has run yet", async () => {
+// #390: the server builds the session when the palette asks, so `none` means that build failed
+// with nothing to fall back on — said as such, not as "no thread has run yet".
+test("`source: 'none'` says the session could not start", async () => {
   const mounted = await mountPalette(() => Response.json({ threadId: 'thread 1', commands: [], source: 'none' }))
   await mounted.open()
-  await eventually(() =>
-    expect(mounted.palette().textContent).toContain('no thread has run yet — commands appear after the first prompt'),
-  )
+  await eventually(() => expect(mounted.palette().textContent).toContain('the session could not start'))
   await mounted.unmount()
 })
 
@@ -556,16 +556,16 @@ test('a live list with no rows says the session registers no commands', async ()
   const mounted = await mountPalette(() => Response.json({ threadId: 'thread 1', commands: [], source: 'live' }))
   await mounted.open()
   await eventually(() => expect(mounted.palette().textContent).toContain('this session registers no commands'))
-  expect(mounted.palette().textContent).not.toContain('no thread has run yet')
+  expect(mounted.palette().textContent).not.toContain('could not start')
   await mounted.unmount()
 })
 
-test("`source: 'remembered'` shows the rows and a footer note that the thread has no live session", async () => {
+test("`source: 'remembered'` shows the rows and a footer note that this thread's session could not start", async () => {
   const mounted = await mountPalette(() => Response.json({ ...LIVE, source: 'remembered' }))
   await mounted.open()
   await eventually(() => {
     expect(mounted.rows()).toHaveLength(4)
-    expect(mounted.palette().textContent).toContain('from the last session — this thread has no live session')
+    expect(mounted.palette().textContent).toContain("from the last session — this thread's session could not start")
   })
   await mounted.unmount()
 })

@@ -266,27 +266,34 @@ test('⚠ a thread id that is not thread-id shaped is a 400 at every entry point
   expect((await fetch(`${url}/api/threads`)).status).toBe(200)
 })
 
-// ⚠ THE PALETTE'S SOURCE, SAID (#338). A thread has no session until its first prompt, and
-// looking must not build (#86) — so the route cannot ask a runtime that does not exist. Every
-// session builds its list from the same sources under the same configuration, as they stood at
-// that build, so the last built session's list is the next one's until a file changes on disk;
-// the answer says which it is, and a palette that quietly showed a stale list would be a palette
-// that lies. Before any session: `none`, an empty list, no build. A `remembered` host row's
-// options are the last build's too — the models a provider offered THEN, credentials as they
-// stood then — which is why the row keeps them and loses its value.
-test('⚠ GET …/commands says where its list came from: none before any session, remembered after one, live for the thread that has it', async () => {
-  const { url, built } = await startWith(settlesAtOnce)
-  const commandsOf = async (threadId: string): Promise<unknown> =>
-    (await fetch(`${url}/api/threads/${threadId}/commands`)).json()
+// ⚠ THE PALETTE'S LIST IS THE THREAD'S OWN (#338, #390). This route is asked only when a person
+// opens the `/` palette or the model picker, or sends a bare command — so a thread with no session
+// is BUILT here (#390: after a restart `/login` could not run until something had been prompted),
+// while inspection keeps the look that builds nothing (#86). The answer still says where its list
+// came from: `live`, the thread's own session; and when the build FAILS, the last build's list with
+// its host rows stripped of their value (`remembered` — another session's current model would be a
+// lie here), or `none` before any build. A palette that quietly showed a stale list would lie.
+test('⚠ GET …/commands builds the thread’s session and answers its own list; a failed build says remembered or none', async () => {
+  const { url, built } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({
+    ...host,
+    createSession: (threadId: string): ReturnType<AgentHost['createSession']> =>
+      threadId.startsWith('broken') ? Promise.reject(new Error('the build failed')) : host.createSession(threadId),
+  }))
+  const commandsOf = async (threadId: string): Promise<EnsoThreadCommands> => {
+    const answered: unknown = await (await fetch(`${url}/api/threads/${threadId}/commands`)).json()
+    if (!Check(EnsoThreadCommands, answered)) throw new Error('the answer is not an EnsoThreadCommands')
+    return answered
+  }
 
-  const before = await commandsOf('never-ran')
-  expect(Check(EnsoThreadCommands, before)).toBe(true)
-  expect(before).toEqual({ threadId: 'never-ran', commands: [], source: 'none' })
+  // A failed build before any other: nothing to remember.
+  expect(await commandsOf('broken-first')).toEqual({ threadId: 'broken-first', commands: [], source: 'none' })
   expect(built).toHaveLength(0)
 
-  await prompt(url, 'ran', 'hello')
-  const live = (await commandsOf('ran')) as EnsoThreadCommands
-  expect(live).toMatchObject({ threadId: 'ran', source: 'live' })
+  // No prompt has run: the ask itself builds the session, and the list is live, values and all.
+  const live = await commandsOf('fresh')
+  expect(live).toMatchObject({ threadId: 'fresh', source: 'live' })
+  expect(built).toHaveLength(1)
+  expect(built[0]?.prompts).toEqual([])
   // pi's row first, then the host's (#338 slices 2 and 3, #361) — the settings with their CURRENT
   // value on a live thread, the flows with none (there is no "current" login), the view last.
   expect(live.commands.map((command) => [command.name, command.source])).toEqual([
@@ -308,20 +315,15 @@ test('⚠ GET …/commands says where its list came from: none before any sessio
     options: [{ id: 'off' }, { id: 'low' }, { id: 'medium' }, { id: 'high' }],
   })
 
-  // Another thread, no session of its own: the remembered list, and still no build for it. The
-  // host rows keep their options (every session offers the same) and LOSE their value: this
-  // thread has no current model, and a value that was another session's would be a lie.
-  const remembered = (await commandsOf('never-ran')) as EnsoThreadCommands
-  expect(remembered).toMatchObject({ threadId: 'never-ran', source: 'remembered' })
-  expect(remembered.commands.map((command) => command.name)).toEqual([
-    'mode',
-    'model',
-    'thinking',
-    'login',
-    'logout',
-    'compact',
-    'context',
-  ])
+  // Asking again reuses the session: an ask is not a build.
+  await commandsOf('fresh')
+  expect(built).toHaveLength(1)
+
+  // A failed build after one: the remembered list. The host rows keep their options (every
+  // session offers the same) and LOSE their value: this thread has no current model.
+  const remembered = await commandsOf('broken-later')
+  expect(remembered).toMatchObject({ threadId: 'broken-later', source: 'remembered' })
+  expect(remembered.commands.map((command) => command.name)).toEqual(live.commands.map((command) => command.name))
   const rememberedHostRows = remembered.commands.filter((command) => command.source === 'host')
   expect(rememberedHostRows.every((hostRow) => hostRow.value === undefined)).toBe(true)
   // An `action` or a `view` row has no options to keep; every other host row keeps its.
