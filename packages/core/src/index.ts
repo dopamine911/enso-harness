@@ -188,11 +188,13 @@ export {
 } from './thread-inspection.ts'
 export {
   type DialogAnswer,
+  EnsoConfigurationRefusal,
   EnsoContextUsage,
   EnsoHostCommandRun,
   EnsoModelChoice,
   EnsoModelState,
   EnsoPromptAdmission,
+  EnsoSessionConfiguration,
   EnsoSessionUsage,
   EnsoThreadCommands,
   HostCommandOption,

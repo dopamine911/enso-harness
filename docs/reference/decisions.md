@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 266.**
+**Decision headers: 267.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -211,6 +211,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/thread-registry.ts` | `#43`, `#69`, `#113`, `#116` | One pi session per chat THREAD, held across runs (#69 PR 2 — closes #43). |
 | `packages/web/src/server/thread-stats-route.ts` | `#45`, `#358`, `#359` | `GET /api/threads/:threadId/stats` (#45 phase 2): one thread, analysed — the chat's stats drawer reads it. |
 | `packages/web/src/server/transcript-to-messages.ts` | `#93`, `#95`, `#162`, `#220` | The transcript → TanStack `UIMessage`s (#95): the history a resumed thread mounts with. |
+| `packages/web/src/start-session.tsx` | `#390`, `#391` | The Start-a-session dialog (#391): a new thread opens on it — the model, the effort, the mode and the first prompt, then **Start session**. |
 | `packages/web/src/stats-table.tsx` | `#45`, `#144` | The table and the number formats the two stats surfaces share (#45 phase 2): the day's (`debug/day-stats-screen.tsx`, #144) and one thread's (`thread-stats.tsx`). |
 | `packages/web/src/store.ts` | `#90` | The smallest external store React can subscribe to: one value, replaced whole, and a listener set. |
 | `packages/web/src/stored-threads.ts` | `#29`, `#86`, `#95` | The sessions a user can come back to (#95): pi's session files for this workspace, as the server lists them. |

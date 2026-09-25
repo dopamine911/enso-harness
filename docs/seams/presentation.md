@@ -63,6 +63,12 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    */
   readonly runHostCommand: (run: EnsoHostCommandRun) => Promise<HostCommandOutcome>
   /**
+   * Apply a new session's model, effort and mode together (#391): `POST …/configure`, the
+   * Start-a-session dialog's Start. The server applies them in order under one lease; a refusal
+   * comes back with its step and reason for the dialog to show.
+   */
+  readonly configure: (configuration: EnsoSessionConfiguration) => Promise<ConfigureOutcome>
+  /**
    * Release the thread's follow (#272): the socket closes and nothing else opens one on
    * this connection. The page calls it when a thread leaves its live list — a thread whose
    * pane is gone must not keep a stream the browser counts against its six-per-origin
@@ -202,6 +208,12 @@ export interface ThreadStores {
    * next to `idle` is never read as "free" when it means "nothing ran".
    */
   readonly refusal: WritableStore<ProviderRefusalMark | undefined>
+  /**
+   * The Start-a-session dialog is open (#391). Raised when the page MINTS the thread — New Thread,
+   * a page with no thread in its URL — and lowered by Start or Escape; a thread adopted from
+   * history never raises it.
+   */
+  readonly startSession: WritableStore<boolean>
   /** The thread's transport: TanStack's connection over prompt/follow, and the dialog answer beside it. */
   readonly connection: FollowConnection
 }

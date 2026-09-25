@@ -1262,3 +1262,41 @@ test('⚠ a login that finishes by its callback withdraws the code question it l
   expect(await withdrawn).toMatchObject({ kind: 'dialog-settled', outcome: 'aborted' })
   expect(hosted.runtime.openDialogs()).toEqual([])
 })
+
+// #391: the Start-a-session dialog offers the effort of the model CHOSEN in it, before anything is
+// applied — so every `/model` option carries that model's levels, decided by pi's own rule
+// (`getSupportedThinkingLevels`), not the session's current model's.
+test('each /model option carries the levels pi decides for THAT model (#391)', async () => {
+  const twoModels: InlineExtension = {
+    name: 'enso-host-two-models',
+    factory: (pi: ExtensionAPI) => {
+      const base = {
+        input: ['text' as const],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 50_000,
+        maxTokens: 1000,
+      }
+      pi.registerProvider('enso-levels', {
+        api: 'enso-faux',
+        baseUrl: 'http://faux.invalid',
+        apiKey: 'faux',
+        models: [
+          { ...base, id: 'plain', name: 'Plain', reasoning: false },
+          { ...base, id: 'deep', name: 'Deep', reasoning: true },
+        ],
+      })
+    },
+  }
+  const hosted = await hostedSession([twoModels])
+  const modelRow = hosted.runtime
+    .listCommands()
+    .find((command) => command.source === 'host' && command.name === 'model')
+  const levelsOf = (id: string): readonly string[] | undefined =>
+    modelRow?.options?.find((option) => option.id === `enso-levels/${id}`)?.thinkingLevels
+  expect(levelsOf('plain')).toEqual(['off'])
+  const deep = levelsOf('deep') ?? []
+  expect(deep).toContain('off')
+  expect(deep).toContain('high')
+  // `xhigh` is offered only to a model that maps it explicitly — pi's rule, carried as it decides.
+  expect(deep).not.toContain('xhigh')
+})

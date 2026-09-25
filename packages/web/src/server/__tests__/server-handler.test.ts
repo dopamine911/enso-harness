@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  type EnsoModelState,
   type EnsoObservation,
   EnsoStoredThread,
   EnsoThreadCommands,
@@ -905,4 +906,43 @@ test('GET …/context/:request reads a turn or `next`; any other segment, or a t
   for (const segment of ['0', '01', 'x', '-1']) expect((await read(segment)).status).toBe(404)
   // Looking builds nothing (#86).
   expect(built).toHaveLength(0)
+})
+
+// ⚠ #391: Start applies the new session's settings TOGETHER — the model first (the effort a model
+// allows depends on it), then the effort, then the mode — and a refusal NAMES its step, so the
+// dialog can say which: the steps before it applied, the ones after it never ran.
+test('⚠ POST …/configure applies model, effort, mode in order and names the step that refuses (#391)', async () => {
+  const { url, built } = await startWith(settlesAtOnce)
+  const configure = async (body: unknown): Promise<{ status: number; body: string }> => {
+    const response = await fetch(`${url}/api/threads/start-me/configure`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return { status: response.status, body: await response.text() }
+  }
+  const state = (): EnsoModelState | undefined => built[0]?.modelState
+
+  // Everything applies; the mode the thread already has is left alone.
+  expect(await configure({ model: 'fake/fake-2', thinking: 'high', mode: 'default' })).toEqual({
+    status: 204,
+    body: '',
+  })
+  expect(state()).toMatchObject({ model: { id: 'fake-2' }, thinkingLevel: 'high' })
+  expect(built[0]?.prompts).toEqual([])
+
+  // The model refuses: the effort after it is never applied.
+  const refusedModel = await configure({ model: 'fake/no-such-model', thinking: 'off' })
+  expect(refusedModel.status).toBe(422)
+  expect(JSON.parse(refusedModel.body)).toMatchObject({ step: 'model' })
+  expect(state()?.thinkingLevel).toBe('high')
+
+  // A later step refuses: the ones before it applied.
+  const refusedMode = await configure({ thinking: 'low', mode: 'plan' })
+  expect(refusedMode.status).toBe(422)
+  expect(JSON.parse(refusedMode.body)).toMatchObject({ step: 'mode', reason: expect.stringContaining('default') })
+  expect(state()?.thinkingLevel).toBe('low')
+
+  // Only the three settings, and nothing else, is a configuration.
+  expect((await configure({ model: 'fake/fake-1', prompt: 'hi' })).status).toBe(400)
 })

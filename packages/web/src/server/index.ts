@@ -24,9 +24,11 @@ import {
   abortThread,
   answerThreadDialog,
   changeThreadMode,
+  configureThread,
   type FollowRouteDeps,
   followThread,
   promptThread,
+  readConfigureBody,
   readDialogBody,
   readHostCommandBody,
   readModeChangeBody,
@@ -66,6 +68,8 @@ const THREAD_ABORT_ROUTE = /^\/api\/threads\/([^/?#]+)\/abort$/
 const THREAD_MODE_ROUTE = /^\/api\/threads\/([^/?#]+)\/mode$/
 /** `POST …/command` (#338 slice 2): run a `host` command — `/model`, `/thinking` — as a control route, not a prompt. */
 const THREAD_COMMAND_ROUTE = /^\/api\/threads\/([^/?#]+)\/command$/
+/** `POST …/configure` (#391): a new session's model, effort and mode, applied together — the Start-a-session dialog. */
+const THREAD_CONFIGURE_ROUTE = /^\/api\/threads\/([^/?#]+)\/configure$/
 
 /**
  * The dev backend: the thread routes the browser's `FollowConnection` talks to (#112), and
@@ -666,6 +670,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_DIALOG_ROUTE, respond: respondToDialog },
     { method: 'POST', route: THREAD_MODE_ROUTE, respond: respondToModeChange },
     { method: 'POST', route: THREAD_COMMAND_ROUTE, respond: respondToHostCommand },
+    { method: 'POST', route: THREAD_CONFIGURE_ROUTE, respond: respondToConfigure },
     {
       method: 'POST',
       route: THREAD_ABORT_ROUTE,
@@ -854,6 +859,39 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       ...(run.value === undefined ? {} : { value: run.value }),
     })
     response.writeHead(outcome.status)
+    response.end()
+  }
+
+  /**
+   * `POST …/configure` (#391): a new session's model, effort and mode, applied together — the
+   * Start-a-session dialog's Start. A refused step answers 422 with its JSON refusal (the step and
+   * the reason), so the dialog can say which; a run in flight is the usual 409 text.
+   */
+  async function respondToConfigure(
+    threadId: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
+    const configuration = await readJsonBody(request, response, {
+      maxBytes: MAX_DIALOG_BODY_BYTES,
+      capText: `a session configuration is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+      parse: readConfigureBody,
+    })
+    if (configuration === undefined) return
+    const outcome = await configureThread(followDeps, threadId, configuration)
+    if (outcome.status === 409) {
+      log.warn('configure refused (409): {reason}', { threadId, reason: outcome.reason })
+      refuseWith(response, outcome)
+      return
+    }
+    if (outcome.status === 422) {
+      log.warn('configure refused at {step}: {reason}', { threadId, ...outcome.refusal })
+      response.writeHead(422, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify(outcome.refusal))
+      return
+    }
+    log.info('session configured', { threadId, ...configuration })
+    response.writeHead(204)
     response.end()
   }
 

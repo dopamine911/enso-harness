@@ -14,6 +14,7 @@ import {
   PromptInputCommandItem,
   PromptInputCommandList,
 } from './components/ai-elements/prompt-input.tsx'
+import { optionKeywords } from './model-state.tsx'
 
 /**
  * The `/` command palette (#338, slice 1): Claude Code's `/` button in VS Code, as a popup
@@ -354,7 +355,7 @@ export function CommandPalette({
                     <PromptInputCommandItem
                       key={option.id}
                       value={option.id}
-                      keywords={option.detail === undefined ? [option.label] : [option.label, option.detail]}
+                      keywords={optionKeywords(option)}
                       data-checked={option.id === page.value}
                       onSelect={(): void => finish({ kind: 'host', command: page, optionId: option.id })}
                     >
