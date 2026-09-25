@@ -144,6 +144,7 @@ export {
 } from './observation.ts'
 export { EnsoPermissionModeChange, EnsoPermissionModeState } from './permission-mode.ts'
 export {
+  ENSO_PROVIDER_REFUSAL_KEY,
   EnsoProviderRefusal,
   EnsoProviderRetry,
   EnsoProviderRetryEnd,
@@ -151,6 +152,7 @@ export {
   providerReasonOf,
   providerRefusalClass,
   providerStatusOf,
+  readEnsoProviderRefusal,
 } from './provider-refusal.ts'
 export {
   ENSO_CONTEXT_ADDITIONS_SHOWN,

@@ -18,6 +18,26 @@ test('a transcript entry row: time, kind, custom type, message role, tool name, 
   expect(
     describeTranscriptEntry({ kind: 'message', id: 'u', at: '2026-09-08T12:34:56.000Z', role: 'user', parts: [] }),
   ).toBe('12:34:56 message user')
+  // A refused attempt (#381) is not a reply: it says so, with the status when the message carried one.
+  expect(
+    describeTranscriptEntry({
+      kind: 'message',
+      id: 'a',
+      at: '2026-09-08T12:34:56.000Z',
+      role: 'assistant',
+      parts: [],
+      refusal: { provider: 'anthropic', status: 429, message: '429 rate limited' },
+    }),
+  ).toBe('12:34:56 message assistant refused (429)')
+  expect(
+    describeTranscriptEntry({
+      kind: 'message',
+      id: 'b',
+      role: 'assistant',
+      parts: [],
+      refusal: { message: 'fetch failed' },
+    }),
+  ).toBe('message assistant refused')
   expect(
     describeTranscriptEntry({
       kind: 'tool-result',

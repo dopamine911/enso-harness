@@ -70,7 +70,7 @@ const CUSTOM_METADATA: Record<string, CustomMetadata> = {
  */
 const FRAME_METADATA: Record<string, string> = {
   snapshot:
-    '`recentChunks`; `permissionMode`; `modeLines`; `model`; `cwd`; `usage`; `dialog` (the complete open list); `generation`; `disconnected`',
+    "`recentChunks`; `permissionMode`; `modeLines`; `model`; `cwd`; `usage`; `refusal` (the status bar's class word off the branch's last reply, #381); `dialog` (the complete open list); `generation`; `disconnected`",
   status: '`recentChunks`; `generation`; `disconnected`',
   'follow-ended': '`recentChunks`; `disconnected`; `notifications`',
 }

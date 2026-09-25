@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import type {
-  EnsoDialogSpec,
-  EnsoFollowSnapshot,
-  EnsoFollowStatus,
-  EnsoModelState,
-  EnsoObservation,
-  EnsoSessionUsage,
+import {
+  ENSO_PROVIDER_REFUSAL_KEY,
+  type EnsoDialogSpec,
+  type EnsoFollowSnapshot,
+  type EnsoFollowStatus,
+  type EnsoModelState,
+  type EnsoObservation,
+  type EnsoSessionUsage,
 } from '@enso/core'
 import { FOLLOW_ENDED_CUSTOM_EVENT, routeEnsoCustomEvent } from '../custom-event-router.ts'
 import { clearThreadsForTest, mintThread, type ThreadStores } from '../thread-stores.ts'
@@ -468,4 +469,30 @@ test('the status word stays while nothing got through, and clears once output gr
   expect(stores.refusal.get()).toEqual({ refusalClass: 'rate-limited', outputAtRefusal: SPENT.output })
   observe({ kind: 'session-usage', ...SPENT, output: SPENT.output + 12 })
   expect(stores.refusal.get()).toBeUndefined()
+})
+
+// #381: the word lived only in the page's stores, so a reload lost it and the status bar read
+// `idle · $0.0000` again. The snapshot carries the branch, whose last reply is the refused
+// attempt pi stored — that is the resync. A refusal a reply came after is history, not state.
+const refusedAttempt = (id: string): unknown => ({
+  id,
+  role: 'assistant',
+  parts: [],
+  metadata: { [ENSO_PROVIDER_REFUSAL_KEY]: { provider: 'anthropic', status: 401, message: '401 invalid x-api-key' } },
+})
+const reply = (id: string): unknown => ({ id, role: 'assistant', parts: [{ type: 'text', content: 'hello' }] })
+const prompt = (id: string): unknown => ({ id, role: 'user', parts: [{ type: 'text', content: 'hi' }] })
+
+test('a snapshot whose last reply is a refused attempt shows the word; one with a reply after it clears it (#381)', () => {
+  route('snapshot', snapshot({ usage: SPENT, messages: [prompt('u1'), refusedAttempt('a1'), prompt('u2')] }))
+  expect(stores.refusal.get()).toEqual({ refusalClass: 'not logged in', outputAtRefusal: SPENT.output })
+  // the mark is the snapshot's output: a later reply's usage clears it as a live one would
+  observe({ kind: 'session-usage', ...SPENT, output: SPENT.output + 1 })
+  expect(stores.refusal.get()).toBeUndefined()
+
+  route('snapshot', snapshot({ messages: [refusedAttempt('a1')] }))
+  route('snapshot', snapshot({ messages: [prompt('u1'), refusedAttempt('a1'), reply('a2')] }))
+  expect(stores.refusal.get()).toBeUndefined()
+  // and the snapshot adds no transcript line: the attempt's own bubble says it
+  expect(noticesBesideModeLines()).toEqual([])
 })

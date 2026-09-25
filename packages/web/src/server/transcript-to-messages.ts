@@ -1,4 +1,5 @@
 import {
+  ENSO_PROVIDER_REFUSAL_KEY,
   ENSO_TOOL_RESULT_KEY,
   type EnsoInterruptedTail,
   type EnsoTranscriptEntry,
@@ -90,6 +91,10 @@ export function transcriptToMessages(transcript: readonly EnsoTranscriptEntry[])
         role: transcriptEntry.role,
         parts: transcriptEntry.parts.map(messagePart),
         ...createdAt(transcriptEntry.at),
+        // A refused attempt (#381) says so in its own place; the bubble reads it back off the bag.
+        ...(transcriptEntry.refusal === undefined
+          ? {}
+          : { metadata: { [ENSO_PROVIDER_REFUSAL_KEY]: transcriptEntry.refusal } }),
       })
     } else if (transcriptEntry.kind === 'tool-result') {
       // A result whose call is not on the transcript (a compacted or edited history) is

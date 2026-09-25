@@ -1065,6 +1065,19 @@ test('⚠ a provider refusal is on the feed: the failed attempt, pi’s retry, t
     success: true,
     attempt: 1,
   })
+  // #381: pi keeps the failed attempt on the branch, and the transcript says it was one — the
+  // reload's source, so a resumed thread says the refusal instead of an empty reply
+  const replies = hosted
+    .inspect()
+    .entries.filter((entry) => entry.kind === 'message' && entry.role === 'assistant')
+    .map((entry) => (entry.kind === 'message' ? { refusal: entry.refusal, parts: entry.parts } : undefined))
+  expect(replies).toEqual([
+    {
+      refusal: { provider: 'enso-faux', model: 'faux-1', status: 429, message: RATE_LIMITED },
+      parts: expect.any(Array),
+    },
+    { refusal: undefined, parts: [{ type: 'text', text: 'hello after the retry' }] },
+  ])
 })
 
 // #380 review: the two-hour case ENDS with pi giving up — and before, the feed's last word was the

@@ -1,4 +1,5 @@
 import { type Static, Type } from 'typebox'
+import { Check } from 'typebox/value'
 
 /**
  * A model provider refused a request (#340): the fact the page and the log were missing. Before
@@ -31,6 +32,28 @@ export const EnsoProviderRefusal = Type.Object({
 })
 /** @group Thread runtime */
 export type EnsoProviderRefusal = Static<typeof EnsoProviderRefusal>
+
+/**
+ * The key a stored refusal rides under in a mounted assistant message's `metadata` (#381) — the
+ * same colon-namespaced bag {@link ENSO_TOOL_RESULT_KEY} uses, for the same reason: the message
+ * shape is the renderer's, and this is the one fact of ours on it.
+ *
+ * @group Thread runtime
+ */
+export const ENSO_PROVIDER_REFUSAL_KEY = 'enso:providerRefusal' as const
+
+/**
+ * The refusal a mounted message's `metadata` carries, or nothing — checked, since the bag is
+ * anyone's and crosses the wire as JSON.
+ *
+ * @group Thread runtime
+ */
+export function readEnsoProviderRefusal(
+  metadata: Record<string, unknown> | undefined,
+): EnsoProviderRefusal | undefined {
+  const candidate = metadata?.[ENSO_PROVIDER_REFUSAL_KEY]
+  return Check(EnsoProviderRefusal, candidate) ? candidate : undefined
+}
 
 /**
  * pi is retrying a refused request (#340): which attempt this will be, of how many, and after how

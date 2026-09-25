@@ -1,4 +1,5 @@
 import { type Static, Type } from 'typebox'
+import { EnsoProviderRefusal } from './provider-refusal.ts'
 import { EnsoToolResultDescriptor } from './tool-result.ts'
 
 /**
@@ -53,6 +54,12 @@ export const EnsoTranscriptMessage = Type.Object({
   ...base,
   role: Type.Union([Type.Literal('user'), Type.Literal('assistant')]),
   parts: Type.Array(EnsoTranscriptPart),
+  /**
+   * The provider refused the request this reply was for (#381): an assistant message only. pi keeps
+   * the failed attempt on the branch (its parts usually empty) marked as an error, so a reload has the
+   * fact without anything new being persisted — without this it read as an empty reply.
+   */
+  refusal: Type.Optional(EnsoProviderRefusal),
 })
 /** @group Transcript */
 export type EnsoTranscriptMessage = Static<typeof EnsoTranscriptMessage>
@@ -127,8 +134,15 @@ function isPrimitive(value: unknown): value is string | number | boolean {
 export function describeTranscriptEntry(entry: EnsoTranscriptEntry): string {
   const when = entry.at === undefined ? '' : entry.at.slice(11, 19)
   switch (entry.kind) {
-    case 'message':
-      return `${when} message ${entry.role}`.trim()
+    case 'message': {
+      // A refused attempt (#381) says so, as a tool result says ` error`: the log bundle and the
+      // drawer are where this bug is read, and a plain `message assistant` reads as a reply.
+      const refused =
+        entry.refusal === undefined
+          ? ''
+          : ` refused${entry.refusal.status === undefined ? '' : ` (${entry.refusal.status})`}`
+      return `${when} message ${entry.role}${refused}`.trim()
+    }
     case 'tool-result':
       return `${when} tool-result ${entry.toolName}${entry.isError ? ' error' : ''}`.trim()
     case 'custom': {

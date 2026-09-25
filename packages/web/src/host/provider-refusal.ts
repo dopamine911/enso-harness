@@ -12,7 +12,17 @@ import { type EnsoProviderRefusal, providerStatusOf } from '@enso/core'
  */
 export function providerRefusalOf(event: AgentSessionEvent): EnsoProviderRefusal | undefined {
   if (event.type !== 'message_end') return undefined
-  const message = event.message as {
+  return providerRefusalOfMessage(event.message)
+}
+
+/**
+ * The refusal one of pi's messages records, or nothing — live off `message_end`, or stored on the
+ * branch (#381): pi keeps the failed attempt in the session file with the same two fields, so a
+ * reload reads the refusal from where the live event read it.
+ */
+export function providerRefusalOfMessage(raw: unknown): EnsoProviderRefusal | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const message = raw as {
     role?: unknown
     stopReason?: unknown
     errorMessage?: unknown
