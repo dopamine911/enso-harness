@@ -205,3 +205,26 @@ test('an attachment the form refuses is a notice saying how many and naming the 
     '3 files were not attached: at most 20 images on one prompt',
   )
 })
+
+// #388: a login's code question is the FALLBACK to signing in on the provider's page, so the card
+// must say what to paste and offer that page — in a new tab of this browser, where the login
+// happens. The schema admits only http(s); the card refuses any other URL as an href all the same.
+test('a login’s code question says what to paste and links the login page in a new tab', () => {
+  const rendered = answerControls({
+    method: 'input',
+    title: 'Finish logging in to Faux',
+    message: 'Open the login page and sign in.',
+    link: { url: 'https://login.faux.invalid/authorize?state=1', label: 'Open login page' },
+  })
+  expect(rendered).toContain('Open the login page and sign in.')
+  expect(rendered).toContain('href="https://login.faux.invalid/authorize?state=1"')
+  expect(rendered).toContain('target="_blank"')
+  expect(rendered).toContain('rel="noopener noreferrer"')
+  expect(rendered).toContain('Open login page')
+  const hostile = answerControls({
+    method: 'input',
+    title: 'x',
+    link: { url: 'javascript:alert(1)', label: 'Open login page' },
+  })
+  expect(hostile).not.toContain('href=')
+})

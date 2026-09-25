@@ -52,7 +52,7 @@ flowchart LR
 
 | Stage | Contract | Source |
 |---|---|---|
-| `mapPiEvent (22 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:270`](../../packages/web/src/host/map-events.ts#L270) |
+| `mapPiEvent (22 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:280`](../../packages/web/src/host/map-events.ts#L280) |
 | `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:567`](../../packages/core/src/observation.ts#L567) |
 | `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:179`](../../packages/web/src/server/follow.ts#L179) |
 | `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:427`](../../packages/web/src/follow-connection.ts#L427) |

@@ -1,4 +1,5 @@
 import type { EnsoHostCommandRun, HostCommandOption, RuntimeCommand } from '@enso/core'
+import type { HostInputQuestion } from './extension-ui-context.ts'
 import { HostCommandRefused } from './host-commands.ts'
 
 /**
@@ -175,11 +176,16 @@ export type HostAuthEvent =
     }
   | { readonly type: 'progress'; readonly message: string }
 
-/** One `notify` line per auth event: the URL and the code are the whole point, so they are in the text. */
-export function authEventText(event: HostAuthEvent): string {
+/**
+ * One `notify` line per auth event: the URL and the code are the whole point, so they are in the
+ * text — and the page renders a URL in a line as a link (#388). An `auth_url` is said in OUR words:
+ * pi's `instructions` ("A browser window should open…") are its terminal's, which opens one; the
+ * web host opens nothing, so repeating them was a false instruction (#388).
+ */
+export function authEventText(event: HostAuthEvent, providerName: string): string {
   switch (event.type) {
     case 'auth_url':
-      return `${event.instructions ?? 'Open this URL to authenticate:'} ${event.url}`
+      return `To log in to ${providerName}, open ${event.url}`
     case 'device_code': {
       const expiry =
         event.expiresInSeconds === undefined ? '' : ` (expires in ${Math.round(event.expiresInSeconds / 60)} min)`
@@ -193,6 +199,34 @@ export function authEventText(event: HostAuthEvent): string {
     }
     case 'progress':
       return event.message
+  }
+}
+
+/**
+ * pi's code prompt during a browser login, as the host asks it (#388). pi's own words are a bare
+ * "Paste the authorization code" (`provider-composer.js:173`, every extension-registered
+ * provider) and never say that the paste is the FALLBACK: each login pi ships that sends a URL
+ * and asks for a code also runs a local callback server (Anthropic, Codex, OpenRouter), so
+ * signing in from a browser on this machine finishes by itself and pi withdraws the question.
+ * The page the login redirects to only loads on this machine; from anywhere else, its address is
+ * what to paste.
+ */
+export function loginCodeQuestion(
+  providerName: string,
+  authUrl: string | undefined,
+  placeholder: string | undefined,
+): HostInputQuestion {
+  const opening = authUrl === undefined ? 'Sign in' : 'Open the login page and sign in'
+  return {
+    title: `Finish logging in to ${providerName}`,
+    message:
+      `${opening}. When this browser runs on the same machine as Enso, the login finishes by itself. ` +
+      "Otherwise — or if the page you land on after signing in doesn't load — copy that page's address, " +
+      'or the code it shows, and paste it here.',
+    placeholder: placeholder ?? 'the code, or the address you landed on',
+    ...(authUrl !== undefined && /^https?:\/\//.test(authUrl)
+      ? { link: { url: authUrl, label: 'Open login page' } }
+      : {}),
   }
 }
 

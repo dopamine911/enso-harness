@@ -28,6 +28,7 @@ export {
 } from './config.ts'
 export {
   EnsoDialogAnswer,
+  EnsoDialogLink,
   EnsoDialogSpec,
   EnsoOpenDialog,
   EnsoQuestion,

@@ -2,7 +2,12 @@ import { afterAll, expect, test } from 'bun:test'
 import type { EnsoThreadCommands, RuntimeCommand } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
-import type { CommandPalette as CommandPaletteComponent, rankCommand as RankCommand } from '../command-palette.tsx'
+import type {
+  CommandPalette as CommandPaletteComponent,
+  rankCommand as RankCommand,
+  runTypedHostCommand as RunTypedHostCommand,
+  typedCommandName as TypedCommandName,
+} from '../command-palette.tsx'
 import { ensureDom, releaseDom } from './dom-environment.ts'
 
 // ⚠ A DOM before react-dom/client evaluates, and again if another mounting file has already
@@ -17,9 +22,14 @@ const { createRoot }: { createRoot: typeof CreateRoot } = await import('react-do
 const {
   CommandPalette,
   rankCommand,
-}: { CommandPalette: typeof CommandPaletteComponent; rankCommand: typeof RankCommand } = await import(
-  '../command-palette.tsx'
-)
+  runTypedHostCommand,
+  typedCommandName,
+}: {
+  CommandPalette: typeof CommandPaletteComponent
+  rankCommand: typeof RankCommand
+  runTypedHostCommand: typeof RunTypedHostCommand
+  typedCommandName: typeof TypedCommandName
+} = await import('../command-palette.tsx')
 
 /**
  * The `/` palette (#338), MOUNTED under happy-dom over a fetch seam: the menu (Radix
@@ -568,4 +578,28 @@ test('a failed fetch renders `<status> <body>` inside the palette', async () => 
   )
   expect(mounted.rows()).toEqual([])
   await mounted.unmount()
+})
+
+// #388: a bare `/login` typed into the composer opens what its palette row opens — and ONLY a bare
+// name is a command: `/login now` is a message, and must still be sent as one.
+test('a typed bare host command does what its row does; words after it make it a message', () => {
+  expect(typedCommandName('/login')).toBe('login')
+  expect(typedCommandName('/login  \n')).toBe('login')
+  expect(typedCommandName('/login now')).toBeUndefined()
+  expect(typedCommandName('login')).toBeUndefined()
+  const opened: string[] = []
+  const handlers = {
+    onRun: (): void => undefined,
+    onInsert: (): void => undefined,
+    onHost: (): void => undefined,
+    onOpenModelDialog: (command: RuntimeCommand): void => {
+      opened.push(command.name)
+    },
+    onOpenView: (): void => undefined,
+  }
+  const login: RuntimeCommand = { name: 'login', source: 'host', kind: 'flow', options: [] }
+  const thinking: RuntimeCommand = { name: 'thinking', source: 'host', kind: 'level', options: [] }
+  expect(runTypedHostCommand(login, handlers)).toBe(true)
+  expect(opened).toEqual(['login'])
+  expect(runTypedHostCommand(thinking, handlers)).toBe(false)
 })

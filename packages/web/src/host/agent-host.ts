@@ -47,6 +47,7 @@ import {
   isCompactionRefusal,
   isFlowCancelled,
   type LoginProviderFacts,
+  loginCodeQuestion,
   loginDoneText,
   loginOptions,
   logoutDoneText,
@@ -182,6 +183,16 @@ const STREAMING_BEHAVIOR_OF: Record<EnsoPromptAdmission, NonNullable<PromptOptio
 
 /** The `ExtensionMode` we bind — `ctx.mode` as extensions see it. rpc is the truthful one: no terminal, a remote surface. */
 const EXTENSION_MODE_RPC = 'rpc'
+
+/**
+ * A login while it runs (#388): whose, the page its flow announced (the code prompt links to it),
+ * and the end of its questions — see `runLogin`.
+ */
+interface LoginInProgress {
+  readonly providerName: string
+  authUrl: string | undefined
+  readonly questions: AbortController
+}
 
 export interface AgentHostOptions {
   /** The tree pi reads and writes. One per server, never from a request (see `server/index.ts`). */
@@ -692,18 +703,36 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
     /**
      * pi asks; the browser answers through the dialog seam. A `secret` is masked (the host's own
-     * `askSecret`); a `select` crosses as labels and comes back as the chosen option's id;
-     * `text` and `manual_code` are plain inputs. No answer — cancelled, aborted — is pi's own
-     * "Login cancelled", which the flow reports as a cancellation, not a failure.
+     * `askHostInput`); a `select` crosses as labels and comes back as the chosen option's id; a
+     * `manual_code` is asked in our words, with the login page the flow announced as a link on the
+     * card (#388: nothing opens a browser from here, and pi's own words never said the paste is
+     * the fallback); `text` is a plain input. No answer — cancelled, aborted — is pi's own "Login
+     * cancelled", which the flow reports as a cancellation, not a failure.
      */
     async function askAuthPrompt(
       prompt: Parameters<Parameters<typeof session.modelRuntime.login>[2]['prompt']>[0],
+      login: LoginInProgress,
     ): Promise<string> {
-      const signal = prompt.signal
+      // pi's own signal when it passed one, AND the login's: a question outlives neither (#389).
+      const signal =
+        prompt.signal === undefined ? login.questions.signal : AbortSignal.any([prompt.signal, login.questions.signal])
       let answer: string | undefined
       switch (prompt.type) {
         case 'secret':
-          answer = await ui.askSecret(prompt.message, prompt.placeholder, signal)
+          answer = await ui.askHostInput(
+            {
+              title: prompt.message,
+              secret: true,
+              ...(prompt.placeholder === undefined ? {} : { placeholder: prompt.placeholder }),
+            },
+            signal,
+          )
+          break
+        case 'manual_code':
+          answer = await ui.askHostInput(
+            loginCodeQuestion(login.providerName, login.authUrl, prompt.placeholder),
+            signal,
+          )
           break
         case 'select': {
           const labels = prompt.options.map((option) => option.label)
@@ -752,12 +781,25 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
     async function runLogin(providerId: string, authType: HostAuthType): Promise<void> {
       const providerName = providerNameOf(providerId)
+      // The page the flow announces (`auth_url`) is remembered for the code prompt that follows it.
+      // ⚠ A LOGIN'S QUESTIONS END WITH IT (#389). A browser login races its local callback server
+      // against the pasted code; when the callback wins, pi withdraws the code prompt through the
+      // prompt's signal — but an extension provider's prompt carries none: pi-multi-account's
+      // bridge drops it (`index.ts:263-264`) and pi's composer asks with none
+      // (`provider-composer.js:173`). The login finished and its card stayed open, "a question is
+      // waiting". So every question is tied to the login too, and withdrawn once it settles.
+      const login: LoginInProgress = { providerName, authUrl: undefined, questions: new AbortController() }
       try {
         await session.modelRuntime.login(providerId, authType, {
           signal: flowsAbort.signal,
-          prompt: askAuthPrompt,
-          notify: (event: HostAuthEvent): void => ui.uiContext.notify(authEventText(event), 'info'),
+          prompt: (prompt: Parameters<typeof askAuthPrompt>[0]): Promise<string> => askAuthPrompt(prompt, login),
+          notify: (event: HostAuthEvent): void => {
+            if (event.type === 'auth_url') login.authUrl = event.url
+            ui.uiContext.notify(authEventText(event, providerName), 'info')
+          },
         })
+        // The credential is stored: the card goes now, not after the catalog refresh below.
+        login.questions.abort()
         // The credential IS stored past this line (PR #346 review): what follows can fail —
         // pi refusing the model, the catalog not refreshing — and is said as a warning, never
         // as a failed login that `/logout` would then contradict by listing the credential.
@@ -777,6 +819,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           ui.uiContext.notify(`Failed to log in to ${providerName}: ${reason}`, 'error')
         }
       } finally {
+        login.questions.abort()
         await refreshStoredCredentials()
         announceModelState()
       }

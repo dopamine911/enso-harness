@@ -22,10 +22,19 @@ import {
   type LayoutProps,
   type MessageProps,
 } from '@tanstack/ai-react/ui'
-import { ArrowUpIcon, ChartColumnIcon, LayersIcon, MessagesSquareIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
+import {
+  ArrowUpIcon,
+  ChartColumnIcon,
+  ExternalLinkIcon,
+  LayersIcon,
+  MessagesSquareIcon,
+  PaperclipIcon,
+  SquareIcon,
+} from 'lucide-react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
-import { CommandPalette } from './command-palette.tsx'
+import { type ChoiceHandlers, CommandPalette, runTypedHostCommand, typedCommandName } from './command-palette.tsx'
+import { fetchThreadCommands } from './commands-connection.ts'
 import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from './components/ai-elements/attachments.tsx'
 import {
   Conversation,
@@ -402,6 +411,24 @@ interface HostCommandHandlers {
   readonly onOpenView: (commandName: string) => void
 }
 
+/**
+ * The palette's handlers, built from the composer's — ONE object, so a row chosen in the palette
+ * and the same command typed bare (#388) are routed by the same code.
+ */
+function paletteHandlers(
+  host: HostCommandHandlers,
+  onRun: (commandName: string) => void,
+  onInsert: (commandName: string) => void,
+): ChoiceHandlers {
+  return {
+    onRun,
+    onInsert,
+    onHost: host.onHost,
+    onOpenModelDialog: (command: RuntimeCommand): void => host.onOpenModelDialog(command.name),
+    onOpenView: (command: RuntimeCommand): void => host.onOpenView(command.name),
+  }
+}
+
 /*
  * ⓘ `DialogAnswerControls` and `EnsoDialogCard` are exported for `__tests__/chat-screen.test.tsx`
  * (#49): static renders of each dialog method. Nothing outside this file and that test imports
@@ -483,33 +510,64 @@ export function DialogAnswerControls({
     )
   }
   return (
-    <form
-      onSubmit={(event: React.FormEvent<HTMLFormElement>) => {
-        event.preventDefault()
-        const field = event.currentTarget.elements.namedItem('answer')
-        if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
-          answer({ value: field.value })
-        }
-      }}
-      className="flex items-start gap-2"
-    >
-      {dialog.method === 'editor' ? (
-        <Textarea name="answer" defaultValue={dialog.prefill ?? ''} rows={6} disabled={disabled} className="flex-1" />
-      ) : (
-        <Input
-          name="answer"
-          // A credential (#338 slice 3: `/login`'s API key) is masked, and never a transcript line.
-          type={dialog.method === 'input' && dialog.secret === true ? 'password' : 'text'}
-          placeholder={dialog.placeholder ?? ''}
-          autoComplete={dialog.method === 'input' && dialog.secret === true ? 'new-password' : 'off'}
-          disabled={disabled}
-          className="flex-1"
-        />
+    <div className="flex flex-col gap-3">
+      <InputGuidance dialog={dialog} />
+      <form
+        onSubmit={(event: React.FormEvent<HTMLFormElement>) => {
+          event.preventDefault()
+          const field = event.currentTarget.elements.namedItem('answer')
+          if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+            answer({ value: field.value })
+          }
+        }}
+        className="flex items-start gap-2"
+      >
+        {dialog.method === 'editor' ? (
+          <Textarea name="answer" defaultValue={dialog.prefill ?? ''} rows={6} disabled={disabled} className="flex-1" />
+        ) : (
+          <Input
+            name="answer"
+            // A credential (#338 slice 3: `/login`'s API key) is masked, and never a transcript line.
+            type={dialog.method === 'input' && dialog.secret === true ? 'password' : 'text'}
+            placeholder={dialog.placeholder ?? ''}
+            autoComplete={dialog.method === 'input' && dialog.secret === true ? 'new-password' : 'off'}
+            disabled={disabled}
+            className="flex-1"
+          />
+        )}
+        <Button type="submit" disabled={disabled}>
+          Answer
+        </Button>
+      </form>
+    </div>
+  )
+}
+
+/**
+ * What an `input` question carries beside its field (#388) — both set by the host, never by pi:
+ * the explanation (a login's code prompt says the paste is the fallback, and what to paste; plain
+ * text, never markdown) and the page to open (a login's authorization page, in a NEW TAB of this
+ * browser, the one where the login has to happen). The page is a link styled as a button, not
+ * `window.open`, so it is a click the browser allows. The schema admits only http(s); the check
+ * here keeps a `javascript:` URL from ever becoming an href if that changes.
+ */
+function InputGuidance({ dialog }: { dialog: EnsoDialogSpec }): React.ReactNode {
+  if (dialog.method !== 'input') return null
+  const { message, link } = dialog
+  return (
+    <>
+      {message === undefined || message.length === 0 ? null : (
+        <p className="whitespace-pre-wrap text-muted-foreground text-sm">{message}</p>
       )}
-      <Button type="submit" disabled={disabled}>
-        Answer
-      </Button>
-    </form>
+      {link === undefined || !/^https?:\/\//.test(link.url) ? null : (
+        <Button asChild variant="outline" className="self-start">
+          <a href={link.url} target="_blank" rel="noopener noreferrer">
+            <ExternalLinkIcon />
+            {link.label}
+          </a>
+        </Button>
+      )}
+    </>
   )
 }
 
@@ -712,11 +770,7 @@ function ComposerBody({
         <CommandPalette
           threadId={stores.threadId}
           disabled={disconnected}
-          onRun={onRunCommand}
-          onInsert={onInsertCommand}
-          onHost={host.onHost}
-          onOpenModelDialog={(command: RuntimeCommand): void => host.onOpenModelDialog(command.name)}
-          onOpenView={(command: RuntimeCommand): void => host.onOpenView(command.name)}
+          {...paletteHandlers(host, onRunCommand, onInsertCommand)}
         />
         {/* Attach (#68): the same file dialog a paste or a drop bypasses. */}
         <PromptInputButton
@@ -1065,6 +1119,27 @@ const chatComponents = {
           else stores.notifications.push(`/${commandName} opens a view this page does not have`, 'warning', 'run')
         },
       }
+      // A bare `/<name>` typed and sent (#388): when the thread's command list names it as a HOST
+      // row, it does what choosing that row in the palette does — `/login` opens the provider
+      // picker — instead of reaching the transcript as a user message the server then refuses
+      // ("the run failed", which outlived the login started next). Anything else, or a list that
+      // cannot be read, is sent exactly as before. ⚠ A server where no thread has run yet lists
+      // nothing (`source: 'none'`), so there the refusal remains (#390).
+      // The draft clears BEFORE the lookup (#389 review): the composer stays live during it, and a
+      // second Enter on a draft still holding `/word` would route or send it twice. A send the
+      // fallback refuses (disconnected) gives the words back, as a refused submit keeps them.
+      const submitTypedCommand = async (commandName: string, text: string): Promise<void> => {
+        setDraft('')
+        const listed = await fetchThreadCommands(stores.threadId).catch((): undefined => undefined)
+        const row = listed?.commands.find((command) => command.source === 'host' && command.name === commandName)
+        if (row === undefined) {
+          if (!send(text, [])) setDraft(text)
+          return
+        }
+        const opened = runTypedHostCommand(row, paletteHandlers(host, runCommand, insertCommand))
+        if (!opened)
+          stores.notifications.push(`/${row.name} is a setting: choose a value from the / palette`, 'info', 'run')
+      }
 
       return (
         <PromptInput
@@ -1103,7 +1178,9 @@ const chatComponents = {
             // The draft WAS the text: it clears here, at the submit, not in `send` — the palette
             // sends through `send` too and must leave what the user has typed alone (PR #343 review)
             // — and only if something went: a submit `send` refuses keeps its words.
-            if (send(text, images)) setDraft('')
+            const commandName = images.length === 0 ? typedCommandName(text) : undefined
+            if (commandName !== undefined) void submitTypedCommand(commandName, text)
+            else if (send(text, images)) setDraft('')
           }}
         >
           {/* The composer chrome (#90): the knobs at the point of use, deepseek's shape — the

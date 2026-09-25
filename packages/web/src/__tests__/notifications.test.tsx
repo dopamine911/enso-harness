@@ -168,3 +168,25 @@ test('the fold sits at the head of the block; run notices follow it in order', (
   expect(rendered.indexOf('Mode: default')).toBeGreaterThan(fold)
   expect(rendered.indexOf('later')).toBeGreaterThan(rendered.indexOf('Mode: default'))
 })
+
+// #388: a login URL in a line was plain text — unclickable, and one 500-character token that
+// pushed the transcript sideways. A URL is a link to the WHOLE address, read as its host and path;
+// the sentence keeps its own period; nothing but http(s) becomes an href.
+test('a URL in a line links the whole address, reads as host and path, and leaves the sentence its period', () => {
+  const rendered = renderToStaticMarkup(
+    <NotificationLine
+      notification={{
+        id: 1,
+        message:
+          'To log in to Faux, open https://auth.faux.invalid/oauth/authorize?client_id=a&state=b. Or file:///etc/x',
+        notifyType: 'info',
+        origin: 'run',
+        at: new Date(0),
+      }}
+    />,
+  )
+  expect(rendered).toContain('href="https://auth.faux.invalid/oauth/authorize?client_id=a&amp;state=b"')
+  expect(rendered).toContain('>auth.faux.invalid/oauth/authorize…</a>.')
+  expect(rendered).toContain('target="_blank"')
+  expect(rendered).not.toContain('href="file:')
+})
