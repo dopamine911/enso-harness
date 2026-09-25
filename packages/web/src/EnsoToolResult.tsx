@@ -101,12 +101,15 @@ export function EnsoToolResult({
     )
   }
 
-  // An errored result is the envelope's business, not the descriptor's.
+  // An errored result is the envelope's business, not the descriptor's. It WRAPS: it is usually
+  // a sentence — a guard's denial names its rule and says why — and on one scrolling line the
+  // reason sat past the box's edge behind a scrollbar that only shows on hover. Line breaks the
+  // error carries (a stderr) are kept.
   if (state.status === 'error') {
     return (
       <pre
         data-enso-tool-result="error"
-        className="overflow-x-auto rounded-md border border-destructive/50 bg-destructive/10 p-3 font-mono text-destructive text-xs"
+        className="whitespace-pre-wrap break-words rounded-md border border-destructive/50 bg-destructive/10 p-3 font-mono text-destructive text-xs"
       >
         {state.error}
       </pre>
