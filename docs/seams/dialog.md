@@ -55,6 +55,14 @@ export const EnsoDialogSpec = Type.Union([
      * the host sets it when it lifts that prompt to a dialog.
      */
     secret: Type.Optional(Type.Literal(true)),
+    /**
+     * What the answer is and where it comes from (#388): a login's code prompt says that the
+     * login completes by itself when finished in a browser on this machine, and what to paste
+     * when it does not. Plain text, never markdown. pi's own `input` has none; the host sets it.
+     */
+    message: Type.Optional(Type.String()),
+    /** The page to open to get the answer (#388): the login's authorization URL. The host sets it. */
+    link: Type.Optional(EnsoDialogLink),
     timeout: Type.Optional(Type.Number({ minimum: 0 })),
   }),
   Type.Object({
@@ -214,16 +222,13 @@ export interface EnsoExtensionUiContext {
   /** How many dialogs are blocked right now — observable state for tests and for the idle-timeout logic. */
   pendingDialogCount(): number
   /**
-   * The HOST's own question, for a credential (#338 slice 3): pi's `AuthPrompt.type: 'secret'`
-   * lifted to an `input` dialog the browser masks. Not on `uiContext` — pi's interface has no
-   * such method, and an extension must not be able to ask a masked question the transcript then
-   * fails to show. Same wait, same settle record, same cancel value as `input`.
+   * The HOST's own questions, lifted to an `input` dialog: a credential (#338 slice 3: pi's
+   * `AuthPrompt.type: 'secret'`, masked by the browser) and a login's code (#388: with what to
+   * paste and a link to the login page). Not on `uiContext` — pi's interface has no such method,
+   * and an extension must not be able to ask a masked question the transcript then fails to show,
+   * or put a link on the card. Same wait, same settle record, same cancel value as `input`.
    */
-  askSecret(
-    title: string,
-    placeholder: string | undefined,
-    signal: AbortSignal | undefined,
-  ): Promise<string | undefined>
+  askHostInput(question: HostInputQuestion, signal: AbortSignal | undefined): Promise<string | undefined>
 }
 ```
 
@@ -232,15 +237,15 @@ export interface EnsoExtensionUiContext {
 **Implemented once**, by `createEnsoExtensionUiContext` in `packages/web/src/host/extension-ui-context.ts`
 (line 235). The host is the UI: it implements the interface extensions call and turns each call into
 the same record the mapper already consumed over the old transport (header lines 38–40). The four
-blocking methods — `select`, `confirm`, `input`, `editor` (lines 347–393) — go through one
-`awaitDialog` (line 304): mint an id, park the request in a pending map, emit the request, and block
+blocking methods — `select`, `confirm`, `input`, `editor` (lines 362–408) — go through one
+`awaitDialog` (line 309): mint an id, park the request in a pending map, emit the request, and block
 until an answer, a cancel, the caller's abort signal or its own timeout. Every path that stops the wait
-goes through `finish` (line 320), which deletes the pending entry, emits the settle record with its
+goes through `finish` (line 335), which deletes the pending entry, emits the settle record with its
 outcome (line 324) and resolves the extension with its value — `undefined` for `select`/`input`/
 `editor`, `false` for `confirm`, on every non-answer outcome (lines 297–298). That is why the settle
 observation exists at all: the runtime has no event for a question ending (lines 301–302).
 `agent-host.ts` binds one context per session (line 569) and delegates the runtime contract's
-`answerDialog` and `openDialogs` to it (lines 908–913); `cancelAllDialogs` cancels every pending
+`answerDialog` and `openDialogs` to it (lines 936–941); `cancelAllDialogs` cancels every pending
 question at session teardown (line 536, called from `agent-host.ts:1031`), so teardown is a settle
 path too.
 

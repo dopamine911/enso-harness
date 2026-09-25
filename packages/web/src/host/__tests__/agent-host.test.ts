@@ -1114,3 +1114,89 @@ test('⚠ a run that runs out of retries ends with pi giving up, and its last er
     finalError: RATE_LIMITED,
   })
 })
+
+/** pi's extension OAuth config, derived from `registerProvider` itself — no vendor subpath import. */
+type FauxOAuthConfig = NonNullable<Parameters<ExtensionAPI['registerProvider']>[1]['oauth']>
+type OAuthLoginCallbacks = Parameters<FauxOAuthConfig['login']>[0]
+type OAuthCredentials = Awaited<ReturnType<FauxOAuthConfig['login']>>
+
+const LOGIN_PAGE = 'https://login.faux.invalid/oauth/authorize?client_id=enso&state=388'
+
+/**
+ * An extension-registered OAuth provider — the path a pi-multi-account slot takes: pi's composer
+ * turns `onAuth` into an `auth_url` event and `onManualCodeInput` into its bare "Paste the
+ * authorization code" prompt. The login waits for the pasted code, as a callback server would.
+ */
+const fauxOAuthProvider: InlineExtension = {
+  name: 'enso-host-faux-oauth',
+  factory: (pi: ExtensionAPI) => {
+    pi.registerProvider('faux-oauth', {
+      api: 'enso-faux',
+      baseUrl: 'http://faux.invalid',
+      models: [
+        {
+          id: 'faux-oauth-1',
+          name: 'Faux OAuth One',
+          reasoning: false,
+          input: ['text'],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 50_000,
+          maxTokens: 1000,
+        },
+      ],
+      oauth: {
+        name: 'Faux OAuth',
+        login: async (callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> => {
+          callbacks.onAuth({ url: LOGIN_PAGE, instructions: 'A browser window should open. Complete login to finish.' })
+          const code = await callbacks.onManualCodeInput?.()
+          if (code === undefined) throw new Error('no manual code input')
+          return { access: code, refresh: 'refresh', expires: Date.now() + 3_600_000 }
+        },
+        refreshToken: async (credentials: OAuthCredentials): Promise<OAuthCredentials> => credentials,
+        getApiKey: (credentials: OAuthCredentials): string => credentials.access,
+      },
+    })
+  },
+}
+
+// ⚠ #388: a browser login from the web opened nothing, repeated pi's terminal sentence ("A browser
+// window should open"), and asked a bare "Paste the authorization code" with the URL somewhere
+// else. The line must carry the URL in our words, and the code question must LINK the login page.
+test('⚠ a browser login from the web: the URL in our words, and a code question that links the login page (#388)', async () => {
+  const loginAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-login-'))
+  const host = createAgentHost({
+    cwd: repoRoot,
+    agentDir: loginAgentDir,
+    harnessPackageDir: harnessDir,
+    extensionFactories: [fauxOAuthProvider],
+  })
+  const hosted = await host.createSession(crypto.randomUUID())
+  openSessions.push(hosted)
+  const events = collectEvents(hosted)
+  const asked = untilObservation(hosted, (event) => event.kind === 'extension-ui-request' && event.method === 'input')
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.startHostFlow(
+    { name: 'login', value: 'faux-oauth/oauth' },
+    { onAccepted: (): void => undefined, onRejected: settled.reject, onSettled: settled.resolve },
+  )
+  await asked
+
+  const [question] = hosted.runtime.openDialogs()
+  expect(question?.dialog).toMatchObject({
+    method: 'input',
+    title: 'Finish logging in to Faux OAuth',
+    link: { url: LOGIN_PAGE, label: 'Open login page' },
+  })
+  const lines = (): string[] =>
+    events.flatMap((event) =>
+      event.kind === 'extension-ui-request' && event.method === 'notify' && event.message !== undefined
+        ? [event.message]
+        : [],
+    )
+  expect(lines()).toContain(`To log in to Faux OAuth, open ${LOGIN_PAGE}`)
+  expect(lines().some((line) => line.includes('A browser window should open'))).toBe(false)
+
+  hosted.runtime.answerDialog({ id: question?.id ?? '', value: 'the-code' })
+  await settled.promise
+  expect(lines().some((line) => line.startsWith('Logged in to Faux OAuth.'))).toBe(true)
+})

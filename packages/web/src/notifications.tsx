@@ -98,14 +98,66 @@ export function TranscriptLine({
       role="status"
       {...rest}
       className={cn(
-        'flex items-center gap-2 text-xs',
+        'flex items-start gap-2 text-xs',
         notifyType === 'error' ? 'text-destructive' : 'text-muted-foreground',
       )}
     >
-      <Icon className="size-3.5 shrink-0" />
-      <span className="whitespace-pre-wrap">{message}</span>
+      <Icon className="mt-px size-3.5 shrink-0" />
+      <span className="min-w-0 whitespace-pre-wrap break-words">
+        <LinkedText text={message} />
+      </span>
     </div>
   )
+}
+
+/**
+ * A URL in a line: `http(s)://` up to whitespace, minus the sentence punctuation that trails it
+ * (`…at https://x/device.` — the period is the sentence's). Only http(s): nothing else becomes an href.
+ */
+const LINE_URL = /https?:\/\/[^\s<>"']*[^\s<>"'.,;:!?)\]}]/g
+
+/**
+ * A URL as a person reads it in a line (#388): host and path, `…` standing for a query or
+ * fragment. A login's authorization URL is 500 characters of query nobody reads; the host is what
+ * says where the link goes, and the full URL is on hover and in the href.
+ */
+function shortUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    const path = parsed.pathname === '/' ? '' : parsed.pathname
+    return `${parsed.host}${path}${parsed.search.length > 0 || parsed.hash.length > 0 ? '…' : ''}`
+  } catch {
+    return url
+  }
+}
+
+/**
+ * A line's text with every URL in it a link that opens a new tab (#388): a login URL, a device
+ * code's verification page, a provider's docs link in a refusal. Before, a URL was plain text —
+ * unclickable, and one unbreakable token that pushed the whole transcript sideways.
+ */
+function LinkedText({ text }: { text: string }): React.ReactNode {
+  const pieces: React.ReactNode[] = []
+  let consumed = 0
+  for (const found of text.matchAll(LINE_URL)) {
+    const url = found[0]
+    if (found.index > consumed) pieces.push(text.slice(consumed, found.index))
+    pieces.push(
+      <a
+        key={found.index}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={url}
+        className="underline underline-offset-2"
+      >
+        {shortUrl(url)}
+      </a>,
+    )
+    consumed = found.index + url.length
+  }
+  if (consumed < text.length) pieces.push(text.slice(consumed))
+  return pieces
 }
 
 /**

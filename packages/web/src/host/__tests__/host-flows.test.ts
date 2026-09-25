@@ -4,6 +4,7 @@ import {
   compactDoneText,
   decideHostFlow,
   hostFlowRows,
+  loginCodeQuestion,
   loginDoneText,
   loginOptions,
   logoutDoneText,
@@ -80,24 +81,28 @@ test('a run names an offered option or is refused with the reason the route says
 })
 
 test('every auth event is one line with the thing the user needs in it — the URL, the code', () => {
-  expect(authEventText({ type: 'auth_url', url: 'https://x/auth' })).toBe(
-    'Open this URL to authenticate: https://x/auth',
+  // #388: pi's `instructions` are its terminal's ("A browser window should open…"), false on the
+  // web, where nothing opens one: the line names the provider and the URL, never pi's sentence.
+  const announced = authEventText(
+    { type: 'auth_url', url: 'https://x/auth', instructions: 'A browser window should open.' },
+    'OpenAI Codex',
   )
-  expect(authEventText({ type: 'auth_url', url: 'https://x/auth', instructions: 'Sign in here:' })).toBe(
-    'Sign in here: https://x/auth',
-  )
+  expect(announced).toBe('To log in to OpenAI Codex, open https://x/auth')
   expect(
-    authEventText({
-      type: 'device_code',
-      userCode: 'B599-2E10',
-      verificationUri: 'https://x/device',
-      expiresInSeconds: 900,
-    }),
+    authEventText(
+      {
+        type: 'device_code',
+        userCode: 'B599-2E10',
+        verificationUri: 'https://x/device',
+        expiresInSeconds: 900,
+      },
+      'GitHub Copilot',
+    ),
   ).toBe('Enter code B599-2E10 at https://x/device (expires in 15 min)')
-  expect(authEventText({ type: 'info', message: 'Read this', links: [{ url: 'https://x/doc', label: 'docs' }] })).toBe(
-    'Read this docs: https://x/doc',
-  )
-  expect(authEventText({ type: 'progress', message: 'Waiting…' })).toBe('Waiting…')
+  expect(
+    authEventText({ type: 'info', message: 'Read this', links: [{ url: 'https://x/doc', label: 'docs' }] }, 'X'),
+  ).toBe('Read this docs: https://x/doc')
+  expect(authEventText({ type: 'progress', message: 'Waiting…' }, 'X')).toBe('Waiting…')
   expect(loginDoneText('OpenAI', 'oauth', 'gpt-5')).toBe('Logged in to OpenAI. Selected gpt-5.')
   expect(loginDoneText('OpenAI', 'api_key', undefined)).toBe('Saved API key for OpenAI.')
   expect(logoutDoneText('OpenAI', 'oauth')).toBe('Logged out of OpenAI.')
@@ -108,4 +113,19 @@ test('every auth event is one line with the thing the user needs in it — the U
     'Compacted the context from 84,120 tokens. Reload the page to see the compacted transcript.',
   )
   expect(logoutDoneText('OpenAI', undefined)).toBe('Removed the stored credential for OpenAI.')
+})
+
+// #388: the code prompt is the FALLBACK to a browser login, so it carries the page to open when the
+// flow announced one — and only an http(s) page, since the card renders it as a link.
+test('a login’s code question links the page the flow announced, http(s) only, and keeps pi’s placeholder', () => {
+  const withPage = loginCodeQuestion(
+    'OpenAI Codex',
+    'https://auth.openai.com/oauth/authorize?x=1',
+    'http://localhost:1455/auth/callback',
+  )
+  expect(withPage.link).toEqual({ url: 'https://auth.openai.com/oauth/authorize?x=1', label: 'Open login page' })
+  expect(withPage.placeholder).toBe('http://localhost:1455/auth/callback')
+  expect(withPage.title).toContain('OpenAI Codex')
+  expect(loginCodeQuestion('X', undefined, undefined).link).toBeUndefined()
+  expect(loginCodeQuestion('X', 'javascript:alert(1)', undefined).link).toBeUndefined()
 })

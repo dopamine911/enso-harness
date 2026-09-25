@@ -47,6 +47,7 @@ import {
   isCompactionRefusal,
   isFlowCancelled,
   type LoginProviderFacts,
+  loginCodeQuestion,
   loginDoneText,
   loginOptions,
   logoutDoneText,
@@ -182,6 +183,12 @@ const STREAMING_BEHAVIOR_OF: Record<EnsoPromptAdmission, NonNullable<PromptOptio
 
 /** The `ExtensionMode` we bind — `ctx.mode` as extensions see it. rpc is the truthful one: no terminal, a remote surface. */
 const EXTENSION_MODE_RPC = 'rpc'
+
+/** A login while it runs (#388): whose, and the page its flow announced — the code prompt links to it. */
+interface LoginInProgress {
+  readonly providerName: string
+  authUrl: string | undefined
+}
 
 export interface AgentHostOptions {
   /** The tree pi reads and writes. One per server, never from a request (see `server/index.ts`). */
@@ -692,18 +699,34 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
     /**
      * pi asks; the browser answers through the dialog seam. A `secret` is masked (the host's own
-     * `askSecret`); a `select` crosses as labels and comes back as the chosen option's id;
-     * `text` and `manual_code` are plain inputs. No answer — cancelled, aborted — is pi's own
-     * "Login cancelled", which the flow reports as a cancellation, not a failure.
+     * `askHostInput`); a `select` crosses as labels and comes back as the chosen option's id; a
+     * `manual_code` is asked in our words, with the login page the flow announced as a link on the
+     * card (#388: nothing opens a browser from here, and pi's own words never said the paste is
+     * the fallback); `text` is a plain input. No answer — cancelled, aborted — is pi's own "Login
+     * cancelled", which the flow reports as a cancellation, not a failure.
      */
     async function askAuthPrompt(
       prompt: Parameters<Parameters<typeof session.modelRuntime.login>[2]['prompt']>[0],
+      login: LoginInProgress,
     ): Promise<string> {
       const signal = prompt.signal
       let answer: string | undefined
       switch (prompt.type) {
         case 'secret':
-          answer = await ui.askSecret(prompt.message, prompt.placeholder, signal)
+          answer = await ui.askHostInput(
+            {
+              title: prompt.message,
+              secret: true,
+              ...(prompt.placeholder === undefined ? {} : { placeholder: prompt.placeholder }),
+            },
+            signal,
+          )
+          break
+        case 'manual_code':
+          answer = await ui.askHostInput(
+            loginCodeQuestion(login.providerName, login.authUrl, prompt.placeholder),
+            signal,
+          )
           break
         case 'select': {
           const labels = prompt.options.map((option) => option.label)
@@ -752,11 +775,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
     async function runLogin(providerId: string, authType: HostAuthType): Promise<void> {
       const providerName = providerNameOf(providerId)
+      // The page the flow announces (`auth_url`) is remembered for the code prompt that follows it.
+      const login: LoginInProgress = { providerName, authUrl: undefined }
       try {
         await session.modelRuntime.login(providerId, authType, {
           signal: flowsAbort.signal,
-          prompt: askAuthPrompt,
-          notify: (event: HostAuthEvent): void => ui.uiContext.notify(authEventText(event), 'info'),
+          prompt: (prompt: Parameters<typeof askAuthPrompt>[0]): Promise<string> => askAuthPrompt(prompt, login),
+          notify: (event: HostAuthEvent): void => {
+            if (event.type === 'auth_url') login.authUrl = event.url
+            ui.uiContext.notify(authEventText(event, providerName), 'info')
+          },
         })
         // The credential IS stored past this line (PR #346 review): what follows can fail —
         // pi refusing the model, the catalog not refreshing — and is said as a warning, never

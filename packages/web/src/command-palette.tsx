@@ -170,7 +170,10 @@ function choiceFor(command: RuntimeCommand): Choice | undefined {
   }
 }
 
-type ChoiceHandlers = Pick<CommandPaletteProps, 'onRun' | 'onInsert' | 'onHost' | 'onOpenModelDialog' | 'onOpenView'>
+export type ChoiceHandlers = Pick<
+  CommandPaletteProps,
+  'onRun' | 'onInsert' | 'onHost' | 'onOpenModelDialog' | 'onOpenView'
+>
 
 /** Hands a choice to the owner's callback for it. */
 function deliver(chosen: Choice, handlers: ChoiceHandlers): void {
@@ -192,6 +195,28 @@ function deliver(chosen: Choice, handlers: ChoiceHandlers): void {
       handlers.onOpenView(chosen.command)
       break
   }
+}
+
+/**
+ * A bare `/<name>` typed into the composer (#388): the command's name, or undefined when the text
+ * is anything else — words after it, a second line, no slash. Only a bare name is a command to
+ * route; `/login` followed by words is a message.
+ */
+export function typedCommandName(text: string): string | undefined {
+  return /^\/([a-z][\w-]*)\s*$/i.exec(text)?.[1]
+}
+
+/**
+ * A typed host command does what choosing its row does (#388): `/login` opens the provider picker
+ * the palette would, instead of going to pi as a prompt the server refuses — the refusal read as
+ * "the run failed" and outlived the login the user then started. False for a `level` row
+ * (`/thinking`), whose options live on a palette page the composer cannot open.
+ */
+export function runTypedHostCommand(command: RuntimeCommand, handlers: ChoiceHandlers): boolean {
+  const choice = choiceFor(command)
+  if (choice === undefined) return false
+  deliver(choice, handlers)
+  return true
 }
 
 export function CommandPalette({

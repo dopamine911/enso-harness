@@ -121,6 +121,20 @@ export const QUESTIONNAIRE_COMPONENT_KEY: unique symbol = Symbol.for('enso.quest
 export type EnsoQuestionnaireResult = { cancelled: true } | { answers: EnsoQuestionAnswer[] }
 
 /**
+ * A page the person must open to answer (#388): a login's authorization page. Only `http(s)` —
+ * the browser renders it as a link that opens a new tab, and a `javascript:` or `file:` URL must
+ * not become one.
+ *
+ * @group Dialogs
+ */
+export const EnsoDialogLink = Type.Object({
+  url: Type.String({ pattern: '^https?://' }),
+  label: Type.String({ minLength: 1 }),
+})
+/** @group Dialogs */
+export type EnsoDialogLink = Static<typeof EnsoDialogLink>
+
+/**
  * One dialog question, per method.
  *
  * `timeout` is pi's OWN deadline (milliseconds), when the requesting extension set one:
@@ -160,6 +174,14 @@ export const EnsoDialogSpec = Type.Union([
      * the host sets it when it lifts that prompt to a dialog.
      */
     secret: Type.Optional(Type.Literal(true)),
+    /**
+     * What the answer is and where it comes from (#388): a login's code prompt says that the
+     * login completes by itself when finished in a browser on this machine, and what to paste
+     * when it does not. Plain text, never markdown. pi's own `input` has none; the host sets it.
+     */
+    message: Type.Optional(Type.String()),
+    /** The page to open to get the answer (#388): the login's authorization URL. The host sets it. */
+    link: Type.Optional(EnsoDialogLink),
     timeout: Type.Optional(Type.Number({ minimum: 0 })),
   }),
   Type.Object({
