@@ -317,6 +317,15 @@ export async function stopRunSettlingDialogs(
   await stopping
 }
 
+/**
+ * The host will not run this thread where it would have to: its stored session, or its new one,
+ * is in a directory the server does not serve (#395). A refusal the server decided — never a
+ * fault — so the routes answer it with its reason rather than as a failed request.
+ */
+export class SessionDirectoryRefused extends Error {
+  override readonly name = 'SessionDirectoryRefused'
+}
+
 export interface AgentHost {
   /**
    * A session for this thread, with its own services, extensions bound, events flowing.
@@ -326,9 +335,13 @@ export interface AgentHost {
    * restarted, and the user came back; otherwise a fresh session is CREATED with the id in
    * `newSessionDirectory`. So resume needs no id mapping and no index file: pi's own listing is
    * the one source, and a page-owned thread finds its own file again across a server restart.
-   * Either directory must pass `servesDirectory`, or nothing is built.
+   * Either directory must pass `servesDirectory`, or nothing is built: `SessionDirectoryRefused`.
+   *
+   * `newSessionDirectory` is asked only when there is no session file under the id (PR #399
+   * review). A thread that has one never depends on where a NEW thread would go: a project it
+   * was once named for can be removed, or its directory deleted, and it still resumes.
    */
-  createSession(threadId: string, newSessionDirectory: string): Promise<HostedThread>
+  createSession(threadId: string, newSessionDirectory: () => string): Promise<HostedThread>
   /** pi's session files in the directories this host serves, newest first — the resumable listing. */
   listSessions(): Promise<StoredThread[]>
   /**
@@ -510,14 +523,15 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     return path === undefined ? undefined : branchRequestDetail(SessionManager.open(path).getBranch(), request)
   }
 
-  async function createSession(threadId: string, newSessionDirectory: string): Promise<HostedThread> {
+  async function createSession(threadId: string, newSessionDirectory: () => string): Promise<HostedThread> {
     // Resolved BEFORE the services so a bad id fails before anything is built. A file under this
     // id decides the directory — pi fixed it at creation — and one this host does not serve is a
-    // refusal, never a fresh session beside it under the same id.
+    // refusal, never a fresh session beside it under the same id. Only a thread with no file asks
+    // where a new one goes, so a stale answer to that question cannot block a resume.
     const located = await locate(threadId)
-    const cwd = located?.cwd ?? newSessionDirectory
+    const cwd = located?.cwd ?? newSessionDirectory()
     if (!servesDirectory(cwd)) {
-      throw new Error(`thread ${threadId}: ${cwd} is not a project this server runs sessions in`)
+      throw new SessionDirectoryRefused(`thread ${threadId}: ${cwd} is not a project this server runs sessions in`)
     }
     // The watcher's handler is bound after the session exists (`announceModelState` below);
     // `model_select` cannot fire before it — only the session's own methods emit it.

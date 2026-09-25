@@ -206,7 +206,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/logs-stats-route.ts` | `#97`, `#144` | `GET /api/logs/stats` (#144 slice 4): the day, derived — `dayStats` over today's file, as JSON, for the debug page's stats view. |
 | `packages/web/src/server/logs-tail-route.ts` | `#97`, `#132`, `#144` | `GET /api/logs/tail` (#144 slice 2): the day's file, filtered server-side, as SSE — what the debug page reads instead of a terminal. |
 | `packages/web/src/server/observation-log.ts` | `#97`, `#132` | Every observation the server publishes becomes a record (#132, "trace everything") — at the tier it belongs to, with the ids that join it to the transcript, the event tail (#97) and the other layers' lines about the same moment. |
-| `packages/web/src/server/projects.ts` | `#24`, `#395` | The projects one server runs threads in (#395). |
+| `packages/web/src/server/projects.ts` | `#24`, `#395`, `#399` | The projects one server runs threads in (#395). |
 | `packages/web/src/server/run-timing.ts` | `#144` | When a run was admitted, so its FIRST delta can be recorded as a latency (#144 slice 1). |
 | `packages/web/src/server/sse.ts` | `#109` | The SSE plumbing every streaming route shares: the response headers and the keepalive. |
 | `packages/web/src/server/thread-context-route.ts` | `#86`, `#361` | `GET /api/threads/:threadId/context` (#361): the thread's context, request by request — the Context view reads it. |

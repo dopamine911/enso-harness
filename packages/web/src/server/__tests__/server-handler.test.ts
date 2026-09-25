@@ -21,7 +21,12 @@ import {
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { Check } from 'typebox/value'
-import type { AgentHost, HostedThreadInspection } from '../../host/agent-host.ts'
+import {
+  type AgentHost,
+  type HostedThread,
+  type HostedThreadInspection,
+  SessionDirectoryRefused,
+} from '../../host/agent-host.ts'
 import { transcriptOf } from '../../host/transcript.ts'
 import { startEnsoServer } from '../index.ts'
 import {
@@ -93,12 +98,17 @@ function fakeHost(
   const built: FakeThreadRecord[] = []
   /** Thread ids the host was asked to build, in order — the prompt route passes the id through. */
   const requested: string[] = []
-  /** The directory each build was asked for (#395), in the same order — the session reports it as its cwd. */
+  /**
+   * The directory each NEW session was built in (#395) — the session reports it as its cwd. A
+   * stored thread reopens where it was made and, as the real host does, never asks.
+   */
   const builtIn: string[] = []
   const host = createFakeAgentHost(
-    (threadId: string, newSessionDirectory: string) => {
+    (threadId: string, newSessionDirectory: () => string) => {
       requested.push(threadId)
-      builtIn.push(newSessionDirectory)
+      const storedThread = stored[threadId]
+      const directory = storedThread === undefined ? newSessionDirectory() : (storedThread.cwd ?? tmpdir())
+      if (storedThread === undefined) builtIn.push(directory)
       const fake = createFakeHostedThread({
         runtime: (parts: FakeThreadParts) => ({
           prompt: (request: PromptRequest, outcome: PromptOutcome) => {
@@ -110,7 +120,7 @@ function fakeHost(
           permissionModeState: () => ({ mode: 'default', available: ['default', 'acceptEdits'] }),
           ...script.runtime?.(parts),
         }),
-        inspect: { ...piccShapedInspection(), cwd: newSessionDirectory },
+        inspect: { ...piccShapedInspection(), cwd: directory },
       })
       built.push(fake.record)
       return Promise.resolve(fake.hosted)
@@ -290,7 +300,7 @@ test('⚠ a thread id that is not thread-id shaped is a 400 at every entry point
 test('⚠ GET …/commands builds the thread’s session and answers its own list; a failed build says remembered or none', async () => {
   const { url, built } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({
     ...host,
-    createSession: (threadId: string, directory: string): ReturnType<AgentHost['createSession']> =>
+    createSession: (threadId: string, directory: () => string): ReturnType<AgentHost['createSession']> =>
       threadId.startsWith('broken')
         ? Promise.reject(new Error('the build failed'))
         : host.createSession(threadId, directory),
@@ -551,6 +561,99 @@ test('⚠ removing a project ends its idle live threads, and nothing is built fo
   expect(await liveIds()).toEqual([])
   expect(await prompt(url, 't1', 'again', naming)).toBe(400)
   expect(requested).toEqual(['t1'])
+})
+
+// PR #399 review, the gaps it reproduced. A claim is asked for only when a NEW session is made: a
+// stored thread once named for a project that is since removed still resumes where pi recorded it.
+test('⚠ a claim naming a removed project does not block resuming a thread that has a session', async () => {
+  const { root, app } = projectRoot()
+  const old: FakeStoredThread = { transcript: [], modified: new Date('2026-09-24T00:00:00.000Z'), firstMessage: 'old' }
+  const { url, requested, builtIn } = await startWith(settlesAtOnce, { old }, undefined, [root])
+  const project = await registeredProject(url, app)
+  const history = await fetch(`${url}/api/threads/old/history`, {
+    headers: { [ENSO_PROJECT_HEADER]: project.projectId },
+  })
+  expect(history.status).toBe(200)
+  expect((await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })).status).toBe(204)
+
+  expect(await prompt(url, 'old', 'still here?')).toBe(202)
+  expect(requested).toEqual(['old'])
+  expect(builtIn).toEqual([])
+})
+
+// A new thread whose project is gone is built nowhere, and says so: its snapshot has no directory,
+// and its prompt is a 409 with the reason — a refusal the server decided, not a failed request.
+test('⚠ a new thread whose project was removed shows no directory, and its prompt is refused with the reason (409)', async () => {
+  const { root, app } = projectRoot()
+  const { url, builtIn } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const project = await registeredProject(url, app)
+  const named = new AbortController()
+  openFollows.push(named)
+  expect(
+    (await openFollow(url, 'orphan', named, { [ENSO_PROJECT_HEADER]: project.projectId })).frames[0],
+  ).toMatchObject({
+    cwd: app,
+  })
+  expect((await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })).status).toBe(204)
+
+  const after = new AbortController()
+  openFollows.push(after)
+  expect((await openFollow(url, 'orphan', after)).frames[0]).toMatchObject({ live: false, cwd: '' })
+  const refused = await fetch(`${url}/api/threads/orphan/prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'hello' }),
+  })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toContain('its project is no longer registered')
+  expect(builtIn).toEqual([])
+})
+
+test("⚠ the host's refusal to run a session where it would have to is a 409 with its reason, never a 500", async () => {
+  const { url } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({
+    ...host,
+    createSession: (threadId: string): Promise<HostedThread> =>
+      Promise.reject(
+        new SessionDirectoryRefused(`thread ${threadId}: /gone is not a project this server runs sessions in`),
+      ),
+  }))
+  const refused = await fetch(`${url}/api/threads/unserved/prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'hello' }),
+  })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toBe('thread unserved: /gone is not a project this server runs sessions in')
+})
+
+test('removing the launch project says why at once, even while one of its threads runs', async () => {
+  const { url } = await startWith(asksAndWaits)
+  await prompt(url, 'busy', '/mode')
+  const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]
+  const refused = await fetch(`${url}/api/projects/${launch?.projectId}`, { method: 'DELETE' })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toBe('the launch directory is always a project')
+})
+
+test('⚠ a request naming a different project for a thread already named is a 409, and nothing is built', async () => {
+  const { root, app } = projectRoot()
+  const other = join(root, 'other')
+  mkdirSync(other)
+  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const appProject = await registeredProject(url, app)
+  const otherProject = await registeredProject(url, other)
+  const follow = new AbortController()
+  openFollows.push(follow)
+  await openFollow(url, 'named', follow, { [ENSO_PROJECT_HEADER]: appProject.projectId })
+
+  const refused = await fetch(`${url}/api/threads/named/prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', [ENSO_PROJECT_HEADER]: otherProject.projectId },
+    body: JSON.stringify({ message: 'hello' }),
+  })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toContain(`already named for project ${appProject.projectId}`)
+  expect(requested).toEqual([])
 })
 
 // ⚠ A FAULT IS NOT A REFUSAL (PR #344 review): only a refusal the host decided is the 422 the user

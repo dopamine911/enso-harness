@@ -25,9 +25,13 @@ export interface AgentHost {
    * restarted, and the user came back; otherwise a fresh session is CREATED with the id in
    * `newSessionDirectory`. So resume needs no id mapping and no index file: pi's own listing is
    * the one source, and a page-owned thread finds its own file again across a server restart.
-   * Either directory must pass `servesDirectory`, or nothing is built.
+   * Either directory must pass `servesDirectory`, or nothing is built: `SessionDirectoryRefused`.
+   *
+   * `newSessionDirectory` is asked only when there is no session file under the id (PR #399
+   * review). A thread that has one never depends on where a NEW thread would go: a project it
+   * was once named for can be removed, or its directory deleted, and it still resumes.
    */
-  createSession(threadId: string, newSessionDirectory: string): Promise<HostedThread>
+  createSession(threadId: string, newSessionDirectory: () => string): Promise<HostedThread>
   /** pi's session files in the directories this host serves, newest first — the resumable listing. */
   listSessions(): Promise<StoredThread[]>
   /**
@@ -244,14 +248,17 @@ export const EnsoInterruptedTail = Type.Union([
 directory scan, newest first, and keeps only the sessions whose own directory — the one the runtime's
 header records — passes the host's required `servesDirectory` rule: the server's projects (#395). A
 session made in any other directory is not listed, not read, and not reopened; building under its id
-is refused rather than creating a second session beside it. `readStoredThread` resolves the id to a path through that listing, opens the file into
+is refused (`SessionDirectoryRefused`, answered 409 with its reason) rather than creating a second
+session beside it. `readStoredThread` resolves the id to a path through that listing, opens the file into
 memory (nothing is written until an append) and converts the branch through
 `packages/web/src/host/transcript.ts` — the one place above `session-events.ts` that reads the
 runtime's stored message shapes — and, from the same open, sums the spend pi recorded in the file
 through `packages/web/src/host/session-usage.ts` (#45): pi's `getSessionStats` rule over every entry,
 every branch, pinned equal to pi's own total in `agent-host.test.ts`. `createSession` resolves the same path, then *opens* the file or
 *creates* one under the thread's id: the thread id IS the session id (#95), so resume needs no mapping
-and no index file. `inspect()` reads ids and directory straight off the session manager and converts
+and no index file. Only a thread with no file asks where a new one goes (`newSessionDirectory` is a
+function, called on that branch alone), so a project the thread was once named for can be removed and
+the thread still resumes. `inspect()` reads ids and directory straight off the session manager and converts
 the live branch the same way. The host is tested against the real session manager in
 `host/__tests__/agent-host.test.ts`.
 

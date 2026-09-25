@@ -111,7 +111,12 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
   }
 }
 
-/** Where a thread runs and which project that is: its session's directory, or a new thread's project's. */
+/**
+ * Where a thread runs and which project that is: its session's directory, or a new thread's
+ * project's. `cwd: ''` when a new thread's project has been removed: there is nowhere it will be
+ * built — its first prompt is refused (409) saying so — and falling back to the launch directory
+ * would name a place it will never run (PR #399 review).
+ */
 function placeOf(
   projects: ProjectRegistry,
   threadId: string,

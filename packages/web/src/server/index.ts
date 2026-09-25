@@ -20,7 +20,7 @@ import {
   withEnsoLogContext,
 } from '@enso/core'
 import { missingVendorPaths } from '@enso/core/pi-manifest'
-import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost } from '../host/agent-host.ts'
+import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost, SessionDirectoryRefused } from '../host/agent-host.ts'
 import { withoutHostValues } from '../host/host-commands.ts'
 import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
@@ -42,7 +42,7 @@ import {
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
 import { createLogStatsRoute } from './logs-stats-route.ts'
 import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
-import { createProjectRegistry } from './projects.ts'
+import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
 import { noteRunAdmitted } from './run-timing.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
@@ -359,9 +359,10 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     })
   const threads = createThreadRegistry({
     // A thread with a session on disk is opened where pi recorded it; a new one where its project
-    // is. The claim that named it has done its work once the session exists (PR #399 review).
+    // is — asked for only when there is no session, so a claim naming a project that has since
+    // gone cannot block a resume. The claim has done its work once the session exists (PR #399 review).
     createSession: async (threadId: string) => {
-      const hosted = await host.createSession(threadId, projects.directoryForNewThread(threadId))
+      const hosted = await host.createSession(threadId, () => projects.directoryForNewThread(threadId))
       projects.dropClaim(threadId)
       return hosted
     },
@@ -489,9 +490,20 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    * it (PR #87). Every handler that awaits (the thread routes, the listing, the browser log) runs
    * through here: a rejection is reported and answered as a 500 whose text names no route (it
    * answers every one of them; PR #393 review), and the server stays up.
+   *
+   * The one exception is a refusal the SERVER decided while building a thread (#395): the thread's
+   * project is gone, its directory deleted, or its session is in a directory not served. Any route
+   * that builds can meet one, so it is answered here, once — 409 with the reason, not a fault
+   * (PR #399 review: a refusal is not a fault, and must not read as one).
    */
   function answerOrFail(work: Promise<void>, response: ServerResponse): void {
     work.catch((error: unknown) => {
+      if (error instanceof ProjectUnavailable || error instanceof SessionDirectoryRefused) {
+        log.warn('a thread could not be built where it belongs: {reason}', { reason: error.message })
+        if (response.headersSent) response.end()
+        else refuseWith(response, { status: 409, reason: error.message })
+        return
+      }
       log.error('a handler failed: {error}', { error })
       if (!response.headersSent) response.writeHead(500, { 'Content-Type': 'text/plain' })
       response.end('the request failed — see the server log')
@@ -714,19 +726,20 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
 
   /**
    * A page names a NEW thread's project on its requests (`X-Enso-Project`, #395). An id that is no
-   * registered project is refused here, before any route runs — the page would otherwise have its
-   * thread built somewhere else without a word. The body is never read, so the connection closes.
+   * registered project is refused here (400), before any route runs — the page would otherwise have
+   * its thread built somewhere else without a word — and so is a name that contradicts the one the
+   * thread already has (409). The body is never read, so the connection closes.
    */
   function admitProjectClaim(threadId: string, request: IncomingMessage, response: ServerResponse): boolean {
     const header = request.headers[ENSO_PROJECT_HEADER]
     const refusal = projects.claim(threadId, typeof header === 'string' ? header : undefined)
     if (refusal === undefined) return true
-    log.warn('thread request refused: {reason}', { threadId, reason: refusal })
-    endAndClose(request, response, 400, refusal)
+    log.warn('thread request refused: {reason}', { threadId, reason: refusal.reason })
+    endAndClose(request, response, refusal.status, refusal.reason)
     return false
   }
 
-  /** True when the request was a thread route — answered, or refused with a 400 (`decodeThreadId`, `admitProjectClaim`). */
+  /** True when the request was a thread route — answered, or refused (`decodeThreadId`, `admitProjectClaim`). */
   function dispatchThreadRoute(request: IncomingMessage, response: ServerResponse): boolean {
     const url = request.url ?? ''
     for (const { method, route, respond } of THREAD_ROUTES) {
@@ -981,6 +994,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    * the removed directory for as long as it kept it from idling out.
    */
   function respondToProjectRemoval(projectId: string, response: ServerResponse): void {
+    // The launch project first: it is never removable, running or not, so it is not told to wait.
+    if (projects.get(projectId)?.launch === true) {
+      refuseWith(response, { status: 409, reason: 'the launch directory is always a project' })
+      return
+    }
     // `inspect()` decodes a branch (#285); removal is a rare, explicit act, and live threads are few.
     const live = threads
       .list()

@@ -70,7 +70,7 @@ test('registrations outlive the process; a root taken out of the config hides it
   expect(rootBack.byDirectory(app)?.projectId).toBe(registered.project.projectId)
 })
 
-test('a new thread is built in the first project a page named for it, else the launch directory; never in a vanished one', () => {
+test('a new thread is built in the one project a page named for it, else the launch directory; never in a vanished one', () => {
   const { launch, root } = layout()
   const app = join(root, 'app')
   const other = join(root, 'other')
@@ -83,11 +83,59 @@ test('a new thread is built in the first project a page named for it, else the l
 
   expect(projects.directoryForNewThread('unnamed')).toBe(launch)
   expect(projects.claim('t1', appProject.project.projectId)).toBeUndefined()
-  expect(projects.claim('t1', otherProject.project.projectId)).toBeUndefined()
+  // The same name again is no news; a DIFFERENT one is refused out loud, never dropped (PR #399 review).
+  expect(projects.claim('t1', appProject.project.projectId)).toBeUndefined()
+  expect(projects.claim('t1', otherProject.project.projectId)).toEqual({
+    status: 409,
+    reason: expect.stringContaining(`already named for project ${appProject.project.projectId}`),
+  })
   expect(projects.directoryForNewThread('t1')).toBe(app)
-  expect(projects.claim('t2', '0123456789abcdef')).toBe('no registered project has the id 0123456789abcdef')
+  expect(projects.claim('t2', '0123456789abcdef')).toEqual({
+    status: 400,
+    reason: 'no registered project has the id 0123456789abcdef',
+  })
+  // Built: the claim is dropped, and the thread's session decides from here on.
+  projects.dropClaim('t1')
+  expect(projects.claim('t1', otherProject.project.projectId)).toBeUndefined()
 
   rmSync(app, { recursive: true })
   expect(projects.get(appProject.project.projectId)?.status).toBe('missing-dir')
-  expect(() => projects.directoryForNewThread('t1')).toThrow(ProjectUnavailable)
+  expect(projects.claim('t3', appProject.project.projectId)).toBeUndefined()
+  expect(() => projects.directoryForNewThread('t3')).toThrow(ProjectUnavailable)
+})
+
+// PR #399 review: roots may nest, and whether a directory is accepted must not depend on the order
+// they are declared in. `code/sub` is a root itself for the second root, and strictly under the first.
+test('⚠ a directory any declared root accepts is registered, whatever order nested roots are declared in', () => {
+  const { launch, root, statePath } = layout()
+  const sub = join(root, 'sub')
+  mkdirSync(join(sub, 'app'), { recursive: true })
+  for (const roots of [
+    [sub, root],
+    [root, sub],
+  ]) {
+    const projects = createProjectRegistry({
+      launchDirectory: launch,
+      roots,
+      statePath: `${statePath}.${roots[0] === sub}`,
+    })
+    expect(projects.register({ path: sub })).toMatchObject({ kind: 'registered', project: { path: sub } })
+    expect(projects.register({ path: join(sub, 'app') })).toMatchObject({ kind: 'registered' })
+  }
+  // …and the refusal a root gives is still the reason when no root accepts.
+  const alone = createProjectRegistry({ launchDirectory: launch, roots: [sub], statePath: `${statePath}.alone` })
+  expect(alone.register({ path: sub })).toEqual({
+    kind: 'refused',
+    reason: expect.stringContaining('a project root itself'),
+  })
+})
+
+test('a directory merely NAMED `..something` under a root is inside it: refused as hidden, not as outside', () => {
+  const { launch, root, statePath } = layout()
+  mkdirSync(join(root, '..dotted'))
+  const projects = createProjectRegistry({ launchDirectory: launch, roots: [root], statePath })
+  expect(projects.register({ path: join(root, '..dotted') })).toEqual({
+    kind: 'refused',
+    reason: expect.stringContaining('hidden directory (..dotted)'),
+  })
 })

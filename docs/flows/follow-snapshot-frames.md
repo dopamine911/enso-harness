@@ -88,7 +88,8 @@ export const EnsoFollowSnapshot = Type.Object(
     /**
      * The tree pi reads and writes for this thread (#44), AS OF THIS SNAPSHOT — the live session's
      * own cwd; when the thread is not live, the stored session's (pi fixed it at creation); and
-     * for a thread with neither, its project's (#395), where it will be built. Not re-sent when a
+     * for a thread with neither, its project's (#395), where it will be built — or `''` when that
+     * project has been removed, so it will be built nowhere (its prompt is refused). Not re-sent when a
      * session is built mid-follow: it cannot differ, since a new thread is built in exactly that
      * directory. What makes a wrong-project session visible.
      *

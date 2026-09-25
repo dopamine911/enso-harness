@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join, sep as pathSeparator, relative } from 'node:path'
 import {
   type EnsoProject,
   type EnsoProjectRegistration,
@@ -29,8 +29,10 @@ import { Compile } from 'typebox/compile'
  * and are served again when the directory is registered again.
  *
  * A NEW thread's project is the one a page named for it (`X-Enso-Project`, `claim`), else the
- * launch project — today's behaviour. Once the thread has a session, the session's own directory
- * decides (pi records it in the session header), whatever a page says afterwards.
+ * launch project — today's behaviour. A thread is named once: a later request naming ANOTHER
+ * project before the thread is built is refused (409), never quietly dropped (PR #399 review).
+ * Once the thread has a session, the session's own directory decides (pi records it in the
+ * session header), whatever a page says afterwards.
  */
 
 const log = ensoLogger('server', 'projects')
@@ -56,6 +58,12 @@ export type ProjectRegistrationOutcome =
 
 export type ProjectRemovalOutcome = 'removed' | 'unknown' | 'launch'
 
+/** Why a request's project name is refused: 400 for an id that is no project, 409 for a thread already named otherwise. */
+export interface ProjectClaimRefusal {
+  readonly status: 400 | 409
+  readonly reason: string
+}
+
 /** A new thread cannot be built where its project says: the directory is gone. */
 export class ProjectUnavailable extends Error {
   override readonly name = 'ProjectUnavailable'
@@ -72,9 +80,10 @@ export interface ProjectRegistry {
   /**
    * A page names the project of a thread (`X-Enso-Project`). The first name a thread gets is
    * kept; it matters only until the thread has a session. `undefined` when accepted (or when
-   * there is no header), else why not — an id that is no registered project.
+   * there is no header, or the same name again), else why not: an id that is no registered
+   * project, or a thread already named for a different one.
    */
-  claim(threadId: string, projectId: string | undefined): string | undefined
+  claim(threadId: string, projectId: string | undefined): ProjectClaimRefusal | undefined
   /** The thread has a session: its directory is fixed, and its claim is dead weight — forget it. */
   dropClaim(threadId: string): void
   /** The project a thread with no session yet belongs to: its claim's, else the launch one; `undefined` when the claimed one is gone. */
@@ -129,6 +138,10 @@ function writeRegistrations(statePath: string, registrations: readonly Registrat
 /**
  * Why a canonical directory may not be registered under these roots, or `undefined` when it may.
  * Strictly under one root, and no segment below that root hidden.
+ *
+ * ⚠ ANY root that accepts it is enough, whatever the order (PR #399 review): roots may nest
+ * (`~/code` and `~/code/sub`), and `~/code/sub` itself is under the first even though it is the
+ * second. So a root's refusal is kept only as the reason to give if no other root accepts.
  */
 function refusalUnderRoots(
   canonical: string,
@@ -138,15 +151,18 @@ function refusalUnderRoots(
   if (roots.length === 0) {
     return 'no project roots are declared — add `"projects": { "roots": ["~/code"] }` to enso.config.json'
   }
+  let refusal: string | undefined
   for (const root of roots) {
     const below = relative(root, canonical)
-    if (below === '') return `${canonical} is a project root itself; register a directory under it`
-    if (below.startsWith('..') || isAbsolute(below)) continue
+    // Outside this root: `..` itself or a `../` prefix — not a directory merely NAMED `..foo`.
+    if (below === '..' || below.startsWith(`..${pathSeparator}`) || isAbsolute(below)) continue
     const hidden = below.split(/[\\/]/).find((segment) => segment.startsWith('.'))
-    if (hidden !== undefined) return `${canonical} is inside a hidden directory (${hidden}), which cannot be a project`
-    return undefined
+    if (below === '') refusal ??= `${canonical} is a project root itself; register a directory under it`
+    else if (hidden !== undefined) {
+      refusal ??= `${canonical} is inside a hidden directory (${hidden}), which cannot be a project`
+    } else return undefined
   }
-  return `${canonical} is not under a declared project root (${declared.join(', ')})`
+  return refusal ?? `${canonical} is not under a declared project root (${declared.join(', ')})`
 }
 
 export function createProjectRegistry(options: ProjectRegistryOptions): ProjectRegistry {
@@ -174,6 +190,12 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     if (options.statePath !== undefined) writeRegistrations(options.statePath, next)
     stored = next
   }
+  /**
+   * The project each not-yet-built thread was named for. Dropped once the thread has a session
+   * (`dropClaim`). ⓘ Not pruned otherwise — one id per thread a page named and never built, the
+   * same named non-coverage as the registry's `generations` map: loopback, dev-only, ids minted by
+   * the page. A claim nothing builds is inert: only a new thread's build reads it.
+   */
   const claims = new Map<string, string>()
 
   function viewOf(path: string, title: string | undefined, isLaunch: boolean): EnsoProject {
@@ -234,10 +256,17 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     return 'removed'
   }
 
-  function claim(threadId: string, projectId: string | undefined): string | undefined {
+  function claim(threadId: string, projectId: string | undefined): ProjectClaimRefusal | undefined {
     if (projectId === undefined) return undefined
-    if (get(projectId) === undefined) return `no registered project has the id ${projectId}`
-    if (!claims.has(threadId)) claims.set(threadId, projectId)
+    if (get(projectId) === undefined) return { status: 400, reason: `no registered project has the id ${projectId}` }
+    const named = claims.get(threadId)
+    if (named !== undefined && named !== projectId) {
+      return {
+        status: 409,
+        reason: `thread ${threadId} was already named for project ${named}; a thread's project is chosen once`,
+      }
+    }
+    claims.set(threadId, projectId)
     return undefined
   }
 

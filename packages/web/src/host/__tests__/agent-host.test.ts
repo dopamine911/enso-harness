@@ -19,6 +19,7 @@ import {
   createAgentHost,
   type HostedThread,
   MODEL_WATCH_EXTENSION_PATH,
+  SessionDirectoryRefused,
   seedMultiAccountChildProxyOff,
   stopRunSettlingDialogs,
 } from '../agent-host.ts'
@@ -85,7 +86,7 @@ function hostWith(extensionFactories: InlineExtension[] = []): AgentHost {
 }
 
 async function hostedSession(extensionFactories: InlineExtension[] = []): Promise<HostedThread> {
-  const hosted = await hostWith(extensionFactories).createSession(crypto.randomUUID(), repoRoot)
+  const hosted = await hostWith(extensionFactories).createSession(crypto.randomUUID(), () => repoRoot)
   openSessions.push(hosted)
   return hosted
 }
@@ -701,7 +702,11 @@ test('⚠ createSession(threadId) OPENS the session file already under that id �
   const threadId = crypto.randomUUID()
   const file = storeSession(threadId, 'what was I doing?', 'fixing the login bug')
   const host = hostWith()
-  const hosted = await host.createSession(threadId, repoRoot)
+  // Never asked where a NEW session would go (PR #399 review): a stale answer — a removed project
+  // the thread was once named for — must not stand between a thread and its own file.
+  const hosted = await host.createSession(threadId, () => {
+    throw new Error('a thread with a session file was asked for a new directory')
+  })
   openSessions.push(hosted)
   const inspection = hosted.inspect()
   expect(inspection.sessionId).toBe(threadId)
@@ -713,7 +718,7 @@ test('⚠ createSession(threadId) OPENS the session file already under that id �
 
 test('createSession(threadId) with no file under that id CREATES the session under it, so the file it flushes is found next time', async () => {
   const threadId = crypto.randomUUID()
-  const hosted = await hostWith().createSession(threadId, repoRoot)
+  const hosted = await hostWith().createSession(threadId, () => repoRoot)
   openSessions.push(hosted)
   expect(hosted.inspect().sessionId).toBe(threadId)
   // Nothing flushed yet (no assistant message): not listed — there is nothing to come back to.
@@ -750,9 +755,9 @@ test('⚠ a stored session in a directory the host does not serve is not listed,
   const host = hostWith()
   expect((await host.listSessions()).some((stored) => stored.id === threadId)).toBe(false)
   expect(await host.readStoredThread(threadId)).toBeUndefined()
-  expect(host.createSession(threadId, repoRoot)).rejects.toThrow(
-    `${elsewhere} is not a project this server runs sessions in`,
-  )
+  const refused = host.createSession(threadId, () => repoRoot)
+  await expect(refused).rejects.toBeInstanceOf(SessionDirectoryRefused)
+  await expect(refused).rejects.toThrow(`${elsewhere} is not a project this server runs sessions in`)
 })
 
 // ── session usage (#45): pi's totals, live and stored ────────────────────────
@@ -898,7 +903,7 @@ test("⚠ a stored session's usage is pi's own getSessionStats total — every b
   const host = hostWith()
   const stored = await host.readStoredThread(threadId)
   if (stored === undefined) throw new Error('the stored session was not found')
-  const hosted = await host.createSession(threadId, repoRoot)
+  const hosted = await host.createSession(threadId, () => repoRoot)
   openSessions.push(hosted)
   const { context: storedContext, ...fromFile } = stored.usage
   const { context: _liveContext, ...fromPi } = hosted.runtime.sessionUsage()
@@ -1050,7 +1055,7 @@ test('⚠ a provider refusal is on the feed: the failed attempt, pi’s retry, t
     harnessPackageDir: harnessDir,
     extensionFactories: [fauxModelExtension(core)],
   })
-  const hosted = await host.createSession(crypto.randomUUID(), repoRoot)
+  const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
   openSessions.push(hosted)
   const events = collectEvents(hosted)
   const settled = Promise.withResolvers<void>()
@@ -1113,7 +1118,7 @@ test('⚠ a run that runs out of retries ends with pi giving up, and its last er
     harnessPackageDir: harnessDir,
     extensionFactories: [fauxModelExtension(core)],
   })
-  const hosted = await host.createSession(crypto.randomUUID(), repoRoot)
+  const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
   openSessions.push(hosted)
   const events = collectEvents(hosted)
   const settled = Promise.withResolvers<void>()
@@ -1188,7 +1193,7 @@ test('⚠ a browser login from the web: the URL in our words, and a code questio
     harnessPackageDir: harnessDir,
     extensionFactories: [fauxOAuthProvider],
   })
-  const hosted = await host.createSession(crypto.randomUUID(), repoRoot)
+  const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
   openSessions.push(hosted)
   const events = collectEvents(hosted)
   const asked = untilObservation(hosted, (event) => event.kind === 'extension-ui-request' && event.method === 'input')
@@ -1268,7 +1273,7 @@ test('⚠ a login that finishes by its callback withdraws the code question it l
     harnessPackageDir: harnessDir,
     extensionFactories: [callbackWinsProvider],
   })
-  const hosted = await host.createSession(crypto.randomUUID(), repoRoot)
+  const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
   openSessions.push(hosted)
   const withdrawn = untilObservation(hosted, (event) => event.kind === 'dialog-settled')
   const settled = Promise.withResolvers<void>()
