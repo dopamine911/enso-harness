@@ -123,8 +123,9 @@ that title, so a renamed or deleted pin fails this page.
 **Where the messages come from.** The pane's messages come from `/history` (`adoptThread`); the snapshot
 carries the same `messages`, and `custom-event-router.ts` reads one fact off them: whether the last
 assistant message is a refused attempt, which sets the status bar's class word (#381) with the
-snapshot's output as the mark a later reply must grow past. The image's rendering from a resumed history is pinned at the page (below), beside the reader's
-pin. The host's name for the listing is `listSessions`; there is no `listThreads`.
+snapshot's output as the mark a later reply must grow past. The image's rendering from a resumed
+history is pinned at the page (below), beside the reader's pin. The host's name for the listing is
+`listSessions`; there is no `listThreads`.
 
 <!-- test: packages/web/src/__tests__/thread-pane.test.tsx#a resumed thread's image renders as an <img> from the stored history, bytes inline (#68, #95) -->
 - **The image, at the page** — [`thread-pane.test.tsx`](../../packages/web/src/__tests__/thread-pane.test.tsx):
