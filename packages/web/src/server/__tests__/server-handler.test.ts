@@ -522,6 +522,37 @@ test('stored threads are listed and read only in a project, each under its own; 
   expect((await fetch(`${url}/api/threads/inApp/history`)).status).toBe(404)
 })
 
+// PR #399 review. Removing a project must not strand a run: while a thread in it RUNS, the removal is
+// refused and the project stays. And a thread that is live but idle is taken again without a
+// build — so it ends with the project, or a page still showing it could go on prompting it there.
+test('⚠ removing a project is refused while one of its threads runs, and the project stays', async () => {
+  const { root, app } = projectRoot()
+  const { url } = await startWith(asksAndWaits, {}, undefined, [root])
+  const project = await registeredProject(url, app)
+  await prompt(url, 'busy', '/mode', { [ENSO_PROJECT_HEADER]: project.projectId })
+  const refused = await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toContain('is running')
+  const listed = (await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[]
+  expect(listed.map((listedProject) => listedProject.projectId)).toContain(project.projectId)
+})
+
+test('⚠ removing a project ends its idle live threads, and nothing is built for them in the removed directory', async () => {
+  const { root, app } = projectRoot()
+  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const project = await registeredProject(url, app)
+  const naming = { [ENSO_PROJECT_HEADER]: project.projectId }
+  expect(await prompt(url, 't1', 'hello', naming)).toBe(202)
+  const liveIds = async (): Promise<string[]> =>
+    ((await (await fetch(`${url}/api/threads`)).json()) as EnsoThreadSummary[]).map((summary) => summary.threadId)
+  expect(await liveIds()).toEqual(['t1'])
+
+  expect((await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })).status).toBe(204)
+  expect(await liveIds()).toEqual([])
+  expect(await prompt(url, 't1', 'again', naming)).toBe(400)
+  expect(requested).toEqual(['t1'])
+})
+
 // ⚠ A FAULT IS NOT A REFUSAL (PR #344 review): only a refusal the host decided is the 422 the user
 // reads as "your choice was refused"; anything else the runtime throws is the handler's 500.
 test('POST …/command: a runtime fault is a 500, never a 422 dressed as a refusal', async () => {

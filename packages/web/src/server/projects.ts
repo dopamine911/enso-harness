@@ -75,6 +75,8 @@ export interface ProjectRegistry {
    * there is no header), else why not — an id that is no registered project.
    */
   claim(threadId: string, projectId: string | undefined): string | undefined
+  /** The thread has a session: its directory is fixed, and its claim is dead weight — forget it. */
+  dropClaim(threadId: string): void
   /** The project a thread with no session yet belongs to: its claim's, else the launch one; `undefined` when the claimed one is gone. */
   projectOfNewThread(threadId: string): EnsoProject | undefined
   /** Where a thread with no session yet is built — `projectOfNewThread`'s directory; throws `ProjectUnavailable` when there is none. */
@@ -239,6 +241,10 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     return undefined
   }
 
+  function dropClaim(threadId: string): void {
+    claims.delete(threadId)
+  }
+
   function projectOfNewThread(threadId: string): EnsoProject | undefined {
     const claimed = claims.get(threadId)
     return claimed === undefined ? viewOf(launch.path, launch.title, true) : get(claimed)
@@ -253,5 +259,5 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     return project.path
   }
 
-  return { list, get, byDirectory, register, remove, claim, projectOfNewThread, directoryForNewThread }
+  return { list, get, byDirectory, register, remove, claim, dropClaim, projectOfNewThread, directoryForNewThread }
 }

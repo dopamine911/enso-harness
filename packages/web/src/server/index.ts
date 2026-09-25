@@ -358,8 +358,13 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       harnessPackageDir: options.harnessPackageDir,
     })
   const threads = createThreadRegistry({
-    // A thread with a session on disk is opened where pi recorded it; a new one where its project is.
-    createSession: (threadId: string) => host.createSession(threadId, projects.directoryForNewThread(threadId)),
+    // A thread with a session on disk is opened where pi recorded it; a new one where its project
+    // is. The claim that named it has done its work once the session exists (PR #399 review).
+    createSession: async (threadId: string) => {
+      const hosted = await host.createSession(threadId, projects.directoryForNewThread(threadId))
+      projects.dropClaim(threadId)
+      return hosted
+    },
   })
   /** The one live-or-cold read (#214), shared with the follow route's snapshot. */
   const threadRead: ThreadReadDeps = { threads, host, projects }
@@ -971,12 +976,16 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   /**
    * Forget a registration. Its sessions stay on disk. Refused while one of its threads is RUNNING
    * here — a run would go on in a directory the rail no longer shows, with nothing to stop it from.
+   * Its live threads that are NOT running are retired with it (PR #399 review): a live thread is
+   * taken again without a build, so a page still showing one could otherwise go on prompting it in
+   * the removed directory for as long as it kept it from idling out.
    */
   function respondToProjectRemoval(projectId: string, response: ServerResponse): void {
-    const running = threads
+    // `inspect()` decodes a branch (#285); removal is a rare, explicit act, and live threads are few.
+    const live = threads
       .list()
-      .some((thread) => thread.busy && projects.byDirectory(thread.hosted.inspect().cwd)?.projectId === projectId)
-    if (running) {
+      .filter((thread) => projects.byDirectory(thread.hosted.inspect().cwd)?.projectId === projectId)
+    if (live.some((thread) => thread.busy)) {
       refuseWith(response, { status: 409, reason: 'a thread in this project is running; remove it when that settles' })
       return
     }
@@ -989,6 +998,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       refuseWith(response, { status: 404, reason: `no registered project has the id ${projectId}` })
       return
     }
+    for (const thread of live) threads.retire(thread.threadId, 'its project was removed')
     response.writeHead(204)
     response.end()
   }
