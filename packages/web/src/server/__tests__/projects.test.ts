@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createProjectRegistry, ProjectUnavailable } from '../projects.ts'
 
 /**
@@ -138,4 +138,16 @@ test('a directory merely NAMED `..something` under a root is inside it: refused 
     kind: 'refused',
     reason: expect.stringContaining('hidden directory (..dotted)'),
   })
+})
+
+// PR #399 review: a relative root would resolve against the server PROCESS's cwd, which the launch
+// directory need not be — a boundary nobody wrote down. It fails the launch instead, with the fix.
+test('⚠ a relative project root is refused at construction; `~/` is the home directory', () => {
+  const { launch, root } = layout()
+  expect(() => createProjectRegistry({ launchDirectory: launch, roots: ['code'] })).toThrow(
+    'projects.roots entry code is not an absolute or ~/ path',
+  )
+  mkdirSync(join(root, 'app'))
+  const home = createProjectRegistry({ launchDirectory: launch, roots: ['~/code'], homeDirectory: dirname(root) })
+  expect(home.register({ path: join(root, 'app') })).toMatchObject({ kind: 'registered' })
 })

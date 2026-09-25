@@ -209,7 +209,7 @@ const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
     reader: '`packages/web/src/server/projects.ts#createProjectRegistry`',
     check: {
       file: 'packages/web/src/server/projects.ts',
-      contains: 'options.roots.map((root) => realpathOrSelf(expandHome(root, home)))',
+      contains: 'is not an absolute or ~/ path — fix enso.config.json',
     },
   },
   webSearchField('', '`{}`; current-model routing with no Tavily domain filters.', 'parsed.config.webSearch ?? {}'),

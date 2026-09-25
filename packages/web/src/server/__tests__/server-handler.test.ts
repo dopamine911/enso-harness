@@ -94,6 +94,8 @@ const FRESH_MODE = { mode: 'default', available: ['default', 'acceptEdits', 'pla
 function fakeHost(
   script: FakeSessionScript,
   stored: Record<string, FakeStoredThread> = {},
+  /** The server's projects' rule, as the real host is given it (#395). */
+  servesDirectory: (directory: string) => boolean = () => true,
 ): { host: AgentHost; built: FakeThreadRecord[]; requested: string[]; builtIn: string[] } {
   const built: FakeThreadRecord[] = []
   /** Thread ids the host was asked to build, in order — the prompt route passes the id through. */
@@ -127,6 +129,7 @@ function fakeHost(
     },
     stored,
     FRESH_MODE,
+    servesDirectory,
   )
   return { host, built, requested, builtIn }
 }
@@ -185,7 +188,11 @@ async function startWith(
   /** Where a page may register projects (#395); none, so only the launch directory, when absent. */
   projectRoots: readonly string[] = [],
 ): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[]; builtIn: string[] }> {
-  const { host, built, requested, builtIn } = fakeHost(script, stored)
+  // The fake is made before the server, whose projects' rule it must apply — bound when the server asks.
+  let servesDirectory: (directory: string) => boolean = () => false
+  const { host, built, requested, builtIn } = fakeHost(script, stored, (directory: string) =>
+    servesDirectory(directory),
+  )
   const started = startEnsoServer({
     cwd: tmpdir(),
     projectRoots,
@@ -193,7 +200,10 @@ async function startWith(
     agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
-    host: wrapHost(host),
+    host: (serverRule: (directory: string) => boolean) => {
+      servesDirectory = serverRule
+      return wrapHost(host)
+    },
   })
   openServers.push(started)
   const url = await started.listening
@@ -530,6 +540,11 @@ test('stored threads are listed and read only in a project, each under its own; 
   expect((await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })).status).toBe(204)
   expect(await listed()).toEqual([expect.objectContaining({ threadId: 'inLaunch' })])
   expect((await fetch(`${url}/api/threads/inApp/history`)).status).toBe(404)
+  // A stale tab still following it is told there is nowhere it runs — never the launch directory,
+  // where resuming it would not happen either (PR #399 review).
+  const stale = new AbortController()
+  openFollows.push(stale)
+  expect((await openFollow(url, 'inApp', stale)).frames[0]).toMatchObject({ live: false, cwd: '' })
 })
 
 // PR #399 review. Removing a project must not strand a run: while a thread in it RUNS, the removal is
@@ -1021,7 +1036,7 @@ test('⚠ a bind conflict rejects `listening` instead of hanging, and reports th
     agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
-    host,
+    host: () => host,
   })
   openServers.push(first)
   const occupied = Number(new URL(await first.listening).port)
@@ -1035,7 +1050,7 @@ test('⚠ a bind conflict rejects `listening` instead of hanging, and reports th
     agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: occupied,
-    host,
+    host: () => host,
   })
   openServers.push(second)
   await expect(second.listening).rejects.toThrow()

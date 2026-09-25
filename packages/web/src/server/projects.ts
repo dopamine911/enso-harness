@@ -156,7 +156,7 @@ function refusalUnderRoots(
     const below = relative(root, canonical)
     // Outside this root: `..` itself or a `../` prefix — not a directory merely NAMED `..foo`.
     if (below === '..' || below.startsWith(`..${pathSeparator}`) || isAbsolute(below)) continue
-    const hidden = below.split(/[\\/]/).find((segment) => segment.startsWith('.'))
+    const hidden = below.split(pathSeparator).find((segment) => segment.startsWith('.'))
     if (below === '') refusal ??= `${canonical} is a project root itself; register a directory under it`
     else if (hidden !== undefined) {
       refusal ??= `${canonical} is inside a hidden directory (${hidden}), which cannot be a project`
@@ -167,7 +167,16 @@ function refusalUnderRoots(
 
 export function createProjectRegistry(options: ProjectRegistryOptions): ProjectRegistry {
   const home = options.homeDirectory ?? homedir()
-  const roots = options.roots.map((root) => realpathOrSelf(expandHome(root, home)))
+  // ⚠ A relative root would resolve against this PROCESS's cwd, not the launch directory (PR #399
+  // review) — a boundary nobody wrote down. Refused here, failing the launch, as an unreadable
+  // config does: the documented form is absolute or `~/`.
+  const roots = options.roots.map((root) => {
+    const expanded = expandHome(root, home)
+    if (!isAbsolute(expanded)) {
+      throw new Error(`enso-server: projects.roots entry ${root} is not an absolute or ~/ path — fix enso.config.json`)
+    }
+    return realpathOrSelf(expanded)
+  })
   const launchPath = realpathOrSelf(options.launchDirectory)
   const launch = { projectId: projectIdOf(launchPath), path: launchPath, title: basename(launchPath) || launchPath }
   // ⚠ The roots are applied to what the state file holds on every read, not once: a root taken out
@@ -191,10 +200,12 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     stored = next
   }
   /**
-   * The project each not-yet-built thread was named for. Dropped once the thread has a session
-   * (`dropClaim`). ⓘ Not pruned otherwise — one id per thread a page named and never built, the
-   * same named non-coverage as the registry's `generations` map: loopback, dev-only, ids minted by
-   * the page. A claim nothing builds is inert: only a new thread's build reads it.
+   * The project each thread was named for. Dropped when its session is built (`dropClaim`) — and
+   * put back by the next request that names it, since `claim` records whatever a request says for a
+   * thread with no entry (PR #399 review). So with a page that names the project on every request,
+   * this holds one entry per thread such a page has asked about, for the process's life: the same
+   * named non-coverage as the registry's `generations` map — loopback, dev-only, ids minted by the
+   * page. Inert once the session exists: only a NEW thread's build reads it.
    */
   const claims = new Map<string, string>()
 

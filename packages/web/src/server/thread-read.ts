@@ -6,7 +6,7 @@ import type {
   EnsoSessionUsage,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
-import type { AgentHost } from '../host/agent-host.ts'
+import type { AgentHost, StoredThreadRead } from '../host/agent-host.ts'
 import type { ProjectRegistry } from './projects.ts'
 import type { ThreadRegistry } from './thread-registry.ts'
 import { interruptedTail, transcriptToMessages } from './transcript-to-messages.ts'
@@ -82,11 +82,27 @@ export interface ThreadMount {
 /** A thread with neither a session nor a file has spent nothing and has no window to fill. */
 const NO_USAGE: EnsoSessionUsage = { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null }
 
+/** A live thread's mount reads no file. */
+const NOT_READ = { stored: undefined, storedUnserved: false } as const
+
+/**
+ * The file, read only for a thread that is not live here — nothing is built to answer (#86).
+ * `readStoredThread` answers nothing both for "never stored" and for "stored in a directory that is
+ * no project here"; only the second has a file, and it must not read as a new thread (PR #399 review).
+ */
+async function readCold(
+  host: AgentHost,
+  threadId: string,
+): Promise<{ readonly stored: StoredThreadRead | undefined; readonly storedUnserved: boolean }> {
+  const stored = await host.readStoredThread(threadId)
+  if (stored !== undefined) return { stored, storedUnserved: false }
+  return { stored, storedUnserved: (await host.storedThreadDirectory(threadId)) !== undefined }
+}
+
 export async function readThreadMount(deps: ThreadReadDeps, threadId: string): Promise<ThreadMount> {
   const { threads, host, projects } = deps
   const live = threads.peek(threadId)
-  /** The file, read only for a thread that is not live here — nothing is built to answer (#86). */
-  const stored = live === undefined ? await host.readStoredThread(threadId) : undefined
+  const { stored, storedUnserved } = live === undefined ? await readCold(host, threadId) : NOT_READ
   const nowLive = threads.peek(threadId)
   const inspection = nowLive?.hosted.inspect()
   const transcript = inspection === undefined ? (stored?.transcript ?? []) : inspection.entries
@@ -106,25 +122,28 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
       nowLive === undefined ? host.storedPermissionMode(transcript) : nowLive.hosted.runtime.permissionModeState(),
     model: nowLive === undefined ? null : nowLive.hosted.runtime.modelState(),
     openDialogs: nowLive === undefined ? [] : nowLive.hosted.runtime.openDialogs(),
-    ...placeOf(projects, threadId, inspection?.cwd ?? stored?.cwd),
+    ...placeOf(projects, threadId, inspection?.cwd ?? stored?.cwd, storedUnserved),
     usage: nowLive === undefined ? (stored?.usage ?? NO_USAGE) : nowLive.hosted.runtime.sessionUsage(),
   }
 }
 
 /**
  * Where a thread runs and which project that is: its session's directory, or a new thread's
- * project's. `cwd: ''` when a new thread's project has been removed: there is nowhere it will be
- * built — its first prompt is refused (409) saying so — and falling back to the launch directory
- * would name a place it will never run (PR #399 review).
+ * project's. `cwd: ''` when there is nowhere it will run — a new thread whose project was removed
+ * (its first prompt is refused, 409, saying so), or a stored one whose directory is no project here
+ * (resuming it is refused the same way). Falling back to the launch directory would name a place
+ * it will never run (PR #399 review).
  */
 function placeOf(
   projects: ProjectRegistry,
   threadId: string,
   sessionDirectory: string | undefined,
+  storedUnserved: boolean,
 ): Pick<ThreadMount, 'cwd' | 'projectId'> {
   if (sessionDirectory !== undefined) {
     return { cwd: sessionDirectory, projectId: projects.byDirectory(sessionDirectory)?.projectId }
   }
+  if (storedUnserved) return { cwd: '', projectId: undefined }
   const project = projects.projectOfNewThread(threadId)
   return { cwd: project?.path ?? '', projectId: project?.projectId }
 }

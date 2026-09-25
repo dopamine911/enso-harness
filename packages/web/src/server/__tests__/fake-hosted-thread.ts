@@ -340,12 +340,25 @@ const FAKE_EMPTY_CONTEXT: BranchContext = {
  * where a test counts what was built and hands out a `createFakeHostedThread`. Its mode
  * answers are declared, not computed (L3): `fresh` is what a new thread starts in, and a
  * stored thread's mode is the one written beside its branch.
+ *
+ * `servesDirectory` is the real host's rule (#395), applied as the real host applies it: a
+ * stored thread whose directory fails it is not listed and not read, and only
+ * `storedThreadDirectory` still finds it (PR #399 review — the fake once read everything, so
+ * the suite could not see what a removed project does to a reader). A server started with
+ * `host: (servesDirectory) => …` hands the fake its own projects' rule; every other use serves all.
  */
 export function createFakeAgentHost(
   createSession: AgentHost['createSession'],
   stored: Record<string, FakeStoredThread> = {},
   fresh: EnsoPermissionModeState = FAKE_FRESH_MODE,
+  servesDirectory: (directory: string) => boolean = () => true,
 ): AgentHost {
+  const directoryOf = (storedThread: FakeStoredThread): string => storedThread.cwd ?? FAKE_PROJECT_DIRECTORY
+  /** The stored thread under this id if its directory is served — what the real host reads. */
+  const served = (threadId: string): FakeStoredThread | undefined => {
+    const storedThread = stored[threadId]
+    return storedThread !== undefined && servesDirectory(directoryOf(storedThread)) ? storedThread : undefined
+  }
   return {
     createSession,
     freshPermissionMode: () => fresh,
@@ -355,29 +368,40 @@ export function createFakeAgentHost(
     },
     listSessions: () =>
       Promise.resolve(
-        Object.entries(stored).map(([threadId, storedThread]) => ({
-          id: threadId,
-          path: `/stored/${threadId}.jsonl`,
-          cwd: storedThread.cwd ?? FAKE_PROJECT_DIRECTORY,
-          modified: storedThread.modified,
-          messageCount: storedThread.transcript.filter((transcriptEntry) => transcriptEntry.kind === 'message').length,
-          firstMessage: storedThread.firstMessage,
-        })),
+        Object.entries(stored).flatMap(([threadId, storedThread]) =>
+          servesDirectory(directoryOf(storedThread))
+            ? [
+                {
+                  id: threadId,
+                  path: `/stored/${threadId}.jsonl`,
+                  cwd: directoryOf(storedThread),
+                  modified: storedThread.modified,
+                  messageCount: storedThread.transcript.filter((transcriptEntry) => transcriptEntry.kind === 'message')
+                    .length,
+                  firstMessage: storedThread.firstMessage,
+                },
+              ]
+            : [],
+        ),
       ),
-    readStoredThread: (threadId: string) => {
+    storedThreadDirectory: (threadId: string) => {
       const storedThread = stored[threadId]
+      return Promise.resolve(storedThread === undefined ? undefined : directoryOf(storedThread))
+    },
+    readStoredThread: (threadId: string) => {
+      const storedThread = served(threadId)
       return Promise.resolve(
         storedThread === undefined
           ? undefined
           : {
-              cwd: storedThread.cwd ?? FAKE_PROJECT_DIRECTORY,
+              cwd: directoryOf(storedThread),
               transcript: storedThread.transcript,
               usage: storedThread.usage ?? { ...FAKE_NO_USAGE },
             },
       )
     },
     readStoredThreadStats: (threadId: string) => {
-      const storedThread = stored[threadId]
+      const storedThread = served(threadId)
       return Promise.resolve(
         storedThread === undefined
           ? undefined
@@ -385,9 +409,9 @@ export function createFakeAgentHost(
       )
     },
     readStoredRequestDetail: (threadId: string, request: number | 'next') =>
-      Promise.resolve(stored[threadId]?.details?.[String(request)]),
+      Promise.resolve(served(threadId)?.details?.[String(request)]),
     readStoredThreadContext: (threadId: string) => {
-      const storedThread = stored[threadId]
+      const storedThread = served(threadId)
       return Promise.resolve(
         storedThread === undefined
           ? undefined

@@ -345,6 +345,13 @@ export interface AgentHost {
   /** pi's session files in the directories this host serves, newest first — the resumable listing. */
   listSessions(): Promise<StoredThread[]>
   /**
+   * The directory of the session file under this id — WHETHER OR NOT this host serves it —
+   * `undefined` when there is no file. What lets a reader tell "a thread that was never stored"
+   * from "a thread whose project is gone" (PR #399 review): `readStoredThread` answers `undefined`
+   * for both.
+   */
+  storedThreadDirectory(threadId: string): Promise<string | undefined>
+  /**
    * A stored session, read-only — no pi session is built, nothing is written (#86's rule:
    * looking must not build): its branch as the transcript of ours, and pi's totals over the
    * whole file (#45). `undefined` when no file has that id.
@@ -1180,6 +1187,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   return {
     createSession,
     listSessions,
+    storedThreadDirectory: async (threadId: string) => (await locate(threadId))?.cwd,
     readStoredThread,
     readStoredThreadStats,
     readStoredThreadContext,

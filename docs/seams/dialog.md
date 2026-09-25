@@ -244,9 +244,9 @@ goes through `finish` (line 335), which deletes the pending entry, emits the set
 outcome (line 339) and resolves the extension with its value — `undefined` for `select`/`input`/
 `editor`, `false` for `confirm`, on every non-answer outcome (lines 312–313). That is why the settle
 observation exists at all: the runtime has no event for a question ending (lines 316–317).
-`agent-host.ts` binds one context per session (line 630) and delegates the runtime contract's
-`answerDialog` and `openDialogs` to it (lines 1000–1005); `cancelAllDialogs` cancels every pending
-question at session teardown (line 547, called from `agent-host.ts:1134`), so teardown is a settle
+`agent-host.ts` binds one context per session (line 637) and delegates the runtime contract's
+`answerDialog` and `openDialogs` to it (lines 1007–1012); `cancelAllDialogs` cancels every pending
+question at session teardown (line 547, called from `agent-host.ts:1141`), so teardown is a settle
 path too.
 
 **Consumed by the server.** `answerThreadDialog` in `packages/web/src/server/follow.ts` (line 363)
@@ -254,7 +254,7 @@ finds the open question by id on the live thread (line 366; 404 when the thread 
 question is spent, lines 365–372), validates a non-cancel answer against the question's kind
 (lines 373–376; 422 with the refusal, and the question stays open), then hands it to the runtime
 (line 377) and answers 204 (line 378). `server/index.ts` maps that outcome to the response (lines
-829–851). The follow's snapshot lists every open question, oldest first, so a reconnect renders the
+840–862). The follow's snapshot lists every open question, oldest first, so a reconnect renders the
 card at once (`follow.ts` line 200; `openDialogs` at extension-ui-context.ts line 526 checks each
 request with `isEnsoDialogSpec` rather than casting, line 532).
 

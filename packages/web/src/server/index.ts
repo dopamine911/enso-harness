@@ -263,12 +263,13 @@ export interface EnsoServerOptions {
   logsDir: string
   port?: number
   /**
-   * The pi host to use instead of building one from `agentDir` / `harnessPackageDir` and the
-   * projects. ⓘ Exists for `__tests__/server-handler.test.ts` (#76): a fake host whose sessions
+   * The pi host to use instead of building one from `agentDir` / `harnessPackageDir`, made from
+   * the server's own `servesDirectory` rule (its projects, #395) so a fake applies what the real
+   * host would. ⓘ Exists for `__tests__/server-handler.test.ts` (#76): a fake host whose sessions
    * record abort/dispose is the only way to observe the handler's stop/release sequencing
    * without a model. Production launchers never pass it.
    */
-  host?: AgentHost
+  host?: (servesDirectory: (directory: string) => boolean) => AgentHost
   /** SSE keepalive interval; defaults to `SSE_KEEPALIVE_MS`. ⓘ Injectable for `server-handler.test.ts`. */
   sseKeepaliveMs?: number
 }
@@ -350,13 +351,10 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     roots: options.projectRoots ?? [],
     ...(options.projectsStatePath === undefined ? {} : { statePath: options.projectsStatePath }),
   })
+  const servesDirectory = (directory: string): boolean => projects.byDirectory(directory) !== undefined
   const host: AgentHost =
-    options.host ??
-    createAgentHost({
-      servesDirectory: (directory: string) => projects.byDirectory(directory) !== undefined,
-      agentDir: options.agentDir,
-      harnessPackageDir: options.harnessPackageDir,
-    })
+    options.host?.(servesDirectory) ??
+    createAgentHost({ servesDirectory, agentDir: options.agentDir, harnessPackageDir: options.harnessPackageDir })
   const threads = createThreadRegistry({
     // A thread with a session on disk is opened where pi recorded it; a new one where its project
     // is — asked for only when there is no session, so a claim naming a project that has since
