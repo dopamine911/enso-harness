@@ -43,6 +43,10 @@ export function trailingRefusalOf(messages: readonly unknown[]): EnsoProviderRef
 /**
  * The refusal in the attempt's own bubble (#381), styled as the live line is (`NotificationLine`,
  * error) so a reloaded thread reads the way it did while it ran.
+ *
+ * ⚠ The markup is a deliberate copy of `NotificationLine`'s error row (PR #383 review): that
+ * component takes a whole `EnsoNotification` — id, origin, time — and this line has none of them
+ * to give. A style change to the error row lands in both; a third copy is the point to extract one.
  */
 export function RefusedAttemptLine({ refusal }: { refusal: EnsoProviderRefusal }): React.ReactNode {
   return (
