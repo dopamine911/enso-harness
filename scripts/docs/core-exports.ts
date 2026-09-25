@@ -56,6 +56,7 @@ const MODULE_FACTS: Readonly<Record<string, readonly [classification: Classifica
   'paths.ts': ['node-only utility', 'Project vocabulary'],
   'pi-manifest.ts': ['node-only utility', 'Project vocabulary'],
   'permission-mode.ts': ['config/policy', 'Permission'],
+  'project.ts': ['wire', 'Thread, Permission'],
   'provider-refusal.ts': ['wire', 'Observation, Record'],
   'secrets.ts': ['node-only utility', 'Permission'],
   'thread-inspection.ts': ['wire', 'Thread, Observation'],

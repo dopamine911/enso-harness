@@ -196,8 +196,13 @@ interface LoginInProgress {
 }
 
 export interface AgentHostOptions {
-  /** The tree pi reads and writes. One per server, never from a request (see `server/index.ts`). */
-  cwd: string
+  /**
+   * Which directories this host may run a session in and serve stored sessions from — the
+   * server's projects (#395). REQUIRED, never defaulted: with no sandbox (#24) a session's
+   * directory is its blast radius, and "every directory" must not be what forgetting it means.
+   * A stored session whose own directory fails it is not listed, not read, and not resumed.
+   */
+  servesDirectory: (directory: string) => boolean
   /** Scratch config dir — the operator's own packages and credentials stay invisible. */
   agentDir: string
   /** The enso harness pi package directory; loaded as the ONLY extension source. */
@@ -271,11 +276,13 @@ export interface ToolCallVerdict {
   readonly reason: string | undefined
 }
 
-/** One of pi's session files for this workspace, as pi lists it (#95). */
+/** One of pi's session files in a directory this host serves, as pi lists it (#95). */
 export interface StoredThread {
   /** pi's session id — the thread id it was created under. */
   readonly id: string
   readonly path: string
+  /** The directory the session runs in — pi's header records it at creation, and it never changes (#395). */
+  readonly cwd: string
   readonly modified: Date
   readonly messageCount: number
   /** The first user message, verbatim; empty for a session with none. */
@@ -315,15 +322,14 @@ export interface AgentHost {
    * A session for this thread, with its own services, extensions bound, events flowing.
    *
    * ⚠ THE THREAD ID IS PI'S SESSION ID (#95). A session file already under that id is
-   * OPENED — the thread idled out, or the server restarted, and the user came back;
-   * otherwise a fresh session is CREATED with the id. So resume needs no id mapping and
-   * no index file: pi's own listing is the one source, and a page-owned thread finds its
-   * own file again across a server restart.
+   * OPENED, in the directory its header records — the thread idled out, or the server
+   * restarted, and the user came back; otherwise a fresh session is CREATED with the id in
+   * `newSessionDirectory`. So resume needs no id mapping and no index file: pi's own listing is
+   * the one source, and a page-owned thread finds its own file again across a server restart.
+   * Either directory must pass `servesDirectory`, or nothing is built.
    */
-  createSession(threadId: string): Promise<HostedThread>
-  /** The tree every session this host builds runs in — the launch argument, one per server (`server/index.ts`). */
-  readonly cwd: string
-  /** pi's session files for this workspace, newest first — the resumable listing. */
+  createSession(threadId: string, newSessionDirectory: string): Promise<HostedThread>
+  /** pi's session files in the directories this host serves, newest first — the resumable listing. */
   listSessions(): Promise<StoredThread[]>
   /**
    * A stored session, read-only — no pi session is built, nothing is written (#86's rule:
@@ -348,6 +354,8 @@ export interface AgentHost {
 
 /** One stored session as `readStoredThread` reads it — both halves from one open of the file. */
 export interface StoredThreadRead {
+  /** The directory the session runs in (#395), from its header. */
+  readonly cwd: string
   /** The branch, root to leaf. */
   readonly transcript: EnsoTranscriptEntry[]
   /** Every usage in the file, on every branch, by pi's rule (`session-usage.ts`); no context. */
@@ -405,7 +413,7 @@ function describeCommand(
 }
 
 export function createAgentHost(options: AgentHostOptions): AgentHost {
-  const { cwd, agentDir, harnessPackageDir } = options
+  const { agentDir, harnessPackageDir, servesDirectory } = options
 
   // Order matters, and it is the module header's ⚠⚠ items: env before any pi module can
   // be imported by the loader, the proxy pin and the independent-roots switch before the first
@@ -413,8 +421,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   process.env.PI_CODING_AGENT_DIR = agentDir
   process.env.PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS = '1'
   seedMultiAccountChildProxyOff(agentDir)
-  // The secrets file is a fact about THIS checkout (the harness), not about the tree pi
-  // operates on — `cwd` may be anywhere, a tmpdir in tests — so it resolves from here.
+  // The secrets file is a fact about THIS checkout (the harness), not about the trees pi
+  // operates in — a session may run anywhere, a tmpdir in tests — so it resolves from here.
   const quarantine = quarantineSecrets(options.environment ?? process.env, findRepoRoot(import.meta.url))
   if (quarantine.removed.length > 0) {
     log.info('secrets kept out of the tool environment (#89): {removed}', { removed: quarantine.removed })
@@ -430,17 +438,19 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
   /**
    * pi's listing, through its API — never a directory scan: the file naming is pi's to
-   * change, and `list` reads each file's header for the id. Cost is one parse per file,
-   * paid per call; a workspace with dozens of sessions is milliseconds. Sessions pi has
-   * not flushed yet (no assistant message) have no file and are not listed — there is
-   * nothing to come back to.
+   * change, and `listAll` reads each file's header for the id and the directory. Every session
+   * this host ever built is under the ONE agent dir (the env pin above), whatever its directory,
+   * so `listAll` is the whole set; cost is one parse per file, paid per call. Sessions pi has not
+   * flushed yet (no assistant message) have no file and are not listed — there is nothing to
+   * come back to.
    */
-  async function listSessions(): Promise<StoredThread[]> {
-    const listed = await SessionManager.list(cwd)
+  async function everySession(): Promise<StoredThread[]> {
+    const listed = await SessionManager.listAll()
     return listed
       .map((info) => ({
         id: info.id,
         path: info.path,
+        cwd: info.cwd,
         modified: info.modified,
         messageCount: info.messageCount,
         firstMessage: info.firstMessage,
@@ -448,16 +458,34 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       .sort((first, second) => second.modified.getTime() - first.modified.getTime())
   }
 
+  async function listSessions(): Promise<StoredThread[]> {
+    return (await everySession()).filter((stored) => servesDirectory(stored.cwd))
+  }
+
+  /** The thread's session file, served or not — `createSession` must tell "none" from "not yours". */
+  async function locate(threadId: string): Promise<StoredThread | undefined> {
+    return (await everySession()).find((stored) => stored.id === threadId)
+  }
+
+  async function storedSession(threadId: string): Promise<StoredThread | undefined> {
+    const located = await locate(threadId)
+    return located !== undefined && servesDirectory(located.cwd) ? located : undefined
+  }
+
   async function storedSessionPath(threadId: string): Promise<string | undefined> {
-    return (await listSessions()).find((stored) => stored.id === threadId)?.path
+    return (await storedSession(threadId))?.path
   }
 
   async function readStoredThread(threadId: string): Promise<StoredThreadRead | undefined> {
-    const path = await storedSessionPath(threadId)
-    if (path === undefined) return undefined
+    const located = await storedSession(threadId)
+    if (located === undefined) return undefined
     // `open` loads the file into memory and writes nothing until an append.
-    const stored = SessionManager.open(path)
-    return { transcript: transcriptOf(stored.getBranch()), usage: storedSessionUsage(stored.getEntries()) }
+    const stored = SessionManager.open(located.path)
+    return {
+      cwd: located.cwd,
+      transcript: transcriptOf(stored.getBranch()),
+      usage: storedSessionUsage(stored.getEntries()),
+    }
   }
 
   async function readStoredThreadStats(threadId: string): Promise<StoredThreadStats | undefined> {
@@ -482,9 +510,15 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     return path === undefined ? undefined : branchRequestDetail(SessionManager.open(path).getBranch(), request)
   }
 
-  async function createSession(threadId: string): Promise<HostedThread> {
-    // Resolved BEFORE the services so a bad id fails before anything is built.
-    const storedPath = await storedSessionPath(threadId)
+  async function createSession(threadId: string, newSessionDirectory: string): Promise<HostedThread> {
+    // Resolved BEFORE the services so a bad id fails before anything is built. A file under this
+    // id decides the directory — pi fixed it at creation — and one this host does not serve is a
+    // refusal, never a fresh session beside it under the same id.
+    const located = await locate(threadId)
+    const cwd = located?.cwd ?? newSessionDirectory
+    if (!servesDirectory(cwd)) {
+      throw new Error(`thread ${threadId}: ${cwd} is not a project this server runs sessions in`)
+    }
     // The watcher's handler is bound after the session exists (`announceModelState` below);
     // `model_select` cannot fire before it — only the session's own methods emit it.
     let onModelSelect = (): void => undefined
@@ -534,9 +568,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     // (#95), created under the thread's id when not. Retained: `permissionModeState()`
     // below walks its branch, the same walk picc's `restoreState` does.
     const sessionManager =
-      storedPath === undefined
+      located === undefined
         ? SessionManager.create(cwd, undefined, { id: threadId })
-        : SessionManager.open(storedPath)
+        : SessionManager.open(located.path)
     const { session } = await createAgentSessionFromServices({ services, sessionManager })
 
     // ── The event fan-out. Records emitted before the FIRST subscriber (everything an
@@ -1130,7 +1164,6 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   }
 
   return {
-    cwd,
     createSession,
     listSessions,
     readStoredThread,

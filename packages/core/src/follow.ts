@@ -36,10 +36,10 @@ export const EnsoFollowSnapshot = Type.Object(
     model: Type.Union([EnsoModelState, Type.Null()]),
     /**
      * The tree pi reads and writes for this thread (#44), AS OF THIS SNAPSHOT — the live session's
-     * own cwd, or, when the thread is not live, the one this server builds every session in
-     * (`server/index.ts` takes it from its own launch arguments, never a request). Not re-sent
-     * when a session is built mid-follow: it cannot differ, since the host creates and lists
-     * sessions by that same cwd. What makes a wrong-project session visible.
+     * own cwd; when the thread is not live, the stored session's (pi fixed it at creation); and
+     * for a thread with neither, its project's (#395), where it will be built. Not re-sent when a
+     * session is built mid-follow: it cannot differ, since a new thread is built in exactly that
+     * directory. What makes a wrong-project session visible.
      *
      * ⚠ Adding a field here is wire-breaking for an OPEN TAB: the schema is closed, so a page and
      * server of different versions reject each other's snapshots. The page says so and asks for a

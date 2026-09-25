@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 267.**
+**Decision headers: 270.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -35,6 +35,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/paths.ts` | `#58`, `#59` | The workspace path helpers (#59) — THE one place that walks the filesystem for roots. |
 | `packages/core/src/permission-mode.ts` | `#84`, `#162` | The permission mode's shape on the wire (#84; #162 workstream 4, L3): what a run starts in and what it may switch to. |
 | `packages/core/src/pi-manifest.ts` | `#211`, `#221` | What a pi package's manifest declares, and where pi will look for it (#221) — THE one place that knows pi's manifest-resource layout. |
+| `packages/core/src/project.ts` | `#24`, `#395` | Projects (#395): the local directories one Enso server runs threads in. |
 | `packages/core/src/provider-refusal.ts` | `#340` | A model provider refused a request (#340): the fact the page and the log were missing. |
 | `packages/core/src/secrets.ts` | `#7`, `#89`, `#98` | Secrets stay OUT of the environment the model's tools inherit (#89). |
 | `packages/core/src/thread-context.ts` | `#361` | One thread's context, request by request (#361): what `GET /api/threads/:threadId/context` answers and the Context view draws — dsh-context's composition and trend, over pi. |
@@ -190,6 +191,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/__tests__/logs-stats-route.test.ts` | `#144`, `#336` | The stats route's own three facts (#144 slice 4, PR #336 review): WHICH file it folds is the clock's local day, a day nobody has written is an empty answer and not a failure, and a line that is not a record is counted rather than folded. |
 | `packages/web/src/server/__tests__/logs-tail-route.test.ts` | `#97`, `#144` | `GET /api/logs/tail` (#144 slice 2), over real HTTP: the day's file, filtered server-side, as frames the browser's schema takes — and NO record of its own, which is the rule the whole debug surface rests on (#144, #97). |
 | `packages/web/src/server/__tests__/observation-log.test.ts` | `#144` | The tier an observation lands at, and the one record that is not an observation at all: the run's time to first token (#144). |
+| `packages/web/src/server/__tests__/projects.test.ts` | `#395` | The project boundary (#395), decided in `projects.ts`: which directories a page may make projects of, and where a new thread is built. |
 | `packages/web/src/server/__tests__/run-timing.test.ts` | `#144` | Time to first token, once per run (#144). |
 | `packages/web/src/server/__tests__/server-handler.test.ts` | `#76`, `#86`, `#95`, `#97` | The server's routes beside the wire, over real HTTP (#76, #86, #95, #97): what the inspection, history and session-listing routes report about threads the prompt route built. |
 | `packages/web/src/server/__tests__/thread-context-route.test.ts` | `#361` | #361: one thread's context — pi's branch and pi's meter, from memory for a live thread and from the file otherwise, building nothing to answer. |
@@ -197,13 +199,14 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/__tests__/transcript-to-messages.test.ts` | `#95`, `#162` | #95: a stored branch mounts as the messages a live run would have left behind. |
 | `packages/web/src/server/bundle-route.ts` | `#132`, `#137` | `GET /api/logs/bundle[?thread=<id or prefix>]` (#132 item 5): the day's records, the live threads' inspections, and the versions, as ONE markdown file with the records fenced as JSONL — `bun run logs --file` reads it back. |
 | `packages/web/src/server/dev-web.ts` | `#9`, `#36` | Dev entry point for the web surface — Bun's fullstack dev server, replacing vite (#36). |
-| `packages/web/src/server/dev.ts` | `#9`, `#132` | Dev entry point for the enso server. |
+| `packages/web/src/server/dev.ts` | `#9`, `#132`, `#395` | Dev entry point for the enso server. |
 | `packages/web/src/server/follow.ts` | `#75`, `#109`, `#112`, `#116`, `#162` | The prompt/follow split (#112) — the server↔browser wire. |
 | `packages/web/src/server/live-or-stored.ts` | `#45`, `#86`, `#361` | A thread's answer from pi's memory when it is live, from its file when it is not (#45, #361) — READ THE WAY `thread-read.ts` READS: peek, read the file if not live, re-peek. |
 | `packages/web/src/server/logs-route.ts` | `#132` | `POST /api/logs` (#132 slice 3): the browser's records, into the one file. |
 | `packages/web/src/server/logs-stats-route.ts` | `#97`, `#144` | `GET /api/logs/stats` (#144 slice 4): the day, derived — `dayStats` over today's file, as JSON, for the debug page's stats view. |
 | `packages/web/src/server/logs-tail-route.ts` | `#97`, `#132`, `#144` | `GET /api/logs/tail` (#144 slice 2): the day's file, filtered server-side, as SSE — what the debug page reads instead of a terminal. |
 | `packages/web/src/server/observation-log.ts` | `#97`, `#132` | Every observation the server publishes becomes a record (#132, "trace everything") — at the tier it belongs to, with the ids that join it to the transcript, the event tail (#97) and the other layers' lines about the same moment. |
+| `packages/web/src/server/projects.ts` | `#24`, `#395` | The projects one server runs threads in (#395). |
 | `packages/web/src/server/run-timing.ts` | `#144` | When a run was admitted, so its FIRST delta can be recorded as a latency (#144 slice 1). |
 | `packages/web/src/server/sse.ts` | `#109` | The SSE plumbing every streaming route shares: the response headers and the keepalive. |
 | `packages/web/src/server/thread-context-route.ts` | `#86`, `#361` | `GET /api/threads/:threadId/context` (#361): the thread's context, request by request — the Context view reads it. |

@@ -21,15 +21,14 @@ export interface AgentHost {
    * A session for this thread, with its own services, extensions bound, events flowing.
    *
    * ⚠ THE THREAD ID IS PI'S SESSION ID (#95). A session file already under that id is
-   * OPENED — the thread idled out, or the server restarted, and the user came back;
-   * otherwise a fresh session is CREATED with the id. So resume needs no id mapping and
-   * no index file: pi's own listing is the one source, and a page-owned thread finds its
-   * own file again across a server restart.
+   * OPENED, in the directory its header records — the thread idled out, or the server
+   * restarted, and the user came back; otherwise a fresh session is CREATED with the id in
+   * `newSessionDirectory`. So resume needs no id mapping and no index file: pi's own listing is
+   * the one source, and a page-owned thread finds its own file again across a server restart.
+   * Either directory must pass `servesDirectory`, or nothing is built.
    */
-  createSession(threadId: string): Promise<HostedThread>
-  /** The tree every session this host builds runs in — the launch argument, one per server (`server/index.ts`). */
-  readonly cwd: string
-  /** pi's session files for this workspace, newest first — the resumable listing. */
+  createSession(threadId: string, newSessionDirectory: string): Promise<HostedThread>
+  /** pi's session files in the directories this host serves, newest first — the resumable listing. */
   listSessions(): Promise<StoredThread[]>
   /**
    * A stored session, read-only — no pi session is built, nothing is written (#86's rule:
@@ -113,11 +112,13 @@ What `listSessions` returns, one per file on disk:
 
 <!-- source: packages/web/src/host/agent-host.ts#StoredThread -->
 ```ts
-/** One of pi's session files for this workspace, as pi lists it (#95). */
+/** One of pi's session files in a directory this host serves, as pi lists it (#95). */
 export interface StoredThread {
   /** pi's session id — the thread id it was created under. */
   readonly id: string
   readonly path: string
+  /** The directory the session runs in — pi's header records it at creation, and it never changes (#395). */
+  readonly cwd: string
   readonly modified: Date
   readonly messageCount: number
   /** The first user message, verbatim; empty for a session with none. */
@@ -140,6 +141,8 @@ The wire shapes the server derives from those, in `@enso/core`. The rail's listi
 export const EnsoStoredThread = Type.Object(
   {
     threadId: Type.String(),
+    /** The project it belongs to (#395) — the session's own directory decides; an unregistered one is never listed. */
+    projectId: Type.String(),
     /** The first user message, or undefined for a session with none — the rail's title, as deepseek does. */
     title: Type.Optional(Type.String()),
     /** The file's mtime, ISO 8601 — when the session last grew. */
@@ -206,6 +209,8 @@ A thread's history as the browser mounts it, live or cold: `GET …/history` and
 export const EnsoThreadHistory = Type.Object(
   {
     threadId: Type.String(),
+    /** The project it belongs to (#395), so a resumed thread is grouped under it. */
+    projectId: Type.String(),
     messages: Type.Array(Type.Unknown()),
     permissionMode: EnsoPermissionModeState,
     /** Present only when the branch ends inside a turn — see {@link EnsoInterruptedTail}. */
@@ -235,8 +240,11 @@ export const EnsoInterruptedTail = Type.Union([
 ## Who implements it, who consumes it
 
 **Implemented once**, in `packages/web/src/host/agent-host.ts`, the only file that imports the runtime's
-`SessionManager`. `listSessions` goes through the runtime's own listing, never a directory scan,
-newest first. `readStoredThread` resolves the id to a path through that listing, opens the file into
+`SessionManager`. `listSessions` goes through the runtime's own listing (`SessionManager.listAll`), never a
+directory scan, newest first, and keeps only the sessions whose own directory — the one the runtime's
+header records — passes the host's required `servesDirectory` rule: the server's projects (#395). A
+session made in any other directory is not listed, not read, and not reopened; building under its id
+is refused rather than creating a second session beside it. `readStoredThread` resolves the id to a path through that listing, opens the file into
 memory (nothing is written until an append) and converts the branch through
 `packages/web/src/host/transcript.ts` — the one place above `session-events.ts` that reads the
 runtime's stored message shapes — and, from the same open, sums the spend pi recorded in the file

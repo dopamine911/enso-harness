@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os'
 import type {
   DialogAnswer,
   EnsoDialogSpec,
@@ -267,7 +268,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
   }
   const inspection: HostedThreadInspection = {
     sessionId: 'session-1',
-    cwd: '/fake/cwd',
+    cwd: FAKE_PROJECT_DIRECTORY,
     sessionDir: '/fake/sessions',
     sessionFile: null,
     entries: [],
@@ -293,6 +294,8 @@ export interface FakeStoredThread {
   readonly transcript: EnsoTranscriptEntry[]
   readonly modified: Date
   readonly firstMessage: string
+  /** The directory its header records (#395); the launch project's when absent. */
+  readonly cwd?: string
   /** The mode the fake reports for this thread's branch; the fresh mode when absent. */
   readonly mode?: string
   /** What pi's rule sums over the file (#45); nothing spent when absent. */
@@ -306,6 +309,13 @@ export interface FakeStoredThread {
 }
 
 const FAKE_FRESH_MODE: EnsoPermissionModeState = { mode: 'default', available: ['default'] }
+
+/**
+ * Where every fake session runs and every fake stored thread was made: the directory the server
+ * tests launch with (`cwd: tmpdir()`), so each is in the launch project (#395). A test about
+ * another directory says so on the thread (`FakeStoredThread.cwd`, `inspect.cwd`).
+ */
+const FAKE_PROJECT_DIRECTORY = tmpdir()
 
 /** A branch with nothing on it: no turn, no prompt, no tool, no first entry. */
 const FAKE_EMPTY_BRANCH: BranchStats = {
@@ -337,7 +347,6 @@ export function createFakeAgentHost(
   fresh: EnsoPermissionModeState = FAKE_FRESH_MODE,
 ): AgentHost {
   return {
-    cwd: '/fake/cwd',
     createSession,
     freshPermissionMode: () => fresh,
     storedPermissionMode: (transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState => {
@@ -349,6 +358,7 @@ export function createFakeAgentHost(
         Object.entries(stored).map(([threadId, storedThread]) => ({
           id: threadId,
           path: `/stored/${threadId}.jsonl`,
+          cwd: storedThread.cwd ?? FAKE_PROJECT_DIRECTORY,
           modified: storedThread.modified,
           messageCount: storedThread.transcript.filter((transcriptEntry) => transcriptEntry.kind === 'message').length,
           firstMessage: storedThread.firstMessage,
@@ -359,7 +369,11 @@ export function createFakeAgentHost(
       return Promise.resolve(
         storedThread === undefined
           ? undefined
-          : { transcript: storedThread.transcript, usage: storedThread.usage ?? { ...FAKE_NO_USAGE } },
+          : {
+              cwd: storedThread.cwd ?? FAKE_PROJECT_DIRECTORY,
+              transcript: storedThread.transcript,
+              usage: storedThread.usage ?? { ...FAKE_NO_USAGE },
+            },
       )
     },
     readStoredThreadStats: (threadId: string) => {

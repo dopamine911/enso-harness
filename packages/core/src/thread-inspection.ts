@@ -222,6 +222,8 @@ export function isEnsoThreadId(value: unknown): value is string {
 export const EnsoStoredThread = Type.Object(
   {
     threadId: Type.String(),
+    /** The project it belongs to (#395) — the session's own directory decides; an unregistered one is never listed. */
+    projectId: Type.String(),
     /** The first user message, or undefined for a session with none — the rail's title, as deepseek does. */
     title: Type.Optional(Type.String()),
     /** The file's mtime, ISO 8601 — when the session last grew. */
@@ -272,6 +274,8 @@ export type EnsoInterruptedTail = Static<typeof EnsoInterruptedTail>
 export const EnsoThreadHistory = Type.Object(
   {
     threadId: Type.String(),
+    /** The project it belongs to (#395), so a resumed thread is grouped under it. */
+    projectId: Type.String(),
     messages: Type.Array(Type.Unknown()),
     permissionMode: EnsoPermissionModeState,
     /** Present only when the branch ends inside a turn — see {@link EnsoInterruptedTail}. */

@@ -161,6 +161,24 @@ interface ConfigFieldMetadata {
   readonly check: SourceCheck
 }
 
+const WEB_SEARCH_SOURCE = 'packages/harness/extensions/web-search/index.ts'
+
+/** A `webSearch` field: optional, read in the extension's source, proven there by `contains`. */
+function webSearchField(
+  suffix: string,
+  defaultWhenOmitted: string,
+  contains: string,
+  readerSymbol = 'createWebSearch',
+): ConfigFieldMetadata {
+  return {
+    field: `webSearch${suffix}`,
+    required: 'no',
+    defaultWhenOmitted,
+    reader: `\`${WEB_SEARCH_SOURCE}#${readerSymbol}\``,
+    check: { file: WEB_SEARCH_SOURCE, contains },
+  }
+}
+
 const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
   {
     field: 'webFetch',
@@ -177,52 +195,41 @@ const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
     check: { file: 'packages/harness/extensions/web-fetch/index.ts', contains: 'parsed.config.webFetch.allowedHosts' },
   },
   {
-    field: 'webSearch',
+    field: 'projects',
     required: 'no',
-    defaultWhenOmitted: '`{}`; current-model routing with no Tavily domain filters.',
-    reader: '`packages/harness/extensions/web-search/index.ts#createWebSearch`',
-    check: { file: 'packages/harness/extensions/web-search/index.ts', contains: 'parsed.config.webSearch ?? {}' },
+    defaultWhenOmitted: 'No roots: the launch directory is the only project, and registering another is refused.',
+    reader: '`packages/web/src/server/dev.ts` → `startEnsoServer({ projectRoots })`',
+    check: { file: 'packages/web/src/server/dev.ts', contains: 'config.config.projects?.roots ?? []' },
   },
   {
-    field: 'webSearch.backend',
-    required: 'no',
-    defaultWhenOmitted: 'Current-model routing; only `"deepseek"` pins the dedicated backend.',
-    reader: '`packages/harness/extensions/web-search/index.ts#runPrimary`',
+    field: 'projects.roots',
+    required: 'yes',
+    defaultWhenOmitted:
+      'n/a — absolute or `~/` paths; a page may register a project only strictly under one (#395), and a root taken out hides the projects under it',
+    reader: '`packages/web/src/server/projects.ts#createProjectRegistry`',
     check: {
-      file: 'packages/harness/extensions/web-search/index.ts',
-      contains: "webSearchConfig.backend === 'deepseek'",
+      file: 'packages/web/src/server/projects.ts',
+      contains: 'options.roots.map((root) => realpathOrSelf(expandHome(root, home)))',
     },
   },
-  {
-    field: 'webSearch.tavily',
-    required: 'no',
-    defaultWhenOmitted: 'No Tavily domain filters.',
-    reader: '`packages/harness/extensions/web-search/index.ts#createWebSearch`',
-    check: {
-      file: 'packages/harness/extensions/web-search/index.ts',
-      contains: 'webSearchConfig.tavily?.includeDomains',
-    },
-  },
-  {
-    field: 'webSearch.tavily.excludeDomains',
-    required: 'no',
-    defaultWhenOmitted: 'Omitted from the Tavily request.',
-    reader: '`packages/harness/extensions/web-search/index.ts#createWebSearch`',
-    check: {
-      file: 'packages/harness/extensions/web-search/index.ts',
-      contains: 'webSearchConfig.tavily?.excludeDomains',
-    },
-  },
-  {
-    field: 'webSearch.tavily.includeDomains',
-    required: 'no',
-    defaultWhenOmitted: 'Omitted from the Tavily request.',
-    reader: '`packages/harness/extensions/web-search/index.ts#createWebSearch`',
-    check: {
-      file: 'packages/harness/extensions/web-search/index.ts',
-      contains: 'webSearchConfig.tavily?.includeDomains',
-    },
-  },
+  webSearchField('', '`{}`; current-model routing with no Tavily domain filters.', 'parsed.config.webSearch ?? {}'),
+  webSearchField(
+    '.backend',
+    'Current-model routing; only `"deepseek"` pins the dedicated backend.',
+    "webSearchConfig.backend === 'deepseek'",
+    'runPrimary',
+  ),
+  webSearchField('.tavily', 'No Tavily domain filters.', 'webSearchConfig.tavily?.includeDomains'),
+  webSearchField(
+    '.tavily.excludeDomains',
+    'Omitted from the Tavily request.',
+    'webSearchConfig.tavily?.excludeDomains',
+  ),
+  webSearchField(
+    '.tavily.includeDomains',
+    'Omitted from the Tavily request.',
+    'webSearchConfig.tavily?.includeDomains',
+  ),
 ]
 
 interface RuntimePathMetadata {
@@ -261,6 +268,13 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
     writer: '`configureProcessLogging` creates it and every harness process appends to the day file.',
     lifetime: 'One file per local day; logging retains 14 days.',
     check: { file: 'packages/core/src/log-process.ts', contains: 'const KEEP_DAYS = 14' },
+  },
+  {
+    helper: 'ensoProjectsPath',
+    path: '.enso/projects.json',
+    writer: 'The web server, when a page registers or removes a project (#395); written whole and renamed over.',
+    lifetime: 'Machine-local until a project is removed; entries outside the configured roots are kept but not served.',
+    check: { file: 'packages/web/src/server/projects.ts', contains: 'renameSync(staging, statePath)' },
   },
   {
     helper: 'ensoSecretsPath',
@@ -470,10 +484,12 @@ function configInventory(): { fields: ConfigFieldMetadata[]; committedAllowedHos
   const configSource = readFileSync(join(ROOT, 'packages/core/src/config.ts'), 'utf8')
   const webFetchSource = readFileSync(join(ROOT, 'packages/core/src/web-fetch.ts'), 'utf8')
   const webSearchSource = readFileSync(join(ROOT, 'packages/core/src/web-search.ts'), 'utf8')
+  const projectSource = readFileSync(join(ROOT, 'packages/core/src/project.ts'), 'utf8')
   const discovered = [
     ...objectFields(configSource, 'EnsoConfig'),
     ...objectFields(webFetchSource, 'WebFetchConfig', 'webFetch.'),
     ...objectFields(webSearchSource, 'WebSearchConfig', 'webSearch.'),
+    ...objectFields(projectSource, 'EnsoProjectsConfig', 'projects.'),
   ].sort()
   const metadata = [...CONFIG_FIELD_METADATA].sort((left, right) => compareText(left.field, right.field))
   const classified = metadata.map((row) => row.field)

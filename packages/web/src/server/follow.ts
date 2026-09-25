@@ -21,10 +21,9 @@ import {
 } from '@enso/core'
 import type { Static, TSchema } from 'typebox'
 import { Check, Errors } from 'typebox/value'
-import type { AgentHost } from '../host/agent-host.ts'
 import { HostCommandRefused, modelOptionId } from '../host/host-commands.ts'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
-import { readThreadMount } from './thread-read.ts'
+import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
 
 /**
@@ -70,9 +69,7 @@ import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
 
 const log = ensoLogger('server', 'follow')
 
-export interface FollowRouteDeps {
-  readonly threads: ThreadRegistry
-  readonly host: AgentHost
+export interface FollowRouteDeps extends ThreadReadDeps {
   readonly sseKeepaliveMs: number
 }
 
@@ -435,10 +432,10 @@ export function readModeChangeBody(raw: string): EnsoPermissionModeChange {
 
 /**
  * A control route's body: JSON, and exactly its closed schema — the shared half of every control
- * reader (`mode`, `command`, `configure`). `name` says which body was malformed; `requirement` what
- * a well-formed one holds.
+ * reader (`mode`, `command`, `configure`, a project registration). `name` says which body was
+ * malformed; `requirement` what a well-formed one holds.
  */
-function readClosedBody<Schema extends TSchema>(
+export function readClosedBody<Schema extends TSchema>(
   raw: string,
   schema: Schema,
   name: string,
