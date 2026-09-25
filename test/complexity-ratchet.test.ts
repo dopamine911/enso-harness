@@ -46,7 +46,13 @@ function measuredOverrides(): readonly ThresholdOverride[] {
   const scripts: Readonly<Record<string, string>> = JSON.parse(
     readFileSync(join(REPOSITORY_ROOT, 'package.json'), 'utf8'),
   ).scripts
-  const [tool, ...gateArguments] = (scripts['complexity:check'] ?? '').split(' ')
+  const script = scripts['complexity:check'] ?? ''
+  // The script is split on single spaces — no shell runs here — which is right for a plain flag
+  // list and wrong the day an argument is quoted. That day is refused rather than misparsed: a
+  // quote would land inside an argv entry and fallow would measure with different thresholds
+  // than the gate (PR #398 review).
+  if (/["'\\]/.test(script)) throw new Error(`complexity ratchet: cannot split a quoted script: ${script}`)
+  const [tool, ...gateArguments] = script.split(' ')
   if (tool !== 'fallow') throw new Error('complexity ratchet: `complexity:check` no longer runs fallow')
   const measured = Bun.spawnSync(
     [join(REPOSITORY_ROOT, 'node_modules', '.bin', 'fallow'), ...gateArguments, '--format', 'json'],
