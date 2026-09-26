@@ -1,14 +1,22 @@
 /*
- * THE COLOUR THEMES (src/theme.ts). Each is the shadcn token set, chosen by `data-theme` on
- * <html>; the settings dialog sets it and this browser keeps it. Each block states its
- * `color-scheme`, and the page keeps the `dark` class on <html> only for a dark theme, so
- * `dark:` variants and native controls follow the scheme. A theme block is an ATTRIBUTE
+ * THE COLOUR THEMES (src/theme.ts). Each is the shadcn token set plus Enso's own — the four
+ * state roles (`evidence`, `human`, `ok`, `refuse`), `border-strong`, `radius` and the three
+ * font stacks — chosen by `data-theme` on <html>; the settings dialog sets it and this browser
+ * keeps it. EVERY BLOCK DECLARES EVERY VARIABLE: `.dark` and `:root` alias two themes, so a
+ * block that left one out would borrow it from them (`__tests__/theme.test.ts`). Each block
+ * states its `color-scheme`, and the page keeps the `dark` class on <html> only for a dark theme,
+ * so `dark:` variants and native controls follow the scheme. A theme block is an ATTRIBUTE
  * selector, not `html[…]`, so any element can wear one — the dialog's swatches draw each theme
  * in its own colours — and the blocks come after `.dark` so they win at equal specificity.
  *
- * ⚠ EVERY VALUE IS UPSTREAM'S OWN ROLE COLOUR, not a palette colour placed by us. Each theme's
- * editor theme assigns colours to UI roles; the variables take them by one rule per kind of
- * upstream, and the comment beside each value names the upstream role it came from.
+ * THE ENSO FAMILY (Signal, the default; Ledger; Ink) is the design direction export's
+ * (Enso-Design-Direction/index.html, `DIRECTIONS`, mapped to these names by its `shadcnTokens`):
+ * the comment beside each value names the export's key. Its contrast was checked there, and holds
+ * the floors below.
+ *
+ * ⚠ EVERY OTHER VALUE IS UPSTREAM'S OWN ROLE COLOUR, not a palette colour placed by us. Each
+ * theme's editor theme assigns colours to UI roles; the variables take them by one rule per kind
+ * of upstream, and the comment beside each value names the upstream role it came from.
  *
  * A VS Code theme (Dracula, Nord, One Dark, SynthWave '84, Gruvbox) — its workbench keys:
  *
@@ -43,6 +51,9 @@
  *   chart-6   ← the theme's orange (no terminal defines one), else terminal red
  *   — for any series, the next distinct colour upstream assigns where one repeats, or nearly
  *     repeats, an earlier series; the comment says which and why
+ *   evidence ← chart-5 (cyan)     human ← chart-4 (magenta)     ok ← chart-2 (green)
+ *   refuse ← destructive          border-strong ← border — upstream draws one border weight
+ *   radius and the fonts are the page's own (Geist, the platform monospace), not upstream's
  *
  * Kanagawa has no VS Code theme of its own: kanagawa.nvim's `themes.lua` names the same roles
  * (ui.bg, ui.float, ui.bg_visual, ui.fg_dim, diag.error, term), cited beside each value.
@@ -53,21 +64,164 @@
  * The derivation that wrote these blocks, with the upstream values it read, is recorded on the
  * PR that introduced them.
  *
- * Kanagawa Lotus is Wave's roles read from the lotus theme, and it is also `:root`: the first
- * block, so `.dark` (Wave) and every theme after it win at equal specificity, and what <html>
- * shows only when nothing else matches — a saved light id this page no longer offers.
+ * Kanagawa Lotus is Wave's roles read from the lotus theme.
  */
-:root {
-  --radius: 0.625rem;
+
+/*
+ * Enso Ink — Enso as a calm, reflective tool: paper-white, black ink, a serif for people and
+ * headings. `:root` too — the first block, so `.dark` and every theme after it win at equal
+ * specificity; what <html> shows for a saved light id this page no longer offers
+ */
+:root,
+[data-theme="enso-ink"] {
+  color-scheme: light;
+  --background: #f7f8f9; /* bg */
+  --foreground: #15171a; /* fg */
+  --card: #ffffff; /* surface */
+  --card-foreground: #15171a; /* fg */
+  --popover: #eef0f2; /* surface2 */
+  --popover-foreground: #15171a; /* fg */
+  --primary: #4b3fd6; /* primary */
+  --primary-foreground: #ffffff; /* primaryFg */
+  --secondary: #eef0f2; /* userBubble */
+  --secondary-foreground: #15171a; /* fg */
+  --muted: #ffffff; /* surface */
+  --muted-foreground: #555b63; /* muted */
+  --accent: #e6e3fb; /* accent */
+  --accent-foreground: #15171a; /* fg */
+  --destructive: #b8321f; /* refuse */
+  --border: #d5d9de; /* border */
+  --border-strong: #9aa1a9; /* borderStrong */
+  --input: #d5d9de; /* border */
+  --ring: #4b3fd6; /* primary */
+  --chart-1: #2f5fd0; /* chart[0] */
+  --chart-2: #1f7a4d; /* chart[1] */
+  --chart-3: #9a6a00; /* chart[2] */
+  --chart-4: #8a3fb8; /* chart[3] */
+  --chart-5: #127a8a; /* chart[4] */
+  --chart-6: #b8541f; /* chart[5] */
+  --sidebar: #ffffff; /* sidebar */
+  --sidebar-foreground: #15171a; /* fg */
+  --sidebar-primary: #4b3fd6; /* = primary */
+  --sidebar-primary-foreground: #ffffff; /* = primary-foreground */
+  --sidebar-accent: #e6e3fb; /* = accent */
+  --sidebar-accent-foreground: #15171a; /* = accent-foreground */
+  --sidebar-border: #d5d9de; /* border */
+  --sidebar-ring: #4b3fd6; /* = ring */
+  --evidence: #1f6f5c; /* evidence — verified */
+  --human: #4b3fd6; /* human — waiting on you */
+  --ok: #1f6f5c; /* ok — allowed */
+  --refuse: #b8321f; /* refuse — refused */
+  --radius: 0.125rem; /* radius 2px */
+  --font-body: "Source Sans 3 Variable", ui-sans-serif, system-ui, sans-serif; /* fonts.body */
+  --font-display: "Fraunces Variable", ui-serif, Georgia, serif; /* fonts.display */
+  --font-code: "IBM Plex Mono", ui-monospace, Menlo, monospace; /* fonts.mono */
+}
+
+/*
+ * Enso Signal — THE DEFAULT. Enso as a live monitor: blue-black ground; cyan means pi is working, violet
+ * means you are needed. `.dark` too — what <html> shows when nothing else matches (a saved dark id
+ * this page no longer offers), before main.tsx replaces it with this theme's id
+ */
+.dark,
+[data-theme="enso-signal"] {
+  color-scheme: dark;
+  --background: #0a0d14; /* bg */
+  --foreground: #e8ecf5; /* fg */
+  --card: #111623; /* surface */
+  --card-foreground: #e8ecf5; /* fg */
+  --popover: #182032; /* surface2 */
+  --popover-foreground: #e8ecf5; /* fg */
+  --primary: #3fd8f0; /* primary */
+  --primary-foreground: #06121a; /* primaryFg */
+  --secondary: #182032; /* userBubble */
+  --secondary-foreground: #e8ecf5; /* fg */
+  --muted: #111623; /* surface */
+  --muted-foreground: #9aa6bd; /* muted */
+  --accent: #1f2a48; /* accent */
+  --accent-foreground: #e8ecf5; /* fg */
+  --destructive: #ff8a7a; /* refuse */
+  --border: #253049; /* border */
+  --border-strong: #3d4b6b; /* borderStrong */
+  --input: #253049; /* border */
+  --ring: #3fd8f0; /* primary */
+  --chart-1: #60a5fa; /* chart[0] */
+  --chart-2: #6ee7b7; /* chart[1] */
+  --chart-3: #fcd34d; /* chart[2] */
+  --chart-4: #a78bfa; /* chart[3] */
+  --chart-5: #3fd8f0; /* chart[4] */
+  --chart-6: #fb923c; /* chart[5] */
+  --sidebar: #070a10; /* sidebar */
+  --sidebar-foreground: #e8ecf5; /* fg */
+  --sidebar-primary: #3fd8f0; /* = primary */
+  --sidebar-primary-foreground: #06121a; /* = primary-foreground */
+  --sidebar-accent: #1f2a48; /* = accent */
+  --sidebar-accent-foreground: #e8ecf5; /* = accent-foreground */
+  --sidebar-border: #253049; /* border */
+  --sidebar-ring: #3fd8f0; /* = ring */
+  --evidence: #3fd8f0; /* evidence — pi is running */
+  --human: #a78bfa; /* human — waiting on you */
+  --ok: #6ee7b7; /* ok — allowed */
+  --refuse: #ff8a7a; /* refuse — refused */
+  --radius: 0.625rem; /* radius 10px */
+  --font-body: "Inter Variable", ui-sans-serif, system-ui, sans-serif; /* fonts.body */
+  --font-display: "Sora Variable", ui-sans-serif, system-ui, sans-serif; /* fonts.display */
+  --font-code: "JetBrains Mono Variable", ui-monospace, Menlo, monospace; /* fonts.mono */
+}
+
+/*
+ * Enso Ledger — Enso as an instrument panel: graphite ground, evidence in monospace, cyan only for
+ * what was checked; a refusal prints as a receipt
+ */
+[data-theme="enso-ledger"] {
+  color-scheme: dark;
+  --background: #111315; /* bg */
+  --foreground: #e6e8eb; /* fg */
+  --card: #181b1e; /* surface */
+  --card-foreground: #e6e8eb; /* fg */
+  --popover: #1f2327; /* surface2 */
+  --popover-foreground: #e6e8eb; /* fg */
+  --primary: #5ee0e6; /* primary */
+  --primary-foreground: #0b1416; /* primaryFg */
+  --secondary: #1f2327; /* surface2 — Ledger draws no bubble; its user row is a hairline receipt */
+  --secondary-foreground: #e6e8eb; /* fg */
+  --muted: #181b1e; /* surface */
+  --muted-foreground: #9aa1a9; /* muted */
+  --accent: #173336; /* accent */
+  --accent-foreground: #e6e8eb; /* fg */
+  --destructive: #f2b14c; /* refuse */
+  --border: #2c3136; /* border */
+  --border-strong: #4a525b; /* borderStrong */
+  --input: #2c3136; /* border */
+  --ring: #5ee0e6; /* primary */
+  --chart-1: #7aa7ff; /* chart[0] */
+  --chart-2: #7fd99a; /* chart[1] */
+  --chart-3: #f2d46b; /* chart[2] */
+  --chart-4: #d9a0f0; /* chart[3] */
+  --chart-5: #5ee0e6; /* chart[4] */
+  --chart-6: #f2b14c; /* chart[5] */
+  --sidebar: #0d0f11; /* sidebar */
+  --sidebar-foreground: #e6e8eb; /* fg */
+  --sidebar-primary: #5ee0e6; /* = primary */
+  --sidebar-primary-foreground: #0b1416; /* = primary-foreground */
+  --sidebar-accent: #173336; /* = accent */
+  --sidebar-accent-foreground: #e6e8eb; /* = accent-foreground */
+  --sidebar-border: #2c3136; /* border */
+  --sidebar-ring: #5ee0e6; /* = ring */
+  --evidence: #5ee0e6; /* evidence — what was checked */
+  --human: #c4b5fd; /* human — waiting on you */
+  --ok: #7fd99a; /* ok — allowed */
+  --refuse: #f2b14c; /* refuse — refused */
+  --radius: 0.25rem; /* radius 4px */
+  --font-body: "IBM Plex Sans Variable", ui-sans-serif, system-ui, sans-serif; /* fonts.body */
+  --font-display: "Space Grotesk Variable", ui-sans-serif, system-ui, sans-serif; /* fonts.display */
+  --font-code: "JetBrains Mono Variable", ui-monospace, Menlo, monospace; /* fonts.mono */
 }
 
 /*
  * Kanagawa Lotus — rebelot/kanagawa.nvim lua/kanagawa/themes.lua (lotus) + colors.lua @ bb85e4b — the roles Wave reads
  */
-:root,
 [data-theme="kanagawa-lotus"] {
-  /* :root too — before `.dark` and every theme, which override it: what <html> shows when nothing
-     else matches (a light id this page no longer offers) */
   color-scheme: light;
   --background: #f2ecbc; /* ui.bg lotusWhite3 (Normal) */
   --foreground: #545464; /* ui.fg lotusInk1 (Normal) */
@@ -101,12 +255,20 @@
   --sidebar-accent-foreground: #545464; /* = accent-foreground */
   --sidebar-border: #d5cea3; /* ui.bg_m3 lotusWhite0 (WinSeparator) */
   --sidebar-ring: #4d699b; /* = ring */
+  --border-strong: #716e61; /* = border — upstream draws one border weight */
+  --evidence: #456660; /* = chart-5, terminal cyan — pi is running — lightness adjusted (#597b75, 3.33:1 → 4.53:1 on background / card), hue kept */
+  --human: #984361; /* = chart-4, terminal magenta — waiting on you — lightness adjusted (#b35b79, 3.21:1 → 4.54:1 on background / card), hue kept */
+  --ok: #4f672d; /* = chart-2, terminal green — allowed — lightness adjusted (#6f894e, 2.80:1 → 4.54:1 on background / card), hue kept */
+  --refuse: #c10000; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
  * Kanagawa Wave — rebelot/kanagawa.nvim lua/kanagawa/themes.lua (wave) + colors.lua @ bb85e4b
  */
-.dark,
 [data-theme="kanagawa-wave"] {
   color-scheme: dark;
   --background: #1f1f28; /* ui.bg sumiInk3 (Normal) */
@@ -141,6 +303,15 @@
   --sidebar-accent-foreground: #dcd7ba; /* = accent-foreground */
   --sidebar-border: #16161d; /* ui.bg_m3 sumiInk0 (WinSeparator) */
   --sidebar-ring: #7e9cd8; /* = ring */
+  --border-strong: #54546d; /* = border — upstream draws one border weight */
+  --evidence: #6f9a8e; /* = chart-5, terminal cyan — pi is running — lightness adjusted (#6a9589, 4.22:1 → 4.50:1 on background / card), hue kept */
+  --human: #9e87c1; /* = chart-4, terminal magenta — waiting on you — lightness adjusted (#957fb8, 4.04:1 → 4.51:1 on background / card), hue kept */
+  --ok: #7b9a6f; /* = chart-2, terminal green — allowed — lightness adjusted (#76946a, 4.19:1 → 4.51:1 on background / card), hue kept */
+  --refuse: #ff5b4f; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -180,6 +351,15 @@
   --sidebar-accent-foreground: #f8f8f2; /* = accent-foreground */
   --sidebar-border: #bd93f9; /* panel.border (no sideBar.border) */
   --sidebar-ring: #6272a4; /* = ring */
+  --border-strong: #bd93f9; /* = border — upstream draws one border weight */
+  --evidence: #8be9fd; /* = chart-5, terminal cyan — pi is running */
+  --human: #ff79c6; /* = chart-4, terminal magenta — waiting on you */
+  --ok: #50fa7b; /* = chart-2, terminal green — allowed */
+  --refuse: #ff7975; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -219,6 +399,15 @@
   --sidebar-accent-foreground: #2e3440; /* = accent-foreground */
   --sidebar-border: #3b4252; /* sideBar.border */
   --sidebar-ring: #788092; /* = ring */
+  --border-strong: #3b4252; /* = border — upstream draws one border weight */
+  --evidence: #88c0d0; /* = chart-5, terminal cyan — pi is running */
+  --human: #c9a2c1; /* = chart-4, terminal magenta — waiting on you — lightness adjusted (#b48ead, 3.55:1 → 4.51:1 on background / card), hue kept */
+  --ok: #a3be8c; /* = chart-2, terminal green — allowed */
+  --refuse: #f7949b; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -258,6 +447,15 @@
   --sidebar-accent-foreground: #d7dae0; /* = accent-foreground */
   --sidebar-border: #3e4452; /* panel.border (no sideBar.border) */
   --sidebar-ring: #717887; /* = ring */
+  --border-strong: #3e4452; /* = border — upstream draws one border weight */
+  --evidence: #42b3c2; /* = chart-5, terminal cyan — pi is running */
+  --human: #d071ee; /* = chart-4, terminal magenta — waiting on you — lightness adjusted (#c162de, 3.77:1 → 4.52:1 on background / card), hue kept */
+  --ok: #8cc265; /* = chart-2, terminal green — allowed */
+  --refuse: #f77064; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -297,6 +495,15 @@
   --sidebar-accent-foreground: #ffffff; /* = accent-foreground */
   --sidebar-border: #495495; /* editorGroup.border (no sideBar.border / panel.border) */
   --sidebar-ring: #6e717d; /* = ring */
+  --border-strong: #495495; /* = border — upstream draws one border weight */
+  --evidence: #36f9f6; /* = chart-5, terminal cyan — pi is running */
+  --human: #ff7edb; /* = chart-4, terminal magenta — waiting on you */
+  --ok: #72f1b8; /* = chart-2, terminal green — allowed */
+  --refuse: #ff4a54; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -336,6 +543,15 @@
   --sidebar-accent-foreground: #8ec07c; /* = accent-foreground */
   --sidebar-border: #3c3836; /* sideBar.border */
   --sidebar-ring: #787371; /* = ring */
+  --border-strong: #3c3836; /* = border — upstream draws one border weight */
+  --evidence: #6da26f; /* = chart-5, terminal cyan — pi is running — lightness adjusted (#689d6a, 4.26:1 → 4.53:1 on background / card), hue kept */
+  --human: #ce7ca1; /* = chart-4, terminal magenta — waiting on you — lightness adjusted (#b16286, 3.19:1 → 4.52:1 on background / card), hue kept */
+  --ok: #9b9a1f; /* = chart-2, terminal green — allowed — lightness adjusted (#98971a, 4.36:1 → 4.53:1 on background / card), hue kept */
+  --refuse: #ff644d; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -375,6 +591,15 @@
   --sidebar-accent-foreground: #494c66; /* = accent-foreground */
   --sidebar-border: #dce0e8; /* WinSeparator.fg crust */
   --sidebar-ring: #1e66f5; /* = ring */
+  --border-strong: #acb0be; /* = border — upstream draws one border weight */
+  --evidence: #006fac; /* = chart-5, terminal cyan — pi is running — lightness adjusted (#04a5e5, 2.34:1 → 4.55:1 on background / card), hue kept */
+  --human: #ae3e93; /* = chart-4, terminal magenta — waiting on you — lightness adjusted (#ea76cb, 2.22:1 → 4.51:1 on background / card), hue kept */
+  --ok: #127c00; /* = chart-2, terminal green — allowed — lightness adjusted (#40a02b, 2.80:1 → 4.51:1 on background / card), hue kept */
+  --refuse: #d20f39; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -414,6 +639,15 @@
   --sidebar-accent-foreground: #c6d0f5; /* = accent-foreground */
   --sidebar-border: #232634; /* WinSeparator.fg crust */
   --sidebar-ring: #8caaee; /* = ring */
+  --border-strong: #626880; /* = border — upstream draws one border weight */
+  --evidence: #99d1db; /* = chart-5, terminal cyan — pi is running */
+  --human: #f4b8e4; /* = chart-4, terminal magenta — waiting on you */
+  --ok: #a6d189; /* = chart-2, terminal green — allowed */
+  --refuse: #f79092; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -453,6 +687,15 @@
   --sidebar-accent-foreground: #cad3f5; /* = accent-foreground */
   --sidebar-border: #181926; /* WinSeparator.fg crust */
   --sidebar-ring: #8aadf4; /* = ring */
+  --border-strong: #5b6078; /* = border — upstream draws one border weight */
+  --evidence: #91d7e3; /* = chart-5, terminal cyan — pi is running */
+  --human: #f5bde6; /* = chart-4, terminal magenta — waiting on you */
+  --ok: #a6da95; /* = chart-2, terminal green — allowed */
+  --refuse: #ed8796; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -492,6 +735,15 @@
   --sidebar-accent-foreground: #cdd6f4; /* = accent-foreground */
   --sidebar-border: #11111b; /* WinSeparator.fg crust */
   --sidebar-ring: #89b4fa; /* = ring */
+  --border-strong: #585b70; /* = border — upstream draws one border weight */
+  --evidence: #89dceb; /* = chart-5, terminal cyan — pi is running */
+  --human: #f5c2e7; /* = chart-4, terminal magenta — waiting on you */
+  --ok: #a6e3a1; /* = chart-2, terminal green — allowed */
+  --refuse: #f38ba8; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -531,6 +783,15 @@
   --sidebar-accent-foreground: #d3c6aa; /* = accent-foreground */
   --sidebar-border: #495156; /* WinSeparator.fg */
   --sidebar-ring: #e69875; /* = ring */
+  --border-strong: #859289; /* = border — upstream draws one border weight */
+  --evidence: #83c092; /* = chart-5, terminal cyan — pi is running */
+  --human: #d699b6; /* = chart-4, terminal magenta — waiting on you */
+  --ok: #a7c080; /* = chart-2, terminal green — allowed */
+  --refuse: #eb8384; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -570,6 +831,15 @@
   --sidebar-accent-foreground: #d3c6aa; /* = accent-foreground */
   --sidebar-border: #4f585e; /* WinSeparator.fg */
   --sidebar-ring: #e69875; /* = ring */
+  --border-strong: #859289; /* = border — upstream draws one border weight */
+  --evidence: #83c092; /* = chart-5, terminal cyan — pi is running */
+  --human: #d699b6; /* = chart-4, terminal magenta — waiting on you */
+  --ok: #a7c080; /* = chart-2, terminal green — allowed */
+  --refuse: #f68c8e; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -609,6 +879,15 @@
   --sidebar-accent-foreground: #d3c6aa; /* = accent-foreground */
   --sidebar-border: #555f66; /* WinSeparator.fg */
   --sidebar-ring: #e69875; /* = ring */
+  --border-strong: #859289; /* = border — upstream draws one border weight */
+  --evidence: #83c092; /* = chart-5, terminal cyan — pi is running */
+  --human: #dc9fbc; /* = chart-4, terminal magenta — waiting on you — lightness adjusted (#d699b6, 4.21:1 → 4.50:1 on background / card), hue kept */
+  --ok: #a7c080; /* = chart-2, terminal green — allowed */
+  --refuse: #ff9597; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -648,6 +927,15 @@
   --sidebar-accent-foreground: #5c6a72; /* = accent-foreground */
   --sidebar-border: #e8e5d5; /* WinSeparator.fg */
   --sidebar-ring: #e36d04; /* = ring */
+  --border-strong: #939f91; /* = border — upstream draws one border weight */
+  --evidence: #008058; /* = chart-5, terminal cyan — pi is running — lightness adjusted (#35a77c, 2.75:1 → 4.53:1 on background / card), hue kept */
+  --human: #b64394; /* = chart-4, terminal magenta — waiting on you — lightness adjusted (#df69ba, 2.79:1 → 4.54:1 on background / card), hue kept */
+  --ok: #667800; /* = chart-2, terminal green — allowed — lightness adjusted (#8da101, 2.65:1 → 4.51:1 on background / card), hue kept */
+  --refuse: #d02c31; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -687,6 +975,15 @@
   --sidebar-accent-foreground: #5c6a72; /* = accent-foreground */
   --sidebar-border: #e0dcc7; /* WinSeparator.fg */
   --sidebar-ring: #e06a00; /* = ring */
+  --border-strong: #939f91; /* = border — upstream draws one border weight */
+  --evidence: #007d55; /* = chart-5, terminal cyan — pi is running — lightness adjusted (#35a77c, 2.63:1 → 4.51:1 on background / card), hue kept */
+  --human: #b34091; /* = chart-4, terminal magenta — waiting on you — lightness adjusted (#df69ba, 2.67:1 → 4.51:1 on background / card), hue kept */
+  --ok: #637400; /* = chart-2, terminal green — allowed — lightness adjusted (#8da101, 2.53:1 → 4.55:1 on background / card), hue kept */
+  --refuse: #cd272e; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -726,6 +1023,15 @@
   --sidebar-accent-foreground: #56646c; /* = accent-foreground */
   --sidebar-border: #d8d3ba; /* WinSeparator.fg */
   --sidebar-ring: #d76200; /* = ring */
+  --border-strong: #939f91; /* = border — upstream draws one border weight */
+  --evidence: #00754e; /* = chart-5, terminal cyan — pi is running — lightness adjusted (#35a77c, 2.36:1 → 4.50:1 on background / card), hue kept */
+  --human: #aa3789; /* = chart-4, terminal magenta — waiting on you — lightness adjusted (#df69ba, 2.40:1 → 4.55:1 on background / card), hue kept */
+  --ok: #5c6d00; /* = chart-2, terminal green — allowed — lightness adjusted (#8da101, 2.27:1 → 4.52:1 on background / card), hue kept */
+  --refuse: #c41b26; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -765,6 +1071,15 @@
   --sidebar-accent-foreground: #e0def4; /* = accent-foreground */
   --sidebar-border: #6e6a86; /* WinSeparator.fg muted */
   --sidebar-ring: #9ccfd8; /* = ring */
+  --border-strong: #6e6a86; /* = border — upstream draws one border weight */
+  --evidence: #ebbcba; /* = chart-5, terminal cyan — pi is running */
+  --human: #c4a7e7; /* = chart-4, terminal magenta — waiting on you */
+  --ok: #5395b1; /* = chart-2, terminal green — allowed — lightness adjusted (#31748f, 2.91:1 → 4.55:1 on background / card), hue kept */
+  --refuse: #eb6f92; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -804,6 +1119,15 @@
   --sidebar-accent-foreground: #e0def4; /* = accent-foreground */
   --sidebar-border: #6e6a86; /* WinSeparator.fg muted */
   --sidebar-ring: #9ccfd8; /* = ring */
+  --border-strong: #6e6a86; /* = border — upstream draws one border weight */
+  --evidence: #ea9a97; /* = chart-5, terminal cyan — pi is running */
+  --human: #c4a7e7; /* = chart-4, terminal magenta — waiting on you */
+  --ok: #5babcd; /* = chart-2, terminal green — allowed — lightness adjusted (#3e8fb0, 3.19:1 → 4.52:1 on background / card), hue kept */
+  --refuse: #f97c9e; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -843,6 +1167,15 @@
   --sidebar-accent-foreground: #464261; /* = accent-foreground */
   --sidebar-border: #9893a5; /* WinSeparator.fg muted */
   --sidebar-ring: #56949f; /* = ring */
+  --border-strong: #9893a5; /* = border — upstream draws one border weight */
+  --evidence: #a25250; /* = chart-5, terminal cyan — pi is running — lightness adjusted (#d7827e, 2.37:1 → 4.54:1 on background / card), hue kept */
+  --human: #76618e; /* = chart-4, terminal magenta — waiting on you — lightness adjusted (#907aa9, 3.16:1 → 4.53:1 on background / card), hue kept */
+  --ok: #286983; /* = chart-2, terminal green — allowed */
+  --refuse: #9d4f66; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }
 
 /*
@@ -882,4 +1215,13 @@
   --sidebar-accent-foreground: #a0a8cd; /* = accent-foreground */
   --sidebar-border: #282c34; /* WinSeparator.fg bg5 */
   --sidebar-ring: #d7a65f; /* = ring */
+  --border-strong: #4a5057; /* = border — upstream draws one border weight */
+  --evidence: #38a89d; /* = chart-5, terminal cyan — pi is running */
+  --human: #a485dd; /* = chart-4, terminal magenta — waiting on you */
+  --ok: #95c561; /* = chart-2, terminal green — allowed */
+  --refuse: #ee6d85; /* = destructive — refused */
+  --radius: 0.625rem; /* the page's own, not upstream's */
+  --font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif; /* the page's own */
+  --font-code: ui-monospace, SFMono-Regular, Menlo, monospace; /* the page's own */
 }

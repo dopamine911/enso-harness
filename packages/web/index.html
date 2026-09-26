@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- class="dark" is the default theme's (Kanagawa Wave): `dark:` variants follow it. A light
+<!-- class="dark" is the default theme's (Enso Signal): `dark:` variants follow it. A light
      theme removes it (src/theme.ts); `data-theme` picks the theme, from the settings dialog.
      The variables live in src/styles/themes.css. -->
 <html lang="en" class="dark">
@@ -15,17 +15,19 @@
 		<title>Enso</title>
 		<!-- The saved colour theme (src/theme.ts) on <html> before the first paint. INLINE on
 		     purpose: bun bundles every <script src> into the app's deferred module, which would
-		     run after a paint in the default theme. It copies the saved id, and drops the `dark`
-		     class for a light theme. An id no theme block matches paints `.dark` (Kanagawa Wave),
-		     or `:root` (Kanagawa Lotus) if its saved scheme was light, until main.tsx normalises it. The keys are THEME_STORAGE_KEY and THEME_SCHEME_STORAGE_KEY —
-		     pinned by __tests__/theme.test.ts. -->
+		     run after a paint in the default theme. It copies the saved id — or, with nothing
+		     saved, the default's (DEFAULT_THEME), whose own treatments (`signal:` variants) key on
+		     the attribute — and drops the `dark` class for a light theme. An id no theme block
+		     matches paints `.dark` (Enso Signal), or `:root` (Enso Ink) if its saved scheme was
+		     light, until main.tsx normalises it. The keys and the default id are pinned by
+		     __tests__/theme.test.ts. -->
 		<script>
 			try {
-				const saved = localStorage.getItem('enso:theme')
-				if (saved) document.documentElement.dataset.theme = saved
+				document.documentElement.dataset.theme = localStorage.getItem('enso:theme') || 'enso-signal'
 				if (localStorage.getItem('enso:theme-scheme') === 'light') document.documentElement.classList.remove('dark')
 			} catch {
 				// Storage refused (private mode, a policy): the default theme stands.
+				document.documentElement.dataset.theme = 'enso-signal'
 			}
 		</script>
 	</head>
