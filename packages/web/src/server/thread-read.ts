@@ -114,7 +114,9 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
     // entry can be a tool result or a custom entry, and asking the mapped messages answers
     // about the last MESSAGE instead. The merge that brought #220 here left this call reading
     // the wrong one.
-    interrupted: interruptedTail(transcript),
+    // A torn tail is a fact about a run that ENDED (#412): a run still going — parked on an open
+    // question, which by construction ends on a call with no result yet — has not torn.
+    interrupted: nowLive?.busy === true ? undefined : interruptedTail(transcript),
     live: nowLive !== undefined,
     busy: nowLive?.busy ?? false,
     generation: nowLive?.generation ?? 0,

@@ -890,14 +890,20 @@ function PendingQueue(): React.ReactNode {
  * (0.03 ms at 20, 0.98 ms at 100) before React touched the DOM. Indexed, the same pass costs
  * 0.03 ms.
  *
- * `openRunMessageId` rides along because it is the only other thing a row needed from the
+ * `openRunMessageIds` rides along because it is the only other thing a row needed from the
  * chat: with it here, no row calls `useChatContext`, and a row that reads only this can hand
  * everything it draws to a memo (see `MessageBody`).
  */
 interface TranscriptSelection {
   readonly partsByMessageId: ReadonlyMap<string, KeyedPart[]>
-  /** The message whose run is in flight — the last one, while the thread generates. */
-  readonly openRunMessageId: string | undefined
+  /**
+   * The messages whose run is in flight, while the thread generates: every assistant message after
+   * the last user message. Not just the last message (#412): joining a run that is already going
+   * (a reload) opens a NEW message for what streams next, after the stored one that holds the
+   * call pi is still waiting on — and a user message is where a run, or a queued prompt pi took,
+   * began, so no call before it is still running.
+   */
+  readonly openRunMessageIds: ReadonlySet<string>
   /**
    * The messages that CONTINUE the one before them — same role, so no speaker line of their own:
    * one pi turn is several assistant messages (each tool round is one), and "pi" says it once.
@@ -907,7 +913,7 @@ interface TranscriptSelection {
 
 const TranscriptSelectionContext = createContext<TranscriptSelection>({
   partsByMessageId: new Map(),
-  openRunMessageId: undefined,
+  openRunMessageIds: new Set(),
   continuedMessageIds: new Set(),
 })
 
@@ -1360,11 +1366,14 @@ const chatComponents = {
         chat.messages.forEach((message, position) => {
           if (position > 0 && chat.messages[position - 1]?.role === message.role) continuedMessageIds.add(message.id)
         })
-        return {
-          partsByMessageId,
-          openRunMessageId: chat.sessionGenerating ? chat.messages.at(-1)?.id : undefined,
-          continuedMessageIds,
+        const openRunMessageIds = new Set<string>()
+        if (chat.sessionGenerating) {
+          for (const message of chat.messages.toReversed()) {
+            if (message.role !== 'assistant') break
+            openRunMessageIds.add(message.id)
+          }
         }
+        return { partsByMessageId, openRunMessageIds, continuedMessageIds }
       }, [chat.messages, chat.sessionGenerating])
       return (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -1468,13 +1477,13 @@ const chatComponents = {
      * bubble that changed.
      */
     message: function ChatMessageRow({ message }: MessageProps<ThreadChatOptions>): React.ReactNode {
-      const { partsByMessageId, openRunMessageId, continuedMessageIds } = useContext(TranscriptSelectionContext)
+      const { partsByMessageId, openRunMessageIds, continuedMessageIds } = useContext(TranscriptSelectionContext)
       return (
         <MessageBody
           messageId={message.id}
           role={message.role}
           parts={partsByMessageId.get(message.id) ?? NO_PARTS}
-          runOpen={openRunMessageId === message.id}
+          runOpen={openRunMessageIds.has(message.id)}
           refusal={refusalOfMessage(message)}
           speaker={!continuedMessageIds.has(message.id)}
         />

@@ -62,6 +62,8 @@ interface FakeSessionScript {
   onPrompt: (emit: EmitPiEvent, outcome: PromptOutcome, message: string) => void
   /** Further runtime members to replace over the fake's own — a fault to inject, say. */
   runtime?: (parts: FakeThreadParts) => Partial<ThreadRuntime>
+  /** What the live session's inspection holds, over the fake's own — a branch to serve. */
+  inspect?: Partial<HostedThreadInspection>
 }
 
 /**
@@ -122,7 +124,7 @@ function fakeHost(
           permissionModeState: () => ({ mode: 'default', available: ['default', 'acceptEdits'] }),
           ...script.runtime?.(parts),
         }),
-        inspect: { ...piccShapedInspection(), cwd: directory },
+        inspect: { ...piccShapedInspection(), cwd: directory, ...script.inspect },
       })
       built.push(fake.record)
       return Promise.resolve(fake.hosted)
@@ -1016,6 +1018,41 @@ test('⚠ GET /api/threads/:id/history serves a thread that is BUSY here — a r
   expect(((await response.json()) as EnsoThreadHistory).threadId).toBe('t1')
   // Looking did not build a second session.
   expect(built).toHaveLength(1)
+})
+
+// #412: pi parked on a question ends its branch on the `ask_user` call, with no result yet — the
+// shape #109's torn-tail rule warns about. While the run is live that is not a torn tail, and the
+// warning (with every call on the page read as aborted) contradicted the question card beside it.
+const ENDS_ON_AN_OPEN_CALL: Partial<HostedThreadInspection> = {
+  entries: transcriptOf([
+    {
+      type: 'message',
+      id: 'u1',
+      parentId: null,
+      timestamp: '2026-09-08T10:00:00.000Z',
+      message: { role: 'user', content: 'pick one', timestamp: 1 },
+    },
+    {
+      type: 'message',
+      id: 'a1',
+      parentId: 'u1',
+      timestamp: '2026-09-08T10:00:01.000Z',
+      message: { role: 'assistant', content: [{ type: 'toolCall', id: 'ask-1', name: 'ask_user', arguments: {} }] },
+    },
+  ]),
+}
+
+test('⚠ a thread BUSY here that ends on a call with no result is not a torn tail; the same tail once idle is (#412)', async () => {
+  const busy = await startWith({ ...asksAndWaits, inspect: ENDS_ON_AN_OPEN_CALL })
+  await prompt(busy.url, 't1', '/mode')
+  const asked = (await (await fetch(`${busy.url}/api/threads/t1/history`)).json()) as EnsoThreadHistory
+  expect(asked.messages).not.toEqual([])
+  expect(asked).not.toHaveProperty('interrupted')
+  // Live but idle, the run is over: #109's warning stands.
+  const idle = await startWith({ ...settlesAtOnce, inspect: ENDS_ON_AN_OPEN_CALL })
+  await prompt(idle.url, 't1', 'go')
+  const ended = (await (await fetch(`${idle.url}/api/threads/t1/history`)).json()) as EnsoThreadHistory
+  expect(ended.interrupted).toBe('tool-call-without-result')
 })
 
 test('GET /api/threads lists live threads with busy state and the run number', async () => {

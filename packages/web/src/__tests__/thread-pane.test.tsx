@@ -1,9 +1,15 @@
 import { afterAll, afterEach, expect, spyOn, test } from 'bun:test'
-import { ENSO_GUARD_DENIAL_ENTRY, ENSO_PROVIDER_REFUSAL_KEY, type EnsoThreadStats } from '@enso/core'
+import {
+  ENSO_GUARD_DENIAL_ENTRY,
+  ENSO_PROVIDER_REFUSAL_KEY,
+  type EnsoThreadHistory,
+  type EnsoThreadStats,
+} from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import { ChatScreen, ThreadPane, type ThreadView } from '../chat-screen.tsx'
 import {
+  adoptThread,
   clearThreadsForTest,
   getThreadStores,
   mintThread,
@@ -110,12 +116,14 @@ async function mountPane(
     startSession?: boolean
     /** The page's GLOBAL fetch — the scripted server's unless a test sets a tripwire (#404). */
     globalFetch?: typeof fetch
+    /** Mount a STORED thread, as a reload does (`adoptThread`), instead of minting a new one. */
+    history?: EnsoThreadHistory
   } = {},
 ): Promise<MountedPane> {
   const server = createScriptedFetch(options.server ?? {})
   // What the page itself fetches outside a thread; a pane's own requests go through its thread's.
   globalThis.fetch = options.globalFetch ?? server.fetch
-  const stores = mintThread(server.fetch)
+  const stores = options.history === undefined ? mintThread(server.fetch) : adoptThread(options.history, server.fetch)
   // A minted thread opens on the Start-a-session dialog (#391). These tests are about the pane
   // behind it, so it is closed first — as the person pressing Escape would — unless one asks.
   stores.startSession.set(options.startSession ?? false)
@@ -1038,6 +1046,43 @@ test('⚠ a truncated tool result says so LIVE, from the descriptor TanStack wou
   await eventually(() => {
     expect(pane.container.querySelector('[data-enso-tool-call="done"]')).not.toBeNull()
     expect(pane.container.querySelector('[data-enso-truncation]')?.textContent).toBe('showing 1 of 400 lines')
+  })
+  await pane.unmount()
+})
+
+// #412: a reload while pi is parked on a question. The stored history ends on the `ask_user` call,
+// with no result yet, and the snapshot says the run is live. Joining it opens a new assistant
+// message for what streams next, so the history's message holding the call is no longer the
+// LAST one — and a row whose run is "the last message's" read the open call as aborted.
+test('⚠ a call still waiting when the page joins a busy run reads running, not aborted (#412)', async () => {
+  const pane = await mountPane({
+    history: {
+      threadId: 'asked-1',
+      projectId: 'p-launch',
+      messages: [
+        { id: 'u1', role: 'user', parts: [{ type: 'text', content: 'pick one' }] },
+        {
+          id: 'a1',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-call',
+              id: 'ask-1',
+              name: 'ask_user',
+              arguments: '{}',
+              input: {},
+              state: 'input-complete',
+            },
+          ],
+        },
+      ],
+      permissionMode: { mode: 'default', available: ['default', 'plan'] },
+    },
+  })
+  await pane.settle({ ...SNAPSHOT_IDLE, threadId: 'asked-1', live: true, busy: true, generation: 1 })
+  await eventually(() => {
+    expect(pane.status()).toContain('working')
+    expect(pane.container.querySelector('[data-enso-tool-call]')?.getAttribute('data-enso-tool-call')).toBe('pending')
   })
   await pane.unmount()
 })
