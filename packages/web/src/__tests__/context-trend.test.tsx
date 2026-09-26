@@ -6,6 +6,7 @@ import { ThreadStoresContext } from '../store.ts'
 import type * as ThreadContextModule from '../thread-context.tsx'
 import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
+import { requestedUrl } from './scripted-server.ts'
 import { waitUntil } from './wait-until.ts'
 
 /**
@@ -45,7 +46,7 @@ test("picking a turn, then bars per prompt, moves the page to that prompt's last
     requests: [request(1, 1), request(2, 1), request(3, 2)],
   }
   globalThis.fetch = ((input: string | URL | Request): Promise<Response> => {
-    const which = String(input).split('/context/')[1] ?? 'next'
+    const which = requestedUrl(input).split('/context/')[1] ?? 'next'
     return Promise.resolve(
       Response.json({
         threadId: stores.threadId,

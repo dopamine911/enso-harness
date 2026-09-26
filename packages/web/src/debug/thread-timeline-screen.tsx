@@ -175,7 +175,7 @@ function LogEntryRow({
         <LogRow line={line} threadHref={threadHref} />
       </div>
       {joins.shown === '' ? null : (
-        <span className="shrink-0 pr-4 font-mono text-muted-foreground text-xs" title={joins.full}>
+        <span className="shrink-0 pr-4 font-mono text-xs text-muted-foreground" title={joins.full}>
           {joins.shown}
         </span>
       )}
@@ -289,7 +289,7 @@ export function ThreadTimelineScreen({ threadId, fetch: pageFetch }: ThreadTimel
       <TerminalHeader>
         <TerminalTitle>enso · thread</TerminalTitle>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-1.5 text-muted-foreground text-xs" htmlFor="thread-timeline-level">
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground" htmlFor="thread-timeline-level">
             <span>level</span>
             <LogLevelSelect controlId="thread-timeline-level" level={level} onLevel={changeLevel} />
           </label>

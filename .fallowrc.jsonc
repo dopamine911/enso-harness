@@ -64,7 +64,7 @@
     { "file": "packages/core/src/web-search.ts", "exports": ["WebSearchToolParameters"] }
   ],
   // Vendored presentation and shadcn primitives stay IN the graph (their dependencies are real)
-  // but their own findings are hidden: biome and coverage already exclude them (#31, #121), and
+  // but their own findings are hidden: the linter and coverage already exclude them (#31, #121), and
   // an unused sub-component there is upstream's, kept diffable, not ours to prune.
   "ignoreFindings": ["packages/web/src/components/**"],
   // Clone detection (#174). `semantic` is the mode this repo reads: `mild` (the default) found
@@ -116,19 +116,66 @@
     "ignore": ["packages/web/src/components/**", "packages/core/src/**", "packages/web/src/styles/themes.css"],
     "threshold": 2.55
   },
-  // Complexity thresholds for `fallow audit` (the advisory job). CRAP is OFF, not raised: it is
-  // cyclomatic × (1 − coverage)³, and fallow can only ESTIMATE coverage here — Bun's LCOV has no
-  // function spans for `--coverage`, so every score is `coverage_source: estimated`, and the
-  // estimate reads from export references, which a request listener or a generator's
-  // `generate()` never has. Every complexity finding the audit raised on #180, #181 and #182
-  // was `exceeded: crap` on a function the suite drives; cyclomatic (20) and cognitive (15)
-  // never fired and stay on — cognitive is also biome's hard ceiling at 25.
+  // Complexity. Two readers of this block:
+  //
+  //   • `fallow audit` (the advisory job) applies these thresholds to CHANGED functions. CRAP is
+  //     OFF, not raised: it is cyclomatic × (1 − coverage)³, and fallow can only ESTIMATE coverage
+  //     here — Bun's LCOV has no function spans for `--coverage`, so every score is
+  //     `coverage_source: estimated`, and the estimate reads from export references, which a
+  //     request listener or a generator's `generate()` never has. Every complexity finding the
+  //     audit raised on #180, #181 and #182 was `exceeded: crap` on a function the suite drives;
+  //     cyclomatic (20) and cognitive (15) are fallow's defaults and stay advisory.
+  //   • The `complexity` gate (scripts/gate.ts → `complexity:check`) runs `fallow health` over
+  //     EVERY function at a cognitive ceiling of 25 — the ceiling that keeps us from writing
+  //     functions a human cannot read. It gates cognitive only (`--max-cyclomatic` is lifted
+  //     there); cyclomatic stays the audit's advisory signal, as it has always been.
+  //
+  // `thresholdOverrides` are the exceptions to the gate's ceiling, pinned per FUNCTION at the
+  // exact score it measures today, so the rule still fails the moment that function grows. A
+  // number may go down, never up. Each exists because the complexity belongs to an EXTERNAL
+  // grammar or protocol that must be read top-to-bottom, where extracting helpers would scatter
+  // a state machine rather than simplify it. To retire one: reduce the function, then lower (or
+  // delete) its entry. `test/complexity-ratchet.test.ts` refuses an entry that is looser than
+  // its function's score, names a function that no longer exists, or pins one already under 25.
+  //
   // `ignore`: the vendored components, for the reason `ignoreFindings` gives above — their
   // functions are upstream's, kept diffable (the shadcn `chart.tsx` #45 fetched arrived with a
   // 22-branch tooltip formatter the audit then called ours).
   "health": {
     "maxCrap": 0,
-    "ignore": ["packages/web/src/components/**"]
+    "ignore": ["packages/web/src/components/**"],
+    "thresholdOverrides": [
+      {
+        "files": ["packages/harness/core/shell-segments.ts"],
+        "functions": ["extractFlatShellCommandSegments"],
+        "maxCognitive": 68,
+        "reason": "The shell character-scanner: one linear read of the quote/escape state machine, kept close to upstream oh-my-pi so a diff stays reviewable."
+      },
+      {
+        "files": ["packages/harness/core/shell-segments.ts"],
+        "functions": ["literalShellWord"],
+        "maxCognitive": 50,
+        "reason": "Same scanner: the quoted-word reader."
+      },
+      {
+        "files": ["packages/harness/core/shell-segments.ts"],
+        "functions": ["skipShellWord"],
+        "maxCognitive": 32,
+        "reason": "Same scanner: the word skipper."
+      },
+      {
+        "files": ["packages/harness/extensions/guards/index.ts"],
+        "functions": ["decide"],
+        "maxCognitive": 28,
+        "reason": "The tool_call guard dispatch: bash patch, then the write denials in precedence order, then the reader gate. The precedence order IS the security contract the file header documents; splitting it hides it."
+      },
+      {
+        "files": ["packages/web/src/thread-debug.tsx"],
+        "functions": ["ThreadDebugView"],
+        "maxCognitive": 26,
+        "reason": "The debug drawer's view: one branch per record kind it renders. Biome scored it at or under 25; fallow's scorer counts its JSX conditionals one higher. Pinned at the measured score when complexity moved to fallow."
+      }
+    ]
   },
   // `error` since the day-one list (five, all `rpc/`, recorded on #173) reached zero: a crossing
   // now fails the dead-code gate step. Coverage and forbidden-call findings share the severity.
@@ -183,10 +230,12 @@
     ],
     // Both HTML entries: an `.html` is the bundler's entry, not a module in any zone. The chat
     // page and the debug page (#144 slice 2) are the two, and naming each keeps a third from
-    // arriving unremarked.
+    // arriving unremarked. `oxlint.config.ts` is the lint tool's config, loaded by oxlint and by
+    // nothing in the program; it reads its lists from `scripts/lint/`, where the tests and doc
+    // generators that hold them also read them.
     "coverage": {
       "requireAllFiles": true,
-      "allowUnmatched": ["packages/web/index.html", "packages/web/debug.html"]
+      "allowUnmatched": ["packages/web/index.html", "packages/web/debug.html", "oxlint.config.ts"]
     },
     // The storage seam (`no-duplicate-paths`): one file constructs the session manager.
     "calls": {

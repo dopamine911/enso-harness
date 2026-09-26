@@ -44,9 +44,7 @@ if (rootElement === null) throw new Error('Enso: #root is missing from index.htm
 // (seen live while verifying #29). Dev-only, but the cache is three lines and makes an
 // HMR edit render through the ONE root instead of racing two.
 const globalWithRoot = globalThis as { __ensoReactRoot?: ReturnType<typeof createRoot> }
-if (globalWithRoot.__ensoReactRoot === undefined) {
-  globalWithRoot.__ensoReactRoot = createRoot(rootElement)
-}
+globalWithRoot.__ensoReactRoot ??= createRoot(rootElement)
 const reactRoot: Root = globalWithRoot.__ensoReactRoot
 reactRoot.render(
   <StrictMode>

@@ -84,7 +84,7 @@ export function LogRow({ line, threadHref }: LogRowProps): React.ReactNode {
       <span className="w-40 shrink-0 truncate text-muted-foreground">{line.logger.replace(/^enso\.?/, '')}</span>
       <span className="min-w-0 flex-1 truncate">{message}</span>
       {unsaid.length === 0 ? null : (
-        <span className="min-w-0 max-w-80 shrink-0 truncate text-muted-foreground">
+        <span className="max-w-80 min-w-0 shrink-0 truncate text-muted-foreground">
           {unsaid.map(([propertyName, propertyValue]) => propertyText(propertyName, propertyValue)).join(' ')}
         </span>
       )}

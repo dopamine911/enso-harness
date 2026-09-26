@@ -8,9 +8,10 @@ import { GATES, reportsWorkerAbort } from '../scripts/gate.ts'
 /**
  * The gate's blind spot, closed (#157): a tool that dies mid-run and still exits 0.
  *
- * Measured 2026-09-10 — Biome 2.5.13 with any GritQL plugin loaded overflows a worker's
- * stack, prints `fatal runtime error: stack overflow, aborting`, and exits **0**. The files
- * that worker held go unchecked and `bun run check` says green. Every other gate failure
+ * Measured 2026-09-10 — Biome 2.5.13 (this repo's linter until the oxlint migration) with a
+ * GritQL plugin loaded overflowed a worker's stack, printed `fatal runtime error: stack
+ * overflow, aborting`, and exited **0**. The files that worker held went unchecked and
+ * `bun run check` said green. Any native tool can die that way, so the scan outlived the tool. Every other gate failure
  * announces itself in the exit code; this one does not, so it is the one worth a test.
  */
 
@@ -72,9 +73,32 @@ test('⚠ the header of scripts/gate.ts names the gates the file actually runs, 
  */
 const NUMBERED_STEP = /^(\d+)\.\s+\*\*(.+?)\*\*/gm
 const COUNT_WORDS_TWENTY: readonly string[] = [
-  ...['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'],
-  ...['eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'],
-  ...['twenty-one', 'twenty-two', 'twenty-three', 'twenty-four', 'twenty-five'],
+  'zero',
+  'one',
+  'two',
+  'three',
+  'four',
+  'five',
+  'six',
+  'seven',
+  'eight',
+  'nine',
+  'ten',
+  'eleven',
+  'twelve',
+  'thirteen',
+  'fourteen',
+  'fifteen',
+  'sixteen',
+  'seventeen',
+  'eighteen',
+  'nineteen',
+  'twenty',
+  'twenty-one',
+  'twenty-two',
+  'twenty-three',
+  'twenty-four',
+  'twenty-five',
 ]
 const COUNT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'] as const
 
@@ -101,9 +125,11 @@ test('⚠ docs/verification.md counts and numbers the gates the file actually ru
  * mentioned TypeDoc for an unrelated reason, so a plain word-presence check passed it.
  */
 const GATE_PROSE_MARKS: Readonly<Record<string, RegExp>> = {
-  biome: /biome|lint/i,
+  format: /format|oxfmt/i,
+  lint: /lint|oxlint/i,
   typecheck: /typecheck|tsc/i,
-  'dead-code': /dead-code|fallow/i,
+  'dead-code': /dead-code|fallow dead-code|baseline/i,
+  complexity: /complexity|cognitive/i,
   'react-doctor': /react-doctor/i,
   test: /bun test|the suite/i,
   coverage: /coverage/i,
@@ -250,14 +276,14 @@ test('⚠ megabytes of stderr before the banner does not hide the abort', () => 
   expect(run.status).toBe(1)
   expect(run.output).toContain('ABORTED')
   expect(run.output).not.toContain('failed to spawn')
-  expect(run.output).toContain('✗ gate "biome" failed.')
+  expect(run.output).toContain('✗ gate "lint" failed.')
 })
 
 /**
  * Both streams are piped, so the gate is now the only writer to the terminal. Every line the
  * tool wrote must arrive whole and on the stream it was written to — an earlier revision
- * inherited stdout while piping stderr, and Biome's diagnostics and its summary spliced into
- * each other mid-line. (Ordering ACROSS the two streams is grouped in chunks, not exact;
+ * inherited stdout while piping stderr, and a linter's diagnostics and its summary (Biome's, at
+ * the time) spliced into each other mid-line. (Ordering ACROSS the two streams is grouped in chunks, not exact;
  * that is the price of reading either of them.)
  */
 test('⚠ a tool writing both streams has every line arrive whole, on the stream it came from', () => {
@@ -270,7 +296,7 @@ test('⚠ a tool writing both streams has every line arrive whole, on the stream
 
 /**
  * stdout is forwarded but never scanned. A linter quoting source — this very file names every
- * banner, and Biome prints the offending lines — must not read as its own death.
+ * banner, and a linter prints the offending lines — must not read as its own death.
  */
 test('⚠ a banner quoted on stdout is a tool reporting, not a tool dying', () => {
   const run = runGateOver('echo "fatal runtime error: stack overflow, aborting"\necho "  > 42 | Segmentation fault"\n')

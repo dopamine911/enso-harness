@@ -70,9 +70,12 @@ export interface ThemeFamily {
 export const THEME_FAMILIES: readonly ThemeFamily[] = Object.entries(FAMILIES).map(([family, members]) => ({
   family,
   // `Object.entries` widens the keys to `string`; they are the ids `ThemeId` is built from.
-  themes: (Object.entries(members) as Array<[ThemeId, string]>).map(
-    ([id, label]): ThemeOption => ({ id, label, family, scheme: LIGHT_THEMES.has(id) ? 'light' : 'dark' }),
-  ),
+  themes: (Object.entries(members) as Array<[ThemeId, string]>).map(([id, label]): ThemeOption => ({
+    id,
+    label,
+    family,
+    scheme: LIGHT_THEMES.has(id) ? 'light' : 'dark',
+  })),
 }))
 
 export const THEMES: readonly ThemeOption[] = THEME_FAMILIES.flatMap((group) => group.themes)

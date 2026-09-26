@@ -5,6 +5,6 @@
     "rootDir": ".",
     "types": ["bun"]
   },
-  "include": ["*.ts", "docs/*.ts", "__tests__/*.ts"],
+  "include": ["*.ts", "docs/*.ts", "lint/*.ts", "__tests__/*.ts"],
   "references": [{ "path": "../packages/core" }]
 }

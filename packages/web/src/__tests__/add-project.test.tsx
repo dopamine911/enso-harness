@@ -84,7 +84,8 @@ async function mountAdd(listings: Record<string, EnsoDirectoryListing>, registra
   const closes: number[] = []
   const fetchImpl = (input: string, init?: RequestInit): Promise<Response> => {
     if (init?.method === 'POST') {
-      registered.push((JSON.parse(String(init.body)) as { path: string }).path)
+      if (typeof init.body !== 'string') throw new Error(`expected a JSON text body, got ${typeof init.body}`)
+      registered.push((JSON.parse(init.body) as { path: string }).path)
       return Promise.resolve(registration.clone())
     }
     const path = new URL(input, 'http://page').searchParams.get('path') ?? ''

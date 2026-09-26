@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import { ENSO_REDACTED, type EnsoLogLine } from '../log.ts'
 import { browserSection, buildLogBundle, bundleRecordsText, isLogBundle, redactionManifest } from '../log-bundle.ts'
 import { parseEnsoLogLine } from '../log-process.ts'
+import { ENSO_REDACTED, type EnsoLogLine } from '../log.ts'
 import type { EnsoThreadInspection } from '../thread-inspection.ts'
 
 const line = (message: string, properties: Record<string, unknown>): EnsoLogLine => ({

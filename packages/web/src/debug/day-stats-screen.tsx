@@ -194,9 +194,9 @@ function DaySections({ view }: { view: DayView }): React.ReactNode {
   return (
     <>
       <section className="mb-4">
-        <h2 className="pb-1 font-semibold text-foreground text-xs">totals</h2>
+        <h2 className="pb-1 text-xs font-semibold text-foreground">totals</h2>
         <p className="text-xs">{describeTotals(stats)}</p>
-        <p className="text-muted-foreground text-xs">
+        <p className="text-xs text-muted-foreground">
           prompts: {durationsText(stats.totals.prompts, 'no settled prompt')} · first token:{' '}
           {durationsText(stats.totals.firstDelta, 'none')}
         </p>
@@ -392,10 +392,10 @@ export function DayStatsScreen({ fetch: pageFetch }: { fetch?: FetchLike } = {})
           refresh
         </Button>
         <TerminalActions>
-          <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href="/debug">
+          <a className="px-2 text-xs text-primary underline-offset-2 hover:underline" href="/debug">
             the day's log
           </a>
-          <a className="px-2 text-primary text-xs underline-offset-2 hover:underline" href={bundleUrl()} download>
+          <a className="px-2 text-xs text-primary underline-offset-2 hover:underline" href={bundleUrl()} download>
             download the day's bundle
           </a>
           <TerminalStatus>

@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test'
 import type { EnsoContextRequest, EnsoFileOperation, EnsoThreadContext } from '@enso/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ThreadStoresContext } from '../store.ts'
-import { ThreadContextView } from '../thread-context.tsx'
 import { changeOf, displayPath, filesUpTo, lastRequestPerPrompt, totalOf } from '../thread-context-analysis.ts'
+import { ThreadContextView } from '../thread-context.tsx'
 import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 
 afterEach(() => clearThreadsForTest())

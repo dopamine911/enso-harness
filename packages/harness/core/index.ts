@@ -38,12 +38,7 @@ export {
 export { createSessionReadTracker } from './read-tracker.ts'
 export { findSecretPathWord } from './shell-secret-paths.ts'
 export { canonicalToolName } from './tool-identity.ts'
-export {
-  isFetchableContentType,
-  isHostAllowed,
-  isPublicIpAddress,
-  parseWebFetchUrl,
-} from './web-fetch-policy.ts'
+export { isFetchableContentType, isHostAllowed, isPublicIpAddress, parseWebFetchUrl } from './web-fetch-policy.ts'
 export { resolveModelAuth } from './web-search/auth.ts'
 export { runAnthropicProviderSearch } from './web-search/providers/anthropic.ts'
 export {

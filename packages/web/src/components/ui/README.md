@@ -54,8 +54,8 @@ unportable primitive is one nobody can re-fetch.
 
 1. **Every file carries the provenance header** naming this receipt. `test/presentation-gate.test.ts`
    fails on a file that does not, and on a new subdirectory of `components/` with no receipt
-   at all — the three exclusions drawn at `packages/web/src/components` (biome's
-   `files.includes`, bunfig's `coveragePathIgnorePatterns`, `.fallowrc.jsonc`'s
+   at all — the three exclusions drawn at `packages/web/src/components` (oxlint's
+   `ignorePatterns`, bunfig's `coveragePathIgnorePatterns`, `.fallowrc.jsonc`'s
    `ignoreFindings`) are not something a directory should inherit in silence.
 2. **Presentation only.** Nothing here may import the state layer — our stores, the follow
    connection, `@enso/core`'s wire schemas, TanStack's client. A primitive that reads a

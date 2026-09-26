@@ -200,17 +200,17 @@ The host's side of it — what `agent-host.ts` binds to a session and what the r
 export interface EnsoExtensionUiContext {
   readonly uiContext: ExtensionUIContext
   /** Deliver an answer. Unknown ids are reported, not thrown — the extension is not waiting on them. */
-  answerDialog(response: DialogAnswer): void
+  readonly answerDialog: (response: DialogAnswer) => void
   /** Every pending question, oldest first, as the follow's snapshot lists them (#114). Empty once settled. */
-  openDialogs(): EnsoOpenDialog[]
+  readonly openDialogs: () => EnsoOpenDialog[]
   /** Cancel every pending dialog — session teardown. Each blocked extension call resolves to its cancel value. */
-  cancelAllDialogs(): void
+  readonly cancelAllDialogs: () => void
   /**
    * Settle every pending dialog as the RUN's abort: each blocked call resolves to its cancel
    * value with outcome `aborted` — the glossary's word for exactly this, produced by no code
    * until Stop was made to stop. The asking extension need not have passed a signal.
    */
-  abortAllDialogs(): void
+  readonly abortAllDialogs: () => void
   /**
    * Refuse every question asked before `settled` settles: it resolves at once to its cancel
    * value, outcome `aborted`, and no card is shown. For the window while a stopped run winds
@@ -218,9 +218,9 @@ export interface EnsoExtensionUiContext {
    * multi-select loop asks the next option) would otherwise open a question after the stop,
    * and the stop would wait on it (#376 review).
    */
-  refuseDialogsUntil(settled: Promise<unknown>): void
+  readonly refuseDialogsUntil: (settled: Promise<unknown>) => void
   /** How many dialogs are blocked right now — observable state for tests and for the idle-timeout logic. */
-  pendingDialogCount(): number
+  readonly pendingDialogCount: () => number
   /**
    * The HOST's own questions, lifted to an `input` dialog: a credential (#338 slice 3: pi's
    * `AuthPrompt.type: 'secret'`, masked by the browser) and a login's code (#388: with what to
@@ -228,7 +228,7 @@ export interface EnsoExtensionUiContext {
    * and an extension must not be able to ask a masked question the transcript then fails to show,
    * or put a link on the card. Same wait, same settle record, same cancel value as `input`.
    */
-  askHostInput(question: HostInputQuestion, signal: AbortSignal | undefined): Promise<string | undefined>
+  readonly askHostInput: (question: HostInputQuestion, signal: AbortSignal | undefined) => Promise<string | undefined>
 }
 ```
 

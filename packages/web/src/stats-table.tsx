@@ -93,7 +93,7 @@ export function StatsTable({ caption, columns, rows, empty }: StatsTableProps): 
                       className={
                         column?.numeric === true
                           ? 'px-2 py-0.5 text-right tabular-nums'
-                          : 'whitespace-nowrap px-2 py-0.5 text-left'
+                          : 'px-2 py-0.5 text-left whitespace-nowrap'
                       }
                     >
                       {cell}

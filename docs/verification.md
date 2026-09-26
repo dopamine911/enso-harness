@@ -7,11 +7,15 @@ how to use it. It does not repeat the inventory.
 
 ## One definition of green
 
-`bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Eight gates, in order, stopping
+`bun run check` (the same script as `check:all`) runs `scripts/gate.ts`. Ten gates, in order, stopping
 at the first failure:
 
-1. **Biome** — formatting, lint, import organisation and the repository naming plugin, check-only.
-2. **TypeScript** — `tsc -b`, a project-reference build. It emits: project references require
+1. **Format** — `oxfmt --check`: formatting, import order and Tailwind class order, check-only.
+2. **Lint** — `oxlint` with `oxlint.config.ts`, type-aware (`oxlint-tsgolint`). It carries the
+   repository's naming gate: `scripts/lint/enso-plugin.ts` runs upstream's
+   `unicorn/name-replacements` over the word lists in `scripts/lint/naming-policy.ts`. Test rules
+   come from `eslint-plugin-jest`, told that `describe`/`test` are imported from `bun:test`.
+3. **TypeScript** — `tsc -b`, a project-reference build. It emits: project references require
    `composite`, `composite` requires declaration output, and `tsc -b --noEmit` is refused with
    TS6310, so the declarations land in each package's gitignored `dist-types/`. **The major is 6, and
    TypeDoc is why** (#188): 7.x is the native port and ships no compiler API, so every tool that
@@ -19,7 +23,7 @@ at the first failure:
    faster (1.0 s against 6.4 s cold over this tree), and that speed was given up for the generated
    API reference. `test/dependency-gate.test.ts` holds the pin against TypeDoc's own peer range, so
    a bump back to 7 fails naming TypeDoc rather than surfacing as a broken docs build later.
-3. **Dead code** — `fallow dead-code --baseline fallow-baseline.json` (#163): fails on any unused file,
+4. **Dead code** — `fallow dead-code --baseline fallow-baseline.json` (#163): fails on any unused file,
    export, type or dependency that is *not* in the committed identity baseline. The baseline is the
    backlog as inventory; growth is the regression. **It is empty since #263**, and the last 17 rows
    are why it should stay that way: they were the harness barrel's unconsumed exports, carried under
@@ -30,20 +34,24 @@ at the first failure:
    `.fallowrc.jsonc` names every program fallow cannot see a loader for (the harness extensions, the
    Bun plugin, the direct-run scripts), and `test/fallow-config.test.ts` holds its extension entries
    equal to the harness manifest.
-4. **react-doctor** — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`
+5. **Complexity** — `fallow health` over every function at a cognitive ceiling of 25. Exceptions are
+   per FUNCTION in `.fallowrc.jsonc` (`health.thresholdOverrides`), each pinned at the exact score its
+   function measures, and `test/complexity-ratchet.test.ts` refuses a pin that is looser than that
+   score, names a function that no longer exists, or covers one already under the ceiling.
+6. **react-doctor** — `react-doctor --project packages/web --scope full --no-score --no-supply-chain --blocking error`
    (#342): the web surface, failing on an error-severity finding. Offline flags are part of the
    command, not options — a pre-commit hook must not phone home — and so is `--scope full`: on a
    terminal, with changes on the branch, react-doctor otherwise asks what to scan and waits. The rule set is upstream's, so
    a bump of the pinned `react-doctor` is a gate change.
-5. **Bun test** — the complete test tree, with text and LCOV coverage reporters.
-6. **Aggregate coverage** — `scripts/check-coverage.ts` reads LCOV and enforces the total line and
+7. **Bun test** — the complete test tree, with text and LCOV coverage reporters.
+8. **Aggregate coverage** — `scripts/check-coverage.ts` reads LCOV and enforces the total line and
    function floors. The current values are generated under *Ratchets* in the inventory.
-7. **API docs** — `typedoc` over both barrels with `treatWarningsAsErrors` (#188). TypeDoc's warnings
+9. **API docs** — `typedoc` over both barrels with `treatWarningsAsErrors` (#188). TypeDoc's warnings
    *are* documentation drift — a `{@link}` whose target was renamed, a type a documented signature
    exposes but nothing exports — and none of them is visible to `tsc`. It runs with `--emit none`:
    the step validates, and the site renders the same surface as native pages from the same
    `typedoc.json` (`starlight-typedoc`), so nothing here produces an artifact to keep in step.
-8. **Site** — projects `docs/` into the Starlight site, builds it, then crawls every built page for
+10. **Site** — projects `docs/` into the Starlight site, builds it, then crawls every built page for
    dead internal links (#188). **The build is not the check.** `astro build` reported success over 139
    dead links on the first run, because a page's `./routes.md` and `../../packages/…#L47` are both
    correct on GitHub and both 404 as routes; `scripts/docs/site-links.ts` is what notices.
@@ -55,7 +63,7 @@ the site's navigation, theme and search instead of TypeDoc's own HTML shell.
 Publishing is separate and **manual**: `.github/workflows/docs-site.yml` runs on
 `workflow_dispatch`, builds the same two steps, and deploys to GitHub Pages only when the run is
 asked to (`deploy: true`); otherwise it uploads the built site as an artifact. Nothing publishes on
-a push, because gate 8 has already proved the build on every PR and a second one would buy only
+a push, because gate 10 has already proved the build on every PR and a second one would buy only
 Actions minutes. ⚠ The workflow takes the site's base path from the repository
 (`ENSO_SITE_BASE: /${{ github.event.repository.name }}` → `scripts/docs/site-base.ts`, the one
 reader Astro, the projector and the crawl all share). A project site is served from
@@ -70,7 +78,7 @@ two exceptions are `git commit -a` and `git commit -- <path>`, where git hands t
 temporary index; there it gates the working tree and says so on the first line of its output.
 CI adds independent jobs or advisory steps — secret
 scan, automated review, `fallow audit` over the changed files — but none replaces the
-eight-step gate (react-doctor was one of them until #342 made it gate 4). A green editor or a
+ten-step gate (react-doctor was one of them until #342 promoted it into the gate). A green editor or a
 single test is not repository green.
 
 `test/coverage-manifest.test.ts` closes Bun's denominator hole: Bun reports coverage only for files a
@@ -115,8 +123,8 @@ table reads the numbers from source — aggregate coverage floors, global and pe
 ceilings, allowlist and exception counts.
 
 - A coverage floor may rise after the full suite proves the new number; it does not fall to land a PR.
-- A per-file complexity pin may fall after the named function shrinks; it does not rise to admit a
-  rewrite. `biome.jsonc` carries the reason beside each exception.
+- A per-function complexity pin may fall after the named function shrinks; it does not rise to admit a
+  rewrite. `.fallowrc.jsonc` carries the reason beside each exception.
 - An allowlist may shrink as leaks close. Growth needs a boundary decision with a removal condition.
 
 Counts describe reviewed surface, not quality. Four allowlist rows are not four bugs, and 90% coverage

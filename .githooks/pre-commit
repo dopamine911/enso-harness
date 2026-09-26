@@ -1,6 +1,6 @@
 #!/bin/sh
-# Pre-commit gate — runs the full check:all (biome + tsc -b + fallow + bun test + the coverage
-# floor), the single source of "green" (scripts/gate.ts). Wired via core.hooksPath, set by the
+# Pre-commit gate — runs the full check:all (oxfmt + oxlint + tsc -b + fallow + bun test + the
+# coverage floor + the docs), the single source of "green" (scripts/gate.ts). Wired via core.hooksPath, set by the
 # package.json `prepare` script on install. For a deliberate work-in-progress commit, bypass with
 # `git commit --no-verify`.
 #

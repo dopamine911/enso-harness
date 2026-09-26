@@ -85,7 +85,7 @@ async function typeAndSend(page: Page, message: string): Promise<void> {
 
 /**
  * Full-page PNG under a stable name (README.md lists them), also attached to the test so a
- * trace or HTML report links it. No console echo: biome's `noConsole` applies here and the
+ * trace or HTML report links it. No console echo: the lint gate's `no-console` applies here and the
  * names are fixed, so a reader knows the path without a log line.
  */
 async function captureScreenshot(page: Page, fileName: string): Promise<void> {

@@ -39,8 +39,8 @@ export function Card({
   return (
     <section aria-label={title} className="min-w-0 rounded-lg border bg-card p-4">
       <header className="mb-3 flex items-baseline justify-between gap-3">
-        <h2 className="font-semibold text-foreground text-sm">{title}</h2>
-        {aside === undefined ? null : <div className="text-muted-foreground text-xs">{aside}</div>}
+        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+        {aside === undefined ? null : <div className="text-xs text-muted-foreground">{aside}</div>}
       </header>
       {children}
     </section>
@@ -76,7 +76,7 @@ export function MakeupBar({
       {total > scale && scale > 0 ? (
         <span
           data-slot="scale-edge"
-          className="absolute inset-y-0 right-0 border-destructive border-l-2 bg-destructive/35"
+          className="absolute inset-y-0 right-0 border-l-2 border-destructive bg-destructive/35"
           style={{ left: `${shareOf(scale, width) * 100}%` }}
         />
       ) : null}

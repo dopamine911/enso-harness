@@ -286,7 +286,7 @@ function ContextTrend({
       }
     >
       {requests.length === 0 ? (
-        <p className="text-muted-foreground text-xs">
+        <p className="text-xs text-muted-foreground">
           a bar appears for each model request, once the first one has run
         </p>
       ) : (
@@ -342,7 +342,7 @@ function ContextTrend({
               </BarChart>
             </ChartContainer>
           </div>
-          <div className="mt-2 flex items-center justify-end gap-1 text-muted-foreground text-xs">
+          <div className="mt-2 flex items-center justify-end gap-1 text-xs text-muted-foreground">
             <button
               type="button"
               aria-label="previous bar"
@@ -400,7 +400,7 @@ function ContextCards({ context }: { context: EnsoThreadContext }): React.ReactN
   const requestCount = context.requests.length
   return (
     <div className="grid grid-cols-1 gap-4 p-4">
-      <p className="text-muted-foreground text-xs">
+      <p className="text-xs text-muted-foreground">
         {context.live ? 'live' : 'from the file'} · {countText(requestCount)} model requests · every category is pi's
         estimate (≈); the provider's own counts are named as such
       </p>
@@ -442,9 +442,9 @@ function ContextCards({ context }: { context: EnsoThreadContext }): React.ReactN
 /** What a read of the context shows before it has one: reading, or why there is none. */
 function whenRead(outcome: ContextOutcome, show: (context: EnsoThreadContext) => React.ReactNode): React.ReactNode {
   if (outcome.kind === 'reading')
-    return <p className="p-4 text-muted-foreground text-xs">reading the thread's context…</p>
+    return <p className="p-4 text-xs text-muted-foreground">reading the thread's context…</p>
   if (outcome.kind === 'failed')
-    return <p className="p-4 text-muted-foreground text-xs">no context: {outcome.problem}</p>
+    return <p className="p-4 text-xs text-muted-foreground">no context: {outcome.problem}</p>
   return show(outcome.payload)
 }
 

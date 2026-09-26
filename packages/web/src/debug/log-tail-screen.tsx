@@ -122,7 +122,7 @@ function FilterField({
 }): React.ReactNode {
   const controlId = `log-tail-${field}`
   return (
-    <label className="flex items-center gap-1.5 text-muted-foreground text-xs" htmlFor={controlId}>
+    <label className="flex items-center gap-1.5 text-xs text-muted-foreground" htmlFor={controlId}>
       <span>{field}</span>
       <Input
         id={controlId}
@@ -146,7 +146,7 @@ function FilterField({
 function LogTailControls({ filter, following, onFilter, onFollowing }: LogTailControlsProps): React.ReactNode {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <label className="flex items-center gap-1.5 text-muted-foreground text-xs" htmlFor="log-tail-level">
+      <label className="flex items-center gap-1.5 text-xs text-muted-foreground" htmlFor="log-tail-level">
         <span>level</span>
         <LogLevelSelect
           controlId="log-tail-level"

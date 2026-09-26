@@ -87,8 +87,8 @@ test('the projection rewrites every link class a route cannot serve (#188)', () 
   // docs-relative — the one page where `docs/architecture.md` and `./architecture.md` mean the
   // same thing. Anchored wrongly, every link on the site's front page points into the blob.
   expect(rewriteLinks('[arch](docs/architecture.md)', 'README.md', 'repository')).toBe('[arch](/enso/architecture/)')
-  expect(rewriteLinks('[lint](biome.jsonc)', 'README.md', 'repository')).toBe(
-    '[lint](https://github.com/dopamine911/zen-harness-foundation/blob/main/biome.jsonc)',
+  expect(rewriteLinks('[lint](oxlint.config.ts)', 'README.md', 'repository')).toBe(
+    '[lint](https://github.com/dopamine911/zen-harness-foundation/blob/main/oxlint.config.ts)',
   )
   // An external link is left exactly as it is: a site does not rewrite the web.
   expect(rewriteLinks('[pi](https://example.invalid/pi)', page)).toBe('[pi](https://example.invalid/pi)')

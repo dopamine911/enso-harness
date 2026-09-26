@@ -15,8 +15,8 @@ import { filesUnder } from '../scripts/source-tree.ts'
  * ⚠ The cost, stated: importing a module runs its top-level code. Every library module
  * here is import-clean (chat-screen.tsx guards its one `window` read for exactly this
  * reason). The files that are NOT import-clean are the named ENTRY_POINTS below — modules
- * whose body IS the program — and the VENDORED components, which share biome.jsonc's
- * exclusion boundary: upstream's code, kept diffable, not held to our coverage.
+ * whose body IS the program — and the VENDORED components, which share the linter's
+ * exclusion boundary (oxlint.config.ts): upstream's code, kept diffable, not held to our coverage.
  *
  * ⚠ Each entry-point exception is asserted to EXIST, so a renamed entry fails here instead
  * of silently widening the exclusion into a dead pattern.
@@ -44,7 +44,7 @@ const ENTRY_POINT_EXCEPTIONS = [
   'packages/web/src/server/dev-web.ts',
 ] as const
 
-/** Vendored code — biome.jsonc's exclusion boundary, applied to coverage for the same reason. */
+/** Vendored code — the linter's exclusion boundary (oxlint.config.ts), applied to coverage for the same reason. */
 const VENDORED_DIRECTORIES = ['packages/web/src/components'] as const
 /**
  * The same list as bunfig must spell it. ONE source of truth, the way `test/fallow-config.test.ts`

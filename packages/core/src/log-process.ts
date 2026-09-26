@@ -51,7 +51,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { closeSync, fchmodSync, fstatSync, mkdirSync, openSync, readSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-
 import { getTimeRotatingFileSink } from '@logtape/file'
 import {
   compareLogLevel,
@@ -70,9 +69,9 @@ import {
 import { getPrettyFormatter } from '@logtape/pretty'
 import { redactByField } from '@logtape/redaction'
 import { Check } from 'typebox/value'
-import { ENSO_LOG_ROOT, ENSO_REDACT_FIELDS, ENSO_REDACTED, ENSO_REDACTED_VALUE, EnsoLogLine } from './log.ts'
 import { ENSO_LOG_EVENTS } from './log-stats.ts'
 import { type EnsoLogFilter, LOG_TAIL_MAX_RECORDS, logLineMatches, logLineMessageParts } from './log-tail.ts'
+import { ENSO_LOG_ROOT, ENSO_REDACT_FIELDS, ENSO_REDACTED, ENSO_REDACTED_VALUE, EnsoLogLine } from './log.ts'
 import { ensoLogsDir } from './paths.ts'
 
 /**

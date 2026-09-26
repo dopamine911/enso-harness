@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
+import { PROCESS_ENVIRONMENT_READERS } from '../lint/process-environment.ts'
 import { filesUnder } from '../source-tree.ts'
 import { runGenerator } from './generator-support.ts'
 
@@ -398,31 +399,17 @@ function scanProcessEnvironmentReads(
   return directBases.length > 0
 }
 
-function noProcessEnvAllowlist(): string[] {
-  const source = readFileSync(join(ROOT, 'biome.jsonc'), 'utf8')
-  const disabled = [...source.matchAll(/"noProcessEnv"\s*:\s*"off"/g)]
-  if (disabled.length !== 1) throw new Error(`expected one noProcessEnv=off override, found ${disabled.length}`)
-  const disabledAt = disabled[0]?.index ?? -1
-  const includesAt = source.lastIndexOf('"includes"', disabledAt)
-  const openAt = source.indexOf('[', includesAt)
-  const closeAt = source.indexOf(']', openAt)
-  if (includesAt === -1 || openAt === -1 || closeAt === -1 || closeAt > disabledAt) {
-    throw new Error('could not locate the noProcessEnv allowlist in biome.jsonc')
-  }
-  return [...source.slice(openAt + 1, closeAt).matchAll(/"([^"]+)"/g)].map((match) => match[1] ?? '').sort()
-}
-
 function sameRows(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
 function assertEnvironmentInventory(scan: EnvironmentScan): void {
-  const allowlist = noProcessEnvAllowlist()
+  const allowlist = [...PROCESS_ENVIRONMENT_READERS].sort()
   if (!sameRows(scan.directFiles, allowlist)) {
     const detectedOnly = scan.directFiles.filter((file) => !allowlist.includes(file))
     const allowlistOnly = allowlist.filter((file) => !scan.directFiles.includes(file))
     throw new Error(
-      `direct environment readers and biome.jsonc noProcessEnv allowlist diverge; ` +
+      `direct environment readers and the process-environment allowlist (scripts/lint/process-environment.ts) diverge; ` +
         `detected only: ${detectedOnly.join(', ') || '(none)'}; ` +
         `allowlist only: ${allowlistOnly.join(', ') || '(none)'}`,
     )
@@ -586,13 +573,13 @@ function generate(): string {
     '<!-- generated: scripts/docs/env-and-config.ts -->',
     '# Environment and configuration reference',
     '',
-    'Generated from the owned source roots, `biome.jsonc`, the core config/path declarations,',
+    'Generated from the owned source roots, `scripts/lint/process-environment.ts`, the core config/path declarations,',
     '`enso.config.json`, and `packages/harness/package.json`. No machine environment is read.',
     '',
     '## Explicit environment keys',
     '',
     `The ${environment.directFiles.length} files that directly touch the process environment exactly match the`,
-    '`noProcessEnv` exception list in `biome.jsonc`; generation fails if either side gains or loses a file.',
+    '`node/no-process-env` exception list in `scripts/lint/process-environment.ts`; generation fails if either side gains or loses a file.',
     'Rows cover literal dot access, literal bracket access, destructuring, `node:process` `env` imports,',
     'grounded `environment.KEY` seams, and keys explicitly written beside a process-environment spread.',
     '',

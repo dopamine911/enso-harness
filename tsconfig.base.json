@@ -9,7 +9,7 @@
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
     "verbatimModuleSyntax": true,
-    // Biome's `useExhaustiveSwitchCases` proves every arm EXISTS; only this proves no arm
+    // oxlint's `switch-exhaustiveness-check` proves every arm EXISTS; only this proves no arm
     // runs into the next one (#230). The repo's central pattern is a switch over a
     // discriminated union, and `scripts/enso-logs.ts` parses argv with a `break`-based one.
     "noFallthroughCasesInSwitch": true,

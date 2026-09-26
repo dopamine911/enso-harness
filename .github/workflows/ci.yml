@@ -1,15 +1,15 @@
 # CI — the enforced quality gate.
 #
-# Runs the SAME gate as the local pre-commit hook (`bun run check:all` = biome → tsc → fallow →
-# react-doctor → bun test → the total-coverage floor → typedoc → the docs site and its link
-# crawl), so "green"
+# Runs the SAME gate as the local pre-commit hook (`bun run check:all` = oxfmt → oxlint → tsc →
+# fallow dead-code → fallow complexity → react-doctor → bun test → the total-coverage floor →
+# typedoc → the docs site and its link crawl), so "green"
 # means one thing whether it ran on a machine or here. A commit made with `--no-verify`, or by
 # someone without the hook installed, is caught at the PR instead of slipping into main.
 #
-# The coverage floor needs no separate step: it is gate 6 inside check:all
+# The coverage floor needs no separate step: it is gate 8 inside check:all
 # (scripts/check-coverage.ts — the TOTAL floor bun's own per-file coverageThreshold
 # cannot express; see that file's header for the 2026-09-04 measurement). Nor does the site:
-# gate 8 builds it and crawls every built page for dead links (scripts/docs/site-links.ts).
+# gate 10 builds it and crawls every built page for dead links (scripts/docs/site-links.ts).
 name: CI
 
 on:
@@ -48,7 +48,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Gate (biome + tsc + fallow baseline + tests + coverage floor)
+      - name: Gate (oxfmt + oxlint + tsc + fallow + tests + coverage floor + docs)
         run: bun run check:all
 
   # ADVISORY, deliberately (#163): the blocking gate refuses a NEW dead-code finding; this

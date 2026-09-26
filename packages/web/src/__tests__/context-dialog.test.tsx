@@ -6,6 +6,7 @@ import { ThreadStoresContext } from '../store.ts'
 import type * as ThreadContextModule from '../thread-context.tsx'
 import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 import { ensureDom, releaseDom } from './dom-environment.ts'
+import { requestedUrl } from './scripted-server.ts'
 import { waitUntil } from './wait-until.ts'
 
 /**
@@ -38,7 +39,7 @@ test('closed, the dialog reads nothing; open, it shows Current Context and the C
   const detail: EnsoContextRequestDetail = { threadId: stores.threadId, request: 'next', elements: [], left: [] }
   const asked: string[] = []
   globalThis.fetch = ((input: string | URL | Request): Promise<Response> => {
-    const url = String(input)
+    const url = requestedUrl(input)
     asked.push(url)
     return Promise.resolve(Response.json(url.endsWith('/context') ? context : detail))
   }) as typeof fetch

@@ -1,7 +1,7 @@
 /**
  * Shell-shaped literals the scanner tests write, in one place (#261, PR #289 review).
  *
- * ⚠ `braced` exists to dodge Biome's `noTemplateCurlyInString`, not to save typing: a test
+ * ⚠ `braced` exists to dodge the lint gate's `no-template-curly-in-string`, not to save typing: a test
  * that needs the text `${NAME}` cannot write it inside a template literal without tripping
  * that rule, and suppressing the rule per line is what this repository refuses. Three test
  * files needed the same escape hatch and each had declared its own copy, so the next one

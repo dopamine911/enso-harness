@@ -103,7 +103,7 @@ export function TranscriptLine({
       )}
     >
       <Icon className="mt-px size-3.5 shrink-0" />
-      <span className="min-w-0 whitespace-pre-wrap break-words">
+      <span className="min-w-0 break-words whitespace-pre-wrap">
         <LinkedText text={message} />
       </span>
     </div>
@@ -183,7 +183,7 @@ function StartupNotices({ notifications }: { notifications: readonly EnsoNotific
   if (notifications.length === 0) return null
   const noun = notifications.length === 1 ? 'notice' : 'notices'
   return (
-    <details data-enso-startup-notices="" className="text-muted-foreground text-xs">
+    <details data-enso-startup-notices="" className="text-xs text-muted-foreground">
       <summary className="cursor-pointer">
         {notifications.length} startup {noun} from extensions
       </summary>

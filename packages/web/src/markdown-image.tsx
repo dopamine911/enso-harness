@@ -54,14 +54,15 @@ export function MarkdownImage(props: ComponentPropsWithoutRef<'img'>): React.Rea
   return (
     <button
       aria-label={`load image from ${host}`}
-      className="not-prose my-1 flex max-w-full flex-col items-start gap-0.5 rounded-md border bg-muted/50 px-2 py-1 text-left text-muted-foreground text-xs hover:bg-muted"
+      className="not-prose my-1 flex max-w-full flex-col items-start gap-0.5 rounded-md border bg-muted/50 px-2 py-1 text-left text-xs text-muted-foreground hover:bg-muted"
       onClick={() => setRequested(true)}
       type="button"
     >
       <span>
-        {alt || 'image'} · <strong className="text-foreground">{host}</strong> · click to load
+        {alt === undefined || alt === '' ? 'image' : alt} · <strong className="text-foreground">{host}</strong> · click
+        to load
       </span>
-      <span className="break-all font-mono">{source}</span>
+      <span className="font-mono break-all">{source}</span>
     </button>
   )
 }

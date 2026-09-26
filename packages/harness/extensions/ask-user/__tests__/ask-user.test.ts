@@ -16,12 +16,15 @@ import askUser, { DONE_ROW, OTHER_ROW } from '../index.ts'
 
 interface CapturedTool {
   name: string
+  /** pi's five positional execute arguments, named as a tuple — the gate caps declared parameters at four. */
   execute: (
-    toolCallId: string,
-    params: { questions: EnsoQuestion[] },
-    signal: AbortSignal | undefined,
-    onUpdate: undefined,
-    extensionContext: unknown,
+    ...executeArguments: [
+      toolCallId: string,
+      params: { questions: EnsoQuestion[] },
+      signal: AbortSignal | undefined,
+      onUpdate: undefined,
+      extensionContext: unknown,
+    ]
   ) => Promise<{ content: { type: string; text: string }[] }>
 }
 

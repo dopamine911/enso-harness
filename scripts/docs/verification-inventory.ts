@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
+import fallowConfig from '../../.fallowrc.jsonc'
 import { findRepoRoot } from '../../packages/core/src/paths.ts'
 import { filesUnder } from '../source-tree.ts'
 import { detectedExceptionConstants, numericConstant, stringArray, stringConstant } from './gate-source.ts'
@@ -26,7 +27,8 @@ import { assertExactKeys, runGenerator } from './generator-support.ts'
 const ROOT = findRepoRoot(import.meta.url)
 const TEST_ROOT = join(ROOT, 'test')
 const COVERAGE_SCRIPT = 'scripts/check-coverage.ts'
-const BIOME_CONFIG = 'biome.jsonc'
+const FALLOW_CONFIG = '.fallowrc.jsonc'
+const COMPLEXITY_SCRIPT = 'complexity:check'
 const EXTRA_GATE_FILES = [
   'coverage-manifest.test.ts',
   'check-coverage.test.ts',
@@ -79,10 +81,10 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
     limitation: 'Exercises synthetic LCOV records; it does not run the suite or measure live coverage.',
   },
   'test/complexity-ratchet.test.ts': {
-    roots: [BIOME_CONFIG],
+    roots: [FALLOW_CONFIG, 'package.json'],
     exceptions: [],
     limitation:
-      'Re-measures today’s scores and asserts each file pin equals its own worst function; whether the pinned complexity is warranted is not a question it can ask.',
+      'Re-runs the gate’s own fallow command and asserts each per-function pin is live and equal to its function’s score; whether the pinned complexity is warranted is not a question it can ask.',
   },
   'test/coverage-manifest.test.ts': {
     rootArrays: ['LIBRARY_SOURCE_ROOTS'],
@@ -167,7 +169,7 @@ const GATE_METADATA: Readonly<Record<string, GateMetadata>> = {
       },
     ],
     limitation:
-      'The executable fixture covers the externally fixed `dir` key and asserts each diagnostic’s severity; the site scan recognizes that key spelling and reports an exemption no file spells. The counted `EXEMPTED_KEY_SITES` row counts exempted FILES — the exempted NAMES live in `.biome/naming.grit`, which this generator does not parse.',
+      'The executable fixture covers the externally fixed `dir` key and asserts each diagnostic’s severity; the site scan recognizes that key spelling and reports an exemption no file spells. The counted `EXEMPTED_KEY_SITES` row counts exempted FILES — the exempted NAMES live in `scripts/lint/naming-policy.ts`, which the test imports and this generator does not parse.',
   },
   'test/no-lint-suppressions.test.ts': {
     rootArrays: ['SCANNED_ROOTS'],
@@ -341,15 +343,6 @@ const DOUBLE_METADATA: readonly DoubleMetadata[] = [
   },
 ]
 
-const COMPLEXITY_REASONS: Readonly<Record<string, string>> = {
-  global: 'Global cognitive-complexity ceiling for code without a narrower pin.',
-  'packages/harness/core/shell-segments.ts':
-    'External shell quote/escape scanners stay linear and close to their upstream shape.',
-  'packages/harness/extensions/guards/index.ts':
-    'The security dispatch and write-denial precedence is kept in one readable control flow.',
-  'packages/web/src/host/map-events.ts': 'The mapper keeps one branch per external event-protocol kind.',
-}
-
 function repositoryFile(path: string): string {
   return readFileSync(join(ROOT, path), 'utf8')
 }
@@ -413,43 +406,63 @@ interface Ratchet {
   readonly reason: string
 }
 
-function complexityRatchets(): Ratchet[] {
-  const source = repositoryFile(BIOME_CONFIG)
-  const matches = [
-    ...source.matchAll(
-      /"noExcessiveCognitiveComplexity"\s*:\s*\{\s*"level"\s*:\s*"([^"]+)"[\s\S]*?"maxAllowedComplexity"\s*:\s*(\d+(?:\.\d+)?)/g,
-    ),
-  ]
-  if (matches.length === 0) throw new Error(`${BIOME_CONFIG}: no cognitive-complexity values`)
-  const ratchets: Ratchet[] = []
-  let previousEnd = 0
-  for (const [matchIndex, match] of matches.entries()) {
-    const key = matchIndex === 0 ? 'global' : lastIncludes(source.slice(previousEnd, match.index))
-    const reason = COMPLEXITY_REASONS[key]
-    if (reason === undefined) throw new Error(`${BIOME_CONFIG}: no reason metadata for complexity entry ${key}`)
-    ratchets.push({
-      kind: matchIndex === 0 ? 'Complexity ceiling' : 'Complexity pin',
-      value: `level \`${match[1]}\`, max \`${match[2]}\``,
-      location: key === 'global' ? `${linkedPath(BIOME_CONFIG)} — global` : `${linkedPath(BIOME_CONFIG)} — \`${key}\``,
-      reason,
-    })
-    previousEnd = (match.index ?? 0) + match[0].length
-  }
-  assertExactKeys(
-    'complexity reason',
-    ratchets.map((row) => (row.location.includes('— `') ? (/— `([^`]+)`/.exec(row.location)?.[1] ?? '') : 'global')),
-    Object.keys(COMPLEXITY_REASONS),
-  )
-  return ratchets
+interface ComplexityPin {
+  readonly files: readonly string[]
+  readonly functions: readonly string[]
+  readonly maxCognitive: number
+  readonly reason: string
 }
 
-function lastIncludes(source: string): string {
-  const matches = [...source.matchAll(/"includes"\s*:\s*\[([^\]]*)\]/g)]
-  const body = matches.at(-1)?.[1]
-  if (body === undefined) throw new Error(`${BIOME_CONFIG}: complexity override has no includes array`)
-  const values = [...body.matchAll(/"([^"]+)"/g)].map((match) => match[1] ?? '')
-  if (values.length !== 1) throw new Error(`${BIOME_CONFIG}: complexity override must name exactly one file`)
-  return values[0] ?? ''
+/** Whether one `health.thresholdOverrides` entry has the one-file, one-function shape published here. */
+function isComplexityPin(entry: unknown): entry is ComplexityPin {
+  if (typeof entry !== 'object' || entry === null) return false
+  if (!('files' in entry && 'functions' in entry && 'maxCognitive' in entry && 'reason' in entry)) return false
+  return (
+    Array.isArray(entry.files) &&
+    entry.files.length === 1 &&
+    Array.isArray(entry.functions) &&
+    entry.functions.length === 1 &&
+    typeof entry.maxCognitive === 'number' &&
+    typeof entry.reason === 'string'
+  )
+}
+
+/**
+ * The complexity gate's ceiling (the `complexity:check` script's `--max-cognitive`) and its
+ * per-function pins (`.fallowrc.jsonc` → `health.thresholdOverrides`). An entry this cannot read
+ * as one file, one function, a number and a reason is REFUSED, never skipped.
+ */
+function complexityRatchets(): Ratchet[] {
+  const scripts: Readonly<Record<string, string>> = JSON.parse(repositoryFile('package.json')).scripts
+  const ceiling = /--max-cognitive (\d+)/.exec(scripts[COMPLEXITY_SCRIPT] ?? '')?.[1]
+  if (ceiling === undefined) throw new Error(`package.json: \`${COMPLEXITY_SCRIPT}\` sets no --max-cognitive`)
+  // Bun imports the JSONC config untyped; every field read below is checked before it is used.
+  const config: unknown = fallowConfig
+  const health: unknown =
+    typeof config === 'object' && config !== null && 'health' in config ? config.health : undefined
+  const overrides: unknown =
+    typeof health === 'object' && health !== null && 'thresholdOverrides' in health
+      ? health.thresholdOverrides
+      : undefined
+  if (!Array.isArray(overrides)) throw new Error(`${FALLOW_CONFIG}: health.thresholdOverrides is not a list`)
+  return [
+    {
+      kind: 'Complexity ceiling',
+      value: `cognitive max \`${ceiling}\``,
+      location: `${linkedPath('package.json')} — \`${COMPLEXITY_SCRIPT}\``,
+      reason: 'Global cognitive-complexity ceiling for code without a narrower pin.',
+    },
+    ...overrides.map((entry: unknown): Ratchet => {
+      if (!isComplexityPin(entry))
+        throw new Error(`${FALLOW_CONFIG}: a complexity override is not one file + one function`)
+      return {
+        kind: 'Complexity pin',
+        value: `cognitive max \`${entry.maxCognitive}\``,
+        location: `${linkedPath(FALLOW_CONFIG)} — \`${entry.files[0]}:${entry.functions[0]}\``,
+        reason: entry.reason,
+      }
+    }),
+  ]
 }
 
 /** Repository-relative paths under `root`, the shape every table here keys on. */
@@ -613,10 +626,10 @@ function generate(): string {
     '<!-- generated: scripts/docs/verification-inventory.ts -->',
     '# Verification inventory',
     '',
-    'Generated from gate sources, coverage and Biome ratchets, and exact test-double declarations and imports.',
+    'Generated from gate sources, coverage and complexity ratchets, and exact test-double declarations and imports.',
     '**Counts are inventory, not quality scores.** A larger count records a larger reviewed surface; it does not make that surface better.',
     '',
-    'Parser boundary: this generator reads the repository’s current flat string arrays, numeric constants, Biome complexity objects,',
+    'Parser boundary: this generator reads the repository’s current flat string arrays, numeric constants, fallow complexity overrides,',
     'and exact helper exports. Unsupported or stale shapes fail generation instead of being silently omitted.',
     '',
     '## Enforcement gates',

@@ -1,6 +1,6 @@
-import { defineCollection } from 'astro:content'
 import { docsLoader } from '@astrojs/starlight/loaders'
 import { docsSchema } from '@astrojs/starlight/schema'
+import { defineCollection } from 'astro:content'
 
 /**
  * The docs collection. `docsLoader()` reads `src/content/docs/` and takes no path argument, so

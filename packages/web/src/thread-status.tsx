@@ -164,7 +164,7 @@ function ContextMeter({ context }: { readonly context: EnsoContextUsage }): Reac
         min={0}
         max={100}
         value={Math.min(percent, 100)}
-        className="h-1.5 w-16 appearance-none overflow-hidden rounded-full bg-muted-foreground/25 [&::-moz-meter-bar]:bg-foreground/60 [&::-webkit-meter-bar]:border-0 [&::-webkit-meter-bar]:bg-none [&::-webkit-meter-bar]:bg-transparent [&::-webkit-meter-optimum-value]:bg-foreground/60 [&::-webkit-meter-optimum-value]:bg-none"
+        className="h-1.5 w-16 appearance-none overflow-hidden rounded-full bg-muted-foreground/25 [&::-moz-meter-bar]:bg-foreground/60 [&::-webkit-meter-bar]:border-0 [&::-webkit-meter-bar]:bg-transparent [&::-webkit-meter-bar]:bg-none [&::-webkit-meter-optimum-value]:bg-foreground/60 [&::-webkit-meter-optimum-value]:bg-none"
       />
       {percent}% · {COMPACT_TOKENS.format(context.tokens)} / {window}
     </span>
@@ -215,7 +215,7 @@ export function ThreadStatusView({
   return (
     <footer
       id="thread-status"
-      className="flex items-center gap-3 border-t px-4 py-1 font-mono text-muted-foreground text-xs"
+      className="flex items-center gap-3 border-t px-4 py-1 font-mono text-xs text-muted-foreground"
     >
       <span
         className="flex items-center gap-1.5"

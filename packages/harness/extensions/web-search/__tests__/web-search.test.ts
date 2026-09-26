@@ -16,12 +16,15 @@ import { createWebSearch, fallbackReasonFor, type WebSearchDependencies } from '
 interface CapturedTool {
   name: string
   description: string
+  /** pi's five positional execute arguments, named as a tuple — the gate caps declared parameters at four. */
   execute: (
-    toolCallId: string,
-    params: { query: string },
-    signal: AbortSignal | undefined,
-    onUpdate: undefined,
-    extensionContext: unknown,
+    ...executeArguments: [
+      toolCallId: string,
+      params: { query: string },
+      signal: AbortSignal | undefined,
+      onUpdate: undefined,
+      extensionContext: unknown,
+    ]
   ) => Promise<{ content: { type: string; text: string }[] }>
 }
 

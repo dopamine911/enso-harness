@@ -91,6 +91,20 @@ const SCRIPTED_LAUNCH_PROJECT: EnsoProject = {
   launch: true,
 }
 
+/** The URL a `fetch` was asked for, whichever of its three forms the caller handed it. */
+export function requestedUrl(input: string | URL | Request): string {
+  if (typeof input === 'string') return input
+  if (input instanceof URL) return input.href
+  return input.url
+}
+
+/** A scripted route's posted body, parsed: the page posts JSON text, so anything else is a test bug. */
+function postedJson(init: RequestInit | undefined): unknown {
+  const body = init?.body
+  if (typeof body !== 'string') throw new Error(`expected a JSON text body, got ${typeof body}`)
+  return JSON.parse(body)
+}
+
 export function createScriptedFetch(options: ScriptedFetchOptions = {}): ScriptedFetch {
   const promptStatus = options.promptStatus ?? {
     status: 202,
@@ -167,12 +181,12 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   const threadActions: Record<string, (init: RequestInit | undefined) => Promise<Response>> = {
     follow: (): Promise<Response> => Promise.resolve(openFollow()),
     prompt: (init: RequestInit | undefined): Promise<Response> => {
-      prompts.push(JSON.parse(String(init?.body)) as { message: string; admission?: string; images?: unknown[] })
+      prompts.push(postedJson(init) as { message: string; admission?: string; images?: unknown[] })
       const body = typeof promptStatus.body === 'string' ? promptStatus.body : JSON.stringify(promptStatus.body)
       return promptGate.promise.then(() => new Response(body, { status: promptStatus.status }))
     },
     dialog: (init: RequestInit | undefined): Promise<Response> => {
-      const answer = JSON.parse(String(init?.body)) as { id?: string }
+      const answer = postedJson(init) as { id?: string }
       const questionId = answer.id ?? ''
       dialogs.push(answer)
       // Recorded first, then refused a response: an unreachable answer IS one the page sent.
@@ -186,11 +200,11 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
       return Promise.resolve(new Response(null, { status: 204 }))
     },
     mode: (init: RequestInit | undefined): Promise<Response> => {
-      modeChanges.push(JSON.parse(String(init?.body)))
+      modeChanges.push(postedJson(init))
       return Promise.resolve(new Response(modeStatus === 204 ? null : 'no', { status: modeStatus }))
     },
     command: (init: RequestInit | undefined): Promise<Response> => {
-      hostCommands.push(JSON.parse(String(init?.body)))
+      hostCommands.push(postedJson(init))
       if (commandStatus === 204) return Promise.resolve(new Response(null, { status: 204 }))
       return Promise.resolve(new Response(options.commandBody ?? 'no', { status: commandStatus }))
     },
@@ -202,7 +216,7 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
   }
   const fetchImpl = ((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     // Relative URLs, as the browser issues them; the base only makes `pathname` parse.
-    const path = new URL(String(input), 'http://localhost').pathname
+    const path = new URL(requestedUrl(input), 'http://localhost').pathname
     const action = threadAction(path)
     const respond = action === undefined ? undefined : threadActions[action]
     if (respond !== undefined) return respond(init)
