@@ -225,6 +225,39 @@ export function looksLikeSecret(absolutePath: string, fragments: readonly string
 }
 
 /**
+ * The credential location a search starting at this directory would reach beneath it, if any:
+ * each fragment placed in the user's home (`~/.ssh`, `~/.aws`, `~/.docker/config.json`, …), and
+ * the directory an ancestor of it or the location itself (#160 §4).
+ *
+ * {@link looksLikeSecret} judges the one path it is given, which is the right question for a tool
+ * that reads that path. A recursive search reads everything BENEATH it, so `~/.aws` refused while
+ * `~` — and `/` — searched the same files. As {@link looksLikeSecret} does, both the literal
+ * directory and the realpath of its nearest existing ancestor are judged (a workspace symlink to
+ * home), against the literal home and its realpath.
+ *
+ * ⚠ WHAT THIS DOES NOT SEE, stated: a fragment's directory anywhere but home (`/srv/app/.aws`),
+ * and a basename-class file (`.env`, `id_rsa`) beneath the directory — those are found only by
+ * walking the tree. Beneath a git work tree the search tool's own ignore rules usually skip them;
+ * elsewhere they are reachable.
+ *
+ * @group Guard predicates
+ */
+export function secretLocationBeneath(
+  absolutePath: string,
+  fragments: readonly string[],
+  home: string = homedir(),
+): string | undefined {
+  const directories = new Set([absolutePath, realpathOfNearestExisting(absolutePath)])
+  for (const homeDirectory of new Set([home, realpathOfNearestExisting(home)])) {
+    for (const fragment of fragments) {
+      const location = resolve(join(homeDirectory, fragment))
+      for (const directory of directories) if (isInsideRoot(location, directory)) return location
+    }
+  }
+  return undefined
+}
+
+/**
  * True when the path contains a fragment that is never writable.
  *
  * @group Guard predicates

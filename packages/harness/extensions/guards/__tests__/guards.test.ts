@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdtempSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createCodingTools, createPowerShellTool, createReadOnlyTools } from '@earendil-works/pi-coding-agent'
 import { ENSO_GUARD_DENIAL_ENTRY, ENSO_GUARD_RULES, readEnsoGuardDenial } from '@enso/core'
@@ -746,6 +746,32 @@ test('⚠ grep over the credential DIRECTORY is blocked — the #8 incident shap
   const result = call('grep', { path: '~/.aws' })
   expect(result?.block).toBe(true)
   expect(result?.reason).toContain('credential')
+})
+
+// #160 §4: pi's grep is `rg --hidden` over whatever its path holds, so a directory ABOVE a
+// credential directory reads the credential files too. The gate judged the one path it was
+// given: `~/.aws` refused, `~` allowed, and `grep aws_secret_access_key path=~` returned the line.
+for (const above of ['~', '/', dirname(homedir())]) {
+  test(`⚠ grep over "${above}", which holds ~/.aws beneath it, is blocked (#160 §4)`, () => {
+    const result = call('grep', { path: above })
+    expect(result?.block).toBe(true)
+    expect(result?.reason).toContain(join(homedir(), '.ssh'))
+  })
+}
+
+test('⚠ grep through a workspace symlink to home is blocked: the realpath is judged too (#160 §4)', () => {
+  const link = join(mkdtempSync(join(tmpdir(), 'enso-guard-link-')), 'notes')
+  symlinkSync(homedir(), link)
+  expect(call('grep', { path: link })?.block).toBe(true)
+})
+
+// Names are not contents: `ls ~` and `find ~` list what is there and read no file, and refusing
+// them would block the most ordinary look around there is. A directory that holds no credential
+// location is searched as before.
+test('ls and find over home, and grep over a directory holding no credential location, are allowed', () => {
+  expect(call('ls', { path: '~' })).toBeUndefined()
+  expect(call('find', { path: '~', pattern: '*.md' })).toBeUndefined()
+  expect(call('grep', { path: cwd, pattern: 'x' })).toBeUndefined()
 })
 
 // The consuming-module spot check: `tool_result` resolves through the same function, so a

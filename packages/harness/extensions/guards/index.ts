@@ -22,6 +22,7 @@ import {
   isProtectedForWrite,
   looksLikeSecret,
   resolveAgainstCwd,
+  secretLocationBeneath,
 } from '../../core/index.ts'
 
 /**
@@ -158,6 +159,15 @@ const MUTATING_PATH_TOOLS = new Set([TOOL_WRITE, TOOL_EDIT])
 const log = ensoLogger('extension', 'guards')
 
 const KNOWLEDGE_CONFERRING_TOOLS = new Set([TOOL_READ, TOOL_WRITE])
+
+/**
+ * The readers that return NAMES, never contents: pi's `ls` (a readdir) and `find` (fd). They are
+ * the one exception to the search-beneath check (#160 §4) — listing `~` shows that `.aws` exists
+ * and reads no file in it, and refusing it would block the most ordinary look around there is.
+ * An EXCLUSION again, for the reason the reader gate gives: a reader not named here gets the
+ * check, so a future recursive tool is refused over home until someone decides it reads names.
+ */
+const NAME_ONLY_READERS = new Set(['ls', 'find'])
 
 /**
  * The tool's arguments as a plain record, whatever actually arrived. pi's contract says
@@ -507,21 +517,37 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
       return undefined
     }
 
-    // --- every remaining tool carrying a `path` reads the filesystem: deny credential
-    // material. This is an EXCLUSION, never an inclusion list, and the asymmetry is the
-    // whole point for a boundary: an over-broad reader set blocks something harmless and
-    // says so, while a too-narrow one permits a credential read silently. pi ships `read`,
-    // `grep`, `find` and `ls` with a `path` today — an inclusion list naming only `read`
-    // left `grep` over ~/.aws returning the credential line, past a guard whose own header
-    // claimed it denied secret reads.
+    return readerDenial(event.toolName, candidate, target)
+  }
+
+  /**
+   * Every remaining tool carrying a `path` reads the filesystem: deny credential material. This is
+   * an EXCLUSION, never an inclusion list, and the asymmetry is the whole point for a boundary: an
+   * over-broad reader set blocks something harmless and says so, while a too-narrow one permits a
+   * credential read silently. pi ships `read`, `grep`, `find` and `ls` with a `path` today — an
+   * inclusion list naming only `read` left `grep` over ~/.aws returning the credential line, past a
+   * guard whose own header claimed it denied secret reads.
+   *
+   * #160 §4: and pi's `grep` is `rg --hidden` over everything beneath its path, so a directory ABOVE
+   * a credential directory reads it too — that incident, reached one directory up. A reader that
+   * returns names only is exempt from that second check (`NAME_ONLY_READERS`).
+   */
+  function readerDenial(toolName: string, candidate: string, target: string): GuardDenial | undefined {
     if (looksLikeSecret(target, policy.secretPathFragments)) {
       return deny(
         'secret-read',
-        `Reading "${candidate}" via ${event.toolName} is blocked: it matches a credential pattern. ` +
+        `Reading "${candidate}" via ${toolName} is blocked: it matches a credential pattern. ` +
           `A secret read is the precondition for exfiltration, so this is denied even for inspection.`,
       )
     }
-
-    return undefined
+    if (NAME_ONLY_READERS.has(canonicalToolName(toolName))) return undefined
+    const reached = secretLocationBeneath(target, policy.secretPathFragments)
+    if (reached === undefined) return undefined
+    return deny(
+      'secret-read',
+      `Searching "${candidate}" via ${toolName} is blocked: ${reached} is beneath it, and ${toolName} reads ` +
+        `every file under its path, hidden ones included — the credential material a direct read of ` +
+        `${reached} is refused. Search a directory that does not contain it.`,
+    )
   }
 }

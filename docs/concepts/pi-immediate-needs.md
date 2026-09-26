@@ -235,7 +235,7 @@ Start deny-by-default with a narrow allow set and let it accrete.
 |---|---|---|---|---|
 | 1 | Workspace confinement for writes | `tool_call` block | Small — **do first** | **Landed** — the guards ([`seams/guards.md`](../seams/guards.md)) |
 | 2 | Default bash timeout | tool override or clamp | Trivial | **Landed** — the guard patches `timeout` in when absent ([`seams/guards.md`](../seams/guards.md)) |
-| 3 | Secret-path denial, read and write | tool override (omp example) | Small | **Landed** — `secret-read`, and on the bash route (#204); `grep`/`find`/`ls` too (#8) |
+| 3 | Secret-path denial, read and write | tool override (omp example) | Small | **Landed** — `secret-read`, and on the bash route (#204); `grep`/`find`/`ls` too (#8); `grep` over a directory holding one, too (#160 §4) |
 | 4 | Egress policy decision | `tool_call` on bash | Medium, mostly deciding | **Landed as a bar, not a boundary** (#9) — ad-hoc network clients denied, `web_fetch`/`web_search` the sanctioned route ([`seams/web-providers.md`](../seams/web-providers.md)); git remotes and interpreters stay open by statement. #160 (the deny is closed by spelling, not by class) is open |
 | 5 | `write` requires prior read or a non-existent path | `tool_call` precondition | Small | **Landed** — `read-before-write` (#10) |
 | 6 | Stale-write detection | port omp `conflict-detect.ts` | Small port | **Landed** — `stale-write`, built rather than ported: the stamp is pi's own `ino:size:mtimeNs:ctimeNs` (#11) |

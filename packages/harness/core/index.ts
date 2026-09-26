@@ -33,6 +33,7 @@ export {
   isPersistenceWriteTarget,
   isProtectedForWrite,
   looksLikeSecret,
+  secretLocationBeneath,
   resolveAgainstCwd,
 } from './paths.ts'
 export { createSessionReadTracker } from './read-tracker.ts'

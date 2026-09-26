@@ -66,6 +66,10 @@ sequenceDiagram
    thread's knowledge of the file — *stale* refuses both tools, *unknown and existing* refuses `write`
    only (#10, #11). Every other tool carrying a `path` is a reader and a credential pattern denies it:
    exclusion, because an inclusion list naming only `read` once let `grep` over `~/.aws` through.
+   A reader is also refused when its path holds a credential location beneath it — `grep` over `~`
+   or `/` recurses into `~/.aws` the same way (#160 §4, `#secretLocationBeneath`) — except `ls` and
+   `find`, which return names, never contents. Not seen: a fragment's directory outside home, and a
+   basename-class file (`.env`) beneath the path, which only a walk would find.
 5. **Every verdict is a record** (#132): a denial at `warn` with `toolCallId`, `toolName`, the path
    and the reason; an allow at `debug` — never silent (`#guardsWithDependencies`).
 6. **Knowledge comes from results, never from calls.** The `tool_result` handler records a file as
