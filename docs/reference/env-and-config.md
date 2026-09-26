@@ -38,6 +38,8 @@ behavior when an optional field is omitted; required fields have no schema defau
 
 | Field | Required | Default when omitted | Reader |
 |---|---|---|---|
+| `projects` | no | No roots: the launch directory is the only project, and registering another is refused. | `packages/web/src/server/dev.ts` → `startEnsoServer({ projectRoots })` |
+| `projects.roots` | yes | n/a — absolute or `~/` paths; a page may register a project only strictly under one (#395), and a root taken out hides the projects under it | `packages/web/src/server/projects.ts#createProjectRegistry` |
 | `webFetch` | yes | None; omission makes the strict config unreadable. | `packages/harness/extensions/web-fetch/index.ts#createWebFetch` |
 | `webFetch.allowedHosts` | yes | None in the schema; the committed policy is shown from `enso.config.json` below. | `packages/harness/extensions/web-fetch/index.ts#createWebFetch` |
 | `webSearch` | no | `{}`; current-model routing with no Tavily domain filters. | `packages/harness/extensions/web-search/index.ts#createWebSearch` |
@@ -61,6 +63,7 @@ These are every exported path assembled with `ENSO_RUNTIME_DIRECTORY` in `packag
 | `.enso/logs` | `ensoLogsDir` | `configureProcessLogging` creates it and every harness process appends to the day file. | One file per local day; logging retains 14 days. |
 | `.enso/pi-agent` | `ensoAgentDir` | The TUI/server launchers create it; pi and `createAgentHost` write settings, auth, sessions, and the multi-account pin. | Machine-local state shared across launches; retained until the operator removes it. |
 | `.enso/print-harness` | `printHarnessDir` | `scripts/print-harness.ts#materializePrintHarness` rebuilds the package mirror for non-interactive launches. | Machine-local scratch; reconciled on every print launch. |
+| `.enso/projects.json` | `ensoProjectsPath` | The web server, when a page registers or removes a project (#395); written whole and renamed over. | Machine-local until a project is removed; entries outside the configured roots are kept but not served. |
 | `.enso/secrets.env` | `ensoSecretsPath` | Operator only; harness code reads and quarantines but never writes it. | Machine-local until the operator edits or removes it; secret reads are per call. |
 
 ## Harness manifest resources

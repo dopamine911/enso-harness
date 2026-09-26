@@ -1420,6 +1420,7 @@ test("Previous Threads lists the server's stored threads; a click resumes one wi
     storedThreads: [
       {
         threadId: 'stored-1',
+        projectId: 'p-launch',
         title: 'fix the login bug',
         lastActivityAt: new Date().toISOString(),
         messageCount: 2,
@@ -1429,6 +1430,7 @@ test("Previous Threads lists the server's stored threads; a click resumes one wi
     histories: {
       'stored-1': {
         threadId: 'stored-1',
+        projectId: 'p-launch',
         messages: [
           { id: 'u1', role: 'user', parts: [{ type: 'text', content: 'fix the login bug' }] },
           { id: 'a1', role: 'assistant', parts: [{ type: 'text', content: 'Looking at auth.ts' }] },
@@ -1467,6 +1469,7 @@ test("a resumed thread's image renders as an <img> from the stored history, byte
     storedThreads: [
       {
         threadId: 'stored-img',
+        projectId: 'p-launch',
         title: 'what does this say?',
         lastActivityAt: new Date().toISOString(),
         messageCount: 1,
@@ -1476,6 +1479,7 @@ test("a resumed thread's image renders as an <img> from the stored history, byte
     histories: {
       'stored-img': {
         threadId: 'stored-img',
+        projectId: 'p-launch',
         messages: [
           {
             id: 'u1',
@@ -1514,6 +1518,7 @@ test("a resumed thread's refused attempt says the refusal in its own bubble, bef
     storedThreads: [
       {
         threadId: 'stored-refused',
+        projectId: 'p-launch',
         title: 'hi',
         lastActivityAt: new Date().toISOString(),
         messageCount: 3,
@@ -1523,6 +1528,7 @@ test("a resumed thread's refused attempt says the refusal in its own bubble, bef
     histories: {
       'stored-refused': {
         threadId: 'stored-refused',
+        projectId: 'p-launch',
         messages: [
           { id: 'u1', role: 'user', parts: [{ type: 'text', content: 'hi' }] },
           {

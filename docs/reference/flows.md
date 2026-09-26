@@ -5,11 +5,13 @@ Every node below is read out of the source the flow runs through — the route t
 
 ## Control plane
 
-The 6 control routes: what the browser can ask the runtime to do. Observation routes are the next diagram's first stage rather than a second copy of it.
+The 8 control routes: what the browser can ask the runtime to do. Observation routes are the next diagram's first stage rather than a second copy of it.
 
 ```mermaid
 flowchart LR
   Browser["Browser"]
+  Browser -->|POST /api/projects| R_POST_api_projects["respondToProjectRegistration → ProjectRegistry.register"]
+  Browser -->|DELETE /api/projects/:projectId| R_DELETE_api_projects_projectId["respondToProjectRemoval → ProjectRegistry.remove"]
   Browser -->|POST /api/threads/:threadId/abort| R_POST_api_threads_threadId_abort["respondToAbort → abortThread"]
   R_POST_api_threads_threadId_abort --> H_respondToAbort_abortThread["abortThread()"]
   H_respondToAbort_abortThread --> Runtime
@@ -29,12 +31,14 @@ flowchart LR
 
 | Node | Contract | Input | Source |
 |---|---|---|---|
-| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:66`](../../packages/web/src/server/index.ts#L66)<br>[`packages/web/src/server/follow.ts:671`](../../packages/web/src/server/follow.ts#L671) |
-| `respondToHostCommand → runHostCommand` | [`POST /api/threads/:threadId/command`](./routes.md) | path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`) is the page's to open, never run | [`packages/web/src/server/index.ts:70`](../../packages/web/src/server/index.ts#L70) |
-| `respondToConfigure → configureThread` | [`POST /api/threads/:threadId/configure`](./routes.md) | path: `threadId`; body: `EnsoSessionConfiguration` — optional `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone | [`packages/web/src/server/index.ts:72`](../../packages/web/src/server/index.ts#L72) |
-| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:65`](../../packages/web/src/server/index.ts#L65)<br>[`packages/web/src/server/follow.ts:366`](../../packages/web/src/server/follow.ts#L366) |
-| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:68`](../../packages/web/src/server/index.ts#L68)<br>[`packages/web/src/server/follow.ts:402`](../../packages/web/src/server/follow.ts#L402) |
-| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:64`](../../packages/web/src/server/index.ts#L64)<br>[`packages/web/src/server/follow.ts:268`](../../packages/web/src/server/follow.ts#L268) |
+| `respondToProjectRegistration → ProjectRegistry.register` | [`POST /api/projects`](./routes.md) | body: `EnsoProjectRegistration` — an absolute `path` strictly under a root `enso.config.json` declares (`projects.roots`), optional `title` | [`packages/web/src/server/index.ts:1029`](../../packages/web/src/server/index.ts#L1029) |
+| `respondToProjectRemoval → ProjectRegistry.remove` | [`DELETE /api/projects/:projectId`](./routes.md) | path: `projectId` (sixteen hex digits) | [`packages/web/src/server/index.ts:79`](../../packages/web/src/server/index.ts#L79) |
+| `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:71`](../../packages/web/src/server/index.ts#L71)<br>[`packages/web/src/server/follow.ts:668`](../../packages/web/src/server/follow.ts#L668) |
+| `respondToHostCommand → runHostCommand` | [`POST /api/threads/:threadId/command`](./routes.md) | path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`) is the page's to open, never run | [`packages/web/src/server/index.ts:75`](../../packages/web/src/server/index.ts#L75) |
+| `respondToConfigure → configureThread` | [`POST /api/threads/:threadId/configure`](./routes.md) | path: `threadId`; body: `EnsoSessionConfiguration` — optional `model` (`provider/id`), `thinking` (a level that model supports) and `mode`; applied in that order under one lease, a value equal to the current one left alone | [`packages/web/src/server/index.ts:77`](../../packages/web/src/server/index.ts#L77) |
+| `respondToDialog → answerThreadDialog` | [`POST /api/threads/:threadId/dialog`](./routes.md) | path: `threadId`; body: `DialogAnswer` | [`packages/web/src/server/index.ts:70`](../../packages/web/src/server/index.ts#L70)<br>[`packages/web/src/server/follow.ts:363`](../../packages/web/src/server/follow.ts#L363) |
+| `respondToModeChange → changeThreadMode` | [`POST /api/threads/:threadId/mode`](./routes.md) | path: `threadId`; body: `EnsoPermissionModeChange` | [`packages/web/src/server/index.ts:73`](../../packages/web/src/server/index.ts#L73)<br>[`packages/web/src/server/follow.ts:399`](../../packages/web/src/server/follow.ts#L399) |
+| `respondToPrompt → promptThread` | [`POST /api/threads/:threadId/prompt`](./routes.md) | path: `threadId`; body: `EnsoPromptBody` | [`packages/web/src/server/index.ts:69`](../../packages/web/src/server/index.ts#L69)<br>[`packages/web/src/server/follow.ts:265`](../../packages/web/src/server/follow.ts#L265) |
 
 ## Observation pipeline
 
@@ -56,7 +60,7 @@ flowchart LR
 |---|---|---|
 | `mapPiEvent (22 kinds)` | [Observations](./observations.md) | [`packages/web/src/host/map-events.ts:280`](../../packages/web/src/host/map-events.ts#L280) |
 | `EnsoObservation` | [Core exports](./core-exports.md) | [`packages/core/src/observation.ts:567`](../../packages/core/src/observation.ts#L567) |
-| `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:182`](../../packages/web/src/server/follow.ts#L182) |
+| `observation frame` | [Observations](./observations.md) | [`packages/web/src/server/follow.ts:179`](../../packages/web/src/server/follow.ts#L179) |
 | `follow connection` | [Routes](./routes.md) | [`packages/web/src/follow-connection.ts:448`](../../packages/web/src/follow-connection.ts#L448) |
 | `to-agui chunk` | [Observations](./observations.md) | [`packages/web/src/to-agui.ts:76`](../../packages/web/src/to-agui.ts#L76) |
 | `custom event router` | [Observations](./observations.md) | [`packages/web/src/custom-event-router.ts:176`](../../packages/web/src/custom-event-router.ts#L176) |

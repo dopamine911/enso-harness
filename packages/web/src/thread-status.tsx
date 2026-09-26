@@ -187,6 +187,20 @@ function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof 
   return DOT_IN_FLIGHT
 }
 
+/** Where the thread runs (#44): nothing before the first snapshot, and the server's `''` said as what it means. */
+function ProjectIndicator({ cwd }: { readonly cwd: string | undefined }): React.ReactNode {
+  if (cwd === undefined) return null
+  if (cwd === '') {
+    // A new thread whose project was removed (#395): it will be built nowhere.
+    return (
+      <span title="this thread's project is no longer registered — its first prompt will be refused">
+        project removed
+      </span>
+    )
+  }
+  return <span title={`the tree pi reads and writes for this thread: ${cwd}`}>project {projectName(cwd)}</span>
+}
+
 /** Pure view — everything it shows arrives as props, so a static render pins the wording. */
 export function ThreadStatusView({
   activity,
@@ -233,9 +247,7 @@ export function ThreadStatusView({
       <span title="tool calls across this transcript, finished or not">
         {counts.toolCalls} {counts.toolCalls === 1 ? 'tool call' : 'tool calls'}
       </span>
-      {cwd === undefined ? null : (
-        <span title={`the tree pi reads and writes for this thread: ${cwd}`}>project {projectName(cwd)}</span>
-      )}
+      <ProjectIndicator cwd={cwd} />
       {context === null ? null : (
         <span className="ml-auto">
           <ContextMeter context={context} />

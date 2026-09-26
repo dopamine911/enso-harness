@@ -221,7 +221,7 @@ effective level (376-379), and wraps the file sink — and the console sink when
 ## Who implements it, who consumes it
 
 **Three configurators, one per process kind**, each writing into the same day's file: the server
-(`packages/web/src/server/dev.ts:30-37`, `process: 'server'`), the web launcher (`dev-web.ts:32-39`,
+(`packages/web/src/server/dev.ts:41-48`, `process: 'server'`), the web launcher (`dev-web.ts:32-39`,
 `'web'`) and the runtime as a child (`packages/harness/extensions/logging/index.ts:40-48`, `'pi'`).
 
 The extension is the interesting one (`logging/index.ts:11-21`): in-process under the web host the

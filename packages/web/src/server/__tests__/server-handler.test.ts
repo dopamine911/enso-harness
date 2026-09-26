@@ -1,10 +1,12 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  ENSO_PROJECT_HEADER,
   type EnsoModelState,
   type EnsoObservation,
+  EnsoProject,
   EnsoStoredThread,
   EnsoThreadCommands,
   EnsoThreadEvents,
@@ -19,7 +21,12 @@ import {
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { Check } from 'typebox/value'
-import type { AgentHost, HostedThreadInspection } from '../../host/agent-host.ts'
+import {
+  type AgentHost,
+  type HostedThread,
+  type HostedThreadInspection,
+  SessionDirectoryRefused,
+} from '../../host/agent-host.ts'
 import { transcriptOf } from '../../host/transcript.ts'
 import { startEnsoServer } from '../index.ts'
 import {
@@ -87,13 +94,23 @@ const FRESH_MODE = { mode: 'default', available: ['default', 'acceptEdits', 'pla
 function fakeHost(
   script: FakeSessionScript,
   stored: Record<string, FakeStoredThread> = {},
-): { host: AgentHost; built: FakeThreadRecord[]; requested: string[] } {
+  /** The server's projects' rule, as the real host is given it (#395). */
+  servesDirectory: (directory: string) => boolean = () => true,
+): { host: AgentHost; built: FakeThreadRecord[]; requested: string[]; builtIn: string[] } {
   const built: FakeThreadRecord[] = []
   /** Thread ids the host was asked to build, in order — the prompt route passes the id through. */
   const requested: string[] = []
+  /**
+   * The directory each NEW session was built in (#395) — the session reports it as its cwd. A
+   * stored thread reopens where it was made and, as the real host does, never asks.
+   */
+  const builtIn: string[] = []
   const host = createFakeAgentHost(
-    (threadId: string) => {
+    (threadId: string, newSessionDirectory: () => string) => {
       requested.push(threadId)
+      const storedThread = stored[threadId]
+      const directory = storedThread === undefined ? newSessionDirectory() : (storedThread.cwd ?? tmpdir())
+      if (storedThread === undefined) builtIn.push(directory)
       const fake = createFakeHostedThread({
         runtime: (parts: FakeThreadParts) => ({
           prompt: (request: PromptRequest, outcome: PromptOutcome) => {
@@ -105,15 +122,16 @@ function fakeHost(
           permissionModeState: () => ({ mode: 'default', available: ['default', 'acceptEdits'] }),
           ...script.runtime?.(parts),
         }),
-        inspect: piccShapedInspection(),
+        inspect: { ...piccShapedInspection(), cwd: directory },
       })
       built.push(fake.record)
       return Promise.resolve(fake.hosted)
     },
     stored,
     FRESH_MODE,
+    servesDirectory,
   )
-  return { host, built, requested }
+  return { host, built, requested, builtIn }
 }
 
 /** A harness dir with an empty pi manifest — enough for `assertVendorLinks` to pass. */
@@ -167,25 +185,40 @@ async function startWith(
   stored: Record<string, FakeStoredThread> = {},
   /** Wrap the fake host — a test that needs something to happen mid-read replaces one method. */
   wrapHost: (host: AgentHost) => AgentHost = (host: AgentHost) => host,
-): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[] }> {
-  const { host, built, requested } = fakeHost(script, stored)
+  /** Where a page may register projects (#395); none, so only the launch directory, when absent. */
+  projectRoots: readonly string[] = [],
+): Promise<{ url: string; built: FakeThreadRecord[]; requested: string[]; builtIn: string[] }> {
+  // The fake is made before the server, whose projects' rule it must apply — bound when the server asks.
+  let servesDirectory: (directory: string) => boolean = () => false
+  const { host, built, requested, builtIn } = fakeHost(script, stored, (directory: string) =>
+    servesDirectory(directory),
+  )
   const started = startEnsoServer({
     cwd: tmpdir(),
+    projectRoots,
     harnessPackageDir: emptyHarnessDir(),
     agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
-    host: wrapHost(host),
+    host: (serverRule: (directory: string) => boolean) => {
+      servesDirectory = serverRule
+      return wrapHost(host)
+    },
   })
   openServers.push(started)
   const url = await started.listening
-  return { url, built, requested }
+  return { url, built, requested, builtIn }
 }
 
-async function prompt(url: string, threadId: string, message: string): Promise<number> {
+async function prompt(
+  url: string,
+  threadId: string,
+  message: string,
+  headers: Record<string, string> = {},
+): Promise<number> {
   const response = await fetch(`${url}/api/threads/${encodeURIComponent(threadId)}/prompt`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify({ message }),
   })
   await response.text()
@@ -277,8 +310,10 @@ test('⚠ a thread id that is not thread-id shaped is a 400 at every entry point
 test('⚠ GET …/commands builds the thread’s session and answers its own list; a failed build says remembered or none', async () => {
   const { url, built } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({
     ...host,
-    createSession: (threadId: string): ReturnType<AgentHost['createSession']> =>
-      threadId.startsWith('broken') ? Promise.reject(new Error('the build failed')) : host.createSession(threadId),
+    createSession: (threadId: string, directory: () => string): ReturnType<AgentHost['createSession']> =>
+      threadId.startsWith('broken')
+        ? Promise.reject(new Error('the build failed'))
+        : host.createSession(threadId, directory),
   }))
   const commandsOf = async (threadId: string): Promise<EnsoThreadCommands> => {
     const answered: unknown = await (await fetch(`${url}/api/threads/${threadId}/commands`)).json()
@@ -399,27 +434,241 @@ test('⚠ POST …/command sets the thinking level on a thread that never ran: 2
   expect(built).toHaveLength(1)
 })
 
-// #44: the project indicator's source. A thread this server holds live says ITS session's cwd; one
-// it does not — cold, or never run — says the tree this host builds every session in. The two
-// differ here on purpose, so the precedence is what is pinned, not a coincidence of fixtures.
-test("a follow's snapshot names the thread's cwd: the host's tree before a session exists, the session's own once it does", async () => {
-  const { url } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({ ...host, cwd: '/host/tree' }))
+/** A project root with one directory under it, both canonical — a page may register `app` (#395). */
+function projectRoot(): { root: string; app: string } {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'enso-roots-')))
+  const app = join(root, 'app')
+  mkdirSync(app)
+  return { root, app }
+}
+
+async function registerProject(url: string, body: unknown): Promise<Response> {
+  return await fetch(`${url}/api/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+async function registeredProject(url: string, path: string): Promise<EnsoProject> {
+  const answered: unknown = await (await registerProject(url, { path })).json()
+  if (!Check(EnsoProject, answered)) throw new Error('the answer is not an EnsoProject')
+  return answered
+}
+
+// #44, #395: the project indicator's source. A thread with no session says where it WILL be built —
+// the project a page named for it, else the launch directory; a live one says its session's own.
+// The named project differs from the launch directory on purpose, so the precedence is what is pinned.
+test("a follow's snapshot names where the thread runs: its project's directory before a session, the session's own after", async () => {
+  const { root, app } = projectRoot()
+  const { url, builtIn } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const project = await registeredProject(url, app)
+  const naming = { [ENSO_PROJECT_HEADER]: project.projectId }
+
+  const unnamed = new AbortController()
+  openFollows.push(unnamed)
+  expect((await openFollow(url, 'plain', unnamed)).frames[0]).toMatchObject({
+    live: false,
+    cwd: realpathSync(tmpdir()),
+  })
   const cold = new AbortController()
   openFollows.push(cold)
-  expect((await openFollow(url, 'fresh', cold)).frames[0]).toMatchObject({
-    type: 'snapshot',
-    live: false,
-    cwd: '/host/tree',
-  })
+  expect((await openFollow(url, 'fresh', cold, naming)).frames[0]).toMatchObject({ live: false, cwd: app })
 
-  expect(await prompt(url, 'fresh', 'hello')).toBe(202)
+  expect(await prompt(url, 'fresh', 'hello', naming)).toBe(202)
+  expect(builtIn).toEqual([app])
   const live = new AbortController()
   openFollows.push(live)
-  expect((await openFollow(url, 'fresh', live)).frames[0]).toMatchObject({
-    type: 'snapshot',
-    live: true,
-    cwd: '/fake/cwd',
+  expect((await openFollow(url, 'fresh', live)).frames[0]).toMatchObject({ live: true, cwd: app })
+})
+
+// #395's boundary over HTTP: only a directory strictly under a declared root registers, the answer
+// says why not, registering twice is the same project, and a page can never name a project that is
+// not registered — nothing is built for it.
+test('⚠ projects: registered under a root or refused with the reason; an unregistered id on a thread is a 400 and builds nothing', async () => {
+  const { root, app } = projectRoot()
+  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const launchOnly: unknown = await (await fetch(`${url}/api/projects`)).json()
+  expect(launchOnly).toEqual([expect.objectContaining({ launch: true, path: realpathSync(tmpdir()), status: 'ok' })])
+
+  const first = await registerProject(url, { path: app })
+  expect(first.status).toBe(201)
+  const again = await registerProject(url, { path: `${app}/` })
+  expect(again.status).toBe(200)
+  expect(((await again.json()) as EnsoProject).projectId).toBe(((await first.json()) as EnsoProject).projectId)
+
+  const outside = await registerProject(url, { path: mkdtempSync(join(tmpdir(), 'enso-outside-')) })
+  expect(outside.status).toBe(422)
+  expect(await outside.text()).toContain('not under a declared project root')
+  const rootItself = await registerProject(url, { path: root })
+  expect(rootItself.status).toBe(422)
+  expect(await rootItself.text()).toContain('is a project root itself')
+  expect((await registerProject(url, { path: app, cwd: '/' })).status).toBe(400)
+
+  expect(await prompt(url, 't1', 'hello', { [ENSO_PROJECT_HEADER]: '0123456789abcdef' })).toBe(400)
+  expect(requested).toEqual([])
+})
+
+// A stored session belongs to the project its OWN directory is (pi's header); one whose directory
+// is no project is not served at all — not listed, not read — and forgetting a project takes its
+// threads off the rail without touching them.
+test('stored threads are listed and read only in a project, each under its own; removing a project hides its threads', async () => {
+  const { root, app } = projectRoot()
+  const stored = (cwd: string): FakeStoredThread => ({
+    cwd,
+    transcript: [],
+    modified: new Date('2026-09-24T00:00:00.000Z'),
+    firstMessage: `made in ${cwd}`,
   })
+  const { url } = await startWith(
+    settlesAtOnce,
+    { inLaunch: stored(tmpdir()), inApp: stored(app), elsewhere: stored('/somewhere/else') },
+    undefined,
+    [root],
+  )
+  const project = await registeredProject(url, app)
+  const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]
+  const listed = async (): Promise<unknown> => await (await fetch(`${url}/api/stored-threads`)).json()
+  expect(await listed()).toEqual([
+    expect.objectContaining({ threadId: 'inLaunch', projectId: launch?.projectId }),
+    expect.objectContaining({ threadId: 'inApp', projectId: project.projectId }),
+  ])
+  expect(await (await fetch(`${url}/api/threads/inApp/history`)).json()).toMatchObject({ projectId: project.projectId })
+  expect((await fetch(`${url}/api/threads/elsewhere/history`)).status).toBe(404)
+
+  expect((await fetch(`${url}/api/projects/${launch?.projectId}`, { method: 'DELETE' })).status).toBe(409)
+  expect((await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })).status).toBe(204)
+  expect(await listed()).toEqual([expect.objectContaining({ threadId: 'inLaunch' })])
+  expect((await fetch(`${url}/api/threads/inApp/history`)).status).toBe(404)
+  // A stale tab still following it is told there is nowhere it runs — never the launch directory,
+  // where resuming it would not happen either (PR #399 review).
+  const stale = new AbortController()
+  openFollows.push(stale)
+  expect((await openFollow(url, 'inApp', stale)).frames[0]).toMatchObject({ live: false, cwd: '' })
+})
+
+// PR #399 review. Removing a project must not strand a run: while a thread in it RUNS, the removal is
+// refused and the project stays. And a thread that is live but idle is taken again without a
+// build — so it ends with the project, or a page still showing it could go on prompting it there.
+test('⚠ removing a project is refused while one of its threads runs, and the project stays', async () => {
+  const { root, app } = projectRoot()
+  const { url } = await startWith(asksAndWaits, {}, undefined, [root])
+  const project = await registeredProject(url, app)
+  await prompt(url, 'busy', '/mode', { [ENSO_PROJECT_HEADER]: project.projectId })
+  const refused = await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toContain('is running')
+  const listed = (await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[]
+  expect(listed.map((listedProject) => listedProject.projectId)).toContain(project.projectId)
+})
+
+test('⚠ removing a project ends its idle live threads, and nothing is built for them in the removed directory', async () => {
+  const { root, app } = projectRoot()
+  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const project = await registeredProject(url, app)
+  const naming = { [ENSO_PROJECT_HEADER]: project.projectId }
+  expect(await prompt(url, 't1', 'hello', naming)).toBe(202)
+  const liveIds = async (): Promise<string[]> =>
+    ((await (await fetch(`${url}/api/threads`)).json()) as EnsoThreadSummary[]).map((summary) => summary.threadId)
+  expect(await liveIds()).toEqual(['t1'])
+
+  expect((await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })).status).toBe(204)
+  expect(await liveIds()).toEqual([])
+  expect(await prompt(url, 't1', 'again', naming)).toBe(400)
+  expect(requested).toEqual(['t1'])
+})
+
+// PR #399 review, the gaps it reproduced. A claim is asked for only when a NEW session is made: a
+// stored thread once named for a project that is since removed still resumes where pi recorded it.
+test('⚠ a claim naming a removed project does not block resuming a thread that has a session', async () => {
+  const { root, app } = projectRoot()
+  const old: FakeStoredThread = { transcript: [], modified: new Date('2026-09-24T00:00:00.000Z'), firstMessage: 'old' }
+  const { url, requested, builtIn } = await startWith(settlesAtOnce, { old }, undefined, [root])
+  const project = await registeredProject(url, app)
+  const history = await fetch(`${url}/api/threads/old/history`, {
+    headers: { [ENSO_PROJECT_HEADER]: project.projectId },
+  })
+  expect(history.status).toBe(200)
+  expect((await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })).status).toBe(204)
+
+  expect(await prompt(url, 'old', 'still here?')).toBe(202)
+  expect(requested).toEqual(['old'])
+  expect(builtIn).toEqual([])
+})
+
+// A new thread whose project is gone is built nowhere, and says so: its snapshot has no directory,
+// and its prompt is a 409 with the reason — a refusal the server decided, not a failed request.
+test('⚠ a new thread whose project was removed shows no directory, and its prompt is refused with the reason (409)', async () => {
+  const { root, app } = projectRoot()
+  const { url, builtIn } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const project = await registeredProject(url, app)
+  const named = new AbortController()
+  openFollows.push(named)
+  expect(
+    (await openFollow(url, 'orphan', named, { [ENSO_PROJECT_HEADER]: project.projectId })).frames[0],
+  ).toMatchObject({
+    cwd: app,
+  })
+  expect((await fetch(`${url}/api/projects/${project.projectId}`, { method: 'DELETE' })).status).toBe(204)
+
+  const after = new AbortController()
+  openFollows.push(after)
+  expect((await openFollow(url, 'orphan', after)).frames[0]).toMatchObject({ live: false, cwd: '' })
+  const refused = await fetch(`${url}/api/threads/orphan/prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'hello' }),
+  })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toContain('its project is no longer registered')
+  expect(builtIn).toEqual([])
+})
+
+test("⚠ the host's refusal to run a session where it would have to is a 409 with its reason, never a 500", async () => {
+  const { url } = await startWith(settlesAtOnce, {}, (host: AgentHost) => ({
+    ...host,
+    createSession: (threadId: string): Promise<HostedThread> =>
+      Promise.reject(
+        new SessionDirectoryRefused(`thread ${threadId}: /gone is not a project this server runs sessions in`),
+      ),
+  }))
+  const refused = await fetch(`${url}/api/threads/unserved/prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'hello' }),
+  })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toBe('thread unserved: /gone is not a project this server runs sessions in')
+})
+
+test('removing the launch project says why at once, even while one of its threads runs', async () => {
+  const { url } = await startWith(asksAndWaits)
+  await prompt(url, 'busy', '/mode')
+  const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]
+  const refused = await fetch(`${url}/api/projects/${launch?.projectId}`, { method: 'DELETE' })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toBe('the launch directory is always a project')
+})
+
+test('⚠ a request naming a different project for a thread already named is a 409, and nothing is built', async () => {
+  const { root, app } = projectRoot()
+  const other = join(root, 'other')
+  mkdirSync(other)
+  const { url, requested } = await startWith(settlesAtOnce, {}, undefined, [root])
+  const appProject = await registeredProject(url, app)
+  const otherProject = await registeredProject(url, other)
+  const follow = new AbortController()
+  openFollows.push(follow)
+  await openFollow(url, 'named', follow, { [ENSO_PROJECT_HEADER]: appProject.projectId })
+
+  const refused = await fetch(`${url}/api/threads/named/prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', [ENSO_PROJECT_HEADER]: otherProject.projectId },
+    body: JSON.stringify({ message: 'hello' }),
+  })
+  expect(refused.status).toBe(409)
+  expect(await refused.text()).toContain(`already named for project ${appProject.projectId}`)
+  expect(requested).toEqual([])
 })
 
 // ⚠ A FAULT IS NOT A REFUSAL (PR #344 review): only a refusal the host decided is the 422 the user
@@ -649,16 +898,24 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
   expect(response.status).toBe(200)
   const listed: unknown = await response.json()
   expect(Array.isArray(listed) && listed.every((thread) => Check(EnsoStoredThread, thread))).toBe(true)
+  const launch = ((await (await fetch(`${url}/api/projects`)).json()) as EnsoProject[])[0]?.projectId
   expect(listed).toEqual([
     {
       threadId: 'stored-1',
+      projectId: launch,
       title: 'earlier question',
       lastActivityAt: '2026-09-08T10:00:05.000Z',
       messageCount: 2,
       busy: true,
     },
     // A blank first message is no title — the rail says "new thread", not "   ".
-    { threadId: 'stored-2', lastActivityAt: '2026-09-08T11:00:00.000Z', messageCount: 0, busy: false },
+    {
+      threadId: 'stored-2',
+      projectId: launch,
+      lastActivityAt: '2026-09-08T11:00:00.000Z',
+      messageCount: 0,
+      busy: false,
+    },
   ])
 })
 
@@ -779,7 +1036,7 @@ test('⚠ a bind conflict rejects `listening` instead of hanging, and reports th
     agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
-    host,
+    host: () => host,
   })
   openServers.push(first)
   const occupied = Number(new URL(await first.listening).port)
@@ -793,7 +1050,7 @@ test('⚠ a bind conflict rejects `listening` instead of hanging, and reports th
     agentDir: mkdtempSync(join(tmpdir(), 'enso-handler-agent-')),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: occupied,
-    host,
+    host: () => host,
   })
   openServers.push(second)
   await expect(second.listening).rejects.toThrow()

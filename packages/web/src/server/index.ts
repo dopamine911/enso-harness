@@ -5,8 +5,11 @@ import {
   base64DecodedBytes,
   ENSO_IMAGE_MAX_BYTES,
   ENSO_LOG_EVENTS,
+  ENSO_PROJECT_HEADER,
   ENSO_PROMPT_BODY_MAX_BYTES,
   ENSO_PROMPT_MAX_IMAGES,
+  EnsoProjectRegistration,
+  type EnsoProjectsConfig,
   type EnsoStoredThread,
   type EnsoThreadCommands,
   type EnsoThreadEvents,
@@ -17,7 +20,7 @@ import {
   withEnsoLogContext,
 } from '@enso/core'
 import { missingVendorPaths } from '@enso/core/pi-manifest'
-import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost } from '../host/agent-host.ts'
+import { AGENT_RUNTIME_VERSION, type AgentHost, createAgentHost, SessionDirectoryRefused } from '../host/agent-host.ts'
 import { withoutHostValues } from '../host/host-commands.ts'
 import { createAboutRoute, createBundleRoute } from './bundle-route.ts'
 import {
@@ -28,6 +31,7 @@ import {
   type FollowRouteDeps,
   followThread,
   promptThread,
+  readClosedBody,
   readConfigureBody,
   readDialogBody,
   readHostCommandBody,
@@ -38,6 +42,7 @@ import {
 import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
 import { createLogStatsRoute } from './logs-stats-route.ts'
 import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
+import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
 import { noteRunAdmitted } from './run-timing.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
@@ -70,18 +75,20 @@ const THREAD_MODE_ROUTE = /^\/api\/threads\/([^/?#]+)\/mode$/
 const THREAD_COMMAND_ROUTE = /^\/api\/threads\/([^/?#]+)\/command$/
 /** `POST …/configure` (#391): a new session's model, effort and mode, applied together — the Start-a-session dialog. */
 const THREAD_CONFIGURE_ROUTE = /^\/api\/threads\/([^/?#]+)\/configure$/
+/** `DELETE /api/projects/<projectId>` (#395) — the id is sixteen hex digits, so it needs no decoding. */
+const PROJECT_ROUTE = /^\/api\/projects\/([0-9a-f]{16})$/
 
 /**
  * The dev backend: the thread routes the browser's `FollowConnection` talks to (#112), and
  * the inspection routes beside them.
  *
  * ⚠ DEV ONLY, AND THE REASON IS NOT POLISH.
- * There is no sandbox (#24), `bash` is unconfined (#9), and `cwd` is the tree pi reads and
- * writes — so whatever this process accepts as `cwd` IS the blast radius. It therefore
- * binds loopback only and takes `cwd` from ITS OWN launch arguments, never from the request
- * body. Accepting a browser-supplied working directory is a deliberate, later decision that
- * should not happen by default, and doing it before #9 closes would mean a page could point
- * an unconfined agent at any path on the machine.
+ * There is no sandbox (#24), `bash` is unconfined (#9), and a session's directory is the tree
+ * pi reads and writes — so the directories this process accepts ARE the blast radius. It
+ * therefore binds loopback only, and no request chooses a directory the install did not
+ * allow: the launch directory comes from ITS OWN launch arguments, and a page may register a
+ * project only strictly under a root `enso.config.json` declares (#395, `projects.ts`). After
+ * that the page names projects by id; a path never reaches a session from a request.
  */
 const DEFAULT_PORT = 5179
 const LOOPBACK_ONLY = '127.0.0.1'
@@ -233,10 +240,16 @@ function decodeThreadId(rawSegment: string, response: ServerResponse): string | 
 
 export interface EnsoServerOptions {
   /**
-   * Where pi runs — the tree it will read and write. With no sandbox (#24) this value IS
-   * the blast radius; it comes from the launcher's own arguments, never from a request.
+   * The launch directory: the first project (#395), where a thread nobody named a project for
+   * runs. With no sandbox (#24) a session's directory IS its blast radius, so this comes from the
+   * launcher's own arguments, never from a request — and every other project must sit under one
+   * of `projectRoots`, which also come from the install (`enso.config.json`), not the page.
    */
   cwd: string
+  /** `projects.roots` from `enso.config.json`: where a page may register projects. None means the launch directory only. */
+  projectRoots?: Readonly<EnsoProjectsConfig['roots']>
+  /** Where registrations are kept (`.enso/projects.json`); absent, they last as long as the process (tests). */
+  projectsStatePath?: string
   /**
    * The Enso pi package directory, loaded as the ONLY extension source.
    *
@@ -250,12 +263,13 @@ export interface EnsoServerOptions {
   logsDir: string
   port?: number
   /**
-   * The pi host to use instead of building one from `cwd` / `agentDir` /
-   * `harnessPackageDir`. ⓘ Exists for `__tests__/server-handler.test.ts` (#76): a fake host
-   * whose sessions record abort/dispose is the only way to observe the handler's
-   * stop/release sequencing without a model. Production launchers never pass it.
+   * The pi host to use instead of building one from `agentDir` / `harnessPackageDir`, made from
+   * the server's own `servesDirectory` rule (its projects, #395) so a fake applies what the real
+   * host would. ⓘ Exists for `__tests__/server-handler.test.ts` (#76): a fake host whose sessions
+   * record abort/dispose is the only way to observe the handler's stop/release sequencing
+   * without a model. Production launchers never pass it.
    */
-  host?: AgentHost
+  host?: (servesDirectory: (directory: string) => boolean) => AgentHost
   /** SSE keepalive interval; defaults to `SSE_KEEPALIVE_MS`. ⓘ Injectable for `server-handler.test.ts`. */
   sseKeepaliveMs?: number
 }
@@ -332,18 +346,27 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   // multi-account config; sessions are created per chat THREAD below and live across runs
   // (#43 — a mode chosen on prompt 1 is in force on prompt 2).
   const sseKeepaliveMs = options.sseKeepaliveMs ?? SSE_KEEPALIVE_MS
+  const projects = createProjectRegistry({
+    launchDirectory: options.cwd,
+    roots: options.projectRoots ?? [],
+    ...(options.projectsStatePath === undefined ? {} : { statePath: options.projectsStatePath }),
+  })
+  const servesDirectory = (directory: string): boolean => projects.byDirectory(directory) !== undefined
   const host: AgentHost =
-    options.host ??
-    createAgentHost({
-      cwd: options.cwd,
-      agentDir: options.agentDir,
-      harnessPackageDir: options.harnessPackageDir,
-    })
+    options.host?.(servesDirectory) ??
+    createAgentHost({ servesDirectory, agentDir: options.agentDir, harnessPackageDir: options.harnessPackageDir })
   const threads = createThreadRegistry({
-    createSession: (threadId: string) => host.createSession(threadId),
+    // A thread with a session on disk is opened where pi recorded it; a new one where its project
+    // is — asked for only when there is no session, so a claim naming a project that has since
+    // gone cannot block a resume. The claim has done its work once the session exists (PR #399 review).
+    createSession: async (threadId: string) => {
+      const hosted = await host.createSession(threadId, () => projects.directoryForNewThread(threadId))
+      projects.dropClaim(threadId)
+      return hosted
+    },
   })
   /** The one live-or-cold read (#214), shared with the follow route's snapshot. */
-  const threadRead: ThreadReadDeps = { threads, host }
+  const threadRead: ThreadReadDeps = { threads, host, projects }
 
   // The permission mode a FRESH thread starts in (#84). The browser asks once on mount,
   // before any run exists, so the header can read the starting mode instead of `unknown`
@@ -402,13 +425,21 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    */
   async function respondWithStoredThreads(response: ServerResponse): Promise<void> {
     const stored = await host.listSessions()
-    const payload: EnsoStoredThread[] = stored.map((session) => ({
-      threadId: session.id,
-      ...(session.firstMessage.trim().length === 0 ? {} : { title: session.firstMessage.trim() }),
-      lastActivityAt: session.modified.toISOString(),
-      messageCount: session.messageCount,
-      busy: threads.peek(session.id)?.busy === true,
-    }))
+    const payload: EnsoStoredThread[] = stored.flatMap((session) => {
+      // The host lists only sessions in a project; the lookup is what names which one.
+      const project = projects.byDirectory(session.cwd)
+      if (project === undefined) return []
+      return [
+        {
+          threadId: session.id,
+          projectId: project.projectId,
+          ...(session.firstMessage.trim().length === 0 ? {} : { title: session.firstMessage.trim() }),
+          lastActivityAt: session.modified.toISOString(),
+          messageCount: session.messageCount,
+          busy: threads.peek(session.id)?.busy === true,
+        },
+      ]
+    })
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify(payload))
   }
@@ -435,7 +466,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    */
   async function respondWithThreadHistory(threadId: string, response: ServerResponse): Promise<void> {
     const mount = await readThreadMount(threadRead, threadId)
-    if (!mount.present) {
+    if (!mount.present || mount.projectId === undefined) {
       response.writeHead(404, { 'Content-Type': 'text/plain' })
       response.end(`no session for thread ${threadId}`)
       return
@@ -443,6 +474,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
 
     const payload: EnsoThreadHistory = {
       threadId,
+      projectId: mount.projectId,
       messages: mount.messages,
       permissionMode: mount.permissionMode,
       ...(mount.interrupted === undefined ? {} : { interrupted: mount.interrupted }),
@@ -456,9 +488,20 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
    * it (PR #87). Every handler that awaits (the thread routes, the listing, the browser log) runs
    * through here: a rejection is reported and answered as a 500 whose text names no route (it
    * answers every one of them; PR #393 review), and the server stays up.
+   *
+   * The one exception is a refusal the SERVER decided while building a thread (#395): the thread's
+   * project is gone, its directory deleted, or its session is in a directory not served. Any route
+   * that builds can meet one, so it is answered here, once — 409 with the reason, not a fault
+   * (PR #399 review: a refusal is not a fault, and must not read as one).
    */
   function answerOrFail(work: Promise<void>, response: ServerResponse): void {
     work.catch((error: unknown) => {
+      if (error instanceof ProjectUnavailable || error instanceof SessionDirectoryRefused) {
+        log.warn('a thread could not be built where it belongs: {reason}', { reason: error.message })
+        if (response.headersSent) response.end()
+        else refuseWith(response, { status: 409, reason: error.message })
+        return
+      }
       log.error('a handler failed: {error}', { error })
       if (!response.headersSent) response.writeHead(500, { 'Content-Type': 'text/plain' })
       response.end('the request failed — see the server log')
@@ -597,7 +640,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
 
   // ── The wire (#112): prompt / follow / dialog ────────────────────────────────────
-  const followDeps: FollowRouteDeps = { threads, host, sseKeepaliveMs }
+  const followDeps: FollowRouteDeps = { threads, host, projects, sseKeepaliveMs }
 
   /**
    * The thread routes, one row each, in precedence order (#174, workstream 6): method, the
@@ -679,7 +722,22 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     },
   ]
 
-  /** True when the request was a thread route — answered, or refused with the 400 `decodeThreadId` wrote. */
+  /**
+   * A page names a NEW thread's project on its requests (`X-Enso-Project`, #395). An id that is no
+   * registered project is refused here (400), before any route runs — the page would otherwise have
+   * its thread built somewhere else without a word — and so is a name that contradicts the one the
+   * thread already has (409). The body is never read, so the connection closes.
+   */
+  function admitProjectClaim(threadId: string, request: IncomingMessage, response: ServerResponse): boolean {
+    const header = request.headers[ENSO_PROJECT_HEADER]
+    const refusal = projects.claim(threadId, typeof header === 'string' ? header : undefined)
+    if (refusal === undefined) return true
+    log.warn('thread request refused: {reason}', { threadId, reason: refusal.reason })
+    endAndClose(request, response, refusal.status, refusal.reason)
+    return false
+  }
+
+  /** True when the request was a thread route — answered, or refused (`decodeThreadId`, `admitProjectClaim`). */
   function dispatchThreadRoute(request: IncomingMessage, response: ServerResponse): boolean {
     const url = request.url ?? ''
     for (const { method, route, respond } of THREAD_ROUTES) {
@@ -688,7 +746,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       const segment = match?.[1]
       if (match === null || segment === undefined) continue
       const threadId = decodeThreadId(segment, response)
-      if (threadId !== undefined) {
+      if (threadId !== undefined && admitProjectClaim(threadId, request, response)) {
         withEnsoLogContext({ threadId }, () => {
           const work = respond(threadId, request, response, match)
           if (work !== undefined) answerOrFail(work, response)
@@ -896,6 +954,88 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     response.end()
   }
 
+  // ── Projects (#395): the directories threads run in — listed, registered under a declared
+  // root, forgotten. Registration is the one request that carries a path; `projects.ts` decides it.
+  function respondWithProjects(response: ServerResponse): void {
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(projects.list()))
+  }
+
+  async function respondToProjectRegistration(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const registration = await readJsonBody(request, response, {
+      maxBytes: MAX_DIALOG_BODY_BYTES,
+      capText: `a project registration is at most ${MAX_DIALOG_BODY_BYTES} bytes`,
+      parse: (raw: string) =>
+        readClosedBody(
+          raw,
+          EnsoProjectRegistration,
+          'project',
+          'a project registration takes an absolute `path` and an optional `title`',
+        ),
+    })
+    if (registration === undefined) return
+    const outcome = projects.register(registration)
+    if (outcome.kind === 'refused') {
+      log.warn('project registration refused: {reason}', { path: registration.path, reason: outcome.reason })
+      refuseWith(response, { status: 422, reason: outcome.reason })
+      return
+    }
+    response.writeHead(outcome.kind === 'registered' ? 201 : 200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(outcome.project))
+  }
+
+  /**
+   * Forget a registration. Its sessions stay on disk. Refused while one of its threads is RUNNING
+   * here — a run would go on in a directory the rail no longer shows, with nothing to stop it from.
+   * Its live threads that are NOT running are retired with it (PR #399 review): a live thread is
+   * taken again without a build, so a page still showing one could otherwise go on prompting it in
+   * the removed directory for as long as it kept it from idling out.
+   */
+  function respondToProjectRemoval(projectId: string, response: ServerResponse): void {
+    // The launch project first: it is never removable, running or not, so it is not told to wait.
+    if (projects.get(projectId)?.launch === true) {
+      refuseWith(response, { status: 409, reason: 'the launch directory is always a project' })
+      return
+    }
+    // `inspect()` decodes a branch (#285); removal is a rare, explicit act, and live threads are few.
+    const live = threads
+      .list()
+      .filter((thread) => projects.byDirectory(thread.hosted.inspect().cwd)?.projectId === projectId)
+    if (live.some((thread) => thread.busy)) {
+      refuseWith(response, { status: 409, reason: 'a thread in this project is running; remove it when that settles' })
+      return
+    }
+    const outcome = projects.remove(projectId)
+    if (outcome === 'launch') {
+      refuseWith(response, { status: 409, reason: 'the launch directory is always a project' })
+      return
+    }
+    if (outcome === 'unknown') {
+      refuseWith(response, { status: 404, reason: `no registered project has the id ${projectId}` })
+      return
+    }
+    for (const thread of live) threads.retire(thread.threadId, 'its project was removed')
+    response.writeHead(204)
+    response.end()
+  }
+
+  /** True when the request was a project route. */
+  function dispatchProjectRoute(request: IncomingMessage, response: ServerResponse): boolean {
+    const url = request.url ?? ''
+    if (request.method === 'GET' && url === '/api/projects') {
+      respondWithProjects(response)
+      return true
+    }
+    if (request.method === 'POST' && url === '/api/projects') {
+      answerOrFail(respondToProjectRegistration(request, response), response)
+      return true
+    }
+    const projectId = PROJECT_ROUTE.exec(url)?.[1]
+    if (projectId === undefined || request.method !== 'DELETE') return false
+    respondToProjectRemoval(projectId, response)
+    return true
+  }
+
   /**
    * The one check that stands between a page the operator happens to visit and an agent
    * with unconfined `bash` in their tree.
@@ -1010,6 +1150,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       return
     }
     if (dispatchLiteralRoute(request, response)) return
+    if (dispatchProjectRoute(request, response)) return
     if (dispatchThreadRoute(request, response)) return
     response.writeHead(404, { 'Content-Type': 'text/plain' })
     response.end('not found')

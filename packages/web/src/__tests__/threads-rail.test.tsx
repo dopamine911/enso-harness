@@ -117,6 +117,7 @@ test("a summary update reaches the list and moves the thread's activity clock; a
 test('adopting stored history restores dates, title and mode under the stored thread id exactly once, and never asks to start a session (#391)', () => {
   const history = {
     threadId: 'stored-1',
+    projectId: 'p-launch',
     messages: [
       {
         id: 'u1',
@@ -143,6 +144,7 @@ test('adopting stored history restores dates, title and mode under the stored th
 test('⚠ adopting a branch that ends inside a turn opens with a warning that says so; a settled one opens clean (#109)', () => {
   const torn = adoptThread({
     threadId: 'torn-1',
+    projectId: 'p-launch',
     messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', content: 'never answered' }] }],
     permissionMode: { mode: 'default', available: [] },
     interrupted: 'unanswered-prompt',
@@ -152,6 +154,7 @@ test('⚠ adopting a branch that ends inside a turn opens with a warning that sa
   ])
   const settled = adoptThread({
     threadId: 'settled-1',
+    projectId: 'p-launch',
     messages: [],
     permissionMode: { mode: 'default', available: [] },
   })
@@ -221,6 +224,7 @@ test('the earlier list distinguishes resumable, running-elsewhere, empty and fai
       earlier={[
         {
           threadId: 'stored',
+          projectId: 'p-launch',
           title: 'resume me',
           lastActivityAt: new Date(now.getTime() - 2 * 3_600_000).toISOString(),
           messageCount: 4,
@@ -228,6 +232,7 @@ test('the earlier list distinguishes resumable, running-elsewhere, empty and fai
         },
         {
           threadId: 'elsewhere',
+          projectId: 'p-launch',
           lastActivityAt: now.toISOString(),
           messageCount: 2,
           busy: true,

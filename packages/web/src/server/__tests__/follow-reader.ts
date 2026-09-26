@@ -55,8 +55,10 @@ export async function openFollow(
   url: string,
   threadId: string,
   controller = new AbortController(),
+  /** Request headers — a page names a new thread's project this way (#395, `X-Enso-Project`). */
+  headers: Record<string, string> = {},
 ): Promise<OpenFollow> {
-  const response = await fetch(`${url}/api/threads/${threadId}/follow`, { signal: controller.signal })
+  const response = await fetch(`${url}/api/threads/${threadId}/follow`, { signal: controller.signal, headers })
   if (response.status !== 200) throw new Error(`follow ${threadId}: ${response.status} ${await response.text()}`)
   const frames: EnsoFollowFrame[] = []
   let comments = 0

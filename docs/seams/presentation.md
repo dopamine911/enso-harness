@@ -318,7 +318,7 @@ need none: an upstream re-port is the second implementation, and the gate is wha
 ## What crosses it that should not
 
 **The state layer's message shape crosses two wire payloads.** `EnsoThreadHistory.messages`
-(`thread-inspection.ts` line 228) and `EnsoFollowSnapshot.messages` (`follow.ts` line 35) are both
+(`thread-inspection.ts` line 279) and `EnsoFollowSnapshot.messages` (`follow.ts` line 56) are both
 `Type.Array(Type.Unknown())` on purpose — core must not own the client's transport shape — and both
 carry the client's `UIMessage`s. They are built by `transcriptToMessages` in
 `server/transcript-to-messages.ts`, the read-side twin of `to-agui.ts`, which imports `MessagePart`
@@ -360,7 +360,7 @@ written against the client's `ChatUIHost`), plus the message-shape crossing, whi
 not three: `ThreadStores.history` and `reviveHistoryMessages` in the browser,
 `server/transcript-to-messages.ts` as the producer, its two callers in `server/follow.ts` (the follow
 snapshot) and `server/index.ts` (the history route), and the two schema fields that carry the result,
-`packages/core/src/follow.ts:35` and `packages/core/src/thread-inspection.ts:228`.
+`packages/core/src/follow.ts:56` and `packages/core/src/thread-inspection.ts:279`.
 The per-thread stores, the router's dispatch, and the fixture path are shaped by the thread, not the
 client, and survive.
 

@@ -180,6 +180,7 @@ test('⚠ two mounted panes with ?debug open render exactly ONE debug column, in
 test('a resumed pane mounts with the stored messages and the stored permission mode already visible', () => {
   const stored = adoptThread({
     threadId: 'stored-1',
+    projectId: 'p-launch',
     messages: [
       { id: 'u1', role: 'user', parts: [{ type: 'text', content: 'Earlier question' }] },
       { id: 'a1', role: 'assistant', parts: [{ type: 'text', content: 'Earlier answer' }] },

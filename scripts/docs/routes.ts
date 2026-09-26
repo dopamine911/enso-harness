@@ -18,7 +18,7 @@ const LOGS_TAIL_PATH = 'packages/web/src/server/logs-tail-route.ts'
 const LOGS_STATS_PATH = 'packages/web/src/server/logs-stats-route.ts'
 
 interface RouteMetadata {
-  readonly method: 'GET' | 'POST'
+  readonly method: 'GET' | 'POST' | 'DELETE'
   readonly path: string
   readonly handler: string
   readonly input: string
@@ -39,6 +39,20 @@ function threadRead(
     Partial<Pick<RouteMetadata, 'input'>>,
 ): RouteMetadata {
   return { method: 'GET', input: 'path: `threadId`', routeClass: 'observation', builds: 'no', logs: 'no', ...facts }
+}
+
+/** A literal GET that takes no input, reads, and builds nothing — the listing and inspection rows. */
+function literalRead(
+  facts: Pick<RouteMetadata, 'handler' | 'success'> & Partial<Pick<RouteMetadata, 'errors' | 'factory'>>,
+): Omit<RouteMetadata, 'method' | 'path'> {
+  return {
+    input: 'none',
+    errors: '403 untrusted origin',
+    routeClass: 'observation',
+    builds: 'no',
+    logs: 'no',
+    ...facts,
+  }
 }
 
 const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
@@ -157,6 +171,19 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     builds: 'yes',
     logs: 'yes',
   },
+  PROJECT_ROUTE: {
+    method: 'DELETE',
+    path: '/api/projects/:projectId',
+    handler: 'respondToProjectRemoval → ProjectRegistry.remove',
+    input: 'path: `projectId` (sixteen hex digits)',
+    success:
+      '204 empty — the registration is forgotten; its sessions stay on disk and are served again if the directory is registered again',
+    errors:
+      '403 untrusted origin; 404 no registered project with that id; 409 the launch project, or a thread in the project is running',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+  },
   THREAD_MODE_ROUTE: {
     method: 'POST',
     path: '/api/threads/:threadId/mode',
@@ -182,34 +209,32 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     builds: 'no',
     logs: 'no',
   },
-  'GET /api/threads': {
-    handler: 'respondWithThreads',
-    input: 'none',
-    success: '200 `EnsoThreadSummary[]` JSON',
-    errors: '403 untrusted origin',
-    routeClass: 'observation',
-    builds: 'no',
-    logs: 'no',
-  },
-  'GET /api/stored-threads': {
+  'GET /api/threads': literalRead({ handler: 'respondWithThreads', success: '200 `EnsoThreadSummary[]` JSON' }),
+  'GET /api/stored-threads': literalRead({
     handler: 'respondWithStoredThreads',
-    input: 'none',
     success: '200 `EnsoStoredThread[]` JSON',
     errors: '403 untrusted origin; 500 handler failure',
-    routeClass: 'observation',
+  }),
+  'GET /api/projects': literalRead({
+    handler: 'respondWithProjects',
+    success: '200 `EnsoProject[]` JSON — the launch project first, then the registered ones',
+  }),
+  'POST /api/projects': {
+    handler: 'respondToProjectRegistration → ProjectRegistry.register',
+    input:
+      'body: `EnsoProjectRegistration` — an absolute `path` strictly under a root `enso.config.json` declares (`projects.roots`), optional `title`',
+    success: '201 `EnsoProject` JSON when registered; 200 when the directory already is a project',
+    errors:
+      '400 malformed body; 403 untrusted origin; 413 body too large; 422 refused, with the reason — not absolute, missing, not a directory, a root itself, outside every root (resolved through symlinks), or inside a hidden directory; 500 handler failure',
+    routeClass: 'control',
     builds: 'no',
-    logs: 'no',
+    logs: 'yes',
   },
-  'GET /api/about': {
+  'GET /api/about': literalRead({
     handler: 'createAboutRoute → about',
-    input: 'none',
     success: '200 `EnsoBundleAbout` JSON',
-    errors: '403 untrusted origin',
-    routeClass: 'observation',
-    builds: 'no',
-    logs: 'no',
     factory: { path: BUNDLE_PATH, declaration: 'export function createAboutRoute' },
-  },
+  }),
   'GET /api/logs/bundle*': {
     handler: 'createBundleRoute → bundle',
     input: 'query: optional `thread` id/prefix',
@@ -231,16 +256,11 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
     logs: 'no',
     factory: { path: LOGS_TAIL_PATH, declaration: 'export function followLogTail' },
   },
-  'GET /api/logs/stats': {
+  'GET /api/logs/stats': literalRead({
     handler: 'createLogStatsRoute → stats',
-    input: 'none',
     success: '200 `EnsoDayStats` JSON',
-    errors: '403 untrusted origin',
-    routeClass: 'observation',
-    builds: 'no',
-    logs: 'no',
     factory: { path: LOGS_STATS_PATH, declaration: 'export function createLogStatsRoute' },
-  },
+  }),
   'POST /api/logs': {
     handler: 'respondToBrowserLogs → receiveBrowserLogs',
     input: 'body: `EnsoBrowserLogBatch`',
@@ -255,7 +275,7 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
 
 interface DetectedRoute {
   readonly key: string
-  readonly method: 'GET' | 'POST'
+  readonly method: 'GET' | 'POST' | 'DELETE'
   readonly path: string
   readonly line: number
   readonly kind: 'regex' | 'literal'
@@ -378,6 +398,8 @@ function generate(): string {
     '# HTTP routes',
     '',
     'Generated from the route constants and dispatcher in `packages/web/src/server/index.ts`, with handler contracts from `server/follow.ts`, `server/bundle-route.ts`, and `server/logs-route.ts`.',
+    '',
+    "Every `/api/threads/:threadId…` route also reads the `X-Enso-Project` header (#395): a page names a new thread's project with it, and an id that is no registered project is a 400 before the route runs.",
     '',
     '> Parser limitation: discovery recognizes top-level `const *_ROUTE = /…/` declarations plus direct `request.method` branches using `url === …` or `url.startsWith(…)`. Statuses, input shapes, classes, acquisition, and self-logging are intentionally explicit checked metadata rather than inferred behavior.',
     '',

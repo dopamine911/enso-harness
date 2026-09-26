@@ -162,6 +162,13 @@ export interface ThreadRegistry {
   /** Every live thread, for the inspection listing. Never creates. */
   list(): ThreadView[]
   /**
+   * Dispose a live thread that is NOT running (#395: its project was removed, so a page still
+   * showing it must not go on prompting it in that directory). Its follow ends; the next ask
+   * builds anew, and the build decides whether it may. A run is never cut from here: `false`, and
+   * nothing is done, while it runs; `true` once it is gone — or was never live.
+   */
+  retire(threadId: string, why: string): boolean
+  /**
    * The slash commands the most recently built session registered (#338), for a thread that
    * has no live one. Every session builds the set from the same sources under the same
    * configuration, so the last one's answer is the next one's — until a template or skill file
@@ -577,6 +584,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
     },
     list(): ThreadView[] {
       return [...threads.entries()].map(([threadId, thread]) => viewOf(threadId, thread))
+    },
+    retire(threadId: string, why: string): boolean {
+      const thread = threads.get(threadId)
+      if (thread === undefined) return true
+      if (thread.busy) return false
+      disposeThread(threadId, why)
+      return true
     },
     shutdown(): void {
       shutDown = true

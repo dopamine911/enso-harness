@@ -27,6 +27,7 @@ test('the resumable-session store validates listings and preserves the last good
   let answer: unknown = [
     {
       threadId: 'stored-1',
+      projectId: 'p-launch',
       title: 'earlier work',
       lastActivityAt: '2026-09-08T12:00:00.000Z',
       messageCount: 2,
@@ -56,12 +57,14 @@ test('the earlier list excludes every session already owned by this page', () =>
   const stored = [
     {
       threadId: 'here',
+      projectId: 'p-launch',
       lastActivityAt: '2026-09-08T12:00:00.000Z',
       messageCount: 2,
       busy: true,
     },
     {
       threadId: 'earlier',
+      projectId: 'p-launch',
       lastActivityAt: '2026-09-08T11:00:00.000Z',
       messageCount: 4,
       busy: false,
@@ -101,7 +104,9 @@ function controlledHistory(): {
       return deferred.promise
     },
     resolve: (threadId: string) => {
-      pending.get(threadId)?.resolve({ threadId, messages: [], permissionMode: { mode: 'default', available: [] } })
+      pending
+        .get(threadId)
+        ?.resolve({ threadId, projectId: 'p-launch', messages: [], permissionMode: { mode: 'default', available: [] } })
       return settled(threadId)
     },
     reject: (threadId: string, message: string) => {

@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os'
 import type {
   DialogAnswer,
   EnsoDialogSpec,
@@ -267,7 +268,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
   }
   const inspection: HostedThreadInspection = {
     sessionId: 'session-1',
-    cwd: '/fake/cwd',
+    cwd: FAKE_PROJECT_DIRECTORY,
     sessionDir: '/fake/sessions',
     sessionFile: null,
     entries: [],
@@ -293,6 +294,8 @@ export interface FakeStoredThread {
   readonly transcript: EnsoTranscriptEntry[]
   readonly modified: Date
   readonly firstMessage: string
+  /** The directory its header records (#395); the launch project's when absent. */
+  readonly cwd?: string
   /** The mode the fake reports for this thread's branch; the fresh mode when absent. */
   readonly mode?: string
   /** What pi's rule sums over the file (#45); nothing spent when absent. */
@@ -306,6 +309,13 @@ export interface FakeStoredThread {
 }
 
 const FAKE_FRESH_MODE: EnsoPermissionModeState = { mode: 'default', available: ['default'] }
+
+/**
+ * Where every fake session runs and every fake stored thread was made: the directory the server
+ * tests launch with (`cwd: tmpdir()`), so each is in the launch project (#395). A test about
+ * another directory says so on the thread (`FakeStoredThread.cwd`, `inspect.cwd`).
+ */
+const FAKE_PROJECT_DIRECTORY = tmpdir()
 
 /** A branch with nothing on it: no turn, no prompt, no tool, no first entry. */
 const FAKE_EMPTY_BRANCH: BranchStats = {
@@ -330,14 +340,26 @@ const FAKE_EMPTY_CONTEXT: BranchContext = {
  * where a test counts what was built and hands out a `createFakeHostedThread`. Its mode
  * answers are declared, not computed (L3): `fresh` is what a new thread starts in, and a
  * stored thread's mode is the one written beside its branch.
+ *
+ * `servesDirectory` is the real host's rule (#395), applied as the real host applies it: a
+ * stored thread whose directory fails it is not listed and not read, and only
+ * `storedThreadDirectory` still finds it (PR #399 review — the fake once read everything, so
+ * the suite could not see what a removed project does to a reader). A server started with
+ * `host: (servesDirectory) => …` hands the fake its own projects' rule; every other use serves all.
  */
 export function createFakeAgentHost(
   createSession: AgentHost['createSession'],
   stored: Record<string, FakeStoredThread> = {},
   fresh: EnsoPermissionModeState = FAKE_FRESH_MODE,
+  servesDirectory: (directory: string) => boolean = () => true,
 ): AgentHost {
+  const directoryOf = (storedThread: FakeStoredThread): string => storedThread.cwd ?? FAKE_PROJECT_DIRECTORY
+  /** The stored thread under this id if its directory is served — what the real host reads. */
+  const served = (threadId: string): FakeStoredThread | undefined => {
+    const storedThread = stored[threadId]
+    return storedThread !== undefined && servesDirectory(directoryOf(storedThread)) ? storedThread : undefined
+  }
   return {
-    cwd: '/fake/cwd',
     createSession,
     freshPermissionMode: () => fresh,
     storedPermissionMode: (transcript: readonly EnsoTranscriptEntry[]): EnsoPermissionModeState => {
@@ -346,24 +368,40 @@ export function createFakeAgentHost(
     },
     listSessions: () =>
       Promise.resolve(
-        Object.entries(stored).map(([threadId, storedThread]) => ({
-          id: threadId,
-          path: `/stored/${threadId}.jsonl`,
-          modified: storedThread.modified,
-          messageCount: storedThread.transcript.filter((transcriptEntry) => transcriptEntry.kind === 'message').length,
-          firstMessage: storedThread.firstMessage,
-        })),
+        Object.entries(stored).flatMap(([threadId, storedThread]) =>
+          servesDirectory(directoryOf(storedThread))
+            ? [
+                {
+                  id: threadId,
+                  path: `/stored/${threadId}.jsonl`,
+                  cwd: directoryOf(storedThread),
+                  modified: storedThread.modified,
+                  messageCount: storedThread.transcript.filter((transcriptEntry) => transcriptEntry.kind === 'message')
+                    .length,
+                  firstMessage: storedThread.firstMessage,
+                },
+              ]
+            : [],
+        ),
       ),
-    readStoredThread: (threadId: string) => {
+    storedThreadDirectory: (threadId: string) => {
       const storedThread = stored[threadId]
+      return Promise.resolve(storedThread === undefined ? undefined : directoryOf(storedThread))
+    },
+    readStoredThread: (threadId: string) => {
+      const storedThread = served(threadId)
       return Promise.resolve(
         storedThread === undefined
           ? undefined
-          : { transcript: storedThread.transcript, usage: storedThread.usage ?? { ...FAKE_NO_USAGE } },
+          : {
+              cwd: directoryOf(storedThread),
+              transcript: storedThread.transcript,
+              usage: storedThread.usage ?? { ...FAKE_NO_USAGE },
+            },
       )
     },
     readStoredThreadStats: (threadId: string) => {
-      const storedThread = stored[threadId]
+      const storedThread = served(threadId)
       return Promise.resolve(
         storedThread === undefined
           ? undefined
@@ -371,9 +409,9 @@ export function createFakeAgentHost(
       )
     },
     readStoredRequestDetail: (threadId: string, request: number | 'next') =>
-      Promise.resolve(stored[threadId]?.details?.[String(request)]),
+      Promise.resolve(served(threadId)?.details?.[String(request)]),
     readStoredThreadContext: (threadId: string) => {
-      const storedThread = stored[threadId]
+      const storedThread = served(threadId)
       return Promise.resolve(
         storedThread === undefined
           ? undefined

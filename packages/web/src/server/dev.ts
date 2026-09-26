@@ -2,8 +2,10 @@
  * Dev entry point for the enso server.
  *
  * ⚠ `cwd` comes from an argument or this process's own cwd — NEVER from a request. With no
- * sandbox and `bash` unconfined (#9), whatever this value is becomes the blast radius, so
- * it is set by whoever starts the server rather than by whoever opens the page.
+ * sandbox and `bash` unconfined (#9), whatever directory a session runs in is its blast radius,
+ * so the launch directory is set by whoever starts the server, and the roots other projects may
+ * sit under (#395) by the install's `enso.config.json` — never by whoever opens the page. A config
+ * that cannot be read refuses the launch rather than meaning "no roots": it is a policy file.
  *
  * The launcher is where logging is configured (#132): the library under it configures
  * nothing. `ENSO_LOG_LEVEL` picks the file's tier (default `info`; `debug` for every
@@ -11,15 +13,15 @@
  * `ENSO_LOG_CONSOLE` the terminal's (default `info`).
  */
 
-import { mkdirSync } from 'node:fs'
-import { ensoLogger } from '@enso/core'
+import { mkdirSync, readFileSync } from 'node:fs'
+import { ensoLogger, parseEnsoConfig } from '@enso/core'
 import {
   configureProcessLogging,
   installLoggingShutdown,
   logsDirFrom,
   parseEnsoLogLevels,
 } from '@enso/core/log-process'
-import { ensoAgentDir, findRepoRoot, harnessPackageDir } from '@enso/core/paths'
+import { ensoAgentDir, ensoConfigPath, ensoProjectsPath, findRepoRoot, harnessPackageDir } from '@enso/core/paths'
 import { knownSecretValuesTracking } from '@enso/core/secrets'
 import { startEnsoServer } from './index.ts'
 
@@ -30,6 +32,10 @@ const repoRoot = findRepoRoot(import.meta.url)
 // Same scratch dir the TUI launcher uses, so both surfaces share one isolated config.
 const agentDir = ensoAgentDir(repoRoot)
 mkdirSync(agentDir, { recursive: true })
+
+const config = parseEnsoConfig(readFileSync(ensoConfigPath(repoRoot), 'utf8'))
+if (config.kind === 'unreadable') throw new Error(`enso-server: ${config.reason}`)
+const projectRoots: readonly string[] = config.config.projects?.roots ?? []
 
 const logsDir = logsDirFrom(process.env, repoRoot)
 const disposeLogging: () => Promise<void> = await configureProcessLogging({
@@ -46,6 +52,8 @@ installLoggingShutdown(disposeLogging)
 
 const { listening } = startEnsoServer({
   cwd,
+  projectRoots,
+  projectsStatePath: ensoProjectsPath(repoRoot),
   harnessPackageDir: harnessPackageDir(repoRoot),
   agentDir,
   logsDir,
