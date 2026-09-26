@@ -1380,6 +1380,44 @@ test('the Stats tab replaces the transcript in the thread on screen, and follows
   await page.unmount()
 })
 
+// #407: on a narrow screen the rail is a page of its own, behind the header's threads button.
+// Choosing a thread from it must also close it — otherwise, on a phone, the thread just chosen
+// stays hidden behind the rail. ⚠ happy-dom has no media queries: this reads the state the
+// classes encode (`hidden` below md; the panes `max-md:hidden` while it is open), not a layout.
+test('the threads button opens the rail over the thread; choosing a thread from it closes it again', async () => {
+  const page = await mountPage()
+  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
+  if (newThread === undefined) throw new Error('expected a New Thread button')
+  await page.click(newThread)
+  await page.click(newThread)
+  const toggle = page.container.querySelector<HTMLButtonElement>('header button[aria-controls="threads-rail"]')
+  const rail = page.container.querySelector<HTMLElement>('#threads-rail')
+  if (toggle === null || rail === null) throw new Error('expected the threads button and the rail it controls')
+  const panesHiddenNarrow = (): boolean =>
+    page.container.querySelector('#thread-status')?.parentElement?.closest('.max-md\\:hidden') !== null
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  expect(rail.classList.contains('hidden')).toBe(true)
+  expect(panesHiddenNarrow()).toBe(false)
+
+  await page.click(toggle)
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  expect(toggle.getAttribute('aria-label')).toBe('hide threads')
+  expect(rail.classList.contains('hidden')).toBe(false)
+  expect(panesHiddenNarrow()).toBe(true)
+
+  const older = page.activeRows()[1]
+  if (older === undefined) throw new Error('expected two rows')
+  expect(older.getAttribute('aria-current')).toBeNull()
+  await page.click(older)
+  await eventually(() => {
+    expect(older.getAttribute('aria-current')).toBe('true')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(rail.classList.contains('hidden')).toBe(true)
+    expect(panesHiddenNarrow()).toBe(false)
+  })
+  await page.unmount()
+})
+
 // A question from pi waits in the transcript; on another view the Chat tab, the status bar and the
 // rail's row say so, and nothing moves the reader (#362 review) — they switch when ready.
 test('a question waiting while Stats is shown is said on the Chat tab, in the status bar and on the rail; the view stays', async () => {
