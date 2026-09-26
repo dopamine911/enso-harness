@@ -30,6 +30,7 @@ import {
   CircleQuestionMarkIcon,
   ExternalLinkIcon,
   LayersIcon,
+  MenuIcon,
   MessagesSquareIcon,
   PaperclipIcon,
   SquareIcon,
@@ -102,6 +103,7 @@ import {
   markThreadActive,
   mintThread,
   type ThreadStores,
+  type ThreadSummary,
   threadListStore,
   titleFromMessage,
   updateThreadSummary,
@@ -619,7 +621,7 @@ export function EnsoDialogCard({
       ref={ref}
       role="group"
       aria-labelledby={titleId}
-      className="my-2 grid max-w-3xl overflow-hidden rounded-lg border border-human bg-card signal:ring-1 signal:ring-human/30"
+      className="my-2 grid max-w-3xl overflow-hidden rounded-lg border border-human bg-card signal:ring-1 signal:ring-human/30 ledger:my-3 ledger:rounded-xs ledger:border-dashed ink:border-2"
     >
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wider text-human uppercase">
@@ -979,7 +981,11 @@ const MessageBody = memo(function MessageBody({
   speaker,
 }: MessageBodyProps): React.ReactNode {
   return (
-    <Message from={role} data-role={role} className="max-w-3xl gap-1 ledger:ml-0">
+    <Message
+      from={role}
+      data-role={role}
+      className="max-w-3xl gap-1 ledger:ml-0 ledger:max-w-none ledger:border-b ledger:py-3"
+    >
       {speaker ? <MessageSpeaker role={role} /> : null}
       <MessageContent className="text-base leading-relaxed group-[.is-assistant]:w-full group-[.is-user]:rounded-lg group-[.is-user]:px-3 group-[.is-user]:py-2 signal:group-[.is-user]:rounded-br-sm ledger:group-[.is-user]:ml-0 ledger:group-[.is-user]:bg-transparent ledger:group-[.is-user]:p-0">
         {parts.map(({ partKey, selected, isTrailingPart }) => (
@@ -1365,7 +1371,7 @@ const chatComponents = {
               >
                 <Conversation>
                   <TranscriptRevealBridge into={scroller} />
-                  <ConversationContent className="w-full gap-4 px-6 py-4">
+                  <ConversationContent className="w-full gap-4 px-6 py-4 ledger:gap-0">
                     {chat.messages.length === 0 ? (
                       <ConversationEmptyState>
                         <EnsoSmile className="size-28" />
@@ -1618,6 +1624,97 @@ function QuestionWaiting({ threadId }: { threadId: string }): React.ReactNode {
   )
 }
 
+/**
+ * A narrow screen shows the rail OR the thread — the design's rail under 760px (#407); choosing a
+ * thread from the rail goes back to it. `leave` wraps a rail action so it also closes the rail.
+ */
+function useNarrowRail(): {
+  open: boolean
+  toggle: () => void
+  leave: <Arg>(act: (arg: Arg) => void) => (arg: Arg) => void
+  paneClass: string
+} {
+  const [open, setOpen] = useState(false)
+  return {
+    open,
+    toggle: () => setOpen((current) => !current),
+    leave: (act) => (arg) => {
+      setOpen(false)
+      act(arg)
+    },
+    paneClass: open ? 'flex min-w-0 flex-1 max-md:hidden' : 'flex min-w-0 flex-1',
+  }
+}
+
+/**
+ * The page's header: the threads button (narrow screens), the mark, where you are — the active
+ * thread's title, the same one the rail shows — then the view tabs, settings and `?debug`'s switch.
+ */
+function AppHeader({
+  active,
+  activeThreadId,
+  rail,
+  view,
+  onView,
+  debugOpen,
+  onToggleDebug,
+}: {
+  active: ThreadSummary | undefined
+  activeThreadId: string | undefined
+  rail: { open: boolean; toggle: () => void }
+  view: ThreadView
+  onView: (view: ThreadView) => void
+  debugOpen: boolean
+  onToggleDebug: () => void
+}): React.ReactNode {
+  return (
+    <header className="flex min-h-14 items-center gap-3 border-b bg-sidebar px-3 py-2">
+      <RailToggle open={rail.open} onToggle={rail.toggle} />
+      <EnsoSmile className="size-7.5" />
+      <div className="grid min-w-0 flex-1">
+        <h1 className="font-heading text-xs font-semibold tracking-wider text-muted-foreground uppercase max-sm:sr-only">
+          Enso · pi runtime
+        </h1>
+        <span className="truncate font-heading text-base font-semibold" title={activeThreadId ?? ''}>
+          {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
+        </span>
+      </div>
+      {isFixtureMode ? (
+        <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
+      ) : null}
+      <ViewTabs view={view} onView={onView} threadId={active?.threadId} />
+      <SettingsDialog />
+      {isDebugMode ? (
+        <PaneSwitch
+          open={debugOpen}
+          pane="thread-debug-pane"
+          labels={['show debug', 'hide debug']}
+          title="what the page believes beside what pi's session holds"
+          onToggle={onToggleDebug}
+        />
+      ) : null}
+    </header>
+  )
+}
+
+/** The header's threads button: on a narrow screen, the rail is a page of its own (#407). */
+function RailToggle({ open, onToggle }: { open: boolean; onToggle: () => void }): React.ReactNode {
+  return (
+    <Button
+      type="button"
+      size="icon"
+      variant="outline"
+      className="size-11 md:hidden"
+      aria-label={open ? 'hide threads' : 'show threads'}
+      aria-expanded={open}
+      aria-controls="threads-rail"
+      onClick={onToggle}
+    >
+      <MenuIcon />
+    </Button>
+  )
+}
+
 const VIEW_TAB =
   'inline-flex h-10 items-center gap-2 rounded-md border-b-2 border-transparent px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-popover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring aria-selected:border-primary aria-selected:bg-popover aria-selected:text-foreground signal:aria-selected:border-transparent signal:aria-selected:ring-1 signal:aria-selected:ring-border-strong signal:aria-selected:ring-inset ink:aria-selected:border-foreground ink:aria-selected:bg-transparent [&_svg]:size-4'
 
@@ -1650,7 +1747,7 @@ function ViewTabs({
           className={VIEW_TAB}
         >
           <MessagesSquareIcon aria-hidden="true" />
-          Chat
+          <span className="max-sm:sr-only">Chat</span>
           {view === 'chat' || threadId === undefined ? null : <QuestionWaiting threadId={threadId} />}
         </TabsPrimitive.Trigger>
         <TabsPrimitive.Trigger
@@ -1661,7 +1758,7 @@ function ViewTabs({
           className={VIEW_TAB}
         >
           <LayersIcon aria-hidden="true" />
-          Context
+          <span className="max-sm:sr-only">Context</span>
         </TabsPrimitive.Trigger>
         <TabsPrimitive.Trigger
           value="stats"
@@ -1671,7 +1768,7 @@ function ViewTabs({
           className={VIEW_TAB}
         >
           <ChartColumnIcon aria-hidden="true" />
-          Stats
+          <span className="max-sm:sr-only">Stats</span>
         </TabsPrimitive.Trigger>
       </TabsPrimitive.List>
     </TabsPrimitive.Root>
@@ -1777,35 +1874,19 @@ export function ChatScreen(): React.ReactNode {
   }
   const [debugOpen, setDebugOpen] = useState(isDebugMode)
   const [view, setView] = useState<ThreadView>('chat')
+  const rail = useNarrowRail()
   const active = threads.find((thread) => thread.threadId === activeThreadId)
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">
-      <header className="flex min-h-14 items-center gap-3 border-b bg-sidebar px-3 py-2">
-        <EnsoSmile className="size-7.5" />
-        <div className="grid min-w-0 flex-1">
-          <h1 className="font-heading text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-            Enso · pi runtime
-          </h1>
-          {/* Where you are: the active thread's title, the same one the rail shows. */}
-          <span className="truncate font-heading text-base font-semibold" title={activeThreadId ?? ''}>
-            {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
-          </span>
-        </div>
-        {isFixtureMode ? (
-          <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
-        ) : null}
-        <ViewTabs view={view} onView={setView} threadId={active?.threadId} />
-        <SettingsDialog />
-        {isDebugMode ? (
-          <PaneSwitch
-            open={debugOpen}
-            pane="thread-debug-pane"
-            labels={['show debug', 'hide debug']}
-            title="what the page believes beside what pi's session holds"
-            onToggle={() => setDebugOpen((open) => !open)}
-          />
-        ) : null}
-      </header>
+      <AppHeader
+        active={active}
+        activeThreadId={activeThreadId}
+        rail={rail}
+        view={view}
+        onView={setView}
+        debugOpen={debugOpen}
+        onToggleDebug={() => setDebugOpen((open) => !open)}
+      />
       <div className="flex min-h-0 flex-1">
         <ThreadsRail
           projects={projects.rows}
@@ -1813,12 +1894,13 @@ export function ChatScreen(): React.ReactNode {
           activeThreadId={activeThreadId}
           earlier={storedThreadsNotOnThisPage(stored.rows, pageThreadIds)}
           earlierError={stored.error ?? projects.error ?? resumeError}
-          onSelect={(threadId: string) => navigate(threadId, 'push')}
-          onResume={(threadId: string) => resumeFrom(threadId, 'push')}
-          onNew={(projectId: string | undefined) => navigate(mintPageThread(projectId).threadId, 'push')}
+          onSelect={rail.leave((threadId: string) => navigate(threadId, 'push'))}
+          onResume={rail.leave((threadId: string) => resumeFrom(threadId, 'push'))}
+          onNew={rail.leave((projectId: string | undefined) => navigate(mintPageThread(projectId).threadId, 'push'))}
           onAddProject={() => setAddingProject(true)}
           onRemoveProject={(projectId: string) => void forgetProject(projectId)}
           projectNotice={projectNotice}
+          shownNarrow={rail.open}
         />
         <AddProjectDialog
           open={addingProject}
@@ -1829,16 +1911,18 @@ export function ChatScreen(): React.ReactNode {
             void storedThreads.refresh()
           }}
         />
-        {threads.map((thread) => (
-          <ThreadPane
-            key={thread.threadId}
-            threadId={thread.threadId}
-            active={thread.threadId === activeThreadId}
-            debugOpen={isDebugMode && debugOpen}
-            view={view}
-            onView={setView}
-          />
-        ))}
+        <div className={rail.paneClass}>
+          {threads.map((thread) => (
+            <ThreadPane
+              key={thread.threadId}
+              threadId={thread.threadId}
+              active={thread.threadId === activeThreadId}
+              debugOpen={isDebugMode && debugOpen}
+              view={view}
+              onView={setView}
+            />
+          ))}
+        </div>
       </div>
     </div>
   )

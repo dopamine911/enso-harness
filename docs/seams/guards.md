@@ -251,6 +251,12 @@ registration and the hook's event types do not. That is already the arbiter's sh
 owning the verdict, participants as libraries beneath it — designed, deferred while the count is two
 with aligned fail direction (`tool-call-participants.test.ts:9-21`).
 
+The guard also writes to the runtime's log: on every denial it appends a custom entry,
+`ENSO_GUARD_DENIAL_ENTRY` with `{ toolCallId, rule }` (`@enso/core` `guard.ts`), through `pi.appendEntry`
+(#387). The crossing is the call, not the shape — the entry's type and reader are ours — and it exists
+because the runtime turns a block into an error result identical to a failed command's and runs no
+result hook for a blocked call, so the entry is the only place a refusal survives a reload.
+
 A smaller crossing, named: `guard.ts`'s `ENSO_PERSISTENCE_WRITE_DIRECTORIES` spells the analyzer's state
 directory as a path (`:144-148`), which is the gate's one guard line.
 

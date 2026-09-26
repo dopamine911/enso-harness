@@ -5,8 +5,8 @@ import {
   AreaChart,
   CartesianGrid,
   type DotItemDotProps,
-  Line,
-  LineChart,
+  Bar,
+  BarChart,
   type MouseHandlerDataParam,
   XAxis,
   YAxis,
@@ -18,11 +18,14 @@ import { OptionSelect } from './option-select.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
 import { COMPACT, costText, countText, durationsText } from './stats-table.tsx'
+import { useStore, useThreadStores } from './store.ts'
 import {
   type CallMetric,
   callValue,
   headlineOf,
+  isRefused,
   rankCalls,
+  type RefusedCalls,
   rankTools,
   type ToolSummary,
   type ToolUsageMetric,
@@ -79,8 +82,18 @@ const plural = (count: number, word: string): string => `${countText(count)} ${w
 
 // ── building blocks ──────────────────────────────────────────────────────────────────────────
 
-/** One headline figure: what it is, then the number large — the design's `.meter-figure`. */
-function Metric({ label, value, danger = false }: { label: string; value: string; danger?: boolean }): React.ReactNode {
+/** One headline figure: what it is, then the number large — the design's `.meter-figure` — and an optional note beneath. */
+function Metric({
+  label,
+  value,
+  danger = false,
+  note,
+}: {
+  label: string
+  value: string
+  danger?: boolean
+  note?: string | undefined
+}): React.ReactNode {
   return (
     <div className="grid content-start gap-1 rounded-lg border bg-background px-3 py-2">
       <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -92,6 +105,7 @@ function Metric({ label, value, danger = false }: { label: string; value: string
       >
         {value}
       </dd>
+      {note === undefined ? null : <dd className="text-xs text-muted-foreground">{note}</dd>}
     </div>
   )
 }
@@ -111,7 +125,7 @@ function Section({
       title={title}
       tools={aside === undefined ? undefined : <span className="text-xs text-muted-foreground">{aside}</span>}
     >
-      <div className="grid min-w-0 gap-2 text-sm">{children}</div>
+      <div className="grid min-w-0 grid-cols-1 gap-2 text-sm">{children}</div>
     </Card>
   )
 }
@@ -219,10 +233,15 @@ const TOKEN_SERIES: Readonly<Record<TokenSeries, { readonly label: string; reado
 }
 
 /**
- * Tokens per turn, one line per series, each toggled from its legend button. ⓘ No animation on
- * any chart here: the drawer refetches after each turn, and a chart re-drawing from zero every
- * time would replay the thread's history as if it were happening again.
+ * Tokens per turn, the series stacked in one bar — what the cache served at the base, then what
+ * was written to it, what missed it, and what the model wrote — each toggled from its legend
+ * button (#407: four crossing lines read as a zig-zag). ⓘ No animation on any chart here: the
+ * drawer refetches after each turn, and a chart re-drawing from zero every time would replay the
+ * thread's history as if it were happening again.
  */
+/** The stack, base first: a long thread is mostly cache reads, and the rarer series sit on top where they show. */
+const STACK_ORDER: readonly TokenSeries[] = ['cacheRead', 'cacheWrite', 'input', 'output']
+
 function TokenChart({
   data,
   onTurn,
@@ -231,17 +250,22 @@ function TokenChart({
   readonly onTurn: OnTurn
 }): React.ReactNode {
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set())
-  const series = Object.entries(TOKEN_SERIES)
+  // The legend reads in the stack's order, base first.
+  const series = STACK_ORDER.map((key) => [key, TOKEN_SERIES[key]] as const)
+  const stacked = STACK_ORDER.filter((key) => !hidden.has(key))
   const toggle = (key: string): void => setHidden((current) => toggleMember(current, key))
   return (
     <>
-      <fieldset aria-label="token series shown" className="mb-1 flex gap-3">
+      <fieldset aria-label="token series shown" className="mb-1 flex flex-wrap gap-x-3 gap-y-1">
         {series.map(([key, { label, color }]) => (
           <button
             key={key}
             type="button"
             aria-pressed={!hidden.has(key)}
-            className={hidden.has(key) ? 'text-muted-foreground line-through' : 'text-foreground'}
+            className={cn(
+              'whitespace-nowrap',
+              hidden.has(key) ? 'text-muted-foreground line-through' : 'text-foreground',
+            )}
             onClick={() => toggle(key)}
           >
             <span aria-hidden="true" className="mr-1 inline-block size-2 rounded-full" style={{ background: color }} />
@@ -250,22 +274,12 @@ function TokenChart({
         ))}
       </fieldset>
       <ChartContainer config={TOKEN_SERIES} className="aspect-auto h-36 w-full">
-        <LineChart data={[...data]} accessibilityLayer {...turnClick(data, onTurn)}>
+        <BarChart data={[...data]} accessibilityLayer {...turnClick(data, onTurn)}>
           {turnAxes(tokenTick, 40)}
-          {series
-            .filter(([key]) => !hidden.has(key))
-            .map(([key]) => (
-              <Line
-                key={key}
-                dataKey={key}
-                type="linear"
-                stroke={`var(--color-${key})`}
-                strokeWidth={2}
-                dot
-                isAnimationActive={false}
-              />
-            ))}
-        </LineChart>
+          {stacked.map((key) => (
+            <Bar key={key} dataKey={key} stackId="tokens" fill={`var(--color-${key})`} isAnimationActive={false} />
+          ))}
+        </BarChart>
       </ChartContainer>
     </>
   )
@@ -284,7 +298,10 @@ function ContextSection({
   const context = usage.context
   const percent = context?.percent ?? null
   return (
-    <Section title="Context" aside={percent === null ? undefined : PERCENT.format(percent / 100)}>
+    <Section
+      title="Tokens"
+      aside={percent === null ? undefined : `${PERCENT.format(percent / 100)} of the context window`}
+    >
       {percent === null ? null : (
         <meter
           aria-label="context window used"
@@ -369,6 +386,7 @@ function ToolUsageRow({
   const measured =
     metric === 'duration' && tool.measured < tool.calls ? ` · ${tool.measured}/${tool.calls} durations measured` : ''
   const failures = tool.failed > 0 ? ` · ${plural(tool.failed, 'failure')}` : ''
+  const refusals = tool.refused > 0 ? ` · ${countText(tool.refused)} refused` : ''
   return (
     <li className="grid gap-1">
       <div className="flex justify-between gap-2">
@@ -383,10 +401,11 @@ function ToolUsageRow({
           style={{ width: `${largest > 0 ? (value / largest) * 100 : 0}%` }}
         />
       </span>
-      <small className="font-mono text-xs text-muted-foreground">
+      <small className="text-xs text-muted-foreground">
         {plural(tool.calls, 'call')}
         {measured}
         {failures}
+        {refusals}
       </small>
     </li>
   )
@@ -427,10 +446,16 @@ const CALL_METRICS: ReadonlyArray<readonly [CallMetric, string]> = [
   ['failure', 'failures'],
 ]
 
-function callMetricText(call: EnsoToolCallStats, metric: CallMetric): string {
+function callMetricText(call: EnsoToolCallStats, metric: CallMetric, refused: RefusedCalls): string {
   if (metric === 'duration') return durationText(call.durationMs ?? 0)
   if (metric === 'failure') return 'failed'
-  return charsText(callValue(call, metric))
+  return charsText(callValue(call, metric, refused))
+}
+
+/** What became of a ranked call, beside its name: refused by a guard (#407), failed, or nothing. */
+function CallOutcome({ call, refused }: { call: EnsoToolCallStats; refused: RefusedCalls }): React.ReactNode {
+  if (isRefused(call, refused)) return <i className="ml-1.5 text-muted-foreground not-italic">refused</i>
+  return call.isError ? <i className="ml-1.5 text-refuse not-italic">failed</i> : null
 }
 
 /** Opens a target in the transcript; absent where there is nowhere to go (a static render). */
@@ -469,13 +494,15 @@ function RankedRow({
 
 function CostliestCalls({
   calls,
+  refused,
   onNavigate,
 }: {
   calls: readonly EnsoToolCallStats[]
+  refused: RefusedCalls
   onNavigate: Navigate
 }): React.ReactNode {
   const [metric, setMetric] = useState<CallMetric>('input')
-  const ranked = rankCalls(calls, metric)
+  const ranked = rankCalls(calls, metric, refused)
   const empty: Record<CallMetric, string> = {
     input: 'no tool called on this branch yet',
     output: 'no tool called on this branch yet',
@@ -499,13 +526,13 @@ function CostliestCalls({
             >
               <span>
                 <code className="font-mono">{call.toolName}</code>
-                {call.isError ? <i className="ml-1.5 text-refuse not-italic">failed</i> : null}
+                <CallOutcome call={call} refused={refused} />
                 {call.pending ? <i className="ml-1.5 text-muted-foreground not-italic">in progress</i> : null}
-                <small className="block font-mono text-xs text-muted-foreground">
+                <small className="block text-xs text-muted-foreground">
                   turn {call.turn} · {charsText(call.inputChars)} input · {charsText(call.outputChars)} output
                 </small>
               </span>
-              <b className="shrink-0 font-mono font-medium tabular-nums">{callMetricText(call, metric)}</b>
+              <b className="shrink-0 font-mono font-medium tabular-nums">{callMetricText(call, metric, refused)}</b>
             </RankedRow>
           ))}
         </ol>
@@ -530,21 +557,26 @@ function missedText(target: StatsTarget): string {
  * Pure view — the data arrives as props; only the rankings' choices are its own state. `onNavigate`
  * opens a target in the transcript; `missed` says the last one could not be found.
  */
+const NO_REFUSALS: RefusedCalls = new Map()
+
 export function ThreadStatsView({
   outcome,
   onNavigate,
   missed,
+  refused = NO_REFUSALS,
 }: {
   readonly outcome: StatsOutcome
   readonly onNavigate?: ((target: StatsTarget) => void) | undefined
   readonly missed?: string | undefined
+  /** The calls a guard refused (#387) — the thread's `guardDenials`; none in a static render. */
+  readonly refused?: RefusedCalls
 }): React.ReactNode {
   if (outcome.kind === 'reading')
     return <p className="p-3 text-xs text-muted-foreground">reading the thread's stats…</p>
   if (outcome.kind === 'failed') return <p className="p-3 text-xs text-muted-foreground">no stats: {outcome.problem}</p>
   const stats = outcome.payload
-  const headline = headlineOf(stats)
-  const tools = toolSummaries(stats.callStats)
+  const headline = headlineOf(stats, refused)
+  const tools = toolSummaries(stats.callStats, refused)
   const data = stats.turnStats.map((turn) => ({ ...turn, label: String(turn.turn) }))
   const costliest = stats.promptStats
     .filter((prompt) => prompt.turnCount > 0)
@@ -576,6 +608,12 @@ export function ThreadStatsView({
             label="failures"
             value={`${countText(headline.failedToolCalls)} · ${PERCENT.format(headline.failureRate)}`}
             danger={headline.failedToolCalls > 0}
+            // Policy doing its job is not danger (#407): a refusal is said beside, never counted in.
+            note={
+              headline.refusedToolCalls > 0
+                ? `${countText(headline.refusedToolCalls)} refused by a guard — not failures`
+                : undefined
+            }
           />
         </dl>
         {headline.offBranchCost > 0 ? (
@@ -594,7 +632,7 @@ export function ThreadStatsView({
           {noTurn ? <Empty>costs appear after the first response</Empty> : <CostChart data={data} onTurn={onTurn} />}
         </Section>
         <ToolUsage tools={tools} />
-        <CostliestCalls calls={stats.callStats} onNavigate={onNavigate} />
+        <CostliestCalls calls={stats.callStats} refused={refused} onNavigate={onNavigate} />
         {tools.length === 0 ? null : (
           <Section title="Distribution" aside="calls · failures">
             <ul className="grid gap-1">
@@ -605,6 +643,9 @@ export function ThreadStatsView({
                     {countText(tool.calls)}
                     {tool.failed > 0 ? (
                       <b className="ml-1 font-medium text-refuse">· {countText(tool.failed)}</b>
+                    ) : null}
+                    {tool.refused > 0 ? (
+                      <span className="ml-1 text-muted-foreground">· {countText(tool.refused)} refused</span>
                     ) : null}
                   </span>
                 </li>
@@ -627,7 +668,7 @@ export function ThreadStatsView({
                     <strong className="block truncate font-medium text-foreground" title={prompt.text}>
                       {prompt.text || '(before the first prompt)'}
                     </strong>
-                    <small className="font-mono text-xs text-muted-foreground">
+                    <small className="text-xs text-muted-foreground">
                       {plural(prompt.turnCount, 'model call')} · {plural(prompt.toolCalls, 'tool')}
                       {prompt.durationMs === undefined ? null : (
                         <span title="the prompt to the last reply entry, as pi stamped them">
@@ -673,5 +714,6 @@ export function ThreadStatsDrawer({ onNavigate }: { readonly onNavigate?: Reveal
     onNavigate === undefined || outcome.kind !== 'read'
       ? undefined
       : (target: StatsTarget): void => setMissed(onNavigate(target, outcome.payload) ? undefined : missedText(target))
-  return <ThreadStatsView outcome={outcome} onNavigate={navigate} missed={missed} />
+  const refused = useStore(useThreadStores().guardDenials)
+  return <ThreadStatsView outcome={outcome} onNavigate={navigate} missed={missed} refused={refused} />
 }

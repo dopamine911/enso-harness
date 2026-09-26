@@ -61,12 +61,17 @@ export {
 } from './follow.ts'
 export {
   DEFAULT_GUARD_POLICY,
+  ENSO_GUARD_DENIAL_ENTRY,
+  ENSO_GUARD_DENIAL_KEY,
   ENSO_GUARD_RULES,
   ENSO_PERSISTENCE_WRITE_DIRECTORIES,
+  EnsoGuardDenial,
   type EnsoGuardRule,
   GuardPolicy,
   PERSISTENCE_WRITE_BASENAMES,
   PERSISTENCE_WRITE_DIRECTORIES,
+  readEnsoGuardDenial,
+  readEnsoGuardDenialMetadata,
   SECRET_BASENAME_PATTERNS,
 } from './guard.ts'
 export {

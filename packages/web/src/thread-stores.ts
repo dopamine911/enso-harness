@@ -1,11 +1,13 @@
 import {
   ENSO_PROJECT_HEADER,
   type EnsoDialogSpec,
+  type EnsoGuardRule,
   type EnsoInterruptedTail,
   type EnsoSessionUsage,
   type EnsoThreadHistory,
   ensoLogger,
   type ProviderRefusalClass,
+  readEnsoGuardDenialMetadata,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import type { BrowserLogging, FetchLike } from './browser-logging.ts'
@@ -110,6 +112,14 @@ export interface ThreadStores {
    */
   readonly refusal: WritableStore<ProviderRefusalMark | undefined>
   /**
+   * The calls a guard refused (#387, #407), by tool-call id, with the rule that refused each.
+   * pi hands the page a refusal as an error result shaped like any failed command; this is what
+   * tells them apart. Seeded from the history's results (the server joined the guard's session
+   * entry onto each), then fed by the live `custom-entry` chunk the guard's entry crosses as —
+   * one store either way, so a refusal reads the same live, reloaded and resumed.
+   */
+  readonly guardDenials: WritableStore<ReadonlyMap<string, EnsoGuardRule>>
+  /**
    * The Start-a-session dialog is open (#391). Raised when the page MINTS the thread — New Thread,
    * a page with no thread in its URL — and lowered by Start or Escape; a thread adopted from
    * history never raises it.
@@ -158,6 +168,19 @@ function namingProject(fetchImpl: FetchLike | undefined, projectId: string | und
   }
 }
 
+/** The refusals a stored history's tool results carry — see {@link ThreadStores.guardDenials}. */
+function guardDenialsIn(history: readonly UIMessage[]): Map<string, EnsoGuardRule> {
+  const denials = new Map<string, EnsoGuardRule>()
+  for (const message of history) {
+    for (const part of message.parts) {
+      if (part.type !== 'tool-result') continue
+      const denial = readEnsoGuardDenialMetadata(part.metadata)
+      if (denial !== undefined) denials.set(denial.toolCallId, denial.rule)
+    }
+  }
+  return denials
+}
+
 /**
  * `fetch` is the one seam between a thread and the network: a test mounts a real pane over a
  * scripted server through it (#118), and the fixture page mints its threads with a fetch that
@@ -186,6 +209,7 @@ function createThreadStores(
     disconnected: createStore(false),
     queue: createStore<readonly string[]>([]),
     refusal: createStore<ProviderRefusalMark | undefined>(undefined),
+    guardDenials: createStore<ReadonlyMap<string, EnsoGuardRule>>(guardDenialsIn(history)),
     startSession: createStore(false),
     projectId,
     fetch: threadFetch,

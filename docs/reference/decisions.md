@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 275.**
+**Decision headers: 276.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -142,6 +142,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/debug/thread-timeline-screen.tsx` | `#144` | One thread's timeline (#144 slice 3): what the host emitted, what the server sent, and what was logged, as ONE list ordered by time — on the debug page at `debug.html?thread=<id>`. |
 | `packages/web/src/fixture-conversation.ts` | `#27`, `#31`, `#75`, `#404` | The styling dev loop (#31): a scripted conversation streamed through the REAL `useChat` pipeline as local AG-UI events — no server, no pi. |
 | `packages/web/src/follow-connection.ts` | `#112`, `#272`, `#274` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |
+| `packages/web/src/guard-refusal.tsx` | `#387`, `#407` | A guard refusal as the design draws it (`Enso-Design-Direction` `.guard`, #407 item 1): the tool, the verdict in the refusal colour, what was asked, why it was refused, and who refused it. |
 | `packages/web/src/host/__tests__/agent-host.test.ts` | `#27`, `#45`, `#69` | The in-process host against the REAL harness package (#69) — every extension the manifest names loads, and inline probe extensions observe what the host does. |
 | `packages/web/src/host/__tests__/agent-loop-contract.test.ts` | `#130` | A CONTRACT TEST on the runtime's loop, the shape of `cc-safety-net-contract.test.ts`: the wire shape of a refused tool call is the vendor's doing — a guard's `{ block, reason }` becomes an error result with the reason as its content, `isError: true` — and `map-events.ts` relies on it (the `tool_execution_end` case, "isError is the only signal a refused call has"). |
 | `packages/web/src/host/__tests__/branch-context.test.ts` | `#361` | #361: a thread's context, request by request, off pi's own entries — built here with pi's real session manager, so the entries read are the ones pi writes and the assembly is pi's own (`buildContextEntries`, compaction included). |
@@ -223,7 +224,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/stored-threads.ts` | `#95`, `#395` | The sessions a user can come back to (#95): pi's session files in this server's projects, as the server lists them — the rail's rows under each project (#395). |
 | `packages/web/src/thread-context-analysis.ts` | `#361` | What the Context view derives from `EnsoThreadContext` before it draws (#361): the category order and names, totals, the prompt-granularity roll-up and the delta series — dsh-context's `categories.ts`, `headline.ts` and trend aggregation, over our wire. |
 | `packages/web/src/thread-context.tsx` | `#361` | The Context view (#361) — dsh-context's Context tab over pi, in the design direction's layout (`Enso-Design-Direction`, the Context view): Now (what the next request is made of, beside the provider's count for the last one), Trend (every request's makeup, and the picked one's brief), then the Context Browser with Context Events and File Activity beside it on a wide view. |
-| `packages/web/src/thread-stats-analysis.ts` | `#45` | What the stats drawer derives from `EnsoThreadStats` before it draws (#45 phase 2): the averages, the per-tool totals and the two rankings — pi-livecraft's `analyzeSession` and `SessionAnalysisWidget` rankings (`.inspiration/pi-extensions/pi-livecraft`), ported to our wire. |
+| `packages/web/src/thread-stats-analysis.ts` | `#45`, `#387`, `#407` | What the stats drawer derives from `EnsoThreadStats` before it draws (#45 phase 2): the averages, the per-tool totals and the two rankings — pi-livecraft's `analyzeSession` and `SessionAnalysisWidget` rankings (`.inspiration/pi-extensions/pi-livecraft`), ported to our wire. |
 | `packages/web/src/thread-stats.tsx` | `#45`, `#359` | The thread's stats drawer (#45 phase 2) — pi-livecraft's session analysis widget (`.inspiration/pi-extensions/pi-livecraft/src/features/session-analysis/`), section for section, over our wire: summary cards, context and tokens per turn, cost per turn, cumulative usage by tool, costliest calls, distribution, costliest prompts. |
 | `packages/web/src/thread-status.tsx` | `#45`, `#51`, `#84`, `#90`, `#103` | The status bar (#90 PR 1): the always-on line that says what this session is doing and what it has cost, so the answer to "is anything happening?" |
 | `packages/web/src/thread-stores.ts` | `#90`, `#272` | Everything the browser knows about one thread beyond its messages (#90 PR 3). |

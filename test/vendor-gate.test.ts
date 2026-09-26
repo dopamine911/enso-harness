@@ -115,6 +115,10 @@ const VENDOR_NAMED_ALLOWED: readonly string[] = [
   // The guard's write-allowlist names cc-safety-net's state directory: a path, not an import.
   // Leaves when the harness owns the list of directories an extension may write.
   'packages/core/src/guard.ts',
+  // The refusal card's verdict words, one per rule in `ENSO_GUARD_RULES` — and one rule is named
+  // after the analyzer whose verdict it carries (`cc-safety-net`). The leak is the vocabulary's,
+  // and this file spells it as a key. Leaves when that rule is named for what it guards.
+  'packages/web/src/guard-refusal.tsx',
   // `PICC_EXTENSION_FRAGMENT` — the print variant exists to REMOVE picc from the manifest
   // (#20: no permission modes under `--print`), so it must name the extension it filters, in
   // the constant and in the shape error that fires when no entry matches. Leaves when the

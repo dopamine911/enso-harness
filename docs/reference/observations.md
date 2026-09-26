@@ -9,7 +9,7 @@ A carrier marked **ELIDED** does not reach the browser in that state (#279): the
 
 | Kind | Schema | Producer | Follow carrier | Adapter emissions | Browser consumer / store |
 |---|---|---|---|---|---|
-| `custom-entry` | [`EnsoCustomEntry`](../../packages/core/src/observation.ts#L231) | [mapper](../../packages/web/src/host/map-events.ts#L407) | [`observation` frame](../../packages/web/src/server/follow.ts#L179) | `custom-entry` (CUSTOM) | `recentChunks` only; recorded and counted, rendered by nothing (L3) |
+| `custom-entry` | [`EnsoCustomEntry`](../../packages/core/src/observation.ts#L231) | [mapper](../../packages/web/src/host/map-events.ts#L407) | [`observation` frame](../../packages/web/src/server/follow.ts#L179) | `custom-entry` (CUSTOM) | `recentChunks`; a guard refusal (`enso-guard-denial`, #387) lands in `guardDenials` — every other entry is rendered by nothing (L3) |
 | `dialog-settled` | [`EnsoDialogSettled`](../../packages/core/src/observation.ts#L200) | [mapper](../../packages/web/src/host/map-events.ts#L374) | [`observation` frame](../../packages/web/src/server/follow.ts#L179) | `dialog-settled` (CUSTOM) | `recentChunks`; `dialog` |
 | `extension-error` | [`EnsoExtensionError`](../../packages/core/src/observation.ts#L522) | [mapper](../../packages/web/src/host/map-events.ts#L414) | [`observation` frame](../../packages/web/src/server/follow.ts#L179) | `EventType.RUN_ERROR` | TanStack chat state |
 | `extension-ui-request` | [`EnsoExtensionUiRequest`](../../packages/core/src/observation.ts#L156) | [mapper](../../packages/web/src/host/map-events.ts#L170) | [`observation` frame](../../packages/web/src/server/follow.ts#L179) | `EventType.RUN_ERROR`<br>`extension-ui-request` (CUSTOM)<br>`dropped` | `recentChunks`; `dialog` (a blocking question; or `notifications` if unreadable); `notifications` (a notify)<br>TanStack chat state<br>nothing consumes the dropped branch |
@@ -45,7 +45,7 @@ A carrier marked **ELIDED** does not reach the browser in that state (#279): the
 ## Diagnostics
 
 - Schemas with no producer: none
-- CUSTOM kinds the router records but does not route: `custom-entry`, `unmapped`
+- CUSTOM kinds the router records but does not route: `unmapped`
 - Kinds with an unclassified cell: none
 
 Inventory: 24 union members; 12 ride CUSTOM by kind; 3 chunks that are not observations; every chunk name has a checked browser classification.

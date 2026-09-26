@@ -5,8 +5,9 @@ order; the first `{ block: true, reason }` ends the call, and nothing after it c
 (`guards/index.ts` header). Our guard is one handler with an ordered `decide` inside it — the
 fail-closed floor, the shell denies, the write gates, then every other path-bearing tool as a reader —
 and the bash analyzer is a library under that handler, not a participant of its own, so the count
-stays at two (#4, #9). Every answer is a log record. A refused call reaches the browser only as a
-result flagged `isError`, rendered as an error on a live follow and on resume alike (#130).
+stays at two (#4, #9). Every answer is a log record. A refused call reaches the browser as a result
+flagged `isError` — the runtime's shape for any failure — and beside it the guard's own custom entry
+naming the call and the rule, which is what the page draws a refusal from, live and on resume (#387).
 
 ## The sequence
 
@@ -34,10 +35,13 @@ sequenceDiagram
     G->>G: reader by EXCLUSION: credential pattern
   end
   G->>L: warn "{toolName} denied: {reason}" · or debug "{toolName} allowed"
+  G->>P: appendEntry("enso-guard-denial", { toolCallId, rule }) — denials only
   G-->>P: { block: true, reason } · or undefined
+  P->>H: entry_appended { custom }
+  H-->>B: observation custom-entry — the page's denials store, by toolCallId
   P->>H: tool_execution_end { isError }
   H-->>B: observation tool-result { complete: true, isError, text }
-  B->>B: isError ⇒ state "output-error" ⇒ call and result render `error`
+  B->>B: in the denials ⇒ refusal card, `refused` · else isError ⇒ step row, `error`
 ```
 
 ## The invariants it shows
@@ -70,10 +74,18 @@ sequenceDiagram
    (`packages/harness/package.json`, `pi.extensions`); the tripwire scans every declared extension
    tree for a `tool_call` registration and asserts set equality with those two. A third is #4's
    arbiter trigger, and the test says not to add yourself to the list.
-8. **A refusal is an error result, and the browser says so.** `isError` is the only signal a refused
-   call has on the wire (`map-events.ts`, `tool_execution_end`); the AG-UI derivation adds
-   `state: "output-error"` so the state layer marks the call and its result `error` with the text as
-   the message — the same shape the transcript rebuild produces on resume.
+8. **A refusal is an error result on the wire.** `isError` is the only signal pi gives a refused call
+   (`map-events.ts`, `tool_execution_end`); the AG-UI derivation adds `state: "output-error"` so the
+   state layer marks the call and its result `error` with the text as the message — the same shape
+   the transcript rebuild produces on resume, and the same shape a command that ran and failed has.
+9. **The guard says it refused, in the log pi keeps** (#387). pi discards the block marker and a
+   blocked call never reaches a `tool_result` hook, so the guard appends a custom entry —
+   `ENSO_GUARD_DENIAL_ENTRY`, `{ toolCallId, rule }` — before returning the verdict. Live it crosses as
+   a `custom-entry` observation into the thread's `guardDenials` store; on a cold read
+   `transcript-to-messages.ts` joins it onto its result as `enso:guardDenial` metadata, and adopting
+   the history seeds the same store. The tool row and the status bar read only that store: a
+   refusal is never recognised by its wording. pi's context builder skips `custom` entries, so the
+   model's view is unchanged.
 
 **What is pinned where.** A guard's `{ block, reason }` becomes an error result in the runtime's own
 loop — `pi-agent-core/dist/agent-loop.js`, the `beforeResult?.block` branch: `createErrorToolResult(reason)`,
@@ -114,6 +126,16 @@ that title, so a renamed or deleted pin fails this page.
 <!-- test: packages/web/src/server/__tests__/transcript-to-messages.test.ts#a refused tool call (isError) reads as an error on both the call and the result — a denial must not render as success -->
 - **Invariant 8, resumed** — [`transcript-to-messages.test.ts`](../../packages/web/src/server/__tests__/transcript-to-messages.test.ts):
   the rebuilt branch agrees with the live derivation.
+<!-- test: packages/harness/extensions/guards/__tests__/guards.test.ts#⚠ a denial appends one guard-denial entry naming the call and the rule; an allow appends none -->
+- **Invariant 9, the entry** — the guard appends one entry per denial, naming the call and the rule.
+<!-- test: packages/web/src/__tests__/custom-event-router.test.ts#a guard-denial custom-entry marks its call refused; any other entry marks nothing (#387) -->
+- **Invariant 9, live** — [`custom-event-router.test.ts`](../../packages/web/src/__tests__/custom-event-router.test.ts):
+  the entry's chunk lands in the denials store; another extension's entry does not.
+<!-- test: packages/web/src/server/__tests__/transcript-to-messages.test.ts#⚠ a guard refusal rides its own result as metadata; a failed call with the same shape carries none (#387) -->
+- **Invariant 9, resumed** — the same `bash` call refused and failing: only the refusal carries the mark.
+<!-- test: packages/web/src/__tests__/selected-message-part.test.tsx#⚠ a refused call renders as the refusal card; the same error result without a denial is an error row -->
+- **Invariant 9, drawn** — [`selected-message-part.test.tsx`](../../packages/web/src/__tests__/selected-message-part.test.tsx):
+  a refused call is the refusal card, never the word `error`.
 
 <!-- test: packages/web/src/host/__tests__/agent-loop-contract.test.ts#⚠ CONTRACT: pi-agent-core@${version} turns a blocking tool_call verdict into an error result carrying the reason -->
 - **Invariant 8, the vendor's half** — [`agent-loop-contract.test.ts`](../../packages/web/src/host/__tests__/agent-loop-contract.test.ts):

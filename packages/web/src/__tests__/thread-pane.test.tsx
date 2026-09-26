@@ -1,5 +1,5 @@
 import { afterAll, afterEach, expect, spyOn, test } from 'bun:test'
-import { ENSO_PROVIDER_REFUSAL_KEY, type EnsoThreadStats } from '@enso/core'
+import { ENSO_GUARD_DENIAL_ENTRY, ENSO_PROVIDER_REFUSAL_KEY, type EnsoThreadStats } from '@enso/core'
 import { act } from 'react'
 import type { createRoot as CreateRoot, Root } from 'react-dom/client'
 import { ChatScreen, ThreadPane, type ThreadView } from '../chat-screen.tsx'
@@ -1003,7 +1003,10 @@ test('⚠ a tool call reads running… while its run is open and aborted once th
   await pane.unmount()
 })
 
-test("⚠ a refused or aborted tool call's result reads error LIVE — the same as a resumed log shows it (#130)", async () => {
+// An `isError` result with NO guard-denial entry — a command that ran and failed — reads error. The
+// reason text here is a guard's on purpose: the page never reads the wording (#387); only the
+// entry makes a refusal, and its live path is the sibling test below.
+test('⚠ an isError result with no guard denial reads error LIVE — the same as a resumed log shows it (#130, #407)', async () => {
   const pane = await mountPane()
   await pane.settle(SNAPSHOT_IDLE)
   await flush(async () => {
@@ -1037,6 +1040,63 @@ test("⚠ a refused or aborted tool call's result reads error LIVE — the same 
     expect(row?.hasAttribute('open')).toBe(true) // an error opens itself
     expect(pane.container.textContent).toContain('blocked: outside the write root')
     expect(pane.status()).toContain('working') // the model has the output and is composing
+  })
+  await pane.unmount()
+})
+
+// #387, #407 — live: the guard appends its entry inside `tool_call`, before pi builds the error
+// result, so the entry's `custom-entry` crosses FIRST. The row is the refusal card from that
+// moment (its verdict; no reason yet), gains the reason when the result lands, and never reads
+// `error`; the status bar counts it refused, not failed.
+test('⚠ a guard-refused call reads refused LIVE: the entry, then the result — the card, then its reason (#387, #407)', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  await flush(async () => {
+    typeInto(pane.composer(), 'write it')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    {
+      type: 'observation',
+      seq: 2,
+      observation: { kind: 'tool-call', toolCallId: 'c2', toolName: 'write', args: { path: '/etc/x' } },
+    },
+    {
+      type: 'observation',
+      seq: 3,
+      observation: {
+        kind: 'custom-entry',
+        customType: ENSO_GUARD_DENIAL_ENTRY,
+        data: { toolCallId: 'c2', rule: 'write-confinement' },
+      },
+    },
+  )
+  const row = (): Element | null => pane.container.querySelector('[data-tool-call-id="c2"]')
+  await eventually(() => {
+    expect(row()?.getAttribute('data-enso-tool-call')).toBe('refused')
+    expect(row()?.textContent).toContain('Refused · outside the workspace')
+    expect(row()?.textContent).not.toContain('outside the write root')
+  })
+  await pane.settle({
+    type: 'observation',
+    seq: 4,
+    observation: {
+      kind: 'tool-result',
+      toolCallId: 'c2',
+      toolName: 'write',
+      text: 'blocked: outside the write root',
+      complete: true,
+      isError: true,
+    },
+  })
+  await eventually(() => {
+    expect(row()?.getAttribute('data-enso-tool-call')).toBe('refused')
+    expect(row()?.textContent).toContain('blocked: outside the write root')
+    expect(pane.container.querySelector('[data-enso-tool-call="error"]')).toBeNull()
+    expect(pane.status()).toContain('1 refused')
+    expect(pane.status()).not.toContain('failed')
   })
   await pane.unmount()
 })
@@ -1376,6 +1436,44 @@ test('the Stats tab replaces the transcript in the thread on screen, and follows
   await eventually(() => {
     expect(page.container.querySelectorAll('#thread-view-stats')).toHaveLength(0)
     expect(shown('thread-view-chat')).toHaveLength(1)
+  })
+  await page.unmount()
+})
+
+// #407: on a narrow screen the rail is a page of its own, behind the header's threads button.
+// Choosing a thread from it must also close it — otherwise, on a phone, the thread just chosen
+// stays hidden behind the rail. ⚠ happy-dom has no media queries: this reads the state the
+// classes encode (`hidden` below md; the panes `max-md:hidden` while it is open), not a layout.
+test('the threads button opens the rail over the thread; choosing a thread from it closes it again', async () => {
+  const page = await mountPage()
+  const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
+  if (newThread === undefined) throw new Error('expected a New Thread button')
+  await page.click(newThread)
+  await page.click(newThread)
+  const toggle = page.container.querySelector<HTMLButtonElement>('header button[aria-controls="threads-rail"]')
+  const rail = page.container.querySelector<HTMLElement>('#threads-rail')
+  if (toggle === null || rail === null) throw new Error('expected the threads button and the rail it controls')
+  const panesHiddenNarrow = (): boolean =>
+    page.container.querySelector('#thread-status')?.parentElement?.closest('.max-md\\:hidden') !== null
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  expect(rail.classList.contains('hidden')).toBe(true)
+  expect(panesHiddenNarrow()).toBe(false)
+
+  await page.click(toggle)
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  expect(toggle.getAttribute('aria-label')).toBe('hide threads')
+  expect(rail.classList.contains('hidden')).toBe(false)
+  expect(panesHiddenNarrow()).toBe(true)
+
+  const older = page.activeRows()[1]
+  if (older === undefined) throw new Error('expected two rows')
+  expect(older.getAttribute('aria-current')).toBeNull()
+  await page.click(older)
+  await eventually(() => {
+    expect(older.getAttribute('aria-current')).toBe('true')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(rail.classList.contains('hidden')).toBe(true)
+    expect(panesHiddenNarrow()).toBe(false)
   })
   await page.unmount()
 })

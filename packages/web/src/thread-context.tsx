@@ -22,6 +22,7 @@ import { COMPACT, countText } from './stats-table.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import {
   CATEGORY_COLOR,
+  CATEGORY_LABEL,
   CONTEXT_CATEGORIES,
   changeOf,
   lastRequestPerPrompt,
@@ -308,54 +309,90 @@ function TrendPlot(props: TrendPlotProps): React.ReactNode {
       style={{ height: `${(Math.abs(tokens) / scale) * 100}%`, background: CATEGORY_COLOR[category] }}
     />
   )
+  const figure = mode === 'total' ? estimateText : estimateChangeText
   return (
-    <div className="overflow-x-auto">
-      <div
-        className={cn(
-          'relative flex h-44 items-stretch gap-0.75 pt-4.5',
-          mode === 'total' ? 'border-b border-border-strong' : '',
-        )}
-      >
-        {bars.map((bar, index) => {
-          const makeup = values[index] ?? bar.estimated
-          const total = CONTEXT_CATEGORIES.reduce((sum, category) => sum + makeup[category], 0)
-          const compacted = compactedBar(bar, requests, granularity)
-          const label = `request ${bar.turn}, prompt ${bar.prompt}, ${mode === 'total' ? estimateText(total) : estimateChangeText(total)}${compacted ? ', compaction' : ''}`
-          return (
-            <button
-              key={bar.turn}
-              type="button"
-              aria-pressed={index === pickedIndex}
-              aria-label={label}
-              title={label}
-              className="relative flex min-w-2.5 flex-1 flex-col rounded-xs transition-colors hover:bg-popover aria-pressed:bg-accent aria-pressed:ring-1 aria-pressed:ring-foreground"
-              onClick={() => onPick(index)}
-            >
-              {compacted ? (
-                <LayersIcon aria-hidden="true" className="absolute -top-4.5 left-1/2 size-4 -translate-x-1/2" />
-              ) : null}
-              <span className="flex min-h-0 flex-1 flex-col justify-end">
-                {[...CONTEXT_CATEGORIES]
-                  .reverse()
-                  .map((category) => (makeup[category] > 0 ? segment(category, makeup[category], false) : null))}
-              </span>
-              {mode === 'delta' ? (
-                <span className="flex min-h-0 flex-1 flex-col justify-start border-t border-border-strong">
-                  {CONTEXT_CATEGORIES.map((category) =>
-                    makeup[category] < 0 ? segment(category, makeup[category], true) : null,
-                  )}
-                </span>
-              ) : null}
-            </button>
-          )
-        })}
+    <div className="flex gap-2">
+      <TrendScale scale={scale} mode={mode} />
+      <div className="min-w-0 flex-1 overflow-x-auto">
+        <div className="pt-4.5">
+          <div
+            className={cn(
+              'relative flex h-40 items-stretch gap-0.75',
+              mode === 'total' ? 'border-b border-border-strong' : '',
+            )}
+          >
+            {/* Guides at the scale's top and its middle, behind the bars. */}
+            <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 border-t border-dashed" />
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-1/2 border-t border-dashed"
+            />
+            {bars.map((bar, index) => {
+              const makeup = values[index] ?? bar.estimated
+              const total = CONTEXT_CATEGORIES.reduce((sum, category) => sum + makeup[category], 0)
+              const compacted = compactedBar(bar, requests, granularity)
+              const label = `request ${bar.turn}, prompt ${bar.prompt}, ${figure(total)}${compacted ? ', compaction' : ''}`
+              // The hover names every category's figure: the bar alone says only proportions.
+              const detail = CONTEXT_CATEGORIES.map(
+                (category) => `${CATEGORY_LABEL[category]} ${figure(makeup[category])}`,
+              )
+              return (
+                <button
+                  key={bar.turn}
+                  type="button"
+                  aria-pressed={index === pickedIndex}
+                  aria-label={label}
+                  title={[label, ...detail].join('\n')}
+                  className="relative flex max-w-16 min-w-2.5 flex-1 flex-col rounded-xs transition-colors hover:bg-popover aria-pressed:bg-accent aria-pressed:ring-1 aria-pressed:ring-foreground"
+                  onClick={() => onPick(index)}
+                >
+                  {compacted ? (
+                    <LayersIcon aria-hidden="true" className="absolute -top-4.5 left-1/2 size-4 -translate-x-1/2" />
+                  ) : null}
+                  <span className="flex min-h-0 flex-1 flex-col justify-end">
+                    {[...CONTEXT_CATEGORIES]
+                      .reverse()
+                      .map((category) => (makeup[category] > 0 ? segment(category, makeup[category], false) : null))}
+                  </span>
+                  {mode === 'delta' ? (
+                    <span className="flex min-h-0 flex-1 flex-col justify-start border-t border-border-strong">
+                      {CONTEXT_CATEGORIES.map((category) =>
+                        makeup[category] < 0 ? segment(category, makeup[category], true) : null,
+                      )}
+                    </span>
+                  ) : null}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        <div aria-hidden="true" className="flex gap-0.75 pt-1 font-mono text-xs text-muted-foreground">
+          {bars.map((bar, index) => (
+            <span key={bar.turn} className="max-w-16 min-w-2.5 flex-1 text-center">
+              {index % every === 0 ? labelOf(bar) : ''}
+            </span>
+          ))}
+        </div>
       </div>
-      <div aria-hidden="true" className="flex gap-0.75 pt-1 font-mono text-xs text-muted-foreground">
-        {bars.map((bar, index) => (
-          <span key={bar.turn} className="min-w-2.5 flex-1 text-center">
-            {index % every === 0 ? labelOf(bar) : ''}
-          </span>
-        ))}
+    </div>
+  )
+}
+
+/**
+ * The trend's scale, beside the bars (#407): what the top guide is worth, its middle, and the
+ * base — zero in Total; in Change, the line is zero and the extremes are signed.
+ */
+function TrendScale({ scale, mode }: { scale: number; mode: TrendMode }): React.ReactNode {
+  const marks =
+    mode === 'total'
+      ? [estimateText(scale), estimateText(scale / 2), '0']
+      : [estimateChangeText(scale), '±0', estimateChangeText(-scale)]
+  return (
+    <div aria-hidden="true" className="shrink-0 pt-4.5 font-mono text-xs text-muted-foreground">
+      <div className="relative h-40 w-14">
+        <span className="absolute top-0 right-0 -translate-y-1/2">{marks[0]}</span>
+        <span className="absolute top-1/2 right-0 -translate-y-1/2">{marks[1]}</span>
+        <span className="absolute right-0 bottom-0 translate-y-1/2">{marks[2]}</span>
       </div>
     </div>
   )
@@ -418,7 +455,7 @@ function RequestBrief({
       </p>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <h3 className="font-heading text-base font-semibold ink:italic">Request {request.turn}</h3>
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           prompt {request.prompt} · {timeText(request.at)} · {request.model}
         </span>
         {request.compaction === undefined ? null : (
@@ -475,23 +512,23 @@ function RequestBrief({
           </Listed>
         </BriefRow>
       </dl>
-      <p className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
+      <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span title="pi's estimate of what the request was assembled from">
-          estimate <b className="font-medium text-foreground">{estimateText(totalOf(request.estimated))}</b>
+          estimate <b className="font-mono font-medium text-foreground">{estimateText(totalOf(request.estimated))}</b>
         </span>
         {actual.prompt === 0 ? (
           <span>no count from the provider</span>
         ) : (
           <>
             <span title="the provider's count: input, cache read and cache write">
-              provider prompt <b className="font-medium text-foreground">{COMPACT.format(actual.prompt)}</b>
+              provider prompt <b className="font-mono font-medium text-foreground">{COMPACT.format(actual.prompt)}</b>
             </span>
             <span>
-              cache read <b className="font-medium text-foreground">{COMPACT.format(actual.cacheRead)}</b> (
+              cache read <b className="font-mono font-medium text-foreground">{COMPACT.format(actual.cacheRead)}</b> (
               {PERCENT.format(shareOf(actual.cacheRead, actual.prompt))})
             </span>
             <span>
-              output <b className="font-medium text-foreground">{COMPACT.format(actual.output)}</b>
+              output <b className="font-mono font-medium text-foreground">{COMPACT.format(actual.output)}</b>
             </span>
           </>
         )}

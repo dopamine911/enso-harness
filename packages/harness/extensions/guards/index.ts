@@ -2,7 +2,9 @@ import { existsSync } from 'node:fs'
 import type { ExtensionAPI, ToolCallEvent, ToolCallEventResult, ToolResultEvent } from '@earendil-works/pi-coding-agent'
 import {
   DEFAULT_GUARD_POLICY,
+  ENSO_GUARD_DENIAL_ENTRY,
   ENSO_LOG_EVENTS,
+  type EnsoGuardDenial,
   type EnsoGuardRule,
   ensoLogger,
   type GuardPolicy,
@@ -385,7 +387,9 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
   // the RULE that refused (#144 — the word a day's stats count by) and the reason; an allow
   // at `debug`. The transcript shows the model what was refused; this says WHEN, on which
   // call, in the file beside every other layer's line about it. pi is handed its own shape
-  // back — `{ block, reason }` — and never our `rule`.
+  // back — `{ block, reason }` — and never our `rule`: the rule rides a custom session entry
+  // instead (#387), because pi turns a block into an error result indistinguishable from a
+  // failed command, and the entry is the one thing of ours pi persists beside it.
   pi.on('tool_call', (event, extensionContext): ToolCallEventResult | undefined => {
     const verdict = decide(event, extensionContext.cwd)
     const path = pathArgumentOf(event)
@@ -399,6 +403,8 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
       return undefined
     }
     log.warn(ENSO_LOG_EVENTS.toolDenied, { ...properties, rule: verdict.rule, reason: verdict.reason })
+    const denial: EnsoGuardDenial = { toolCallId: event.toolCallId, rule: verdict.rule }
+    pi.appendEntry(ENSO_GUARD_DENIAL_ENTRY, denial)
     return { block: verdict.block, reason: verdict.reason }
   })
 

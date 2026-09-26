@@ -109,17 +109,35 @@ export interface ThreadCounts {
   readonly prompts: number
   /** Tool calls across the whole transcript, paired or not. */
   readonly toolCalls: number
+  /** Results an Enso guard refused (#387) — by policy, not by error. */
+  readonly refused: number
+  /** Results that came back as errors and were not refusals: the tool ran, or tried to, and failed. */
+  readonly failed: number
 }
 
-/** Count the transcript. Cheap enough to run per render; the list is what is on screen. */
-export function countThread(messages: ReadonlyArray<UIMessage>): ThreadCounts {
+/**
+ * Count the transcript. Cheap enough to run per render; the list is what is on screen.
+ * `guardDenials` is the thread's store of refused call ids — the one thing that tells a refusal
+ * from a failure, since pi hands both over as an error result.
+ */
+export function countThread(
+  messages: ReadonlyArray<UIMessage>,
+  guardDenials: ReadonlyMap<string, unknown> = new Map(),
+): ThreadCounts {
   let prompts = 0
   let toolCalls = 0
+  let refused = 0
+  let failed = 0
   for (const message of messages) {
     if (message.role === 'user') prompts += 1
-    for (const part of message.parts) if (part.type === 'tool-call') toolCalls += 1
+    for (const part of message.parts) {
+      if (part.type === 'tool-call') toolCalls += 1
+      if (part.type !== 'tool-result') continue
+      if (guardDenials.has(part.toolCallId)) refused += 1
+      else if (part.state === 'error') failed += 1
+    }
   }
-  return { prompts, toolCalls }
+  return { prompts, toolCalls, refused, failed }
 }
 
 /** `running read` — the tool named as pi names it, so it matches the transcript's step row. */
@@ -166,7 +184,8 @@ function ContextMeter({ context }: { readonly context: EnsoContextUsage }): Reac
         value={Math.min(percent, 100)}
         className="h-1.5 w-16 appearance-none overflow-hidden rounded-full bg-muted-foreground/25 [&::-moz-meter-bar]:bg-foreground/60 [&::-webkit-meter-bar]:border-0 [&::-webkit-meter-bar]:bg-transparent [&::-webkit-meter-bar]:bg-none [&::-webkit-meter-optimum-value]:bg-foreground/60 [&::-webkit-meter-optimum-value]:bg-none"
       />
-      {percent}% · {COMPACT_TOKENS.format(context.tokens)} / {window}
+      {/* pi's meter: the provider's count for the last response plus pi's estimate since — an estimate, so ≈ (#407). */}
+      {percent}% · ≈{COMPACT_TOKENS.format(context.tokens)} / {window}
     </span>
   )
 }
@@ -252,6 +271,17 @@ export function ThreadStatusView({
       <span title="tool calls across this transcript, finished or not">
         {counts.toolCalls} {counts.toolCalls === 1 ? 'tool call' : 'tool calls'}
       </span>
+      {/* Said apart (#407): a refusal is policy doing its job, a failure is something to fix. */}
+      {counts.refused === 0 ? null : (
+        <span className="text-refuse" title="tool calls an Enso guard refused — by policy, not by error">
+          {counts.refused} refused
+        </span>
+      )}
+      {counts.failed === 0 ? null : (
+        <span title="tool calls that came back as errors: the tool ran, or tried to, and failed">
+          {counts.failed} failed
+        </span>
+      )}
       <ProjectIndicator cwd={cwd} />
       {context === null ? null : (
         <span className="ml-auto">
@@ -285,10 +315,11 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
   const cwd = useStore(stores.cwd)
   const questionWaiting = useStore(stores.dialog) !== undefined
   const refusal = useStore(stores.refusal)
+  const guardDenials = useStore(stores.guardDenials)
   return (
     <ThreadStatusView
       activity={describeActivity(messages, generating, disconnected)}
-      counts={countThread(messages)}
+      counts={countThread(messages, guardDenials)}
       usage={usage}
       cwd={cwd}
       questionWaiting={questionWaiting}

@@ -119,8 +119,37 @@ test('prompts count user messages; tool calls count every call, paired or not', 
     user('u2', 'two'),
     assistant('a2', [{ type: 'text', content: 'done' }]),
   ]
-  expect(countThread(messages)).toEqual({ prompts: 2, toolCalls: 2 })
-  expect(countThread([])).toEqual({ prompts: 0, toolCalls: 0 })
+  expect(countThread(messages)).toEqual({ prompts: 2, toolCalls: 2, refused: 0, failed: 0 })
+  expect(countThread([])).toEqual({ prompts: 0, toolCalls: 0, refused: 0, failed: 0 })
+})
+
+// #407: pi hands a guard refusal and a failed command over as the same error result; only the
+// thread's denials store says which is which — never the text.
+test('⚠ an error result a guard refused counts as refused; the same shape without a denial counts as failed', () => {
+  const errored = (toolCallId: string): UIMessage['parts'][number] => ({
+    type: 'tool-result',
+    toolCallId,
+    content: 'bash command refused',
+    state: 'error',
+    error: 'bash command refused',
+  })
+  const messages = [
+    assistant('a1', [
+      call('c1', 'bash'),
+      errored('c1'),
+      call('c2', 'bash'),
+      errored('c2'),
+      call('c3', 'read'),
+      result('c3'),
+    ]),
+  ]
+  expect(countThread(messages, new Map([['c1', 'secret-path']]))).toEqual({
+    prompts: 0,
+    toolCalls: 3,
+    refused: 1,
+    failed: 1,
+  })
+  expect(countThread(messages)).toMatchObject({ refused: 0, failed: 2 })
 })
 
 // ── the view ─────────────────────────────────────────────────────────────────
@@ -129,7 +158,7 @@ const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string 
   renderToStaticMarkup(
     <ThreadStatusView
       activity={props.activity ?? { kind: 'idle' }}
-      counts={props.counts ?? { prompts: 0, toolCalls: 0 }}
+      counts={props.counts ?? { prompts: 0, toolCalls: 0, refused: 0, failed: 0 }}
       usage={'usage' in props ? props.usage : NO_USAGE}
       cwd={props.cwd}
       refusal={props.refusal}
@@ -148,6 +177,16 @@ test('a fresh session renders idle with zeros — never an empty string', () => 
   expect(rendered).not.toContain('context')
 })
 
+test('refused and failed are said apart, each only when there is one (#407)', () => {
+  const both = render({ counts: { prompts: 1, toolCalls: 4, refused: 2, failed: 1 } })
+  expect(both).toContain('2 refused')
+  expect(both).toContain('1 failed')
+  expect(both).toContain('by policy, not by error')
+  const neither = render({ counts: { prompts: 1, toolCalls: 4, refused: 0, failed: 0 } })
+  expect(neither).not.toContain('refused')
+  expect(neither).not.toContain('failed')
+})
+
 test('disconnected renders as its own word, not pulsing, with the recovery in the title', () => {
   const rendered = render({ activity: { kind: 'disconnected' } })
   expect(rendered).toContain('disconnected')
@@ -156,7 +195,10 @@ test('disconnected renders as its own word, not pulsing, with the recovery in th
 })
 
 test('the running tool is named, and counts read as English', () => {
-  const rendered = render({ activity: { kind: 'running', tool: 'bash' }, counts: { prompts: 1, toolCalls: 1 } })
+  const rendered = render({
+    activity: { kind: 'running', tool: 'bash' },
+    counts: { prompts: 1, toolCalls: 1, refused: 0, failed: 0 },
+  })
   expect(rendered).toContain('running bash')
   expect(rendered).toContain('1 prompt<')
   expect(rendered).toContain('1 tool call<')
@@ -179,7 +221,7 @@ test("context is pi's percent of its window, with the token count, clamped in th
   }
   const rendered = render({ usage })
   expect(rendered).toContain('$0.0132')
-  expect(rendered).toContain('34% · 68.4K / 200K')
+  expect(rendered).toContain('34% · ≈68.4K / 200K')
   expect(rendered).toContain('68,400 of 200,000 tokens')
   expect(rendered).toContain('value="34"')
   const over = render({ usage: { ...usage, context: { tokens: 210_000, window: 200_000, percent: 105 } } })
