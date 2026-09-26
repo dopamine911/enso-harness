@@ -4,11 +4,12 @@ import type {
   EnsoOpenDialog,
   EnsoPermissionModeState,
   EnsoSessionUsage,
+  EnsoTranscriptEntry,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import type { AgentHost, StoredThreadRead } from '../host/agent-host.ts'
 import type { ProjectRegistry } from './projects.ts'
-import type { ThreadRegistry } from './thread-registry.ts'
+import type { ThreadRegistry, ThreadView } from './thread-registry.ts'
 import { interruptedTail, transcriptToMessages } from './transcript-to-messages.ts'
 
 /**
@@ -106,26 +107,55 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
   const nowLive = threads.peek(threadId)
   const inspection = nowLive?.hosted.inspect()
   const transcript = inspection === undefined ? (stored?.transcript ?? []) : inspection.entries
-  const messages = transcriptToMessages(transcript)
   return {
     present: nowLive !== undefined || stored !== undefined,
-    messages,
-    // The ENTRIES, not the messages this function just mapped (#220): a transcript's last
-    // entry can be a tool result or a custom entry, and asking the mapped messages answers
-    // about the last MESSAGE instead. The merge that brought #220 here left this call reading
-    // the wrong one.
-    // A torn tail is a fact about a run that ENDED (#412): a run still going — parked on an open
-    // question, which by construction ends on a call with no result yet — has not torn.
-    interrupted: nowLive?.busy === true ? undefined : interruptedTail(transcript),
-    live: nowLive !== undefined,
-    busy: nowLive?.busy ?? false,
-    generation: nowLive?.generation ?? 0,
-    permissionMode:
-      nowLive === undefined ? host.storedPermissionMode(transcript) : nowLive.hosted.runtime.permissionModeState(),
-    model: nowLive === undefined ? null : nowLive.hosted.runtime.modelState(),
-    openDialogs: nowLive === undefined ? [] : nowLive.hosted.runtime.openDialogs(),
+    messages: transcriptToMessages(transcript),
+    ...(nowLive === undefined ? coldReading(host, transcript, stored) : liveReading(nowLive, transcript)),
     ...placeOf(projects, threadId, inspection?.cwd ?? stored?.cwd, storedUnserved),
-    usage: nowLive === undefined ? (stored?.usage ?? NO_USAGE) : nowLive.hosted.runtime.sessionUsage(),
+  }
+}
+
+/** What a mount says about the run, read one way per kind of thread — a live one's session, or a cold one's file. */
+type RunReading = Pick<
+  ThreadMount,
+  'interrupted' | 'live' | 'busy' | 'generation' | 'permissionMode' | 'model' | 'openDialogs' | 'usage'
+>
+
+/**
+ * A thread live here: its session says it all. `interrupted` reads the ENTRIES, not the mapped
+ * messages (#220): a transcript's last entry can be a tool result or a custom entry. And a torn tail
+ * is a fact about a run that ENDED (#412): a run still going — parked on an open question, which by
+ * construction ends on a call with no result yet — has not torn.
+ */
+function liveReading(thread: ThreadView, transcript: readonly EnsoTranscriptEntry[]): RunReading {
+  const { runtime } = thread.hosted
+  return {
+    interrupted: thread.busy ? undefined : interruptedTail(transcript),
+    live: true,
+    busy: thread.busy,
+    generation: thread.generation,
+    permissionMode: runtime.permissionModeState(),
+    model: runtime.modelState(),
+    openDialogs: runtime.openDialogs(),
+    usage: runtime.sessionUsage(),
+  }
+}
+
+/** A thread not live here: what its file says, or nothing at all for one never stored. */
+function coldReading(
+  host: AgentHost,
+  transcript: readonly EnsoTranscriptEntry[],
+  stored: StoredThreadRead | undefined,
+): RunReading {
+  return {
+    interrupted: interruptedTail(transcript),
+    live: false,
+    busy: false,
+    generation: 0,
+    permissionMode: host.storedPermissionMode(transcript),
+    model: null,
+    openDialogs: [],
+    usage: stored?.usage ?? NO_USAGE,
   }
 }
 
