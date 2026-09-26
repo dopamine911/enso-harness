@@ -76,15 +76,14 @@ test("picking a turn, then bars per prompt, moves the page to that prompt's last
     container.querySelector<HTMLSelectElement>('section[aria-label="Context Browser"] select')?.value
   const filesUpTo = (): string =>
     container.querySelector('section[aria-label="File Activity"] header')?.textContent ?? ''
-  // Back two bars from the latest: turn 1.
-  await click(container.querySelector<HTMLButtonElement>('button[aria-label="previous bar"]'))
-  await click(container.querySelector<HTMLButtonElement>('button[aria-label="previous bar"]'))
+  // Pick turn 1's bar — each bar is a button named for its request.
+  await click(container.querySelector<HTMLButtonElement>('button[aria-label^="request 1,"]'))
   await waitUntil(() => browserRequest() === '1')
   expect(browserRequest()).toBe('1')
   expect(filesUpTo()).toContain('up to turn 1')
   // Per prompt, turn 1 is in prompt 1's bar — its last request, turn 2: the page follows.
   const perPrompt = [...container.querySelectorAll<HTMLButtonElement>('fieldset[aria-label="bar per"] button')].find(
-    (button) => button.textContent === 'prompt',
+    (button) => button.textContent === 'Prompts',
   )
   await click(perPrompt)
   await waitUntil(() => browserRequest() === '2')

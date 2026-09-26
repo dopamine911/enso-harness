@@ -1,20 +1,27 @@
-import { type EnsoContextCategory, type EnsoContextRequest, EnsoThreadContext } from '@enso/core'
-import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
+import { type EnsoContextMakeup, type EnsoContextRequest, EnsoThreadContext } from '@enso/core'
+import { InfoIcon, LayersIcon, PanelsTopLeftIcon } from 'lucide-react'
 import { useRef, useState } from 'react'
-import { Bar, BarChart, CartesianGrid, Cell, type MouseHandlerDataParam, ReferenceLine, XAxis, YAxis } from 'recharts'
 import type { FetchLike } from './browser-logging.ts'
-import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from './components/ui/chart.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
 import { ContextEvents, FileActivity } from './context-activity.tsx'
 import { ContextBrowser, type ContextBrowserFocus, type ContextBrowserRequest } from './context-browser.tsx'
-import { Card, Choice, estimateText, MakeupBar, MakeupLegend, PERCENT, timeText } from './context-parts.tsx'
+import {
+  changeText,
+  estimateChangeText,
+  estimateText,
+  MakeupBar,
+  MakeupLegend,
+  PERCENT,
+  Swatch,
+  timeText,
+} from './context-parts.tsx'
+import { cn } from './lib/utils.ts'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
 import { COMPACT, countText } from './stats-table.tsx'
 import { useStore, useThreadStores } from './store.ts'
 import {
   CATEGORY_COLOR,
-  CATEGORY_LABEL,
   CONTEXT_CATEGORIES,
   changeOf,
   lastRequestPerPrompt,
@@ -23,15 +30,20 @@ import {
   type TrendMode,
   totalOf,
 } from './thread-context-analysis.ts'
+import { Card, Choice, SmallButton } from './view-parts.tsx'
 
 /**
- * The Context view (#361) — dsh-context's Context tab over pi: what the next request is made of
- * (Current Context), and every request's makeup with its brief (Context Trend). Reads
+ * The Context view (#361) — dsh-context's Context tab over pi, in the design direction's layout
+ * (`Enso-Design-Direction`, the Context view): Now (what the next request is made of, beside the
+ * provider's count for the last one), Trend (every request's makeup, and the picked one's brief),
+ * then the Context Browser with Context Events and File Activity beside it on a wide view. Reads
  * `GET /api/threads/:threadId/context` on open and whenever the thread's usage moves.
  *
  * ⚠ ESTIMATES, SAID AS SUCH. Every category figure is pi's estimate (characters over four) and is
- * written `≈`; the provider's count for a request, and pi's context meter, are written plain and
- * named as the provider's. They disagree, and the view shows both rather than choosing.
+ * written `≈`, as is every change between two estimates; the provider's count for a request is
+ * written plain and named as the provider's. pi's live context meter is both — the provider's
+ * count for the last response plus pi's estimate of what has landed since (`getContextUsage`) — so
+ * it is written `≈` and named as pi's. They disagree, and the view shows both rather than choosing.
  */
 
 export type ContextOutcome = AnalysisOutcome<EnsoThreadContext>
@@ -40,182 +52,179 @@ export type ContextOutcome = AnalysisOutcome<EnsoThreadContext>
 const readThreadContext = (threadId: string, fetchImpl: FetchLike): Promise<ContextOutcome> =>
   readThreadAnalysis(threadId, 'context', EnsoThreadContext, fetchImpl)
 
-// ── Current Context ──────────────────────────────────────────────────────────────────────────
+/** Opens a request in the Context Browser — the Now card's and the brief's button. */
+type OpenRequest = (request: ContextBrowserRequest) => void
 
-function CurrentContext({ context }: { context: EnsoThreadContext }): React.ReactNode {
+// ── Now ──────────────────────────────────────────────────────────────────────────────────────
+
+/** A big figure and what it is of — the design's `.meter-figure`. */
+function Figure({ value, of, estimate = false }: { value: string; of?: string; estimate?: boolean }): React.ReactNode {
+  return (
+    <p className="flex flex-wrap items-baseline gap-2">
+      <b
+        className={cn(
+          'font-heading text-3xl leading-tight font-semibold whitespace-nowrap',
+          estimate ? 'font-mono' : '',
+        )}
+      >
+        {value}
+      </b>
+      {of === undefined ? null : (
+        <span className="font-mono text-sm whitespace-nowrap text-muted-foreground">{of}</span>
+      )}
+    </p>
+  )
+}
+
+/** The latest request the provider counted — an errored request has no count, so it is passed over. */
+const lastCounted = (requests: readonly EnsoContextRequest[]): EnsoContextRequest | undefined =>
+  requests.findLast((request) => request.actual.prompt > 0)
+
+/**
+ * The live meter — pi's context meter: the provider's count for the last response plus pi's
+ * estimate of what has landed since, against the model's window — or, for a thread read from its
+ * file (no window without a live model), the provider's count for the latest request it counted,
+ * named. Headed and written by which it is: an estimate carries `≈`, a provider count does not.
+ */
+function ContextMeter({ context }: { context: EnsoThreadContext }): React.ReactNode {
+  const { usage } = context
+  const last = context.requests.at(-1)
+  const caption = 'text-xs text-muted-foreground'
+  if (usage !== null && usage.tokens !== null && usage.percent !== null) {
+    return (
+      <div className="grid content-start gap-2">
+        <span className={caption}>pi’s context meter</span>
+        <Figure
+          estimate
+          value={estimateText(usage.tokens)}
+          of={`of ${COMPACT.format(usage.window)} · ${PERCENT.format(usage.percent / 100)}`}
+        />
+        <meter
+          aria-label="context window used"
+          min={0}
+          max={usage.window}
+          value={Math.min(usage.tokens, usage.window)}
+          className="h-2 w-full appearance-none overflow-hidden rounded-full bg-popover [&::-moz-meter-bar]:bg-foreground [&::-webkit-meter-bar]:border-0 [&::-webkit-meter-bar]:bg-transparent [&::-webkit-meter-bar]:bg-none [&::-webkit-meter-optimum-value]:bg-foreground [&::-webkit-meter-optimum-value]:bg-none"
+        />
+        <span className={caption}>
+          The provider’s count for the last response, plus pi’s estimate of what has landed since — against{' '}
+          {last === undefined ? 'the model’s' : `${last.model}’s`} window.
+        </span>
+      </div>
+    )
+  }
+  const heading = <span className={caption}>provider count</span>
+  const counted = lastCounted(context.requests)
+  return (
+    <div className="grid content-start gap-2">
+      {heading}
+      {counted === undefined ? (
+        <Figure value="—" />
+      ) : (
+        <Figure value={COMPACT.format(counted.actual.prompt)} of={`request ${counted.turn}`} />
+      )}
+      <span className={caption}>
+        {meterCaption(usage !== null && usage.tokens === null, counted !== undefined)}
+        {usage === null ? ' · the model’s window is known once the thread is live' : ''}
+      </span>
+    </div>
+  )
+}
+
+/** What the meter's figure is, when it is not the live meter. */
+function meterCaption(compacted: boolean, counted: boolean): string {
+  if (compacted) return 'unknown after a compaction until the model’s next response reports it'
+  return counted ? 'the latest request the provider counted' : 'the provider has counted no request yet'
+}
+
+/** What the next request would be assembled from: pi's estimate, its change, the bar and legend. */
+function NextEstimate({ context }: { context: EnsoThreadContext }): React.ReactNode {
   const total = totalOf(context.next)
+  const last = context.requests.at(-1)
   const window = context.usage?.window ?? null
-  const meter = context.usage?.tokens ?? null
   // The window the estimate is past, when it is: said in the text and marked on the bar.
   const overWindow = window !== null && total > window ? window : undefined
   return (
-    <Card title="Current Context" aside="what the next request is made of — pi's estimate, by category">
-      <p className="mb-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
-        <span>
-          <b className="font-mono text-lg">{estimateText(total)}</b>
-          {window === null ? null : <span className="text-muted-foreground"> / {COMPACT.format(window)} window</span>}
-        </span>
-        {window === null ? (
-          <span className="text-muted-foreground">the model's window is known once the thread is live</span>
-        ) : (
-          <span className={overWindow === undefined ? 'text-muted-foreground' : 'text-destructive'}>
-            {PERCENT.format(shareOf(total, window))} of the window, estimated
-            {overWindow === undefined ? '' : ' — over it'}
-          </span>
-        )}
-        {meter === null ? null : (
-          <span className="text-muted-foreground" title="pi's context meter: the provider's count for the last request">
-            last request, by the provider: <b className="font-mono text-foreground">{countText(meter)}</b>
-          </span>
-        )}
-      </p>
+    <div className="grid content-start gap-2">
+      <span className="text-xs text-muted-foreground">next request · pi’s estimate (characters ÷ 4)</span>
+      <Figure
+        estimate
+        value={estimateText(total)}
+        of={
+          last === undefined
+            ? 'not sent yet'
+            : `${estimateChangeText(total - totalOf(last.estimated))} since request ${last.turn}`
+        }
+      />
       <MakeupBar
         makeup={context.next}
         scale={window ?? total}
         label={`next request ${estimateText(total)} tokens, estimated${overWindow === undefined ? '' : `, over the ${COMPACT.format(overWindow)} window`}`}
       />
       <MakeupLegend makeup={context.next} />
+      {window === null ? null : (
+        <span className={cn('text-xs', overWindow === undefined ? 'text-muted-foreground' : 'text-refuse')}>
+          {PERCENT.format(shareOf(total, window))} of the {COMPACT.format(window)} window, estimated
+          {overWindow === undefined ? '' : ' — over it'}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** The two numbers for the last request, side by side — pi's estimate and the provider's count. */
+function Disagreement({ request }: { request: EnsoContextRequest }): React.ReactNode {
+  const estimated = totalOf(request.estimated)
+  return (
+    <p className="flex items-start gap-2 rounded-md bg-popover px-3 py-2 text-sm text-muted-foreground">
+      <InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      <span>
+        <strong className="font-semibold text-foreground">Two numbers, both shown.</strong> For request {request.turn}{' '}
+        pi estimated {estimateText(estimated)}; the provider counted {COMPACT.format(request.actual.prompt)} (
+        {changeText(request.actual.prompt - estimated)}). Enso doesn’t choose between them.
+      </span>
+    </p>
+  )
+}
+
+function CurrentContext({ context, onOpen }: { context: EnsoThreadContext; onOpen?: OpenRequest }): React.ReactNode {
+  const counted = lastCounted(context.requests)
+  return (
+    <Card
+      title="Now"
+      sub="what the next request is made of"
+      tools={
+        onOpen === undefined ? undefined : (
+          <SmallButton onClick={() => onOpen('next')}>
+            <PanelsTopLeftIcon aria-hidden="true" />
+            Open next request
+          </SmallButton>
+        )
+      }
+    >
+      <div className="grid gap-4 @3xl:grid-cols-5">
+        <div className="@3xl:col-span-2">
+          <ContextMeter context={context} />
+        </div>
+        <div className="min-w-0 @3xl:col-span-3">
+          <NextEstimate context={context} />
+        </div>
+      </div>
+      {counted === undefined ? null : <Disagreement request={counted} />}
     </Card>
   )
 }
 
-// ── Context Trend ────────────────────────────────────────────────────────────────────────────
-
-const SERIES: ChartConfig = Object.fromEntries(
-  CONTEXT_CATEGORIES.map((category) => [
-    category,
-    { label: CATEGORY_LABEL[category], color: CATEGORY_COLOR[category] },
-  ]),
-)
-
-type TrendPoint = Record<EnsoContextCategory, number> & { readonly label: string; readonly request: EnsoContextRequest }
-
-/** A bar's label: `T12` for a turn, `P3` for a prompt — dsh's step and turn, named ours. */
-function barLabel(request: EnsoContextRequest, granularity: TrendGranularity): string {
-  return granularity === 'turn' ? `T${request.turn}` : `P${request.prompt}`
-}
-
-function trendPoints(
-  bars: readonly EnsoContextRequest[],
-  granularity: TrendGranularity,
-  mode: TrendMode,
-): TrendPoint[] {
-  return bars.map((request, index) => {
-    const values = mode === 'total' ? request.estimated : changeOf(request.estimated, bars[index - 1]?.estimated)
-    return { ...values, label: barLabel(request, granularity), request }
-  })
-}
+// ── Trend ────────────────────────────────────────────────────────────────────────────────────
 
 const GRANULARITIES: ReadonlyArray<readonly [TrendGranularity, string]> = [
-  ['turn', 'turn'],
-  ['prompt', 'prompt'],
+  ['turn', 'Requests'],
+  ['prompt', 'Prompts'],
 ]
 const MODES: ReadonlyArray<readonly [TrendMode, string]> = [
-  ['total', 'total'],
-  ['delta', 'delta'],
+  ['total', 'Total'],
+  ['delta', 'Change'],
 ]
-
-/** A row of the brief: its name, then its content. */
-function BriefRow({ name, children }: { name: string; children: React.ReactNode }): React.ReactNode {
-  return (
-    <div className="flex gap-3 rounded-md border px-2 py-1">
-      <dt className="w-16 shrink-0 text-muted-foreground">{name}</dt>
-      <dd className="min-w-0 flex-1 truncate">{children}</dd>
-    </div>
-  )
-}
-
-function RequestDetail({
-  request,
-  previous,
-  onOpen,
-}: {
-  request: EnsoContextRequest
-  previous: EnsoContextRequest | undefined
-  /** Opens an element of this request in the Context Browser. */
-  onOpen: (key: string) => void
-}): React.ReactNode {
-  const estimated = totalOf(request.estimated)
-  const { actual, brief } = request
-  const cached = shareOf(actual.cacheRead, actual.prompt)
-  return (
-    <div className="mt-3 border-t pt-3 text-xs">
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <b className="text-sm">
-          turn {request.turn} · prompt {request.prompt}
-        </b>
-        <span className="text-muted-foreground">
-          {timeText(request.at)} · {request.model}
-        </span>
-        <span className="ml-auto flex flex-wrap gap-1.5 font-mono">
-          <span className="rounded bg-muted px-1.5 py-0.5" title="pi's estimate of what the request was assembled from">
-            estimated {estimateText(estimated)}
-          </span>
-          {actual.prompt === 0 ? (
-            <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">no count from the provider</span>
-          ) : (
-            <>
-              <span
-                className="rounded bg-muted px-1.5 py-0.5"
-                title="the provider's count: input, cache read and cache write"
-              >
-                actual prompt {COMPACT.format(actual.prompt)}
-              </span>
-              <span className="rounded bg-muted px-1.5 py-0.5">output {COMPACT.format(actual.output)}</span>
-              <span className="rounded bg-muted px-1.5 py-0.5">cache {PERCENT.format(cached)}</span>
-            </>
-          )}
-        </span>
-      </div>
-      {request.compaction === undefined ? null : (
-        <p className="mb-2 text-muted-foreground">
-          ✂ compacted before this request — pi counted {COMPACT.format(request.compaction.tokensBefore)} tokens in the
-          context it replaced
-        </p>
-      )}
-      <dl className="mb-3 grid grid-cols-1 gap-1">
-        <BriefRow name="prompt">{brief.prompt === '' ? '(before the first prompt)' : brief.prompt}</BriefRow>
-        <BriefRow name="in">
-          {brief.added.length === 0
-            ? 'nothing new since the previous request'
-            : brief.added.map((addition) => (
-                <button
-                  key={addition.key}
-                  type="button"
-                  className="mr-3 underline-offset-2 hover:underline"
-                  title="open it in the Context Browser"
-                  onClick={() => onOpen(addition.key)}
-                >
-                  <span
-                    aria-hidden="true"
-                    className="mr-1 inline-block size-2 rounded-sm"
-                    style={{ background: CATEGORY_COLOR[addition.category] }}
-                  />
-                  {addition.label}
-                </button>
-              ))}
-          {brief.moreAdded > 0 ? <span className="text-muted-foreground">and {brief.moreAdded} more</span> : null}
-        </BriefRow>
-        <BriefRow name="reply">
-          {brief.reply}
-          {brief.toolCalls.length === 0 ? null : (
-            <span className="text-muted-foreground">
-              {brief.reply === '' ? '' : ' · '}calls {brief.toolCalls.join(', ')}
-            </span>
-          )}
-        </BriefRow>
-      </dl>
-      <MakeupBar makeup={request.estimated} scale={estimated} label={`turn ${request.turn}'s makeup, estimated`} />
-      <MakeupLegend
-        makeup={request.estimated}
-        change={previous === undefined ? undefined : changeOf(request.estimated, previous.estimated)}
-      />
-    </div>
-  )
-}
-
-/** The narrowest a bar may draw, in spacing units: past this many bars, the chart scrolls sideways (dsh does). */
-const BAR_MIN_SPACING = 2.5
 
 /** A granularity's bars: one per request, or each prompt's last. */
 const barsOf = (requests: readonly EnsoContextRequest[], granularity: TrendGranularity): EnsoContextRequest[] =>
@@ -236,22 +245,276 @@ function pickedBarIndex(
   return index === -1 ? bars.length - 1 : index
 }
 
+/** Whether a bar marks a compaction: its own request's, or — per prompt — any of its prompt's. */
+function compactedBar(
+  bar: EnsoContextRequest,
+  requests: readonly EnsoContextRequest[],
+  granularity: TrendGranularity,
+): boolean {
+  return granularity === 'turn'
+    ? bar.compaction !== undefined
+    : requests.some((request) => request.prompt === bar.prompt && request.compaction !== undefined)
+}
+
+/** A bar's value per category: the whole makeup, or its signed change from the bar before. */
+function barValues(bars: readonly EnsoContextRequest[], mode: TrendMode): EnsoContextMakeup[] {
+  return bars.map((bar, index) =>
+    mode === 'total' ? bar.estimated : changeOf(bar.estimated, bars[index - 1]?.estimated),
+  )
+}
+
+/** What a bar's height is a share of: the tallest stack above the line, or below it. */
+function scaleOf(values: readonly EnsoContextMakeup[]): number {
+  let scale = 1
+  for (const makeup of values) {
+    let above = 0
+    let below = 0
+    for (const category of CONTEXT_CATEGORIES) {
+      if (makeup[category] > 0) above += makeup[category]
+      else below -= makeup[category]
+    }
+    scale = Math.max(scale, above, below)
+  }
+  return scale
+}
+
+/** Axis labels, thinned so they stay legible on a long thread: every one up to twenty bars. */
+const AXIS_LABELS = 20
+
+/**
+ * The bars — the design's `.trend-plot`: each a button (a keyboard reaches every request), its
+ * segments stacked in context order with the system prompt at the base; in Change mode, what left
+ * hangs below the line. A compaction flags its bar.
+ */
+interface TrendPlotProps {
+  readonly bars: readonly EnsoContextRequest[]
+  readonly requests: readonly EnsoContextRequest[]
+  readonly granularity: TrendGranularity
+  readonly mode: TrendMode
+  readonly pickedIndex: number
+  readonly onPick: (index: number) => void
+}
+
+function TrendPlot(props: TrendPlotProps): React.ReactNode {
+  const { bars, requests, granularity, mode, pickedIndex, onPick } = props
+  const values = barValues(bars, mode)
+  const scale = scaleOf(values)
+  const every = Math.ceil(bars.length / AXIS_LABELS)
+  const labelOf = (bar: EnsoContextRequest): string => (granularity === 'turn' ? String(bar.turn) : `p${bar.prompt}`)
+  const segment = (category: (typeof CONTEXT_CATEGORIES)[number], tokens: number, below: boolean): React.ReactNode => (
+    <span
+      key={category}
+      className={cn('block w-full shrink-0', below ? 'opacity-75' : '')}
+      style={{ height: `${(Math.abs(tokens) / scale) * 100}%`, background: CATEGORY_COLOR[category] }}
+    />
+  )
+  return (
+    <div className="overflow-x-auto">
+      <div
+        className={cn(
+          'relative flex h-44 items-stretch gap-0.75 pt-4.5',
+          mode === 'total' ? 'border-b border-border-strong' : '',
+        )}
+      >
+        {bars.map((bar, index) => {
+          const makeup = values[index] ?? bar.estimated
+          const total = CONTEXT_CATEGORIES.reduce((sum, category) => sum + makeup[category], 0)
+          const compacted = compactedBar(bar, requests, granularity)
+          const label = `request ${bar.turn}, prompt ${bar.prompt}, ${mode === 'total' ? estimateText(total) : estimateChangeText(total)}${compacted ? ', compaction' : ''}`
+          return (
+            <button
+              key={bar.turn}
+              type="button"
+              aria-pressed={index === pickedIndex}
+              aria-label={label}
+              title={label}
+              className="relative flex min-w-2.5 flex-1 flex-col rounded-xs transition-colors hover:bg-popover aria-pressed:bg-accent aria-pressed:ring-1 aria-pressed:ring-foreground"
+              onClick={() => onPick(index)}
+            >
+              {compacted ? (
+                <LayersIcon aria-hidden="true" className="absolute -top-4.5 left-1/2 size-4 -translate-x-1/2" />
+              ) : null}
+              <span className="flex min-h-0 flex-1 flex-col justify-end">
+                {[...CONTEXT_CATEGORIES]
+                  .reverse()
+                  .map((category) => (makeup[category] > 0 ? segment(category, makeup[category], false) : null))}
+              </span>
+              {mode === 'delta' ? (
+                <span className="flex min-h-0 flex-1 flex-col justify-start border-t border-border-strong">
+                  {CONTEXT_CATEGORIES.map((category) =>
+                    makeup[category] < 0 ? segment(category, makeup[category], true) : null,
+                  )}
+                </span>
+              ) : null}
+            </button>
+          )
+        })}
+      </div>
+      <div aria-hidden="true" className="flex gap-0.75 pt-1 font-mono text-xs text-muted-foreground">
+        {bars.map((bar, index) => (
+          <span key={bar.turn} className="min-w-2.5 flex-1 text-center">
+            {index % every === 0 ? labelOf(bar) : ''}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** One row of the brief: its name in mono capitals, then its content — the design's `.brief-rows`. */
+function BriefRow({ name, children }: { name: string; children: React.ReactNode }): React.ReactNode {
+  return (
+    <>
+      <dt className="font-mono text-xs leading-6 font-semibold tracking-wide text-muted-foreground uppercase">
+        {name}
+      </dt>
+      <dd className="min-w-0 break-words">{children}</dd>
+    </>
+  )
+}
+
+/** A brief row's list — or, when it has nothing, the muted word for that. */
+function Listed({
+  items,
+  none,
+  children,
+}: {
+  items: readonly unknown[]
+  none: string
+  children: React.ReactNode
+}): React.ReactNode {
+  return items.length === 0 ? <None>{none}</None> : children
+}
+
+/** The muted word a brief row says when it has nothing. */
+function None({ children }: { children: string }): React.ReactNode {
+  return <span className="text-xs text-muted-foreground">{children}</span>
+}
+
+/** A brief row's text — or, when it is empty, the word for that. */
+function Said({ text, none }: { text: string; none: string }): React.ReactNode {
+  return text === '' ? <None>{none}</None> : text
+}
+
+/** The picked request's brief — the design's `.brief`: what was asked, what entered, the reply, the tools, the counts. */
+function RequestBrief({
+  request,
+  onOpenRequest,
+  onOpenElement,
+}: {
+  request: EnsoContextRequest
+  onOpenRequest: () => void
+  /** Opens an element of this request in the Context Browser. */
+  onOpenElement: (key: string) => void
+}): React.ReactNode {
+  const { actual, brief } = request
+  const muted = 'text-xs text-muted-foreground'
+  return (
+    <article className="grid gap-3 rounded-lg border bg-background p-3">
+      {/* A pick is confirmed in one line, not by re-reading the brief: the region below changes
+          with the request, and nothing else in the article is live. */}
+      <p aria-live="polite" className="sr-only">
+        Request {request.turn}, prompt {request.prompt}
+      </p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h3 className="font-heading text-base font-semibold ink:italic">Request {request.turn}</h3>
+        <span className="font-mono text-xs text-muted-foreground">
+          prompt {request.prompt} · {timeText(request.at)} · {request.model}
+        </span>
+        {request.compaction === undefined ? null : (
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full bg-popover px-2 py-0.5 text-xs"
+            title="pi's count of the context the compaction replaced"
+          >
+            <LayersIcon aria-hidden="true" className="size-4" />
+            compacted from {COMPACT.format(request.compaction.tokensBefore)}
+          </span>
+        )}
+        <SmallButton className="ml-auto" onClick={onOpenRequest}>
+          <PanelsTopLeftIcon aria-hidden="true" />
+          Open in browser
+        </SmallButton>
+      </div>
+      <dl className="grid grid-cols-label-value gap-x-3 gap-y-2 text-sm">
+        <BriefRow name="Prompt">
+          <Said text={brief.prompt} none="before the first prompt" />
+        </BriefRow>
+        <BriefRow name="In">
+          <Listed items={brief.added} none="nothing new since the previous request">
+            <ul className="grid gap-0.5">
+              {brief.added.map((addition) => (
+                <li key={addition.key} className="min-w-0">
+                  <button
+                    type="button"
+                    className="flex max-w-full items-center gap-2 text-left underline-offset-2 hover:underline"
+                    title="open it in the Context Browser"
+                    onClick={() => onOpenElement(addition.key)}
+                  >
+                    <Swatch category={addition.category} className="size-2" />
+                    <span className="truncate">{addition.label}</span>
+                  </button>
+                </li>
+              ))}
+              {brief.moreAdded > 0 ? <li className={muted}>+ {brief.moreAdded} more</li> : null}
+            </ul>
+          </Listed>
+        </BriefRow>
+        <BriefRow name="Reply">
+          <Said text={brief.reply} none="no text" />
+        </BriefRow>
+        <BriefRow name="Tools">
+          <Listed items={brief.toolCalls} none="none">
+            <span className="flex flex-wrap gap-1">
+              {brief.toolCalls.map((toolName, place) => (
+                // A reply can call one tool twice; its place in the reply tells the two apart.
+                <code key={`${toolName}-${String(place)}`} className="rounded-sm bg-popover px-1.5 font-mono text-xs">
+                  {toolName}
+                </code>
+              ))}
+            </span>
+          </Listed>
+        </BriefRow>
+      </dl>
+      <p className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
+        <span title="pi's estimate of what the request was assembled from">
+          estimate <b className="font-medium text-foreground">{estimateText(totalOf(request.estimated))}</b>
+        </span>
+        {actual.prompt === 0 ? (
+          <span>no count from the provider</span>
+        ) : (
+          <>
+            <span title="the provider's count: input, cache read and cache write">
+              provider prompt <b className="font-medium text-foreground">{COMPACT.format(actual.prompt)}</b>
+            </span>
+            <span>
+              cache read <b className="font-medium text-foreground">{COMPACT.format(actual.cacheRead)}</b> (
+              {PERCENT.format(shareOf(actual.cacheRead, actual.prompt))})
+            </span>
+            <span>
+              output <b className="font-medium text-foreground">{COMPACT.format(actual.output)}</b>
+            </span>
+          </>
+        )}
+      </p>
+    </article>
+  )
+}
+
 function ContextTrend({
   requests,
   onPick,
   onOpen,
 }: {
   requests: readonly EnsoContextRequest[]
-  /** The picked bar's request, for the Context Browser to follow. */
+  /** The picked bar's request, for the Context Browser and File Activity to follow. */
   onPick: (turn: number) => void
-  onOpen: (turn: number, key: string) => void
+  onOpen: (request: ContextBrowserRequest, focus?: ContextBrowserFocus) => void
 }): React.ReactNode {
   const [granularity, setGranularity] = useState<TrendGranularity>('turn')
   const [mode, setMode] = useState<TrendMode>('total')
   // The picked request by its turn — stable across a refresh and a change of granularity. None: the latest.
   const [pickedTurn, setPickedTurn] = useState<number | undefined>(undefined)
   const bars = barsOf(requests, granularity)
-  const points = trendPoints(bars, granularity, mode)
   const pickedIndex = pickedBarIndex(requests, granularity, pickedTurn)
   const picked = bars[pickedIndex]
   const pick = (index: number): void => {
@@ -269,108 +532,49 @@ function ContextTrend({
     const bar = barsOf(requests, next)[pickedBarIndex(requests, next, pickedTurn)]
     if (bar !== undefined) onPick(bar.turn)
   }
-  const compacted = points.filter((point) => {
-    const first = point.request
-    return granularity === 'turn'
-      ? first.compaction !== undefined
-      : requests.some((request) => request.prompt === first.prompt && request.compaction !== undefined)
-  })
   return (
     <Card
-      title="Context Trend"
-      aside={
-        <span className="flex items-center gap-2">
-          <span>✂ marks a compaction</span>
+      title="Trend"
+      sub={`${granularity === 'turn' ? 'every model request' : 'each prompt’s last request'} · ${mode === 'total' ? 'whole makeup' : 'change from the bar before'}`}
+      tools={
+        <>
           <Choice label="bar per" value={granularity} options={GRANULARITIES} onChange={changeGranularity} />
           <Choice label="bar shows" value={mode} options={MODES} onChange={setMode} />
-        </span>
+        </>
       }
     >
       {requests.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           a bar appears for each model request, once the first one has run
         </p>
       ) : (
         <>
-          <div className="overflow-x-auto">
-            <ChartContainer
-              config={SERIES}
-              className="aspect-auto h-56"
-              style={{ minWidth: `calc(var(--spacing) * ${points.length * BAR_MIN_SPACING})`, width: '100%' }}
-            >
-              <BarChart
-                data={points}
-                stackOffset={mode === 'delta' ? 'sign' : 'none'}
-                className="cursor-pointer"
-                onClick={(state: MouseHandlerDataParam): void => {
-                  const index = state.activeTooltipIndex
-                  if (index !== undefined && index !== null) pick(Number(index))
-                }}
-                accessibilityLayer
-              >
-                <CartesianGrid vertical={false} />
-                <XAxis dataKey="label" tickLine={false} axisLine={false} minTickGap={12} />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  width={44}
-                  tickFormatter={(value: number) => COMPACT.format(value)}
-                />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                {mode === 'delta' ? <ReferenceLine y={0} stroke="var(--border)" /> : null}
-                {compacted.map((point) => (
-                  <ReferenceLine
-                    key={point.label}
-                    x={point.label}
-                    stroke="var(--muted-foreground)"
-                    strokeDasharray="3 3"
-                    label={{ value: '✂', position: 'top', fill: 'var(--muted-foreground)' }}
-                  />
-                ))}
-                {CONTEXT_CATEGORIES.map((category) => (
-                  <Bar
-                    key={category}
-                    dataKey={category}
-                    stackId="context"
-                    fill={CATEGORY_COLOR[category]}
-                    isAnimationActive={false}
-                  >
-                    {points.map((point, index) => (
-                      <Cell key={point.label} fillOpacity={index === pickedIndex ? 1 : 0.55} />
-                    ))}
-                  </Bar>
-                ))}
-              </BarChart>
-            </ChartContainer>
-          </div>
-          <div className="mt-2 flex items-center justify-end gap-1 text-xs text-muted-foreground">
-            <button
-              type="button"
-              aria-label="previous bar"
-              disabled={pickedIndex <= 0}
-              className="rounded p-1 hover:bg-muted disabled:opacity-40"
-              onClick={() => pick(pickedIndex - 1)}
-            >
-              <ChevronLeftIcon className="size-4" />
-            </button>
-            <span className="font-mono tabular-nums">
-              {pickedIndex + 1} / {bars.length}
-            </span>
-            <button
-              type="button"
-              aria-label="next bar"
-              disabled={pickedIndex >= bars.length - 1}
-              className="rounded p-1 hover:bg-muted disabled:opacity-40"
-              onClick={() => pick(pickedIndex + 1)}
-            >
-              <ChevronRightIcon className="size-4" />
-            </button>
+          <div className="grid gap-2">
+            <TrendPlot
+              bars={bars}
+              requests={requests}
+              granularity={granularity}
+              mode={mode}
+              pickedIndex={pickedIndex}
+              onPick={pick}
+            />
+            <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <LayersIcon aria-hidden="true" className="size-4" />
+                compaction
+              </span>
+              <span>Bars stack in context order, system prompt at the base.</span>
+              {mode === 'delta' ? <span>Below the line: what left.</span> : null}
+              <span className="ml-auto font-mono tabular-nums">
+                {pickedIndex + 1} / {bars.length}
+              </span>
+            </p>
           </div>
           {picked === undefined ? null : (
-            <RequestDetail
+            <RequestBrief
               request={picked}
-              previous={bars[pickedIndex - 1]}
-              onOpen={(key: string) => onOpen(picked.turn, key)}
+              onOpenRequest={() => onOpen(picked.turn)}
+              onOpenElement={(key: string) => onOpen(picked.turn, { request: picked.turn, key })}
             />
           )}
         </>
@@ -383,8 +587,10 @@ function ContextTrend({
 
 /**
  * The cards, and what joins them: the Context Browser opens the request the trend's bar picks
- * (dsh's linkage), File Activity counts up to it, and a brief's line, an event or a file
- * operation opens its request — and its element — in the browser.
+ * (dsh's linkage), File Activity counts up to it, and the Now card's button, a brief's line, an
+ * event or a file operation opens its request — and its element — in the browser. On a wide view
+ * (the design's `ctx-grid`, a container query) the browser takes two columns and Events and Files
+ * stack in the third.
  */
 function ContextCards({ context }: { context: EnsoThreadContext }): React.ReactNode {
   const stores = useThreadStores()
@@ -400,42 +606,41 @@ function ContextCards({ context }: { context: EnsoThreadContext }): React.ReactN
   }
   const requestCount = context.requests.length
   return (
-    <div className="grid grid-cols-1 gap-4 p-4">
-      <p className="text-xs text-muted-foreground">
-        {context.live ? 'live' : 'from the file'} · {countText(requestCount)} model requests · every category is pi's
-        estimate (≈); the provider's own counts are named as such
-      </p>
-      <CurrentContext context={context} />
+    <div className="@container grid grid-cols-1 gap-4 p-4">
+      <CurrentContext context={context} onOpen={openInBrowser} />
       <ContextTrend
         requests={context.requests}
         onPick={(turn: number) => {
           setTrendTurn(turn)
           setBrowserRequest(turn)
         }}
-        onOpen={(turn: number, key: string) => {
-          setBrowserRequest(turn)
-          setFocus({ request: turn, key })
-        }}
+        onOpen={openInBrowser}
       />
-      <div ref={browser} className="min-w-0">
-        <ContextBrowser
-          requests={context.requests}
-          next={context.next}
-          request={browserRequest}
-          onRequest={setBrowserRequest}
-          focus={focus}
-        />
+      <div className="grid grid-cols-1 items-start gap-4 @5xl:grid-cols-3">
+        <div ref={browser} className="min-w-0 scroll-mt-4 @5xl:col-span-2">
+          <ContextBrowser
+            requests={context.requests}
+            next={context.next}
+            request={browserRequest}
+            onRequest={setBrowserRequest}
+            focus={focus}
+          />
+        </div>
+        <div className="grid min-w-0 gap-4">
+          <ContextEvents events={context.events} requestCount={requestCount} onOpen={openInBrowser} />
+          <FileActivity
+            operations={context.files}
+            upToTurn={trendTurn}
+            cwd={cwd}
+            requestCount={requestCount}
+            onOpen={openInBrowser}
+          />
+        </div>
       </div>
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ContextEvents events={context.events} requestCount={requestCount} onOpen={openInBrowser} />
-        <FileActivity
-          operations={context.files}
-          upToTurn={trendTurn}
-          cwd={cwd}
-          requestCount={requestCount}
-          onOpen={openInBrowser}
-        />
-      </div>
+      <p className="text-xs text-muted-foreground">
+        {context.live ? 'Live' : 'Read from the file'} · {countText(requestCount)} model requests. Estimates are pi’s,
+        written ≈; provider counts are plain.
+      </p>
     </div>
   )
 }
@@ -463,7 +668,7 @@ export function ThreadContextDrawer(): React.ReactNode {
 function ContextComposition({ context }: { context: EnsoThreadContext }): React.ReactNode {
   const [browserRequest, setBrowserRequest] = useState<ContextBrowserRequest>('next')
   return (
-    <div className="grid min-w-0 grid-cols-1 gap-4">
+    <div className="@container grid min-w-0 grid-cols-1 gap-4">
       <CurrentContext context={context} />
       <ContextBrowser
         requests={context.requests}

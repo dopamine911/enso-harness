@@ -8,35 +8,32 @@ import {
   EnsoContextRequestDetail,
 } from '@enso/core'
 import { TextPart } from '@tanstack/ai-react/ui'
-import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
+import { ArrowLeftIcon, ArrowRightIcon, ChevronRightIcon, LayersIcon, PanelsTopLeftIcon } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
-import { Card, Choice, changeText, estimateText, MakeupBar, PERCENT, timeText } from './context-parts.tsx'
+import { estimateChangeText, estimateText, MakeupBar, PERCENT, Swatch, timeText } from './context-parts.tsx'
+import { cn } from './lib/utils.ts'
 import { TEXT_PART_COMPONENTS } from './markdown-image.tsx'
 import { OptionSelect } from './option-select.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
 import { COMPACT } from './stats-table.tsx'
-import {
-  CATEGORY_COLOR,
-  CATEGORY_LABEL,
-  CONTEXT_CATEGORIES,
-  changeOf,
-  shareOf,
-  totalOf,
-} from './thread-context-analysis.ts'
+import { CATEGORY_COLOR, CATEGORY_LABEL, CONTEXT_CATEGORIES, shareOf, totalOf } from './thread-context-analysis.ts'
 import { toggleMember } from './toggle-member.ts'
+import { Card, Choice, SmallButton } from './view-parts.tsx'
 
 /**
- * The Context Browser (#361 phase 3) — dsh-context's "open the box of any request": pick the next
- * request or any past one, and see what it was assembled from — six categories, each expanding
- * into one row per element with its estimate, each row into the element itself: a prompt
- * section, a tool's schema, a message, a reply's parts, a tool result beside its call's arguments.
+ * The Context Browser (#361 phase 3) — dsh-context's "open the box of any request", in the design
+ * direction's two columns: pick the next request or any past one (the picker, or a step either
+ * way), and see what it was assembled from — six categories, each expanding into one row per
+ * element with its estimate — beside the element picked: a prompt section, a tool's schema, a
+ * message, a reply's parts, a tool result beside its call's arguments. One column on a narrow view,
+ * the element below its list.
  *
  * Read per request (`GET /api/threads/:threadId/context/:request`) when one is opened, not with
- * the trend: a request's detail carries its whole text. A row marked `+` entered since the
- * previous request; each category says how many did, and its estimate's change. What the
- * previous request held and this one does not (a compaction's work) is listed apart.
+ * the trend: a request's detail carries its whole text. A row marked `+ new` entered since the
+ * previous request; each category says how many did, and its estimate's change. What the previous
+ * request held and this one does not (a compaction's work) is listed apart.
  */
 
 export type ContextBrowserRequest = number | 'next'
@@ -69,10 +66,22 @@ function keyedByPlace<Item>(items: readonly Item[], prefix: string): Array<{ ite
 
 // ── an element's body ──────────────────────────────────────────────────────────────────────────
 
+const PRE = 'max-h-96 overflow-auto font-mono text-sm leading-relaxed wrap-anywhere whitespace-pre-wrap'
+
+/** A part of an element, under its name in mono capitals — the design's `.part`. */
+function Part({ label, children }: { label: string; children: React.ReactNode }): React.ReactNode {
+  return (
+    <div className="grid min-w-0 gap-1">
+      <span className="font-mono text-xs font-semibold tracking-wide text-muted-foreground uppercase">{label}</span>
+      {children}
+    </div>
+  )
+}
+
 function Images({ images }: { images: readonly EnsoContextImage[] }): React.ReactNode {
   if (images.length === 0) return null
   return (
-    <div className="mt-2 flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-2">
       {keyedByPlace(images, 'image').map(({ item: image, slot }) => (
         <figure key={slot} className="rounded-md border p-1 text-xs">
           {image.data === undefined ? (
@@ -93,53 +102,31 @@ function Images({ images }: { images: readonly EnsoContextImage[] }): React.Reac
   )
 }
 
-/** Long text, as it was sent — or rendered as markdown, the reader's choice. */
-function TextBlock({ text, muted = false }: { text: string; muted?: boolean }): React.ReactNode {
-  const [markdown, setMarkdown] = useState(false)
-  const lines = text === '' ? 0 : text.split('\n').length
-  return (
-    <div className="rounded-md border">
-      <div className="flex items-center justify-between border-b px-2 py-1 text-muted-foreground">
-        <span>{lines === 1 ? '1 line' : `${lines} lines`}</span>
-        <Choice
-          label="show the text"
-          value={markdown ? 'markdown' : 'raw'}
-          options={TEXT_VIEWS}
-          onChange={(view: TextView) => setMarkdown(view === 'markdown')}
-        />
+/** Long text, as it was sent — or rendered as markdown, the reader's choice in the element's head. */
+function TextBlock({ text, view, muted = false }: { text: string; view: TextView; muted?: boolean }): React.ReactNode {
+  if (view === 'markdown') {
+    return (
+      <div className="prose prose-sm max-w-none dark:prose-invert prose-headings:font-heading">
+        <TextPart components={TEXT_PART_COMPONENTS} content={text} />
       </div>
-      {markdown ? (
-        <div className="prose prose-sm max-w-none p-2 dark:prose-invert">
-          <TextPart components={TEXT_PART_COMPONENTS} content={text} />
-        </div>
-      ) : (
-        <pre
-          className={`max-h-96 overflow-auto p-2 font-mono break-words whitespace-pre-wrap ${muted ? 'text-muted-foreground' : ''}`}
-        >
-          {text}
-        </pre>
-      )}
-    </div>
-  )
+    )
+  }
+  return <pre className={cn(PRE, muted ? 'text-muted-foreground' : '')}>{text}</pre>
 }
 
 function Json({ value }: { value: unknown }): React.ReactNode {
-  return (
-    <pre className="max-h-96 overflow-auto rounded-md border p-2 font-mono break-words whitespace-pre-wrap">
-      {JSON.stringify(value, null, 2)}
-    </pre>
-  )
+  return <pre className={PRE}>{JSON.stringify(value, null, 2)}</pre>
 }
 
 /** A call's arguments as a table when they are an object of plain values — the way dsh lays them out. */
 function Arguments({ value }: { value: unknown }): React.ReactNode {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return <Json value={value} />
   return (
-    <dl className="grid grid-cols-label-value gap-x-3 gap-y-1 rounded-md border p-2">
+    <dl className="grid grid-cols-label-value gap-x-3 gap-y-1 text-sm">
       {Object.entries(value).map(([name, argument]) => (
         <div key={name} className="contents">
-          <dt className="text-muted-foreground">{name}</dt>
-          <dd className="min-w-0 font-mono break-words whitespace-pre-wrap">
+          <dt className="font-mono text-muted-foreground">{name}</dt>
+          <dd className="min-w-0 font-mono wrap-anywhere whitespace-pre-wrap">
             {typeof argument === 'string' ? argument : JSON.stringify(argument)}
           </dd>
         </div>
@@ -148,99 +135,164 @@ function Arguments({ value }: { value: unknown }): React.ReactNode {
   )
 }
 
-function Body({ body }: { body: EnsoContextBody }): React.ReactNode {
+/** Whether a body holds text the raw / markdown choice applies to. */
+function hasText(body: EnsoContextBody): boolean {
+  if (body.kind === 'text' || body.kind === 'toolResult') return body.text !== ''
+  if (body.kind === 'reply') return body.parts.some((part) => part.type !== 'toolCall')
+  return false
+}
+
+function Body({ body, view }: { body: EnsoContextBody; view: TextView }): React.ReactNode {
   switch (body.kind) {
     case 'text':
       return (
         <>
-          {body.text === '' ? null : <TextBlock text={body.text} />}
+          {body.text === '' ? null : <TextBlock text={body.text} view={view} />}
           <Images images={body.images} />
         </>
       )
     case 'tool':
       return (
-        <div className="grid gap-2">
-          <p className="whitespace-pre-wrap">{body.description}</p>
-          <Json value={body.parameters} />
-        </div>
+        <>
+          <Part label="description">
+            <p className="text-sm whitespace-pre-wrap">{body.description}</p>
+          </Part>
+          <Part label="parameters">
+            <Json value={body.parameters} />
+          </Part>
+        </>
       )
     case 'reply':
-      return (
-        <div className="grid gap-2">
-          {keyedByPlace(body.parts, 'part').map(({ item: part, slot }) =>
-            part.type === 'toolCall' ? (
-              <div key={slot}>
-                <p className="mb-1 font-mono">→ {part.name}</p>
-                <Arguments value={part.arguments} />
-              </div>
-            ) : (
-              <TextBlock key={slot} text={part.text} muted={part.type === 'thinking'} />
-            ),
-          )}
-        </div>
+      return keyedByPlace(body.parts, 'part').map(({ item: part, slot }) =>
+        part.type === 'toolCall' ? (
+          <Part key={slot} label={`tool call · ${part.name}`}>
+            <Arguments value={part.arguments} />
+          </Part>
+        ) : (
+          <Part key={slot} label={part.type}>
+            <TextBlock text={part.text} view={view} muted={part.type === 'thinking'} />
+          </Part>
+        ),
       )
     case 'toolResult':
       return (
-        <div className="grid gap-2">
-          <p className="flex items-center gap-2 font-mono">
-            ← {body.toolName}
-            <span className={body.isError ? 'text-destructive' : 'text-muted-foreground'}>
-              {body.isError ? 'error' : 'ok'}
-            </span>
-          </p>
-          {body.arguments === undefined ? (
-            <p className="text-muted-foreground">its call is no longer in this context</p>
-          ) : (
-            <Arguments value={body.arguments} />
-          )}
+        <>
+          <Part label={`arguments · ${body.toolName}`}>
+            {body.arguments === undefined ? (
+              <p className="text-sm text-muted-foreground">its call is no longer in this context</p>
+            ) : (
+              <Arguments value={body.arguments} />
+            )}
+          </Part>
           {/* An image-only result (a read of a PNG) has no text: its images are all it holds. */}
-          {body.text === '' ? null : <TextBlock text={body.text} />}
-          <Images images={body.images} />
-        </div>
+          <Part label={body.isError ? 'result · error' : 'result · ok'}>
+            <ResultText text={body.text} isError={body.isError} view={view} />
+            <Images images={body.images} />
+          </Part>
+        </>
       )
   }
+}
+
+/** A tool result's text: in the refusal colour when it failed (a guard's reason is a sentence to read, not markdown). */
+function ResultText({ text, isError, view }: { text: string; isError: boolean; view: TextView }): React.ReactNode {
+  if (text === '') return null
+  if (isError) return <pre className={cn(PRE, 'text-refuse')}>{text}</pre>
+  return <TextBlock text={text} view={view} />
+}
+
+/** The element picked, beside the list — the design's `.el-view`; what to do when there is none. */
+function ElementView({
+  element,
+  picked,
+}: {
+  element: EnsoContextElement | undefined
+  /** Whether a pick is held — one this request does not hold says so. */
+  picked: boolean
+}): React.ReactNode {
+  const [view, setView] = useState<TextView>('raw')
+  const frame = 'grid min-w-0 grid-cols-1 content-start rounded-lg border bg-background @5xl:sticky @5xl:top-4'
+  if (element === undefined) {
+    return (
+      <aside aria-label="element" className={frame}>
+        <div className="grid justify-items-start gap-2 px-4 py-5 text-sm text-muted-foreground">
+          <PanelsTopLeftIcon aria-hidden="true" className="size-4" />
+          <span>
+            Pick an element to see exactly what the model received: a prompt section, a tool’s schema, a message, a
+            reply’s parts, or a tool result beside its call’s arguments.
+          </span>
+          {picked ? (
+            <span>The element you had open isn’t in this request. It entered later or left earlier.</span>
+          ) : null}
+        </div>
+      </aside>
+    )
+  }
+  return (
+    <aside aria-label="element" className={frame}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b p-3">
+        <h3 className="min-w-0 flex-1 font-heading text-base font-semibold wrap-anywhere">{element.label}</h3>
+        {hasText(element.body) ? (
+          <Choice label="show the text" value={view} options={TEXT_VIEWS} onChange={setView} />
+        ) : null}
+      </div>
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pt-2 font-mono text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5">
+          <Swatch category={element.category} className="size-2" />
+          {CATEGORY_LABEL[element.category]}
+        </span>
+        <span>{estimateText(element.tokens)}</span>
+        <span>{element.at === undefined ? 'not stamped by pi' : `stored ${timeText(element.at)}`}</span>
+        {element.entered ? <NewBadge>+ new in this request</NewBadge> : null}
+      </p>
+      <div className="grid min-w-0 grid-cols-1 gap-3 p-3">
+        <Body body={element.body} view={view} />
+      </div>
+    </aside>
+  )
+}
+
+/** "Entered since the previous request" — the design's `.new-badge`, outlined in the evidence colour. */
+function NewBadge({ children }: { children: React.ReactNode }): React.ReactNode {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center rounded-sm border border-evidence px-1.5 font-mono text-xs leading-normal font-semibold text-foreground"
+      title="entered since the previous request"
+    >
+      {children}
+    </span>
+  )
 }
 
 // ── rows ───────────────────────────────────────────────────────────────────────────────────────
 
 function ElementRow({
   element,
-  open,
-  onToggle,
+  picked,
+  onPick,
   rowRef,
 }: {
   element: EnsoContextElement
-  open: boolean
-  onToggle: () => void
+  picked: boolean
+  onPick: () => void
   rowRef: ((node: HTMLLIElement | null) => void) | undefined
 }): React.ReactNode {
   return (
-    <li ref={rowRef} className="border-t first:border-t-0">
+    <li ref={rowRef}>
       <button
         type="button"
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 px-2 py-1 text-left hover:bg-muted/50"
-        onClick={onToggle}
+        aria-pressed={picked}
+        className="flex min-h-10 w-full items-center gap-3 py-1 pr-3 pl-12 text-left text-sm transition-colors hover:bg-popover aria-pressed:bg-accent"
+        onClick={onPick}
       >
-        {open ? <ChevronDownIcon className="size-3 shrink-0" /> : <ChevronRightIcon className="size-3 shrink-0" />}
-        <span className="min-w-0 flex-1 truncate">
-          {element.entered ? (
-            <b className="mr-1 font-normal text-chart-2" title="entered since the previous request">
-              +
-            </b>
-          ) : null}
-          {element.label}
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="truncate">{element.label}</span>
+          {element.entered ? <NewBadge>+ new</NewBadge> : null}
         </span>
-        {element.at === undefined ? null : <span className="text-muted-foreground">{timeText(element.at)}</span>}
-        <span className="w-14 text-right font-mono text-muted-foreground tabular-nums">
+        <span className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
           {estimateText(element.tokens)}
         </span>
       </button>
-      {open ? (
-        <div className="px-2 pb-2 pl-7">
-          <Body body={element.body} />
-        </div>
-      ) : null}
     </li>
   )
 }
@@ -258,93 +310,52 @@ function ordered(elements: readonly EnsoContextElement[], order: ToolOrder): Ens
   return [...elements]
 }
 
-/**
- * A category's open state and its open rows, following a focus: a focus that arrives — on mount
- * or later — opens the category and the row, and brings the row into view.
- */
-function useFocusedRows(focused: EnsoContextElement | undefined): {
-  open: boolean
-  setOpen: (update: (wasOpen: boolean) => boolean) => void
-  openKeys: ReadonlySet<string>
-  toggle: (key: string) => void
-  focusRow: React.RefObject<HTMLLIElement | null>
-} {
-  const [open, setOpen] = useState(focused !== undefined)
-  const [openKeys, setOpenKeys] = useState<ReadonlySet<string>>(
-    () => new Set(focused === undefined ? [] : [focused.key]),
-  )
-  const focusRow = useRef<HTMLLIElement | null>(null)
-  // ⚠ By KEY, not by element: each read of the detail is a new payload, so the element's identity
-  // moves on every usage move — keyed on it, a turn landing re-opened the row the reader had
-  // closed and scrolled back to it. A focus is the same focus until its key changes.
-  const focusedKey = focused?.key
-  useEffect(() => {
-    if (focusedKey === undefined) return
-    setOpen(true)
-    setOpenKeys((keys) => new Set([...keys, focusedKey]))
-  }, [focusedKey])
-  // The row is in the DOM only once its category is open, which a focus arriving on a closed
-  // category makes true a render LATER — so the scroll waits for the row, once per focus: a
-  // category the reader closes and reopens is not a new focus.
-  const scrolledFor = useRef<string | undefined>(undefined)
-  useEffect(() => {
-    if (focusedKey === undefined || scrolledFor.current === focusedKey || !open) return
-    const row = focusRow.current
-    if (row === null) return
-    row.scrollIntoView({ block: 'start' })
-    scrolledFor.current = focusedKey
-  }, [focusedKey, open])
-  const toggle = (key: string): void => setOpenKeys((keys) => toggleMember(keys, key))
-  return { open, setOpen, openKeys, toggle, focusRow }
+/** A category long enough to need finding in: past this many rows it offers a filter and an order. */
+const FINDABLE_ROWS = 8
+
+/** One category of the opened request: its elements, the makeup they are a share of, and whether it is open. */
+interface CategoryShape {
+  readonly category: EnsoContextCategory
+  readonly elements: readonly EnsoContextElement[]
+  readonly makeup: EnsoContextMakeup
+  /** Its estimate's change from the request before; none for the first. */
+  readonly change: number | undefined
+  readonly open: boolean
+  readonly onToggle: () => void
 }
 
-/** A category's header: its name, its items (and how many entered), its estimate, change and share. */
-function CategoryHeader({
-  category,
-  elements,
-  makeup,
-  change,
-  open,
-  onToggle,
-}: {
-  category: EnsoContextCategory
-  elements: readonly EnsoContextElement[]
-  makeup: EnsoContextMakeup
-  change: number | undefined
-  open: boolean
-  onToggle: () => void
-}): React.ReactNode {
+/** A category's header: its name, its elements (and how many entered), its estimate, share and change. */
+function CategoryHeader({ category, elements, makeup, change, open, onToggle }: CategoryShape): React.ReactNode {
   const entered = elements.filter((element) => element.entered).length
+  const share = shareOf(makeup[category], totalOf(makeup))
+  const details = [
+    elements.length === 1 ? '1 element' : `${elements.length} elements`,
+    ...(entered > 0 ? [`${entered} new`] : []),
+    ...(change === undefined || change === 0 ? [] : [estimateChangeText(change)]),
+  ]
   return (
     <button
       type="button"
       aria-expanded={open}
       disabled={elements.length === 0}
-      className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-muted/50 disabled:opacity-50"
+      className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-popover disabled:opacity-55 disabled:hover:bg-transparent"
       onClick={onToggle}
     >
-      {open ? <ChevronDownIcon className="size-3 shrink-0" /> : <ChevronRightIcon className="size-3 shrink-0" />}
-      <span
+      <ChevronRightIcon
         aria-hidden="true"
-        className="size-2 shrink-0 rounded-sm"
-        style={{ background: CATEGORY_COLOR[category] }}
+        className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open ? 'rotate-90' : '')}
       />
-      <b className="font-medium">{CATEGORY_LABEL[category]}</b>
-      <span className="text-muted-foreground">{elements.length === 1 ? '1 item' : `${elements.length} items`}</span>
-      {entered > 0 ? (
-        <span className="rounded bg-muted px-1 font-mono" title="entered since the previous request">
-          +{entered}
+      <Swatch category={category} />
+      <span className="grid min-w-0 flex-1 gap-0.5">
+        <b className="text-sm font-semibold">{CATEGORY_LABEL[category]}</b>
+        <small className="font-mono text-xs text-muted-foreground">{details.join(' · ')}</small>
+      </span>
+      <span className="grid justify-items-end gap-1 font-mono text-xs whitespace-nowrap tabular-nums">
+        <span>
+          {estimateText(makeup[category])} · {PERCENT.format(share)}
         </span>
-      ) : null}
-      <span className="ml-auto flex items-center gap-2 font-mono tabular-nums">
-        {change === undefined || change === 0 ? null : (
-          <span className="rounded bg-muted px-1" title="change from the previous request, estimated">
-            {changeText(change)}
-          </span>
-        )}
-        <span>{estimateText(makeup[category])}</span>
-        <span className="w-9 text-right text-muted-foreground">
-          {PERCENT.format(shareOf(makeup[category], totalOf(makeup)))}
+        <span aria-hidden="true" className="block h-1 w-18 overflow-hidden rounded-full bg-popover">
+          <span className="block h-full" style={{ width: `${share * 100}%`, background: CATEGORY_COLOR[category] }} />
         </span>
       </span>
     </button>
@@ -352,20 +363,19 @@ function CategoryHeader({
 }
 
 function CategoryRow({
-  category,
-  elements,
-  makeup,
-  change,
-  focusKey,
-}: {
-  category: EnsoContextCategory
-  elements: readonly EnsoContextElement[]
-  makeup: EnsoContextMakeup
-  change: number | undefined
-  focusKey: string | undefined
+  pickedKey,
+  onPick,
+  focusedKey,
+  focusRow,
+  ...shape
+}: CategoryShape & {
+  pickedKey: string | undefined
+  onPick: (key: string) => void
+  /** The element a focus names, whose row the browser brings into view. */
+  focusedKey: string | undefined
+  focusRow: React.RefObject<HTMLLIElement | null>
 }): React.ReactNode {
-  const focused = focusKey === undefined ? undefined : elements.find((element) => matchesKey(element, focusKey))
-  const { open, setOpen, openKeys, toggle, focusRow } = useFocusedRows(focused)
+  const { category, elements, open } = shape
   const [filter, setFilter] = useState('')
   const [order, setOrder] = useState<ToolOrder>('context')
   const needle = filter.trim().toLowerCase()
@@ -374,42 +384,37 @@ function CategoryRow({
     order,
   )
   return (
-    <li className="rounded-md border">
-      <CategoryHeader
-        category={category}
-        elements={elements}
-        makeup={makeup}
-        change={change}
-        open={open}
-        onToggle={() => setOpen((wasOpen) => !wasOpen)}
-      />
+    <li className="overflow-hidden rounded-lg border bg-background">
+      <CategoryHeader {...shape} />
       {open ? (
-        <div className="border-t">
-          <div className="flex items-center gap-2 p-2">
-            <input
-              type="search"
-              aria-label={`filter ${CATEGORY_LABEL[category]}`}
-              placeholder="filter by name…"
-              className="min-w-0 flex-1 rounded-md border bg-background px-2 py-0.5"
-              value={filter}
-              onChange={(event: React.ChangeEvent<HTMLInputElement>) => setFilter(event.target.value)}
-            />
-            <OptionSelect
-              label={`order ${CATEGORY_LABEL[category]}`}
-              value={order}
-              options={TOOL_ORDERS}
-              onChange={setOrder}
-            />
-          </div>
+        <div className="border-t pb-2">
+          {elements.length > FINDABLE_ROWS ? (
+            <div className="flex items-center gap-2 px-3 pt-2">
+              <input
+                type="search"
+                aria-label={`filter ${CATEGORY_LABEL[category]}`}
+                placeholder="filter by name…"
+                className="min-h-8 min-w-0 flex-1 rounded-md border bg-card px-2 text-xs"
+                value={filter}
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) => setFilter(event.target.value)}
+              />
+              <OptionSelect
+                label={`order ${CATEGORY_LABEL[category]}`}
+                value={order}
+                options={TOOL_ORDERS}
+                onChange={setOrder}
+              />
+            </div>
+          ) : null}
           <ul className="max-h-128 overflow-y-auto">
             {shown.map((element) => (
               <ElementRow
                 key={element.key}
                 element={element}
-                open={openKeys.has(element.key)}
-                onToggle={() => toggle(element.key)}
+                picked={element.key === pickedKey}
+                onPick={() => onPick(element.key)}
                 rowRef={
-                  element === focused
+                  element.key === focusedKey
                     ? (node: HTMLLIElement | null): void => {
                         focusRow.current = node
                       }
@@ -426,83 +431,184 @@ function CategoryRow({
 
 // ── the card ───────────────────────────────────────────────────────────────────────────────────
 
-function requestLabel(request: EnsoContextRequest): string {
-  return `turn ${request.turn} · prompt ${request.prompt} · ${timeText(request.at)}`
-}
-
 /** The picker's choices: the next request, then every request, newest first. */
-function requestOptions(requests: readonly EnsoContextRequest[]): ReadonlyArray<readonly [string, string]> {
+function requestOptions(
+  requests: readonly EnsoContextRequest[],
+  next: EnsoContextMakeup,
+): ReadonlyArray<readonly [string, string]> {
   return [
-    ['next', 'next request (live)'],
-    ...[...requests].reverse().map((candidate) => [String(candidate.turn), requestLabel(candidate)] as const),
+    ['next', `Next request · ${estimateText(totalOf(next))}`],
+    ...[...requests]
+      .reverse()
+      .map(
+        (candidate) =>
+          [
+            String(candidate.turn),
+            `Request ${candidate.turn} · prompt ${candidate.prompt} · ${estimateText(totalOf(candidate.estimated))}${candidate.compaction === undefined ? '' : ' · compacted'}`,
+          ] as const,
+      ),
   ]
 }
 
-/** The opened request's makeup (from the trend's read), the request before's, and the change between. */
-function openedMakeup(
+/**
+ * The opened request's place, makeup (from the trend's read), the request before's, and its
+ * record — or, for a turn the branch does not hold (every picker draws from these requests, and a
+ * branch only grows, so this is a guard), no makeup: none is shown rather than the next request's
+ * under this one's name.
+ */
+function openedRequest(
   requests: readonly EnsoContextRequest[],
   next: EnsoContextMakeup,
   request: ContextBrowserRequest,
-): { makeup: EnsoContextMakeup; before: EnsoContextMakeup | undefined; change: EnsoContextMakeup | undefined } {
-  const turnIndex = request === 'next' ? requests.length : requests.findIndex((candidate) => candidate.turn === request)
-  const makeup = request === 'next' ? next : (requests[turnIndex]?.estimated ?? next)
-  const before = requests[turnIndex - 1]?.estimated
-  return { makeup, before, change: before === undefined ? undefined : changeOf(makeup, before) }
+): {
+  index: number
+  makeup: EnsoContextMakeup | undefined
+  before: EnsoContextRequest | undefined
+  record: EnsoContextRequest | undefined
+} {
+  if (request === 'next') return { index: requests.length, makeup: next, before: requests.at(-1), record: undefined }
+  const index = requests.findIndex((candidate) => candidate.turn === request)
+  const record = requests[index]
+  return { index, makeup: record?.estimated, before: record === undefined ? undefined : requests[index - 1], record }
+}
+
+/** A request one step from `index` — `next` past the last one. */
+function stepped(requests: readonly EnsoContextRequest[], index: number): ContextBrowserRequest | undefined {
+  if (index < 0) return undefined
+  if (index >= requests.length) return index === requests.length ? 'next' : undefined
+  return requests[index]?.turn
+}
+
+/** The provider's count for the opened request — or why there is none. */
+function ProviderCount({ record }: { record: EnsoContextRequest | undefined }): React.ReactNode {
+  if (record === undefined) return <span>not sent yet</span>
+  if (record.actual.prompt === 0) return <span>no count from the provider</span>
+  return (
+    <span>
+      provider prompt <b className="font-medium text-foreground">{COMPACT.format(record.actual.prompt)}</b>
+    </span>
+  )
 }
 
 /** Why no rows show yet: the read failed, or the asked-for request is still being read. */
 function DetailStatus({ outcome, waiting }: { outcome: DetailOutcome; waiting: boolean }): React.ReactNode {
-  if (outcome.kind === 'failed')
-    return <p className="mt-3 text-xs text-muted-foreground">no detail: {outcome.problem}</p>
-  return waiting ? <p className="mt-3 text-xs text-muted-foreground">reading the request's context…</p> : null
+  if (outcome.kind === 'failed') return <p className="text-sm text-muted-foreground">no detail: {outcome.problem}</p>
+  return waiting ? <p className="text-sm text-muted-foreground">reading the request's context…</p> : null
 }
 
-/** A read request's six categories, and what left it since the request before. */
-function DetailCategories({
+/** What the previous request held that this one does not — the design's dashed `.left-list`. */
+function LeftList({
+  left,
+  before,
+}: {
+  left: EnsoContextRequestDetail['left']
+  before: number | undefined
+}): React.ReactNode {
+  if (left.length === 0) return null
+  return (
+    <div className="grid gap-2 rounded-lg border border-dashed border-border-strong p-3">
+      <h4 className="flex items-center gap-2 text-sm font-semibold">
+        <LayersIcon aria-hidden="true" className="size-4" />
+        Left since {before === undefined ? 'the request before' : `request ${before}`} · {left.length}{' '}
+        {left.length === 1 ? 'element' : 'elements'}
+      </h4>
+      <ul className="grid gap-0.5 text-sm text-muted-foreground">
+        {left.map((gone) => (
+          <li key={gone.key} className="flex min-w-0 items-center gap-2">
+            <Swatch category={gone.category} className="size-2" />
+            <span className="truncate">{gone.label}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/**
+ * The pick and the open categories, following a focus: a focus that arrives — on mount or later —
+ * picks its element, opens its category and brings its row into view, once. ⚠ By KEY, not by
+ * element: each read of the detail is a new payload, so the element's identity moves on every usage
+ * move — keyed on it, a turn landing re-opened the category the reader had closed and scrolled
+ * back to the row.
+ */
+type BrowserPick = {
+  pickedKey: string | undefined
+  setPickedKey: (key: string) => void
+  openCategories: ReadonlySet<EnsoContextCategory>
+  toggleCategory: (category: EnsoContextCategory) => void
+  focusRow: React.RefObject<HTMLLIElement | null>
+}
+
+function useBrowserPick(focused: EnsoContextElement | undefined): BrowserPick {
+  const [pickedKey, setPickedKey] = useState<string | undefined>(focused?.key)
+  const [openCategories, setOpenCategories] = useState<ReadonlySet<EnsoContextCategory>>(
+    () => new Set(focused === undefined ? [] : [focused.category]),
+  )
+  const focusRow = useRef<HTMLLIElement | null>(null)
+  const focusedKey = focused?.key
+  const focusedCategory = focused?.category
+  useEffect(() => {
+    if (focusedKey === undefined || focusedCategory === undefined) return
+    setPickedKey(focusedKey)
+    setOpenCategories((open) => new Set([...open, focusedCategory]))
+  }, [focusedKey, focusedCategory])
+  // The row is in the DOM only once its category is open, which a focus arriving on a closed
+  // category makes true a render LATER — so the scroll waits for the row, once per focus: a
+  // category the reader closes and reopens is not a new focus.
+  const scrolledFor = useRef<string | undefined>(undefined)
+  const open = focusedCategory !== undefined && openCategories.has(focusedCategory)
+  useEffect(() => {
+    if (focusedKey === undefined || scrolledFor.current === focusedKey || !open) return
+    const row = focusRow.current
+    if (row === null) return
+    row.scrollIntoView({ block: 'nearest' })
+    scrolledFor.current = focusedKey
+  }, [focusedKey, open])
+  const toggleCategory = (category: EnsoContextCategory): void =>
+    setOpenCategories((current) => toggleMember(current, category))
+  return { pickedKey, setPickedKey, openCategories, toggleCategory, focusRow }
+}
+
+/** A read request's six categories and what left it, beside the element picked. */
+function DetailColumns({
   detail,
   makeup,
-  change,
-  focusKey,
+  before,
+  focused,
+  pick,
 }: {
   detail: EnsoContextRequestDetail
   makeup: EnsoContextMakeup
-  change: EnsoContextMakeup | undefined
-  focusKey: string | undefined
+  before: EnsoContextRequest | undefined
+  focused: EnsoContextElement | undefined
+  pick: BrowserPick
 }): React.ReactNode {
+  const { pickedKey, setPickedKey, openCategories, toggleCategory, focusRow } = pick
+  const picked = pickedKey === undefined ? undefined : detail.elements.find((element) => element.key === pickedKey)
   return (
-    <>
-      <ul className="mt-3 grid grid-cols-1 gap-1.5 text-xs">
-        {CONTEXT_CATEGORIES.map((category) => (
-          <CategoryRow
-            key={`${detail.request}-${category}`}
-            category={category}
-            elements={detail.elements.filter((element) => element.category === category)}
-            makeup={makeup}
-            change={change?.[category]}
-            focusKey={focusKey}
-          />
-        ))}
-      </ul>
-      {detail.left.length === 0 ? null : (
-        <details className="mt-3 text-xs">
-          <summary className="cursor-pointer text-muted-foreground">
-            {detail.left.length} left since the request before
-          </summary>
-          <ul className="mt-1 grid gap-0.5 pl-4">
-            {detail.left.map((gone) => (
-              <li key={gone.key} className="truncate">
-                <span
-                  aria-hidden="true"
-                  className="mr-1 inline-block size-2 rounded-sm"
-                  style={{ background: CATEGORY_COLOR[gone.category] }}
-                />
-                {gone.label}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </>
+    <div className="grid min-w-0 items-start gap-4 @5xl:grid-cols-2">
+      <div className="grid min-w-0 gap-3">
+        <ul className="grid gap-2">
+          {CONTEXT_CATEGORIES.map((category) => (
+            <CategoryRow
+              key={category}
+              category={category}
+              elements={detail.elements.filter((element) => element.category === category)}
+              makeup={makeup}
+              change={before === undefined ? undefined : makeup[category] - before.estimated[category]}
+              open={openCategories.has(category)}
+              onToggle={() => toggleCategory(category)}
+              pickedKey={pickedKey}
+              onPick={setPickedKey}
+              focusedKey={focused?.key}
+              focusRow={focusRow}
+            />
+          ))}
+        </ul>
+        <LeftList left={detail.left} before={before?.turn} />
+      </div>
+      <ElementView element={picked} picked={pickedKey !== undefined} />
+    </div>
   )
 }
 
@@ -525,37 +631,120 @@ export function ContextBrowser({
     [request],
   )
   const outcome = useReadOnUsage<DetailOutcome>(read, ANALYSIS_READING)
-  const { makeup, before, change } = openedMakeup(requests, next, request)
+  const { index, makeup, before, record } = openedRequest(requests, next, request)
   // The payload says which request it is: until the one asked for arrives, none shows — the
   // status says it is reading.
   const detail = outcome.kind === 'read' && outcome.payload.request === request ? outcome.payload : undefined
+  // The pick and the open categories live here, not in the columns: those unmount while a request
+  // is read, and the reader's place must survive a step through requests (the design's "the element
+  // you had open isn't in this request").
+  const focusKey = focus?.request === request ? focus.key : undefined
+  const focused =
+    focusKey === undefined || detail === undefined
+      ? undefined
+      : detail.elements.find((element) => matchesKey(element, focusKey))
+  const pick = useBrowserPick(focused)
+  const earlier = stepped(requests, index - 1)
+  // Nowhere to step from a turn the branch does not hold, either way.
+  const later = request === 'next' || index === -1 ? undefined : stepped(requests, index + 1)
   return (
     <Card
       title="Context Browser"
-      aside={
-        <OptionSelect
-          label="the request to open"
-          value={String(request)}
-          options={requestOptions(requests)}
-          onChange={(value: string) => onRequest(value === 'next' ? 'next' : Number(value))}
-        />
+      sub="open the box of any request"
+      tools={
+        <>
+          <SmallButton
+            aria-label="earlier request"
+            disabled={earlier === undefined}
+            onClick={() => {
+              if (earlier !== undefined) onRequest(earlier)
+            }}
+          >
+            <ArrowLeftIcon aria-hidden="true" />
+          </SmallButton>
+          <OptionSelect
+            label="the request to open"
+            value={String(request)}
+            options={requestOptions(requests, next)}
+            onChange={(value: string) => onRequest(value === 'next' ? 'next' : Number(value))}
+            className="min-h-8 max-w-full rounded-md border bg-background px-2 text-sm text-foreground"
+          />
+          <SmallButton
+            aria-label="later request"
+            disabled={later === undefined}
+            onClick={() => {
+              if (later !== undefined) onRequest(later)
+            }}
+          >
+            <ArrowRightIcon aria-hidden="true" />
+          </SmallButton>
+        </>
       }
     >
-      <p className="mb-2 text-xs">
-        <b>{request === 'next' ? 'next request' : `turn ${request}`}</b>
-        <span className="text-muted-foreground"> · estimated {estimateText(totalOf(makeup))}</span>
-        {before === undefined ? null : <span className="text-muted-foreground"> · against the request before</span>}
+      {makeup === undefined ? (
+        <p className="text-sm text-muted-foreground">request {request} is not on this branch</p>
+      ) : (
+        <OpenedRequest
+          request={request}
+          makeup={makeup}
+          before={before}
+          record={record}
+          detail={detail}
+          outcome={outcome}
+          focused={focused}
+          pick={pick}
+        />
+      )}
+    </Card>
+  )
+}
+
+/** The opened request's summary, its makeup, and its categories beside the element picked. */
+function OpenedRequest({
+  request,
+  makeup,
+  before,
+  record,
+  detail,
+  outcome,
+  focused,
+  pick,
+}: {
+  request: ContextBrowserRequest
+  makeup: EnsoContextMakeup
+  before: EnsoContextRequest | undefined
+  record: EnsoContextRequest | undefined
+  detail: EnsoContextRequestDetail | undefined
+  outcome: DetailOutcome
+  focused: EnsoContextElement | undefined
+  pick: BrowserPick
+}): React.ReactNode {
+  const figure = 'font-medium text-foreground'
+  return (
+    <>
+      <p className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
+        <span>
+          {request === 'next' ? 'next request' : `request ${request}`} · estimate{' '}
+          <b className={figure}>{estimateText(totalOf(makeup))}</b>
+        </span>
+        {detail === undefined ? null : (
+          <>
+            <span>
+              <b className={figure}>{detail.elements.length}</b> elements
+            </span>
+            <span>
+              <b className={figure}>{detail.elements.filter((element) => element.entered).length}</b> entered since{' '}
+              {before === undefined ? 'the start' : `request ${before.turn}`}
+            </span>
+          </>
+        )}
+        <ProviderCount record={record} />
       </p>
       <MakeupBar makeup={makeup} scale={totalOf(makeup)} label="the opened request's makeup, estimated" />
       <DetailStatus outcome={outcome} waiting={detail === undefined} />
       {detail === undefined ? null : (
-        <DetailCategories
-          detail={detail}
-          makeup={makeup}
-          change={change}
-          focusKey={focus?.request === request ? focus.key : undefined}
-        />
+        <DetailColumns detail={detail} makeup={makeup} before={before} focused={focused} pick={pick} />
       )}
-    </Card>
+    </>
   )
 }

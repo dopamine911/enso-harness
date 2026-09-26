@@ -25,7 +25,7 @@ const MAKEUP = { system: 10, tools: 0, user: 2, injected: 0, assistant: 5, toolR
 
 const flush = (work: () => Promise<void>): Promise<void> => act(work)
 
-test('closed, the dialog reads nothing; open, it shows Current Context and the Context Browser — and only them', async () => {
+test('closed, the dialog reads nothing; open, it shows Now and the Context Browser — and only them', async () => {
   const stores = mintThread()
   const context: EnsoThreadContext = {
     threadId: stores.threadId,
@@ -65,7 +65,7 @@ test('closed, the dialog reads nothing; open, it shows Current Context and the C
       (section) => section.getAttribute('aria-label') ?? '',
     )
   await waitUntil(() => cards().length >= 2)
-  expect(cards()).toEqual(['Current Context', 'Context Browser'])
+  expect(cards()).toEqual(['Now', 'Context Browser'])
   expect(asked[0]).toBe(`/api/threads/${stores.threadId}/context`)
   await flush(async () => root.unmount())
   container.remove()

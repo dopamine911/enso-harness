@@ -11,7 +11,8 @@ import { waitUntil } from './wait-until.ts'
 
 /**
  * #361 phase 3: the Context Browser, mounted — it reads the request it is asked for, and a focus
- * (a brief's line) opens that element's category and row, where its content is.
+ * (a brief's line) opens that element's category and picks its row, whose content the element
+ * view beside the list shows.
  */
 
 ensureDom()
@@ -65,7 +66,7 @@ const DETAIL: EnsoContextRequestDetail = {
 
 const flush = (work: () => Promise<void>): Promise<void> => act(work)
 
-test("a focus opens its element's category and row; the row shows the call's arguments beside its result", async () => {
+test("a focus opens its element's category and picks its row; the element view shows the call's arguments beside its result", async () => {
   const stores = mintThread()
   const asked: string[] = []
   globalThis.fetch = ((input: string | URL | Request): Promise<Response> => {
@@ -94,9 +95,10 @@ test("a focus opens its element's category and row; the row shows the call's arg
     )
   await waitUntil(() => row() !== undefined)
   expect(asked).toEqual([`/api/threads/${stores.threadId}/context/2`])
-  expect(row()?.getAttribute('aria-expanded')).toBe('true')
-  expect(container.textContent).toContain('ls -la')
-  expect(container.textContent).toContain('a b')
+  expect(row()?.getAttribute('aria-pressed')).toBe('true')
+  const view = container.querySelector('aside[aria-label="element"]')?.textContent ?? ''
+  expect(view).toContain('ls -la')
+  expect(view).toContain('a b')
   // The other category stays closed: the focus opens where it points, not everything.
   const system = [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')].find((button) =>
     button.textContent?.includes('system prompt'),
@@ -107,8 +109,8 @@ test("a focus opens its element's category and row; the row shows the call's arg
 })
 
 // A live thread re-reads the detail on every usage move, and each read is a new payload: the
-// focus must stay the focus the reader already had — not re-open a row they closed, nor scroll.
-test('a re-read keeps the reader where they are: a focused row they closed stays closed, and nothing scrolls again', async () => {
+// focus must stay the focus the reader already had — not re-open a category they closed, nor scroll.
+test('a re-read keeps the reader where they are: a focused category they closed stays closed, and nothing scrolls again', async () => {
   const stores = mintThread()
   const asked: string[] = []
   globalThis.fetch = ((input: string | URL | Request): Promise<Response> => {
@@ -138,16 +140,16 @@ test('a re-read keeps the reader where they are: a focused row they closed stays
         </ThreadStoresContext.Provider>,
       )
     })
-    const row = (): HTMLButtonElement | undefined =>
-      [...container.querySelectorAll<HTMLButtonElement>('li li button')].find((button) =>
-        button.textContent?.includes('bash ls -la'),
+    const category = (): HTMLButtonElement | undefined =>
+      [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')].find((button) =>
+        button.textContent?.includes('tool results'),
       )
-    await waitUntil(() => row()?.getAttribute('aria-expanded') === 'true')
+    await waitUntil(() => category()?.getAttribute('aria-expanded') === 'true')
     expect(scrolled).toHaveLength(1)
     await flush(async () => {
-      row()?.click()
+      category()?.click()
     })
-    expect(row()?.getAttribute('aria-expanded')).toBe('false')
+    expect(category()?.getAttribute('aria-expanded')).toBe('false')
     // A turn lands: the usage moves, the detail is read again.
     await flush(async () => {
       stores.usage.set({ cost: 0, input: 1, output: 1, cacheRead: 0, cacheWrite: 0, context: null })
@@ -155,7 +157,7 @@ test('a re-read keeps the reader where they are: a focused row they closed stays
     await waitUntil(() => asked.length === 2)
     await flush(() => new Promise((resolve) => setTimeout(resolve, 40)))
     expect(asked).toHaveLength(2)
-    expect(row()?.getAttribute('aria-expanded')).toBe('false')
+    expect(category()?.getAttribute('aria-expanded')).toBe('false')
     expect(scrolled).toHaveLength(1)
     await flush(async () => root.unmount())
     container.remove()
@@ -245,6 +247,79 @@ test("a failed read is not shown as another request's while that one is read", a
   expect(container.textContent).not.toContain('no detail')
   expect(container.textContent).toContain("reading the request's context…")
   pending.resolve(Response.json({ ...DETAIL, request: 'next', threadId: stores.threadId }))
+  await flush(async () => root.unmount())
+  container.remove()
+})
+
+// The arrows step through the branch's requests and stop at its ends; a pick is the reader's, not
+// the request's — it survives a step to a request that does not hold it, which says so, and shows
+// again on the way back (PR #406 review).
+test('the arrows step between requests and stop at the ends; a pick the opened request lacks is said, and kept', async () => {
+  const stores = mintThread()
+  const first: EnsoContextRequest = { ...REQUEST, turn: 1 }
+  const detailOf = (request: ContextBrowserRequest): EnsoContextRequestDetail => ({
+    ...DETAIL,
+    threadId: stores.threadId,
+    request,
+    // Request 1 predates the bash call: its result is not in that context.
+    elements: request === 1 ? DETAIL.elements.filter((element) => element.key !== 'e4#0') : DETAIL.elements,
+  })
+  globalThis.fetch = ((input: string | URL | Request): Promise<Response> => {
+    const which = requestedUrl(input).split('/context/')[1] ?? 'next'
+    return Promise.resolve(Response.json(detailOf(which === 'next' ? 'next' : Number(which))))
+  }) as typeof fetch
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  const asked: ContextBrowserRequest[] = []
+  const render = (request: ContextBrowserRequest): Promise<void> =>
+    flush(async () => {
+      root.render(
+        <ThreadStoresContext.Provider value={stores}>
+          <ContextBrowser
+            requests={[first, REQUEST]}
+            next={MAKEUP}
+            request={request}
+            onRequest={(chosen: ContextBrowserRequest): void => {
+              asked.push(chosen)
+            }}
+            focus={undefined}
+          />
+        </ThreadStoresContext.Provider>,
+      )
+    })
+  const arrow = (label: string): HTMLButtonElement | null =>
+    container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+  const view = (): string => container.querySelector('aside[aria-label="element"]')?.textContent ?? ''
+  const button = (selector: string, text: string): HTMLButtonElement | undefined =>
+    [...container.querySelectorAll<HTMLButtonElement>(selector)].find((candidate) =>
+      candidate.textContent?.includes(text),
+    )
+
+  // The first request: nothing earlier; later is request 2.
+  await render(1)
+  expect(arrow('earlier request')?.disabled).toBe(true)
+  await flush(async () => arrow('later request')?.click())
+  // The next request: nothing later; earlier is the last request, 2.
+  await render('next')
+  expect(arrow('later request')?.disabled).toBe(true)
+  await flush(async () => arrow('earlier request')?.click())
+  expect(asked).toEqual([2, 2])
+
+  // Pick the bash result in request 2, then open request 1, which does not hold it.
+  await render(2)
+  await waitUntil(() => button('button[aria-expanded]', 'tool results') !== undefined)
+  expect(button('button[aria-expanded]', 'tool results')).toBeDefined()
+  await flush(async () => button('button[aria-expanded]', 'tool results')?.click())
+  await flush(async () => button('li li button', 'bash ls -la')?.click())
+  expect(view()).toContain('a b')
+  await render(1)
+  await waitUntil(() => view().includes('isn’t in this request'))
+  expect(view()).toContain('The element you had open isn’t in this request')
+  expect(view()).not.toContain('a b')
+  await render(2)
+  await waitUntil(() => view().includes('a b'))
+  expect(view()).toContain('a b')
   await flush(async () => root.unmount())
   container.remove()
 })
