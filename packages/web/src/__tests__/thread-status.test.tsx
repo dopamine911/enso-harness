@@ -68,6 +68,16 @@ test('a thinking tail is thinking; a text tail is responding', () => {
   })
 })
 
+// #418: joining a live run (a reload) opens a new assistant message after the stored one holding
+// the pending call, and it stays empty until something streams. The bar reads past it — but never
+// past a user message: an earlier turn's unanswered call is not what a new prompt is doing.
+test('an empty assistant message at the tail is read past to the step behind it, never past a user message', () => {
+  const joined = [user('u1', 'pick one'), assistant('a1', [call('c1', 'ask_user')]), assistant('a2', [])]
+  expect(describeActivity(joined, true)).toEqual({ kind: 'running', tool: 'ask_user' })
+  const newPrompt = [user('u1', 'hi'), assistant('a1', [call('c1', 'bash')]), user('u2', 'next'), assistant('a2', [])]
+  expect(describeActivity(newPrompt, true)).toEqual({ kind: 'working' })
+})
+
 // ⓘ Diverges from the transcript's render-everything policy on purpose: a one-word summary
 // has no word for an image or an unmatched result, and `working` is true of both — the run
 // is in flight, and the part itself is still visible in the transcript.

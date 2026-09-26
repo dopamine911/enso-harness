@@ -62,6 +62,11 @@ export type Activity =
  * assistant message yet, a user message as the tail, an image — is `working`: in flight,
  * nothing more specific known.
  *
+ * "The last message" skips assistant messages with NO parts at the tail (#418). Joining a run that
+ * is already going (a reload) opens a new assistant message for what streams next, after the stored
+ * one holding the step in progress; until something streams into it, that step is still the one in
+ * progress. The skip stops at the first message with a part, or at a user message.
+ *
  * ⓘ The catch-all DIVERGES from `selected-message-part.tsx` on purpose (PR #92 review).
  * The transcript renders every part kind it has no handler for visibly, because there a
  * silently skipped part is indistinguishable from one never sent. This is a one-word
@@ -89,7 +94,7 @@ export function describeActivity(
 ): Activity {
   if (disconnected) return { kind: 'disconnected' }
   if (!generating) return { kind: 'idle' }
-  const message = messages.at(-1)
+  const message = messages.findLast((candidate) => candidate.role !== 'assistant' || candidate.parts.length > 0)
   const last = message === undefined ? undefined : selectMessageUI(message, {})
   if (last === undefined || last.message.role !== 'assistant') return { kind: 'working' }
   const tail = automaticPartsForMessage(last).at(-1)
