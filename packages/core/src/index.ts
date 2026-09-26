@@ -159,6 +159,7 @@ export {
   EnsoProviderRefusal,
   EnsoProviderRetry,
   EnsoProviderRetryEnd,
+  PROVIDER_POLICY_STOP_REASONS,
   type ProviderRefusalClass,
   providerReasonOf,
   providerRefusalClass,

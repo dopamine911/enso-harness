@@ -107,6 +107,8 @@ function compactOf(observation: EnsoObservation): EnsoLogProperties {
         ...(observation.provider === undefined ? {} : { provider: observation.provider }),
         ...(observation.model === undefined ? {} : { model: observation.model }),
         ...(observation.status === undefined ? {} : { status: observation.status }),
+        // What classes a refusal with no status (#384): the provider's own stop reason.
+        ...(observation.providerStopReason === undefined ? {} : { stopReason: observation.providerStopReason }),
         // The provider's own sentence (#340) — the fact, not transcript text; the whole message is on `trace`.
         reason: providerReasonOf(observation.message),
       }

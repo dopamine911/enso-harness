@@ -28,14 +28,35 @@ export function providerRefusalOfMessage(raw: unknown): EnsoProviderRefusal | un
     errorMessage?: unknown
     provider?: unknown
     model?: unknown
+    rawStopReason?: unknown
+    usage?: { output?: unknown }
   }
   if (message.role !== 'assistant' || message.stopReason !== 'error') return undefined
-  const text = typeof message.errorMessage === 'string' && message.errorMessage.length > 0 ? message.errorMessage : ''
-  const status = providerStatusOf(text)
+  const text = nonEmpty(message.errorMessage)
+  const output = message.usage?.output
+  // #384: the provider's own stop reason — a policy stop arrives on a response that already
+  // succeeded, so it carries no status — and what the attempt spent before it was stopped.
   return {
-    ...(typeof message.provider === 'string' && message.provider.length > 0 ? { provider: message.provider } : {}),
-    ...(typeof message.model === 'string' && message.model.length > 0 ? { model: message.model } : {}),
-    ...(status === undefined ? {} : { status }),
-    message: text.length > 0 ? text : 'the provider returned an error without a message',
+    ...definedOnly({
+      provider: nonEmpty(message.provider),
+      model: nonEmpty(message.model),
+      status: text === undefined ? undefined : providerStatusOf(text),
+      providerStopReason: nonEmpty(message.rawStopReason),
+      output: typeof output === 'number' && Number.isInteger(output) && output > 0 ? output : undefined,
+    }),
+    message: text ?? 'the provider returned an error without a message',
   }
+}
+
+function nonEmpty(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+/** The fields that have a value — the wire's optional fields are absent, never `undefined`. */
+function definedOnly<Fields extends Record<string, unknown>>(
+  fields: Fields,
+): Partial<{ [Key in keyof Fields]: NonNullable<Fields[Key]> }> {
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) as Partial<{
+    [Key in keyof Fields]: NonNullable<Fields[Key]>
+  }>
 }

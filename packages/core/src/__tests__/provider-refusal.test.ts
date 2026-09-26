@@ -72,12 +72,25 @@ const ROWS: ReadonlyArray<{
 
 test('each real shape of a provider error reads as its status, its class word and the provider’s own sentence', () => {
   for (const row of ROWS) {
+    const status = providerStatusOf(row.message)
     expect({
-      status: providerStatusOf(row.message),
-      refusalClass: providerRefusalClass(providerStatusOf(row.message)),
+      status,
+      refusalClass: providerRefusalClass(status === undefined ? {} : { status }),
       reason: providerReasonOf(row.message),
     }).toEqual({ status: row.status, refusalClass: row.refusalClass, reason: row.reason })
   }
+})
+
+// #384: a policy stop arrives on a response that already succeeded — no status — and pi keeps the
+// provider's own stop reason. Those class as the provider's policy, ahead of any status; any other
+// stop reason (a network failure, a malformed tool call) is not a policy and falls back to the status.
+test('a provider policy stop classes as `provider policy` from its stop reason; any other stop reason falls back to the status', () => {
+  for (const providerStopReason of ['refusal', 'content_filter', 'SAFETY']) {
+    expect(providerRefusalClass({ providerStopReason })).toBe('provider policy')
+  }
+  expect(providerRefusalClass({ providerStopReason: 'refusal', status: 429 })).toBe('provider policy')
+  expect(providerRefusalClass({ providerStopReason: 'network_error' })).toBe('request failed')
+  expect(providerRefusalClass({ providerStopReason: 'MALFORMED_FUNCTION_CALL', status: 400 })).toBe('model refused')
 })
 
 // A status is only the one pi's providers put in front — never a number from inside the prose, or

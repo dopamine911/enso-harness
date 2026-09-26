@@ -13,9 +13,11 @@ import { Check } from 'typebox/value'
  * `message_end`, which keeps its accounting role unchanged. pi's retry (`auto_retry_start`) is
  * the separate `EnsoProviderRetry`, and its end (`auto_retry_end`) `EnsoProviderRetryEnd`.
  *
- * ⚠ CLASSIFIED BY STATUS, NOT PARSED FROM PROSE. The one structured part of the message is the
- * HTTP status pi's providers put in front of it; the class word comes from that, and the
- * provider's own message travels verbatim for a reader.
+ * ⚠ CLASSIFIED, NOT PARSED FROM PROSE. Two parts are structured: the provider's own stop reason,
+ * which pi keeps (`rawStopReason`) when a response that already succeeded ends in a refusal (#384 —
+ * Anthropic's `refusal`, OpenAI's `content_filter`, Gemini's `SAFETY`, …, with no HTTP status at
+ * all), and the HTTP status pi's providers put in front of an error message. The class word comes
+ * from those, the stop reason first; the provider's own message travels verbatim for a reader.
  */
 
 /**
@@ -28,6 +30,13 @@ export const EnsoProviderRefusal = Type.Object({
   provider: Type.Optional(Type.String({ minLength: 1 })),
   model: Type.Optional(Type.String({ minLength: 1 })),
   status: Type.Optional(Type.Integer({ minimum: 100, maximum: 599 })),
+  /** The provider's own stop reason, when it ended a response it had begun (#384): `refusal`, `content_filter`, `SAFETY`, … */
+  providerStopReason: Type.Optional(Type.String({ minLength: 1 })),
+  /**
+   * The output tokens the refused attempt itself spent (#384): a refusal mid-stream comes after
+   * the model wrote some, and that is not a reply getting through.
+   */
+  output: Type.Optional(Type.Integer({ minimum: 0 })),
   message: Type.String(),
 })
 /** @group Thread runtime */
@@ -107,17 +116,54 @@ export type ProviderRefusalClass =
   | 'rate-limited'
   | 'not logged in'
   | 'model refused'
+  | 'provider policy'
   | 'provider error'
   | 'request failed'
 
 /**
- * The short word for a refusal, by its status: what a person glancing at the status bar needs —
- * whether waiting helps (`rate-limited`, `provider error`), logging in does (`not logged in`), or
- * neither (`model refused`: the request itself, often the model, is not allowed).
+ * The provider stop reasons that mean "the provider's policy stopped this content" (#384), as pi
+ * records them per API: Anthropic's `refusal` and `sensitive`; OpenAI chat's `content_filter`, and
+ * the Responses API's `incomplete.content_filter`; Bedrock's guardrail and content filter; Gemini
+ * and Vertex's safety, blocklist, prohibited-content and recitation reasons. pi maps every one to an
+ * error stop; nothing else here says which of those errors is a policy.
  *
  * @group Thread runtime
  */
-export function providerRefusalClass(status: number | undefined): ProviderRefusalClass {
+export const PROVIDER_POLICY_STOP_REASONS: ReadonlySet<string> = new Set([
+  'refusal',
+  'sensitive',
+  'content_filter',
+  'incomplete.content_filter',
+  'guardrail_intervened',
+  'content_filtered',
+  'SAFETY',
+  'PROHIBITED_CONTENT',
+  'BLOCKLIST',
+  'SPII',
+  'RECITATION',
+  'IMAGE_SAFETY',
+  'IMAGE_PROHIBITED_CONTENT',
+  'IMAGE_RECITATION',
+])
+
+/**
+ * The short word for a refusal: what a person glancing at the status bar needs — whether waiting
+ * helps (`rate-limited`, `provider error`), logging in does (`not logged in`), rephrasing might
+ * (`provider policy`: the provider's content policy stopped it), or none of these (`model refused`:
+ * the request itself, often the model, is not allowed).
+ *
+ * ⚠ `provider policy`, not `content policy` (#384, #387): until an error line says whose it is, the
+ * word must name the owner, or it reads as one of Enso's own guards.
+ *
+ * @group Thread runtime
+ */
+export function providerRefusalClass(
+  refusal: Pick<EnsoProviderRefusal, 'status' | 'providerStopReason'>,
+): ProviderRefusalClass {
+  if (refusal.providerStopReason !== undefined && PROVIDER_POLICY_STOP_REASONS.has(refusal.providerStopReason)) {
+    return 'provider policy'
+  }
+  const { status } = refusal
   if (status === 429) return 'rate-limited'
   if (status === 401 || status === 403) return 'not logged in'
   if (status !== undefined && status >= 400 && status < 500) return 'model refused'

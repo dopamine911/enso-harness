@@ -36,7 +36,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/permission-mode.ts` | `#84`, `#162` | The permission mode's shape on the wire (#84; #162 workstream 4, L3): what a run starts in and what it may switch to. |
 | `packages/core/src/pi-manifest.ts` | `#211`, `#221` | What a pi package's manifest declares, and where pi will look for it (#221) — THE one place that knows pi's manifest-resource layout. |
 | `packages/core/src/project.ts` | `#24`, `#395` | Projects (#395): the local directories one Enso server runs threads in. |
-| `packages/core/src/provider-refusal.ts` | `#340` | A model provider refused a request (#340): the fact the page and the log were missing. |
+| `packages/core/src/provider-refusal.ts` | `#340`, `#384` | A model provider refused a request (#340): the fact the page and the log were missing. |
 | `packages/core/src/secrets.ts` | `#7`, `#89`, `#98` | Secrets stay OUT of the environment the model's tools inherit (#89). |
 | `packages/core/src/thread-context.ts` | `#361` | One thread's context, request by request (#361): what `GET /api/threads/:threadId/context` answers and the Context view draws — dsh-context's composition and trend, over pi. |
 | `packages/core/src/thread-inspection.ts` | `#86` | What a live thread's session ACTUALLY contains, as the server reports it (#86). |
