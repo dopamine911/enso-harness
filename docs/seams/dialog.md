@@ -263,7 +263,7 @@ request with `isEnsoDialogSpec` rather than casting, line 532).
 observation whole on a CUSTOM chunk named by its kind (`to-agui.ts#custom`) and the router checks
 `{ id, dialog }` again against `EnsoOpenDialog` before it reaches the store (`custom-event-router.ts#routeUiRequest`). `EnsoDialogCard` in
 `packages/web/src/chat-screen.tsx` (`#EnsoDialogCard`) renders one card and hands `answerDialog` in
-`packages/web/src/follow-connection.ts` (line 689) exactly the answer shapes — `{ value }`,
+`packages/web/src/follow-connection.ts` (line 690) exactly the answer shapes — `{ value }`,
 `{ confirmed }`, `{ answers }`, `{ cancelled: true }` — because the server forwards them verbatim (chat-screen.tsx
 lines 631–632). The card drops on `dialog-settled` for its id, whoever answered (router lines 148–153), and
 the snapshot's list replaces what is shown (router line 105).

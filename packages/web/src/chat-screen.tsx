@@ -6,6 +6,7 @@ import {
   ENSO_PROMPT_MAX_IMAGES,
   type EnsoDialogAnswer,
   type EnsoDialogSpec,
+  type EnsoProject,
   type EnsoPromptImage,
   type EnsoProviderRefusal,
   isEnsoImageMimeType,
@@ -75,6 +76,7 @@ import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.
 import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState } from './model-state.tsx'
 import { ThreadNotifications } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
+import { createProjectsStore } from './project-list.ts'
 import { QuestionnaireControls } from './questionnaire-card.tsx'
 import { providerRefusalLine, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
@@ -770,6 +772,7 @@ function ComposerBody({
             command POSTs (slice 2) and `/model` opens the dialog the composer renders. */}
         <CommandPalette
           threadId={stores.threadId}
+          fetch={stores.fetch}
           disabled={disconnected}
           {...paletteHandlers(host, onRunCommand, onInsertCommand)}
         />
@@ -1077,6 +1080,7 @@ const chatComponents = {
       // The Start-a-session dialog (#391): open on a minted thread; Start configures the session
       // and sends the first prompt through THIS send, so the bubble and the run are the composer's.
       const startSessionOpen = useStore(stores.startSession)
+      const threadProject = useThreadProject(stores.projectId)
       const permission = usePermissionMode()
       // The `/` palette's two outcomes (#338; the rule is in `command-palette.tsx`'s header).
       // ⚠ NEITHER TOUCHES WHAT THE USER HAS TYPED (PR #343 review). An extension command is a
@@ -1196,6 +1200,7 @@ const chatComponents = {
           </div>
           <ModelChoiceDialog
             threadId={stores.threadId}
+            fetch={stores.fetch}
             command={modelDialog}
             onClose={(): void => setModelDialog(undefined)}
             onPick={host.onHost}
@@ -1203,6 +1208,8 @@ const chatComponents = {
           <ThreadContextDialog open={contextOpen} onClose={(): void => setContextOpen(false)} />
           <StartSessionDialog
             threadId={stores.threadId}
+            fetch={stores.fetch}
+            project={threadProject}
             open={startSessionOpen}
             onClose={(): void => stores.startSession.set(false)}
             mode={permission.mode}
@@ -1484,6 +1491,15 @@ type ThreadNavigation =
  */
 const storedThreads = createStoredThreadsStore()
 
+/** The projects the rail groups threads under (#395). Page-level, fetched on load. */
+const projectList = createProjectsStore()
+
+/** The project a thread runs in, as the page lists it — a thread with none is the launch directory's. */
+function useThreadProject(projectId: string | undefined): EnsoProject | undefined {
+  const { rows } = useStore(projectList)
+  return rows.find((project) => (projectId === undefined ? project.launch : project.projectId === projectId))
+}
+
 interface PaneSwitchProps {
   readonly open: boolean
   /** The pane's element id — what `aria-controls` names. */
@@ -1589,6 +1605,7 @@ function ViewTabs({
 export function ChatScreen(): React.ReactNode {
   const threads = useStore(threadListStore)
   const stored = useStore(storedThreads)
+  const projects = useStore(projectList)
   // Undefined only while a URL-named thread is being adopted: no pane, nothing active.
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(FIRST_THREAD_ID)
   const [resumeError, setResumeError] = useState<string | undefined>(BOOT.kind === 'fresh' ? BOOT.notice : undefined)
@@ -1597,6 +1614,9 @@ export function ChatScreen(): React.ReactNode {
     // Load, and every time the page goes from a run in flight to none: something settled.
     if (!(anyBusy || isFixtureMode)) void storedThreads.refresh()
   }, [anyBusy])
+  useEffect(() => {
+    if (!isFixtureMode) void projectList.refresh()
+  }, [])
   const pageThreadIds = new Set(threads.map((thread) => thread.threadId))
   // ⚠ Two things a resume's outcome must know, and cannot read from shared state (PR #143
   // review — a shared "how" slot plus a "no threads yet" check desynced the URL from the
@@ -1700,13 +1720,14 @@ export function ChatScreen(): React.ReactNode {
       </header>
       <div className="flex min-h-0 flex-1">
         <ThreadsRail
+          projects={projects.rows}
           threads={threads}
           activeThreadId={activeThreadId}
-          earlier={storedThreadsNotOnThisPage(stored.threads, pageThreadIds)}
-          earlierError={stored.error ?? resumeError}
+          earlier={storedThreadsNotOnThisPage(stored.rows, pageThreadIds)}
+          earlierError={stored.error ?? projects.error ?? resumeError}
           onSelect={(threadId: string) => navigate(threadId, 'push')}
           onResume={(threadId: string) => resumeFrom(threadId, 'push')}
-          onNew={() => navigate(mintThread().threadId, 'push')}
+          onNew={(projectId: string | undefined) => navigate(mintThread(undefined, projectId).threadId, 'push')}
         />
         {threads.map((thread) => (
           <ThreadPane

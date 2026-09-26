@@ -1240,7 +1240,7 @@ test('⚠ a costliest-calls row opens Chat at its call; a call not drawn there i
   }
 })
 
-// ── the page (#90): the rail, New Thread, switching, Previous Threads, resume (#95) ───────
+// ── the page (#90): the rail, New Thread, switching, earlier threads, resume (#95) ───────
 
 interface MountedPage {
   readonly container: HTMLElement
@@ -1263,8 +1263,9 @@ async function mountPage(options: ScriptedFetchOptions = {}): Promise<MountedPag
     root.render(<ChatScreen />)
   })
   await flush(tick)
-  const buttons = (list: string): HTMLButtonElement[] => [
-    ...container.querySelectorAll<HTMLButtonElement>(`ol[aria-label="${list}"] button`),
+  // The rail's two kinds of row, across every project's section (#395): open on this page, and earlier.
+  const buttons = (list: 'open' | 'earlier'): HTMLButtonElement[] => [
+    ...container.querySelectorAll<HTMLButtonElement>(`ol[aria-label^="${list} threads in"] button`),
   ]
   return {
     container,
@@ -1273,8 +1274,8 @@ async function mountPage(options: ScriptedFetchOptions = {}): Promise<MountedPag
       await flush(async () => root.unmount())
       container.remove()
     },
-    activeRows: () => buttons('Active Threads'),
-    previousRows: () => buttons('Previous Threads'),
+    activeRows: () => buttons('open'),
+    previousRows: () => buttons('earlier'),
     click: async (button: HTMLElement) => {
       await flush(async () => {
         button.click()
@@ -1415,7 +1416,7 @@ test('New Thread mints a thread, lists it in the rail as current, and shows exac
   await page.unmount()
 })
 
-test("Previous Threads lists the server's stored threads; a click resumes one with its history and mode (#95)", async () => {
+test("the rail lists the server's stored threads; a click resumes one with its history and mode (#95)", async () => {
   const page = await mountPage({
     storedThreads: [
       {
@@ -1585,7 +1586,7 @@ test('a stored listing the server cannot serve is said in the rail, and the page
   await flush(tick)
   // One bounded line, status first, never the page (#103 receipt, step 8).
   await eventually(() => {
-    expect(container.textContent).toContain('could not list previous threads: 500 <!doctype html>')
+    expect(container.textContent).toContain('could not list threads: 500 <!doctype html>')
     expect(container.textContent).not.toContain('<html>boom</html>')
   })
   await flush(async () => root.unmount())

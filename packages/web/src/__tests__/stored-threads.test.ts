@@ -40,16 +40,16 @@ test('the resumable-session store validates listings and preserves the last good
   })
 
   await store.refresh()
-  expect(store.get()).toMatchObject({ threads: [{ threadId: 'stored-1', title: 'earlier work' }], error: undefined })
+  expect(store.get()).toMatchObject({ rows: [{ threadId: 'stored-1', title: 'earlier work' }], error: undefined })
 
   answer = new Error('connection refused')
   await store.refresh()
-  expect(store.get().threads).toHaveLength(1)
+  expect(store.get().rows).toHaveLength(1)
   expect(store.get().error).toBe('connection refused')
 
   answer = [{ threadId: 'missing-fields' }]
   await store.refresh()
-  expect(store.get().threads).toHaveLength(1)
+  expect(store.get().rows).toHaveLength(1)
   expect(store.get().error).toContain('did not match its schema')
 })
 
