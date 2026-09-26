@@ -176,11 +176,11 @@ function projectName(cwd: string): string {
   return cwd.split(/[\\/]/).findLast((segment) => segment.length > 0) ?? cwd
 }
 
-const DOT_DISCONNECTED = 'size-2 rounded-full bg-destructive'
-const DOT_IDLE = 'size-2 rounded-full bg-muted-foreground/40'
-const DOT_IN_FLIGHT = 'size-2 animate-pulse rounded-full bg-foreground'
+const DOT_DISCONNECTED = 'size-2 shrink-0 rotate-45 rounded-xs bg-refuse'
+const DOT_IDLE = 'size-2 shrink-0 rounded-full border border-muted-foreground'
+const DOT_IN_FLIGHT = 'size-2 shrink-0 animate-pulse rounded-full bg-evidence signal:shadow-glow-evidence'
 
-/** The dot beside the word: pulsing while in flight, still when idle, red once the follow ended (#119). */
+/** The dot beside the word: pulsing in the running colour while in flight, hollow when idle, a refusal-coloured diamond once the follow ended (#119). */
 function activityDotClass(activity: Activity): typeof DOT_DISCONNECTED | typeof DOT_IDLE | typeof DOT_IN_FLIGHT {
   if (activity.kind === 'disconnected') return DOT_DISCONNECTED
   if (activity.kind === 'idle') return DOT_IDLE
@@ -215,10 +215,10 @@ export function ThreadStatusView({
   return (
     <footer
       id="thread-status"
-      className="flex items-center gap-3 border-t px-4 py-1 font-mono text-xs text-muted-foreground"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-5 py-2 font-mono text-xs text-muted-foreground"
     >
       <span
-        className="flex items-center gap-1.5"
+        className="flex items-center gap-2 font-medium text-foreground"
         title={
           activity.kind === 'disconnected'
             ? 'the connection to the server ended — reload and resume from the rail'
@@ -230,14 +230,19 @@ export function ThreadStatusView({
       </span>
       {/* Seen from every view: the question itself is in the transcript (#362 review). */}
       {questionWaiting ? (
-        <span role="status" className="text-destructive" title="pi is waiting for your answer — it is in the Chat view">
+        <span
+          role="status"
+          className="flex items-center gap-2 font-medium text-human"
+          title="pi is waiting for your answer — it is in the Chat view"
+        >
+          <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-human signal:shadow-glow-human" />
           a question is waiting
         </span>
       ) : null}
       {/* #340: `$0.0000` beside `idle` means "nothing ran" here, not "free" — the line in the
 			    transcript says who refused and why. */}
       {refusal === undefined ? null : (
-        <span className="text-destructive" title="the provider refused the last request — the transcript says why">
+        <span className="text-refuse" title="the provider refused the last request — the transcript says why">
           {refusal}
         </span>
       )}

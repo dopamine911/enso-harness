@@ -549,7 +549,7 @@ test('a blocking question announces itself: a group named by the question, and f
   // reader resolves it, and the title is a heading so the rotor can reach it.
   const nameSource = document.getElementById(card.getAttribute('aria-labelledby') ?? '')
   expect(nameSource?.textContent).toBe('Apply the edit?')
-  expect(nameSource?.getAttribute('role')).toBe('heading')
+  expect(nameSource?.matches('h1, h2, h3, h4, h5, h6, [role="heading"]')).toBe(true)
   // Focus is inside the group, on the control a human answers with — not still in the transcript.
   await eventually(() => {
     expect(card.contains(document.activeElement)).toBe(true)
