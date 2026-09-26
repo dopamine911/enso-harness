@@ -108,12 +108,12 @@ function TextBlock({ text, muted = false }: { text: string; muted?: boolean }): 
         />
       </div>
       {markdown ? (
-        <div className="prose prose-sm dark:prose-invert max-w-none p-2">
+        <div className="prose prose-sm max-w-none p-2 dark:prose-invert">
           <TextPart components={TEXT_PART_COMPONENTS} content={text} />
         </div>
       ) : (
         <pre
-          className={`max-h-96 overflow-auto whitespace-pre-wrap break-words p-2 font-mono ${muted ? 'text-muted-foreground' : ''}`}
+          className={`max-h-96 overflow-auto p-2 font-mono break-words whitespace-pre-wrap ${muted ? 'text-muted-foreground' : ''}`}
         >
           {text}
         </pre>
@@ -124,7 +124,7 @@ function TextBlock({ text, muted = false }: { text: string; muted?: boolean }): 
 
 function Json({ value }: { value: unknown }): React.ReactNode {
   return (
-    <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md border p-2 font-mono">
+    <pre className="max-h-96 overflow-auto rounded-md border p-2 font-mono break-words whitespace-pre-wrap">
       {JSON.stringify(value, null, 2)}
     </pre>
   )
@@ -138,7 +138,7 @@ function Arguments({ value }: { value: unknown }): React.ReactNode {
       {Object.entries(value).map(([name, argument]) => (
         <div key={name} className="contents">
           <dt className="text-muted-foreground">{name}</dt>
-          <dd className="min-w-0 whitespace-pre-wrap break-words font-mono">
+          <dd className="min-w-0 font-mono break-words whitespace-pre-wrap">
             {typeof argument === 'string' ? argument : JSON.stringify(argument)}
           </dd>
         </div>
@@ -452,8 +452,8 @@ function openedMakeup(
 /** Why no rows show yet: the read failed, or the asked-for request is still being read. */
 function DetailStatus({ outcome, waiting }: { outcome: DetailOutcome; waiting: boolean }): React.ReactNode {
   if (outcome.kind === 'failed')
-    return <p className="mt-3 text-muted-foreground text-xs">no detail: {outcome.problem}</p>
-  return waiting ? <p className="mt-3 text-muted-foreground text-xs">reading the request's context…</p> : null
+    return <p className="mt-3 text-xs text-muted-foreground">no detail: {outcome.problem}</p>
+  return waiting ? <p className="mt-3 text-xs text-muted-foreground">reading the request's context…</p> : null
 }
 
 /** A read request's six categories, and what left it since the request before. */

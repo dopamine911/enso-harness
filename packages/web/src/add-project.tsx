@@ -72,7 +72,7 @@ function DirectoryList({
           <button
             type="button"
             onClick={() => onOpen(listing.parent)}
-            className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-muted-foreground text-sm hover:bg-muted"
+            className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm text-muted-foreground hover:bg-muted"
           >
             <ArrowUpIcon className="size-4" /> {listing.parent === null ? 'project roots' : 'up'}
           </button>
@@ -89,15 +89,15 @@ function DirectoryList({
             <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate">{directory.name}</span>
             {directory.projectId === undefined ? null : (
-              <span className="shrink-0 text-muted-foreground text-xs">project</span>
+              <span className="shrink-0 text-xs text-muted-foreground">project</span>
             )}
           </button>
         </li>
       ))}
       {listing.directories.length === 0 && listing.path !== null ? (
-        <li className="px-2 py-1 text-muted-foreground text-sm italic">no folders here</li>
+        <li className="px-2 py-1 text-sm text-muted-foreground italic">no folders here</li>
       ) : null}
-      {listing.truncated ? <li className="px-2 py-1 text-muted-foreground text-xs">more folders than shown</li> : null}
+      {listing.truncated ? <li className="px-2 py-1 text-xs text-muted-foreground">more folders than shown</li> : null}
     </ul>
   )
 }
@@ -139,7 +139,7 @@ export function AddProjectDialog({ open, onClose, onAdded, fetch: fetchImpl }: A
             {listing?.path ?? 'the project roots enso.config.json declares'}
           </DialogDescription>
         </DialogHeader>
-        {browsing.kind === 'loading' ? <p className="text-muted-foreground text-sm">reading folders…</p> : null}
+        {browsing.kind === 'loading' ? <p className="text-sm text-muted-foreground">reading folders…</p> : null}
         {browsing.kind === 'failed' ? <FieldError>{browsing.reason}</FieldError> : null}
         {listing === undefined ? null : <DirectoryList listing={listing} onOpen={move} />}
         {refusal === undefined ? null : <FieldError>{refusal}</FieldError>}

@@ -40,7 +40,7 @@ const SCANNED_ROOTS = [
   'scripts',
 ] as const
 
-/** Vendored code — biome.jsonc's exclusion boundary, same as the coverage manifest. */
+/** Vendored code — the linter's exclusion boundary (oxlint.config.ts), same as the coverage manifest. */
 const VENDORED_DIRECTORIES = ['packages/web/src/components'] as const
 
 function isScannableSource(fileName: string): boolean {

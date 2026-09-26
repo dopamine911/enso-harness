@@ -1,0 +1,55 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "useTabs": false,
+  "tabWidth": 2,
+  "printWidth": 120,
+  "endOfLine": "lf",
+  "singleQuote": true,
+  "jsxSingleQuote": false,
+  "quoteProps": "as-needed",
+  "trailingComma": "all",
+  "semi": false,
+  "arrowParens": "always",
+  "bracketSameLine": false,
+  "bracketSpacing": true,
+  "sortPackageJson": false,
+  "sortImports": {
+    "newlinesBetween": false
+  },
+  "sortTailwindcss": {
+    "stylesheet": "./packages/web/src/styles/global.css",
+    "functions": ["cn", "cva"]
+  },
+  "overrides": [
+    {
+      "files": ["*.css"],
+      "options": {
+        "singleQuote": false
+      }
+    },
+    {
+      "files": ["*.json", "*.jsonc"],
+      "options": {
+        "trailingComma": "none"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "**/node_modules",
+    "**/dist",
+    "**/dist-types",
+    "**/coverage",
+    ".claude",
+    ".inspiration",
+    ".local",
+    ".enso",
+    ".playwright-mcp",
+    ".codegraph",
+    "packages/web/src/components",
+    "**/*.md",
+    "**/*.yml",
+    "**/*.yaml",
+    "**/*.html",
+    "**/*.toml"
+  ]
+}

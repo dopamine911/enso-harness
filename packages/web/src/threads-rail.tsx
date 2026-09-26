@@ -210,7 +210,7 @@ function EarlierThreadRow({
         type="button"
         title={thread.busy ? 'running — resume to follow it' : `not open here — resume it (${at.toLocaleString()})`}
         onClick={() => onResume(thread.threadId)}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-muted-foreground/70 text-xs hover:bg-muted"
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground/70 hover:bg-muted"
       >
         {thread.busy ? <Running /> : null}
         <span className={cn('min-w-0 flex-1 truncate', thread.title === undefined ? 'italic' : '')}>
@@ -261,7 +261,7 @@ function SectionHeader({
         aria-expanded={!folded}
         title={hover}
         onClick={onFold}
-        className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-left font-medium text-muted-foreground text-xs hover:bg-muted"
+        className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-xs font-medium text-muted-foreground hover:bg-muted"
       >
         {folded ? <ChevronRightIcon className="size-3 shrink-0" /> : <ChevronDownIcon className="size-3 shrink-0" />}
         <span className="min-w-0 truncate">{name}</span>
@@ -339,13 +339,13 @@ function SectionRows({
         </ol>
       ) : null}
       {group.threads.length === 0 && group.earlier.length === 0 ? (
-        <p className="px-2 py-1 text-muted-foreground text-xs italic">no threads yet</p>
+        <p className="px-2 py-1 text-xs text-muted-foreground italic">no threads yet</p>
       ) : null}
       {hidden > 0 || allStored ? (
         <button
           type="button"
           onClick={() => setAllStored((was) => !was)}
-          className="self-start px-2 py-1 text-muted-foreground text-xs hover:underline"
+          className="self-start px-2 py-1 text-xs text-muted-foreground hover:underline"
         >
           {allStored ? 'show less' : `show ${hidden} more`}
         </button>
@@ -419,12 +419,12 @@ export function ThreadsRail({
         New Thread
       </Button>
       {earlierError !== undefined ? (
-        <div role="alert" className="px-2 text-destructive text-xs">
+        <div role="alert" className="px-2 text-xs text-destructive">
           could not list threads: {earlierError}
         </div>
       ) : null}
       {projectNotice !== undefined ? (
-        <div role="alert" className="px-2 text-destructive text-xs">
+        <div role="alert" className="px-2 text-xs text-destructive">
           {projectNotice}
         </div>
       ) : null}

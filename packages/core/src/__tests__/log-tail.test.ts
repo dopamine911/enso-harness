@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { EnsoLogLine } from '../log.ts'
 import { ensoLogFilename, logChunkDecoder, openLogTail } from '../log-process.ts'
 import {
   ENSO_LOG_LEVEL_RANK,
@@ -12,6 +11,7 @@ import {
   logLineText,
   parseLogSince,
 } from '../log-tail.ts'
+import type { EnsoLogLine } from '../log.ts'
 
 /**
  * The reader's question and the tail's answer (#144 slice 2): what a filter admits, and what

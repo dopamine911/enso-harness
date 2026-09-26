@@ -76,7 +76,10 @@ function selectRecords(
       malformed += 1
       continue
     }
-    if (threadPrefix !== undefined && !String(parsed.properties?.threadId ?? '').startsWith(threadPrefix)) continue
+    if (threadPrefix !== undefined) {
+      const threadId = parsed.properties?.threadId
+      if (typeof threadId !== 'string' || !threadId.startsWith(threadPrefix)) continue
+    }
     lines.push(parsed)
   }
   return { lines, malformed }

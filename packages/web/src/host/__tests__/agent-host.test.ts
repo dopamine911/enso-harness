@@ -407,7 +407,7 @@ test('⚠ setPermissionMode runs the vendor command: the modes entry, the permis
 test('setPermissionMode with a mode the vendor registers no command for is rejected at the host, never prompted', async () => {
   const hosted = await hostedSession()
   const events = collectEvents(hosted)
-  const { promise: settled, resolve } = Promise.withResolvers<'accepted' | string>()
+  const { promise: settled, resolve } = Promise.withResolvers<string>()
   hosted.runtime.setPermissionMode('no-such-mode', { onAccepted: () => resolve('accepted'), onRejected: resolve })
   const outcome = await settled
   expect(outcome).toBe('mode no-such-mode is not one this thread offers')
@@ -849,7 +849,9 @@ test("⚠ after a turn the host says the session's usage WITH that turn's spend 
   const spent = seen[answered]
   const after = seen.slice(answered).find((observation) => observation.kind === 'session-usage')
   if (spent?.kind !== 'message-end' || spent.usage === undefined || after?.kind !== 'session-usage') {
-    throw new Error(`no assistant spend followed by a session-usage: ${seen.map((observation) => observation.kind)}`)
+    throw new Error(
+      `no assistant spend followed by a session-usage: ${seen.map((observation) => observation.kind).join(',')}`,
+    )
   }
   expect(after.input).toBe(spent.usage.input)
   expect(after.output).toBe(spent.usage.output)
@@ -972,7 +974,9 @@ async function askedQuestionnaire(questions: readonly unknown[]): Promise<{
 /** What `ask_user` returned to the model, once the run has settled. */
 function askUserText(events: EnsoObservation[]): string {
   const result = events.find((event) => event.kind === 'tool-result' && event.toolName === ASK_USER_TOOL_NAME)
-  if (result?.kind !== 'tool-result') throw new Error(`no ask_user result: ${events.map((event) => event.kind)}`)
+  if (result?.kind !== 'tool-result') {
+    throw new Error(`no ask_user result: ${events.map((event) => event.kind).join(',')}`)
+  }
   expect(result.isError).toBe(false)
   return result.text
 }

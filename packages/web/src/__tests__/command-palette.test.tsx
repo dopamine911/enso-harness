@@ -220,9 +220,9 @@ async function mountPalette(respond: () => Response): Promise<MountedPalette> {
  * value tracker wraps the instance's own), then one bubbling `input` event.
  */
 function typeInto(field: HTMLInputElement, text: string): void {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
-  if (setter === undefined) throw new Error('HTMLInputElement.prototype.value has no setter')
-  setter.call(field, text)
+  if (!Reflect.set(HTMLInputElement.prototype, 'value', text, field)) {
+    throw new Error('HTMLInputElement.prototype.value has no setter')
+  }
   field.dispatchEvent(new Event('input', { bubbles: true }))
 }
 

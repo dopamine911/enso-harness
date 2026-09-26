@@ -128,7 +128,7 @@ export function PermissionModeSelect({
   const known = mode !== undefined
   return (
     <label
-      className="flex items-center gap-1.5 text-muted-foreground text-xs"
+      className="flex items-center gap-1.5 text-xs text-muted-foreground"
       title={
         known
           ? "pi's permission mode for this thread — change it here or with /mode"
@@ -138,7 +138,7 @@ export function PermissionModeSelect({
       <span>mode</span>
       <select
         aria-label="permission mode"
-        className="rounded-md border bg-background px-1.5 py-0.5 text-foreground text-xs disabled:opacity-60"
+        className="rounded-md border bg-background px-1.5 py-0.5 text-xs text-foreground disabled:opacity-60"
         disabled={disabled || available.length === 0}
         value={known ? mode : ''}
         onChange={(event: React.ChangeEvent<HTMLSelectElement>) => {

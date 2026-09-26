@@ -26,12 +26,14 @@ export type ThreadUrl =
  * review). The page that knows what it fell back to says so.
  */
 export function readThreadUrl(search: string, fellBackTo = 'opened a new thread instead'): ThreadUrl {
-  const named: unknown = new URLSearchParams(search).get(THREAD_QUERY_PARAMETER)
+  const named = new URLSearchParams(search).get(THREAD_QUERY_PARAMETER)
   if (named === null || named === '') return { kind: 'fresh' }
-  if (isEnsoThreadId(named)) return { kind: 'resume', threadId: named }
+  // Checked as `unknown`: the guard narrows to `string`, which would leave `named` as `never` below.
+  const candidate: unknown = named
+  if (isEnsoThreadId(candidate)) return { kind: 'resume', threadId: candidate }
   return {
     kind: 'fresh',
-    notice: `?thread=${String(named).slice(0, 40)} is not a thread id — ${fellBackTo}`,
+    notice: `?thread=${named.slice(0, 40)} is not a thread id — ${fellBackTo}`,
   }
 }
 

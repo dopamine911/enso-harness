@@ -64,7 +64,9 @@ function captureOnLoad(plugin: BunPlugin): { filter: RegExp; load: OnLoadCallbac
       registrations.push({ filter: constraints.filter, load })
     },
   } as unknown as PluginBuilder
-  plugin.setup(builder)
+  // Registrations are read straight after `setup` returns, so an async setup would be read too early.
+  const setupDone = plugin.setup(builder)
+  if (setupDone instanceof Promise) throw new Error('expected a synchronous setup, got a promise')
   const only = registrations[0]
   if (registrations.length !== 1 || only === undefined) {
     throw new Error(`expected one onLoad registration, got ${registrations.length}`)

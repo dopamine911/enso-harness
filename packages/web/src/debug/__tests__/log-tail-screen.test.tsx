@@ -319,10 +319,10 @@ test('⚠ changing the level asks a new question — a new connection, from the 
 
   const select = page.container.querySelector('select')
   if (select === null) throw new Error('expected the level control')
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set
-  if (setter === undefined) throw new Error('HTMLSelectElement.prototype.value has no setter')
   await flush(async () => {
-    setter.call(select, 'trace')
+    if (!Reflect.set(window.HTMLSelectElement.prototype, 'value', 'trace', select)) {
+      throw new Error('HTMLSelectElement.prototype.value has no setter')
+    }
     select.dispatchEvent(new Event('change', { bubbles: true }))
     await tick()
   })
@@ -350,10 +350,10 @@ test('⚠ a refused question stops the spinner and says nothing is being read; a
 
   const select = page.container.querySelector('select')
   if (select === null) throw new Error('expected the level control')
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set
-  if (setter === undefined) throw new Error('HTMLSelectElement.prototype.value has no setter')
   await flush(async () => {
-    setter.call(select, 'trace')
+    if (!Reflect.set(window.HTMLSelectElement.prototype, 'value', 'trace', select)) {
+      throw new Error('HTMLSelectElement.prototype.value has no setter')
+    }
     select.dispatchEvent(new Event('change', { bubbles: true }))
     await tick()
   })

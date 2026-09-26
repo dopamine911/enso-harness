@@ -25,7 +25,7 @@ preload = ["./packages/web/src/__tests__/radix-preload.ts"]
 coverage = true
 coverageReporter = ["text", "lcov"]
 coverageDir = "coverage"
-# The vendored shadcn/ai-elements components share biome.jsonc's exclusion boundary:
+# The vendored shadcn/ai-elements components share the linter's exclusion boundary (oxlint.config.ts):
 # upstream's code, kept diffable, not held to our floor. chat-screen.tsx imports them
 # transitively, so test/coverage-manifest.test.ts not importing them is not enough — this
 # pattern is what keeps them out of the DENOMINATOR.

@@ -61,7 +61,7 @@ function TruncationNote({
 }): React.ReactNode {
   // Rendered here, from data — the terminal renders the same fields differently.
   return (
-    <p data-enso-truncation className="text-muted-foreground text-xs">
+    <p data-enso-truncation className="text-xs text-muted-foreground">
       showing {truncated.shown} of {truncated.total} {truncated.unit}
     </p>
   )
@@ -86,7 +86,7 @@ export function EnsoToolResult({
   // No result yet — the call is in flight. Say so rather than rendering nothing.
   if (state.status === 'pending') {
     return (
-      <p data-enso-tool-result="pending" className="animate-pulse text-muted-foreground text-xs">
+      <p data-enso-tool-result="pending" className="animate-pulse text-xs text-muted-foreground">
         running…
       </p>
     )
@@ -95,7 +95,7 @@ export function EnsoToolResult({
   // server going away, or a torn tail on resume. Still, not pulsing; the words say why.
   if (state.status === 'aborted') {
     return (
-      <p data-enso-tool-result="aborted" className="text-muted-foreground text-xs">
+      <p data-enso-tool-result="aborted" className="text-xs text-muted-foreground">
         aborted — the run ended before this call returned
       </p>
     )
@@ -109,7 +109,7 @@ export function EnsoToolResult({
     return (
       <pre
         data-enso-tool-result="error"
-        className="whitespace-pre-wrap break-words rounded-md border border-destructive/50 bg-destructive/10 p-3 font-mono text-destructive text-xs"
+        className="rounded-md border border-destructive/50 bg-destructive/10 p-3 font-mono text-xs break-words whitespace-pre-wrap text-destructive"
       >
         {state.error}
       </pre>

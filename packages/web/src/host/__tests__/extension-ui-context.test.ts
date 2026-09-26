@@ -17,9 +17,18 @@ import type { RuntimeEvent } from '../runtime-event.ts'
  * surface is inert — pi's rpc mode's behaviour, which extensions already tolerate.
  */
 
+/** picc's `createFilePermissionDialogFactory(opts)` — the value it hands `ctx.ui.custom`. */
+type PermissionFactoryBuilder = (options: Record<string, unknown>) => CustomComponentFactory<string | null>
+
 let logs: LogRecorder
+let createFilePermissionDialogFactory: PermissionFactoryBuilder
 beforeAll(async () => {
   logs = await recordEnsoLogs()
+  // Runtime import, as the host does it: picc's sources must not enter this package's type graph.
+  const loaded = (await import(PICC_PERMISSION_DIALOG_MODULE)) as {
+    createFilePermissionDialogFactory: PermissionFactoryBuilder
+  }
+  createFilePermissionDialogFactory = loaded.createFilePermissionDialogFactory
 })
 beforeEach(() => logs.clear())
 afterAll(releaseEnsoLogs)
@@ -265,19 +274,6 @@ test("the terminal-only surface is inert, exactly as in pi's rpc mode", async ()
 })
 
 // ── picc's permission prompt, through `custom` (#73) ─────────────────────────
-
-/** picc's `createFilePermissionDialogFactory(opts)` — the value it hands `ctx.ui.custom`. */
-type PermissionFactoryBuilder = (options: Record<string, unknown>) => CustomComponentFactory<string | null>
-
-let createFilePermissionDialogFactory: PermissionFactoryBuilder
-
-beforeAll(async () => {
-  // Runtime import, as the host does it: picc's sources must not enter this package's type graph.
-  const loaded = (await import(PICC_PERMISSION_DIALOG_MODULE)) as {
-    createFilePermissionDialogFactory: PermissionFactoryBuilder
-  }
-  createFilePermissionDialogFactory = loaded.createFilePermissionDialogFactory
-})
 
 /** Drain microtasks until `count` records exist — the lift awaits a cached module promise, so depth is not one tick. */
 async function untilEmitted(events: RuntimeEvent[], count: number): Promise<void> {

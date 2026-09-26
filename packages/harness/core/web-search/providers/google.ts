@@ -102,7 +102,7 @@ export async function runGoogleProviderSearch(request: ModelSearchRequest): Prom
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'text/event-stream',
-    ...(credential.headers ?? {}),
+    ...credential.headers,
   }
   if (credential.apiKey !== undefined && credential.apiKey.length > 0) headers['x-goog-api-key'] = credential.apiKey
 

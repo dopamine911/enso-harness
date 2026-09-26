@@ -172,7 +172,7 @@ export function ActionLink({
 }): React.ReactNode {
   return (
     <a
-      className="px-2 text-primary text-xs underline-offset-2 hover:underline"
+      className="px-2 text-xs text-primary underline-offset-2 hover:underline"
       href={href}
       download={download ? true : undefined}
     >
@@ -235,7 +235,7 @@ export function PinnedTail<Item>({
 
   return (
     <>
-      <div className="flex items-center gap-3 border-b px-4 py-1 font-mono text-muted-foreground text-xs">
+      <div className="flex items-center gap-3 border-b px-4 py-1 font-mono text-xs text-muted-foreground">
         <span>{heading}</span>
         {pinnedToNewest ? null : <span>paused at your scroll position — scroll to the bottom to follow again</span>}
       </div>

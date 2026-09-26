@@ -12,7 +12,7 @@ import type { EnsoThreadStats, EnsoToolCallStats } from '@enso/core'
  */
 
 /** A difference below a hundredth of a cent is float noise, not spend. */
-const COST_EPSILON = 0.000_05
+const COST_EPSILON = 0.00005
 
 /** One tool, its calls summed — livecraft's `ToolSummary`. */
 export interface ToolSummary {

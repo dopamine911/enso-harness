@@ -25,7 +25,7 @@ export function OptionSelect<Option extends string>({
     <select
       id={id}
       aria-label={label}
-      className="rounded-md border bg-background px-1.5 py-0.5 text-foreground text-xs"
+      className="rounded-md border bg-background px-1.5 py-0.5 text-xs text-foreground"
       value={value}
       onChange={(event: React.ChangeEvent<HTMLSelectElement>) => {
         const chosen = options.find(([option]) => option === event.target.value)

@@ -39,7 +39,9 @@ function recordingFetch(answer: () => Promise<Response> = () => Promise.resolve(
       return waiting.promise
     },
     fetch: (url: string, init?: RequestInit) => {
-      const post: Post = { url, body: JSON.parse(String(init?.body)), keepalive: init?.keepalive }
+      const body = init?.body
+      if (typeof body !== 'string') throw new Error(`expected a JSON text body, got ${typeof body}`)
+      const post: Post = { url, body: JSON.parse(body), keepalive: init?.keepalive }
       posts.push(post)
       waiting?.resolve(post)
       waiting = undefined

@@ -99,7 +99,7 @@ export function ThinkingLevelSelect({ state, onSelect }: ThinkingLevelSelectProp
   const { thinkingLevel, availableThinkingLevels } = state
   return (
     <span
-      className="flex items-center gap-1.5 text-muted-foreground text-xs"
+      className="flex items-center gap-1.5 text-xs text-muted-foreground"
       title="how hard pi thinks — the levels this model offers"
     >
       <span>thinking</span>
@@ -157,7 +157,7 @@ export function ModelChip({ state, onOpen }: ModelChipProps): React.ReactNode {
       type="button"
       aria-label="model"
       title={title}
-      className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-muted-foreground text-xs hover:bg-accent hover:text-foreground"
+      className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
       onClick={onOpen}
     >
       {model === null ? null : <span>model</span>}
@@ -174,7 +174,7 @@ export function optionKeywords(option: HostCommandOption): string[] {
 
 /** A model option's provider, dim beside its name — the model picker's row and the Start-a-session dialog's (#391). */
 export function OptionDetail({ option }: { option: HostCommandOption }): React.ReactNode {
-  return option.detail === undefined ? null : <span className="text-muted-foreground text-xs">{option.detail}</span>
+  return option.detail === undefined ? null : <span className="text-xs text-muted-foreground">{option.detail}</span>
 }
 
 export interface ModelChoiceDialogProps {
@@ -277,12 +277,12 @@ export function ModelChoiceDialog({
         <ModelSelectorInput placeholder="filter options…" />
         <ModelSelectorList>
           {state.kind === 'loading' ? (
-            <div role="status" className="px-2 py-3 text-muted-foreground text-sm">
+            <div role="status" className="px-2 py-3 text-sm text-muted-foreground">
               loading models…
             </div>
           ) : null}
           {state.kind === 'failed' ? (
-            <div role="alert" className="px-2 py-3 text-destructive text-sm">
+            <div role="alert" className="px-2 py-3 text-sm text-destructive">
               {state.detail}
             </div>
           ) : null}
