@@ -91,7 +91,7 @@
  */
 @theme {
   --container-context-view: 72rem; /* the Context tab */
-  --container-stats-view: 56rem; /* the Stats tab */
+  --container-stats-view: 72rem; /* the Stats tab — the Context tab's width, so its cards pair up the same way */
   --container-context-dialog: 64rem; /* /context's dialog */
   --container-debug-pane: 30rem; /* the ?debug column */
   --container-command-palette: 28rem; /* the / palette's popup */

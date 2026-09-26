@@ -13,6 +13,7 @@ import {
 } from 'recharts'
 import type { FetchLike } from './browser-logging.ts'
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from './components/ui/chart.tsx'
+import { cn } from './lib/utils.ts'
 import { OptionSelect } from './option-select.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
@@ -30,6 +31,7 @@ import {
 } from './thread-stats-analysis.ts'
 import { toggleMember } from './toggle-member.ts'
 import type { RevealStatsTarget, StatsTarget } from './transcript-reveal.ts'
+import { Card } from './view-parts.tsx'
 
 /**
  * The thread's stats drawer (#45 phase 2) — pi-livecraft's session analysis widget
@@ -77,16 +79,24 @@ const plural = (count: number, word: string): string => `${countText(count)} ${w
 
 // ── building blocks ──────────────────────────────────────────────────────────────────────────
 
+/** One headline figure: what it is, then the number large — the design's `.meter-figure`. */
 function Metric({ label, value, danger = false }: { label: string; value: string; danger?: boolean }): React.ReactNode {
   return (
-    <div className="rounded-md border px-2 py-1.5">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className={danger ? 'text-base text-destructive' : 'text-base text-foreground'}>{value}</dd>
+    <div className="grid content-start gap-1 rounded-lg border bg-background px-3 py-2">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd
+        className={cn(
+          'font-heading text-2xl leading-tight font-semibold whitespace-nowrap tabular-nums',
+          danger ? 'text-refuse' : 'text-foreground',
+        )}
+      >
+        {value}
+      </dd>
     </div>
   )
 }
 
-/** A section: its heading, and on the right what it ranks by or how to read it. */
+/** A section of the analysis as a card: its title, and on the right what it ranks by or how to read it. */
 function Section({
   title,
   aside,
@@ -97,18 +107,17 @@ function Section({
   children: React.ReactNode
 }): React.ReactNode {
   return (
-    <section className="mb-5">
-      <header className="mb-1.5 flex items-center justify-between gap-2">
-        <h3 className="font-semibold text-foreground">{title}</h3>
-        {aside === undefined ? null : <span className="text-muted-foreground">{aside}</span>}
-      </header>
-      {children}
-    </section>
+    <Card
+      title={title}
+      tools={aside === undefined ? undefined : <span className="text-xs text-muted-foreground">{aside}</span>}
+    >
+      <div className="grid min-w-0 gap-2 text-sm">{children}</div>
+    </Card>
   )
 }
 
 function Empty({ children }: { children: string }): React.ReactNode {
-  return <p className="text-muted-foreground">{children}</p>
+  return <p className="text-sm text-muted-foreground">{children}</p>
 }
 
 /** A chart tooltip's heading: the turn its point is. */
@@ -275,17 +284,17 @@ function ContextSection({
   const context = usage.context
   const percent = context?.percent ?? null
   return (
-    <Section title="context" aside={percent === null ? undefined : PERCENT.format(percent / 100)}>
+    <Section title="Context" aside={percent === null ? undefined : PERCENT.format(percent / 100)}>
       {percent === null ? null : (
         <meter
           aria-label="context window used"
           min={0}
           max={100}
           value={Math.min(percent, 100)}
-          className="mb-2 h-1.5 w-full appearance-none overflow-hidden rounded-full bg-muted-foreground/25 [&::-moz-meter-bar]:bg-foreground/60 [&::-webkit-meter-bar]:border-0 [&::-webkit-meter-bar]:bg-transparent [&::-webkit-meter-bar]:bg-none [&::-webkit-meter-optimum-value]:bg-foreground/60 [&::-webkit-meter-optimum-value]:bg-none"
+          className="h-2 w-full appearance-none overflow-hidden rounded-full bg-popover [&::-moz-meter-bar]:bg-foreground [&::-webkit-meter-bar]:border-0 [&::-webkit-meter-bar]:bg-transparent [&::-webkit-meter-bar]:bg-none [&::-webkit-meter-optimum-value]:bg-foreground [&::-webkit-meter-optimum-value]:bg-none"
         />
       )}
-      <dl className="mb-2 grid grid-cols-2 gap-x-3 gap-y-0.5">
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
         {(
           [
             ['cache miss', countText(usage.input)],
@@ -296,7 +305,7 @@ function ContextSection({
         ).map(([label, value]) => (
           <div key={label} className="flex justify-between">
             <dt className="text-muted-foreground">{label}</dt>
-            <dd className="tabular-nums">{value}</dd>
+            <dd className="font-mono tabular-nums">{value}</dd>
           </div>
         ))}
       </dl>
@@ -361,18 +370,20 @@ function ToolUsageRow({
     metric === 'duration' && tool.measured < tool.calls ? ` · ${tool.measured}/${tool.calls} durations measured` : ''
   const failures = tool.failed > 0 ? ` · ${plural(tool.failed, 'failure')}` : ''
   return (
-    <li className="mb-1.5">
-      <div className="flex justify-between">
-        <code>{tool.toolName}</code>
-        <b className="font-normal tabular-nums">{metric === 'duration' ? durationText(value) : charsText(value)}</b>
+    <li className="grid gap-1">
+      <div className="flex justify-between gap-2">
+        <code className="font-mono">{tool.toolName}</code>
+        <b className="font-mono font-medium tabular-nums">
+          {metric === 'duration' ? durationText(value) : charsText(value)}
+        </b>
       </div>
-      <span aria-hidden="true" className="block h-1 rounded-full bg-muted-foreground/20">
+      <span aria-hidden="true" className="block h-1 overflow-hidden rounded-full bg-popover">
         <span
           className="block h-full rounded-full bg-chart-1"
           style={{ width: `${largest > 0 ? (value / largest) * 100 : 0}%` }}
         />
       </span>
-      <small className="text-muted-foreground">
+      <small className="font-mono text-xs text-muted-foreground">
         {plural(tool.calls, 'call')}
         {measured}
         {failures}
@@ -387,7 +398,7 @@ function ToolUsage({ tools }: { tools: readonly ToolSummary[] }): React.ReactNod
   const largest = ranked[0] === undefined ? 0 : toolUsageValue(ranked[0], metric)
   return (
     <Section
-      title="cumulative usage by tool"
+      title="Cumulative usage by tool"
       aside={
         <OptionSelect label="rank cumulative tool usage" value={metric} options={USAGE_METRICS} onChange={setMetric} />
       }
@@ -399,7 +410,7 @@ function ToolUsage({ tools }: { tools: readonly ToolSummary[] }): React.ReactNod
             : 'no tool called on this branch yet'}
         </Empty>
       ) : (
-        <ol>
+        <ol className="grid gap-2">
           {ranked.map((tool) => (
             <ToolUsageRow key={tool.toolName} tool={tool} metric={metric} largest={largest} />
           ))}
@@ -438,15 +449,15 @@ function RankedRow({
   onNavigate: Navigate
   children: React.ReactNode
 }): React.ReactNode {
-  const layout = 'flex w-full items-start justify-between gap-2 pb-1 text-left'
+  const layout = 'flex w-full items-start justify-between gap-3 px-2 py-2 text-left'
   return (
-    <li className="mb-1 border-b border-dashed">
+    <li className="border-b last:border-b-0">
       {onNavigate === undefined ? (
         <div className={layout}>{children}</div>
       ) : (
         <button
           type="button"
-          className={`${layout} cursor-pointer rounded-sm hover:bg-muted/50 focus-visible:outline-1 focus-visible:outline-ring`}
+          className={`${layout} cursor-pointer transition-colors hover:bg-popover focus-visible:outline-2 focus-visible:outline-ring`}
           onClick={() => onNavigate(target)}
         >
           {children}
@@ -473,13 +484,13 @@ function CostliestCalls({
   }
   return (
     <Section
-      title="costliest calls"
+      title="Costliest calls"
       aside={<OptionSelect label="rank tool calls" value={metric} options={CALL_METRICS} onChange={setMetric} />}
     >
       {ranked.length === 0 ? (
         <Empty>{empty[metric]}</Empty>
       ) : (
-        <ol>
+        <ol className="-mx-2">
           {ranked.map((call) => (
             <RankedRow
               key={call.toolCallId}
@@ -487,14 +498,14 @@ function CostliestCalls({
               onNavigate={onNavigate}
             >
               <span>
-                <code>{call.toolName}</code>
-                {call.isError ? <i className="ml-1.5 text-destructive not-italic">failed</i> : null}
+                <code className="font-mono">{call.toolName}</code>
+                {call.isError ? <i className="ml-1.5 text-refuse not-italic">failed</i> : null}
                 {call.pending ? <i className="ml-1.5 text-muted-foreground not-italic">in progress</i> : null}
-                <small className="block text-muted-foreground">
+                <small className="block font-mono text-xs text-muted-foreground">
                   turn {call.turn} · {charsText(call.inputChars)} input · {charsText(call.outputChars)} output
                 </small>
               </span>
-              <b className="shrink-0 font-normal tabular-nums">{callMetricText(call, metric)}</b>
+              <b className="shrink-0 font-mono font-medium tabular-nums">{callMetricText(call, metric)}</b>
             </RankedRow>
           ))}
         </ol>
@@ -542,96 +553,110 @@ export function ThreadStatsView({
   const noTurn = headline.turnCount === 0
   const onTurn = onNavigate === undefined ? undefined : (turn: number): void => onNavigate({ kind: 'turn', turn })
   return (
-    <section aria-label="thread stats" className="p-3 font-mono text-xs">
-      <h2 className="pb-2 font-semibold text-foreground">
-        session analysis{' '}
-        <span className="font-normal text-muted-foreground">
-          · {plural(stats.promptStats.length, 'prompt')} analysed · {stats.live ? 'live' : 'from the file'}
-        </span>
-      </h2>
-      {missed === undefined ? null : (
-        <p role="status" className="mb-3 text-muted-foreground">
-          {missed}
-        </p>
-      )}
-      <dl className="mb-5 grid grid-cols-2 gap-1.5">
-        <Metric label="total cost" value={costText(stats.usage.cost)} />
-        <Metric label="average cost / turn" value={noTurn ? '—' : costText(headline.averageTurnCost)} />
-        <Metric label="turn count" value={countText(headline.turnCount)} />
-        <Metric label="average tools / turn" value={noTurn ? '—' : ONE_DECIMAL.format(headline.averageToolsPerTurn)} />
-        <Metric label="tool calls" value={countText(headline.toolCalls)} />
-        <Metric
-          label="failures"
-          value={`${countText(headline.failedToolCalls)} · ${PERCENT.format(headline.failureRate)}`}
-          danger={headline.failedToolCalls > 0}
-        />
-      </dl>
-      <ContextSection stats={stats} data={data} onTurn={onTurn} />
-      {headline.offBranchCost > 0 ? (
-        <p className="mb-5" title="compactions, branch summaries, cache warms and abandoned branches">
-          <b>{costText(headline.offBranchCost)}</b> not attributed to a turn on this branch.
-        </p>
-      ) : null}
-      <Section title="cost per turn" aside={noTurn ? undefined : `median ${costText(headline.medianTurnCost)}`}>
-        {noTurn ? <Empty>costs appear after the first response</Empty> : <CostChart data={data} onTurn={onTurn} />}
-      </Section>
-      <ToolUsage tools={tools} />
-      <CostliestCalls calls={stats.callStats} onNavigate={onNavigate} />
-      {tools.length === 0 ? null : (
-        <Section title="distribution" aside="calls · failures">
-          <ul>
-            {tools.map((tool) => (
-              <li key={tool.toolName} className="flex justify-between">
-                <code>{tool.toolName}</code>
-                <span className="tabular-nums">
-                  {countText(tool.calls)}
-                  {tool.failed > 0 ? <b className="ml-1 text-destructive">· {countText(tool.failed)}</b> : null}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
-      <Section title="costliest prompts" aside="cost">
-        {costliest.length === 0 ? (
-          <Empty>costs appear after the first response</Empty>
-        ) : (
-          <ol>
-            {costliest.map((prompt) => (
-              <RankedRow key={prompt.prompt} target={{ kind: 'prompt', prompt: prompt.prompt }} onNavigate={onNavigate}>
-                <span className="min-w-0">
-                  <strong className="block truncate font-normal text-foreground" title={prompt.text}>
-                    {prompt.text || '(before the first prompt)'}
-                  </strong>
-                  <small className="text-muted-foreground">
-                    {plural(prompt.turnCount, 'model call')} · {plural(prompt.toolCalls, 'tool')}
-                    {prompt.durationMs === undefined ? null : (
-                      <span title="the prompt to the last reply entry, as pi stamped them">
-                        {' '}
-                        · {durationText(prompt.durationMs)}
-                      </span>
-                    )}
-                  </small>
-                </span>
-                <b className="shrink-0 font-normal tabular-nums">{costText(prompt.cost)}</b>
-              </RankedRow>
-            ))}
-          </ol>
+    <section aria-label="thread stats" className="@container grid grid-cols-1 gap-4 p-4">
+      <Card
+        title="Session analysis"
+        sub={`${plural(stats.promptStats.length, 'prompt')} analysed · ${stats.live ? 'live' : 'from the file'}`}
+      >
+        {missed === undefined ? null : (
+          <p role="status" className="text-sm text-muted-foreground">
+            {missed}
+          </p>
         )}
-      </Section>
-      <Section title="latency" aside="from the log">
-        <dl className="grid grid-cols-label-value gap-x-3 gap-y-0.5">
-          <dt className="text-muted-foreground">prompt → settle</dt>
-          <dd className="tabular-nums">{durationsText(stats.latency.prompts, 'not in the log')}</dd>
-          <dt className="text-muted-foreground">first token</dt>
-          <dd className="tabular-nums">{durationsText(stats.latency.firstDelta, 'not in the log')}</dd>
+        <dl className="grid grid-cols-2 gap-2 @3xl:grid-cols-3">
+          <Metric label="total cost" value={costText(stats.usage.cost)} />
+          <Metric label="average cost / turn" value={noTurn ? '—' : costText(headline.averageTurnCost)} />
+          <Metric label="turn count" value={countText(headline.turnCount)} />
+          <Metric
+            label="average tools / turn"
+            value={noTurn ? '—' : ONE_DECIMAL.format(headline.averageToolsPerTurn)}
+          />
+          <Metric label="tool calls" value={countText(headline.toolCalls)} />
+          <Metric
+            label="failures"
+            value={`${countText(headline.failedToolCalls)} · ${PERCENT.format(headline.failureRate)}`}
+            danger={headline.failedToolCalls > 0}
+          />
         </dl>
-        <p className="mt-1 text-muted-foreground">
-          {stats.logDays.length === 0
-            ? 'no day file covers this thread — the log keeps 14 days'
-            : `read from ${stats.logDays.join(', ')}`}
-        </p>
-      </Section>
+        {headline.offBranchCost > 0 ? (
+          <p
+            className="text-sm text-muted-foreground"
+            title="compactions, branch summaries, cache warms and abandoned branches"
+          >
+            <b className="font-mono font-medium text-foreground">{costText(headline.offBranchCost)}</b> not attributed
+            to a turn on this branch.
+          </p>
+        ) : null}
+      </Card>
+      <div className="grid grid-cols-1 items-start gap-4 @4xl:grid-cols-2">
+        <ContextSection stats={stats} data={data} onTurn={onTurn} />
+        <Section title="Cost per turn" aside={noTurn ? undefined : `median ${costText(headline.medianTurnCost)}`}>
+          {noTurn ? <Empty>costs appear after the first response</Empty> : <CostChart data={data} onTurn={onTurn} />}
+        </Section>
+        <ToolUsage tools={tools} />
+        <CostliestCalls calls={stats.callStats} onNavigate={onNavigate} />
+        {tools.length === 0 ? null : (
+          <Section title="Distribution" aside="calls · failures">
+            <ul className="grid gap-1">
+              {tools.map((tool) => (
+                <li key={tool.toolName} className="flex justify-between gap-2">
+                  <code className="font-mono">{tool.toolName}</code>
+                  <span className="font-mono tabular-nums">
+                    {countText(tool.calls)}
+                    {tool.failed > 0 ? (
+                      <b className="ml-1 font-medium text-refuse">· {countText(tool.failed)}</b>
+                    ) : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+        <Section title="Costliest prompts" aside="cost">
+          {costliest.length === 0 ? (
+            <Empty>costs appear after the first response</Empty>
+          ) : (
+            <ol className="-mx-2">
+              {costliest.map((prompt) => (
+                <RankedRow
+                  key={prompt.prompt}
+                  target={{ kind: 'prompt', prompt: prompt.prompt }}
+                  onNavigate={onNavigate}
+                >
+                  <span className="min-w-0">
+                    <strong className="block truncate font-medium text-foreground" title={prompt.text}>
+                      {prompt.text || '(before the first prompt)'}
+                    </strong>
+                    <small className="font-mono text-xs text-muted-foreground">
+                      {plural(prompt.turnCount, 'model call')} · {plural(prompt.toolCalls, 'tool')}
+                      {prompt.durationMs === undefined ? null : (
+                        <span title="the prompt to the last reply entry, as pi stamped them">
+                          {' '}
+                          · {durationText(prompt.durationMs)}
+                        </span>
+                      )}
+                    </small>
+                  </span>
+                  <b className="shrink-0 font-mono font-medium tabular-nums">{costText(prompt.cost)}</b>
+                </RankedRow>
+              ))}
+            </ol>
+          )}
+        </Section>
+        <Section title="Latency" aside="from the log">
+          <dl className="grid grid-cols-label-value gap-x-3 gap-y-1">
+            <dt className="text-muted-foreground">prompt → settle</dt>
+            <dd className="font-mono tabular-nums">{durationsText(stats.latency.prompts, 'not in the log')}</dd>
+            <dt className="text-muted-foreground">first token</dt>
+            <dd className="font-mono tabular-nums">{durationsText(stats.latency.firstDelta, 'not in the log')}</dd>
+          </dl>
+          <p className="text-xs text-muted-foreground">
+            {stats.logDays.length === 0
+              ? 'no day file covers this thread — the log keeps 14 days'
+              : `read from ${stats.logDays.join(', ')}`}
+          </p>
+        </Section>
+      </div>
     </section>
   )
 }
