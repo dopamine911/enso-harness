@@ -111,7 +111,7 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     stores.refusal.set(
       trailing === undefined
         ? undefined
-        : { refusalClass: providerRefusalClass(trailing.status), outputAtRefusal: data.usage.output },
+        : { refusalClass: providerRefusalClass(trailing), outputAtRefusal: data.usage.output },
     )
     // The complete list, every snapshot (#114): a reconnect's snapshot is the resync, so an
     // empty list is a fact ("nothing is waiting") this page must apply too — it clears a
@@ -136,9 +136,13 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
  */
 function applyRefusal(stores: ThreadStores, refusal: EnsoProviderRefused): void {
   stores.notifications.push(providerRefusalLine(refusal), 'error', 'run')
+  // ⚠ The refused attempt's own output is not a reply getting through (#384): a refusal mid-stream
+  // comes after the model wrote some, and the turn's `session-usage` — which the host says after
+  // this — counts it. So the mark is the output as of now PLUS the attempt's own; only output past
+  // both clears the word.
   stores.refusal.set({
-    refusalClass: providerRefusalClass(refusal.status),
-    outputAtRefusal: stores.usage.get()?.output ?? 0,
+    refusalClass: providerRefusalClass(refusal),
+    outputAtRefusal: (stores.usage.get()?.output ?? 0) + (refusal.output ?? 0),
   })
 }
 

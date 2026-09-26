@@ -49,7 +49,12 @@ const ROWS: ReadonlyArray<{
     refusalClass: 'provider error',
     reason: 'No Cursor account is logged in for this request. Run /login and pick a cursor slot.',
   },
-  { message: '503: upstream unavailable', status: 503, refusalClass: 'provider error', reason: 'upstream unavailable' },
+  {
+    message: '503: upstream unavailable',
+    status: 503,
+    refusalClass: 'provider error',
+    reason: 'upstream unavailable',
+  },
   {
     // #380 review: `@google/genai` puts the whole body in the message and pi's Gemini provider adds
     // no prefix — the status is the body's numeric `code`, or a Gemini rate limit reads as a
@@ -67,17 +72,76 @@ const ROWS: ReadonlyArray<{
     refusalClass: 'request failed',
     reason: 'Rate limit reached',
   },
-  { message: 'fetch failed', status: undefined, refusalClass: 'request failed', reason: 'fetch failed' },
+  {
+    message: 'fetch failed',
+    status: undefined,
+    refusalClass: 'request failed',
+    reason: 'fetch failed',
+  },
 ]
 
 test('each real shape of a provider error reads as its status, its class word and the provider’s own sentence', () => {
   for (const row of ROWS) {
+    const status = providerStatusOf(row.message)
     expect({
-      status: providerStatusOf(row.message),
-      refusalClass: providerRefusalClass(providerStatusOf(row.message)),
+      status,
+      refusalClass: providerRefusalClass(status === undefined ? {} : { status }),
       reason: providerReasonOf(row.message),
-    }).toEqual({ status: row.status, refusalClass: row.refusalClass, reason: row.reason })
+    }).toEqual({
+      status: row.status,
+      refusalClass: row.refusalClass,
+      reason: row.reason,
+    })
   }
+})
+
+// #384: a policy stop arrives on a response that already succeeded — no status — and pi keeps the
+// provider's own stop reason. Those class as the provider's policy, ahead of any status; any other
+// stop reason (a network failure, a malformed tool call) is not a policy and falls back to the status.
+test('a provider policy stop classes as `provider policy` from its stop reason; any other stop reason falls back to the status', () => {
+  // The test's OWN list, not the set it checks (PR #402 review): iterating the set would miss an
+  // entry dropped from it. Each API's policy stops, as pi records them in `rawStopReason`
+  // (`@earendil-works/pi-ai/dist/api/…`).
+  const policyStops: Record<string, readonly string[]> = {
+    // `anthropic-messages.js` `mapStopReason`: `refusal` and `sensitive` → error
+    anthropic: ['refusal', 'sensitive'],
+    // `openai-completions.js`: `content_filter` → error; `openai-responses-shared.js`: `${status}.${incompleteReason}`
+    openai: ['content_filter', 'incomplete.content_filter'],
+    // `bedrock-converse-stream.js`: every stop reason pi does not name → error, with the reason kept
+    bedrock: ['guardrail_intervened', 'content_filtered'],
+    // `google-shared.js` `mapStopReason`, for Gemini and Vertex alike
+    google: [
+      'SAFETY',
+      'PROHIBITED_CONTENT',
+      'BLOCKLIST',
+      'SPII',
+      'RECITATION',
+      'IMAGE_SAFETY',
+      'IMAGE_PROHIBITED_CONTENT',
+      'IMAGE_RECITATION',
+    ],
+  }
+  for (const [api, stops] of Object.entries(policyStops)) {
+    for (const providerStopReason of stops) {
+      expect({
+        api,
+        providerStopReason,
+        refusalClass: providerRefusalClass({ providerStopReason }),
+      }).toEqual({
+        api,
+        providerStopReason,
+        refusalClass: 'provider policy',
+      })
+    }
+  }
+  expect(providerRefusalClass({ providerStopReason: 'refusal', status: 429 })).toBe('provider policy')
+  expect(providerRefusalClass({ providerStopReason: 'network_error' })).toBe('request failed')
+  expect(
+    providerRefusalClass({
+      providerStopReason: 'MALFORMED_FUNCTION_CALL',
+      status: 400,
+    }),
+  ).toBe('model refused')
 })
 
 // A status is only the one pi's providers put in front — never a number from inside the prose, or

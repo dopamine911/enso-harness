@@ -14,7 +14,7 @@ export function providerRefusalLine(refusal: EnsoProviderRefusal): string {
       ? `${refusal.provider}/${refusal.model}`
       : (refusal.provider ?? refusal.model ?? 'the provider')
   const status = refusal.status === undefined ? '' : ` (${refusal.status})`
-  return `${who} refused: ${providerRefusalClass(refusal.status)}${status} — ${providerReasonOf(refusal.message)}`
+  return `${who} refused: ${providerRefusalClass(refusal)}${status} — ${providerReasonOf(refusal.message)}`
 }
 
 /** The refusal a mounted message carries (#381), or nothing — a message as JSON or as TanStack's. */

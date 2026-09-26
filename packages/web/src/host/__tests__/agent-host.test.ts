@@ -1107,6 +1107,47 @@ test('⚠ a provider refusal is on the feed: the failed attempt, pi’s retry, t
   ])
 })
 
+/** Anthropic's sentence for a policy stop (`stop_details.explanation`) — pi keeps it as the error message. */
+const POLICY_STOP =
+  "This request triggered restrictions on violative cyber content and was blocked under Anthropic's Usage Policy."
+
+// #384: a provider's policy stops a response it had ALREADY begun — HTTP 200, text streamed, then
+// `stop_reason: "refusal"` — so the error carries no status, only the provider's own stop reason pi
+// keeps, and the attempt spent output of its own. Both must reach the feed: the stop reason is what
+// classes it, and the attempt's output is what the page must not mistake for a reply getting through.
+test('⚠ a policy stop mid-stream is on the feed with the provider’s stop reason and the output the attempt spent (#384)', async () => {
+  const core = createFauxCore()
+  const stopped = faux.fauxAssistantMessage('Here is how you would find the AWS credentials on', {
+    stopReason: 'error',
+    errorMessage: POLICY_STOP,
+  }) as { rawStopReason?: string }
+  stopped.rawStopReason = 'refusal'
+  core.setResponses([stopped])
+  const hosted = await hostedSession([fauxModelExtension(core)])
+  const events = collectEvents(hosted)
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.subscribe((observation) => {
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  hosted.runtime.prompt(
+    { message: 'where are the aws credentials' },
+    { onAccepted: () => undefined, onRejected: settled.reject },
+  )
+  await settled.promise
+
+  const refused = events.find((event) => event.kind === 'provider-refused')
+  const ended = events.find((event) => event.kind === 'message-end' && event.role === 'assistant')
+  if (refused?.kind !== 'provider-refused' || ended?.kind !== 'message-end')
+    throw new Error('no refused attempt on the feed')
+  expect(refused).toMatchObject({ providerStopReason: 'refusal', message: POLICY_STOP })
+  expect(refused.status).toBeUndefined()
+  expect(refused.output).toBeGreaterThan(0)
+  expect(refused.output).toBe(ended.usage?.output)
+  // said BEFORE the turn's usage, which already counts the attempt's output — the page's mark must add it
+  const kinds = events.map((event) => event.kind)
+  expect(kinds.indexOf('provider-refused')).toBeLessThan(kinds.lastIndexOf('session-usage'))
+})
+
 // #380 review: the two-hour case ENDS with pi giving up — and before, the feed's last word was the
 // retry, so the page read as if one were still coming. The end must be on the feed, with the error.
 test('⚠ a run that runs out of retries ends with pi giving up, and its last error, on the feed', async () => {

@@ -471,6 +471,29 @@ test('the status word stays while nothing got through, and clears once output gr
   expect(stores.refusal.get()).toBeUndefined()
 })
 
+// #384: a refusal MID-STREAM comes after the model wrote some — 178 tokens in the live case — and the
+// turn's usage, said after the refusal, counts them. That growth is the refused attempt's own, not a
+// reply getting through: the word must stay until output grows past the attempt too.
+test('⚠ a refusal after streamed text keeps its word through the turn’s usage, which counts the refused attempt’s own output', () => {
+  observe({ kind: 'session-usage', ...SPENT })
+  observe({
+    kind: 'provider-refused',
+    provider: 'anthropic',
+    model: 'claude-opus-5',
+    providerStopReason: 'refusal',
+    output: 178,
+    message:
+      'This request triggered restrictions on violative cyber content and was blocked under Anthropic’s Usage Policy.',
+  })
+  expect(notificationMessages().at(-1)).toBe(
+    'anthropic/claude-opus-5 refused: provider policy — This request triggered restrictions on violative cyber content and was blocked under Anthropic’s Usage Policy.',
+  )
+  observe({ kind: 'session-usage', ...SPENT, output: SPENT.output + 178 })
+  expect(stores.refusal.get()?.refusalClass).toBe('provider policy')
+  observe({ kind: 'session-usage', ...SPENT, output: SPENT.output + 178 + 5 })
+  expect(stores.refusal.get()).toBeUndefined()
+})
+
 // #381: the word lived only in the page's stores, so a reload lost it and the status bar read
 // `idle · $0.0000` again. The snapshot carries the branch, whose last reply is the refused
 // attempt pi stored — that is the resync. A refusal a reply came after is history, not state.
