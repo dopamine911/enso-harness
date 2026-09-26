@@ -215,10 +215,10 @@ export function descriptorFrom(toolName: string, details: unknown): EnsoToolResu
 ```
 
 Only truncation is mapped, and the `kind` is `pi.tool.<toolName>` with empty `props` — the floor, not
-the ceiling: a tool that wants a richer descriptor should emit one (`:77-89`). **No tool does today.**
+the ceiling: a tool that wants a richer descriptor should emit one (`:75-87`). **No tool does today.**
 `web-fetch` and `web-search` return `details: undefined` on every path
 (`packages/harness/extensions/web-fetch/index.ts:170,277,309`; `web-search/index.ts:353,358,372,402`),
-so no extension of ours attaches a descriptor. `toolResultMetadata` (`map-events.ts:104`) is the
+so no extension of ours attaches a descriptor. `toolResultMetadata` (`map-events.ts:102`) is the
 one place the key is written onto a part's `metadata`.
 
 **Carried** on the observation (`EnsoToolResultObservation.descriptor`), then onto the state layer's
@@ -271,10 +271,10 @@ through its renderer (`:39-43`), an unknown kind falls back to the envelope text
 in `@enso/core` and consumed by name. Two facts to know, neither a leak of this seam:
 
 - **The descriptor is derived from the runtime's `details` field**, read by the mapper as the
-  vendor's own type (`TruncationResult`, imported at `map-events.ts:1`; `result?.details` at `:345`). That is L2's
+  vendor's own type (`TruncationResult`, imported at `map-events.ts:1`; `result?.details` at `:343`). That is L2's
   event-side half, inventoried on the thread-runtime page; the mapper is the one place it is read.
 - **The `kind` values in use are the runtime's tool names** — `pi.tool.bash`, `pi.tool.read` — minted
-  by `descriptorFrom` (`:95`). A kind is a string by contract and the renderer map has no entry for any
+  by `descriptorFrom` (`:93`). A kind is a string by contract and the renderer map has no entry for any
   of them, so today the vendor's name is data, not a dependency; a renderer keyed on `pi.tool.*` would
   make it one.
 

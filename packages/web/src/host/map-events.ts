@@ -46,8 +46,6 @@ interface PiContentPart {
   text?: string
 }
 
-/** pi's tool `details` bag, which is where truncation lives. */
-
 function readUsage(raw: unknown): EnsoUsage | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const usage = raw as Record<string, unknown>
