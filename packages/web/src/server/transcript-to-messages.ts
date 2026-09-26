@@ -1,9 +1,12 @@
 import {
+  ENSO_GUARD_DENIAL_KEY,
   ENSO_PROVIDER_REFUSAL_KEY,
   ENSO_TOOL_RESULT_KEY,
+  type EnsoGuardDenial,
   type EnsoInterruptedTail,
   type EnsoTranscriptEntry,
   type EnsoTranscriptPart,
+  readEnsoGuardDenial,
 } from '@enso/core'
 import type { MessagePart, UIMessage } from '@tanstack/ai-client'
 
@@ -13,8 +16,8 @@ import type { MessagePart, UIMessage } from '@tanstack/ai-client'
  * chunks); this maps the STORED transcript (entries of ours → messages). Since #162
  * workstream 4 (L2) the entries ARE ours — the host decoded the runtime's stored shapes below
  * the seam (`host/transcript.ts`) — so this file assembles and never decodes: no vendor field
- * name, no defensive read of an unknown, and an entry kind it does not render (`custom`,
- * `other`) is skipped, not invented.
+ * name, no defensive read of an unknown, and an entry kind it does not render (`other`, a
+ * `custom` entry that is not a guard refusal) is skipped, not invented.
  *
  * Tool results take the shape TanStack itself normalises a stream into (`processor.js`
  * `reconcileSnapshotToolCalls`): the `tool-result` part sits in the assistant message that
@@ -55,10 +58,25 @@ function createdAt(at: string | undefined): { createdAt?: Date } {
   return Number.isNaN(parsed.getTime()) ? {} : { createdAt: parsed }
 }
 
+/** The bag a stored result carries: the #18 descriptor, and the guard's refusal (#387) — each only when there is one. */
+function resultMetadata(
+  result: Extract<EnsoTranscriptEntry, { kind: 'tool-result' }>,
+  denial: EnsoGuardDenial | undefined,
+): { metadata?: Record<string, unknown> } {
+  if (result.descriptor === undefined && denial === undefined) return {}
+  return {
+    metadata: {
+      ...(result.descriptor === undefined ? {} : { [ENSO_TOOL_RESULT_KEY]: result.descriptor }),
+      ...(denial === undefined ? {} : { [ENSO_GUARD_DENIAL_KEY]: denial }),
+    },
+  }
+}
+
 /** Attach a tool result to the assistant message holding its call; false if no call is found. */
 function attachToolResult(
   messages: UIMessage[],
   result: Extract<EnsoTranscriptEntry, { kind: 'tool-result' }>,
+  denial: EnsoGuardDenial | undefined,
 ): boolean {
   for (let position = messages.length - 1; position >= 0; position -= 1) {
     const candidate = messages[position]
@@ -74,7 +92,7 @@ function attachToolResult(
       content: result.text,
       state: result.isError ? 'error' : 'complete',
       ...(result.isError ? { error: result.text } : {}),
-      ...(result.descriptor === undefined ? {} : { metadata: { [ENSO_TOOL_RESULT_KEY]: result.descriptor } }),
+      ...resultMetadata(result, denial),
     })
     return true
   }
@@ -84,6 +102,9 @@ function attachToolResult(
 /** The transcript, root to leaf, as the messages a chat mounts with. Entries that are not messages are skipped. */
 export function transcriptToMessages(transcript: readonly EnsoTranscriptEntry[]): UIMessage[] {
   const messages: UIMessage[] = []
+  // The guard writes its refusal entry before pi builds the error result (#387), so a
+  // refusal is always read before the result it belongs to.
+  const denials = new Map<string, EnsoGuardDenial>()
   for (const transcriptEntry of transcript) {
     if (transcriptEntry.kind === 'message') {
       messages.push({
@@ -96,10 +117,13 @@ export function transcriptToMessages(transcript: readonly EnsoTranscriptEntry[])
           ? {}
           : { metadata: { [ENSO_PROVIDER_REFUSAL_KEY]: transcriptEntry.refusal } }),
       })
+    } else if (transcriptEntry.kind === 'custom') {
+      const denial = readEnsoGuardDenial(transcriptEntry.customType, transcriptEntry.data)
+      if (denial !== undefined) denials.set(denial.toolCallId, denial)
     } else if (transcriptEntry.kind === 'tool-result') {
       // A result whose call is not on the transcript (a compacted or edited history) is
       // dropped: TanStack keeps detached results verbatim, which renders as a stray row.
-      attachToolResult(messages, transcriptEntry)
+      attachToolResult(messages, transcriptEntry, denials.get(transcriptEntry.toolCallId))
     }
   }
   return messages

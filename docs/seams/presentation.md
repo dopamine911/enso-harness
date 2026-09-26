@@ -209,6 +209,14 @@ export interface ThreadStores {
    */
   readonly refusal: WritableStore<ProviderRefusalMark | undefined>
   /**
+   * The calls a guard refused (#387, #407), by tool-call id, with the rule that refused each.
+   * pi hands the page a refusal as an error result shaped like any failed command; this is what
+   * tells them apart. Seeded from the history's results (the server joined the guard's session
+   * entry onto each), then fed by the live `custom-entry` chunk the guard's entry crosses as —
+   * one store either way, so a refusal reads the same live, reloaded and resumed.
+   */
+  readonly guardDenials: WritableStore<ReadonlyMap<string, EnsoGuardRule>>
+  /**
    * The Start-a-session dialog is open (#391). Raised when the page MINTS the thread — New Thread,
    * a page with no thread in its URL — and lowered by Start or Escape; a thread adopted from
    * history never raises it.

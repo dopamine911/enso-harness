@@ -1,4 +1,5 @@
 import { type Static, Type } from 'typebox'
+import { Compile } from 'typebox/compile'
 
 /**
  * The Tier 0 guard policy.
@@ -72,6 +73,75 @@ export const ENSO_GUARD_RULES = [
 
 /** @group Guards */
 export type EnsoGuardRule = (typeof ENSO_GUARD_RULES)[number]
+
+/**
+ * The `customType` of the session entry the guards extension appends when it refuses a call
+ * (#387 gap 1, #407 item 1).
+ *
+ * WHY AN ENTRY. pi discards the block marker: a `tool_call` handler's `{ block, reason }` becomes
+ * `createErrorToolResult(reason)`, the same shape a thrown tool error makes, and a blocked call
+ * never reaches `tool_result` hooks, so nothing can stamp its `details` either. The guard is the
+ * one place that knows a refusal happened, and a custom entry is the one thing it can write that
+ * pi persists — so a reload, a resume and the stored transcript still say "refused by policy",
+ * where an event on pi's bus would be gone with the process.
+ *
+ * pi's context builder skips `custom` entries, so the model's view is unchanged; it reads the
+ * reason from the tool result, as before.
+ *
+ * @group Guards
+ */
+export const ENSO_GUARD_DENIAL_ENTRY = 'enso-guard-denial' as const
+
+/**
+ * A guard refusal as data: the call it refused and the rule that refused it. The reason is
+ * NOT repeated — it is the tool result's text already, the one copy the model and the page
+ * both read.
+ *
+ * The entry's `data`, and — under {@link ENSO_GUARD_DENIAL_KEY} — the metadata a stored tool
+ * result carries, so a surface reads one shape either way.
+ *
+ * @group Guards
+ */
+export const EnsoGuardDenial = Type.Object({
+  toolCallId: Type.String({ minLength: 1 }),
+  // `Unsafe` for the static type only: a union mapped from the list validates every rule, but
+  // TypeBox infers a mapped array's union as `never`.
+  rule: Type.Unsafe<EnsoGuardRule>(Type.Union(ENSO_GUARD_RULES.map((rule) => Type.Literal(rule)))),
+})
+/** @group Guards */
+export type EnsoGuardDenial = Static<typeof EnsoGuardDenial>
+
+/**
+ * The tool-result metadata key a refusal rides under on a stored result — beside
+ * `ENSO_TOOL_RESULT_KEY`, namespaced the same way and for the same reason (no dot).
+ *
+ * @group Guards
+ */
+export const ENSO_GUARD_DENIAL_KEY = 'enso:guardDenial' as const
+
+const denialValidator = Compile(EnsoGuardDenial)
+
+/**
+ * The refusal a custom entry records, or undefined when the entry is another extension's or
+ * malformed. Read defensively — an entry is a wire crossing, and a bad one is not a refusal.
+ *
+ * @group Guards
+ */
+export function readEnsoGuardDenial(customType: string, data: unknown): EnsoGuardDenial | undefined {
+  return customType === ENSO_GUARD_DENIAL_ENTRY && denialValidator.Check(data) ? data : undefined
+}
+
+/**
+ * The refusal a tool result's metadata carries (see {@link ENSO_GUARD_DENIAL_KEY}), or undefined.
+ *
+ * @group Guards
+ */
+export function readEnsoGuardDenialMetadata(
+  metadata: Record<string, unknown> | undefined,
+): EnsoGuardDenial | undefined {
+  const candidate = metadata?.[ENSO_GUARD_DENIAL_KEY]
+  return denialValidator.Check(candidate) ? candidate : undefined
+}
 
 /**
  * Defaults.

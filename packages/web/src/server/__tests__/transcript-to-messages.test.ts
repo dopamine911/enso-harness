@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test'
-import { ENSO_PROVIDER_REFUSAL_KEY, ENSO_TOOL_RESULT_KEY, type EnsoInterruptedTail } from '@enso/core'
+import {
+  ENSO_GUARD_DENIAL_ENTRY,
+  ENSO_GUARD_DENIAL_KEY,
+  ENSO_PROVIDER_REFUSAL_KEY,
+  ENSO_TOOL_RESULT_KEY,
+  type EnsoInterruptedTail,
+} from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { transcriptOf } from '../../host/transcript.ts'
 import { interruptedTail, transcriptToMessages } from '../transcript-to-messages.ts'
@@ -135,6 +141,50 @@ test('a refused tool call (isError) reads as an error on both the call and the r
   ])
   expect(messages[0]?.parts[0]).toMatchObject({ type: 'tool-call', state: 'error' })
   expect(messages[0]?.parts[1]).toMatchObject({ type: 'tool-result', state: 'error', error: 'refused' })
+})
+
+// #387's fixture: the same `bash` call, refused by a guard and failing on its own. Both are
+// `isError` with a reason as the text — pi builds them identically — and only the guard's
+// custom entry, written before the result, tells them apart after a reload. A marker that is
+// malformed, or names a call it does not precede, marks nothing.
+test('⚠ a guard refusal rides its own result as metadata; a failed call with the same shape carries none (#387)', () => {
+  const bashCall = (id: string): BranchEntry =>
+    entry(`a-${id}`, {
+      role: 'assistant',
+      content: [{ type: 'toolCall', id, name: 'bash', arguments: { command: 'cat ~/.aws/credentials' } }],
+    })
+  const errorResult = (id: string, text: string): BranchEntry =>
+    entry(`r-${id}`, {
+      role: 'toolResult',
+      toolCallId: id,
+      toolName: 'bash',
+      content: [{ type: 'text', text }],
+      isError: true,
+    })
+  const custom = (id: string, data: unknown): unknown => ({
+    type: 'custom',
+    customType: ENSO_GUARD_DENIAL_ENTRY,
+    data,
+    id,
+    parentId: null,
+    timestamp: '',
+  })
+  const messages = branchToMessages([
+    bashCall('refused'),
+    custom('d1', { toolCallId: 'refused', rule: 'secret-path' }),
+    errorResult('refused', 'bash command refused: "~/.aws/credentials" names credential material'),
+    bashCall('failed'),
+    custom('d2', { toolCallId: 'failed', rule: 'not-a-rule' }),
+    errorResult('failed', 'cat: /home/me/.aws/credentials: No such file or directory'),
+  ])
+  const resultOf = (id: string): unknown =>
+    messages.flatMap((message) => message.parts).find((part) => part.type === 'tool-result' && part.toolCallId === id)
+  expect(resultOf('refused')).toMatchObject({
+    state: 'error',
+    metadata: { [ENSO_GUARD_DENIAL_KEY]: { toolCallId: 'refused', rule: 'secret-path' } },
+  })
+  expect(resultOf('failed')).toMatchObject({ state: 'error' })
+  expect(resultOf('failed')).not.toHaveProperty('metadata')
 })
 
 test('a result whose call is not on the branch is dropped, not rendered as a stray row', () => {

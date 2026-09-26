@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { ENSO_PROJECT_HEADER, type EnsoProject, type EnsoStoredThread } from '@enso/core'
+import { ENSO_GUARD_DENIAL_KEY, ENSO_PROJECT_HEADER, type EnsoProject, type EnsoStoredThread } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { pageClock } from '../page-clock.ts'
@@ -141,6 +141,32 @@ test('adopting stored history restores dates, title and mode under the stored th
   expect(threadListStore.get()).toMatchObject([{ threadId: 'stored-1', title: 'resume this work', busy: false }])
   expect(adoptThread({ ...history, messages: [] })).toBe(adopted)
   expect(threadListStore.get()).toHaveLength(1)
+})
+
+// #387 after a reload: the server joined the guard's entry onto the stored result; adopting
+// the history puts it where the live chunk would have — the thread's denials, by call id.
+test('adopting a history seeds the refused calls from its results; a failed result is not one (#387)', () => {
+  const errored = (toolCallId: string, metadata?: Record<string, unknown>): UIMessage['parts'][number] => ({
+    type: 'tool-result',
+    toolCallId,
+    content: 'no',
+    state: 'error',
+    error: 'no',
+    ...(metadata === undefined ? {} : { metadata }),
+  })
+  const adopted = adoptThread({
+    threadId: 'refused-1',
+    projectId: 'p-launch',
+    messages: [
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [errored('c1', { [ENSO_GUARD_DENIAL_KEY]: { toolCallId: 'c1', rule: 'secret-read' } }), errored('c2')],
+      },
+    ],
+    permissionMode: { mode: 'default', available: [] },
+  })
+  expect([...adopted.guardDenials.get()]).toEqual([['c1', 'secret-read']])
 })
 
 test('⚠ adopting a branch that ends inside a turn opens with a warning that says so; a settled one opens clean (#109)', () => {

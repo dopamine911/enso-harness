@@ -7,6 +7,7 @@ import { TextPart } from '@tanstack/ai-react/ui'
 import { ChevronRightIcon, CircleCheckIcon, CircleSlashIcon, CircleXIcon, LoaderCircleIcon } from 'lucide-react'
 import { Reasoning, ReasoningContent, ReasoningTrigger } from './components/ai-elements/reasoning.tsx'
 import { type EnsoRendererMap, EnsoToolResult, type ToolResultState, toolResultState } from './EnsoToolResult.tsx'
+import { GuardRefusal, useGuardDenial } from './guard-refusal.tsx'
 import { cn } from './lib/utils.ts'
 import { TEXT_PART_COMPONENTS } from './markdown-image.tsx'
 
@@ -22,6 +23,13 @@ function readToolInput(selected: ChatUISelectedToolPart): unknown {
   } catch {
     return undefined
   }
+}
+
+/** A result's text, as the fallback renderer prints it; undefined before the result lands. */
+function resultText(result: ChatUISelectedToolPart['result']): string | undefined {
+  if (result === undefined) return undefined
+  if (typeof result.content === 'string') return result.content
+  return result.content.map((part) => JSON.stringify(part)).join('\n')
 }
 
 /** The glyph before a step: a check, a cross, the spinner while pi runs it, a slash once cut off. */
@@ -60,6 +68,19 @@ function ToolCallRow({
   const input = readToolInput(selected)
   const summary = summarizeToolInput(input)
   const { status } = toolResultState(selected.result, runOpen)
+  // A guard refused it (#387): a receipt, drawn as one — not a failed step with the word `error`.
+  const refusedBy = useGuardDenial(selected.part.id)
+  if (refusedBy !== undefined) {
+    return (
+      <GuardRefusal
+        toolCallId={selected.part.id}
+        toolName={selected.part.name}
+        asked={summary}
+        reason={resultText(selected.result)}
+        rule={refusedBy}
+      />
+    )
+  }
   return (
     // Only an error opens itself: its body is a reason the reader needs (the guard's refusal,
     // the command's stderr). `aborted` has nothing more inside — its whole story is the one
