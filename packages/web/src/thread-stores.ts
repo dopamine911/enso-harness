@@ -220,6 +220,8 @@ export interface ThreadSummary {
   readonly lastActivityAt: Date
   /** A run is in flight. */
   readonly busy: boolean
+  /** pi is parked on a question for the user (the thread's open dialog) — the rail's violet dot. */
+  readonly waiting: boolean
   /** Which project's group the rail lists it under — `ThreadStores.projectId`. */
   readonly projectId: string | undefined
 }
@@ -362,6 +364,7 @@ export function mintThread(fetchImpl?: FetchLike, projectId?: string): ThreadSto
     title: undefined,
     lastActivityAt: new Date(),
     busy: false,
+    waiting: false,
     projectId,
   })
   publishThreadList()
@@ -424,6 +427,7 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike): 
     title: titleFromMessages(messages),
     lastActivityAt: new Date(),
     busy: false,
+    waiting: false,
     projectId: history.projectId,
   })
   publishThreadList()
@@ -438,10 +442,10 @@ export function getThreadStores(threadId: string): ThreadStores {
 }
 
 /** Called by a thread's pane whenever its transcript or in-flight state changes. */
-export function updateThreadSummary(threadId: string, patch: Pick<ThreadSummary, 'title' | 'busy'>): void {
+export function updateThreadSummary(threadId: string, patch: Pick<ThreadSummary, 'title' | 'busy' | 'waiting'>): void {
   const current = summaries.get(threadId)
   if (current === undefined) return
-  if (current.title === patch.title && current.busy === patch.busy) return
+  if (current.title === patch.title && current.busy === patch.busy && current.waiting === patch.waiting) return
   summaries.set(threadId, { ...current, ...patch, lastActivityAt: new Date() })
   publishThreadList()
 }

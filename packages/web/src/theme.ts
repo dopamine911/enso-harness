@@ -21,6 +21,7 @@ export interface ThemeOption {
 
 /** The themes as the dialog lists them: family → id → label. Every theme is dark unless it is in `LIGHT_THEMES`. */
 const FAMILIES = {
+  Enso: { 'enso-signal': 'Enso Signal', 'enso-ledger': 'Enso Ledger', 'enso-ink': 'Enso Ink' },
   Kanagawa: { 'kanagawa-wave': 'Kanagawa Wave', 'kanagawa-lotus': 'Kanagawa Lotus' },
   Catppuccin: {
     'catppuccin-latte': 'Catppuccin Latte',
@@ -53,6 +54,7 @@ type Families = typeof FAMILIES
 export type ThemeId = { [Family in keyof Families]: keyof Families[Family] }[keyof Families]
 
 const LIGHT_THEMES: ReadonlySet<ThemeId> = new Set<ThemeId>([
+  'enso-ink',
   'kanagawa-lotus',
   'catppuccin-latte',
   'everforest-light-hard',
@@ -80,8 +82,8 @@ export const THEME_FAMILIES: readonly ThemeFamily[] = Object.entries(FAMILIES).m
 
 export const THEMES: readonly ThemeOption[] = THEME_FAMILIES.flatMap((group) => group.themes)
 
-/** What a browser with nothing saved shows — the theme the page has always had. */
-export const DEFAULT_THEME: ThemeId = 'kanagawa-wave'
+/** What a browser with nothing saved shows — Enso's own, the design direction's default. */
+export const DEFAULT_THEME: ThemeId = 'enso-signal'
 
 /** Where the choice is kept, per browser — the id, and beside it the scheme the pre-paint script needs. */
 export const THEME_STORAGE_KEY = 'enso:theme'

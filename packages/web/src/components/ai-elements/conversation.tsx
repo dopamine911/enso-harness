@@ -8,8 +8,6 @@
  *   here), and with them the `import type { UIMessage } from "ai"` — no Vercel AI SDK
  *   type crosses (see README rule 4)
  * - removed the `"use client"` directive (Vite SPA, no RSC)
- * - `ConversationEmptyState` renders its title conditionally, so an empty-string title
- *   (used when the icon is the wordmark logo) leaves no stray empty `<h3>`
  */
 import { ArrowDownIcon } from "lucide-react";
 import type { ComponentProps } from "react";
@@ -61,10 +59,7 @@ export const ConversationEmptyState = ({
 			<>
 				{icon && <div className="text-muted-foreground">{icon}</div>}
 				<div className="space-y-1">
-					{/* Conditional (upstream renders it unconditionally): main.tsx passes the
-					    wordmark logo as the icon, whose image already says the title — an empty
-					    string then must not leave a stray empty <h3>. */}
-					{title && <h3 className="font-medium text-sm">{title}</h3>}
+					<h3 className="font-medium text-sm">{title}</h3>
 					{description && <p className="text-muted-foreground text-sm">{description}</p>}
 				</div>
 			</>

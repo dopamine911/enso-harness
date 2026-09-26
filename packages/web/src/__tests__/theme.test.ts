@@ -69,7 +69,7 @@ test('a page whose localStorage property throws has no storage, and shows the de
 // A theme without a block would show the default under its own name; a block missing a
 // variable would borrow the default's value for it — both silently.
 test('every theme has a stylesheet block, and each defines every variable the default does', () => {
-  const required = declared(blockOf('[data-theme="kanagawa-wave"]'))
+  const required = declared(blockOf(`[data-theme="${DEFAULT_THEME}"]`))
   expect(required.size).toBeGreaterThan(30)
   for (const theme of THEMES) {
     const missing = [...required].filter((variable) => !declared(blockOf(`[data-theme="${theme.id}"]`)).has(variable))
@@ -110,9 +110,10 @@ test('applying a theme sets data-theme and the `dark` class by its scheme; savin
   })
 })
 
-// The pre-paint script is inline, so it cannot import the keys: it spells them, and this holds the spelling.
-test("index.html's pre-paint script reads the keys the settings dialog saves under", () => {
+// The pre-paint script is inline, so it cannot import the keys or the default: it spells them,
+// and this holds the spelling.
+test("index.html's pre-paint script reads the keys the settings dialog saves under, and names the default", () => {
   const html = readFileSync(join(WEB, 'index.html'), 'utf8')
-  expect(html).toContain(`localStorage.getItem('${THEME_STORAGE_KEY}')`)
+  expect(html).toContain(`localStorage.getItem('${THEME_STORAGE_KEY}') || '${DEFAULT_THEME}'`)
   expect(html).toContain(`localStorage.getItem('${THEME_SCHEME_STORAGE_KEY}') === 'light'`)
 })

@@ -1,5 +1,5 @@
 import type { EnsoNotifyType, EnsoUiRequestOrigin } from '@enso/core'
-import { InfoIcon, OctagonAlertIcon, TriangleAlertIcon } from 'lucide-react'
+import { ChevronRightIcon, InfoIcon, OctagonAlertIcon, TriangleAlertIcon } from 'lucide-react'
 import { cn } from '@/lib/utils.ts'
 import { createStore, type Store, useStore, useThreadStores } from './store.ts'
 
@@ -75,14 +75,22 @@ const NOTIFY_TYPE_ICONS = {
   error: OctagonAlertIcon,
 } as const
 
+/** Each line kind's row and icon colours — see {@link TranscriptLine}. */
+const LINE_STYLE: Record<EnsoNotifyType, { row: string; icon: string }> = {
+  error: { row: 'rounded-md border border-refuse bg-card px-3 py-2 text-foreground', icon: 'text-refuse' },
+  warning: { row: 'text-foreground', icon: 'text-refuse' },
+  info: { row: 'text-muted-foreground', icon: '' },
+}
+
 /**
  * One line in the transcript's voice: an icon by `notifyType`, the text beside it (#383 review).
  * Presentational, and the ONE definition of that row — a notification renders through it, and so
  * does a refused attempt's bubble (`refused-attempt.tsx`), which has no notification to give.
  *
- * `notifyType` styling: error uses the destructive token; warning has no shadcn token, so it stays
- * muted with the triangle icon carrying the distinction; an absent type renders as info. Anything
- * else — a `title`, a `data-*` marker — passes through to the row.
+ * `notifyType` styling (the design direction's transcript lines): an error is a bordered card in
+ * the refusal colour, text in the foreground; a warning is foreground text beside a triangle in
+ * the refusal colour; info — and an absent type — is muted. Anything else — a `title`, a
+ * `data-*` marker — passes through to the row.
  */
 export function TranscriptLine({
   notifyType,
@@ -92,17 +100,15 @@ export function TranscriptLine({
   notifyType: EnsoNotifyType | undefined
   message: string
 } & Omit<React.ComponentProps<'div'>, 'role' | 'className' | 'children'>): React.ReactNode {
-  const Icon = NOTIFY_TYPE_ICONS[notifyType ?? 'info']
+  const kind = notifyType ?? 'info'
+  const Icon = NOTIFY_TYPE_ICONS[kind]
   return (
     <div
       role="status"
       {...rest}
-      className={cn(
-        'flex items-start gap-2 text-xs',
-        notifyType === 'error' ? 'text-destructive' : 'text-muted-foreground',
-      )}
+      className={cn('flex max-w-3xl items-start gap-2 text-sm leading-normal', LINE_STYLE[kind].row)}
     >
-      <Icon className="mt-px size-3.5 shrink-0" />
+      <Icon className={cn('mt-0.5 size-4 shrink-0', LINE_STYLE[kind].icon)} />
       <span className="min-w-0 break-words whitespace-pre-wrap">
         <LinkedText text={message} />
       </span>
@@ -183,11 +189,13 @@ function StartupNotices({ notifications }: { notifications: readonly EnsoNotific
   if (notifications.length === 0) return null
   const noun = notifications.length === 1 ? 'notice' : 'notices'
   return (
-    <details data-enso-startup-notices="" className="text-xs text-muted-foreground">
-      <summary className="cursor-pointer">
+    <details data-enso-startup-notices="" className="group max-w-3xl text-sm text-muted-foreground">
+      <summary className="-ml-2 inline-flex min-h-8 cursor-pointer list-none items-center gap-2 rounded-md px-2 marker:hidden hover:bg-popover hover:text-foreground">
+        <ChevronRightIcon aria-hidden="true" className="size-4 transition-transform group-open:rotate-90" />
+        <InfoIcon aria-hidden="true" className="size-4" />
         {notifications.length} startup {noun} from extensions
       </summary>
-      <div className="mt-1.5 flex flex-col gap-1.5 pl-4">
+      <div className="mt-1 flex flex-col gap-1.5 pl-6">
         {notifications.map((notification) => (
           <NotificationLine key={notification.id} notification={notification} />
         ))}

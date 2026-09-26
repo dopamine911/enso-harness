@@ -582,7 +582,7 @@ test('a blocking question announces itself: a group named by the question, and f
   // reader resolves it, and the title is a heading so the rotor can reach it.
   const nameSource = document.getElementById(card.getAttribute('aria-labelledby') ?? '')
   expect(nameSource?.textContent).toBe('Apply the edit?')
-  expect(nameSource?.getAttribute('role')).toBe('heading')
+  expect(nameSource?.matches('h1, h2, h3, h4, h5, h6, [role="heading"]')).toBe(true)
   // Focus is inside the group, on the control a human answers with — not still in the transcript.
   await eventually(() => {
     expect(card.contains(document.activeElement)).toBe(true)
@@ -1380,9 +1380,9 @@ test('the Stats tab replaces the transcript in the thread on screen, and follows
   await page.unmount()
 })
 
-// A question from pi waits in the transcript; on another view the Chat tab and the status bar say
-// so, and nothing moves the reader (#362 review) — they switch when ready.
-test('a question waiting while Stats is shown is said on the Chat tab and in the status bar; the view stays', async () => {
+// A question from pi waits in the transcript; on another view the Chat tab, the status bar and the
+// rail's row say so, and nothing moves the reader (#362 review) — they switch when ready.
+test('a question waiting while Stats is shown is said on the Chat tab, in the status bar and on the rail; the view stays', async () => {
   const page = await mountPage()
   const newThread = [...page.container.querySelectorAll('button')].find((button) => button.textContent === 'New Thread')
   if (newThread === undefined) throw new Error('expected a New Thread button')
@@ -1400,6 +1400,9 @@ test('a question waiting while Stats is shown is said on the Chat tab and in the
   const threadId = new URLSearchParams(window.location.search).get('thread')
   if (threadId === null) throw new Error('expected the thread in the url')
   expect(tab('chat').textContent).not.toContain('a question is waiting')
+  // The rail's row is the pane's summary: `waiting` follows the thread's open dialog (PR #403 review).
+  const railRow = (): string => page.activeRows()[0]?.textContent ?? ''
+  expect(railRow()).not.toContain('waiting on you')
   await flush(async () => {
     getThreadStores(threadId).dialog.set({ id: 'd1', dialog: { method: 'confirm', title: 'Proceed?', message: '' } })
     await tick()
@@ -1407,6 +1410,7 @@ test('a question waiting while Stats is shown is said on the Chat tab and in the
   expect(tab('stats').getAttribute('aria-selected')).toBe('true')
   expect(tab('chat').textContent).toContain('a question is waiting')
   expect(statusBar()).toContain('a question is waiting')
+  expect(railRow()).toContain('waiting on you')
   // On Chat the question is in view: the tab no longer flags it; the bar still says it waits.
   await flush(async () => {
     tab('chat').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
@@ -1419,6 +1423,7 @@ test('a question waiting while Stats is shown is said on the Chat tab and in the
     await tick()
   })
   expect(statusBar()).not.toContain('a question is waiting')
+  expect(railRow()).not.toContain('waiting on you')
   await page.unmount()
 })
 

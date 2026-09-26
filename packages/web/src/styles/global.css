@@ -1,17 +1,48 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+/* The themes' fonts (styles/themes.css `--font-*`). Each file only DECLARES its faces; a browser
+   downloads the ones the current theme names, so the other themes' fonts cost nothing. */
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/sora";
+@import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource-variable/source-sans-3";
+@import "@fontsource-variable/fraunces/wght.css";
+@import "@fontsource-variable/fraunces/wght-italic.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
 /* The colour themes — every palette, one block per theme (src/theme.ts). */
 @import "./themes.css";
 
 @plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
+/*
+ * One Enso theme's own TREATMENT — what its design direction does beyond colour (Signal's glow on
+ * the two live states, Ledger's receipt rows, Ink's serif voices). `ledger:bg-transparent` applies
+ * under that theme only; every other theme renders the shared markup untouched. `:is`, not
+ * `:where`: the selector's weight is what lets `signal:aria-selected:…` outrank `aria-selected:…`.
+ */
+@custom-variant signal (&:is([data-theme="enso-signal"] *));
+@custom-variant ledger (&:is([data-theme="enso-ledger"] *));
+@custom-variant ink (&:is([data-theme="enso-ink"] *));
 
 @theme inline {
-  --font-heading: var(--font-sans);
-  --font-sans: "Geist Variable", sans-serif;
+  --font-heading: var(--font-display);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-code);
+  /* The four states every theme names (styles/themes.css): pi running, waiting on you, allowed, refused. */
+  --color-evidence: var(--evidence);
+  --color-human: var(--human);
+  --color-ok: var(--ok);
+  --color-refuse: var(--refuse);
+  --color-border-strong: var(--border-strong);
+  /* Signal's glow — kept for its two live states and nowhere else (`signal:shadow-glow-evidence`). */
+  --shadow-glow-evidence: 0 0 0 3px color-mix(in srgb, var(--evidence) 22%, transparent), 0 0 12px var(--evidence);
+  --shadow-glow-human: 0 0 0 3px color-mix(in srgb, var(--human) 22%, transparent), 0 0 12px var(--human);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -107,13 +138,18 @@
  * (`content: "`"` on ::before/::after) — visible in the fixture's turn-1 receipt.
  * shadcn-styled chat UIs (the ai-elements chatbot example included) render inline
  * code as a tinted chip instead, so the backticks are stripped here globally.
+ *
+ * The chip is a TINT of the text colour, not a surface token: it sits on the background (pi's
+ * reply), the card and the user's bubble, and every surface token equals one of those in some
+ * theme (`--muted` is `--card` everywhere, `--secondary` is the bubble) — a chip in that colour
+ * vanishes there (PR #403 review).
  */
 .prose :where(code):not(:where([class~="not-prose"], [class~="not-prose"] *))::before,
 .prose :where(code):not(:where([class~="not-prose"], [class~="not-prose"] *))::after {
   content: none;
 }
 .prose :where(code):not(:where(pre *, [class~="not-prose"], [class~="not-prose"] *)) {
-  background-color: var(--muted);
+  background-color: color-mix(in srgb, var(--foreground) 10%, transparent);
   border-radius: 0.25rem;
   padding: 0.125rem 0.25rem;
   font-weight: 500;

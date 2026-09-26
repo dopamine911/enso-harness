@@ -49,7 +49,7 @@ async function mountRail(lastActivityAt: Date): Promise<{
   const view = (earlierError: string | undefined): React.ReactNode => (
     <ThreadsRail
       projects={[]}
-      threads={[{ threadId: 't1', title: 'live', lastActivityAt, busy: false, projectId: undefined }]}
+      threads={[{ threadId: 't1', title: 'live', lastActivityAt, busy: false, waiting: false, projectId: undefined }]}
       activeThreadId="t1"
       earlier={[]}
       earlierError={earlierError}
