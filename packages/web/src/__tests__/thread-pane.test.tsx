@@ -1003,6 +1003,45 @@ test('⚠ a tool call reads running… while its run is open and aborted once th
   await pane.unmount()
 })
 
+// #411: a truncated result's descriptor rides the AG-UI result, and TanStack's processor keeps
+// none of it — so live, the note was never drawn (resumed, the result carries it in metadata).
+// The follow connection hands it to the thread's store before the result is pushed.
+test('⚠ a truncated tool result says so LIVE, from the descriptor TanStack would have dropped (#411)', async () => {
+  const pane = await mountPane()
+  await pane.settle(SNAPSHOT_IDLE)
+  await flush(async () => {
+    typeInto(pane.composer(), 'read it')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await pane.settle(
+    { type: 'observation', seq: 1, observation: { kind: 'message-start', role: 'assistant' } },
+    {
+      type: 'observation',
+      seq: 2,
+      observation: { kind: 'tool-call', toolCallId: 'c1', toolName: 'read', args: { path: 'big.ts' } },
+    },
+    {
+      type: 'observation',
+      seq: 3,
+      observation: {
+        kind: 'tool-result',
+        toolCallId: 'c1',
+        toolName: 'read',
+        text: 'line 1',
+        complete: true,
+        isError: false,
+        descriptor: { kind: 'pi.tool.read', props: {}, truncated: { shown: 1, total: 400, unit: 'lines' } },
+      },
+    },
+  )
+  await eventually(() => {
+    expect(pane.container.querySelector('[data-enso-tool-call="done"]')).not.toBeNull()
+    expect(pane.container.querySelector('[data-enso-truncation]')?.textContent).toBe('showing 1 of 400 lines')
+  })
+  await pane.unmount()
+})
+
 // An `isError` result with NO guard-denial entry — a command that ran and failed — reads error. The
 // reason text here is a guard's on purpose: the page never reads the wording (#387); only the
 // entry makes a refusal, and its live path is the sibling test below.
