@@ -621,7 +621,7 @@ export function EnsoDialogCard({
       ref={ref}
       role="group"
       aria-labelledby={titleId}
-      className="my-2 grid max-w-3xl overflow-hidden rounded-lg border border-human bg-card signal:ring-1 signal:ring-human/30"
+      className="my-2 grid max-w-3xl overflow-hidden rounded-lg border border-human bg-card signal:ring-1 signal:ring-human/30 ledger:my-3 ledger:rounded-xs ledger:border-dashed ink:border-2"
     >
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wider text-human uppercase">
@@ -981,7 +981,11 @@ const MessageBody = memo(function MessageBody({
   speaker,
 }: MessageBodyProps): React.ReactNode {
   return (
-    <Message from={role} data-role={role} className="max-w-3xl gap-1 ledger:ml-0">
+    <Message
+      from={role}
+      data-role={role}
+      className="max-w-3xl gap-1 ledger:ml-0 ledger:max-w-none ledger:border-b ledger:py-3"
+    >
       {speaker ? <MessageSpeaker role={role} /> : null}
       <MessageContent className="text-base leading-relaxed group-[.is-assistant]:w-full group-[.is-user]:rounded-lg group-[.is-user]:px-3 group-[.is-user]:py-2 signal:group-[.is-user]:rounded-br-sm ledger:group-[.is-user]:ml-0 ledger:group-[.is-user]:bg-transparent ledger:group-[.is-user]:p-0">
         {parts.map(({ partKey, selected, isTrailingPart }) => (
@@ -1367,7 +1371,7 @@ const chatComponents = {
               >
                 <Conversation>
                   <TranscriptRevealBridge into={scroller} />
-                  <ConversationContent className="w-full gap-4 px-6 py-4">
+                  <ConversationContent className="w-full gap-4 px-6 py-4 ledger:gap-0">
                     {chat.messages.length === 0 ? (
                       <ConversationEmptyState>
                         <EnsoSmile className="size-28" />

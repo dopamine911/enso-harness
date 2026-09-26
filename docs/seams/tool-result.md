@@ -224,7 +224,7 @@ result event under the same key — as an extra field, because that event declar
 nothing else (`packages/web/src/to-agui.ts:30-42,126-128`).
 
 **Rendered by `EnsoToolResult`** (`packages/web/src/EnsoToolResult.tsx:69-129`), reached from every tool
-row but a guard refusal's (`selected-message-part.tsx:124-127,186`) — a refused call is drawn as a receipt
+row but a guard refusal's (`selected-message-part.tsx:134-137,196`) — a refused call is drawn as a receipt
 by `guard-refusal.tsx` instead, its reason being the result's text (#407). The order is fixed: pending (`running…`) while the run
 is open and no result has paired; `aborted` once the run has ended with none (#130); an errored
 envelope renders its error and never consults the descriptor (`:103-113`); then the descriptor is read
