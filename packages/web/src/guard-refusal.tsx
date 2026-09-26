@@ -48,12 +48,21 @@ export interface GuardRefusalProps {
   readonly toolName: string
   /** The call's input in one line — the command, the path, the URL; undefined when it names none. */
   readonly asked: string | undefined
+  /** `asked` is a shell command: Ledger prints it after a `$ `, as a terminal would (#407). */
+  readonly asCommand: boolean
   /** The guard's reason, as the tool result carries it; undefined until the result lands. */
   readonly reason: string | undefined
   readonly rule: EnsoGuardRule
 }
 
-export function GuardRefusal({ toolCallId, toolName, asked, reason, rule }: GuardRefusalProps): React.ReactNode {
+export function GuardRefusal({
+  toolCallId,
+  toolName,
+  asked,
+  asCommand,
+  reason,
+  rule,
+}: GuardRefusalProps): React.ReactNode {
   return (
     // `data-tool-call-id`: where the stats drawer's rows land (#359), as on a step row.
     <article
@@ -71,6 +80,11 @@ export function GuardRefusal({ toolCallId, toolName, asked, reason, rule }: Guar
       </header>
       {asked === undefined ? null : (
         <pre className="border-t bg-background px-3 py-2 font-mono text-sm break-words whitespace-pre-wrap">
+          {asCommand ? (
+            <span aria-hidden="true" className="hidden text-muted-foreground ledger:inline">
+              ${' '}
+            </span>
+          ) : null}
           {asked}
         </pre>
       )}

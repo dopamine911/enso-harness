@@ -77,9 +77,13 @@ const NOTIFY_TYPE_ICONS = {
 
 /** Each line kind's row and icon colours — see {@link TranscriptLine}. */
 const LINE_STYLE: Record<EnsoNotifyType, { row: string; icon: string }> = {
-  error: { row: 'rounded-md border border-refuse bg-card px-3 py-2 text-foreground', icon: 'text-refuse' },
-  warning: { row: 'text-foreground', icon: 'text-refuse' },
-  info: { row: 'text-muted-foreground', icon: '' },
+  // Ledger (#407): the receipt transcript — an error boxed in-line, every other line on a hairline.
+  error: {
+    row: 'rounded-md border border-refuse bg-card px-3 py-2 text-foreground ledger:my-3 ledger:max-w-none ledger:rounded-xs',
+    icon: 'text-refuse',
+  },
+  warning: { row: 'text-foreground ledger:max-w-none ledger:border-b ledger:py-3', icon: 'text-refuse' },
+  info: { row: 'text-muted-foreground ledger:max-w-none ledger:border-b ledger:py-3', icon: '' },
 }
 
 /**

@@ -25,6 +25,11 @@ function readToolInput(selected: ChatUISelectedToolPart): unknown {
   }
 }
 
+/** The call's input carries a `command` — a shell line, which Ledger prints after a `$ ` (#407). */
+function isCommandInput(input: unknown): boolean {
+  return typeof input === 'object' && input !== null && 'command' in input
+}
+
 /** A result's text, as the fallback renderer prints it; undefined before the result lands. */
 function resultText(result: ChatUISelectedToolPart['result']): string | undefined {
   if (result === undefined) return undefined
@@ -76,6 +81,7 @@ function ToolCallRow({
         toolCallId={selected.part.id}
         toolName={selected.part.name}
         asked={summary}
+        asCommand={isCommandInput(input)}
         reason={resultText(selected.result)}
         rule={refusedBy}
       />
@@ -93,7 +99,11 @@ function ToolCallRow({
       open={status === 'error'}
       className={cn(
         'group my-1 max-w-3xl rounded-md border bg-card ledger:rounded-xs',
-        status === 'error' ? 'border-refuse' : '',
+        // Ink (#407): marginalia — a finished step is a ruled line in the margin, not a box; an
+        // error keeps its box, because a failure behind a click is a failure missed.
+        status === 'error'
+          ? 'border-refuse'
+          : 'ink:rounded-none ink:border-transparent ink:border-b-border ink:bg-transparent',
       )}
     >
       <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-md px-3 marker:hidden hover:bg-popover">
@@ -108,7 +118,7 @@ function ToolCallRow({
           className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90"
         />
       </summary>
-      <dl className="grid grid-cols-label-value border-t font-mono text-sm">
+      <dl className="grid grid-cols-label-value border-t font-mono text-sm ink:bg-card">
         <dt className="px-3 py-2 text-xs leading-6 font-semibold text-muted-foreground uppercase">in</dt>
         <dd className="min-w-0 px-3 py-2">
           <pre className="max-h-56 overflow-y-auto break-words whitespace-pre-wrap">
