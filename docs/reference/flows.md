@@ -31,7 +31,7 @@ flowchart LR
 
 | Node | Contract | Input | Source |
 |---|---|---|---|
-| `respondToProjectRegistration → ProjectRegistry.register` | [`POST /api/projects`](./routes.md) | body: `EnsoProjectRegistration` — an absolute `path` strictly under a root `enso.config.json` declares (`projects.roots`), optional `title` | [`packages/web/src/server/index.ts:1044`](../../packages/web/src/server/index.ts#L1044) |
+| `respondToProjectRegistration → ProjectRegistry.register` | [`POST /api/projects`](./routes.md) | body: `EnsoProjectRegistration` — an absolute `path` strictly under a root `enso.config.json` declares (`projects.roots`), optional `title` | [`packages/web/src/server/index.ts:1046`](../../packages/web/src/server/index.ts#L1046) |
 | `respondToProjectRemoval → ProjectRegistry.remove` | [`DELETE /api/projects/:projectId`](./routes.md) | path: `projectId` (sixteen hex digits) | [`packages/web/src/server/index.ts:79`](../../packages/web/src/server/index.ts#L79) |
 | `respondToAbort → abortThread` | [`POST /api/threads/:threadId/abort`](./routes.md) | path: `threadId`; no body | [`packages/web/src/server/index.ts:71`](../../packages/web/src/server/index.ts#L71)<br>[`packages/web/src/server/follow.ts:668`](../../packages/web/src/server/follow.ts#L668) |
 | `respondToHostCommand → runHostCommand` | [`POST /api/threads/:threadId/command`](./routes.md) | path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`) is the page's to open, never run | [`packages/web/src/server/index.ts:75`](../../packages/web/src/server/index.ts#L75) |

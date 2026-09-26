@@ -73,6 +73,8 @@ interface Mounted {
   readonly closes: number[]
   readonly dialog: () => HTMLElement
   readonly click: (label: string) => Promise<void>
+  /** Render the dialog open or closed, as the page does with the same mounted component. */
+  readonly setOpen: (open: boolean) => Promise<void>
   readonly unmount: () => Promise<void>
 }
 
@@ -92,19 +94,20 @@ async function mountAdd(listings: Record<string, EnsoDirectoryListing>, registra
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root: Root = createRoot(container)
+  const view = (open: boolean): React.ReactNode => (
+    <AddProjectDialog
+      open={open}
+      onClose={(): void => {
+        closes.push(1)
+      }}
+      onAdded={(project: EnsoProject): void => {
+        added.push(project)
+      }}
+      fetch={fetchImpl}
+    />
+  )
   await flush(async () => {
-    root.render(
-      <AddProjectDialog
-        open={true}
-        onClose={(): void => {
-          closes.push(1)
-        }}
-        onAdded={(project: EnsoProject): void => {
-          added.push(project)
-        }}
-        fetch={fetchImpl}
-      />,
-    )
+    root.render(view(true))
   })
   const dialog = (): HTMLElement => {
     const found = document.querySelector<HTMLElement>('[role="dialog"]')
@@ -125,6 +128,12 @@ async function mountAdd(listings: Record<string, EnsoDirectoryListing>, registra
       const button = await eventually(() => buttonNamed(label))
       await flush(async () => {
         button.click()
+        await tick()
+      })
+    },
+    setOpen: async (open: boolean) => {
+      await flush(async () => {
+        root.render(view(open))
         await tick()
       })
     },
@@ -176,4 +185,16 @@ test("a refused registration stays open and says the server's reason; no roots d
   const none = await mountAdd({ '': { ...ROOTS, directories: [] } }, new Response(null, { status: 500 }))
   await eventually(() => expect(none.dialog().textContent).toContain(NO_ROOTS))
   await none.unmount()
+})
+
+// PR #401 review: the page keeps the dialog mounted while it is closed; each opening starts at the
+// roots, never at the folder it was left on — which may since be gone, unreadable, or added.
+test('closed mid-browse and opened again, the dialog starts at the roots', async () => {
+  const mounted = await mountAdd({ '': ROOTS, '/home/me/code': ROOT }, new Response(null, { status: 500 }))
+  await mounted.click('/home/me/code')
+  await mounted.click('Close')
+  await mounted.setOpen(false)
+  await mounted.setOpen(true)
+  await eventually(() => expect(mounted.dialog().textContent).toContain('the project roots enso.config.json declares'))
+  await mounted.unmount()
 })

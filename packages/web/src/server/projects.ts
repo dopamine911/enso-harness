@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import {
+  type Dirent,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -325,16 +326,35 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
       const refusal = refusalUnderRoots(resolved, roots, options.roots)
       if (refusal !== undefined) return { kind: 'refused', reason: refusal }
     }
+    const children = childDirectories(resolved)
+    if (!Array.isArray(children)) return children
     return {
       kind: 'listing',
-      listing: listingOf(resolved, isRoot ? null : dirname(resolved), !isRoot, childDirectories(resolved)),
+      listing: listingOf(resolved, isRoot ? null : dirname(resolved), !isRoot, children),
     }
   }
 
-  /** The directories under `directory` a page may browse into: resolved, inside a root, not hidden. */
-  function childDirectories(directory: string): EnsoDirectoryEntry[] {
+  /**
+   * The directories under `directory` a page may browse into: resolved, inside a root, not hidden.
+   * ⚠ A directory can be searchable and not readable (`--x`): `realpath` and `stat` pass, the listing
+   * throws (PR #401 review — it took the server down). That is a refusal saying so, not an empty
+   * list, which would read as "no folders here". Each child is only resolved and stat'ed, never read.
+   */
+  function childDirectories(
+    directory: string,
+  ): EnsoDirectoryEntry[] | { readonly kind: 'refused'; readonly reason: string } {
+    let listed: Dirent[]
+    try {
+      listed = readdirSync(directory, { withFileTypes: true })
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      return {
+        kind: 'refused',
+        reason: `cannot read ${directory}${code === 'EACCES' ? ' — permission denied' : ` (${code})`}`,
+      }
+    }
     const entries: EnsoDirectoryEntry[] = []
-    for (const child of readdirSync(directory, { withFileTypes: true })) {
+    for (const child of listed) {
       if (child.name.startsWith('.') || !(child.isDirectory() || child.isSymbolicLink())) continue
       const canonical = realpathOrSelf(join(directory, child.name))
       if (!isDirectory(canonical) || refusalUnderRoots(canonical, roots, options.roots) !== undefined) continue

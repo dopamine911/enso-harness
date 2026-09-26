@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createProjectRegistry, ProjectUnavailable } from '../projects.ts'
@@ -198,4 +198,20 @@ test('⚠ browsing lists only directories a registration would take: resolved, i
     kind: 'refused',
     reason: expect.stringContaining('not under a declared project root'),
   })
+})
+
+// PR #401 review: a directory can be searchable and not readable (`--x`) — `realpath` and `stat`
+// pass, the listing throws. From the browse route that throw had nothing above it and took the
+// server down; it is a refusal that says why, not an empty list that would say "no folders here".
+test('⚠ browsing a directory the server may enter but not read is a refusal saying so, never a throw', () => {
+  const { launch, root } = layout()
+  const locked = join(root, 'locked')
+  mkdirSync(join(locked, 'inner'), { recursive: true })
+  chmodSync(locked, 0o100)
+  try {
+    const projects = createProjectRegistry({ launchDirectory: launch, roots: [root] })
+    expect(projects.browse(locked)).toEqual({ kind: 'refused', reason: `cannot read ${locked} — permission denied` })
+  } finally {
+    chmodSync(locked, 0o700)
+  }
 })

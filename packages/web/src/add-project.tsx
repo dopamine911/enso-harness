@@ -112,6 +112,12 @@ export function AddProjectDialog({ open, onClose, onAdded, fetch: fetchImpl }: A
     setRefusal(undefined)
     setPath(next)
   }
+  // Every opening starts at the roots (PR #401 review): the dialog stays mounted while closed, and
+  // the folder it was left on may since be gone, unreadable, or already added.
+  const close = (): void => {
+    move(null)
+    onClose()
+  }
   const add = async (): Promise<void> => {
     if (listing?.path == null || !listing.registrable) return
     setAdding(true)
@@ -122,10 +128,10 @@ export function AddProjectDialog({ open, onClose, onAdded, fetch: fetchImpl }: A
       return
     }
     onAdded(outcome.value)
-    onClose()
+    close()
   }
   return (
-    <Dialog open={open} onOpenChange={(next: boolean): void => (next ? undefined : onClose())}>
+    <Dialog open={open} onOpenChange={(next: boolean): void => (next ? undefined : close())}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Add a project</DialogTitle>
@@ -138,7 +144,7 @@ export function AddProjectDialog({ open, onClose, onAdded, fetch: fetchImpl }: A
         {listing === undefined ? null : <DirectoryList listing={listing} onOpen={move} />}
         {refusal === undefined ? null : <FieldError>{refusal}</FieldError>}
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={close}>
             Close
           </Button>
           <Button disabled={adding || listing?.registrable !== true} onClick={(): void => void add()}>

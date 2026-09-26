@@ -1022,8 +1022,10 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   /**
    * What a page may browse while adding a project: the declared roots, or `?path=` inside them. Read
    * only; the rules are the registration's (`projects.ts#browse`), so nothing listed is refused later.
+   * It reads the disk under a root, so it answers through `answerOrFail` (PR #401 review): whatever the
+   * disk throws that `browse` did not foresee is a 500, never a throw with nothing above it.
    */
-  function respondWithBrowse(url: string, response: ServerResponse): void {
+  async function respondWithBrowse(url: string, response: ServerResponse): Promise<void> {
     const path = new URL(url, 'http://loopback').searchParams.get('path') ?? undefined
     const outcome = projects.browse(path)
     if (outcome.kind === 'refused') {
@@ -1046,7 +1048,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       return true
     }
     if (request.method === 'GET' && url.startsWith('/api/projects/browse')) {
-      respondWithBrowse(url, response)
+      answerOrFail(respondWithBrowse(url, response), response)
       return true
     }
     const projectId = PROJECT_ROUTE.exec(url)?.[1]
