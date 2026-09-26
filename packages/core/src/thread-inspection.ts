@@ -252,6 +252,9 @@ export type EnsoStoredThread = Static<typeof EnsoStoredThread>
  * synthetic `turn/end { interrupted }` on resume repair; here the report is the repair, and the
  * next prompt continues from the torn tail as pi would.
  *
+ * Never said of a thread whose run is still going here (#412): pi parked on a question ends its
+ * branch on the call with no result yet, by construction, and that run has not torn.
+ *
  * @group Thread inspection
  */
 export const EnsoInterruptedTail = Type.Union([

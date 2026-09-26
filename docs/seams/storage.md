@@ -241,6 +241,9 @@ export const EnsoThreadHistory = Type.Object(
  * Derived on read from the branch, never written to pi's file: deepseek-harness appends a
  * synthetic `turn/end { interrupted }` on resume repair; here the report is the repair, and the
  * next prompt continues from the torn tail as pi would.
+ *
+ * Never said of a thread whose run is still going here (#412): pi parked on a question ends its
+ * branch on the call with no result yet, by construction, and that run has not torn.
  */
 export const EnsoInterruptedTail = Type.Union([
   Type.Literal('unanswered-prompt'),
