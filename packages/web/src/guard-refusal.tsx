@@ -13,7 +13,7 @@ import { type Store, ThreadStoresContext, useStore } from './store.ts'
 /** The verdict after "Refused ·" — what the rule guards, in the reader's words. One per rule: a new rule fails the build here. */
 const GUARD_RULE_VERDICT: Readonly<Record<EnsoGuardRule, string>> = {
   'policy-mismatch': 'policy names a missing tool',
-  'cc-safety-net': 'safety analyzer',
+  'cc-safety-net': 'unsafe shell command',
   'network-egress': 'network egress',
   'environment-dump': 'environment dump',
   'secret-path': 'credential path',

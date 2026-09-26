@@ -7,9 +7,27 @@ import type { EnsoThreadStats, EnsoToolCallStats } from '@enso/core'
  * wire. Pure, so the rules are pinned without a DOM.
  *
  * ⚠ livecraft's rules, kept: a duration ranking lists only calls the log timed, never a zero for
- * one it did not; a failure ranking lists only calls pi marked `isError`; a tool's duration says
- * how many of its calls were measured.
+ * one it did not; a failure ranking lists only failed calls; a tool's duration says how many of
+ * its calls were measured.
+ *
+ * ⚠ OURS, ON TOP (#407): a failure is an `isError` result a guard did NOT refuse. pi hands a
+ * guard's refusal over as the same `isError` result a failed command makes; the thread's
+ * `guardDenials` (#387) is what tells them apart, so every function here that counts failures
+ * takes it — required, so no caller can count a refusal as a failure by leaving it out.
  */
+
+/** The calls a guard refused, by tool-call id — the thread's `guardDenials` store. */
+export type RefusedCalls = ReadonlyMap<string, unknown>
+
+/** Refused by a guard (#387): policy doing its job, said apart from a failure. */
+export function isRefused(call: EnsoToolCallStats, refused: RefusedCalls): boolean {
+  return refused.has(call.toolCallId)
+}
+
+/** Failed: an error result no guard refused — the tool ran, or tried to, and failed. */
+function isFailure(call: EnsoToolCallStats, refused: RefusedCalls): boolean {
+  return call.isError && !isRefused(call, refused)
+}
 
 /** A difference below a hundredth of a cent is float noise, not spend. */
 const COST_EPSILON = 0.00005
@@ -19,6 +37,7 @@ export interface ToolSummary {
   readonly toolName: string
   readonly calls: number
   readonly failed: number
+  readonly refused: number
   readonly inputChars: number
   readonly outputChars: number
   /** The measured calls' durations, summed; `measured` says how many that is. */
@@ -34,7 +53,8 @@ export interface StatsHeadline {
   readonly averageToolsPerTurn: number
   readonly toolCalls: number
   readonly failedToolCalls: number
-  /** `failed / calls`, 0 with no call. */
+  readonly refusedToolCalls: number
+  /** `failed / calls`, 0 with no call — a refusal is not a failure. */
   readonly failureRate: number
   /** pi's session total beyond what the branch's messages account for; 0 when within noise. */
   readonly offBranchCost: number
@@ -47,11 +67,12 @@ function median(values: readonly number[]): number {
   return ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
 }
 
-export function headlineOf(stats: EnsoThreadStats): StatsHeadline {
+export function headlineOf(stats: EnsoThreadStats, refused: RefusedCalls): StatsHeadline {
   const turnCosts = stats.turnStats.map((turn) => turn.cost)
   const turnCount = turnCosts.length
   const toolCalls = stats.callStats.length
-  const failedToolCalls = stats.callStats.filter((call) => call.isError).length
+  const failedToolCalls = stats.callStats.filter((call) => isFailure(call, refused)).length
+  const refusedToolCalls = stats.callStats.filter((call) => isRefused(call, refused)).length
   const offBranch = stats.usage.cost - stats.branchCost
   return {
     turnCount,
@@ -60,26 +81,29 @@ export function headlineOf(stats: EnsoThreadStats): StatsHeadline {
     averageToolsPerTurn: turnCount === 0 ? 0 : toolCalls / turnCount,
     toolCalls,
     failedToolCalls,
+    refusedToolCalls,
     failureRate: toolCalls === 0 ? 0 : failedToolCalls / toolCalls,
     offBranchCost: offBranch >= COST_EPSILON ? offBranch : 0,
   }
 }
 
 /** Per tool, most calls first, ties by name — livecraft's `summarizeTools`. */
-export function toolSummaries(calls: readonly EnsoToolCallStats[]): ToolSummary[] {
+export function toolSummaries(calls: readonly EnsoToolCallStats[], refused: RefusedCalls): ToolSummary[] {
   const byName = new Map<string, { -readonly [Key in keyof ToolSummary]: ToolSummary[Key] }>()
   for (const call of calls) {
     const summary = byName.get(call.toolName) ?? {
       toolName: call.toolName,
       calls: 0,
       failed: 0,
+      refused: 0,
       inputChars: 0,
       outputChars: 0,
       durationMs: 0,
       measured: 0,
     }
     summary.calls += 1
-    summary.failed += Number(call.isError)
+    summary.failed += Number(isFailure(call, refused))
+    summary.refused += Number(isRefused(call, refused))
     summary.inputChars += call.inputChars
     summary.outputChars += call.outputChars
     if (call.durationMs !== undefined) {
@@ -111,22 +135,26 @@ export function rankTools(tools: readonly ToolSummary[], metric: ToolUsageMetric
 /** What "costliest calls" ranks by. */
 export type CallMetric = 'input' | 'output' | 'duration' | 'failure'
 
-export function callValue(call: EnsoToolCallStats, metric: CallMetric): number {
+export function callValue(call: EnsoToolCallStats, metric: CallMetric, refused: RefusedCalls): number {
   if (metric === 'duration') return call.durationMs ?? 0
-  if (metric === 'failure') return Number(call.isError)
+  if (metric === 'failure') return Number(isFailure(call, refused))
   return metric === 'input' ? call.inputChars : call.outputChars
 }
 
 /** livecraft shows the top eight calls. */
 const RANKED_CALLS = 8
 
-/** The calls by a metric, top eight; by duration only timed calls, by failure only failed ones. */
-export function rankCalls(calls: readonly EnsoToolCallStats[], metric: CallMetric): EnsoToolCallStats[] {
+/** The calls by a metric, top eight; by duration only timed calls, by failure only failed ones — never a refused one. */
+export function rankCalls(
+  calls: readonly EnsoToolCallStats[],
+  metric: CallMetric,
+  refused: RefusedCalls,
+): EnsoToolCallStats[] {
   return calls
     .filter((call) => {
       if (metric === 'duration') return call.durationMs !== undefined
-      return metric !== 'failure' || call.isError
+      return metric !== 'failure' || isFailure(call, refused)
     })
-    .sort((first, second) => callValue(second, metric) - callValue(first, metric))
+    .sort((first, second) => callValue(second, metric, refused) - callValue(first, metric, refused))
     .slice(0, RANKED_CALLS)
 }
