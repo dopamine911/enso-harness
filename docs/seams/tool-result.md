@@ -232,7 +232,7 @@ is the point, not a courtesy* (`:11-14`): a type-tag design's characteristic fai
 payload showing as nothing, indistinguishable from a successful empty result. `toolResultState` is also
 what the status bar's `running <tool>` reads (`thread-status.tsx:5`).
 
-**The renderer map is empty** (`chat-screen.tsx:123-130`): every result falls through to the text form,
+**The renderer map is empty** (`chat-screen.tsx:124-131`): every result falls through to the text form,
 which is exactly what the contract promises for an unknown kind, so empty is the honest default. A
 renderer is added when a tool earns one.
 
