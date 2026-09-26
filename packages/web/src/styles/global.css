@@ -1,19 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-/* The themes' fonts (styles/themes.css `--font-*`). Each file only DECLARES its faces; a browser
-   downloads the ones the current theme names, so the other themes' fonts cost nothing. */
-@import "@fontsource-variable/geist";
-@import "@fontsource-variable/inter";
-@import "@fontsource-variable/sora";
-@import "@fontsource-variable/jetbrains-mono";
-@import "@fontsource-variable/ibm-plex-sans";
-@import "@fontsource-variable/space-grotesk";
-@import "@fontsource-variable/source-sans-3";
-@import "@fontsource-variable/fraunces/wght.css";
-@import "@fontsource-variable/fraunces/wght-italic.css";
-@import "@fontsource/ibm-plex-mono/400.css";
-@import "@fontsource/ibm-plex-mono/500.css";
+/* The themes' fonts are NOT imported here: Bun inlines every font a stylesheet names (1.74 MB).
+   src/fonts.ts links the @fontsource stylesheets unbundled, from server/font-files.ts (#407). */
 /* The colour themes — every palette, one block per theme (src/theme.ts). */
 @import "./themes.css";
 

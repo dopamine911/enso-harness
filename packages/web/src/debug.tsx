@@ -6,6 +6,7 @@ import { StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { configureBrowserLogging, pageLogLevel } from './browser-logging.ts'
 import { DebugScreen } from './debug/debug-screen.tsx'
+import { linkFontFaces } from './fonts.ts'
 
 /**
  * THE OBSERVATION ENTRY (#144 slices 2–3), deliberately thin: read the URL, mount the debug
@@ -31,6 +32,9 @@ await configureBrowserLogging({
   page: crypto.randomUUID().slice(0, 8),
   console: true,
 })
+
+// The same fonts as the main page (#407), unbundled; this page keeps the default theme's.
+linkFontFaces(document)
 
 const rootElement = document.getElementById('root')
 if (rootElement === null) throw new Error('Enso: #root is missing from debug.html')

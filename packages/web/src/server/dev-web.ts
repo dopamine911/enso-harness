@@ -14,6 +14,7 @@
  * only (see `src/server/index.ts`), and this server does too: with no sandbox and `bash`
  * unconfined (#9), neither surface may be reachable from another host.
  */
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ensoLogger } from '@enso/core'
 import {
@@ -29,12 +30,18 @@ import { knownSecretValuesTracking } from '@enso/core/secrets'
 // page that only watches it cannot drift into one bundle.
 import debugPage from '../../debug.html'
 import homepage from '../../index.html'
+import { createFontFileRoute } from './font-files.ts'
 
 const WEB_PORT = 5178
 const API_UPSTREAM_ORIGIN = 'http://127.0.0.1:5179'
 
 const repoRoot = findRepoRoot(import.meta.url)
 const publicDir = join(webPackageDir(repoRoot), 'public')
+// The page's fonts, from the installed `@fontsource` packages, unbundled (`font-files.ts`, #407).
+const webPackage: { dependencies?: Record<string, string> } = JSON.parse(
+  readFileSync(join(webPackageDir(repoRoot), 'package.json'), 'utf8'),
+)
+const fontFiles = createFontFileRoute(webPackageDir(repoRoot), Object.keys(webPackage.dependencies ?? {}))
 
 // Its own process, the same day's file (#132) — nothing of substance happens here, but a
 // proxy that cannot reach the enso server is exactly the line a bundle needs.
@@ -95,6 +102,7 @@ try {
       '/': homepage,
       '/debug': debugPage,
       '/api/*': proxyToApiServer,
+      '/fonts/*': fontFiles,
       // Everything else falls through to the public assets (favicon, logos). Bun's
       // directory route rejects non-canonical paths and clamps symlink escapes, and a
       // miss is a 404 — this app has no client-side routing to fall back for.

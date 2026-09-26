@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 276.**
+**Decision headers: 281.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -106,6 +106,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/fixture-conversation.test.ts` | `#27`, `#218` | The compatibility probe that used to live in a PR body (#218). |
 | `packages/web/src/__tests__/follow-budget.test.ts` | `#272` | The page's follow budget (#272). |
 | `packages/web/src/__tests__/follow-connection.test.ts` | `#112` | The adapter is the ONLY place AG-UI is made (#112). |
+| `packages/web/src/__tests__/fonts.test.ts` | `#407` | #407 item 6: a font per role, kept in this browser, over the theme's; and the families' faces declared from their own stylesheets, unbundled. |
 | `packages/web/src/__tests__/mode-lines.test.ts` | `#29`, `#90` | #29's remaining half: a mode change becomes a visible transcript line. |
 | `packages/web/src/__tests__/notifications.test.tsx` | `#29`, `#90` | #29's browser half: notify messages become visible transcript lines. |
 | `packages/web/src/__tests__/page-scoped-stores.test.ts` | `#103`, `#125` | The anchor for #125 item 3 / #103 invariant 2 (switching threads leaks no state): every store that holds a THREAD's state is created inside `createThreadStores` (thread-stores.ts), so a second thread on the page gets its own. |
@@ -142,6 +143,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/debug/thread-timeline-screen.tsx` | `#144` | One thread's timeline (#144 slice 3): what the host emitted, what the server sent, and what was logged, as ONE list ordered by time — on the debug page at `debug.html?thread=<id>`. |
 | `packages/web/src/fixture-conversation.ts` | `#27`, `#31`, `#75`, `#404` | The styling dev loop (#31): a scripted conversation streamed through the REAL `useChat` pipeline as local AG-UI events — no server, no pi. |
 | `packages/web/src/follow-connection.ts` | `#112`, `#272`, `#274` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |
+| `packages/web/src/fonts.ts` | `#407` | The page's fonts (#407 item 6): the families it ships, the per-role choice in Settings, and how both reach the page. |
 | `packages/web/src/guard-refusal.tsx` | `#387`, `#407` | A guard refusal as the design draws it (`Enso-Design-Direction` `.guard`, #407 item 1): the tool, the verdict in the refusal colour, what was asked, why it was refused, and who refused it. |
 | `packages/web/src/host/__tests__/agent-host.test.ts` | `#27`, `#45`, `#69` | The in-process host against the REAL harness package (#69) — every extension the manifest names loads, and inline probe extensions observe what the host does. |
 | `packages/web/src/host/__tests__/agent-loop-contract.test.ts` | `#130` | A CONTRACT TEST on the runtime's loop, the shape of `cc-safety-net-contract.test.ts`: the wire shape of a refused tool call is the vendor's doing — a guard's `{ block, reason }` becomes an error result with the reason as its content, `isError: true` — and `map-events.ts` relies on it (the `tool_execution_end` case, "isError is the only signal a refused call has"). |
@@ -190,6 +192,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/__tests__/follow-reader.test.ts` | `#231` | The double's own contract (#231). |
 | `packages/web/src/server/__tests__/follow-reader.ts` | `#231` | A follow as a test reads it: frames and keepalive comments as they arrive, awaited by count — never by a guessed delay. |
 | `packages/web/src/server/__tests__/follow.test.ts` | `#109`, `#112` | The wire, measured (#109's receipt, kept as the contract — #112). |
+| `packages/web/src/server/__tests__/font-files.test.ts` | `#407` | #407 item 6: the page's fonts are served unbundled from the installed `@fontsource` packages. |
 | `packages/web/src/server/__tests__/live-or-stored.test.ts` | `#45`, `#361` | The analysis routes' one read rule (#45, #361), the rule `thread-read.ts` reads by: peek, read the file if not live, re-peek. |
 | `packages/web/src/server/__tests__/logs-route.test.ts` | `#132` | `POST /api/logs` (#132 slice 3): the browser's batch into this process's logger, under the browser's own category, at its level, marked as the browser's — or a 4xx that is never a record of its own. |
 | `packages/web/src/server/__tests__/logs-stats-route.test.ts` | `#144`, `#336` | The stats route's own three facts (#144 slice 4, PR #336 review): WHICH file it folds is the clock's local day, a day nobody has written is an empty answer and not a failure, and a line that is not a record is counted rather than folded. |
@@ -205,6 +208,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/dev-web.ts` | `#9`, `#36` | Dev entry point for the web surface — Bun's fullstack dev server, replacing vite (#36). |
 | `packages/web/src/server/dev.ts` | `#9`, `#132`, `#395` | Dev entry point for the enso server. |
 | `packages/web/src/server/follow.ts` | `#75`, `#109`, `#112`, `#116`, `#162` | The prompt/follow split (#112) — the server↔browser wire. |
+| `packages/web/src/server/font-files.ts` | `#407` | The page's fonts, served as files rather than bundled (#407 item 6). |
 | `packages/web/src/server/live-or-stored.ts` | `#45`, `#86`, `#361` | A thread's answer from pi's memory when it is live, from its file when it is not (#45, #361) — READ THE WAY `thread-read.ts` READS: peek, read the file if not live, re-peek. |
 | `packages/web/src/server/logs-route.ts` | `#132` | `POST /api/logs` (#132 slice 3): the browser's records, into the one file. |
 | `packages/web/src/server/logs-stats-route.ts` | `#97`, `#144` | `GET /api/logs/stats` (#144 slice 4): the day, derived — `dayStats` over today's file, as JSON, for the debug page's stats view. |
@@ -218,6 +222,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/thread-registry.ts` | `#43`, `#69`, `#113`, `#116` | One pi session per chat THREAD, held across runs (#69 PR 2 — closes #43). |
 | `packages/web/src/server/thread-stats-route.ts` | `#45`, `#358`, `#359` | `GET /api/threads/:threadId/stats` (#45 phase 2): one thread, analysed — the chat's stats drawer reads it. |
 | `packages/web/src/server/transcript-to-messages.ts` | `#93`, `#95`, `#162`, `#220` | The transcript → TanStack `UIMessage`s (#95): the history a resumed thread mounts with. |
+| `packages/web/src/settings-dialog.tsx` | `#407` | The page's settings (the header's gear): its colour theme, and a font per role (#407). |
 | `packages/web/src/start-session.tsx` | `#390`, `#391` | The Start-a-session dialog (#391): a new thread opens on it — the model, the effort, the mode and the first prompt, then **Start session**. |
 | `packages/web/src/stats-table.tsx` | `#45`, `#144` | The table and the number formats the two stats surfaces share (#45 phase 2): the day's (`debug/day-stats-screen.tsx`, #144) and one thread's (`thread-stats.tsx`). |
 | `packages/web/src/store.ts` | `#90` | The smallest external store React can subscribe to: one value, replaced whole, and a listener set. |
