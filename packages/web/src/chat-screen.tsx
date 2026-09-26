@@ -3,6 +3,7 @@ import {
   ENSO_CONTEXT_COMMAND,
   ENSO_IMAGE_MAX_BYTES,
   ENSO_IMAGE_MIME_TYPES,
+  ENSO_NOTICE_SOURCE,
   ENSO_PROMPT_MAX_IMAGES,
   type EnsoDialogAnswer,
   type EnsoDialogSpec,
@@ -82,7 +83,7 @@ import { ThreadNotifications } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
 import { createProjectsStore, projectOf, removeProject } from './project-list.ts'
 import { QuestionnaireControls } from './questionnaire-card.tsx'
-import { providerRefusalLine, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
+import { providerRefusalLine, providerRefusalSource, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
 import { SettingsDialog } from './settings-dialog.tsx'
 import { StartSessionDialog } from './start-session.tsx'
@@ -1014,7 +1015,10 @@ const MessageBody = memo(function MessageBody({
 /** The same refusal line, whether or not the message object behind it was replaced. */
 function sameRefusal(before: EnsoProviderRefusal | undefined, after: EnsoProviderRefusal | undefined): boolean {
   if (before === undefined || after === undefined) return before === after
-  return providerRefusalLine(before) === providerRefusalLine(after)
+  return (
+    providerRefusalLine(before) === providerRefusalLine(after) &&
+    providerRefusalSource(before) === providerRefusalSource(after)
+  )
 }
 
 /**
@@ -1188,7 +1192,13 @@ const chatComponents = {
         onOpenModelDialog: setModelDialog,
         onOpenView: (commandName: string): void => {
           if (commandName === ENSO_CONTEXT_COMMAND) setContextOpen(true)
-          else stores.notifications.push(`/${commandName} opens a view this page does not have`, 'warning', 'run')
+          else
+            stores.notifications.push(
+              `/${commandName} opens a view this page does not have`,
+              'warning',
+              'run',
+              ENSO_NOTICE_SOURCE,
+            )
         },
       }
       // A bare `/<name>` typed and sent (#388): when the thread's command list names it as a HOST
@@ -1210,7 +1220,12 @@ const chatComponents = {
         }
         const opened = runTypedHostCommand(row, paletteHandlers(host, runCommand, insertCommand))
         if (!opened)
-          stores.notifications.push(`/${row.name} is a setting: choose a value from the / palette`, 'info', 'run')
+          stores.notifications.push(
+            `/${row.name} is a setting: choose a value from the / palette`,
+            'info',
+            'run',
+            ENSO_NOTICE_SOURCE,
+          )
       }
 
       return (
@@ -1222,7 +1237,7 @@ const chatComponents = {
           maxFileSize={ENSO_IMAGE_MAX_BYTES}
           // A file the form would not take is said, not dropped (#68): the reason names the cap.
           onError={(error: PromptInputError): void =>
-            stores.notifications.push(describeAttachmentError(error), 'warning', 'run')
+            stores.notifications.push(describeAttachmentError(error), 'warning', 'run', ENSO_NOTICE_SOURCE)
           }
           onSubmit={({ text, files }: PromptInputMessage): void => {
             // The form hands back `data:` URLs (blob → FileReader); the wire takes bytes + kind.
@@ -1245,6 +1260,7 @@ const chatComponents = {
                 describeAttachmentError({ code: 'accept', message: '', count: notImages }),
                 'warning',
                 'run',
+                ENSO_NOTICE_SOURCE,
               )
             }
             // The draft WAS the text: it clears here, at the submit, not in `send` — the palette

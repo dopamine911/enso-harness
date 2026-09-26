@@ -237,6 +237,25 @@ test('follow-ended is said where the human looks, as an error of this run (#103 
   expect(stores.notifications.get().at(-1)).toMatchObject({ notifyType: 'error', origin: 'run' })
 })
 
+// #387: every line says who acted. An extension's notice carries the sender the host tagged it
+// with; the page's own lines — the connection, a busy thread — say Enso; a notice nobody tagged
+// says nothing rather than a guess.
+test('a notice carries its sender as the line’s source; Enso’s own lines say Enso; an untagged one says none (#387)', () => {
+  observe({
+    kind: 'extension-ui-request',
+    id: '',
+    method: 'notify',
+    blocking: false,
+    origin: 'run',
+    message: 'no recoverable account is available',
+    notifyType: 'warning',
+    sender: 'probe-extension',
+  })
+  observe({ kind: 'extension-ui-request', id: '', method: 'notify', blocking: false, origin: 'run', message: 'x' })
+  route(FOLLOW_ENDED_CUSTOM_EVENT, { threadId: 't1' })
+  expect(stores.notifications.get().map((line) => line.source)).toEqual(['probe-extension', undefined, 'Enso'])
+})
+
 // #119: the notice scrolls away; the status bar's own state must say it too. Only a live
 // follow delivers a status frame, so the next one is the honest "connected again".
 test('follow-ended marks the thread disconnected; the next status frame clears it (#119)', () => {
@@ -419,6 +438,7 @@ test("⚠ a chunk routed to one thread never touches another thread's stores", (
 const refusal = (status: number | undefined, message: string): EnsoObservation => ({
   kind: 'provider-refused',
   provider: 'anthropic',
+  providerName: 'Anthropic',
   model: 'claude-sonnet-4-5',
   ...(status === undefined ? {} : { status }),
   message,
@@ -427,7 +447,7 @@ const refusal = (status: number | undefined, message: string): EnsoObservation =
 // The acceptance's three: a 429, a 401 and a 400 must read as three different things — what to do
 // about each differs (wait, log in, change the model), so a person must be able to tell them apart.
 test('a 429, a 401 and a 400 are three distinct transcript lines and status words, each with the provider’s sentence', () => {
-  const seen: Array<{ line: string | undefined; word: string | undefined }> = []
+  const seen: Array<{ source: string | undefined; line: string | undefined; word: string | undefined }> = []
   for (const [status, message] of [
     [429, '429 {"type":"error","error":{"type":"rate_limit_error","message":"rate limit exceeded"}}'],
     [401, '401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}'],
@@ -437,23 +457,46 @@ test('a 429, a 401 and a 400 are three distinct transcript lines and status word
     ],
   ] as const) {
     observe(refusal(status, message))
-    seen.push({ line: notificationMessages().at(-1), word: stores.refusal.get()?.refusalClass })
+    seen.push({
+      source: stores.notifications.get().at(-1)?.source,
+      line: notificationMessages().at(-1),
+      word: stores.refusal.get()?.refusalClass,
+    })
   }
+  // Who refused leads each line (#387) — the provider's display name, so the class word is never
+  // read as an Enso policy.
   expect(seen).toEqual([
-    { line: 'anthropic/claude-sonnet-4-5 refused: rate-limited (429) — rate limit exceeded', word: 'rate-limited' },
-    { line: 'anthropic/claude-sonnet-4-5 refused: not logged in (401) — invalid x-api-key', word: 'not logged in' },
     {
-      line: 'anthropic/claude-sonnet-4-5 refused: model refused (400) — Claude Code 2.1.259 does not support this model',
+      source: 'Anthropic',
+      line: 'claude-sonnet-4-5 refused: rate-limited (429) — rate limit exceeded',
+      word: 'rate-limited',
+    },
+    {
+      source: 'Anthropic',
+      line: 'claude-sonnet-4-5 refused: not logged in (401) — invalid x-api-key',
+      word: 'not logged in',
+    },
+    {
+      source: 'Anthropic',
+      line: 'claude-sonnet-4-5 refused: model refused (400) — Claude Code 2.1.259 does not support this model',
       word: 'model refused',
     },
   ])
   expect(stores.notifications.get().at(-1)).toMatchObject({ notifyType: 'error', origin: 'run' })
 })
 
-test('pi’s retry is its own line: when, and which attempt of how many', () => {
+// pi retries the request the provider just refused, so the retry line names that provider (#387) —
+// the retry itself carries none.
+test('pi’s retry is its own line: when, which attempt of how many, and the provider it retries', () => {
+  observe(refusal(429, '429 rate limited'))
   observe({ kind: 'provider-retry', attempt: 2, maxAttempts: 4, delayMs: 4000 })
   observe({ kind: 'provider-retry', attempt: 1, maxAttempts: 3, delayMs: 500 })
-  expect(notificationMessages()).toEqual(['retrying in 4 s — attempt 2 of 4', 'retrying in 500 ms — attempt 1 of 3'])
+  const retries = stores.notifications.get().slice(1)
+  expect(retries.map((line) => line.message)).toEqual([
+    'retrying in 4 s — attempt 2 of 4',
+    'retrying in 500 ms — attempt 1 of 3',
+  ])
+  expect(retries.map((line) => line.source)).toEqual(['Anthropic', 'Anthropic'])
 })
 
 // #380 review: without an end line, a thread that ran out of retries ends on `retrying in …`, as
@@ -482,7 +525,11 @@ test('the status word stays while nothing got through, and clears once output gr
   observe({ kind: 'session-usage', ...SPENT })
   observe(refusal(429, '429 rate limited'))
   observe({ kind: 'session-usage', ...SPENT })
-  expect(stores.refusal.get()).toEqual({ refusalClass: 'rate-limited', outputAtRefusal: SPENT.output })
+  expect(stores.refusal.get()).toEqual({
+    refusalClass: 'rate-limited',
+    provider: 'Anthropic',
+    outputAtRefusal: SPENT.output,
+  })
   observe({ kind: 'session-usage', ...SPENT, output: SPENT.output + 12 })
   expect(stores.refusal.get()).toBeUndefined()
 })
@@ -502,8 +549,10 @@ test('⚠ a refusal after streamed text keeps its word through the turn’s usag
       'This request triggered restrictions on violative cyber content and was blocked under Anthropic’s Usage Policy.',
   })
   expect(notificationMessages().at(-1)).toBe(
-    'anthropic/claude-opus-5 refused: provider policy — This request triggered restrictions on violative cyber content and was blocked under Anthropic’s Usage Policy.',
+    'claude-opus-5 refused: provider policy — This request triggered restrictions on violative cyber content and was blocked under Anthropic’s Usage Policy.',
   )
+  // A refusal pi names no display name for still says who refused — by its id.
+  expect(stores.notifications.get().at(-1)?.source).toBe('anthropic')
   observe({ kind: 'session-usage', ...SPENT, output: SPENT.output + 178 })
   expect(stores.refusal.get()?.refusalClass).toBe('provider policy')
   observe({ kind: 'session-usage', ...SPENT, output: SPENT.output + 178 + 5 })
@@ -524,7 +573,11 @@ const prompt = (id: string): unknown => ({ id, role: 'user', parts: [{ type: 'te
 
 test('a snapshot whose last reply is a refused attempt shows the word; one with a reply after it clears it (#381)', () => {
   route('snapshot', snapshot({ usage: SPENT, messages: [prompt('u1'), refusedAttempt('a1'), prompt('u2')] }))
-  expect(stores.refusal.get()).toEqual({ refusalClass: 'not logged in', outputAtRefusal: SPENT.output })
+  expect(stores.refusal.get()).toEqual({
+    refusalClass: 'not logged in',
+    provider: 'anthropic',
+    outputAtRefusal: SPENT.output,
+  })
   // the mark is the snapshot's output: a later reply's usage clears it as a live one would
   observe({ kind: 'session-usage', ...SPENT, output: SPENT.output + 1 })
   expect(stores.refusal.get()).toBeUndefined()

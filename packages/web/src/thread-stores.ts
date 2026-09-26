@@ -1,4 +1,5 @@
 import {
+  ENSO_NOTICE_SOURCE,
   ENSO_PROJECT_HEADER,
   type EnsoDialogSpec,
   type EnsoGuardRule,
@@ -145,6 +146,8 @@ export interface ThreadStores {
 /** A refusal the status bar shows — see {@link ThreadStores.refusal}. */
 export interface ProviderRefusalMark {
   readonly refusalClass: ProviderRefusalClass
+  /** Who refused (#387) — `providerRefusalSource`: said beside the word, and on the retry lines that follow. */
+  readonly provider?: string | undefined
   readonly outputAtRefusal: number
 }
 
@@ -216,7 +219,9 @@ function createThreadStores(
     connection: createFollowConnection({
       threadId,
       fetch: threadFetch,
-      onProblem: (problem: unknown) => notifications.push(String(problem), 'warning', 'run'),
+      // The page's own connection to the server — a busy thread (409), a refused answer, the
+      // network: Enso's lines (#387).
+      onProblem: (problem: unknown) => notifications.push(String(problem), 'warning', 'run', ENSO_NOTICE_SOURCE),
     }),
   }
 }
@@ -443,7 +448,7 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike): 
   const stores = createThreadStores(history.threadId, messages, fetchImpl, history.projectId)
   stores.permissionMode.applyReceipt(history.permissionMode)
   if (history.interrupted !== undefined) {
-    stores.notifications.push(INTERRUPTED_TAIL_NOTICE[history.interrupted], 'warning', 'run')
+    stores.notifications.push(INTERRUPTED_TAIL_NOTICE[history.interrupted], 'warning', 'run', ENSO_NOTICE_SOURCE)
   }
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {

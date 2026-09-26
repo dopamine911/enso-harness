@@ -59,8 +59,9 @@ sequenceDiagram
    tool result into the assistant message holding its call, drops one whose call is not on the branch,
    skips `custom` and `other`; an image's bytes render as a data URL, never a fetch (`selected-message-part.tsx`).
    A refused attempt (#381) — pi keeps it on the branch with `stopReason: "error"` — is a message
-   carrying its `refusal`, and its bubble says `<provider>/<model> refused: <class> (<status>) — <reason>`
-   where the reply would have been, not an empty bubble.
+   carrying its `refusal`, and its bubble says `<Provider> · <model> refused: <class> (<status>) — <reason>`
+   where the reply would have been, not an empty bubble. The provider is pi's display name for it
+   (#387), from pi-ai's built-in catalogue, since a cold read has no session to ask.
 6. **The URL names the thread; the latest navigation wins.** `readThreadUrl`: a thread id resumes,
    none is fresh, a malformed one is fresh *and said*; `urlForThread` keeps every other parameter.
    The boot resumes with `pop` (no history written), a rail click pushes, and two guards drop a late

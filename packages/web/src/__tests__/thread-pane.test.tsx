@@ -1701,7 +1701,7 @@ test("a resumed thread's refused attempt says the refusal in its own bubble, bef
   await eventually(() => {
     const lines = page.container.querySelectorAll('[data-enso-refused-attempt]')
     expect([...lines].map((line) => line.textContent)).toEqual([
-      'anthropic/claude-sonnet-4-5 refused: rate-limited (429) — rate limit exceeded',
+      'anthropic · claude-sonnet-4-5 refused: rate-limited (429) — rate limit exceeded',
     ])
     // in the attempt's place: the bubble between the prompt and the reply
     const text = page.container.textContent ?? ''

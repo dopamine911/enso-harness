@@ -150,6 +150,15 @@ export const EnsoUiRequestOrigin = Type.Union([Type.Literal('session-start'), Ty
 export type EnsoUiRequestOrigin = Static<typeof EnsoUiRequestOrigin>
 
 /**
+ * The source a line of Enso's own says it came from (#387) — the host's login and compaction
+ * notices, the page's connection and busy lines — beside an extension's name or a provider's.
+ *
+ * @group Observations
+ * @category Extension surface
+ */
+export const ENSO_NOTICE_SOURCE = 'Enso' as const
+
+/**
  * @group Observations
  * @category Extension surface
  */
@@ -162,6 +171,13 @@ export const EnsoExtensionUiRequest = Type.Object({
   dialog: Type.Optional(EnsoDialogSpec),
   message: Type.Optional(Type.String()),
   notifyType: Type.Optional(EnsoNotifyType),
+  /**
+   * Who said a notify (#387): the extension that called `ui.notify` — its package, or `Enso <name>`
+   * for the harness's own — or `Enso` for the host's own lines. pi hands every extension the same
+   * `ctx.ui`, so this is never read from the call; the host tags each extension's context with
+   * the extension pi loaded it as (`host/notice-sender.ts`). Absent when nothing is known.
+   */
+  sender: Type.Optional(Type.String({ minLength: 1 })),
 })
 
 /**

@@ -478,7 +478,7 @@ cc-safety-net, the command analyzer the bash guard wires as a library. *log subs
 | admission (#216) | `streamingBehavior`: `steer` or `followUp`; `steer()` / `follow_up()` | inbox `next-step` / `next-turn` | — | — |
 | queue | `queue_update`, `clearQueue()` | inbox `claimed` / `discarded` | the browser queue we do **not** use | — |
 | dialog / dialog kind | `extension_ui_request`; `ctx.ui.select / confirm / input / editor` | approval `request()` inside a turn | — | mode extension's `FilePermissionDialog`, lifted to `select`; `ask_user`'s questionnaire component, lifted to `questionnaire` (ours) |
-| notify | `ctx.ui.notify`; `setStatus` is dropped | — | — | — |
+| notify | `ctx.ui.notify`; `setStatus` is dropped. One `ctx.ui` for every extension, so the host tags each extension's context with the extension pi loaded (`extensionsOverride`, `host/notice-sender.ts`) and a notify carries its `sender` (#387) | — | — | — |
 | permission mode | — | `permission/preset` + knobs; `custom` derived | — | mode extension's modes (`default`, `acceptEdits`, `plan`, `bypassPermissions`), persisted as `customType: "modes"` |
 | (no word) — the runtime's interface setting | `ctx.mode`: `tui` / `rpc` / `json` / `print` | — | — | — |
 | verdict | `ToolCallEventResult`: `{ block, reason }` or `undefined` | — | — | analyzer `checkCommand` → `kind` `allow` or `deny`, with `ruleId`; a throw is a deny |

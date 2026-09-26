@@ -37,6 +37,12 @@ export interface EnsoNotification {
    * which is not extension chatter and stays open however early it arrives.
    */
   origin: EnsoUiRequestOrigin
+  /**
+   * Who acted (#387): the extension that said it, the provider that refused, or `Enso` for the
+   * harness's own lines — always from data (a tagged sender, a refusal's provider), never from
+   * the wording. Absent when nothing names one.
+   */
+  source?: string | undefined
   at: Date
 }
 
@@ -48,7 +54,12 @@ export interface EnsoNotification {
 const MAX_KEPT_NOTIFICATIONS = 100
 
 export interface NotificationsStore extends Store<ReadonlyArray<EnsoNotification>> {
-  readonly push: (message: string, notifyType: EnsoNotifyType | undefined, origin: EnsoUiRequestOrigin) => void
+  readonly push: (
+    message: string,
+    notifyType: EnsoNotifyType | undefined,
+    origin: EnsoUiRequestOrigin,
+    source?: string,
+  ) => void
 }
 
 export function createNotificationsStore(): NotificationsStore {
@@ -57,8 +68,11 @@ export function createNotificationsStore(): NotificationsStore {
   return {
     get: store.get,
     subscribe: store.subscribe,
-    push: (message: string, notifyType: EnsoNotifyType | undefined, origin: EnsoUiRequestOrigin) => {
-      const appended = [...store.get(), { id: nextNotificationId++, message, notifyType, origin, at: new Date() }]
+    push: (message: string, notifyType: EnsoNotifyType | undefined, origin: EnsoUiRequestOrigin, source?: string) => {
+      const appended = [
+        ...store.get(),
+        { id: nextNotificationId++, message, notifyType, origin, source, at: new Date() },
+      ]
       store.set(appended.slice(-MAX_KEPT_NOTIFICATIONS))
     },
   }
@@ -95,14 +109,19 @@ const LINE_STYLE: Record<EnsoNotifyType, { row: string; icon: string }> = {
  * the refusal colour, text in the foreground; a warning is foreground text beside a triangle in
  * the refusal colour; info — and an absent type — is muted. Anything else — a `title`, a
  * `data-*` marker — passes through to the row.
+ *
+ * `source` leads the text when there is one (#387): `Anthropic · …`, `pi-multi-account · …`,
+ * `Enso · …` — who acted, so a reader knows what would fix it without reading logs.
  */
 export function TranscriptLine({
   notifyType,
   message,
+  source,
   ...rest
 }: {
   notifyType: EnsoNotifyType | undefined
   message: string
+  source?: string | undefined
 } & Omit<React.ComponentProps<'div'>, 'role' | 'className' | 'children'>): React.ReactNode {
   const kind = notifyType ?? 'info'
   const Icon = NOTIFY_TYPE_ICONS[kind]
@@ -114,6 +133,14 @@ export function TranscriptLine({
     >
       <Icon className={cn('mt-0.5 size-4 shrink-0', LINE_STYLE[kind].icon)} />
       <span className="min-w-0 break-words whitespace-pre-wrap">
+        {source === undefined ? null : (
+          <>
+            <b data-enso-line-source="" className="font-medium text-foreground">
+              {source}
+            </b>
+            {' · '}
+          </>
+        )}
         <LinkedText text={message} />
       </span>
     </div>
@@ -179,6 +206,7 @@ export function NotificationLine({ notification }: { notification: EnsoNotificat
     <TranscriptLine
       notifyType={notification.notifyType}
       message={notification.message}
+      source={notification.source}
       title={notification.at.toLocaleString()}
     />
   )

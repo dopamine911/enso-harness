@@ -134,6 +134,11 @@ const hostLog = ensoLogger('host', 'ui')
 
 export interface EnsoExtensionUiContext {
   readonly uiContext: ExtensionUIContext
+  /**
+   * A notice with its sender (#387): what an extension's tagged context calls in place of
+   * `notify` (`notice-sender.ts`), and what the host's own lines say themselves with, as `Enso`.
+   */
+  readonly notifyFrom: (sender: string, message: string, type?: 'info' | 'warning' | 'error') => void
   /** Deliver an answer. Unknown ids are reported, not thrown — the extension is not waiting on them. */
   readonly answerDialog: (response: DialogAnswer) => void
   /** Every pending question, oldest first, as the follow's snapshot lists them (#114). Empty once settled. */
@@ -358,7 +363,14 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
     })
   }
 
-  const uiContext: ExtensionUIContext = {
+  function notifyFrom(sender: string, message: string, type?: 'info' | 'warning' | 'error'): void {
+    emit({ type: 'extension_ui_request', id: crypto.randomUUID(), method: 'notify', message, notifyType: type, sender })
+  }
+
+  // `notifyFrom` rides on the context itself so pi's wrapper (`runner.js` `wrapUIPromptContext`,
+  // which spreads it) keeps it, and an extension's tagged context can reach it.
+  const uiContext: ExtensionUIContext & { notifyFrom: typeof notifyFrom } = {
+    notifyFrom,
     select(title: string, options: string[], dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined> {
       return awaitDialog(
         {
@@ -516,6 +528,7 @@ export function createEnsoExtensionUiContext(options: EnsoExtensionUiContextOpti
 
   return {
     uiContext,
+    notifyFrom,
     answerDialog(response: DialogAnswer): void {
       const pending = pendingDialogs.get(response.id)
       if (pending === undefined) {

@@ -63,6 +63,26 @@ test('a notification line renders its message', () => {
   expect(rendered).toContain('role="status"')
 })
 
+// #387: who acted leads the line, so a reader knows what fixes it; a line with no source reads as
+// it always did.
+test('a line’s source leads its message; a line without one has no label', () => {
+  const line = (source?: string): string =>
+    renderToStaticMarkup(
+      <NotificationLine
+        notification={{
+          id: 1,
+          message: 'no recoverable account',
+          notifyType: 'warning',
+          origin: 'run',
+          source,
+          at: new Date(0),
+        }}
+      />,
+    ).replace(/<[^>]*>/g, '')
+  expect(line('pi-multi-account')).toBe('pi-multi-account · no recoverable account')
+  expect(line()).toBe('no recoverable account')
+})
+
 // ⚠ DELETED (#236): "an error notification styles with the destructive token; others stay muted"
 // asserted `toContain('text-destructive')` and `toContain('text-muted-foreground')` — Tailwind
 // class names, which go red on a token rename that breaks nothing and stay green on any

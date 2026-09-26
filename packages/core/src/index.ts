@@ -118,6 +118,7 @@ export {
   parseLogSince,
 } from './log-tail.ts'
 export {
+  ENSO_NOTICE_SOURCE,
   EnsoCustomEntry,
   EnsoDialogOutcome,
   EnsoDialogSettled,

@@ -56,6 +56,7 @@ import {
   type StoredCredentialFacts,
 } from './host-flows.ts'
 import { mapPiEvent } from './map-events.ts'
+import { attributeNotices, ENSO_SENDER } from './notice-sender.ts'
 import {
   freshPermissionModeState,
   PICC_PERMISSION_MODES,
@@ -64,7 +65,7 @@ import {
   readPiccPersistedMode,
   storedPermissionModeState,
 } from './permission-mode-adapter.ts'
-import { providerRefusalOf } from './provider-refusal.ts'
+import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
 import { growsSessionSpend, liveSessionUsage, storedSessionUsage } from './session-usage.ts'
@@ -562,6 +563,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         noSkills: true,
         additionalExtensionPaths: [harnessPackageDir],
         extensionFactories: [modelWatch, ...(options.extensionFactories ?? [])],
+        // Who said a notice (#387): each extension's registrations get a context whose
+        // `ui.notify` names that extension, read off the path pi loaded it from.
+        extensionsOverride: (loaded) => attributeNotices(loaded, harnessPackageDir),
       },
     })
     for (const diagnostic of services.diagnostics) {
@@ -830,7 +834,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         signal: AbortSignal.timeout(15_000),
       })
       if (refresh.aborted || refresh.errors.size > 0) {
-        ui.uiContext.notify('Model catalog could not be refreshed; using cached models.', 'warning')
+        ui.notifyFrom(ENSO_SENDER, 'Model catalog could not be refreshed; using cached models.', 'warning')
       }
       return selected
     }
@@ -851,7 +855,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           prompt: (prompt: Parameters<typeof askAuthPrompt>[0]): Promise<string> => askAuthPrompt(prompt, login),
           notify: (event: HostAuthEvent): void => {
             if (event.type === 'auth_url') login.authUrl = event.url
-            ui.uiContext.notify(authEventText(event, providerName), 'info')
+            ui.notifyFrom(ENSO_SENDER, authEventText(event, providerName), 'info')
           },
         })
         // The credential is stored: the card goes now, not after the catalog refresh below.
@@ -861,18 +865,18 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         // as a failed login that `/logout` would then contradict by listing the credential.
         try {
           const selected = await settleAfterLogin(providerId)
-          ui.uiContext.notify(loginDoneText(providerName, authType, selected), 'info')
+          ui.notifyFrom(ENSO_SENDER, loginDoneText(providerName, authType, selected), 'info')
         } catch (error) {
           // Said ONCE, and neutrally: the throw may be the catalog refresh after the model was
           // selected, so "could not select a model" would be wrong (PR #346 review 3).
           const reason = error instanceof Error ? error.message : String(error)
-          ui.uiContext.notify(`Logged in to ${providerName}; post-login setup failed: ${reason}`, 'warning')
+          ui.notifyFrom(ENSO_SENDER, `Logged in to ${providerName}; post-login setup failed: ${reason}`, 'warning')
         }
       } catch (error) {
-        if (isFlowCancelled(error)) ui.uiContext.notify(`Login to ${providerName} cancelled.`, 'info')
+        if (isFlowCancelled(error)) ui.notifyFrom(ENSO_SENDER, `Login to ${providerName} cancelled.`, 'info')
         else {
           const reason = error instanceof Error ? error.message : String(error)
-          ui.uiContext.notify(`Failed to log in to ${providerName}: ${reason}`, 'error')
+          ui.notifyFrom(ENSO_SENDER, `Failed to log in to ${providerName}: ${reason}`, 'error')
         }
       } finally {
         login.questions.abort()
@@ -893,16 +897,16 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
      * compacted branch.
      */
     async function runCompact(): Promise<void> {
-      ui.uiContext.notify('Compacting the context…', 'info')
+      ui.notifyFrom(ENSO_SENDER, 'Compacting the context…', 'info')
       try {
         const compacted = await session.compact()
-        ui.uiContext.notify(compactDoneText(compacted.tokensBefore, compacted.estimatedTokensAfter), 'info')
+        ui.notifyFrom(ENSO_SENDER, compactDoneText(compacted.tokensBefore, compacted.estimatedTokensAfter), 'info')
       } catch (error) {
         // pi's refusals ("Nothing to compact (session too small)", smoke 2026-09-23) are not
         // failures: said as a warning with pi's reason. Anything else is (PR #347 review).
         const reason = error instanceof Error ? error.message : String(error)
-        if (isCompactionRefusal(error)) ui.uiContext.notify(`Compaction did not run: ${reason}`, 'warning')
-        else ui.uiContext.notify(`Compaction failed: ${reason}`, 'error')
+        if (isCompactionRefusal(error)) ui.notifyFrom(ENSO_SENDER, `Compaction did not run: ${reason}`, 'warning')
+        else ui.notifyFrom(ENSO_SENDER, `Compaction failed: ${reason}`, 'error')
       }
     }
 
@@ -922,9 +926,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       const type = storedCredentials.find((credential) => credential.providerId === providerId)?.type
       try {
         await session.modelRuntime.logout(providerId, { signal: AbortSignal.timeout(15_000) })
-        ui.uiContext.notify(logoutDoneText(providerName, type), 'info')
+        ui.notifyFrom(ENSO_SENDER, logoutDoneText(providerName, type), 'info')
       } catch (error) {
-        ui.uiContext.notify(
+        ui.notifyFrom(
+          ENSO_SENDER,
           `Logout from ${providerName} failed: ${error instanceof Error ? error.message : String(error)}`,
           'error',
         )
@@ -949,7 +954,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         if (wire.type === 'thinking_level_changed') announceModelState()
         // #340: the provider refused the request — said beside the failed message's own
         // `message_end`, which stays the accounting boundary it always was.
-        const refusal = providerRefusalOf(event)
+        // The provider named as a reader knows it (#387): the session's own catalogue first — an
+        // extension may have registered the provider — then pi's built-in one.
+        const refusal = providerRefusalOf(
+          event,
+          (providerId) => session.modelRuntime.getProvider(providerId)?.name ?? builtinProviderName(providerId),
+        )
         if (refusal !== undefined) emit({ type: 'provider_refused', ...refusal })
         if (growsSessionSpend(event)) announceSessionUsage()
       } catch (error) {

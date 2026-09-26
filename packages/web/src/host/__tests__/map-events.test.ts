@@ -175,6 +175,19 @@ test('a notify carries its message and a declared notifyType', () =>
     notifyType: 'info',
   }))
 
+// #387: who said it crosses with the notify, as the host tagged it; an empty or non-string sender
+// is no sender, and a dialog carries none.
+test('a notify carries the sender the host tagged it with; a malformed one is dropped', () => {
+  const notify = (sender: unknown): unknown =>
+    mapPiEvent({ type: 'extension_ui_request', id: 'n', method: 'notify', message: 'm', sender })
+  expect(notify('pi-multi-account')).toMatchObject({ sender: 'pi-multi-account' })
+  expect(notify('')).not.toHaveProperty('sender')
+  expect(notify(7)).not.toHaveProperty('sender')
+  expect(
+    mapPiEvent({ type: 'extension_ui_request', id: 'c', method: 'confirm', title: 't', message: 'm', sender: 'x' }),
+  ).not.toHaveProperty('sender')
+})
+
 test('an unrecognised notifyType degrades to an untyped notification, not a failure', () => {
   const observed = mapPiEvent({
     type: 'extension_ui_request',

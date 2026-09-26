@@ -299,6 +299,8 @@ test('a stored refused attempt, then the reply that got through: the refusal rid
       {
         [ENSO_PROVIDER_REFUSAL_KEY]: {
           provider: 'anthropic',
+          // Named from pi's built-in catalogue (#387) — a cold read has no session to ask.
+          providerName: 'Anthropic',
           model: 'claude-sonnet-4-5',
           status: 429,
           message: rateLimited,

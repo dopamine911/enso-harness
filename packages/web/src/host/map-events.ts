@@ -156,9 +156,11 @@ function mapExtensionUiRequest(event: RuntimeEvent, delivery: EventDelivery): En
   // copied only when it is one of pi's three declared values (info|warning|error);
   // an unrecognised value degrades to an untyped notification, never a validation
   // failure.
-  const notifyFields: { message?: string; notifyType?: EnsoNotifyType } = {}
+  const notifyFields: { message?: string; notifyType?: EnsoNotifyType; sender?: string } = {}
   if (method === 'notify') {
     notifyFields.message = textOr(event.message, '')
+    // Who said it (#387), as the host tagged it — never read from the message.
+    if (typeof event.sender === 'string' && event.sender.length > 0) notifyFields.sender = event.sender
     // The declared values come from the schema, not a literal list — the browser
     // router (custom-event-router.ts) makes the same check the same way.
     const notifyTypeCandidate = event.notifyType
