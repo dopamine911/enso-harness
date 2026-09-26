@@ -1,4 +1,5 @@
 import { cn } from './lib/utils.ts'
+import { toggleMember } from './toggle-member.ts'
 
 /**
  * The analysis views' building blocks — the Context and Stats tabs (#361), in the design
@@ -107,24 +108,33 @@ function FilterPill({
 
 /**
  * The kinds a list shows, as pills — each pressed while shown, with its icon and how many there
- * are: `read · 3`. The caller holds which kinds are hidden.
+ * are: `read · 3`. The caller holds which kinds are hidden. Only kinds the list has are offered,
+ * and none unless there are two to choose between: a filter over nothing is noise.
  */
 interface KindFiltersProps<Kind extends string> {
   readonly label: string
-  readonly kinds: readonly Kind[]
-  readonly hidden: ReadonlySet<Kind>
-  readonly onToggle: (kind: Kind) => void
-  readonly icon: (kind: Kind) => React.ReactNode
+  /** Each kind the list can hold, in the order it is offered, and its icon. */
+  readonly icons: Readonly<Record<Kind, React.ReactNode>>
   readonly count: (kind: Kind) => number
+  /** The kinds hidden, and how the pills change it — the caller's state. */
+  readonly hidden: ReadonlySet<Kind>
+  readonly setHidden: (update: (hidden: ReadonlySet<Kind>) => ReadonlySet<Kind>) => void
 }
 
 export function KindFilters<Kind extends string>(props: KindFiltersProps<Kind>): React.ReactNode {
-  const { label, kinds, hidden, onToggle, icon, count } = props
+  const { label, icons, count, hidden, setHidden } = props
+  // `Object.keys` widens to `string`; the keys are the table's own kinds.
+  const present = (Object.keys(icons) as Kind[]).filter((kind) => count(kind) > 0)
+  if (present.length < 2) return null
   return (
     <fieldset aria-label={label} className="flex flex-wrap gap-2">
-      {kinds.map((kind) => (
-        <FilterPill key={kind} pressed={!hidden.has(kind)} onToggle={() => onToggle(kind)}>
-          {icon(kind)}
+      {present.map((kind) => (
+        <FilterPill
+          key={kind}
+          pressed={!hidden.has(kind)}
+          onToggle={() => setHidden((current) => toggleMember(current, kind))}
+        >
+          {icons[kind]}
           {kind} · {count(kind)}
         </FilterPill>
       ))}

@@ -15,7 +15,6 @@ import type { ContextBrowserFocus, ContextBrowserRequest } from './context-brows
 import { estimateChangeText, timeText } from './context-parts.tsx'
 import { cn } from './lib/utils.ts'
 import { displayPath, operationsUpTo } from './thread-context-analysis.ts'
-import { toggleMember } from './toggle-member.ts'
 import { Card, KindFilters, KindLabel, ROW_BUTTON } from './view-parts.tsx'
 
 /**
@@ -53,8 +52,6 @@ function RowEnd({ children }: { children: React.ReactNode }): React.ReactNode {
 
 // ── Context Events ─────────────────────────────────────────────────────────────────────────────
 
-const EVENT_KINDS: readonly EnsoContextEventKind[] = ['inject', 'compact', 'prune', 'switch', 'mode']
-
 const EVENT_ICON: Readonly<Record<EnsoContextEventKind, React.ReactNode>> = {
   inject: <SquarePlusIcon aria-hidden="true" />,
   compact: <LayersIcon aria-hidden="true" />,
@@ -84,20 +81,9 @@ export function ContextEvents({
   const [hidden, setHidden] = useState<ReadonlySet<EnsoContextEventKind>>(() => new Set())
   const shown = [...events].reverse().filter((event) => !hidden.has(event.kind))
   const countOf = (kind: EnsoContextEventKind): number => events.filter((event) => event.kind === kind).length
-  const present = EVENT_KINDS.filter((kind) => countOf(kind) > 0)
   return (
     <Card title="Context Events" sub="when and why the window changed">
-      {/* Only the kinds the thread has: a filter over nothing is noise. */}
-      {present.length > 1 ? (
-        <KindFilters
-          label="event kinds shown"
-          kinds={present}
-          hidden={hidden}
-          onToggle={(kind) => setHidden((current) => toggleMember(current, kind))}
-          icon={(kind) => EVENT_ICON[kind]}
-          count={countOf}
-        />
-      ) : null}
+      <KindFilters label="event kinds shown" icons={EVENT_ICON} count={countOf} hidden={hidden} setHidden={setHidden} />
       {shown.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {events.length === 0
@@ -137,8 +123,6 @@ export function ContextEvents({
 // ── File Activity ──────────────────────────────────────────────────────────────────────────────
 
 type FileKind = EnsoFileOperation['kind']
-
-const FILE_KINDS: readonly FileKind[] = ['read', 'write', 'search']
 
 const FILE_ICON: Readonly<Record<FileKind, React.ReactNode>> = {
   read: <EyeIcon aria-hidden="true" />,
@@ -223,7 +207,6 @@ export function FileActivity({
   const [needle, setNeedle] = useState('')
   const upTo = operationsUpTo(operations, upToTurn)
   const countOf = (kind: FileKind): number => upTo.filter((operation) => operation.kind === kind).length
-  const present = FILE_KINDS.filter((kind) => countOf(kind) > 0)
   const wanted = needle.trim().toLowerCase()
   const shown = upTo.filter(
     (operation) =>
@@ -235,17 +218,13 @@ export function FileActivity({
       sub={`pi’s file tools; bash names no file · ${upToTurn === undefined ? 'every request' : `up to turn ${upToTurn}`}`}
     >
       <div className="flex flex-wrap items-center gap-2">
-        {/* Only the kinds the operations have, as the Events card does: a filter over nothing is noise. */}
-        {present.length > 1 ? (
-          <KindFilters
-            label="file operations shown"
-            kinds={present}
-            hidden={hidden}
-            onToggle={(kind) => setHidden((current) => toggleMember(current, kind))}
-            icon={(kind) => FILE_ICON[kind]}
-            count={countOf}
-          />
-        ) : null}
+        <KindFilters
+          label="file operations shown"
+          icons={FILE_ICON}
+          count={countOf}
+          hidden={hidden}
+          setHidden={setHidden}
+        />
         {upTo.length > 0 ? (
           <input
             type="search"
