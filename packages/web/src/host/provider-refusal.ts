@@ -42,6 +42,8 @@ export function providerRefusalOfMessage(raw: unknown): EnsoProviderRefusal | un
       model: nonEmpty(message.model),
       status: text === undefined ? undefined : providerStatusOf(text),
       providerStopReason: nonEmpty(message.rawStopReason),
+      // 0 is "spent nothing", the same as absent to its one reader; left out, so a refusal before any
+      // token (a 429) reads as it always did (PR #402 review).
       output: typeof output === 'number' && Number.isInteger(output) && output > 0 ? output : undefined,
     }),
     message: text ?? 'the provider returned an error without a message',
