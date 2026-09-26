@@ -3,6 +3,7 @@ import {
   ENSO_PROJECT_HEADER,
   type EnsoDialogSpec,
   type EnsoGuardRule,
+  type EnsoToolResultDescriptor,
   type EnsoInterruptedTail,
   type EnsoSessionUsage,
   type EnsoThreadHistory,
@@ -121,6 +122,13 @@ export interface ThreadStores {
    */
   readonly guardDenials: WritableStore<ReadonlyMap<string, EnsoGuardRule>>
   /**
+   * Finished tool results' #18 descriptors, by tool-call id, as they arrive LIVE (#411): TanStack
+   * drops the one the AG-UI result carries, so the follow connection hands it over here. A stored
+   * result carries its descriptor in its own metadata, so nothing is seeded; `EnsoToolResult`
+   * reads this first, then the result.
+   */
+  readonly toolResultDescriptors: WritableStore<ReadonlyMap<string, EnsoToolResultDescriptor>>
+  /**
    * The Start-a-session dialog is open (#391). Raised when the page MINTS the thread — New Thread,
    * a page with no thread in its URL — and lowered by Start or Escape; a thread adopted from
    * history never raises it.
@@ -196,6 +204,7 @@ function createThreadStores(
   projectId: string | undefined,
 ): ThreadStores {
   const notifications = createNotificationsStore()
+  const toolResultDescriptors = createStore<ReadonlyMap<string, EnsoToolResultDescriptor>>(new Map())
   const threadFetch = namingProject(fetchImpl, projectId)
   return {
     threadId,
@@ -213,6 +222,7 @@ function createThreadStores(
     queue: createStore<readonly string[]>([]),
     refusal: createStore<ProviderRefusalMark | undefined>(undefined),
     guardDenials: createStore<ReadonlyMap<string, EnsoGuardRule>>(guardDenialsIn(history)),
+    toolResultDescriptors,
     startSession: createStore(false),
     projectId,
     fetch: threadFetch,
@@ -222,6 +232,9 @@ function createThreadStores(
       // The page's own connection to the server — a busy thread (409), a refused answer, the
       // network: Enso's lines (#387).
       onProblem: (problem: unknown) => notifications.push(String(problem), 'warning', 'run', ENSO_NOTICE_SOURCE),
+      onToolResultDescriptor: (toolCallId: string, descriptor: EnsoToolResultDescriptor) => {
+        toolResultDescriptors.set(new Map(toolResultDescriptors.get()).set(toolCallId, descriptor))
+      },
     }),
   }
 }

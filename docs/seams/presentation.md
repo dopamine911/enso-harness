@@ -26,6 +26,13 @@ export interface FollowConnectionOptions {
   readonly fetch?: FetchLike
   /** Notified for anything the adapter could not deliver. Never silent. */
   readonly onProblem?: (problem: unknown) => void
+  /**
+   * A finished tool result's #18 descriptor (#411). It rides the AG-UI result as an extra key, and
+   * TanStack's processor keeps none (`updateToolResultPart` takes no metadata), so the page would
+   * never see it live; this hands it over before the result is pushed, so it is known when the
+   * result renders.
+   */
+  readonly onToolResultDescriptor?: (toolCallId: string, descriptor: EnsoToolResultDescriptor) => void
 }
 ```
 
@@ -217,6 +224,13 @@ export interface ThreadStores {
    */
   readonly guardDenials: WritableStore<ReadonlyMap<string, EnsoGuardRule>>
   /**
+   * Finished tool results' #18 descriptors, by tool-call id, as they arrive LIVE (#411): TanStack
+   * drops the one the AG-UI result carries, so the follow connection hands it over here. A stored
+   * result carries its descriptor in its own metadata, so nothing is seeded; `EnsoToolResult`
+   * reads this first, then the result.
+   */
+  readonly toolResultDescriptors: WritableStore<ReadonlyMap<string, EnsoToolResultDescriptor>>
+  /**
    * The Start-a-session dialog is open (#391). Raised when the page MINTS the thread — New Thread,
    * a page with no thread in its URL — and lowered by Start or Escape; a thread adopted from
    * history never raises it.
@@ -256,7 +270,7 @@ throwing inside the state layer's stream loop, where a throw would end the run.
 
 **The state layer's side is built once per thread.** `createThreadStores` (`thread-stores.ts:98-118`)
 creates every store above and the thread's `connection` (`createFollowConnection` at lines 112-116,
-with `onProblem` routed into the thread's notifications). `chat-screen.tsx:182-196` (`threadChatOptions`)
+with `onProblem` routed into the thread's notifications and `onToolResultDescriptor` into `toolResultDescriptors`, #411). `chat-screen.tsx:182-196` (`threadChatOptions`)
 hands that connection, the stored history and an `onCustomEvent` closure over the thread's stores to the
 state layer's chat factory (`createThreadChatHook`, line 218-220) — one factory per thread, because
 the state layer passes `onCustomEvent` no thread id (lines 155-163).

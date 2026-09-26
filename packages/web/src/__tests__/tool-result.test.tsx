@@ -95,6 +95,26 @@ test('truncation is rendered from data, not from a pre-rendered string', () => {
   expect(rendered).toContain('lines')
 })
 
+// #411: no renderer is registered for pi's descriptors (`pi.tool.<name>`), so every truncated
+// result a pi tool returns lands in the text fallback — and the truncation is data, not the
+// renderer's: it is said there too, or a reader takes the first 500 lines for the whole file.
+test('⚠ a descriptor no renderer knows still says its truncation under the text', () => {
+  const rendered = html(
+    partWith({
+      metadata: {
+        [ENSO_TOOL_RESULT_KEY]: {
+          kind: 'pi.tool.read',
+          props: {},
+          truncated: { shown: 500, total: 4000, unit: 'lines' },
+        },
+      },
+    }),
+  )
+  expect(rendered).toContain('PLAIN TEXT FORM')
+  expect(rendered).toContain('data-enso-truncation')
+  expect(rendered.replace(/<[^>]*>/g, '')).toContain('showing 500 of 4000 lines')
+})
+
 // `content` is `string | ContentPart[]` (#53 S3: the array branch was never rendered).
 test('array content renders every part as JSON, one per line, never dropped', () => {
   const rendered = html(

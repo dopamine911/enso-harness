@@ -38,6 +38,15 @@ export function createStore<T>(initial: T): WritableStore<T> {
   }
 }
 
+/**
+ * A store that holds one value and never changes — what a component reads outside a thread pane
+ * (a test's static render) in place of a thread's store. It has no setter, so it can never become
+ * state shared between threads.
+ */
+export function constantStore<T>(value: T): Store<T> {
+  return { get: () => value, subscribe: () => () => undefined }
+}
+
 /** `useSyncExternalStore` over a `Store` — the store's own methods are stable, so no memo. */
 export function useStore<T>(store: Store<T>): T {
   return useSyncExternalStore(store.subscribe, store.get, store.get)

@@ -106,7 +106,9 @@ test('⚠ a tool result is paired into the assistant message holding its call; t
       toolName: 'bash',
       content: [{ type: 'text', text: 'a.ts\nb.ts' }],
       isError: false,
-      details: { truncation: { shown: 2, total: 40, unit: 'lines' } },
+      // pi's TruncationResult fields the mapper reads; the host's mapper tests build the whole
+      // thing with pi's own truncation (#411), and this side is not allowed to name the vendor.
+      details: { truncation: { truncated: true, truncatedBy: 'lines', outputLines: 2000, totalLines: 2500 } },
     }),
     entry('a2', { role: 'assistant', content: [{ type: 'text', text: 'Two files.' }] }),
   ])
@@ -120,7 +122,9 @@ test('⚠ a tool result is paired into the assistant message holding its call; t
     name: 'bash',
     content: 'a.ts\nb.ts',
     state: 'complete',
-    metadata: { [ENSO_TOOL_RESULT_KEY]: { kind: 'pi.tool.bash', truncated: { shown: 2, total: 40, unit: 'lines' } } },
+    metadata: {
+      [ENSO_TOOL_RESULT_KEY]: { kind: 'pi.tool.bash', truncated: { shown: 2000, total: 2500, unit: 'lines' } },
+    },
   })
   expect(withCall?.parts[1]).not.toHaveProperty('error')
 })

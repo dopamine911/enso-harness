@@ -1,7 +1,7 @@
 import type { EnsoGuardRule } from '@enso/core'
 import { ShieldXIcon } from 'lucide-react'
 import { useContext } from 'react'
-import { type Store, ThreadStoresContext, useStore } from './store.ts'
+import { constantStore, ThreadStoresContext, useStore } from './store.ts'
 
 /**
  * A guard refusal as the design draws it (`Enso-Design-Direction` `.guard`, #407 item 1): the tool,
@@ -26,12 +26,8 @@ const GUARD_RULE_VERDICT: Readonly<Record<EnsoGuardRule, string>> = {
   'secret-read': 'credential read',
 }
 
-/** What a row outside a thread pane reads: nothing refused, and nothing can ever be — it has no setter. */
-const NO_DENIALS: Store<ReadonlyMap<string, EnsoGuardRule>> = {
-  get: () => EMPTY_DENIALS,
-  subscribe: () => () => undefined,
-}
-const EMPTY_DENIALS: ReadonlyMap<string, EnsoGuardRule> = new Map()
+/** What a row outside a thread pane reads: nothing refused. */
+const NO_DENIALS = constantStore<ReadonlyMap<string, EnsoGuardRule>>(new Map())
 
 /**
  * The rule that refused this call, or undefined. Read from the thread's `guardDenials` store —

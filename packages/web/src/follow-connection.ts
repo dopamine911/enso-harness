@@ -7,11 +7,12 @@ import {
   type EnsoFollowFrame,
   EnsoFollowFrame as EnsoFollowFrameSchema,
   type EnsoHostCommandRun,
+  ensoLogger,
   type EnsoPromptBody,
   type EnsoPromptImage,
   EnsoPromptReceipt,
   type EnsoSessionConfiguration,
-  ensoLogger,
+  type EnsoToolResultDescriptor,
   isEnsoImageMimeType,
 } from '@enso/core'
 import type { MessagePart, StreamChunk } from '@tanstack/ai'
@@ -89,6 +90,13 @@ export interface FollowConnectionOptions {
   readonly fetch?: FetchLike
   /** Notified for anything the adapter could not deliver. Never silent. */
   readonly onProblem?: (problem: unknown) => void
+  /**
+   * A finished tool result's #18 descriptor (#411). It rides the AG-UI result as an extra key, and
+   * TanStack's processor keeps none (`updateToolResultPart` takes no metadata), so the page would
+   * never see it live; this hands it over before the result is pushed, so it is known when the
+   * result renders.
+   */
+  readonly onToolResultDescriptor?: (toolCallId: string, descriptor: EnsoToolResultDescriptor) => void
 }
 
 /** One run this adapter has open: its AG-UI ids and, once the receipt is in, the acquisition it took or queued behind. */
@@ -480,6 +488,9 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     }
     if (observation.kind === 'extension-ui-request' && observation.blocking && observation.dialog === undefined) {
       if (observation.id.length > 0) void declineUnreadable(observation.id)
+    }
+    if (observation.kind === 'tool-result' && observation.complete && observation.descriptor !== undefined) {
+      options.onToolResultDescriptor?.(observation.toolCallId, observation.descriptor)
     }
     push(...observationToAguiEvents(observation, idsOf(current)))
   }

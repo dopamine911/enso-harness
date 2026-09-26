@@ -193,49 +193,59 @@ entry carries it), so a live transcript and a resumed one agree. The builder:
  * ⚠ Only truncation is mapped today, and deliberately: `details` is tool-specific and
  * inventing a `kind` per tool here would put rendering decisions in the transport. A tool
  * that wants a richer descriptor should emit one; this is the floor, not the ceiling.
+ *
+ * `truncation` is pi's `TruncationResult` — the one shape every built-in tool (read, bash, grep,
+ * find, ls) puts there (#411: this once read `shown`/`total`/`unit`, which pi never sends, so no
+ * pi result ever had a descriptor). It is said in LINES whenever lines were dropped, even when
+ * the byte limit is what cut them — the reader counts lines, and pi's own notice does
+ * (`Showing lines 1-1841 of 3000 (50.0KB limit)`). Only a cut inside one line is said in bytes.
  */
 export function descriptorFrom(toolName: string, details: unknown): EnsoToolResultDescriptor | undefined {
   if (typeof details !== 'object' || details === null) return undefined
-  const truncation = (details as PiToolDetails).truncation
-  if (truncation === null || truncation === undefined) return undefined
-  const { shown, total, unit } = truncation
-  if (typeof shown !== 'number' || typeof total !== 'number') return undefined
-  return {
-    kind: `pi.tool.${toolName}`,
-    props: {},
-    truncated: {
-      shown,
-      total,
-      unit: unit === 'bytes' || unit === 'items' ? unit : 'lines',
-    },
+  const truncation = (details as { truncation?: Partial<TruncationResult> | null }).truncation
+  if (truncation?.truncated !== true) return undefined
+  const { outputLines, totalLines, outputBytes, totalBytes } = truncation
+  const kind = `pi.tool.${toolName}`
+  if (typeof outputLines === 'number' && typeof totalLines === 'number' && outputLines < totalLines) {
+    return { kind, props: {}, truncated: { shown: outputLines, total: totalLines, unit: 'lines' } }
   }
+  if (typeof outputBytes !== 'number' || typeof totalBytes !== 'number') return undefined
+  return { kind, props: {}, truncated: { shown: outputBytes, total: totalBytes, unit: 'bytes' } }
 }
 ```
 
 Only truncation is mapped, and the `kind` is `pi.tool.<toolName>` with empty `props` — the floor, not
-the ceiling: a tool that wants a richer descriptor should emit one (`:72-78`). **No tool does today.**
+the ceiling: a tool that wants a richer descriptor should emit one (`:77-89`). **No tool does today.**
 `web-fetch` and `web-search` return `details: undefined` on every path
 (`packages/harness/extensions/web-fetch/index.ts:170,277,309`; `web-search/index.ts:353,358,372,402`),
-so no extension of ours attaches a descriptor. `toolResultMetadata` (`map-events.ts:97-101`) is the
+so no extension of ours attaches a descriptor. `toolResultMetadata` (`map-events.ts:104`) is the
 one place the key is written onto a part's `metadata`.
 
 **Carried** on the observation (`EnsoToolResultObservation.descriptor`), then onto the state layer's
 result event under the same key — as an extra field, because that event declares `content` and
-nothing else (`packages/web/src/to-agui.ts:30-42,126-128`).
+nothing else (`packages/web/src/to-agui.ts:30-42,126-128`). **The state layer drops it there** (#411):
+TanStack's processor writes a result part from `content`, state and error only, and keeps no extra
+field, so live the part has no `metadata`. The follow connection therefore hands a finished result's
+descriptor to the thread's `toolResultDescriptors` store before it pushes the result
+(`follow-connection.ts:492-494`, `thread-stores.ts:235-237`). A resumed thread needs no store: its
+parts are built from the stored transcript, `metadata` and all.
 
 **Rendered by `EnsoToolResult`** (`packages/web/src/EnsoToolResult.tsx:69-129`), reached from every tool
 row but a guard refusal's (`selected-message-part.tsx:134-137,196`) — a refused call is drawn as a receipt
 by `guard-refusal.tsx` instead, its reason being the result's text (#407). The order is fixed: pending (`running…`) while the run
 is open and no result has paired; `aborted` once the run has ended with none (#130); an errored
-envelope renders its error and never consults the descriptor (`:103-113`); then the descriptor is read
-off `metadata` — none, or a `kind` with no renderer, is the textual fallback (`:115-121`). *The fallback
+envelope renders its error and never consults the descriptor (`:127-133`); then the descriptor — the
+store's, else the one on `metadata` (`useDescriptor`, `:81-86`) — picks the rendering: none is the
+textual fallback, and a `kind` with no renderer is the textual fallback WITH the truncation note under
+it (`:135-150`), because the truncation is data, not the renderer's. *The fallback
 is the point, not a courtesy* (`:11-14`): a type-tag design's characteristic failure is an unrenderable
 payload showing as nothing, indistinguishable from a successful empty result. `toolResultState` is also
 what the status bar's `running <tool>` reads (`thread-status.tsx:5`).
 
 **The renderer map is empty** (`chat-screen.tsx:124-131`): every result falls through to the text form,
 which is exactly what the contract promises for an unknown kind, so empty is the honest default. A
-renderer is added when a tool earns one.
+renderer is added when a tool earns one. A truncated `read` or `bash` result therefore reads as its
+text and `showing 1841 of 3000 lines` under it.
 
 **Second implementation:** none for a surface. `packages/web/src/__tests__/tool-result.test.tsx` renders
 `EnsoToolResult` over a one-entry `EnsoRendererMap` (`:15-17`) and pins the branches: a known kind renders
@@ -260,11 +270,11 @@ through its renderer (`:39-43`), an unknown kind falls back to the envelope text
 **Nothing of ours leaks.** The descriptor, the key, the truncation and the reader are declared once
 in `@enso/core` and consumed by name. Two facts to know, neither a leak of this seam:
 
-- **The descriptor is derived from the runtime's `details` field**, read by the mapper under the
-  vendor's name (`PiToolDetails`, `map-events.ts:39-43`; `result?.details` at `:274-276`). That is L2's
+- **The descriptor is derived from the runtime's `details` field**, read by the mapper as the
+  vendor's own type (`TruncationResult`, imported at `map-events.ts:1`; `result?.details` at `:345`). That is L2's
   event-side half, inventoried on the thread-runtime page; the mapper is the one place it is read.
 - **The `kind` values in use are the runtime's tool names** — `pi.tool.bash`, `pi.tool.read` — minted
-  by `descriptorFrom` (`:86`). A kind is a string by contract and the renderer map has no entry for any
+  by `descriptorFrom` (`:95`). A kind is a string by contract and the renderer map has no entry for any
   of them, so today the vendor's name is data, not a dependency; a renderer keyed on `pi.tool.*` would
   make it one.
 
@@ -281,6 +291,6 @@ alone.
 calls `readEnsoToolResultDescriptor(metadata)` on whatever bag it holds, keys its own map by `kind`, and
 falls back to `content`. That is the pivot this seam was built to make cheap, and it has not been made.
 
-**Replace the runtime** and the producer moves: `descriptorFrom` and its `PiToolDetails` read go with
+**Replace the runtime** and the producer moves: `descriptorFrom` and its `TruncationResult` read go with
 the mapper (thread-runtime page, L2); the descriptor a new loop's tools emit is whatever they put under
 `ENSO_TOOL_RESULT_KEY`. Renderer, reader, schema and tests stay.

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { truncateHead, truncateTail } from '@earendil-works/pi-coding-agent'
 import { ENSO_TOOL_RESULT_KEY, type EnsoObservation } from '@enso/core'
 import { Check } from 'typebox/value'
 import { mapPiEvent, toolResultMetadata } from '../map-events.ts'
@@ -103,49 +104,45 @@ test('non-text content parts are named, not silently dropped', () =>
     }),
   ).toMatchObject({ text: '[image content] ok' }))
 
-// --- truncation becomes a descriptor, so it renders per surface (#18)
-test('truncation in details becomes a descriptor with structured fields', () => {
-  const observed = mapPiEvent({
+// --- truncation becomes a descriptor, so it renders per surface (#18). `details` is built by pi's
+// OWN truncation (#411: a hand-written shape pi never sends kept these green while no pi result
+// ever had a descriptor).
+const ended = (toolName: string, details: unknown): EnsoObservation | undefined =>
+  mapPiEvent({
     type: 'tool_execution_end',
     toolCallId: 'c1',
-    toolName: 'bash',
-    result: { content: '…', details: { truncation: { shown: 500, total: 4000, unit: 'lines' } } },
+    toolName,
+    result: { content: '…', details },
     isError: false,
   })
-  expect(observed).toMatchObject({
-    descriptor: { kind: 'pi.tool.bash', truncated: { shown: 500, total: 4000, unit: 'lines' } },
+const numbered = (count: number): string => Array.from({ length: count }, (_, index) => `line ${index + 1}`).join('\n')
+
+test("⚠ pi's line-limited truncation becomes a descriptor in lines", () =>
+  expect(ended('bash', { truncation: truncateTail(numbered(4000)) })).toMatchObject({
+    descriptor: { kind: 'pi.tool.bash', truncated: { shown: 2000, total: 4000, unit: 'lines' } },
+  }))
+
+// A read cut by the 50KB limit says pi's own words: lines 1-N of the file's lines.
+test('⚠ a byte-limited cut that drops lines is still said in lines, as pi says it', () => {
+  const truncation = truncateHead(numbered(1500).replaceAll('line', 'x'.repeat(60)))
+  expect(truncation.truncatedBy).toBe('bytes')
+  expect(ended('read', { truncation })).toMatchObject({
+    descriptor: { truncated: { shown: truncation.outputLines, total: 1500, unit: 'lines' } },
   })
 })
 
-test('absent or null truncation yields no descriptor', () => {
-  const withNull = mapPiEvent({
-    type: 'tool_execution_end',
-    toolCallId: 'c1',
-    toolName: 'bash',
-    result: { content: 'x', details: { truncation: null } },
-    isError: false,
+test('a cut inside one line is said in bytes', () => {
+  const truncation = truncateTail('y'.repeat(60_000))
+  expect(ended('bash', { truncation })).toMatchObject({
+    descriptor: { truncated: { shown: truncation.outputBytes, total: 60_000, unit: 'bytes' } },
   })
-  expect(withNull).not.toHaveProperty('descriptor')
-  const withoutDetails = mapPiEvent({
-    type: 'tool_execution_end',
-    toolCallId: 'c1',
-    toolName: 'bash',
-    result: { content: 'x' },
-    isError: false,
-  })
-  expect(withoutDetails).not.toHaveProperty('descriptor')
 })
 
-test('an unknown truncation unit falls back to lines rather than propagating garbage', () =>
-  expect(
-    mapPiEvent({
-      type: 'tool_execution_end',
-      toolCallId: 'c1',
-      toolName: 'bash',
-      result: { content: 'x', details: { truncation: { shown: 1, total: 2, unit: 'furlongs' } } },
-      isError: false,
-    }),
-  ).toMatchObject({ descriptor: { truncated: { unit: 'lines' } } }))
+test('an untruncated, absent, or null truncation yields no descriptor', () => {
+  expect(ended('bash', { truncation: truncateTail(numbered(3)) })).not.toHaveProperty('descriptor')
+  expect(ended('bash', { truncation: null })).not.toHaveProperty('descriptor')
+  expect(ended('bash', undefined)).not.toHaveProperty('descriptor')
+})
 
 test('the descriptor is wrapped under the namespaced metadata key', () => {
   const descriptor = { kind: 'pi.tool.bash', props: {} }

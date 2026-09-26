@@ -1,5 +1,7 @@
 import { type EnsoToolResultDescriptor, readEnsoToolResultDescriptor } from '@enso/core'
 import type { ToolResultPart } from '@tanstack/ai'
+import { useContext } from 'react'
+import { constantStore, ThreadStoresContext, useStore } from './store.ts'
 
 /**
  * The web renderer for a enso tool result — the React half of #18's contract.
@@ -70,6 +72,19 @@ function TruncationNote({
   )
 }
 
+const NO_DESCRIPTORS = constantStore<ReadonlyMap<string, EnsoToolResultDescriptor>>(new Map())
+
+/**
+ * A result's #18 descriptor: the one the follow connection handed the thread's store LIVE (#411 —
+ * TanStack keeps none on the part), else the one a stored result carries in its metadata.
+ */
+function useDescriptor(result: ToolResultPart | undefined): EnsoToolResultDescriptor | undefined {
+  const stores = useContext(ThreadStoresContext)
+  const live = useStore(stores?.toolResultDescriptors ?? NO_DESCRIPTORS)
+  if (result === undefined) return undefined
+  return live.get(result.toolCallId) ?? readEnsoToolResultDescriptor(result.metadata)
+}
+
 export function EnsoToolResult({
   result,
   runOpen,
@@ -86,6 +101,7 @@ export function EnsoToolResult({
   renderers: EnsoRendererMap
 }): React.ReactNode {
   const state = toolResultState(result, runOpen)
+  const descriptor = useDescriptor(result)
   // No result yet — the call is in flight. Say so rather than rendering nothing.
   if (state.status === 'pending') {
     return (
@@ -116,13 +132,21 @@ export function EnsoToolResult({
     )
   }
 
-  const descriptor = readEnsoToolResultDescriptor(state.result.metadata)
   if (descriptor === undefined) return <TextFallback result={state.result} />
 
   const render = renderers[descriptor.kind]
   // ⚠ Unknown kind: fall through to text. This is the branch that makes an unrecognised
-  // descriptor visible instead of blank, and it is the one worth a test.
-  if (render === undefined) return <TextFallback result={state.result} />
+  // descriptor visible instead of blank, and it is the one worth a test. The truncation is data,
+  // not the renderer's (#411): it is said under the text too — and with no renderer registered,
+  // this is where every pi tool's truncated result lands.
+  if (render === undefined) {
+    return (
+      <div data-enso-kind={descriptor.kind}>
+        <TextFallback result={state.result} />
+        {descriptor.truncated !== undefined ? <TruncationNote truncated={descriptor.truncated} /> : null}
+      </div>
+    )
+  }
 
   return (
     <div data-enso-tool-result="descriptor" data-enso-kind={descriptor.kind}>

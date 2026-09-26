@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { truncateTail } from '@earendil-works/pi-coding-agent'
 import { EnsoObservation } from '@enso/core'
 import { observationKindsDeclaredByTheUnion } from '@enso/core/observation-kinds'
 import { Check } from 'typebox/value'
@@ -25,7 +26,8 @@ test('EVERY observation the mapper can emit validates against EnsoObservation', 
       type: 'tool_execution_end',
       toolCallId: 'c',
       toolName: 'bash',
-      result: { content: 'y', details: { truncation: { shown: 1, total: 9, unit: 'lines' } } },
+      // pi's own truncation (#411), so the descriptor branch is really exercised.
+      result: { content: 'y', details: { truncation: truncateTail('y\n'.repeat(3000)) } },
       isError: false,
     },
     { type: 'tool_execution_end', toolCallId: 'c', toolName: 'write', result: { content: 'denied' }, isError: true },

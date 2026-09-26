@@ -1,3 +1,4 @@
+import type { TruncationResult } from '@earendil-works/pi-coding-agent'
 import {
   ENSO_TOOL_RESULT_KEY,
   EnsoDialogOutcome,
@@ -46,11 +47,6 @@ interface PiContentPart {
 }
 
 /** pi's tool `details` bag, which is where truncation lives. */
-interface PiToolDetails {
-  truncation?: { shown?: number; total?: number; unit?: string } | null
-  fullOutputPath?: string | null
-  [field: string]: unknown
-}
 
 function readUsage(raw: unknown): EnsoUsage | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
@@ -84,22 +80,24 @@ export function contentToText(content: unknown): string {
  * ⚠ Only truncation is mapped today, and deliberately: `details` is tool-specific and
  * inventing a `kind` per tool here would put rendering decisions in the transport. A tool
  * that wants a richer descriptor should emit one; this is the floor, not the ceiling.
+ *
+ * `truncation` is pi's `TruncationResult` — the one shape every built-in tool (read, bash, grep,
+ * find, ls) puts there (#411: this once read `shown`/`total`/`unit`, which pi never sends, so no
+ * pi result ever had a descriptor). It is said in LINES whenever lines were dropped, even when
+ * the byte limit is what cut them — the reader counts lines, and pi's own notice does
+ * (`Showing lines 1-1841 of 3000 (50.0KB limit)`). Only a cut inside one line is said in bytes.
  */
 export function descriptorFrom(toolName: string, details: unknown): EnsoToolResultDescriptor | undefined {
   if (typeof details !== 'object' || details === null) return undefined
-  const truncation = (details as PiToolDetails).truncation
-  if (truncation === null || truncation === undefined) return undefined
-  const { shown, total, unit } = truncation
-  if (typeof shown !== 'number' || typeof total !== 'number') return undefined
-  return {
-    kind: `pi.tool.${toolName}`,
-    props: {},
-    truncated: {
-      shown,
-      total,
-      unit: unit === 'bytes' || unit === 'items' ? unit : 'lines',
-    },
+  const truncation = (details as { truncation?: Partial<TruncationResult> | null }).truncation
+  if (truncation?.truncated !== true) return undefined
+  const { outputLines, totalLines, outputBytes, totalBytes } = truncation
+  const kind = `pi.tool.${toolName}`
+  if (typeof outputLines === 'number' && typeof totalLines === 'number' && outputLines < totalLines) {
+    return { kind, props: {}, truncated: { shown: outputLines, total: totalLines, unit: 'lines' } }
   }
+  if (typeof outputBytes !== 'number' || typeof totalBytes !== 'number') return undefined
+  return { kind, props: {}, truncated: { shown: outputBytes, total: totalBytes, unit: 'bytes' } }
 }
 
 /** The metadata bag to attach to a TanStack `ToolResultPart`, or undefined if there is none. */
