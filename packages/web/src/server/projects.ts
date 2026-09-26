@@ -1,0 +1,427 @@
+import { createHash } from 'node:crypto'
+import {
+  type Dirent,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
+import { homedir } from 'node:os'
+import { basename, dirname, isAbsolute, join, sep as pathSeparator, relative } from 'node:path'
+import {
+  type EnsoDirectoryEntry,
+  type EnsoDirectoryListing,
+  type EnsoProject,
+  type EnsoProjectRegistration,
+  EnsoProjectsState,
+  ensoLogger,
+  isEnsoProjectId,
+} from '@enso/core'
+import { realpathOrSelf } from '@enso/core/paths'
+import { Compile } from 'typebox/compile'
+
+/**
+ * The projects one server runs threads in (#395).
+ *
+ * ⚠ THE BLAST RADIUS IS STILL CHOSEN OUTSIDE THE BROWSER. With no sandbox (#24) a session's
+ * directory is what it can reach, so the directories that can be projects are the launch
+ * directory and directories STRICTLY UNDER a root the install declares (`projects.roots` in
+ * `enso.config.json`). A page registers one by path — the only request that carries a path —
+ * and every request after names it by id. The path is resolved (`realpath`) BEFORE it is
+ * checked, so a symlink under a root cannot lead out of it, and no segment below the root may be
+ * hidden (`.ssh`, `.config`, `.enso` — dot-directories hold credentials and config, not projects).
+ *
+ * A project's id is derived from its canonical path: the same directory is always the same
+ * project, across restarts, with nothing stored to keep it so. Registrations are server state in
+ * `.enso/projects.json`; removing one forgets only the registration — its sessions stay on disk
+ * and are served again when the directory is registered again.
+ *
+ * A NEW thread's project is the one a page named for it (`X-Enso-Project`, `claim`), else the
+ * launch project — today's behaviour. A thread is named once: a later request naming ANOTHER
+ * project before the thread is built is refused (409), never quietly dropped (PR #399 review).
+ * Once the thread has a session, the session's own directory decides (pi records it in the
+ * session header), whatever a page says afterwards.
+ */
+
+const log = ensoLogger('server', 'projects')
+
+const storedProjectsValidator = Compile(EnsoProjectsState)
+/** One registration as `.enso/projects.json` stores it. */
+type Registration = EnsoProjectsState['projects'][number]
+
+export interface ProjectRegistryOptions {
+  /** The directory the server was launched in: the first project, never removable. */
+  readonly launchDirectory: string
+  /** `projects.roots` from `enso.config.json`, as written: absolute or `~/`. */
+  readonly roots: readonly string[]
+  /** `.enso/projects.json` (`ensoProjectsPath`); absent, registrations live in memory only (tests). */
+  readonly statePath?: string
+  /** Where `~/` points; the running user's home unless a test says otherwise. */
+  readonly homeDirectory?: string
+}
+
+export type ProjectRegistrationOutcome =
+  | { readonly kind: 'registered' | 'existing'; readonly project: EnsoProject }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+export type ProjectRemovalOutcome = 'removed' | 'unknown' | 'launch'
+
+export type ProjectBrowseOutcome =
+  | { readonly kind: 'listing'; readonly listing: EnsoDirectoryListing }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+/** The most directories one listing holds — the first by name; `truncated` says there were more. */
+const MAX_BROWSED_DIRECTORIES = 500
+
+/** Why a request's project name is refused: 400 for an id that is no project, 409 for a thread already named otherwise. */
+export interface ProjectClaimRefusal {
+  readonly status: 400 | 409
+  readonly reason: string
+}
+
+/** A new thread cannot be built where its project says: the directory is gone. */
+export class ProjectUnavailable extends Error {
+  override readonly name = 'ProjectUnavailable'
+}
+
+export interface ProjectRegistry {
+  /** The launch project first, then the registered ones in the order they were registered. */
+  list(): EnsoProject[]
+  get(projectId: string): EnsoProject | undefined
+  /** The project whose directory this is, by canonical path; `undefined` for a directory that is no project. */
+  byDirectory(directory: string): EnsoProject | undefined
+  register(request: EnsoProjectRegistration): ProjectRegistrationOutcome
+  /**
+   * What a page may browse while adding a project: the declared roots (no `path`), or one directory
+   * inside them and the directories under it — each resolved and checked as a registration is, so a
+   * symlink that leads out of the roots and every hidden directory are left out.
+   */
+  browse(path: string | undefined): ProjectBrowseOutcome
+  remove(projectId: string): ProjectRemovalOutcome
+  /**
+   * A page names the project of a thread (`X-Enso-Project`). The first name a thread gets is
+   * kept; it matters only until the thread has a session. `undefined` when accepted (or when
+   * there is no header, or the same name again), else why not: an id that is no registered
+   * project, or a thread already named for a different one.
+   */
+  claim(threadId: string, projectId: string | undefined): ProjectClaimRefusal | undefined
+  /** The thread has a session: its directory is fixed, and its claim is dead weight — forget it. */
+  dropClaim(threadId: string): void
+  /** The project a thread with no session yet belongs to: its claim's, else the launch one; `undefined` when the claimed one is gone. */
+  projectOfNewThread(threadId: string): EnsoProject | undefined
+  /** Where a thread with no session yet is built — `projectOfNewThread`'s directory; throws `ProjectUnavailable` when there is none. */
+  directoryForNewThread(threadId: string): string
+}
+
+/** An absolute path resolved to the directory it is, or the refusal a registration or a browse gives. */
+function canonicalDirectory(path: string): string | { readonly kind: 'refused'; readonly reason: string } {
+  if (!isAbsolute(path)) return { kind: 'refused', reason: `${path} is not an absolute path` }
+  let canonical: string
+  try {
+    canonical = realpathSync(path)
+  } catch {
+    return { kind: 'refused', reason: `${path} does not exist` }
+  }
+  return isDirectory(canonical) ? canonical : { kind: 'refused', reason: `${canonical} is not a directory` }
+}
+
+function listingOf(
+  path: string | null,
+  parent: string | null,
+  registrable: boolean,
+  directories: readonly EnsoDirectoryEntry[],
+): EnsoDirectoryListing {
+  return {
+    path,
+    parent,
+    registrable,
+    directories: directories.slice(0, MAX_BROWSED_DIRECTORIES),
+    truncated: directories.length > MAX_BROWSED_DIRECTORIES,
+  }
+}
+
+/** The id of a canonical directory: its path, hashed. Sixteen hex digits (`isEnsoProjectId`). */
+function projectIdOf(canonicalPath: string): string {
+  return createHash('sha256').update(canonicalPath).digest('hex').slice(0, 16)
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+function expandHome(path: string, home: string): string {
+  if (path === '~') return home
+  return path.startsWith('~/') ? join(home, path.slice(2)) : path
+}
+
+function readRegistrations(statePath: string): Registration[] {
+  if (!existsSync(statePath)) return []
+  const text = readFileSync(statePath, 'utf8')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch (error) {
+    throw new Error(`enso-server: ${statePath} is not valid JSON (${String(error)}) — fix it or delete it`)
+  }
+  if (!storedProjectsValidator.Check(parsed)) {
+    throw new Error(
+      `enso-server: ${statePath} does not match { "projects": [{ "path", "title"? }] } — fix it or delete it`,
+    )
+  }
+  return parsed.projects
+}
+
+/** Written whole to a sibling and renamed over, so a crash mid-write never leaves half a file. */
+function writeRegistrations(statePath: string, registrations: readonly Registration[]): void {
+  mkdirSync(dirname(statePath), { recursive: true })
+  const staging = `${statePath}.${process.pid}.tmp`
+  writeFileSync(staging, `${JSON.stringify({ projects: registrations }, null, 2)}\n`)
+  renameSync(staging, statePath)
+}
+
+/**
+ * Why a canonical directory may not be registered under these roots, or `undefined` when it may.
+ * Strictly under one root, and no segment below that root hidden.
+ *
+ * ⚠ ANY root that accepts it is enough, whatever the order (PR #399 review): roots may nest
+ * (`~/code` and `~/code/sub`), and `~/code/sub` itself is under the first even though it is the
+ * second. So a root's refusal is kept only as the reason to give if no other root accepts.
+ */
+function refusalUnderRoots(
+  canonical: string,
+  roots: readonly string[],
+  declared: readonly string[],
+): string | undefined {
+  if (roots.length === 0) {
+    return 'no project roots are declared — add `"projects": { "roots": ["~/code"] }` to enso.config.json'
+  }
+  let refusal: string | undefined
+  for (const root of roots) {
+    const below = relative(root, canonical)
+    // Outside this root: `..` itself or a `../` prefix — not a directory merely NAMED `..foo`.
+    if (below === '..' || below.startsWith(`..${pathSeparator}`) || isAbsolute(below)) continue
+    const hidden = below.split(pathSeparator).find((segment) => segment.startsWith('.'))
+    if (below === '') refusal ??= `${canonical} is a project root itself; register a directory under it`
+    else if (hidden !== undefined) {
+      refusal ??= `${canonical} is inside a hidden directory (${hidden}), which cannot be a project`
+    } else return undefined
+  }
+  return refusal ?? `${canonical} is not under a declared project root (${declared.join(', ')})`
+}
+
+export function createProjectRegistry(options: ProjectRegistryOptions): ProjectRegistry {
+  const home = options.homeDirectory ?? homedir()
+  // ⚠ A relative root would resolve against this PROCESS's cwd, not the launch directory (PR #399
+  // review) — a boundary nobody wrote down. Refused here, failing the launch, as an unreadable
+  // config does: the documented form is absolute or `~/`.
+  const roots = options.roots.map((root) => {
+    const expanded = expandHome(root, home)
+    if (!isAbsolute(expanded)) {
+      throw new Error(`enso-server: projects.roots entry ${root} is not an absolute or ~/ path — fix enso.config.json`)
+    }
+    return realpathOrSelf(expanded)
+  })
+  const launchPath = realpathOrSelf(options.launchDirectory)
+  const launch = { projectId: projectIdOf(launchPath), path: launchPath, title: basename(launchPath) || launchPath }
+  // ⚠ The roots are applied to what the state file holds on every read, not once: a root taken out
+  // of the config takes its projects with it. The file keeps them, so putting the root back
+  // restores them — which is why `stored` is written back whole and only `served()` is filtered.
+  let stored: Registration[] = options.statePath === undefined ? [] : readRegistrations(options.statePath)
+  for (const registration of stored) {
+    const refusal = refusalUnderRoots(registration.path, roots, options.roots)
+    if (refusal !== undefined) log.warn('registered project not served: {reason}', { reason: refusal })
+  }
+
+  function served(): Registration[] {
+    return stored.filter(
+      (registration) =>
+        registration.path !== launch.path && refusalUnderRoots(registration.path, roots, options.roots) === undefined,
+    )
+  }
+
+  function persist(next: Registration[]): void {
+    if (options.statePath !== undefined) writeRegistrations(options.statePath, next)
+    stored = next
+  }
+  /**
+   * The project each thread was named for. Dropped when its session is built (`dropClaim`) — and
+   * put back by the next request that names it, since `claim` records whatever a request says for a
+   * thread with no entry (PR #399 review). So with a page that names the project on every request,
+   * this holds one entry per thread such a page has asked about, for the process's life: the same
+   * named non-coverage as the registry's `generations` map — loopback, dev-only, ids minted by the
+   * page. Inert once the session exists: only a NEW thread's build reads it.
+   */
+  const claims = new Map<string, string>()
+
+  function viewOf(path: string, title: string | undefined, isLaunch: boolean): EnsoProject {
+    return {
+      projectId: projectIdOf(path),
+      title: title ?? (basename(path) || path),
+      path,
+      status: isDirectory(path) ? 'ok' : 'missing-dir',
+      launch: isLaunch,
+    }
+  }
+
+  function list(): EnsoProject[] {
+    return [
+      viewOf(launch.path, launch.title, true),
+      ...served().map((registration) => viewOf(registration.path, registration.title, false)),
+    ]
+  }
+
+  function get(projectId: string): EnsoProject | undefined {
+    if (!isEnsoProjectId(projectId)) return undefined
+    return list().find((project) => project.projectId === projectId)
+  }
+
+  function byDirectory(directory: string): EnsoProject | undefined {
+    const canonical = realpathOrSelf(directory)
+    if (canonical === launch.path) return viewOf(launch.path, launch.title, true)
+    const registration = served().find((candidate) => candidate.path === canonical)
+    return registration === undefined ? undefined : viewOf(registration.path, registration.title, false)
+  }
+
+  function register(request: EnsoProjectRegistration): ProjectRegistrationOutcome {
+    const resolved = canonicalDirectory(request.path)
+    if (typeof resolved !== 'string') return resolved
+    const canonical = resolved
+    if (canonical === launch.path) return { kind: 'existing', project: viewOf(launch.path, launch.title, true) }
+    const refusal = refusalUnderRoots(canonical, roots, options.roots)
+    if (refusal !== undefined) return { kind: 'refused', reason: refusal }
+    const existing = served().find((registration) => registration.path === canonical)
+    if (existing !== undefined) return { kind: 'existing', project: viewOf(existing.path, existing.title, false) }
+    const added: Registration =
+      request.title === undefined ? { path: canonical } : { path: canonical, title: request.title }
+    persist([...stored.filter((registration) => registration.path !== canonical), added])
+    log.info('project registered: {path}', { path: canonical, projectId: projectIdOf(canonical) })
+    return { kind: 'registered', project: viewOf(canonical, request.title, false) }
+  }
+
+  function browse(path: string | undefined): ProjectBrowseOutcome {
+    if (path === undefined) {
+      const existing = roots.filter(isDirectory)
+      return {
+        kind: 'listing',
+        listing: listingOf(
+          null,
+          null,
+          false,
+          existing.map((root) => entryOf(root, root)),
+        ),
+      }
+    }
+    const resolved = canonicalDirectory(path)
+    if (typeof resolved !== 'string') return resolved
+    const isRoot = roots.includes(resolved)
+    if (!isRoot) {
+      const refusal = refusalUnderRoots(resolved, roots, options.roots)
+      if (refusal !== undefined) return { kind: 'refused', reason: refusal }
+    }
+    const children = childDirectories(resolved)
+    if (!Array.isArray(children)) return children
+    return {
+      kind: 'listing',
+      listing: listingOf(resolved, isRoot ? null : dirname(resolved), !isRoot, children),
+    }
+  }
+
+  /**
+   * The directories under `directory` a page may browse into: resolved, inside a root, not hidden.
+   * ⚠ A directory can be searchable and not readable (`--x`): `realpath` and `stat` pass, the listing
+   * throws (PR #401 review — it took the server down). That is a refusal saying so, not an empty
+   * list, which would read as "no folders here". Each child is only resolved and stat'ed, never read.
+   */
+  function childDirectories(
+    directory: string,
+  ): EnsoDirectoryEntry[] | { readonly kind: 'refused'; readonly reason: string } {
+    let listed: Dirent[]
+    try {
+      listed = readdirSync(directory, { withFileTypes: true })
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      return {
+        kind: 'refused',
+        reason: `cannot read ${directory}${code === 'EACCES' ? ' — permission denied' : ` (${code})`}`,
+      }
+    }
+    const entries: EnsoDirectoryEntry[] = []
+    for (const child of listed) {
+      if (child.name.startsWith('.') || !(child.isDirectory() || child.isSymbolicLink())) continue
+      const canonical = realpathOrSelf(join(directory, child.name))
+      if (!isDirectory(canonical) || refusalUnderRoots(canonical, roots, options.roots) !== undefined) continue
+      entries.push(entryOf(canonical, child.name))
+    }
+    return entries.sort((left, right) => left.name.localeCompare(right.name))
+  }
+
+  function entryOf(canonical: string, name: string): EnsoDirectoryEntry {
+    const projectId = byDirectory(canonical)?.projectId
+    return projectId === undefined ? { name, path: canonical } : { name, path: canonical, projectId }
+  }
+
+  function remove(projectId: string): ProjectRemovalOutcome {
+    if (projectId === launch.projectId) return 'launch'
+    if (!served().some((registration) => projectIdOf(registration.path) === projectId)) return 'unknown'
+    persist(stored.filter((registration) => projectIdOf(registration.path) !== projectId))
+    log.info('project removed: {projectId}', { projectId })
+    return 'removed'
+  }
+
+  function claim(threadId: string, projectId: string | undefined): ProjectClaimRefusal | undefined {
+    if (projectId === undefined) return undefined
+    if (get(projectId) === undefined) {
+      // Said for the reader of a thread whose project was removed (the live check of #395 slice 3):
+      // the id alone says nothing to them.
+      return { status: 400, reason: `project ${projectId} is not registered here — it was removed, or never added` }
+    }
+    const named = claims.get(threadId)
+    if (named !== undefined && named !== projectId) {
+      return {
+        status: 409,
+        reason: `thread ${threadId} was already named for project ${named}; a thread's project is chosen once`,
+      }
+    }
+    claims.set(threadId, projectId)
+    return undefined
+  }
+
+  function dropClaim(threadId: string): void {
+    claims.delete(threadId)
+  }
+
+  function projectOfNewThread(threadId: string): EnsoProject | undefined {
+    const claimed = claims.get(threadId)
+    return claimed === undefined ? viewOf(launch.path, launch.title, true) : get(claimed)
+  }
+
+  function directoryForNewThread(threadId: string): string {
+    const project = projectOfNewThread(threadId)
+    if (project === undefined) throw new ProjectUnavailable(`thread ${threadId}: its project is no longer registered`)
+    if (project.status === 'missing-dir') {
+      throw new ProjectUnavailable(`thread ${threadId}: the project directory ${project.path} no longer exists`)
+    }
+    return project.path
+  }
+
+  return {
+    list,
+    get,
+    byDirectory,
+    register,
+    browse,
+    remove,
+    claim,
+    dropClaim,
+    projectOfNewThread,
+    directoryForNewThread,
+  }
+}

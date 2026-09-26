@@ -72,7 +72,7 @@ async function startOverLogs(): Promise<{ url: string; logsDir: string }> {
     agentDir: mkdtempSync(join(tmpdir(), 'enso-tail-agent-')),
     logsDir,
     port: 0,
-    host: createFakeAgentHost(() => Promise.resolve(createFakeHostedThread().hosted)),
+    host: () => createFakeAgentHost(() => Promise.resolve(createFakeHostedThread().hosted)),
   })
   openServers.push(started)
   return { url: await started.listening, logsDir }

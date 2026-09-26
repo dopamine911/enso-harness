@@ -6,7 +6,8 @@ import type {
   EnsoSessionUsage,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
-import type { AgentHost } from '../host/agent-host.ts'
+import type { AgentHost, StoredThreadRead } from '../host/agent-host.ts'
+import type { ProjectRegistry } from './projects.ts'
 import type { ThreadRegistry } from './thread-registry.ts'
 import { interruptedTail, transcriptToMessages } from './transcript-to-messages.ts'
 
@@ -47,6 +48,7 @@ import { interruptedTail, transcriptToMessages } from './transcript-to-messages.
 export interface ThreadReadDeps {
   readonly threads: ThreadRegistry
   readonly host: AgentHost
+  readonly projects: ProjectRegistry
 }
 
 /** One thread as of this read: what a pane mounts with, and what the follow's snapshot says. */
@@ -66,8 +68,13 @@ export interface ThreadMount {
   readonly model: EnsoModelState | null
   /** Every question pi is blocked on, oldest first (#114); empty when the thread is not live. */
   readonly openDialogs: EnsoOpenDialog[]
-  /** The tree pi runs this thread in (#44): the live session's own, or the one this host builds every session in. */
+  /**
+   * The tree pi runs this thread in (#44): the live session's own, the stored session's (pi fixed
+   * it at creation), or — for a thread with neither — its project's, where it will be built (#395).
+   */
   readonly cwd: string
+  /** The project that directory is (#395); `undefined` when it is no registered project — the thread is not served. */
+  readonly projectId: string | undefined
   /** What the session has spent and how full its context is (#45): pi's live totals, or the file's with no context. */
   readonly usage: EnsoSessionUsage
 }
@@ -75,11 +82,27 @@ export interface ThreadMount {
 /** A thread with neither a session nor a file has spent nothing and has no window to fill. */
 const NO_USAGE: EnsoSessionUsage = { cost: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, context: null }
 
+/** A live thread's mount reads no file. */
+const NOT_READ = { stored: undefined, storedUnserved: false } as const
+
+/**
+ * The file, read only for a thread that is not live here — nothing is built to answer (#86).
+ * `readStoredThread` answers nothing both for "never stored" and for "stored in a directory that is
+ * no project here"; only the second has a file, and it must not read as a new thread (PR #399 review).
+ */
+async function readCold(
+  host: AgentHost,
+  threadId: string,
+): Promise<{ readonly stored: StoredThreadRead | undefined; readonly storedUnserved: boolean }> {
+  const stored = await host.readStoredThread(threadId)
+  if (stored !== undefined) return { stored, storedUnserved: false }
+  return { stored, storedUnserved: (await host.storedThreadDirectory(threadId)) !== undefined }
+}
+
 export async function readThreadMount(deps: ThreadReadDeps, threadId: string): Promise<ThreadMount> {
-  const { threads, host } = deps
+  const { threads, host, projects } = deps
   const live = threads.peek(threadId)
-  /** The file, read only for a thread that is not live here — nothing is built to answer (#86). */
-  const stored = live === undefined ? await host.readStoredThread(threadId) : undefined
+  const { stored, storedUnserved } = live === undefined ? await readCold(host, threadId) : NOT_READ
   const nowLive = threads.peek(threadId)
   const inspection = nowLive?.hosted.inspect()
   const transcript = inspection === undefined ? (stored?.transcript ?? []) : inspection.entries
@@ -99,7 +122,28 @@ export async function readThreadMount(deps: ThreadReadDeps, threadId: string): P
       nowLive === undefined ? host.storedPermissionMode(transcript) : nowLive.hosted.runtime.permissionModeState(),
     model: nowLive === undefined ? null : nowLive.hosted.runtime.modelState(),
     openDialogs: nowLive === undefined ? [] : nowLive.hosted.runtime.openDialogs(),
-    cwd: inspection?.cwd ?? host.cwd,
+    ...placeOf(projects, threadId, inspection?.cwd ?? stored?.cwd, storedUnserved),
     usage: nowLive === undefined ? (stored?.usage ?? NO_USAGE) : nowLive.hosted.runtime.sessionUsage(),
   }
+}
+
+/**
+ * Where a thread runs and which project that is: its session's directory, or a new thread's
+ * project's. `cwd: ''` when there is nowhere it will run — a new thread whose project was removed
+ * (its first prompt is refused, 409, saying so), or a stored one whose directory is no project here
+ * (resuming it is refused the same way). Falling back to the launch directory would name a place
+ * it will never run (PR #399 review).
+ */
+function placeOf(
+  projects: ProjectRegistry,
+  threadId: string,
+  sessionDirectory: string | undefined,
+  storedUnserved: boolean,
+): Pick<ThreadMount, 'cwd' | 'projectId'> {
+  if (sessionDirectory !== undefined) {
+    return { cwd: sessionDirectory, projectId: projects.byDirectory(sessionDirectory)?.projectId }
+  }
+  if (storedUnserved) return { cwd: '', projectId: undefined }
+  const project = projects.projectOfNewThread(threadId)
+  return { cwd: project?.path ?? '', projectId: project?.projectId }
 }

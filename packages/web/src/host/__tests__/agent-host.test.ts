@@ -12,13 +12,14 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import { ASK_USER_TOOL_NAME, type EnsoObservation } from '@enso/core'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
-import { findRepoRoot, harnessPackageDir } from '@enso/core/paths'
+import { findRepoRoot, harnessPackageDir, realpathOrSelf } from '@enso/core/paths'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import {
   type AgentHost,
   createAgentHost,
   type HostedThread,
   MODEL_WATCH_EXTENSION_PATH,
+  SessionDirectoryRefused,
   seedMultiAccountChildProxyOff,
   stopRunSettlingDialogs,
 } from '../agent-host.ts'
@@ -43,6 +44,8 @@ import { readPiccPersistedMode, storedPermissionModeState } from '../permission-
 const repoRoot = findRepoRoot(import.meta.url)
 const harnessDir = harnessPackageDir(repoRoot)
 const agentDir = mkdtempSync(join(tmpdir(), 'enso-host-agent-'))
+/** The one directory these hosts run sessions in (#395) — the server's projects, reduced to one. */
+const servesRepoRoot = (directory: string): boolean => realpathOrSelf(directory) === realpathOrSelf(repoRoot)
 const openSessions: HostedThread[] = []
 
 let logs: LogRecorder
@@ -75,7 +78,7 @@ function collectEvents(hosted: HostedThread): EnsoObservation[] {
 
 function hostWith(extensionFactories: InlineExtension[] = []): AgentHost {
   return createAgentHost({
-    cwd: repoRoot,
+    servesDirectory: servesRepoRoot,
     agentDir,
     harnessPackageDir: harnessDir,
     extensionFactories,
@@ -83,7 +86,7 @@ function hostWith(extensionFactories: InlineExtension[] = []): AgentHost {
 }
 
 async function hostedSession(extensionFactories: InlineExtension[] = []): Promise<HostedThread> {
-  const hosted = await hostWith(extensionFactories).createSession(crypto.randomUUID())
+  const hosted = await hostWith(extensionFactories).createSession(crypto.randomUUID(), () => repoRoot)
   openSessions.push(hosted)
   return hosted
 }
@@ -141,7 +144,7 @@ test("⚠ childProxy is pinned off in the agent dir's multi-account config, othe
   })
   // and creating a host seeds it in the host's own agent dir — before any session exists
   const hostAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-seed-at-boot-'))
-  createAgentHost({ cwd: repoRoot, agentDir: hostAgentDir, harnessPackageDir: harnessDir })
+  createAgentHost({ servesDirectory: servesRepoRoot, agentDir: hostAgentDir, harnessPackageDir: harnessDir })
   expect(existsSync(join(hostAgentDir, 'provider-failover.json'))).toBe(true)
   expect(JSON.parse(readFileSync(join(hostAgentDir, 'provider-failover.json'), 'utf8'))).toEqual({ childProxy: false })
 })
@@ -154,7 +157,7 @@ test('⚠ creating a host removes secret-shaped variables from its environment, 
   const environment: Record<string, string | undefined> = { PATH: '/usr/bin', PLANTED_API_KEY: 'must-not-survive' }
   logs.clear()
   createAgentHost({
-    cwd: repoRoot,
+    servesDirectory: servesRepoRoot,
     agentDir: mkdtempSync(join(tmpdir(), 'enso-host-quarantine-')),
     harnessPackageDir: harnessDir,
     environment,
@@ -668,10 +671,10 @@ test("⚠ subscribe delivers startup records with origin `session-start` and a r
  * did, once, run in isolation). A host is created first so the env — and pi's own idea of the
  * session dir — is the scratch one, then that dir is passed rather than assumed.
  */
-function storeSession(threadId: string, userText: string, assistantText: string): string {
+function storeSession(threadId: string, userText: string, assistantText: string, directory = repoRoot): string {
   hostWith()
-  const sessionDir = SessionManager.inMemory(repoRoot).getSessionDir()
-  const stored = SessionManager.create(repoRoot, sessionDir, { id: threadId })
+  const sessionDir = SessionManager.inMemory(directory).getSessionDir()
+  const stored = SessionManager.create(directory, sessionDir, { id: threadId })
   stored.appendMessage({ role: 'user', content: userText, timestamp: Date.now() })
   stored.appendMessage({
     role: 'assistant',
@@ -699,7 +702,11 @@ test('⚠ createSession(threadId) OPENS the session file already under that id �
   const threadId = crypto.randomUUID()
   const file = storeSession(threadId, 'what was I doing?', 'fixing the login bug')
   const host = hostWith()
-  const hosted = await host.createSession(threadId)
+  // Never asked where a NEW session would go (PR #399 review): a stale answer — a removed project
+  // the thread was once named for — must not stand between a thread and its own file.
+  const hosted = await host.createSession(threadId, () => {
+    throw new Error('a thread with a session file was asked for a new directory')
+  })
   openSessions.push(hosted)
   const inspection = hosted.inspect()
   expect(inspection.sessionId).toBe(threadId)
@@ -711,7 +718,7 @@ test('⚠ createSession(threadId) OPENS the session file already under that id �
 
 test('createSession(threadId) with no file under that id CREATES the session under it, so the file it flushes is found next time', async () => {
   const threadId = crypto.randomUUID()
-  const hosted = await hostWith().createSession(threadId)
+  const hosted = await hostWith().createSession(threadId, () => repoRoot)
   openSessions.push(hosted)
   expect(hosted.inspect().sessionId).toBe(threadId)
   // Nothing flushed yet (no assistant message): not listed — there is nothing to come back to.
@@ -731,10 +738,26 @@ test('listSessions names stored sessions newest first with the first user messag
   expect(listed.find((stored) => stored.id === newer)).toMatchObject({
     firstMessage: 'newer question',
     messageCount: 2,
+    cwd: repoRoot,
   })
   const transcript = (await host.readStoredThread(older))?.transcript
   expect(transcript?.some((entry) => entry.kind === 'message' && entry.role === 'assistant')).toBe(true)
   expect(await host.readStoredThread('never-stored')).toBeUndefined()
+})
+
+// #395: the host serves the server's projects and nothing else. A session pi keeps for another
+// directory is invisible here — and, the part that matters, its id is not free: building under it
+// is a refusal, never a fresh session beside the stored one in a directory nobody chose.
+test('⚠ a stored session in a directory the host does not serve is not listed, not read, and not reopened or replaced (#395)', async () => {
+  const elsewhere = mkdtempSync(join(tmpdir(), 'enso-unserved-'))
+  const threadId = crypto.randomUUID()
+  storeSession(threadId, 'made elsewhere', 'still elsewhere', elsewhere)
+  const host = hostWith()
+  expect((await host.listSessions()).some((stored) => stored.id === threadId)).toBe(false)
+  expect(await host.readStoredThread(threadId)).toBeUndefined()
+  const refused = host.createSession(threadId, () => repoRoot)
+  await expect(refused).rejects.toBeInstanceOf(SessionDirectoryRefused)
+  await expect(refused).rejects.toThrow(`${elsewhere} is not a project this server runs sessions in`)
 })
 
 // ── session usage (#45): pi's totals, live and stored ────────────────────────
@@ -882,7 +905,7 @@ test("⚠ a stored session's usage is pi's own getSessionStats total — every b
   const host = hostWith()
   const stored = await host.readStoredThread(threadId)
   if (stored === undefined) throw new Error('the stored session was not found')
-  const hosted = await host.createSession(threadId)
+  const hosted = await host.createSession(threadId, () => repoRoot)
   openSessions.push(hosted)
   const { context: storedContext, ...fromFile } = stored.usage
   const { context: _liveContext, ...fromPi } = hosted.runtime.sessionUsage()
@@ -1031,12 +1054,12 @@ test('⚠ a provider refusal is on the feed: the failed attempt, pi’s retry, t
   const retryAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-retry-'))
   writeFileSync(join(retryAgentDir, 'settings.json'), JSON.stringify({ retry: { baseDelayMs: 1 } }))
   const host = createAgentHost({
-    cwd: repoRoot,
+    servesDirectory: servesRepoRoot,
     agentDir: retryAgentDir,
     harnessPackageDir: harnessDir,
     extensionFactories: [fauxModelExtension(core)],
   })
-  const hosted = await host.createSession(crypto.randomUUID())
+  const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
   openSessions.push(hosted)
   const events = collectEvents(hosted)
   const settled = Promise.withResolvers<void>()
@@ -1094,12 +1117,12 @@ test('⚠ a run that runs out of retries ends with pi giving up, and its last er
   const retryAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-retry-'))
   writeFileSync(join(retryAgentDir, 'settings.json'), JSON.stringify({ retry: { baseDelayMs: 1, maxRetries: 1 } }))
   const host = createAgentHost({
-    cwd: repoRoot,
+    servesDirectory: servesRepoRoot,
     agentDir: retryAgentDir,
     harnessPackageDir: harnessDir,
     extensionFactories: [fauxModelExtension(core)],
   })
-  const hosted = await host.createSession(crypto.randomUUID())
+  const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
   openSessions.push(hosted)
   const events = collectEvents(hosted)
   const settled = Promise.withResolvers<void>()
@@ -1169,12 +1192,12 @@ const fauxOAuthProvider: InlineExtension = {
 test('⚠ a browser login from the web: the URL in our words, and a code question that links the login page (#388)', async () => {
   const loginAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-login-'))
   const host = createAgentHost({
-    cwd: repoRoot,
+    servesDirectory: servesRepoRoot,
     agentDir: loginAgentDir,
     harnessPackageDir: harnessDir,
     extensionFactories: [fauxOAuthProvider],
   })
-  const hosted = await host.createSession(crypto.randomUUID())
+  const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
   openSessions.push(hosted)
   const events = collectEvents(hosted)
   const asked = untilObservation(hosted, (event) => event.kind === 'extension-ui-request' && event.method === 'input')
@@ -1249,12 +1272,12 @@ const callbackWinsProvider: InlineExtension = {
 test('⚠ a login that finishes by its callback withdraws the code question it left open (#389)', async () => {
   const loginAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-login-callback-'))
   const host = createAgentHost({
-    cwd: repoRoot,
+    servesDirectory: servesRepoRoot,
     agentDir: loginAgentDir,
     harnessPackageDir: harnessDir,
     extensionFactories: [callbackWinsProvider],
   })
-  const hosted = await host.createSession(crypto.randomUUID())
+  const hosted = await host.createSession(crypto.randomUUID(), () => repoRoot)
   openSessions.push(hosted)
   const withdrawn = untilObservation(hosted, (event) => event.kind === 'dialog-settled')
   const settled = Promise.withResolvers<void>()

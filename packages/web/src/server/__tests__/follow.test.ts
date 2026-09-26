@@ -98,7 +98,7 @@ async function startWith(fake: FakeHost, sseKeepaliveMs = 1000): Promise<string>
     agentDir: mkdtempSync(join(tmpdir(), 'enso-follow-agent-')),
     logsDir: mkdtempSync(join(tmpdir(), 'enso-logs-')),
     port: 0,
-    host: fake.host,
+    host: () => fake.host,
     sseKeepaliveMs,
   })
   openServers.push(started)

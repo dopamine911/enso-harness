@@ -145,6 +145,16 @@ export {
 } from './observation.ts'
 export { EnsoPermissionModeChange, EnsoPermissionModeState } from './permission-mode.ts'
 export {
+  ENSO_PROJECT_HEADER,
+  EnsoDirectoryEntry,
+  EnsoDirectoryListing,
+  EnsoProject,
+  EnsoProjectRegistration,
+  EnsoProjectsConfig,
+  EnsoProjectsState,
+  isEnsoProjectId,
+} from './project.ts'
+export {
   ENSO_PROVIDER_REFUSAL_KEY,
   EnsoProviderRefusal,
   EnsoProviderRetry,

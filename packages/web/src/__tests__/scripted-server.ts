@@ -1,6 +1,7 @@
 import type {
   EnsoFollowFrame,
   EnsoFollowSnapshot,
+  EnsoProject,
   EnsoStoredThread,
   EnsoThreadEvents,
   EnsoThreadHistory,
@@ -62,8 +63,10 @@ export interface ScriptedFetchOptions {
   /** What the stop hands back (#75): the prompts pi had queued. Answered with the 200 receipt. */
   readonly queued?: string[]
   readonly mode?: { mode: string; available: string[] }
-  /** What `GET /api/stored-threads` lists — the rail's Previous Threads (#95). */
+  /** What `GET /api/stored-threads` lists — the rail's earlier threads (#95). */
   readonly storedThreads?: EnsoStoredThread[]
+  /** What `GET /api/projects` lists (#395); the launch project alone, `p-launch`, when absent. */
+  readonly projects?: EnsoProject[]
   /** What `GET /api/threads/:id/history` answers for a resume click; keyed by thread id. */
   readonly histories?: Record<string, EnsoThreadHistory>
   /**
@@ -77,6 +80,15 @@ export interface ScriptedFetchOptions {
   readonly commands?: readonly RuntimeCommand[]
   /** What the stats drawer's read answers (#45 phase 2); 404 when absent, the drawer's "no stats". */
   readonly stats?: Omit<EnsoThreadStats, 'threadId'>
+}
+
+/** The launch project a scripted server lists by default — the id the fixtures' stored threads carry. */
+const SCRIPTED_LAUNCH_PROJECT: EnsoProject = {
+  projectId: 'p-launch',
+  title: 'launch',
+  path: '/scripted/launch',
+  status: 'ok',
+  launch: true,
 }
 
 /** The URL a `fetch` was asked for, whichever of its three forms the caller handed it. */
@@ -125,10 +137,16 @@ export function createScriptedFetch(options: ScriptedFetchOptions = {}): Scripte
     })
     return new Response(body, { status: 200 })
   }
+  /** The page-level lists and the mode seed, by exact path. */
+  const literalReads: Readonly<Record<string, unknown>> = {
+    '/api/mode': mode,
+    '/api/stored-threads': options.storedThreads ?? [],
+    '/api/projects': options.projects ?? [SCRIPTED_LAUNCH_PROJECT],
+  }
   /** The page's own reads — mode seed, the rail's stored list, a resume click's history. Exact paths. */
   const pageRead = (path: string): Response | undefined => {
-    if (path === '/api/mode') return Response.json(mode)
-    if (path === '/api/stored-threads') return Response.json(options.storedThreads ?? [])
+    const literal = literalReads[path]
+    if (literal !== undefined) return Response.json(literal)
     const history = /^\/api\/threads\/([^/]+)\/history$/.exec(path)
     if (history?.[1] !== undefined) {
       const found = options.histories?.[decodeURIComponent(history[1])]

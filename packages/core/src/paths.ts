@@ -196,6 +196,16 @@ export function ensoLogsDir(repoRoot: string): string {
 }
 
 /**
+ * The projects registered from a page (#395): `.enso/projects.json`. Server STATE, not config —
+ * the roots they may sit under are config (`enso.config.json`), committed with the install.
+ *
+ * @group Workspace paths
+ */
+export function ensoProjectsPath(repoRoot: string): string {
+  return join(repoRoot, ENSO_RUNTIME_DIRECTORY, 'projects.json')
+}
+
+/**
  * The harness package — the directory `enso.ts` hands to pi's `-e`.
  *
  * @group Workspace paths

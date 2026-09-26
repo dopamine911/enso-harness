@@ -1,4 +1,5 @@
 import {
+  ENSO_PROJECT_HEADER,
   type EnsoDialogSpec,
   type EnsoInterruptedTail,
   type EnsoSessionUsage,
@@ -7,7 +8,7 @@ import {
   type ProviderRefusalClass,
 } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
-import type { BrowserLogging } from './browser-logging.ts'
+import type { BrowserLogging, FetchLike } from './browser-logging.ts'
 import { createRecentChunksStore, type RecentChunksStore } from './custom-event-router.ts'
 import { createFollowConnection, type FollowConnection } from './follow-connection.ts'
 import { createModeLines, type ModeLines } from './mode-lines.ts'
@@ -40,7 +41,7 @@ import { createStore, type Store, type WritableStore } from './store.ts'
  * thread, which closes its follow. Neither a thread with a run in flight nor the one ON
  * SCREEN is ever the victim — a follow the page is showing or streaming is not spare
  * capacity — so a page made only of those goes over budget and records it. The session is
- * the server's, not the page's, so a dropped thread comes back through Previous Threads —
+ * the server's, not the page's, so a dropped thread comes back through the rail's earlier threads —
  * the rail and `popstate` already resume a thread this page does not hold.
  */
 export interface ThreadStores {
@@ -114,6 +115,19 @@ export interface ThreadStores {
    * history never raises it.
    */
   readonly startSession: WritableStore<boolean>
+  /**
+   * The project this thread runs in (#395): the one its `+` named when minted, or its stored
+   * session's when adopted. `undefined` for a thread minted before the page knew its projects (a
+   * fresh page's first thread) — the server builds it in the launch directory, which is where the
+   * rail files it.
+   */
+  readonly projectId: string | undefined
+  /**
+   * Every thread-scoped request's fetch: the #118 seam's (or the page's), naming `projectId` in
+   * `X-Enso-Project` so the server builds a new thread's session there. The server reads the header
+   * only until the session exists; after that, the session's own directory decides.
+   */
+  readonly fetch: FetchLike
   /** The thread's transport: TanStack's connection over prompt/follow, and the dialog answer beside it. */
   readonly connection: FollowConnection
 }
@@ -130,11 +144,32 @@ export interface EnsoPendingDialog {
 }
 
 /**
+ * A fetch that names the thread's project on every request (#395) — or the fetch as it is, for a
+ * thread with none. The base is read at CALL time, so a test that swaps `globalThis.fetch` after a
+ * thread is minted is still the one asked.
+ */
+function namingProject(fetchImpl: FetchLike | undefined, projectId: string | undefined): FetchLike {
+  return (input: string, init?: RequestInit): Promise<Response> => {
+    const base = fetchImpl ?? fetch
+    if (projectId === undefined) return base(input, init)
+    const headers = new Headers(init?.headers)
+    headers.set(ENSO_PROJECT_HEADER, projectId)
+    return base(input, { ...init, headers })
+  }
+}
+
+/**
  * `fetch` is injectable so a test can mount a real pane over a scripted server (#118) — the
  * one seam between the page and the network. Production never passes it.
  */
-function createThreadStores(threadId: string, history: readonly UIMessage[], fetchImpl?: typeof fetch): ThreadStores {
+function createThreadStores(
+  threadId: string,
+  history: readonly UIMessage[],
+  fetchImpl: typeof fetch | undefined,
+  projectId: string | undefined,
+): ThreadStores {
   const notifications = createNotificationsStore()
+  const threadFetch = namingProject(fetchImpl, projectId)
   return {
     threadId,
     history,
@@ -151,9 +186,11 @@ function createThreadStores(threadId: string, history: readonly UIMessage[], fet
     queue: createStore<readonly string[]>([]),
     refusal: createStore<ProviderRefusalMark | undefined>(undefined),
     startSession: createStore(false),
+    projectId,
+    fetch: threadFetch,
     connection: createFollowConnection({
       threadId,
-      ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
+      fetch: threadFetch,
       onProblem: (problem: unknown) => notifications.push(String(problem), 'warning', 'run'),
     }),
   }
@@ -182,6 +219,8 @@ export interface ThreadSummary {
   readonly lastActivityAt: Date
   /** A run is in flight. */
   readonly busy: boolean
+  /** Which project's group the rail lists it under — `ThreadStores.projectId`. */
+  readonly projectId: string | undefined
 }
 
 /**
@@ -265,7 +304,7 @@ function leastRecentlyActiveIdle(): ThreadSummary | undefined {
  * The thread leaves this page (#272): its follow closes, its stores are forgotten, and the
  * rail stops listing it — so its pane unmounts and the connection is released twice over
  * (here, and again by TanStack's dispose). The pi session is the SERVER's: a dropped thread
- * that ran reappears under Previous Threads and `/history` rebuilds its transcript.
+ * that ran reappears among the rail's earlier threads and `/history` rebuilds its transcript.
  * Idempotent — dropping a thread this page does not hold does nothing.
  */
 function dropThread(threadId: string): void {
@@ -312,9 +351,9 @@ function makeRoomForOneMore(): void {
  * Start-a-session dialog (#391) — every way the page mints one is a new thread the person is about
  * to start.
  */
-export function mintThread(fetchImpl?: typeof fetch): ThreadStores {
+export function mintThread(fetchImpl?: typeof fetch, projectId?: string): ThreadStores {
   makeRoomForOneMore()
-  const stores = createThreadStores(crypto.randomUUID(), [], fetchImpl)
+  const stores = createThreadStores(crypto.randomUUID(), [], fetchImpl, projectId)
   stores.startSession.set(true)
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {
@@ -322,6 +361,7 @@ export function mintThread(fetchImpl?: typeof fetch): ThreadStores {
     title: undefined,
     lastActivityAt: new Date(),
     busy: false,
+    projectId,
   })
   publishThreadList()
   return stores
@@ -371,7 +411,7 @@ export function adoptThread(history: EnsoThreadHistory): ThreadStores {
   if (existing !== undefined) return existing
   makeRoomForOneMore()
   const messages = reviveHistoryMessages(history.messages)
-  const stores = createThreadStores(history.threadId, messages)
+  const stores = createThreadStores(history.threadId, messages, undefined, history.projectId)
   stores.permissionMode.applyReceipt(history.permissionMode)
   if (history.interrupted !== undefined) {
     stores.notifications.push(INTERRUPTED_TAIL_NOTICE[history.interrupted], 'warning', 'run')
@@ -382,6 +422,7 @@ export function adoptThread(history: EnsoThreadHistory): ThreadStores {
     title: titleFromMessages(messages),
     lastActivityAt: new Date(),
     busy: false,
+    projectId: history.projectId,
   })
   publishThreadList()
   return stores

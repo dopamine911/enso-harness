@@ -19,6 +19,7 @@ import type { RunAgentInputContext, SubscribeConnectionAdapter } from '@tanstack
 import type { ModelMessage, UIMessage } from '@tanstack/ai/client'
 import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
+import type { FetchLike } from './browser-logging.ts'
 import { FOLLOW_ENDED_CUSTOM_EVENT } from './custom-event-router.ts'
 import { type AguiIdentifiers, observationToAguiEvents } from './to-agui.ts'
 
@@ -85,7 +86,7 @@ function sentence(template: string, properties: Record<string, unknown>): string
 export interface FollowConnectionOptions {
   readonly threadId: string
   /** Test seam: the page's `fetch`. */
-  readonly fetch?: typeof fetch
+  readonly fetch?: FetchLike
   /** Notified for anything the adapter could not deliver. Never silent. */
   readonly onProblem?: (problem: unknown) => void
 }

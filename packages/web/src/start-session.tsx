@@ -1,4 +1,4 @@
-import type { EnsoSessionConfiguration, HostCommandOption, RuntimeCommand } from '@enso/core'
+import type { EnsoProject, EnsoSessionConfiguration, HostCommandOption, RuntimeCommand } from '@enso/core'
 import { useEffect, useRef, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { fetchThreadCommands } from './commands-connection.ts'
@@ -48,8 +48,14 @@ export interface StartSessionDialogProps {
   readonly configure: (configuration: EnsoSessionConfiguration) => Promise<ConfigureOutcome>
   /** The chat's send: false when it refused (disconnected), and the dialog then stays open. */
   readonly send: (text: string) => boolean
-  /** The connection's `fetch` — injected by tests, the page's global by default. */
+  /** The thread's `fetch` — it names the thread's project (#395); injected by tests. */
   readonly fetch?: FetchLike
+  /**
+   * Where the session runs (#395), shown and NOT chosen here: the session was built for this
+   * dialog, in this directory, and a different project is a different thread — the rail's `+`.
+   * Undefined until the page has its projects.
+   */
+  readonly project?: EnsoProject | undefined
 }
 
 type Catalogue =
@@ -259,12 +265,23 @@ function initialMode(
 }
 
 /** The dialog's header, and why there are no fields when loading the session failed. */
-function SessionStatus({ catalogue }: { catalogue: Catalogue }): React.ReactNode {
+function SessionStatus({
+  catalogue,
+  project,
+}: {
+  catalogue: Catalogue
+  project: EnsoProject | undefined
+}): React.ReactNode {
   return (
     <>
       <DialogHeader>
         <DialogTitle>Start a session</DialogTitle>
         <DialogDescription>
+          {project === undefined ? null : (
+            <span title={project.path}>
+              in <span className="font-medium text-foreground">{project.title}</span> ·{' '}
+            </span>
+          )}
           {catalogue.kind === 'loading' ? 'starting the session…' : 'applied together when you start'}
         </DialogDescription>
       </DialogHeader>
@@ -312,7 +329,7 @@ export function StartSessionDialog(props: StartSessionDialogProps): React.ReactN
   return (
     <Dialog open={open} onOpenChange={(next: boolean): void => (next ? undefined : onClose())}>
       <DialogContent className="sm:max-w-lg">
-        <SessionStatus catalogue={catalogue} />
+        <SessionStatus catalogue={catalogue} project={props.project} />
         {catalogue.kind === 'loaded' ? (
           <FieldGroup>
             <ModelField models={catalogue.models} chosen={model} onChoose={chooseModel} />

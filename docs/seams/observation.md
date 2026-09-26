@@ -109,10 +109,11 @@ export const EnsoFollowSnapshot = Type.Object(
     model: Type.Union([EnsoModelState, Type.Null()]),
     /**
      * The tree pi reads and writes for this thread (#44), AS OF THIS SNAPSHOT — the live session's
-     * own cwd, or, when the thread is not live, the one this server builds every session in
-     * (`server/index.ts` takes it from its own launch arguments, never a request). Not re-sent
-     * when a session is built mid-follow: it cannot differ, since the host creates and lists
-     * sessions by that same cwd. What makes a wrong-project session visible.
+     * own cwd; when the thread is not live, the stored session's (pi fixed it at creation); and
+     * for a thread with neither, its project's (#395), where it will be built — or `''` when that
+     * project has been removed, so it will be built nowhere (its prompt is refused). Not re-sent when a
+     * session is built mid-follow: it cannot differ, since a new thread is built in exactly that
+     * directory. What makes a wrong-project session visible.
      *
      * ⚠ Adding a field here is wire-breaking for an OPEN TAB: the schema is closed, so a page and
      * server of different versions reject each other's snapshots. The page says so and asks for a
@@ -172,12 +173,12 @@ prompt route in `packages/web/src/server/follow.ts` announces it (line 256) when
 a prompt after its receipt went out. Both are grounded in the kinds table's "Produced by" column.
 
 **Minted once.** The registry, `packages/web/src/server/thread-registry.ts`, is the only place a `seq`
-is assigned: `publishObservation` (line 347) increments the feed's counter, records the observation
+is assigned: `publishObservation` (line 354) increments the feed's counter, records the observation
 (`observation-log.ts` — `info` for the spine kinds, `debug` for every observation, `trace` with the
 payload), then publishes. The feed subscribes the runtime once per live thread and routes every event
 through the mapper (lines 332–334); the prompt route's `announce` (line 516) enters the same counter.
 
-**Consumed by the follow route and the browser.** `followThread` (`server/follow.ts` line 156) writes
+**Consumed by the follow route and the browser.** `followThread` (`server/follow.ts` line 153) writes
 one frame per feed frame — `observation` with its `seq`, `status` with `live`/`busy`/`generation`
 (lines 160–170) — after a snapshot taken in the same tick as the subscription, exact as of `asOfSeq`
 (lines 146–150, 178–189). In the browser `packages/web/src/follow-connection.ts` checks every frame
@@ -188,9 +189,9 @@ queued (line 400). `packages/web/src/to-agui.ts` is the adapter proper: observat
 chunk, run in the page, never serialised or stored (header lines 5–34).
 
 **The resync rule.** Nothing is replayed by cursor. A reconnect opens a new follow and gets a new
-snapshot (`follow.ts` header lines 13–15; `server/follow.ts` lines 178–189); when the last follower
+snapshot (`follow.ts` header lines 13–15; `server/follow.ts` lines 175–186); when the last follower
 leaves, the registry forgets the feed and `seq` restarts with the next follower, snapshot-first
-(`thread-registry.ts` lines 556–564). `asOfSeq` is the watermark the snapshot is complete through.
+(`thread-registry.ts` lines 563–571). `asOfSeq` is the watermark the snapshot is complete through.
 
 ## What fences it
 
@@ -221,7 +222,7 @@ renders what is waiting and "this one cuts in" is a different sentence from "thi
 turn"; a runtime with one queue class, or three, changes this shape and nothing above it.
 
 **`messages` on the snapshot is the state layer's shape.** `EnsoFollowSnapshot.messages`
-(`follow.ts` line 35), carried as `Type.Array(Type.Unknown())`: not an observation but the storage
+(`follow.ts` line 56), carried as `Type.Array(Type.Unknown())`: not an observation but the storage
 seam's rebuild, built by `server/transcript-to-messages.ts` and put on the opening snapshot by the
 follow route — see `storage.md`, and `presentation.md` → *What crosses it that should not*, which
 prices it. It is on THIS wire, with `Unknown` in place of a shape, and no client reads it off the

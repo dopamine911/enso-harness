@@ -23,7 +23,7 @@ methods beside the vendored adapter interface are ours, and each says why the ve
 export interface FollowConnectionOptions {
   readonly threadId: string
   /** Test seam: the page's `fetch`. */
-  readonly fetch?: typeof fetch
+  readonly fetch?: FetchLike
   /** Notified for anything the adapter could not deliver. Never silent. */
   readonly onProblem?: (problem: unknown) => void
 }
@@ -140,7 +140,7 @@ thread on the page gets its own:
  * thread, which closes its follow. Neither a thread with a run in flight nor the one ON
  * SCREEN is ever the victim — a follow the page is showing or streaming is not spare
  * capacity — so a page made only of those goes over budget and records it. The session is
- * the server's, not the page's, so a dropped thread comes back through Previous Threads —
+ * the server's, not the page's, so a dropped thread comes back through the rail's earlier threads —
  * the rail and `popstate` already resume a thread this page does not hold.
  */
 export interface ThreadStores {
@@ -214,6 +214,19 @@ export interface ThreadStores {
    * history never raises it.
    */
   readonly startSession: WritableStore<boolean>
+  /**
+   * The project this thread runs in (#395): the one its `+` named when minted, or its stored
+   * session's when adopted. `undefined` for a thread minted before the page knew its projects (a
+   * fresh page's first thread) — the server builds it in the launch directory, which is where the
+   * rail files it.
+   */
+  readonly projectId: string | undefined
+  /**
+   * Every thread-scoped request's fetch: the #118 seam's (or the page's), naming `projectId` in
+   * `X-Enso-Project` so the server builds a new thread's session there. The server reads the header
+   * only until the session exists; after that, the session's own directory decides.
+   */
+  readonly fetch: FetchLike
   /** The thread's transport: TanStack's connection over prompt/follow, and the dialog answer beside it. */
   readonly connection: FollowConnection
 }
@@ -318,7 +331,7 @@ need none: an upstream re-port is the second implementation, and the gate is wha
 ## What crosses it that should not
 
 **The state layer's message shape crosses two wire payloads.** `EnsoThreadHistory.messages`
-(`thread-inspection.ts` line 228) and `EnsoFollowSnapshot.messages` (`follow.ts` line 35) are both
+(`thread-inspection.ts` line 279) and `EnsoFollowSnapshot.messages` (`follow.ts` line 56) are both
 `Type.Array(Type.Unknown())` on purpose — core must not own the client's transport shape — and both
 carry the client's `UIMessage`s. They are built by `transcriptToMessages` in
 `server/transcript-to-messages.ts`, the read-side twin of `to-agui.ts`, which imports `MessagePart`
@@ -360,7 +373,7 @@ written against the client's `ChatUIHost`), plus the message-shape crossing, whi
 not three: `ThreadStores.history` and `reviveHistoryMessages` in the browser,
 `server/transcript-to-messages.ts` as the producer, its two callers in `server/follow.ts` (the follow
 snapshot) and `server/index.ts` (the history route), and the two schema fields that carry the result,
-`packages/core/src/follow.ts:35` and `packages/core/src/thread-inspection.ts:228`.
+`packages/core/src/follow.ts:56` and `packages/core/src/thread-inspection.ts:279`.
 The per-thread stores, the router's dispatch, and the fixture path are shaped by the thread, not the
 client, and survive.
 

@@ -206,6 +206,14 @@ test('the project is the directory name with the full path in its title; absent 
   )
 })
 
+// #395, PR #399 review: the server's empty directory means a new thread's project was removed —
+// it will be built nowhere. Said as such, not as a project with no name.
+test('an empty directory says the project was removed, not an unnamed project', () => {
+  const rendered = render({ cwd: '' })
+  expect(rendered).toContain('project removed<')
+  expect(rendered).not.toContain('the tree pi reads and writes')
+})
+
 // #340: beside `idle · $0.0000` the bar says a refusal's class while nothing has got through —
 // "nothing ran", not "free" — and says nothing when there is none.
 test('a refusal renders its class word beside the activity; none renders nothing extra', () => {

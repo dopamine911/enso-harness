@@ -174,7 +174,7 @@ from our words to the vendors' is its vendor map, the one place it names them.
 
 | Noun | Meaning | Id | Minted by | Owner, lifetime |
 |---|---|---|---|---|
-| **project** | the cwd pi reads and writes | path | server startup (`EnsoServerOptions.cwd`), never a request | the server process; one project, many threads |
+| **project** | a directory threads run in (#395) | `projectId` (its canonical path, hashed) | the launch directory (`EnsoServerOptions.cwd`), or registered under a root `enso.config.json` declares — never a path chosen by a request | the registration; many threads per project, many projects per server |
 | **thread** | one conversation | `threadId`, UUID-shaped (`isEnsoThreadId`) | the browser (`crypto.randomUUID()`), or reused from a stored log on resume | the registry's `ThreadEntry` while live; the id outlives it |
 | **pi session** | pi's append-only log, and the live `AgentSession` over it | **the same string as `threadId`** (#95) | pi, under the browser's id | 1:1 with the thread; the log outlives everything |
 | **run** | one acquisition of a thread: prompt admission → `agent_settled`. Not one prompt — prompts during a run queue into it (#75) | `generation`, per thread, monotonic for the server's lifetime | `acquire()` | the lease; released by the settle observer, or on acceptance where acceptance IS completion (an extension command, a mode change); never by a returning prompt |

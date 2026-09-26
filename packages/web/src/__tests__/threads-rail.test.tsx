@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
+import { ENSO_PROJECT_HEADER, type EnsoProject, type EnsoStoredThread } from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { pageClock } from '../page-clock.ts'
@@ -12,7 +13,7 @@ import {
   titleFromMessages,
   updateThreadSummary,
 } from '../thread-stores.ts'
-import { relativeAge, ThreadsRail, UNTITLED_THREAD } from '../threads-rail.tsx'
+import { groupByProject, relativeAge, STORED_ROWS_SHOWN, ThreadsRail, UNTITLED_THREAD } from '../threads-rail.tsx'
 
 /**
  * #90 PR 3: the sessions rail and the page's thread list behind it. The rail is rendered
@@ -117,6 +118,7 @@ test("a summary update reaches the list and moves the thread's activity clock; a
 test('adopting stored history restores dates, title and mode under the stored thread id exactly once, and never asks to start a session (#391)', () => {
   const history = {
     threadId: 'stored-1',
+    projectId: 'p-launch',
     messages: [
       {
         id: 'u1',
@@ -143,6 +145,7 @@ test('adopting stored history restores dates, title and mode under the stored th
 test('⚠ adopting a branch that ends inside a turn opens with a warning that says so; a settled one opens clean (#109)', () => {
   const torn = adoptThread({
     threadId: 'torn-1',
+    projectId: 'p-launch',
     messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', content: 'never answered' }] }],
     permissionMode: { mode: 'default', available: [] },
     interrupted: 'unanswered-prompt',
@@ -152,6 +155,7 @@ test('⚠ adopting a branch that ends inside a turn opens with a warning that sa
   ])
   const settled = adoptThread({
     threadId: 'settled-1',
+    projectId: 'p-launch',
     messages: [],
     permissionMode: { mode: 'default', available: [] },
   })
@@ -176,13 +180,15 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
   const now = pageClock.get()
   const rendered = renderToStaticMarkup(
     <ThreadsRail
+      projects={[]}
       threads={[
-        { threadId: 't2', title: undefined, lastActivityAt: now, busy: true },
+        { threadId: 't2', title: undefined, lastActivityAt: now, busy: true, projectId: undefined },
         {
           threadId: 't1',
           title: 'fix the login bug',
           lastActivityAt: new Date(now.getTime() - 6 * 86_400_000),
           busy: false,
+          projectId: undefined,
         },
       ]}
       activeThreadId="t1"
@@ -191,9 +197,11 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
       onSelect={noop}
       onResume={noop}
       onNew={noop}
+      onAddProject={noop}
+      onRemoveProject={noop}
+      projectNotice={undefined}
     />,
   )
-  expect(rendered).toContain('Active Threads')
   expect(rendered).toContain('New Thread')
   expect(rendered).toContain(UNTITLED_THREAD)
   expect(rendered).toContain('fix the login bug')
@@ -206,48 +214,134 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
   expect(rendered).toContain('running')
 })
 
-test('the earlier list distinguishes resumable, running-elsewhere, empty and failed states', () => {
+// ── projects (#395) ──────────────────────────────────────────────────────────
+
+const LAUNCH: EnsoProject = { projectId: 'p-launch', title: 'enso', path: '/code/enso', status: 'ok', launch: true }
+const APP: EnsoProject = { projectId: 'p-app', title: 'app', path: '/code/app', status: 'ok', launch: false }
+const GONE: EnsoProject = {
+  projectId: 'p-gone',
+  title: 'gone',
+  path: '/code/gone',
+  status: 'missing-dir',
+  launch: false,
+}
+
+function storedIn(projectId: string, threadId: string, extra: Partial<EnsoStoredThread> = {}): EnsoStoredThread {
+  return { threadId, projectId, lastActivityAt: pageClock.get().toISOString(), messageCount: 2, busy: false, ...extra }
+}
+
+/** The markup of the section a project's rows are in — from its label to the next section. */
+function sectionOf(rendered: string, name: string): string {
+  const start = rendered.indexOf(`<section aria-label="${name}"`)
+  if (start < 0) throw new Error(`no section ${name}`)
+  const end = rendered.indexOf('<section', start + 1)
+  return rendered.slice(start, end < 0 ? undefined : end)
+}
+
+test("each project is a section with its own threads — the page's open ones, then its stored ones — and a + that starts one there", () => {
   const now = pageClock.get()
-  const baseProps = {
-    threads: [{ threadId: 'here', title: 'current', lastActivityAt: now, busy: false }],
-    activeThreadId: 'here',
+  const rendered = renderToStaticMarkup(
+    <ThreadsRail
+      projects={[LAUNCH, APP, GONE]}
+      // A thread minted before the page knew its projects has none: the server built it in the launch directory.
+      threads={[{ threadId: 'here', title: 'current', lastActivityAt: now, busy: false, projectId: undefined }]}
+      activeThreadId="here"
+      earlier={[
+        storedIn('p-launch', 'stored', {
+          title: 'resume me',
+          lastActivityAt: new Date(now.getTime() - 2 * 3_600_000).toISOString(),
+        }),
+        storedIn('p-app', 'elsewhere', { busy: true }),
+      ]}
+      earlierError={undefined}
+      onSelect={noop}
+      onResume={noop}
+      onNew={noop}
+      onAddProject={noop}
+      onRemoveProject={noop}
+      projectNotice={undefined}
+    />,
+  )
+  const launch = sectionOf(rendered, 'enso')
+  expect(launch.indexOf('current')).toBeLessThan(launch.indexOf('resume me'))
+  expect(launch).toContain('2h')
+  expect(launch).toContain('title="/code/enso"')
+  // Running elsewhere is shown, not locked (#114): the row is how a reloaded page gets back to an open question.
+  const app = sectionOf(rendered, 'app')
+  expect(app).toContain(UNTITLED_THREAD)
+  expect(app).toContain('running')
+  expect(app).toContain('aria-label="new thread in app"')
+  expect(app).not.toContain('disabled=""')
+  // A project whose directory is gone says so, and starts nothing.
+  const gone = sectionOf(rendered, 'gone')
+  expect(gone).toContain('missing')
+  expect(gone).toContain('no threads yet')
+  expect(gone).toMatch(
+    /aria-label="new thread in gone"[^>]*disabled=""|disabled=""[^>]*aria-label="new thread in gone"/,
+  )
+})
+
+test('⚠ an open thread whose project is not listed is kept, under "other"; with no projects yet, every thread is still there', () => {
+  const now = pageClock.get()
+  const orphan = { threadId: 'orphan', title: 'still open', lastActivityAt: now, busy: false, projectId: 'p-removed' }
+  const grouped = groupByProject([LAUNCH], [orphan], [])
+  expect(grouped.map((group) => group.project?.projectId)).toEqual(['p-launch', undefined])
+  expect(grouped[1]?.threads).toEqual([orphan])
+  expect(groupByProject([], [orphan], [storedIn('p-launch', 'stored')])).toEqual([
+    { project: undefined, threads: [orphan], earlier: [storedIn('p-launch', 'stored')] },
+  ])
+})
+
+test('a section shows five stored threads and says how many more there are; a failed listing is an alert, not an empty rail', () => {
+  const earlier = Array.from({ length: STORED_ROWS_SHOWN + 2 }, (_, index) => storedIn('p-launch', `s${index}`))
+  const props = {
+    projects: [LAUNCH],
+    threads: [],
+    activeThreadId: undefined,
     onSelect: noop,
     onResume: noop,
     onNew: noop,
+    onAddProject: noop,
+    onRemoveProject: noop,
+    projectNotice: undefined,
   }
+  const rendered = renderToStaticMarkup(<ThreadsRail {...props} earlier={earlier} earlierError={undefined} />)
+  expect(rendered.match(/not open here/g)).toHaveLength(STORED_ROWS_SHOWN)
+  expect(rendered).toContain('show 2 more')
+  const failed = renderToStaticMarkup(<ThreadsRail {...props} earlier={[]} earlierError="connection refused" />)
+  expect(failed).toContain('role="alert"')
+  expect(failed).toContain('could not list threads: connection refused')
+})
+
+test('⚠ a thread minted in a project names it on every request it makes; one minted with none names nothing', async () => {
+  const seen: Array<string | null> = []
+  const recording = ((_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    seen.push(new Headers(init?.headers).get(ENSO_PROJECT_HEADER))
+    return Promise.resolve(new Response(null, { status: 204 }))
+  }) as typeof fetch
+  await mintThread(recording, 'p-app').connection.configure({ mode: 'plan' })
+  await mintThread(recording).connection.configure({ mode: 'plan' })
+  expect(seen).toEqual(['p-app', null])
+})
+
+test('a registered project can be removed from its section, the launch directory cannot; a refused removal is said', () => {
   const rendered = renderToStaticMarkup(
     <ThreadsRail
-      {...baseProps}
-      earlier={[
-        {
-          threadId: 'stored',
-          title: 'resume me',
-          lastActivityAt: new Date(now.getTime() - 2 * 3_600_000).toISOString(),
-          messageCount: 4,
-          busy: false,
-        },
-        {
-          threadId: 'elsewhere',
-          lastActivityAt: now.toISOString(),
-          messageCount: 2,
-          busy: true,
-        },
-      ]}
+      projects={[LAUNCH, APP]}
+      threads={[]}
+      activeThreadId={undefined}
+      earlier={[]}
       earlierError={undefined}
+      onSelect={noop}
+      onResume={noop}
+      onNew={noop}
+      onAddProject={noop}
+      onRemoveProject={noop}
+      projectNotice="could not remove the project: 409 a thread in this project is running"
     />,
   )
-  expect(rendered).toContain('aria-label="Previous Threads"')
-  expect(rendered).toContain('resume me')
-  expect(rendered).toContain('2h')
-  // Running is shown, not locked (#114): the row is how a reloaded page gets back to an open question.
-  expect(rendered).toContain('running')
-  expect(rendered).not.toContain('disabled=""')
-  expect(rendered).toContain(UNTITLED_THREAD)
-
-  const empty = renderToStaticMarkup(<ThreadsRail {...baseProps} earlier={[]} earlierError={undefined} />)
-  expect(empty).toContain('none yet')
-  const failed = renderToStaticMarkup(<ThreadsRail {...baseProps} earlier={[]} earlierError="connection refused" />)
-  expect(failed).toContain('role="alert"')
-  expect(failed).toContain('could not list previous threads: connection refused')
-  expect(failed).not.toContain('none yet')
+  expect(sectionOf(rendered, 'app')).toContain('aria-label="more for app"')
+  expect(sectionOf(rendered, 'enso')).not.toContain('more for')
+  expect(rendered).toContain('Add project')
+  expect(rendered).toMatch(/role="alert"[^>]*>could not remove the project: 409 a thread in this project is running/)
 })

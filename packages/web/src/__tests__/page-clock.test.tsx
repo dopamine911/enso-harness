@@ -48,13 +48,17 @@ async function mountRail(lastActivityAt: Date): Promise<{
   const root: Root = createRoot(container)
   const view = (earlierError: string | undefined): React.ReactNode => (
     <ThreadsRail
-      threads={[{ threadId: 't1', title: 'live', lastActivityAt, busy: false }]}
+      projects={[]}
+      threads={[{ threadId: 't1', title: 'live', lastActivityAt, busy: false, projectId: undefined }]}
       activeThreadId="t1"
       earlier={[]}
       earlierError={earlierError}
       onSelect={noop}
       onResume={noop}
       onNew={noop}
+      onAddProject={noop}
+      onRemoveProject={noop}
+      projectNotice={undefined}
     />
   )
   await flush(async () => {
