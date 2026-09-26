@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 270.**
+**Decision headers: 272.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -170,6 +170,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/session-events.ts` | `#69` | `AgentSessionEvent` → the rpc WIRE shape (#69). |
 | `packages/web/src/host/session-usage.ts` | `#45`, `#86` | A thread's spend and context, as pi reckons them (#45) — the two halves of `EnsoSessionUsage`. |
 | `packages/web/src/host/transcript.ts` | `#162` | The runtime's session branch → the transcript of ours (#162 workstream 4, L2's persistence side). |
+| `packages/web/src/listing-store.ts` | `#29`, `#86`, `#95`, `#395` | A list the server hands the page and the rail shows — stored threads (#95), projects (#395). |
 | `packages/web/src/markdown-image.tsx` | `#350` | ⚠ A MARKDOWN IMAGE IS A FETCH, so a remote one waits for a click (PR #350 review). |
 | `packages/web/src/mode-lines.ts` | `#29`, `#69`, `#88`, `#162` | Permission-mode lines in the transcript (#29, the remaining half). |
 | `packages/web/src/model-state.tsx` | `#44`, `#90`, `#338`, `#341` | The model the thread runs and how hard it thinks, as STATE — and the two composer controls that change them (#338 slice 2; the control half of #44). |
@@ -177,6 +178,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/option-select.tsx` | `#45` | A closed vocabulary as a control (#45 phase 2 folded the log level's and the stats drawer's copies): a native `<select>` — keyboard- and screen-reader-complete without a dependency, the reasoning the permission-mode control gives — that only ever hands back one of its options. |
 | `packages/web/src/page-clock.ts` | `#278` | The page's clock as a store (#278): the one value that changes with no input. |
 | `packages/web/src/permission-mode.tsx` | `#73`, `#84`, `#90` | The CURRENT permission mode, as state — and the control that changes it (#84). |
+| `packages/web/src/project-list.ts` | `#395` | The projects the rail groups threads under (#395): the launch directory first, then the ones registered under the install's roots, as `GET /api/projects` lists them. |
 | `packages/web/src/questionnaire-card.tsx` | `#12` | The agent's `ask_user` questionnaire as one card (#12): a tab per question, each option a row with its label and what choosing it means, an "Other" row for an answer in the user's own words, and one "Submit answers" once every question has one. |
 | `packages/web/src/read-on-usage.ts` | `#45`, `#361`, `#362` | A thread's route, read on mount and again whenever the thread's usage moves (#45, #361) — the Stats and Context views' one refresh rule. |
 | `packages/web/src/refused-attempt.tsx` | `#340`, `#381` | A refused attempt, said (#340, #381): `<provider>/<model> refused: <class> (<status>) — <reason>`. |
@@ -217,7 +219,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/start-session.tsx` | `#390`, `#391` | The Start-a-session dialog (#391): a new thread opens on it — the model, the effort, the mode and the first prompt, then **Start session**. |
 | `packages/web/src/stats-table.tsx` | `#45`, `#144` | The table and the number formats the two stats surfaces share (#45 phase 2): the day's (`debug/day-stats-screen.tsx`, #144) and one thread's (`thread-stats.tsx`). |
 | `packages/web/src/store.ts` | `#90` | The smallest external store React can subscribe to: one value, replaced whole, and a listener set. |
-| `packages/web/src/stored-threads.ts` | `#29`, `#86`, `#95` | The sessions a user can come back to (#95): pi's session files for this workspace, as the server lists them. |
+| `packages/web/src/stored-threads.ts` | `#95`, `#395` | The sessions a user can come back to (#95): pi's session files in this server's projects, as the server lists them — the rail's rows under each project (#395). |
 | `packages/web/src/thread-context-analysis.ts` | `#361` | What the Context view derives from `EnsoThreadContext` before it draws (#361): the category order and names, totals, the prompt-granularity roll-up and the delta series — dsh-context's `categories.ts`, `headline.ts` and trend aggregation, over our wire. |
 | `packages/web/src/thread-context.tsx` | `#361` | The Context view (#361) — dsh-context's Context tab over pi: what the next request is made of (Current Context), and every request's makeup with its brief (Context Trend). |
 | `packages/web/src/thread-stats-analysis.ts` | `#45` | What the stats drawer derives from `EnsoThreadStats` before it draws (#45 phase 2): the averages, the per-tool totals and the two rankings — pi-livecraft's `analyzeSession` and `SessionAnalysisWidget` rankings (`.inspiration/pi-extensions/pi-livecraft`), ported to our wire. |
@@ -225,7 +227,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/thread-status.tsx` | `#45`, `#51`, `#84`, `#90`, `#103` | The status bar (#90 PR 1): the always-on line that says what this session is doing and what it has cost, so the answer to "is anything happening?" |
 | `packages/web/src/thread-stores.ts` | `#90`, `#272` | Everything the browser knows about one thread beyond its messages (#90 PR 3). |
 | `packages/web/src/thread-url.ts` | `#95`, `#142` | The thread a page URL names (#142): `?thread=<id>`. |
-| `packages/web/src/threads-rail.tsx` | `#90`, `#95`, `#104`, `#278` | The threads rail (#90 PR 3): which conversation am I in, what else is live on this page, how do I start over. |
+| `packages/web/src/threads-rail.tsx` | `#90`, `#95`, `#104`, `#114`, `#278`, `#395` | The threads rail (#90 PR 3, #395): which conversation am I in, in which project, what else is there, how do I start another. |
 | `packages/web/src/to-agui.ts` | `#18`, `#24`, `#112` | `EnsoObservation` → AG-UI `StreamChunk` (#24, #112). |
 | `packages/web/src/transcript-reveal.ts` | `#359`, `#360` | From a point or a row in the stats drawer to the transcript row it describes (#359) — pi-livecraft's `onNavigate({ kind: 'turn' \| 'message' \| 'tool' })`, over our transcript. |
 | `scripts/__tests__/enso-launch.test.ts` | `#221` | The terminal launcher's decisions (docs/flows/boot-and-launchers.md, stated gap: `enso.ts` had no test of its own). |

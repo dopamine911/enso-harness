@@ -1,50 +1,18 @@
 import { EnsoStoredThread, EnsoThreadHistory } from '@enso/core'
 import { Check } from 'typebox/value'
-import { createStore, type Store } from './store.ts'
+import { createListingStore, type ListingStore } from './listing-store.ts'
 
 /**
- * The sessions a user can come back to (#95): pi's session files for this workspace, as
- * the server lists them.
- *
- * Page-level, not per thread — it is the rail's second list.
- *
- * ⚠ Refreshed on demand, never streamed: page load, and after a run settles (that is when
- * a session file appears or grows). The same rule as the debug drawer (#86): a listing puts
- * no traffic in the trace it describes.
- *
- * ⚠ A failed listing is STATE, not a log line: an empty list and a listing that could not
- * be fetched must not look the same (#29's rule, applied to a list). The rail shows the
- * error where the rows would be; the last good rows are kept beneath it.
+ * The sessions a user can come back to (#95): pi's session files in this server's projects, as
+ * the server lists them — the rail's rows under each project (#395). Refreshed on load and after a
+ * run settles, when a session file appears or grows (`listing-store.ts` has the rules).
  */
-
-export interface StoredThreadsState {
-  readonly threads: readonly EnsoStoredThread[]
-  /** Why the last refresh produced nothing — a down server, a payload off its schema. */
-  readonly error: string | undefined
-}
-
-export interface StoredThreadsStore extends Store<StoredThreadsState> {
-  readonly refresh: () => Promise<void>
-}
+export type StoredThreadsStore = ListingStore<EnsoStoredThread>
 
 export function createStoredThreadsStore(
   fetchStoredThreads: () => Promise<unknown> = fetchStoredThreadList,
 ): StoredThreadsStore {
-  const store = createStore<StoredThreadsState>({ threads: [], error: undefined })
-  return {
-    get: store.get,
-    subscribe: store.subscribe,
-    refresh: async () => {
-      try {
-        const listed = await fetchStoredThreads()
-        const wellFormed = Array.isArray(listed) && listed.every((thread) => Check(EnsoStoredThread, thread))
-        if (!wellFormed) throw new Error("the server's session listing did not match its schema")
-        store.set({ threads: listed as EnsoStoredThread[], error: undefined })
-      } catch (error) {
-        store.set({ threads: store.get().threads, error: error instanceof Error ? error.message : String(error) })
-      }
-    },
-  }
+  return createListingStore(EnsoStoredThread, 'session listing', fetchStoredThreads)
 }
 
 /**

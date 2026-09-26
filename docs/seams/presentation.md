@@ -23,7 +23,7 @@ methods beside the vendored adapter interface are ours, and each says why the ve
 export interface FollowConnectionOptions {
   readonly threadId: string
   /** Test seam: the page's `fetch`. */
-  readonly fetch?: typeof fetch
+  readonly fetch?: FetchLike
   /** Notified for anything the adapter could not deliver. Never silent. */
   readonly onProblem?: (problem: unknown) => void
 }
@@ -140,7 +140,7 @@ thread on the page gets its own:
  * thread, which closes its follow. Neither a thread with a run in flight nor the one ON
  * SCREEN is ever the victim — a follow the page is showing or streaming is not spare
  * capacity — so a page made only of those goes over budget and records it. The session is
- * the server's, not the page's, so a dropped thread comes back through Previous Threads —
+ * the server's, not the page's, so a dropped thread comes back through the rail's earlier threads —
  * the rail and `popstate` already resume a thread this page does not hold.
  */
 export interface ThreadStores {
@@ -214,6 +214,19 @@ export interface ThreadStores {
    * history never raises it.
    */
   readonly startSession: WritableStore<boolean>
+  /**
+   * The project this thread runs in (#395): the one its `+` named when minted, or its stored
+   * session's when adopted. `undefined` for a thread minted before the page knew its projects (a
+   * fresh page's first thread) — the server builds it in the launch directory, which is where the
+   * rail files it.
+   */
+  readonly projectId: string | undefined
+  /**
+   * Every thread-scoped request's fetch: the #118 seam's (or the page's), naming `projectId` in
+   * `X-Enso-Project` so the server builds a new thread's session there. The server reads the header
+   * only until the session exists; after that, the session's own directory decides.
+   */
+  readonly fetch: FetchLike
   /** The thread's transport: TanStack's connection over prompt/follow, and the dialog answer beside it. */
   readonly connection: FollowConnection
 }
