@@ -26,12 +26,14 @@ import {
 import {
   ArrowUpIcon,
   ChartColumnIcon,
+  CircleQuestionMarkIcon,
   ExternalLinkIcon,
   LayersIcon,
   MessagesSquareIcon,
   PaperclipIcon,
   SquareIcon,
 } from 'lucide-react'
+import { Tabs as TabsPrimitive } from 'radix-ui'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
 import { AddProjectDialog } from './add-project.tsx'
@@ -66,11 +68,10 @@ import {
 } from './components/ai-elements/queue.tsx'
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.tsx'
 import { Button } from './components/ui/button.tsx'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './components/ui/card.tsx'
 import { Input } from './components/ui/input.tsx'
-import { Tabs, TabsList, TabsTrigger } from './components/ui/tabs.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
 import { routeEnsoCustomEvent } from './custom-event-router.ts'
+import { EnsoRing, EnsoSmile } from './enso-mark.tsx'
 import type { EnsoRendererMap } from './EnsoToolResult.tsx'
 import { createFixtureChat } from './fixture-conversation.ts'
 import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.ts'
@@ -604,22 +605,31 @@ export function EnsoDialogCard({
 }): React.ReactNode {
   const titleId = `enso-dialog-title-${dialogId}`
   return (
-    <Card ref={ref} role="group" aria-labelledby={titleId} className="my-4">
-      <CardHeader>
-        <CardDescription className="tracking-wide uppercase">pi is asking</CardDescription>
-        <CardTitle id={titleId} role="heading" aria-level={2} className="text-base">
+    <div
+      ref={ref}
+      role="group"
+      aria-labelledby={titleId}
+      className="my-2 grid max-w-3xl overflow-hidden rounded-lg border border-human bg-card signal:ring-1 signal:ring-human/30"
+    >
+      <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wider text-human uppercase">
+          <CircleQuestionMarkIcon aria-hidden="true" className="size-4" />
+          pi is asking
+        </span>
+        <span className="font-mono text-xs text-muted-foreground">{dialog.method}</span>
+      </div>
+      <div className="grid gap-3 p-3">
+        <h2 id={titleId} className="font-heading text-base font-semibold">
           {dialog.title}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
+        </h2>
         <DialogAnswerControls dialog={dialog} answer={answer} disabled={disabled} />
-      </CardContent>
-      <CardFooter>
+      </div>
+      <div className="flex justify-end px-3 pb-3">
         <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={cancel}>
           Cancel — decline the question
         </Button>
-      </CardFooter>
-    </Card>
+      </div>
+    </div>
   )
 }
 
@@ -747,7 +757,7 @@ function ComposerBody({
   const attachments = usePromptInputAttachments()
   const canSend = (draft.trim().length > 0 || attachments.files.length > 0) && !disconnected
   return (
-    <div className="flex flex-col gap-2 rounded-xl border bg-background p-2 shadow-sm focus-within:ring-1 focus-within:ring-ring">
+    <div className="flex flex-col gap-2 rounded-lg border border-input bg-card p-2 transition-colors focus-within:border-ring">
       {attachments.files.length === 0 ? null : (
         <Attachments aria-label="attached images" className="px-1 pt-1">
           {attachments.files.map((file) => (
@@ -766,7 +776,7 @@ function ComposerBody({
           placeholder={disconnected ? 'disconnected — reload and resume from the rail' : 'ask pi something'}
           autoComplete="off"
           rows={1}
-          className="max-h-40 min-h-9 flex-1 resize-none border-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
+          className="max-h-40 min-h-11 flex-1 resize-none border-0 bg-transparent text-base shadow-none placeholder:text-muted-foreground focus-visible:ring-0 dark:bg-transparent"
         />
         {/* The `/` palette (#338): the session's slash commands, grouped; an extension command
             runs through `send`, a prompt template or skill lands in the draft with focus, a host
@@ -800,6 +810,7 @@ function ComposerBody({
             type="button"
             size="icon"
             variant="outline"
+            className="size-11"
             aria-label="stop the run"
             title="stop the run in flight — pi is told; the run ends on the feed"
             onClick={onStop}
@@ -809,7 +820,7 @@ function ComposerBody({
         ) : null}
         {/* Send stays offered in flight: a prompt during a run queues through pi (#75) —
 				    the form's submit takes the direct route past TanStack's own queue. */}
-        <Button type="submit" size="icon" aria-label="send message" disabled={!canSend}>
+        <Button type="submit" size="icon" className="size-11" aria-label="send message" disabled={!canSend}>
           <ArrowUpIcon />
         </Button>
       </div>
@@ -874,11 +885,17 @@ interface TranscriptSelection {
   readonly partsByMessageId: ReadonlyMap<string, KeyedPart[]>
   /** The message whose run is in flight — the last one, while the thread generates. */
   readonly openRunMessageId: string | undefined
+  /**
+   * The messages that CONTINUE the one before them — same role, so no speaker line of their own:
+   * one pi turn is several assistant messages (each tool round is one), and "pi" says it once.
+   */
+  readonly continuedMessageIds: ReadonlySet<string>
 }
 
 const TranscriptSelectionContext = createContext<TranscriptSelection>({
   partsByMessageId: new Map(),
   openRunMessageId: undefined,
+  continuedMessageIds: new Set(),
 })
 
 /**
@@ -899,6 +916,33 @@ interface MessageBodyProps {
   readonly runOpen: boolean
   /** The provider refused this attempt (#381): said in the bubble, after whatever parts it has. */
   readonly refusal: EnsoProviderRefusal | undefined
+  /** Whether the speaker line is drawn — not when the message before it is the same speaker's. */
+  readonly speaker: boolean
+}
+
+/**
+ * Who a message is from, above it (the design direction's speaker line): `you`, or pi beside its
+ * ring. Ledger drops the ring and prints the user's prompt as a receipt line, `› you`.
+ */
+function MessageSpeaker({ role }: { role: UIMessage['role'] }): React.ReactNode {
+  if (role === 'user') {
+    return (
+      <div className="flex items-center justify-end gap-1 font-mono text-xs text-muted-foreground ledger:justify-start ink:font-heading ink:text-sm ink:italic">
+        <span aria-hidden="true" className="hidden text-evidence ledger:inline">
+          ›
+        </span>
+        you
+      </div>
+    )
+  }
+  return (
+    <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground ink:font-heading ink:text-sm ink:italic">
+      {role === 'assistant' ? (
+        <EnsoRing className="size-4.5 text-foreground signal:text-evidence ledger:hidden" />
+      ) : null}
+      {role === 'assistant' ? 'pi' : role}
+    </div>
+  )
 }
 
 /**
@@ -922,10 +966,12 @@ const MessageBody = memo(function MessageBody({
   parts,
   runOpen,
   refusal,
+  speaker,
 }: MessageBodyProps): React.ReactNode {
   return (
-    <Message from={role} data-role={role}>
-      <MessageContent>
+    <Message from={role} data-role={role} className="max-w-3xl gap-1 ledger:ml-0">
+      {speaker ? <MessageSpeaker role={role} /> : null}
+      <MessageContent className="text-base leading-relaxed group-[.is-assistant]:w-full group-[.is-user]:rounded-lg group-[.is-user]:px-3 group-[.is-user]:py-2 signal:group-[.is-user]:rounded-br-sm ledger:group-[.is-user]:ml-0 ledger:group-[.is-user]:bg-transparent ledger:group-[.is-user]:p-0">
         {parts.map(({ partKey, selected, isTrailingPart }) => (
           <SelectedMessagePart
             key={`${messageId}-${partKey}`}
@@ -962,7 +1008,7 @@ function sameRefusal(before: EnsoProviderRefusal | undefined, after: EnsoProvide
  * lengths and equal keys already settle.
  */
 function sameRenderedMessage(previous: MessageBodyProps, next: MessageBodyProps): boolean {
-  if (previous.runOpen !== next.runOpen) return false
+  if (previous.runOpen !== next.runOpen || previous.speaker !== next.speaker) return false
   if (!sameRefusal(previous.refusal, next.refusal)) return false
   if (previous.parts.length !== next.parts.length) return false
   return previous.parts.every((part, index) => {
@@ -1153,7 +1199,7 @@ const chatComponents = {
 
       return (
         <PromptInput
-          className="w-full px-6 pb-4"
+          className="w-full px-6 pt-3 pb-4"
           accept={ENSO_IMAGE_MIME_TYPES.join(',')}
           multiple
           maxFiles={ENSO_PROMPT_MAX_IMAGES}
@@ -1278,9 +1324,14 @@ const chatComponents = {
         for (const selected of selectChatUI({ messages: chat.messages }).messages) {
           partsByMessageId.set(selected.message.id, keyedParts(automaticPartsForMessage(selected)))
         }
+        const continuedMessageIds = new Set<string>()
+        chat.messages.forEach((message, position) => {
+          if (position > 0 && chat.messages[position - 1]?.role === message.role) continuedMessageIds.add(message.id)
+        })
         return {
           partsByMessageId,
           openRunMessageId: chat.sessionGenerating ? chat.messages.at(-1)?.id : undefined,
+          continuedMessageIds,
         }
       }, [chat.messages, chat.sessionGenerating])
       return (
@@ -1304,13 +1355,15 @@ const chatComponents = {
               >
                 <Conversation>
                   <TranscriptRevealBridge into={scroller} />
-                  <ConversationContent className="w-full px-6">
+                  <ConversationContent className="w-full gap-4 px-6 py-4">
                     {chat.messages.length === 0 ? (
-                      <ConversationEmptyState
-                        icon={<img src="/logo-full.png" alt="Enso" className="w-44" />}
-                        title=""
-                        description="ask pi something to get started"
-                      />
+                      <ConversationEmptyState>
+                        <EnsoSmile className="size-28" />
+                        <h2 className="font-heading text-xl font-semibold">
+                          Give agents room to work. Keep the receipts.
+                        </h2>
+                        <p className="text-sm text-muted-foreground">ask pi something to get started</p>
+                      </ConversationEmptyState>
                     ) : (
                       <TranscriptSelectionContext.Provider value={selection}>
                         <Messages />
@@ -1383,7 +1436,7 @@ const chatComponents = {
      * bubble that changed.
      */
     message: function ChatMessageRow({ message }: MessageProps<ThreadChatOptions>): React.ReactNode {
-      const { partsByMessageId, openRunMessageId } = useContext(TranscriptSelectionContext)
+      const { partsByMessageId, openRunMessageId, continuedMessageIds } = useContext(TranscriptSelectionContext)
       return (
         <MessageBody
           messageId={message.id}
@@ -1391,6 +1444,7 @@ const chatComponents = {
           parts={partsByMessageId.get(message.id) ?? NO_PARTS}
           runOpen={openRunMessageId === message.id}
           refusal={refusalOfMessage(message)}
+          speaker={!continuedMessageIds.has(message.id)}
         />
       )
     },
@@ -1445,9 +1499,10 @@ export function ThreadPane({
     () => (firstUserMessage === undefined ? undefined : titleFromMessage(firstUserMessage)),
     [firstUserMessage],
   )
+  const waiting = useStore(stores.dialog) !== undefined
   useEffect(() => {
-    updateThreadSummary(threadId, { title, busy: chat.sessionGenerating })
-  }, [threadId, title, chat.sessionGenerating])
+    updateThreadSummary(threadId, { title, busy: chat.sessionGenerating, waiting })
+  }, [threadId, title, chat.sessionGenerating, waiting])
   const paneView = useMemo<PaneView>(() => ({ shown: active ? view : undefined, open: onView }), [active, view, onView])
   return (
     <div className={active ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'hidden'}>
@@ -1532,8 +1587,10 @@ function PaneSwitch({ open, pane, labels, title, onToggle, children }: PaneSwitc
 
 /**
  * The page's views as tabs (#361): Radix's tab list, for its keyboard (arrows move between tabs)
- * and its roles. The panels are the active pane's own (`ChatLayout`), so each trigger names its
- * panel by id rather than through Radix's `TabsContent`, which would unmount the transcript.
+ * and its roles — the primitive, styled here to the design direction's tab (a raised selected tab
+ * with an underline in the primary; Signal rings it instead, Ink underlines in ink). The panels
+ * are the active pane's own (`ChatLayout`), so each trigger names its panel by id rather than
+ * through Radix's `TabsContent`, which would unmount the transcript.
  */
 /**
  * A question from pi waits in the transcript while another view is shown (#362 review): the Chat
@@ -1545,11 +1602,14 @@ function QuestionWaiting({ threadId }: { threadId: string }): React.ReactNode {
   if (pending === undefined) return null
   return (
     <>
-      <span aria-hidden="true" className="size-2 rounded-full bg-destructive" />
+      <span aria-hidden="true" className="size-2 rounded-full bg-human signal:shadow-glow-human" />
       <span className="sr-only">, a question is waiting</span>
     </>
   )
 }
+
+const VIEW_TAB =
+  'inline-flex h-10 items-center gap-2 rounded-md border-b-2 border-transparent px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-popover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring aria-selected:border-primary aria-selected:bg-popover aria-selected:text-foreground signal:aria-selected:border-transparent signal:aria-selected:ring-1 signal:aria-selected:ring-border-strong signal:aria-selected:ring-inset ink:aria-selected:border-foreground ink:aria-selected:bg-transparent [&_svg]:size-4'
 
 function ViewTabs({
   view,
@@ -1565,39 +1625,46 @@ function ViewTabs({
   // reference to a panel that is not there is one a screen reader cannot follow.
   const controls = (tab: ThreadView): string | undefined => (tab === view ? `thread-view-${tab}` : undefined)
   return (
-    <Tabs
+    <TabsPrimitive.Root
       value={view}
       onValueChange={(value: string): void => {
         const chosen = THREAD_VIEWS[value]
         if (chosen !== undefined) onView(chosen)
       }}
     >
-      <TabsList aria-label="what the thread view shows">
-        <TabsTrigger value="chat" id="thread-view-chat-tab" aria-controls={controls('chat')}>
+      <TabsPrimitive.List aria-label="what the thread view shows" className="flex gap-1">
+        <TabsPrimitive.Trigger
+          value="chat"
+          id="thread-view-chat-tab"
+          aria-controls={controls('chat')}
+          className={VIEW_TAB}
+        >
           <MessagesSquareIcon aria-hidden="true" />
           Chat
           {view === 'chat' || threadId === undefined ? null : <QuestionWaiting threadId={threadId} />}
-        </TabsTrigger>
-        <TabsTrigger
+        </TabsPrimitive.Trigger>
+        <TabsPrimitive.Trigger
           value="context"
           id="thread-view-context-tab"
           aria-controls={controls('context')}
           title="what each model request was made of, and how the context grew"
+          className={VIEW_TAB}
         >
           <LayersIcon aria-hidden="true" />
           Context
-        </TabsTrigger>
-        <TabsTrigger
+        </TabsPrimitive.Trigger>
+        <TabsPrimitive.Trigger
           value="stats"
           id="thread-view-stats-tab"
           aria-controls={controls('stats')}
           title="per prompt, turn and tool: what this thread spent, and on what"
+          className={VIEW_TAB}
         >
           <ChartColumnIcon aria-hidden="true" />
           Stats
-        </TabsTrigger>
-      </TabsList>
-    </Tabs>
+        </TabsPrimitive.Trigger>
+      </TabsPrimitive.List>
+    </TabsPrimitive.Root>
   )
 }
 
@@ -1703,18 +1770,20 @@ export function ChatScreen(): React.ReactNode {
   const active = threads.find((thread) => thread.threadId === activeThreadId)
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">
-      <header className="flex items-center gap-2 border-b px-4 py-2">
-        {/* The ensō mark, cropped from .local/logo.png into public/enso.png —
-				    kanagawa fujiWhite cream, so it reads on the Wave background. */}
-        <img src="/enso.png" alt="" className="size-6" />
-        <h1 className="text-sm font-medium text-muted-foreground">Enso</h1>
+      <header className="flex min-h-14 items-center gap-3 border-b bg-sidebar px-3 py-2">
+        <EnsoSmile className="size-7.5" />
+        <div className="grid min-w-0 flex-1">
+          <h1 className="font-heading text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+            Enso · pi runtime
+          </h1>
+          {/* Where you are: the active thread's title, the same one the rail shows. */}
+          <span className="truncate font-heading text-base font-semibold" title={activeThreadId ?? ''}>
+            {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
+          </span>
+        </div>
         {isFixtureMode ? (
           <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">fixture</span>
         ) : null}
-        {/* Where you are: the active thread's title, the same one the rail shows. */}
-        <span className="min-w-0 flex-1 truncate text-sm" title={activeThreadId ?? ''}>
-          {active?.title ?? (activeThreadId === undefined ? 'resuming…' : UNTITLED_THREAD)}
-        </span>
         <ViewTabs view={view} onView={setView} threadId={active?.threadId} />
         <SettingsDialog />
         {isDebugMode ? (

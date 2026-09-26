@@ -99,7 +99,7 @@ test('⚠ a thread with a run in flight keeps its follow: the page goes over bud
     const stores = mintThread(probe.fetch)
     mount(stores)
     await probe.untilOpened(index + 1)
-    updateThreadSummary(stores.threadId, { title: undefined, busy: true })
+    updateThreadSummary(stores.threadId, { title: undefined, busy: true, waiting: false })
   }
   mount(mintThread(probe.fetch))
   await probe.untilOpened(MAX_LIVE_THREADS + 1)

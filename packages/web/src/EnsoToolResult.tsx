@@ -48,7 +48,10 @@ function TextFallback({ result }: { result: ToolResultPart }): React.ReactNode {
   const text =
     typeof result.content === 'string' ? result.content : result.content.map((part) => JSON.stringify(part)).join('\n')
   return (
-    <pre data-enso-tool-result="text" className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">
+    <pre
+      data-enso-tool-result="text"
+      className="max-h-56 overflow-y-auto font-mono text-sm break-words whitespace-pre-wrap"
+    >
       {text}
     </pre>
   )
@@ -86,7 +89,7 @@ export function EnsoToolResult({
   // No result yet — the call is in flight. Say so rather than rendering nothing.
   if (state.status === 'pending') {
     return (
-      <p data-enso-tool-result="pending" className="animate-pulse text-xs text-muted-foreground">
+      <p data-enso-tool-result="pending" className="animate-pulse text-sm text-evidence">
         running…
       </p>
     )
@@ -95,7 +98,7 @@ export function EnsoToolResult({
   // server going away, or a torn tail on resume. Still, not pulsing; the words say why.
   if (state.status === 'aborted') {
     return (
-      <p data-enso-tool-result="aborted" className="text-xs text-muted-foreground">
+      <p data-enso-tool-result="aborted" className="text-sm text-muted-foreground">
         aborted — the run ended before this call returned
       </p>
     )
@@ -107,10 +110,7 @@ export function EnsoToolResult({
   // error carries (a stderr) are kept.
   if (state.status === 'error') {
     return (
-      <pre
-        data-enso-tool-result="error"
-        className="rounded-md border border-destructive/50 bg-destructive/10 p-3 font-mono text-xs break-words whitespace-pre-wrap text-destructive"
-      >
+      <pre data-enso-tool-result="error" className="font-mono text-sm break-words whitespace-pre-wrap text-refuse">
         {state.error}
       </pre>
     )

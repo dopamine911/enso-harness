@@ -9,6 +9,7 @@ import {
   mintThread,
   reviveHistoryMessages,
   TITLE_MAX_CHARS,
+  type ThreadSummary,
   threadListStore,
   titleFromMessages,
   updateThreadSummary,
@@ -103,15 +104,15 @@ test('minting lists the thread at once, newest first, untitled and idle', () => 
 test("a summary update reaches the list and moves the thread's activity clock; a no-change update does not", () => {
   const thread = mintThread()
   const before = threadListStore.get()[0]
-  updateThreadSummary(thread.threadId, { title: 'hello', busy: true })
+  updateThreadSummary(thread.threadId, { title: 'hello', busy: true, waiting: false })
   const after = threadListStore.get()[0]
   expect(after).toMatchObject({ title: 'hello', busy: true })
   expect(after?.lastActivityAt.getTime()).toBeGreaterThanOrEqual(before?.lastActivityAt.getTime() ?? 0)
   // Same values again: the snapshot is not replaced, so subscribers are not woken for nothing.
-  updateThreadSummary(thread.threadId, { title: 'hello', busy: true })
+  updateThreadSummary(thread.threadId, { title: 'hello', busy: true, waiting: false })
   expect(threadListStore.get()[0]).toBe(after)
   // An id this page never minted is ignored, not created.
-  updateThreadSummary('not-minted', { title: 'x', busy: false })
+  updateThreadSummary('not-minted', { title: 'x', busy: false, waiting: false })
   expect(threadListStore.get()).toHaveLength(1)
 })
 
@@ -174,7 +175,7 @@ test('history revival drops malformed rows and invalid dates instead of handing 
 
 // ── the rail ─────────────────────────────────────────────────────────────────
 
-test('the rail names the active thread, titles the untitled honestly, and marks a busy one', () => {
+test('the rail names the active thread, titles the untitled honestly, and marks a busy or waiting one', () => {
   // The clock a static render reads, so an age of exactly six days reads as six and not as
   // five days and 999 ms.
   const now = pageClock.get()
@@ -182,14 +183,17 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
     <ThreadsRail
       projects={[]}
       threads={[
-        { threadId: 't2', title: undefined, lastActivityAt: now, busy: true, projectId: undefined },
+        { threadId: 't2', title: undefined, lastActivityAt: now, busy: true, waiting: false, projectId: undefined },
         {
           threadId: 't1',
           title: 'fix the login bug',
           lastActivityAt: new Date(now.getTime() - 6 * 86_400_000),
           busy: false,
+          waiting: false,
           projectId: undefined,
         },
+        // Parked on a question mid-run: waiting on you is what the row says, not running.
+        { threadId: 't3', title: 'asks first', lastActivityAt: now, busy: true, waiting: true, projectId: undefined },
       ]}
       activeThreadId="t1"
       earlier={[]}
@@ -210,8 +214,14 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
   expect(rendered.match(/aria-current="true"/g)).toHaveLength(1)
   const currentRow = rendered.slice(rendered.indexOf('aria-current="true"'))
   expect(currentRow.indexOf('fix the login bug')).toBeLessThan(currentRow.indexOf('</button>'))
-  // The busy row says so for assistive tech, not only with a dot.
-  expect(rendered).toContain('running')
+  // The busy row says so for assistive tech, not only with a dot; so does the waiting one.
+  const rowOf = (title: string): string => {
+    const start = rendered.lastIndexOf('<button', rendered.indexOf(title))
+    return rendered.slice(start, rendered.indexOf('</button>', start))
+  }
+  expect(rowOf(UNTITLED_THREAD)).toContain('running')
+  expect(rowOf('asks first')).toContain('waiting on you')
+  expect(rowOf('asks first')).not.toContain('running')
 })
 
 // ── projects (#395) ──────────────────────────────────────────────────────────
@@ -244,7 +254,9 @@ test("each project is a section with its own threads — the page's open ones, t
     <ThreadsRail
       projects={[LAUNCH, APP, GONE]}
       // A thread minted before the page knew its projects has none: the server built it in the launch directory.
-      threads={[{ threadId: 'here', title: 'current', lastActivityAt: now, busy: false, projectId: undefined }]}
+      threads={[
+        { threadId: 'here', title: 'current', lastActivityAt: now, busy: false, waiting: false, projectId: undefined },
+      ]}
       activeThreadId="here"
       earlier={[
         storedIn('p-launch', 'stored', {
@@ -283,13 +295,78 @@ test("each project is a section with its own threads — the page's open ones, t
 
 test('⚠ an open thread whose project is not listed is kept, under "other"; with no projects yet, every thread is still there', () => {
   const now = pageClock.get()
-  const orphan = { threadId: 'orphan', title: 'still open', lastActivityAt: now, busy: false, projectId: 'p-removed' }
+  const orphan = {
+    threadId: 'orphan',
+    title: 'still open',
+    lastActivityAt: now,
+    busy: false,
+    waiting: false,
+    projectId: 'p-removed',
+  }
   const grouped = groupByProject([LAUNCH], [orphan], [])
   expect(grouped.map((group) => group.project?.projectId)).toEqual(['p-launch', undefined])
   expect(grouped[1]?.threads).toEqual([orphan])
   expect(groupByProject([], [orphan], [storedIn('p-launch', 'stored')])).toEqual([
     { project: undefined, threads: [orphan], earlier: [storedIn('p-launch', 'stored')] },
   ])
+})
+
+// A folded section hides the rows that would say it; its header says it instead — a question
+// waiting on you over a run in flight, since a thread parked on a question is still busy (PR #403 review).
+test('a folded section says a question is waiting in it, over a run in flight; unfolded, the row says it', () => {
+  const now = pageClock.get()
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  const kept = new Map<string, string>([['enso.rail.folded', JSON.stringify([APP.projectId])]])
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => kept.get(key) ?? null,
+      setItem: (key: string, value: string) => kept.set(key, value),
+    },
+  })
+  const rail = (threads: ThreadSummary[]): string =>
+    renderToStaticMarkup(
+      <ThreadsRail
+        projects={[LAUNCH, APP]}
+        threads={threads}
+        activeThreadId={undefined}
+        earlier={[]}
+        earlierError={undefined}
+        onSelect={noop}
+        onResume={noop}
+        onNew={noop}
+        onAddProject={noop}
+        onRemoveProject={noop}
+        projectNotice={undefined}
+      />,
+    )
+  const asking = {
+    threadId: 'asks',
+    title: 'asks first',
+    lastActivityAt: now,
+    busy: true,
+    waiting: true,
+    projectId: 'p-app',
+  }
+  const working = { ...asking, threadId: 'works', title: 'still working', waiting: false }
+  try {
+    const folded = sectionOf(rail([asking, working]), 'app')
+    expect(folded).not.toContain('asks first')
+    expect(folded).toContain('waiting on you')
+    expect(folded).not.toContain('running')
+    // Only a run in flight: the folded header says running.
+    const onlyRunning = sectionOf(rail([working]), 'app')
+    expect(onlyRunning).toContain('running')
+    expect(onlyRunning).not.toContain('waiting on you')
+    // Unfolded, the header says nothing; the row does.
+    kept.set('enso.rail.folded', '[]')
+    const open = sectionOf(rail([asking]), 'app')
+    expect(open).toContain('asks first')
+    expect(open.match(/waiting on you/g)).toHaveLength(1)
+  } finally {
+    if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage')
+    else Object.defineProperty(globalThis, 'localStorage', original)
+  }
 })
 
 test('a section shows five stored threads and says how many more there are; a failed listing is an alert, not an empty rail', () => {

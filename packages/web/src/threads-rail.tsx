@@ -148,14 +148,35 @@ export function groupByProject(
     : groups
 }
 
-/** The busy dot is the status bar's, at rail size: a run is in flight there. */
-function Running(): React.ReactNode {
-  return (
-    <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-foreground">
-      <span className="sr-only">running</span>
-    </span>
-  )
+/**
+ * A thread's live state, as the status bar's dot at rail size: violet while pi waits on you,
+ * pulsing in the running colour while a run is in flight (Signal lights both), hollow when an
+ * open thread is idle. A stored thread says only that it is running.
+ */
+function LiveDot({ state }: { state: 'waiting' | 'running' | 'idle' }): React.ReactNode {
+  if (state === 'waiting') {
+    return (
+      <span className="size-2 shrink-0 rounded-full bg-human signal:shadow-glow-human">
+        <span className="sr-only">waiting on you</span>
+      </span>
+    )
+  }
+  if (state === 'running') {
+    return (
+      <span className="size-2 shrink-0 animate-pulse rounded-full bg-evidence signal:shadow-glow-evidence">
+        <span className="sr-only">running</span>
+      </span>
+    )
+  }
+  return <span aria-hidden="true" className="size-2 shrink-0 rounded-full border border-muted-foreground" />
 }
+
+function liveState(thread: ThreadSummary): 'waiting' | 'running' | 'idle' {
+  if (thread.waiting) return 'waiting'
+  return thread.busy ? 'running' : 'idle'
+}
+
+const ROW = 'flex min-h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-popover'
 
 function ThreadRow({
   thread,
@@ -172,16 +193,16 @@ function ThreadRow({
         type="button"
         aria-current={active ? 'true' : undefined}
         onClick={() => onSelect(thread.threadId)}
-        className={cn(
-          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted',
-          active ? 'bg-muted text-foreground' : 'text-muted-foreground',
-        )}
+        className={cn(ROW, active ? 'bg-accent text-foreground hover:bg-accent' : 'text-foreground')}
       >
-        {thread.busy ? <Running /> : null}
+        <LiveDot state={liveState(thread)} />
         <span className={cn('min-w-0 flex-1 truncate', thread.title === undefined ? 'italic' : '')}>
           {thread.title ?? UNTITLED_THREAD}
         </span>
-        <span className="shrink-0 tabular-nums" title={thread.lastActivityAt.toLocaleString()}>
+        <span
+          className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
+          title={thread.lastActivityAt.toLocaleString()}
+        >
           <Age from={thread.lastActivityAt} />
         </span>
       </button>
@@ -210,13 +231,13 @@ function EarlierThreadRow({
         type="button"
         title={thread.busy ? 'running — resume to follow it' : `not open here — resume it (${at.toLocaleString()})`}
         onClick={() => onResume(thread.threadId)}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground/70 hover:bg-muted"
+        className={cn(ROW, 'text-muted-foreground hover:text-foreground')}
       >
-        {thread.busy ? <Running /> : null}
+        {thread.busy ? <LiveDot state="running" /> : null}
         <span className={cn('min-w-0 flex-1 truncate', thread.title === undefined ? 'italic' : '')}>
           {thread.title ?? UNTITLED_THREAD}
         </span>
-        <span className="shrink-0 tabular-nums">
+        <span className="shrink-0 font-mono text-xs tabular-nums">
           <Age from={at} />
         </span>
       </button>
@@ -230,6 +251,16 @@ function sectionTitle(project: EnsoProject | undefined, anyProjects: boolean): {
   return anyProjects
     ? { name: 'other', hover: 'threads in a project this server no longer lists' }
     : { name: 'threads', hover: 'the projects are not listed yet' }
+}
+
+/**
+ * What a folded section's header says for the rows it hides: a question waiting on you first (only
+ * an open thread can hold one, and it is busy too), else a run in flight — the order `liveState` uses.
+ */
+function hiddenState(group: ProjectGroup): 'waiting' | 'running' | undefined {
+  if (group.threads.some((thread) => thread.waiting)) return 'waiting'
+  if (group.threads.some((thread) => thread.busy) || group.earlier.some((thread) => thread.busy)) return 'running'
+  return undefined
 }
 
 /** The section's header: fold it, see where it is, start a thread in it. */
@@ -252,8 +283,7 @@ function SectionHeader({
 }): React.ReactNode {
   const { project } = group
   const missing = project?.status === 'missing-dir'
-  // A folded section still says a run is in flight in it.
-  const running = folded && (group.threads.some((thread) => thread.busy) || group.earlier.some((thread) => thread.busy))
+  const hidden = folded ? hiddenState(group) : undefined
   return (
     <div className="flex items-center gap-1">
       <button
@@ -261,12 +291,12 @@ function SectionHeader({
         aria-expanded={!folded}
         title={hover}
         onClick={onFold}
-        className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-xs font-medium text-muted-foreground hover:bg-muted"
+        className="flex min-h-8 min-w-0 flex-1 items-center gap-1 rounded-md px-1 text-left text-xs font-semibold tracking-wide text-muted-foreground hover:bg-popover hover:text-foreground"
       >
         {folded ? <ChevronRightIcon className="size-3 shrink-0" /> : <ChevronDownIcon className="size-3 shrink-0" />}
         <span className="min-w-0 truncate">{name}</span>
         {missing ? <span className="shrink-0 text-destructive">missing</span> : null}
-        {running ? <Running /> : null}
+        {hidden === undefined ? null : <LiveDot state={hidden} />}
       </button>
       {project === undefined ? null : (
         <Button
@@ -320,7 +350,7 @@ function SectionRows({
   return (
     <>
       {group.threads.length > 0 ? (
-        <ol aria-label={`open threads in ${name}`} className="flex flex-col gap-0.5">
+        <ol aria-label={`open threads in ${name}`} className="flex flex-col gap-px">
           {group.threads.map((thread) => (
             <ThreadRow
               key={thread.threadId}
@@ -332,7 +362,7 @@ function SectionRows({
         </ol>
       ) : null}
       {shownStored.length > 0 ? (
-        <ol aria-label={`earlier threads in ${name}`} className="flex flex-col gap-0.5">
+        <ol aria-label={`earlier threads in ${name}`} className="flex flex-col gap-px">
           {shownStored.map((thread) => (
             <EarlierThreadRow key={thread.threadId} thread={thread} onResume={onResume} />
           ))}
@@ -345,7 +375,7 @@ function SectionRows({
         <button
           type="button"
           onClick={() => setAllStored((was) => !was)}
-          className="self-start px-2 py-1 text-xs text-muted-foreground hover:underline"
+          className="self-start rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-popover hover:text-foreground"
         >
           {allStored ? 'show less' : `show ${hidden} more`}
         </button>
@@ -374,7 +404,7 @@ function ProjectSection({
   const [folded, toggleFolded] = useFolded(group.project?.projectId ?? 'unlisted')
   const { name, hover } = sectionTitle(group.project, anyProjects)
   return (
-    <section aria-label={name} className="flex flex-col gap-0.5">
+    <section aria-label={name} className="flex flex-col gap-1">
       <SectionHeader
         group={group}
         name={name}
@@ -414,8 +444,9 @@ export function ThreadsRail({
   // New Thread starts where the reader is: the project of the thread on screen.
   const activeProject = groups.find((group) => group.threads.some((thread) => thread.threadId === activeThreadId))
   return (
-    <nav aria-label="threads" className="flex w-56 shrink-0 flex-col gap-2 overflow-y-auto border-r p-2">
-      <Button type="button" size="sm" variant="outline" onClick={() => onNew(activeProject?.project?.projectId)}>
+    <nav aria-label="threads" className="flex w-62 shrink-0 flex-col gap-4 overflow-y-auto border-r bg-sidebar p-3">
+      <Button type="button" className="h-10 w-full" onClick={() => onNew(activeProject?.project?.projectId)}>
+        <PlusIcon />
         New Thread
       </Button>
       {earlierError !== undefined ? (
