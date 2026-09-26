@@ -1054,7 +1054,7 @@ test('⚠ a truncated tool result says so LIVE, from the descriptor TanStack wou
 // with no result yet, and the snapshot says the run is live. Joining it opens a new assistant
 // message for what streams next, so the history's message holding the call is no longer the
 // LAST one — and a row whose run is "the last message's" read the open call as aborted.
-test('⚠ a call still waiting when the page joins a busy run reads running, not aborted (#412)', async () => {
+test('⚠ a call still waiting when the page joins a busy run reads running, not aborted — row and status bar (#412, #418)', async () => {
   const pane = await mountPane({
     history: {
       threadId: 'asked-1',
@@ -1081,7 +1081,8 @@ test('⚠ a call still waiting when the page joins a busy run reads running, not
   })
   await pane.settle({ ...SNAPSHOT_IDLE, threadId: 'asked-1', live: true, busy: true, generation: 1 })
   await eventually(() => {
-    expect(pane.status()).toContain('working')
+    // The joined run's own message is still empty; the bar names the call behind it (#418).
+    expect(pane.status()).toContain('running ask_user')
     expect(pane.container.querySelector('[data-enso-tool-call]')?.getAttribute('data-enso-tool-call')).toBe('pending')
   })
   await pane.unmount()
