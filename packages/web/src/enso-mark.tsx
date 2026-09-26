@@ -6,7 +6,9 @@ import { cn } from './lib/utils.ts'
  * `EnsoSmile` is the painted mascot, unaltered: `public/enso-smile.png`, the export's
  * `enso-smile.png` scaled to 256px. Its ground is black, not transparent — on a dark theme it is
  * SCREEN-blended, so the black takes the surface's colour and only the glow remains; on a light
- * theme it sits on its own rounded dark tile, as the brand sheet shows it on paper.
+ * theme it sits on its own rounded dark tile, as the brand sheet shows it on paper. Its `alt` is
+ * empty ON PURPOSE: every place it appears sits beside text that names it (the header's "Enso · pi
+ * runtime", the empty thread's heading), so naming the image would have a screen reader say it twice.
  *
  * `EnsoRing` is the export's proposal for the sizes the painting cannot hold (a transcript's
  * speaker label): one stroke in the current text colour, so a theme colours it.
