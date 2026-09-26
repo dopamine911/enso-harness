@@ -450,20 +450,26 @@ function requestOptions(
   ]
 }
 
-/** The opened request's place, makeup (from the trend's read), the request before's, and its record. */
+/**
+ * The opened request's place, makeup (from the trend's read), the request before's, and its
+ * record — or, for a turn the branch does not hold (every picker draws from these requests, and a
+ * branch only grows, so this is a guard), no makeup: none is shown rather than the next request's
+ * under this one's name.
+ */
 function openedRequest(
   requests: readonly EnsoContextRequest[],
   next: EnsoContextMakeup,
   request: ContextBrowserRequest,
 ): {
   index: number
-  makeup: EnsoContextMakeup
+  makeup: EnsoContextMakeup | undefined
   before: EnsoContextRequest | undefined
   record: EnsoContextRequest | undefined
 } {
-  const index = request === 'next' ? requests.length : requests.findIndex((candidate) => candidate.turn === request)
-  const record = request === 'next' ? undefined : requests[index]
-  return { index, makeup: record?.estimated ?? next, before: requests[index - 1], record }
+  if (request === 'next') return { index: requests.length, makeup: next, before: requests.at(-1), record: undefined }
+  const index = requests.findIndex((candidate) => candidate.turn === request)
+  const record = requests[index]
+  return { index, makeup: record?.estimated, before: record === undefined ? undefined : requests[index - 1], record }
 }
 
 /** A request one step from `index` — `next` past the last one. */
@@ -640,7 +646,6 @@ export function ContextBrowser({
   const pick = useBrowserPick(focused)
   const earlier = stepped(requests, index - 1)
   const later = request === 'next' ? undefined : stepped(requests, index + 1)
-  const figure = 'font-medium text-foreground'
   return (
     <Card
       title="Context Browser"
@@ -675,6 +680,47 @@ export function ContextBrowser({
         </>
       }
     >
+      {makeup === undefined ? (
+        <p className="text-sm text-muted-foreground">request {request} is not on this branch</p>
+      ) : (
+        <OpenedRequest
+          request={request}
+          makeup={makeup}
+          before={before}
+          record={record}
+          detail={detail}
+          outcome={outcome}
+          focused={focused}
+          pick={pick}
+        />
+      )}
+    </Card>
+  )
+}
+
+/** The opened request's summary, its makeup, and its categories beside the element picked. */
+function OpenedRequest({
+  request,
+  makeup,
+  before,
+  record,
+  detail,
+  outcome,
+  focused,
+  pick,
+}: {
+  request: ContextBrowserRequest
+  makeup: EnsoContextMakeup
+  before: EnsoContextRequest | undefined
+  record: EnsoContextRequest | undefined
+  detail: EnsoContextRequestDetail | undefined
+  outcome: DetailOutcome
+  focused: EnsoContextElement | undefined
+  pick: BrowserPick
+}): React.ReactNode {
+  const figure = 'font-medium text-foreground'
+  return (
+    <>
       <p className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
         <span>
           {request === 'next' ? 'next request' : `request ${request}`} · estimate{' '}
@@ -698,6 +744,6 @@ export function ContextBrowser({
       {detail === undefined ? null : (
         <DetailColumns detail={detail} makeup={makeup} before={before} focused={focused} pick={pick} />
       )}
-    </Card>
+    </>
   )
 }

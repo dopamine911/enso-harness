@@ -250,3 +250,76 @@ test("a failed read is not shown as another request's while that one is read", a
   await flush(async () => root.unmount())
   container.remove()
 })
+
+// The arrows step through the branch's requests and stop at its ends; a pick is the reader's, not
+// the request's — it survives a step to a request that does not hold it, which says so, and shows
+// again on the way back (PR #406 review).
+test('the arrows step between requests and stop at the ends; a pick the opened request lacks is said, and kept', async () => {
+  const stores = mintThread()
+  const first: EnsoContextRequest = { ...REQUEST, turn: 1 }
+  const detailOf = (request: ContextBrowserRequest): EnsoContextRequestDetail => ({
+    ...DETAIL,
+    threadId: stores.threadId,
+    request,
+    // Request 1 predates the bash call: its result is not in that context.
+    elements: request === 1 ? DETAIL.elements.filter((element) => element.key !== 'e4#0') : DETAIL.elements,
+  })
+  globalThis.fetch = ((input: string | URL | Request): Promise<Response> => {
+    const which = requestedUrl(input).split('/context/')[1] ?? 'next'
+    return Promise.resolve(Response.json(detailOf(which === 'next' ? 'next' : Number(which))))
+  }) as typeof fetch
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  const asked: ContextBrowserRequest[] = []
+  const render = (request: ContextBrowserRequest): Promise<void> =>
+    flush(async () => {
+      root.render(
+        <ThreadStoresContext.Provider value={stores}>
+          <ContextBrowser
+            requests={[first, REQUEST]}
+            next={MAKEUP}
+            request={request}
+            onRequest={(chosen: ContextBrowserRequest): void => {
+              asked.push(chosen)
+            }}
+            focus={undefined}
+          />
+        </ThreadStoresContext.Provider>,
+      )
+    })
+  const arrow = (label: string): HTMLButtonElement | null =>
+    container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+  const view = (): string => container.querySelector('aside[aria-label="element"]')?.textContent ?? ''
+  const button = (selector: string, text: string): HTMLButtonElement | undefined =>
+    [...container.querySelectorAll<HTMLButtonElement>(selector)].find((candidate) =>
+      candidate.textContent?.includes(text),
+    )
+
+  // The first request: nothing earlier; later is request 2.
+  await render(1)
+  expect(arrow('earlier request')?.disabled).toBe(true)
+  await flush(async () => arrow('later request')?.click())
+  // The next request: nothing later; earlier is the last request, 2.
+  await render('next')
+  expect(arrow('later request')?.disabled).toBe(true)
+  await flush(async () => arrow('earlier request')?.click())
+  expect(asked).toEqual([2, 2])
+
+  // Pick the bash result in request 2, then open request 1, which does not hold it.
+  await render(2)
+  await waitUntil(() => button('button[aria-expanded]', 'tool results') !== undefined)
+  expect(button('button[aria-expanded]', 'tool results')).toBeDefined()
+  await flush(async () => button('button[aria-expanded]', 'tool results')?.click())
+  await flush(async () => button('li li button', 'bash ls -la')?.click())
+  expect(view()).toContain('a b')
+  await render(1)
+  await waitUntil(() => view().includes('isn’t in this request'))
+  expect(view()).toContain('The element you had open isn’t in this request')
+  expect(view()).not.toContain('a b')
+  await render(2)
+  await waitUntil(() => view().includes('a b'))
+  expect(view()).toContain('a b')
+  await flush(async () => root.unmount())
+  container.remove()
+})

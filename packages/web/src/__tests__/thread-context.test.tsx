@@ -85,7 +85,7 @@ test('estimates are written ≈, the provider count is named, and what is not kn
 })
 
 // A full bar alone reads the same at 100% and at 140% of the window: past it, the text says so
-// and what lies past the window's edge is tinted — on the Current Context only, the one bar scaled to it.
+// and what lies past the window's edge is tinted — on the Now card only, the one bar scaled to it.
 test('a next request past the window is said, and its bar marks the window edge', () => {
   const markup = (window: number): string =>
     renderToStaticMarkup(
