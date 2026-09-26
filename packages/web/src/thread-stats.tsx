@@ -11,6 +11,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import type { FetchLike } from './browser-logging.ts'
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from './components/ui/chart.tsx'
 import { OptionSelect } from './option-select.tsx'
 import { useReadOnUsage } from './read-on-usage.ts'
@@ -55,8 +56,8 @@ import type { RevealStatsTarget, StatsTarget } from './transcript-reveal.ts'
 export type StatsOutcome = AnalysisOutcome<EnsoThreadStats>
 
 /** The thread's stats (stable, module-level: `useReadOnUsage` subscribes with it). */
-const readThreadStats = (threadId: string): Promise<StatsOutcome> =>
-  readThreadAnalysis(threadId, 'stats', EnsoThreadStats)
+const readThreadStats = (threadId: string, fetchImpl: FetchLike): Promise<StatsOutcome> =>
+  readThreadAnalysis(threadId, 'stats', EnsoThreadStats, fetchImpl)
 
 // ── formats ──────────────────────────────────────────────────────────────────────────────────
 

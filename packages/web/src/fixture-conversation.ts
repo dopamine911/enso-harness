@@ -1,4 +1,5 @@
 import { createChat, type TanStackChat } from '@shadcn/helpers/tanstack-ai'
+import type { FetchLike } from './browser-logging.ts'
 
 /**
  * The styling dev loop (#31): a scripted conversation streamed through the REAL
@@ -16,6 +17,13 @@ import { createChat, type TanStackChat } from '@shadcn/helpers/tanstack-ai'
  * the text renderer's refusal to build elements from it is a load-bearing claim: this turn
  * carries an onerror image, a javascript: link and a raw script tag, so a renderer regression
  * is VISIBLE on the styling page (an alert firing, or a live link) instead of latent.
+ *
+ * ⚠ NOTHING LEAVES THE PAGE (#404). The transport above is only TanStack's send; the pane talks to
+ * the server through its thread's own `fetch` too — a prompt sent mid-reply (pi's queue, #75),
+ * Stop, the mode select, host commands, the Start dialog, the Context and Stats reads. So a
+ * fixture page's threads are minted with `fixtureFetch` below, which answers every request with a
+ * 503 naming the fixture: a control used here says it went nowhere, instead of running a real
+ * model on the real agent dir's grant (which is what #404 found it doing).
  *
  * ⚠ What this fixture CANNOT produce: a #27 dialog interrupt. The helper has no writer
  * operation for an interrupt outcome, so `EnsoDialogInterrupt` styling is verified against
@@ -92,3 +100,9 @@ export function createFixtureChat(): TanStackChat {
       writer.error("a scripted failure, so RunProblem's styling is visible on demand")
     })
 }
+
+/** What every request from a fixture page's threads is answered with — see the header (#404). */
+const FIXTURE_REFUSAL = 'fixture mode: the scripted conversation (?fixture) sends nothing to the server'
+
+/** The fetch a fixture page's threads are minted with: every request refused, by name, without a network. */
+export const fixtureFetch: FetchLike = async (): Promise<Response> => new Response(FIXTURE_REFUSAL, { status: 503 })

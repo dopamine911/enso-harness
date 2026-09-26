@@ -108,11 +108,13 @@ async function mountPane(
     server?: ScriptedFetchOptions
     /** Leave the Start-a-session dialog open (#391); closed otherwise, as Escape would. */
     startSession?: boolean
+    /** The page's GLOBAL fetch — the scripted server's unless a test sets a tripwire (#404). */
+    globalFetch?: typeof fetch
   } = {},
 ): Promise<MountedPane> {
   const server = createScriptedFetch(options.server ?? {})
-  // The composer's mode control seeds from the page's own `fetch("/api/mode")`.
-  globalThis.fetch = server.fetch
+  // What the page itself fetches outside a thread; a pane's own requests go through its thread's.
+  globalThis.fetch = options.globalFetch ?? server.fetch
   const stores = mintThread(server.fetch)
   // A minted thread opens on the Start-a-session dialog (#391). These tests are about the pane
   // behind it, so it is closed first — as the person pressing Escape would — unless one asks.
@@ -219,6 +221,37 @@ test('a live thread titles its rail row from the first user message (#283)', asy
   await eventually(() => expect(pane.server.prompts.length).toBe(2))
   expect(railTitle(pane.stores.threadId)).toBe('fix the login bug before the release')
   await pane.unmount()
+})
+
+// ⚠ #404: a thread's requests go through ITS fetch — the seam the fixture page closes (its threads
+// get one that refuses), and the one that carries the project header (#395). A request a pane
+// issues on the page's GLOBAL fetch instead escapes both: on the fixture page that ran a real
+// model. The page global here is a tripwire; every pane path that reads or writes is driven.
+test("every request a pane makes goes through its thread's fetch, never the page's global one (#404)", async () => {
+  const strays: string[] = []
+  const tripwire = (async (input: string): Promise<Response> => {
+    strays.push(input)
+    return new Response('the page global, not the thread fetch', { status: 500 })
+  }) as typeof fetch
+  // The composer: the mode seed on mount, then a typed `/word` — looked up in the thread's command
+  // list first (#388), then sent as a prompt when it is not a host row.
+  const pane = await mountPane({ globalFetch: tripwire })
+  await pane.settle(SNAPSHOT_IDLE)
+  await flush(async () => {
+    typeInto(pane.composer(), '/not-a-host-command')
+    pressEnter(pane.composer())
+    await tick()
+  })
+  await eventually(() => expect(pane.server.prompts.map((prompt) => prompt.message)).toEqual(['/not-a-host-command']))
+  await pane.unmount()
+  // The Stats and Context views read their routes; the thread's server answers 404, which the view
+  // says as "nothing has run" — the tripwire's 500 would read as a failure instead.
+  for (const view of ['stats', 'context'] as const) {
+    const viewing = await mountPane({ view, globalFetch: tripwire })
+    await eventually(() => expect(viewing.container.textContent).toContain('nothing has run in this thread yet'))
+    await viewing.unmount()
+  }
+  expect(strays).toEqual([])
 })
 
 // ── #125 item 1: the in-flight readings flip with the wire's status frames ───────────────

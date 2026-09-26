@@ -10,6 +10,7 @@ import {
 import { TextPart } from '@tanstack/ai-react/ui'
 import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { FetchLike } from './browser-logging.ts'
 import { Card, Choice, changeText, estimateText, MakeupBar, PERCENT, timeText } from './context-parts.tsx'
 import { TEXT_PART_COMPONENTS } from './markdown-image.tsx'
 import { OptionSelect } from './option-select.tsx'
@@ -519,8 +520,8 @@ export function ContextBrowser({
   focus: ContextBrowserFocus | undefined
 }): React.ReactNode {
   const read = useCallback(
-    (threadId: string): Promise<DetailOutcome> =>
-      readThreadAnalysis(threadId, `context/${request}`, EnsoContextRequestDetail),
+    (threadId: string, fetchImpl: FetchLike): Promise<DetailOutcome> =>
+      readThreadAnalysis(threadId, `context/${request}`, EnsoContextRequestDetail, fetchImpl),
     [request],
   )
   const outcome = useReadOnUsage<DetailOutcome>(read, ANALYSIS_READING)

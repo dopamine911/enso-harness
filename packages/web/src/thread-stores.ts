@@ -159,13 +159,14 @@ function namingProject(fetchImpl: FetchLike | undefined, projectId: string | und
 }
 
 /**
- * `fetch` is injectable so a test can mount a real pane over a scripted server (#118) — the
- * one seam between the page and the network. Production never passes it.
+ * `fetch` is the one seam between a thread and the network: a test mounts a real pane over a
+ * scripted server through it (#118), and the fixture page mints its threads with a fetch that
+ * refuses every request (#404). The live page passes nothing — the page's own `fetch`.
  */
 function createThreadStores(
   threadId: string,
   history: readonly UIMessage[],
-  fetchImpl: typeof fetch | undefined,
+  fetchImpl: FetchLike | undefined,
   projectId: string | undefined,
 ): ThreadStores {
   const notifications = createNotificationsStore()
@@ -349,11 +350,11 @@ function makeRoomForOneMore(): void {
  * Mint a new thread on this page and return its stores.
  *
  * The rail lists it at once, untitled. Inside the page's follow budget: minting past it drops
- * an idle thread (#272). `fetch` is the #118 test seam. A minted thread opens on the
+ * an idle thread (#272). `fetch` is the thread's network seam (`createThreadStores`). A minted thread opens on the
  * Start-a-session dialog (#391) — every way the page mints one is a new thread the person is about
  * to start.
  */
-export function mintThread(fetchImpl?: typeof fetch, projectId?: string): ThreadStores {
+export function mintThread(fetchImpl?: FetchLike, projectId?: string): ThreadStores {
   makeRoomForOneMore()
   const stores = createThreadStores(crypto.randomUUID(), [], fetchImpl, projectId)
   stores.startSession.set(true)
@@ -407,14 +408,15 @@ export function reviveHistoryMessages(messages: readonly unknown[]): UIMessage[]
  * a plan-mode session must not read `default` until its first run (#84's lesson).
  *
  * Adopting a thread already on this page returns it — the rail cannot hold one twice — and
- * adopting one past the page's follow budget drops an idle thread to make room (#272).
+ * adopting one past the page's follow budget drops an idle thread to make room (#272). `fetch`
+ * is the thread's network seam, as `mintThread`'s.
  */
-export function adoptThread(history: EnsoThreadHistory): ThreadStores {
+export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike): ThreadStores {
   const existing = threads.get(history.threadId)
   if (existing !== undefined) return existing
   makeRoomForOneMore()
   const messages = reviveHistoryMessages(history.messages)
-  const stores = createThreadStores(history.threadId, messages, undefined, history.projectId)
+  const stores = createThreadStores(history.threadId, messages, fetchImpl, history.projectId)
   stores.permissionMode.applyReceipt(history.permissionMode)
   if (history.interrupted !== undefined) {
     stores.notifications.push(INTERRUPTED_TAIL_NOTICE[history.interrupted], 'warning', 'run')

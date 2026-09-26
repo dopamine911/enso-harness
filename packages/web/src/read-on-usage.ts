@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { FetchLike } from './browser-logging.ts'
 import { useThreadStores } from './store.ts'
 import { latestWins } from './thread-debug.tsx'
 
@@ -10,20 +11,27 @@ import { latestWins } from './thread-debug.tsx'
  * dependency. Two reads can be in flight (a turn lands while the first is out); only the latest
  * one issued is shown.
  *
+ * `read` is handed the thread's own `fetch` (`ThreadStores.fetch`): a thread's reads go where its
+ * other requests go — the project header on them, and nothing on the network from a fixture page
+ * (#404).
+ *
  * `read` must be stable — a module-level function, or memoised — or every render would subscribe
  * again. `reading` is where an outcome starts, not an input: it is held, so a caller may write it
  * inline (#362 review). A CHANGE of `read` is a new question (the Context Browser asks for another request): the
  * outcome goes back to `reading` until it is answered, so a failure of the last question is not
  * shown as this one's.
  */
-export function useReadOnUsage<Outcome>(read: (threadId: string) => Promise<Outcome>, reading: Outcome): Outcome {
+export function useReadOnUsage<Outcome>(
+  read: (threadId: string, fetchImpl: FetchLike) => Promise<Outcome>,
+  reading: Outcome,
+): Outcome {
   const stores = useThreadStores()
   const [outcome, setOutcome] = useState<Outcome>(reading)
   const initial = useRef(reading)
   useEffect(() => {
     setOutcome(initial.current)
     let mounted = true
-    const readLatest = latestWins(() => read(stores.threadId))
+    const readLatest = latestWins(() => read(stores.threadId, stores.fetch))
     const refresh = (): void => {
       void readLatest().then((latest) => {
         if (mounted && latest !== undefined) setOutcome(latest)

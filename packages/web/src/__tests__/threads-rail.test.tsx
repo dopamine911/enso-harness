@@ -398,7 +398,10 @@ test('⚠ a thread minted in a project names it on every request it makes; one m
   }) as typeof fetch
   await mintThread(recording, 'p-app').connection.configure({ mode: 'plan' })
   await mintThread(recording).connection.configure({ mode: 'plan' })
-  expect(seen).toEqual(['p-app', null])
+  // The thread's own fetch too — what its reads go through (the typed-command lookup, the mode seed,
+  // the Stats and Context views: PR #405 review).
+  await mintThread(recording, 'p-app').fetch('/api/threads/t/commands')
+  expect(seen).toEqual(['p-app', null, 'p-app'])
 })
 
 test('a registered project can be removed from its section, the launch directory cannot; a refused removal is said', () => {
