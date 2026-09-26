@@ -9,6 +9,7 @@ import {
   type EnsoProject,
   type EnsoPromptImage,
   type EnsoProviderRefusal,
+  type EnsoThreadHistory,
   isEnsoImageMimeType,
   type RuntimeCommand,
 } from '@enso/core'
@@ -72,7 +73,7 @@ import { Tabs, TabsList, TabsTrigger } from './components/ui/tabs.tsx'
 import { Textarea } from './components/ui/textarea.tsx'
 import { routeEnsoCustomEvent } from './custom-event-router.ts'
 import type { EnsoRendererMap } from './EnsoToolResult.tsx'
-import { createFixtureChat } from './fixture-conversation.ts'
+import { createFixtureChat, fixtureFetch } from './fixture-conversation.ts'
 import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.ts'
 import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState } from './model-state.tsx'
 import { ThreadNotifications } from './notifications.tsx'
@@ -167,6 +168,15 @@ const descriptorRenderers: EnsoRendererMap = {}
 // test`, where no DOM exists — fixture mode is a browser concern, so headless is never
 // fixture mode. The ENTRY (main.tsx) stays the only module that touches the DOM freely.
 const isFixtureMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('fixture')
+/**
+ * The network every thread on this page talks through — the page's own, or on the fixture page a
+ * fetch that refuses (#404): the transport swap covers only TanStack's send, and a prompt sent
+ * mid-reply, Stop or a mode change reached the real server and ran a real model. Every thread
+ * the page mints or adopts goes through these two, so none is left on the real network.
+ */
+const PAGE_FETCH = isFixtureMode ? fixtureFetch : undefined
+const mintPageThread = (projectId?: string): ThreadStores => mintThread(PAGE_FETCH, projectId)
+const adoptPageThread = (history: EnsoThreadHistory): ThreadStores => adoptThread(history, PAGE_FETCH)
 /** `?debug` opens the session debug drawer (#86) — same switch shape as `?fixture`. */
 const isDebugMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('debug')
 /**
@@ -375,7 +385,7 @@ function PermissionModeControl(): React.ReactNode {
   const stores = useThreadStores()
   const { mode, available } = usePermissionMode()
   useEffect(() => {
-    void stores.permissionMode.seed(async () => (await fetch('/api/mode')).json())
+    void stores.permissionMode.seed(async () => (await stores.fetch('/api/mode')).json())
   }, [stores])
   return (
     <PermissionModeSelect
@@ -1140,7 +1150,7 @@ const chatComponents = {
       // fallback refuses (disconnected) gives the words back, as a refused submit keeps them.
       const submitTypedCommand = async (commandName: string, text: string): Promise<void> => {
         setDraft('')
-        const listed = await fetchThreadCommands(stores.threadId).catch((): undefined => undefined)
+        const listed = await fetchThreadCommands(stores.threadId, stores.fetch).catch((): undefined => undefined)
         const row = listed?.commands.find((command) => command.source === 'host' && command.name === commandName)
         if (row === undefined) {
           if (!send(text, [])) setDraft(text)
@@ -1469,7 +1479,7 @@ export function ThreadPane({
  * once, so a reload from the first prompt on shows this thread, not another fresh one.
  */
 const BOOT: ThreadUrl = typeof window === 'undefined' ? { kind: 'fresh' } : readThreadUrl(window.location.search)
-const FIRST_THREAD_ID: string | undefined = BOOT.kind === 'fresh' ? mintThread().threadId : undefined
+const FIRST_THREAD_ID: string | undefined = BOOT.kind === 'fresh' ? mintPageThread().threadId : undefined
 // The boot thread is on screen before any navigation happens, so the store has to be told
 // here too — otherwise the first pane is evictable until the user clicks something.
 markThreadActive(FIRST_THREAD_ID)
@@ -1649,7 +1659,7 @@ export function ChatScreen(): React.ReactNode {
         (history, intent) => {
           if (intent.epoch !== epoch.current) return // a navigation happened since — superseded
           setResumeError(undefined)
-          navigate(adoptThread(history).threadId, intent.how)
+          navigate(adoptPageThread(history).threadId, intent.how)
         },
         (message, intent) => {
           if (intent.epoch !== epoch.current) return
@@ -1657,7 +1667,7 @@ export function ChatScreen(): React.ReactNode {
           // The page must show SOMETHING: a resume that failed with no pane behind it (the
           // boot's, or a rail click while the boot was still out) leaves a fresh thread, said
           // (the error is on the rail), and the URL rewritten so a reload does not ask again.
-          if (activePane.current === undefined) navigate(mintThread().threadId, 'replace')
+          if (activePane.current === undefined) navigate(mintPageThread().threadId, 'replace')
         },
       ),
     [navigate],
@@ -1736,7 +1746,7 @@ export function ChatScreen(): React.ReactNode {
           earlierError={stored.error ?? projects.error ?? resumeError}
           onSelect={(threadId: string) => navigate(threadId, 'push')}
           onResume={(threadId: string) => resumeFrom(threadId, 'push')}
-          onNew={(projectId: string | undefined) => navigate(mintThread(undefined, projectId).threadId, 'push')}
+          onNew={(projectId: string | undefined) => navigate(mintPageThread(projectId).threadId, 'push')}
           onAddProject={() => setAddingProject(true)}
           onRemoveProject={(projectId: string) => void forgetProject(projectId)}
           projectNotice={projectNotice}

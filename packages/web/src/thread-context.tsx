@@ -2,6 +2,7 @@ import { type EnsoContextCategory, type EnsoContextRequest, EnsoThreadContext } 
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Cell, type MouseHandlerDataParam, ReferenceLine, XAxis, YAxis } from 'recharts'
+import type { FetchLike } from './browser-logging.ts'
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from './components/ui/chart.tsx'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
 import { ContextEvents, FileActivity } from './context-activity.tsx'
@@ -36,8 +37,8 @@ import {
 export type ContextOutcome = AnalysisOutcome<EnsoThreadContext>
 
 /** The thread's context (stable, module-level: `useReadOnUsage` subscribes with it). */
-const readThreadContext = (threadId: string): Promise<ContextOutcome> =>
-  readThreadAnalysis(threadId, 'context', EnsoThreadContext)
+const readThreadContext = (threadId: string, fetchImpl: FetchLike): Promise<ContextOutcome> =>
+  readThreadAnalysis(threadId, 'context', EnsoThreadContext, fetchImpl)
 
 // ── Current Context ──────────────────────────────────────────────────────────────────────────
 

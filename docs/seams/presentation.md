@@ -248,12 +248,12 @@ throwing inside the state layer's stream loop, where a throw would end the run.
 
 **The state layer's side is built once per thread.** `createThreadStores` (`thread-stores.ts:98-118`)
 creates every store above and the thread's `connection` (`createFollowConnection` at lines 112-116,
-with `onProblem` routed into the thread's notifications). `chat-screen.tsx:171-185` (`threadChatOptions`)
+with `onProblem` routed into the thread's notifications). `chat-screen.tsx:181-195` (`threadChatOptions`)
 hands that connection, the stored history and an `onCustomEvent` closure over the thread's stores to the
-state layer's chat factory (`createThreadChatHook`, line 207-209) — one factory per thread, because
-the state layer passes `onCustomEvent` no thread id (lines 153-161).
+state layer's chat factory (`createThreadChatHook`, line 217-219) — one factory per thread, because
+the state layer passes `onCustomEvent` no thread id (lines 154-162).
 
-**The presentation layer is consumed by two files.** `chat-screen.tsx`'s imports at lines 23-49 pull
+**The presentation layer is consumed by two files.** `chat-screen.tsx`'s imports at lines 24-50 pull
 `attachments`, `conversation`, `message`, `prompt-input` and `queue` from `components/ai-elements/`;
 `selected-message-part.tsx:7` pulls `reasoning`. Those six ai-elements files and their commit pins are
 the generated table in [`ported-provenance.md`](./ported-provenance.md); the eight `ui/` shadcn
@@ -262,13 +262,16 @@ instead, because the shadcn registry is re-fetched by style and version rather t
 The renderers that stay ours are outside the ported directory: the dialog card is `EnsoDialogCard` in
 `chat-screen.tsx` itself (`#EnsoDialogCard`), and the tool-result descriptor renderer, notices, the mode select
 and the status bar are the `SelectedMessagePart`, `ThreadNotifications`, `PermissionModeSelect`,
-`ThreadStatusBar` and `EnsoRendererMap` imports at lines 55-81.
+`ThreadStatusBar` and `EnsoRendererMap` imports at lines 56-82.
 
 **A second connection today: the fixture.** `?fixture` swaps the live adapter for the scripted
-conversation in `fixture-conversation.ts` (`chat-screen.tsx:176`, `connection: isFixtureMode ?
-createFixtureChat().transport() : stores.connection`), and the option's type admits both (line 191).
+conversation in `fixture-conversation.ts` (`chat-screen.tsx:186`, `connection: isFixtureMode ?
+createFixtureChat().transport() : stores.connection`), and the option's type admits both (line 201).
 Everything downstream of the connection is identical on both paths, which is what the fixture is for
-(the styling dev loop, #31). The presentation components themselves have no second implementation and
+(the styling dev loop, #31). The swap covers only the client's send, so a fixture page's threads are
+also minted with `fixtureFetch`, which refuses every request by name (#404): a prompt queued
+mid-reply, Stop, a mode change or the Start dialog's model list reached the real server and ran a
+real model before. The presentation components themselves have no second implementation and
 need none: an upstream re-port is the second implementation, and the gate is what keeps it possible.
 
 ## What fences it
@@ -339,7 +342,7 @@ and `UIMessage` from `@tanstack/ai-client` on its first line; the history route 
 and the follow's opening snapshot (`server/follow.ts`) each call it and put the result on the wire.
 `Unknown` here is a deliberate hole, not an absence: the shape crosses with nothing to diff, so a
 partially-deployed change to it raises no schema error on either side. Of the two, only the history
-payload is read — `reviveHistoryMessages` (`thread-stores.ts:249-270`) restores the `Date` that JSON
+payload is read — `reviveHistoryMessages` (`thread-stores.ts:250-271`) restores the `Date` that JSON
 flattened and drops rows that cannot be UI messages, and `ThreadStores.history` is typed as the
 client's `UIMessage` (line 34). The snapshot's copy is written and read by nobody: the router's
 `snapshot` branch takes `permissionMode`, `openDialogs` and `generation` off the frame and never
@@ -368,7 +371,7 @@ Replace the state layer and the files that change are the adapter and its two ne
 `follow-connection.ts` (a new send/subscribe shape, or none), `custom-event-router.ts` (the client's
 `onCustomEvent` is the entry; the dispatch to stores stays), `to-agui.ts` (deleted — its header
 says so: *a renderer that stops speaking AG-UI deletes it and the adapter*), the chat factory in
-`chat-screen.tsx` (`threadChatOptions` and `createThreadChatHook`, lines 171-209, and the widget map
+`chat-screen.tsx` (`threadChatOptions` and `createThreadChatHook`, lines 181-219, and the widget map
 written against the client's `ChatUIHost`), plus the message-shape crossing, which is seven sites and
 not three: `ThreadStores.history` and `reviveHistoryMessages` in the browser,
 `server/transcript-to-messages.ts` as the producer, its two callers in `server/follow.ts` (the follow
