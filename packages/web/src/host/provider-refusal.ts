@@ -1,5 +1,21 @@
+import { builtinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { AgentSessionEvent } from '@earendil-works/pi-coding-agent'
 import { type EnsoProviderRefusal, providerStatusOf } from '@enso/core'
+
+/** A provider's display name by id, or undefined when pi names no such provider. */
+export type ProviderNameOf = (providerId: string) => string | undefined
+
+let builtinNames: ReadonlyMap<string, string> | undefined
+
+/**
+ * pi's own display name for one of its built-in providers (`Anthropic`, `OpenAI`, `xAI`), read from
+ * pi-ai's catalogue — no session, so a stored thread read cold is named the same as a live one
+ * (#387). Built once, on first use: constructing the catalogue is a millisecond of plain objects.
+ */
+export function builtinProviderName(providerId: string): string | undefined {
+  builtinNames ??= new Map(builtinProviders().map((provider) => [provider.id, provider.name]))
+  return builtinNames.get(providerId)
+}
 
 /**
  * The refusal an assistant `message_end` records, or nothing (#340).
@@ -10,9 +26,12 @@ import { type EnsoProviderRefusal, providerStatusOf } from '@enso/core'
  * beside it, as its own `provider_refused` event, so nothing above the seam reads pi's message
  * shape. A stop the user made is `stopReason: "aborted"` — not a refusal, and not said.
  */
-export function providerRefusalOf(event: AgentSessionEvent): EnsoProviderRefusal | undefined {
+export function providerRefusalOf(
+  event: AgentSessionEvent,
+  providerNameOf: ProviderNameOf = builtinProviderName,
+): EnsoProviderRefusal | undefined {
   if (event.type !== 'message_end') return undefined
-  return providerRefusalOfMessage(event.message)
+  return providerRefusalOfMessage(event.message, providerNameOf)
 }
 
 /**
@@ -20,7 +39,10 @@ export function providerRefusalOf(event: AgentSessionEvent): EnsoProviderRefusal
  * branch (#381): pi keeps the failed attempt in the session file with the same two fields, so a
  * reload reads the refusal from where the live event read it.
  */
-export function providerRefusalOfMessage(raw: unknown): EnsoProviderRefusal | undefined {
+export function providerRefusalOfMessage(
+  raw: unknown,
+  providerNameOf: ProviderNameOf = builtinProviderName,
+): EnsoProviderRefusal | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const message = raw as {
     role?: unknown
@@ -34,11 +56,13 @@ export function providerRefusalOfMessage(raw: unknown): EnsoProviderRefusal | un
   if (message.role !== 'assistant' || message.stopReason !== 'error') return undefined
   const text = nonEmpty(message.errorMessage)
   const output = message.usage?.output
+  const provider = nonEmpty(message.provider)
   // #384: the provider's own stop reason — a policy stop arrives on a response that already
   // succeeded, so it carries no status — and what the attempt spent before it was stopped.
   return {
     ...definedOnly({
-      provider: nonEmpty(message.provider),
+      provider,
+      providerName: provider === undefined ? undefined : providerNameOf(provider),
       model: nonEmpty(message.model),
       status: text === undefined ? undefined : providerStatusOf(text),
       providerStopReason: nonEmpty(message.rawStopReason),

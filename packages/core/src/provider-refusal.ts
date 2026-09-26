@@ -28,6 +28,12 @@ import { Check } from 'typebox/value'
  */
 export const EnsoProviderRefusal = Type.Object({
   provider: Type.Optional(Type.String({ minLength: 1 })),
+  /**
+   * The provider as a reader names it — `Anthropic`, not `anthropic` (#387): pi's own display name,
+   * from its built-in catalogue or, for a provider an extension registered, the live session's.
+   * Absent when pi names no such provider.
+   */
+  providerName: Type.Optional(Type.String({ minLength: 1 })),
   model: Type.Optional(Type.String({ minLength: 1 })),
   status: Type.Optional(Type.Integer({ minimum: 100, maximum: 599 })),
   /** The provider's own stop reason, when it ended a response it had begun (#384): `refusal`, `content_filter`, `SAFETY`, … */

@@ -156,6 +156,8 @@ export interface ThreadStatusViewProps {
   readonly questionWaiting?: boolean
   /** The provider's last refusal while no reply has got through since (#340) — its class word. */
   readonly refusal?: ProviderRefusalClass | undefined
+  /** Who refused (#387): `Anthropic: rate-limited`, never a bare word that reads as Enso's policy. */
+  readonly refusalSource?: string | undefined
 }
 
 const COMPACT_TOKENS = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
@@ -220,6 +222,25 @@ function ProjectIndicator({ cwd }: { readonly cwd: string | undefined }): React.
   return <span title={`the tree pi reads and writes for this thread: ${cwd}`}>project {projectName(cwd)}</span>
 }
 
+/** The provider's refusal (#340), named for who refused (#387): `Anthropic: rate-limited`; nothing without one. */
+function RefusalWord({
+  refusal,
+  source,
+}: {
+  readonly refusal: ProviderRefusalClass | undefined
+  readonly source: string | undefined
+}): React.ReactNode {
+  if (refusal === undefined) return null
+  return (
+    <span
+      className="text-refuse"
+      title={`${source ?? 'the provider'} refused the last request — the transcript says why`}
+    >
+      {source === undefined ? refusal : `${source}: ${refusal}`}
+    </span>
+  )
+}
+
 /** Pure view — everything it shows arrives as props, so a static render pins the wording. */
 export function ThreadStatusView({
   activity,
@@ -228,6 +249,7 @@ export function ThreadStatusView({
   cwd,
   questionWaiting,
   refusal,
+  refusalSource,
 }: ThreadStatusViewProps): React.ReactNode {
   const dotClass = activityDotClass(activity)
   const context = usage?.context ?? null
@@ -260,11 +282,7 @@ export function ThreadStatusView({
       ) : null}
       {/* #340: `$0.0000` beside `idle` means "nothing ran" here, not "free" — the line in the
 			    transcript says who refused and why. */}
-      {refusal === undefined ? null : (
-        <span className="text-refuse" title="the provider refused the last request — the transcript says why">
-          {refusal}
-        </span>
-      )}
+      <RefusalWord refusal={refusal} source={refusalSource} />
       <span title="user messages in this transcript">
         {counts.prompts} {counts.prompts === 1 ? 'prompt' : 'prompts'}
       </span>
@@ -324,6 +342,7 @@ export function ThreadStatusBar({ messages, generating }: ThreadStatusBarProps):
       cwd={cwd}
       questionWaiting={questionWaiting}
       refusal={refusal?.refusalClass}
+      refusalSource={refusal?.provider}
     />
   )
 }

@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 281.**
+**Decision headers: 282.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -153,6 +153,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/event-tail.test.ts` | `#97` | #97's tail is a debugging surface: what it must not do is lie by omission. |
 | `packages/web/src/host/__tests__/extension-ui-context.test.ts` | `#69` | The `ExtensionUIContext` the host binds (#69), driven directly: the blocking methods become `extension_ui_request` records and resolve on an answer, a cancel, an abort signal or a timeout; the fire-and-forget methods emit and return; the terminal-only surface is inert — pi's rpc mode's behaviour, which extensions already tolerate. |
 | `packages/web/src/host/__tests__/host-flows.test.ts` | `#338` | The flow decisions (#338 slice 3), as the fake and the real host share them: what `/login` and `/logout` offer, what a run must name, and the words the flow says. |
+| `packages/web/src/host/__tests__/notice-sender.test.ts` | `#387` | #387 gap 2: who said a notice. |
 | `packages/web/src/host/__tests__/permission-dialog.test.ts` | `#73` | The coupling to picc's `FilePermissionDialog` (#73), pinned against the REAL class: the lift reads TypeScript-private fields by name, so this is what fails — loudly — when a picc refactor renames one. |
 | `packages/web/src/host/__tests__/permission-mode-adapter.test.ts` | `#95` | picc's own restore rule, applied to the raw branch, below the seam (L3 step A). |
 | `packages/web/src/host/__tests__/session-events.test.ts` | `#69` | The replica of pi's unexported `toJsonEvent` (#69): what `map-events.ts` consumes must be byte-for-byte the rpc wire shape. |
@@ -166,9 +167,9 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/host-commands.ts` | `#338`, `#341` | The `host` command source (#338 slice 2) — the rows the host appends to `listCommands()` and the decision behind `runHostCommand`, as PURE functions over a model state and a model list. |
 | `packages/web/src/host/host-flows.ts` | `#338` | The `flow` host commands (#338 slice 3): `/login` and `/logout`, as PURE decisions over what the model runtime reports — the rows the host appends to `listCommands()`, the check a run passes before anything starts, and the sentences the flow says as it goes. |
 | `packages/web/src/host/map-events.ts` | `#24` | pi rpc events → the observations a surface renders (#24). |
+| `packages/web/src/host/notice-sender.ts` | `#387` | Who said a notice (#387 gap 2). |
 | `packages/web/src/host/permission-dialog.ts` | `#27`, `#69`, `#73` | picc's permission prompt, lifted to a question the web surface can ask (#73). |
 | `packages/web/src/host/permission-mode-adapter.ts` | `#84`, `#162` | picc-permission-modes' PERSISTED MODE, as the host reads it (#84; below the seam since #162 workstream 4, L3). |
-| `packages/web/src/host/provider-refusal.ts` | `#340` | The refusal an assistant `message_end` records, or nothing (#340). |
 | `packages/web/src/host/questionnaire-dialog.ts` | `#12` | The agent's `ask_user` questionnaire, lifted to a dialog the web card asks as one (#12). |
 | `packages/web/src/host/runtime-event.ts` | `#69`, `#162` | The runtime's event, as the host receives it — BELOW the thread-runtime seam since #162 workstream 4 (L2). |
 | `packages/web/src/host/session-events.ts` | `#69` | `AgentSessionEvent` → the rpc WIRE shape (#69). |
@@ -185,7 +186,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/project-list.ts` | `#395` | The projects the rail groups threads under (#395): the launch directory first, then the ones registered under the install's roots, as `GET /api/projects` lists them. |
 | `packages/web/src/questionnaire-card.tsx` | `#12` | The agent's `ask_user` questionnaire as one card (#12): a tab per question, each option a row with its label and what choosing it means, an "Other" row for an answer in the user's own words, and one "Submit answers" once every question has one. |
 | `packages/web/src/read-on-usage.ts` | `#45`, `#361`, `#362`, `#404` | A thread's route, read on mount and again whenever the thread's usage moves (#45, #361) — the Stats and Context views' one refresh rule. |
-| `packages/web/src/refused-attempt.tsx` | `#340`, `#381` | A refused attempt, said (#340, #381): `<provider>/<model> refused: <class> (<status>) — <reason>`. |
+| `packages/web/src/refused-attempt.tsx` | `#387` | Who refused, as a reader names them (#387): pi's display name for the provider (`Anthropic`), else its id; undefined when the refusal names no provider. |
 | `packages/web/src/route-read.ts` | `#45` | One GET of a JSON route whose answer has a schema, in the three ways it can go — a failure is words, never a throw (#45 phase 2 folded the thread timeline's and the stats drawer's copies). |
 | `packages/web/src/server/__tests__/bun-plugin-strict-binding-workaround.test.ts` | `#237` | The dev bundle's one source rewrite, executed (#237). |
 | `packages/web/src/server/__tests__/fake-hosted-thread.ts` | `#178` | The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a `ThreadRuntime` from plain closures that records every call, so the server, the registry and the routes are driven over it and asserted through what it recorded. |

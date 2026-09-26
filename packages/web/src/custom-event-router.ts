@@ -1,4 +1,5 @@
 import {
+  ENSO_NOTICE_SOURCE,
   EnsoFollowSnapshot,
   EnsoFollowStatus,
   EnsoObservation,
@@ -13,7 +14,7 @@ import {
 } from '@enso/core'
 import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
-import { providerRefusalLine, trailingRefusalOf } from './refused-attempt.tsx'
+import { providerRefusalLine, providerRefusalSource, trailingRefusalOf } from './refused-attempt.tsx'
 import { createStore, type Store } from './store.ts'
 import type { ThreadStores } from './thread-stores.ts'
 
@@ -95,6 +96,7 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
       "the connection to the server ended — the thread's state here is as of that moment; reload and resume it from the rail to reconnect",
       'error',
       'run',
+      ENSO_NOTICE_SOURCE,
     )
     return
   }
@@ -113,7 +115,11 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     stores.refusal.set(
       trailing === undefined
         ? undefined
-        : { refusalClass: providerRefusalClass(trailing), outputAtRefusal: data.usage.output },
+        : {
+            refusalClass: providerRefusalClass(trailing),
+            provider: providerRefusalSource(trailing),
+            outputAtRefusal: data.usage.output,
+          },
     )
     // The complete list, every snapshot (#114): a reconnect's snapshot is the resync, so an
     // empty list is a fact ("nothing is waiting") this page must apply too — it clears a
@@ -137,13 +143,14 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
  * the provider's own sentence follows it, verbatim but for the JSON around it.
  */
 function applyRefusal(stores: ThreadStores, refusal: EnsoProviderRefused): void {
-  stores.notifications.push(providerRefusalLine(refusal), 'error', 'run')
+  stores.notifications.push(providerRefusalLine(refusal), 'error', 'run', providerRefusalSource(refusal))
   // ⚠ The refused attempt's own output is not a reply getting through (#384): a refusal mid-stream
   // comes after the model wrote some, and the turn's `session-usage` — which the host says after
   // this — counts it. So the mark is the output as of now PLUS the attempt's own; only output past
   // both clears the word.
   stores.refusal.set({
     refusalClass: providerRefusalClass(refusal),
+    provider: providerRefusalSource(refusal),
     outputAtRefusal: (stores.usage.get()?.output ?? 0) + (refusal.output ?? 0),
   })
 }
@@ -151,7 +158,13 @@ function applyRefusal(stores: ThreadStores, refusal: EnsoProviderRefused): void 
 /** pi is retrying (#340): when, and which attempt of how many — a warning, since a reply may still come. */
 function applyRetry(stores: ThreadStores, retry: EnsoProviderRetrying): void {
   const delay = retry.delayMs < 1000 ? `${Math.round(retry.delayMs)} ms` : `${Math.round(retry.delayMs / 1000)} s`
-  stores.notifications.push(`retrying in ${delay} — attempt ${retry.attempt} of ${retry.maxAttempts}`, 'warning', 'run')
+  // pi retries the request the provider just refused (#387): the line names that provider.
+  stores.notifications.push(
+    `retrying in ${delay} — attempt ${retry.attempt} of ${retry.maxAttempts}`,
+    'warning',
+    'run',
+    stores.refusal.get()?.provider,
+  )
 }
 
 /**
@@ -163,7 +176,7 @@ function applyRetryEnd(stores: ThreadStores, end: EnsoProviderRetryEnded): void 
   if (end.success) return
   const retries = end.attempt === 1 ? '1 retry' : `${end.attempt} retries`
   const reason = end.finalError === undefined ? '' : ` — ${providerReasonOf(end.finalError)}`
-  stores.notifications.push(`no reply after ${retries}${reason}`, 'error', 'run')
+  stores.notifications.push(`no reply after ${retries}${reason}`, 'error', 'run', stores.refusal.get()?.provider)
 }
 
 /** One receipt, two views (#84, L3): the current-mode store (state) and the transcript line (history). */
@@ -200,7 +213,12 @@ function routeObservation(stores: ThreadStores, observation: EnsoObservation): v
     case 'permission-mode-rejected':
       // The click did nothing and the user is told (L3 step C) — a warning, composed here
       // where notices are rendered, not forged upstream as a notify observation.
-      stores.notifications.push(`mode change to ${observation.mode} rejected: ${observation.reason}`, 'warning', 'run')
+      stores.notifications.push(
+        `mode change to ${observation.mode} rejected: ${observation.reason}`,
+        'warning',
+        'run',
+        ENSO_NOTICE_SOURCE,
+      )
       return
     case 'model':
       // The host applied a `/model` or `/thinking` run (#338 slice 2) — the state after, from
@@ -268,7 +286,12 @@ function routeUiRequest(stores: ThreadStores, observation: EnsoObservation & { k
     const open = { id: observation.id, dialog: observation.dialog }
     if (!Check(EnsoOpenDialog, open)) {
       // Said even when a card is up: the unreadable question is parked on the server either way.
-      stores.notifications.push('pi asked a question this page could not read; it was left unanswered', 'error', 'run')
+      stores.notifications.push(
+        'pi asked a question this page could not read; it was left unanswered',
+        'error',
+        'run',
+        ENSO_NOTICE_SOURCE,
+      )
       return
     }
     if (stores.dialog.get() === undefined) stores.dialog.set(open)
@@ -277,7 +300,9 @@ function routeUiRequest(stores: ThreadStores, observation: EnsoObservation & { k
   // A notify without a message has nothing for a human; the schema already validated the
   // notify type and the origin, so no second literal list is consulted here (#96).
   if (observation.method !== 'notify' || observation.message === undefined) return
-  stores.notifications.push(observation.message, observation.notifyType, observation.origin)
+  // Who said it (#387): the extension the host tagged, or `Enso` for the host's own — absent when
+  // neither is known, never guessed from the words.
+  stores.notifications.push(observation.message, observation.notifyType, observation.origin, observation.sender)
 }
 
 // ── the last N chunks, for the debug drawer (#86) ─────────────────────────────

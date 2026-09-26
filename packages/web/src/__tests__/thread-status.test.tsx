@@ -162,6 +162,7 @@ const render = (props: Partial<Parameters<typeof ThreadStatusView>[0]>): string 
       usage={'usage' in props ? props.usage : NO_USAGE}
       cwd={props.cwd}
       refusal={props.refusal}
+      refusalSource={props.refusalSource}
     />,
   )
 
@@ -263,4 +264,8 @@ test('a refusal renders its class word beside the activity; none renders nothing
   expect(refused).toContain('>rate-limited<')
   expect(refused).toContain('the provider refused the last request')
   expect(render({})).not.toContain('refused the last request')
+  // #387: the word names who refused, so it is never read as Enso's policy.
+  const named = render({ refusal: 'rate-limited', refusalSource: 'Anthropic' })
+  expect(named).toContain('>Anthropic: rate-limited<')
+  expect(named).toContain('Anthropic refused the last request')
 })

@@ -122,6 +122,7 @@ export {
   EnsoDialogOutcome,
   EnsoDialogSettled,
   EnsoExtensionError,
+  ENSO_NOTICE_SOURCE,
   EnsoExtensionUiRequest,
   EnsoMessageEnd,
   EnsoMessageStart,

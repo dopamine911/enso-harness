@@ -917,6 +917,22 @@ test("⚠ a stored session's usage is pi's own getSessionStats total — every b
   expect(storedContext).toBeNull()
 })
 
+// ── who said a notice (#387 gap 2) ───────────────────────────────────────────
+
+// The acceptance's fixture is a REAL notify: pi-multi-account says it loaded (and how many
+// accounts it rotates) at every session start. pi hands every extension the same `ctx.ui`, so the
+// notice arrives with no caller; the host tagged pi-multi-account's registrations with the
+// extension pi loaded (`notice-sender.ts`), and the notice names it — from where it was said,
+// never from what it says.
+test('⚠ a vendored extension’s own startup notice names it: pi-multi-account says pi-multi-account (#387)', async () => {
+  const hosted = await hostedSession()
+  const notice = await untilObservation(
+    hosted,
+    (observation) => observation.kind === 'extension-ui-request' && observation.method === 'notify',
+  )
+  expect(notice).toMatchObject({ kind: 'extension-ui-request', method: 'notify', sender: 'pi-multi-account' })
+})
+
 // ── the agent asks (#12) ─────────────────────────────────────────────────────
 
 const DATABASE_QUESTION = {
@@ -1074,6 +1090,9 @@ test('⚠ a provider refusal is on the feed: the failed attempt, pi’s retry, t
   expect(refused).toEqual({
     kind: 'provider-refused',
     provider: 'enso-faux',
+    // #387: a provider an extension registered is named by the live session's own catalogue —
+    // pi-ai's built-in one does not know it. This one registered no display name, so pi's is its id.
+    providerName: 'enso-faux',
     model: 'faux-1',
     status: 429,
     message: RATE_LIMITED,
