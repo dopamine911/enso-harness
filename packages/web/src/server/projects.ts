@@ -1,8 +1,20 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import {
+  type Dirent,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, sep as pathSeparator, relative } from 'node:path'
 import {
+  type EnsoDirectoryEntry,
+  type EnsoDirectoryListing,
   type EnsoProject,
   type EnsoProjectRegistration,
   EnsoProjectsState,
@@ -58,6 +70,13 @@ export type ProjectRegistrationOutcome =
 
 export type ProjectRemovalOutcome = 'removed' | 'unknown' | 'launch'
 
+export type ProjectBrowseOutcome =
+  | { readonly kind: 'listing'; readonly listing: EnsoDirectoryListing }
+  | { readonly kind: 'refused'; readonly reason: string }
+
+/** The most directories one listing holds — the first by name; `truncated` says there were more. */
+const MAX_BROWSED_DIRECTORIES = 500
+
 /** Why a request's project name is refused: 400 for an id that is no project, 409 for a thread already named otherwise. */
 export interface ProjectClaimRefusal {
   readonly status: 400 | 409
@@ -76,6 +95,12 @@ export interface ProjectRegistry {
   /** The project whose directory this is, by canonical path; `undefined` for a directory that is no project. */
   byDirectory(directory: string): EnsoProject | undefined
   register(request: EnsoProjectRegistration): ProjectRegistrationOutcome
+  /**
+   * What a page may browse while adding a project: the declared roots (no `path`), or one directory
+   * inside them and the directories under it — each resolved and checked as a registration is, so a
+   * symlink that leads out of the roots and every hidden directory are left out.
+   */
+  browse(path: string | undefined): ProjectBrowseOutcome
   remove(projectId: string): ProjectRemovalOutcome
   /**
    * A page names the project of a thread (`X-Enso-Project`). The first name a thread gets is
@@ -90,6 +115,33 @@ export interface ProjectRegistry {
   projectOfNewThread(threadId: string): EnsoProject | undefined
   /** Where a thread with no session yet is built — `projectOfNewThread`'s directory; throws `ProjectUnavailable` when there is none. */
   directoryForNewThread(threadId: string): string
+}
+
+/** An absolute path resolved to the directory it is, or the refusal a registration or a browse gives. */
+function canonicalDirectory(path: string): string | { readonly kind: 'refused'; readonly reason: string } {
+  if (!isAbsolute(path)) return { kind: 'refused', reason: `${path} is not an absolute path` }
+  let canonical: string
+  try {
+    canonical = realpathSync(path)
+  } catch {
+    return { kind: 'refused', reason: `${path} does not exist` }
+  }
+  return isDirectory(canonical) ? canonical : { kind: 'refused', reason: `${canonical} is not a directory` }
+}
+
+function listingOf(
+  path: string | null,
+  parent: string | null,
+  registrable: boolean,
+  directories: readonly EnsoDirectoryEntry[],
+): EnsoDirectoryListing {
+  return {
+    path,
+    parent,
+    registrable,
+    directories: directories.slice(0, MAX_BROWSED_DIRECTORIES),
+    truncated: directories.length > MAX_BROWSED_DIRECTORIES,
+  }
 }
 
 /** The id of a canonical directory: its path, hashed. Sixteen hex digits (`isEnsoProjectId`). */
@@ -239,14 +291,9 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
   }
 
   function register(request: EnsoProjectRegistration): ProjectRegistrationOutcome {
-    if (!isAbsolute(request.path)) return { kind: 'refused', reason: `${request.path} is not an absolute path` }
-    let canonical: string
-    try {
-      canonical = realpathSync(request.path)
-    } catch {
-      return { kind: 'refused', reason: `${request.path} does not exist` }
-    }
-    if (!isDirectory(canonical)) return { kind: 'refused', reason: `${canonical} is not a directory` }
+    const resolved = canonicalDirectory(request.path)
+    if (typeof resolved !== 'string') return resolved
+    const canonical = resolved
     if (canonical === launch.path) return { kind: 'existing', project: viewOf(launch.path, launch.title, true) }
     const refusal = refusalUnderRoots(canonical, roots, options.roots)
     if (refusal !== undefined) return { kind: 'refused', reason: refusal }
@@ -259,6 +306,68 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     return { kind: 'registered', project: viewOf(canonical, request.title, false) }
   }
 
+  function browse(path: string | undefined): ProjectBrowseOutcome {
+    if (path === undefined) {
+      const existing = roots.filter(isDirectory)
+      return {
+        kind: 'listing',
+        listing: listingOf(
+          null,
+          null,
+          false,
+          existing.map((root) => entryOf(root, root)),
+        ),
+      }
+    }
+    const resolved = canonicalDirectory(path)
+    if (typeof resolved !== 'string') return resolved
+    const isRoot = roots.includes(resolved)
+    if (!isRoot) {
+      const refusal = refusalUnderRoots(resolved, roots, options.roots)
+      if (refusal !== undefined) return { kind: 'refused', reason: refusal }
+    }
+    const children = childDirectories(resolved)
+    if (!Array.isArray(children)) return children
+    return {
+      kind: 'listing',
+      listing: listingOf(resolved, isRoot ? null : dirname(resolved), !isRoot, children),
+    }
+  }
+
+  /**
+   * The directories under `directory` a page may browse into: resolved, inside a root, not hidden.
+   * ⚠ A directory can be searchable and not readable (`--x`): `realpath` and `stat` pass, the listing
+   * throws (PR #401 review — it took the server down). That is a refusal saying so, not an empty
+   * list, which would read as "no folders here". Each child is only resolved and stat'ed, never read.
+   */
+  function childDirectories(
+    directory: string,
+  ): EnsoDirectoryEntry[] | { readonly kind: 'refused'; readonly reason: string } {
+    let listed: Dirent[]
+    try {
+      listed = readdirSync(directory, { withFileTypes: true })
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      return {
+        kind: 'refused',
+        reason: `cannot read ${directory}${code === 'EACCES' ? ' — permission denied' : ` (${code})`}`,
+      }
+    }
+    const entries: EnsoDirectoryEntry[] = []
+    for (const child of listed) {
+      if (child.name.startsWith('.') || !(child.isDirectory() || child.isSymbolicLink())) continue
+      const canonical = realpathOrSelf(join(directory, child.name))
+      if (!isDirectory(canonical) || refusalUnderRoots(canonical, roots, options.roots) !== undefined) continue
+      entries.push(entryOf(canonical, child.name))
+    }
+    return entries.sort((left, right) => left.name.localeCompare(right.name))
+  }
+
+  function entryOf(canonical: string, name: string): EnsoDirectoryEntry {
+    const projectId = byDirectory(canonical)?.projectId
+    return projectId === undefined ? { name, path: canonical } : { name, path: canonical, projectId }
+  }
+
   function remove(projectId: string): ProjectRemovalOutcome {
     if (projectId === launch.projectId) return 'launch'
     if (!served().some((registration) => projectIdOf(registration.path) === projectId)) return 'unknown'
@@ -269,7 +378,11 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
 
   function claim(threadId: string, projectId: string | undefined): ProjectClaimRefusal | undefined {
     if (projectId === undefined) return undefined
-    if (get(projectId) === undefined) return { status: 400, reason: `no registered project has the id ${projectId}` }
+    if (get(projectId) === undefined) {
+      // Said for the reader of a thread whose project was removed (the live check of #395 slice 3):
+      // the id alone says nothing to them.
+      return { status: 400, reason: `project ${projectId} is not registered here — it was removed, or never added` }
+    }
     const named = claims.get(threadId)
     if (named !== undefined && named !== projectId) {
       return {
@@ -299,5 +412,16 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     return project.path
   }
 
-  return { list, get, byDirectory, register, remove, claim, dropClaim, projectOfNewThread, directoryForNewThread }
+  return {
+    list,
+    get,
+    byDirectory,
+    register,
+    browse,
+    remove,
+    claim,
+    dropClaim,
+    projectOfNewThread,
+    directoryForNewThread,
+  }
 }

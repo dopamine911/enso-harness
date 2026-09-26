@@ -34,6 +34,7 @@ import {
 } from 'lucide-react'
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useStickToBottomContext } from 'use-stick-to-bottom'
+import { AddProjectDialog } from './add-project.tsx'
 import { type ChoiceHandlers, CommandPalette, runTypedHostCommand, typedCommandName } from './command-palette.tsx'
 import { fetchThreadCommands } from './commands-connection.ts'
 import { Attachment, AttachmentPreview, AttachmentRemove, Attachments } from './components/ai-elements/attachments.tsx'
@@ -76,7 +77,7 @@ import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.
 import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState } from './model-state.tsx'
 import { ThreadNotifications } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
-import { createProjectsStore } from './project-list.ts'
+import { createProjectsStore, projectOf, removeProject } from './project-list.ts'
 import { QuestionnaireControls } from './questionnaire-card.tsx'
 import { providerRefusalLine, RefusedAttemptLine, refusalOfMessage } from './refused-attempt.tsx'
 import { SelectedMessagePart } from './selected-message-part.tsx'
@@ -1496,8 +1497,7 @@ const projectList = createProjectsStore()
 
 /** The project a thread runs in, as the page lists it — a thread with none is the launch directory's. */
 function useThreadProject(projectId: string | undefined): EnsoProject | undefined {
-  const { rows } = useStore(projectList)
-  return rows.find((project) => (projectId === undefined ? project.launch : project.projectId === projectId))
+  return projectOf(useStore(projectList).rows, projectId)
 }
 
 interface PaneSwitchProps {
@@ -1689,6 +1689,15 @@ export function ChatScreen(): React.ReactNode {
   // transcript it took forty percent of the height and squeezed the conversation it
   // exists to explain. Opt-in by `?debug`; open by default when it is, and collapsible
   // from the header so it can get out of the way without a reload.
+  // Adding and removing projects (#395 slice 3). A refused removal is said on the rail; a removed
+  // project's open threads stay, under "other" — the server ended them, and the rail never drops one.
+  const [addingProject, setAddingProject] = useState(false)
+  const [projectNotice, setProjectNotice] = useState<string | undefined>(undefined)
+  const forgetProject = async (projectId: string): Promise<void> => {
+    const outcome = await removeProject(projectId)
+    setProjectNotice(outcome.kind === 'ok' ? undefined : `could not remove the project: ${outcome.reason}`)
+    await Promise.all([projectList.refresh(), storedThreads.refresh()])
+  }
   const [debugOpen, setDebugOpen] = useState(isDebugMode)
   const [view, setView] = useState<ThreadView>('chat')
   const active = threads.find((thread) => thread.threadId === activeThreadId)
@@ -1728,6 +1737,18 @@ export function ChatScreen(): React.ReactNode {
           onSelect={(threadId: string) => navigate(threadId, 'push')}
           onResume={(threadId: string) => resumeFrom(threadId, 'push')}
           onNew={(projectId: string | undefined) => navigate(mintThread(undefined, projectId).threadId, 'push')}
+          onAddProject={() => setAddingProject(true)}
+          onRemoveProject={(projectId: string) => void forgetProject(projectId)}
+          projectNotice={projectNotice}
+        />
+        <AddProjectDialog
+          open={addingProject}
+          onClose={() => setAddingProject(false)}
+          onAdded={() => {
+            setProjectNotice(undefined)
+            void projectList.refresh()
+            void storedThreads.refresh()
+          }}
         />
         {threads.map((thread) => (
           <ThreadPane

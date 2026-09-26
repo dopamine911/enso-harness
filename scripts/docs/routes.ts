@@ -43,7 +43,7 @@ function threadRead(
 
 /** A literal GET that takes no input, reads, and builds nothing — the listing and inspection rows. */
 function literalRead(
-  facts: Pick<RouteMetadata, 'handler' | 'success'> & Partial<Pick<RouteMetadata, 'errors' | 'factory'>>,
+  facts: Pick<RouteMetadata, 'handler' | 'success'> & Partial<Pick<RouteMetadata, 'errors' | 'factory' | 'input'>>,
 ): Omit<RouteMetadata, 'method' | 'path'> {
   return {
     input: 'none',
@@ -218,6 +218,14 @@ const LITERAL_ROUTE_METADATA: Record<string, Omit<RouteMetadata, 'method' | 'pat
   'GET /api/projects': literalRead({
     handler: 'respondWithProjects',
     success: '200 `EnsoProject[]` JSON — the launch project first, then the registered ones',
+  }),
+  'GET /api/projects/browse*': literalRead({
+    handler: 'respondWithBrowse → ProjectRegistry.browse',
+    input: 'query: optional `path` — a directory inside a declared root; absent, the roots themselves',
+    success:
+      '200 `EnsoDirectoryListing` JSON — the directories under it that are inside a root and not hidden (symlinks resolved), which already are projects, and whether this one may be added',
+    errors:
+      '403 untrusted origin; 422 refused, with the reason — not absolute, missing, not a directory, outside every root, or inside a hidden directory',
   }),
   'POST /api/projects': {
     handler: 'respondToProjectRegistration → ProjectRegistry.register',

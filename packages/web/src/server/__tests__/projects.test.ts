@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createProjectRegistry, ProjectUnavailable } from '../projects.ts'
@@ -92,7 +92,7 @@ test('a new thread is built in the one project a page named for it, else the lau
   expect(projects.directoryForNewThread('t1')).toBe(app)
   expect(projects.claim('t2', '0123456789abcdef')).toEqual({
     status: 400,
-    reason: 'no registered project has the id 0123456789abcdef',
+    reason: 'project 0123456789abcdef is not registered here — it was removed, or never added',
   })
   // Built: the claim is dropped, and the thread's session decides from here on.
   projects.dropClaim('t1')
@@ -150,4 +150,68 @@ test('⚠ a relative project root is refused at construction; `~/` is the home d
   mkdirSync(join(root, 'app'))
   const home = createProjectRegistry({ launchDirectory: launch, roots: ['~/code'], homeDirectory: dirname(root) })
   expect(home.register({ path: join(root, 'app') })).toMatchObject({ kind: 'registered' })
+})
+
+// #395 slice 3: what a page may browse while adding a project is exactly what it may register —
+// every directory it is shown resolves inside a root, none is hidden, and a symlink out is not shown.
+test('⚠ browsing lists only directories a registration would take: resolved, inside a root, never hidden', () => {
+  const { launch, root } = layout()
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'enso-outside-')))
+  mkdirSync(join(root, 'app', 'src'), { recursive: true })
+  mkdirSync(join(root, 'web'))
+  mkdirSync(join(root, '.cache'))
+  symlinkSync(outside, join(root, 'escape'))
+  symlinkSync(join(root, 'web'), join(root, 'web-link'))
+  const projects = createProjectRegistry({ launchDirectory: launch, roots: [root] })
+  const app = projects.register({ path: join(root, 'app') })
+  if (app.kind === 'refused') throw new Error(app.reason)
+
+  expect(projects.browse(undefined)).toEqual({
+    kind: 'listing',
+    listing: {
+      path: null,
+      parent: null,
+      registrable: false,
+      directories: [{ name: root, path: root }],
+      truncated: false,
+    },
+  })
+  expect(projects.browse(root)).toEqual({
+    kind: 'listing',
+    listing: {
+      path: root,
+      parent: null,
+      registrable: false,
+      directories: [
+        { name: 'app', path: join(root, 'app'), projectId: app.project.projectId },
+        { name: 'web', path: join(root, 'web') },
+        { name: 'web-link', path: join(root, 'web') },
+      ],
+      truncated: false,
+    },
+  })
+  expect(projects.browse(join(root, 'app'))).toMatchObject({
+    kind: 'listing',
+    listing: { parent: root, registrable: true, directories: [{ name: 'src' }] },
+  })
+  expect(projects.browse(outside)).toEqual({
+    kind: 'refused',
+    reason: expect.stringContaining('not under a declared project root'),
+  })
+})
+
+// PR #401 review: a directory can be searchable and not readable (`--x`) — `realpath` and `stat`
+// pass, the listing throws. From the browse route that throw had nothing above it and took the
+// server down; it is a refusal that says why, not an empty list that would say "no folders here".
+test('⚠ browsing a directory the server may enter but not read is a refusal saying so, never a throw', () => {
+  const { launch, root } = layout()
+  const locked = join(root, 'locked')
+  mkdirSync(join(locked, 'inner'), { recursive: true })
+  chmodSync(locked, 0o100)
+  try {
+    const projects = createProjectRegistry({ launchDirectory: launch, roots: [root] })
+    expect(projects.browse(locked)).toEqual({ kind: 'refused', reason: `cannot read ${locked} — permission denied` })
+  } finally {
+    chmodSync(locked, 0o700)
+  }
 })
