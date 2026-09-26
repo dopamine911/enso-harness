@@ -121,6 +121,23 @@ test.describe('chat surface', () => {
     await captureScreenshot(page, '03-mode-answered')
   })
 
+  // #407: the fonts are not in the bundle — `dev-web.ts` mounts `/fonts/*` (`server/font-files.ts`)
+  // and the page links the @fontsource stylesheets at boot. The unit tests cover the route and the
+  // links apart; this is the wiring between them: a stylesheet answers 200 through the real server,
+  // and the default theme's body face (Enso Signal: Inter) actually loads from the file it names.
+  test('the fonts load from /fonts through the web server (model-free)', async ({ page }) => {
+    const fontStylesheet = page.waitForResponse(
+      (response) => response.url().includes('/fonts/@fontsource-variable/inter/') && response.url().endsWith('.css'),
+    )
+    await page.goto('/')
+    expect((await fontStylesheet).status()).toBe(200)
+    await expect(page.getByPlaceholder(COMPOSER_PLACEHOLDER)).toBeVisible()
+    const loadedFaces = await page.evaluate(async () =>
+      (await document.fonts.load('1em "Inter Variable"')).map((face) => face.family),
+    )
+    expect(loadedFaces).toContain('Inter Variable')
+  })
+
   test('paste an image: thumbnail, send enabled, the bytes on the wire as EnsoPromptImage (model-free)', async ({
     page,
   }) => {

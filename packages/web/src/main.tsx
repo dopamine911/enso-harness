@@ -6,6 +6,7 @@ import { StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { configureBrowserLogging, pageLogLevel } from './browser-logging.ts'
 import { ChatScreen } from './chat-screen.tsx'
+import { applyFonts, linkFontFaces, readSavedFonts } from './fonts.ts'
 import { applyTheme, pageStorage, readSavedTheme } from './theme.ts'
 import { browserLogging } from './thread-stores.ts'
 
@@ -19,6 +20,10 @@ import { browserLogging } from './thread-stores.ts'
 // The saved theme, normalised: index.html's inline script already copied the saved id before
 // the first paint; an id this page no longer offers falls back to the default here.
 applyTheme(readSavedTheme(pageStorage()), document.documentElement)
+// The fonts (#407): every family's faces declared from their own stylesheets, unbundled — a face
+// downloads only when text is set in it — and the saved per-role choice over the theme's.
+linkFontFaces(document)
+applyFonts(readSavedFonts(pageStorage()), document.documentElement)
 
 // Logging first (#132): the ring the drawer reads, the shipper to the server, devtools.
 // `?log=debug` turns the page up. The shipper flushes on hide, so a closing tab's last

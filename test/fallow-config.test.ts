@@ -35,6 +35,21 @@ test('⚠ every repository extension in the harness manifest is a fallow entry, 
 })
 
 /**
+ * The page's fonts are served as files, never imported (#407), so fallow cannot see them used and
+ * they are ignored by name. The names are the web package's `@fontsource` dependencies, both
+ * directions: a font dropped from the package leaves no stale ignore, and one added without an
+ * ignore fails the dead-code gate rather than passing here.
+ */
+test('⚠ the ignored font packages are exactly the web package’s @fontsource dependencies (#407)', () => {
+  const webPackage = JSON.parse(readFileSync(join(REPOSITORY_ROOT, 'packages/web/package.json'), 'utf8')) as {
+    dependencies: Record<string, string>
+  }
+  const isFont = (name: string): boolean => name.startsWith('@fontsource')
+  const ignored = (fallowConfig as { ignoreDependencies: string[] }).ignoreDependencies.filter(isFont).sort()
+  expect(ignored).toEqual(Object.keys(webPackage.dependencies).filter(isFont).sort())
+})
+
+/**
  * The zone table in `docs/architecture.md` → *Ownership boundary* is prose restating
  * `.fallowrc.jsonc` → `boundaries` (#173) — which #167's rule forbids unless it is checked. This
  * checks it: one row per zone, its directories, and the zones it may import, in config order.

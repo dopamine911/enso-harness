@@ -29,7 +29,20 @@
     // The runtime's own packages, supplied by it (peer `@earendil-works/pi-coding-agent`);
     // every import site is under the vendor gate's roots or on its allowlist (#145).
     "@earendil-works/pi-ai",
-    "@earendil-works/pi-tui"
+    "@earendil-works/pi-tui",
+    // The page's fonts, served as FILES by `packages/web/src/server/font-files.ts` and linked by
+    // `fonts.ts` — never imported, because Bun inlines every font a bundled stylesheet names
+    // (#407). `test/fallow-config.test.ts` holds this list equal to the web package's @fontsource
+    // dependencies, and `fonts.test.ts` holds those equal to what the page links.
+    "@fontsource-variable/fraunces",
+    "@fontsource-variable/geist",
+    "@fontsource-variable/ibm-plex-sans",
+    "@fontsource-variable/inter",
+    "@fontsource-variable/jetbrains-mono",
+    "@fontsource-variable/sora",
+    "@fontsource-variable/source-sans-3",
+    "@fontsource-variable/space-grotesk",
+    "@fontsource/ibm-plex-mono"
   ],
   "ignorePatterns": [".inspiration/**", ".local/**", ".enso/**", "dist-types/**"],
   // "Every shape is a schema in @enso/core" (architecture → The shared core) emits a `Static<typeof X>`
