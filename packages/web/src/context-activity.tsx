@@ -1,17 +1,29 @@
 import type { EnsoContextEvent, EnsoContextEventKind, EnsoFileOperation } from '@enso/core'
-import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react'
+import {
+  ArrowLeftRightIcon,
+  CircleXIcon,
+  EyeIcon,
+  LayersIcon,
+  PencilIcon,
+  ScissorsIcon,
+  SearchIcon,
+  SlidersHorizontalIcon,
+  SquarePlusIcon,
+} from 'lucide-react'
 import { useState } from 'react'
 import type { ContextBrowserFocus, ContextBrowserRequest } from './context-browser.tsx'
-import { Card, Choice, changeText, timeText } from './context-parts.tsx'
-import { OptionSelect } from './option-select.tsx'
-import { displayPath, type FileSummary, filesUpTo } from './thread-context-analysis.ts'
+import { changeText, timeText } from './context-parts.tsx'
+import { cn } from './lib/utils.ts'
+import { displayPath, operationsUpTo } from './thread-context-analysis.ts'
 import { toggleMember } from './toggle-member.ts'
+import { Card, KindFilters, KindLabel, ROW_BUTTON } from './view-parts.tsx'
 
 /**
- * The Context view's last two cards (#361 phase 4) — dsh-context's Context Events (when and why
- * the window changed) and File Activity (what the agent did to files, up to the trend's picked
- * request). Both lead into the Context Browser: an event opens the first request it reached, a
- * file operation opens its tool result there.
+ * The Context view's side cards (#361 phase 4), in the design direction's row language —
+ * dsh-context's Context Events (when and why the window changed) and File Activity (what pi's file
+ * tools did, up to the trend's picked request). Each row names its kind with an icon and a word,
+ * says what and when, and puts its figure at the end; each opens the Context Browser — an event at
+ * the first request it reached, a file operation at its tool result.
  */
 
 /** Where a card sends the reader: a request of the Context Browser, and an element in it. */
@@ -20,24 +32,44 @@ export type OpenInBrowser = (request: ContextBrowserRequest, focus?: ContextBrow
 /** The request a turn names, or the next one when the branch has none that far yet. */
 const requestAt = (turn: number, requestCount: number): ContextBrowserRequest => (turn <= requestCount ? turn : 'next')
 
-// ── Context Events ─────────────────────────────────────────────────────────────────────────────
-
-const EVENT_KINDS: ReadonlyArray<readonly [EnsoContextEventKind, string]> = [
-  ['inject', 'inject'],
-  ['compact', 'compact'],
-  ['prune', 'prune'],
-  ['switch', 'switch'],
-  ['mode', 'mode'],
-]
-
-/** A signed estimate as the card colours it: growth warm, a reclaim cool — dsh's +orange / −green. */
-function DeltaText({ tokens }: { tokens: number }): React.ReactNode {
-  if (tokens === 0) return null
+/** A row's two lines: what it is, then where and when — the design's `.row-main`. */
+function RowMain({ title, detail }: { title: string; detail: string }): React.ReactNode {
   return (
-    <span className={`font-mono tabular-nums ${tokens > 0 ? 'text-chart-6' : 'text-chart-2'}`}>
-      {changeText(tokens)}
+    <span className="grid min-w-0 flex-1 gap-0.5">
+      <b className="truncate text-sm font-medium">{title}</b>
+      <small className="truncate font-mono text-xs text-muted-foreground">{detail}</small>
     </span>
   )
+}
+
+/** A row's figures at its end — the design's `.row-end`. */
+function RowEnd({ children }: { children: React.ReactNode }): React.ReactNode {
+  return (
+    <span className="grid shrink-0 justify-items-end gap-0.5 font-mono text-xs whitespace-nowrap text-muted-foreground">
+      {children}
+    </span>
+  )
+}
+
+// ── Context Events ─────────────────────────────────────────────────────────────────────────────
+
+const EVENT_KINDS: readonly EnsoContextEventKind[] = ['inject', 'compact', 'prune', 'switch', 'mode']
+
+const EVENT_ICON: Readonly<Record<EnsoContextEventKind, React.ReactNode>> = {
+  inject: <SquarePlusIcon aria-hidden="true" />,
+  compact: <LayersIcon aria-hidden="true" />,
+  prune: <ScissorsIcon aria-hidden="true" />,
+  switch: <ArrowLeftRightIcon aria-hidden="true" />,
+  mode: <SlidersHorizontalIcon aria-hidden="true" />,
+}
+
+/** A compaction or a prune reshapes the window: its word reads in the text colour, the rest muted. */
+const RESHAPES: ReadonlySet<EnsoContextEventKind> = new Set(['compact', 'prune'])
+
+/** An event's signed change to the estimate: growth in the text colour, a reclaim in the allowed colour. */
+function EventChange({ tokens }: { tokens: number }): React.ReactNode {
+  if (tokens === 0) return <span>±0</span>
+  return <span className={tokens > 0 ? 'text-foreground' : 'text-ok'}>≈{changeText(tokens)}</span>
 }
 
 export function ContextEvents({
@@ -52,48 +84,47 @@ export function ContextEvents({
   const [hidden, setHidden] = useState<ReadonlySet<EnsoContextEventKind>>(() => new Set())
   const shown = [...events].reverse().filter((event) => !hidden.has(event.kind))
   const countOf = (kind: EnsoContextEventKind): number => events.filter((event) => event.kind === kind).length
+  const present = EVENT_KINDS.filter((kind) => countOf(kind) > 0)
   return (
-    <Card
-      title="Context Events"
-      aside={
-        <fieldset aria-label="event kinds shown" className="inline-flex gap-1">
-          {EVENT_KINDS.map(([kind, label]) => (
-            <button
-              key={kind}
-              type="button"
-              aria-pressed={!hidden.has(kind)}
-              className={`rounded px-1.5 py-0.5 ${hidden.has(kind) ? 'text-muted-foreground line-through' : 'bg-muted text-foreground'}`}
-              onClick={() => setHidden((current) => toggleMember(current, kind))}
-            >
-              {label} {countOf(kind)}
-            </button>
-          ))}
-        </fieldset>
-      }
-    >
+    <Card title="Context Events" sub="when and why the window changed">
+      {/* Only the kinds the thread has: a filter over nothing is noise. */}
+      {present.length > 1 ? (
+        <KindFilters
+          label="event kinds shown"
+          kinds={present}
+          hidden={hidden}
+          onToggle={(kind) => setHidden((current) => toggleMember(current, kind))}
+          icon={(kind) => EVENT_ICON[kind]}
+          count={countOf}
+        />
+      ) : null}
       {shown.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           {events.length === 0
             ? 'nothing has changed the context but the conversation itself'
             : 'no event of the kinds shown'}
         </p>
       ) : (
-        <ol className="grid grid-cols-1 gap-0.5 text-xs">
+        <ol className="-mx-2">
           {shown.map((event) => (
             <li key={event.key}>
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-muted/50"
+                className={ROW_BUTTON}
                 title="open the first request it reached"
                 onClick={() => onOpen(requestAt(event.turn, requestCount))}
               >
-                <span className="w-14 shrink-0 rounded bg-muted px-1 text-center">{event.kind}</span>
-                <span className="min-w-0 flex-1 truncate">{event.label}</span>
-                <span className="text-muted-foreground">
-                  {event.turn <= requestCount ? `turn ${event.turn}` : 'next request'}
-                </span>
-                <DeltaText tokens={event.tokens} />
-                <span className="text-muted-foreground">{timeText(event.at)}</span>
+                <KindLabel className={RESHAPES.has(event.kind) ? 'text-foreground' : ''}>
+                  {EVENT_ICON[event.kind]}
+                  {event.kind}
+                </KindLabel>
+                <RowMain
+                  title={event.label}
+                  detail={`${event.turn <= requestCount ? `reached request ${event.turn}` : 'reaches the next request'} · ${timeText(event.at)}`}
+                />
+                <RowEnd>
+                  <EventChange tokens={event.tokens} />
+                </RowEnd>
               </button>
             </li>
           ))}
@@ -105,122 +136,71 @@ export function ContextEvents({
 
 // ── File Activity ──────────────────────────────────────────────────────────────────────────────
 
-type FileFilter = 'all' | 'read' | 'written' | 'searched' | 'images'
-type FileOrder = 'active' | 'latest' | 'path'
+type FileKind = EnsoFileOperation['kind']
 
-const FILE_ORDERS: ReadonlyArray<readonly [FileOrder, string]> = [
-  ['active', 'most active'],
-  ['latest', 'latest'],
-  ['path', 'by path'],
-]
+const FILE_KINDS: readonly FileKind[] = ['read', 'write', 'search']
 
-const MATCHES_FILTER: Readonly<Record<FileFilter, (summary: FileSummary) => boolean>> = {
-  all: () => true,
-  read: (summary: FileSummary): boolean => summary.reads > 0,
-  written: (summary: FileSummary): boolean => summary.writes > 0,
-  searched: (summary: FileSummary): boolean => summary.searches > 0,
-  images: (summary: FileSummary): boolean => summary.images > 0,
+const FILE_ICON: Readonly<Record<FileKind, React.ReactNode>> = {
+  read: <EyeIcon aria-hidden="true" />,
+  write: <PencilIcon aria-hidden="true" />,
+  search: <SearchIcon aria-hidden="true" />,
 }
 
-function sortedFiles(files: readonly FileSummary[], order: FileOrder): FileSummary[] {
-  const activity = (summary: FileSummary): number => summary.operations.length
-  if (order === 'path') return [...files].sort((first, second) => first.path.localeCompare(second.path))
-  if (order === 'latest') return [...files].sort((first, second) => second.lastAt.localeCompare(first.lastAt))
-  return [...files].sort(
-    (first, second) => activity(second) - activity(first) || second.lastAt.localeCompare(first.lastAt),
-  )
+/** What an operation did, at its row's end: a write's footprint, a search's hits, a read's range. */
+function Footprint({ operation }: { operation: EnsoFileOperation }): React.ReactNode {
+  if (operation.kind === 'write') {
+    return (
+      <span>
+        <span className="text-ok">+{operation.added}</span> <span className="text-refuse">−{operation.removed}</span>
+      </span>
+    )
+  }
+  if (operation.kind === 'search') return <span>{operation.hits === 1 ? '1 hit' : `${operation.hits} hits`}</span>
+  if (operation.image) return <span>image</span>
+  // A read's subject is its range as the call asked it (`lines 1-80`); none is the whole file.
+  return <span>{operation.subject === '' ? 'whole file' : operation.subject}</span>
 }
 
-/** A path's directory muted and its name bold, as dsh draws it. */
-function PathText({ path }: { path: string }): React.ReactNode {
-  const slash = path.lastIndexOf('/')
-  return (
-    <span className="min-w-0 flex-1 truncate font-mono">
-      <span className="text-muted-foreground">{path.slice(0, slash + 1)}</span>
-      <b className="font-semibold">{path.slice(slash + 1)}</b>
-    </span>
-  )
-}
-
-interface OperationRowProps {
-  readonly operation: EnsoFileOperation
-  readonly requestCount: number
-  readonly onOpen: OpenInBrowser
-}
-
-/** One operation's line in an opened file row; it opens its tool result in the browser. */
-function OperationRow(props: OperationRowProps): React.ReactNode {
-  const { operation, requestCount, onOpen } = props
+/** One operation's row; it opens its tool result in the browser, in the request after its turn. */
+function OperationRow({
+  operation,
+  cwd,
+  requestCount,
+  onOpen,
+}: {
+  operation: EnsoFileOperation
+  cwd: string | undefined
+  requestCount: number
+  onOpen: OpenInBrowser
+}): React.ReactNode {
   const { resultKey } = operation
   const target = requestAt(operation.turn + 1, requestCount)
+  const path = displayPath(operation.path, cwd)
+  const name = path.slice(path.lastIndexOf('/') + 1) || path
+  const pattern = operation.kind === 'search' && operation.subject !== '' ? ` · “${operation.subject}”` : ''
   return (
     <li>
       <button
         type="button"
         disabled={resultKey === undefined}
-        className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-muted/50 disabled:opacity-60"
+        className={ROW_BUTTON}
         title={resultKey === undefined ? 'its result has not landed' : 'open its tool result in the Context Browser'}
         onClick={() => {
           if (resultKey !== undefined) onOpen(target, { request: target, key: resultKey })
         }}
       >
-        <span className="w-14 shrink-0">{operation.kind}</span>
-        <span className="font-mono text-muted-foreground">{operation.tool}</span>
-        <span className="min-w-0 flex-1 truncate font-mono">{operation.subject}</span>
-        {operation.kind === 'write' ? (
-          <span className="font-mono tabular-nums">
-            +{operation.added} −{operation.removed}
+        <KindLabel className={operation.isError ? 'text-refuse' : ''}>
+          {operation.isError ? <CircleXIcon aria-hidden="true" /> : FILE_ICON[operation.kind]}
+          {operation.isError ? 'failed' : operation.kind}
+        </KindLabel>
+        <RowMain title={name} detail={`${path}${pattern}`} />
+        <RowEnd>
+          <Footprint operation={operation} />
+          <span>
+            turn {operation.turn} · {operation.tool}
           </span>
-        ) : null}
-        {operation.hits > 0 ? <span className="font-mono tabular-nums">{operation.hits} hits</span> : null}
-        {operation.isError ? <span className="text-destructive">error</span> : null}
-        <span className="text-muted-foreground">turn {operation.turn}</span>
-        <span className="text-muted-foreground">{timeText(operation.at)}</span>
+        </RowEnd>
       </button>
-    </li>
-  )
-}
-
-function FileRow({
-  summary,
-  cwd,
-  requestCount,
-  onOpen,
-}: {
-  summary: FileSummary
-  cwd: string | undefined
-  requestCount: number
-  onOpen: OpenInBrowser
-}): React.ReactNode {
-  const [open, setOpen] = useState(false)
-  return (
-    <li className="border-t first:border-t-0">
-      <button
-        type="button"
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 px-1 py-1 text-left hover:bg-muted/50"
-        onClick={() => setOpen((wasOpen) => !wasOpen)}
-      >
-        {open ? <ChevronDownIcon className="size-3 shrink-0" /> : <ChevronRightIcon className="size-3 shrink-0" />}
-        <PathText path={displayPath(summary.path, cwd)} />
-        {summary.reads > 0 ? <span className="rounded bg-muted px-1 font-mono">read {summary.reads}</span> : null}
-        {summary.writes > 0 ? (
-          <span className="rounded bg-muted px-1 font-mono text-chart-2">
-            +{summary.added} −{summary.removed}
-          </span>
-        ) : null}
-        {summary.searches > 0 ? (
-          <span className="rounded bg-muted px-1 font-mono text-chart-3">searched {summary.searches}</span>
-        ) : null}
-        <span className="text-muted-foreground">{timeText(summary.lastAt)}</span>
-      </button>
-      {open ? (
-        <ol className="pb-1 pl-6">
-          {summary.operations.map((operation) => (
-            <OperationRow key={operation.key} operation={operation} requestCount={requestCount} onOpen={onOpen} />
-          ))}
-        </ol>
-      ) : null}
     </li>
   )
 }
@@ -239,59 +219,58 @@ export function FileActivity({
   requestCount: number
   onOpen: OpenInBrowser
 }): React.ReactNode {
-  const [filter, setFilter] = useState<FileFilter>('all')
-  const [order, setOrder] = useState<FileOrder>('active')
+  const [hidden, setHidden] = useState<ReadonlySet<FileKind>>(() => new Set())
   const [needle, setNeedle] = useState('')
-  const files = filesUpTo(operations, upToTurn)
-  const counted = (kind: FileFilter): number => files.filter(MATCHES_FILTER[kind]).length
-  const shown = sortedFiles(
-    files.filter(
-      (summary) =>
-        MATCHES_FILTER[filter](summary) &&
-        displayPath(summary.path, cwd).toLowerCase().includes(needle.trim().toLowerCase()),
-    ),
-    order,
+  const upTo = operationsUpTo(operations, upToTurn)
+  const countOf = (kind: FileKind): number => upTo.filter((operation) => operation.kind === kind).length
+  const wanted = needle.trim().toLowerCase()
+  const shown = upTo.filter(
+    (operation) =>
+      !hidden.has(operation.kind) && (wanted === '' || displayPath(operation.path, cwd).toLowerCase().includes(wanted)),
   )
-  const filters: ReadonlyArray<readonly [FileFilter, string]> = [
-    ['all', `all ${counted('all')}`],
-    ['read', `read ${counted('read')}`],
-    ['written', `written ${counted('written')}`],
-    ['searched', `searched ${counted('searched')}`],
-    ['images', `images ${counted('images')}`],
-  ]
   return (
     <Card
       title="File Activity"
-      aside={
-        upToTurn === undefined
-          ? 'every request · follows the trend’s pick'
-          : `up to turn ${upToTurn} · follows the trend’s pick`
-      }
+      sub={`pi’s file tools; bash names no file · ${upToTurn === undefined ? 'every request' : `up to turn ${upToTurn}`}`}
     >
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-        <Choice label="files shown" value={filter} options={filters} onChange={setFilter} />
-        <input
-          type="search"
-          aria-label="filter files by path"
-          placeholder="filter by path…"
-          className="min-w-0 flex-1 rounded-md border bg-background px-2 py-0.5"
-          value={needle}
-          onChange={(event: React.ChangeEvent<HTMLInputElement>) => setNeedle(event.target.value)}
+      <div className="flex flex-wrap items-center gap-2">
+        <KindFilters
+          label="file operations shown"
+          kinds={FILE_KINDS}
+          hidden={hidden}
+          onToggle={(kind) => setHidden((current) => toggleMember(current, kind))}
+          icon={(kind) => FILE_ICON[kind]}
+          count={countOf}
         />
-        <OptionSelect label="order files" value={order} options={FILE_ORDERS} onChange={setOrder} />
+        {upTo.length > 0 ? (
+          <input
+            type="search"
+            aria-label="filter files by path"
+            placeholder="filter by path…"
+            className={cn('min-h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-xs')}
+            value={needle}
+            onChange={(event: React.ChangeEvent<HTMLInputElement>) => setNeedle(event.target.value)}
+          />
+        ) : null}
       </div>
       {shown.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           {operations.length === 0
             ? 'no file tool has run in this thread — read, write, edit, grep, find, ls'
-            : 'no file matches'}
+            : 'no file operation of the kinds shown'}
         </p>
       ) : (
-        <ul className="text-xs">
-          {shown.map((summary) => (
-            <FileRow key={summary.path} summary={summary} cwd={cwd} requestCount={requestCount} onOpen={onOpen} />
+        <ol className="-mx-2">
+          {shown.map((operation) => (
+            <OperationRow
+              key={operation.key}
+              operation={operation}
+              cwd={cwd}
+              requestCount={requestCount}
+              onOpen={onOpen}
+            />
           ))}
-        </ul>
+        </ol>
       )}
     </Card>
   )

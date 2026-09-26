@@ -11,7 +11,8 @@ import { waitUntil } from './wait-until.ts'
 
 /**
  * #361 phase 3: the Context Browser, mounted — it reads the request it is asked for, and a focus
- * (a brief's line) opens that element's category and row, where its content is.
+ * (a brief's line) opens that element's category and picks its row, whose content the element
+ * view beside the list shows.
  */
 
 ensureDom()
@@ -65,7 +66,7 @@ const DETAIL: EnsoContextRequestDetail = {
 
 const flush = (work: () => Promise<void>): Promise<void> => act(work)
 
-test("a focus opens its element's category and row; the row shows the call's arguments beside its result", async () => {
+test("a focus opens its element's category and picks its row; the element view shows the call's arguments beside its result", async () => {
   const stores = mintThread()
   const asked: string[] = []
   globalThis.fetch = ((input: string | URL | Request): Promise<Response> => {
@@ -94,9 +95,10 @@ test("a focus opens its element's category and row; the row shows the call's arg
     )
   await waitUntil(() => row() !== undefined)
   expect(asked).toEqual([`/api/threads/${stores.threadId}/context/2`])
-  expect(row()?.getAttribute('aria-expanded')).toBe('true')
-  expect(container.textContent).toContain('ls -la')
-  expect(container.textContent).toContain('a b')
+  expect(row()?.getAttribute('aria-pressed')).toBe('true')
+  const view = container.querySelector('aside[aria-label="element"]')?.textContent ?? ''
+  expect(view).toContain('ls -la')
+  expect(view).toContain('a b')
   // The other category stays closed: the focus opens where it points, not everything.
   const system = [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')].find((button) =>
     button.textContent?.includes('system prompt'),
@@ -107,8 +109,8 @@ test("a focus opens its element's category and row; the row shows the call's arg
 })
 
 // A live thread re-reads the detail on every usage move, and each read is a new payload: the
-// focus must stay the focus the reader already had — not re-open a row they closed, nor scroll.
-test('a re-read keeps the reader where they are: a focused row they closed stays closed, and nothing scrolls again', async () => {
+// focus must stay the focus the reader already had — not re-open a category they closed, nor scroll.
+test('a re-read keeps the reader where they are: a focused category they closed stays closed, and nothing scrolls again', async () => {
   const stores = mintThread()
   const asked: string[] = []
   globalThis.fetch = ((input: string | URL | Request): Promise<Response> => {
@@ -138,16 +140,16 @@ test('a re-read keeps the reader where they are: a focused row they closed stays
         </ThreadStoresContext.Provider>,
       )
     })
-    const row = (): HTMLButtonElement | undefined =>
-      [...container.querySelectorAll<HTMLButtonElement>('li li button')].find((button) =>
-        button.textContent?.includes('bash ls -la'),
+    const category = (): HTMLButtonElement | undefined =>
+      [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')].find((button) =>
+        button.textContent?.includes('tool results'),
       )
-    await waitUntil(() => row()?.getAttribute('aria-expanded') === 'true')
+    await waitUntil(() => category()?.getAttribute('aria-expanded') === 'true')
     expect(scrolled).toHaveLength(1)
     await flush(async () => {
-      row()?.click()
+      category()?.click()
     })
-    expect(row()?.getAttribute('aria-expanded')).toBe('false')
+    expect(category()?.getAttribute('aria-expanded')).toBe('false')
     // A turn lands: the usage moves, the detail is read again.
     await flush(async () => {
       stores.usage.set({ cost: 0, input: 1, output: 1, cacheRead: 0, cacheWrite: 0, context: null })
@@ -155,7 +157,7 @@ test('a re-read keeps the reader where they are: a focused row they closed stays
     await waitUntil(() => asked.length === 2)
     await flush(() => new Promise((resolve) => setTimeout(resolve, 40)))
     expect(asked).toHaveLength(2)
-    expect(row()?.getAttribute('aria-expanded')).toBe('false')
+    expect(category()?.getAttribute('aria-expanded')).toBe('false')
     expect(scrolled).toHaveLength(1)
     await flush(async () => root.unmount())
     container.remove()

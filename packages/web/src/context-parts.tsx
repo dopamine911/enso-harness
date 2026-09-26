@@ -1,10 +1,12 @@
-import type { EnsoContextMakeup } from '@enso/core'
+import type { EnsoContextCategory, EnsoContextMakeup } from '@enso/core'
+import { cn } from './lib/utils.ts'
 import { COMPACT } from './stats-table.tsx'
 import { CATEGORY_COLOR, CATEGORY_LABEL, CONTEXT_CATEGORIES, shareOf, totalOf } from './thread-context-analysis.ts'
 
 /**
- * The Context view's shared pieces (#361): its number formats, its card, and the six-category bar
- * and legend — drawn by the Current Context, the trend's detail and the Context Browser alike.
+ * The Context view's shared pieces (#361): its number formats, and the six-category bar and
+ * legend — drawn by the Now card and the Context Browser alike. The card and the toggles every
+ * analysis view shares are `view-parts.tsx`'s.
  */
 
 // ── formats ──────────────────────────────────────────────────────────────────────────────────
@@ -27,31 +29,12 @@ export function timeText(at: string): string {
 
 // ── building blocks ──────────────────────────────────────────────────────────────────────────
 
-export function Card({
-  title,
-  aside,
-  children,
-}: {
-  title: string
-  aside?: React.ReactNode
-  children: React.ReactNode
-}): React.ReactNode {
-  return (
-    <section aria-label={title} className="min-w-0 rounded-lg border bg-card p-4">
-      <header className="mb-3 flex items-baseline justify-between gap-3">
-        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-        {aside === undefined ? null : <div className="text-xs text-muted-foreground">{aside}</div>}
-      </header>
-      {children}
-    </section>
-  )
-}
-
 /**
- * The six categories as one bar. `scale` is what the full width means — the model's window for
- * the Current Context, the request's own total in the trend's detail; what the makeup leaves of
- * it is hatched (dsh's free headroom). A makeup past its scale fills the bar, and what lies past
- * the scale's edge is tinted — past the window, which the full bar alone would not say.
+ * The six categories as one bar — the design's `.makeup-bar`. `scale` is what the full width
+ * means — the model's window for the Now card, the request's own total in the browser; what the
+ * makeup leaves of it is hatched (dsh's free headroom). A makeup past its scale fills the bar,
+ * and what lies past the scale's edge is tinted — past the window, which the full bar alone would
+ * not say.
  */
 export function MakeupBar({
   makeup,
@@ -65,18 +48,20 @@ export function MakeupBar({
   const total = totalOf(makeup)
   const width = Math.max(scale, total)
   return (
-    <div role="img" aria-label={label} className="relative flex h-3 w-full overflow-hidden rounded-sm bg-hatch">
-      {CONTEXT_CATEGORIES.map((category) => (
-        <span
-          key={category}
-          className="h-full"
-          style={{ width: `${shareOf(makeup[category], width) * 100}%`, background: CATEGORY_COLOR[category] }}
-        />
-      ))}
+    <div role="img" aria-label={label} className="relative flex h-4 w-full gap-px overflow-hidden rounded-sm bg-hatch">
+      {CONTEXT_CATEGORIES.map((category) =>
+        makeup[category] === 0 ? null : (
+          <span
+            key={category}
+            className="h-full min-w-0.5"
+            style={{ width: `${shareOf(makeup[category], width) * 100}%`, background: CATEGORY_COLOR[category] }}
+          />
+        ),
+      )}
       {total > scale && scale > 0 ? (
         <span
           data-slot="scale-edge"
-          className="absolute inset-y-0 right-0 border-l-2 border-destructive bg-destructive/35"
+          className="absolute inset-y-0 right-0 border-l-2 border-refuse bg-refuse/35"
           style={{ left: `${shareOf(scale, width) * 100}%` }}
         />
       ) : null}
@@ -84,68 +69,37 @@ export function MakeupBar({
   )
 }
 
-/** Each category's estimate and share of the makeup, dsh's legend row. */
-export function MakeupLegend({
-  makeup,
-  change,
+/** The category's colour, as a small square beside its name. */
+export function Swatch({
+  category,
+  className,
 }: {
-  makeup: EnsoContextMakeup
-  change?: EnsoContextMakeup | undefined
+  category: EnsoContextCategory
+  className?: string
 }): React.ReactNode {
-  const total = totalOf(makeup)
   return (
-    <dl className="mt-2 grid grid-cols-legend gap-x-4 gap-y-1 text-xs">
-      {CONTEXT_CATEGORIES.map((category) => (
-        <div key={category} className="flex items-center gap-2">
-          <span
-            aria-hidden="true"
-            className="size-2 shrink-0 rounded-sm"
-            style={{ background: CATEGORY_COLOR[category] }}
-          />
-          <dt className="min-w-0 flex-1 truncate text-muted-foreground">{CATEGORY_LABEL[category]}</dt>
-          {change === undefined || change[category] === 0 ? null : (
-            <span className="font-mono text-muted-foreground tabular-nums">{changeText(change[category])}</span>
-          )}
-          <dd className="font-mono tabular-nums">{estimateText(makeup[category])}</dd>
-          <span className="w-9 text-right font-mono text-muted-foreground tabular-nums">
-            {PERCENT.format(shareOf(makeup[category], total))}
-          </span>
-        </div>
-      ))}
-    </dl>
+    <span
+      aria-hidden="true"
+      className={cn('inline-block size-2.5 shrink-0 rounded-xs', className)}
+      style={{ background: CATEGORY_COLOR[category] }}
+    />
   )
 }
 
-/** One of a few, as pressed buttons — dsh's `Step | Turn` and `Total | Delta` pills; every card's toggle. */
-export function Choice<Value extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string
-  value: Value
-  options: ReadonlyArray<readonly [Value, string]>
-  onChange: (value: Value) => void
-}): React.ReactNode {
+/** Each category's estimate and share of the makeup — the design's `.legend`. */
+export function MakeupLegend({ makeup }: { makeup: EnsoContextMakeup }): React.ReactNode {
+  const total = totalOf(makeup)
   return (
-    <fieldset aria-label={label} className="inline-flex rounded-md bg-muted p-0.5 text-xs">
-      {options.map(([option, text]) => (
-        <button
-          key={option}
-          type="button"
-          aria-pressed={option === value}
-          // The ring keeps the pressed option visible in a theme whose background is near its muted (Nord, Gruvbox).
-          className={
-            option === value
-              ? 'rounded bg-background px-2 py-0.5 text-foreground ring-1 ring-border'
-              : 'px-2 py-0.5 text-muted-foreground'
-          }
-          onClick={() => onChange(option)}
-        >
-          {text}
-        </button>
+    <dl className="grid grid-cols-legend gap-x-4 gap-y-1 text-sm">
+      {CONTEXT_CATEGORIES.map((category) => (
+        <div key={category} className="flex items-center gap-2">
+          <Swatch category={category} />
+          <dt className="min-w-0 flex-1 truncate">{CATEGORY_LABEL[category]}</dt>
+          <dd className="font-mono text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+            {estimateText(makeup[category])} · {PERCENT.format(shareOf(makeup[category], total))}
+          </dd>
+        </div>
       ))}
-    </fieldset>
+    </dl>
   )
 }

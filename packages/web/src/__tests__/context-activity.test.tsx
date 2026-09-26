@@ -109,10 +109,9 @@ test('an operation opens its result in the request after its turn, the next one 
       <FileActivity operations={operations} upToTurn={undefined} cwd={undefined} requestCount={3} onOpen={onOpen} />
     ),
     [
-      buttonWith('button[aria-expanded]', 'a.ts'),
-      buttonWith('ul ol button', 'lines 1–5'),
-      buttonWith('ul ol button', 'lines 6–9'),
-      buttonWith('ul ol button', 'lines 10–12'),
+      buttonWith('ol button', 'lines 1–5'),
+      buttonWith('ol button', 'lines 6–9'),
+      buttonWith('ol button', 'lines 10–12'),
     ],
   )
   expect(clicked.every((button) => button !== undefined)).toBe(true)

@@ -12,6 +12,8 @@ export interface OptionSelectProps<Option extends string> {
   readonly onChange: (option: Option) => void
   readonly id?: string
   readonly label?: string
+  /** Replaces the compact default look — a card's picker is taller. */
+  readonly className?: string
 }
 
 export function OptionSelect<Option extends string>({
@@ -20,12 +22,13 @@ export function OptionSelect<Option extends string>({
   onChange,
   id,
   label,
+  className = 'rounded-md border bg-background px-1.5 py-0.5 text-xs text-foreground',
 }: OptionSelectProps<Option>): React.ReactNode {
   return (
     <select
       id={id}
       aria-label={label}
-      className="rounded-md border bg-background px-1.5 py-0.5 text-xs text-foreground"
+      className={className}
       value={value}
       onChange={(event: React.ChangeEvent<HTMLSelectElement>) => {
         const chosen = options.find(([option]) => option === event.target.value)
