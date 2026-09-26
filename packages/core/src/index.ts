@@ -146,6 +146,8 @@ export {
 export { EnsoPermissionModeChange, EnsoPermissionModeState } from './permission-mode.ts'
 export {
   ENSO_PROJECT_HEADER,
+  EnsoDirectoryEntry,
+  EnsoDirectoryListing,
   EnsoProject,
   EnsoProjectRegistration,
   EnsoProjectsConfig,

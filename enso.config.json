@@ -1,5 +1,8 @@
 {
   "webFetch": {
     "allowedHosts": []
+  },
+  "projects": {
+    "roots": ["~/dopamine911/repo"]
   }
 }

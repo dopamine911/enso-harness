@@ -102,3 +102,45 @@ export const EnsoProjectsState = Type.Object(
 )
 /** @group Projects */
 export type EnsoProjectsState = Static<typeof EnsoProjectsState>
+
+/**
+ * One directory a page may browse into while adding a project (#395): only directories inside a
+ * declared root appear, resolved (a symlink that leads out is left out), never a hidden one.
+ *
+ * @group Projects
+ */
+export const EnsoDirectoryEntry = Type.Object(
+  {
+    name: Type.String(),
+    /** Canonical — what a page registers, or browses next. */
+    path: Type.String(),
+    /** Present when it already is a project. */
+    projectId: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+)
+/** @group Projects */
+export type EnsoDirectoryEntry = Static<typeof EnsoDirectoryEntry>
+
+/**
+ * `GET /api/projects/browse[?path=…]`: the declared roots (no `path`), or one directory inside them
+ * and the directories under it.
+ *
+ * @group Projects
+ */
+export const EnsoDirectoryListing = Type.Object(
+  {
+    /** The directory listed; `null` for the list of roots. */
+    path: Type.Union([Type.String(), Type.Null()]),
+    /** Where "up" goes: the directory above while it is inside a root; `null` at a root (up is the list of roots). */
+    parent: Type.Union([Type.String(), Type.Null()]),
+    /** This directory may be added — strictly under a root; a root itself is not. */
+    registrable: Type.Boolean(),
+    directories: Type.Array(EnsoDirectoryEntry),
+    /** More directories than a listing holds were there; the first ones by name are listed. */
+    truncated: Type.Boolean(),
+  },
+  { additionalProperties: false },
+)
+/** @group Projects */
+export type EnsoDirectoryListing = Static<typeof EnsoDirectoryListing>

@@ -1019,6 +1019,21 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     response.end()
   }
 
+  /**
+   * What a page may browse while adding a project: the declared roots, or `?path=` inside them. Read
+   * only; the rules are the registration's (`projects.ts#browse`), so nothing listed is refused later.
+   */
+  function respondWithBrowse(url: string, response: ServerResponse): void {
+    const path = new URL(url, 'http://loopback').searchParams.get('path') ?? undefined
+    const outcome = projects.browse(path)
+    if (outcome.kind === 'refused') {
+      refuseWith(response, { status: 422, reason: outcome.reason })
+      return
+    }
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(outcome.listing))
+  }
+
   /** True when the request was a project route. */
   function dispatchProjectRoute(request: IncomingMessage, response: ServerResponse): boolean {
     const url = request.url ?? ''
@@ -1028,6 +1043,10 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     }
     if (request.method === 'POST' && url === '/api/projects') {
       answerOrFail(respondToProjectRegistration(request, response), response)
+      return true
+    }
+    if (request.method === 'GET' && url.startsWith('/api/projects/browse')) {
+      respondWithBrowse(url, response)
       return true
     }
     const projectId = PROJECT_ROUTE.exec(url)?.[1]

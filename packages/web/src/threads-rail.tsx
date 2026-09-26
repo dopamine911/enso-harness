@@ -1,9 +1,16 @@
 import type { EnsoProject, EnsoStoredThread } from '@enso/core'
-import { ChevronDownIcon, ChevronRightIcon, PlusIcon } from 'lucide-react'
+import { ChevronDownIcon, ChevronRightIcon, EllipsisIcon, FolderPlusIcon, PlusIcon } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from './components/ui/button.tsx'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './components/ui/dropdown-menu.tsx'
 import { cn } from './lib/utils.ts'
 import { pageClock } from './page-clock.ts'
+import { projectOf } from './project-list.ts'
 import { useStore } from './store.ts'
 import type { ThreadSummary } from './thread-stores.ts'
 
@@ -99,6 +106,12 @@ export interface ThreadsRailProps {
   readonly onResume: (threadId: string) => void
   /** Start a thread in this project; `undefined` when the page knows no project yet (the server's launch directory). */
   readonly onNew: (projectId: string | undefined) => void
+  /** Open the Add project dialog (#395 slice 3). */
+  readonly onAddProject: () => void
+  /** Forget a registered project; its threads stay on disk. Never offered for the launch directory. */
+  readonly onRemoveProject: (projectId: string) => void
+  /** Why the last add or remove did not go through, or undefined. Shown above the sections. */
+  readonly projectNotice: string | undefined
 }
 
 /** One section of the rail: a project, or — `project: undefined` — the threads no listed project holds. */
@@ -119,12 +132,7 @@ export function groupByProject(
   threads: readonly ThreadSummary[],
   earlier: readonly EnsoStoredThread[],
 ): ProjectGroup[] {
-  const launchId = projects.find((project) => project.launch)?.projectId
-  const listed = new Set(projects.map((project) => project.projectId))
-  const keyOf = (projectId: string | undefined): string | undefined => {
-    const key = projectId ?? launchId
-    return key !== undefined && listed.has(key) ? key : undefined
-  }
+  const keyOf = (projectId: string | undefined): string | undefined => projectOf(projects, projectId)?.projectId
   const groups: ProjectGroup[] = projects.map((project) => ({
     project,
     threads: threads.filter((thread) => keyOf(thread.projectId) === project.projectId),
@@ -232,6 +240,7 @@ function SectionHeader({
   folded,
   onFold,
   onNew,
+  onRemove,
 }: {
   group: ProjectGroup
   name: string
@@ -239,6 +248,7 @@ function SectionHeader({
   folded: boolean
   onFold: () => void
   onNew: (projectId: string) => void
+  onRemove: (projectId: string) => void
 }): React.ReactNode {
   const { project } = group
   const missing = project?.status === 'missing-dir'
@@ -271,6 +281,20 @@ function SectionHeader({
         >
           <PlusIcon />
         </Button>
+      )}
+      {project === undefined || project.launch ? null : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" size="icon" variant="ghost" className="size-6" aria-label={`more for ${name}`}>
+              <EllipsisIcon />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => onRemove(project.projectId)}>
+              Remove project — its threads stay on disk
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
     </div>
   )
@@ -337,6 +361,7 @@ function ProjectSection({
   onSelect,
   onResume,
   onNew,
+  onRemove,
 }: {
   group: ProjectGroup
   anyProjects: boolean
@@ -344,12 +369,21 @@ function ProjectSection({
   onSelect: (threadId: string) => void
   onResume: (threadId: string) => void
   onNew: (projectId: string) => void
+  onRemove: (projectId: string) => void
 }): React.ReactNode {
   const [folded, toggleFolded] = useFolded(group.project?.projectId ?? 'unlisted')
   const { name, hover } = sectionTitle(group.project, anyProjects)
   return (
     <section aria-label={name} className="flex flex-col gap-0.5">
-      <SectionHeader group={group} name={name} hover={hover} folded={folded} onFold={toggleFolded} onNew={onNew} />
+      <SectionHeader
+        group={group}
+        name={name}
+        hover={hover}
+        folded={folded}
+        onFold={toggleFolded}
+        onNew={onNew}
+        onRemove={onRemove}
+      />
       {folded ? null : (
         <SectionRows
           group={group}
@@ -372,6 +406,9 @@ export function ThreadsRail({
   onSelect,
   onResume,
   onNew,
+  onAddProject,
+  onRemoveProject,
+  projectNotice,
 }: ThreadsRailProps): React.ReactNode {
   const groups = groupByProject(projects, threads, earlier)
   // New Thread starts where the reader is: the project of the thread on screen.
@@ -386,6 +423,11 @@ export function ThreadsRail({
           could not list threads: {earlierError}
         </div>
       ) : null}
+      {projectNotice !== undefined ? (
+        <div role="alert" className="px-2 text-destructive text-xs">
+          {projectNotice}
+        </div>
+      ) : null}
       {groups.map((group) => (
         <ProjectSection
           key={group.project?.projectId ?? 'unlisted'}
@@ -395,8 +437,19 @@ export function ThreadsRail({
           onSelect={onSelect}
           onResume={onResume}
           onNew={onNew}
+          onRemove={onRemoveProject}
         />
       ))}
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="justify-start text-muted-foreground"
+        onClick={onAddProject}
+      >
+        <FolderPlusIcon />
+        Add project
+      </Button>
     </nav>
   )
 }

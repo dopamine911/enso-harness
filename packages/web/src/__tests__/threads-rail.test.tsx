@@ -197,6 +197,9 @@ test('the rail names the active thread, titles the untitled honestly, and marks 
       onSelect={noop}
       onResume={noop}
       onNew={noop}
+      onAddProject={noop}
+      onRemoveProject={noop}
+      projectNotice={undefined}
     />,
   )
   expect(rendered).toContain('New Thread')
@@ -254,6 +257,9 @@ test("each project is a section with its own threads — the page's open ones, t
       onSelect={noop}
       onResume={noop}
       onNew={noop}
+      onAddProject={noop}
+      onRemoveProject={noop}
+      projectNotice={undefined}
     />,
   )
   const launch = sectionOf(rendered, 'enso')
@@ -295,6 +301,9 @@ test('a section shows five stored threads and says how many more there are; a fa
     onSelect: noop,
     onResume: noop,
     onNew: noop,
+    onAddProject: noop,
+    onRemoveProject: noop,
+    projectNotice: undefined,
   }
   const rendered = renderToStaticMarkup(<ThreadsRail {...props} earlier={earlier} earlierError={undefined} />)
   expect(rendered.match(/not open here/g)).toHaveLength(STORED_ROWS_SHOWN)
@@ -313,4 +322,26 @@ test('⚠ a thread minted in a project names it on every request it makes; one m
   await mintThread(recording, 'p-app').connection.configure({ mode: 'plan' })
   await mintThread(recording).connection.configure({ mode: 'plan' })
   expect(seen).toEqual(['p-app', null])
+})
+
+test('a registered project can be removed from its section, the launch directory cannot; a refused removal is said', () => {
+  const rendered = renderToStaticMarkup(
+    <ThreadsRail
+      projects={[LAUNCH, APP]}
+      threads={[]}
+      activeThreadId={undefined}
+      earlier={[]}
+      earlierError={undefined}
+      onSelect={noop}
+      onResume={noop}
+      onNew={noop}
+      onAddProject={noop}
+      onRemoveProject={noop}
+      projectNotice="could not remove the project: 409 a thread in this project is running"
+    />,
+  )
+  expect(sectionOf(rendered, 'app')).toContain('aria-label="more for app"')
+  expect(sectionOf(rendered, 'enso')).not.toContain('more for')
+  expect(rendered).toContain('Add project')
+  expect(rendered).toMatch(/role="alert"[^>]*>could not remove the project: 409 a thread in this project is running/)
 })
