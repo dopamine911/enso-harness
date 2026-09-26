@@ -25,6 +25,8 @@ test('an extension is named by the path pi loaded it from: its package, the harn
     'Enso web-search',
   )
   expect(extensionSender('<inline:enso-host-model-watch>', harnessPackageDir)).toBeUndefined()
+  // Anywhere else: the extension's own directory.
+  expect(extensionSender('/elsewhere/probe/index.ts', harnessPackageDir)).toBe('probe')
 })
 
 // The probe keeps its unsubscribe on globalThis so the test can call it — the way an extension
