@@ -22,6 +22,11 @@ export function changeText(tokens: number): string {
   return tokens > 0 ? `+${COMPACT.format(tokens)}` : `−${COMPACT.format(-tokens)}`
 }
 
+/** A change between two estimates, said as one: `≈+1.2k`, `≈−5k` — and `±0` for none, which is exact. */
+export function estimateChangeText(tokens: number): string {
+  return tokens === 0 ? '±0' : `≈${changeText(tokens)}`
+}
+
 export function timeText(at: string): string {
   const moment = new Date(at)
   return Number.isNaN(moment.getTime()) ? '' : moment.toLocaleTimeString([], { hour12: false })

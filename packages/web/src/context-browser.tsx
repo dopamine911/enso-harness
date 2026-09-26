@@ -11,7 +11,7 @@ import { TextPart } from '@tanstack/ai-react/ui'
 import { ArrowLeftIcon, ArrowRightIcon, ChevronRightIcon, LayersIcon, PanelsTopLeftIcon } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
-import { changeText, estimateText, MakeupBar, PERCENT, Swatch, timeText } from './context-parts.tsx'
+import { estimateChangeText, estimateText, MakeupBar, PERCENT, Swatch, timeText } from './context-parts.tsx'
 import { cn } from './lib/utils.ts'
 import { TEXT_PART_COMPONENTS } from './markdown-image.tsx'
 import { OptionSelect } from './option-select.tsx'
@@ -331,7 +331,7 @@ function CategoryHeader({ category, elements, makeup, change, open, onToggle }: 
   const details = [
     elements.length === 1 ? '1 element' : `${elements.length} elements`,
     ...(entered > 0 ? [`${entered} new`] : []),
-    ...(change === undefined || change === 0 ? [] : [changeText(change)]),
+    ...(change === undefined || change === 0 ? [] : [estimateChangeText(change)]),
   ]
   return (
     <button
@@ -645,7 +645,8 @@ export function ContextBrowser({
       : detail.elements.find((element) => matchesKey(element, focusKey))
   const pick = useBrowserPick(focused)
   const earlier = stepped(requests, index - 1)
-  const later = request === 'next' ? undefined : stepped(requests, index + 1)
+  // Nowhere to step from a turn the branch does not hold, either way.
+  const later = request === 'next' || index === -1 ? undefined : stepped(requests, index + 1)
   return (
     <Card
       title="Context Browser"

@@ -80,7 +80,9 @@ test('estimates are written ≈, the provider count is named, and what is not kn
   expect(rendered).toContain('4K  request 1')
   expect(rendered).toContain('For request 1 pi estimated ≈4.6K; the provider counted 4K (−610)')
   const live = text({ ...STORED, live: true, usage: { tokens: 4100, window: 200_000, percent: 2 } })
-  expect(live).toContain('4.1K  of 200K · 2%')
+  expect(live).toContain('≈4.1K  of 200K · 2%')
+  expect(live).toContain("pi's context meter")
+  expect(rendered).toContain('provider count')
   expect(live).toContain('3% of the 200K window, estimated')
 })
 

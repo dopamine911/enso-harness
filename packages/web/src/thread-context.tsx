@@ -5,7 +5,16 @@ import type { FetchLike } from './browser-logging.ts'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog.tsx'
 import { ContextEvents, FileActivity } from './context-activity.tsx'
 import { ContextBrowser, type ContextBrowserFocus, type ContextBrowserRequest } from './context-browser.tsx'
-import { changeText, estimateText, MakeupBar, MakeupLegend, PERCENT, Swatch, timeText } from './context-parts.tsx'
+import {
+  changeText,
+  estimateChangeText,
+  estimateText,
+  MakeupBar,
+  MakeupLegend,
+  PERCENT,
+  Swatch,
+  timeText,
+} from './context-parts.tsx'
 import { cn } from './lib/utils.ts'
 import { useReadOnUsage } from './read-on-usage.ts'
 import { ANALYSIS_READING, type AnalysisOutcome, readThreadAnalysis } from './route-read.ts'
@@ -31,8 +40,10 @@ import { Card, Choice, SmallButton } from './view-parts.tsx'
  * `GET /api/threads/:threadId/context` on open and whenever the thread's usage moves.
  *
  * ⚠ ESTIMATES, SAID AS SUCH. Every category figure is pi's estimate (characters over four) and is
- * written `≈`; the provider's count for a request, and pi's context meter, are written plain and
- * named as the provider's. They disagree, and the view shows both rather than choosing.
+ * written `≈`, as is every change between two estimates; the provider's count for a request is
+ * written plain and named as the provider's. pi's live context meter is both — the provider's
+ * count for the last response plus pi's estimate of what has landed since (`getContextUsage`) — so
+ * it is written `≈` and named as pi's. They disagree, and the view shows both rather than choosing.
  */
 
 export type ContextOutcome = AnalysisOutcome<EnsoThreadContext>
@@ -70,21 +81,22 @@ const lastCounted = (requests: readonly EnsoContextRequest[]): EnsoContextReques
   requests.findLast((request) => request.actual.prompt > 0)
 
 /**
- * pi's context meter — the provider's count for the last response against the model's window —
- * or, for a thread read from its file (no window without a live model), the provider's count for
- * the latest request it counted, named.
+ * The live meter — pi's context meter: the provider's count for the last response plus pi's
+ * estimate of what has landed since, against the model's window — or, for a thread read from its
+ * file (no window without a live model), the provider's count for the latest request it counted,
+ * named. Headed and written by which it is: an estimate carries `≈`, a provider count does not.
  */
-function ProviderMeter({ context }: { context: EnsoThreadContext }): React.ReactNode {
+function ContextMeter({ context }: { context: EnsoThreadContext }): React.ReactNode {
   const { usage } = context
   const last = context.requests.at(-1)
   const caption = 'text-xs text-muted-foreground'
-  const heading = <span className={caption}>pi’s context meter · provider count</span>
   if (usage !== null && usage.tokens !== null && usage.percent !== null) {
     return (
       <div className="grid content-start gap-2">
-        {heading}
+        <span className={caption}>pi’s context meter</span>
         <Figure
-          value={COMPACT.format(usage.tokens)}
+          estimate
+          value={estimateText(usage.tokens)}
           of={`of ${COMPACT.format(usage.window)} · ${PERCENT.format(usage.percent / 100)}`}
         />
         <meter
@@ -95,11 +107,13 @@ function ProviderMeter({ context }: { context: EnsoThreadContext }): React.React
           className="h-2 w-full appearance-none overflow-hidden rounded-full bg-popover [&::-moz-meter-bar]:bg-foreground [&::-webkit-meter-bar]:border-0 [&::-webkit-meter-bar]:bg-transparent [&::-webkit-meter-bar]:bg-none [&::-webkit-meter-optimum-value]:bg-foreground [&::-webkit-meter-optimum-value]:bg-none"
         />
         <span className={caption}>
-          The last response’s tokens against {last === undefined ? 'the model' : `${last.model}’s`} window.
+          The provider’s count for the last response, plus pi’s estimate of what has landed since — against{' '}
+          {last === undefined ? 'the model’s' : `${last.model}’s`} window.
         </span>
       </div>
     )
   }
+  const heading = <span className={caption}>provider count</span>
   const counted = lastCounted(context.requests)
   return (
     <div className="grid content-start gap-2">
@@ -139,7 +153,7 @@ function NextEstimate({ context }: { context: EnsoThreadContext }): React.ReactN
         of={
           last === undefined
             ? 'not sent yet'
-            : `${changeText(total - totalOf(last.estimated))} since request ${last.turn}`
+            : `${estimateChangeText(total - totalOf(last.estimated))} since request ${last.turn}`
         }
       />
       <MakeupBar
@@ -190,7 +204,7 @@ function CurrentContext({ context, onOpen }: { context: EnsoThreadContext; onOpe
     >
       <div className="grid gap-4 @3xl:grid-cols-5">
         <div className="@3xl:col-span-2">
-          <ProviderMeter context={context} />
+          <ContextMeter context={context} />
         </div>
         <div className="min-w-0 @3xl:col-span-3">
           <NextEstimate context={context} />
@@ -306,7 +320,7 @@ function TrendPlot(props: TrendPlotProps): React.ReactNode {
           const makeup = values[index] ?? bar.estimated
           const total = CONTEXT_CATEGORIES.reduce((sum, category) => sum + makeup[category], 0)
           const compacted = compactedBar(bar, requests, granularity)
-          const label = `request ${bar.turn}, prompt ${bar.prompt}, ${mode === 'total' ? estimateText(total) : changeText(total)}${compacted ? ', compaction' : ''}`
+          const label = `request ${bar.turn}, prompt ${bar.prompt}, ${mode === 'total' ? estimateText(total) : estimateChangeText(total)}${compacted ? ', compaction' : ''}`
           return (
             <button
               key={bar.turn}
@@ -396,7 +410,12 @@ function RequestBrief({
   const { actual, brief } = request
   const muted = 'text-xs text-muted-foreground'
   return (
-    <article aria-live="polite" className="grid gap-3 rounded-lg border bg-background p-3">
+    <article className="grid gap-3 rounded-lg border bg-background p-3">
+      {/* A pick is confirmed in one line, not by re-reading the brief: the region below changes
+          with the request, and nothing else in the article is live. */}
+      <p aria-live="polite" className="sr-only">
+        Request {request.turn}, prompt {request.prompt}
+      </p>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <h3 className="font-heading text-base font-semibold ink:italic">Request {request.turn}</h3>
         <span className="font-mono text-xs text-muted-foreground">

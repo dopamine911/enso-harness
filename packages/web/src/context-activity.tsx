@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import type { ContextBrowserFocus, ContextBrowserRequest } from './context-browser.tsx'
-import { changeText, timeText } from './context-parts.tsx'
+import { estimateChangeText, timeText } from './context-parts.tsx'
 import { cn } from './lib/utils.ts'
 import { displayPath, operationsUpTo } from './thread-context-analysis.ts'
 import { toggleMember } from './toggle-member.ts'
@@ -68,8 +68,8 @@ const RESHAPES: ReadonlySet<EnsoContextEventKind> = new Set(['compact', 'prune']
 
 /** An event's signed change to the estimate: growth in the text colour, a reclaim in the allowed colour. */
 function EventChange({ tokens }: { tokens: number }): React.ReactNode {
-  if (tokens === 0) return <span>±0</span>
-  return <span className={tokens > 0 ? 'text-foreground' : 'text-ok'}>≈{changeText(tokens)}</span>
+  if (tokens === 0) return <span>{estimateChangeText(tokens)}</span>
+  return <span className={tokens > 0 ? 'text-foreground' : 'text-ok'}>{estimateChangeText(tokens)}</span>
 }
 
 export function ContextEvents({
@@ -223,6 +223,7 @@ export function FileActivity({
   const [needle, setNeedle] = useState('')
   const upTo = operationsUpTo(operations, upToTurn)
   const countOf = (kind: FileKind): number => upTo.filter((operation) => operation.kind === kind).length
+  const present = FILE_KINDS.filter((kind) => countOf(kind) > 0)
   const wanted = needle.trim().toLowerCase()
   const shown = upTo.filter(
     (operation) =>
@@ -234,14 +235,17 @@ export function FileActivity({
       sub={`pi’s file tools; bash names no file · ${upToTurn === undefined ? 'every request' : `up to turn ${upToTurn}`}`}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <KindFilters
-          label="file operations shown"
-          kinds={FILE_KINDS}
-          hidden={hidden}
-          onToggle={(kind) => setHidden((current) => toggleMember(current, kind))}
-          icon={(kind) => FILE_ICON[kind]}
-          count={countOf}
-        />
+        {/* Only the kinds the operations have, as the Events card does: a filter over nothing is noise. */}
+        {present.length > 1 ? (
+          <KindFilters
+            label="file operations shown"
+            kinds={present}
+            hidden={hidden}
+            onToggle={(kind) => setHidden((current) => toggleMember(current, kind))}
+            icon={(kind) => FILE_ICON[kind]}
+            count={countOf}
+          />
+        ) : null}
         {upTo.length > 0 ? (
           <input
             type="search"
