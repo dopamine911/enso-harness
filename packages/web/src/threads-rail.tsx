@@ -253,6 +253,16 @@ function sectionTitle(project: EnsoProject | undefined, anyProjects: boolean): {
     : { name: 'threads', hover: 'the projects are not listed yet' }
 }
 
+/**
+ * What a folded section's header says for the rows it hides: a question waiting on you first (only
+ * an open thread can hold one, and it is busy too), else a run in flight — the order `liveState` uses.
+ */
+function hiddenState(group: ProjectGroup): 'waiting' | 'running' | undefined {
+  if (group.threads.some((thread) => thread.waiting)) return 'waiting'
+  if (group.threads.some((thread) => thread.busy) || group.earlier.some((thread) => thread.busy)) return 'running'
+  return undefined
+}
+
 /** The section's header: fold it, see where it is, start a thread in it. */
 function SectionHeader({
   group,
@@ -273,8 +283,7 @@ function SectionHeader({
 }): React.ReactNode {
   const { project } = group
   const missing = project?.status === 'missing-dir'
-  // A folded section still says a run is in flight in it.
-  const running = folded && (group.threads.some((thread) => thread.busy) || group.earlier.some((thread) => thread.busy))
+  const hidden = folded ? hiddenState(group) : undefined
   return (
     <div className="flex items-center gap-1">
       <button
@@ -287,7 +296,7 @@ function SectionHeader({
         {folded ? <ChevronRightIcon className="size-3 shrink-0" /> : <ChevronDownIcon className="size-3 shrink-0" />}
         <span className="min-w-0 truncate">{name}</span>
         {missing ? <span className="shrink-0 text-destructive">missing</span> : null}
-        {running ? <LiveDot state="running" /> : null}
+        {hidden === undefined ? null : <LiveDot state={hidden} />}
       </button>
       {project === undefined ? null : (
         <Button

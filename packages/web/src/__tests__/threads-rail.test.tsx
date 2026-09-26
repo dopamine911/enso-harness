@@ -9,6 +9,7 @@ import {
   mintThread,
   reviveHistoryMessages,
   TITLE_MAX_CHARS,
+  type ThreadSummary,
   threadListStore,
   titleFromMessages,
   updateThreadSummary,
@@ -308,6 +309,64 @@ test('⚠ an open thread whose project is not listed is kept, under "other"; wit
   expect(groupByProject([], [orphan], [storedIn('p-launch', 'stored')])).toEqual([
     { project: undefined, threads: [orphan], earlier: [storedIn('p-launch', 'stored')] },
   ])
+})
+
+// A folded section hides the rows that would say it; its header says it instead — a question
+// waiting on you over a run in flight, since a thread parked on a question is still busy (PR #403 review).
+test('a folded section says a question is waiting in it, over a run in flight; unfolded, the row says it', () => {
+  const now = pageClock.get()
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  const kept = new Map<string, string>([['enso.rail.folded', JSON.stringify([APP.projectId])]])
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => kept.get(key) ?? null,
+      setItem: (key: string, value: string) => kept.set(key, value),
+    },
+  })
+  const rail = (threads: ThreadSummary[]): string =>
+    renderToStaticMarkup(
+      <ThreadsRail
+        projects={[LAUNCH, APP]}
+        threads={threads}
+        activeThreadId={undefined}
+        earlier={[]}
+        earlierError={undefined}
+        onSelect={noop}
+        onResume={noop}
+        onNew={noop}
+        onAddProject={noop}
+        onRemoveProject={noop}
+        projectNotice={undefined}
+      />,
+    )
+  const asking = {
+    threadId: 'asks',
+    title: 'asks first',
+    lastActivityAt: now,
+    busy: true,
+    waiting: true,
+    projectId: 'p-app',
+  }
+  const working = { ...asking, threadId: 'works', title: 'still working', waiting: false }
+  try {
+    const folded = sectionOf(rail([asking, working]), 'app')
+    expect(folded).not.toContain('asks first')
+    expect(folded).toContain('waiting on you')
+    expect(folded).not.toContain('running')
+    // Only a run in flight: the folded header says running.
+    const onlyRunning = sectionOf(rail([working]), 'app')
+    expect(onlyRunning).toContain('running')
+    expect(onlyRunning).not.toContain('waiting on you')
+    // Unfolded, the header says nothing; the row does.
+    kept.set('enso.rail.folded', '[]')
+    const open = sectionOf(rail([asking]), 'app')
+    expect(open).toContain('asks first')
+    expect(open.match(/waiting on you/g)).toHaveLength(1)
+  } finally {
+    if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage')
+    else Object.defineProperty(globalThis, 'localStorage', original)
+  }
 })
 
 test('a section shows five stored threads and says how many more there are; a failed listing is an alert, not an empty rail', () => {

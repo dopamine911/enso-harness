@@ -138,13 +138,18 @@
  * (`content: "`"` on ::before/::after) — visible in the fixture's turn-1 receipt.
  * shadcn-styled chat UIs (the ai-elements chatbot example included) render inline
  * code as a tinted chip instead, so the backticks are stripped here globally.
+ *
+ * The chip is a TINT of the text colour, not a surface token: it sits on the background (pi's
+ * reply), the card and the user's bubble, and every surface token equals one of those in some
+ * theme (`--muted` is `--card` everywhere, `--secondary` is the bubble) — a chip in that colour
+ * vanishes there (PR #403 review).
  */
 .prose :where(code):not(:where([class~="not-prose"], [class~="not-prose"] *))::before,
 .prose :where(code):not(:where([class~="not-prose"], [class~="not-prose"] *))::after {
   content: none;
 }
 .prose :where(code):not(:where(pre *, [class~="not-prose"], [class~="not-prose"] *)) {
-  background-color: var(--secondary);
+  background-color: color-mix(in srgb, var(--foreground) 10%, transparent);
   border-radius: 0.25rem;
   padding: 0.125rem 0.25rem;
   font-weight: 500;
