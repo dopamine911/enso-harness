@@ -85,6 +85,9 @@ export function operationsUpTo(
 
 /** A path as the card shows it: under the thread's tree, `./`-relative; elsewhere, as given. */
 export function displayPath(path: string, cwd: string | undefined): string {
+  // The tree itself — a search over `.` — reads `./`, not `./.` (#407).
+  if (path === '.' || path === './' || (cwd !== undefined && path.replace(/\/$/, '') === cwd.replace(/\/$/, '')))
+    return './'
   if (cwd === undefined) return path
   const root = cwd.endsWith('/') ? cwd : `${cwd}/`
   if (path.startsWith(root)) return `./${path.slice(root.length)}`

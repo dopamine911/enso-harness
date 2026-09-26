@@ -348,7 +348,7 @@ function CategoryHeader({ category, elements, makeup, change, open, onToggle }: 
       <Swatch category={category} />
       <span className="grid min-w-0 flex-1 gap-0.5">
         <b className="text-sm font-semibold">{CATEGORY_LABEL[category]}</b>
-        <small className="font-mono text-xs text-muted-foreground">{details.join(' · ')}</small>
+        <small className="text-xs text-muted-foreground">{details.join(' · ')}</small>
       </span>
       <span className="grid justify-items-end gap-1 font-mono text-xs whitespace-nowrap tabular-nums">
         <span>
@@ -485,7 +485,7 @@ function ProviderCount({ record }: { record: EnsoContextRequest | undefined }): 
   if (record.actual.prompt === 0) return <span>no count from the provider</span>
   return (
     <span>
-      provider prompt <b className="font-medium text-foreground">{COMPACT.format(record.actual.prompt)}</b>
+      provider prompt <b className="font-mono font-medium text-foreground">{COMPACT.format(record.actual.prompt)}</b>
     </span>
   )
 }
@@ -719,10 +719,10 @@ function OpenedRequest({
   focused: EnsoContextElement | undefined
   pick: BrowserPick
 }): React.ReactNode {
-  const figure = 'font-medium text-foreground'
+  const figure = 'font-mono font-medium text-foreground'
   return (
     <>
-      <p className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
+      <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span>
           {request === 'next' ? 'next request' : `request ${request}`} · estimate{' '}
           <b className={figure}>{estimateText(totalOf(makeup))}</b>

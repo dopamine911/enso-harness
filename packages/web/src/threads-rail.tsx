@@ -112,6 +112,11 @@ export interface ThreadsRailProps {
   readonly onRemoveProject: (projectId: string) => void
   /** Why the last add or remove did not go through, or undefined. Shown above the sections. */
   readonly projectNotice: string | undefined
+  /**
+   * On a narrow screen the rail is a page of its own, shown by the header's threads button (the
+   * design's rail under 760px, #407): hidden unless this is true. A wide screen always shows it.
+   */
+  readonly shownNarrow?: boolean
 }
 
 /** One section of the rail: a project, or — `project: undefined` — the threads no listed project holds. */
@@ -439,12 +444,20 @@ export function ThreadsRail({
   onAddProject,
   onRemoveProject,
   projectNotice,
+  shownNarrow = false,
 }: ThreadsRailProps): React.ReactNode {
   const groups = groupByProject(projects, threads, earlier)
   // New Thread starts where the reader is: the project of the thread on screen.
   const activeProject = groups.find((group) => group.threads.some((thread) => thread.threadId === activeThreadId))
   return (
-    <nav aria-label="threads" className="flex w-62 shrink-0 flex-col gap-4 overflow-y-auto border-r bg-sidebar p-3">
+    <nav
+      id="threads-rail"
+      aria-label="threads"
+      className={cn(
+        'shrink-0 flex-col gap-4 overflow-y-auto bg-sidebar p-3 md:flex md:w-62 md:border-r',
+        shownNarrow ? 'flex w-full' : 'hidden',
+      )}
+    >
       <Button type="button" className="h-10 w-full" onClick={() => onNew(activeProject?.project?.projectId)}>
         <PlusIcon />
         New Thread

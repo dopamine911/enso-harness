@@ -166,7 +166,8 @@ function ContextMeter({ context }: { readonly context: EnsoContextUsage }): Reac
         value={Math.min(percent, 100)}
         className="h-1.5 w-16 appearance-none overflow-hidden rounded-full bg-muted-foreground/25 [&::-moz-meter-bar]:bg-foreground/60 [&::-webkit-meter-bar]:border-0 [&::-webkit-meter-bar]:bg-transparent [&::-webkit-meter-bar]:bg-none [&::-webkit-meter-optimum-value]:bg-foreground/60 [&::-webkit-meter-optimum-value]:bg-none"
       />
-      {percent}% · {COMPACT_TOKENS.format(context.tokens)} / {window}
+      {/* pi's meter: the provider's count for the last response plus pi's estimate since — an estimate, so ≈ (#407). */}
+      {percent}% · ≈{COMPACT_TOKENS.format(context.tokens)} / {window}
     </span>
   )
 }

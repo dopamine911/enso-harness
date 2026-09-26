@@ -113,11 +113,11 @@
   grid-template-columns: repeat(auto-fill, minmax(calc(var(--spacing) * 56), 1fr));
 }
 
-/* dsh's free headroom: the muted colour hatched, one spacing unit per stripe. */
+/* dsh's free headroom, hatched: a text-colour tint, so it shows on every card (--muted didn't, #407). */
 @utility bg-hatch {
   background-image: repeating-linear-gradient(
     135deg,
-    var(--muted) 0 var(--spacing),
+    color-mix(in srgb, var(--foreground) 14%, transparent) 0 var(--spacing),
     transparent var(--spacing) calc(var(--spacing) * 2)
   );
 }

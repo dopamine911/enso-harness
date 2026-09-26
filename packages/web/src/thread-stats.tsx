@@ -5,8 +5,8 @@ import {
   AreaChart,
   CartesianGrid,
   type DotItemDotProps,
-  Line,
-  LineChart,
+  Bar,
+  BarChart,
   type MouseHandlerDataParam,
   XAxis,
   YAxis,
@@ -111,7 +111,7 @@ function Section({
       title={title}
       tools={aside === undefined ? undefined : <span className="text-xs text-muted-foreground">{aside}</span>}
     >
-      <div className="grid min-w-0 gap-2 text-sm">{children}</div>
+      <div className="grid min-w-0 grid-cols-1 gap-2 text-sm">{children}</div>
     </Card>
   )
 }
@@ -219,10 +219,15 @@ const TOKEN_SERIES: Readonly<Record<TokenSeries, { readonly label: string; reado
 }
 
 /**
- * Tokens per turn, one line per series, each toggled from its legend button. ⓘ No animation on
- * any chart here: the drawer refetches after each turn, and a chart re-drawing from zero every
- * time would replay the thread's history as if it were happening again.
+ * Tokens per turn, the series stacked in one bar — what the cache served at the base, then what
+ * was written to it, what missed it, and what the model wrote — each toggled from its legend
+ * button (#407: four crossing lines read as a zig-zag). ⓘ No animation on any chart here: the
+ * drawer refetches after each turn, and a chart re-drawing from zero every time would replay the
+ * thread's history as if it were happening again.
  */
+/** The stack, base first: a long thread is mostly cache reads, and the rarer series sit on top where they show. */
+const STACK_ORDER: readonly TokenSeries[] = ['cacheRead', 'cacheWrite', 'input', 'output']
+
 function TokenChart({
   data,
   onTurn,
@@ -231,17 +236,22 @@ function TokenChart({
   readonly onTurn: OnTurn
 }): React.ReactNode {
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set())
-  const series = Object.entries(TOKEN_SERIES)
+  // The legend reads in the stack's order, base first.
+  const series = STACK_ORDER.map((key) => [key, TOKEN_SERIES[key]] as const)
+  const stacked = STACK_ORDER.filter((key) => !hidden.has(key))
   const toggle = (key: string): void => setHidden((current) => toggleMember(current, key))
   return (
     <>
-      <fieldset aria-label="token series shown" className="mb-1 flex gap-3">
+      <fieldset aria-label="token series shown" className="mb-1 flex flex-wrap gap-x-3 gap-y-1">
         {series.map(([key, { label, color }]) => (
           <button
             key={key}
             type="button"
             aria-pressed={!hidden.has(key)}
-            className={hidden.has(key) ? 'text-muted-foreground line-through' : 'text-foreground'}
+            className={cn(
+              'whitespace-nowrap',
+              hidden.has(key) ? 'text-muted-foreground line-through' : 'text-foreground',
+            )}
             onClick={() => toggle(key)}
           >
             <span aria-hidden="true" className="mr-1 inline-block size-2 rounded-full" style={{ background: color }} />
@@ -250,22 +260,12 @@ function TokenChart({
         ))}
       </fieldset>
       <ChartContainer config={TOKEN_SERIES} className="aspect-auto h-36 w-full">
-        <LineChart data={[...data]} accessibilityLayer {...turnClick(data, onTurn)}>
+        <BarChart data={[...data]} accessibilityLayer {...turnClick(data, onTurn)}>
           {turnAxes(tokenTick, 40)}
-          {series
-            .filter(([key]) => !hidden.has(key))
-            .map(([key]) => (
-              <Line
-                key={key}
-                dataKey={key}
-                type="linear"
-                stroke={`var(--color-${key})`}
-                strokeWidth={2}
-                dot
-                isAnimationActive={false}
-              />
-            ))}
-        </LineChart>
+          {stacked.map((key) => (
+            <Bar key={key} dataKey={key} stackId="tokens" fill={`var(--color-${key})`} isAnimationActive={false} />
+          ))}
+        </BarChart>
       </ChartContainer>
     </>
   )
@@ -284,7 +284,10 @@ function ContextSection({
   const context = usage.context
   const percent = context?.percent ?? null
   return (
-    <Section title="Context" aside={percent === null ? undefined : PERCENT.format(percent / 100)}>
+    <Section
+      title="Tokens"
+      aside={percent === null ? undefined : `${PERCENT.format(percent / 100)} of the context window`}
+    >
       {percent === null ? null : (
         <meter
           aria-label="context window used"
@@ -383,7 +386,7 @@ function ToolUsageRow({
           style={{ width: `${largest > 0 ? (value / largest) * 100 : 0}%` }}
         />
       </span>
-      <small className="font-mono text-xs text-muted-foreground">
+      <small className="text-xs text-muted-foreground">
         {plural(tool.calls, 'call')}
         {measured}
         {failures}
@@ -501,7 +504,7 @@ function CostliestCalls({
                 <code className="font-mono">{call.toolName}</code>
                 {call.isError ? <i className="ml-1.5 text-refuse not-italic">failed</i> : null}
                 {call.pending ? <i className="ml-1.5 text-muted-foreground not-italic">in progress</i> : null}
-                <small className="block font-mono text-xs text-muted-foreground">
+                <small className="block text-xs text-muted-foreground">
                   turn {call.turn} · {charsText(call.inputChars)} input · {charsText(call.outputChars)} output
                 </small>
               </span>
@@ -627,7 +630,7 @@ export function ThreadStatsView({
                     <strong className="block truncate font-medium text-foreground" title={prompt.text}>
                       {prompt.text || '(before the first prompt)'}
                     </strong>
-                    <small className="font-mono text-xs text-muted-foreground">
+                    <small className="text-xs text-muted-foreground">
                       {plural(prompt.turnCount, 'model call')} · {plural(prompt.toolCalls, 'tool')}
                       {prompt.durationMs === undefined ? null : (
                         <span title="the prompt to the last reply entry, as pi stamped them">

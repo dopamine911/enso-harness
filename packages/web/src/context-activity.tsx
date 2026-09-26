@@ -36,7 +36,7 @@ function RowMain({ title, detail }: { title: string; detail: string }): React.Re
   return (
     <span className="grid min-w-0 flex-1 gap-0.5">
       <b className="truncate text-sm font-medium">{title}</b>
-      <small className="truncate font-mono text-xs text-muted-foreground">{detail}</small>
+      <small className="truncate text-xs text-muted-foreground">{detail}</small>
     </span>
   )
 }
@@ -160,7 +160,7 @@ function OperationRow({
   const { resultKey } = operation
   const target = requestAt(operation.turn + 1, requestCount)
   const path = displayPath(operation.path, cwd)
-  const name = path.slice(path.lastIndexOf('/') + 1) || path
+  const name = path === './' ? 'the thread’s tree' : path.slice(path.lastIndexOf('/') + 1) || path
   const pattern = operation.kind === 'search' && operation.subject !== '' ? ` · “${operation.subject}”` : ''
   return (
     <li>

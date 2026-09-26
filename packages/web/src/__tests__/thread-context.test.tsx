@@ -144,4 +144,7 @@ test('a path under the thread tree reads ./-relative; one outside it as given', 
   expect(displayPath('/home/me/repo/src/a.ts', '/home/me/repo')).toBe('./src/a.ts')
   expect(displayPath('src/a.ts', '/home/me/repo')).toBe('./src/a.ts')
   expect(displayPath('/etc/hosts', '/home/me/repo')).toBe('/etc/hosts')
+  // The tree itself — a search over `.` — is `./`, never `./.` (#407).
+  expect(displayPath('.', '/home/me/repo')).toBe('./')
+  expect(displayPath('/home/me/repo', '/home/me/repo')).toBe('./')
 })

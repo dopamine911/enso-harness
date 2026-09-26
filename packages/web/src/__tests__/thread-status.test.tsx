@@ -179,7 +179,7 @@ test("context is pi's percent of its window, with the token count, clamped in th
   }
   const rendered = render({ usage })
   expect(rendered).toContain('$0.0132')
-  expect(rendered).toContain('34% · 68.4K / 200K')
+  expect(rendered).toContain('34% · ≈68.4K / 200K')
   expect(rendered).toContain('68,400 of 200,000 tokens')
   expect(rendered).toContain('value="34"')
   const over = render({ usage: { ...usage, context: { tokens: 210_000, window: 200_000, percent: 105 } } })
