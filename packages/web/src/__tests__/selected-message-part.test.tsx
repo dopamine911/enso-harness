@@ -4,6 +4,8 @@ import type { MessagePart, ToolCallPart, ToolResultPart } from '@tanstack/ai'
 import type { ChatUISelectedPart } from '@tanstack/ai-client/ui'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { SelectedMessagePart } from '../selected-message-part.tsx'
+import { ThreadStoresContext } from '../store.ts'
+import { clearThreadsForTest, mintThread } from '../thread-stores.ts'
 
 /**
  * The dispatch this file guards was DEAD for its whole prior life: TanStack routes tool
@@ -44,6 +46,39 @@ test('a tool call from an UNREGISTERED name renders its name and result text', (
   })
   expect(rendered).toContain('mcp_tool_nobody_registered')
   expect(rendered).toContain('the visible result text')
+})
+
+// #407 item 1: pi hands a guard refusal over shaped like a failed command. With the call in the
+// thread's denials it is the design's refusal card — the verdict, what was asked, the reason,
+// who refused — and never the word `error`; the same result without a denial stays an error row.
+test('⚠ a refused call renders as the refusal card; the same error result without a denial is an error row', () => {
+  const stores = mintThread()
+  stores.guardDenials.set(new Map([['call-1', 'secret-path']]))
+  const selected: ChatUISelectedPart = {
+    key: 'toolCall',
+    part: toolCallWith({ arguments: '{"command":"cat ~/.aws/credentials"}' }),
+    result: toolResultWith({
+      content: 'bash command refused: names credential material',
+      state: 'error',
+      error: 'refused',
+    }),
+  }
+  const inPane = renderToStaticMarkup(
+    <ThreadStoresContext.Provider value={stores}>
+      <SelectedMessagePart selected={selected} isStreaming={false} runOpen={false} renderers={{}} />
+    </ThreadStoresContext.Provider>,
+  )
+  expect(inPane).toContain('data-enso-tool-call="refused"')
+  expect(inPane).toContain('Refused · credential path')
+  expect(inPane).toContain('cat ~/.aws/credentials')
+  expect(inPane).toContain('bash command refused: names credential material')
+  expect(inPane).toContain('Enso guard')
+  expect(inPane).toContain('secret-path')
+  expect(inPane).not.toContain('>error<')
+  const noDenial = html(selected, false, false)
+  expect(noDenial).toContain('data-enso-tool-call="error"')
+  expect(noDenial).not.toContain('Refused')
+  clearThreadsForTest()
 })
 
 test('a tool call with no result yet renders the visible pending state', () => {

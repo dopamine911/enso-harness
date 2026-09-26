@@ -260,6 +260,7 @@ What is durable, and where:
 |---|---|---|---|
 | pi session log, `<timestamp>_<threadId>.jsonl` under pi's session dir | thread id | pi — **lazily**: `sessionFile` is null until pi's first flush | live from the hosted session when the thread is live; cold from the file otherwise; messages are rebuilt from entries on every cold read, so a mapper change applies retroactively |
 | picc's `modes` custom entry in that log | — | picc, on `/mode` | `persistedPermissionMode(branch)`: last entry wins, deliberately uncached because `/tree` and `/fork` move the leaf (#84, #95) |
+| the guards' `enso-guard-denial` custom entry in that log | the refused call's `toolCallId` | the guards extension, on every denial (#387) | live as a `custom-entry` observation; cold, `transcript-to-messages.ts` joins it onto its tool result — what tells a refusal from a failed command after a reload |
 | `enso.config.json` at the repo root | — | committed | once, at extension load; fails closed (#59) |
 | `.enso/secrets.env` | — | operator | per call by the extension that needs it; quarantined from `process.env` |
 | `.enso/pi-agent/provider-failover.json` | — | seeded at host creation | pi's multi-account extension |

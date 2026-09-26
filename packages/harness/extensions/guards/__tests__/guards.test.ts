@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from '
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createCodingTools, createPowerShellTool, createReadOnlyTools } from '@earendil-works/pi-coding-agent'
-import { ENSO_GUARD_RULES } from '@enso/core'
+import { ENSO_GUARD_DENIAL_ENTRY, ENSO_GUARD_RULES, readEnsoGuardDenial } from '@enso/core'
 import { recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import type { LogRecorder } from '@logtape/testing/recorder'
 import { createGuards, GUARD_POLICY_TOOL_NAMES, type GuardDependencies } from '../index.ts'
@@ -18,6 +18,8 @@ interface GuardRuntime {
   toolCall: Handler
   toolResult: Handler
   sessionStart: Handler
+  /** What the guard appended with `pi.appendEntry`, in order (#387). */
+  entries: { customType: string; data: unknown }[]
 }
 
 /** pi's shipped tool set, as `getAllTools` returns it (probed live 2026-09-04). */
@@ -47,15 +49,19 @@ function loadGuardRuntime(
   analyzeBashCommand: GuardDependencies['analyzeBashCommand'] = ALLOW_ALL_ANALYZER,
 ): GuardRuntime {
   const handlers = new Map<string, Handler>()
+  const entries: GuardRuntime['entries'] = []
   const guards = createGuards({ analyzeBashCommand })
-  guards({ on: (e: string, h: Handler) => handlers.set(e, h), getAllTools } as never)
+  const appendEntry = (customType: string, data: unknown): void => {
+    entries.push({ customType, data })
+  }
+  guards({ on: (e: string, h: Handler) => handlers.set(e, h), getAllTools, appendEntry } as never)
   const toolCall = handlers.get('tool_call')
   const toolResult = handlers.get('tool_result')
   const sessionStart = handlers.get('session_start')
   if (!(toolCall && toolResult && sessionStart)) {
     throw new Error('guards did not register tool_call + tool_result + session_start')
   }
-  return { toolCall, toolResult, sessionStart }
+  return { toolCall, toolResult, sessionStart, entries }
 }
 
 /** The original single-handler loader — per-call tests that need no cross-call state. */
@@ -113,6 +119,32 @@ test('⚠ a denial record names its rule from the closed vocabulary; pi receives
   logs.clear()
   call('read', { path: join(cwd, '.aws', 'credentials') })
   logs.assertLogged({ level: 'warning', properties: { rule: 'secret-read' } })
+})
+
+// ⚠ THE MARKER pi DISCARDS (#387 gap 1). pi turns `{ block, reason }` into an error result the
+// same shape as a failed command, so the refusal is said beside it, in a custom session entry
+// pi persists — the call and the rule, never on an allow. A page reloaded or resumed reads it
+// from the stored transcript; nothing matches the reason's wording.
+test('⚠ a denial appends one guard-denial entry naming the call and the rule; an allow appends none', () => {
+  const runtime = loadGuardRuntime()
+  runtime.toolCall(
+    { type: 'tool_call', toolCallId: 'allowed', toolName: 'write', input: { path: 'src/a.ts' } },
+    { cwd },
+  )
+  expect(runtime.entries).toEqual([])
+  runtime.toolCall(
+    { type: 'tool_call', toolCallId: 'refused', toolName: 'write', input: { path: '/etc/passwd' } },
+    { cwd },
+  )
+  expect(runtime.entries).toEqual([
+    { customType: ENSO_GUARD_DENIAL_ENTRY, data: { toolCallId: 'refused', rule: 'write-confinement' } },
+  ])
+  // And it reads back as a refusal through the one reader every surface uses.
+  const [entry] = runtime.entries
+  expect(entry && readEnsoGuardDenial(entry.customType, entry.data)).toEqual({
+    toolCallId: 'refused',
+    rule: 'write-confinement',
+  })
 })
 
 test('registers a tool_call handler', () => expect(typeof loadGuard()).toBe('function'))

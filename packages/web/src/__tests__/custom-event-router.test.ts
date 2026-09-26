@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import {
+  ENSO_GUARD_DENIAL_ENTRY,
   ENSO_PROVIDER_REFUSAL_KEY,
   type EnsoDialogSpec,
   type EnsoFollowSnapshot,
@@ -137,6 +138,21 @@ test('a custom-entry is recorded but renders nothing and moves no store', () => 
   expect(notificationMessages()).toEqual([])
   expect(stores.permissionMode.get().mode).toBeUndefined()
   expect(stores.recentChunks.get().map((chunk) => chunk.name)).toEqual(['custom-entry'])
+})
+
+// #387, live: the guard's entry is the one thing that says a call was refused rather than
+// failed. Its custom-entry lands in the thread's denials by call id; an entry that is another
+// extension's, or malformed, marks nothing.
+test('a guard-denial custom-entry marks its call refused; any other entry marks nothing (#387)', () => {
+  observe({
+    kind: 'custom-entry',
+    customType: ENSO_GUARD_DENIAL_ENTRY,
+    data: { toolCallId: 'c1', rule: 'network-egress' },
+  })
+  observe({ kind: 'custom-entry', customType: 'modes', data: { toolCallId: 'c2', rule: 'network-egress' } })
+  observe({ kind: 'custom-entry', customType: ENSO_GUARD_DENIAL_ENTRY, data: { toolCallId: 'c3', rule: 'curl' } })
+  expect([...stores.guardDenials.get()]).toEqual([['c1', 'network-egress']])
+  expect(notificationMessages()).toEqual([])
 })
 
 test("a status frame sets the thread's run generation; a malformed one leaves the last standing (#109)", () => {

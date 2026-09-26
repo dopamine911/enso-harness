@@ -9,6 +9,7 @@ import {
   type EnsoProviderRetrying,
   providerReasonOf,
   providerRefusalClass,
+  readEnsoGuardDenial,
 } from '@enso/core'
 import { Compile } from 'typebox/compile'
 import { Check } from 'typebox/value'
@@ -79,8 +80,9 @@ const observationValidator = Compile(EnsoObservation)
  *
  * ⚠ Every value is validated against its schema, the way every wire crossing in the browser
  * is: a malformed value moves no store rather than throwing inside TanStack's stream loop,
- * where a throw would end the run. Kinds this surface does not render (`custom-entry`,
- * `unmapped`) are recorded and fall through — see the mapper for why they exist at all.
+ * where a throw would end the run. Kinds this surface does not render (`unmapped`, a
+ * `custom-entry` that is not a guard refusal) are recorded and fall through — see the mapper
+ * for why they exist at all.
  */
 export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, data: unknown): void {
   stores.recentChunks.record(eventType, data)
@@ -176,6 +178,19 @@ function applyStatus(stores: ThreadStores, generation: number): void {
   if (stores.disconnected.get()) stores.disconnected.set(false)
 }
 
+/**
+ * A guard refused a call (#387): its entry names the call and the rule, and the tool row and the
+ * status bar read it off the store. Every other extension's entry is a state receipt rendered
+ * by nothing (L3 moved the mode onto its own observation).
+ */
+function applyGuardDenial(stores: ThreadStores, customType: string, data: unknown): void {
+  const denial = readEnsoGuardDenial(customType, data)
+  if (denial === undefined) return
+  const denials = new Map(stores.guardDenials.get())
+  denials.set(denial.toolCallId, denial.rule)
+  stores.guardDenials.set(denials)
+}
+
 function routeObservation(stores: ThreadStores, observation: EnsoObservation): void {
   switch (observation.kind) {
     case 'permission-mode':
@@ -224,8 +239,11 @@ function routeObservation(stores: ThreadStores, observation: EnsoObservation): v
       // The whole queue (#75): what cuts in first, then what waits its turn.
       stores.queue.set([...observation.interrupting, ...observation.enqueued])
       return
+    case 'custom-entry':
+      applyGuardDenial(stores, observation.customType, observation.data)
+      return
     default:
-      // Recorded above; rendered by nothing. `custom-entry` since L3, `unmapped` by design.
+      // Recorded above; rendered by nothing. `unmapped` by design.
       return
   }
 }

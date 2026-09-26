@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 275.**
+**Decision headers: 276.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -142,6 +142,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/debug/thread-timeline-screen.tsx` | `#144` | One thread's timeline (#144 slice 3): what the host emitted, what the server sent, and what was logged, as ONE list ordered by time — on the debug page at `debug.html?thread=<id>`. |
 | `packages/web/src/fixture-conversation.ts` | `#27`, `#31`, `#75`, `#404` | The styling dev loop (#31): a scripted conversation streamed through the REAL `useChat` pipeline as local AG-UI events — no server, no pi. |
 | `packages/web/src/follow-connection.ts` | `#112`, `#272`, `#274` | The browser's connection to a thread (#112): TanStack's `SubscribeConnectionAdapter` over the prompt/follow split. |
+| `packages/web/src/guard-refusal.tsx` | `#387`, `#407` | A guard refusal as the design draws it (`Enso-Design-Direction` `.guard`, #407 item 1): the tool, the verdict in the refusal colour, what was asked, why it was refused, and who refused it. |
 | `packages/web/src/host/__tests__/agent-host.test.ts` | `#27`, `#45`, `#69` | The in-process host against the REAL harness package (#69) — every extension the manifest names loads, and inline probe extensions observe what the host does. |
 | `packages/web/src/host/__tests__/agent-loop-contract.test.ts` | `#130` | A CONTRACT TEST on the runtime's loop, the shape of `cc-safety-net-contract.test.ts`: the wire shape of a refused tool call is the vendor's doing — a guard's `{ block, reason }` becomes an error result with the reason as its content, `isError: true` — and `map-events.ts` relies on it (the `tool_execution_end` case, "isError is the only signal a refused call has"). |
 | `packages/web/src/host/__tests__/branch-context.test.ts` | `#361` | #361: a thread's context, request by request, off pi's own entries — built here with pi's real session manager, so the entries read are the ones pi writes and the assembly is pi's own (`buildContextEntries`, compaction included). |
