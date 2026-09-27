@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   ENSO_PROJECT_HEADER,
+  type EnsoFollowFrame,
   type EnsoModelState,
   type EnsoObservation,
   EnsoProject,
@@ -718,7 +719,13 @@ test('⚠ POST …/command with a flow row: 202 on start, the thread is not busy
   await follow.untilFrames(4)
   expect(follow.frames.at(-1)).toMatchObject({ type: 'status', live: true, busy: false })
   // …so a prompt during the wait is accepted, not refused as busy.
+  const beforePrompt = follow.frames.length
   expect(await prompt(url, 'flowing', 'hello while logging in')).toBe(202)
+  // That prompt's run settles at once, and its `settled` must be on the follow before the flow's
+  // window is measured below, or it lands inside it (a slow CI runner delivered it late).
+  const settled = (frame: EnsoFollowFrame): boolean =>
+    frame.type === 'observation' && frame.observation.kind === 'settled'
+  if (!follow.frames.slice(beforePrompt).some(settled)) await follow.untilFrame(settled)
 
   // One flow at a time on a session: a second start while the first waits is refused, and says which.
   const second = await run({ name: 'login', value: 'fake/api_key' })
