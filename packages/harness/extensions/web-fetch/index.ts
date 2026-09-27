@@ -34,12 +34,13 @@ import {
  * 1. **An empty-by-default host allowlist.** The `webFetch.allowedHosts` section of the
  *    user's `ENSO_HOME/config.json` (#59, #421) names every fetchable host; absent — no
  *    file, no section — it is EMPTY, and each host a human adds is one deliberate line.
- *    ⚠ Read ONCE at extension load, deliberately: the running session cannot widen its own
- *    egress by editing the file — an edit takes effect next session. (write/edit into
- *    `ENSO_HOME` are also denied, as a persistence target; a bash redirect into it is the
- *    stated residual, made inert within the session by the load-once read.)
- *    ⚠ Never located from the session cwd — a foreign checkout's config must not become
- *    this session's allowlist (see config.ts).
+ *    A trusted project's `.enso/config.json` adds its hosts for that project's sessions (#421).
+ *    ⚠ Read ONCE per session, deliberately: the running session cannot widen its own egress
+ *    by editing either file — an edit takes effect next session. (Writes into `ENSO_HOME` and
+ *    into any `.enso/config.json` are also refused by the guards, bash redirects included.)
+ *    ⚠ The cwd supplies nothing on its own say-so: the user's file comes from `ENSO_HOME`,
+ *    and a project's is read only once pi's trust decision covers the project (see
+ *    core/session-config.ts).
  * 2. **An audit line per call** — every outcome, refusals included, prints one stderr line
  *    naming the URL and what happened.
  * 3. **Bounded response handling** — http(s) only, no credentials in URLs, redirects

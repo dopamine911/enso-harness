@@ -254,12 +254,18 @@ default — no project roots, nothing fetchable, the default search routing. For
 }
 ```
 
+A project can add its own `.enso/config.json`, read over yours — its lists add to yours, its values
+win — but **only once you trust the project**, with pi's own trust decision: the first session in an
+undecided project asks (Trust, Trust parent folder, this session only, or not), the answer is saved
+in pi's `trust.json`, and the same answer covers the project's `.pi/`. An untrusted project's file is
+skipped, and the thread says so. `projects.roots` stays yours: a project cannot set it.
+
 Its loading contract is deliberately strict:
 
 - unreadable configuration is not treated as "no policy";
 - unknown keys are rejected so a typo cannot silently configure nothing;
-- the file is resolved from Enso's own tree rather than the current working directory, preventing a
-  different checkout from accidentally supplying this run's policy.
+- a checkout never supplies a session's policy on its own say-so — a project's file is read only
+  once the project is trusted, and never from its parent folders.
 
 The goal is not more configuration. It is to make the configuration that matters explicit and
 inspectable.

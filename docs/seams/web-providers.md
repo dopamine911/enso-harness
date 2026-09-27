@@ -178,7 +178,7 @@ export const WebFetchConfig = Type.Object(
 ## Who implements it, who consumes it
 
 **Five providers, one `run*` function each, all top level and all exported through the harness
-core barrel** (`packages/harness/core/index.ts:45-58`):
+core barrel** (`packages/harness/core/index.ts:46-58`):
 
 | Provider | Function | Takes | Wire |
 |---|---|---|---|
@@ -197,18 +197,20 @@ and budgets, and the wire module owns the request body, the stream parse and the
 verdict — keyed on `server_tool_use` blocks having appeared, never on source count (lines 20-24).
 
 **The web_search extension is the one consumer and owns selection** (`packages/harness/extensions/web-search/index.ts`).
-`createWebSearch` (115-232) loads the config once at extension load and fails closed; `runPrimary`
-(254-308) picks the backend: `webSearch.backend: "deepseek"` pins the dedicated backend (257), else the
-current model routes through `routedProviderIdForModel` (273) and its auth through `resolveModelAuth`
-(289-294), and a model with no native search selects nothing (274-281). The composition root (419-436)
+`createWebSearch` (122-264) loads the user's config at extension load, then the session's at
+`session_start` — a trusted project's `.enso/config.json` over it, resolved once per session and
+shared with web_fetch (#421) — and fails closed; `runPrimary`
+(286-340) picks the backend: `webSearch.backend: "deepseek"` pins the dedicated backend (289), else the
+current model routes through `routedProviderIdForModel` (305) and its auth through `resolveModelAuth`
+(321-326), and a model with no native search selects nothing (306-313). The composition root (452-470)
 wires the five `run*` functions into `runProviders`, real `fetch` into `fetchUrl`, and
 `readEnvironmentVariable` to `readSecret` over `ENSO_HOME/secrets.env` — never `process.env` (422-427): the
 host quarantines secrets out of the environment before a session exists, and providers receive values,
 never names.
 
-**web_fetch consumes its own four seams** (`web-fetch/index.ts:68-76`): `locateConfigFile` and
-`readConfigText` are called once inside `createWebFetch` (91-92), so the allowlist is captured at load
-and an in-session edit is inert (header lines 32-34); `resolveHostAddresses` feeds the advisory
+**web_fetch consumes its own five seams** (`web-fetch/index.ts:73-87`): `locateConfigFile` and
+`readConfigText` are called once at load (108-109), and `resolveSessionConfig` once at the session's
+start, so the allowlist is captured per session and an in-session edit is inert (header lines 34-44); `resolveHostAddresses` feeds the advisory
 public-address gate (`addressGateReason`, 178-202); `fetchUrl` is called once per call under
 `fetchUnderDeadline` (205-231) with `redirect: 'manual'` and `WEB_FETCH_TIMEOUT_MS`. The pure policy —
 URL gate, host match, content-type gate, the address classifier — is `harness/core/web-fetch-policy.ts`.
@@ -274,7 +276,7 @@ do not change; `web-search.test.ts` runs against scripted providers and does not
 `vocabulary.ts` (`ModelSearchRequest.model`, `ResolvedProviderAuth`, `routedProviderIdForModel`, which
 reads `model.provider` and `model.api`) and `auth.ts` (`ModelAuthSource`, `resolveModelAuth`), plus the
 one call site that builds a `ModelSearchRequest` from the runtime's context
-(`extensions/web-search/index.ts:286-298`).
+(`extensions/web-search/index.ts:318-330`).
 The five providers read only `request.model` fields through the request and `resolveAuth`; the wire
 modules, the outcome union, the config sections, web_fetch and every test that scripts a provider do
 not change. That pivot has already been paid once: it is what deleted the allowlist's last two rows.
