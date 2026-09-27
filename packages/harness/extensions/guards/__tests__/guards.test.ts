@@ -356,6 +356,8 @@ function bigFileFixture(): { runtime: GuardRuntime; cwd: string } {
   const workspace = mkdtempSync(join(tmpdir(), 'enso-guard-57-'))
   writeFileSync(join(workspace, 'big.ts'), Array.from({ length: 3000 }, (_, index) => `line ${index + 1}`).join('\n'))
   writeFileSync(join(workspace, 'small.ts'), 'one\ntwo\nthree')
+  // One line over pi's 50 KB byte limit: pi returns none of it, and a pointer to bash instead.
+  writeFileSync(join(workspace, 'one-long-line.min.js'), 'x'.repeat(60_000))
   return { runtime: loadGuardRuntime(), cwd: workspace }
 }
 
@@ -363,6 +365,7 @@ for (const [how, input] of [
   ["pi's own cut (3000 lines, 2000 shown)", { path: 'big.ts' }],
   ['an offset past the first line', { path: 'small.ts', offset: 2 }],
   ['a limit that stops early', { path: 'small.ts', limit: 1 }],
+  ['a first line over the byte limit (none of it returned)', { path: 'one-long-line.min.js' }],
 ] as const) {
   test(`⚠ a read that returned part of the file — ${how} — does not permit a whole-file write (#57 S2)`, async () => {
     const { runtime, cwd } = bigFileFixture()
