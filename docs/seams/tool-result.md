@@ -217,7 +217,7 @@ export function descriptorFrom(toolName: string, details: unknown): EnsoToolResu
 Only truncation is mapped, and the `kind` is `pi.tool.<toolName>` with empty `props` — the floor, not
 the ceiling: a tool that wants a richer descriptor should emit one (`:75-87`). **No tool does today.**
 `web-fetch` and `web-search` return `details: undefined` on every path
-(`packages/harness/extensions/web-fetch/index.ts:226,333,365`; `web-search/index.ts:387,392,406,436`),
+(`packages/harness/extensions/web-fetch/index.ts:229,336,368`; `web-search/index.ts:391,396,410,440`),
 so no extension of ours attaches a descriptor. `toolResultMetadata` (`map-events.ts:102`) is the
 one place the key is written onto a part's `metadata`.
 

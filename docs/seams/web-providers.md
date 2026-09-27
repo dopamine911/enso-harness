@@ -197,12 +197,12 @@ and budgets, and the wire module owns the request body, the stream parse and the
 verdict — keyed on `server_tool_use` blocks having appeared, never on source count (lines 20-24).
 
 **The web_search extension is the one consumer and owns selection** (`packages/harness/extensions/web-search/index.ts`).
-`createWebSearch` (122-264) loads the user's config at extension load, then the session's at
+`createWebSearch` (122-268) loads the user's config at extension load, then the session's at
 `session_start` — a trusted project's `.enso/config.json` over it, resolved once per session and
 shared with web_fetch (#421) — and fails closed; `runPrimary`
-(286-340) picks the backend: `webSearch.backend: "deepseek"` pins the dedicated backend (289), else the
-current model routes through `routedProviderIdForModel` (305) and its auth through `resolveModelAuth`
-(321-326), and a model with no native search selects nothing (306-313). The composition root (452-470)
+(290-344) picks the backend: `webSearch.backend: "deepseek"` pins the dedicated backend (293), else the
+current model routes through `routedProviderIdForModel` (309) and its auth through `resolveModelAuth`
+(325-330), and a model with no native search selects nothing (310-317). The composition root (456-474)
 wires the five `run*` functions into `runProviders`, real `fetch` into `fetchUrl`, and
 `readEnvironmentVariable` to `readSecret` over `ENSO_HOME/secrets.env` — never `process.env` (422-427): the
 host quarantines secrets out of the environment before a session exists, and providers receive values,
@@ -276,7 +276,7 @@ do not change; `web-search.test.ts` runs against scripted providers and does not
 `vocabulary.ts` (`ModelSearchRequest.model`, `ResolvedProviderAuth`, `routedProviderIdForModel`, which
 reads `model.provider` and `model.api`) and `auth.ts` (`ModelAuthSource`, `resolveModelAuth`), plus the
 one call site that builds a `ModelSearchRequest` from the runtime's context
-(`extensions/web-search/index.ts:318-330`).
+(`extensions/web-search/index.ts:322-334`).
 The five providers read only `request.model` fields through the request and `resolveAuth`; the wire
 modules, the outcome union, the config sections, web_fetch and every test that scripts a provider do
 not change. That pivot has already been paid once: it is what deleted the allowlist's last two rows.
