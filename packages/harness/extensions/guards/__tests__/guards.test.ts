@@ -159,22 +159,26 @@ test('write outside the workspace is blocked', () => {
   expect(r?.reason).toContain('outside the workspace')
 })
 test('write into .git is blocked', () => expect(call('write', { path: '.git/config' })?.block).toBe(true))
-// #54/#59: enso.config.json carries web_fetch's committed host allowlist — the guard is the
-// only layer keeping the agent from editing the policy that gates it (same shape as
-// .cc-safety-net).
-test('write and edit to enso.config.json are blocked', () => {
-  expect(call('write', { path: 'enso.config.json' })?.block).toBe(true)
-  expect(call('edit', { path: 'enso.config.json' })?.block).toBe(true)
+// #54/#59, #421: Enso's config carries web_fetch's host allowlist, and the guard is the only
+// layer keeping the agent from editing the policy that gates it. The config lives under `.enso`
+// now — the user's in ENSO_HOME, a project's in its own `.enso/` — so write/edit are refused as a
+// persistence target wherever the `.enso` segment is.
+test('write and edit to a config under .enso are blocked as persistence', () => {
+  for (const toolName of ['write', 'edit']) {
+    const result = call(toolName, { path: '.enso/config.json' })
+    expect(result?.block).toBe(true)
+    expect(result?.reason).toContain('persistence')
+  }
 })
-// ⚠ STATED RESIDUAL, pinned (#54/#59): a bash REDIRECT into the config is allowed — the
-// write/edit denial above and cc-safety-net both miss it. Accepted because the extension
-// reads the file ONCE at load (an in-session edit is inert for this session) and the edit
-// then sits in `git status` where a human sees it. If this goes red, a layer started
-// denying it — update this record, don't re-open the gap.
-test('recorded residual: a bash redirect into enso.config.json passes the guard', () => {
-  expect(
-    call('bash', { command: 'echo \'{"webFetch":{"allowedHosts":["evil.example"]}}\' > enso.config.json' }),
-  ).toBeUndefined()
+// #421 closed the residual #54/#59 recorded: a bash REDIRECT into the config used to pass both
+// the guard and cc-safety-net. Under `.enso`, the path word is credential-shaped on the shell route
+// (#204's `/.enso/` fragment), so a spelled redirect is refused. A runtime-assembled path is still
+// the shell leg's stated non-coverage (`shell-secret-paths.ts`).
+test('⚠ a bash redirect into the user config is refused on the shell route (#421)', () => {
+  for (const target of ['~/.enso/config.json', '"$HOME/.enso/config.json"', '.enso/config.json']) {
+    const result = call('bash', { command: `echo '{"webFetch":{"allowedHosts":["evil.example"]}}' > ${target}` })
+    expect(result?.block).toBe(true)
+  }
 })
 test('read of .env is blocked', () => {
   const r = call('read', { path: '.env' })
@@ -770,7 +774,7 @@ test('⚠ an environment listing is blocked, naming #89 and the match, and gets 
   // ⚠ The reason is read by the model and lands in transcripts: it must point at the
   // secrets file, never at the root .env this fix exists to get secrets OUT of (PR #98
   // review — the first version said ".env" and no substring assertion caught it).
-  expect(result?.reason).toContain('.enso/secrets.env')
+  expect(result?.reason).toContain('ENSO_HOME/secrets.env')
   expect(result?.reason).not.toMatch(/from the gated \.env/)
   expect(input.timeout).toBeUndefined()
 })

@@ -1,14 +1,26 @@
 import { expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   ensoAgentDir,
+  ensoHome,
   fileUrlToPath,
   findRepoRoot,
   harnessPackageDir,
   isFileUrl,
+  migrateCheckoutEnso,
+  migrateCheckoutEnsoOnLaunch,
   printHarnessDir,
   RepoRootNotFoundError,
   realpathOrSelf,
@@ -98,9 +110,9 @@ test('realpathOrSelf returns the input unchanged for a path that does not exist'
   expect(realpathOrSelf('/no/such/path/anywhere')).toBe('/no/such/path/anywhere')
 })
 
-test('the derived directories assemble from one root', () => {
-  expect(ensoAgentDir('/repo')).toBe('/repo/.enso/pi-agent')
-  expect(printHarnessDir('/repo')).toBe('/repo/.enso/print-harness')
+test('the derived directories assemble from their roots: runtime under ENSO_HOME, the build cache in the checkout', () => {
+  expect(ensoAgentDir('/home/u/.enso')).toBe('/home/u/.enso/pi-agent')
+  expect(printHarnessDir('/repo')).toBe('/repo/node_modules/.cache/enso/print-harness')
   expect(harnessPackageDir('/repo')).toBe('/repo/packages/harness')
   expect(webPackageDir('/repo')).toBe('/repo/packages/web')
 })
@@ -121,4 +133,75 @@ test('isFileUrl / fileUrlToPath — the one shared file:// decoder (#53 added it
   expect(isFileUrl('https://example.test/x')).toBe(false)
   expect(fileUrlToPath('file:///etc/cron.d/x')).toBe('/etc/cron.d/x')
   expect(fileUrlToPath('file:///tmp/a%20b')).toBe('/tmp/a b')
+})
+
+// ── #421: ENSO_HOME, and the checkout's .enso moved into it ──────────────────────────────
+
+test("ENSO_HOME is the environment's when set, else ~/.enso — pi's PI_CODING_AGENT_DIR pattern", () => {
+  expect(ensoHome({ ENSO_HOME: '/elsewhere/.enso' })).toBe('/elsewhere/.enso')
+  expect(ensoHome({})).toBe(join(homedir(), '.enso'))
+  expect(ensoHome({ ENSO_HOME: '' })).toBe(join(homedir(), '.enso'))
+})
+
+/** A checkout holding a pre-#421 `.enso/`, and an ENSO_HOME for it to move into. */
+function legacyCheckout(): { repoRoot: string; home: string } {
+  const root = mkdtempSync(join(tmpdir(), 'enso-migrate-'))
+  const repoRoot = join(root, 'checkout')
+  const legacy = join(repoRoot, '.enso')
+  mkdirSync(join(legacy, 'pi-agent', 'sessions', '--project--'), { recursive: true })
+  writeFileSync(join(legacy, 'pi-agent', 'auth.json'), '{"old":true}')
+  writeFileSync(join(legacy, 'pi-agent', 'sessions', '--project--', 's1.jsonl'), 'session')
+  writeFileSync(join(legacy, 'secrets.env'), 'TAVILY_API_KEY=x')
+  mkdirSync(join(legacy, 'print-harness'))
+  symlinkSync('../../packages/harness/core', join(legacy, 'print-harness', 'core'))
+  return { repoRoot, home: join(root, 'home', '.enso') }
+}
+
+test("⚠ the checkout's .enso moves into ENSO_HOME whole, and the emptied .enso is gone (#421)", () => {
+  const { repoRoot, home } = legacyCheckout()
+  const migration = migrateCheckoutEnso(repoRoot, home)
+  expect([...migration.moved].sort()).toEqual([
+    'pi-agent/auth.json',
+    'pi-agent/sessions/--project--/s1.jsonl',
+    'secrets.env',
+  ])
+  expect(migration.kept).toEqual([])
+  expect(readFileSync(join(home, 'pi-agent', 'auth.json'), 'utf8')).toBe('{"old":true}')
+  expect(readFileSync(join(home, 'pi-agent', 'sessions', '--project--', 's1.jsonl'), 'utf8')).toBe('session')
+  expect(existsSync(join(repoRoot, '.enso'))).toBe(false)
+  // The build cache is regenerated elsewhere, never carried into ENSO_HOME with broken links.
+  expect(existsSync(join(home, 'print-harness'))).toBe(false)
+  expect(statSync(home).mode & 0o777).toBe(0o700)
+})
+
+test('⚠ a file ENSO_HOME already holds is never overwritten: it stays in the checkout and is reported (#421)', () => {
+  const { repoRoot, home } = legacyCheckout()
+  mkdirSync(join(home, 'pi-agent'), { recursive: true })
+  writeFileSync(join(home, 'pi-agent', 'auth.json'), '{"already":true}')
+  const migration = migrateCheckoutEnso(repoRoot, home)
+  expect(migration.kept).toEqual(['pi-agent/auth.json'])
+  expect(readFileSync(join(home, 'pi-agent', 'auth.json'), 'utf8')).toBe('{"already":true}')
+  expect(readFileSync(join(repoRoot, '.enso', 'pi-agent', 'auth.json'), 'utf8')).toBe('{"old":true}')
+  // Everything else still moved.
+  expect(existsSync(join(home, 'secrets.env'))).toBe(true)
+})
+
+// The launch's rule: a scratch or test ENSO_HOME must never receive a checkout's logins — they
+// would be lost with it. Only the default ~/.enso is migrated into without being asked.
+test("⚠ with ENSO_HOME set explicitly, a launch moves nothing: the checkout's .enso is held and said (#421)", () => {
+  const { repoRoot, home } = legacyCheckout()
+  const migration = migrateCheckoutEnsoOnLaunch(repoRoot, { ENSO_HOME: home })
+  expect(migration).toMatchObject({ moved: [], kept: [], held: true })
+  expect(readFileSync(join(repoRoot, '.enso', 'pi-agent', 'auth.json'), 'utf8')).toBe('{"old":true}')
+  expect(existsSync(home)).toBe(false)
+})
+
+test('migrating twice moves nothing the second time, and a checkout with no .enso creates no ENSO_HOME', () => {
+  const { repoRoot, home } = legacyCheckout()
+  migrateCheckoutEnso(repoRoot, home)
+  expect(migrateCheckoutEnso(repoRoot, home)).toMatchObject({ moved: [], kept: [] })
+  const fresh = mkdtempSync(join(tmpdir(), 'enso-fresh-'))
+  const untouched = join(fresh, 'home', '.enso')
+  expect(migrateCheckoutEnso(fresh, untouched)).toMatchObject({ moved: [], kept: [] })
+  expect(existsSync(untouched)).toBe(false)
 })

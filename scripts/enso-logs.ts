@@ -39,7 +39,6 @@ import {
   logsDirFrom,
   parseEnsoLogLine,
 } from '../packages/core/src/log-process.ts'
-import { findRepoRoot } from '../packages/core/src/paths.ts'
 
 const FOLLOW_POLL_MS = 250
 
@@ -239,7 +238,7 @@ async function main(argv: readonly string[]): Promise<void> {
     return
   }
 
-  const logsDir = logsDirFrom(process.env, findRepoRoot(import.meta.url))
+  const logsDir = logsDirFrom(process.env)
   const file = join(logsDir, ensoLogFilename(query.date))
   if (query.follow) await untilExists(file)
   else if (!existsSync(file)) {

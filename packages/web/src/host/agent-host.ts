@@ -30,7 +30,7 @@ import {
   type RuntimeCommand,
   type ThreadRuntime,
 } from '@enso/core'
-import { findRepoRoot } from '@enso/core/paths'
+import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
 import { quarantineSecrets } from '@enso/core/secrets'
 import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
 import { type BranchStats, branchStats } from './branch-stats.ts'
@@ -442,16 +442,21 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   process.env.PI_CODING_AGENT_DIR = agentDir
   process.env.PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS = '1'
   seedMultiAccountChildProxyOff(agentDir)
-  // The secrets file is a fact about THIS checkout (the harness), not about the trees pi
-  // operates in — a session may run anywhere, a tmpdir in tests — so it resolves from here.
-  const quarantine = quarantineSecrets(options.environment ?? process.env, findRepoRoot(import.meta.url))
+  // The secrets file is the USER's (`ENSO_HOME`, #421), and the root `.env` bun autoloads is THIS
+  // checkout's — neither is about the trees pi operates in (a session may run anywhere, a tmpdir
+  // in tests). Both resolve from the environment and the harness, never from a session's cwd.
+  const environment = options.environment ?? process.env
+  const quarantine = quarantineSecrets(environment, {
+    repoRoot: findRepoRoot(import.meta.url),
+    home: ensoHome(environment),
+  })
   if (quarantine.removed.length > 0) {
     log.info('secrets kept out of the tool environment (#89): {removed}', { removed: quarantine.removed })
   }
   if (quarantine.misplaced.length > 0) {
     log.warn(
-      'the root .env defines {misplaced} — bun autoloads .env into every bun child, so a tool can still read it there. Move it to .enso/secrets.env (#89); it is not read from .env',
-      { misplaced: quarantine.misplaced },
+      'the root .env defines {misplaced} — bun autoloads .env into every bun child, so a tool can still read it there. Move it to {secretsFile} (#89); it is not read from .env',
+      { misplaced: quarantine.misplaced, secretsFile: ensoSecretsPath(ensoHome(environment)) },
     )
   }
   // The theme registry pi's UI code consults; harmless without a terminal, required once.

@@ -71,8 +71,18 @@ import { redactByField } from '@logtape/redaction'
 import { Check } from 'typebox/value'
 import { ENSO_LOG_EVENTS } from './log-stats.ts'
 import { type EnsoLogFilter, LOG_TAIL_MAX_RECORDS, logLineMatches, logLineMessageParts } from './log-tail.ts'
-import { ENSO_LOG_ROOT, ENSO_REDACT_FIELDS, ENSO_REDACTED, ENSO_REDACTED_VALUE, EnsoLogLine } from './log.ts'
-import { ensoLogsDir } from './paths.ts'
+import {
+  ENSO_LOG_ROOT,
+  ENSO_REDACT_FIELDS,
+  ENSO_REDACTED,
+  ENSO_REDACTED_VALUE,
+  type EnsoLogger,
+  type EnsoLogLayer,
+  EnsoLogLine,
+  ensoLogger,
+} from './log.ts'
+import { ensoHome, ensoLogsDir, migrateCheckoutEnsoOnLaunch } from './paths.ts'
+import { knownSecretValuesTracking } from './secrets.ts'
 
 /**
  * A per-category override: `enso.host.events=trace` turns one subtree up without the rest.
@@ -320,7 +330,7 @@ function redactingKnownValues(values: readonly string[] | (() => readonly string
 
 /** @group Logging */
 export interface ProcessLoggingOptions {
-  /** `ensoLogsDir(repoRoot)` — created if absent. */
+  /** `logsDirFrom(environment)` — created if absent. */
   readonly logsDir: string
   /** Which launcher this is — `server`, `web`, `pi` — on every record it writes, since the file is shared. */
   readonly process: string
@@ -330,8 +340,8 @@ export interface ProcessLoggingOptions {
    * The secret values to scrub wherever they appear, from `knownSecretValues` (#139).
    * Omitted — a test, a process with no secret store — means the value pass does not run.
    *
-   * A THUNK — `knownSecretValuesTracking(repoRoot)` — is what a launcher passes (#207): it is
-   * asked per record, so a key rotated in `.enso/secrets.env` while the process runs is
+   * A THUNK — `knownSecretValuesTracking(home)` — is what a launcher passes (#207): it is
+   * asked per record, so a key rotated in `ENSO_HOME/secrets.env` while the process runs is
    * redacted from the next record on, matching the reader, which was always per call. An
    * array is a snapshot of the set at configure time and stays one.
    */
@@ -339,16 +349,80 @@ export interface ProcessLoggingOptions {
 }
 
 /**
- * Where this process writes: `ENSO_LOGS_DIR` when set — a user keeping logs elsewhere, a test
- * keeping them out of the checkout — else `.enso/logs` under the repo (`ensoLogsDir`).
+ * A dev launcher's start (#132, #421), in the one order that works: the checkout's old `.enso/`
+ * migrated into `ENSO_HOME` FIRST — before the logs, the secrets and pi's agent dir are opened
+ * where they now live — then logging configured there, what the migration did reported (an `info`
+ * line for what moved, a `warn` per file left because `ENSO_HOME` already had one: nothing is
+ * overwritten), and the shutdown flush installed. One function, so the two dev launchers cannot
+ * drift into different orders; `bun run dev` starts both at once, and either may migrate first.
+ *
+ * @group Logging
+ */
+export async function startLauncher(options: {
+  readonly repoRoot: string
+  readonly environment: Readonly<Record<string, string | undefined>>
+  /** The `process` field on this launcher's records: `server`, `web`. */
+  readonly process: string
+  /** This launcher's own logger: `['server', 'dev']`. */
+  readonly logger: readonly [EnsoLogLayer, ...string[]]
+}): Promise<{
+  readonly home: string
+  readonly logsDir: string
+  readonly log: EnsoLogger
+  /** Flush and close the log — for a launcher that exits on its own, not by signal. */
+  readonly dispose: () => Promise<void>
+}> {
+  const home = ensoHome(options.environment)
+  const migration = migrateCheckoutEnsoOnLaunch(options.repoRoot, options.environment)
+  const logsDir = ensoLogsDir(home)
+  const dispose = await configureProcessLogging({
+    logsDir,
+    process: options.process,
+    levels: parseEnsoLogLevels(options.environment, { console: 'info' }),
+    // The value pass (#139): what a token quoted in a message or a trace payload is scrubbed
+    // against — asked per record, so a key rotated while the launcher runs is redacted too (#207).
+    secretValues: knownSecretValuesTracking(home, options.environment),
+  })
+  installLoggingShutdown(dispose)
+  const [layer, ...subcategory] = options.logger
+  const log = ensoLogger(layer, ...subcategory)
+  const { from, to } = migration
+  if (migration.moved.length > 0) {
+    log.info('moved {count} file(s) from {from} to {to}: Enso keeps its state in ENSO_HOME now', {
+      count: migration.moved.length,
+      from,
+      to,
+    })
+  }
+  for (const path of migration.kept) {
+    log.warn('{path} stays in {from}: {to} already has one, and nothing is overwritten — keep one by hand', {
+      path,
+      from,
+      to,
+    })
+  }
+  if (migration.held) {
+    log.warn(
+      '{from} was not moved: ENSO_HOME is set to {to}, and a launch moves it into ~/.enso only — move it by hand if you mean to',
+      {
+        from,
+        to,
+      },
+    )
+  }
+  return { home, logsDir, log, dispose }
+}
+
+/**
+ * Where this process writes: `ENSO_HOME/logs` (`ensoHome`, `ensoLogsDir`, #421). A test keeps its
+ * records out of the user's home by giving the environment its own `ENSO_HOME`.
  *
  * One rule for every launcher and for the extension, so they land in the same file.
  *
  * @group Logging
  */
-export function logsDirFrom(environment: Readonly<Record<string, string | undefined>>, repoRoot: string): string {
-  const configured = environment.ENSO_LOGS_DIR
-  return configured === undefined || configured.length === 0 ? ensoLogsDir(repoRoot) : configured
+export function logsDirFrom(environment: Readonly<Record<string, string | undefined>>): string {
+  return ensoLogsDir(ensoHome(environment))
 }
 
 /**

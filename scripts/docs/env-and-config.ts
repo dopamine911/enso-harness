@@ -23,8 +23,9 @@ const ROOT = findRepoRoot(import.meta.url)
 const SOURCE_ROOTS = ['packages', 'scripts', 'test'] as const
 const PROCESS_ENV_BASE = /\bprocess\s*\.\s*env\b/g
 const PROCESS_ENV_CHILD_OVERRIDE = /\{\s*\.\.\.\s*process\s*\.\s*env\s*,\s*([A-Za-z_$][\w$]*)\s*:/g
+/** A runtime path helper: a file under `ENSO_HOME` (#421), or the checkout's own build cache under `node_modules`. */
 const RUNTIME_PATH_EXPORT =
-  /export function (\w+)[^{]+\{\s*return join\(repoRoot, ENSO_RUNTIME_DIRECTORY, '([^']+)'\)\s*\}/g
+  /export function (\w+)[^{]+\{\s*return join\((home|repoRoot, 'node_modules'), ((?:'[^']+'(?:, )?)+)\)\s*\}/g
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
 
 function compareText(left: string, right: string): number {
@@ -97,11 +98,13 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     phase: 'boot',
   },
   {
-    key: 'ENSO_AGENT_DIR',
-    source: 'scripts/enso.ts',
-    reader: '`scripts/enso.ts`',
-    purposeAndDefault: 'Optional agent-directory override; defaults to `.enso/pi-agent`.',
-    phase: 'boot',
+    key: 'ENSO_HOME',
+    source: 'packages/core/src/paths.ts',
+    reader: '`packages/core/src/paths.ts#ensoHome`',
+    purposeAndDefault:
+      'Optional user-level Enso directory (#421); an absent or empty value defaults to `~/.enso`. ' +
+      "pi's agent dir, the secrets file, the logs and the project list all resolve under it.",
+    phase: 'boot / load / per-call',
   },
   {
     key: 'ENSO_LOG_CONSOLE',
@@ -118,13 +121,6 @@ const ENVIRONMENT_METADATA: readonly EnvironmentMetadata[] = [
     reader: '`packages/core/src/log-process.ts#parseEnsoLogLevels`',
     purposeAndDefault: 'Optional file log level and per-category overrides; defaults to `info`.',
     phase: 'boot / load',
-  },
-  {
-    key: 'ENSO_LOGS_DIR',
-    source: 'packages/core/src/log-process.ts',
-    reader: '`packages/core/src/log-process.ts#logsDirFrom`',
-    purposeAndDefault: 'Optional log-directory override; an absent or empty value defaults to `.enso/logs`.',
-    phase: 'boot / load / per-call',
   },
   {
     key: 'ENSO_SERVER_URL',
@@ -183,17 +179,23 @@ function webSearchField(
 const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
   {
     field: 'webFetch',
-    required: 'yes',
-    defaultWhenOmitted: 'None; omission makes the strict config unreadable.',
+    required: 'no',
+    defaultWhenOmitted: 'An empty allowlist: nothing is fetchable.',
     reader: '`packages/harness/extensions/web-fetch/index.ts#createWebFetch`',
-    check: { file: 'packages/harness/extensions/web-fetch/index.ts', contains: 'parsed.config.webFetch.allowedHosts' },
+    check: {
+      file: 'packages/harness/extensions/web-fetch/index.ts',
+      contains: 'result.config.webFetch?.allowedHosts ?? []',
+    },
   },
   {
     field: 'webFetch.allowedHosts',
     required: 'yes',
-    defaultWhenOmitted: 'None in the schema; the committed policy is shown from `enso.config.json` below.',
+    defaultWhenOmitted: 'n/a — required once `webFetch` is present; `[]` fetches nothing.',
     reader: '`packages/harness/extensions/web-fetch/index.ts#createWebFetch`',
-    check: { file: 'packages/harness/extensions/web-fetch/index.ts', contains: 'parsed.config.webFetch.allowedHosts' },
+    check: {
+      file: 'packages/harness/extensions/web-fetch/index.ts',
+      contains: 'result.config.webFetch?.allowedHosts ?? []',
+    },
   },
   {
     field: 'projects',
@@ -210,7 +212,7 @@ const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
     reader: '`packages/web/src/server/projects.ts#createProjectRegistry`',
     check: {
       file: 'packages/web/src/server/projects.ts',
-      contains: 'is not an absolute or ~/ path — fix enso.config.json',
+      contains: 'is not an absolute or ~/ path — fix ${configPath}',
     },
   },
   webSearchField('', '`{}`; current-model routing with no Tavily domain filters.', 'parsed.config.webSearch ?? {}'),
@@ -244,20 +246,20 @@ interface RuntimePathMetadata {
 const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
   {
     helper: 'printHarnessDir',
-    path: '.enso/print-harness',
+    path: 'node_modules/.cache/enso/print-harness',
     writer:
       '`scripts/print-harness.ts#materializePrintHarness` rebuilds the package mirror ' +
       'for non-interactive launches.',
-    lifetime: 'Machine-local scratch; reconciled on every print launch.',
+    lifetime: 'Per-checkout build cache (its links point into this checkout); reconciled on every print launch.',
     check: { file: 'scripts/print-harness.ts', contains: 'export function materializePrintHarness' },
   },
   {
     helper: 'ensoAgentDir',
-    path: '.enso/pi-agent',
+    path: 'ENSO_HOME/pi-agent',
     writer:
       'The TUI/server launchers create it; pi and `createAgentHost` write settings, auth, ' +
       'sessions, and the multi-account pin.',
-    lifetime: 'Machine-local state shared across launches; retained until the operator removes it.',
+    lifetime: 'Per-user state shared by every checkout and launch; retained until the operator removes it.',
     check: {
       file: 'packages/web/src/host/agent-host.ts',
       contains: 'seedMultiAccountChildProxyOff(agentDir)',
@@ -265,24 +267,24 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
   },
   {
     helper: 'ensoLogsDir',
-    path: '.enso/logs',
+    path: 'ENSO_HOME/logs',
     writer: '`configureProcessLogging` creates it and every harness process appends to the day file.',
     lifetime: 'One file per local day; logging retains 14 days.',
     check: { file: 'packages/core/src/log-process.ts', contains: 'const KEEP_DAYS = 14' },
   },
   {
     helper: 'ensoProjectsPath',
-    path: '.enso/projects.json',
+    path: 'ENSO_HOME/projects.json',
     writer: 'The web server, when a page registers or removes a project (#395); written whole and renamed over.',
-    lifetime: 'Machine-local until a project is removed; entries outside the configured roots are kept but not served.',
+    lifetime: 'Per-user until a project is removed; entries outside the configured roots are kept but not served.',
     check: { file: 'packages/web/src/server/projects.ts', contains: 'renameSync(staging, statePath)' },
   },
   {
     helper: 'ensoSecretsPath',
-    path: '.enso/secrets.env',
+    path: 'ENSO_HOME/secrets.env',
     writer: 'Operator only; harness code reads and quarantines but never writes it.',
-    lifetime: 'Machine-local until the operator edits or removes it; secret reads are per call.',
-    check: { file: 'packages/core/src/secrets.ts', contains: 'readDotenvFile(ensoSecretsPath(repoRoot)).get(name)' },
+    lifetime: 'Per-user until the operator edits or removes it; secret reads are per call.',
+    check: { file: 'packages/core/src/secrets.ts', contains: 'readDotenvFile(ensoSecretsPath(home)).get(name)' },
   },
 ]
 
@@ -467,7 +469,7 @@ function assertSourceCheck(check: SourceCheck): void {
   }
 }
 
-function configInventory(): { fields: ConfigFieldMetadata[]; committedAllowedHosts: unknown } {
+function configInventory(): { fields: ConfigFieldMetadata[] } {
   const configSource = readFileSync(join(ROOT, 'packages/core/src/config.ts'), 'utf8')
   const webFetchSource = readFileSync(join(ROOT, 'packages/core/src/web-fetch.ts'), 'utf8')
   const webSearchSource = readFileSync(join(ROOT, 'packages/core/src/web-search.ts'), 'utf8')
@@ -489,20 +491,16 @@ function configInventory(): { fields: ConfigFieldMetadata[]; committedAllowedHos
     )
   }
   for (const row of metadata) assertSourceCheck(row.check)
-  const committed: unknown = JSON.parse(readFileSync(join(ROOT, 'enso.config.json'), 'utf8'))
-  if (typeof committed !== 'object' || committed === null || !('webFetch' in committed)) {
-    throw new Error('enso.config.json has no webFetch section')
-  }
-  const webFetch: unknown = committed.webFetch
-  const committedAllowedHosts =
-    typeof webFetch === 'object' && webFetch !== null && 'allowedHosts' in webFetch ? webFetch.allowedHosts : undefined
-  return { fields: metadata, committedAllowedHosts }
+  return { fields: metadata }
 }
 
 function runtimePathInventory(): RuntimePathMetadata[] {
   const pathSource = readFileSync(join(ROOT, 'packages/core/src/paths.ts'), 'utf8')
   const discovered = [...pathSource.matchAll(RUNTIME_PATH_EXPORT)]
-    .map((match) => ({ helper: match[1] ?? '', path: `.enso/${match[2] ?? ''}` }))
+    .map((match) => ({
+      helper: match[1] ?? '',
+      path: `${match[2] === 'home' ? 'ENSO_HOME' : 'node_modules'}/${(match[3] ?? '').replaceAll("'", '').split(', ').join('/')}`,
+    }))
     .sort((left, right) => compareText(left.path, right.path))
   const metadata = [...RUNTIME_PATH_METADATA].sort((left, right) => compareText(left.path, right.path))
   if (
@@ -511,7 +509,7 @@ function runtimePathInventory(): RuntimePathMetadata[] {
       metadata.map((row) => `${row.helper}\0${row.path}`),
     )
   ) {
-    throw new Error('`.enso/` path metadata differs from the exports assembled in packages/core/src/paths.ts')
+    throw new Error('runtime path metadata differs from the exports assembled in packages/core/src/paths.ts')
   }
   for (const row of metadata) assertSourceCheck(row.check)
   return metadata
@@ -574,7 +572,7 @@ function generate(): string {
     '# Environment and configuration reference',
     '',
     'Generated from the owned source roots, `scripts/lint/process-environment.ts`, the core config/path declarations,',
-    '`enso.config.json`, and `packages/harness/package.json`. No machine environment is read.',
+    'and `packages/harness/package.json`. No machine environment and no user config is read.',
     '',
     '## Explicit environment keys',
     '',
@@ -593,22 +591,21 @@ function generate(): string {
     '',
     '## `EnsoConfig` schema',
     '',
-    'The whole-file schema is strict on unknown keys. Nested fields are explicit below. Defaults are consumer',
-    'behavior when an optional field is omitted; required fields have no schema default.',
+    "The user's `ENSO_HOME/config.json` (#421). No file at all is every default below. A file that is there is strict",
+    'on unknown keys and fails closed when unreadable. Defaults are consumer behavior when an optional field is omitted;',
+    'required fields have no schema default.',
     '',
     '| Field | Required | Default when omitted | Reader |',
     '|---|---|---|---|',
     ...configRows,
     '',
-    `Committed \`webFetch.allowedHosts\`: \`${JSON.stringify(config.committedAllowedHosts)}\`.`,
-    '',
     "**Parser limit.** The schema reader handles this repository's current `Type.Object` / `Type.Optional`",
     'declaration layout in `config.ts`, `web-fetch.ts`, and `web-search.ts`; metadata and consumer probes must',
     'match every discovered field or generation fails.',
     '',
-    '## `.enso/` runtime paths',
+    '## Runtime paths',
     '',
-    'These are every exported path assembled with `ENSO_RUNTIME_DIRECTORY` in `packages/core/src/paths.ts`.',
+    "Every runtime path helper in `packages/core/src/paths.ts`: the user's state under `ENSO_HOME` (`~/.enso` by default, #421), and the checkout's own build cache.",
     '',
     '| Path | Assembler | Writer | Lifetime |',
     '|---|---|---|---|',

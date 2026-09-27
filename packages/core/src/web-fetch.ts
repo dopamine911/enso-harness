@@ -9,7 +9,7 @@ import { type Static, Type } from 'typebox'
  * `packages/harness/core/web-fetch-policy.ts`; the extension that wires IO lives in
  * `packages/harness/extensions/web-fetch/`. This module holds what both sides share:
  * the tool's config section and parameter schema, and the numeric caps. The allowlist
- * lives in `enso.config.json` since #59 — `config.ts` composes {@link WebFetchConfig}
+ * lives in the user's config (`ENSO_HOME/config.json`, #59, #421) — `config.ts` composes {@link WebFetchConfig}
  * into the whole-file schema and owns the loading contract.
  */
 
@@ -21,7 +21,7 @@ import { type Static, Type } from 'typebox'
 export const WEB_FETCH_TOOL_NAME = 'web_fetch'
 
 /**
- * web_fetch's section of `enso.config.json`.
+ * web_fetch's section of the user's config. Absent, the allowlist is EMPTY.
  *
  * `allowedHosts` are exact hostnames (case-insensitive, no wildcards, no ports) — each entry is
  * one reviewable grant. Strict on unknown keys for the same reason the whole config is — see

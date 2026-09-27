@@ -19,7 +19,7 @@ sequenceDiagram
   I->>M: dependencies ∪ node_modules/ resource paths = the required names · present → verified · absent → link the hoisted copy, or exit 1
   Z->>M: read pi.* — every node_modules/ path must exist, or refuse (exit 1, naming each path and `bun install`)
   S->>M: assertVendorLinks — the same check, the same message, before the host is created
-  Z->>Z: isPrintRun (-p · --print · stdin not a TTY) → buildPrintManifest + materializePrintHarness → .enso/print-harness
+  Z->>Z: isPrintRun (-p · --print · stdin not a TTY) → buildPrintManifest + materializePrintHarness → node_modules/.cache/enso/print-harness
   Z->>Z: pi --version — inside the range the guard corpus was run against, or refuse (exit 1, naming both bounds)
   Z->>R: quarantineSecrets, then spawn pi --no-extensions --no-skills -e the package dir · env PI_CODING_AGENT_DIR = the agent dir
   S->>S: process.env.PI_CODING_AGENT_DIR = agentDir · PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS = 1 → childProxy pinned off → quarantineSecrets
@@ -44,7 +44,7 @@ sequenceDiagram
    a record before `session_start` today, so the position decides nothing yet — it is first so that
    stays true when one does (`extensions/logging/index.ts` header, *Why first in the manifest*).
 3. **Isolation is three mechanisms, each closing a different hole — the same three at both launch
-   points.** `PI_CODING_AGENT_DIR` points the runtime at `.enso/pi-agent`: none of the user's packages,
+   points.** `PI_CODING_AGENT_DIR` points the runtime at `ENSO_HOME/pi-agent` (`~/.enso`, #421): none of the user's packages,
    settings or credentials are visible. `--no-extensions` turns discovery off — including this repo's
    own `.pi/settings.json`, which installs the package and would load it twice. `--no-skills` is required
    and covered by neither: `~/.agents/skills/` is outside the agent dir. The host applies the same triple
@@ -63,10 +63,10 @@ sequenceDiagram
    constant twice and a bare literal once — which is why the duplicate-shape gate never named them.
 6. **A print run loads a generated mirror, not a flag.** The trigger is "this run cannot prompt". The
    mode extension fails closed when it cannot prompt, the runtime has no per-extension exclusion, and
-   invariant 4 forbids passing files — so the variant is a package under `.enso/print-harness`: the
+   invariant 4 forbids passing files — so the variant is a package under `node_modules/.cache/enso/print-harness` (the checkout's own build cache, since its links point into this checkout): the
    filtered manifest (the fence below) plus a symlink for EVERY package-root entry, by `readdir`, since
-   extensions import siblings by relative path. `enso.config.json` is not mirrored and must not be:
-   `findRepoRoot` realpaths out of the mirror first. A print run has our guards only — `bash` unconfined (#9).
+   extensions import siblings by relative path. Enso's config is not in the package at all: it is the
+   user's, `ENSO_HOME/config.json` (#421), found from the environment. A print run has our guards only — `bash` unconfined (#9).
 7. **The terminal launcher refuses a `pi` it was not pinned against (#217).** The two surfaces resolve
    pi differently and only one was bounded: in-process imports the WORKSPACE copy, while the terminal
    launcher spawns the first `pi` on `PATH`. The guard REPLICATES pi's path resolver (`resolveToCwd` is

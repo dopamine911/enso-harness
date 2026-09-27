@@ -3,7 +3,7 @@
 The provider seam under the harness: five search backends behind one contract and one vocabulary,
 selected by the tool that owns the fallback policy, and the fetch tool's injected IO beside it.
 Glossary domains: **Permission** (egress — the two sanctioned network calls the bash guard denies by
-name; a committed allowlist and a committed backend pin decide what may run) and **Control** (a tool
+name; an allowlist and a backend pin in the user config decide what may run) and **Control** (a tool
 call inside a run). This directory is the pattern the consolidation (#162) copied elsewhere — *where
 we already did it right*: a normalizer in our own code that has held.
 
@@ -105,9 +105,12 @@ What the two extensions take at their composition roots — the IO seams tests r
 ```ts
 /** The IO seams. Provider runs are injectable so the fallback policy is testable alone. */
 export interface WebSearchDependencies {
-  /** Where `enso.config.json` lives. May throw; the extension fails CLOSED on that. */
+  /** Where the user's config lives. May throw; the extension fails CLOSED on that. */
   locateConfigFile: () => string
-  readConfigText: (path: string) => string
+  /** `undefined` when there is no file: the defaults. */
+  readConfigText: (path: string) => string | undefined
+  /** The SESSION's config at `session_start` (#421) — shared with web_fetch; see its seam. */
+  resolveSessionConfig: (session: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
   /** Env reads happen HERE (composition root) — providers receive values, never names. */
   readEnvironmentVariable: (variableName: string) => string | undefined
   runProviders: {
@@ -130,31 +133,35 @@ export interface WebSearchDependencies {
  * same pattern as the guards' `analyzeBashCommand`.
  */
 export interface WebFetchDependencies {
-  /**
-   * Where `enso.config.json` lives — read from AND named in refusal messages. May throw
-   * (a broken install has no findable root); the extension fails CLOSED on that.
-   */
+  /** Where the user's config lives — read from AND named in refusal messages. */
   locateConfigFile: () => string
-  readConfigText: (path: string) => string
+  /** The config's text; `undefined` when there is no file, which is the defaults. A read that fails otherwise throws, and the extension fails CLOSED. */
+  readConfigText: (path: string) => string | undefined
+  /**
+   * The SESSION's config, at `session_start` (#421): the user's, and over it the project's own
+   * `.enso/config.json` once the project is trusted — one resolution per session, shared with
+   * web_search, so the trust question is asked once.
+   */
+  resolveSessionConfig: (session: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
   fetchUrl: (url: string, init: WebFetchRequestInit) => Promise<Response>
   /** Resolve a hostname to its addresses. Rejects on NXDOMAIN/timeouts. */
   resolveHostAddresses: (hostname: string) => Promise<string[]>
 }
 ```
 
-The config sections, in `@enso/core`, composed into the one committed file by `config.ts:40-43`
+The config sections, in `@enso/core`, composed into the one config file by `config.ts:57-64`
 (`webFetch` required, `webSearch` optional). `WebSearchConfig` (`core/src/web-search.ts:55-70`) is
 two optional knobs and nothing else: `backend: "deepseek"` — the ONLY way that backend is selected,
 so no provider is billed the file never named — and `tavily.includeDomains` / `excludeDomains`, passed
 verbatim; the fallback is armed by the key's presence, never by config, because a key is a secret
 (header lines 47-53). The section must stay optional (42-45): the whole-file schema is closed and
-fail-closed, so a required new section would make every committed config unreadable — and an
+fail-closed, so a required new section would make every existing config unreadable — and an
 unreadable config refuses all web_fetch calls too.
 
 <!-- source: packages/core/src/web-fetch.ts#WebFetchConfig -->
 ```ts
 /**
- * web_fetch's section of `enso.config.json`.
+ * web_fetch's section of the user's config. Absent, the allowlist is EMPTY.
  *
  * `allowedHosts` are exact hostnames (case-insensitive, no wildcards, no ports) — each entry is
  * one reviewable grant. Strict on unknown keys for the same reason the whole config is — see
@@ -171,7 +178,7 @@ export const WebFetchConfig = Type.Object(
 ## Who implements it, who consumes it
 
 **Five providers, one `run*` function each, all top level and all exported through the harness
-core barrel** (`packages/harness/core/index.ts:45-58`):
+core barrel** (`packages/harness/core/index.ts:46-58`):
 
 | Provider | Function | Takes | Wire |
 |---|---|---|---|
@@ -190,18 +197,20 @@ and budgets, and the wire module owns the request body, the stream parse and the
 verdict — keyed on `server_tool_use` blocks having appeared, never on source count (lines 20-24).
 
 **The web_search extension is the one consumer and owns selection** (`packages/harness/extensions/web-search/index.ts`).
-`createWebSearch` (115-232) loads the config once at extension load and fails closed; `runPrimary`
-(254-308) picks the backend: `webSearch.backend: "deepseek"` pins the dedicated backend (257), else the
-current model routes through `routedProviderIdForModel` (273) and its auth through `resolveModelAuth`
-(289-294), and a model with no native search selects nothing (274-281). The composition root (419-436)
+`createWebSearch` (122-268) loads the user's config at extension load, then the session's at
+`session_start` — a trusted project's `.enso/config.json` over it, resolved once per session and
+shared with web_fetch (#421) — and fails closed; `runPrimary`
+(290-344) picks the backend: `webSearch.backend: "deepseek"` pins the dedicated backend (293), else the
+current model routes through `routedProviderIdForModel` (309) and its auth through `resolveModelAuth`
+(325-330), and a model with no native search selects nothing (310-317). The composition root (456-474)
 wires the five `run*` functions into `runProviders`, real `fetch` into `fetchUrl`, and
-`readEnvironmentVariable` to `readSecret` over `.enso/secrets.env` — never `process.env` (422-427): the
+`readEnvironmentVariable` to `readSecret` over `ENSO_HOME/secrets.env` — never `process.env` (422-427): the
 host quarantines secrets out of the environment before a session exists, and providers receive values,
 never names.
 
-**web_fetch consumes its own four seams** (`web-fetch/index.ts:68-78`): `locateConfigFile` and
-`readConfigText` are called once inside `createWebFetch` (93-94), so the allowlist is captured at load
-and an in-session edit is inert (header lines 32-34); `resolveHostAddresses` feeds the advisory
+**web_fetch consumes its own five seams** (`web-fetch/index.ts:73-87`): `locateConfigFile` and
+`readConfigText` are called once at load (108-109), and `resolveSessionConfig` once at the session's
+start, so the allowlist is captured per session and an in-session edit is inert (header lines 34-44); `resolveHostAddresses` feeds the advisory
 public-address gate (`addressGateReason`, 178-202); `fetchUrl` is called once per call under
 `fetchUnderDeadline` (205-231) with `redirect: 'manual'` and `WEB_FETCH_TIMEOUT_MS`. The pure policy —
 URL gate, host match, content-type gate, the address classifier — is `harness/core/web-fetch-policy.ts`.
@@ -267,7 +276,7 @@ do not change; `web-search.test.ts` runs against scripted providers and does not
 `vocabulary.ts` (`ModelSearchRequest.model`, `ResolvedProviderAuth`, `routedProviderIdForModel`, which
 reads `model.provider` and `model.api`) and `auth.ts` (`ModelAuthSource`, `resolveModelAuth`), plus the
 one call site that builds a `ModelSearchRequest` from the runtime's context
-(`extensions/web-search/index.ts:286-298`).
+(`extensions/web-search/index.ts:322-334`).
 The five providers read only `request.model` fields through the request and `resolveAuth`; the wire
 modules, the outcome union, the config sections, web_fetch and every test that scripts a provider do
 not change. That pivot has already been paid once: it is what deleted the allowlist's last two rows.

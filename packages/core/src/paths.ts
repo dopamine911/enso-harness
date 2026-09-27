@@ -8,7 +8,7 @@
  * module fail the suite by name.
  *
  * ⚠ REALPATH FIRST, then walk — load-bearing, observed live (PR #58 receipts): bun does
- * NOT realpath `import.meta.url` through the `.enso/print-harness/` symlink mirror, so a
+ * NOT realpath `import.meta.url` through the print-harness symlink mirror (`printHarnessDir`), so a
  * walk from the un-resolved module path starts inside the mirror. The mirror's entries
  * are symlinks back into the real tree, so resolving first lands the walk in the real
  * checkout; walking first would search the wrong ancestry.
@@ -20,8 +20,24 @@
  * @module
  */
 
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import {
+  constants,
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  renameSync,
+  rmdirSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+} from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ENSO_CONFIG_FILENAME } from './config.ts'
 
@@ -126,27 +142,173 @@ export function findRepoRoot(startPathOrFileUrl: string): string {
 const ENSO_RUNTIME_DIRECTORY = '.enso'
 
 /**
- * pi's scratch agent dir — settings, extensions, auth. Shared by the TUI launcher and the web server.
+ * The user-level Enso directory (#421): `ENSO_HOME` when set, else `~/.enso` — pi's own pattern,
+ * `PI_CODING_AGENT_DIR` else `~/.pi/agent`. Every runtime path resolves under it: pi's agent dir,
+ * the secrets file, the logs, the project list. One per user, so a second checkout or worktree
+ * shares its logins, sessions and projects, and nothing runtime lives in a source tree.
+ *
+ * Read from the environment it is given, never from `process.env` directly, so a test passes its
+ * own and the launchers pass theirs — and a child the terminal launcher spawns inherits the same.
  *
  * @group Workspace paths
  */
-export function ensoAgentDir(repoRoot: string): string {
-  return join(repoRoot, ENSO_RUNTIME_DIRECTORY, 'pi-agent')
+export function ensoHome(environment: Readonly<Record<string, string | undefined>>): string {
+  const configured = environment.ENSO_HOME
+  return configured === undefined || configured.length === 0
+    ? join(homedir(), ENSO_RUNTIME_DIRECTORY)
+    : resolve(configured)
 }
 
 /**
- * The harness's secrets file (#89): `.enso/secrets.env`, NOT `.env` at the root.
+ * The checkout-local `.enso/` every runtime path lived in before #421. Read by the migration
+ * (`migrateCheckoutEnso`) and nothing else.
+ *
+ * @group Workspace paths
+ */
+export function checkoutEnsoDir(repoRoot: string): string {
+  return join(repoRoot, ENSO_RUNTIME_DIRECTORY)
+}
+
+/**
+ * What moving the checkout's `.enso/` into `ENSO_HOME` did (#421).
+ *
+ * @group Workspace paths
+ */
+export interface EnsoHomeMigration {
+  /** The checkout's `.enso/` the files came from. */
+  readonly from: string
+  /** `ENSO_HOME`. */
+  readonly to: string
+  /** Files moved, relative to both. */
+  readonly moved: readonly string[]
+  /** Files LEFT in `from`: `to` already holds one at that path. Never overwritten — the user decides. */
+  readonly kept: readonly string[]
+  /**
+   * The checkout HAS an old `.enso/` that this launch did not move, because `ENSO_HOME` was set
+   * explicitly (`migrateCheckoutEnsoOnLaunch`). Said, so it is not silently ignored.
+   */
+  readonly held: boolean
+}
+
+/**
+ * Move the checkout's `.enso/` into `ENSO_HOME` (#421) — pi's `runMigrations` pattern: automatic
+ * on startup, idempotent, never overwriting. Each file whose path is free in `ENSO_HOME` is moved;
+ * one that is taken is left where it is and reported in `kept`, so two checkouts' logins or
+ * sessions conflict loudly instead of one silently replacing the other. Emptied directories are
+ * removed, the checkout's `.enso/` with them once nothing is left in it.
+ *
+ * `print-harness/` is not moved but deleted: a build cache of the checkout, regenerated at its new
+ * place (`printHarnessDir`) on the next terminal launch, whose relative links would break moved.
+ *
+ * Tolerant of a second launcher migrating at the same moment (`bun run dev` starts two): a file
+ * the other process moved first is skipped, not reported. `ENSO_HOME` is created `0700` — it
+ * holds credentials.
+ *
+ * @group Workspace paths
+ */
+export function migrateCheckoutEnso(repoRoot: string, home: string): EnsoHomeMigration {
+  const from = checkoutEnsoDir(repoRoot)
+  const migration = { from, to: home, moved: [] as string[], kept: [] as string[], held: false }
+  if (!existsSync(from) || resolve(from) === resolve(home)) return migration
+  mkdirSync(home, { recursive: true, mode: 0o700 })
+  rmSync(join(from, 'print-harness'), { recursive: true, force: true })
+  moveTree(from, home, '', migration)
+  removeEmptyDirectories(from)
+  return migration
+}
+
+/**
+ * The migration a LAUNCH runs (#421): into the default `ENSO_HOME` (`~/.enso`) only. With
+ * `ENSO_HOME` set explicitly nothing moves — the checkout's old `.enso/` is `held` and reported.
+ *
+ * ⚠ Why: a launcher run from a checkout with a scratch or test `ENSO_HOME` (`ENSO_HOME=/tmp/x`)
+ * would otherwise move that checkout's logins and sessions into the scratch directory, to be lost
+ * with it — which happened, once, while this was being built. `~/.enso` is the one place a user's
+ * state is meant to live, so it is the one place a launch moves it to without being asked. Someone
+ * who chose another home moves the old directory by hand, and the launch says so.
+ *
+ * @group Workspace paths
+ */
+export function migrateCheckoutEnsoOnLaunch(
+  repoRoot: string,
+  environment: Readonly<Record<string, string | undefined>>,
+): EnsoHomeMigration {
+  const home = ensoHome(environment)
+  const configured = environment.ENSO_HOME
+  if (configured === undefined || configured.length === 0) return migrateCheckoutEnso(repoRoot, home)
+  const from = checkoutEnsoDir(repoRoot)
+  return { from, to: home, moved: [], kept: [], held: existsSync(from) }
+}
+
+function moveTree(
+  from: string,
+  to: string,
+  relativeDirectory: string,
+  migration: { moved: string[]; kept: string[] },
+): void {
+  for (const entry of readdirSync(join(from, relativeDirectory), { withFileTypes: true })) {
+    const relativePath = join(relativeDirectory, entry.name)
+    if (entry.isDirectory()) {
+      moveTree(from, to, relativePath, migration)
+      continue
+    }
+    const outcome = moveEntry(join(from, relativePath), join(to, relativePath))
+    if (outcome !== 'gone') migration[outcome].push(relativePath)
+  }
+}
+
+/** One file or link: `moved`, `kept` (the target is taken), or `gone` (another launcher moved it first). */
+function moveEntry(source: string, target: string): 'moved' | 'kept' | 'gone' {
+  if (lstatSync(target, { throwIfNoEntry: false }) !== undefined) {
+    return lstatSync(source, { throwIfNoEntry: false }) === undefined ? 'gone' : 'kept'
+  }
+  mkdirSync(dirname(target), { recursive: true })
+  try {
+    renameSync(source, target)
+  } catch (error: unknown) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') return 'gone'
+    if (code !== 'EXDEV') throw error
+    // `ENSO_HOME` on another filesystem: copy, then remove — never the other way round.
+    if (lstatSync(source).isSymbolicLink()) symlinkSync(readlinkSync(source), target)
+    else copyFileSync(source, target, constants.COPYFILE_EXCL)
+    unlinkSync(source)
+  }
+  return 'moved'
+}
+
+function removeEmptyDirectories(directory: string): void {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) removeEmptyDirectories(join(directory, entry.name))
+  }
+  if (readdirSync(directory).length === 0) rmdirSync(directory)
+}
+
+/**
+ * pi's scratch agent dir — settings, extensions, auth, sessions, trust. Shared by the TUI launcher
+ * and the web server. ⚠ Deliberately NOT `~/.pi/agent`: the operator's own pi packages and
+ * credentials stay invisible to Enso's sessions (`agent-host.ts`).
+ *
+ * @group Workspace paths
+ */
+export function ensoAgentDir(home: string): string {
+  return join(home, 'pi-agent')
+}
+
+/**
+ * The harness's secrets file (#89): `ENSO_HOME/secrets.env`, NOT `.env` at the root.
  *
  * bun auto-loads `.env*` from the cwd into EVERY bun process — including a `bun -e` the model
  * runs from the repo root — so a root `.env` reaches a tool child no matter what the parent
  * scrubbed (verified with `env -i`).
  *
- * `.enso/` is git-ignored, write-protected (`ENSO_PERSISTENCE_WRITE_DIRECTORIES`) and read-denied
- * on BOTH tool routes by the `/.enso/` fragment in
+ * `ENSO_HOME` is write-protected (`ENSO_PERSISTENCE_WRITE_DIRECTORIES`) and read-denied on BOTH
+ * tool routes by the `/.enso/` fragment in
  * {@link core/src!DEFAULT_GUARD_POLICY | DEFAULT_GUARD_POLICY}: the reader gate for every tool
  * carrying a path, and the shell deny (#204) for a literal path word in `bash`/`powershell`.
  * ⚠ The shell leg is a bar, not a boundary — `shell-secret-paths.ts` states what a
- * runtime-assembled name still gets past.
+ * runtime-assembled name still gets past. ⚠ An `ENSO_HOME` whose path has no `.enso` segment is
+ * NOT matched by that fragment: keep the directory named `.enso`.
  *
  * ⚠ THE `core/src!` QUALIFIER IS LOAD-BEARING, and the obvious simplification does not work
  * (#188). `guard.ts` is not imported here, so TypeScript's own link resolution — which TypeDoc
@@ -160,8 +322,8 @@ export function ensoAgentDir(repoRoot: string): string {
  *
  * @group Workspace paths
  */
-export function ensoSecretsPath(repoRoot: string): string {
-  return join(repoRoot, ENSO_RUNTIME_DIRECTORY, 'secrets.env')
+export function ensoSecretsPath(home: string): string {
+  return join(home, 'secrets.env')
 }
 
 /**
@@ -174,35 +336,39 @@ export function rootDotenvPath(repoRoot: string): string {
 }
 
 /**
- * Where the print variant of the harness package is materialized (#20).
+ * Where the print variant of the harness package is materialized (#20): a build cache of THIS
+ * checkout, so it stays in the checkout — its links point into this checkout's harness, and two
+ * checkouts sharing one `ENSO_HOME` would otherwise relink it to whichever launched last (#421).
+ * Under `node_modules/.cache`, the conventional home of a regenerated artifact, gitignored and
+ * outside every `.enso` the guards protect.
  *
  * @group Workspace paths
  */
 export function printHarnessDir(repoRoot: string): string {
-  return join(repoRoot, ENSO_RUNTIME_DIRECTORY, 'print-harness')
+  return join(repoRoot, 'node_modules', '.cache', 'enso', 'print-harness')
 }
 
 /**
- * Where the harness's log lives (#132): `.enso/logs/enso-YYYY-MM-DD.jsonl`, ONE file per day
+ * Where the harness's log lives (#132): `ENSO_HOME/logs/enso-YYYY-MM-DD.jsonl`, ONE file per day
  * that every process appends to (dated, never renamed, so a second writer is safe — see
  * `web/server/logging.ts`).
  *
- * Under `.enso/` so bun never autoloads from it and the write gate already knows it (guard.ts).
+ * Under `ENSO_HOME` so bun never autoloads from it and the write gate already knows it (guard.ts).
  *
  * @group Workspace paths
  */
-export function ensoLogsDir(repoRoot: string): string {
-  return join(repoRoot, ENSO_RUNTIME_DIRECTORY, 'logs')
+export function ensoLogsDir(home: string): string {
+  return join(home, 'logs')
 }
 
 /**
- * The projects registered from a page (#395): `.enso/projects.json`. Server STATE, not config —
- * the roots they may sit under are config (`enso.config.json`), committed with the install.
+ * The projects registered from a page (#395): `ENSO_HOME/projects.json`. Server STATE, not config —
+ * the roots they may sit under are config (`ENSO_HOME/config.json`).
  *
  * @group Workspace paths
  */
-export function ensoProjectsPath(repoRoot: string): string {
-  return join(repoRoot, ENSO_RUNTIME_DIRECTORY, 'projects.json')
+export function ensoProjectsPath(home: string): string {
+  return join(home, 'projects.json')
 }
 
 /**
@@ -224,10 +390,37 @@ export function webPackageDir(repoRoot: string): string {
 }
 
 /**
- * The committed config file's path under a repository root (#59): `enso.config.json`, beside `package.json`.
+ * The user's config file (#59, #421): `ENSO_HOME/config.json`. Absent is the defaults (`parseEnsoConfig`).
  *
  * @group Workspace paths
  */
-export function ensoConfigPath(repoRoot: string): string {
-  return join(repoRoot, ENSO_CONFIG_FILENAME)
+export function ensoConfigPath(home: string): string {
+  return join(home, ENSO_CONFIG_FILENAME)
+}
+
+/**
+ * A project's own config (#421): `<project>/.enso/config.json`. Read only once the project is
+ * trusted, over the user's (`ensoConfigPath`); the project directory only, never its parents, as
+ * pi reads `<cwd>/.pi/`.
+ *
+ * @group Workspace paths
+ */
+export function projectConfigPath(projectDirectory: string): string {
+  return join(projectDirectory, ENSO_RUNTIME_DIRECTORY, ENSO_CONFIG_FILENAME)
+}
+
+/**
+ * A file's text, or `undefined` when there is no file — for a file whose absence means its
+ * defaults (the config). Any other failure to read it throws: a file that is there and unreadable
+ * is not a missing one.
+ *
+ * @group Workspace paths
+ */
+export function readTextIfPresent(path: string): string | undefined {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
 }

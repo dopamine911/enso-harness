@@ -2,19 +2,18 @@
 # Environment and configuration reference
 
 Generated from the owned source roots, `scripts/lint/process-environment.ts`, the core config/path declarations,
-`enso.config.json`, and `packages/harness/package.json`. No machine environment is read.
+and `packages/harness/package.json`. No machine environment and no user config is read.
 
 ## Explicit environment keys
 
-The 10 files that directly touch the process environment exactly match the
+The 12 files that directly touch the process environment exactly match the
 `node/no-process-env` exception list in `scripts/lint/process-environment.ts`; generation fails if either side gains or loses a file.
 Rows cover literal dot access, literal bracket access, destructuring, `node:process` `env` imports,
 grounded `environment.KEY` seams, and keys explicitly written beside a process-environment spread.
 
 | Key | Reader | Purpose, requirement, and default | Phase |
 |---|---|---|---|
-| `ENSO_AGENT_DIR` | `scripts/enso.ts` | Optional agent-directory override; defaults to `.enso/pi-agent`. | boot |
-| `ENSO_LOGS_DIR` | `packages/core/src/log-process.ts#logsDirFrom` | Optional log-directory override; an absent or empty value defaults to `.enso/logs`. | boot / load / per-call |
+| `ENSO_HOME` | `packages/core/src/paths.ts#ensoHome` | Optional user-level Enso directory (#421); an absent or empty value defaults to `~/.enso`. pi's agent dir, the secrets file, the logs and the project list all resolve under it. | boot / load / per-call |
 | `ENSO_LOG_CONSOLE` | `packages/core/src/log-process.ts#parseEnsoLogLevels` | Optional terminal log level; launcher default is `info`, while child-pi logging defaults to no console sink. | boot / load |
 | `ENSO_LOG_LEVEL` | `packages/core/src/log-process.ts#parseEnsoLogLevels` | Optional file log level and per-category overrides; defaults to `info`. | boot / load |
 | `ENSO_SERVER_URL` | `scripts/enso-logs.ts#bundle` | Optional live-server URL for bundle retrieval; defaults to `http://127.0.0.1:5179`. | per-call |
@@ -33,38 +32,37 @@ shape or a literal without checked metadata fails generation as `UNCLASSIFIED` r
 
 ## `EnsoConfig` schema
 
-The whole-file schema is strict on unknown keys. Nested fields are explicit below. Defaults are consumer
-behavior when an optional field is omitted; required fields have no schema default.
+The user's `ENSO_HOME/config.json` (#421). No file at all is every default below. A file that is there is strict
+on unknown keys and fails closed when unreadable. Defaults are consumer behavior when an optional field is omitted;
+required fields have no schema default.
 
 | Field | Required | Default when omitted | Reader |
 |---|---|---|---|
 | `projects` | no | No roots: the launch directory is the only project, and registering another is refused. | `packages/web/src/server/dev.ts` → `startEnsoServer({ projectRoots })` |
 | `projects.roots` | yes | n/a — absolute or `~/` paths; a page may register a project only strictly under one (#395), and a root taken out hides the projects under it | `packages/web/src/server/projects.ts#createProjectRegistry` |
-| `webFetch` | yes | None; omission makes the strict config unreadable. | `packages/harness/extensions/web-fetch/index.ts#createWebFetch` |
-| `webFetch.allowedHosts` | yes | None in the schema; the committed policy is shown from `enso.config.json` below. | `packages/harness/extensions/web-fetch/index.ts#createWebFetch` |
+| `webFetch` | no | An empty allowlist: nothing is fetchable. | `packages/harness/extensions/web-fetch/index.ts#createWebFetch` |
+| `webFetch.allowedHosts` | yes | n/a — required once `webFetch` is present; `[]` fetches nothing. | `packages/harness/extensions/web-fetch/index.ts#createWebFetch` |
 | `webSearch` | no | `{}`; current-model routing with no Tavily domain filters. | `packages/harness/extensions/web-search/index.ts#createWebSearch` |
 | `webSearch.backend` | no | Current-model routing; only `"deepseek"` pins the dedicated backend. | `packages/harness/extensions/web-search/index.ts#runPrimary` |
 | `webSearch.tavily` | no | No Tavily domain filters. | `packages/harness/extensions/web-search/index.ts#createWebSearch` |
 | `webSearch.tavily.excludeDomains` | no | Omitted from the Tavily request. | `packages/harness/extensions/web-search/index.ts#createWebSearch` |
 | `webSearch.tavily.includeDomains` | no | Omitted from the Tavily request. | `packages/harness/extensions/web-search/index.ts#createWebSearch` |
 
-Committed `webFetch.allowedHosts`: `[]`.
-
 **Parser limit.** The schema reader handles this repository's current `Type.Object` / `Type.Optional`
 declaration layout in `config.ts`, `web-fetch.ts`, and `web-search.ts`; metadata and consumer probes must
 match every discovered field or generation fails.
 
-## `.enso/` runtime paths
+## Runtime paths
 
-These are every exported path assembled with `ENSO_RUNTIME_DIRECTORY` in `packages/core/src/paths.ts`.
+Every runtime path helper in `packages/core/src/paths.ts`: the user's state under `ENSO_HOME` (`~/.enso` by default, #421), and the checkout's own build cache.
 
 | Path | Assembler | Writer | Lifetime |
 |---|---|---|---|
-| `.enso/logs` | `ensoLogsDir` | `configureProcessLogging` creates it and every harness process appends to the day file. | One file per local day; logging retains 14 days. |
-| `.enso/pi-agent` | `ensoAgentDir` | The TUI/server launchers create it; pi and `createAgentHost` write settings, auth, sessions, and the multi-account pin. | Machine-local state shared across launches; retained until the operator removes it. |
-| `.enso/print-harness` | `printHarnessDir` | `scripts/print-harness.ts#materializePrintHarness` rebuilds the package mirror for non-interactive launches. | Machine-local scratch; reconciled on every print launch. |
-| `.enso/projects.json` | `ensoProjectsPath` | The web server, when a page registers or removes a project (#395); written whole and renamed over. | Machine-local until a project is removed; entries outside the configured roots are kept but not served. |
-| `.enso/secrets.env` | `ensoSecretsPath` | Operator only; harness code reads and quarantines but never writes it. | Machine-local until the operator edits or removes it; secret reads are per call. |
+| `ENSO_HOME/logs` | `ensoLogsDir` | `configureProcessLogging` creates it and every harness process appends to the day file. | One file per local day; logging retains 14 days. |
+| `ENSO_HOME/pi-agent` | `ensoAgentDir` | The TUI/server launchers create it; pi and `createAgentHost` write settings, auth, sessions, and the multi-account pin. | Per-user state shared by every checkout and launch; retained until the operator removes it. |
+| `ENSO_HOME/projects.json` | `ensoProjectsPath` | The web server, when a page registers or removes a project (#395); written whole and renamed over. | Per-user until a project is removed; entries outside the configured roots are kept but not served. |
+| `ENSO_HOME/secrets.env` | `ensoSecretsPath` | Operator only; harness code reads and quarantines but never writes it. | Per-user until the operator edits or removes it; secret reads are per call. |
+| `node_modules/.cache/enso/print-harness` | `printHarnessDir` | `scripts/print-harness.ts#materializePrintHarness` rebuilds the package mirror for non-interactive launches. | Per-checkout build cache (its links point into this checkout); reconciled on every print launch. |
 
 ## Harness manifest resources
 
