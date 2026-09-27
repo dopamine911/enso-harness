@@ -86,7 +86,7 @@ const PROJECT_ROUTE = /^\/api\/projects\/([0-9a-f]{16})$/
  * pi reads and writes — so the directories this process accepts ARE the blast radius. It
  * therefore binds loopback only, and no request chooses a directory the install did not
  * allow: the launch directory comes from ITS OWN launch arguments, and a page may register a
- * project only strictly under a root `enso.config.json` declares (#395, `projects.ts`). After
+ * project only strictly under a root the user's config declares (#395, `projects.ts`). After
  * that the page names projects by id; a path never reaches a session from a request.
  */
 const DEFAULT_PORT = 5179
@@ -242,10 +242,10 @@ export interface EnsoServerOptions {
    * The launch directory: the first project (#395), where a thread nobody named a project for
    * runs. With no sandbox (#24) a session's directory IS its blast radius, so this comes from the
    * launcher's own arguments, never from a request — and every other project must sit under one
-   * of `projectRoots`, which also come from the install (`enso.config.json`), not the page.
+   * of `projectRoots`, which also come from the user's config (`ENSO_HOME/config.json`), not the page.
    */
   cwd: string
-  /** `projects.roots` from `enso.config.json`: where a page may register projects. None means the launch directory only. */
+  /** `projects.roots` from the user's config: where a page may register projects. None means the launch directory only. */
   projectRoots?: Readonly<EnsoProjectsConfig['roots']>
   /** Where registrations are kept (`.enso/projects.json`); absent, they last as long as the process (tests). */
   projectsStatePath?: string

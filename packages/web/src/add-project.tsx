@@ -16,7 +16,7 @@ import { browseDirectories, registerProject } from './project-list.ts'
 
 /**
  * Add a project (#395 slice 3): browse the directories the install allows — inside the roots
- * `enso.config.json` declares — and register one. Only what the server lists can be chosen, and
+ * the user's config declares (`ENSO_HOME/config.json`) — and register one. Only what the server lists can be chosen, and
  * the server lists only what it would register: resolved, inside a root, never hidden. A root
  * itself is browsed, not added; a directory already a project says so.
  */
@@ -35,7 +35,7 @@ type Browsing =
   | { readonly kind: 'failed'; readonly reason: string }
 
 /** What the dialog says when there is nothing to browse. */
-export const NO_ROOTS = 'no project roots are declared — add "projects": { "roots": ["~/code"] } to enso.config.json'
+export const NO_ROOTS = 'no project roots are declared — add "projects": { "roots": ["~/code"] } to ~/.enso/config.json'
 
 /** The listing at `path` (`null`: the roots), reloaded whenever the dialog opens or moves. */
 function useBrowsing(open: boolean, path: string | null, fetchImpl: FetchLike | undefined): Browsing {
@@ -136,7 +136,7 @@ export function AddProjectDialog({ open, onClose, onAdded, fetch: fetchImpl }: A
         <DialogHeader>
           <DialogTitle>Add a project</DialogTitle>
           <DialogDescription className="break-all">
-            {listing?.path ?? 'the project roots enso.config.json declares'}
+            {listing?.path ?? 'the project roots your config declares'}
           </DialogDescription>
         </DialogHeader>
         {browsing.kind === 'loading' ? <p className="text-sm text-muted-foreground">reading folders…</p> : null}

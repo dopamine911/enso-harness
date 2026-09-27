@@ -1,14 +1,11 @@
 import { expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
-import { ENSO_CONFIG_FILENAME, parseEnsoConfig, WEB_FETCH_MAX_RESPONSE_BYTES, WEB_FETCH_TOOL_NAME } from '@enso/core'
+import { ENSO_CONFIG_FILENAME, WEB_FETCH_MAX_RESPONSE_BYTES, WEB_FETCH_TOOL_NAME } from '@enso/core'
 import { auditRecords, recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
-import { ensoConfigPath, findRepoRoot } from '@enso/core/paths'
 import { createWebFetch, type WebFetchDependencies, type WebFetchRequestInit } from '../index.ts'
 
 /**
  * The web_fetch extension (#54), against injected IO seams — no test here touches the
- * network, DNS, or the committed config file (one shape-pin at the bottom reads the
- * real `enso.config.json`, read-only). The gate's per-dimension vectors live in
+ * network, DNS, or the user's config file. The gate's per-dimension vectors live in
  * `core/__tests__/web-fetch-policy.test.ts`; these tests cover the WIRING: which gate
  * fires first, what each refusal message carries, and that a refused call never fetches.
  */
@@ -28,7 +25,7 @@ interface CapturedTool {
   ) => Promise<{ content: { type: string; text: string }[] }>
 }
 
-const CONFIG_PATH = '/repo/enso.config.json'
+const CONFIG_PATH = '/home/u/.enso/config.json'
 const ALLOWED_HOST = 'docs.example.com'
 
 /** The config file's committed shape (#59) with the given hosts in web_fetch's section. */
@@ -110,27 +107,37 @@ test('empty allowlist: the refusal names the file, the shape, the restart, and t
 
 // --- an unreadable config fails CLOSED: "could not read the policy" ≠ "no policy".
 
-test('a missing config file refuses every call, naming the read failure', async () => {
+test('a config file that is there but cannot be read refuses every call, naming the read failure', async () => {
   const loaded = loadWebFetch({
     readConfigText: () => {
-      throw new Error('ENOENT: no such file')
+      throw new Error('EACCES: permission denied')
     },
   })
   const text = await run(loaded, 'https://docs.example.com/')
   expect(text).toContain('could not be')
-  expect(text).toContain('ENOENT')
+  expect(text).toContain('EACCES')
   expect(loaded.fetchedUrls).toEqual([])
 })
 
-test('an UNFINDABLE repo root refuses every call and still names the file for the human', async () => {
+// #421: no config file is the defaults — an EMPTY allowlist — so nothing is fetchable, and the
+// refusal is the ordinary "not on the allowlist" one, naming where a human adds a host.
+test('⚠ no config file at all: the allowlist is empty, and a fetch is refused naming the file (#421)', async () => {
+  const loaded = loadWebFetch({ readConfigText: () => undefined })
+  const text = await run(loaded, 'https://docs.example.com/')
+  expect(text).toContain(CONFIG_PATH)
+  expect(text).not.toContain('could not be')
+  expect(loaded.fetchedUrls).toEqual([])
+})
+
+test('a config that cannot be located refuses every call and still names where it lives for the human', async () => {
   const loaded = loadWebFetch({
     locateConfigFile: () => {
-      throw new Error('no ancestor is a workspace root')
+      throw new Error('no home directory')
     },
   })
   const text = await run(loaded, 'https://docs.example.com/')
   expect(text).toContain(ENSO_CONFIG_FILENAME)
-  expect(text).toContain('repository root')
+  expect(text).toContain('ENSO_HOME')
   expect(loaded.fetchedUrls).toEqual([])
 })
 
@@ -362,15 +369,4 @@ test('the config is read ONCE at extension load, never per call', async () => {
   await run(loaded, `https://${ALLOWED_HOST}/one`)
   await run(loaded, `https://${ALLOWED_HOST}/two`)
   expect(readCount).toBe(1)
-})
-
-// --- the committed config file itself, located the way the composition root locates it ---
-
-test('the committed enso.config.json is found via findRepoRoot and parses against the schema', () => {
-  // Dogfoods the exact expression the default dependencies use — so this test also pins
-  // that the located path is the CHECKOUT's config (derived from this file's tree, never
-  // from process.cwd(); the paths tests prove that discrimination with a tmp fixture).
-  const committedPath = ensoConfigPath(findRepoRoot(import.meta.url))
-  const parsed = parseEnsoConfig(readFileSync(committedPath, 'utf8'))
-  expect(parsed.kind).toBe('ok')
 })

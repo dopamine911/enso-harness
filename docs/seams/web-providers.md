@@ -3,7 +3,7 @@
 The provider seam under the harness: five search backends behind one contract and one vocabulary,
 selected by the tool that owns the fallback policy, and the fetch tool's injected IO beside it.
 Glossary domains: **Permission** (egress — the two sanctioned network calls the bash guard denies by
-name; a committed allowlist and a committed backend pin decide what may run) and **Control** (a tool
+name; an allowlist and a backend pin in the user config decide what may run) and **Control** (a tool
 call inside a run). This directory is the pattern the consolidation (#162) copied elsewhere — *where
 we already did it right*: a normalizer in our own code that has held.
 
@@ -105,9 +105,10 @@ What the two extensions take at their composition roots — the IO seams tests r
 ```ts
 /** The IO seams. Provider runs are injectable so the fallback policy is testable alone. */
 export interface WebSearchDependencies {
-  /** Where `enso.config.json` lives. May throw; the extension fails CLOSED on that. */
+  /** Where the user's config lives. May throw; the extension fails CLOSED on that. */
   locateConfigFile: () => string
-  readConfigText: (path: string) => string
+  /** `undefined` when there is no file: the defaults. */
+  readConfigText: (path: string) => string | undefined
   /** Env reads happen HERE (composition root) — providers receive values, never names. */
   readEnvironmentVariable: (variableName: string) => string | undefined
   runProviders: {
@@ -130,31 +131,29 @@ export interface WebSearchDependencies {
  * same pattern as the guards' `analyzeBashCommand`.
  */
 export interface WebFetchDependencies {
-  /**
-   * Where `enso.config.json` lives — read from AND named in refusal messages. May throw
-   * (a broken install has no findable root); the extension fails CLOSED on that.
-   */
+  /** Where the user's config lives — read from AND named in refusal messages. */
   locateConfigFile: () => string
-  readConfigText: (path: string) => string
+  /** The config's text; `undefined` when there is no file, which is the defaults. A read that fails otherwise throws, and the extension fails CLOSED. */
+  readConfigText: (path: string) => string | undefined
   fetchUrl: (url: string, init: WebFetchRequestInit) => Promise<Response>
   /** Resolve a hostname to its addresses. Rejects on NXDOMAIN/timeouts. */
   resolveHostAddresses: (hostname: string) => Promise<string[]>
 }
 ```
 
-The config sections, in `@enso/core`, composed into the one committed file by `config.ts:40-43`
+The config sections, in `@enso/core`, composed into the one config file by `config.ts:57-64`
 (`webFetch` required, `webSearch` optional). `WebSearchConfig` (`core/src/web-search.ts:55-70`) is
 two optional knobs and nothing else: `backend: "deepseek"` — the ONLY way that backend is selected,
 so no provider is billed the file never named — and `tavily.includeDomains` / `excludeDomains`, passed
 verbatim; the fallback is armed by the key's presence, never by config, because a key is a secret
 (header lines 47-53). The section must stay optional (42-45): the whole-file schema is closed and
-fail-closed, so a required new section would make every committed config unreadable — and an
+fail-closed, so a required new section would make every existing config unreadable — and an
 unreadable config refuses all web_fetch calls too.
 
 <!-- source: packages/core/src/web-fetch.ts#WebFetchConfig -->
 ```ts
 /**
- * web_fetch's section of `enso.config.json`.
+ * web_fetch's section of the user's config. Absent, the allowlist is EMPTY.
  *
  * `allowedHosts` are exact hostnames (case-insensitive, no wildcards, no ports) — each entry is
  * one reviewable grant. Strict on unknown keys for the same reason the whole config is — see
@@ -199,8 +198,8 @@ wires the five `run*` functions into `runProviders`, real `fetch` into `fetchUrl
 host quarantines secrets out of the environment before a session exists, and providers receive values,
 never names.
 
-**web_fetch consumes its own four seams** (`web-fetch/index.ts:68-78`): `locateConfigFile` and
-`readConfigText` are called once inside `createWebFetch` (93-94), so the allowlist is captured at load
+**web_fetch consumes its own four seams** (`web-fetch/index.ts:68-76`): `locateConfigFile` and
+`readConfigText` are called once inside `createWebFetch` (91-92), so the allowlist is captured at load
 and an in-session edit is inert (header lines 32-34); `resolveHostAddresses` feeds the advisory
 public-address gate (`addressGateReason`, 178-202); `fetchUrl` is called once per call under
 `fetchUnderDeadline` (205-231) with `redirect: 'manual'` and `WEB_FETCH_TIMEOUT_MS`. The pure policy —

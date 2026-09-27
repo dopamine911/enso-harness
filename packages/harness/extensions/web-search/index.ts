@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { getEnvApiKey } from '@earendil-works/pi-ai/compat'
 import type {
@@ -17,7 +16,7 @@ import {
   type WebSearchConfig,
   WebSearchToolParameters,
 } from '@enso/core'
-import { ensoConfigPath, ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
+import { ensoConfigPath, ensoHome, ensoSecretsPath, readTextIfPresent } from '@enso/core/paths'
 import { readSecret } from '@enso/core/secrets'
 import {
   DEEPSEEK_API_KEY_VARIABLE,
@@ -47,15 +46,15 @@ import {
  *
  * The shape, in one pass:
  *
- * 1. **Primary selection.** `enso.config.json`'s optional `webSearch.backend: "deepseek"`
+ * 1. **Primary selection.** The user config's optional `webSearch.backend: "deepseek"`
  *    pins the dedicated DeepSeek backend; otherwise the CURRENT MODEL routes to its own
  *    native search API (anthropic / google / openai families), billing the same identity
  *    the conversation does. A model with no native search selects nothing.
  * 2. **The fallback.** When the primary is unavailable, fails, or answers WITHOUT
  *    searching (`ungrounded`), and `TAVILY_API_KEY` is present in the gated secrets file
- *    `.enso/secrets.env` (#89 — never the process environment), one Tavily call answers instead. Key absent → the primary's own outcome is
+ *    `ENSO_HOME/secrets.env` (#89 — never the process environment), one Tavily call answers instead. Key absent → the primary's own outcome is
  *    returned unchanged. No config knob arms this — a key is a secret and secrets never
- *    enter the committed config.
+ *    enter the config.
  * 3. **The ACCURATE response** (#63, the requirement this exists for): every result's
  *    first line names the backend that answered and, on fallback, why. An ungrounded
  *    answer is never rendered as a search result — with no fallback armed it is returned
@@ -71,9 +70,10 @@ import {
 
 /** The IO seams. Provider runs are injectable so the fallback policy is testable alone. */
 export interface WebSearchDependencies {
-  /** Where `enso.config.json` lives. May throw; the extension fails CLOSED on that. */
+  /** Where the user's config lives. May throw; the extension fails CLOSED on that. */
   locateConfigFile: () => string
-  readConfigText: (path: string) => string
+  /** `undefined` when there is no file: the defaults. */
+  readConfigText: (path: string) => string | undefined
   /** Env reads happen HERE (composition root) — providers receive values, never names. */
   readEnvironmentVariable: (variableName: string) => string | undefined
   runProviders: {
@@ -130,7 +130,7 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
     } catch (error) {
       configProblem = `the config file could not be read: ${String(error)}`
     }
-    const configDisplayPath = configPath ?? `${ENSO_CONFIG_FILENAME} (at the Enso repository root)`
+    const configDisplayPath = configPath ?? `${ENSO_CONFIG_FILENAME} in ENSO_HOME (~/.enso by default)`
 
     pi.registerTool({
       name: WEB_SEARCH_TOOL_NAME,
@@ -414,13 +414,12 @@ function auditLine(outcome: string, providerId: WebSearchProviderId | undefined,
 }
 
 /**
- * The pi entry point — real filesystem, env and fetch, wired at the composition root.
- * `findRepoRoot` realpaths first, so the config named is the COMMITTED file even under
- * the print harness's symlink mirror (#20, same rationale as web_fetch's root).
+ * The pi entry point — real filesystem, env and fetch, wired at the composition root. The config
+ * is the user's, in `ENSO_HOME` (#421).
  */
 export default createWebSearch({
-  locateConfigFile: () => ensoConfigPath(findRepoRoot(import.meta.url)),
-  readConfigText: (path: string) => readFileSync(path, 'utf8'),
+  locateConfigFile: () => ensoConfigPath(ensoHome(process.env)),
+  readConfigText: readTextIfPresent,
   // ⚠ From the gated `ENSO_HOME/secrets.env` FILE, never `process.env` (#89): the host
   // quarantines every secret out of the environment before a session exists, precisely so
   // a `bash` child cannot print it. Extension code is trusted to read the file the model's

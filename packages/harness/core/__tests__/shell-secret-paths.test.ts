@@ -81,7 +81,7 @@ test('ordinary development commands are untouched', () => {
     'git status --short',
     'cat packages/core/src/secrets.ts',
     'bun run enso',
-    'echo \'{"webFetch":{"allowedHosts":["x"]}}\' > enso.config.json',
+    'echo \'{"compilerOptions":{}}\' > tsconfig.json',
     'rg --files packages/web/src',
     'ls .zenith/config',
   ]) {

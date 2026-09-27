@@ -1,5 +1,4 @@
 import { lookup } from 'node:dns/promises'
-import { readFileSync } from 'node:fs'
 import { isIP } from 'node:net'
 import type { AgentToolResult, ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import {
@@ -13,7 +12,7 @@ import {
   WEB_FETCH_TOOL_NAME,
   WebFetchToolParameters,
 } from '@enso/core'
-import { ensoConfigPath, findRepoRoot } from '@enso/core/paths'
+import { ensoConfigPath, ensoHome, readTextIfPresent } from '@enso/core/paths'
 import {
   isFetchableContentType,
   isHostAllowed,
@@ -28,17 +27,15 @@ import {
  *
  * Three properties the shell path could never have:
  *
- * 1. **A committed, empty-by-default host allowlist.** The `webFetch.allowedHosts`
- *    section of `enso.config.json` at the REPOSITORY root (#59) names every fetchable
- *    host; it ships EMPTY as the recorded policy, and each host a human adds is one
- *    reviewable diff line. ⚠ Read ONCE at extension load, deliberately: the running
- *    session cannot widen its own egress by editing the file — an edit takes effect next
- *    session, after it has sat in `git status` where a human sees it. (write/edit on the
- *    file are also denied by the guard's `protectedWriteFragments`; a bash redirect into
- *    it is the stated residual, made inert within the session by the load-once read.)
- *    ⚠ The config belongs to the Enso INSTALL: located via `findRepoRoot` from
- *    this module's own tree, never from the session cwd — a foreign checkout's
- *    `enso.config.json` must not become this session's allowlist (see config.ts).
+ * 1. **An empty-by-default host allowlist.** The `webFetch.allowedHosts` section of the
+ *    user's `ENSO_HOME/config.json` (#59, #421) names every fetchable host; absent — no
+ *    file, no section — it is EMPTY, and each host a human adds is one deliberate line.
+ *    ⚠ Read ONCE at extension load, deliberately: the running session cannot widen its own
+ *    egress by editing the file — an edit takes effect next session. (write/edit into
+ *    `ENSO_HOME` are also denied, as a persistence target; a bash redirect into it is the
+ *    stated residual, made inert within the session by the load-once read.)
+ *    ⚠ Never located from the session cwd — a foreign checkout's config must not become
+ *    this session's allowlist (see config.ts).
  * 2. **An audit line per call** — every outcome, refusals included, prints one stderr line
  *    naming the URL and what happened.
  * 3. **Bounded response handling** — http(s) only, no credentials in URLs, redirects
@@ -69,12 +66,10 @@ export interface WebFetchRequestInit {
  * same pattern as the guards' `analyzeBashCommand`.
  */
 export interface WebFetchDependencies {
-  /**
-   * Where `enso.config.json` lives — read from AND named in refusal messages. May throw
-   * (a broken install has no findable root); the extension fails CLOSED on that.
-   */
+  /** Where the user's config lives — read from AND named in refusal messages. */
   locateConfigFile: () => string
-  readConfigText: (path: string) => string
+  /** The config's text; `undefined` when there is no file, which is the defaults. A read that fails otherwise throws, and the extension fails CLOSED. */
+  readConfigText: (path: string) => string | undefined
   fetchUrl: (url: string, init: WebFetchRequestInit) => Promise<Response>
   /** Resolve a hostname to its addresses. Rejects on NXDOMAIN/timeouts. */
   resolveHostAddresses: (hostname: string) => Promise<string[]>
@@ -96,7 +91,7 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
       configPath = dependencies.locateConfigFile()
       const parsed = parseEnsoConfig(dependencies.readConfigText(configPath))
       if (parsed.kind === 'ok') {
-        allowedHosts = parsed.config.webFetch.allowedHosts
+        allowedHosts = parsed.config.webFetch?.allowedHosts ?? []
       } else {
         configProblem = parsed.reason
       }
@@ -105,7 +100,7 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
     }
     // A locate failure leaves no path to name; the filename plus its home still tells
     // the human where to look.
-    const configDisplayPath = configPath ?? `${ENSO_CONFIG_FILENAME} (at the Enso repository root)`
+    const configDisplayPath = configPath ?? `${ENSO_CONFIG_FILENAME} in ENSO_HOME (~/.enso by default)`
 
     pi.registerTool({
       name: WEB_FETCH_TOOL_NAME,
@@ -113,7 +108,7 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
       description:
         `Fetch one absolute http(s) URL and return the response body as text (capped at ` +
         `${WEB_FETCH_MAX_RESPONSE_BYTES} bytes; redirects are reported, never followed). ` +
-        `Only hosts on the committed allowlist are fetchable` +
+        `Only hosts on the config's allowlist are fetchable` +
         (allowedHosts.length > 0 ? ` (currently: ${allowedHosts.join(', ')})` : ` — and it is currently EMPTY`) +
         `; a refusal names the file a human can extend.`,
       promptSnippet: `${WEB_FETCH_TOOL_NAME}: fetch an allowlisted http(s) URL as text`,
@@ -348,14 +343,12 @@ async function readBodyUpTo(response: Response, maxBytes: number): Promise<{ tex
 }
 
 /**
- * The pi entry point — real filesystem, DNS and fetch, wired at the composition root.
- * `findRepoRoot` realpaths before walking, which is what keeps the named path the
- * COMMITTED file even when the print harness (#20) runs this extension through its
- * `.enso/print-harness/` symlink mirror (observed live 2026-09-04, PR #58).
+ * The pi entry point — real filesystem, DNS and fetch, wired at the composition root. The
+ * config is the user's, in `ENSO_HOME` (#421), whichever surface — or print mirror — loads this.
  */
 export default createWebFetch({
-  locateConfigFile: () => ensoConfigPath(findRepoRoot(import.meta.url)),
-  readConfigText: (path: string) => readFileSync(path, 'utf8'),
+  locateConfigFile: () => ensoConfigPath(ensoHome(process.env)),
+  readConfigText: readTextIfPresent,
   fetchUrl: (url: string, init: WebFetchRequestInit) => fetch(url, init),
   resolveHostAddresses: async (hostname: string) =>
     (await lookup(hostname, { all: true })).map((resolved) => resolved.address),

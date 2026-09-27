@@ -67,7 +67,7 @@ function loadWebSearch(
   const tavilyRequests: LoadedWebSearch['tavilyRequests'] = []
   const deepseekKeys: (string | undefined)[] = []
   const dependencies: WebSearchDependencies = {
-    locateConfigFile: () => '/repo/enso.config.json',
+    locateConfigFile: () => '/home/u/.enso/config.json',
     readConfigText: () => JSON.stringify({ webFetch: { allowedHosts: [] } }),
     readEnvironmentVariable: (variableName: string) => environment[variableName],
     runProviders: {
@@ -343,14 +343,14 @@ test('an unreadable config fails CLOSED: every call refuses, no provider runs', 
   })
   const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
   expect(text.startsWith('Not searched:')).toBe(true)
-  expect(text).toContain('enso.config.json')
+  expect(text).toContain('/home/u/.enso/config.json')
   expect(loaded.calls.anthropic).toBe(0)
   expect(loaded.calls.tavily).toBe(0)
 })
 
 test('the ABSENT webSearch section is the working default — current-model routing runs', async () => {
-  // The committed config has no webSearch section; the tool must work anyway (#63:
-  // a required section would have made every committed config unreadable).
+  // A config with no webSearch section; the tool must work anyway (#63:
+  // a required section would have made every existing config unreadable).
   const loaded = loadWebSearch()
   const { value: text } = await withAuditCapture(() => run(loaded, { model: ANTHROPIC_MODEL }))
   expect(text.startsWith('Searched the web via anthropic.')).toBe(true)

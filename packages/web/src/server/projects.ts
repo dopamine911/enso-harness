@@ -30,7 +30,7 @@ import { Compile } from 'typebox/compile'
  * ⚠ THE BLAST RADIUS IS STILL CHOSEN OUTSIDE THE BROWSER. With no sandbox (#24) a session's
  * directory is what it can reach, so the directories that can be projects are the launch
  * directory and directories STRICTLY UNDER a root the install declares (`projects.roots` in
- * `enso.config.json`). A page registers one by path — the only request that carries a path —
+ * the user's config, `ENSO_HOME/config.json`). A page registers one by path — the only request that carries a path —
  * and every request after names it by id. The path is resolved (`realpath`) BEFORE it is
  * checked, so a symlink under a root cannot lead out of it, and no segment below the root may be
  * hidden (`.ssh`, `.config`, `.enso` — dot-directories hold credentials and config, not projects).
@@ -56,9 +56,9 @@ type Registration = EnsoProjectsState['projects'][number]
 export interface ProjectRegistryOptions {
   /** The directory the server was launched in: the first project, never removable. */
   readonly launchDirectory: string
-  /** `projects.roots` from `enso.config.json`, as written: absolute or `~/`. */
+  /** `projects.roots` from the user's config (`ENSO_HOME/config.json`), as written: absolute or `~/`. */
   readonly roots: readonly string[]
-  /** `.enso/projects.json` (`ensoProjectsPath`); absent, registrations live in memory only (tests). */
+  /** `ENSO_HOME/projects.json` (`ensoProjectsPath`); absent, registrations live in memory only (tests). */
   readonly statePath?: string
   /** Where `~/` points; the running user's home unless a test says otherwise. */
   readonly homeDirectory?: string
@@ -201,7 +201,7 @@ function refusalUnderRoots(
   declared: readonly string[],
 ): string | undefined {
   if (roots.length === 0) {
-    return 'no project roots are declared — add `"projects": { "roots": ["~/code"] }` to enso.config.json'
+    return 'no project roots are declared — add `"projects": { "roots": ["~/code"] }` to ~/.enso/config.json (ENSO_HOME)'
   }
   let refusal: string | undefined
   for (const root of roots) {
@@ -225,7 +225,9 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
   const roots = options.roots.map((root) => {
     const expanded = expandHome(root, home)
     if (!isAbsolute(expanded)) {
-      throw new Error(`enso-server: projects.roots entry ${root} is not an absolute or ~/ path — fix enso.config.json`)
+      throw new Error(
+        `enso-server: projects.roots entry ${root} is not an absolute or ~/ path — fix ENSO_HOME/config.json`,
+      )
     }
     return realpathOrSelf(expanded)
   })

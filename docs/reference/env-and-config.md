@@ -2,11 +2,11 @@
 # Environment and configuration reference
 
 Generated from the owned source roots, `scripts/lint/process-environment.ts`, the core config/path declarations,
-`enso.config.json`, and `packages/harness/package.json`. No machine environment is read.
+and `packages/harness/package.json`. No machine environment and no user config is read.
 
 ## Explicit environment keys
 
-The 11 files that directly touch the process environment exactly match the
+The 12 files that directly touch the process environment exactly match the
 `node/no-process-env` exception list in `scripts/lint/process-environment.ts`; generation fails if either side gains or loses a file.
 Rows cover literal dot access, literal bracket access, destructuring, `node:process` `env` imports,
 grounded `environment.KEY` seams, and keys explicitly written beside a process-environment spread.
@@ -32,22 +32,21 @@ shape or a literal without checked metadata fails generation as `UNCLASSIFIED` r
 
 ## `EnsoConfig` schema
 
-The whole-file schema is strict on unknown keys. Nested fields are explicit below. Defaults are consumer
-behavior when an optional field is omitted; required fields have no schema default.
+The user's `ENSO_HOME/config.json` (#421). No file at all is every default below. A file that is there is strict
+on unknown keys and fails closed when unreadable. Defaults are consumer behavior when an optional field is omitted;
+required fields have no schema default.
 
 | Field | Required | Default when omitted | Reader |
 |---|---|---|---|
 | `projects` | no | No roots: the launch directory is the only project, and registering another is refused. | `packages/web/src/server/dev.ts` → `startEnsoServer({ projectRoots })` |
 | `projects.roots` | yes | n/a — absolute or `~/` paths; a page may register a project only strictly under one (#395), and a root taken out hides the projects under it | `packages/web/src/server/projects.ts#createProjectRegistry` |
-| `webFetch` | yes | None; omission makes the strict config unreadable. | `packages/harness/extensions/web-fetch/index.ts#createWebFetch` |
-| `webFetch.allowedHosts` | yes | None in the schema; the committed policy is shown from `enso.config.json` below. | `packages/harness/extensions/web-fetch/index.ts#createWebFetch` |
+| `webFetch` | no | An empty allowlist: nothing is fetchable. | `packages/harness/extensions/web-fetch/index.ts#createWebFetch` |
+| `webFetch.allowedHosts` | yes | n/a — required once `webFetch` is present; `[]` fetches nothing. | `packages/harness/extensions/web-fetch/index.ts#createWebFetch` |
 | `webSearch` | no | `{}`; current-model routing with no Tavily domain filters. | `packages/harness/extensions/web-search/index.ts#createWebSearch` |
 | `webSearch.backend` | no | Current-model routing; only `"deepseek"` pins the dedicated backend. | `packages/harness/extensions/web-search/index.ts#runPrimary` |
 | `webSearch.tavily` | no | No Tavily domain filters. | `packages/harness/extensions/web-search/index.ts#createWebSearch` |
 | `webSearch.tavily.excludeDomains` | no | Omitted from the Tavily request. | `packages/harness/extensions/web-search/index.ts#createWebSearch` |
 | `webSearch.tavily.includeDomains` | no | Omitted from the Tavily request. | `packages/harness/extensions/web-search/index.ts#createWebSearch` |
-
-Committed `webFetch.allowedHosts`: `[]`.
 
 **Parser limit.** The schema reader handles this repository's current `Type.Object` / `Type.Optional`
 declaration layout in `config.ts`, `web-fetch.ts`, and `web-search.ts`; metadata and consumer probes must

@@ -20,7 +20,8 @@ export const PROCESS_ENVIRONMENT_READERS: readonly string[] = [
   'scripts/gate.ts', // npm_config_user_agent, and the child's FORCE_COLOR
   'packages/core/src/secrets.ts', // the quarantine's default argument — the seam itself
   'packages/harness/extensions/logging/index.ts', // the pi entry point's own environment
-  'packages/harness/extensions/web-search/index.ts', // ENSO_HOME: where the secrets file is (#421)
+  'packages/harness/extensions/web-fetch/index.ts', // ENSO_HOME: where the user's config is (#421)
+  'packages/harness/extensions/web-search/index.ts', // ENSO_HOME: where the secrets file and the config are (#421)
   'packages/web/src/host/agent-host.ts', // pins PI_CODING_AGENT_DIR, then quarantines
   'packages/web/src/server/dev.ts', // launcher: ENSO_HOME + levels
   'packages/web/src/server/dev-web.ts', // launcher: ENSO_HOME + levels

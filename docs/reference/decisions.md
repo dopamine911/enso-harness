@@ -9,7 +9,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 
 | File | Issues | First complete decision sentence |
 |---|---|---|
-| `packages/core/src/__tests__/config.test.ts` | `#59` | The enso.config.json loading contract (#59): parse fails CLOSED — every non-conforming input comes back `unreadable`, never as a silently-empty config. |
+| `packages/core/src/__tests__/config.test.ts` | `#59`, `#421` | The config loading contract (#59, #421): a file that is there parses or fails CLOSED — every non-conforming input comes back `unreadable`, never as a silently-empty config — and no file is the defaults. |
 | `packages/core/src/__tests__/log-process.test.ts` | `#132` | The file a user hands us (#132), end to end through the real configurator: what a line looks like, what never reaches it, what every line under a route carries — and the knob. |
 | `packages/core/src/__tests__/log-recorder.ts` | `#132`, `#178` | The tests' sink (#132), one for every package (#178): every `enso` record, at every level, into memory — a guard's verdict, an audit line or a route's problem is asserted as the record it is, the way a bundle reader would read it, not as a line on stderr. |
 | `packages/core/src/__tests__/log-stats.test.ts` | `#144` | The day, derived (#144 slice 4): every number a fold over records that already exist, joined by the ids they carry and never by adjacency in a file three processes interleave. |
@@ -24,7 +24,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/__tests__/thread-inspection.test.ts` | `#86`, `#100` | The row formats are shared by the `?debug` drawer and `enso-thread.ts` (PR #100 review: one definition, after the #86 pair had drifted). |
 | `packages/core/src/__tests__/thread-timeline.test.ts` | `#144` | One thread, one ordering (#144 slice 3): the two tails and the log, by time, with the arrival order kept inside a tie and an unreadable stamp kept rather than dropped. |
 | `packages/core/src/ask-user.ts` | `#12` | The agent's `ask_user` tool (#12): what the model writes when it has a question only the user can answer. |
-| `packages/core/src/config.ts` | `#59` | Enso's ONE committed config file (#59): `enso.config.json` at the repository root. |
+| `packages/core/src/config.ts` | `#59`, `#421` | Enso's config (#59): the USER's `config.json` in `ENSO_HOME` (`~/.enso/config.json`, #421). |
 | `packages/core/src/dialog.ts` | `#12`, `#27`, `#112` | pi's blocking extension dialogs, as data (#27, #112). |
 | `packages/core/src/follow.ts` | `#112` | The server↔browser wire (#112): a thread's feed, as the follow route serves it. |
 | `packages/core/src/log-bundle.ts` | `#132` | The bundle (#132 item 5): ONE plaintext file a user attaches to an issue, built from things that already exist — the day's records, the live threads' inspections, the versions, and what the browser logged — with a manifest of what was redacted so the reader knows what is missing rather than wondering. |
@@ -46,7 +46,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/tool-input.ts` | `#361` | A tool call's one-line subject — `ls -la`, `src/x.ts`, `TODO` — shared by the transcript's step row (`selected-message-part.tsx`) and the Context view's brief (`host/branch-context.ts`, #361), so a call reads the same in both. |
 | `packages/core/src/tool-result.ts` | `#16`, `#17`, `#18` | The tool-result payload contract (#18), as a TypeBox schema. |
 | `packages/core/src/transcript.ts` | `#162` | The transcript (#162 workstream 4, leak L2's persistence side): a thread's branch, root to leaf, as entries of OURS. |
-| `packages/core/src/web-fetch.ts` | `#9`, `#54`, `#59` | The web_fetch tool's shapes and policy constants (#54). |
+| `packages/core/src/web-fetch.ts` | `#9`, `#54`, `#59`, `#421` | The web_fetch tool's shapes and policy constants (#54). |
 | `packages/core/src/web-search.ts` | `#63` | The web_search tool's shapes and config section (#63). |
 | `packages/harness/core/__tests__/environment-dump.test.ts` | `#89` | #89's depth layer: the bash environment-dump deny. |
 | `packages/harness/core/__tests__/paths.test.ts` | `#53` | ⚠ FAIL CLOSED (#53 S3): no roots means nothing is inside — a misconfigured policy with an empty root list must deny, not allow, every write. |
@@ -86,8 +86,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/extensions/guards/index.ts` | `#4`, `#9`, `#10`, `#11`, `#20`, `#21`, `#69` | Tier 0 guards — see `docs/concepts/pi-immediate-needs.md`. |
 | `packages/harness/extensions/logging/__tests__/logging.test.ts` | `#132` | The extension's two branches (#132): pi as a CHILD configures its own sink; pi IN-PROCESS leaves the server's alone. |
 | `packages/harness/extensions/logging/index.ts` | `#132`, `#144`, `#167` | The extension process's logging (#132), and the one record only an extension can write: the provider's own request id (#144). |
-| `packages/harness/extensions/web-fetch/__tests__/web-fetch.test.ts` | `#54` | The web_fetch extension (#54), against injected IO seams — no test here touches the network, DNS, or the committed config file (one shape-pin at the bottom reads the real `enso.config.json`, read-only). |
-| `packages/harness/extensions/web-fetch/index.ts` | `#9`, `#54`, `#59` | The web_fetch tool (#54) — the sanctioned web access that replaces the ad-hoc network clients #9 denies in bash. |
+| `packages/harness/extensions/web-fetch/__tests__/web-fetch.test.ts` | `#54` | The web_fetch extension (#54), against injected IO seams — no test here touches the network, DNS, or the user's config file. |
+| `packages/harness/extensions/web-fetch/index.ts` | `#9`, `#54`, `#59`, `#421` | The web_fetch tool (#54) — the sanctioned web access that replaces the ad-hoc network clients #9 denies in bash. |
 | `packages/harness/extensions/web-search/__tests__/web-search.test.ts` | `#63` | The web_search extension (#63) against injected seams — the SELECTION and FALLBACK policy, and the ACCURATE rendering contract. |
 | `packages/harness/extensions/web-search/index.ts` | `#54`, `#63`, `#89`, `#132` | The web_search tool (#63) — provider-native search with a Tavily fallback, consumed from pi-web-search 1.4.0 (© ttttmr, MIT) and retyped behind enso's seams. |
 | `packages/web/e2e/chat.e2e.ts` | `#27`, `#71` | Manual web smoke (#71): drive the real chat surface and leave screenshots behind. |
@@ -124,7 +124,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/__tests__/thread-url.test.ts` | `#142` | The URL is the source of truth for the active thread (#142): what it names, and what it cannot. |
 | `packages/web/src/__tests__/threads-rail.test.tsx` | `#90` | #90 PR 3: the sessions rail and the page's thread list behind it. |
 | `packages/web/src/__tests__/transcript-reveal.test.ts` | `#359` | #359: a stats target → the transcript row it names. |
-| `packages/web/src/add-project.tsx` | `#395` | Add a project (#395 slice 3): browse the directories the install allows — inside the roots `enso.config.json` declares — and register one. |
+| `packages/web/src/add-project.tsx` | `#395` | Add a project (#395 slice 3): browse the directories the install allows — inside the roots the user's config declares (`ENSO_HOME/config.json`) — and register one. |
 | `packages/web/src/browser-logging.ts` | `#86`, `#132` | The browser's logging (#132 slice 3). |
 | `packages/web/src/command-palette.tsx` | `#31`, `#338`, `#341`, `#343`, `#361`, `#390` | The `/` command palette (#338, slice 1): Claude Code's `/` button in VS Code, as a popup over the composer — a filter box, rows grouped by where the command came from, a description on each row. |
 | `packages/web/src/commands-connection.ts` | `#144`, `#338`, `#344` | The `/` palette's one read (#338, slice 1): `GET /api/threads/:id/commands` — the slash commands the thread's session registers, grouped by the server into extension commands, prompt templates and skills, with a `source` that says whose list it is (`live`: this thread's session; `remembered`: the last built session's, because every session builds it from the same sources under the same configuration and this thread has no live session — never ran, or ran and idled out; the server cannot tell; `none`: no session has been built in this process). |
@@ -210,7 +210,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/bundle-route.ts` | `#132`, `#137` | `GET /api/logs/bundle[?thread=<id or prefix>]` (#132 item 5): the day's records, the live threads' inspections, and the versions, as ONE markdown file with the records fenced as JSONL — `bun run logs --file` reads it back. |
 | `packages/web/src/server/dev-proxy.ts` | `#34`, `#38`, `#160` | The web surface's `/api/*` hop to the Enso server (`dev-web.ts`), streaming both directions. |
 | `packages/web/src/server/dev-web.ts` | `#9`, `#36` | Dev entry point for the web surface — Bun's fullstack dev server, replacing vite (#36). |
-| `packages/web/src/server/dev.ts` | `#9`, `#132`, `#395` | Dev entry point for the enso server. |
+| `packages/web/src/server/dev.ts` | `#9`, `#132`, `#395`, `#421` | Dev entry point for the enso server. |
 | `packages/web/src/server/follow.ts` | `#75`, `#109`, `#112`, `#116`, `#162` | The prompt/follow split (#112) — the server↔browser wire. |
 | `packages/web/src/server/font-files.ts` | `#407` | The page's fonts, served as files rather than bundled (#407 item 6). |
 | `packages/web/src/server/live-or-stored.ts` | `#45`, `#86`, `#361` | A thread's answer from pi's memory when it is live, from its file when it is not (#45, #361) — READ THE WAY `thread-read.ts` READS: peek, read the file if not live, re-peek. |

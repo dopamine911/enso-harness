@@ -18,7 +18,7 @@ sequenceDiagram
   participant V as core/web-search (vocabulary.ts, auth.ts)
   participant P as native provider · Tavily (providers/*.ts)
 
-  Note over X: at load: enso.config.json read ONCE · unreadable ⇒ every call refuses, no provider runs
+  Note over X: at load: ENSO_HOME/config.json read ONCE · absent ⇒ defaults · unreadable ⇒ every call refuses, no provider runs
   R->>X: execute({ query }, signal, onUpdate, context)
   X->>S: TAVILY_API_KEY — the fallback is armed iff present and non-empty
   X->>V: routedProviderIdForModel(context.model) — unless config pins backend "deepseek"
@@ -38,8 +38,8 @@ sequenceDiagram
 
 ## The invariants it shows
 
-1. **Selection is the current model's own API, or the committed pin — never implicit.** `runPrimary`
-   runs DeepSeek only when `enso.config.json` says `webSearch.backend: "deepseek"`; otherwise
+1. **Selection is the current model's own API, or the configured pin — never implicit.** `runPrimary`
+   runs DeepSeek only when the user's config says `webSearch.backend: "deepseek"`; otherwise
    `routedProviderIdForModel` reads `model.provider` and `model.api` — Google by either, the three
    Responses APIs to `openai`, `anthropic-messages` to `anthropic` — and anything else (the runtime
    registers DeepSeek chat models as `openai-completions`) selects nothing: a failure record. The

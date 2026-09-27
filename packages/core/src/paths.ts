@@ -335,7 +335,7 @@ export function ensoLogsDir(home: string): string {
 
 /**
  * The projects registered from a page (#395): `ENSO_HOME/projects.json`. Server STATE, not config —
- * the roots they may sit under are config (`enso.config.json`).
+ * the roots they may sit under are config (`ENSO_HOME/config.json`).
  *
  * @group Workspace paths
  */
@@ -362,10 +362,26 @@ export function webPackageDir(repoRoot: string): string {
 }
 
 /**
- * The committed config file's path under a repository root (#59): `enso.config.json`, beside `package.json`.
+ * The user's config file (#59, #421): `ENSO_HOME/config.json`. Absent is the defaults (`parseEnsoConfig`).
  *
  * @group Workspace paths
  */
-export function ensoConfigPath(repoRoot: string): string {
-  return join(repoRoot, ENSO_CONFIG_FILENAME)
+export function ensoConfigPath(home: string): string {
+  return join(home, ENSO_CONFIG_FILENAME)
+}
+
+/**
+ * A file's text, or `undefined` when there is no file — for a file whose absence means its
+ * defaults (the config). Any other failure to read it throws: a file that is there and unreadable
+ * is not a missing one.
+ *
+ * @group Workspace paths
+ */
+export function readTextIfPresent(path: string): string | undefined {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
 }

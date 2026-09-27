@@ -174,7 +174,7 @@ from our words to the vendors' is its vendor map, the one place it names them.
 
 | Noun | Meaning | Id | Minted by | Owner, lifetime |
 |---|---|---|---|---|
-| **project** | a directory threads run in (#395) | `projectId` (its canonical path, hashed) | the launch directory (`EnsoServerOptions.cwd`), or registered under a root `enso.config.json` declares — never a path chosen by a request | the registration; many threads per project, many projects per server |
+| **project** | a directory threads run in (#395) | `projectId` (its canonical path, hashed) | the launch directory (`EnsoServerOptions.cwd`), or registered under a root the user's config declares — never a path chosen by a request | the registration; many threads per project, many projects per server |
 | **thread** | one conversation | `threadId`, UUID-shaped (`isEnsoThreadId`) | the browser (`crypto.randomUUID()`), or reused from a stored log on resume | the registry's `ThreadEntry` while live; the id outlives it |
 | **pi session** | pi's append-only log, and the live `AgentSession` over it | **the same string as `threadId`** (#95) | pi, under the browser's id | 1:1 with the thread; the log outlives everything |
 | **run** | one acquisition of a thread: prompt admission → `agent_settled`. Not one prompt — prompts during a run queue into it (#75) | `generation`, per thread, monotonic for the server's lifetime | `acquire()` | the lease; released by the settle observer, or on acceptance where acceptance IS completion (an extension command, a mode change); never by a returning prompt |
@@ -261,7 +261,7 @@ What is durable, and where:
 | pi session log, `<timestamp>_<threadId>.jsonl` under pi's session dir | thread id | pi — **lazily**: `sessionFile` is null until pi's first flush | live from the hosted session when the thread is live; cold from the file otherwise; messages are rebuilt from entries on every cold read, so a mapper change applies retroactively |
 | picc's `modes` custom entry in that log | — | picc, on `/mode` | `persistedPermissionMode(branch)`: last entry wins, deliberately uncached because `/tree` and `/fork` move the leaf (#84, #95) |
 | the guards' `enso-guard-denial` custom entry in that log | the refused call's `toolCallId` | the guards extension, on every denial (#387) | live as a `custom-entry` observation; cold, `transcript-to-messages.ts` joins it onto its tool result — what tells a refusal from a failed command after a reload |
-| `enso.config.json` at the repo root | — | committed | once, at extension load; fails closed (#59) |
+| `ENSO_HOME/config.json` (the user's; absent is the defaults) | — | operator | once, at extension load; a file that is there and unreadable fails closed (#59, #421) |
 | `ENSO_HOME/secrets.env` | — | operator | per call by the extension that needs it; quarantined from `process.env` |
 | `ENSO_HOME/pi-agent/provider-failover.json` | — | seeded at host creation | pi's multi-account extension |
 
@@ -379,7 +379,6 @@ Three workspaces. The harness is the pi package; core is the shared shapes; web 
 
 ```
 Enso/
-  enso.config.json           # the ONE committed harness config (#59)
   packages/
     core/                   # @enso/core — every TypeBox schema and shared type, one place
     harness/                # the pi package

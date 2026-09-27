@@ -14,8 +14,8 @@ import { WebSearchProviderError } from '../vocabulary.ts'
  * `openai-completions` at `https://api.deepseek.com` (verified 2026-09-04), and the
  * SEARCH endpoint is a DIFFERENT base — the Anthropic-compatible
  * `https://api.deepseek.com/anthropic/v1`. Do not derive one base from the other.
- * Selection is by explicit `webSearch.backend: "deepseek"` in `enso.config.json` only, so
- * no provider is ever billed that the committed config never named.
+ * Selection is by explicit `webSearch.backend: "deepseek"` in the user's config only, so
+ * no provider is ever billed that the config never named.
  *
  * @group Web search
  */
@@ -49,7 +49,7 @@ export async function runDeepseekProviderSearch(request: DeepseekSearchRequest):
     throw new WebSearchProviderError(
       'deepseek',
       `the configured deepseek backend has no credential — set ${DEEPSEEK_API_KEY_VARIABLE} in the ` +
-        `environment (a human step; the key never enters enso.config.json) and restart the session`,
+        `environment (a human step; the key never enters the config) and restart the session`,
       { requestDispatched: false },
     )
   }
