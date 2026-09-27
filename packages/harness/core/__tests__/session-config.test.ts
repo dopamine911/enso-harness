@@ -132,12 +132,12 @@ test("a trusted project's unreadable config fails CLOSED, naming the project's f
   expect(resolved.path).toBe(projectConfigPath(f.cwd))
 })
 
-test('⚠ one question per session: two tools resolving on the same session bus share the answer', async () => {
+test('⚠ one question per session: two tools resolving for the same session share the answer', async () => {
   const f = fixture({ user: USER, project: PROJECT })
-  const sessionBus = {}
+  const sessionManager = {}
   const [first, second] = await Promise.all([
-    sessionEnsoConfig(sessionBus, f.context('Trust (this session only)')),
-    sessionEnsoConfig(sessionBus, f.context('Trust (this session only)')),
+    sessionEnsoConfig(sessionManager, f.context('Trust (this session only)')),
+    sessionEnsoConfig(sessionManager, f.context('Trust (this session only)')),
   ])
   expect(f.asked).toHaveLength(1)
   expect(second).toBe(first)

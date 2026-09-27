@@ -117,7 +117,7 @@ function loadWebSearch(
       return captured
     },
     startSession: async () => {
-      await sessionStart?.({ type: 'session_start' }, { cwd: '/work/project', hasUI: true, ui: {} })
+      await sessionStart?.({ type: 'session_start' }, { cwd: '/work/project', hasUI: true, ui: {}, sessionManager: {} })
     },
     calls,
     tavilyRequests,

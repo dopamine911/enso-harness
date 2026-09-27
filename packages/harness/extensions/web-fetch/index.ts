@@ -79,7 +79,7 @@ export interface WebFetchDependencies {
    * `.enso/config.json` once the project is trusted — one resolution per session, shared with
    * web_search, so the trust question is asked once.
    */
-  resolveSessionConfig: (sessionBus: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
+  resolveSessionConfig: (session: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
   fetchUrl: (url: string, init: WebFetchRequestInit) => Promise<Response>
   /** Resolve a hostname to its addresses. Rejects on NXDOMAIN/timeouts. */
   resolveHostAddresses: (hostname: string) => Promise<string[]>
@@ -134,7 +134,7 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
       // question raised during session_start only once the session exists and the thread is being
       // followed — awaiting it here held session creation on an answer nobody could see, a deadlock
       // (found live). The call that needs the policy awaits it instead, like a permission prompt.
-      session.ready = dependencies.resolveSessionConfig(pi.events, context).then(
+      session.ready = dependencies.resolveSessionConfig(context.sessionManager, context).then(
         (resolved) => {
           Object.assign(policy, policyFrom(resolved.result, resolved.path))
           register()
@@ -406,8 +406,7 @@ async function readBodyUpTo(response: Response, maxBytes: number): Promise<{ tex
 export default createWebFetch({
   locateConfigFile: () => ensoConfigPath(ensoHome(process.env)),
   readConfigText: readTextIfPresent,
-  resolveSessionConfig: (sessionBus, context) =>
-    sessionEnsoConfig(sessionBus, { ...context, home: ensoHome(process.env) }),
+  resolveSessionConfig: (session, context) => sessionEnsoConfig(session, { ...context, home: ensoHome(process.env) }),
   fetchUrl: (url: string, init: WebFetchRequestInit) => fetch(url, init),
   resolveHostAddresses: async (hostname: string) =>
     (await lookup(hostname, { all: true })).map((resolved) => resolved.address),

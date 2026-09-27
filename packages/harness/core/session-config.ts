@@ -12,8 +12,10 @@ import { createProjectTrustStore, defaultProjectTrust, projectTrustOptions } fro
  * project's config is not read, and the session is told so: skipped, never silently ignored.
  *
  * ⚠ ONE resolution per session, shared by every tool that reads the config: keyed on the
- * session's event bus, which pi creates per session and hands every extension of it. Two tools
- * resolving on their own would ask the trust question twice.
+ * session's `sessionManager`, the one object pi's runner hands every extension's context in that
+ * session. Two tools resolving on their own would ask the trust question twice. (Not `pi.events`:
+ * pi builds that object per EXTENSION — keyed on it, each tool resolved and asked on its own,
+ * found live.)
  */
 
 /**
@@ -46,15 +48,15 @@ export interface SessionConfigContext {
 const resolutions = new WeakMap<object, Promise<SessionEnsoConfig>>()
 
 /**
- * The session's config, resolved once per `sessionBus` (the extension API's `events`).
+ * The session's config, resolved once per `session` (the context's `sessionManager`).
  *
  * @group Project trust
  */
-export function sessionEnsoConfig(sessionBus: object, context: SessionConfigContext): Promise<SessionEnsoConfig> {
-  let resolution = resolutions.get(sessionBus)
+export function sessionEnsoConfig(session: object, context: SessionConfigContext): Promise<SessionEnsoConfig> {
+  let resolution = resolutions.get(session)
   if (resolution === undefined) {
     resolution = resolveSessionConfig(context)
-    resolutions.set(sessionBus, resolution)
+    resolutions.set(session, resolution)
   }
   return resolution
 }

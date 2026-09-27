@@ -80,7 +80,7 @@ export interface WebSearchDependencies {
   /** `undefined` when there is no file: the defaults. */
   readConfigText: (path: string) => string | undefined
   /** The SESSION's config at `session_start` (#421) — shared with web_fetch; see its seam. */
-  resolveSessionConfig: (sessionBus: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
+  resolveSessionConfig: (session: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
   /** Env reads happen HERE (composition root) — providers receive values, never names. */
   readEnvironmentVariable: (variableName: string) => string | undefined
   runProviders: {
@@ -147,7 +147,7 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
       // question raised during session_start only once the session exists and the thread is being
       // followed — awaiting it here held session creation on an answer nobody could see, a deadlock
       // (found live). The call that needs the policy awaits it instead, like a permission prompt.
-      sessionReady = dependencies.resolveSessionConfig(pi.events, context).then(
+      sessionReady = dependencies.resolveSessionConfig(context.sessionManager, context).then(
         (session) => {
           webSearchConfig = session.result.kind === 'ok' ? (session.result.config.webSearch ?? {}) : {}
           configProblem = session.result.kind === 'ok' ? undefined : session.result.reason
@@ -452,8 +452,7 @@ function auditLine(outcome: string, providerId: WebSearchProviderId | undefined,
 export default createWebSearch({
   locateConfigFile: () => ensoConfigPath(ensoHome(process.env)),
   readConfigText: readTextIfPresent,
-  resolveSessionConfig: (sessionBus, context) =>
-    sessionEnsoConfig(sessionBus, { ...context, home: ensoHome(process.env) }),
+  resolveSessionConfig: (session, context) => sessionEnsoConfig(session, { ...context, home: ensoHome(process.env) }),
   // ⚠ From the gated `ENSO_HOME/secrets.env` FILE, never `process.env` (#89): the host
   // quarantines every secret out of the environment before a session exists, precisely so
   // a `bash` child cannot print it. Extension code is trusted to read the file the model's
