@@ -63,13 +63,14 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
     '/.netrc',
     '/.pgpass',
     '/.kube/config',
-    // The harness's OWN credential dir (#204): `.enso/secrets.env` (#89) and, under
-    // `.enso/pi-agent/`, pi's `auth.json`, the provider-failover files and every session
-    // transcript — all `0600` on disk, i.e. the operator's own umask calls them secret.
-    // The basename gate below covered `secrets.env` alone, so `auth.json` was readable
-    // and `grep path=.enso` recursed the lot; `containsPathFragment` appends a separator,
-    // so this one entry denies the directory itself and everything under it.
-    // ⚠ THE COST, stated: the agent can no longer read `.enso/logs/*.jsonl` with a tool.
+    // The harness's OWN credential dir (#204): `ENSO_HOME` (`~/.enso`, #421) with its
+    // `secrets.env` (#89) and, under `pi-agent/`, pi's `auth.json`, the provider-failover files
+    // and every session transcript — all `0600` on disk, i.e. the operator's own umask calls
+    // them secret — and a checkout's pre-#421 `.enso/` until it is migrated. The basename gate
+    // below covered `secrets.env` alone, so `auth.json` was readable and `grep path=.enso`
+    // recursed the lot; `containsPathFragment` appends a separator, so this one entry denies
+    // the directory itself and everything under it.
+    // ⚠ THE COST, stated: the agent can no longer read `ENSO_HOME/logs/*.jsonl` with a tool.
     // Reading the log is a human command — `bun run logs` — which uses node fs and never
     // passes this guard. Writes were already denied (`ENSO_PERSISTENCE_WRITE_DIRECTORIES`).
     '/.enso/',
@@ -139,8 +140,10 @@ What the extension takes, and what it is:
 export interface GuardDependencies {
   analyzeBashCommand: (input: { command: string; cwd: string }) => CheckCommandResult
   /**
-   * The harness's own root, where `.enso/` (credentials, sessions, logs) lives — one of the places a
-   * search over a directory above it is refused for (#160 §4, `CredentialPlaces`).
+   * The harness's own root — one of the places a search over a directory above it is refused for
+   * when it holds a credential location (#160 §4, `CredentialPlaces`). Since #421 its `.enso/` is
+   * migrated into `ENSO_HOME` (in home, so always a place); what the migration leaves behind — a
+   * login `ENSO_HOME` already had — is still here, and still refused.
    */
   harnessRoot: string
 }
@@ -174,7 +177,7 @@ built-ins are lowercase and vendor packages register capitalised names — a cas
 let the call proceed with nothing reporting it (`:4-9`).
 
 **The verdict.** The `tool_call` handler returns the runtime's `ToolCallEventResult | undefined`
-(`guards/index.ts:341,354`): a denial is `{ block: true, reason }` (every `return` in `decide` and
+(`guards/index.ts:343,354`): a denial is `{ block: true, reason }` (every `return` in `decide` and
 `shellCommandDenial` has that shape, e.g. `:365-368`), a pass is `undefined` (`:385,389,460,479`).
 There is no third value — the glossary's Retired table refuses `allow`/`abstain` as verdict words.
 
@@ -208,7 +211,7 @@ arrives `isError` (`:339-359`); `tool_call` calls `decide` and logs the verdict 
 5. **Every other tool with a `path` is a reader**, by exclusion, and a credential pattern denies it
    (`:486-500`). Exclusion, not inclusion: an inclusion list naming only `read` once let `grep` over
    `~/.aws` through (header, `:27-33`). Since #204 the same policy also runs on the shell route, so
-   `read .enso/pi-agent/auth.json` and `cat .enso/pi-agent/auth.json` agree — they did not.
+   `read ~/.enso/pi-agent/auth.json` and `cat ~/.enso/pi-agent/auth.json` agree — they did not.
 
 **Every verdict is a record** (#132): a denial at `warn` with the tool, the path and the reason; an
 allow at `debug`; never silent (`:361-373`; pinned by `guards.test.ts:77-97`).

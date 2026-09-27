@@ -163,13 +163,14 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
     '/.netrc',
     '/.pgpass',
     '/.kube/config',
-    // The harness's OWN credential dir (#204): `.enso/secrets.env` (#89) and, under
-    // `.enso/pi-agent/`, pi's `auth.json`, the provider-failover files and every session
-    // transcript — all `0600` on disk, i.e. the operator's own umask calls them secret.
-    // The basename gate below covered `secrets.env` alone, so `auth.json` was readable
-    // and `grep path=.enso` recursed the lot; `containsPathFragment` appends a separator,
-    // so this one entry denies the directory itself and everything under it.
-    // ⚠ THE COST, stated: the agent can no longer read `.enso/logs/*.jsonl` with a tool.
+    // The harness's OWN credential dir (#204): `ENSO_HOME` (`~/.enso`, #421) with its
+    // `secrets.env` (#89) and, under `pi-agent/`, pi's `auth.json`, the provider-failover files
+    // and every session transcript — all `0600` on disk, i.e. the operator's own umask calls
+    // them secret — and a checkout's pre-#421 `.enso/` until it is migrated. The basename gate
+    // below covered `secrets.env` alone, so `auth.json` was readable and `grep path=.enso`
+    // recursed the lot; `containsPathFragment` appends a separator, so this one entry denies
+    // the directory itself and everything under it.
+    // ⚠ THE COST, stated: the agent can no longer read `ENSO_HOME/logs/*.jsonl` with a tool.
     // Reading the log is a human command — `bun run logs` — which uses node fs and never
     // passes this guard. Writes were already denied (`ENSO_PERSISTENCE_WRITE_DIRECTORIES`).
     '/.enso/',

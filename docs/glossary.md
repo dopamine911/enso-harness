@@ -289,7 +289,7 @@ harness did). The first is canonical and never rewritten by us; the second is th
 
 - **entry** — see Thread. One line of the runtime's log; a *branch* is a chain of them; a *custom
   entry* is an extension's. Not a record.
-- **record** — one line of *our* log file, `.enso/logs/enso-YYYY-MM-DD.jsonl`: a message that is an
+- **record** — one line of *our* log file, `ENSO_HOME/logs/enso-YYYY-MM-DD.jsonl`: a message that is an
   *event* with placeholders, and properties that stay structured (`threadId`, `generation`, `seq`,
   `toolCallId`) so a file can be filtered, not grepped. Written unbuffered and **redacted at write**.
   Not an entry.
@@ -323,7 +323,10 @@ harness did). The first is canonical and never rewritten by us; the second is th
 - **event name** — a record's message TEMPLATE, values unrendered: what a bundle filters on and
   what a stat folds over. Declared once in `ENSO_LOG_EVENTS` and imported by the producers.
 - **config** — `enso.config.json` at the repo root, committed, read once at extension load, failing
-  closed (#59). Secrets are not config: `.enso/secrets.env`, read per call, quarantined.
+  closed (#59). Secrets are not config: `ENSO_HOME/secrets.env`, read per call, quarantined.
+- **ENSO_HOME** — the user's Enso directory, `~/.enso` unless the variable says otherwise (#421): the
+  runtime's agent dir, the secrets file, the logs and the project list, shared by every checkout. A checkout's
+  old `.enso/` is moved into it on launch, never overwriting.
 - **run provenance** — what a fork point will additionally record — project revision, context
   manifest, active rules and skills, configuration — as custom entries in the runtime's log, never a
   side file. Schema designed in the lineage phase against a real fork (#126).

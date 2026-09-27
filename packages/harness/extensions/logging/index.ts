@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { ensoLogger } from '@enso/core'
 import { configureProcessLogging, isLoggingConfigured, logsDirFrom, parseEnsoLogLevels } from '@enso/core/log-process'
-import { findRepoRoot } from '@enso/core/paths'
+import { ensoHome } from '@enso/core/paths'
 import { knownSecretValuesTracking } from '@enso/core/secrets'
 
 /**
@@ -36,15 +36,14 @@ export function createLoggingExtension(
   return async (pi: ExtensionAPI): Promise<void> => {
     recordProviderResponses(pi)
     if (isLoggingConfigured()) return
-    const repoRoot = findRepoRoot(import.meta.url)
     const disposeLogging = await configureProcessLogging({
-      logsDir: logsDirFrom(environment, repoRoot),
+      logsDir: logsDirFrom(environment),
       process: 'pi',
       levels: parseEnsoLogLevels(environment, { console: undefined }),
       // The value pass (#139): pi as a child writes tool output and model text, which is
       // exactly where a known secret is quoted rather than named — and asked per record, so
       // a key rotated mid-session is redacted from the next record on (#207).
-      secretValues: knownSecretValuesTracking(repoRoot, environment),
+      secretValues: knownSecretValuesTracking(ensoHome(environment), environment),
     })
     ensoLogger('extension', 'logging').debug('configured by the extension: pi is a child process')
     pi.on('session_shutdown', async (): Promise<void> => {

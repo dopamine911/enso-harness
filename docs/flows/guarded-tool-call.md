@@ -17,7 +17,7 @@ sequenceDiagram
   participant P as runtime (tool_call hook)
   participant G as guards handler (extensions/guards/index.ts)
   participant A as cc-safety-net (library)
-  participant L as log (.enso/logs)
+  participant L as log (ENSO_HOME/logs)
   participant H as host mapper (map-events.ts)
   participant B as browser (to-agui.ts)
 
@@ -71,9 +71,10 @@ sequenceDiagram
    A reader is also refused when its path holds a credential location beneath it — `grep` over `~`
    or `/` recurses into `~/.aws` the same way (#160 §4, `#secretLocationBeneath`) — except `ls` and
    `find`, which return names, never contents. The locations are the fragments placed in home, and,
-   where they exist, in the workspace and the harness's own root (its `.enso/`: a `.gitignore` does
-   not keep ripgrep out — it is ignored outside a git work tree, and the agent may edit it). So
-   `grep path=.` at the root of the Enso checkout itself is refused; a subfolder is not. Not seen: a
+   where they exist, in the workspace and the harness's own root (a pre-#421 `.enso/` the migration
+   left behind: a `.gitignore` does not keep ripgrep out — it is ignored outside a git work tree,
+   and the agent may edit it). `~/.enso` is in home, so it is always covered; once the checkout's
+   `.enso/` is migrated, `grep path=.` at the root of the Enso checkout itself passes. Not seen: a
    fragment's location anywhere else, and a basename-class file (`.env`) beneath the path, which
    only a walk would find.
 5. **Every verdict is a record** (#132): a denial at `warn` with `toolCallId`, `toolName`, the path

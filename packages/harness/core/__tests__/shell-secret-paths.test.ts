@@ -139,6 +139,6 @@ test('recorded residual: a name assembled at runtime is not seen', () => {
   expect(find("cat $'\\056enso/secrets.env'")?.via).toBe('text')
   expect(find('cat .en*o/sec*')).toBeUndefined()
   // An ASSIGNMENT keeps its prefix, so the dir inside one is invisible — the price of
-  // leaving `ENSO_LOGS_DIR=.enso/logs bun run dev` alone, which reads nothing.
-  expect(find('ENSO_LOGS_DIR=.enso/logs bun run dev')).toBeUndefined()
+  // leaving `ENSO_HOME=.enso bun run dev` alone, which reads nothing.
+  expect(find('ENSO_HOME=.enso bun run dev')).toBeUndefined()
 })

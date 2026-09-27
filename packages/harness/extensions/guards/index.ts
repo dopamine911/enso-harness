@@ -244,8 +244,10 @@ function pathArgumentOf(event: ToolCallEvent | ToolResultEvent): string | undefi
 export interface GuardDependencies {
   analyzeBashCommand: (input: { command: string; cwd: string }) => CheckCommandResult
   /**
-   * The harness's own root, where `.enso/` (credentials, sessions, logs) lives — one of the places a
-   * search over a directory above it is refused for (#160 §4, `CredentialPlaces`).
+   * The harness's own root — one of the places a search over a directory above it is refused for
+   * when it holds a credential location (#160 §4, `CredentialPlaces`). Since #421 its `.enso/` is
+   * migrated into `ENSO_HOME` (in home, so always a place); what the migration leaves behind — a
+   * login `ENSO_HOME` already had — is still here, and still refused.
    */
   harnessRoot: string
 }
@@ -357,7 +359,8 @@ function shellCommandDenial(
         `Secrets are kept out of the tool environment (#89), so an environment dump or a ` +
         `secret-shaped variable expansion is refused rather than trusted to be empty. ` +
         `If a command needs a value from the environment, name a non-secret variable; ` +
-        `API keys are read by the harness's own tools from .enso/secrets.env, never the root .env.`,
+        `API keys are read by the harness's own tools from its secrets file (ENSO_HOME/secrets.env, ` +
+        `~/.enso by default), never the root .env.`,
     )
   }
 
@@ -371,7 +374,7 @@ function shellCommandDenial(
         `read is the precondition for exfiltration. This gates the WORD, not the read, so a ` +
         `mention counts: if the word is prose or a search pattern rather than a path, spell ` +
         `it so it is not one (an escaped dot, '/\\.enso/', passes). The harness's own ` +
-        `credential dir (.enso/) is off limits for inspection either way; the log-reading ` +
+        `credential dir (ENSO_HOME, ~/.enso by default) is off limits for inspection either way; the log-reading ` +
         `path is "bun run logs", a human command and not a tool call.`,
     )
   }

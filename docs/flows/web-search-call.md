@@ -4,7 +4,7 @@ One `web_search` call is the model asking for the live web through a sanctioned 
 two network tools the bash guard denies the ad-hoc clients for. The extension reads the committed
 config **once** at load and fails closed; per call it routes the **current model** to its own native
 search API, resolves auth through the runtime's model registry, and — only when `TAVILY_API_KEY`
-sits in `.enso/secrets.env` — arms one Tavily attempt behind it. The result's first line names the
+sits in `ENSO_HOME/secrets.env` — arms one Tavily attempt behind it. The result's first line names the
 backend that answered and, on fallback, why; an answer produced without searching is labeled, never
 rendered as a search result (#63). One deadline covers both attempts (#99); one audit record per call.
 
@@ -14,7 +14,7 @@ rendered as a search result (#63). One deadline covers both attempts (#99); one 
 sequenceDiagram
   participant R as runtime (a tool call inside a run)
   participant X as web_search (extensions/web-search/index.ts)
-  participant S as .enso/secrets.env (readSecret)
+  participant S as ENSO_HOME/secrets.env (readSecret)
   participant V as core/web-search (vocabulary.ts, auth.ts)
   participant P as native provider · Tavily (providers/*.ts)
 
@@ -29,7 +29,7 @@ sequenceDiagram
   alt searched
     X-->>R: "Searched the web via <provider>." + notice + answer + sources
   else ungrounded · no route · failure, Tavily NOT armed
-    X-->>R: "No web search was performed …" | "Not searched: … TAVILY_API_KEY in .enso/secrets.env"
+    X-->>R: "No web search was performed …" | "Not searched: … TAVILY_API_KEY in <ENSO_HOME>/secrets.env"
   else Tavily armed
     X->>P: runTavilyProviderSearch, announced as progress, under what the primary LEFT of the deadline
     X-->>R: "Searched the web via tavily (fallback — <reason>)." | "Not searched: <both reasons>"
@@ -49,7 +49,7 @@ sequenceDiagram
    the environment only when neither a key nor an `authorization` / `x-api-key` / `x-goog-api-key`
    header came back. The resolver travels inside `ModelSearchRequest`; the extension never calls it.
 3. **The fallback is armed by a secret's presence, never by config, and fires on three things.**
-   `TAVILY_API_KEY` is read per call through `readSecret` over `.enso/secrets.env` — never
+   `TAVILY_API_KEY` is read per call through `readSecret` over `ENSO_HOME/secrets.env` — never
    `process.env`, which the host has quarantined (#89). `fallbackReasonFor` is the whole policy:
    `searched` never falls back; `ungrounded`, an unrouted model and a thrown provider error all do.
 4. **`searched` vs `ungrounded` is keyed on search activity, never on source count.** The fence below

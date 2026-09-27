@@ -40,7 +40,7 @@ were four such schemas; the subprocess transport they described is deleted.)
 | `web-fetch.ts` | web_fetch's config section, tool parameters, and caps (#54) |
 | `web-search.ts` | web_search's optional config section (backend pin + Tavily domain filters), tool parameters, and the per-attempt deadline (#63) |
 | `config.ts` | `enso.config.json`: the whole-file schema and the fail-closed loading contract (#59) |
-| `paths.ts` | the workspace path helpers — `findRepoRoot` (realpath-first) and the `.enso` dirs (#59); node/bun only, tree-shaken out of the browser bundle |
+| `paths.ts` | the workspace path helpers — `findRepoRoot` (realpath-first), `ENSO_HOME` and the paths under it, and the migration of a checkout's old `.enso/` (#59, #421); node/bun only, tree-shaken out of the browser bundle |
 
 `index.ts` re-exports all of it. Import from `@enso/core`, never from a module path — the
 barrel is what makes "is this shape already declared?" answerable by one search.

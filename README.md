@@ -152,7 +152,7 @@ hole:
 
 | Mechanism | What it stops |
 |---|---|
-| `PI_CODING_AGENT_DIR=.enso/pi-agent` | Your global pi packages, settings and credentials are invisible to this run. |
+| `PI_CODING_AGENT_DIR=~/.enso/pi-agent` | Your global pi packages, settings and credentials are invisible to this run. |
 | `--no-extensions` | pi's own discovery, which would otherwise load this repo's package a second time. |
 | `--no-skills` | Skills discovered from `~/.agents/skills/`, which the agent-dir redirect does not cover. |
 
@@ -184,7 +184,7 @@ layers that make that loop easier to observe, constrain and investigate.
                guards · observations · dialogs
                 web access · logging · config
                              │
-                           .enso/
+                          ~/.enso/
                     state · logs · pi auth
 ```
 
@@ -262,7 +262,7 @@ The permission-modes extension fails closed when it cannot ask a human. A `-p` n
 under the full package could therefore continue chatting while being unable to perform work that
 requires interaction.
 
-Enso materialises a **print variant** under `.enso/print-harness/`: the same package minus that one
+Enso materialises a **print variant** under `node_modules/.cache/enso/print-harness/`: the same package minus that one
 interactive extension, with everything else symlinked into place. The distinction is explicit rather
 than silently changing how the permission model behaves when no human is present.
 
@@ -286,7 +286,7 @@ URL, and image attachments. Routes: [`docs/reference/routes.md`](docs/reference/
 
 ### The log — keep the receipts
 
-Enso writes one JSONL log per day at `.enso/logs/enso-YYYY-MM-DD.jsonl`. Every process appends records
+Enso writes one JSONL log per day at `~/.enso/logs/enso-YYYY-MM-DD.jsonl`. Every process appends records
 to it, with sensitive values redacted by field name before they are written. Records carry
 `threadId`, `generation`, `seq` and `toolCallId`, allowing one thread's behavior to be followed across
 layers. The browser writes to the same log.
@@ -391,7 +391,10 @@ site/                the Starlight docs site — a projection of docs/, never a 
 test/                repo-wide gates
 ```
 
-State the agent and the tools use lives in `.enso/` (logs, secrets, pi's auth) and is gitignored.
+State the agent and the tools use lives in your `ENSO_HOME` — `~/.enso` unless you set `ENSO_HOME` —
+not in the checkout: logs, secrets, pi's auth and sessions, the project list. Every checkout and
+worktree shares it. A checkout from before #421 has its `.enso/` moved there on the next launch; a
+file `~/.enso` already holds is never overwritten, and the launch names what it left behind.
 
 ---
 

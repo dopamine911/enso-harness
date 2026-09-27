@@ -17,7 +17,7 @@ import {
   type WebSearchConfig,
   WebSearchToolParameters,
 } from '@enso/core'
-import { ensoConfigPath, findRepoRoot } from '@enso/core/paths'
+import { ensoConfigPath, ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
 import { readSecret } from '@enso/core/secrets'
 import {
   DEEPSEEK_API_KEY_VARIABLE,
@@ -197,7 +197,7 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
           auditLine('refused', primary.providerId, query, primary.reason)
           return refusal(
             `${primary.reason}. The Tavily fallback is not armed — a human can set ` +
-              `${TAVILY_API_KEY_VARIABLE} in .enso/secrets.env (never in ${ENSO_CONFIG_FILENAME}, never in ` +
+              `${TAVILY_API_KEY_VARIABLE} in ${ensoSecretsPath(ensoHome(process.env))} (never in ${ENSO_CONFIG_FILENAME}, never in ` +
               `the root .env, never in the environment — #89). No restart needed; the file is read per call.`,
           )
         }
@@ -421,12 +421,12 @@ function auditLine(outcome: string, providerId: WebSearchProviderId | undefined,
 export default createWebSearch({
   locateConfigFile: () => ensoConfigPath(findRepoRoot(import.meta.url)),
   readConfigText: (path: string) => readFileSync(path, 'utf8'),
-  // ⚠ From the gated `.enso/secrets.env` FILE, never `process.env` (#89): the host
+  // ⚠ From the gated `ENSO_HOME/secrets.env` FILE, never `process.env` (#89): the host
   // quarantines every secret out of the environment before a session exists, precisely so
   // a `bash` child cannot print it. Extension code is trusted to read the file the model's
   // `read` cannot. The composition root keeps the dependency's name — the providers still
   // receive values, never names, and never learn where they came from.
-  readEnvironmentVariable: (variableName: string) => readSecret(findRepoRoot(import.meta.url), variableName),
+  readEnvironmentVariable: (variableName: string) => readSecret(ensoHome(process.env), variableName),
   runProviders: {
     anthropic: runAnthropicProviderSearch,
     google: runGoogleProviderSearch,

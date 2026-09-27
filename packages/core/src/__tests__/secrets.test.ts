@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ensoSecretsPath, rootDotenvPath } from '../paths.ts'
@@ -20,10 +20,9 @@ import {
  */
 
 /** A scratch repo root with `.enso/` present, the way `enso.ts` and the host find it. */
+/** One scratch directory standing in for both the checkout (its root `.env`) and `ENSO_HOME` (its `secrets.env`). */
 function scratchRepoRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'enso-secrets-'))
-  mkdirSync(join(root, '.enso'))
-  return root
+  return mkdtempSync(join(tmpdir(), 'enso-secrets-'))
 }
 
 test('secret-shaped names are whole underscore-delimited words, so a look-alike is untouched', () => {
@@ -96,12 +95,12 @@ test('⚠ the quarantine removes secret-shaped and file-defined names, and nothi
     HARMLESS_LOOKING: 'but-in-the-file',
     TOKENIZER_PATH: '/tok',
   }
-  const report = quarantineSecrets(environment, root)
+  const report = quarantineSecrets(environment, { repoRoot: root, home: root })
   expect(report.removed).toEqual(['CLIENT_SECRET', 'GH_TOKEN', 'HARMLESS_LOOKING', 'TAVILY_API_KEY'])
   expect(report.misplaced).toEqual([])
   expect(Object.keys(environment).sort()).toEqual(['HOME', 'PATH', 'PI_CODING_AGENT_DIR', 'TOKENIZER_PATH'])
   // Idempotent: nothing left to remove, nothing else touched.
-  expect(quarantineSecrets(environment, root).removed).toEqual([])
+  expect(quarantineSecrets(environment, { repoRoot: root, home: root }).removed).toEqual([])
   expect(environment.PATH).toBe('/usr/bin')
 })
 
@@ -117,7 +116,7 @@ test('a root .env: its secret-shaped names are scrubbed and reported as misplace
     TAVILY_API_KEY: 'in-the-wrong-place',
     PUBLIC_URL: 'https://x',
   }
-  const report = quarantineSecrets(environment, root)
+  const report = quarantineSecrets(environment, { repoRoot: root, home: root })
   expect(report.removed).toEqual(['TAVILY_API_KEY'])
   expect(report.misplaced).toEqual(['TAVILY_API_KEY'])
   expect(environment).toEqual({ PUBLIC_URL: 'https://x' })
@@ -125,7 +124,7 @@ test('a root .env: its secret-shaped names are scrubbed and reported as misplace
 
 test('with no secrets file the quarantine still removes secret-shaped names from the environment', () => {
   const environment: Record<string, string | undefined> = { GH_TOKEN: 'ghp', LANG: 'C' }
-  const report = quarantineSecrets(environment, scratchRepoRoot())
+  const report = quarantineSecrets(environment, { repoRoot: scratchRepoRoot(), home: scratchRepoRoot() })
   expect(report).toEqual({ removed: ['GH_TOKEN'], misplaced: [] })
   expect(environment).toEqual({ LANG: 'C' })
 })

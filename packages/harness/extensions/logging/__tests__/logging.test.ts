@@ -11,7 +11,7 @@ import { createLoggingExtension } from '../index.ts'
 
 /**
  * The extension's two branches (#132): pi as a CHILD configures its own sink; pi IN-PROCESS
- * leaves the server's alone. `ENSO_LOGS_DIR` keeps the child's file out of the checkout.
+ * leaves the server's alone. A scratch `ENSO_HOME` keeps the child's file out of the user's home.
  */
 
 /** A pi whose only surface is `on`, recording what the extension registered. */
@@ -29,14 +29,14 @@ afterEach(reset)
 test('⚠ pi as a child: nothing has configured, so the extension does — its own record lands as process pi, and session_shutdown flushes', async () => {
   await reset()
   expect(isLoggingConfigured()).toBe(false)
-  const logsDir = mkdtempSync(join(tmpdir(), 'enso-ext-logs-'))
+  const home = mkdtempSync(join(tmpdir(), 'enso-ext-home-'))
   const { pi, handlers } = fakePi()
-  await createLoggingExtension({ ENSO_LOGS_DIR: logsDir, ENSO_LOG_LEVEL: 'debug' })(pi)
+  await createLoggingExtension({ ENSO_HOME: home, ENSO_LOG_LEVEL: 'debug' })(pi)
   expect(isLoggingConfigured()).toBe(true)
   const shutdown = handlers.get('session_shutdown')
   if (shutdown === undefined) throw new Error('the extension registered no session_shutdown handler')
   await shutdown({ type: 'session_shutdown', reason: 'quit' })
-  const lines = readFileSync(join(logsDir, ensoLogFilename(new Date())), 'utf8')
+  const lines = readFileSync(join(home, 'logs', ensoLogFilename(new Date())), 'utf8')
     .split('\n')
     .filter((line) => line.length > 0)
     .map((line) => JSON.parse(line) as { message?: string; properties?: Record<string, unknown> })
@@ -47,7 +47,7 @@ test('⚠ pi as a child: nothing has configured, so the extension does — its o
 test('pi in-process: the server configured first, so the extension configures nothing and disposes nothing', async () => {
   const logs = await recordEnsoLogs()
   const { pi, handlers } = fakePi()
-  await createLoggingExtension({ ENSO_LOGS_DIR: mkdtempSync(join(tmpdir(), 'enso-ext-unused-')) })(pi)
+  await createLoggingExtension({ ENSO_HOME: mkdtempSync(join(tmpdir(), 'enso-ext-unused-')) })(pi)
   // The provider record is not about configuration, so it registers either way (#144) — but
   // a shutdown handler here would tear down the SERVER's sink when one pi session ends.
   expect([...handlers.keys()]).toEqual(['after_provider_response'])
@@ -60,7 +60,7 @@ test('pi in-process: the server configured first, so the extension configures no
 test('⚠ a provider response is one record with the request id — and ONLY the allowlisted headers (#144)', async () => {
   const logs = await recordEnsoLogs()
   const { pi, handlers } = fakePi()
-  await createLoggingExtension({ ENSO_LOGS_DIR: mkdtempSync(join(tmpdir(), 'enso-ext-unused-')) })(pi)
+  await createLoggingExtension({ ENSO_HOME: mkdtempSync(join(tmpdir(), 'enso-ext-unused-')) })(pi)
   const responded = handlers.get('after_provider_response')
   if (responded === undefined) throw new Error('the extension registered no after_provider_response handler')
   responded({

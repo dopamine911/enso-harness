@@ -6,15 +6,14 @@ Generated from the owned source roots, `scripts/lint/process-environment.ts`, th
 
 ## Explicit environment keys
 
-The 10 files that directly touch the process environment exactly match the
+The 11 files that directly touch the process environment exactly match the
 `node/no-process-env` exception list in `scripts/lint/process-environment.ts`; generation fails if either side gains or loses a file.
 Rows cover literal dot access, literal bracket access, destructuring, `node:process` `env` imports,
 grounded `environment.KEY` seams, and keys explicitly written beside a process-environment spread.
 
 | Key | Reader | Purpose, requirement, and default | Phase |
 |---|---|---|---|
-| `ENSO_AGENT_DIR` | `scripts/enso.ts` | Optional agent-directory override; defaults to `.enso/pi-agent`. | boot |
-| `ENSO_LOGS_DIR` | `packages/core/src/log-process.ts#logsDirFrom` | Optional log-directory override; an absent or empty value defaults to `.enso/logs`. | boot / load / per-call |
+| `ENSO_HOME` | `packages/core/src/paths.ts#ensoHome` | Optional user-level Enso directory (#421); an absent or empty value defaults to `~/.enso`. pi's agent dir, the secrets file, the logs and the project list all resolve under it. | boot / load / per-call |
 | `ENSO_LOG_CONSOLE` | `packages/core/src/log-process.ts#parseEnsoLogLevels` | Optional terminal log level; launcher default is `info`, while child-pi logging defaults to no console sink. | boot / load |
 | `ENSO_LOG_LEVEL` | `packages/core/src/log-process.ts#parseEnsoLogLevels` | Optional file log level and per-category overrides; defaults to `info`. | boot / load |
 | `ENSO_SERVER_URL` | `scripts/enso-logs.ts#bundle` | Optional live-server URL for bundle retrieval; defaults to `http://127.0.0.1:5179`. | per-call |
@@ -54,17 +53,17 @@ Committed `webFetch.allowedHosts`: `[]`.
 declaration layout in `config.ts`, `web-fetch.ts`, and `web-search.ts`; metadata and consumer probes must
 match every discovered field or generation fails.
 
-## `.enso/` runtime paths
+## Runtime paths
 
-These are every exported path assembled with `ENSO_RUNTIME_DIRECTORY` in `packages/core/src/paths.ts`.
+Every runtime path helper in `packages/core/src/paths.ts`: the user's state under `ENSO_HOME` (`~/.enso` by default, #421), and the checkout's own build cache.
 
 | Path | Assembler | Writer | Lifetime |
 |---|---|---|---|
-| `.enso/logs` | `ensoLogsDir` | `configureProcessLogging` creates it and every harness process appends to the day file. | One file per local day; logging retains 14 days. |
-| `.enso/pi-agent` | `ensoAgentDir` | The TUI/server launchers create it; pi and `createAgentHost` write settings, auth, sessions, and the multi-account pin. | Machine-local state shared across launches; retained until the operator removes it. |
-| `.enso/print-harness` | `printHarnessDir` | `scripts/print-harness.ts#materializePrintHarness` rebuilds the package mirror for non-interactive launches. | Machine-local scratch; reconciled on every print launch. |
-| `.enso/projects.json` | `ensoProjectsPath` | The web server, when a page registers or removes a project (#395); written whole and renamed over. | Machine-local until a project is removed; entries outside the configured roots are kept but not served. |
-| `.enso/secrets.env` | `ensoSecretsPath` | Operator only; harness code reads and quarantines but never writes it. | Machine-local until the operator edits or removes it; secret reads are per call. |
+| `ENSO_HOME/logs` | `ensoLogsDir` | `configureProcessLogging` creates it and every harness process appends to the day file. | One file per local day; logging retains 14 days. |
+| `ENSO_HOME/pi-agent` | `ensoAgentDir` | The TUI/server launchers create it; pi and `createAgentHost` write settings, auth, sessions, and the multi-account pin. | Per-user state shared by every checkout and launch; retained until the operator removes it. |
+| `ENSO_HOME/projects.json` | `ensoProjectsPath` | The web server, when a page registers or removes a project (#395); written whole and renamed over. | Per-user until a project is removed; entries outside the configured roots are kept but not served. |
+| `ENSO_HOME/secrets.env` | `ensoSecretsPath` | Operator only; harness code reads and quarantines but never writes it. | Per-user until the operator edits or removes it; secret reads are per call. |
+| `node_modules/.cache/enso/print-harness` | `printHarnessDir` | `scripts/print-harness.ts#materializePrintHarness` rebuilds the package mirror for non-interactive launches. | Per-checkout build cache (its links point into this checkout); reconciled on every print launch. |
 
 ## Harness manifest resources
 

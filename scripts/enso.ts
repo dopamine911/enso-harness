@@ -47,11 +47,19 @@
  *   outside `enso-launch.ts#SUPPORTED_PI_VERSIONS`; see the block below.
  *
  * Usage:  bun run enso -p "hello"
- *         ENSO_AGENT_DIR=/somewhere/else bun run enso
+ *         ENSO_HOME=/somewhere/else/.enso bun run enso
  */
 import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ensoAgentDir, findRepoRoot, harnessPackageDir, printHarnessDir } from '../packages/core/src/paths.ts'
+import {
+  ensoAgentDir,
+  ensoHome,
+  ensoSecretsPath,
+  findRepoRoot,
+  harnessPackageDir,
+  migrateCheckoutEnso,
+  printHarnessDir,
+} from '../packages/core/src/paths.ts'
 import { declaredResources, missingVendorPaths } from '../packages/core/src/pi-manifest.ts'
 import { quarantineSecrets } from '../packages/core/src/secrets.ts'
 import { isPrintRun, piArguments, piVersionSupported, piVersionText, SUPPORTED_PI_VERSIONS } from './enso-launch.ts'
@@ -84,7 +92,19 @@ if (missing.length > 0) {
   process.exit(1)
 }
 
-const agentDir: string = process.env.ENSO_AGENT_DIR ?? ensoAgentDir(repoRoot)
+// The user's Enso state (#421): the checkout's old `.enso/` moved in first, before the secrets are
+// read and pi is pointed at its agent dir there. Said on stderr, as everything here is.
+const home = ensoHome(process.env)
+const migration = migrateCheckoutEnso(repoRoot, home)
+if (migration.moved.length > 0) {
+  process.stderr.write(`enso: moved ${migration.moved.length} file(s) from ${migration.from} to ${home} (#421)\n`)
+}
+for (const path of migration.kept) {
+  process.stderr.write(
+    `enso: ⚠ ${path} stays in ${migration.from}: ${home} already has one, and nothing is overwritten — keep one by hand\n`,
+  )
+}
+const agentDir: string = ensoAgentDir(home)
 mkdirSync(agentDir, { recursive: true })
 
 const passthroughArgs = process.argv.slice(2)
@@ -111,7 +131,7 @@ const args = piArguments(packageToLoad, passthroughArgs)
  * ⚠ SECRETS OUT BEFORE ANY CHILD (#89). bun auto-loaded a root `.env` into THIS process's
  * environment; the spread below would carry every key into pi and from there into every
  * `bash` child — which is how `TAVILY_API_KEY` ended up in a transcript. The extensions
- * that need a key read `.enso/secrets.env` directly (`readSecret`); the environment carries
+ * that need a key read `ENSO_HOME/secrets.env` directly (`readSecret`); the environment carries
  * none, and a root `.env` that still holds a secret is reported as misplaced.
  *
  * ⚠ FIRST, not just before the pi spawn (PR #294 review). `secrets.ts` says "before any
@@ -122,13 +142,13 @@ const args = piArguments(packageToLoad, passthroughArgs)
  * of `--version`. Quarantining here makes the probe's inherited environment the scrubbed
  * one, so the ordering matches the invariant instead of contradicting it eight lines down.
  */
-const quarantine = quarantineSecrets(process.env, repoRoot)
+const quarantine = quarantineSecrets(process.env, { repoRoot, home })
 if (quarantine.removed.length > 0)
   process.stderr.write(`enso: secrets kept out of pi's environment (#89): ${quarantine.removed.join(', ')}\n`)
 if (quarantine.misplaced.length > 0) {
   process.stderr.write(
     `enso: ⚠ the root .env defines ${quarantine.misplaced.join(', ')} — bun autoloads .env into every bun child, ` +
-      'so a tool can still read it there. Move it to .enso/secrets.env (#89); it is not read from .env.\n',
+      `so a tool can still read it there. Move it to ${ensoSecretsPath(home)} (#89); it is not read from .env.\n`,
   )
 }
 

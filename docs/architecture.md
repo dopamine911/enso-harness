@@ -48,7 +48,7 @@ graph LR
   end
 
   PKG["<b>Enso</b> pi package<br/>extensions · skills · prompts · themes"]
-  STATE[("pi session logs<br/>+ <b>.enso/</b> config · secrets")]
+  STATE[("pi session logs<br/>+ <b>~/.enso/</b> config · secrets")]
   BROWSER["browser<br/>TanStack AI (state) · ai-elements (presentation)"]
 
   PKG --> PITUI
@@ -66,7 +66,7 @@ entries, partial tool output, mode, usage or queue state. So the backend embeds 
 wire; the browser derives whatever its renderer wants in memory. Details under *The control plane*.
 
 **Why state is files, not a service.** pi's session log is the durable record and both hosts read it;
-`.enso/` holds harness config and secrets. A service later becomes an optimisation for push (live
+`ENSO_HOME` (`~/.enso`, #421) holds harness state and secrets. A service later becomes an optimisation for push (live
 alerts) rather than a migration — see *Persistence* below for the one rule this imposes today.
 
 ---
@@ -87,7 +87,7 @@ graph TB
     G["guards<br/>path confinement · bash timeout<br/>secret denial · egress"]
     T["tools<br/>ask · git · issues · ci · logs<br/>notes · memory · health"]
     R["renderers<br/>per surface, over one payload"]
-    ST["state<br/>.enso/ files"]
+    ST["state<br/>~/.enso/ files"]
     SK["skills · prompts"]
   end
 
@@ -262,8 +262,8 @@ What is durable, and where:
 | picc's `modes` custom entry in that log | — | picc, on `/mode` | `persistedPermissionMode(branch)`: last entry wins, deliberately uncached because `/tree` and `/fork` move the leaf (#84, #95) |
 | the guards' `enso-guard-denial` custom entry in that log | the refused call's `toolCallId` | the guards extension, on every denial (#387) | live as a `custom-entry` observation; cold, `transcript-to-messages.ts` joins it onto its tool result — what tells a refusal from a failed command after a reload |
 | `enso.config.json` at the repo root | — | committed | once, at extension load; fails closed (#59) |
-| `.enso/secrets.env` | — | operator | per call by the extension that needs it; quarantined from `process.env` |
-| `.enso/pi-agent/provider-failover.json` | — | seeded at host creation | pi's multi-account extension |
+| `ENSO_HOME/secrets.env` | — | operator | per call by the extension that needs it; quarantined from `process.env` |
+| `ENSO_HOME/pi-agent/provider-failover.json` | — | seeded at host creation | pi's multi-account extension |
 
 Not durable, by design: `EnsoObservation` (derived from pi events in memory, never written); AG-UI
 (derived in the adapter, never on the wire); `generation` and the rest of the registry's `ThreadEntry`
@@ -405,11 +405,11 @@ Enso/
     reference/              # generated tables (core exports, decisions, observations, routes, …)
     concepts/               # the live design notes; concepts/archive/ the pre-build ones
   .fallowrc.jsonc           # fallow: entries, baseline, duplicates, architecture boundaries (the zones)
-  .enso/                     # secrets, pi agent dir (gitignored)
 ```
 
 Every path in this tree exists — `test/docs-gate.test.ts` checks the ones it can name, so a move
-or deletion fails the docs before it fails a reader.
+or deletion fails the docs before it fails a reader. Runtime state is not in the checkout at all: it
+lives in the user's `ENSO_HOME` (`~/.enso`, #421) — pi's agent dir, secrets, logs, the project list.
 
 `web/` sits outside the manifest deliberately: pi packages carry only `extensions`, `skills`, `prompts`
 and `themes`, and pi does nothing with a frontend. Settings likewise live outside — see `pi-share` for
@@ -547,7 +547,7 @@ Settled. Each carries its reason so a later session can tell when the reason has
 | On `session_start` assert that the guard policy's tool names are registered | `verifyPolicyToolNames` checks the gated names against pi's live `getAllTools()`: presence, not identity — a tool pi renames would otherwise make the guard a silent no-op. A mismatch fails closed by denying every call, never by throwing (a throwing `session_start` wedges print mode). Tool identity is deliberately not asserted; the veto does not depend on it. |
 | **All schemas TypeBox in `@enso/core`** | One library, no bridge. TypeBox is mandatory at pi's tool API and *is* JSON Schema at the HTTP boundary — two of three destinations, zero conversion. |
 | Adapter boundaries map explicitly, never via schema transforms | Keeps validation separate from translation, which is what makes a provider swappable. |
-| **Durable state is pi's session log plus `.enso/` files, never process memory only** | Both surfaces read the same files; a service later is optional. The one cost: one live writer per session id (control plane, invariant 4). |
+| **Durable state is pi's session log plus `ENSO_HOME` files, never process memory only** | Both surfaces read the same files; a service later is optional. The one cost: one live writer per session id (control plane, invariant 4). |
 | Web app **embeds the pi SDK** (#69); no chat protocol between server and pi | The context pane needs the entry array; a run must outlive its request; a second tab must see the first's run. ACP and AG-UI carry none of that. |
 | The server↔browser wire is **`EnsoObservation`** (`@enso/core` `follow.ts`); AG-UI is a browser-side view, never on the wire, never stored | The ACP reason at the other seam (#112): AG-UI carries chat, tool calls and interrupts — not entries, partial tool output, mode, usage or queue state. A wire that lacks our nouns forces a side channel for every one of them (the `Enso.*` CUSTOM chunks) and made the run the HTTP response, which is where parking (#27) and the no-progress cutoff (#99) came from. TanStack connects through its `SubscribeConnectionAdapter`, whose `send`/`subscribe` split is exactly prompt/follow; the adapter derives AG-UI in memory if a renderer wants it. |
 | Context overlays keyed by **entry id**, persisted via `appendEntry()` | Survives restarts and compaction; `session_before_compact` hands `branchEntries`. |
@@ -567,7 +567,7 @@ Settled. Each carries its reason so a later session can tell when the reason has
 | **One thread id, pi's session id** (#95) | The browser mints it, pi stores under it, the rail finds it again after a restart. Validated as a filename component at every entry point. |
 | **`AgentHost` is the storage seam** | The only file that touches `SessionManager` or the session-file layout. Keeps a later store a one-file change. |
 | **Run provenance lives in pi's log as custom entries**, never a side file | picc's `modes` entry is the pattern; a fork inherits provenance by construction. Fields beyond what pi records are deferred to the lineage phase. |
-| **Logging is one file for the harness, off the loop, and the file is the export** (#132) | LogTape under a typed `ensoLogger`; every process appends to the same day's `.enso/logs/enso-YYYY-MM-DD.jsonl` (`process` on every record; dated so nothing is ever renamed under another writer — measured with two processes, 800 lines, none torn), unbuffered (measured: the buffered sink held the last record until the next one), redacted by field name **at write** — the canonical record this harness never rewrites is pi's session log, and a file that is safe at rest is what a user can hand over. A record is an event with properties (`threadId`, `generation`, `toolCallId`), never a sentence with the values baked in. Three tiers on one knob: `info` is the spine (runs, tool calls, guard verdicts, questions, failures), `debug` every observation as a compact line, `trace` with payloads — `ENSO_LOG_LEVEL`, per subtree if wanted; a bad value is a startup error. `test/logging-gate.test.ts` holds the line: no production `console.*`, `@logtape/*` named only where the schema and the configurator live; the configurator is a subpath export (`@enso/core/log-process`) because `@logtape/file` is not tree-shakable and took the page down from the barrel. The browser is a layer like the others: its problems are records first and notices second (one site each), its `info`+ ships to `POST /api/logs` and lands in the same file as `process: browser` with the page's own clock as `at`; the rest stays in a ring the drawer shows. The log route never logs its own failures — a page in a loop must not write its garbage here. |
+| **Logging is one file for the harness, off the loop, and the file is the export** (#132) | LogTape under a typed `ensoLogger`; every process appends to the same day's `ENSO_HOME/logs/enso-YYYY-MM-DD.jsonl` (`process` on every record; dated so nothing is ever renamed under another writer — measured with two processes, 800 lines, none torn), unbuffered (measured: the buffered sink held the last record until the next one), redacted by field name **at write** — the canonical record this harness never rewrites is pi's session log, and a file that is safe at rest is what a user can hand over. A record is an event with properties (`threadId`, `generation`, `toolCallId`), never a sentence with the values baked in. Three tiers on one knob: `info` is the spine (runs, tool calls, guard verdicts, questions, failures), `debug` every observation as a compact line, `trace` with payloads — `ENSO_LOG_LEVEL`, per subtree if wanted; a bad value is a startup error. `test/logging-gate.test.ts` holds the line: no production `console.*`, `@logtape/*` named only where the schema and the configurator live; the configurator is a subpath export (`@enso/core/log-process`) because `@logtape/file` is not tree-shakable and took the page down from the barrel. The browser is a layer like the others: its problems are records first and notices second (one site each), its `info`+ ships to `POST /api/logs` and lands in the same file as `process: browser` with the page's own clock as `at`; the rest stays in a ring the drawer shows. The log route never logs its own failures — a page in a loop must not write its garbage here. |
 | **Presentation is ported from ai-elements**, not built (#31, #121) | **Port before you build**: before writing a presentation component for `packages/web`, check `.inspiration/ai-elements/packages/elements/src/`; if a component covers the shape, port it under the #31 procedure (provenance header naming the pinned commit, a `Modified:` list, upstream's `ai` types retyped as they cross). Building from scratch is the exception and the reason goes in the file header — `reasoning.tsx` says why it dropped streamdown. Seven files ported (`conversation`, `message`, `reasoning`, `queue`, `prompt-input`, `attachments`, `terminal`). #144's log page is the rule working: the shell it needed — header, title, status, actions, a scrolling content region — is upstream's `terminal.tsx`, ported as a subset that drops the copy and clear buttons (an observation surface offers no control) and the `ansi-to-react` default child (the records are structured, not one ANSI string). The composer sits on the ported `PromptInput` for its form, attachments, paste and drop; send and stop stay two buttons of ours because a prompt in flight queues (#75) and a stop is its own act (#116) — upstream's one `PromptInputSubmit` is the named divergence, in the file header. **The seam does not move: ai-elements is presentation, TanStack is state.** "Holds no state" means no APPLICATION state — component-local `useState`/`useRef` (a disclosure's open flag, an IME composing flag, the attachment strip before submit) is what a presentation component is; what may not cross the directory is the state layer itself — our stores, the follow connection, `@enso/core`'s wire schemas, TanStack's client. A component that reads a thread's store stops being replaceable by a re-port. `test/presentation-gate.test.ts` holds both lines: every file carries the pin, no file imports the state layer. |
 | **The vendor seam is fenced by a gate, and its allowlist is the leak inventory** (#145) | Only `web/src/host/` and `harness/extensions/` may import `@earendil-works/*` or name a vendor extension (`picc`, `pi-multi-account`, `cc-safety-net`) in code — `test/vendor-gate.test.ts`, in the shape of the logging gate. Every other site is one allowlist line with its reason and the leak it maps to, so fixing a leak deletes a line and adding a dependency has to say why. The scan reads every source root the repo has — `packages/core/src`, `packages/web/src`, `packages/harness`, `packages/web/e2e`, `scripts`, `test` — with `__tests__` included; until #215 it read three of them with tests skipped, and the twelve unlisted sites that widening found are why the inventory is thirteen rows rather than one. The bundle's `about` was the last import outside the roots; the host exports `AGENT_RUNTIME_VERSION` and the route takes the string. Blind to semantics by construction: `entries: unknown[]` carries pi's persistence format with nothing to match on, and a manifest is out of reach by the same construction — a `package.json` is where a dependency is declared rather than leaked (`test/fallow-config.test.ts` holds that one honest). Adding or removing a root is a design conversation. |
 | **The vocabulary is fenced the same way** (#161, #165) | `docs/glossary.md` decides what a word means; its *Retired* table was applied by LSP in one PR, and `test/glossary-gate.test.ts` refuses a retired identifier or file name outside the two vendor roots, with an allowlist that names the one leak kept on purpose (L2) and nothing else. The source-tree gates share one walker and one word-splitter, `test/gate-support.ts`. |

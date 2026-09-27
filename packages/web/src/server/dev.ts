@@ -18,10 +18,19 @@ import { ensoLogger, parseEnsoConfig } from '@enso/core'
 import {
   configureProcessLogging,
   installLoggingShutdown,
+  logEnsoHomeMigration,
   logsDirFrom,
   parseEnsoLogLevels,
 } from '@enso/core/log-process'
-import { ensoAgentDir, ensoConfigPath, ensoProjectsPath, findRepoRoot, harnessPackageDir } from '@enso/core/paths'
+import {
+  ensoAgentDir,
+  ensoConfigPath,
+  ensoHome,
+  ensoProjectsPath,
+  findRepoRoot,
+  harnessPackageDir,
+  migrateCheckoutEnso,
+} from '@enso/core/paths'
 import { knownSecretValuesTracking } from '@enso/core/secrets'
 import { startEnsoServer } from './index.ts'
 
@@ -29,31 +38,36 @@ const cwdArgument: string | undefined = process.argv[2]
 const cwd: string = cwdArgument === undefined || cwdArgument.length === 0 ? process.cwd() : cwdArgument
 
 const repoRoot = findRepoRoot(import.meta.url)
+// The user's Enso state (#421), the checkout's old `.enso/` moved into it FIRST — before the
+// logs, the secrets and pi's agent dir are opened where they now live.
+const home = ensoHome(process.env)
+const migration = migrateCheckoutEnso(repoRoot, home)
 // Same scratch dir the TUI launcher uses, so both surfaces share one isolated config.
-const agentDir = ensoAgentDir(repoRoot)
+const agentDir = ensoAgentDir(home)
 mkdirSync(agentDir, { recursive: true })
 
 const config = parseEnsoConfig(readFileSync(ensoConfigPath(repoRoot), 'utf8'))
 if (config.kind === 'unreadable') throw new Error(`enso-server: ${config.reason}`)
 const projectRoots: readonly string[] = config.config.projects?.roots ?? []
 
-const logsDir = logsDirFrom(process.env, repoRoot)
+const logsDir = logsDirFrom(process.env)
 const disposeLogging: () => Promise<void> = await configureProcessLogging({
   logsDir,
   process: 'server',
   levels: parseEnsoLogLevels(process.env, { console: 'info' }),
   // The value pass (#139): what a token quoted in a message or a trace payload is scrubbed
   // against — asked per record, so a key rotated while the server runs is redacted too (#207).
-  secretValues: knownSecretValuesTracking(repoRoot),
+  secretValues: knownSecretValuesTracking(home),
 })
 const log = ensoLogger('server', 'dev')
+logEnsoHomeMigration(log, migration)
 
 installLoggingShutdown(disposeLogging)
 
 const { listening } = startEnsoServer({
   cwd,
   projectRoots,
-  projectsStatePath: ensoProjectsPath(repoRoot),
+  projectsStatePath: ensoProjectsPath(home),
   harnessPackageDir: harnessPackageDir(repoRoot),
   agentDir,
   logsDir,

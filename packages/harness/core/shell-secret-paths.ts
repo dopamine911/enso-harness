@@ -33,7 +33,7 @@ import { extractFlatShellCommandSegments, literalShellWord, shellWordsOf } from 
  *     `ln -s "$PWD/.enso" n` and `.enso/$KEY` — and nothing spelled indirectly.
  *   - A `NAME=value` word keeps its prefix, so a path inside an ASSIGNMENT resolves to
  *     `<cwd>/NAME=.enso/…` and matches no directory fragment. Deliberate: stripping it
- *     would refuse `ENSO_LOGS_DIR=.enso/logs bun run dev`, which reads nothing. (The
+ *     would refuse `ENSO_HOME=.enso bun run dev`, which reads nothing. (The
  *     basename pass still catches an assignment ending in a credential basename.)
  *   - A `-c` payload is not re-parsed one level down the way `network-egress.ts` re-parses
  *     a wrapper's argument vector: `bash -c 'cat .enso/secrets.env'` is caught because that

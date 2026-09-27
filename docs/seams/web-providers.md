@@ -195,7 +195,7 @@ verdict — keyed on `server_tool_use` blocks having appeared, never on source c
 current model routes through `routedProviderIdForModel` (273) and its auth through `resolveModelAuth`
 (289-294), and a model with no native search selects nothing (274-281). The composition root (419-436)
 wires the five `run*` functions into `runProviders`, real `fetch` into `fetchUrl`, and
-`readEnvironmentVariable` to `readSecret` over `.enso/secrets.env` — never `process.env` (422-427): the
+`readEnvironmentVariable` to `readSecret` over `ENSO_HOME/secrets.env` — never `process.env` (422-427): the
 host quarantines secrets out of the environment before a session exists, and providers receive values,
 never names.
 
