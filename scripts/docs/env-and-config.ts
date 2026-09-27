@@ -258,11 +258,11 @@ const RUNTIME_PATH_METADATA: readonly RuntimePathMetadata[] = [
     path: 'ENSO_HOME/pi-agent',
     writer:
       'The TUI/server launchers create it; pi and `createAgentHost` write settings, auth, ' +
-      'sessions, and the multi-account pin.',
+      'sessions, and the multi-account seed.',
     lifetime: 'Per-user state shared by every checkout and launch; retained until the operator removes it.',
     check: {
       file: 'packages/web/src/host/agent-host.ts',
-      contains: 'seedMultiAccountChildProxyOff(agentDir)',
+      contains: 'seedMultiAccountConfig(agentDir)',
     },
   },
   {
