@@ -7,8 +7,10 @@
  * `info` record per run, at its first delta, with the ms since admission.
  *
  * Keyed by thread and generation because that pair is what every other record joins on. A run
- * that never produces a delta (refused, aborted before the first token) leaves its entry until
- * the run settles, which clears it — the map holds live runs only.
+ * that never produces a delta (aborted before the first token) leaves its entry until it
+ * settles, which clears it. Two endings publish no `settled` — a prompt pi rejects after its
+ * receipt, and an extension slash command, whose acceptance is its completion — so the prompt
+ * route forgets those itself (#160 §8). The map holds live runs only.
  */
 
 /** `${threadId}:${generation}` → the ms clock at admission. */

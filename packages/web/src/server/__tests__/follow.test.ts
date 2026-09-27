@@ -18,6 +18,7 @@ import type { LogRecorder } from '@logtape/testing/recorder'
 import type { AgentHost } from '../../host/agent-host.ts'
 import { answerThreadDialog, type FollowRouteDeps } from '../follow.ts'
 import { startEnsoServer } from '../index.ts'
+import { takeFirstDeltaMs } from '../run-timing.ts'
 import {
   createFakeAgentHost,
   createFakeHostedThread,
@@ -241,6 +242,28 @@ test("⚠ a prompt the runtime REJECTS after the 202 is said on the follow with 
     properties: { threadId: 't1', messageId },
   })
   follow.close()
+})
+
+// #160 §8: run-timing keeps a run's admission until its first delta or its settle. A prompt pi
+// rejects after the receipt never settles, and neither does an extension slash command (its
+// acceptance IS its completion), so each left one entry for the life of the process.
+test('⚠ a rejected prompt and a finished slash command leave no run-timing entry; an ordinary run keeps its own (#160 §8)', async () => {
+  let reject = true
+  const fake = fakeHost(['mode'], {
+    prompt: (request: PromptRequest, outcome: PromptOutcome) => {
+      if (request.message === '/mode') outcome.onAccepted()
+      else if (reject) outcome.onRejected('the runtime would not take it')
+    },
+  })
+  const url = await startWith(fake)
+  const rejected = await prompt(url, 'timing-rejected', 'hello')
+  expect(takeFirstDeltaMs('timing-rejected', Number(rejected.body.generation))).toBeUndefined()
+  const command = await prompt(url, 'timing-command', '/mode')
+  expect(takeFirstDeltaMs('timing-command', Number(command.body.generation))).toBeUndefined()
+  // The control: a run that is still going keeps its admission for its first delta.
+  reject = false
+  const running = await prompt(url, 'timing-running', 'hello')
+  expect(takeFirstDeltaMs('timing-running', Number(running.body.generation))).toBeNumber()
 })
 
 test('⚠ a QUEUED prompt the runtime rejects is said on the follow too, and the run it queued behind stays open', async () => {

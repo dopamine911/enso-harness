@@ -2,7 +2,9 @@ import { expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { AgentHost } from '../../host/agent-host.ts'
 import { startEnsoServer } from '../index.ts'
+import { createFakeAgentHost } from './fake-hosted-thread.ts'
 
 /**
  * ⚠ The precondition that was missing when a real run failed.
@@ -11,8 +13,13 @@ import { startEnsoServer } from '../index.ts'
  * hoisted linker leaves the harness tree to our postinstall), pi skips a missing
  * manifest resource path
  * SILENTLY, and the visible symptom was an HTTP 400 from the provider several layers away.
- * `scripts/enso.ts` already refused to launch on this; the server did not. These assert it
- * now does, at both launch points.
+ * `scripts/enso.ts` already refused to launch on this; the server did not. These assert the
+ * server now does. Both launchers ask the same question, `@enso/core`'s `missingVendorPaths`, so
+ * the two cannot drift; the terminal launcher's own refusal is not exercised here.
+ *
+ * ⚠ Every server here takes {@link NO_HOST}, never a real `AgentHost` (#160 §7): building one sets
+ * `PI_CODING_AGENT_DIR` and quarantines secrets IN THIS PROCESS'S environment — the test runner's
+ * (`agent-host.ts`). What is under test runs before the host is built.
  */
 
 function fakeHarness(manifestPi: Record<string, string[]>, createLinks: boolean): string {
@@ -37,14 +44,24 @@ function fakeHarnessWithPi(pi: unknown): string {
 
 const cwd = tmpdir()
 
+/** A host no test here reaches — see the header's ⚠. */
+const NO_HOST = (): AgentHost =>
+  createFakeAgentHost(() => Promise.reject(new Error('the vendor-link tests build no session')))
+
 test('refuses to start when a vendor manifest path is missing', () => {
   const harness = fakeHarness(
     { extensions: ['./extensions/guards/index.ts', 'node_modules/pi-multi-account/index.ts'] },
     false,
   )
-  expect(() => startEnsoServer({ cwd, harnessPackageDir: harness, agentDir: tmpdir(), logsDir: tmpdir() })).toThrow(
-    /vendor package paths are missing/,
-  )
+  expect(() =>
+    startEnsoServer({
+      host: NO_HOST,
+      cwd,
+      harnessPackageDir: harness,
+      agentDir: tmpdir(),
+      logsDir: tmpdir(),
+    }),
+  ).toThrow(/vendor package paths are missing/)
 })
 
 test('the refusal NAMES the missing path and the fix', () => {
@@ -53,7 +70,13 @@ test('the refusal NAMES the missing path and the fix', () => {
   // undefined, and the message assertions fail on `undefined` rather than being skipped.
   let thrown: unknown
   try {
-    startEnsoServer({ cwd, harnessPackageDir: harness, agentDir: tmpdir(), logsDir: tmpdir() })
+    startEnsoServer({
+      host: NO_HOST,
+      cwd,
+      harnessPackageDir: harness,
+      agentDir: tmpdir(),
+      logsDir: tmpdir(),
+    })
   } catch (error) {
     thrown = error
   }
@@ -66,6 +89,7 @@ test('the refusal NAMES the missing path and the fix', () => {
 test('starts when every vendor path resolves', async () => {
   const harness = fakeHarness({ extensions: ['node_modules/pi-multi-account/index.ts'] }, true)
   const started = startEnsoServer({
+    host: NO_HOST,
     cwd,
     harnessPackageDir: harness,
     agentDir: tmpdir(),
@@ -80,6 +104,7 @@ test('a non-vendor manifest path is not required to exist', async () => {
   // `./extensions/...` is our own source; only `node_modules/` entries are link-dependent.
   const harness = fakeHarness({ extensions: ['./extensions/guards/index.ts'] }, false)
   const started = startEnsoServer({
+    host: NO_HOST,
     cwd,
     harnessPackageDir: harness,
     agentDir: tmpdir(),
@@ -94,6 +119,7 @@ test('a non-vendor manifest path is not required to exist', async () => {
 test('refuses when the harness package.json itself is absent', () => {
   expect(() =>
     startEnsoServer({
+      host: NO_HOST,
       cwd,
       harnessPackageDir: join(tmpdir(), 'definitely-not-here'),
       agentDir: tmpdir(),
@@ -105,6 +131,7 @@ test('refuses when the harness package.json itself is absent', () => {
 test('refuses an empty cwd before touching the filesystem', () => {
   expect(() =>
     startEnsoServer({
+      host: NO_HOST,
       cwd: '',
       harnessPackageDir: fakeHarness({ extensions: [] }, true),
       agentDir: tmpdir(),
@@ -124,6 +151,7 @@ test('refuses an empty cwd before touching the filesystem', () => {
 test('a `pi` that is not an object is refused by name, not walked character by character', () => {
   expect(() =>
     startEnsoServer({
+      host: NO_HOST,
       cwd,
       harnessPackageDir: fakeHarnessWithPi('node_modules/pi-multi-account/index.ts'),
       agentDir: tmpdir(),
@@ -141,6 +169,7 @@ test('a `pi` that is not an object is refused by name, not walked character by c
  */
 test('a non-string resource path is skipped, not handed to `.startsWith`', async () => {
   const started = startEnsoServer({
+    host: NO_HOST,
     cwd,
     harnessPackageDir: fakeHarnessWithPi({ extensions: [{ path: 'node_modules/whatever' }], skills: 42 }),
     agentDir: tmpdir(),

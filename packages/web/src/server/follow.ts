@@ -22,6 +22,7 @@ import {
 import type { Static, TSchema } from 'typebox'
 import { Check, Errors } from 'typebox/value'
 import { HostCommandRefused, modelOptionId } from '../host/host-commands.ts'
+import { forgetRun, noteRunAdmitted } from './run-timing.ts'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
@@ -184,6 +185,13 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     stopKeepalive()
     follow.unsubscribe()
   })
+  // ⚠ A client that left DURING the read above had already fired `close`, before the listener
+  // existed: the subscription would stay in the feed for the life of the process (#160 §6).
+  if (response.destroyed || response.writableEnded) {
+    stopKeepalive()
+    follow.unsubscribe()
+    return
+  }
 
   writeFrame(threads, threadId, response, {
     type: 'snapshot',
@@ -294,6 +302,11 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
     return { status: 400, reason: unavailable }
   }
 
+  // The clock the first-delta record measures from (#144), started BEFORE pi is told: a rejection
+  // or a command's completion can arrive inside `prompt`, and must find the entry to forget. A
+  // queued prompt (the busy path above) joins the run in flight and does not restart it.
+  noteRunAdmitted(threadId, lease.generation)
+
   // The run's end, observed the way a follower would: the thread's own `settled`.
   const settle = threads.observe(threadId, (frame: ThreadFeedFrame) => {
     if (frame.kind !== 'observation' || frame.observation.kind !== 'settled') return
@@ -311,11 +324,14 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
         // An extension command's acceptance IS its completion (pi reports it after the
         // command ran); an ordinary prompt's acceptance is only admission.
         if (command === undefined) return
+        forgetRun(threadId, lease.generation)
         settle.unsubscribe()
         lease.release()
       },
+      // Neither ending publishes `settled`, the one the timing otherwise forgets on (#160 §8).
       onRejected: (reason: string) => {
         rejected(reason)
+        forgetRun(threadId, lease.generation)
         settle.unsubscribe()
         lease.release()
       },
