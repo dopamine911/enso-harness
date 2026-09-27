@@ -399,6 +399,17 @@ export function ensoConfigPath(home: string): string {
 }
 
 /**
+ * A project's own config (#421): `<project>/.enso/config.json`. Read only once the project is
+ * trusted, over the user's (`ensoConfigPath`); the project directory only, never its parents, as
+ * pi reads `<cwd>/.pi/`.
+ *
+ * @group Workspace paths
+ */
+export function projectConfigPath(projectDirectory: string): string {
+  return join(projectDirectory, ENSO_RUNTIME_DIRECTORY, ENSO_CONFIG_FILENAME)
+}
+
+/**
  * A file's text, or `undefined` when there is no file — for a file whose absence means its
  * defaults (the config). Any other failure to read it throws: a file that is there and unreadable
  * is not a missing one.

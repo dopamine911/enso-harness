@@ -96,3 +96,31 @@ export function parseEnsoConfig(fileText: string | undefined): EnsoConfigParseRe
   }
   return { kind: 'ok', config: parsed }
 }
+
+/**
+ * A trusted project's config over the user's (#421): objects merge key by key, the project's
+ * value wins for a scalar, and a list COMBINES — a project's `allowedHosts` adds to the user's
+ * rather than replacing them, as #421 decided (pi's own settings merge replaces arrays; its
+ * resource lists combine, and a host grant is Enso's resource list). `projects` is user-only and
+ * is dropped by the caller before this is reached.
+ *
+ * @group Configuration
+ */
+export function mergeEnsoConfig(user: EnsoConfig, project: EnsoConfig): EnsoConfig {
+  return mergeValues(user, project) as EnsoConfig
+}
+
+function mergeValues(base: unknown, override: unknown): unknown {
+  if (override === undefined) return base
+  if (Array.isArray(base) && Array.isArray(override)) return [...new Set([...base, ...override])]
+  if (isPlainObject(base) && isPlainObject(override)) {
+    const merged: Record<string, unknown> = { ...base }
+    for (const [key, value] of Object.entries(override)) merged[key] = mergeValues(base[key], value)
+    return merged
+  }
+  return override
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}

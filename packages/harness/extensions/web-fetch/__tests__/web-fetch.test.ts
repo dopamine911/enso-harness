@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
-import { ENSO_CONFIG_FILENAME, WEB_FETCH_MAX_RESPONSE_BYTES, WEB_FETCH_TOOL_NAME } from '@enso/core'
+import { ENSO_CONFIG_FILENAME, parseEnsoConfig, WEB_FETCH_MAX_RESPONSE_BYTES, WEB_FETCH_TOOL_NAME } from '@enso/core'
 import { auditRecords, recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import type { SessionEnsoConfig } from '../../../core/index.ts'
 import { createWebFetch, type WebFetchDependencies, type WebFetchRequestInit } from '../index.ts'
 
 /**
@@ -41,7 +42,10 @@ function textResponse(body: string, init?: { status?: number; contentType?: stri
 }
 
 interface LoadedWebFetch {
-  tool: CapturedTool
+  /** The tool as last registered — `startSession` re-registers it with the session's policy. */
+  readonly tool: CapturedTool
+  /** Run the extension's `session_start`, as pi does when the session begins. */
+  startSession: () => Promise<void>
   fetchedUrls: string[]
   fetchInits: { redirect: string; signal: AbortSignal }[]
   resolvedHosts: string[]
@@ -63,12 +67,33 @@ function loadWebFetch(overrides: Partial<WebFetchDependencies> = {}): LoadedWebF
       resolvedHosts.push(hostname)
       return [PUBLIC_ADDRESS]
     },
+    // No project config unless a test says so: the session's policy is the user's.
+    resolveSessionConfig: () =>
+      Promise.resolve({ result: parseEnsoConfig(configWith([ALLOWED_HOST])), path: CONFIG_PATH }),
     ...overrides,
   }
   let captured: CapturedTool | undefined
-  createWebFetch(dependencies)({ registerTool: (tool: CapturedTool) => (captured = tool) } as never)
+  let sessionStart: ((event: unknown, context: unknown) => Promise<void>) | undefined
+  createWebFetch(dependencies)({
+    registerTool: (tool: CapturedTool) => (captured = tool),
+    on: (event: string, handler: typeof sessionStart) => {
+      if (event === 'session_start') sessionStart = handler
+    },
+    events: {},
+  } as never)
   if (captured === undefined) throw new Error('web-fetch did not register a tool')
-  return { tool: captured, fetchedUrls, fetchInits, resolvedHosts }
+  return {
+    get tool(): CapturedTool {
+      if (captured === undefined) throw new Error('web-fetch did not register a tool')
+      return captured
+    },
+    startSession: async () => {
+      await sessionStart?.({ type: 'session_start' }, { cwd: '/work/project', hasUI: true, ui: {}, sessionManager: {} })
+    },
+    fetchedUrls,
+    fetchInits,
+    resolvedHosts,
+  }
 }
 
 async function run(loaded: LoadedWebFetch, url: string): Promise<string> {
@@ -102,6 +127,75 @@ test('empty allowlist: the refusal names the file, the shape, the restart, and t
   expect(text).toContain(`{ "webFetch": { "allowedHosts": ["docs.example.com"] } }`)
   expect(text).toContain('restart')
   expect(text).toContain('human')
+  expect(loaded.fetchedUrls).toEqual([])
+})
+
+// #421: at session_start the tool takes the SESSION's config — here a trusted project's, whose
+// hosts were merged over the user's — and re-registers, so the model is told the hosts it has.
+test("⚠ at session start the session's config replaces the user's: the merged hosts are fetchable and named (#421)", async () => {
+  const projectPath = '/work/project/.enso/config.json'
+  const loaded = loadWebFetch({
+    resolveSessionConfig: () =>
+      Promise.resolve({
+        result: parseEnsoConfig(configWith([ALLOWED_HOST, 'docs.project.example'])),
+        path: projectPath,
+      }),
+  })
+  expect(loaded.tool.description).not.toContain('docs.project.example')
+  await loaded.startSession()
+  expect(await run(loaded, 'https://docs.project.example/guide')).toContain('hello from the docs')
+  expect(await run(loaded, 'https://elsewhere.example/')).toContain(projectPath)
+  expect(loaded.tool.description).toContain('docs.project.example')
+})
+
+// #428 review: a trust store that cannot be read (corrupt trust.json, a lock never taken) rejects the
+// resolution. Every call refuses — and the description stops naming the load-time hosts.
+test("⚠ a session whose config cannot be resolved refuses every call, and stops advertising the user's hosts", async () => {
+  const loaded = loadWebFetch({
+    resolveSessionConfig: () =>
+      Promise.reject(new Error('Invalid trust store /home/u/.enso/pi-agent/trust.json: expected an object')),
+  })
+  expect(loaded.tool.description).toContain(ALLOWED_HOST)
+  await loaded.startSession()
+  const text = await run(loaded, `https://${ALLOWED_HOST}/guide`)
+  expect(text).toContain("the session's config could not be resolved")
+  expect(text).toContain('Invalid trust store')
+  expect(loaded.fetchedUrls).toEqual([])
+  expect(loaded.tool.description).not.toContain(ALLOWED_HOST)
+})
+
+// ⚠ THE DEADLOCK (#421, found live): the trust question is shown on the thread only once the
+// session exists, so session_start must NOT wait for its answer — it did, and session creation
+// hung on a card nobody could see. The call that needs the policy waits instead.
+test('⚠ session_start returns while the trust question is open; a call made meanwhile waits for the answer (#421)', async () => {
+  const answer = Promise.withResolvers<SessionEnsoConfig>()
+  const loaded = loadWebFetch({ resolveSessionConfig: () => answer.promise })
+  await loaded.startSession()
+  let settled = false
+  const call = run(loaded, 'https://docs.project.example/').then((text) => {
+    settled = true
+    return text
+  })
+  await Promise.resolve()
+  expect(settled).toBe(false)
+  answer.resolve({
+    result: parseEnsoConfig(configWith(['docs.project.example'])),
+    path: '/work/project/.enso/config.json',
+  })
+  expect(await call).toContain('hello from the docs')
+})
+
+test("a session whose config is unreadable fails CLOSED from its start, naming the session's file", async () => {
+  const loaded = loadWebFetch({
+    resolveSessionConfig: () =>
+      Promise.resolve({
+        result: { kind: 'unreadable', reason: 'not valid JSON' },
+        path: '/work/project/.enso/config.json',
+      }),
+  })
+  await loaded.startSession()
+  const text = await run(loaded, 'https://docs.example.com/')
+  expect(text).toContain('/work/project/.enso/config.json')
   expect(loaded.fetchedUrls).toEqual([])
 })
 

@@ -96,6 +96,10 @@ const VENDOR_IMPORT_ALLOWED: readonly string[] = [
   // implementation, so the import is the test. Leaves when the replica does — i.e. when the
   // runtime exports those two functions, or the guard stops needing to agree with them.
   'packages/harness/core/__tests__/paths.test.ts',
+  // Same route, to load pi's own `core/trust-manager.js` and hold the replica of its project-trust
+  // store (#421) to it: reads, writes and the lock must agree, or a project is trusted in `.pi/`
+  // and not in `.enso/`. Leaves when the runtime exports the store.
+  'packages/harness/core/__tests__/project-trust.test.ts',
   // `import.meta.resolve('@earendil-works/pi-coding-agent')` once, to read the WORKSPACE pi's
   // version and assert the launcher's supported range still covers the pi that corpus is
   // pinned against (#217, arrived with #294). Naming the package IS the question it asks:

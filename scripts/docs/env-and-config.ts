@@ -184,7 +184,7 @@ const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
     reader: '`packages/harness/extensions/web-fetch/index.ts#createWebFetch`',
     check: {
       file: 'packages/harness/extensions/web-fetch/index.ts',
-      contains: 'parsed.config.webFetch?.allowedHosts ?? []',
+      contains: 'result.config.webFetch?.allowedHosts ?? []',
     },
   },
   {
@@ -194,7 +194,7 @@ const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
     reader: '`packages/harness/extensions/web-fetch/index.ts#createWebFetch`',
     check: {
       file: 'packages/harness/extensions/web-fetch/index.ts',
-      contains: 'parsed.config.webFetch?.allowedHosts ?? []',
+      contains: 'result.config.webFetch?.allowedHosts ?? []',
     },
   },
   {

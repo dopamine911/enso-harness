@@ -53,6 +53,8 @@ const ANTHROPIC_MODEL = { id: 'claude-test', provider: 'anthropic', api: 'anthro
 const UNROUTED_MODEL = { id: 'deepseek-v4-flash', provider: 'deepseek', api: 'openai-completions', maxTokens: 8192 }
 
 interface LoadedWebSearch {
+  /** Run the extension's `session_start`, as pi does when the session begins. */
+  startSession: () => Promise<void>
   tool: CapturedTool
   calls: { anthropic: number; deepseek: number; tavily: number }
   tavilyRequests: { apiKey: string; includeDomains?: readonly string[] | undefined }[]
@@ -95,12 +97,32 @@ function loadWebSearch(
     fetchUrl: async () => {
       throw new Error('no test reaches the network')
     },
+    resolveSessionConfig: () =>
+      Promise.resolve({ result: { kind: 'ok', config: {} }, path: '/home/u/.enso/config.json' }),
     ...overrides,
   }
   let captured: CapturedTool | undefined
-  createWebSearch(dependencies)({ registerTool: (tool: CapturedTool) => (captured = tool) } as never)
+  let sessionStart: ((event: unknown, context: unknown) => Promise<void>) | undefined
+  createWebSearch(dependencies)({
+    registerTool: (tool: CapturedTool) => (captured = tool),
+    on: (event: string, handler: typeof sessionStart) => {
+      if (event === 'session_start') sessionStart = handler
+    },
+    events: {},
+  } as never)
   if (captured === undefined) throw new Error('web-search did not register a tool')
-  return { tool: captured, calls, tavilyRequests, deepseekKeys }
+  return {
+    get tool(): CapturedTool {
+      if (captured === undefined) throw new Error('web-search did not register a tool')
+      return captured
+    },
+    startSession: async () => {
+      await sessionStart?.({ type: 'session_start' }, { cwd: '/work/project', hasUI: true, ui: {}, sessionManager: {} })
+    },
+    calls,
+    tavilyRequests,
+    deepseekKeys,
+  }
 }
 
 async function run(loaded: LoadedWebSearch, extensionContext: unknown): Promise<string> {
@@ -335,6 +357,46 @@ test('both backends failing renders BOTH reasons', async () => {
   expect(text.startsWith('Not searched:')).toBe(true)
   expect(text).toContain('primary broke')
   expect(text).toContain('fallback broke too')
+})
+
+// #421: the session's config — a trusted project's pin over the user's none — takes over at its
+// start: the project pinned the DeepSeek backend, so that is what runs, and the description says so.
+test("⚠ at session start the session's config replaces the user's: a project's backend pin takes effect (#421)", async () => {
+  const loaded = loadWebSearch(
+    {
+      resolveSessionConfig: () =>
+        Promise.resolve({
+          result: { kind: 'ok', config: { webSearch: { backend: 'deepseek' } } },
+          path: '/work/project/.enso/config.json',
+        }),
+    },
+    { DEEPSEEK_API_KEY: 'sk-deepseek' },
+  )
+  expect(loaded.tool.description).not.toContain('DeepSeek backend')
+  await loaded.startSession()
+  await run(loaded, { model: ANTHROPIC_MODEL })
+  expect(loaded.calls.deepseek).toBe(1)
+  expect(loaded.calls.anthropic).toBe(0)
+  expect(loaded.tool.description).toContain('DeepSeek backend')
+})
+
+// #428 review: a trust store that cannot be read rejects the resolution. Every call refuses, and the
+// description drops the load-time backend pin rather than advertise it to a session that cannot use it.
+test("⚠ a session whose config cannot be resolved refuses every call, and drops the user's backend pin", async () => {
+  const loaded = loadWebSearch(
+    {
+      readConfigText: () => JSON.stringify({ webSearch: { backend: 'deepseek' } }),
+      resolveSessionConfig: () =>
+        Promise.reject(new Error('Invalid trust store /home/u/.enso/pi-agent/trust.json: expected an object')),
+    },
+    { DEEPSEEK_API_KEY: 'sk-deepseek', TAVILY_API_KEY: 'tv-key' },
+  )
+  expect(loaded.tool.description).toContain('DeepSeek backend')
+  await loaded.startSession()
+  const text = await run(loaded, { model: ANTHROPIC_MODEL })
+  expect(text).toContain("the session's config could not be resolved")
+  expect(loaded.calls).toEqual({ anthropic: 0, deepseek: 0, tavily: 0 })
+  expect(loaded.tool.description).not.toContain('DeepSeek backend')
 })
 
 test('an unreadable config fails CLOSED: every call refuses, no provider runs', async () => {

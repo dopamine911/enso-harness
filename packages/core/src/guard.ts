@@ -272,10 +272,9 @@ export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.git', '.vscod
  *   `.agents`  — pi discovers skills from `~/.agents/skills/` even under a redirected
  *                agent dir (scripts/enso.ts's --no-skills note); a written skill loads
  *                next session.
- *   `.enso`     — the harness's own agent dir (`.enso/pi-agent`: settings, extensions,
- *                auth.json). No agent task legitimately writes there via write/edit;
- *                scripts/enso.ts writes `.enso/print-harness` through node fs, which never
- *                passes this guard.
+ *   `.enso`     — `ENSO_HOME` (`~/.enso`: the agent dir, auth.json, config.json) and any
+ *                project's `.enso/config.json`, which widens that project's sessions once
+ *                it is trusted (#421). No agent task legitimately writes there via write/edit.
  *   `.cc-safety-net` — cc-safety-net's own policy dir (#9). Probed 2026-09-04: its
  *                checkCommand DENIES `rm -rf .cc-safety-net` but ALLOWS a shell redirect
  *                into it (`echo x > .cc-safety-net/rules.json`), and pi's write/edit

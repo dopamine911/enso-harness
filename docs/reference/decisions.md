@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 285.**
+**Decision headers: 290.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -50,6 +50,8 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/core/src/web-search.ts` | `#63` | The web_search tool's shapes and config section (#63). |
 | `packages/harness/core/__tests__/environment-dump.test.ts` | `#89` | #89's depth layer: the bash environment-dump deny. |
 | `packages/harness/core/__tests__/paths.test.ts` | `#53` | ⚠ FAIL CLOSED (#53 S3): no roots means nothing is inside — a misconfigured policy with an empty root list must deny, not allow, every write. |
+| `packages/harness/core/__tests__/project-trust.test.ts` | `#421` | The replica of pi's project-trust store (#421), held to pi's OWN module. |
+| `packages/harness/core/__tests__/session-config.test.ts` | `#421` | #421: the session's config — the user's, and over it a trusted project's `.enso/config.json`. |
 | `packages/harness/core/__tests__/shell-fixtures.ts` | `#261`, `#289` | Shell-shaped literals the scanner tests write, in one place (#261, PR #289 review). |
 | `packages/harness/core/__tests__/shell-secret-paths.test.ts` | `#204` | The bash/powershell secret-path deny (#204). |
 | `packages/harness/core/__tests__/shell-segments.test.ts` | `#9`, `#89`, `#261` | The tokenizer's own contract (#261) — the parsing floor under the network deny (#9) and the environment-dump deny (#89), pinned directly instead of transitively. |
@@ -61,7 +63,9 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/core/environment-dump.ts` | `#89`, `#206` | The bash environment-dump deny (#89) — DEPTH, not the fix. |
 | `packages/harness/core/index.ts` | `#173`, `#263` | The harness's own core — path resolution, guard state, and the web-search seam's vocabulary. |
 | `packages/harness/core/network-egress.ts` | `#9`, `#54`, `#55`, `#57`, `#206` | The bash network deny (#9) — a BAR, deliberately not a boundary. |
+| `packages/harness/core/project-trust.ts` | `#421` | pi's project-trust store, replicated (#421): the file, the lookup, the write and the lock. |
 | `packages/harness/core/read-tracker.ts` | `#10`, `#11`, `#57` | Session-scoped record of files whose content this session has seen (#10), and of the on-disk state they had when it saw them (#11). |
+| `packages/harness/core/session-config.ts` | `#421` | The config one session runs under (#421): the user's `ENSO_HOME/config.json`, and over it the project's own `<cwd>/.enso/config.json` — read ONLY once the project is trusted, by pi's trust store and rules (`project-trust.ts`), so one answer covers the project's `.pi/` and `.enso/`. |
 | `packages/harness/core/shell-secret-paths.ts` | `#9`, `#89`, `#204` | The bash/powershell secret-path deny (#204) — the read gate's own policy, on the shell route. |
 | `packages/harness/core/shell-segments.ts` | `#9` | Conservative shell command segmenter — the parsing floor under the bash network deny (#9). |
 | `packages/harness/core/tool-identity.ts` | `#4` | Canonical tool identity (#4, gap 2). |
@@ -86,10 +90,11 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/extensions/guards/index.ts` | `#4`, `#9`, `#10`, `#11`, `#20`, `#21`, `#69` | Tier 0 guards — see `docs/concepts/pi-immediate-needs.md`. |
 | `packages/harness/extensions/logging/__tests__/logging.test.ts` | `#132` | The extension's two branches (#132): pi as a CHILD configures its own sink; pi IN-PROCESS leaves the server's alone. |
 | `packages/harness/extensions/logging/index.ts` | `#132`, `#144`, `#167` | The extension process's logging (#132), and the one record only an extension can write: the provider's own request id (#144). |
+| `packages/harness/extensions/web-fetch/__tests__/one-trust-question.test.ts` | `#421` | #421, found live: the trust question for a project's `.enso/config.json` must be asked ONCE per session, though two tools (web_fetch, web_search) read the config. |
 | `packages/harness/extensions/web-fetch/__tests__/web-fetch.test.ts` | `#54` | The web_fetch extension (#54), against injected IO seams — no test here touches the network, DNS, or the user's config file. |
 | `packages/harness/extensions/web-fetch/index.ts` | `#9`, `#54`, `#59`, `#421` | The web_fetch tool (#54) — the sanctioned web access that replaces the ad-hoc network clients #9 denies in bash. |
 | `packages/harness/extensions/web-search/__tests__/web-search.test.ts` | `#63` | The web_search extension (#63) against injected seams — the SELECTION and FALLBACK policy, and the ACCURATE rendering contract. |
-| `packages/harness/extensions/web-search/index.ts` | `#54`, `#63`, `#89`, `#132` | The web_search tool (#63) — provider-native search with a Tavily fallback, consumed from pi-web-search 1.4.0 (© ttttmr, MIT) and retyped behind enso's seams. |
+| `packages/harness/extensions/web-search/index.ts` | `#54`, `#63`, `#89`, `#132`, `#421` | The web_search tool (#63) — provider-native search with a Tavily fallback, consumed from pi-web-search 1.4.0 (© ttttmr, MIT) and retyped behind enso's seams. |
 | `packages/web/e2e/chat.e2e.ts` | `#27`, `#71` | Manual web smoke (#71): drive the real chat surface and leave screenshots behind. |
 | `packages/web/e2e/playwright.config.ts` | `#71` | Playwright config for the MANUAL web smoke (#71). |
 | `packages/web/src/EnsoToolResult.tsx` | `#18` | The web renderer for a enso tool result — the React half of #18's contract. |
