@@ -210,7 +210,7 @@ export interface ProcessLoggingOptions {
 }
 ```
 
-`configureProcessLogging` (`log-process.ts:501-581`, in prose) builds a date-named file sink with
+`configureProcessLogging` (`log-process.ts:510-590`, in prose) builds a date-named file sink with
 `bufferSize: 0` (line 395; measured, header lines 53-62: the buffered sink held the last record until
 the next one), creates today's file `0600` before the sink opens it and again on each record, so a
 rollover at local midnight does not leave a `0664` file behind (323-339, 349-352, 370-375, #207),
@@ -222,7 +222,7 @@ effective level (376-379), and wraps the file sink — and the console sink when
 
 **Three configurators, one per process kind**, each writing into the same day's file: the server
 (`process: 'server'`) and the web launcher (`'web'`), both through `startLauncher`
-(`log-process.ts:361-405`), which first moves a checkout's old `.enso/` into `ENSO_HOME` (#421), and
+(`log-process.ts:361-414`), which first moves a checkout's old `.enso/` into `ENSO_HOME` (#421), and
 the runtime as a child (`packages/harness/extensions/logging/index.ts:39-47`, `'pi'`).
 
 The extension is the interesting one (`logging/index.ts:11-21`): in-process under the web host the

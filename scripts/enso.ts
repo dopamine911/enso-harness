@@ -57,7 +57,7 @@ import {
   ensoSecretsPath,
   findRepoRoot,
   harnessPackageDir,
-  migrateCheckoutEnso,
+  migrateCheckoutEnsoOnLaunch,
   printHarnessDir,
 } from '../packages/core/src/paths.ts'
 import { declaredResources, missingVendorPaths } from '../packages/core/src/pi-manifest.ts'
@@ -95,13 +95,18 @@ if (missing.length > 0) {
 // The user's Enso state (#421): the checkout's old `.enso/` moved in first, before the secrets are
 // read and pi is pointed at its agent dir there. Said on stderr, as everything here is.
 const home = ensoHome(process.env)
-const migration = migrateCheckoutEnso(repoRoot, home)
+const migration = migrateCheckoutEnsoOnLaunch(repoRoot, process.env)
 if (migration.moved.length > 0) {
   process.stderr.write(`enso: moved ${migration.moved.length} file(s) from ${migration.from} to ${home} (#421)\n`)
 }
 for (const path of migration.kept) {
   process.stderr.write(
     `enso: ⚠ ${path} stays in ${migration.from}: ${home} already has one, and nothing is overwritten — keep one by hand\n`,
+  )
+}
+if (migration.held) {
+  process.stderr.write(
+    `enso: ⚠ ${migration.from} was not moved: ENSO_HOME is set to ${home}, and a launch moves it into ~/.enso only — move it by hand if you mean to\n`,
   )
 }
 const agentDir: string = ensoAgentDir(home)
