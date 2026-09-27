@@ -1,6 +1,12 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import type { ExtensionAPI, ToolCallEvent, ToolCallEventResult, ToolResultEvent } from '@earendil-works/pi-coding-agent'
+import type {
+  ExtensionAPI,
+  ToolCallEvent,
+  ToolCallEventResult,
+  ToolResultEvent,
+  TruncationResult,
+} from '@earendil-works/pi-coding-agent'
 import {
   DEFAULT_GUARD_POLICY,
   ENSO_GUARD_DENIAL_ENTRY,
@@ -166,10 +172,14 @@ const KNOWLEDGE_CONFERRING_TOOLS = new Set([TOOL_READ, TOOL_WRITE])
 /**
  * Whether a successful `read` returned the WHOLE file (#57 S2) — the knowledge a whole-file
  * `write` needs. pi's `read` returns part of a file three ways: its own line/byte cut
- * (`details.truncation`, set whenever it cut, including a first line over the byte limit), an
- * `offset` past the first line, and a `limit` — which pi reports only in the text, so ANY limit
- * counts as partial. That errs toward "read it again without a limit", never toward a write over
- * lines the session did not see.
+ * (`details.truncation`, pi's `TruncationResult`, whose `truncated` is set whenever it cut —
+ * including a first line over the byte limit, of which it returns nothing), an `offset` past the
+ * first line, and a `limit` — which pi reports only in the text, so ANY limit counts as partial.
+ * That errs toward "read it again without a limit", never toward a write over lines the session
+ * did not see.
+ *
+ * `truncation` is read as pi's own type, not a shape written here (PR #422 review): a rename in
+ * pi fails the typecheck. `Partial`, because `details` arrives untyped.
  */
 function returnedWholeFile(event: ToolResultEvent): boolean {
   const input = inputRecordOf(event)
@@ -177,8 +187,8 @@ function returnedWholeFile(event: ToolResultEvent): boolean {
   if (input.limit !== undefined) return false
   const details: unknown = event.details
   if (typeof details !== 'object' || details === null || !('truncation' in details)) return true
-  const truncation = details.truncation as { truncated?: unknown; firstLineExceedsLimit?: unknown } | undefined
-  return truncation?.truncated !== true && truncation?.firstLineExceedsLimit !== true
+  const truncation = details.truncation as Partial<TruncationResult> | undefined
+  return truncation?.truncated !== true
 }
 
 /** Why a `write` over an existing file the session has not wholly seen is refused — never read, or read in part. */
