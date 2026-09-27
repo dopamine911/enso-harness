@@ -225,6 +225,58 @@ export function looksLikeSecret(absolutePath: string, fragments: readonly string
 }
 
 /**
+ * Where a credential fragment is placed to name a location (#160 §4).
+ *
+ * @group Guard predicates
+ */
+export interface CredentialPlaces {
+  /** The user's home: a fragment names a location here whether or not it exists yet. */
+  readonly home: string
+  /**
+   * Places a fragment names a location in only once it EXISTS: the session's workspace and the
+   * harness's own root, where `.enso/` lives. A search normally starts in them, so a location that
+   * is not there must not refuse it — `grep path=.` in every project would be.
+   */
+  readonly existing: readonly string[]
+}
+
+/**
+ * The credential location a search starting at this directory would reach beneath it, if any:
+ * each fragment placed in one of {@link CredentialPlaces} (`~/.ssh`, `~/.aws`, `<harness>/.enso`,
+ * …), and the directory an ancestor of it or the location itself (#160 §4).
+ *
+ * {@link looksLikeSecret} judges the one path it is given, which is the right question for a tool
+ * that reads that path. A recursive search reads everything BENEATH it, so `~/.aws` refused while
+ * `~` — and `/` — searched the same files. As {@link looksLikeSecret} does, both the literal
+ * directory and the realpath of its nearest existing ancestor are judged (a workspace symlink to
+ * home), against each place and its realpath.
+ *
+ * ⚠ The harness's `.enso/` is NOT protected by being gitignored: ripgrep honours `.gitignore` only
+ * inside a git work tree, and the agent may edit `.gitignore` (PR #420 review, measured).
+ *
+ * ⚠ WHAT THIS DOES NOT SEE, stated: a fragment's location anywhere but those places
+ * (`/srv/app/.aws`), and a basename-class file (`.env`, `id_rsa`) beneath the directory — those are
+ * found only by walking the tree.
+ *
+ * @group Guard predicates
+ */
+export function secretLocationBeneath(
+  absolutePath: string,
+  fragments: readonly string[],
+  places: CredentialPlaces,
+): string | undefined {
+  const directories = new Set([absolutePath, realpathOfNearestExisting(absolutePath)])
+  const reached = (location: string): boolean => [...directories].some((directory) => isInsideRoot(location, directory))
+  const locationsIn = (place: string): string[] =>
+    [...new Set([place, realpathOfNearestExisting(place)])].flatMap((base) =>
+      fragments.map((fragment) => resolve(join(base, fragment))),
+    )
+  const fromHome = locationsIn(places.home).find(reached)
+  if (fromHome !== undefined) return fromHome
+  return places.existing.flatMap(locationsIn).find((location) => existsSync(location) && reached(location))
+}
+
+/**
  * True when the path contains a fragment that is never writable.
  *
  * @group Guard predicates

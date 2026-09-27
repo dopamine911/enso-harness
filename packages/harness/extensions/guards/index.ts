@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 import type { ExtensionAPI, ToolCallEvent, ToolCallEventResult, ToolResultEvent } from '@earendil-works/pi-coding-agent'
 import {
   DEFAULT_GUARD_POLICY,
@@ -10,9 +11,11 @@ import {
   type GuardPolicy,
   WEB_FETCH_TOOL_NAME,
 } from '@enso/core'
+import { findRepoRoot } from '@enso/core/paths'
 import { type CheckCommandResult, checkCommand } from 'cc-safety-net/api'
 import {
   canonicalToolName,
+  type CredentialPlaces,
   createSessionReadTracker,
   findDeniedNetworkEgress,
   findEnvironmentDump,
@@ -22,6 +25,7 @@ import {
   isProtectedForWrite,
   looksLikeSecret,
   resolveAgainstCwd,
+  secretLocationBeneath,
 } from '../../core/index.ts'
 
 /**
@@ -160,6 +164,15 @@ const log = ensoLogger('extension', 'guards')
 const KNOWLEDGE_CONFERRING_TOOLS = new Set([TOOL_READ, TOOL_WRITE])
 
 /**
+ * The readers that return NAMES, never contents: pi's `ls` (a readdir) and `find` (fd). They are
+ * the one exception to the search-beneath check (#160 §4) — listing `~` shows that `.aws` exists
+ * and reads no file in it, and refusing it would block the most ordinary look around there is.
+ * An EXCLUSION again, for the reason the reader gate gives: a reader not named here gets the
+ * check, so a future recursive tool is refused over home until someone decides it reads names.
+ */
+const NAME_ONLY_READERS = new Set(['ls', 'find'])
+
+/**
  * The tool's arguments as a plain record, whatever actually arrived. pi's contract says
  * `input` is an object, but this handler must never throw (a throwing hook wedges print
  * mode; in-process it yields a session with the guard half-set-up — see the header), so
@@ -177,15 +190,20 @@ function pathArgumentOf(event: ToolCallEvent | ToolResultEvent): string | undefi
 }
 
 /**
- * The bash analyzer seam (#9).
+ * The guard's two seams: the bash analyzer (#9) and the harness root (#160 §4).
  *
- * Production wires cc-safety-net's `checkCommand`; tests inject known verdicts — `checkCommand`
- * reads LOCAL policy per call, so a guard test that touched the real library would vary with
- * the machine's cc-safety-net config (the contract test alone exercises the real one, and pins
- * defaults explicitly).
+ * Production wires cc-safety-net's `checkCommand` and this checkout's root; tests inject known
+ * verdicts and a root they built. `checkCommand` reads LOCAL policy per call, so a guard test that
+ * touched the real library would vary with the machine's cc-safety-net config (the contract test
+ * alone exercises the real one, and pins defaults explicitly).
  */
 export interface GuardDependencies {
   analyzeBashCommand: (input: { command: string; cwd: string }) => CheckCommandResult
+  /**
+   * The harness's own root, where `.enso/` (credentials, sessions, logs) lives — one of the places a
+   * search over a directory above it is refused for (#160 §4, `CredentialPlaces`).
+   */
+  harnessRoot: string
 }
 
 export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI) => void {
@@ -194,8 +212,8 @@ export function createGuards(dependencies: GuardDependencies): (pi: ExtensionAPI
   }
 }
 
-/** The pi entry point — the real analyzer, wired at the composition root. */
-export default createGuards({ analyzeBashCommand: checkCommand })
+/** The pi entry point — the real analyzer and this checkout's root, wired at the composition root. */
+export default createGuards({ analyzeBashCommand: checkCommand, harnessRoot: findRepoRoot(import.meta.url) })
 
 /**
  * A refusal as this guard produces it: pi's `{ block, reason }` plus the RULE that refused
@@ -507,21 +525,42 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
       return undefined
     }
 
-    // --- every remaining tool carrying a `path` reads the filesystem: deny credential
-    // material. This is an EXCLUSION, never an inclusion list, and the asymmetry is the
-    // whole point for a boundary: an over-broad reader set blocks something harmless and
-    // says so, while a too-narrow one permits a credential read silently. pi ships `read`,
-    // `grep`, `find` and `ls` with a `path` today — an inclusion list naming only `read`
-    // left `grep` over ~/.aws returning the credential line, past a guard whose own header
-    // claimed it denied secret reads.
+    return readerDenial(toolName, candidate, { target, cwd })
+  }
+
+  /**
+   * Every remaining tool carrying a `path` reads the filesystem: deny credential material. This is
+   * an EXCLUSION, never an inclusion list, and the asymmetry is the whole point for a boundary: an
+   * over-broad reader set blocks something harmless and says so, while a too-narrow one permits a
+   * credential read silently. pi ships `read`, `grep`, `find` and `ls` with a `path` today — an
+   * inclusion list naming only `read` left `grep` over ~/.aws returning the credential line, past a
+   * guard whose own header claimed it denied secret reads.
+   *
+   * #160 §4: and pi's `grep` is `rg --hidden` over everything beneath its path, so a directory ABOVE
+   * a credential directory reads it too — that incident, reached one directory up. A reader that
+   * returns names only is exempt from that second check (`NAME_ONLY_READERS`).
+   */
+  function readerDenial(
+    toolName: string,
+    candidate: string,
+    { target, cwd }: { target: string; cwd: string },
+  ): GuardDenial | undefined {
     if (looksLikeSecret(target, policy.secretPathFragments)) {
       return deny(
         'secret-read',
-        `Reading "${candidate}" via ${event.toolName} is blocked: it matches a credential pattern. ` +
+        `Reading "${candidate}" via ${toolName} is blocked: it matches a credential pattern. ` +
           `A secret read is the precondition for exfiltration, so this is denied even for inspection.`,
       )
     }
-
-    return undefined
+    if (NAME_ONLY_READERS.has(toolName)) return undefined
+    const places: CredentialPlaces = { home: homedir(), existing: [cwd, dependencies.harnessRoot] }
+    const reached = secretLocationBeneath(target, policy.secretPathFragments, places)
+    if (reached === undefined) return undefined
+    return deny(
+      'secret-read',
+      `Searching "${candidate}" via ${toolName} is blocked: ${reached} is beneath it, and ${toolName} reads ` +
+        `every file under its path, hidden ones included — the credential material a direct read of ` +
+        `${reached} is refused. Search a directory that does not contain it.`,
+    )
   }
 }

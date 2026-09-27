@@ -126,15 +126,20 @@ What the extension takes, and what it is:
 <!-- source: packages/harness/extensions/guards/index.ts#GuardDependencies -->
 ```ts
 /**
- * The bash analyzer seam (#9).
+ * The guard's two seams: the bash analyzer (#9) and the harness root (#160 §4).
  *
- * Production wires cc-safety-net's `checkCommand`; tests inject known verdicts — `checkCommand`
- * reads LOCAL policy per call, so a guard test that touched the real library would vary with
- * the machine's cc-safety-net config (the contract test alone exercises the real one, and pins
- * defaults explicitly).
+ * Production wires cc-safety-net's `checkCommand` and this checkout's root; tests inject known
+ * verdicts and a root they built. `checkCommand` reads LOCAL policy per call, so a guard test that
+ * touched the real library would vary with the machine's cc-safety-net config (the contract test
+ * alone exercises the real one, and pins defaults explicitly).
  */
 export interface GuardDependencies {
   analyzeBashCommand: (input: { command: string; cwd: string }) => CheckCommandResult
+  /**
+   * The harness's own root, where `.enso/` (credentials, sessions, logs) lives — one of the places a
+   * search over a directory above it is refused for (#160 §4, `CredentialPlaces`).
+   */
+  harnessRoot: string
 }
 ```
 

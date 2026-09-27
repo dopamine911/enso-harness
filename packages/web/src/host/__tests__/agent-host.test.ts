@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -428,6 +428,18 @@ test('⚠ through the runtime, the real guards refuse a write outside the worksp
   expect(refused?.reason).toContain('/etc/passwd')
   const passed = await hosted.probeToolCall('read', { path: 'package.json' })
   expect(passed).toBeUndefined()
+})
+
+// #160 §4, through the runner: pi's own `grep` tool name reaches the search-beneath check, so a
+// rename of it in pi shows here, not in production. The refusal is the GUARD's (its reason names
+// the credential location); on `main` the call reached the permission layer's question instead.
+// (`ls ~` is not asserted here: outside the workspace the permission mode asks before any listing,
+// which is that layer's call — the names-only exemption is pinned in guards.test.ts.)
+test('⚠ through the runtime, the guards refuse grep over home for the credential beneath it (#160 §4)', async () => {
+  const hosted = await hostedSession()
+  const searched = await hosted.probeToolCall('grep', { pattern: 'aws_secret_access_key', path: '~' })
+  expect(searched?.block).toBe(true)
+  expect(searched?.reason).toContain(join(homedir(), '.ssh'))
 })
 
 // ⚠ FIRST BLOCK WINS — the runtime's behaviour the guards header rests on (guards/index.ts:20-25),

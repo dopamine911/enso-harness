@@ -179,8 +179,8 @@
       {
         "files": ["packages/harness/extensions/guards/index.ts"],
         "functions": ["decide"],
-        "maxCognitive": 28,
-        "reason": "The tool_call guard dispatch: bash patch, then the write denials in precedence order, then the reader gate. The precedence order IS the security contract the file header documents; splitting it hides it."
+        "maxCognitive": 27,
+        "reason": "The tool_call guard dispatch: bash patch, then the write denials in precedence order, then the reader gate (readerDenial, last). The precedence order IS the security contract the file header documents; splitting it hides it."
       },
       {
         "files": ["packages/web/src/thread-debug.tsx"],
