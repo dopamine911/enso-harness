@@ -247,6 +247,8 @@ export interface EnsoServerOptions {
   cwd: string
   /** `projects.roots` from the user's config: where a page may register projects. None means the launch directory only. */
   projectRoots?: Readonly<EnsoProjectsConfig['roots']>
+  /** The config file `projectRoots` came from, named when a refusal says to declare a root. */
+  projectsConfigPath?: string
   /** Where registrations are kept (`.enso/projects.json`); absent, they last as long as the process (tests). */
   projectsStatePath?: string
   /**
@@ -348,6 +350,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   const projects = createProjectRegistry({
     launchDirectory: options.cwd,
     roots: options.projectRoots ?? [],
+    ...(options.projectsConfigPath === undefined ? {} : { configPath: options.projectsConfigPath }),
     ...(options.projectsStatePath === undefined ? {} : { statePath: options.projectsStatePath }),
   })
   const servesDirectory = (directory: string): boolean => projects.byDirectory(directory) !== undefined

@@ -61,6 +61,7 @@ mkdirSync(agentDir, { recursive: true })
 const { listening } = startEnsoServer({
   cwd,
   projectRoots,
+  projectsConfigPath: configPath,
   projectsStatePath: ensoProjectsPath(home),
   harnessPackageDir: harnessPackageDir(repoRoot),
   agentDir,

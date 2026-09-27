@@ -39,14 +39,15 @@ test('⚠ nothing inside a hidden directory under a root can be a project', () =
   expect(projects.register({ path: join(root, 'app') })).toMatchObject({ kind: 'registered' })
 })
 
-test('with no roots declared, only the launch directory is a project, and registering says how to declare one', () => {
+test('with no roots declared, only the launch directory is a project, and registering says how to declare one — in the file actually read', () => {
   const { launch, root } = layout()
-  const projects = createProjectRegistry({ launchDirectory: launch, roots: [] })
+  // A scratch ENSO_HOME (#421): pointing at ~/.enso/config.json would send the fix to a file this server never reads.
+  const configPath = '/scratch/enso-home/config.json'
+  const projects = createProjectRegistry({ launchDirectory: launch, roots: [], configPath })
   expect(projects.list()).toEqual([expect.objectContaining({ path: launch, launch: true, status: 'ok' })])
-  expect(projects.register({ path: root })).toEqual({
-    kind: 'refused',
-    reason: expect.stringContaining('"projects": { "roots"'),
-  })
+  const refusal = projects.register({ path: root })
+  expect(refusal).toEqual({ kind: 'refused', reason: expect.stringContaining('"projects": { "roots"') })
+  expect(refusal).toEqual({ kind: 'refused', reason: expect.stringContaining(configPath) })
   // Registering the launch directory is not a new project — it already is one.
   expect(projects.register({ path: launch })).toMatchObject({ kind: 'existing', project: { launch: true } })
 })
