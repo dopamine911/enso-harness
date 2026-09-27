@@ -1,4 +1,5 @@
 import { basename } from 'node:path'
+import { PROC_ENVIRON_IN_COMMAND } from '@enso/core'
 import { isSecretShapedName } from '@enso/core/secrets'
 import { EXEC_TERMINATORS, FIND_COMMAND, findExecPayloads, TRANSPARENT_COMMAND_WRAPPERS } from './network-egress.ts'
 import {
@@ -50,7 +51,6 @@ const LISTING_COMMANDS = new Set(['env', 'printenv', 'export', 'declare', 'types
 /** `export -p`, `declare -p`, `declare -x`, `typeset -p`: the listing options; anything else is an assignment or a flag that does not list. */
 const LISTING_OPTIONS = new Set(['-p', '-x', '-px', '-xp'])
 
-const PROC_ENVIRON_PATTERN = /\/proc\/[^/\s]+\/environ\b/
 const SHELL_EXPANSION_PATTERN = /\$\{?([A-Za-z_][A-Za-z0-9_]*)/g
 const POWERSHELL_ENV_VARIABLE_PATTERN = /\$env:([A-Za-z_][A-Za-z0-9_]*)/gi
 const POWERSHELL_ENV_LISTING_PATTERN = /\b(?:get-childitem|gci|ls|dir|get-item|gi)\s+env:/i
@@ -155,7 +155,7 @@ function gateWords(words: readonly string[]): EnvironmentDumpMatch | undefined {
 }
 
 function rawScan(command: string, coarse: boolean): EnvironmentDumpMatch | undefined {
-  const procMatch = PROC_ENVIRON_PATTERN.exec(command)
+  const procMatch = PROC_ENVIRON_IN_COMMAND.exec(command)
   if (procMatch !== null) return { matched: procMatch[0], via: 'proc-environ' }
   for (const expansion of command.matchAll(SHELL_EXPANSION_PATTERN)) {
     const name = expansion[1] ?? ''
