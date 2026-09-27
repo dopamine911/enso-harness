@@ -183,6 +183,11 @@ export interface EnsoHomeMigration {
   readonly moved: readonly string[]
   /** Files LEFT in `from`: `to` already holds one at that path. Never overwritten — the user decides. */
   readonly kept: readonly string[]
+  /**
+   * The checkout HAS an old `.enso/` that this launch did not move, because `ENSO_HOME` was set
+   * explicitly (`migrateCheckoutEnsoOnLaunch`). Said, so it is not silently ignored.
+   */
+  readonly held: boolean
 }
 
 /**
@@ -203,13 +208,36 @@ export interface EnsoHomeMigration {
  */
 export function migrateCheckoutEnso(repoRoot: string, home: string): EnsoHomeMigration {
   const from = checkoutEnsoDir(repoRoot)
-  const migration = { from, to: home, moved: [] as string[], kept: [] as string[] }
+  const migration = { from, to: home, moved: [] as string[], kept: [] as string[], held: false }
   if (!existsSync(from) || resolve(from) === resolve(home)) return migration
   mkdirSync(home, { recursive: true, mode: 0o700 })
   rmSync(join(from, 'print-harness'), { recursive: true, force: true })
   moveTree(from, home, '', migration)
   removeEmptyDirectories(from)
   return migration
+}
+
+/**
+ * The migration a LAUNCH runs (#421): into the default `ENSO_HOME` (`~/.enso`) only. With
+ * `ENSO_HOME` set explicitly nothing moves — the checkout's old `.enso/` is `held` and reported.
+ *
+ * ⚠ Why: a launcher run from a checkout with a scratch or test `ENSO_HOME` (`ENSO_HOME=/tmp/x`)
+ * would otherwise move that checkout's logins and sessions into the scratch directory, to be lost
+ * with it — which happened, once, while this was being built. `~/.enso` is the one place a user's
+ * state is meant to live, so it is the one place a launch moves it to without being asked. Someone
+ * who chose another home moves the old directory by hand, and the launch says so.
+ *
+ * @group Workspace paths
+ */
+export function migrateCheckoutEnsoOnLaunch(
+  repoRoot: string,
+  environment: Readonly<Record<string, string | undefined>>,
+): EnsoHomeMigration {
+  const home = ensoHome(environment)
+  const configured = environment.ENSO_HOME
+  if (configured === undefined || configured.length === 0) return migrateCheckoutEnso(repoRoot, home)
+  const from = checkoutEnsoDir(repoRoot)
+  return { from, to: home, moved: [], kept: [], held: existsSync(from) }
 }
 
 function moveTree(
