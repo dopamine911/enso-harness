@@ -105,6 +105,16 @@ const log = ensoLogger('host')
  * spawns none. Read-merge-write: multi-account writes its defaults only when the file is
  * absent, and its user-facing commands read-merge-write the same file.
  *
+ * ⚠⚠ …AND SO IS ONE `authErrorPatterns` ENTRY (#341). With no Cursor login, multi-account's own
+ * Cursor proxy throws "No Cursor account is logged in for this request" and answers it as
+ * `500 server_error` (`cursor/proxy.ts`), and its classifier reads the `500` as TRANSIENT: the
+ * thread said "temporary error … send a new message to retry" to someone who can only fix it by
+ * logging in (reproduced on a fresh `ENSO_HOME`, 1.23.2). The entry makes it an AUTH failure —
+ * "authorization is invalid. Run /login …", no automatic resume. The vendor's list only grows
+ * (`patternsWithDefaults`), so this adds to its defaults and to anything the operator listed.
+ * Tied to the proxy's wording: if that changes, behaviour falls back to today's, and
+ * `agent-host.test.ts` goes red against the real proxy. Leaves when the proxy answers 401.
+ *
  * ⚠⚠ EVERY THREAD IS A MULTI-ACCOUNT ROOT: `PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS=1` (#351).
  * pi-multi-account keeps ONE root session per process for terminal pi — a lease on
  * `globalThis[Symbol.for('pi-multi-account:active-root-session')]` — and a session that starts
@@ -145,9 +155,12 @@ const log = ensoLogger('host')
  * `loadedExtensionPaths` like every extension pi loaded.
  */
 
-/** The agent dir's multi-account config file, and the one key this host must pin in it. */
+/** The agent dir's multi-account config file, and the keys this host seeds in it. */
 const MULTI_ACCOUNT_CONFIG_FILENAME = 'provider-failover.json'
 const MULTI_ACCOUNT_CHILD_PROXY_KEY = 'childProxy'
+const MULTI_ACCOUNT_AUTH_PATTERNS_KEY = 'authErrorPatterns'
+/** Matched case-insensitively as a substring of the error text — see the module header (#341). */
+const MULTI_ACCOUNT_AUTH_PATTERNS: readonly string[] = ['account is logged in for this request']
 
 /**
  * The host's own extension (see the module header): named so `loadedExtensionPaths` says what
@@ -405,12 +418,14 @@ export interface StoredThreadContext {
 export const AGENT_RUNTIME_VERSION: string = PI_VERSION
 
 /**
- * Pin `childProxy: false` in the agent dir's multi-account config — see the module header.
+ * Seed the agent dir's multi-account config — see the module header: pin `childProxy: false`,
+ * and add Enso's `authErrorPatterns` to the operator's (#341).
  *
- * Creates the file if absent; otherwise reads, sets the one key, writes. Any other key the
- * operator set is preserved verbatim.
+ * Creates the file if absent; otherwise reads, sets what is missing, writes — and only when
+ * something changed. Every other key, and every entry the operator listed, is kept verbatim;
+ * a pattern already there in any case is not added twice (the vendor compares them that way).
  */
-export function seedMultiAccountChildProxyOff(agentDir: string): void {
+export function seedMultiAccountConfig(agentDir: string): void {
   mkdirSync(agentDir, { recursive: true })
   const configPath = join(agentDir, MULTI_ACCOUNT_CONFIG_FILENAME)
   let existing: Record<string, unknown> = {}
@@ -420,8 +435,20 @@ export function seedMultiAccountChildProxyOff(agentDir: string): void {
       existing = parsed as Record<string, unknown>
     }
   }
-  if (existing[MULTI_ACCOUNT_CHILD_PROXY_KEY] === false) return
-  writeFileSync(configPath, `${JSON.stringify({ ...existing, [MULTI_ACCOUNT_CHILD_PROXY_KEY]: false }, null, '\t')}\n`)
+  const listed = existing[MULTI_ACCOUNT_AUTH_PATTERNS_KEY]
+  // Kept as the operator wrote it, non-strings included (the vendor skips those; the file is theirs).
+  const operatorEntries: readonly unknown[] = Array.isArray(listed) ? listed : []
+  const missingPatterns = MULTI_ACCOUNT_AUTH_PATTERNS.filter(
+    (pattern) =>
+      !operatorEntries.some((known) => typeof known === 'string' && known.toLowerCase() === pattern.toLowerCase()),
+  )
+  if (existing[MULTI_ACCOUNT_CHILD_PROXY_KEY] === false && missingPatterns.length === 0) return
+  const seeded = {
+    ...existing,
+    [MULTI_ACCOUNT_CHILD_PROXY_KEY]: false,
+    [MULTI_ACCOUNT_AUTH_PATTERNS_KEY]: [...operatorEntries, ...missingPatterns],
+  }
+  writeFileSync(configPath, `${JSON.stringify(seeded, null, '\t')}\n`)
 }
 
 /** `RuntimeCommand` with `description` present only when pi supplied one (`exactOptionalPropertyTypes`). */
@@ -441,7 +468,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   // session_start, and the secrets out of the environment before anything can inherit it (#89).
   process.env.PI_CODING_AGENT_DIR = agentDir
   process.env.PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS = '1'
-  seedMultiAccountChildProxyOff(agentDir)
+  seedMultiAccountConfig(agentDir)
   // The secrets file is the USER's (`ENSO_HOME`, #421), and the root `.env` bun autoloads is THIS
   // checkout's — neither is about the trees pi operates in (a session may run anywhere, a tmpdir
   // in tests). Both resolve from the environment and the harness, never from a session's cwd.

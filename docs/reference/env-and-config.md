@@ -59,7 +59,7 @@ Every runtime path helper in `packages/core/src/paths.ts`: the user's state unde
 | Path | Assembler | Writer | Lifetime |
 |---|---|---|---|
 | `ENSO_HOME/logs` | `ensoLogsDir` | `configureProcessLogging` creates it and every harness process appends to the day file. | One file per local day; logging retains 14 days. |
-| `ENSO_HOME/pi-agent` | `ensoAgentDir` | The TUI/server launchers create it; pi and `createAgentHost` write settings, auth, sessions, and the multi-account pin. | Per-user state shared by every checkout and launch; retained until the operator removes it. |
+| `ENSO_HOME/pi-agent` | `ensoAgentDir` | The TUI/server launchers create it; pi and `createAgentHost` write settings, auth, sessions, and the multi-account seed. | Per-user state shared by every checkout and launch; retained until the operator removes it. |
 | `ENSO_HOME/projects.json` | `ensoProjectsPath` | The web server, when a page registers or removes a project (#395); written whole and renamed over. | Per-user until a project is removed; entries outside the configured roots are kept but not served. |
 | `ENSO_HOME/secrets.env` | `ensoSecretsPath` | Operator only; harness code reads and quarantines but never writes it. | Per-user until the operator edits or removes it; secret reads are per call. |
 | `node_modules/.cache/enso/print-harness` | `printHarnessDir` | `scripts/print-harness.ts#materializePrintHarness` rebuilds the package mirror for non-interactive launches. | Per-checkout build cache (its links point into this checkout); reconciled on every print launch. |

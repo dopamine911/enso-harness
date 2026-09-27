@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,7 +20,7 @@ import {
   type HostedThread,
   MODEL_WATCH_EXTENSION_PATH,
   SessionDirectoryRefused,
-  seedMultiAccountChildProxyOff,
+  seedMultiAccountConfig,
   stopRunSettlingDialogs,
 } from '../agent-host.ts'
 import { readPiccPersistedMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
@@ -128,25 +128,105 @@ const nextTick = (): Promise<void> => {
   return promise
 }
 
-test("⚠ childProxy is pinned off in the agent dir's multi-account config, other keys preserved", () => {
+const SEEDED_AUTH_PATTERN = 'account is logged in for this request'
+
+test("⚠ the agent dir's multi-account config is seeded — childProxy off, Enso's auth pattern added — and the operator's keys and patterns are kept", () => {
   const scratch = mkdtempSync(join(tmpdir(), 'enso-host-seed-'))
   const configPath = join(scratch, 'provider-failover.json')
-  // absent → created with just the pin
-  seedMultiAccountChildProxyOff(scratch)
-  expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({ childProxy: false })
-  // present with the operator's keys → merged, not clobbered
-  writeFileSync(configPath, JSON.stringify({ childProxy: true, showUsage: false, providerOrder: ['anthropic'] }))
-  seedMultiAccountChildProxyOff(scratch)
+  // absent → created with the pin and the pattern
+  seedMultiAccountConfig(scratch)
+  expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
+    childProxy: false,
+    authErrorPatterns: [SEEDED_AUTH_PATTERN],
+  })
+  // present with the operator's keys and patterns → merged, not clobbered
+  writeFileSync(
+    configPath,
+    JSON.stringify({ childProxy: true, showUsage: false, authErrorPatterns: ['my proxy says no', 42] }),
+  )
+  seedMultiAccountConfig(scratch)
   expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
     childProxy: false,
     showUsage: false,
-    providerOrder: ['anthropic'],
+    authErrorPatterns: ['my proxy says no', 42, SEEDED_AUTH_PATTERN],
+  })
+  // an agent dir the old seed pinned (every existing one: `{ childProxy: false }`) → the pattern is added
+  writeFileSync(configPath, JSON.stringify({ childProxy: false, showUsage: false }))
+  seedMultiAccountConfig(scratch)
+  expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
+    childProxy: false,
+    showUsage: false,
+    authErrorPatterns: [SEEDED_AUTH_PATTERN],
+  })
+  // the pattern already there, in another case → not added twice (the vendor compares them so) — on a
+  // rewrite, which the unpinned proxy forces
+  writeFileSync(
+    configPath,
+    JSON.stringify({ childProxy: true, showUsage: false, authErrorPatterns: [SEEDED_AUTH_PATTERN.toUpperCase()] }),
+  )
+  seedMultiAccountConfig(scratch)
+  expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
+    childProxy: false,
+    showUsage: false,
+    authErrorPatterns: [SEEDED_AUTH_PATTERN.toUpperCase()],
   })
   // and creating a host seeds it in the host's own agent dir — before any session exists
   const hostAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-seed-at-boot-'))
   createAgentHost({ servesDirectory: servesRepoRoot, agentDir: hostAgentDir, harnessPackageDir: harnessDir })
-  expect(existsSync(join(hostAgentDir, 'provider-failover.json'))).toBe(true)
-  expect(JSON.parse(readFileSync(join(hostAgentDir, 'provider-failover.json'), 'utf8'))).toEqual({ childProxy: false })
+  expect(JSON.parse(readFileSync(join(hostAgentDir, 'provider-failover.json'), 'utf8'))).toEqual({
+    childProxy: false,
+    authErrorPatterns: [SEEDED_AUTH_PATTERN],
+  })
+})
+
+/**
+ * #341, against the vendor's REAL code: its Cursor proxy, asked with no Cursor login, and its
+ * classifier, called as its turn handler calls it (`errorMessage` only). Loaded by file path — the
+ * package's entry point would run the extension. If the proxy is reworded, the seeded pattern stops
+ * matching and this goes red; if it starts answering 401, the "without the seed" line goes red —
+ * then the seed is no longer needed, and leaves.
+ */
+test("⚠ the seeded pattern makes the Cursor proxy's no-login refusal an AUTH failure — the vendor alone calls it transient (#341)", async () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'enso-host-seed-contract-'))
+  seedMultiAccountConfig(scratch)
+  const seeded = JSON.parse(readFileSync(join(scratch, 'provider-failover.json'), 'utf8')) as {
+    authErrorPatterns: string[]
+  }
+  const vendorDirectory = dirname(Bun.resolveSync('pi-multi-account/package.json', import.meta.dir))
+  const cursor = (await import(join(vendorDirectory, 'cursor', 'cursor-shared.ts'))) as {
+    ensureCursorProxy: (resolve: (slot: string) => Promise<string | undefined>) => Promise<number>
+  }
+  const proxy = (await import(join(vendorDirectory, 'cursor', 'proxy.ts'))) as { stopProxy: () => void }
+  const planner = (await import(join(vendorDirectory, 'completion-route-planner.ts'))) as {
+    classifyRouteAttempt: (attempt: object, patterns: object) => string
+  }
+  const port = await cursor.ensureCursorProxy(async () => undefined)
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-4-sonnet', messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    const errorMessage = `${response.status} ${await response.text()}`
+    const classify = (auth: readonly string[]): string =>
+      planner.classifyRouteAttempt(
+        {
+          operationId: 'contract',
+          purpose: 'agent-turn',
+          attempt: 1,
+          model: { provider: 'cursor', id: 'claude-4-sonnet' },
+          dispatched: true,
+          stopReason: 'error',
+          errorMessage,
+        },
+        // `500` is the vendor default that caught it (`DEFAULT_TRANSIENT_ERROR_PATTERNS`).
+        { ignore: [], auth, limit: [], transient: ['500'], model: [], contextOverflow: [] },
+      )
+    expect(classify([])).toBe('transient')
+    expect(classify(seeded.authErrorPatterns)).toBe('auth')
+  } finally {
+    proxy.stopProxy()
+  }
 })
 
 // ⚠ #89. pi runs in this process and every `bash` child inherits its environment, so a
