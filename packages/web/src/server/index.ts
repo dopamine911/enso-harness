@@ -43,7 +43,6 @@ import { MAX_LOG_BODY_BYTES, receiveBrowserLogs } from './logs-route.ts'
 import { createLogStatsRoute } from './logs-stats-route.ts'
 import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
 import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
-import { noteRunAdmitted } from './run-timing.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
@@ -780,9 +779,6 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
       return
     }
     const { messageId, generation, queued } = outcome.receipt
-    // The clock the first-delta record measures from (#144); a queued prompt joins the run
-    // already in flight and does not restart it.
-    noteRunAdmitted(threadId, generation)
     // ⚠ TWO DIFFERENT FACTS, TWO NAMES (PR #326 review). `admission` is what the SERVER did —
     // `queued` or `opened`, the record #132 asks for — and `requestedAdmission` is what the
     // CLIENT asked for. #216's rename gave the request the word `admission` too, and an object

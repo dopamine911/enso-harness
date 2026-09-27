@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 282.**
+**Decision headers: 285.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -189,6 +189,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/refused-attempt.tsx` | `#387` | Who refused, as a reader names them (#387): pi's display name for the provider (`Anthropic`), else its id; undefined when the refusal names no provider. |
 | `packages/web/src/route-read.ts` | `#45` | One GET of a JSON route whose answer has a schema, in the three ways it can go — a failure is words, never a throw (#45 phase 2 folded the thread timeline's and the stats drawer's copies). |
 | `packages/web/src/server/__tests__/bun-plugin-strict-binding-workaround.test.ts` | `#237` | The dev bundle's one source rewrite, executed (#237). |
+| `packages/web/src/server/__tests__/dev-proxy.test.ts` | `#160` | #160: the web surface (5178) forwards `/api/*` to the Enso server (5179), whose admission check refuses a request from a non-loopback page. |
 | `packages/web/src/server/__tests__/fake-hosted-thread.ts` | `#178` | The one fake of the thread-runtime seam (#178; `docs/seams/thread-runtime.md`): a `ThreadRuntime` from plain closures that records every call, so the server, the registry and the routes are driven over it and asserted through what it recorded. |
 | `packages/web/src/server/__tests__/follow-reader.test.ts` | `#231` | The double's own contract (#231). |
 | `packages/web/src/server/__tests__/follow-reader.ts` | `#231` | A follow as a test reads it: frames and keepalive comments as they arrive, awaited by count — never by a guessed delay. |
@@ -205,7 +206,9 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/__tests__/thread-context-route.test.ts` | `#361` | #361: one thread's context — pi's branch and pi's meter, from memory for a live thread and from the file otherwise, building nothing to answer. |
 | `packages/web/src/server/__tests__/thread-stats-route.test.ts` | `#45` | #45 phase 2: one thread's stats — pi's session for the numbers, the day files for the times. |
 | `packages/web/src/server/__tests__/transcript-to-messages.test.ts` | `#95`, `#162` | #95: a stored branch mounts as the messages a live run would have left behind. |
+| `packages/web/src/server/__tests__/vendor-links.test.ts` | `#160` | ⚠ The precondition that was missing when a real run failed. |
 | `packages/web/src/server/bundle-route.ts` | `#132`, `#137` | `GET /api/logs/bundle[?thread=<id or prefix>]` (#132 item 5): the day's records, the live threads' inspections, and the versions, as ONE markdown file with the records fenced as JSONL — `bun run logs --file` reads it back. |
+| `packages/web/src/server/dev-proxy.ts` | `#34`, `#38`, `#160` | The web surface's `/api/*` hop to the Enso server (`dev-web.ts`), streaming both directions. |
 | `packages/web/src/server/dev-web.ts` | `#9`, `#36` | Dev entry point for the web surface — Bun's fullstack dev server, replacing vite (#36). |
 | `packages/web/src/server/dev.ts` | `#9`, `#132`, `#395` | Dev entry point for the enso server. |
 | `packages/web/src/server/follow.ts` | `#75`, `#109`, `#112`, `#116`, `#162` | The prompt/follow split (#112) — the server↔browser wire. |
@@ -216,7 +219,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/logs-tail-route.ts` | `#97`, `#132`, `#144` | `GET /api/logs/tail` (#144 slice 2): the day's file, filtered server-side, as SSE — what the debug page reads instead of a terminal. |
 | `packages/web/src/server/observation-log.ts` | `#97`, `#132` | Every observation the server publishes becomes a record (#132, "trace everything") — at the tier it belongs to, with the ids that join it to the transcript, the event tail (#97) and the other layers' lines about the same moment. |
 | `packages/web/src/server/projects.ts` | `#24`, `#395`, `#399` | The projects one server runs threads in (#395). |
-| `packages/web/src/server/run-timing.ts` | `#144` | When a run was admitted, so its FIRST delta can be recorded as a latency (#144 slice 1). |
+| `packages/web/src/server/run-timing.ts` | `#144`, `#160` | When a run was admitted, so its FIRST delta can be recorded as a latency (#144 slice 1). |
 | `packages/web/src/server/sse.ts` | `#109` | The SSE plumbing every streaming route shares: the response headers and the keepalive. |
 | `packages/web/src/server/thread-context-route.ts` | `#86`, `#361` | `GET /api/threads/:threadId/context` (#361): the thread's context, request by request — the Context view reads it. |
 | `packages/web/src/server/thread-read.ts` | `#214` | THE LIVE-OR-COLD READ, ONCE (#214). |
