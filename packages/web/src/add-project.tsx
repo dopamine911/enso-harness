@@ -34,8 +34,12 @@ type Browsing =
   | { readonly kind: 'loaded'; readonly listing: EnsoDirectoryListing }
   | { readonly kind: 'failed'; readonly reason: string }
 
-/** What the dialog says when there is nothing to browse. */
-export const NO_ROOTS = 'no project roots are declared — add "projects": { "roots": ["~/code"] } to ~/.enso/config.json'
+/**
+ * What the dialog says when there is nothing to browse. ⚠ Names `ENSO_HOME`, not `~/.enso`: the page
+ * cannot know which home the server runs under, and a scratch one is not `~/.enso`.
+ */
+export const NO_ROOTS =
+  'no project roots are declared — add "projects": { "roots": ["~/code"] } to ENSO_HOME/config.json (~/.enso by default)'
 
 /** The listing at `path` (`null`: the roots), reloaded whenever the dialog opens or moves. */
 function useBrowsing(open: boolean, path: string | null, fetchImpl: FetchLike | undefined): Browsing {
