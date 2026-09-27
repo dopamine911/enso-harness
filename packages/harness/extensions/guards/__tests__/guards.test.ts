@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createCodingTools, createPowerShellTool, createReadOnlyTools } from '@earendil-works/pi-coding-agent'
@@ -39,6 +39,9 @@ const PI_SHIPPED_TOOL_NAMES = ['read', 'bash', 'powershell', 'edit', 'write', 'g
  */
 const ALLOW_ALL_ANALYZER: GuardDependencies['analyzeBashCommand'] = () => ({ kind: 'allow' })
 
+/** A harness root holding no credential location — the default, so only the test that means it has one. */
+const NO_CREDENTIALS_ROOT = mkdtempSync(join(tmpdir(), 'enso-guard-harness-'))
+
 /**
  * Minimal stand-in for pi's ExtensionAPI — captures every registered handler.
  * `getAllTools` defaults to pi's real shipped set so session_start's policy check (#4)
@@ -47,10 +50,11 @@ const ALLOW_ALL_ANALYZER: GuardDependencies['analyzeBashCommand'] = () => ({ kin
 function loadGuardRuntime(
   getAllTools: () => { name: string }[] = () => PI_SHIPPED_TOOL_NAMES.map((name) => ({ name })),
   analyzeBashCommand: GuardDependencies['analyzeBashCommand'] = ALLOW_ALL_ANALYZER,
+  harnessRoot: string = NO_CREDENTIALS_ROOT,
 ): GuardRuntime {
   const handlers = new Map<string, Handler>()
   const entries: GuardRuntime['entries'] = []
-  const guards = createGuards({ analyzeBashCommand })
+  const guards = createGuards({ analyzeBashCommand, harnessRoot })
   const appendEntry = (customType: string, data: unknown): void => {
     entries.push({ customType, data })
   }
@@ -765,9 +769,36 @@ test('⚠ grep through a workspace symlink to home is blocked: the realpath is j
   expect(call('grep', { path: link })?.block).toBe(true)
 })
 
+// PR #420 review: the harness's own `.enso/` (auth.json, secrets.env, sessions) sits in its ROOT,
+// not in home, and a `.gitignore` does not keep ripgrep out of it — outside a git work tree rg
+// ignores `.gitignore`, and the agent may edit it. So the workspace and the harness root are places
+// too, counted only where the location EXISTS (a search normally starts there).
+test('⚠ grep over a workspace that holds .enso/ is blocked (#160 §4, PR #420 review)', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'enso-guard-ws-'))
+  mkdirSync(join(workspace, '.enso'))
+  const result = loadGuard()(
+    { type: 'tool_call', toolCallId: 't', toolName: 'grep', input: { path: '.' } },
+    { cwd: workspace },
+  )
+  expect(result?.block).toBe(true)
+  expect(result?.reason).toContain(join(workspace, '.enso'))
+})
+
+test('⚠ grep over the folder ABOVE the harness root is blocked when the harness holds .enso/ (#160 §4, PR #420 review)', () => {
+  const harnessRoot = join(mkdtempSync(join(tmpdir(), 'enso-guard-above-')), 'harness')
+  mkdirSync(join(harnessRoot, '.enso'), { recursive: true })
+  const { toolCall } = loadGuardRuntime(undefined, undefined, harnessRoot)
+  const result = toolCall(
+    { type: 'tool_call', toolCallId: 't', toolName: 'grep', input: { path: dirname(harnessRoot) } },
+    { cwd },
+  )
+  expect(result?.block).toBe(true)
+  expect(result?.reason).toContain(join(harnessRoot, '.enso'))
+})
+
 // Names are not contents: `ls ~` and `find ~` list what is there and read no file, and refusing
 // them would block the most ordinary look around there is. A directory that holds no credential
-// location is searched as before.
+// location is searched as before — the workspace is a place, but `<cwd>/.ssh` does not exist.
 test('ls and find over home, and grep over a directory holding no credential location, are allowed', () => {
   expect(call('ls', { path: '~' })).toBeUndefined()
   expect(call('find', { path: '~', pattern: '*.md' })).toBeUndefined()
@@ -853,7 +884,7 @@ test('⚠ a write to a credential-shaped path inside the workspace is blocked as
 test('⚠ the guard registers no tool: it participates through tool_call only, so no load order can un-guard it', () => {
   const registered: string[] = []
   const events: string[] = []
-  createGuards({ analyzeBashCommand: ALLOW_ALL_ANALYZER })({
+  createGuards({ analyzeBashCommand: ALLOW_ALL_ANALYZER, harnessRoot: NO_CREDENTIALS_ROOT })({
     on: (event: string) => events.push(event),
     registerTool: (tool: { name: string }) => registered.push(tool.name),
     getAllTools: () => PI_SHIPPED_TOOL_NAMES.map((name) => ({ name })),

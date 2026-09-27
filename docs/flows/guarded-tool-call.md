@@ -68,8 +68,12 @@ sequenceDiagram
    exclusion, because an inclusion list naming only `read` once let `grep` over `~/.aws` through.
    A reader is also refused when its path holds a credential location beneath it — `grep` over `~`
    or `/` recurses into `~/.aws` the same way (#160 §4, `#secretLocationBeneath`) — except `ls` and
-   `find`, which return names, never contents. Not seen: a fragment's directory outside home, and a
-   basename-class file (`.env`) beneath the path, which only a walk would find.
+   `find`, which return names, never contents. The locations are the fragments placed in home, and,
+   where they exist, in the workspace and the harness's own root (its `.enso/`: a `.gitignore` does
+   not keep ripgrep out — it is ignored outside a git work tree, and the agent may edit it). So
+   `grep path=.` at the root of the Enso checkout itself is refused; a subfolder is not. Not seen: a
+   fragment's location anywhere else, and a basename-class file (`.env`) beneath the path, which
+   only a walk would find.
 5. **Every verdict is a record** (#132): a denial at `warn` with `toolCallId`, `toolName`, the path
    and the reason; an allow at `debug` — never silent (`#guardsWithDependencies`).
 6. **Knowledge comes from results, never from calls.** The `tool_result` handler records a file as

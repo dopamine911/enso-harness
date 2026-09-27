@@ -29,6 +29,7 @@ export { runUnderDeadline } from './deadline.ts'
 export { findEnvironmentDump } from './environment-dump.ts'
 export { findDeniedNetworkEgress } from './network-egress.ts'
 export {
+  type CredentialPlaces,
   isInsideAnyRoot,
   isPersistenceWriteTarget,
   isProtectedForWrite,
