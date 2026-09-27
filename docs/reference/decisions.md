@@ -61,7 +61,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/harness/core/environment-dump.ts` | `#89`, `#206` | The bash environment-dump deny (#89) — DEPTH, not the fix. |
 | `packages/harness/core/index.ts` | `#173`, `#263` | The harness's own core — path resolution, guard state, and the web-search seam's vocabulary. |
 | `packages/harness/core/network-egress.ts` | `#9`, `#54`, `#55`, `#57`, `#206` | The bash network deny (#9) — a BAR, deliberately not a boundary. |
-| `packages/harness/core/read-tracker.ts` | `#10`, `#11` | Session-scoped record of files whose content this session has seen (#10), and of the on-disk state they had when it saw them (#11). |
+| `packages/harness/core/read-tracker.ts` | `#10`, `#11`, `#57` | Session-scoped record of files whose content this session has seen (#10), and of the on-disk state they had when it saw them (#11). |
 | `packages/harness/core/shell-secret-paths.ts` | `#9`, `#89`, `#204` | The bash/powershell secret-path deny (#204) — the read gate's own policy, on the shell route. |
 | `packages/harness/core/shell-segments.ts` | `#9` | Conservative shell command segmenter — the parsing floor under the bash network deny (#9). |
 | `packages/harness/core/tool-identity.ts` | `#4` | Canonical tool identity (#4, gap 2). |

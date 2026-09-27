@@ -214,7 +214,7 @@ answer before a tool runs; nothing after it does.
 - **tool identity** — the canonical name a tool resolves to, once, centrally, case-insensitive: the
   reason `Write` and `write` are the same guard's business.
 - **read-before-write** — the guard that refuses an edit to a file the run has not read as it currently
-  is (#10).
+  is (#10), and a whole-file `write` to one it has read only part of (#57 S2).
 - **egress** — a network call at command position, or a device that makes one. Denied by name, and by
   construct when the name cannot be resolved.
 - **secret** — a value that must not reach the model or the log: quarantined from the process

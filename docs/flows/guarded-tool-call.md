@@ -64,7 +64,9 @@ sequenceDiagram
    before the reader fall-through and checked in order: outside the write roots (the cwd when none
    are configured), a protected fragment, a persistence target, a credential pattern, then the
    thread's knowledge of the file — *stale* refuses both tools, *unknown and existing* refuses `write`
-   only (#10, #11). Every other tool carrying a `path` is a reader and a credential pattern denies it:
+   only, and so does *partial*: a `read` that returned part of the file (pi's own cut, an `offset`, or
+   any `limit`) stamps it for *stale* but is not the whole-file knowledge a `write` needs (#10, #11,
+   #57 S2). Every other tool carrying a `path` is a reader and a credential pattern denies it:
    exclusion, because an inclusion list naming only `read` once let `grep` over `~/.aws` through.
    A reader is also refused when its path holds a credential location beneath it — `grep` over `~`
    or `/` recurses into `~/.aws` the same way (#160 §4, `#secretLocationBeneath`) — except `ls` and

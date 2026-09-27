@@ -327,6 +327,71 @@ test('session_start resets the read-set on a live instance', () => {
   expect(runtime.toolCall(toolCallEvent('write', existingFile), { cwd })?.block).toBe(true)
 })
 
+// ── #57 S2 (#160): a read that returned PART of the file confers no whole-file knowledge ─────
+// A whole-file `write` replaces every line; the session must have seen every line. pi's `read`
+// returns part of a file three ways: its own line/byte cut (`details.truncation`), an `offset`
+// past the first line, and a `limit` that stops early (said only in the text). The events below
+// are pi's real `read` tool's results, not hand-made shapes.
+
+/** Run pi's own `read` over a file in `cwd` and hand the guard the tool_result it produces. */
+async function readThroughPi(runtime: GuardRuntime, cwd: string, input: Record<string, unknown>): Promise<void> {
+  const [read] = createReadOnlyTools(cwd).filter((tool) => tool.name === 'read')
+  if (read === undefined) throw new Error("pi's read-only tools have no read")
+  const result = await read.execute('t', input as never)
+  runtime.toolResult(
+    {
+      type: 'tool_result',
+      toolCallId: 't',
+      toolName: 'read',
+      input,
+      content: result.content,
+      details: result.details,
+      isError: false,
+    },
+    { cwd },
+  )
+}
+
+function bigFileFixture(): { runtime: GuardRuntime; cwd: string } {
+  const workspace = mkdtempSync(join(tmpdir(), 'enso-guard-57-'))
+  writeFileSync(join(workspace, 'big.ts'), Array.from({ length: 3000 }, (_, index) => `line ${index + 1}`).join('\n'))
+  writeFileSync(join(workspace, 'small.ts'), 'one\ntwo\nthree')
+  return { runtime: loadGuardRuntime(), cwd: workspace }
+}
+
+for (const [how, input] of [
+  ["pi's own cut (3000 lines, 2000 shown)", { path: 'big.ts' }],
+  ['an offset past the first line', { path: 'small.ts', offset: 2 }],
+  ['a limit that stops early', { path: 'small.ts', limit: 1 }],
+] as const) {
+  test(`⚠ a read that returned part of the file — ${how} — does not permit a whole-file write (#57 S2)`, async () => {
+    const { runtime, cwd } = bigFileFixture()
+    await readThroughPi(runtime, cwd, input)
+    const result = runtime.toolCall(toolCallEvent('write', input.path), { cwd })
+    expect(result?.block).toBe(true)
+    expect(result?.reason).toContain('part of')
+  })
+}
+
+test('a partial read still stamps the file: a change underneath is refused as CHANGED, for edit too', async () => {
+  const { runtime, cwd } = bigFileFixture()
+  await readThroughPi(runtime, cwd, { path: 'big.ts' })
+  expect(runtime.toolCall(toolCallEvent('edit', 'big.ts'), { cwd })).toBeUndefined()
+  touchForward(join(cwd, 'big.ts'))
+  expect(runtime.toolCall(toolCallEvent('edit', 'big.ts'), { cwd })?.reason).toContain('CHANGED')
+})
+
+test('a whole read after a partial one permits the write; a partial read after a change does not restore it', async () => {
+  const { runtime, cwd } = bigFileFixture()
+  await readThroughPi(runtime, cwd, { path: 'small.ts', offset: 2 })
+  await readThroughPi(runtime, cwd, { path: 'small.ts' })
+  expect(runtime.toolCall(toolCallEvent('write', 'small.ts'), { cwd })).toBeUndefined()
+  writeFileSync(join(cwd, 'small.ts'), 'one\ntwo\nthree\nfour')
+  touchForward(join(cwd, 'small.ts'))
+  await readThroughPi(runtime, cwd, { path: 'small.ts', offset: 2 })
+  expect(runtime.toolCall(toolCallEvent('write', 'small.ts'), { cwd })?.reason).toContain('part of')
+})
+
 // ── #11: a file changed underneath the session is refused, loudly and distinctly ─────────
 
 /** Move a file's mtime one full second forward — unambiguous at any stat resolution. */

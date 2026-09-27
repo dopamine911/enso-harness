@@ -2,10 +2,12 @@ import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, sep as pathSeparator, resolve } from 'node:path'
 import {
+  ENSO_PERSISTENCE_WRITE_BASENAMES,
   ENSO_PERSISTENCE_WRITE_DIRECTORIES,
   PERSISTENCE_WRITE_BASENAMES,
   PERSISTENCE_WRITE_DIRECTORIES,
   SECRET_BASENAME_PATTERNS,
+  PROC_ENVIRON_PATH,
 } from '@enso/core'
 import { fileUrlToPath, isFileUrl } from '@enso/core/paths'
 
@@ -13,6 +15,10 @@ import { fileUrlToPath, isFileUrl } from '@enso/core/paths'
  * The full directory-segment deny set: picc's vendored corpus plus the enso additions
  * (pi's own persistence surfaces — see the constants' comments in @enso/core guard.ts).
  */
+const ALL_PERSISTENCE_WRITE_BASENAMES: readonly string[] = [
+  ...PERSISTENCE_WRITE_BASENAMES,
+  ...ENSO_PERSISTENCE_WRITE_BASENAMES,
+]
 const ALL_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = [
   ...PERSISTENCE_WRITE_DIRECTORIES,
   ...ENSO_PERSISTENCE_WRITE_DIRECTORIES,
@@ -182,14 +188,6 @@ function containsPathFragment(absolutePath: string, fragments: readonly string[]
 }
 
 /**
- * The kernel's copy of a process's environment. The bash deny already refuses
- * `/proc/<pid>/environ` by regex (`environment-dump.ts`) precisely so a quarantine
- * regression is LOUD; without this the same bytes came back through `read`/`grep`, whose
- * gate saw a path with no credential fragment and a basename matching nothing.
- */
-const PROC_ENVIRON_PATH = /^\/proc\/[^/]+\/environ$/
-
-/**
  * True when the TEXT of a path-shaped string carries credential material, by directory
  * fragment or by basename.
  *
@@ -304,7 +302,7 @@ export function isProtectedForWrite(absolutePath: string, fragments: readonly st
 export function isPersistenceWriteTarget(absolutePath: string): boolean {
   for (const candidate of [absolutePath, realpathOfNearestExisting(absolutePath)]) {
     const name = basename(candidate).toLowerCase()
-    if (PERSISTENCE_WRITE_BASENAMES.some((dangerous) => dangerous === name)) return true
+    if (ALL_PERSISTENCE_WRITE_BASENAMES.some((dangerous) => dangerous === name)) return true
     const segments = candidate.toLowerCase().split(pathSeparator)
     if (segments.some((segment) => ALL_PERSISTENCE_WRITE_DIRECTORIES.some((dangerous) => dangerous === segment))) {
       return true

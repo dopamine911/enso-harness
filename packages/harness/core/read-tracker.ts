@@ -17,7 +17,11 @@ import { realpathOfNearestExisting } from './paths.ts'
  * of observation — and {@link SessionReadTracker.classifyPath} reports one of three states:
  *
  *   "unknown"  never observed this session (#10 blocks `write` to an existing unknown file)
- *   "fresh"    observed, and the current stat still matches the stamp
+ *   "partial"  observed and unchanged, but the session saw only PART of it — a read that pi
+ *              cut, or one with an offset or limit (#57 S2). `write` is blocked as for
+ *              "unknown": it replaces every line, and the session has not seen them all.
+ *              The stamp still counts, so a change underneath reads "stale" as usual.
+ *   "fresh"    observed WHOLE, and the current stat still matches the stamp
  *   "stale"    observed, but mtimeMs or size moved — something else touched the file
  *              (#11 blocks `write` AND `edit`, with a message naming the cause)
  *
@@ -68,15 +72,19 @@ function stampsMatch(current: ObservedFileStamp, recorded: ObservedFileStamp): b
 }
 
 /** @group Guard predicates */
-export type KnownPathState = 'unknown' | 'fresh' | 'stale'
+export type KnownPathState = 'unknown' | 'partial' | 'fresh' | 'stale'
 
 /** @group Guard predicates */
 export interface SessionReadTracker {
   /**
    * Record that the session has seen this file's content (a successful read or write),
    * stamping the file's current stat. A file that cannot be statted records nothing.
+   *
+   * `whole: false` is a read that returned part of the file (#57 S2). It never takes away
+   * whole-file knowledge of the SAME, unchanged file — the earlier whole read still holds —
+   * but after a change the session has seen only that part of the new content.
    */
-  recordKnownPath(absolutePath: string): void
+  recordKnownPath(absolutePath: string, seen: { readonly whole: boolean }): void
   /**
    * Re-stamp a file that is ALREADY known — for the session's own successful `edit`,
    * which moves mtime and size without conferring whole-file knowledge (#10's decision).
@@ -94,7 +102,8 @@ export interface SessionReadTracker {
 
 /** @group Guard predicates */
 export function createSessionReadTracker(): SessionReadTracker {
-  const stampsByRealpath = new Map<string, ObservedFileStamp>()
+  /** What was seen of each file, and its stat when it was seen. */
+  const observedByRealpath = new Map<string, { stamp: ObservedFileStamp; whole: boolean }>()
 
   function statStampOf(realpath: string): ObservedFileStamp | undefined {
     try {
@@ -106,7 +115,7 @@ export function createSessionReadTracker(): SessionReadTracker {
   }
 
   return {
-    recordKnownPath(absolutePath: string): void {
+    recordKnownPath(absolutePath: string, seen: { readonly whole: boolean }): void {
       // ⚠ Only a path that EXISTS may be recorded: for a missing file,
       // realpathOfNearestExisting degrades to the nearest existing ANCESTOR, and
       // stamping that directory poisons the map — a directory's mtime moves on any
@@ -116,19 +125,22 @@ export function createSessionReadTracker(): SessionReadTracker {
       const realpath = realpathOfNearestExisting(absolutePath)
       const stamp = statStampOf(realpath)
       if (stamp === undefined) return
-      stampsByRealpath.set(realpath, stamp)
+      const previous = observedByRealpath.get(realpath)
+      const stillWhole = previous !== undefined && previous.whole && stampsMatch(stamp, previous.stamp)
+      observedByRealpath.set(realpath, { stamp, whole: seen.whole || stillWhole })
     },
     refreshStampIfKnown(absolutePath: string): void {
       const realpath = realpathOfNearestExisting(absolutePath)
-      if (!stampsByRealpath.has(realpath)) return
+      const previous = observedByRealpath.get(realpath)
+      if (previous === undefined) return
       const stamp = statStampOf(realpath)
       if (stamp === undefined) return
-      stampsByRealpath.set(realpath, stamp)
+      observedByRealpath.set(realpath, { stamp, whole: previous.whole })
     },
     classifyPath(absolutePath: string): KnownPathState {
       const realpath = realpathOfNearestExisting(absolutePath)
-      const recorded = stampsByRealpath.get(realpath)
-      if (recorded === undefined) return 'unknown'
+      const observed = observedByRealpath.get(realpath)
+      if (observed === undefined) return 'unknown'
       const current = statStampOf(realpath)
       // ⓘ A recorded file DELETED underneath us never reaches this line: its realpath
       // degrades to the nearest existing ancestor above, misses the map, and returns
@@ -136,10 +148,11 @@ export function createSessionReadTracker(): SessionReadTracker {
       // route. This branch is the narrow remainder (a stat race, a permission flip):
       // the disk no longer matches what the session saw, so fail toward stale.
       if (current === undefined) return 'stale'
-      return stampsMatch(current, recorded) ? 'fresh' : 'stale'
+      if (!stampsMatch(current, observed.stamp)) return 'stale'
+      return observed.whole ? 'fresh' : 'partial'
     },
     reset(): void {
-      stampsByRealpath.clear()
+      observedByRealpath.clear()
     },
   }
 }

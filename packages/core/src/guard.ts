@@ -288,6 +288,55 @@ export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.git', '.vscod
 export const ENSO_PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.pi', '.agents', '.enso', '.cc-safety-net']
 
 /**
+ * ENSO ADDITIONS to {@link PERSISTENCE_WRITE_BASENAMES} — NOT from picc, kept apart for the same
+ * byte-comparability (#160, folded from #21). The shell-init family picc's corpus leaves out, and
+ * direnv's file:
+ *
+ *   `.zshenv`   — read by EVERY zsh, interactive or not, so it runs before any script a later
+ *                 tool call or cron job starts: the widest of the family.
+ *   `.zlogin`, `.zlogout`, `.bash_login`, `.bash_logout` — login-shell start and exit
+ *                 (`.bash_login` runs when there is no `.bash_profile`).
+ *   `.envrc`    — direnv runs it on `cd` into the folder. direnv refuses a CHANGED file until it
+ *                 is re-allowed, so this is a lure the user is one `direnv allow` from running,
+ *                 rather than silent execution; refused all the same, as the rc files are.
+ *
+ * Same matching as the vendored list: exact basename, case-insensitive.
+ *
+ * @group Guards
+ */
+export const ENSO_PERSISTENCE_WRITE_BASENAMES: readonly string[] = [
+  '.zshenv',
+  '.zlogin',
+  '.zlogout',
+  '.bash_login',
+  '.bash_logout',
+  '.envrc',
+]
+
+/**
+ * The kernel's copy of a process's environment: `/proc/<pid>/environ`, and the same bytes per
+ * thread at `/proc/<pid>/task/<tid>/environ` (#160 §5 — one segment deeper, and both copies of the
+ * pattern had missed it). ONE shape, so the read gate and the shell deny cannot drift apart again:
+ * the two had already diverged in anchoring. The read gate matches a whole path; the shell deny
+ * finds it anywhere in a command line.
+ */
+const PROC_ENVIRON_SHAPE = String.raw`/proc/[^/\s]+(?:/task/[^/\s]+)?/environ`
+
+/**
+ * A resolved path that IS a process's environment (see the shape above).
+ *
+ * @group Guards
+ */
+export const PROC_ENVIRON_PATH = new RegExp(`^${PROC_ENVIRON_SHAPE}$`)
+
+/**
+ * A process's environment named anywhere in a command line (see the shape above).
+ *
+ * @group Guards
+ */
+export const PROC_ENVIRON_IN_COMMAND = new RegExp(`${PROC_ENVIRON_SHAPE}\\b`)
+
+/**
  * Basenames that deny a read outright, regardless of directory.
  *
  * @group Guards
