@@ -380,6 +380,25 @@ test("⚠ at session start the session's config replaces the user's: a project's
   expect(loaded.tool.description).toContain('DeepSeek backend')
 })
 
+// #428 review: a trust store that cannot be read rejects the resolution. Every call refuses, and the
+// description drops the load-time backend pin rather than advertise it to a session that cannot use it.
+test("⚠ a session whose config cannot be resolved refuses every call, and drops the user's backend pin", async () => {
+  const loaded = loadWebSearch(
+    {
+      readConfigText: () => JSON.stringify({ webSearch: { backend: 'deepseek' } }),
+      resolveSessionConfig: () =>
+        Promise.reject(new Error('Invalid trust store /home/u/.enso/pi-agent/trust.json: expected an object')),
+    },
+    { DEEPSEEK_API_KEY: 'sk-deepseek', TAVILY_API_KEY: 'tv-key' },
+  )
+  expect(loaded.tool.description).toContain('DeepSeek backend')
+  await loaded.startSession()
+  const text = await run(loaded, { model: ANTHROPIC_MODEL })
+  expect(text).toContain("the session's config could not be resolved")
+  expect(loaded.calls).toEqual({ anthropic: 0, deepseek: 0, tavily: 0 })
+  expect(loaded.tool.description).not.toContain('DeepSeek backend')
+})
+
 test('an unreadable config fails CLOSED: every call refuses, no provider runs', async () => {
   const loaded = loadWebSearch({
     readConfigText: () => '{ not json',

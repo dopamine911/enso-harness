@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { ENSO_CONFIG_EXAMPLE, parseEnsoConfig } from '../config.ts'
+import { ENSO_CONFIG_EXAMPLE, mergeEnsoConfig, parseEnsoConfig } from '../config.ts'
 import { ensoConfigPath } from '../paths.ts'
 
 /**
@@ -82,6 +82,34 @@ test('webSearch is strict like every section: an unknown backend or a typo key i
     JSON.stringify({ webFetch: { allowedHosts: [] }, webSearch: { tavily: { includeDomain: [] } } }),
   )
   expect(typoKey.kind).toBe('unreadable')
+})
+
+// #421: a trusted project's config over the user's. The nesting is real — `webSearch.tavily` holds
+// lists two levels down, `webSearch.backend` is a scalar — so a merge that stops one level down, or
+// that replaces a list, drops a user's setting the project never mentioned.
+test("⚠ mergeEnsoConfig: lists combine at every depth, a project's value wins, and the user's unmentioned settings survive", () => {
+  const merged = mergeEnsoConfig(
+    {
+      webFetch: { allowedHosts: ['docs.user.example', 'shared.example'] },
+      webSearch: {
+        backend: 'deepseek',
+        tavily: { includeDomains: ['user.example'], excludeDomains: ['spam.example'] },
+      },
+      projects: { roots: ['~/code'] },
+    },
+    {
+      webFetch: { allowedHosts: ['shared.example', 'docs.project.example'] },
+      webSearch: { tavily: { includeDomains: ['project.example', 'user.example'] } },
+    },
+  )
+  expect(merged).toEqual({
+    webFetch: { allowedHosts: ['docs.user.example', 'shared.example', 'docs.project.example'] },
+    webSearch: {
+      backend: 'deepseek',
+      tavily: { includeDomains: ['user.example', 'project.example'], excludeDomains: ['spam.example'] },
+    },
+    projects: { roots: ['~/code'] },
+  })
 })
 
 test("ensoConfigPath is the user's config in ENSO_HOME", () => {

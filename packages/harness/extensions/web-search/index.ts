@@ -154,8 +154,12 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
           configDisplayPath = session.path
           register()
         },
+        // Reset and re-registered on failure too (#428 review), as for an unreadable result: the
+        // description must not keep the load-time backend pin for a session whose calls all refuse.
         (error: unknown) => {
+          webSearchConfig = {}
           configProblem = `the session's config could not be resolved: ${String(error)}`
+          register()
         },
       )
     })

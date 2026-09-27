@@ -148,6 +148,22 @@ test("⚠ at session start the session's config replaces the user's: the merged 
   expect(loaded.tool.description).toContain('docs.project.example')
 })
 
+// #428 review: a trust store that cannot be read (corrupt trust.json, a lock never taken) rejects the
+// resolution. Every call refuses — and the description stops naming the load-time hosts.
+test("⚠ a session whose config cannot be resolved refuses every call, and stops advertising the user's hosts", async () => {
+  const loaded = loadWebFetch({
+    resolveSessionConfig: () =>
+      Promise.reject(new Error('Invalid trust store /home/u/.enso/pi-agent/trust.json: expected an object')),
+  })
+  expect(loaded.tool.description).toContain(ALLOWED_HOST)
+  await loaded.startSession()
+  const text = await run(loaded, `https://${ALLOWED_HOST}/guide`)
+  expect(text).toContain("the session's config could not be resolved")
+  expect(text).toContain('Invalid trust store')
+  expect(loaded.fetchedUrls).toEqual([])
+  expect(loaded.tool.description).not.toContain(ALLOWED_HOST)
+})
+
 // ⚠ THE DEADLOCK (#421, found live): the trust question is shown on the thread only once the
 // session exists, so session_start must NOT wait for its answer — it did, and session creation
 // hung on a card nobody could see. The call that needs the policy waits instead.

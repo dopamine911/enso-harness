@@ -140,11 +140,14 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
           Object.assign(policy, policyFrom(resolved.result, resolved.path))
           register()
         },
+        // Re-registered on failure too (#428 review): the description must not keep advertising the
+        // load-time hosts to a model whose every call now refuses.
         (error: unknown) => {
           Object.assign(policy, {
             allowedHosts: [],
             configProblem: `the session's config could not be resolved: ${String(error)}`,
           })
+          register()
         },
       )
     })
