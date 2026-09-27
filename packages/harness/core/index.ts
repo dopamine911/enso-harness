@@ -38,6 +38,7 @@ export {
   resolveAgainstCwd,
 } from './paths.ts'
 export { createSessionReadTracker } from './read-tracker.ts'
+export { type SessionConfigContext, type SessionEnsoConfig, sessionEnsoConfig } from './session-config.ts'
 export { findSecretPathWord } from './shell-secret-paths.ts'
 export { canonicalToolName } from './tool-identity.ts'
 export { isFetchableContentType, isHostAllowed, isPublicIpAddress, parseWebFetchUrl } from './web-fetch-policy.ts'

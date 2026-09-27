@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { ENSO_CONFIG_FILENAME, WEB_FETCH_MAX_RESPONSE_BYTES, WEB_FETCH_TOOL_NAME } from '@enso/core'
+import { ENSO_CONFIG_FILENAME, parseEnsoConfig, WEB_FETCH_MAX_RESPONSE_BYTES, WEB_FETCH_TOOL_NAME } from '@enso/core'
 import { auditRecords, recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
 import { createWebFetch, type WebFetchDependencies, type WebFetchRequestInit } from '../index.ts'
 
@@ -41,7 +41,10 @@ function textResponse(body: string, init?: { status?: number; contentType?: stri
 }
 
 interface LoadedWebFetch {
-  tool: CapturedTool
+  /** The tool as last registered — `startSession` re-registers it with the session's policy. */
+  readonly tool: CapturedTool
+  /** Run the extension's `session_start`, as pi does when the session begins. */
+  startSession: () => Promise<void>
   fetchedUrls: string[]
   fetchInits: { redirect: string; signal: AbortSignal }[]
   resolvedHosts: string[]
@@ -63,12 +66,33 @@ function loadWebFetch(overrides: Partial<WebFetchDependencies> = {}): LoadedWebF
       resolvedHosts.push(hostname)
       return [PUBLIC_ADDRESS]
     },
+    // No project config unless a test says so: the session's policy is the user's.
+    resolveSessionConfig: () =>
+      Promise.resolve({ result: parseEnsoConfig(configWith([ALLOWED_HOST])), path: CONFIG_PATH }),
     ...overrides,
   }
   let captured: CapturedTool | undefined
-  createWebFetch(dependencies)({ registerTool: (tool: CapturedTool) => (captured = tool) } as never)
+  let sessionStart: ((event: unknown, context: unknown) => Promise<void>) | undefined
+  createWebFetch(dependencies)({
+    registerTool: (tool: CapturedTool) => (captured = tool),
+    on: (event: string, handler: typeof sessionStart) => {
+      if (event === 'session_start') sessionStart = handler
+    },
+    events: {},
+  } as never)
   if (captured === undefined) throw new Error('web-fetch did not register a tool')
-  return { tool: captured, fetchedUrls, fetchInits, resolvedHosts }
+  return {
+    get tool(): CapturedTool {
+      if (captured === undefined) throw new Error('web-fetch did not register a tool')
+      return captured
+    },
+    startSession: async () => {
+      await sessionStart?.({ type: 'session_start' }, { cwd: '/work/project', hasUI: true, ui: {} })
+    },
+    fetchedUrls,
+    fetchInits,
+    resolvedHosts,
+  }
 }
 
 async function run(loaded: LoadedWebFetch, url: string): Promise<string> {
@@ -102,6 +126,38 @@ test('empty allowlist: the refusal names the file, the shape, the restart, and t
   expect(text).toContain(`{ "webFetch": { "allowedHosts": ["docs.example.com"] } }`)
   expect(text).toContain('restart')
   expect(text).toContain('human')
+  expect(loaded.fetchedUrls).toEqual([])
+})
+
+// #421: at session_start the tool takes the SESSION's config — here a trusted project's, whose
+// hosts were merged over the user's — and re-registers, so the model is told the hosts it has.
+test("⚠ at session start the session's config replaces the user's: the merged hosts are fetchable and named (#421)", async () => {
+  const projectPath = '/work/project/.enso/config.json'
+  const loaded = loadWebFetch({
+    resolveSessionConfig: () =>
+      Promise.resolve({
+        result: parseEnsoConfig(configWith([ALLOWED_HOST, 'docs.project.example'])),
+        path: projectPath,
+      }),
+  })
+  expect(loaded.tool.description).not.toContain('docs.project.example')
+  await loaded.startSession()
+  expect(loaded.tool.description).toContain('docs.project.example')
+  expect(await run(loaded, 'https://docs.project.example/guide')).toContain('hello from the docs')
+  expect(await run(loaded, 'https://elsewhere.example/')).toContain(projectPath)
+})
+
+test("a session whose config is unreadable fails CLOSED from its start, naming the session's file", async () => {
+  const loaded = loadWebFetch({
+    resolveSessionConfig: () =>
+      Promise.resolve({
+        result: { kind: 'unreadable', reason: 'not valid JSON' },
+        path: '/work/project/.enso/config.json',
+      }),
+  })
+  await loaded.startSession()
+  const text = await run(loaded, 'https://docs.example.com/')
+  expect(text).toContain('/work/project/.enso/config.json')
   expect(loaded.fetchedUrls).toEqual([])
 })
 

@@ -4,6 +4,7 @@ import type { AgentToolResult, ExtensionAPI } from '@earendil-works/pi-coding-ag
 import {
   ENSO_CONFIG_EXAMPLE,
   ENSO_CONFIG_FILENAME,
+  type EnsoConfigParseResult,
   EXTERNAL_WEB_CONTENT_NOTICE,
   ensoLogger,
   parseEnsoConfig,
@@ -19,6 +20,9 @@ import {
   isPublicIpAddress,
   parseWebFetchUrl,
   runUnderDeadline,
+  type SessionConfigContext,
+  type SessionEnsoConfig,
+  sessionEnsoConfig,
 } from '../../core/index.ts'
 
 /**
@@ -70,6 +74,12 @@ export interface WebFetchDependencies {
   locateConfigFile: () => string
   /** The config's text; `undefined` when there is no file, which is the defaults. A read that fails otherwise throws, and the extension fails CLOSED. */
   readConfigText: (path: string) => string | undefined
+  /**
+   * The SESSION's config, at `session_start` (#421): the user's, and over it the project's own
+   * `.enso/config.json` once the project is trusted — one resolution per session, shared with
+   * web_search, so the trust question is asked once.
+   */
+  resolveSessionConfig: (sessionBus: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
   fetchUrl: (url: string, init: WebFetchRequestInit) => Promise<Response>
   /** Resolve a hostname to its addresses. Rejects on NXDOMAIN/timeouts. */
   resolveHostAddresses: (hostname: string) => Promise<string[]>
@@ -77,90 +87,116 @@ export interface WebFetchDependencies {
 
 const USER_AGENT = 'enso-web-fetch'
 
-export function createWebFetch(dependencies: WebFetchDependencies): (pi: ExtensionAPI) => void {
-  return function webFetch(pi: ExtensionAPI): void {
-    // Load ONCE at extension load — see the header's property 1 for why. Every failure
-    // mode (unfindable root, unreadable file, wrong shape) fails CLOSED: the tool still
-    // registers, and every call refuses with the reason, because "could not read the
-    // policy" must never render as "no policy" (and a throw here could wedge pi's load,
-    // the way a throwing session_start handler wedges print mode).
-    let allowedHosts: readonly string[] = []
-    let configProblem: string | undefined
-    let configPath: string | undefined
-    try {
-      configPath = dependencies.locateConfigFile()
-      const parsed = parseEnsoConfig(dependencies.readConfigText(configPath))
-      if (parsed.kind === 'ok') {
-        allowedHosts = parsed.config.webFetch?.allowedHosts ?? []
-      } else {
-        configProblem = parsed.reason
-      }
-    } catch (error) {
-      configProblem = `the config file could not be read: ${String(error)}`
-    }
+/** What the tool enforces: the allowlist, or why there is none, and the file a human changes. */
+interface WebFetchPolicy {
+  allowedHosts: readonly string[]
+  configProblem: string | undefined
+  configDisplayPath: string
+}
+
+function policyFrom(result: EnsoConfigParseResult, path: string): WebFetchPolicy {
+  return result.kind === 'ok'
+    ? { allowedHosts: result.config.webFetch?.allowedHosts ?? [], configProblem: undefined, configDisplayPath: path }
+    : { allowedHosts: [], configProblem: result.reason, configDisplayPath: path }
+}
+
+/** The user's config at extension load — what the tool says before its session has started. */
+function loadPolicy(dependencies: WebFetchDependencies): WebFetchPolicy {
+  let configPath: string | undefined
+  try {
+    configPath = dependencies.locateConfigFile()
+    return policyFrom(parseEnsoConfig(dependencies.readConfigText(configPath)), configPath)
+  } catch (error) {
     // A locate failure leaves no path to name; the filename plus its home still tells
     // the human where to look.
-    const configDisplayPath = configPath ?? `${ENSO_CONFIG_FILENAME} in ENSO_HOME (~/.enso by default)`
+    return {
+      allowedHosts: [],
+      configProblem: `the config file could not be read: ${String(error)}`,
+      configDisplayPath: configPath ?? `${ENSO_CONFIG_FILENAME} in ENSO_HOME (~/.enso by default)`,
+    }
+  }
+}
 
-    pi.registerTool({
-      name: WEB_FETCH_TOOL_NAME,
-      label: 'Web fetch',
-      description:
-        `Fetch one absolute http(s) URL and return the response body as text (capped at ` +
-        `${WEB_FETCH_MAX_RESPONSE_BYTES} bytes; redirects are reported, never followed). ` +
-        `Only hosts on the config's allowlist are fetchable` +
-        (allowedHosts.length > 0 ? ` (currently: ${allowedHosts.join(', ')})` : ` — and it is currently EMPTY`) +
-        `; a refusal names the file a human can extend.`,
-      promptSnippet: `${WEB_FETCH_TOOL_NAME}: fetch an allowlisted http(s) URL as text`,
-      parameters: WebFetchToolParameters,
-      execute: async (
-        _toolCallId: string,
-        params: WebFetchToolParameters,
-        signal: AbortSignal | undefined,
-      ): Promise<AgentToolResult<undefined>> => {
-        const rawUrl = params.url
-
-        // --- the policy gates, in cheapest-first order; each refusal is final.
-        const urlDecision = parseWebFetchUrl(rawUrl)
-        if (urlDecision.kind === 'refused') return refusal(rawUrl, urlDecision.reason)
-        const url = urlDecision.url
-
-        if (configProblem !== undefined) {
-          return refusal(
-            rawUrl,
-            `the ${WEB_FETCH_TOOL_NAME} host allowlist could not be used — ${configProblem}. ` +
-              `Nothing is fetchable until a human fixes ${configDisplayPath} ` +
-              `(expected shape: ${ENSO_CONFIG_EXAMPLE}) and restarts the session.`,
-          )
-        }
-        if (allowedHosts.length === 0) {
-          return refusal(
-            rawUrl,
-            `the ${WEB_FETCH_TOOL_NAME} host allowlist is EMPTY — the recorded default policy (#54), ` +
-              `not an accident. No host is fetchable until a human adds one: edit ` +
-              `${configDisplayPath} to name exact hostnames, e.g. ${ENSO_CONFIG_EXAMPLE}, ` +
-              `commit the change so it is reviewed like code, and restart the session — the allowlist ` +
-              `is read once at session start. Do not edit that file from this session; ask the human.`,
-          )
-        }
-        if (!isHostAllowed(url.hostname, allowedHosts)) {
-          return refusal(
-            rawUrl,
-            `"${url.hostname}" is not on the ${WEB_FETCH_TOOL_NAME} host allowlist ` +
-              `(allowed: ${allowedHosts.join(', ')}). Hosts match exactly — no wildcards, no subdomain ` +
-              `inheritance. A human can add it in ${configDisplayPath} and restart the session.`,
-          )
-        }
-
-        // --- the ADVISORY address gate (see web-fetch-policy.ts's stated non-coverage:
-        // resolve-here vs resolve-in-fetch is a TOCTOU window, accepted for MVP).
-        const addressProblem = await addressGateReason(url.hostname, dependencies.resolveHostAddresses)
-        if (addressProblem !== undefined) return refusal(rawUrl, addressProblem)
-
-        return await fetchUnderDeadline(url, rawUrl, dependencies, signal)
-      },
+export function createWebFetch(dependencies: WebFetchDependencies): (pi: ExtensionAPI) => void {
+  return function webFetch(pi: ExtensionAPI): void {
+    // Read ONCE per session — see the header's property 1 for why: at extension load the user's
+    // config, then at `session_start` the session's (#421: the project's, over it, once trusted),
+    // re-registering so the description names the hosts the session really has. Every failure
+    // mode (unlocatable, unreadable, wrong shape) fails CLOSED: the tool still registers, and
+    // every call refuses with the reason, because "could not read the policy" must never render
+    // as "no policy" (and a throw here could wedge pi's load).
+    const policy = loadPolicy(dependencies)
+    const register = (): void => registerWebFetch(pi, dependencies, policy)
+    register()
+    pi.on('session_start', async (_event, context) => {
+      const session = await dependencies.resolveSessionConfig(pi.events, context)
+      Object.assign(policy, policyFrom(session.result, session.path))
+      register()
     })
   }
+}
+
+function registerWebFetch(pi: ExtensionAPI, dependencies: WebFetchDependencies, policy: WebFetchPolicy): void {
+  const { allowedHosts } = policy
+  pi.registerTool({
+    name: WEB_FETCH_TOOL_NAME,
+    label: 'Web fetch',
+    description:
+      `Fetch one absolute http(s) URL and return the response body as text (capped at ` +
+      `${WEB_FETCH_MAX_RESPONSE_BYTES} bytes; redirects are reported, never followed). ` +
+      `Only hosts on the config's allowlist are fetchable` +
+      (allowedHosts.length > 0 ? ` (currently: ${allowedHosts.join(', ')})` : ` — and it is currently EMPTY`) +
+      `; a refusal names the file a human can extend.`,
+    promptSnippet: `${WEB_FETCH_TOOL_NAME}: fetch an allowlisted http(s) URL as text`,
+    parameters: WebFetchToolParameters,
+    execute: async (
+      _toolCallId: string,
+      params: WebFetchToolParameters,
+      signal: AbortSignal | undefined,
+    ): Promise<AgentToolResult<undefined>> => {
+      const rawUrl = params.url
+
+      // --- the policy gates, in cheapest-first order; each refusal is final.
+      const urlDecision = parseWebFetchUrl(rawUrl)
+      if (urlDecision.kind === 'refused') return refusal(rawUrl, urlDecision.reason)
+      const url = urlDecision.url
+
+      const { configProblem, configDisplayPath } = policy
+      if (configProblem !== undefined) {
+        return refusal(
+          rawUrl,
+          `the ${WEB_FETCH_TOOL_NAME} host allowlist could not be used — ${configProblem}. ` +
+            `Nothing is fetchable until a human fixes ${configDisplayPath} ` +
+            `(expected shape: ${ENSO_CONFIG_EXAMPLE}) and restarts the session.`,
+        )
+      }
+      if (allowedHosts.length === 0) {
+        return refusal(
+          rawUrl,
+          `the ${WEB_FETCH_TOOL_NAME} host allowlist is EMPTY — the recorded default policy (#54), ` +
+            `not an accident. No host is fetchable until a human adds one: edit ` +
+            `${configDisplayPath} to name exact hostnames, e.g. ${ENSO_CONFIG_EXAMPLE}, ` +
+            `and restart the session — the allowlist is read once at session start. Do not edit ` +
+            `that file from this session; ask the human.`,
+        )
+      }
+      if (!isHostAllowed(url.hostname, allowedHosts)) {
+        return refusal(
+          rawUrl,
+          `"${url.hostname}" is not on the ${WEB_FETCH_TOOL_NAME} host allowlist ` +
+            `(allowed: ${allowedHosts.join(', ')}). Hosts match exactly — no wildcards, no subdomain ` +
+            `inheritance. A human can add it in ${configDisplayPath} and restart the session.`,
+        )
+      }
+
+      // --- the ADVISORY address gate (see web-fetch-policy.ts's stated non-coverage:
+      // resolve-here vs resolve-in-fetch is a TOCTOU window, accepted for MVP).
+      const addressProblem = await addressGateReason(url.hostname, dependencies.resolveHostAddresses)
+      if (addressProblem !== undefined) return refusal(rawUrl, addressProblem)
+
+      return await fetchUnderDeadline(url, rawUrl, dependencies, signal)
+    },
+  })
 }
 
 function refusal(rawUrl: string, reason: string): AgentToolResult<undefined> {
@@ -349,6 +385,8 @@ async function readBodyUpTo(response: Response, maxBytes: number): Promise<{ tex
 export default createWebFetch({
   locateConfigFile: () => ensoConfigPath(ensoHome(process.env)),
   readConfigText: readTextIfPresent,
+  resolveSessionConfig: (sessionBus, context) =>
+    sessionEnsoConfig(sessionBus, { ...context, home: ensoHome(process.env) }),
   fetchUrl: (url: string, init: WebFetchRequestInit) => fetch(url, init),
   resolveHostAddresses: async (hostname: string) =>
     (await lookup(hostname, { all: true })).map((resolved) => resolved.address),

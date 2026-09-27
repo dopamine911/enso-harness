@@ -24,6 +24,7 @@ export {
   ENSO_CONFIG_FILENAME,
   EnsoConfig,
   type EnsoConfigParseResult,
+  mergeEnsoConfig,
   parseEnsoConfig,
 } from './config.ts'
 export {
