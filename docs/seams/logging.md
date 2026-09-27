@@ -210,7 +210,7 @@ export interface ProcessLoggingOptions {
 }
 ```
 
-`configureProcessLogging` (`log-process.ts:420-500`, in prose) builds a date-named file sink with
+`configureProcessLogging` (`log-process.ts:501-581`, in prose) builds a date-named file sink with
 `bufferSize: 0` (line 395; measured, header lines 53-62: the buffered sink held the last record until
 the next one), creates today's file `0600` before the sink opens it and again on each record, so a
 rollover at local midnight does not leave a `0664` file behind (323-339, 349-352, 370-375, #207),
@@ -221,8 +221,9 @@ effective level (376-379), and wraps the file sink — and the console sink when
 ## Who implements it, who consumes it
 
 **Three configurators, one per process kind**, each writing into the same day's file: the server
-(`packages/web/src/server/dev.ts:54-61`, `process: 'server'`), the web launcher (`dev-web.ts:33-40`,
-`'web'`) and the runtime as a child (`packages/harness/extensions/logging/index.ts:38-47`, `'pi'`).
+(`process: 'server'`) and the web launcher (`'web'`), both through `startLauncher`
+(`log-process.ts:361-405`), which first moves a checkout's old `.enso/` into `ENSO_HOME` (#421), and
+the runtime as a child (`packages/harness/extensions/logging/index.ts:39-47`, `'pi'`).
 
 The extension is the interesting one (`logging/index.ts:11-21`): in-process under the web host the
 server configured before the runtime existed, `isLoggingConfigured()` is true, and it configures
@@ -244,7 +245,7 @@ failed POST is dropped: *it is the log, and the log must never make more log* (l
 (lines 12-16): a page in a loop sending garbage would otherwise write one line per attempt.
 
 **`process` versus `layer`** (glossary Record, decision 4). `ProcessLoggingOptions.process`
-(`log-process.ts:269-270`) is *which launcher this is — `server`, `web`, `pi` — on every record it
+(`log-process.ts:335-336`) is *which launcher this is — `server`, `web`, `pi` — on every record it
 writes, since the file is shared*: the operating-system process. `EnsoLogLayer` is the region of our
 code: `extension` is our code inside the runtime's process, and under the web host that process is
 `server`. Orthogonal on purpose — a browser record is `process: "browser"` because the server

@@ -77,9 +77,12 @@ import {
   ENSO_REDACTED,
   ENSO_REDACTED_VALUE,
   type EnsoLogger,
+  type EnsoLogLayer,
   EnsoLogLine,
+  ensoLogger,
 } from './log.ts'
-import { type EnsoHomeMigration, ensoHome, ensoLogsDir } from './paths.ts'
+import { ensoHome, ensoLogsDir, migrateCheckoutEnso } from './paths.ts'
+import { knownSecretValuesTracking } from './secrets.ts'
 
 /**
  * A per-category override: `enso.host.events=trace` turns one subtree up without the rest.
@@ -346,14 +349,43 @@ export interface ProcessLoggingOptions {
 }
 
 /**
- * Say what `migrateCheckoutEnso` did (#421), once logging writes to its new home: one `info` line
- * for what moved, and a `warn` per file left in the checkout because `ENSO_HOME` already had one —
- * a login or session the user must reconcile by hand, since nothing is overwritten. Silent when
- * there was nothing to move.
+ * A dev launcher's start (#132, #421), in the one order that works: the checkout's old `.enso/`
+ * migrated into `ENSO_HOME` FIRST — before the logs, the secrets and pi's agent dir are opened
+ * where they now live — then logging configured there, what the migration did reported (an `info`
+ * line for what moved, a `warn` per file left because `ENSO_HOME` already had one: nothing is
+ * overwritten), and the shutdown flush installed. One function, so the two dev launchers cannot
+ * drift into different orders; `bun run dev` starts both at once, and either may migrate first.
  *
  * @group Logging
  */
-export function logEnsoHomeMigration(log: EnsoLogger, migration: EnsoHomeMigration): void {
+export async function startLauncher(options: {
+  readonly repoRoot: string
+  readonly environment: Readonly<Record<string, string | undefined>>
+  /** The `process` field on this launcher's records: `server`, `web`. */
+  readonly process: string
+  /** This launcher's own logger: `['server', 'dev']`. */
+  readonly logger: readonly [EnsoLogLayer, ...string[]]
+}): Promise<{
+  readonly home: string
+  readonly logsDir: string
+  readonly log: EnsoLogger
+  /** Flush and close the log — for a launcher that exits on its own, not by signal. */
+  readonly dispose: () => Promise<void>
+}> {
+  const home = ensoHome(options.environment)
+  const migration = migrateCheckoutEnso(options.repoRoot, home)
+  const logsDir = ensoLogsDir(home)
+  const dispose = await configureProcessLogging({
+    logsDir,
+    process: options.process,
+    levels: parseEnsoLogLevels(options.environment, { console: 'info' }),
+    // The value pass (#139): what a token quoted in a message or a trace payload is scrubbed
+    // against — asked per record, so a key rotated while the launcher runs is redacted too (#207).
+    secretValues: knownSecretValuesTracking(home, options.environment),
+  })
+  installLoggingShutdown(dispose)
+  const [layer, ...subcategory] = options.logger
+  const log = ensoLogger(layer, ...subcategory)
   const { from, to } = migration
   if (migration.moved.length > 0) {
     log.info('moved {count} file(s) from {from} to {to}: Enso keeps its state in ENSO_HOME now', {
@@ -369,6 +401,7 @@ export function logEnsoHomeMigration(log: EnsoLogger, migration: EnsoHomeMigrati
       to,
     })
   }
+  return { home, logsDir, log, dispose }
 }
 
 /**

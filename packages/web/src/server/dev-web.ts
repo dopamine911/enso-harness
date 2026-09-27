@@ -16,16 +16,8 @@
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { ensoLogger } from '@enso/core'
-import {
-  configureProcessLogging,
-  installLoggingShutdown,
-  logEnsoHomeMigration,
-  logsDirFrom,
-  parseEnsoLogLevels,
-} from '@enso/core/log-process'
-import { ensoHome, findRepoRoot, migrateCheckoutEnso, webPackageDir } from '@enso/core/paths'
-import { knownSecretValuesTracking } from '@enso/core/secrets'
+import { startLauncher } from '@enso/core/log-process'
+import { findRepoRoot, webPackageDir } from '@enso/core/paths'
 // A SECOND entry, not a route inside the first (#144 slice 2): the observation surface — a
 // read-only view of the day's log — is its own page, so the page that controls pi and the
 // page that only watches it cannot drift into one bundle.
@@ -45,24 +37,15 @@ const webPackage: { dependencies?: Record<string, string> } = JSON.parse(
 )
 const fontFiles = createFontFileRoute(webPackageDir(repoRoot), Object.keys(webPackage.dependencies ?? {}))
 
-// `bun run dev` starts this beside the server: either may migrate the checkout's old `.enso/` first
-// (#421), and the other finds nothing left to move.
-const home = ensoHome(process.env)
-const migration = migrateCheckoutEnso(repoRoot, home)
-
 // Its own process, the same day's file (#132) — nothing of substance happens here, but a
-// proxy that cannot reach the enso server is exactly the line a bundle needs.
-const disposeLogging: () => Promise<void> = await configureProcessLogging({
-  logsDir: logsDirFrom(process.env),
+// proxy that cannot reach the enso server is exactly the line a bundle needs. `bun run dev` starts
+// this beside the server: either may migrate the checkout's old `.enso/` first (#421).
+const { log, dispose: disposeLogging } = await startLauncher({
+  repoRoot,
+  environment: process.env,
   process: 'web',
-  levels: parseEnsoLogLevels(process.env, { console: 'info' }),
-  // The value pass (#139): what a token quoted in a message or a trace payload is scrubbed
-  // against — asked per record, so a key rotated while this proxy runs is redacted too (#207).
-  secretValues: knownSecretValuesTracking(home),
+  logger: ['server', 'web'],
 })
-const log = ensoLogger('server', 'web')
-logEnsoHomeMigration(log, migration)
-installLoggingShutdown(disposeLogging)
 
 const proxyToApiServer = createApiProxy(API_UPSTREAM_ORIGIN)
 
