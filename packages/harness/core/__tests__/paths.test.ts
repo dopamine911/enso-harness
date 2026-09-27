@@ -80,6 +80,10 @@ test("⚠ a process's environment is credential material — the bash deny's twi
   const f = DEFAULT_GUARD_POLICY.secretPathFragments
   expect(looksLikeSecret('/proc/self/environ', f)).toBe(true)
   expect(looksLikeSecret('/proc/1234/environ', f)).toBe(true)
+  // #160 §5: Linux exposes the same bytes per thread, one level deeper.
+  expect(looksLikeSecret('/proc/self/task/1/environ', f)).toBe(true)
+  expect(looksLikeSecret('/proc/1234/task/1234/environ', f)).toBe(true)
+  expect(looksLikeSecret('/proc/self/task/1/status', f)).toBe(false)
   // Neighbouring /proc entries are ordinary reads.
   expect(looksLikeSecret('/proc/self/status', f)).toBe(false)
   expect(looksLikeSecret('/home/u/project/environ.ts', f)).toBe(false)
@@ -109,6 +113,16 @@ test('anything inside a dangerous directory is a persistence write target', () =
   expect(isPersistenceWriteTarget(join(root, '.idea', 'workspace.xml'))).toBe(true)
   expect(isPersistenceWriteTarget(join(root, '.claude', 'settings.json'))).toBe(true)
   expect(isPersistenceWriteTarget(join(root, '.git', 'hooks', 'pre-commit'))).toBe(true)
+})
+
+// #160 (folded from #21): the rest of the shell-init family the vendored corpus leaves out, and direnv's
+// file. `.zshenv` runs for EVERY zsh, interactive or not; `.envrc` runs on `cd` into the folder.
+test("the shell-init files the vendored corpus omits, and direnv's .envrc, are persistence write targets", () => {
+  for (const name of ['.zshenv', '.zlogin', '.zlogout', '.bash_login', '.bash_logout', '.envrc']) {
+    expect(isPersistenceWriteTarget(join(homedir(), name))).toBe(true)
+    expect(isPersistenceWriteTarget(join('/work/project', name))).toBe(true)
+  }
+  expect(isPersistenceWriteTarget('/work/project/envrc.md')).toBe(false)
 })
 
 // ⚠ The ZEN ADDITIONS: pi's OWN persistence surfaces, which picc's Claude-Code corpus

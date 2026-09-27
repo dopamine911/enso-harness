@@ -65,6 +65,9 @@ test("/proc/<pid>/environ is the kernel's copy of the same list", () => {
   expect(denied('cat /proc/self/environ')).toBe('proc-environ')
   expect(denied("tr '\\0' '\\n' < /proc/1234/environ")).toBe('proc-environ')
   expect(denied('strings /proc/$$/environ')).toBe('proc-environ')
+  // #160 §5: the same bytes per thread, one level deeper.
+  expect(denied('cat /proc/self/task/1/environ')).toBe('proc-environ')
+  expect(denied('xargs -0 < /proc/$$/task/$$/environ')).toBe('proc-environ')
 })
 
 test('expanding a secret-shaped variable is denied; a non-secret one is not', () => {

@@ -164,6 +164,40 @@ const log = ensoLogger('extension', 'guards')
 const KNOWLEDGE_CONFERRING_TOOLS = new Set([TOOL_READ, TOOL_WRITE])
 
 /**
+ * Whether a successful `read` returned the WHOLE file (#57 S2) — the knowledge a whole-file
+ * `write` needs. pi's `read` returns part of a file three ways: its own line/byte cut
+ * (`details.truncation`, set whenever it cut, including a first line over the byte limit), an
+ * `offset` past the first line, and a `limit` — which pi reports only in the text, so ANY limit
+ * counts as partial. That errs toward "read it again without a limit", never toward a write over
+ * lines the session did not see.
+ */
+function returnedWholeFile(event: ToolResultEvent): boolean {
+  const input = inputRecordOf(event)
+  if (typeof input.offset === 'number' && input.offset > 1) return false
+  if (input.limit !== undefined) return false
+  const details: unknown = event.details
+  if (typeof details !== 'object' || details === null || !('truncation' in details)) return true
+  const truncation = details.truncation as { truncated?: unknown; firstLineExceedsLimit?: unknown } | undefined
+  return truncation?.truncated !== true && truncation?.firstLineExceedsLimit !== true
+}
+
+/** Why a `write` over an existing file the session has not wholly seen is refused — never read, or read in part. */
+function unseenContentReason(candidate: string, knownState: 'unknown' | 'partial'): string {
+  if (knownState === 'partial') {
+    return (
+      `Writing to "${candidate}" is blocked: this session has read only part of it (a cut read, an ` +
+      `offset or a limit), so a whole-file write would replace lines it has never seen. Use edit ` +
+      `for a change inside it, or read the whole file first.`
+    )
+  }
+  return (
+    `Writing to "${candidate}" is blocked: the file exists and this session has not ` +
+    `read it, so a whole-file write would replace content the session has never seen. ` +
+    `Read "${candidate}" first, then write.`
+  )
+}
+
+/**
  * The readers that return NAMES, never contents: pi's `ls` (a readdir) and `find` (fd). They are
  * the one exception to the search-beneath check (#160 §4) — listing `~` shows that `.aws` exists
  * and reads no file in it, and refusing it would block the most ordinary look around there is.
@@ -389,7 +423,7 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
     const target = resolveAgainstCwd(candidate, extensionContext.cwd)
     const toolName = canonicalToolName(event.toolName)
     if (KNOWLEDGE_CONFERRING_TOOLS.has(toolName)) {
-      readTracker.recordKnownPath(target)
+      readTracker.recordKnownPath(target, { whole: toolName !== TOOL_READ || returnedWholeFile(event) })
       return
     }
     // ⚠ The session's own successful `edit` moves mtime/size without conferring
@@ -514,13 +548,8 @@ function guardsWithDependencies(pi: ExtensionAPI, dependencies: GuardDependencie
             `then reconsider the change before re-applying it.`,
         )
       }
-      if (toolName === TOOL_WRITE && knownState === 'unknown' && existsSync(target)) {
-        return deny(
-          'read-before-write',
-          `Writing to "${candidate}" is blocked: the file exists and this session has not ` +
-            `read it, so a whole-file write would replace content the session has never seen. ` +
-            `Read "${candidate}" first, then write.`,
-        )
+      if (toolName === TOOL_WRITE && knownState !== 'fresh' && existsSync(target)) {
+        return deny('read-before-write', unseenContentReason(candidate, knownState))
       }
       return undefined
     }

@@ -113,13 +113,16 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
 }
 ```
 
-Four more top-level constants in the same module are corpus, not schema, and are read by
-`packages/harness/core/paths.ts`: `PERSISTENCE_WRITE_BASENAMES` and `PERSISTENCE_WRITE_DIRECTORIES`
+More top-level constants in the same module are corpus, not schema, and are read by
+`packages/harness/core/paths.ts` and `environment-dump.ts`: `PERSISTENCE_WRITE_BASENAMES` and `PERSISTENCE_WRITE_DIRECTORIES`
 (vendored lists of shell-init, git, editor and agent-config paths a write would *install* something
 into, matched by exact basename — `guard.ts:89-126`), `ENSO_PERSISTENCE_WRITE_DIRECTORIES` (`.pi`,
 `.agents`, `.enso`, `.cc-safety-net`: the runtime's and the harness's own persistence surfaces, kept
-apart so the vendored block stays byte-comparable, `guard.ts:128-150`), and `SECRET_BASENAME_PATTERNS`
-(`guard.ts:152-161`).
+apart so the vendored block stays byte-comparable, `guard.ts:128-150`), `ENSO_PERSISTENCE_WRITE_BASENAMES`
+(the shell-init files picc omits — `.zshenv`, `.zlogin`, `.zlogout`, `.bash_login`, `.bash_logout` — and
+direnv's `.envrc`, apart for the same reason, #160), `PROC_ENVIRON_PATH` and `PROC_ENVIRON_IN_COMMAND`
+(a process's environment, per process or per thread: one shape for the read gate and the shell deny,
+#160 §5), and `SECRET_BASENAME_PATTERNS` (`guard.ts:152-161`).
 
 What the extension takes, and what it is:
 
@@ -199,8 +202,9 @@ arrives `isError` (`:339-359`); `tool_call` calls `decide` and logs the verdict 
 3. **No `path` argument** → pass (`:411-412`).
 4. **Writes** (`write`, `edit`; `:417-484`), in order: outside the write roots (the cwd when none are
    configured), a protected fragment, a persistence target, a credential pattern, then the session's
-   knowledge of the file — *stale* refuses both tools, *unknown and existing* refuses `write` only
-   (#10, #11; the comment at `:451-462` says why the two messages differ).
+   knowledge of the file — *stale* refuses both tools, *unknown and existing* refuses `write` only, and
+   so does *partial* — read, but only part of it (#10, #11, #57 S2; the comment at `:451-462` says why
+   the messages differ).
 5. **Every other tool with a `path` is a reader**, by exclusion, and a credential pattern denies it
    (`:486-500`). Exclusion, not inclusion: an inclusion list naming only `read` once let `grep` over
    `~/.aws` through (header, `:27-33`). Since #204 the same policy also runs on the shell route, so
