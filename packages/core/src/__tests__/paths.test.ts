@@ -20,6 +20,7 @@ import {
   harnessPackageDir,
   isFileUrl,
   migrateCheckoutEnso,
+  migrateCheckoutEnsoOnLaunch,
   printHarnessDir,
   RepoRootNotFoundError,
   realpathOrSelf,
@@ -183,6 +184,16 @@ test('⚠ a file ENSO_HOME already holds is never overwritten: it stays in the c
   expect(readFileSync(join(repoRoot, '.enso', 'pi-agent', 'auth.json'), 'utf8')).toBe('{"old":true}')
   // Everything else still moved.
   expect(existsSync(join(home, 'secrets.env'))).toBe(true)
+})
+
+// The launch's rule: a scratch or test ENSO_HOME must never receive a checkout's logins — they
+// would be lost with it. Only the default ~/.enso is migrated into without being asked.
+test("⚠ with ENSO_HOME set explicitly, a launch moves nothing: the checkout's .enso is held and said (#421)", () => {
+  const { repoRoot, home } = legacyCheckout()
+  const migration = migrateCheckoutEnsoOnLaunch(repoRoot, { ENSO_HOME: home })
+  expect(migration).toMatchObject({ moved: [], kept: [], held: true })
+  expect(readFileSync(join(repoRoot, '.enso', 'pi-agent', 'auth.json'), 'utf8')).toBe('{"old":true}')
+  expect(existsSync(home)).toBe(false)
 })
 
 test('migrating twice moves nothing the second time, and a checkout with no .enso creates no ENSO_HOME', () => {

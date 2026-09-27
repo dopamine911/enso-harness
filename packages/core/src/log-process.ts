@@ -81,7 +81,7 @@ import {
   EnsoLogLine,
   ensoLogger,
 } from './log.ts'
-import { ensoHome, ensoLogsDir, migrateCheckoutEnso } from './paths.ts'
+import { ensoHome, ensoLogsDir, migrateCheckoutEnsoOnLaunch } from './paths.ts'
 import { knownSecretValuesTracking } from './secrets.ts'
 
 /**
@@ -373,7 +373,7 @@ export async function startLauncher(options: {
   readonly dispose: () => Promise<void>
 }> {
   const home = ensoHome(options.environment)
-  const migration = migrateCheckoutEnso(options.repoRoot, home)
+  const migration = migrateCheckoutEnsoOnLaunch(options.repoRoot, options.environment)
   const logsDir = ensoLogsDir(home)
   const dispose = await configureProcessLogging({
     logsDir,
@@ -400,6 +400,15 @@ export async function startLauncher(options: {
       from,
       to,
     })
+  }
+  if (migration.held) {
+    log.warn(
+      '{from} was not moved: ENSO_HOME is set to {to}, and a launch moves it into ~/.enso only — move it by hand if you mean to',
+      {
+        from,
+        to,
+      },
+    )
   }
   return { home, logsDir, log, dispose }
 }
