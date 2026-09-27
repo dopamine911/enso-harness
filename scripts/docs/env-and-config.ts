@@ -179,17 +179,23 @@ function webSearchField(
 const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
   {
     field: 'webFetch',
-    required: 'yes',
-    defaultWhenOmitted: 'None; omission makes the strict config unreadable.',
+    required: 'no',
+    defaultWhenOmitted: 'An empty allowlist: nothing is fetchable.',
     reader: '`packages/harness/extensions/web-fetch/index.ts#createWebFetch`',
-    check: { file: 'packages/harness/extensions/web-fetch/index.ts', contains: 'parsed.config.webFetch.allowedHosts' },
+    check: {
+      file: 'packages/harness/extensions/web-fetch/index.ts',
+      contains: 'result.config.webFetch?.allowedHosts ?? []',
+    },
   },
   {
     field: 'webFetch.allowedHosts',
     required: 'yes',
-    defaultWhenOmitted: 'None in the schema; the committed policy is shown from `enso.config.json` below.',
+    defaultWhenOmitted: 'n/a — required once `webFetch` is present; `[]` fetches nothing.',
     reader: '`packages/harness/extensions/web-fetch/index.ts#createWebFetch`',
-    check: { file: 'packages/harness/extensions/web-fetch/index.ts', contains: 'parsed.config.webFetch.allowedHosts' },
+    check: {
+      file: 'packages/harness/extensions/web-fetch/index.ts',
+      contains: 'result.config.webFetch?.allowedHosts ?? []',
+    },
   },
   {
     field: 'projects',
@@ -206,7 +212,7 @@ const CONFIG_FIELD_METADATA: readonly ConfigFieldMetadata[] = [
     reader: '`packages/web/src/server/projects.ts#createProjectRegistry`',
     check: {
       file: 'packages/web/src/server/projects.ts',
-      contains: 'is not an absolute or ~/ path — fix enso.config.json',
+      contains: 'is not an absolute or ~/ path — fix ${configPath}',
     },
   },
   webSearchField('', '`{}`; current-model routing with no Tavily domain filters.', 'parsed.config.webSearch ?? {}'),
@@ -463,7 +469,7 @@ function assertSourceCheck(check: SourceCheck): void {
   }
 }
 
-function configInventory(): { fields: ConfigFieldMetadata[]; committedAllowedHosts: unknown } {
+function configInventory(): { fields: ConfigFieldMetadata[] } {
   const configSource = readFileSync(join(ROOT, 'packages/core/src/config.ts'), 'utf8')
   const webFetchSource = readFileSync(join(ROOT, 'packages/core/src/web-fetch.ts'), 'utf8')
   const webSearchSource = readFileSync(join(ROOT, 'packages/core/src/web-search.ts'), 'utf8')
@@ -485,14 +491,7 @@ function configInventory(): { fields: ConfigFieldMetadata[]; committedAllowedHos
     )
   }
   for (const row of metadata) assertSourceCheck(row.check)
-  const committed: unknown = JSON.parse(readFileSync(join(ROOT, 'enso.config.json'), 'utf8'))
-  if (typeof committed !== 'object' || committed === null || !('webFetch' in committed)) {
-    throw new Error('enso.config.json has no webFetch section')
-  }
-  const webFetch: unknown = committed.webFetch
-  const committedAllowedHosts =
-    typeof webFetch === 'object' && webFetch !== null && 'allowedHosts' in webFetch ? webFetch.allowedHosts : undefined
-  return { fields: metadata, committedAllowedHosts }
+  return { fields: metadata }
 }
 
 function runtimePathInventory(): RuntimePathMetadata[] {
@@ -573,7 +572,7 @@ function generate(): string {
     '# Environment and configuration reference',
     '',
     'Generated from the owned source roots, `scripts/lint/process-environment.ts`, the core config/path declarations,',
-    '`enso.config.json`, and `packages/harness/package.json`. No machine environment is read.',
+    'and `packages/harness/package.json`. No machine environment and no user config is read.',
     '',
     '## Explicit environment keys',
     '',
@@ -592,14 +591,13 @@ function generate(): string {
     '',
     '## `EnsoConfig` schema',
     '',
-    'The whole-file schema is strict on unknown keys. Nested fields are explicit below. Defaults are consumer',
-    'behavior when an optional field is omitted; required fields have no schema default.',
+    "The user's `ENSO_HOME/config.json` (#421). No file at all is every default below. A file that is there is strict",
+    'on unknown keys and fails closed when unreadable. Defaults are consumer behavior when an optional field is omitted;',
+    'required fields have no schema default.',
     '',
     '| Field | Required | Default when omitted | Reader |',
     '|---|---|---|---|',
     ...configRows,
-    '',
-    `Committed \`webFetch.allowedHosts\`: \`${JSON.stringify(config.committedAllowedHosts)}\`.`,
     '',
     "**Parser limit.** The schema reader handles this repository's current `Type.Object` / `Type.Optional`",
     'declaration layout in `config.ts`, `web-fetch.ts`, and `web-search.ts`; metadata and consumer probes must',

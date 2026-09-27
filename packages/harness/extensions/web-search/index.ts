@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { getEnvApiKey } from '@earendil-works/pi-ai/compat'
 import type {
@@ -17,7 +16,7 @@ import {
   type WebSearchConfig,
   WebSearchToolParameters,
 } from '@enso/core'
-import { ensoConfigPath, ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
+import { ensoConfigPath, ensoHome, ensoSecretsPath, readTextIfPresent } from '@enso/core/paths'
 import { readSecret } from '@enso/core/secrets'
 import {
   DEEPSEEK_API_KEY_VARIABLE,
@@ -34,6 +33,9 @@ import {
   runTavilyProviderSearch,
   runUnderDeadline,
   type SearchModel,
+  type SessionConfigContext,
+  type SessionEnsoConfig,
+  sessionEnsoConfig,
   TAVILY_API_KEY_VARIABLE,
   type TavilySearchRequest,
   type WebSearchOutcome,
@@ -47,15 +49,15 @@ import {
  *
  * The shape, in one pass:
  *
- * 1. **Primary selection.** `enso.config.json`'s optional `webSearch.backend: "deepseek"`
+ * 1. **Primary selection.** The user config's optional `webSearch.backend: "deepseek"`
  *    pins the dedicated DeepSeek backend; otherwise the CURRENT MODEL routes to its own
  *    native search API (anthropic / google / openai families), billing the same identity
  *    the conversation does. A model with no native search selects nothing.
  * 2. **The fallback.** When the primary is unavailable, fails, or answers WITHOUT
  *    searching (`ungrounded`), and `TAVILY_API_KEY` is present in the gated secrets file
- *    `.enso/secrets.env` (#89 — never the process environment), one Tavily call answers instead. Key absent → the primary's own outcome is
+ *    `ENSO_HOME/secrets.env` (#89 — never the process environment), one Tavily call answers instead. Key absent → the primary's own outcome is
  *    returned unchanged. No config knob arms this — a key is a secret and secrets never
- *    enter the committed config.
+ *    enter the config.
  * 3. **The ACCURATE response** (#63, the requirement this exists for): every result's
  *    first line names the backend that answered and, on fallback, why. An ungrounded
  *    answer is never rendered as a search result — with no fallback armed it is returned
@@ -64,16 +66,21 @@ import {
  * 4. **One audit record per call** (#132 — a log record, not a stderr line): provider,
  *    outcome, query, fallback reason — never a key.
  *
- * Config is read ONCE at extension load (the web_fetch discipline, #54): a session
- * cannot re-point its own search backend by editing the file mid-run. An unreadable
- * config fails CLOSED — "could not read the policy" is never "no policy".
+ * Config is read ONCE per session (the web_fetch discipline, #54): the user's at extension load,
+ * then the session's at `session_start` — a trusted project's `.enso/config.json` over the user's
+ * (#421), resolved once and shared with web_fetch. A session cannot re-point its own search
+ * backend by editing the file mid-run. An unreadable config fails CLOSED — "could not read the
+ * policy" is never "no policy".
  */
 
 /** The IO seams. Provider runs are injectable so the fallback policy is testable alone. */
 export interface WebSearchDependencies {
-  /** Where `enso.config.json` lives. May throw; the extension fails CLOSED on that. */
+  /** Where the user's config lives. May throw; the extension fails CLOSED on that. */
   locateConfigFile: () => string
-  readConfigText: (path: string) => string
+  /** `undefined` when there is no file: the defaults. */
+  readConfigText: (path: string) => string | undefined
+  /** The SESSION's config at `session_start` (#421) — shared with web_fetch; see its seam. */
+  resolveSessionConfig: (session: object, context: Omit<SessionConfigContext, 'home'>) => Promise<SessionEnsoConfig>
   /** Env reads happen HERE (composition root) — providers receive values, never names. */
   readEnvironmentVariable: (variableName: string) => string | undefined
   runProviders: {
@@ -130,104 +137,133 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
     } catch (error) {
       configProblem = `the config file could not be read: ${String(error)}`
     }
-    const configDisplayPath = configPath ?? `${ENSO_CONFIG_FILENAME} (at the Enso repository root)`
+    let configDisplayPath = configPath ?? `${ENSO_CONFIG_FILENAME} in ENSO_HOME (~/.enso by default)`
 
-    pi.registerTool({
-      name: WEB_SEARCH_TOOL_NAME,
-      label: 'Web search',
-      description:
-        `Search the live web. Primary: the current model's own native search ` +
-        `(Anthropic / Google Gemini / OpenAI Responses families)` +
-        (webSearchConfig.backend === 'deepseek' ? `, pinned by config to the dedicated DeepSeek backend` : '') +
-        `; fallback: the Tavily retrieval API when its key is configured. The result names ` +
-        `which backend answered — an answer produced WITHOUT searching is labeled as such, ` +
-        `never presented as a search result.`,
-      promptSnippet: `${WEB_SEARCH_TOOL_NAME}: search the live web (provider-native, Tavily fallback)`,
-      parameters: WebSearchToolParameters,
-      // ⚠ pi's execute contract is FIVE positional arguments and the gate caps declared
-      // parameters at four (useMaxParams), so they arrive as a named tuple instead.
-      execute: async (...executeArguments: WebSearchExecuteArguments): Promise<AgentToolResult<undefined>> => {
-        const [, params, signal, onUpdate, extensionContext] = executeArguments
-        const query = params.query
-        if (configProblem !== undefined) {
-          return refusal(
-            `the ${WEB_SEARCH_TOOL_NAME} configuration could not be used — ${configProblem}. ` +
-              `Nothing is searchable until a human fixes ${configDisplayPath} and restarts the session.`,
-          )
-        }
-        const tavilyApiKey = dependencies.readEnvironmentVariable(TAVILY_API_KEY_VARIABLE)
-        const isTavilyArmed = tavilyApiKey !== undefined && tavilyApiKey.length > 0
-        // ⚠ ONE deadline for the call (#99): the fallback runs under what the primary left,
-        // so primary + fallback can never outlast the server's no-progress cutoff.
-        const budgetMs = dependencies.timeoutMs ?? WEB_SEARCH_TIMEOUT_MS
-        const deadline: CallDeadline = { at: Date.now() + budgetMs, budgetMs }
-        const onProgress = progressForwarder(onUpdate)
-
-        // --- the primary attempt.
-        const primary = await runPrimary({
-          dependencies,
-          webSearchConfig,
-          extensionContext,
-          query,
-          signal,
-          deadline,
-          onProgress,
-        })
-
-        // --- the fallback decision. `searched` never falls back; everything else does
-        // when Tavily is armed.
-        //
-        // ⚠ THE DISCRIMINANT IS THE BRANCH, not a string the call site re-reads (#227).
-        // `fallbackReasonFor` used to return `string | undefined` and `undefined` meant
-        // "the primary stands", so two `as` casts stood in for a narrowing the compiler
-        // could not carry. The one edit anyone would plausibly make — "do not fall back
-        // when the request already billed", i.e. return `undefined` for some
-        // `PrimaryFailure` — then compiled unchanged and sent a `PrimaryFailure` down the
-        // `searched` path, where `renderOutcome` reads `.sources` off an object that has
-        // none and throws out of `execute`. Now that edit cannot be written.
-        if ('kind' in primary && primary.kind === 'searched') {
-          auditLine(primary.kind, primary.providerId, query, 'primary')
-          return renderOutcome(primary, undefined)
-        }
-        if (!isTavilyArmed) {
-          if ('kind' in primary) {
-            auditLine('ungrounded', primary.providerId, query, 'no fallback armed')
-            return renderUngrounded(primary)
-          }
-          auditLine('refused', primary.providerId, query, primary.reason)
-          return refusal(
-            `${primary.reason}. The Tavily fallback is not armed — a human can set ` +
-              `${TAVILY_API_KEY_VARIABLE} in ${ensoSecretsPath(ensoHome(process.env))} (never in ${ENSO_CONFIG_FILENAME}, never in ` +
-              `the root .env, never in the environment — #89). No restart needed; the file is read per call.`,
-          )
-        }
-        // After the unarmed branch, which builds its refusal from `primary` directly: computed
-        // where it is read, so "why is this string here" needs no answer (#227).
-        const fallbackReason = fallbackReasonFor(primary)
-
-        // A progress update before the fallback: the server counts tool activity as
-        // progress (#99), and this is the one moment in the chain that is otherwise silent.
-        onProgress(`${fallbackReason} — trying the Tavily fallback…`)
-        try {
-          const tavilyOutcome = await underDeadline(signal, deadline, (deadlineSignal) =>
-            dependencies.runProviders.tavily({
-              query,
-              apiKey: tavilyApiKey,
-              includeDomains: webSearchConfig.tavily?.includeDomains,
-              excludeDomains: webSearchConfig.tavily?.excludeDomains,
-              fetchUrl: dependencies.fetchUrl,
-              signal: deadlineSignal,
-            }),
-          )
-          auditLine(tavilyOutcome.kind, 'tavily', query, `fallback: ${fallbackReason}`)
-          return renderOutcome(tavilyOutcome, fallbackReason)
-        } catch (error) {
-          const tavilyReason = error instanceof Error ? error.message : String(error)
-          auditLine('refused', 'tavily', query, tavilyReason)
-          return refusal(`${fallbackReason}; the Tavily fallback then failed too: ${tavilyReason}`)
-        }
-      },
+    // The session's config replaces the user's at its start, and the tool is registered again so
+    // its description names the backend the session really has.
+    let sessionReady: Promise<void> = Promise.resolve()
+    pi.on('session_start', (_event, context) => {
+      // ⚠ NOT awaited (#421): the trust question is asked on the thread, and the host delivers a
+      // question raised during session_start only once the session exists and the thread is being
+      // followed — awaiting it here held session creation on an answer nobody could see, a deadlock
+      // (found live). The call that needs the policy awaits it instead, like a permission prompt.
+      sessionReady = dependencies.resolveSessionConfig(context.sessionManager, context).then(
+        (session) => {
+          webSearchConfig = session.result.kind === 'ok' ? (session.result.config.webSearch ?? {}) : {}
+          configProblem = session.result.kind === 'ok' ? undefined : session.result.reason
+          configDisplayPath = session.path
+          register()
+        },
+        // Reset and re-registered on failure too (#428 review), as for an unreadable result: the
+        // description must not keep the load-time backend pin for a session whose calls all refuse.
+        (error: unknown) => {
+          webSearchConfig = {}
+          configProblem = `the session's config could not be resolved: ${String(error)}`
+          register()
+        },
+      )
     })
+
+    const register = (): void =>
+      pi.registerTool({
+        name: WEB_SEARCH_TOOL_NAME,
+        label: 'Web search',
+        description:
+          `Search the live web. Primary: the current model's own native search ` +
+          `(Anthropic / Google Gemini / OpenAI Responses families)` +
+          (webSearchConfig.backend === 'deepseek' ? `, pinned by config to the dedicated DeepSeek backend` : '') +
+          `; fallback: the Tavily retrieval API when its key is configured. The result names ` +
+          `which backend answered — an answer produced WITHOUT searching is labeled as such, ` +
+          `never presented as a search result.`,
+        promptSnippet: `${WEB_SEARCH_TOOL_NAME}: search the live web (provider-native, Tavily fallback)`,
+        parameters: WebSearchToolParameters,
+        // ⚠ pi's execute contract is FIVE positional arguments and the gate caps declared
+        // parameters at four (useMaxParams), so they arrive as a named tuple instead.
+        execute: async (...executeArguments: WebSearchExecuteArguments): Promise<AgentToolResult<undefined>> => {
+          const [, params, signal, onUpdate, extensionContext] = executeArguments
+          const query = params.query
+          // The session's config, once its trust question (if any) is answered.
+          await sessionReady
+          if (configProblem !== undefined) {
+            return refusal(
+              `the ${WEB_SEARCH_TOOL_NAME} configuration could not be used — ${configProblem}. ` +
+                `Nothing is searchable until a human fixes ${configDisplayPath} and restarts the session.`,
+            )
+          }
+          const tavilyApiKey = dependencies.readEnvironmentVariable(TAVILY_API_KEY_VARIABLE)
+          const isTavilyArmed = tavilyApiKey !== undefined && tavilyApiKey.length > 0
+          // ⚠ ONE deadline for the call (#99): the fallback runs under what the primary left,
+          // so primary + fallback can never outlast the server's no-progress cutoff.
+          const budgetMs = dependencies.timeoutMs ?? WEB_SEARCH_TIMEOUT_MS
+          const deadline: CallDeadline = { at: Date.now() + budgetMs, budgetMs }
+          const onProgress = progressForwarder(onUpdate)
+
+          // --- the primary attempt.
+          const primary = await runPrimary({
+            dependencies,
+            webSearchConfig,
+            extensionContext,
+            query,
+            signal,
+            deadline,
+            onProgress,
+          })
+
+          // --- the fallback decision. `searched` never falls back; everything else does
+          // when Tavily is armed.
+          //
+          // ⚠ THE DISCRIMINANT IS THE BRANCH, not a string the call site re-reads (#227).
+          // `fallbackReasonFor` used to return `string | undefined` and `undefined` meant
+          // "the primary stands", so two `as` casts stood in for a narrowing the compiler
+          // could not carry. The one edit anyone would plausibly make — "do not fall back
+          // when the request already billed", i.e. return `undefined` for some
+          // `PrimaryFailure` — then compiled unchanged and sent a `PrimaryFailure` down the
+          // `searched` path, where `renderOutcome` reads `.sources` off an object that has
+          // none and throws out of `execute`. Now that edit cannot be written.
+          if ('kind' in primary && primary.kind === 'searched') {
+            auditLine(primary.kind, primary.providerId, query, 'primary')
+            return renderOutcome(primary, undefined)
+          }
+          if (!isTavilyArmed) {
+            if ('kind' in primary) {
+              auditLine('ungrounded', primary.providerId, query, 'no fallback armed')
+              return renderUngrounded(primary)
+            }
+            auditLine('refused', primary.providerId, query, primary.reason)
+            return refusal(
+              `${primary.reason}. The Tavily fallback is not armed — a human can set ` +
+                `${TAVILY_API_KEY_VARIABLE} in ${ensoSecretsPath(ensoHome(process.env))} (never in ${ENSO_CONFIG_FILENAME}, never in ` +
+                `the root .env, never in the environment — #89). No restart needed; the file is read per call.`,
+            )
+          }
+          // After the unarmed branch, which builds its refusal from `primary` directly: computed
+          // where it is read, so "why is this string here" needs no answer (#227).
+          const fallbackReason = fallbackReasonFor(primary)
+
+          // A progress update before the fallback: the server counts tool activity as
+          // progress (#99), and this is the one moment in the chain that is otherwise silent.
+          onProgress(`${fallbackReason} — trying the Tavily fallback…`)
+          try {
+            const tavilyOutcome = await underDeadline(signal, deadline, (deadlineSignal) =>
+              dependencies.runProviders.tavily({
+                query,
+                apiKey: tavilyApiKey,
+                includeDomains: webSearchConfig.tavily?.includeDomains,
+                excludeDomains: webSearchConfig.tavily?.excludeDomains,
+                fetchUrl: dependencies.fetchUrl,
+                signal: deadlineSignal,
+              }),
+            )
+            auditLine(tavilyOutcome.kind, 'tavily', query, `fallback: ${fallbackReason}`)
+            return renderOutcome(tavilyOutcome, fallbackReason)
+          } catch (error) {
+            const tavilyReason = error instanceof Error ? error.message : String(error)
+            auditLine('refused', 'tavily', query, tavilyReason)
+            return refusal(`${fallbackReason}; the Tavily fallback then failed too: ${tavilyReason}`)
+          }
+        },
+      })
+    register()
   }
 }
 
@@ -414,13 +450,13 @@ function auditLine(outcome: string, providerId: WebSearchProviderId | undefined,
 }
 
 /**
- * The pi entry point — real filesystem, env and fetch, wired at the composition root.
- * `findRepoRoot` realpaths first, so the config named is the COMMITTED file even under
- * the print harness's symlink mirror (#20, same rationale as web_fetch's root).
+ * The pi entry point — real filesystem, env and fetch, wired at the composition root. The config
+ * is the user's, in `ENSO_HOME` (#421).
  */
 export default createWebSearch({
-  locateConfigFile: () => ensoConfigPath(findRepoRoot(import.meta.url)),
-  readConfigText: (path: string) => readFileSync(path, 'utf8'),
+  locateConfigFile: () => ensoConfigPath(ensoHome(process.env)),
+  readConfigText: readTextIfPresent,
+  resolveSessionConfig: (session, context) => sessionEnsoConfig(session, { ...context, home: ensoHome(process.env) }),
   // ⚠ From the gated `ENSO_HOME/secrets.env` FILE, never `process.env` (#89): the host
   // quarantines every secret out of the environment before a session exists, precisely so
   // a `bash` child cannot print it. Extension code is trusted to read the file the model's

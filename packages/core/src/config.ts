@@ -5,16 +5,21 @@ import { WebFetchConfig } from './web-fetch.ts'
 import { WebSearchConfig } from './web-search.ts'
 
 /**
- * Enso's ONE committed config file (#59): `enso.config.json` at the repository
- * root.
+ * Enso's config (#59): the USER's `config.json` in `ENSO_HOME` (`~/.enso/config.json`, #421).
  *
  * Daniel's scope, 2026-09-04: "just a config file for Enso only, separate from pi" —
  * nothing here rides pi's settings or agent-dir surfaces.
  *
- * ⚠ THE CONFIG BELONGS TO THE ZEN-HARNESS INSTALL, NOT THE SESSION. It is located from
- * the harness's own file tree (`findRepoRoot` on a module inside this repo), NEVER from
- * the session cwd — enso can run against a foreign checkout (`bun run dev /some/path`),
- * and a foreign repo's `enso.config.json` must not become this session's allowlist.
+ * ⚠ pi's pattern (#421): the install ships no config file. Its DEFAULTS are in code — the reader
+ * of each section says what an absent key means — and the user's file overrides them. A missing
+ * file is therefore the defaults, not a failure: an empty `web_fetch` allowlist, the default
+ * search routing, no project roots. Those are the most restrictive settings, so an absent file
+ * can never widen anything. (Until #421 the file was `enso.config.json` in the checkout, with one
+ * machine's project roots in it.)
+ *
+ * ⚠ NEVER located from the session cwd — enso runs against foreign checkouts
+ * (`bun run dev /some/path`), and a foreign repo's config must not become this session's
+ * allowlist. A project's own config is #421's next slice, behind pi's trust decision.
  *
  * ⚠ STRICT ON UNKNOWN KEYS, deliberately. This is a policy file: a typo
  * (`"allowedHost"`) must refuse loudly, not silently configure nothing. The cost is
@@ -27,11 +32,11 @@ import { WebSearchConfig } from './web-search.ts'
  */
 
 /**
- * The committed config file's basename. Lives at the repository root.
+ * The config file's basename, in `ENSO_HOME` (`ensoConfigPath`).
  *
  * @group Configuration
  */
-export const ENSO_CONFIG_FILENAME = 'enso.config.json'
+export const ENSO_CONFIG_FILENAME = 'config.json'
 
 /**
  * The example a refusal message shows a human who needs to change the config.
@@ -45,13 +50,13 @@ export const ENSO_CONFIG_EXAMPLE = `{ "webFetch": { "allowedHosts": ["docs.examp
  *
  * One section per consumer; every section's schema lives with its owner. ⚠ New sections are
  * added `Type.Optional`, load-bearing (#63): a required section would make every
- * already-committed config unreadable, and unreadable fails CLOSED for every consumer at once.
+ * existing config unreadable, and unreadable fails CLOSED for every consumer at once.
  *
  * @group Configuration
  */
 export const EnsoConfig = Type.Object(
   {
-    webFetch: WebFetchConfig,
+    webFetch: Type.Optional(WebFetchConfig),
     webSearch: Type.Optional(WebSearchConfig),
     projects: Type.Optional(EnsoProjectsConfig),
   },
@@ -66,14 +71,15 @@ const ensoConfigValidator = Compile(EnsoConfig)
 export type EnsoConfigParseResult = { kind: 'ok'; config: EnsoConfig } | { kind: 'unreadable'; reason: string }
 
 /**
- * Parse the config file's text.
+ * Parse the config file's text; `undefined` — no file — is the defaults, `{}`.
  *
- * Any failure comes back as `unreadable`, and the caller must fail CLOSED on it — "could not
- * read the policy" must never render as "no policy".
+ * Any failure of a file that IS there comes back as `unreadable`, and the caller must fail CLOSED
+ * on it — "could not read the policy" must never render as "no policy".
  *
  * @group Configuration
  */
-export function parseEnsoConfig(fileText: string): EnsoConfigParseResult {
+export function parseEnsoConfig(fileText: string | undefined): EnsoConfigParseResult {
+  if (fileText === undefined) return { kind: 'ok', config: {} }
   let parsed: unknown
   try {
     parsed = JSON.parse(fileText)
@@ -89,4 +95,32 @@ export function parseEnsoConfig(fileText: string): EnsoConfigParseResult {
     }
   }
   return { kind: 'ok', config: parsed }
+}
+
+/**
+ * A trusted project's config over the user's (#421): objects merge key by key, the project's
+ * value wins for a scalar, and a list COMBINES — a project's `allowedHosts` adds to the user's
+ * rather than replacing them, as #421 decided (pi's own settings merge replaces arrays; its
+ * resource lists combine, and a host grant is Enso's resource list). `projects` is user-only and
+ * is dropped by the caller before this is reached.
+ *
+ * @group Configuration
+ */
+export function mergeEnsoConfig(user: EnsoConfig, project: EnsoConfig): EnsoConfig {
+  return mergeValues(user, project) as EnsoConfig
+}
+
+function mergeValues(base: unknown, override: unknown): unknown {
+  if (override === undefined) return base
+  if (Array.isArray(base) && Array.isArray(override)) return [...new Set([...base, ...override])]
+  if (isPlainObject(base) && isPlainObject(override)) {
+    const merged: Record<string, unknown> = { ...base }
+    for (const [key, value] of Object.entries(override)) merged[key] = mergeValues(base[key], value)
+    return merged
+  }
+  return override
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

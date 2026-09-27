@@ -196,6 +196,6 @@ test('closed mid-browse and opened again, the dialog starts at the roots', async
   await mounted.click('Close')
   await mounted.setOpen(false)
   await mounted.setOpen(true)
-  await eventually(() => expect(mounted.dialog().textContent).toContain('the project roots enso.config.json declares'))
+  await eventually(() => expect(mounted.dialog().textContent).toContain('the project roots your config declares'))
   await mounted.unmount()
 })

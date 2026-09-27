@@ -182,14 +182,12 @@ export const DEFAULT_GUARD_POLICY: GuardPolicy = {
     // nothing and expires on its own; this is not a compatibility path, it is the opposite of one.
     '/.zen/',
   ],
-  // `enso.config.json` is Enso's committed config (#59) and carries web_fetch's
-  // host allowlist (#54): a write there widens the harness's egress for every FUTURE
-  // session (it is read once at extension load, so the running session cannot re-read
-  // its own edit). Same rationale as `.cc-safety-net` below — the guard is the only
-  // layer keeping the agent from editing the policy that gates it. Fragment matching is
-  // deliberately loose (any path whose name contains it is refused) — over-blocking a
-  // lookalike file fails safe and says so.
-  protectedWriteFragments: ['/.git/', 'enso.config.json'],
+  // Enso's config — `ENSO_HOME/config.json` since #421, carrying web_fetch's host allowlist
+  // (#54) — is NOT listed here: a write there widens the harness's egress for every FUTURE
+  // session, and it is refused as a persistence target instead (`.enso` in
+  // `ENSO_PERSISTENCE_WRITE_DIRECTORIES`), with the rest of `ENSO_HOME`. The committed
+  // `enso.config.json` this fragment named is gone.
+  protectedWriteFragments: ['/.git/'],
   defaultBashTimeoutSeconds: 120,
   // The ad-hoc HTTP/TCP clients plus the PowerShell fetch cmdlets (the raw scan sees
   // those; a POSIX segment never will). git and interpreters deliberately absent (#9).
@@ -274,10 +272,9 @@ export const PERSISTENCE_WRITE_DIRECTORIES: readonly string[] = ['.git', '.vscod
  *   `.agents`  — pi discovers skills from `~/.agents/skills/` even under a redirected
  *                agent dir (scripts/enso.ts's --no-skills note); a written skill loads
  *                next session.
- *   `.enso`     — the harness's own agent dir (`.enso/pi-agent`: settings, extensions,
- *                auth.json). No agent task legitimately writes there via write/edit;
- *                scripts/enso.ts writes `.enso/print-harness` through node fs, which never
- *                passes this guard.
+ *   `.enso`     — `ENSO_HOME` (`~/.enso`: the agent dir, auth.json, config.json) and any
+ *                project's `.enso/config.json`, which widens that project's sessions once
+ *                it is trusted (#421). No agent task legitimately writes there via write/edit.
  *   `.cc-safety-net` — cc-safety-net's own policy dir (#9). Probed 2026-09-04: its
  *                checkCommand DENIES `rm -rf .cc-safety-net` but ALLOWS a shell redirect
  *                into it (`echo x > .cc-safety-net/rules.json`), and pi's write/edit

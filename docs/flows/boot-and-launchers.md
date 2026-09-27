@@ -65,8 +65,8 @@ sequenceDiagram
    mode extension fails closed when it cannot prompt, the runtime has no per-extension exclusion, and
    invariant 4 forbids passing files — so the variant is a package under `node_modules/.cache/enso/print-harness` (the checkout's own build cache, since its links point into this checkout): the
    filtered manifest (the fence below) plus a symlink for EVERY package-root entry, by `readdir`, since
-   extensions import siblings by relative path. `enso.config.json` is not mirrored and must not be:
-   `findRepoRoot` realpaths out of the mirror first. A print run has our guards only — `bash` unconfined (#9).
+   extensions import siblings by relative path. Enso's config is not in the package at all: it is the
+   user's, `ENSO_HOME/config.json` (#421), found from the environment. A print run has our guards only — `bash` unconfined (#9).
 7. **The terminal launcher refuses a `pi` it was not pinned against (#217).** The two surfaces resolve
    pi differently and only one was bounded: in-process imports the WORKSPACE copy, while the terminal
    launcher spawns the first `pi` on `PATH`. The guard REPLICATES pi's path resolver (`resolveToCwd` is

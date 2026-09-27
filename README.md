@@ -227,31 +227,45 @@ interpreters and indirection across calls remain known gaps, and those gaps are 
 The mechanism therefore documents its coverage instead of implying confinement. See the header of
 `packages/harness/core/network-egress.ts`.
 
-`web_fetch` reads a URL only when its host appears in the allowlist committed to
-[`enso.config.json`](enso.config.json). The list is empty by default. A refusal names the file, shows
-the exact JSON required to add the host, and leaves that policy change to the human.
+`web_fetch` reads a URL only when its host appears in the allowlist in your config,
+`~/.enso/config.json`. The list is empty by default. A refusal names the file, shows the exact JSON
+required to add the host, and leaves that policy change to the human.
 
 That choice is intentional. In a survey of 1,753 reviews, 99.2% of approval prompts were accepted. A
-prompt that is almost always approved provides little policy signal; a committed allowlist makes the
+prompt that is almost always approved provides little policy signal; an allowlist in a file makes the
 boundary inspectable and durable.
 
 `web_search` uses the current model's own search API, billed to the identity the conversation already
 uses, with a Tavily fallback that activates only when `TAVILY_API_KEY` is present. Secrets do not go
-in the committed config file.
+in the config file.
 
 Details: [`docs/seams/web-providers.md`](docs/seams/web-providers.md).
 
 ### Configuration — fail loudly instead of guessing
 
-`enso.config.json` is the committed configuration surface: one file, one section per consumer,
-schema-validated.
+Your `~/.enso/config.json` (`ENSO_HOME/config.json`) is the configuration surface: one file, one
+section per consumer, schema-validated. Enso ships no config file: without one, every section is its
+default — no project roots, nothing fetchable, the default search routing. For example:
+
+```json
+{
+  "webFetch": { "allowedHosts": ["docs.example.com"] },
+  "projects": { "roots": ["~/code"] }
+}
+```
+
+A project can add its own `.enso/config.json`, read over yours — its lists add to yours, its values
+win — but **only once you trust the project**, with pi's own trust decision: the first session in an
+undecided project asks (Trust, Trust parent folder, this session only, or not), the answer is saved
+in pi's `trust.json`, and the same answer covers the project's `.pi/`. An untrusted project's file is
+skipped, and the thread says so. `projects.roots` stays yours: a project cannot set it.
 
 Its loading contract is deliberately strict:
 
 - unreadable configuration is not treated as "no policy";
 - unknown keys are rejected so a typo cannot silently configure nothing;
-- the file is resolved from Enso's own tree rather than the current working directory, preventing a
-  different checkout from accidentally supplying this run's policy.
+- a checkout never supplies a session's policy on its own say-so — a project's file is read only
+  once the project is trusted, and never from its parent folders.
 
 The goal is not more configuration. It is to make the configuration that matters explicit and
 inspectable.

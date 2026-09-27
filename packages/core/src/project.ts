@@ -6,13 +6,13 @@ import { type Static, Type } from 'typebox'
  * ⚠ THE BROWSER NAMES A PROJECT BY ID, NEVER BY PATH, once it is registered. With no sandbox
  * (#24) the directory a session runs in IS its blast radius, so which directories can be
  * projects is bounded by the INSTALL: the launch directory, and directories strictly under a
- * root `enso.config.json` declares (`projects.roots`). Registering one is the only request
+ * root the user's config declares (`projects.roots`). Registering one is the only request
  * that carries a path, and the server resolves it (`realpath`) before checking it against
  * the roots.
  */
 
 /**
- * The `projects` section of `enso.config.json`: the roots a page may register projects
+ * The `projects` section of the user's config (`ENSO_HOME/config.json`): the roots a page may register projects
  * under. Absolute, or `~/`-relative to the home directory of whoever runs the server. Absent
  * (or empty) means the launch directory is the only project.
  *

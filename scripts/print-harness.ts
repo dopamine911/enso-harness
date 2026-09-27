@@ -106,10 +106,9 @@ export function materializePrintHarness(
   // ⚠ EVERY package-root entry is mirrored, not a curated list: extensions import their
   // siblings by relative path (guards reaches `../../core/index.ts`), and pi resolves
   // those against the variant's path — a missing sibling is a launch-time module error.
-  // readdir keeps the mirror complete as the package grows. ⓘ `enso.config.json` (#59) is
-  // NOT mirrored and does not need to be: it lives at the REPO root, and web-fetch finds
-  // it via `findRepoRoot`, which realpaths out of this mirror before walking (paths.ts) —
-  // do not "fix" the mirror to carry it.
+  // readdir keeps the mirror complete as the package grows. ⓘ Enso's config (#59) is not in
+  // the package at all: it is the user's, `ENSO_HOME/config.json` (#421), found from the
+  // environment whichever package — or mirror — loads the extension.
   const packageEntries = readdirSync(harnessPackageRoot).filter((packageEntry) => packageEntry !== MANIFEST_FILENAME)
   const wantedEntries = new Set([...packageEntries, MANIFEST_FILENAME])
   for (const stale of readdirSync(printHarnessDir)) {

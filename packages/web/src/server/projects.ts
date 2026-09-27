@@ -30,7 +30,7 @@ import { Compile } from 'typebox/compile'
  * ⚠ THE BLAST RADIUS IS STILL CHOSEN OUTSIDE THE BROWSER. With no sandbox (#24) a session's
  * directory is what it can reach, so the directories that can be projects are the launch
  * directory and directories STRICTLY UNDER a root the install declares (`projects.roots` in
- * `enso.config.json`). A page registers one by path — the only request that carries a path —
+ * the user's config, `ENSO_HOME/config.json`). A page registers one by path — the only request that carries a path —
  * and every request after names it by id. The path is resolved (`realpath`) BEFORE it is
  * checked, so a symlink under a root cannot lead out of it, and no segment below the root may be
  * hidden (`.ssh`, `.config`, `.enso` — dot-directories hold credentials and config, not projects).
@@ -56,9 +56,15 @@ type Registration = EnsoProjectsState['projects'][number]
 export interface ProjectRegistryOptions {
   /** The directory the server was launched in: the first project, never removable. */
   readonly launchDirectory: string
-  /** `projects.roots` from `enso.config.json`, as written: absolute or `~/`. */
+  /** `projects.roots` from the user's config (`ENSO_HOME/config.json`), as written: absolute or `~/`. */
   readonly roots: readonly string[]
-  /** `.enso/projects.json` (`ensoProjectsPath`); absent, registrations live in memory only (tests). */
+  /**
+   * The config file those roots were read from — named in every message that says to edit it, so
+   * the fix lands in the file actually read (a scratch `ENSO_HOME` is not `~/.enso`). Absent (tests):
+   * `ENSO_HOME/config.json`.
+   */
+  readonly configPath?: string
+  /** `ENSO_HOME/projects.json` (`ensoProjectsPath`); absent, registrations live in memory only (tests). */
   readonly statePath?: string
   /** Where `~/` points; the running user's home unless a test says otherwise. */
   readonly homeDirectory?: string
@@ -199,9 +205,10 @@ function refusalUnderRoots(
   canonical: string,
   roots: readonly string[],
   declared: readonly string[],
+  configPath: string,
 ): string | undefined {
   if (roots.length === 0) {
-    return 'no project roots are declared — add `"projects": { "roots": ["~/code"] }` to enso.config.json'
+    return `no project roots are declared — add \`"projects": { "roots": ["~/code"] }\` to ${configPath}`
   }
   let refusal: string | undefined
   for (const root of roots) {
@@ -219,13 +226,14 @@ function refusalUnderRoots(
 
 export function createProjectRegistry(options: ProjectRegistryOptions): ProjectRegistry {
   const home = options.homeDirectory ?? homedir()
+  const configPath = options.configPath ?? 'ENSO_HOME/config.json'
   // ⚠ A relative root would resolve against this PROCESS's cwd, not the launch directory (PR #399
   // review) — a boundary nobody wrote down. Refused here, failing the launch, as an unreadable
   // config does: the documented form is absolute or `~/`.
   const roots = options.roots.map((root) => {
     const expanded = expandHome(root, home)
     if (!isAbsolute(expanded)) {
-      throw new Error(`enso-server: projects.roots entry ${root} is not an absolute or ~/ path — fix enso.config.json`)
+      throw new Error(`enso-server: projects.roots entry ${root} is not an absolute or ~/ path — fix ${configPath}`)
     }
     return realpathOrSelf(expanded)
   })
@@ -236,14 +244,15 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
   // restores them — which is why `stored` is written back whole and only `served()` is filtered.
   let stored: Registration[] = options.statePath === undefined ? [] : readRegistrations(options.statePath)
   for (const registration of stored) {
-    const refusal = refusalUnderRoots(registration.path, roots, options.roots)
+    const refusal = refusalUnderRoots(registration.path, roots, options.roots, configPath)
     if (refusal !== undefined) log.warn('registered project not served: {reason}', { reason: refusal })
   }
 
   function served(): Registration[] {
     return stored.filter(
       (registration) =>
-        registration.path !== launch.path && refusalUnderRoots(registration.path, roots, options.roots) === undefined,
+        registration.path !== launch.path &&
+        refusalUnderRoots(registration.path, roots, options.roots, configPath) === undefined,
     )
   }
 
@@ -295,7 +304,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     if (typeof resolved !== 'string') return resolved
     const canonical = resolved
     if (canonical === launch.path) return { kind: 'existing', project: viewOf(launch.path, launch.title, true) }
-    const refusal = refusalUnderRoots(canonical, roots, options.roots)
+    const refusal = refusalUnderRoots(canonical, roots, options.roots, configPath)
     if (refusal !== undefined) return { kind: 'refused', reason: refusal }
     const existing = served().find((registration) => registration.path === canonical)
     if (existing !== undefined) return { kind: 'existing', project: viewOf(existing.path, existing.title, false) }
@@ -323,7 +332,7 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     if (typeof resolved !== 'string') return resolved
     const isRoot = roots.includes(resolved)
     if (!isRoot) {
-      const refusal = refusalUnderRoots(resolved, roots, options.roots)
+      const refusal = refusalUnderRoots(resolved, roots, options.roots, configPath)
       if (refusal !== undefined) return { kind: 'refused', reason: refusal }
     }
     const children = childDirectories(resolved)
@@ -357,7 +366,8 @@ export function createProjectRegistry(options: ProjectRegistryOptions): ProjectR
     for (const child of listed) {
       if (child.name.startsWith('.') || !(child.isDirectory() || child.isSymbolicLink())) continue
       const canonical = realpathOrSelf(join(directory, child.name))
-      if (!isDirectory(canonical) || refusalUnderRoots(canonical, roots, options.roots) !== undefined) continue
+      if (!isDirectory(canonical) || refusalUnderRoots(canonical, roots, options.roots, configPath) !== undefined)
+        continue
       entries.push(entryOf(canonical, child.name))
     }
     return entries.sort((left, right) => left.name.localeCompare(right.name))

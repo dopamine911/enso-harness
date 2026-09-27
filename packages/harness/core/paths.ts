@@ -103,6 +103,19 @@ function normalizeLikePi(input: string, options: { stripAtPrefix: boolean; norma
 }
 
 /**
+ * pi's `resolvePath(input, baseDir)` with its DEFAULT options — tilde and `file://` only, no `@`
+ * strip, no unicode-space folding. What pi's project-trust store keys by (before its realpath);
+ * `resolveAgainstCwd` is the tool-argument variant.
+ *
+ * @group Guard predicates
+ */
+export function resolvePathLikePi(input: string, baseDir: string = process.cwd()): string {
+  const defaults = { stripAtPrefix: false, normalizeUnicodeSpaces: false }
+  const normalized = normalizeLikePi(input, defaults)
+  return isAbsolute(normalized) ? resolve(normalized) : resolve(normalizeLikePi(baseDir, defaults), normalized)
+}
+
+/**
  * Resolve a tool-supplied path against the session cwd, to the SAME absolute path pi's own
  * tool will operate on. Does NOT confine — see {@link isInsideAnyRoot}.
  *

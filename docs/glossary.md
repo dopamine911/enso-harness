@@ -194,7 +194,7 @@ answer before a tool runs; nothing after it does.
   job (#12) and a freeze-review decision. Every verdict is a log record: a denial at `warn`, an allow
   at `debug`, never silent.
 - **policy** — what a guard reads: write roots, secret path fragments, protected write fragments,
-  denied network binaries. `GuardPolicy` in `@enso/core`; from `enso.config.json`, once, failing closed.
+  denied network binaries. `GuardPolicy` in `@enso/core`: `DEFAULT_GUARD_POLICY`, in code.
 - **rule** — the refusal site a denial names, from the closed vocabulary `ENSO_GUARD_RULES` in
   `@enso/core` (`network-egress`, `secret-read`, `stale-write`, …): the word beside a verdict's prose
   reason that a day's stats count by (#144). The command analyzer's own `ruleId`, when it has one, is
@@ -322,8 +322,13 @@ harness did). The first is canonical and never rewritten by us; the second is th
   figure is derived from records; if one cannot be, the file gets the record, never a counter.
 - **event name** — a record's message TEMPLATE, values unrendered: what a bundle filters on and
   what a stat folds over. Declared once in `ENSO_LOG_EVENTS` and imported by the producers.
-- **config** — `enso.config.json` at the repo root, committed, read once at extension load, failing
-  closed (#59). Secrets are not config: `ENSO_HOME/secrets.env`, read per call, quarantined.
+- **config** — the user's `ENSO_HOME/config.json` (#59, #421): absent is the defaults in code, and a
+  file that is there is read once per session and fails closed when unreadable. A trusted project's
+  `.enso/config.json` merges over it for that project's sessions.
+- **project trust** — the runtime's decision that a project's own files may change a session: the
+  runtime's project directory, and the project's `.enso/config.json` (#421). One store, the
+  runtime's `trust.json`; asked once per session when undecided; untrusted, the project's config is
+  skipped and the session is told. Secrets are not config: `ENSO_HOME/secrets.env`, read per call, quarantined.
 - **ENSO_HOME** — the user's Enso directory, `~/.enso` unless the variable says otherwise (#421): the
   runtime's agent dir, the secrets file, the logs and the project list, shared by every checkout. A checkout's
   old `.enso/` is moved into it on launch, never overwriting.
