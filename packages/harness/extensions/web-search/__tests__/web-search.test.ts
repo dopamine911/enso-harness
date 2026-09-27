@@ -374,10 +374,10 @@ test("⚠ at session start the session's config replaces the user's: a project's
   )
   expect(loaded.tool.description).not.toContain('DeepSeek backend')
   await loaded.startSession()
-  expect(loaded.tool.description).toContain('DeepSeek backend')
   await run(loaded, { model: ANTHROPIC_MODEL })
   expect(loaded.calls.deepseek).toBe(1)
   expect(loaded.calls.anthropic).toBe(0)
+  expect(loaded.tool.description).toContain('DeepSeek backend')
 })
 
 test('an unreadable config fails CLOSED: every call refuses, no provider runs', async () => {

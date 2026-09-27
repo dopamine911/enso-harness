@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { ENSO_CONFIG_FILENAME, parseEnsoConfig, WEB_FETCH_MAX_RESPONSE_BYTES, WEB_FETCH_TOOL_NAME } from '@enso/core'
 import { auditRecords, recordEnsoLogs, releaseEnsoLogs } from '@enso/core/log-recorder'
+import type { SessionEnsoConfig } from '../../../core/index.ts'
 import { createWebFetch, type WebFetchDependencies, type WebFetchRequestInit } from '../index.ts'
 
 /**
@@ -142,9 +143,30 @@ test("⚠ at session start the session's config replaces the user's: the merged 
   })
   expect(loaded.tool.description).not.toContain('docs.project.example')
   await loaded.startSession()
-  expect(loaded.tool.description).toContain('docs.project.example')
   expect(await run(loaded, 'https://docs.project.example/guide')).toContain('hello from the docs')
   expect(await run(loaded, 'https://elsewhere.example/')).toContain(projectPath)
+  expect(loaded.tool.description).toContain('docs.project.example')
+})
+
+// ⚠ THE DEADLOCK (#421, found live): the trust question is shown on the thread only once the
+// session exists, so session_start must NOT wait for its answer — it did, and session creation
+// hung on a card nobody could see. The call that needs the policy waits instead.
+test('⚠ session_start returns while the trust question is open; a call made meanwhile waits for the answer (#421)', async () => {
+  const answer = Promise.withResolvers<SessionEnsoConfig>()
+  const loaded = loadWebFetch({ resolveSessionConfig: () => answer.promise })
+  await loaded.startSession()
+  let settled = false
+  const call = run(loaded, 'https://docs.project.example/').then((text) => {
+    settled = true
+    return text
+  })
+  await Promise.resolve()
+  expect(settled).toBe(false)
+  answer.resolve({
+    result: parseEnsoConfig(configWith(['docs.project.example'])),
+    path: '/work/project/.enso/config.json',
+  })
+  expect(await call).toContain('hello from the docs')
 })
 
 test("a session whose config is unreadable fails CLOSED from its start, naming the session's file", async () => {

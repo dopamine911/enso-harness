@@ -141,12 +141,23 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
 
     // The session's config replaces the user's at its start, and the tool is registered again so
     // its description names the backend the session really has.
-    pi.on('session_start', async (_event, context) => {
-      const session = await dependencies.resolveSessionConfig(pi.events, context)
-      webSearchConfig = session.result.kind === 'ok' ? (session.result.config.webSearch ?? {}) : {}
-      configProblem = session.result.kind === 'ok' ? undefined : session.result.reason
-      configDisplayPath = session.path
-      register()
+    let sessionReady: Promise<void> = Promise.resolve()
+    pi.on('session_start', (_event, context) => {
+      // ⚠ NOT awaited (#421): the trust question is asked on the thread, and the host delivers a
+      // question raised during session_start only once the session exists and the thread is being
+      // followed — awaiting it here held session creation on an answer nobody could see, a deadlock
+      // (found live). The call that needs the policy awaits it instead, like a permission prompt.
+      sessionReady = dependencies.resolveSessionConfig(pi.events, context).then(
+        (session) => {
+          webSearchConfig = session.result.kind === 'ok' ? (session.result.config.webSearch ?? {}) : {}
+          configProblem = session.result.kind === 'ok' ? undefined : session.result.reason
+          configDisplayPath = session.path
+          register()
+        },
+        (error: unknown) => {
+          configProblem = `the session's config could not be resolved: ${String(error)}`
+        },
+      )
     })
 
     const register = (): void =>
@@ -167,6 +178,8 @@ export function createWebSearch(dependencies: WebSearchDependencies): (pi: Exten
         execute: async (...executeArguments: WebSearchExecuteArguments): Promise<AgentToolResult<undefined>> => {
           const [, params, signal, onUpdate, extensionContext] = executeArguments
           const query = params.query
+          // The session's config, once its trust question (if any) is answered.
+          await sessionReady
           if (configProblem !== undefined) {
             return refusal(
               `the ${WEB_SEARCH_TOOL_NAME} configuration could not be used — ${configProblem}. ` +

@@ -126,17 +126,36 @@ export function createWebFetch(dependencies: WebFetchDependencies): (pi: Extensi
     // every call refuses with the reason, because "could not read the policy" must never render
     // as "no policy" (and a throw here could wedge pi's load).
     const policy = loadPolicy(dependencies)
-    const register = (): void => registerWebFetch(pi, dependencies, policy)
+    const session: { ready: Promise<void> } = { ready: Promise.resolve() }
+    const register = (): void => registerWebFetch(pi, dependencies, policy, session)
     register()
-    pi.on('session_start', async (_event, context) => {
-      const session = await dependencies.resolveSessionConfig(pi.events, context)
-      Object.assign(policy, policyFrom(session.result, session.path))
-      register()
+    pi.on('session_start', (_event, context) => {
+      // ⚠ NOT awaited (#421): the trust question is asked on the thread, and the host delivers a
+      // question raised during session_start only once the session exists and the thread is being
+      // followed — awaiting it here held session creation on an answer nobody could see, a deadlock
+      // (found live). The call that needs the policy awaits it instead, like a permission prompt.
+      session.ready = dependencies.resolveSessionConfig(pi.events, context).then(
+        (resolved) => {
+          Object.assign(policy, policyFrom(resolved.result, resolved.path))
+          register()
+        },
+        (error: unknown) => {
+          Object.assign(policy, {
+            allowedHosts: [],
+            configProblem: `the session's config could not be resolved: ${String(error)}`,
+          })
+        },
+      )
     })
   }
 }
 
-function registerWebFetch(pi: ExtensionAPI, dependencies: WebFetchDependencies, policy: WebFetchPolicy): void {
+function registerWebFetch(
+  pi: ExtensionAPI,
+  dependencies: WebFetchDependencies,
+  policy: WebFetchPolicy,
+  session: { readonly ready: Promise<void> },
+): void {
   const { allowedHosts } = policy
   pi.registerTool({
     name: WEB_FETCH_TOOL_NAME,
@@ -161,6 +180,8 @@ function registerWebFetch(pi: ExtensionAPI, dependencies: WebFetchDependencies, 
       if (urlDecision.kind === 'refused') return refusal(rawUrl, urlDecision.reason)
       const url = urlDecision.url
 
+      // The session's policy, once its trust question (if any) is answered.
+      await session.ready
       const { configProblem, configDisplayPath } = policy
       if (configProblem !== undefined) {
         return refusal(
@@ -170,7 +191,7 @@ function registerWebFetch(pi: ExtensionAPI, dependencies: WebFetchDependencies, 
             `(expected shape: ${ENSO_CONFIG_EXAMPLE}) and restarts the session.`,
         )
       }
-      if (allowedHosts.length === 0) {
+      if (policy.allowedHosts.length === 0) {
         return refusal(
           rawUrl,
           `the ${WEB_FETCH_TOOL_NAME} host allowlist is EMPTY — the recorded default policy (#54), ` +
@@ -180,11 +201,11 @@ function registerWebFetch(pi: ExtensionAPI, dependencies: WebFetchDependencies, 
             `that file from this session; ask the human.`,
         )
       }
-      if (!isHostAllowed(url.hostname, allowedHosts)) {
+      if (!isHostAllowed(url.hostname, policy.allowedHosts)) {
         return refusal(
           rawUrl,
           `"${url.hostname}" is not on the ${WEB_FETCH_TOOL_NAME} host allowlist ` +
-            `(allowed: ${allowedHosts.join(', ')}). Hosts match exactly — no wildcards, no subdomain ` +
+            `(allowed: ${policy.allowedHosts.join(', ')}). Hosts match exactly — no wildcards, no subdomain ` +
             `inheritance. A human can add it in ${configDisplayPath} and restart the session.`,
         )
       }
