@@ -422,7 +422,7 @@ export const AGENT_RUNTIME_VERSION: string = PI_VERSION
  * and add Enso's `authErrorPatterns` to the operator's (#341).
  *
  * Creates the file if absent; otherwise reads, sets what is missing, writes — and only when
- * something changed. Every other key, and every pattern the operator listed, is kept verbatim;
+ * something changed. Every other key, and every entry the operator listed, is kept verbatim;
  * a pattern already there in any case is not added twice (the vendor compares them that way).
  */
 export function seedMultiAccountConfig(agentDir: string): void {
@@ -436,17 +436,17 @@ export function seedMultiAccountConfig(agentDir: string): void {
     }
   }
   const listed = existing[MULTI_ACCOUNT_AUTH_PATTERNS_KEY]
-  const operatorPatterns = Array.isArray(listed)
-    ? listed.filter((entry): entry is string => typeof entry === 'string')
-    : []
+  // Kept as the operator wrote it, non-strings included (the vendor skips those; the file is theirs).
+  const operatorEntries: readonly unknown[] = Array.isArray(listed) ? listed : []
   const missingPatterns = MULTI_ACCOUNT_AUTH_PATTERNS.filter(
-    (pattern) => !operatorPatterns.some((known) => known.toLowerCase() === pattern.toLowerCase()),
+    (pattern) =>
+      !operatorEntries.some((known) => typeof known === 'string' && known.toLowerCase() === pattern.toLowerCase()),
   )
   if (existing[MULTI_ACCOUNT_CHILD_PROXY_KEY] === false && missingPatterns.length === 0) return
   const seeded = {
     ...existing,
     [MULTI_ACCOUNT_CHILD_PROXY_KEY]: false,
-    [MULTI_ACCOUNT_AUTH_PATTERNS_KEY]: [...operatorPatterns, ...missingPatterns],
+    [MULTI_ACCOUNT_AUTH_PATTERNS_KEY]: [...operatorEntries, ...missingPatterns],
   }
   writeFileSync(configPath, `${JSON.stringify(seeded, null, '\t')}\n`)
 }

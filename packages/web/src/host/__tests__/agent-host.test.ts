@@ -142,25 +142,34 @@ test("⚠ the agent dir's multi-account config is seeded — childProxy off, Ens
   // present with the operator's keys and patterns → merged, not clobbered
   writeFileSync(
     configPath,
-    JSON.stringify({ childProxy: true, showUsage: false, authErrorPatterns: ['my proxy says no'] }),
+    JSON.stringify({ childProxy: true, showUsage: false, authErrorPatterns: ['my proxy says no', 42] }),
   )
   seedMultiAccountConfig(scratch)
   expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
     childProxy: false,
     showUsage: false,
-    authErrorPatterns: ['my proxy says no', SEEDED_AUTH_PATTERN],
+    authErrorPatterns: ['my proxy says no', 42, SEEDED_AUTH_PATTERN],
   })
   // an agent dir the old seed pinned (every existing one: `{ childProxy: false }`) → the pattern is added
-  writeFileSync(configPath, JSON.stringify({ childProxy: false }))
+  writeFileSync(configPath, JSON.stringify({ childProxy: false, showUsage: false }))
   seedMultiAccountConfig(scratch)
-  expect(JSON.parse(readFileSync(configPath, 'utf8')).authErrorPatterns).toEqual([SEEDED_AUTH_PATTERN])
-  // the pattern already there, in another case → not added twice (the vendor compares them so)
+  expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
+    childProxy: false,
+    showUsage: false,
+    authErrorPatterns: [SEEDED_AUTH_PATTERN],
+  })
+  // the pattern already there, in another case → not added twice (the vendor compares them so) — on a
+  // rewrite, which the unpinned proxy forces
   writeFileSync(
     configPath,
-    JSON.stringify({ childProxy: false, authErrorPatterns: [SEEDED_AUTH_PATTERN.toUpperCase()] }),
+    JSON.stringify({ childProxy: true, showUsage: false, authErrorPatterns: [SEEDED_AUTH_PATTERN.toUpperCase()] }),
   )
   seedMultiAccountConfig(scratch)
-  expect(JSON.parse(readFileSync(configPath, 'utf8')).authErrorPatterns).toEqual([SEEDED_AUTH_PATTERN.toUpperCase()])
+  expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
+    childProxy: false,
+    showUsage: false,
+    authErrorPatterns: [SEEDED_AUTH_PATTERN.toUpperCase()],
+  })
   // and creating a host seeds it in the host's own agent dir — before any session exists
   const hostAgentDir = mkdtempSync(join(tmpdir(), 'enso-host-seed-at-boot-'))
   createAgentHost({ servesDirectory: servesRepoRoot, agentDir: hostAgentDir, harnessPackageDir: harnessDir })
