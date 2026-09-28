@@ -36,7 +36,7 @@ import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
 import { quarantineSecrets } from '@enso/core/secrets'
 import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
 import { type BranchStats, branchStats } from './branch-stats.ts'
-import { type ContinuationLead, continuationLead, NOTHING_TO_CONTINUE } from './continuation.ts'
+import { type ContinuationLead, continuationLead, NO_RUN_LIFECYCLE, NOTHING_TO_CONTINUE } from './continuation.ts'
 import { createEventTail, describeObservation } from './event-tail.ts'
 import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
 import { forkPointOf } from './fork-point.ts'
@@ -1289,9 +1289,15 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           outcome.onRejected(NOTHING_TO_CONTINUE)
           return
         }
+        // ⚠⚠ The one cast onto pi's private run lifecycle — the module header says why. Checked
+        // BEFORE acceptance (PR #442 review): an `async` method can only fail synchronously by not
+        // being there, and a pi build without it must refuse, not answer 202 to a run that never starts.
+        const lifecycle = session as unknown as Partial<PiRunLifecycle>
+        if (typeof lifecycle._runAgentPrompt !== 'function') {
+          outcome.onRejected(NO_RUN_LIFECYCLE)
+          return
+        }
         outcome.onAccepted()
-        // ⚠⚠ The one cast onto pi's private run lifecycle — the module header says why.
-        const lifecycle = session as unknown as PiRunLifecycle
         void lifecycle._runAgentPrompt(lead).catch((error: unknown) => {
           log.error('a continued run failed: {error}', { threadId, error })
         })

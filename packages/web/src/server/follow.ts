@@ -380,6 +380,9 @@ export async function continueThread(deps: FollowRouteDeps, threadId: string): P
     lease.release()
   }
   return new Promise<ContinueOutcome>((resolve, reject) => {
+    // Unlike `promptThread`'s call to pi's public `prompt`, `continueRun` reads pi's private run
+    // state (#436), so a fault before either callback is plausible after a pi bump: the lease goes
+    // back and the route answers 500, rather than leaving the thread held (PR #442 review).
     try {
       lease.runtime.continueRun({
         onAccepted: () => resolve({ status: 202 }),

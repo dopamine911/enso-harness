@@ -478,6 +478,20 @@ test('a continue the runtime refuses is a 422 with its reason, and the thread is
   fake.emit(SETTLED)
 })
 
+test('a continue whose runtime faults before accepting or refusing is a 500, and the thread is not left held (#436, PR #442 review)', async () => {
+  const fake = fakeHost([], {
+    continueRun: () => {
+      throw new TypeError('lifecycle._runAgentPrompt is not a function')
+    },
+  })
+  const url = await startWith(fake)
+  const faulted = await fetch(`${url}/api/threads/t1/continue`, { method: 'POST' })
+  expect(faulted.status).toBe(500)
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: false })
+  expect((await prompt(url, 't1', 'hello')).status).toBe(202)
+  fake.emit(SETTLED)
+})
+
 // ── 2. a dialog parks nothing ─────────────────────────────────────────────────────────
 
 test('⚠ a blocking dialog is an observation on the follow and a unary answer back — nothing parks, nothing expires', async () => {

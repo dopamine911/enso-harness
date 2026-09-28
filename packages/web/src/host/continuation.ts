@@ -80,3 +80,9 @@ export function continuationLead(
 /** Why a Continue was refused — the reason the route says as its 422. */
 export const NOTHING_TO_CONTINUE =
   'nothing to continue: the thread does not end on an unanswered prompt or an unfinished tool call'
+
+/**
+ * Why a Continue was refused on a pi build without the private run lifecycle it calls (PR #442
+ * review) — the one way that call could fail before it starts. The pin tests go red first.
+ */
+export const NO_RUN_LIFECYCLE = 'continue is unavailable: this pi build has no run lifecycle to continue in (#436)'
