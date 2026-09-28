@@ -75,34 +75,44 @@ export interface NotificationsStore extends Store<ReadonlyArray<EnsoNotification
     origin: EnsoUiRequestOrigin,
     source?: string,
   ) => void
-  /** Add a line that carries an action (#436) — the one the reader can press once. */
-  readonly pushWithAction: (line: NotificationLineInput & { action: NotificationAction }) => void
+  /** Add a line that carries an action (#436) — the one the reader can press once. Answers the line's id. */
+  readonly pushWithAction: (line: NotificationLineInput & { action: NotificationAction }) => number
   /** Take a line's action off it and hand it back, or `undefined` when it has none (any more). */
   readonly takeAction: (id: number) => NotificationAction | undefined
+  /**
+   * Rewrite a line the thread has moved past, as an `info` line with no action (PR #442 review):
+   * a torn-tail warning once a run has answered it. A line already dropped off the bound is gone.
+   */
+  readonly resolveLine: (id: number, message: string) => void
 }
 
 export function createNotificationsStore(): NotificationsStore {
   const store = createStore<ReadonlyArray<EnsoNotification>>([])
   let nextNotificationId = 1
-  const append = (line: NotificationLineInput): void => {
-    const appended = [...store.get(), { ...line, id: nextNotificationId++, at: new Date() }]
+  const append = (line: NotificationLineInput): number => {
+    const id = nextNotificationId++
+    const appended = [...store.get(), { ...line, id, at: new Date() }]
     store.set(appended.slice(-MAX_KEPT_NOTIFICATIONS))
+    return id
+  }
+  const rewrite = (id: number, change: (notification: EnsoNotification) => EnsoNotification): void => {
+    store.set(store.get().map((notification) => (notification.id === id ? change(notification) : notification)))
   }
   return {
     get: store.get,
     subscribe: store.subscribe,
-    push: (message: string, notifyType: EnsoNotifyType | undefined, origin: EnsoUiRequestOrigin, source?: string) =>
-      append({ message, notifyType, origin, source }),
+    push: (message: string, notifyType: EnsoNotifyType | undefined, origin: EnsoUiRequestOrigin, source?: string) => {
+      append({ message, notifyType, origin, source })
+    },
     pushWithAction: append,
     takeAction: (id: number) => {
       const action = store.get().find((notification) => notification.id === id)?.action
       if (action === undefined) return undefined
-      store.set(
-        store
-          .get()
-          .map((notification) => (notification.id === id ? { ...notification, action: undefined } : notification)),
-      )
+      rewrite(id, (notification) => ({ ...notification, action: undefined }))
       return action
+    },
+    resolveLine: (id: number, message: string) => {
+      rewrite(id, (notification) => ({ ...notification, message, notifyType: 'info', action: undefined }))
     },
   }
 }

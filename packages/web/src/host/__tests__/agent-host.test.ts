@@ -1905,7 +1905,9 @@ function storedReply(text: string, calls: ReadonlyArray<{ id: string; name: stri
 }
 
 /** A cold thread whose last run was cut off as `tail` says: one whole turn, then the torn one. */
-function storeTornThread(tail: 'unanswered-prompt' | 'tool-call-without-result' | 'complete'): {
+function storeTornThread(
+  tail: 'unanswered-prompt' | 'tool-call-without-result' | 'tool-results-without-reply' | 'complete',
+): {
   threadId: string
   file: string
 } {
@@ -1914,10 +1916,20 @@ function storeTornThread(tail: 'unanswered-prompt' | 'tool-call-without-result' 
   const stored = SessionManager.open(file)
   if (tail === 'complete') return { threadId, file }
   stored.appendMessage({ role: 'user', content: 'second question', timestamp: Date.now() })
-  if (tail === 'tool-call-without-result') {
+  if (tail !== 'unanswered-prompt') {
     stored.appendMessage(
       storedReply('reading it', [{ id: 'call-torn', name: 'read', arguments: { path: 'package.json', limit: 1 } }]),
     )
+  }
+  if (tail === 'tool-results-without-reply') {
+    stored.appendMessage({
+      role: 'toolResult',
+      toolCallId: 'call-torn',
+      toolName: 'read',
+      content: [{ type: 'text', text: '{' }],
+      isError: false,
+      timestamp: Date.now(),
+    } as never)
   }
   return { threadId, file }
 }
@@ -2033,6 +2045,35 @@ test('⚠ Continue closes a tool call left without its result with an error resu
     'assistant: reading it',
     `toolResult[isError]: ${LOST_TOOL_RESULT_TEXT}`,
     'assistant: continuing after the lost result',
+  ])
+})
+
+// PR #442 review: the tail a kill leaves most often on a tool-using turn — the results are stored,
+// the reply to them is not. The model is asked with the results last and nothing added.
+test('⚠ Continue answers tool results that never got their reply, adding nothing before the model (#436)', async () => {
+  const { threadId, file } = storeTornThread('tool-results-without-reply')
+  const core = createFauxCore()
+  const asked = Promise.withResolvers<SentContext>()
+  core.setResponses([
+    (context: SentContext) => {
+      asked.resolve(context)
+      return faux.fauxAssistantMessage('the reply the results were waiting for')
+    },
+  ])
+  const hosted = await resumeTorn(threadId, core)
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.subscribe((observation) => {
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  hosted.runtime.continueRun({ onAccepted: () => undefined, onRejected: settled.reject })
+  const turns = (await asked.promise).messages.filter((message) => message.role !== 'system')
+  expect(turns.at(-1)?.role).toBe('toolResult')
+  await settled.promise
+  expect(storedMessages(file).slice(-4)).toEqual([
+    'user: second question',
+    'assistant: reading it',
+    'toolResult: {',
+    'assistant: the reply the results were waiting for',
   ])
 })
 

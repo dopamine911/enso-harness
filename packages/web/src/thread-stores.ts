@@ -259,10 +259,23 @@ const INTERRUPTED_TAIL_NOTICE: Record<EnsoInterruptedTail, string> = {
     "This session's last prompt was never answered — its run was cut off before a reply. Continue picks up from there without a new message, or send a new prompt.",
   'tool-call-without-result':
     "This session's last turn ended mid-tool-call — the result never arrived. Continue picks up from there (the lost result is recorded as an error), or send a new prompt.",
+  'tool-results-without-reply':
+    "This session's last turn ended after its tool results, before the model replied to them. Continue picks up from there without a new message, or send a new prompt.",
 }
 
 /** The interrupted-tail notice's action (#436): post Continue; the run arrives on the follow, a refusal as a line. */
 const CONTINUE_LABEL = 'Continue'
+
+/**
+ * What the torn-tail line becomes once a run answers it (PR #442 review) — Continue's, or any other:
+ * a prompt sent instead, or a run another tab started. Before, the warning and its button outlived
+ * the tail, and a late press was a 409 or a 422 under a reply that had already answered it.
+ */
+export const TORN_TAIL_CONTINUED = 'The cut-off turn was continued from its stored state.'
+export const TORN_TAIL_SUPERSEDED = 'A later run picked up after the cut-off turn.'
+
+/** Per thread, what to do with its torn-tail line when its first run starts; gone once done. */
+const tornTailLines = new Map<string, () => void>()
 
 // ── the page's threads ────────────────────────────────────────────────────────
 
@@ -371,6 +384,7 @@ function dropThread(threadId: string): void {
   stores.connection.close()
   threads.delete(threadId)
   summaries.delete(threadId)
+  tornTailLines.delete(threadId)
   publishThreadList()
 }
 
@@ -478,13 +492,23 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
   })
   stores.permissionMode.applyReceipt(history.permissionMode)
   if (history.interrupted !== undefined) {
-    stores.notifications.pushWithAction({
+    let continued = false
+    const line = stores.notifications.pushWithAction({
       message: INTERRUPTED_TAIL_NOTICE[history.interrupted],
       notifyType: 'warning',
       origin: 'run',
       source: ENSO_NOTICE_SOURCE,
-      action: { label: CONTINUE_LABEL, run: () => void stores.connection.continueRun() },
+      action: {
+        label: CONTINUE_LABEL,
+        run: () => {
+          continued = true
+          void stores.connection.continueRun()
+        },
+      },
     })
+    tornTailLines.set(history.threadId, () =>
+      stores.notifications.resolveLine(line, continued ? TORN_TAIL_CONTINUED : TORN_TAIL_SUPERSEDED),
+    )
   }
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {
@@ -510,6 +534,11 @@ export function getThreadStores(threadId: string): ThreadStores {
 export function updateThreadSummary(threadId: string, patch: Pick<ThreadSummary, 'title' | 'busy' | 'waiting'>): void {
   const current = summaries.get(threadId)
   if (current === undefined) return
+  // The thread's first run — Continue's, a prompt sent instead, another tab's — answers its torn tail.
+  if (patch.busy && !current.busy) {
+    tornTailLines.get(threadId)?.()
+    tornTailLines.delete(threadId)
+  }
   if (current.title === patch.title && current.busy === patch.busy && current.waiting === patch.waiting) return
   summaries.set(threadId, { ...current, ...patch, lastActivityAt: new Date() })
   publishThreadList()

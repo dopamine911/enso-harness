@@ -134,17 +134,24 @@ export function transcriptToMessages(transcript: readonly EnsoTranscriptEntry[])
  * direction `attachToolResult` pairs in, so a result that precedes its call counts for
  * neither (it is dropped from the messages too).
  */
-function isAnsweredAfter(
+function answerAfter(
   transcript: readonly EnsoTranscriptEntry[],
   messageIndex: number,
   toolCallId: string,
-): boolean {
+): Extract<EnsoTranscriptEntry, { kind: 'tool-result' }> | undefined {
   for (let position = messageIndex + 1; position < transcript.length; position += 1) {
     const entry = transcript[position]
-    if (entry?.kind === 'tool-result' && entry.toolCallId === toolCallId) return true
+    if (entry?.kind === 'tool-result' && entry.toolCallId === toolCallId) return entry
   }
-  return false
+  return undefined
 }
+
+/**
+ * The result pi records for a call its run's abort cut (`createErrorToolResult("Operation
+ * aborted")`, pi-agent-core `agent-loop.js:436`, `:501`, `:520`) — a Stop's mark, which a kill
+ * never leaves (PR #442 review).
+ */
+const PI_ABORTED_RESULT_TEXT = 'Operation aborted'
 
 /**
  * Whether the transcript ends inside a turn (#109, `EnsoInterruptedTail`).
@@ -162,18 +169,24 @@ function isAnsweredAfter(
  * The last MESSAGE, not the last entry: a `custom` or `other` entry the runtime appended
  * after the turn (a model change, a compaction) is not what ended the branch.
  *
- * ⚠ Only the two shapes a next prompt would silently paper over are named. An assistant
- * reply with text and no open call reads as settled even if it was cut short — the transcript
- * carries no fact that says so, and inventing one would be a guess.
+ * ⚠ Only the shapes a next prompt would silently paper over are named. An assistant reply with
+ * text and no open call reads as settled even if it was cut short — the transcript carries no
+ * fact that says so, and inventing one would be a guess. A last turn whose calls were ALL
+ * answered is torn too (PR #442 review): pi keeps the reply to the results only at its end, so a
+ * kill anywhere in that model call — the longest window on a tool-using turn — leaves exactly
+ * this. It is told from a Stop by pi's aborted result, which a kill never writes; a turn with
+ * no call at all is a finished reply.
  */
 export function interruptedTail(transcript: readonly EnsoTranscriptEntry[]): EnsoInterruptedTail | undefined {
   const lastMessageIndex = transcript.findLastIndex((entry) => entry.kind === 'message')
   const lastMessage = transcript[lastMessageIndex]
   if (lastMessage === undefined || lastMessage.kind !== 'message') return undefined
   if (lastMessage.role === 'user') return 'unanswered-prompt'
-  for (const part of lastMessage.parts) {
-    if (part.type !== 'tool-call') continue
-    if (!isAnsweredAfter(transcript, lastMessageIndex, part.toolCallId)) return 'tool-call-without-result'
-  }
-  return undefined
+  const answers = lastMessage.parts.flatMap((part) =>
+    part.type === 'tool-call' ? [answerAfter(transcript, lastMessageIndex, part.toolCallId)] : [],
+  )
+  if (answers.length === 0) return undefined
+  if (answers.includes(undefined)) return 'tool-call-without-result'
+  const stopped = answers.some((answer) => answer?.isError === true && answer.text === PI_ABORTED_RESULT_TEXT)
+  return stopped ? undefined : 'tool-results-without-reply'
 }

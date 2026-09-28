@@ -350,6 +350,7 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
 
 export type ContinueOutcome =
   | { readonly status: 202 }
+  | { readonly status: 404; readonly reason: string }
   | { readonly status: 409; readonly reason: string }
   | { readonly status: 422; readonly reason: string }
 
@@ -361,11 +362,18 @@ export type ContinueOutcome =
  * a tail that is no unanswered prompt or unfinished tool call — is the 422, verbatim, and releases
  * the lease. Accepted, it answers 202 and the run arrives on the follow like any other; the thread's
  * own `settled` releases it, as it releases a prompt's.
+ *
+ * A thread neither live here nor stored is a 404 BEFORE anything is built (PR #442 review): there is
+ * nothing to continue by definition, and `acquire` would build a fresh session under the id and hold
+ * it for the idle window only to refuse it — unlike `/command` and `/configure`, which build on purpose.
  */
 export async function continueThread(deps: FollowRouteDeps, threadId: string): Promise<ContinueOutcome> {
-  const { threads } = deps
+  const { threads, host } = deps
   const running = runningRefusal(threads, threadId, 'continue')
   if (running !== undefined) return running
+  if (threads.peek(threadId) === undefined && (await host.storedThreadDirectory(threadId)) === undefined) {
+    return { status: 404, reason: `no thread ${threadId} to continue` }
+  }
   const lease = await threads.acquire(threadId)
   noteRunAdmitted(threadId, lease.generation)
   const settle = threads.observe(threadId, (frame: ThreadFeedFrame) => {
