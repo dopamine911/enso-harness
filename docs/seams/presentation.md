@@ -83,6 +83,13 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    */
   readonly fork: (entryId: string) => Promise<EnsoForkReceipt | undefined>
   /**
+   * Continue the thread's torn tail from its stored state (#436): `POST …/continue`, no prompt and
+   * no new user message. The run arrives on the follow as a run another tab started would; a refusal
+   * — the thread running (409), nothing to continue (422) — is recorded through `problem` and said
+   * once, as a refused control is.
+   */
+  readonly continueRun: () => Promise<ContinueOutcome>
+  /**
    * Release the thread's follow (#272): the socket closes and nothing else opens one on
    * this connection. The page calls it when a thread leaves its live list — a thread whose
    * pane is gone must not keep a stream the browser counts against its six-per-origin

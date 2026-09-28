@@ -102,6 +102,8 @@ export interface FakeThreadRecord {
   modelState: EnsoModelState
   /** What `sessionUsage()` reads (#45); a test sets it to what pi would have summed. */
   sessionUsage: EnsoSessionUsage
+  /** How many continues the server asked for (#436); the default accepts each and runs nothing. */
+  continues: number
   aborts: number
   queueClears: number
   disposed: number
@@ -155,6 +157,7 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
     sessionUsage: { ...FAKE_NO_USAGE },
     aborts: 0,
     queueClears: 0,
+    continues: 0,
     disposed: 0,
     queue: { interrupting: [], enqueued: [] },
   }
@@ -175,6 +178,10 @@ export function createFakeHostedThread(options: FakeHostedThreadOptions = {}): F
   const runtime: ThreadRuntime = {
     prompt: (request: PromptRequest) => {
       record.prompts.push(request)
+    },
+    continueRun: (outcome: PromptOutcome) => {
+      record.continues += 1
+      outcome.onAccepted()
     },
     answerDialog: (response: DialogAnswer) => {
       record.answers.push(response)

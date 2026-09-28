@@ -180,7 +180,7 @@ is assigned: `publishObservation` (line 354) increments the feed's counter, reco
 payload), then publishes. The feed subscribes the runtime once per live thread and routes every event
 through the mapper (lines 332–334); the prompt route's `announce` (line 516) enters the same counter.
 
-**Consumed by the follow route and the browser.** `followThread` (`server/follow.ts` line 156) writes
+**Consumed by the follow route and the browser.** `followThread` (`server/follow.ts` line 161) writes
 one frame per feed frame — `observation` with its `seq`, `status` with `live`/`busy`/`generation`
 (lines 160–170) — after a snapshot taken in the same tick as the subscription, exact as of `asOfSeq`
 (lines 146–150, 178–189). In the browser `packages/web/src/follow-connection.ts` checks every frame

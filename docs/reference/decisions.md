@@ -1,7 +1,7 @@
 <!-- generated: scripts/docs/decisions.ts -->
 # Code-local decisions
 
-**Decision headers: 298.**
+**Decision headers: 300.**
 
 This is an inventory of decisions recorded in leading source-file headers. It is not an index of every
 issue mention: implementation comments, tests and fixture prose after the leading header are deliberately
@@ -161,6 +161,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/branch-context.test.ts` | `#361` | #361: a thread's context, request by request, off pi's own entries — built here with pi's real session manager, so the entries read are the ones pi writes and the assembly is pi's own (`buildContextEntries`, compaction included). |
 | `packages/web/src/host/__tests__/branch-stats.test.ts` | `#45` | #45 phase 2: the branch, analysed off pi's own entries — built here with pi's real session manager, so the shapes read are the ones pi writes. |
 | `packages/web/src/host/__tests__/context-history.test.ts` | `#361` | #361 phase 4: Context Events and File Activity, off pi's own entries — built with pi's real session manager, so every entry kind is one pi writes. |
+| `packages/web/src/host/__tests__/continuation.test.ts` | `#436` | `continuationLead` (#436): whether a torn thread can be continued from its stored state, and what closes it first. |
 | `packages/web/src/host/__tests__/event-tail.test.ts` | `#97` | #97's tail is a debugging surface: what it must not do is lie by omission. |
 | `packages/web/src/host/__tests__/extension-ui-context.test.ts` | `#69` | The `ExtensionUIContext` the host binds (#69), driven directly: the blocking methods become `extension_ui_request` records and resolve on an answer, a cancel, an abort signal or a timeout; the fire-and-forget methods emit and return; the terminal-only surface is inert — pi's rpc mode's behaviour, which extensions already tolerate. |
 | `packages/web/src/host/__tests__/host-flows.test.ts` | `#338` | The flow decisions (#338 slice 3), as the fake and the real host share them: what `/login` and `/logout` offer, what a run must name, and the words the flow says. |
@@ -169,11 +170,12 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/host/__tests__/permission-mode-adapter.test.ts` | `#95` | picc's own restore rule, applied to the raw branch, below the seam (L3 step A). |
 | `packages/web/src/host/__tests__/session-events.test.ts` | `#69` | The replica of pi's unexported `toJsonEvent` (#69): what `map-events.ts` consumes must be byte-for-byte the rpc wire shape. |
 | `packages/web/src/host/__tests__/session-usage.test.ts` | `#45` | #45: which session events make the host re-read pi's totals. |
-| `packages/web/src/host/agent-host.ts` | `#27`, `#69`, `#73`, `#86`, `#89`, `#338`, `#341`, `#351`, `#433`, `#434`, `#435` | pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning `pi --mode rpc` per prompt. |
+| `packages/web/src/host/agent-host.ts` | `#27`, `#69`, `#73`, `#86`, `#89`, `#338`, `#341`, `#351`, `#433`, `#434`, `#435`, `#436` | pi, hosted IN THIS PROCESS (#69) — the web server's replacement for spawning `pi --mode rpc` per prompt. |
 | `packages/web/src/host/branch-context.ts` | `#361` | A thread's context, request by request (#361) — the host half of `EnsoThreadContext` and of `EnsoContextRequestDetail`, read off pi's own entries for a live session and a stored file alike. |
 | `packages/web/src/host/branch-stats.ts` | `#45`, `#359` | A thread's branch, analysed (#45 phase 2): per prompt, per turn, per tool — the session half of `EnsoThreadStats`. |
 | `packages/web/src/host/context-elements.ts` | `#361` | A request's context as ELEMENTS (#361) — dsh-context's browser rows: a prompt section, a tool definition, a message, a tool result — and the prices the makeup sums, so the trend's bars and the browser's rows are one computation, not two that could drift. |
 | `packages/web/src/host/context-history.ts` | `#361` | What happened to a thread's context, and to its files (#361 phase 4) — dsh-context's Context Events and File Activity, read off pi's own entries along the branch. |
+| `packages/web/src/host/continuation.ts` | `#436` | What a Continue sends ahead of the model's next request (#436): the decision whether a torn thread can be continued from exactly its stored state, and what closes it first. |
 | `packages/web/src/host/event-tail.ts` | `#69`, `#84`, `#86`, `#88`, `#97` | A thread's event tail (#97): the last N events through one funnel, with provenance. |
 | `packages/web/src/host/fork-point.ts` | `#433`, `#434`, `#435` | A thread's fork point (#435), assembled from its branch alone — the same walk for a live session's memory and a stored file, so the manifest of a thread reads one way whether it is running. |
 | `packages/web/src/host/host-commands.ts` | `#338`, `#341` | The `host` command source (#338 slice 2) — the rows the host appends to `listCommands()` and the decision behind `runHostCommand`, as PURE functions over a model state and a model list. |
@@ -223,7 +225,7 @@ outside the inventory. Each qualifying file appears exactly once, with every iss
 | `packages/web/src/server/dev-proxy.ts` | `#34`, `#38`, `#160` | The web surface's `/api/*` hop to the Enso server (`dev-web.ts`), streaming both directions. |
 | `packages/web/src/server/dev-web.ts` | `#9`, `#36` | Dev entry point for the web surface — Bun's fullstack dev server, replacing vite (#36). |
 | `packages/web/src/server/dev.ts` | `#9`, `#132`, `#395`, `#421` | Dev entry point for the enso server. |
-| `packages/web/src/server/follow.ts` | `#75`, `#109`, `#112`, `#116`, `#162` | The prompt/follow split (#112) — the server↔browser wire. |
+| `packages/web/src/server/follow.ts` | `#75`, `#109`, `#112`, `#116`, `#162`, `#436` | The prompt/follow split (#112) — the server↔browser wire. |
 | `packages/web/src/server/font-files.ts` | `#407` | The page's fonts, served as files rather than bundled (#407 item 6). |
 | `packages/web/src/server/live-or-stored.ts` | `#45`, `#86`, `#361` | A thread's answer from pi's memory when it is live, from its file when it is not (#45, #361) — READ THE WAY `thread-read.ts` READS: peek, read the file if not live, re-peek. |
 | `packages/web/src/server/logs-route.ts` | `#132` | `POST /api/logs` (#132 slice 3): the browser's records, into the one file. |

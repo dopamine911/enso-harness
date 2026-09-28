@@ -225,8 +225,8 @@ test('entries that are not messages, and malformed messages, never throw: skippe
 })
 
 // ── the interrupted tail (#109) ───────────────────────────────────────────────
-// A branch that ends inside a turn is REPORTED, never repaired: the two shapes a next
-// prompt would paper over. A settled reply — even one cut short — is not one of them.
+// A branch that ends inside a turn is REPORTED, never repaired: the shapes a next prompt
+// would paper over. A settled reply — even one cut short — is not one of them.
 // Read off the ENTRIES since #220 — the fact is the transcript's, not the renderer's — so
 // these cases run the file through the host's decoder and stop there.
 
@@ -246,12 +246,29 @@ test('a branch ending on a user prompt is an unanswered prompt', () => {
   expect(branchTail(branch)).toBe('unanswered-prompt')
 })
 
-test('a branch ending on a tool call with no result is a call without its result; with the result it is settled', () => {
+test('a branch ending on a tool call with no result is a call without its result', () => {
   expect(branchTail([call('a1')])).toBe('tool-call-without-result')
-  expect(branchTail([call('a1'), result('r1')])).toBeUndefined()
-  // A refused call is a result too.
+})
+
+// PR #442 review: pi keeps the reply to the results only at its end, so a kill during that model
+// call leaves the results with nothing after them. A Stop leaves pi's own aborted result instead.
+test("⚠ a turn whose every call has its result and no reply is torn — unless pi's abort wrote a result (a Stop)", () => {
+  expect(branchTail([call('a1'), result('r1')])).toBe('tool-results-without-reply')
+  // A result the guards refused is a real one: a kill after it is still torn.
   const refused = entry('r1', { role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [], isError: true })
-  expect(branchTail([call('a1'), refused])).toBeUndefined()
+  expect(branchTail([call('a1'), refused])).toBe('tool-results-without-reply')
+  // pi's `createErrorToolResult("Operation aborted")`: the run was stopped, not torn.
+  const aborted = entry('r1', {
+    role: 'toolResult',
+    toolCallId: 'c1',
+    toolName: 'bash',
+    content: [{ type: 'text', text: 'Operation aborted' }],
+    isError: true,
+  })
+  expect(branchTail([call('a1'), aborted])).toBeUndefined()
+  // …and the reply to the results settles the turn.
+  const reply = entry('a2', { role: 'assistant', content: [{ type: 'text', text: 'done' }] })
+  expect(branchTail([call('a1'), result('r1'), reply])).toBeUndefined()
 })
 
 test('an empty branch, and one ending on an assistant reply, are settled', () => {
@@ -268,8 +285,8 @@ test('a non-message entry logged after the last message does not hide the torn t
     'unanswered-prompt',
   )
   expect(branchTail([call('a1'), modelChange])).toBe('tool-call-without-result')
-  // …and a result that arrives after one still settles it.
-  expect(branchTail([call('a1'), modelChange, result('r1')])).toBeUndefined()
+  // …and a result that arrives after one leaves a turn waiting on its reply.
+  expect(branchTail([call('a1'), modelChange, result('r1')])).toBe('tool-results-without-reply')
 })
 
 // #381: pi keeps a refused attempt on the branch (`_omitRecoveryAttempt` keeps it in raw history)

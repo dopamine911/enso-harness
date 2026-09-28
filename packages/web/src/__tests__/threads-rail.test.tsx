@@ -1,5 +1,11 @@
 import { afterEach, expect, test } from 'bun:test'
-import { ENSO_GUARD_DENIAL_KEY, ENSO_PROJECT_HEADER, type EnsoProject, type EnsoStoredThread } from '@enso/core'
+import {
+  ENSO_GUARD_DENIAL_KEY,
+  ENSO_PROJECT_HEADER,
+  type EnsoProject,
+  type EnsoStoredThread,
+  type EnsoThreadHistory,
+} from '@enso/core'
 import type { UIMessage } from '@tanstack/ai-client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { pageClock } from '../page-clock.ts'
@@ -12,6 +18,8 @@ import {
   type ThreadSummary,
   threadListStore,
   titleFromMessages,
+  TORN_TAIL_CONTINUED,
+  TORN_TAIL_SUPERSEDED,
   updateThreadSummary,
 } from '../thread-stores.ts'
 import {
@@ -195,6 +203,74 @@ test('⚠ adopting a branch that ends inside a turn opens with a warning that sa
     permissionMode: { mode: 'default', available: [] },
   })
   expect(settled.notifications.get()).toEqual([])
+})
+
+test('⚠ the torn-tail notice offers Continue once: pressing it posts …/continue, and a refusal is said as a line (#436)', async () => {
+  const posted: string[] = []
+  const torn = adoptThread(
+    {
+      threadId: 'torn-2',
+      projectId: 'p-launch',
+      messages: [],
+      permissionMode: { mode: 'default', available: [] },
+      interrupted: 'tool-call-without-result',
+    },
+    (input: string, init?: RequestInit) => {
+      posted.push(`${init?.method} ${input}`)
+      return Promise.resolve(new Response('nothing to continue: the thread ends on a reply', { status: 422 }))
+    },
+  )
+  const [notice] = torn.notifications.get()
+  expect(notice?.message).toContain('Continue picks up from there')
+  expect(notice?.message).toContain('or send a new prompt')
+  const action = torn.notifications.takeAction(notice?.id ?? -1)
+  expect(action?.label).toBe('Continue')
+  // One-shot: taken off the line, so a second press has nothing to run.
+  expect(torn.notifications.takeAction(notice?.id ?? -1)).toBeUndefined()
+  expect(torn.notifications.get()[0]?.action).toBeUndefined()
+
+  const said = Promise.withResolvers<void>()
+  torn.notifications.subscribe(() => {
+    if (torn.notifications.get().length > 1) said.resolve()
+  })
+  action?.run()
+  await said.promise
+  expect(posted).toEqual(['POST /api/threads/torn-2/continue'])
+  expect(torn.notifications.get()[1]).toMatchObject({
+    message: expect.stringContaining('nothing to continue: the thread ends on a reply'),
+    notifyType: 'warning',
+  })
+})
+
+// PR #442 review: the line and its button outlived the tail. The thread's first run — a prompt sent
+// instead, or another tab's — rewrites it; a Continue that started the run says it continued.
+test('⚠ the torn-tail line is resolved by the thread’s first run: superseded by a prompt, continued by Continue (#436)', () => {
+  const history = (threadId: string): EnsoThreadHistory => ({
+    threadId,
+    projectId: 'p-launch',
+    messages: [],
+    permissionMode: { mode: 'default', available: [] },
+    interrupted: 'unanswered-prompt',
+  })
+  const prompted = adoptThread(history('torn-prompted'), () => Promise.resolve(new Response(null, { status: 202 })))
+  updateThreadSummary('torn-prompted', { title: undefined, busy: false, waiting: false })
+  expect(prompted.notifications.get()[0]?.action?.label).toBe('Continue')
+  updateThreadSummary('torn-prompted', { title: undefined, busy: true, waiting: false })
+  expect(prompted.notifications.get()[0]).toMatchObject({
+    message: TORN_TAIL_SUPERSEDED,
+    notifyType: 'info',
+    action: undefined,
+  })
+
+  const continued = adoptThread(history('torn-continued'), () => Promise.resolve(new Response(null, { status: 202 })))
+  const [line] = continued.notifications.get()
+  continued.notifications.takeAction(line?.id ?? -1)?.run()
+  updateThreadSummary('torn-continued', { title: undefined, busy: true, waiting: false })
+  expect(continued.notifications.get()[0]).toMatchObject({ message: TORN_TAIL_CONTINUED, notifyType: 'info' })
+  // Only the first run: a later one leaves the resolved line as it is.
+  updateThreadSummary('torn-continued', { title: undefined, busy: false, waiting: false })
+  updateThreadSummary('torn-continued', { title: undefined, busy: true, waiting: false })
+  expect(continued.notifications.get()[0]?.message).toBe(TORN_TAIL_CONTINUED)
 })
 
 test('history revival drops malformed rows and invalid dates instead of handing them to TanStack', () => {
