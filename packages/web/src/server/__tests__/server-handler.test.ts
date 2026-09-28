@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   ENSO_PROJECT_HEADER,
+  EnsoForkPoint,
   type EnsoFollowFrame,
   type EnsoModelState,
   type EnsoObservation,
@@ -333,8 +334,8 @@ test('⚠ GET …/commands builds the thread’s session and answers its own lis
   expect(live).toMatchObject({ threadId: 'fresh', source: 'live' })
   expect(built).toHaveLength(1)
   expect(built[0]?.prompts).toEqual([])
-  // pi's row first, then the host's (#338 slices 2 and 3, #361) — the settings with their CURRENT
-  // value on a live thread, the flows with none (there is no "current" login), the view last.
+  // pi's row first, then the host's (#338 slices 2 and 3, #361, #433) — the settings with their CURRENT
+  // value on a live thread, the flows with none (there is no "current" login), the views last.
   expect(live.commands.map((command) => [command.name, command.source])).toEqual([
     ['mode', 'extension'],
     ['model', 'host'],
@@ -343,6 +344,7 @@ test('⚠ GET …/commands builds the thread’s session and answers its own lis
     ['logout', 'host'],
     ['compact', 'host'],
     ['context', 'host'],
+    ['fork', 'host'],
   ])
   expect(live.commands[3]).toMatchObject({ kind: 'flow', options: [{ id: 'fake/oauth' }, { id: 'fake/api_key' }] })
   expect(live.commands[3]?.value).toBeUndefined()
@@ -435,6 +437,26 @@ test('⚠ POST …/command sets the thinking level on a thread that never ran: 2
   expect(extra.status).toBe(400)
   // Still the one build: every run above acquired the same live thread.
   expect(built).toHaveLength(1)
+})
+
+// #434: a cold thread's snapshot says what its branch last ran on, as RECORDED beside a `null`
+// model — nothing is built to read it. Once the thread is live, the live state is the whole answer.
+test("a cold thread's snapshot carries its recorded model beside a null model; once live, only the live model (#434)", async () => {
+  const recordedModel = { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'medium' }
+  const stored = { cold: { transcript: [], modified: new Date(0), firstMessage: 'earlier', recordedModel } }
+  const { url, built } = await startWith(settlesAtOnce, stored)
+  const controller = new AbortController()
+  openFollows.push(controller)
+  const coldFollow = await openFollow(url, 'cold', controller)
+  expect(coldFollow.frames[0]).toMatchObject({ type: 'snapshot', live: false, model: null, recordedModel })
+  expect(built).toHaveLength(0)
+
+  expect(await prompt(url, 'cold', 'run it')).toBe(202)
+  const later = new AbortController()
+  openFollows.push(later)
+  const liveFollow = await openFollow(url, 'cold', later)
+  expect(liveFollow.frames[0]).toMatchObject({ type: 'snapshot', live: true, model: { model: { name: 'Fake One' } } })
+  expect(liveFollow.frames[0]).not.toHaveProperty('recordedModel')
 })
 
 /** A project root with one directory under it, both canonical — a page may register `app` (#395). */
@@ -787,6 +809,35 @@ test('POST …/command is refused while the thread runs (409) — a setting is n
   expect(await refused.text()).toContain('is running')
 })
 
+/** `POST …/fork` (#433) with this body; the status and the text or receipt it answered. */
+async function fork(url: string, threadId: string, body: unknown): Promise<{ status: number; body: string }> {
+  const response = await fetch(`${url}/api/threads/${threadId}/fork`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return { status: response.status, body: await response.text() }
+}
+
+test('⚠ POST …/fork answers the new thread and its prefill; refuses a running thread (409), an unknown thread or entry (404), a non-user entry and a bad body (400) (#433)', async () => {
+  const stored = { 'stored-1': { transcript: STORED_BRANCH, modified: new Date(0), firstMessage: 'earlier question' } }
+  const { url, built } = await startWith(asksAndWaits, stored)
+  const forked = await fork(url, 'stored-1', { entryId: 'u1' })
+  expect(forked.status).toBe(200)
+  expect(JSON.parse(forked.body)).toEqual({ threadId: 'stored-1-fork', prefill: 'earlier question' })
+  // Forking reads the file: nothing is built for the source (#86).
+  expect(built).toHaveLength(0)
+  expect((await fork(url, 'stored-1', { entryId: 'a1' })).status).toBe(400)
+  expect((await fork(url, 'stored-1', { entryId: 'nope' })).status).toBe(404)
+  expect((await fork(url, 'never-stored', { entryId: 'u1' })).status).toBe(404)
+  expect((await fork(url, 'stored-1', { entryId: 'u1', extra: 1 })).status).toBe(400)
+  // A run holds the thread: the fork point may not be where the run leaves the branch.
+  await prompt(url, 'stored-1', '/mode')
+  const busy = await fork(url, 'stored-1', { entryId: 'u1' })
+  expect(busy.status).toBe(409)
+  expect(busy.body).toContain('is running')
+})
+
 test('GET /api/threads/:id returns the branch as the transcript of ours, with sessionFile null while unflushed', async () => {
   const { url } = await startWith(settlesAtOnce)
   await prompt(url, 't1', 'hello')
@@ -898,6 +949,7 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
       transcript: [] as EnsoTranscriptEntry[],
       modified: new Date('2026-09-08T11:00:00.000Z'),
       firstMessage: '   ',
+      parentThreadId: 'stored-1',
     },
   }
   const { url } = await startWith(asksAndWaits, stored)
@@ -917,13 +969,14 @@ test('GET /api/stored-threads lists stored threads with title, count and age, ma
       messageCount: 2,
       busy: true,
     },
-    // A blank first message is no title — the rail says "new thread", not "   ".
+    // A blank first message is no title — the rail says "new thread", not "   ". A fork names its parent (#433).
     {
       threadId: 'stored-2',
       projectId: launch,
       lastActivityAt: '2026-09-08T11:00:00.000Z',
       messageCount: 0,
       busy: false,
+      parentThreadId: 'stored-1',
     },
   ])
 })
@@ -1207,6 +1260,30 @@ test('GET …/context/:request reads a turn or `next`; any other segment, or a t
   for (const segment of ['0', '01', 'x', '-1']) expect((await read(segment)).status).toBe(404)
   // Looking builds nothing (#86).
   expect(built).toHaveLength(0)
+})
+
+// #435: the fork point reads cold from the host's branch walk and live from pi's memory — the
+// same route, and looking builds nothing (#86).
+test('GET …/manifest answers a cold thread from its file without building, a live one from its session, and 404 for neither', async () => {
+  const point: EnsoForkPoint = {
+    identity: { threadId: 's1', leafEntryId: 'e2', parentThreadId: 's0' },
+    conditions: { model: null, thinkingLevel: 'high', mode: 'plan', cwd: '/repo', runContext: null },
+  }
+  const { url, built } = await startWith(settlesAtOnce, {
+    s1: { transcript: [], modified: new Date('2026-09-24T10:00:00.000Z'), firstMessage: 'one', forkPoint: point },
+  })
+  const cold = await fetch(`${url}/api/threads/s1/manifest`)
+  expect(cold.status).toBe(200)
+  const body: unknown = await cold.json()
+  expect(Check(EnsoForkPoint, body)).toBe(true)
+  expect(body).toEqual(point)
+  expect(built).toHaveLength(0)
+  expect((await fetch(`${url}/api/threads/nowhere/manifest`)).status).toBe(404)
+  expect(built).toHaveLength(0)
+
+  expect(await prompt(url, 'live1', 'hi')).toBe(202)
+  const live: unknown = await (await fetch(`${url}/api/threads/live1/manifest`)).json()
+  expect(live).toMatchObject({ identity: { threadId: 'session-1' }, conditions: { runContext: null } })
 })
 
 // ⚠ #391: Start applies the new session's settings TOGETHER — the model first (the effort a model

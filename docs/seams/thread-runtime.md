@@ -26,6 +26,13 @@ export const ThreadRuntime = Type.Object({
     Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
   ),
   /**
+   * Continue a torn thread from exactly its stored state (#436): no new user message. Shaped like
+   * `prompt` — fire-and-forget, acceptance through `outcome`, completion the thread's own
+   * `settled`. Rejected before anything runs when a run is in flight or the stored tail is not
+   * one a run can continue from (a completed reply); the reason says which.
+   */
+  continueRun: Type.Unsafe<(outcome: PromptOutcome) => void>(Type.Function([Type.Unknown()], Type.Void())),
+  /**
    * Deliver a human's answer (or cancellation) to a pending blocking dialog. Never throws:
    * an unknown or already-settled id is reported through the host's problem channel, so
    * callers do not wrap this in a try/catch.
@@ -239,8 +246,9 @@ export const RuntimeCommand = Type.Object({
    * chosen in place (`/thinking`); `flow` — chosen like a `select`, but the choice STARTS
    * something rather than applying it: `/login` and `/logout` (slice 3) run as dialog flows,
    * their questions and progress arriving on the feed, the route answering 202 when the flow has
-   * begun; `action` — runs with no value (`/compact`, slice 4); `view` — runs nothing: the page
-   * opens what the row names over the chat (`/context`, #361), and nothing is posted. The palette
+   * begun; `action` — runs with no value (`/compact`, slice 4); `view` — the PAGE does it: opens
+   * what the row names over the chat (`/context`, #361) or forks at the last prompt (`/fork`,
+   * #433) through its own route, and nothing is posted to `…/command`. The palette
    * renders by kind; nothing is per-command UI.
    */
   kind: Type.Optional(
@@ -272,9 +280,9 @@ file-permission component into a `select`.
 
 **Consumed by the server only.** `packages/web/src/server/thread-registry.ts` holds one per live
 thread (`ThreadEntry.hosted.runtime`), subscribes it to the feed, and hands a `ThreadLease.runtime` to
-the run that acquired the thread. `server/follow.ts` calls `prompt`, `listCommands`, `answerDialog`,
-`openDialogs`, `permissionModeState` from the unary routes; the abort route goes through the registry,
-whose `abort` is the one caller of `clearQueue` and `abort` (`thread-registry.ts:456,461`).
+the run that acquired the thread. `server/follow.ts` calls `prompt`, `continueRun` (#436),
+`listCommands`, `answerDialog`, `openDialogs`, `permissionModeState` from the unary routes; the abort
+route goes through the registry, whose `abort` is the one caller of `clearQueue` and `abort`.
 `server/index.ts` reads `permissionModeState` for the thread routes. The browser never sees it: what it
 gets is observations on the follow.
 

@@ -27,7 +27,11 @@ interface RouteMetadata {
   readonly routeClass: 'control' | 'observation' | 'browser-log-ingest' | 'static'
   readonly builds: 'yes' | 'no'
   readonly logs: 'yes' | 'no'
-  readonly factory?: { readonly path: string; readonly declaration: string }
+  /**
+   * The follow-module factory the handler calls, and what that factory reaches: the thread's
+   * runtime (the default), or the storage seam (`AgentHost`) without a runtime — the fork route.
+   */
+  readonly factory?: { readonly path: string; readonly declaration: string; readonly reaches?: 'storage' }
 }
 
 /**
@@ -93,6 +97,12 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     success: "200 `EnsoContextRequestDetail` JSON — one request's context, element by element",
     errors: '400 malformed thread id; 403 untrusted origin; 404 no session or no such turn; 500 handler failure',
   }),
+  THREAD_MANIFEST_ROUTE: threadRead({
+    path: '/api/threads/:threadId/manifest',
+    handler: 'respondWithThreadManifest',
+    success: "200 `EnsoForkPoint` JSON — identity, then run conditions, off pi's branch",
+    errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
+  }),
   THREAD_HISTORY_ROUTE: threadRead({
     path: '/api/threads/:threadId/history',
     handler: 'respondWithThreadHistory',
@@ -113,7 +123,7 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     input: 'path: `threadId`; body: `EnsoPromptBody`',
     success: '202 `EnsoPromptReceipt` JSON',
     errors:
-      '400 malformed id/body or unavailable command; 403 untrusted origin; 413 body too large; 500 handler failure',
+      '400 malformed id/body or unavailable command; 403 untrusted origin; 409 the thread was taken and released again while the prompt waited on its build (rare; #444); 413 body too large; 500 handler failure',
     routeClass: 'control',
     builds: 'yes',
     logs: 'yes',
@@ -149,11 +159,11 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     path: '/api/threads/:threadId/command',
     handler: 'respondToHostCommand → runHostCommand',
     input:
-      "path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`) is the page's to open, never run",
+      "path: `threadId`; body: `EnsoHostCommandRun` — `model` with `provider/id`, `thinking` with a level, `login` with `provider/authType`, `logout` with a provider, `compact` with nothing; a `view` row (`context`, `fork`) is the page's to do, never run",
     success:
       '204 empty for a setting (the change arrives on the follow as `model`); 202 empty for a flow or action (`login`, `logout`, `compact`) — started, its questions and progress arrive on the follow as dialogs and `notify` lines',
     errors:
-      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 unknown command, model or level, a provider without credentials, or a `view` (`/context`) the page opens itself; 500 handler failure',
+      '400 malformed id/body; 403 untrusted origin; 409 thread busy; 413 body too large; 422 unknown command, model or level, a provider without credentials, or a `view` (`/context`, `/fork`) the page does itself; 500 handler failure',
     routeClass: 'control',
     builds: 'yes',
     logs: 'yes',
@@ -170,6 +180,35 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     routeClass: 'control',
     builds: 'yes',
     logs: 'yes',
+  },
+  THREAD_FORK_ROUTE: {
+    method: 'POST',
+    path: '/api/threads/:threadId/fork',
+    handler: 'respondToFork → forkThreadAt → AgentHost.forkThread',
+    input:
+      "path: `threadId`; body: `EnsoForkRequest` — `entryId`, the pi entry id of one of the thread's user messages; the fork is pi's `/fork` at position `before`, taken from the session file",
+    success:
+      "200 `EnsoForkReceipt` JSON — the new thread id (its session file names the source as `parentSession`) and the forked message's text, for the new composer",
+    errors:
+      '400 malformed id/body, or an entry that is no user message; 403 untrusted origin; 404 no session file in a served project, or no such entry; 409 thread busy; 413 body too large; 500 handler failure',
+    routeClass: 'control',
+    builds: 'no',
+    logs: 'yes',
+    factory: { path: FOLLOW_PATH, declaration: 'export async function forkThreadAt', reaches: 'storage' },
+  },
+  THREAD_CONTINUE_ROUTE: {
+    method: 'POST',
+    path: '/api/threads/:threadId/continue',
+    handler: 'respondToContinue → continueThread → ThreadRuntime.continueRun',
+    input: 'path: `threadId`; no body',
+    success:
+      '202 empty — the torn tail is continued from the stored state with no new user message; the run arrives on the follow and its `settled` releases the thread',
+    errors:
+      '400 malformed thread id; 403 untrusted origin; 404 no thread under that id, live or stored; 409 thread busy; 422 nothing to continue — the thread does not end on an unanswered prompt, an unfinished tool call, or tool results with no reply, or this pi build has no run lifecycle to continue in; 500 handler failure',
+    routeClass: 'control',
+    builds: 'yes',
+    logs: 'yes',
+    factory: { path: FOLLOW_PATH, declaration: 'export async function continueThread' },
   },
   PROJECT_ROUTE: {
     method: 'DELETE',

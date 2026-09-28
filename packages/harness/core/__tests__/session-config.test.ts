@@ -69,12 +69,19 @@ test('no project config: the user config alone, and nothing is asked', async () 
   expect(f.asked).toEqual([])
 })
 
+test('no config file anywhere: the defaults, read from no file (#435)', async () => {
+  const resolved = await sessionEnsoConfig({}, fixture().context())
+  expect(resolved.result).toEqual({ kind: 'ok', config: {} })
+  expect(resolved.sources).toEqual([])
+})
+
 test("⚠ a trusted project's config merges over the user's: its hosts ADD to the user's (#421)", async () => {
   const f = fixture({ user: USER, project: PROJECT })
   createProjectTrustStore(ensoAgentDir(f.home)).setMany([{ path: f.cwd, decision: true }])
   const resolved = await sessionEnsoConfig({}, f.context())
   expect(hostsOf(resolved)).toEqual(['docs.user.example', 'docs.project.example'])
   expect(resolved.path).toBe(projectConfigPath(f.cwd))
+  expect(resolved.sources).toEqual([join(f.home, 'config.json'), projectConfigPath(f.cwd)])
   expect(f.asked).toEqual([])
 })
 
@@ -84,6 +91,8 @@ test("⚠ an untrusted project's config is NOT read, and the session is told so 
   const resolved = await sessionEnsoConfig({}, f.context())
   expect(hostsOf(resolved)).toEqual(['docs.user.example'])
   expect(f.notices.join()).toContain('not trusted')
+  // The files the resolution READ (#435): the project's exists but was not read, so it is not one.
+  expect(resolved.sources).toEqual([join(f.home, 'config.json')])
 })
 
 test('⚠ no saved decision: pi\'s question is asked, and "Trust" is saved where pi reads it', async () => {

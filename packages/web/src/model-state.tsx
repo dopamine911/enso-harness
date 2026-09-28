@@ -1,4 +1,10 @@
-import type { EnsoModelObservation, EnsoModelState, HostCommandOption, RuntimeCommand } from '@enso/core'
+import type {
+  EnsoModelObservation,
+  EnsoModelState,
+  EnsoRecordedModel,
+  HostCommandOption,
+  RuntimeCommand,
+} from '@enso/core'
 import { useEffect, useState } from 'react'
 import type { FetchLike } from './browser-logging.ts'
 import { fetchThreadCommands } from './commands-connection.ts'
@@ -48,21 +54,35 @@ import { createStore, type Store, useStore, useThreadStores } from './store.ts'
  * same list for every session, so the `remembered` list is right for a thread that never ran.
  *
  * ⓘ ONE STORE PER THREAD (#90 PR 3): created by `thread-stores.ts`, read through `useThreadStores()`.
+ *
+ * ⓘ RECORDED, NOT LIVE (#434). A cold thread's snapshot carries `recordedModel` — what its branch
+ * last ran on (the last `model_change` / `thinking_level_change`, what pi restores on open). That
+ * is NOT a live state and never enters this store: it rides in `recorded`, and the chip shows it
+ * only while the store is `null`, prefixed `model (recorded):`. The thinking select still hides
+ * then — the levels a model offers are pi's to declare once built. Every snapshot replaces
+ * `recorded` too, so a thread that went live (no `recordedModel`) drops it.
  */
 
 export interface ModelStore extends Store<EnsoModelState | null> {
-  /** The snapshot's `model` or a `model` observation's state — validated by the router before it lands here. */
-  readonly apply: (state: EnsoModelState | null) => void
+  /** What a cold thread's branch records (#434); `null` when live or when the branch records none. */
+  readonly recorded: Store<EnsoRecordedModel | null>
+  /** A snapshot's `model` and `recordedModel` — validated by the router before they land here. */
+  readonly applySnapshot: (model: EnsoModelState | null, recorded: EnsoRecordedModel | undefined) => void
   /** A `model` observation: the state after pi applied a change, whoever asked for it. */
   readonly applyObservation: (observation: EnsoModelObservation) => void
 }
 
 export function createModelStore(): ModelStore {
   const store = createStore<EnsoModelState | null>(null)
+  const recorded = createStore<EnsoRecordedModel | null>(null)
   return {
     get: store.get,
     subscribe: store.subscribe,
-    apply: store.set,
+    recorded: { get: recorded.get, subscribe: recorded.subscribe },
+    applySnapshot: (model: EnsoModelState | null, recordedModel: EnsoRecordedModel | undefined): void => {
+      recorded.set(recordedModel ?? null)
+      store.set(model)
+    },
     applyObservation: ({ model, thinkingLevel, availableThinkingLevels }: EnsoModelObservation): void =>
       store.set({ model, thinkingLevel, availableThinkingLevels }),
   }
@@ -73,10 +93,24 @@ export function useModelState(): EnsoModelState | null {
   return useStore(useThreadStores().model)
 }
 
+/** The rendering thread's recorded model (#434); `null` when live or when its branch records none. */
+export function useRecordedModel(): EnsoRecordedModel | null {
+  return useStore(useThreadStores().model.recorded)
+}
+
 /** The chip's sentence while the store is `null` — worded so a reader knows a choice is still open, not missing. */
 export const MODEL_NOT_LIVE = 'model: default until the thread runs'
 /** A live session that resolved no model — pi reports `model` undefined then. */
 const MODEL_NONE = 'model: none'
+/** The chip's prefix for a cold thread's recorded model (#434) — so it never reads as live. */
+export const MODEL_RECORDED = 'model (recorded):'
+
+/** A recorded model as the chip says it: `claude-sonnet-5 · anthropic · medium`, each half only if the branch recorded it. */
+export function recordedModelText(recorded: EnsoRecordedModel): string {
+  const parts = recorded.model === null ? [] : [recorded.model.modelId, recorded.model.provider]
+  if (recorded.thinkingLevel !== null) parts.push(recorded.thinkingLevel)
+  return `${MODEL_RECORDED} ${parts.join(' · ')}`
+}
 
 export interface ThinkingLevelSelectProps {
   readonly state: EnsoModelState | null
@@ -130,13 +164,15 @@ export function ThinkingLevelSelect({ state, onSelect }: ThinkingLevelSelectProp
 
 export interface ModelChipProps {
   readonly state: EnsoModelState | null
+  /** What a cold thread's branch records (#434); shown only while `state` is `null`. */
+  readonly recorded?: EnsoRecordedModel | null
   /** Open the model dialog — the owner renders it (`chat-screen.tsx`), the same one the palette's `/model` row opens. */
   readonly onOpen: () => void
 }
 
-/** What the chip reads: the model's name; the no-model sentence; the not-live sentence. */
-function chipLabel(state: EnsoModelState | null): string {
-  if (state === null) return MODEL_NOT_LIVE
+/** What the chip reads: the model's name; the no-model sentence; the recorded model; the not-live sentence. */
+function chipLabel(state: EnsoModelState | null, recorded: EnsoRecordedModel | null): string {
+  if (state === null) return recorded === null ? MODEL_NOT_LIVE : recordedModelText(recorded)
   return state.model === null ? MODEL_NONE : state.model.name
 }
 
@@ -146,11 +182,13 @@ function chipLabel(state: EnsoModelState | null): string {
  * providers, and under multi-account the provider id is WHICH ACCOUNT answers — a failover swap
  * changes it and nothing else on the page would say so.
  */
-export function ModelChip({ state, onOpen }: ModelChipProps): React.ReactNode {
-  const label = chipLabel(state)
+export function ModelChip({ state, recorded = null, onOpen }: ModelChipProps): React.ReactNode {
+  const label = chipLabel(state, recorded)
   const model = state?.model ?? null
   let title = 'the model this thread runs — change it here or with /model'
-  if (state === null) title = 'no live session yet — pick a model now and the first prompt runs on it (/model)'
+  if (state === null && recorded !== null) {
+    title = 'what this thread last ran on, from its log — not live yet; pick a model now or run it (/model)'
+  } else if (state === null) title = 'no live session yet — pick a model now and the first prompt runs on it (/model)'
   else if (model !== null) title = `${model.provider}/${model.id} — ${title}`
   return (
     <button

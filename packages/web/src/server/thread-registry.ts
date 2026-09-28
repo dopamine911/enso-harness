@@ -109,14 +109,20 @@ export interface ThreadRegistryOptions {
 
 export interface ThreadRegistry {
   /**
-   * Take the thread for a run: the session, created on first use, held through a lease.
-   * Cancels a pending idle disposal and waits for an in-flight abort so the run always
-   * starts against an idle session.
+   * Take an IDLE thread for a run: the session, created on first use, held through a lease — or
+   * `'busy'` when a run holds it. Cancels a pending idle disposal and waits for an in-flight abort
+   * so the run always starts against an idle session.
+   *
+   * ⚠ THE BUSY CHECK IS HERE, AFTER THE WAITS, IN THE SAME TICK AS THE TAKE (#444, PR #438
+   * review). A route's own `busy` peek comes before the build and the abort wait; two requests on
+   * a cold thread both passed it and both got leases, and the newer lease's refusal released the
+   * thread under the older one's run — idle, Stop refused, the idle disposal armed mid-run. A
+   * route peeks for its fast answer and maps `'busy'` for the one it could not see coming.
    *
    * ⚠ A `createSession` failure is thrown to the caller and leaves NO entry behind, so the
    * next request on that thread retries the build instead of finding a poisoned slot.
    */
-  acquire(threadId: string): Promise<ThreadLease>
+  acquire(threadId: string): Promise<ThreadLease | 'busy'>
   /**
    * Follow the thread's feed (SPIKE #109): every observation and status change from now
    * on, whether or not a run is in flight, whether or not the thread is even built yet.
@@ -520,13 +526,17 @@ export function createThreadRegistry(options: ThreadRegistryOptions): ThreadRegi
   }
 
   return {
-    async acquire(threadId: string): Promise<ThreadLease> {
+    async acquire(threadId: string): Promise<ThreadLease | 'busy'> {
       const thread = await entryOf(threadId)
+      // Cancelled before the abort wait, so the idle window cannot dispose the thread inside it. A
+      // busy thread has no timer armed: `release` arms it, and every take cancels it.
       thread.idleTimer?.cancel()
       thread.idleTimer = undefined
       if (thread.abortInFlight !== undefined) {
         await thread.abortInFlight
       }
+      // Nothing awaits between this check and the take below: no other request can slip in.
+      if (thread.busy) return 'busy'
       thread.busy = true
       thread.generation += 1
       generations.set(threadId, thread.generation)

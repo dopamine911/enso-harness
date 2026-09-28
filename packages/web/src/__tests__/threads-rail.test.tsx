@@ -1,5 +1,13 @@
 import { afterEach, expect, test } from 'bun:test'
-import { ENSO_GUARD_DENIAL_KEY, ENSO_PROJECT_HEADER, type EnsoProject, type EnsoStoredThread } from '@enso/core'
+import { EventType } from '@ag-ui/core'
+import {
+  ENSO_GUARD_DENIAL_KEY,
+  ENSO_PROJECT_HEADER,
+  type EnsoFollowFrame,
+  type EnsoProject,
+  type EnsoStoredThread,
+} from '@enso/core'
+import type { StreamChunk } from '@tanstack/ai'
 import type { UIMessage } from '@tanstack/ai-client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { pageClock } from '../page-clock.ts'
@@ -9,12 +17,24 @@ import {
   mintThread,
   reviveHistoryMessages,
   TITLE_MAX_CHARS,
+  type ThreadStores,
   type ThreadSummary,
   threadListStore,
   titleFromMessages,
+  TORN_TAIL_CONTINUED,
+  TORN_TAIL_SUPERSEDED,
   updateThreadSummary,
 } from '../thread-stores.ts'
-import { groupByProject, relativeAge, STORED_ROWS_SHOWN, ThreadsRail, UNTITLED_THREAD } from '../threads-rail.tsx'
+import {
+  forkParentTitles,
+  groupByProject,
+  relativeAge,
+  STORED_ROWS_SHOWN,
+  ThreadsRail,
+  UNLISTED_PARENT,
+  UNTITLED_THREAD,
+} from '../threads-rail.tsx'
+import { createScriptedFetch, SNAPSHOT_IDLE } from './scripted-server.ts'
 
 /**
  * #90 PR 3: the sessions rail and the page's thread list behind it. The rail is rendered
@@ -189,6 +209,215 @@ test('⚠ adopting a branch that ends inside a turn opens with a warning that sa
   expect(settled.notifications.get()).toEqual([])
 })
 
+test('⚠ the torn-tail notice offers Continue once: pressing it posts …/continue, and a refusal is said as a line (#436)', async () => {
+  const posted: string[] = []
+  const torn = adoptThread(
+    {
+      threadId: 'torn-2',
+      projectId: 'p-launch',
+      messages: [],
+      permissionMode: { mode: 'default', available: [] },
+      interrupted: 'tool-call-without-result',
+    },
+    (input: string, init?: RequestInit) => {
+      posted.push(`${init?.method} ${input}`)
+      return Promise.resolve(new Response('nothing to continue: the thread ends on a reply', { status: 422 }))
+    },
+  )
+  const [notice] = torn.notifications.get()
+  const action = torn.notifications.takeAction(notice?.id ?? -1)
+  expect(action?.label).toBe('Continue')
+  // One-shot: taken off the line, so a second press has nothing to run.
+  expect(torn.notifications.takeAction(notice?.id ?? -1)).toBeUndefined()
+  expect(torn.notifications.get()[0]?.action).toBeUndefined()
+
+  const said = Promise.withResolvers<void>()
+  torn.notifications.subscribe(() => {
+    if (torn.notifications.get().length > 1) said.resolve()
+  })
+  action?.run()
+  await said.promise
+  expect(posted).toEqual(['POST /api/threads/torn-2/continue'])
+  expect(torn.notifications.get()[1]).toMatchObject({
+    message: expect.stringContaining('nothing to continue: the thread ends on a reply'),
+    notifyType: 'warning',
+  })
+})
+
+/**
+ * A torn thread's stores following a scripted server, whose `…/continue` answers `continueStatus`
+ * once `answered` resolves (at once by default) — `0` for no answer at all, a dropped connection.
+ */
+function followedTornThread(
+  threadId: string,
+  continueStatus: number,
+  answered: Promise<void> = Promise.resolve(),
+): {
+  stores: ThreadStores
+  frame: (frame: EnsoFollowFrame) => Promise<void>
+  stop: () => void
+  continues: () => number
+} {
+  const server = createScriptedFetch()
+  let continues = 0
+  const stores = adoptThread(
+    {
+      threadId,
+      projectId: 'p-launch',
+      messages: [],
+      permissionMode: { mode: 'default', available: [] },
+      interrupted: 'unanswered-prompt',
+    },
+    (input: string, init?: RequestInit) => {
+      if (!input.endsWith('/continue')) return server.fetch(input, init)
+      continues += 1
+      return answered.then(() => {
+        if (continueStatus === 0) throw new TypeError('Failed to fetch')
+        return new Response(continueStatus === 202 ? null : 'refused here', { status: continueStatus })
+      })
+    },
+  )
+  let waiter: ((chunk: StreamChunk) => void) | undefined
+  const controller = new AbortController()
+  void (async () => {
+    for await (const chunk of stores.connection.subscribe(controller.signal)) waiter?.(chunk)
+  })()
+  return {
+    continues: () => continues,
+    stores,
+    // Resolves once the frame's OWN first chunk reached the page — a status or snapshot as its
+    // CUSTOM, a turn as its STEP_STARTED — never on a straggler from the frame before.
+    frame: (frame: EnsoFollowFrame): Promise<void> => {
+      const { promise, resolve } = Promise.withResolvers<void>()
+      waiter = (chunk: StreamChunk) => {
+        const own =
+          frame.type === 'observation'
+            ? chunk.type === EventType.STEP_STARTED
+            : chunk.type === EventType.CUSTOM && chunk.name === frame.type
+        if (own) resolve()
+      }
+      server.frame(frame)
+      return promise
+    },
+    stop: () => controller.abort(),
+  }
+}
+
+const TURN_START: EnsoFollowFrame = { type: 'observation', seq: 1, observation: { kind: 'turn-start' } }
+const status = (busy: boolean, generation: number): EnsoFollowFrame => ({
+  type: 'status',
+  live: true,
+  busy,
+  generation,
+})
+
+/** The torn-tail line's words once a run has resolved it — the resolution waits on a pending Continue. */
+function resolvedLine(stores: ThreadStores): Promise<string | undefined> {
+  const { promise, resolve } = Promise.withResolvers<string | undefined>()
+  const check = (): void => {
+    const [line] = stores.notifications.get()
+    if (line?.notifyType === 'info') resolve(line.message)
+  }
+  stores.notifications.subscribe(check)
+  check()
+  return promise
+}
+
+// PR #442 review: the line and its button outlived the tail. PR #440 review: keyed on `busy`, any
+// lease retired it — a mode change, `/model`, a refused Continue. Only a run's first turn does.
+test('⚠ the torn-tail line is kept through a lease that starts no run, and superseded by the first turn (#436)', async () => {
+  const torn = followedTornThread('torn-leased', 202)
+  await torn.frame(SNAPSHOT_IDLE)
+  await torn.frame(status(true, 1)) // a mode change's lease: busy, no run
+  await torn.frame(status(false, 1))
+  expect(torn.stores.notifications.get()[0]?.action?.label).toBe('Continue')
+  await torn.frame(TURN_START)
+  expect(await resolvedLine(torn.stores)).toBe(TORN_TAIL_SUPERSEDED)
+  expect(torn.stores.notifications.get()[0]?.action).toBeUndefined()
+  torn.stop()
+})
+
+test('⚠ an accepted Continue resolves the line as continued, once; a refused one leaves the next run to supersede it (#436)', async () => {
+  const pressContinue = (stores: ThreadStores): void => {
+    const [line] = stores.notifications.get()
+    stores.notifications.takeAction(line?.id ?? -1)?.run()
+  }
+  const accepted = followedTornThread('torn-continued', 202)
+  await accepted.frame(SNAPSHOT_IDLE)
+  pressContinue(accepted.stores)
+  await accepted.frame(TURN_START)
+  expect(await resolvedLine(accepted.stores)).toBe(TORN_TAIL_CONTINUED)
+  // Only the first run: a later turn leaves the resolved line as it is.
+  await accepted.frame(TURN_START)
+  expect(accepted.stores.notifications.get()[0]?.message).toBe(TORN_TAIL_CONTINUED)
+  accepted.stop()
+
+  const refused = followedTornThread('torn-refused', 422)
+  await refused.frame(SNAPSHOT_IDLE)
+  const refusalSaid = Promise.withResolvers<void>()
+  refused.stores.notifications.subscribe(() => {
+    if (refused.stores.notifications.get().length > 1) refusalSaid.resolve()
+  })
+  pressContinue(refused.stores)
+  await refusalSaid.promise
+  await refused.frame(TURN_START) // the prompt the refusal left the user to send
+  expect(await resolvedLine(refused.stores)).toBe(TORN_TAIL_SUPERSEDED)
+  refused.stop()
+
+  // PR #439 review: another tab's prompt won the thread a moment before this Continue. Its first
+  // turn lands while the Continue is unanswered; the 409 that follows says the run was not ours.
+  const answer = Promise.withResolvers<void>()
+  const raced = followedTornThread('torn-raced', 409, answer.promise)
+  await raced.frame(SNAPSHOT_IDLE)
+  pressContinue(raced.stores)
+  await raced.frame(TURN_START)
+  answer.resolve()
+  expect(await resolvedLine(raced.stores)).toBe(TORN_TAIL_SUPERSEDED)
+  raced.stop()
+})
+
+/** Resolves once the torn-tail line carries its action again — a press that did nothing gave it back. */
+function actionBack(stores: ThreadStores): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>()
+  const check = (): void => {
+    if (stores.notifications.get()[0]?.action?.label === 'Continue') resolve()
+  }
+  stores.notifications.subscribe(check)
+  check()
+  return promise
+}
+
+// PR #438 review: the press took the action off the line before the outcome was known, so a press
+// that started nothing — while disconnected, a 409 with no run behind it, no answer — used up the
+// only way to continue.
+test('⚠ a Continue that started nothing gives its action back: not sent while disconnected, answered busy, or unanswered (#436)', async () => {
+  const press = (stores: ThreadStores): void => {
+    const [line] = stores.notifications.get()
+    stores.notifications.takeAction(line?.id ?? -1)?.run()
+  }
+
+  const offline = followedTornThread('torn-offline', 202)
+  await offline.frame(SNAPSHOT_IDLE)
+  offline.stores.disconnected.set(true)
+  press(offline.stores)
+  await actionBack(offline.stores)
+  expect(offline.continues()).toBe(0)
+  expect(offline.stores.notifications.get()).toHaveLength(2) // and said why
+  offline.stop()
+
+  for (const [threadId, status] of [
+    ['torn-busy', 409],
+    ['torn-unreachable', 0],
+  ] as const) {
+    const torn = followedTornThread(threadId, status)
+    await torn.frame(SNAPSHOT_IDLE)
+    press(torn.stores)
+    await actionBack(torn.stores)
+    expect(torn.continues()).toBe(1)
+    torn.stop()
+  }
+})
+
 test('history revival drops malformed rows and invalid dates instead of handing them to TanStack', () => {
   const revived = reviveHistoryMessages([
     null,
@@ -317,6 +546,52 @@ test("each project is a section with its own threads — the page's open ones, t
   expect(gone).toMatch(
     /aria-label="new thread in gone"[^>]*disabled=""|disabled=""[^>]*aria-label="new thread in gone"/,
   )
+})
+
+test('a fork says which thread it came from, by that thread’s title — a stored one’s, an open one’s, or that it is not listed (#433)', () => {
+  const now = pageClock.get()
+  const stored = [
+    storedIn('p-launch', 'parent', { title: 'the original' }),
+    storedIn('p-launch', 'fork', { title: 'the original', parentThreadId: 'parent' }),
+    // A fork of an open thread the listing has no title for yet: the page's own title names it.
+    storedIn('p-launch', 'fork-of-open', { parentThreadId: 'open' }),
+    storedIn('p-launch', 'orphan-fork', { title: 'lost parent', parentThreadId: 'elsewhere' }),
+  ]
+  const threads: ThreadSummary[] = [
+    {
+      threadId: 'open',
+      title: 'asked just now',
+      lastActivityAt: now,
+      busy: false,
+      waiting: false,
+      projectId: 'p-launch',
+    },
+  ]
+  const parents = forkParentTitles(stored, threads)
+  expect([...parents]).toEqual([
+    ['fork', 'the original'],
+    ['fork-of-open', 'asked just now'],
+    ['orphan-fork', UNLISTED_PARENT],
+  ])
+  const rendered = renderToStaticMarkup(
+    <ThreadsRail
+      projects={[LAUNCH]}
+      threads={threads}
+      activeThreadId="open"
+      earlier={stored}
+      forkParents={parents}
+      earlierError={undefined}
+      onSelect={noop}
+      onResume={noop}
+      onNew={noop}
+      onAddProject={noop}
+      onRemoveProject={noop}
+      projectNotice={undefined}
+    />,
+  )
+  const rows = rendered.split('</button>')
+  const forkLines = rows.flatMap((row) => /forked from ([^<]*)/.exec(row)?.[1] ?? [])
+  expect(forkLines).toEqual(['the original', 'asked just now', UNLISTED_PARENT])
 })
 
 test('⚠ an open thread whose project is not listed is kept, under "other"; with no projects yet, every thread is still there', () => {

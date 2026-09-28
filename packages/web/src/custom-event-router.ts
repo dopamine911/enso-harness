@@ -104,8 +104,9 @@ export function routeEnsoCustomEvent(stores: ThreadStores, eventType: string, da
     if (!snapshotValidator.Check(data)) return
     applyPermissionMode(stores, data.permissionMode)
     // The session's model (#338 slice 2) — `null` when the thread is not live, applied as such:
-    // a snapshot is the resync, and a model this page cannot vouch for is no model.
-    stores.model.apply(data.model)
+    // a snapshot is the resync, and a model this page cannot vouch for is no model. A cold
+    // thread's recorded model (#434) rides beside it, never as live state.
+    stores.model.applySnapshot(data.model, data.recordedModel)
     stores.cwd.set(data.cwd)
     stores.usage.set(data.usage)
     // The status bar's refusal word, resynced (#381): set when the branch's last reply is a

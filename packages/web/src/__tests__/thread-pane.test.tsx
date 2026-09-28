@@ -927,6 +927,39 @@ test('the model chip and thinking level follow the snapshot; picking a model POS
   await pane.unmount()
 })
 
+// #434: a cold thread's snapshot names what its branch last ran on. The chip says it, marked
+// recorded — never as live, so no thinking select (the levels are pi's to offer once built) —
+// and the live snapshot replaces it once the thread runs.
+test('a cold thread shows its recorded model on the chip, marked recorded; the live snapshot wins once it runs', async () => {
+  const pane = await mountPane()
+  await pane.settle({
+    ...SNAPSHOT_IDLE,
+    recordedModel: { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'medium' },
+  })
+  const chip = (): HTMLButtonElement => {
+    const found = pane.container.querySelector<HTMLButtonElement>('button[aria-label="model"]')
+    if (found === null) throw new Error('expected the model chip')
+    return found
+  }
+  await eventually(() => expect(chip().textContent).toBe('model (recorded): claude-sonnet-5 · anthropic · medium'))
+  expect(pane.container.querySelector('[aria-label="thinking level"]')).toBeNull()
+
+  await pane.settle({
+    ...SNAPSHOT_IDLE,
+    live: true,
+    model: {
+      model: { provider: 'fake', id: 'fake-1', name: 'Fake One' },
+      thinkingLevel: 'high',
+      availableThinkingLevels: ['off', 'low', 'medium', 'high'],
+    },
+  })
+  await eventually(() => {
+    expect(chip().textContent).toBe('modelFake One· fake')
+    expect(pane.container.querySelector('[aria-label="thinking level"]')?.textContent).toBe('high')
+  })
+  await pane.unmount()
+})
+
 test('⚠ the follow closing mid-run: the notice, disconnected on the bar, no stop, and Enter sends nothing', async () => {
   const pane = await mountPane()
   await pane.settle({ ...SNAPSHOT_IDLE, live: true, busy: true, generation: 2 })

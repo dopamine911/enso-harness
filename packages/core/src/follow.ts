@@ -3,7 +3,7 @@ import { EnsoOpenDialog } from './dialog.ts'
 import { EnsoObservation } from './observation.ts'
 import { EnsoPermissionModeState } from './permission-mode.ts'
 import { EnsoInterruptedTail } from './thread-inspection.ts'
-import { EnsoModelState, EnsoPromptAdmission, EnsoSessionUsage } from './thread-runtime.ts'
+import { EnsoModelState, EnsoPromptAdmission, EnsoRecordedModel, EnsoSessionUsage } from './thread-runtime.ts'
 
 /**
  * The server↔browser wire (#112): a thread's feed, as the follow route serves it.
@@ -32,8 +32,10 @@ export const EnsoFollowSnapshot = Type.Object(
     /** See `EnsoThreadSummary.generation`. */
     generation: Type.Integer({ minimum: 0 }),
     permissionMode: EnsoPermissionModeState,
-    /** The session's model and thinking level (#338 slice 2); `null` when the thread is not live — a stored thread does not say. */
+    /** The session's model and thinking level (#338 slice 2); `null` when the thread is not live — nothing is built to say what pi would run. */
     model: Type.Union([EnsoModelState, Type.Null()]),
+    /** What a NOT-live thread's branch records it last ran on (#434); absent when live, or when the branch records neither. */
+    recordedModel: Type.Optional(EnsoRecordedModel),
     /**
      * The tree pi reads and writes for this thread (#44), AS OF THIS SNAPSHOT — the live session's
      * own cwd; when the thread is not live, the stored session's (pi fixed it at creation); and

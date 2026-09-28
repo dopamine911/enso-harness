@@ -99,6 +99,16 @@ test("the snapshot's model seeds the model store; a null snapshot leaves it null
   expect(stores.model.get()).toEqual(LIVE_MODEL)
 })
 
+test("a cold snapshot's recordedModel rides beside the live store, never in it; a live snapshot without one clears it (#434)", () => {
+  const recorded = { model: { provider: 'anthropic', modelId: 'claude-sonnet-5' }, thinkingLevel: 'medium' }
+  route('snapshot', snapshot({ model: null, recordedModel: recorded }))
+  expect(stores.model.get()).toBeNull()
+  expect(stores.model.recorded.get()).toEqual(recorded)
+  route('snapshot', snapshot({ model: LIVE_MODEL }))
+  expect(stores.model.get()).toEqual(LIVE_MODEL)
+  expect(stores.model.recorded.get()).toBeNull()
+})
+
 // #44: the project the status bar names is whatever the latest snapshot says — a reconnect's
 // snapshot is the resync, so a later one replaces an earlier one rather than being ignored.
 test("the snapshot's cwd is the thread's project, replaced by every later snapshot", () => {

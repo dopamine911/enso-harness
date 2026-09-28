@@ -1,6 +1,6 @@
 import type { EnsoProject, EnsoStoredThread } from '@enso/core'
-import { ChevronDownIcon, ChevronRightIcon, EllipsisIcon, FolderPlusIcon, PlusIcon } from 'lucide-react'
-import { useState } from 'react'
+import { ChevronDownIcon, ChevronRightIcon, EllipsisIcon, FolderPlusIcon, GitForkIcon, PlusIcon } from 'lucide-react'
+import { createContext, useContext, useState } from 'react'
 import { Button } from './components/ui/button.tsx'
 import {
   DropdownMenu,
@@ -28,7 +28,8 @@ import type { ThreadSummary } from './thread-stores.ts'
  * shown with a pulse and still resumable: under the follow transport a resume follows the run
  * (#114). Idle is resumable too, even when this server still holds it — a reload must get its own
  * thread back (PR #104 review). A section's `+` starts a thread IN that project; the header's New
- * Thread starts one in the project of the thread on screen.
+ * Thread starts one in the project of the thread on screen. A fork (#433) says which thread it
+ * came from under its title, by that thread's title — the listing's `parentThreadId`.
  *
  * Presentational: the lists, the active id, and the callbacks arrive as props, so a static
  * render pins the wording and the active marker without any chat. Two inputs are NOT props:
@@ -117,6 +118,55 @@ export interface ThreadsRailProps {
    * design's rail under 760px, #407): hidden unless this is true. A wide screen always shows it.
    */
   readonly shownNarrow?: boolean
+  /**
+   * The forks' parents (#433): a thread id → the title of the thread it was forked from — see
+   * `forkParentTitles`. A row in it says so under its title; none when absent.
+   */
+  readonly forkParents?: ReadonlyMap<string, string>
+}
+
+/** What a fork's parent reads as when the page lists no thread under its id — another project's, say. */
+export const UNLISTED_PARENT = 'a thread not listed here'
+
+/**
+ * Each fork's parent as the rail names it (#433): the stored listing says which thread a fork came
+ * from, by id; the name is that thread's title, from the listing or from this page's open threads
+ * (a thread opened here may carry a title the listing has not caught up with).
+ */
+export function forkParentTitles(
+  stored: readonly EnsoStoredThread[],
+  pageThreads: readonly ThreadSummary[],
+): ReadonlyMap<string, string> {
+  const titles = new Map<string, string>()
+  for (const thread of stored) titles.set(thread.threadId, thread.title ?? UNTITLED_THREAD)
+  for (const thread of pageThreads) if (thread.title !== undefined) titles.set(thread.threadId, thread.title)
+  const parents = new Map<string, string>()
+  for (const thread of stored) {
+    if (thread.parentThreadId !== undefined) {
+      parents.set(thread.threadId, titles.get(thread.parentThreadId) ?? UNLISTED_PARENT)
+    }
+  }
+  return parents
+}
+
+/** No thread on the rail is a fork — the rail's default, and the context's outside one. */
+const NO_FORKS: ReadonlyMap<string, string> = new Map()
+const ForkParentsContext = createContext<ReadonlyMap<string, string>>(NO_FORKS)
+
+/** A row's title, and — for a fork — the thread it came from, under it (#433). */
+function RowTitle({ threadId, title }: { threadId: string; title: string | undefined }): React.ReactNode {
+  const parent = useContext(ForkParentsContext).get(threadId)
+  return (
+    <span className="grid min-w-0 flex-1">
+      <span className={cn('truncate', title === undefined ? 'italic' : '')}>{title ?? UNTITLED_THREAD}</span>
+      {parent === undefined ? null : (
+        <span className="truncate text-xs text-muted-foreground">
+          <GitForkIcon aria-hidden="true" className="mr-1 inline size-3" />
+          {`forked from ${parent}`}
+        </span>
+      )}
+    </span>
+  )
 }
 
 /** One section of the rail: a project, or — `project: undefined` — the threads no listed project holds. */
@@ -201,9 +251,7 @@ function ThreadRow({
         className={cn(ROW, active ? 'bg-accent text-foreground hover:bg-accent' : 'text-foreground')}
       >
         <LiveDot state={liveState(thread)} />
-        <span className={cn('min-w-0 flex-1 truncate', thread.title === undefined ? 'italic' : '')}>
-          {thread.title ?? UNTITLED_THREAD}
-        </span>
+        <RowTitle threadId={thread.threadId} title={thread.title} />
         <span
           className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
           title={thread.lastActivityAt.toLocaleString()}
@@ -239,9 +287,7 @@ function EarlierThreadRow({
         className={cn(ROW, 'text-muted-foreground hover:text-foreground')}
       >
         {thread.busy ? <LiveDot state="running" /> : null}
-        <span className={cn('min-w-0 flex-1 truncate', thread.title === undefined ? 'italic' : '')}>
-          {thread.title ?? UNTITLED_THREAD}
-        </span>
+        <RowTitle threadId={thread.threadId} title={thread.title} />
         <span className="shrink-0 font-mono text-xs tabular-nums">
           <Age from={at} />
         </span>
@@ -445,55 +491,58 @@ export function ThreadsRail({
   onRemoveProject,
   projectNotice,
   shownNarrow = false,
+  forkParents = NO_FORKS,
 }: ThreadsRailProps): React.ReactNode {
   const groups = groupByProject(projects, threads, earlier)
   // New Thread starts where the reader is: the project of the thread on screen.
   const activeProject = groups.find((group) => group.threads.some((thread) => thread.threadId === activeThreadId))
   return (
-    <nav
-      id="threads-rail"
-      aria-label="threads"
-      className={cn(
-        'shrink-0 flex-col gap-4 overflow-y-auto bg-sidebar p-3 md:flex md:w-62 md:border-r',
-        shownNarrow ? 'flex w-full' : 'hidden',
-      )}
-    >
-      <Button type="button" className="h-10 w-full" onClick={() => onNew(activeProject?.project?.projectId)}>
-        <PlusIcon />
-        New Thread
-      </Button>
-      {earlierError !== undefined ? (
-        <div role="alert" className="px-2 text-xs text-destructive">
-          could not list threads: {earlierError}
-        </div>
-      ) : null}
-      {projectNotice !== undefined ? (
-        <div role="alert" className="px-2 text-xs text-destructive">
-          {projectNotice}
-        </div>
-      ) : null}
-      {groups.map((group) => (
-        <ProjectSection
-          key={group.project?.projectId ?? 'unlisted'}
-          group={group}
-          anyProjects={projects.length > 0}
-          activeThreadId={activeThreadId}
-          onSelect={onSelect}
-          onResume={onResume}
-          onNew={onNew}
-          onRemove={onRemoveProject}
-        />
-      ))}
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        className="justify-start text-muted-foreground"
-        onClick={onAddProject}
+    <ForkParentsContext.Provider value={forkParents}>
+      <nav
+        id="threads-rail"
+        aria-label="threads"
+        className={cn(
+          'shrink-0 flex-col gap-4 overflow-y-auto bg-sidebar p-3 md:flex md:w-62 md:border-r',
+          shownNarrow ? 'flex w-full' : 'hidden',
+        )}
       >
-        <FolderPlusIcon />
-        Add project
-      </Button>
-    </nav>
+        <Button type="button" className="h-10 w-full" onClick={() => onNew(activeProject?.project?.projectId)}>
+          <PlusIcon />
+          New Thread
+        </Button>
+        {earlierError !== undefined ? (
+          <div role="alert" className="px-2 text-xs text-destructive">
+            could not list threads: {earlierError}
+          </div>
+        ) : null}
+        {projectNotice !== undefined ? (
+          <div role="alert" className="px-2 text-xs text-destructive">
+            {projectNotice}
+          </div>
+        ) : null}
+        {groups.map((group) => (
+          <ProjectSection
+            key={group.project?.projectId ?? 'unlisted'}
+            group={group}
+            anyProjects={projects.length > 0}
+            activeThreadId={activeThreadId}
+            onSelect={onSelect}
+            onResume={onResume}
+            onNew={onNew}
+            onRemove={onRemoveProject}
+          />
+        ))}
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="justify-start text-muted-foreground"
+          onClick={onAddProject}
+        >
+          <FolderPlusIcon />
+          Add project
+        </Button>
+      </nav>
+    </ForkParentsContext.Provider>
   )
 }

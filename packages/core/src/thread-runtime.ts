@@ -107,6 +107,32 @@ export const EnsoModelState = Type.Object({
 export type EnsoModelState = Static<typeof EnsoModelState>
 
 /**
+ * What a stored thread's branch RECORDS it last ran on (#434): the model of the last `model_change`
+ * or assistant reply on the path to the leaf, and the last `thinking_level_change` — pi's own
+ * restore rule when the session is opened (PR #438 review). Not an `EnsoModelState`: nothing is
+ * built for a cold read (#86), so there is no display name and no available levels, and the page
+ * labels it recorded, not live. A half the branch never recorded is `null`; a branch that records
+ * neither has no recorded model at all.
+ *
+ * @group Thread runtime
+ */
+export const EnsoRecordedModel = Type.Object(
+  {
+    model: Type.Union([
+      Type.Object(
+        { provider: Type.String({ minLength: 1 }), modelId: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+      Type.Null(),
+    ]),
+    thinkingLevel: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread runtime */
+export type EnsoRecordedModel = Static<typeof EnsoRecordedModel>
+
+/**
  * How full the context window is, as pi reckons it (#45): pi's `getContextUsage()`, never a
  * number of ours. `tokens` is pi's estimate — the latest assistant request's usage plus what
  * has been added since — and `null` right after a compaction, until the next response says.
@@ -176,8 +202,9 @@ export const RuntimeCommand = Type.Object({
    * chosen in place (`/thinking`); `flow` — chosen like a `select`, but the choice STARTS
    * something rather than applying it: `/login` and `/logout` (slice 3) run as dialog flows,
    * their questions and progress arriving on the feed, the route answering 202 when the flow has
-   * begun; `action` — runs with no value (`/compact`, slice 4); `view` — runs nothing: the page
-   * opens what the row names over the chat (`/context`, #361), and nothing is posted. The palette
+   * begun; `action` — runs with no value (`/compact`, slice 4); `view` — the PAGE does it: opens
+   * what the row names over the chat (`/context`, #361) or forks at the last prompt (`/fork`,
+   * #433) through its own route, and nothing is posted to `…/command`. The palette
    * renders by kind; nothing is per-command UI.
    */
   kind: Type.Optional(
@@ -352,6 +379,13 @@ export const ThreadRuntime = Type.Object({
   prompt: Type.Unsafe<(request: PromptRequest, outcome: PromptOutcome) => void>(
     Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
   ),
+  /**
+   * Continue a torn thread from exactly its stored state (#436): no new user message. Shaped like
+   * `prompt` — fire-and-forget, acceptance through `outcome`, completion the thread's own
+   * `settled`. Rejected before anything runs when a run is in flight or the stored tail is not
+   * one a run can continue from (a completed reply); the reason says which.
+   */
+  continueRun: Type.Unsafe<(outcome: PromptOutcome) => void>(Type.Function([Type.Unknown()], Type.Void())),
   /**
    * Deliver a human's answer (or cancellation) to a pending blocking dialog. Never throws:
    * an unknown or already-settled id is reported through the host's problem channel, so

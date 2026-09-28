@@ -17,7 +17,7 @@ import { createRecentChunksStore, type RecentChunksStore } from './custom-event-
 import { createFollowConnection, type FollowConnection } from './follow-connection.ts'
 import { createModeLines, type ModeLines } from './mode-lines.ts'
 import { createModelStore, type ModelStore } from './model-state.tsx'
-import { createNotificationsStore, type NotificationsStore } from './notifications.tsx'
+import { createNotificationsStore, type NotificationAction, type NotificationsStore } from './notifications.tsx'
 import { createPermissionModeStore, type PermissionModeStore } from './permission-mode.tsx'
 import { createStore, type Store, type WritableStore } from './store.ts'
 
@@ -56,6 +56,12 @@ export interface ThreadStores {
    * chat factory — TanStack owns the messages from there.
    */
   readonly history: readonly UIMessage[]
+  /**
+   * What the composer opens holding (#433): a fork's prefill — the forked prompt's words, to send
+   * again or edit, as pi's `/fork` puts them in its editor — and empty otherwise. Read ONCE, when
+   * the composer mounts; the composer owns its draft from there.
+   */
+  readonly initialDraft: string
   readonly permissionMode: PermissionModeStore
   /** The session's model and thinking level (#338 slice 2); `null` until a live snapshot or `model` observation says. */
   readonly model: ModelStore
@@ -201,14 +207,16 @@ function createThreadStores(
   threadId: string,
   history: readonly UIMessage[],
   fetchImpl: FetchLike | undefined,
-  projectId: string | undefined,
+  opening: { readonly projectId: string | undefined; readonly initialDraft: string },
 ): ThreadStores {
+  const { projectId, initialDraft } = opening
   const notifications = createNotificationsStore()
   const toolResultDescriptors = createStore<ReadonlyMap<string, EnsoToolResultDescriptor>>(new Map())
   const threadFetch = namingProject(fetchImpl, projectId)
   return {
     threadId,
     history,
+    initialDraft,
     permissionMode: createPermissionModeStore(),
     model: createModelStore(),
     cwd: createStore<string | undefined>(undefined),
@@ -235,20 +243,97 @@ function createThreadStores(
       onToolResultDescriptor: (toolCallId: string, descriptor: EnsoToolResultDescriptor) => {
         toolResultDescriptors.set(new Map(toolResultDescriptors.get()).set(toolCallId, descriptor))
       },
+      onTurnStart: () => retireTornTail(threadId),
     }),
   }
 }
 
 /**
  * What a resumed thread says about a turn that never settled (#109) — a durable line at
- * the head of the transcript's notices, never a toast, because the next prompt continues
- * from the torn tail and the user should know that before typing it.
+ * the head of the transcript's notices, never a toast, because the torn tail is where the
+ * thread stands and the user should know that before typing. Its action is **Continue**
+ * (#436): the run picks up from exactly the stored state, with no new user message; a new
+ * prompt stays the alternative, and also continues from the tail.
  */
 const INTERRUPTED_TAIL_NOTICE: Record<EnsoInterruptedTail, string> = {
   'unanswered-prompt':
-    "This session's last prompt was never answered — its run was cut off before a reply. The next prompt continues from there.",
+    "This session's last prompt was never answered — its run was cut off before a reply. Continue picks up from there without a new message, or send a new prompt.",
   'tool-call-without-result':
-    "This session's last turn ended mid-tool-call — the result never arrived. The next prompt continues from there.",
+    "This session's last turn ended mid-tool-call — the result never arrived. Continue picks up from there (the lost result is recorded as an error), or send a new prompt.",
+  'tool-results-without-reply':
+    "This session's last turn ended after its tool results, before the model replied to them. Continue picks up from there without a new message, or send a new prompt.",
+}
+
+/** The interrupted-tail notice's action (#436): post Continue; the run arrives on the follow, a refusal as a line. */
+const CONTINUE_LABEL = 'Continue'
+
+/**
+ * What the torn-tail line becomes once a run answers it (PR #442 review) — Continue's, or any other:
+ * a prompt sent instead, or a run another tab started. Before, the warning and its button outlived
+ * the tail, and a late press was a 409 or a 422 under a reply that had already answered it.
+ */
+export const TORN_TAIL_CONTINUED = 'The cut-off turn was continued from its stored state.'
+export const TORN_TAIL_SUPERSEDED = 'A later run picked up after the cut-off turn.'
+
+/** Per thread, what to do with its torn-tail line when its first run starts; gone once done. */
+const tornTailLines = new Map<string, () => void>()
+
+/**
+ * The thread's first run — Continue's, a prompt sent instead, another tab's — answers its torn
+ * tail. Keyed on the run's first turn, not on `busy` (PR #440 review): every control route takes
+ * a lease and raises `busy` without starting a run.
+ */
+function retireTornTail(threadId: string): void {
+  tornTailLines.get(threadId)?.()
+  tornTailLines.delete(threadId)
+}
+
+/** Said when Continue is pressed while this page has no follow: the run would land where the page cannot see it. */
+const CONTINUE_WHILE_DISCONNECTED =
+  'Continue was not sent: this page is disconnected from the thread, and would not see the run. Press it again once the page reconnects.'
+
+/**
+ * The torn-tail line and its Continue (#436). Whether Continue started the run is known only once
+ * the server answers (PR #439 review): a first turn that lands while the answer is pending waits
+ * for it — the turn is Continue's on a 202, and someone else's run (another tab's prompt, won just
+ * before) otherwise.
+ *
+ * Only `told` and `refused` are final (PR #438 review). A press while disconnected is not sent at
+ * all — the composer refuses to send then for the same reason (#119) — and a `busy` or
+ * `unreachable` answer started nothing: each puts the action back, so the one way to act is not
+ * used up by a press that did nothing.
+ */
+function offerContinue(stores: ThreadStores, tail: EnsoInterruptedTail): void {
+  let continuing = Promise.resolve(false)
+  const action: NotificationAction = {
+    label: CONTINUE_LABEL,
+    run: () => {
+      if (stores.disconnected.get()) {
+        stores.notifications.push(CONTINUE_WHILE_DISCONNECTED, 'warning', 'run', ENSO_NOTICE_SOURCE)
+        stores.notifications.restoreAction(line, action)
+        return
+      }
+      continuing = stores.connection.continueRun().then(
+        (outcome) => {
+          if (outcome === 'busy' || outcome === 'unreachable') stores.notifications.restoreAction(line, action)
+          return outcome === 'told'
+        },
+        () => false,
+      )
+    },
+  }
+  const line = stores.notifications.pushWithAction({
+    message: INTERRUPTED_TAIL_NOTICE[tail],
+    notifyType: 'warning',
+    origin: 'run',
+    source: ENSO_NOTICE_SOURCE,
+    action,
+  })
+  tornTailLines.set(stores.threadId, () => {
+    void continuing.then((continued) =>
+      stores.notifications.resolveLine(line, continued ? TORN_TAIL_CONTINUED : TORN_TAIL_SUPERSEDED),
+    )
+  })
 }
 
 // ── the page's threads ────────────────────────────────────────────────────────
@@ -358,6 +443,7 @@ function dropThread(threadId: string): void {
   stores.connection.close()
   threads.delete(threadId)
   summaries.delete(threadId)
+  tornTailLines.delete(threadId)
   publishThreadList()
 }
 
@@ -398,7 +484,7 @@ function makeRoomForOneMore(): void {
  */
 export function mintThread(fetchImpl?: FetchLike, projectId?: string): ThreadStores {
   makeRoomForOneMore()
-  const stores = createThreadStores(crypto.randomUUID(), [], fetchImpl, projectId)
+  const stores = createThreadStores(crypto.randomUUID(), [], fetchImpl, { projectId, initialDraft: '' })
   stores.startSession.set(true)
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {
@@ -451,18 +537,20 @@ export function reviveHistoryMessages(messages: readonly unknown[]): UIMessage[]
  *
  * Adopting a thread already on this page returns it — the rail cannot hold one twice — and
  * adopting one past the page's follow budget drops an idle thread to make room (#272). `fetch`
- * is the thread's network seam, as `mintThread`'s.
+ * is the thread's network seam, as `mintThread`'s; `initialDraft` is what its composer opens
+ * holding (a fork's prefill, #433).
  */
-export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike): ThreadStores {
+export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, initialDraft = ''): ThreadStores {
   const existing = threads.get(history.threadId)
   if (existing !== undefined) return existing
   makeRoomForOneMore()
   const messages = reviveHistoryMessages(history.messages)
-  const stores = createThreadStores(history.threadId, messages, fetchImpl, history.projectId)
+  const stores = createThreadStores(history.threadId, messages, fetchImpl, {
+    projectId: history.projectId,
+    initialDraft,
+  })
   stores.permissionMode.applyReceipt(history.permissionMode)
-  if (history.interrupted !== undefined) {
-    stores.notifications.push(INTERRUPTED_TAIL_NOTICE[history.interrupted], 'warning', 'run', ENSO_NOTICE_SOURCE)
-  }
+  if (history.interrupted !== undefined) offerContinue(stores, history.interrupted)
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {
     threadId: stores.threadId,

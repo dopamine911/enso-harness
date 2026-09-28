@@ -6,6 +6,7 @@ import {
   EnsoConfigurationRefusal,
   type EnsoFollowFrame,
   EnsoFollowFrame as EnsoFollowFrameSchema,
+  EnsoForkReceipt,
   type EnsoHostCommandRun,
   ensoLogger,
   type EnsoPromptBody,
@@ -97,6 +98,12 @@ export interface FollowConnectionOptions {
    * result renders.
    */
   readonly onToolResultDescriptor?: (toolCallId: string, descriptor: EnsoToolResultDescriptor) => void
+  /**
+   * A turn started on the thread — pi's `turn_start`, the evidence a run is really going (PR #440
+   * review). A lease alone (a mode change, `/model`, a refused Continue) raises `busy` but never
+   * starts a turn, so what must key on "a run answered this thread" keys on this, not on `busy`.
+   */
+  readonly onTurnStart?: () => void
 }
 
 /** One run this adapter has open: its AG-UI ids and, once the receipt is in, the acquisition it took or queued behind. */
@@ -270,6 +277,20 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    */
   readonly configure: (configuration: EnsoSessionConfiguration) => Promise<ConfigureOutcome>
   /**
+   * Fork the thread at one of its user messages (#433): `POST …/fork` with the message's pi entry
+   * id. The receipt names the new thread and the words to prefill it with; a refusal — the thread
+   * running (409), an entry it does not have (404), one that is no user message (400) — is
+   * recorded through `problem` and said once, as a refused control is, and answers `undefined`.
+   */
+  readonly fork: (entryId: string) => Promise<EnsoForkReceipt | undefined>
+  /**
+   * Continue the thread's torn tail from its stored state (#436): `POST …/continue`, no prompt and
+   * no new user message. The run arrives on the follow as a run another tab started would; a refusal
+   * — the thread running (409), nothing to continue (422) — is recorded through `problem` and said
+   * once, as a refused control is.
+   */
+  readonly continueRun: () => Promise<ContinueOutcome>
+  /**
    * Release the thread's follow (#272): the socket closes and nothing else opens one on
    * this connection. The page calls it when a thread leaves its live list — a thread whose
    * pane is gone must not keep a stream the browser counts against its six-per-origin
@@ -285,6 +306,8 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
 export type ModeChangeOutcome = 'told' | 'busy' | 'refused' | 'unreachable'
 /** What `runHostCommand` reports — the same four words as a mode change, for the same route shape. */
 export type HostCommandOutcome = ModeChangeOutcome
+/** What `continueRun` reports — the control words, `told` meaning the run was accepted (#436). */
+export type ContinueOutcome = ModeChangeOutcome
 /**
  * What `configure` reports (#391): applied, or why not — WITH the reason, because the asking
  * dialog shows it. `refused` is the server's 422, naming the step; `failed` is any other answer
@@ -492,6 +515,7 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
     if (observation.kind === 'tool-result' && observation.complete && observation.descriptor !== undefined) {
       options.onToolResultDescriptor?.(observation.toolCallId, observation.descriptor)
     }
+    if (observation.kind === 'turn-start') options.onTurnStart?.()
     push(...observationToAguiEvents(observation, idsOf(current)))
   }
 
@@ -819,5 +843,42 @@ export function createFollowConnection(options: FollowConnectionOptions): Follow
       : { outcome: 'failed', status: response.status }
   }
 
-  return { subscribe, send, answerDialog, abort, prompt, changeMode, runHostCommand, configure, close }
+  async function fork(entryId: string): Promise<EnsoForkReceipt | undefined> {
+    const response = await post('fork', 'fork', {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entryId }),
+    })
+    if (response === undefined) return undefined
+    if (response.status !== 200) {
+      problem('fork refused: {status} {body}', { status: response.status, body: await response.text() })
+      return undefined
+    }
+    const receipt: unknown = await response.json()
+    if (Check(EnsoForkReceipt, receipt)) return receipt
+    problem('the fork receipt did not match its schema')
+    return undefined
+  }
+
+  async function continueRun(): Promise<ContinueOutcome> {
+    const response = await post('continue', 'continue')
+    if (response === undefined) return 'unreachable'
+    if (response.status === 202) return 'told'
+    const outcome: ContinueOutcome = response.status === 409 ? 'busy' : 'refused'
+    problem('continue {outcome}: {status} {body}', { outcome, status: response.status, body: await response.text() })
+    return outcome
+  }
+
+  return {
+    subscribe,
+    send,
+    answerDialog,
+    abort,
+    prompt,
+    changeMode,
+    runHostCommand,
+    configure,
+    fork,
+    continueRun,
+    close,
+  }
 }

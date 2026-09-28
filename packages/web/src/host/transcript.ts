@@ -1,4 +1,4 @@
-import type { EnsoTranscriptEntry, EnsoTranscriptPart } from '@enso/core'
+import type { EnsoRecordedModel, EnsoTranscriptEntry, EnsoTranscriptPart } from '@enso/core'
 import { contentToText, descriptorFrom } from './map-events.ts'
 import { providerRefusalOfMessage } from './provider-refusal.ts'
 
@@ -13,6 +13,11 @@ import { providerRefusalOfMessage } from './provider-refusal.ts'
  * entry kind this does not model (`model_change`, `thinking_level_change`, a compaction, a
  * label) becomes `other` with its `type` — counted by the drawer, invented by nothing. A
  * malformed message is a message with an empty part list rather than a throw into a route.
+ *
+ * The one exception is `recordedModelOf` (#434): the last `model_change` and the last
+ * `thinking_level_change` on the branch are what a cold thread says it last ran on — what pi
+ * restores when it opens the session. Walked here rather than through pi's `buildSessionContext`,
+ * which answers `off` for a branch that recorded no level: a level nobody chose must read as none.
  */
 
 interface PiSessionEntry {
@@ -124,4 +129,40 @@ function transcriptEntryOf(raw: unknown, position: number): EnsoTranscriptEntry 
 /** The branch, root to leaf, as the transcript — same length, same order. */
 export function transcriptOf(branch: readonly unknown[]): EnsoTranscriptEntry[] {
   return branch.map(transcriptEntryOf)
+}
+
+interface PiStateEntry {
+  type?: unknown
+  provider?: unknown
+  modelId?: unknown
+  thinkingLevel?: unknown
+  message?: { role?: unknown; provider?: unknown; model?: unknown }
+}
+
+const nonEmpty = (value: unknown): value is string => typeof value === 'string' && value !== ''
+
+/**
+ * What the branch (root to leaf) records it last ran on; `undefined` when it records neither half
+ * (#434). pi's own restore rule (`session-manager.js` `getSessionContextSettings`, PR #438
+ * review): the model is the last `model_change` OR assistant reply on the path — a reply records the
+ * model that produced it, and pi falls back to another model on reopen WITHOUT appending a change
+ * when the recorded one cannot be restored. The level is the last `thinking_level_change`; pi
+ * defaults a missing one to `off`, which this does not invent.
+ */
+export function recordedModelOf(branch: readonly unknown[]): EnsoRecordedModel | undefined {
+  let model: EnsoRecordedModel['model'] = null
+  let thinkingLevel: string | null = null
+  for (const raw of branch) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const entry = raw as PiStateEntry
+    const reply = entry.type === 'message' && entry.message?.role === 'assistant' ? entry.message : undefined
+    if (entry.type === 'model_change' && nonEmpty(entry.provider) && nonEmpty(entry.modelId)) {
+      model = { provider: entry.provider, modelId: entry.modelId }
+    } else if (reply !== undefined && nonEmpty(reply.provider) && nonEmpty(reply.model)) {
+      model = { provider: reply.provider, modelId: reply.model }
+    } else if (entry.type === 'thinking_level_change' && nonEmpty(entry.thinkingLevel)) {
+      thinkingLevel = entry.thinkingLevel
+    }
+  }
+  return model === null && thinkingLevel === null ? undefined : { model, thinkingLevel }
 }

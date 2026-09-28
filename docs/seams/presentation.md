@@ -33,6 +33,12 @@ export interface FollowConnectionOptions {
    * result renders.
    */
   readonly onToolResultDescriptor?: (toolCallId: string, descriptor: EnsoToolResultDescriptor) => void
+  /**
+   * A turn started on the thread — pi's `turn_start`, the evidence a run is really going (PR #440
+   * review). A lease alone (a mode change, `/model`, a refused Continue) raises `busy` but never
+   * starts a turn, so what must key on "a run answered this thread" keys on this, not on `busy`.
+   */
+  readonly onTurnStart?: () => void
 }
 ```
 
@@ -75,6 +81,20 @@ export interface FollowConnection extends SubscribeConnectionAdapter {
    * comes back with its step and reason for the dialog to show.
    */
   readonly configure: (configuration: EnsoSessionConfiguration) => Promise<ConfigureOutcome>
+  /**
+   * Fork the thread at one of its user messages (#433): `POST …/fork` with the message's pi entry
+   * id. The receipt names the new thread and the words to prefill it with; a refusal — the thread
+   * running (409), an entry it does not have (404), one that is no user message (400) — is
+   * recorded through `problem` and said once, as a refused control is, and answers `undefined`.
+   */
+  readonly fork: (entryId: string) => Promise<EnsoForkReceipt | undefined>
+  /**
+   * Continue the thread's torn tail from its stored state (#436): `POST …/continue`, no prompt and
+   * no new user message. The run arrives on the follow as a run another tab started would; a refusal
+   * — the thread running (409), nothing to continue (422) — is recorded through `problem` and said
+   * once, as a refused control is.
+   */
+  readonly continueRun: () => Promise<ContinueOutcome>
   /**
    * Release the thread's follow (#272): the socket closes and nothing else opens one on
    * this connection. The page calls it when a thread leaves its live list — a thread whose
@@ -158,6 +178,12 @@ export interface ThreadStores {
    * chat factory — TanStack owns the messages from there.
    */
   readonly history: readonly UIMessage[]
+  /**
+   * What the composer opens holding (#433): a fork's prefill — the forked prompt's words, to send
+   * again or edit, as pi's `/fork` puts them in its editor — and empty otherwise. Read ONCE, when
+   * the composer mounts; the composer owns its draft from there.
+   */
+  readonly initialDraft: string
   readonly permissionMode: PermissionModeStore
   /** The session's model and thinking level (#338 slice 2); `null` until a live snapshot or `model` observation says. */
   readonly model: ModelStore

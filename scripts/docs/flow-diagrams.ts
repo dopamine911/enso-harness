@@ -62,7 +62,8 @@ function sourceLink(path: string, line: number): string {
 }
 
 /**
- * The control plane: browser → dispatcher → handler → the runtime factory the route reaches.
+ * The control plane: browser → dispatcher → handler → what the route's factory reaches — the
+ * thread's runtime, or (the fork route, #433) the storage seam with no runtime at all.
  *
  * Only `control` routes are drawn. The observation routes are the OTHER diagram's first stage,
  * and drawing them here would state the same edge twice in two pictures that could disagree.
@@ -78,8 +79,9 @@ function controlPlane(routes: readonly ResolvedRoute[]): string[] {
     if (route.factory === undefined) continue
     const factoryName = route.factory.declaration.replace(/^export (?:async )?function /, '')
     lines.push(`  ${id} --> ${handlerId}[${nodeLabel(`${factoryName}()`)}]`)
-    lines.push(`  ${handlerId} --> Runtime`)
+    lines.push(`  ${handlerId} --> ${route.factory.reaches === 'storage' ? 'Storage' : 'Runtime'}`)
   }
+  if (control.some((route) => route.factory?.reaches === 'storage')) lines.push('  Storage["AgentHost (storage)"]')
   lines.push('  Runtime["ThreadRuntime"] --> Observations["EnsoObservation stream"]', '```')
   return lines
 }

@@ -6,7 +6,7 @@ and `packages/harness/package.json`. No machine environment and no user config i
 
 ## Explicit environment keys
 
-The 12 files that directly touch the process environment exactly match the
+The 13 files that directly touch the process environment exactly match the
 `node/no-process-env` exception list in `scripts/lint/process-environment.ts`; generation fails if either side gains or loses a file.
 Rows cover literal dot access, literal bracket access, destructuring, `node:process` `env` imports,
 grounded `environment.KEY` seams, and keys explicitly written beside a process-environment spread.
@@ -79,6 +79,7 @@ the other resource arrays are also shown in declared order. A vendor path is any
 | extensions | 5 | `node_modules/@ladbabynpm/picc-permission-modes/index.ts` | **vendor path** |
 | extensions | 6 | `node_modules/pi-multi-account/index.ts` | **vendor path** |
 | extensions | 7 | `./extensions/ask-user/index.ts` | repository path |
+| extensions | 8 | `./extensions/run-context/index.ts` | repository path |
 | skills | 1 | `./skills` | repository path |
 | prompts | 1 | `./prompts` | repository path |
 | themes | 1 | `./themes` | repository path |

@@ -15,7 +15,8 @@
       "./extensions/web-search/index.ts",
       "node_modules/@ladbabynpm/picc-permission-modes/index.ts",
       "node_modules/pi-multi-account/index.ts",
-      "./extensions/ask-user/index.ts"
+      "./extensions/ask-user/index.ts",
+      "./extensions/run-context/index.ts"
     ],
     "skills": [
       "./skills"

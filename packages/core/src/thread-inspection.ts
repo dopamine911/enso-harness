@@ -237,6 +237,12 @@ export const EnsoStoredThread = Type.Object(
      * prompt anyway; this is the readable, early form of that refusal.
      */
     busy: Type.Boolean(),
+    /**
+     * The thread this one was forked from (#433): the session id its header's `parentSession`
+     * file holds. Absent for a thread that is no fork — and for one whose parent file is gone,
+     * which no longer names a thread the page could open.
+     */
+    parentThreadId: Type.Optional(Type.String()),
   },
   { additionalProperties: false },
 )
@@ -244,13 +250,49 @@ export const EnsoStoredThread = Type.Object(
 export type EnsoStoredThread = Static<typeof EnsoStoredThread>
 
 /**
+ * `POST /api/threads/:id/fork` (#433): fork the thread at one of its user messages, pi's `/fork`
+ * with its default position `before`. `entryId` is the pi entry id of that user message — the
+ * id a stored history's message carries.
+ *
+ * @group Thread inspection
+ */
+export const EnsoForkRequest = Type.Object({ entryId: Type.String({ minLength: 1 }) }, { additionalProperties: false })
+/** @group Thread inspection */
+export type EnsoForkRequest = Static<typeof EnsoForkRequest>
+
+/**
+ * What a fork answers (#433): the new thread, and the forked message's text — pi's `/fork` puts it
+ * in the editor, so the new thread's composer opens holding it, ready to send again or edit.
+ *
+ * @group Thread inspection
+ */
+export const EnsoForkReceipt = Type.Object(
+  { threadId: Type.String(), prefill: Type.String() },
+  { additionalProperties: false },
+)
+/** @group Thread inspection */
+export type EnsoForkReceipt = Static<typeof EnsoForkReceipt>
+
+/**
+ * The palette's `/fork` (#433): a `host` row of kind `view` — the page does it, forking at the
+ * thread's last user message through the fork route; nothing is posted to `…/command`.
+ *
+ * @group Thread inspection
+ */
+export const ENSO_FORK_COMMAND = 'fork'
+
+/**
  * How a stored branch ends when its last turn did not settle (#109): a prompt the
- * assistant never answered, or an assistant turn that called a tool and never got its
- * result — the server died mid-run, or the run was cut before the reply.
+ * assistant never answered, an assistant turn that called a tool and never got its
+ * result, or one whose every call got its result and no reply followed (PR #442 review) — the
+ * server died mid-run, or the run was cut before the reply. The third is a kill's shape, never a
+ * Stop's (PR #438 review): a Stop ends the branch on pi's own error reply to the aborted model
+ * call, an assistant message with no call — settled, and not named here.
  *
  * Derived on read from the branch, never written to pi's file: deepseek-harness appends a
- * synthetic `turn/end { interrupted }` on resume repair; here the report is the repair, and the
- * next prompt continues from the torn tail as pi would.
+ * synthetic `turn/end { interrupted }` on resume repair; here the report is the repair. The
+ * browser offers Continue on it (#436: `POST …/continue` runs from exactly the stored state, and
+ * closes an orphan call with an error result first); the next prompt also continues from the tail.
  *
  * Never said of a thread whose run is still going here (#412): pi parked on a question ends its
  * branch on the call with no result yet, by construction, and that run has not torn.
@@ -260,6 +302,7 @@ export type EnsoStoredThread = Static<typeof EnsoStoredThread>
 export const EnsoInterruptedTail = Type.Union([
   Type.Literal('unanswered-prompt'),
   Type.Literal('tool-call-without-result'),
+  Type.Literal('tool-results-without-reply'),
 ])
 /** @group Thread inspection */
 export type EnsoInterruptedTail = Static<typeof EnsoInterruptedTail>

@@ -6,6 +6,8 @@ import {
   type EnsoAbortReceipt,
   type EnsoConfigurationRefusal,
   type EnsoFollowFrame,
+  type EnsoForkReceipt,
+  EnsoForkRequest,
   EnsoHostCommandRun,
   EnsoPermissionModeChange,
   type EnsoPromptAdmission,
@@ -25,16 +27,22 @@ import { HostCommandRefused, modelOptionId } from '../host/host-commands.ts'
 import { forgetRun, noteRunAdmitted } from './run-timing.ts'
 import { SSE_HEADERS, startSseKeepalive } from './sse.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
-import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
+import type { ThreadFeedFrame, ThreadRegistry, ThreadView } from './thread-registry.ts'
 
 /**
  * The prompt/follow split (#112) — the server↔browser wire.
  *
- * Five routes, none of which is a run:
+ * Six routes, none of which is a run:
  *
  *   POST /api/threads/:id/prompt   unary. Takes the thread, fires the prompt, answers at
  *                                  once with a message id. The thread's own `settled`
  *                                  releases it — not an HTTP response ending.
+ *   POST /api/threads/:id/continue unary (#436). Takes the thread like a prompt and continues
+ *                                  its torn tail from the stored state — no new user message.
+ *                                  202 accepted (the run arrives on the follow, its `settled`
+ *                                  releases the thread), 404 for a thread neither live nor
+ *                                  stored, 409 while a run holds it, 422 with the runtime's
+ *                                  reason for a tail there is nothing to continue from.
  *   GET  /api/threads/:id/follow   one snapshot frame, then observations and status
  *                                  frames for as long as the client stays. Observation
  *                                  only: never builds a session; a thread that is not live
@@ -84,6 +92,8 @@ export interface PromptBody {
 export type PromptOutcome =
   | { readonly status: 202; readonly receipt: EnsoPromptReceipt }
   | { readonly status: 400; readonly reason: string }
+  /** The thread was taken and released again while this prompt waited on its build (#444) — rare. */
+  | { readonly status: 409; readonly reason: string }
 
 /**
  * Leading token of a slash input, without the slash. `/mode auto` -> `mode`.
@@ -202,6 +212,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     generation: mount.generation,
     permissionMode: mount.permissionMode,
     model: mount.model,
+    ...(mount.recordedModel === undefined ? {} : { recordedModel: mount.recordedModel }),
     cwd: mount.cwd,
     usage: mount.usage,
     messages: mount.messages,
@@ -280,8 +291,8 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
   }
 
   const command = slashCommandName(body.message)
-  const live = threads.peek(threadId)
-  if (live?.busy === true) {
+  /** The busy path: the prompt joins the run that holds the thread, with its admission (#75). */
+  const joinRun = (live: ThreadView): PromptOutcome => {
     const unavailable = command === undefined ? undefined : unavailableCommand(live.hosted.runtime, command)
     if (unavailable !== undefined) return { status: 400, reason: unavailable }
     live.hosted.runtime.prompt(
@@ -294,8 +305,22 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
     )
     return { status: 202, receipt: { threadId, messageId, generation: live.generation, queued: true } }
   }
+  const live = threads.peek(threadId)
+  if (live?.busy === true) return joinRun(live)
 
   const lease = await threads.acquire(threadId)
+  if (lease === 'busy') {
+    // Another request took the thread while this one waited on the build or an abort (#444): join
+    // its run as a prompt that found it busy would. Released again in between — the other request
+    // was refused — there is nothing to join, and the prompt is not run without a lease: 409.
+    const holder = threads.peek(threadId)
+    if (holder?.busy === true) return joinRun(holder)
+    // Not "is running" (PR #438 review): the client shows this verbatim, and the thread is idle now.
+    return {
+      status: 409,
+      reason: `thread ${threadId} was taken and released again while this prompt waited on its build; send it again`,
+    }
+  }
   const unavailable = command === undefined ? undefined : unavailableCommand(lease.runtime, command)
   if (unavailable !== undefined) {
     lease.release()
@@ -338,6 +363,68 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
     },
   )
   return { status: 202, receipt: { threadId, messageId, generation: lease.generation, queued: false } }
+}
+
+export type ContinueOutcome =
+  | { readonly status: 202 }
+  | { readonly status: 404; readonly reason: string }
+  | { readonly status: 409; readonly reason: string }
+  | { readonly status: 422; readonly reason: string }
+
+/**
+ * Continue a torn thread from its stored state (#436): no prompt, no new user message — the run the
+ * cut-off one never finished. Taken like a prompt's idle path: refused while a run holds the thread
+ * (409 — there is nothing torn about a thread that is running), else acquired (a resumed thread
+ * BUILDS here, which is the case this exists for) and handed to the runtime. The runtime's refusal —
+ * a tail that is no unanswered prompt, unfinished tool call or tool results with no reply, or a pi
+ * build without the run lifecycle — is the 422, verbatim, and releases the lease. Accepted, it
+ * answers 202 and the run arrives on the follow like any other; the thread's own `settled` releases
+ * it, as it releases a prompt's.
+ *
+ * A thread neither live here nor stored is a 404 BEFORE anything is built (PR #442 review): there is
+ * nothing to continue by definition, and `acquire` would build a fresh session under the id and hold
+ * it for the idle window only to refuse it — unlike `/command` and `/configure`, which build on purpose.
+ */
+export async function continueThread(deps: FollowRouteDeps, threadId: string): Promise<ContinueOutcome> {
+  const { threads, host } = deps
+  const running = runningRefusal(threads, threadId, 'continue')
+  if (running !== undefined) return running
+  if (threads.peek(threadId) === undefined && (await host.storedThreadDirectory(threadId)) === undefined) {
+    return { status: 404, reason: `no thread ${threadId} to continue` }
+  }
+  // The one check that cannot race (#444): a second Continue — another tab, or a prompt that won
+  // the thread while this one waited on the build — is refused here, before it holds a lease.
+  const lease = await threads.acquire(threadId)
+  if (lease === 'busy') return busyRefusal(threadId, 'continue')
+  noteRunAdmitted(threadId, lease.generation)
+  const settle = threads.observe(threadId, (frame: ThreadFeedFrame) => {
+    if (frame.kind !== 'observation' || frame.observation.kind !== 'settled') return
+    settle.unsubscribe()
+    lease.release()
+  })
+  /** A refusal, or a fault before either signal: nothing runs, so nothing will settle. */
+  const giveBack = (): void => {
+    forgetRun(threadId, lease.generation)
+    settle.unsubscribe()
+    lease.release()
+  }
+  return new Promise<ContinueOutcome>((resolve, reject) => {
+    // Unlike `promptThread`'s call to pi's public `prompt`, `continueRun` reads pi's private run
+    // state (#436), so a fault before either callback is plausible after a pi bump: the lease goes
+    // back and the route answers 500, rather than leaving the thread held (PR #442 review).
+    try {
+      lease.runtime.continueRun({
+        onAccepted: () => resolve({ status: 202 }),
+        onRejected: (reason: string) => {
+          giveBack()
+          resolve({ status: 422, reason })
+        },
+      })
+    } catch (error) {
+      giveBack()
+      reject(error)
+    }
+  })
 }
 
 /** The dialog body: pi's response shape, keyed by the request id the follow showed. */
@@ -421,6 +508,7 @@ export async function changeThreadMode(
   const running = runningRefusal(threads, threadId, 'change the mode')
   if (running !== undefined) return running
   const lease = await threads.acquire(threadId)
+  if (lease === 'busy') return busyRefusal(threadId, 'change the mode')
   const { available } = lease.runtime.permissionModeState()
   if (!available.includes(change.mode)) {
     lease.release()
@@ -467,15 +555,18 @@ export function readClosedBody<Schema extends TSchema>(
   return body
 }
 
-/** The 409 every control route answers while a run holds the thread (#75: never queued behind a run), or `undefined`. */
+/** The 409 every control route answers while a run holds the thread (#75: never queued behind a run). */
+function busyRefusal(threadId: string, action: string): { readonly status: 409; readonly reason: string } {
+  return { status: 409, reason: `thread ${threadId} is running; ${action} when it settles` }
+}
+
+/** {@link busyRefusal} when a peek already sees the thread held, or `undefined` — the fast answer before any wait. */
 function runningRefusal(
   threads: ThreadRegistry,
   threadId: string,
   action: string,
 ): { readonly status: 409; readonly reason: string } | undefined {
-  return threads.peek(threadId)?.busy === true
-    ? { status: 409, reason: `thread ${threadId} is running; ${action} when it settles` }
-    : undefined
+  return threads.peek(threadId)?.busy === true ? busyRefusal(threadId, action) : undefined
 }
 
 export type HostCommandOutcome =
@@ -503,6 +594,7 @@ export async function runHostCommand(
   const running = runningRefusal(threads, threadId, `change ${run.name}`)
   if (running !== undefined) return running
   const lease = await threads.acquire(threadId)
+  if (lease === 'busy') return busyRefusal(threadId, `change ${run.name}`)
   // ⚠ A `flow` row STARTS and the route answers 202 (#338 slice 3), and so does an `action` (slice
   // 4: `/compact` is a model call, seconds to a minute): a login may wait minutes on a
   // device code, and its questions and progress are on the feed, not in this response. The lease
@@ -607,6 +699,7 @@ export async function configureThread(
   const running = runningRefusal(threads, threadId, 'configure it')
   if (running !== undefined) return running
   const lease = await threads.acquire(threadId)
+  if (lease === 'busy') return busyRefusal(threadId, 'configure it')
   try {
     const refusal = await applyConfiguration(lease.runtime, configuration)
     return refusal === undefined ? { status: 204 } : { status: 422, refusal }
@@ -668,6 +761,36 @@ export function readConfigureBody(raw: string): EnsoSessionConfiguration {
     'configure',
     'configure body takes only `model`, `thinking` and `mode`, each a non-empty string',
   )
+}
+
+export type ForkRouteOutcome =
+  | { readonly status: 200; readonly receipt: EnsoForkReceipt }
+  | { readonly status: 400 | 404 | 409; readonly reason: string }
+
+/** The host's fork refusal → the status the route answers it with. */
+const FORK_REFUSAL_STATUS = { 'no-thread': 404, 'no-entry': 404, 'not-a-user-message': 400 } as const
+
+/**
+ * Fork a thread at one of its user messages (#433): a new thread whose session file names this
+ * one as its parent — the host's `forkThread`, from the file, building nothing (#86). Refused
+ * while a run holds the thread (409), as every control route is: the file is still growing, and
+ * the fork point the page chose may not be where the run leaves the branch.
+ */
+export async function forkThreadAt(
+  deps: ThreadReadDeps,
+  threadId: string,
+  request: EnsoForkRequest,
+): Promise<ForkRouteOutcome> {
+  const running = runningRefusal(deps.threads, threadId, 'fork it')
+  if (running !== undefined) return running
+  const outcome = await deps.host.forkThread(threadId, request.entryId)
+  if (outcome.kind !== 'forked') return { status: FORK_REFUSAL_STATUS[outcome.kind], reason: outcome.reason }
+  return { status: 200, receipt: { threadId: outcome.threadId, prefill: outcome.prefill } }
+}
+
+/** The fork body, checked against its closed schema — `entryId`, nothing else. */
+export function readForkBody(raw: string): EnsoForkRequest {
+  return readClosedBody(raw, EnsoForkRequest, 'fork', 'fork body needs a non-empty `entryId` and nothing else')
 }
 
 export type AbortRouteOutcome =

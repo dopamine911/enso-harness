@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
   createAgentSessionFromServices,
@@ -14,12 +14,14 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import {
   type DialogAnswer,
+  type EnsoForkPoint,
   type EnsoHostCommandRun,
   type EnsoModelState,
   type EnsoObservation,
   type EnsoOpenDialog,
   type EnsoPermissionModeState,
   type EnsoPromptAdmission,
+  type EnsoRecordedModel,
   type EnsoSessionUsage,
   type EnsoThreadEvent,
   type EnsoTranscriptEntry,
@@ -34,8 +36,10 @@ import { ensoHome, ensoSecretsPath, findRepoRoot } from '@enso/core/paths'
 import { quarantineSecrets } from '@enso/core/secrets'
 import { type BranchContext, type BranchRequestDetail, branchContext, branchRequestDetail } from './branch-context.ts'
 import { type BranchStats, branchStats } from './branch-stats.ts'
+import { type ContinuationLead, continuationLead, NO_RUN_LIFECYCLE, NOTHING_TO_CONTINUE } from './continuation.ts'
 import { createEventTail, describeObservation } from './event-tail.ts'
 import { createEnsoExtensionUiContext } from './extension-ui-context.ts'
+import { forkPointOf } from './fork-point.ts'
 import { decideHostCommand, HOST_VIEW_ROWS, HostCommandRefused, hostCommandRows } from './host-commands.ts'
 import {
   authEventText,
@@ -69,7 +73,7 @@ import { builtinProviderName, providerRefusalOf } from './provider-refusal.ts'
 import type { RuntimeEvent } from './runtime-event.ts'
 import { toRpcWireEvent } from './session-events.ts'
 import { growsSessionSpend, liveSessionUsage, storedSessionUsage } from './session-usage.ts'
-import { transcriptOf } from './transcript.ts'
+import { recordedModelOf, transcriptOf } from './transcript.ts'
 
 const log = ensoLogger('host')
 
@@ -167,6 +171,45 @@ const log = ensoLogger('host')
  * so a failover swap by pi-multi-account (`pi.setModel`, `index.ts:4031`) reaches the feed the
  * same way a `/model` from the palette does. The watcher registers nothing else and is listed in
  * `loadedExtensionPaths` like every extension pi loaded.
+ *
+ * ⚠ A FORK IS TAKEN FROM THE FILE, OUTSIDE ANY RUNTIME (#433). `forkThread` opens the source's
+ * session file (`SessionManager.open`, building nothing — #86) and forks it the way pi's `/fork`
+ * does at its default position `before` (`AgentSessionRuntime.fork`, `agent-session-runtime.js`
+ * :174): the entry must be a user message; the new session's branch ends at that message's
+ * PARENT (`createBranchedSession`), or is empty when the message is the root (`create` +
+ * `newSession({ parentSession })`); the message's text comes back to prefill the composer. A live
+ * source and a cold one fork alike — a live thread's file holds every entry its memory does once
+ * flushed, and one never flushed has no file to fork. Stated non-coverage: outside a runtime pi's
+ * `session_before_fork` extension hook does not fire; no loaded extension handles it today. pi
+ * writes a session file only at its first assistant message, so a fork whose branch holds none
+ * (the empty one above) would have no file — nothing to list, nothing naming its parent, and a
+ * resume under its id would create a fresh session. The host writes such a fork's entries the way
+ * pi's first flush does (`_persist`: one JSON line per entry, `wx`), and pi appends to it from
+ * then on as to any flushed file.
+ *
+ * A FORK POINT IS READ OFF THE BRANCH (#435). `forkPoint` (live) and `readStoredForkPoint` (cold,
+ * one open, nothing built) walk the same branch with `fork-point.ts`: the session id, the leaf,
+ * the parent the listing resolves (#433), then the recorded model and level (#434), picc's last
+ * mode, the cwd and the latest `enso-run-context` the harness's `run-context` extension wrote.
+ *
+ * ⚠⚠ CONTINUE RUNS ON pi'S PRIVATE RUN LIFECYCLE (#436). `continueRun` resumes a torn thread from
+ * exactly its stored state — no new user message — by calling `AgentSession._runAgentPrompt(lead)`
+ * (`agent-session.js:1078`, `private` in `agent-session.d.ts:403`, an ordinary method at run time)
+ * through ONE cast (`PiRunLifecycle`). pi 0.87.1 has no public continue that runs inside that
+ * lifecycle, and the lifecycle is what makes it a run: `session.agent.continue()` alone persists the
+ * reply and fires the guards, but never emits `agent_settled` (the route releases the lease on
+ * `settled`, so the thread stayed busy forever), leaves `isStreaming` false (a prompt enqueued during
+ * it was accepted and lost, with a spurious `settled` mid-run), skips auto-retry, and lets `abort()`
+ * resolve before the run stopped (the spike on #436). `_runAgentPrompt` is what `prompt()` itself
+ * ends in (`:1331`). Whether the tail CAN be continued is decided here, not by pi
+ * (`continuation.ts`): the lifecycle would answer a completed reply again. The accepted differences
+ * from a prompt: no `input` or `before_agent_start` for the continued turn — so no picc mode
+ * reminder, no pi-multi-account last-moment account preflight, and the harness's `enso-run-context`
+ * is not re-checked for it; no auth preflight (missing credentials become a stored error reply, and
+ * the run settles); no pre-prompt compaction check (the post-run one still runs); and the first
+ * request reuses the system prompt the transcript holds. `agent-host.test.ts` pins the lifecycle
+ * through the real host and pi's faux provider, so a pi bump that renames or reshapes the method is
+ * a red test, not a silent break. The cast leaves when pi ships a public `AgentSession.continue()`.
  */
 
 /** The agent dir's multi-account config file, and the keys this host seeds in it. */
@@ -223,6 +266,14 @@ const STREAMING_BEHAVIOR_OF: Record<EnsoPromptAdmission, NonNullable<PromptOptio
 
 /** The `ExtensionMode` we bind — `ctx.mode` as extensions see it. rpc is the truthful one: no terminal, a remote surface. */
 const EXTENSION_MODE_RPC = 'rpc'
+
+/**
+ * The one member of pi's private run lifecycle `continueRun` calls (#436, module header): run the
+ * agent from `messages` with retry, compaction recovery, queued prompts and `agent_settled`.
+ */
+interface PiRunLifecycle {
+  _runAgentPrompt(messages: ContinuationLead): Promise<void>
+}
 
 /**
  * A login while it runs (#388): whose, the page its flow announced (the code prompt links to it),
@@ -298,6 +349,8 @@ export interface HostedThread {
   branchContext(): BranchContext
   /** One request's context, element by element (#361 phase 3); undefined for a turn the branch does not have. */
   branchRequestDetail(request: number | 'next'): BranchRequestDetail | undefined
+  /** The branch's fork point (#435): identity, then what it runs under — the manifest's live half. */
+  forkPoint(): Promise<EnsoForkPoint>
   /**
    * What the loaded extensions would say about a tool call, through the runtime's own hook
    * runner — the verdict a model's call would meet, without a model. Inspection, like the
@@ -326,7 +379,21 @@ export interface StoredThread {
   readonly messageCount: number
   /** The first user message, verbatim; empty for a session with none. */
   readonly firstMessage: string
+  /**
+   * The thread it was forked from (#433): its header's `parentSession` file, as that file's
+   * session id. Absent for a thread that is no fork, and for one whose parent file is gone.
+   */
+  readonly parentThreadId?: string
 }
+
+/**
+ * A fork (#433), or why not. The refusals are the host's to decide and the route's to say:
+ * `no-thread` — no session file under the id in a served project; `no-entry` — the file has no
+ * entry under the id; `not-a-user-message` — pi forks only at a user message.
+ */
+export type ThreadForkOutcome =
+  | { readonly kind: 'forked'; readonly threadId: string; readonly prefill: string }
+  | { readonly kind: 'no-thread' | 'no-entry' | 'not-a-user-message'; readonly reason: string }
 
 /**
  * Stop: tell the runtime, then settle every pending question as `aborted` WHILE it stops, and
@@ -405,6 +472,18 @@ export interface AgentHost {
   readStoredThreadContext(threadId: string): Promise<StoredThreadContext | undefined>
   /** One request of a stored thread, element by element (#361 phase 3); undefined for no file or no such turn. */
   readStoredRequestDetail(threadId: string, request: number | 'next'): Promise<BranchRequestDetail | undefined>
+  /**
+   * A stored thread's fork point (#435): identity and run conditions off its branch, one open,
+   * nothing built (#86); undefined for no file in a served project.
+   */
+  readStoredForkPoint(threadId: string): Promise<EnsoForkPoint | undefined>
+  /**
+   * Fork a stored thread at one of its user messages, as pi's `/fork` does (#433; the module
+   * header): a new session file naming the source as its parent, holding everything before that
+   * message, and the message's text to prefill with. The source's file is not written; nothing is
+   * built for either thread (#86).
+   */
+  forkThread(threadId: string, entryId: string): Promise<ThreadForkOutcome>
   /** What a fresh thread starts in — served before any run exists, so the header never guesses. */
   freshPermissionMode(): EnsoPermissionModeState
   /** A stored thread's state from its transcript alone: nothing is built to answer (#86, #95). */
@@ -419,6 +498,8 @@ export interface StoredThreadRead {
   readonly transcript: EnsoTranscriptEntry[]
   /** Every usage in the file, on every branch, by pi's rule (`session-usage.ts`); no context. */
   readonly usage: EnsoSessionUsage
+  /** What the branch records it last ran on (#434); `undefined` when it records neither a model nor a level. */
+  readonly recordedModel: EnsoRecordedModel | undefined
 }
 
 /** A stored thread as `readStoredThreadStats` reads it. */
@@ -546,6 +627,24 @@ function describeCommand(
   return description === undefined ? { name, source } : { name, source, description }
 }
 
+/** A user message's text as pi's `/fork` prefills it (`extractUserMessageText`): its text parts, joined; images dropped. */
+function userMessageText(content: string | ReadonlyArray<{ readonly type: string; readonly text?: string }>): string {
+  if (typeof content === 'string') return content
+  return content.map((part) => (part.type === 'text' && typeof part.text === 'string' ? part.text : '')).join('')
+}
+
+/**
+ * A fork pi has not written because its branch holds no assistant message (the module header,
+ * #433): its header and entries, written as pi's first flush writes them, so the fork is listed,
+ * names its parent, and resumes under its id. A file already there — pi wrote it — is left alone.
+ */
+function writeUnflushedSession(session: SessionManager): void {
+  const file = session.getSessionFile()
+  if (file === undefined || existsSync(file)) return
+  const lines = [session.getHeader(), ...session.getEntries()].map((fileEntry) => `${JSON.stringify(fileEntry)}\n`)
+  writeFileSync(file, lines.join(''), { flag: 'wx' })
+}
+
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   const { agentDir, harnessPackageDir, servesDirectory } = options
 
@@ -585,15 +684,24 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
    */
   async function everySession(): Promise<StoredThread[]> {
     const listed = await SessionManager.listAll()
+    // A fork's header names its parent by FILE (#433); the thread is that file's session id, read
+    // off the same listing. A parent file that is gone names no thread, so the fork carries none.
+    const idByPath = new Map(listed.map((info) => [resolve(info.path), info.id]))
     return listed
-      .map((info) => ({
-        id: info.id,
-        path: info.path,
-        cwd: info.cwd,
-        modified: info.modified,
-        messageCount: info.messageCount,
-        firstMessage: info.firstMessage,
-      }))
+      .map((info) => {
+        const parentThreadId =
+          info.parentSessionPath === undefined ? undefined : idByPath.get(resolve(info.parentSessionPath))
+        return {
+          id: info.id,
+          path: info.path,
+          cwd: info.cwd,
+          modified: info.modified,
+          messageCount: info.messageCount,
+          // pi says `(no messages)` for a file with none — an empty fork's (#433) — which is no title.
+          firstMessage: info.messageCount === 0 ? '' : info.firstMessage,
+          ...(parentThreadId === undefined ? {} : { parentThreadId }),
+        }
+      })
       .sort((first, second) => second.modified.getTime() - first.modified.getTime())
   }
 
@@ -620,10 +728,12 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     if (located === undefined) return undefined
     // `open` loads the file into memory and writes nothing until an append.
     const stored = SessionManager.open(located.path)
+    const branch = stored.getBranch()
     return {
       cwd: located.cwd,
-      transcript: transcriptOf(stored.getBranch()),
+      transcript: transcriptOf(branch),
       usage: storedSessionUsage(stored.getEntries()),
+      recordedModel: recordedModelOf(branch),
     }
   }
 
@@ -647,6 +757,41 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   ): Promise<BranchRequestDetail | undefined> {
     const path = await storedSessionPath(threadId)
     return path === undefined ? undefined : branchRequestDetail(SessionManager.open(path).getBranch(), request)
+  }
+
+  async function forkThread(threadId: string, entryId: string): Promise<ThreadForkOutcome> {
+    const located = await storedSession(threadId)
+    if (located === undefined) {
+      return { kind: 'no-thread', reason: `thread ${threadId} has no session file in a project this server serves` }
+    }
+    const source = SessionManager.open(located.path)
+    const entry = source.getEntry(entryId)
+    if (entry === undefined) return { kind: 'no-entry', reason: `thread ${threadId} has no entry ${entryId}` }
+    if (entry.type !== 'message' || entry.message.role !== 'user') {
+      return { kind: 'not-a-user-message', reason: `entry ${entryId} is not a user message; a fork starts at one` }
+    }
+    const prefill = userMessageText(entry.message.content)
+    // pi's `before`: the fork holds everything up to the message's parent — or nothing, naming its parent.
+    let fork: SessionManager
+    if (entry.parentId === null) {
+      fork = SessionManager.create(source.getCwd(), source.getSessionDir())
+      fork.newSession({ parentSession: located.path })
+    } else {
+      source.createBranchedSession(entry.parentId)
+      fork = source
+    }
+    writeUnflushedSession(fork)
+    return { kind: 'forked', threadId: fork.getSessionId(), prefill }
+  }
+
+  async function readStoredForkPoint(threadId: string): Promise<EnsoForkPoint | undefined> {
+    const located = await storedSession(threadId)
+    if (located === undefined) return undefined
+    return forkPointOf(SessionManager.open(located.path).getBranch(), {
+      threadId,
+      cwd: located.cwd,
+      parentThreadId: located.parentThreadId,
+    })
   }
 
   async function createSession(threadId: string, newSessionDirectory: () => string): Promise<HostedThread> {
@@ -1132,6 +1277,31 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
             if (!accepted) outcome.onRejected(error instanceof Error ? error.message : String(error))
           })
       },
+      continueRun(outcome: PromptOutcome): void {
+        // The run lifecycle's own two states a run cannot start in; the route's lease refuses a
+        // run it knows of first — this is the seam's lock. See the module header (#436).
+        if (session.isStreaming || session.isCompacting) {
+          outcome.onRejected('the thread is running; continue when it settles')
+          return
+        }
+        const lead = continuationLead(session.agent.state.messages)
+        if (lead === undefined) {
+          outcome.onRejected(NOTHING_TO_CONTINUE)
+          return
+        }
+        // ⚠⚠ The one cast onto pi's private run lifecycle — the module header says why. Checked
+        // BEFORE acceptance (PR #442 review): an `async` method can only fail synchronously by not
+        // being there, and a pi build without it must refuse, not answer 202 to a run that never starts.
+        const lifecycle = session as unknown as Partial<PiRunLifecycle>
+        if (typeof lifecycle._runAgentPrompt !== 'function') {
+          outcome.onRejected(NO_RUN_LIFECYCLE)
+          return
+        }
+        outcome.onAccepted()
+        void lifecycle._runAgentPrompt(lead).catch((error: unknown) => {
+          log.error('a continued run failed: {error}', { threadId, error })
+        })
+      },
       answerDialog(response: DialogAnswer): void {
         ui.answerDialog(response)
       },
@@ -1295,6 +1465,14 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       branchStats: () => branchStats(sessionManager.getBranch()),
       branchContext: () => branchContext(sessionManager.getBranch()),
       branchRequestDetail: (request: number | 'next') => branchRequestDetail(sessionManager.getBranch(), request),
+      async forkPoint(): Promise<EnsoForkPoint> {
+        const threadId = sessionManager.getSessionId()
+        return forkPointOf(sessionManager.getBranch(), {
+          threadId,
+          cwd: sessionManager.getCwd(),
+          parentThreadId: (await locate(threadId))?.parentThreadId,
+        })
+      },
       inspect(): HostedThreadInspection {
         // ⚠ `getSessionFile()` names the path pi WILL write, from creation — but pi flushes
         // lazily, holding every entry until the first assistant message. So the path is
@@ -1320,6 +1498,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     readStoredThreadStats,
     readStoredThreadContext,
     readStoredRequestDetail,
+    readStoredForkPoint,
+    forkThread,
     freshPermissionMode: freshPermissionModeState,
     storedPermissionMode: storedPermissionModeState,
   }
