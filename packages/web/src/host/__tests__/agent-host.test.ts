@@ -194,40 +194,69 @@ test("⚠ the agent dir's multi-account config is seeded — childProxy off, Ens
   })
 })
 
+/**
+ * multi-account's Cursor contract: the placeholder key a publication carries and the slot ids it is
+ * published under. Loaded by file path, as the #341 test below loads its proxy — the package's entry
+ * point would run the extension. A renamed key or id family goes red here instead of leaving stale
+ * slots in `models.json` unnoticed.
+ */
+const vendorCursor = (await import(
+  join(dirname(Bun.resolveSync('pi-multi-account/package.json', import.meta.dir)), 'cursor-bridge.ts')
+)) as { CURSOR_PROXY_PLACEHOLDER_KEY: string; isCursorProviderId: (id: string) => boolean }
+
 /** A Cursor slot as multi-account publishes it into `models.json` (`index.ts#provisionNativeSlot`). */
 const cursorPublication = (port: number): Record<string, unknown> => ({
   api: 'openai-completions',
   baseUrl: `http://127.0.0.1:${port}/v1`,
   models: [{ id: 'claude-4-sonnet' }],
-  apiKey: 'cursor-proxy',
+  apiKey: vendorCursor.CURSOR_PROXY_PLACEHOLDER_KEY,
 })
 
-test("⚠ with Cursor off, the Cursor slots multi-account published into pi's models.json are dropped — an operator's own entries, and an opted-in Cursor, are kept", () => {
+test("⚠ with Cursor off, the Cursor slots multi-account published into pi's models.json are dropped — an operator's overrides and own entries, and an opted-in Cursor, are kept", () => {
   const scratch = mkdtempSync(join(tmpdir(), 'enso-host-seed-cursor-'))
   const modelsPath = join(scratch, 'models.json')
   const ollama = { baseUrl: 'http://127.0.0.1:11434/v1', api: 'openai-completions', apiKey: 'ollama', models: [] }
-  // an operator's own `cursor-account-3`: same id family, but a key the vendor never writes
-  const ownCursor = { ...cursorPublication(4000), headers: { 'x-team': 'billing' } }
+  const overrides = { 'claude-4-sonnet': { contextWindow: 200_000 } }
+  // an operator's own Cursor-named provider: a real endpoint and key, not the vendor's loopback
+  const ownCursor = {
+    baseUrl: 'https://cursor.example.com/v1',
+    api: 'openai-completions',
+    apiKey: 'sk-own',
+    models: [],
+  }
+  // the vendor's shape under an id outside its slot family
+  const notASlot = cursorPublication(9123)
   const published = {
     note: 'kept',
     providers: {
       ollama,
       cursor: cursorPublication(9123),
-      'cursor-account-2': cursorPublication(9123),
+      'cursor-account-2': { ...cursorPublication(9123), modelOverrides: overrides },
       'cursor-account-3': ownCursor,
+      'cursor-account-x': notASlot,
     },
   }
+  expect(['cursor', 'cursor-account-2', 'cursor-account-x'].map(vendorCursor.isCursorProviderId)).toEqual([
+    true,
+    true,
+    false,
+  ])
   // opted in → nothing is touched
   writeFileSync(join(scratch, 'provider-failover.json'), JSON.stringify({ includeCursor: true }))
   writeFileSync(modelsPath, JSON.stringify(published))
   seedMultiAccountConfig(scratch)
   expect(JSON.parse(readFileSync(modelsPath, 'utf8'))).toEqual(published)
-  // off (as seeded) → the two publications go, everything else stays
+  // off (as seeded) → each publication's route goes, the operator's overrides and everything else stay
   writeFileSync(join(scratch, 'provider-failover.json'), JSON.stringify({ includeCursor: false }))
   seedMultiAccountConfig(scratch)
   expect(JSON.parse(readFileSync(modelsPath, 'utf8'))).toEqual({
     note: 'kept',
-    providers: { ollama, 'cursor-account-3': ownCursor },
+    providers: {
+      ollama,
+      'cursor-account-2': { modelOverrides: overrides },
+      'cursor-account-3': ownCursor,
+      'cursor-account-x': notASlot,
+    },
   })
   // a malformed registry is pi's to report, not a reason to fail host creation: seeded, file untouched
   writeFileSync(join(scratch, 'provider-failover.json'), '{}')

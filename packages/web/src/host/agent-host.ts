@@ -123,10 +123,11 @@ const log = ensoLogger('host')
  * picker, and as the default model #341 lost two hours to. Cursor is opt-in here: `"includeCursor":
  * true` in the file turns it back on and is kept. The vendor never removes a Cursor publication
  * (`dropOwnLoopbackPublications` skips them), so with Cursor off the seed also drops the ones it
- * left in `models.json` — only entries in exactly the shape it writes, never an operator's own. An
- * operator's `modelOverrides` on a Cursor slot are carried into each republication
- * (`index.ts#provisionNativeSlot`), so such an entry is not that shape and stays, listed: kept,
- * because nothing here deletes what an operator wrote.
+ * left in `models.json` — by the test the vendor applies to its other loopback publications
+ * (`slot-proxy.ts#isOwnLoopbackPublication`): the placeholder key against a loopback `baseUrl`. An
+ * operator's `modelOverrides`, which the vendor carries into every republication, are theirs and
+ * stay, as `{ modelOverrides }` alone (the vendor's own collapse; pi accepts an overrides-only
+ * entry, and for Cursor it offers no model); the route and its placeholder credential go.
  *
  * ⚠⚠ EVERY THREAD IS A MULTI-ACCOUNT ROOT: `PI_MULTI_ACCOUNT_INDEPENDENT_ROOTS=1` (#351).
  * pi-multi-account keeps ONE root session per process for terminal pi — a lease on
@@ -177,21 +178,14 @@ const MULTI_ACCOUNT_INCLUDE_CURSOR_KEY = 'includeCursor'
 const MULTI_ACCOUNT_AUTH_PATTERNS: readonly string[] = ['account is logged in for this request']
 
 /**
- * pi's provider registry in the agent dir, and how multi-account publishes a Cursor slot into it
- * (`cursor-bridge.ts#CURSOR_PROXY_PLACEHOLDER_KEY`): a Cursor slot id, the placeholder key, a
- * loopback `baseUrl`, and exactly the four keys its Cursor path hands `provisionNativeSlot`
- * (`index.ts`, `onProvision` in `refreshCursorSlots`) — never `compat`, which only other callers pass.
+ * pi's provider registry in the agent dir, and how multi-account publishes a Cursor slot into it:
+ * a Cursor slot id (`cursor-bridge.ts#isCursorProviderId`), the placeholder key
+ * (`cursor-bridge.ts#CURSOR_PROXY_PLACEHOLDER_KEY`) and a loopback `baseUrl`.
  */
 const PI_MODELS_FILENAME = 'models.json'
 const CURSOR_SLOT_ID = /^cursor(-account-\d+)?$/
 const CURSOR_PROXY_PLACEHOLDER_KEY = 'cursor-proxy'
 const CURSOR_LOOPBACK_PREFIX = 'http://127.0.0.1:'
-const CURSOR_PUBLICATION_KEYS: Readonly<Record<string, true>> = {
-  api: true,
-  baseUrl: true,
-  models: true,
-  apiKey: true,
-}
 
 /**
  * The host's own extension (see the module header): named so `loadedExtensionPaths` says what
@@ -487,25 +481,32 @@ export function seedMultiAccountConfig(agentDir: string): void {
     }
     writeFileSync(configPath, `${JSON.stringify(seeded, null, '\t')}\n`)
   }
-  // …and by truthiness (`if (!config.includeCursor)`), so this does too.
-  if (cursorUnset || !operatorCursor) dropCursorPublications(agentDir)
+  // …and by truthiness (`if (!config.includeCursor)`), so this does too — unset included.
+  if (!operatorCursor) dropCursorPublications(agentDir)
 }
 
-/** A `models.json` provider entry in exactly the shape multi-account publishes a Cursor slot in. */
-function isCursorPublication(providerId: string, entry: unknown): boolean {
+/** A `models.json` entry multi-account published for a Cursor slot: the placeholder key against a loopback `baseUrl`. */
+function isCursorPublication(providerId: string, entry: unknown): entry is Record<string, unknown> {
   if (!CURSOR_SLOT_ID.test(providerId) || typeof entry !== 'object' || entry === null) return false
   const record = entry as Record<string, unknown>
   return (
     record.apiKey === CURSOR_PROXY_PLACEHOLDER_KEY &&
     typeof record.baseUrl === 'string' &&
-    record.baseUrl.startsWith(CURSOR_LOOPBACK_PREFIX) &&
-    Object.keys(record).every((key) => Object.hasOwn(CURSOR_PUBLICATION_KEYS, key))
+    record.baseUrl.startsWith(CURSOR_LOOPBACK_PREFIX)
   )
 }
 
+/** What of a Cursor publication is the operator's: its `modelOverrides`, when there are any. */
+function operatorOverlay(publication: Record<string, unknown>): { modelOverrides: object } | undefined {
+  const overrides = publication.modelOverrides
+  if (typeof overrides !== 'object' || overrides === null || Array.isArray(overrides)) return undefined
+  return Object.keys(overrides).length > 0 ? { modelOverrides: overrides } : undefined
+}
+
 /**
- * Remove multi-account's Cursor publications from pi's `models.json` — see the module header. Every
- * other provider and key is kept verbatim; the file is written only when something was removed.
+ * Remove multi-account's Cursor publications from pi's `models.json` — see the module header: each
+ * route goes, an operator's `modelOverrides` stay. Every other provider and key is kept verbatim;
+ * the file is written only when a publication was found.
  */
 function dropCursorPublications(agentDir: string): void {
   const modelsPath = join(agentDir, PI_MODELS_FILENAME)
@@ -522,8 +523,12 @@ function dropCursorPublications(agentDir: string): void {
   const providers = models.providers
   if (typeof providers !== 'object' || providers === null || Array.isArray(providers)) return
   const entries = Object.entries(providers)
-  const kept = entries.filter(([providerId, entry]) => !isCursorPublication(providerId, entry))
-  if (kept.length === entries.length) return
+  if (!entries.some(([providerId, entry]) => isCursorPublication(providerId, entry))) return
+  const kept = entries.flatMap(([providerId, entry]): [string, unknown][] => {
+    if (!isCursorPublication(providerId, entry)) return [[providerId, entry]]
+    const overlay = operatorOverlay(entry)
+    return overlay === undefined ? [] : [[providerId, overlay]]
+  })
   // Staged and renamed over, as the vendor writes it: pi never reads a half-written registry.
   const staging = `${modelsPath}.enso.tmp`
   writeFileSync(staging, `${JSON.stringify({ ...models, providers: Object.fromEntries(kept) }, null, 2)}\n`, {
