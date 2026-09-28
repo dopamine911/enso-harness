@@ -197,6 +197,43 @@ test('⚠ adopting a branch that ends inside a turn opens with a warning that sa
   expect(settled.notifications.get()).toEqual([])
 })
 
+test('⚠ the torn-tail notice offers Continue once: pressing it posts …/continue, and a refusal is said as a line (#436)', async () => {
+  const posted: string[] = []
+  const torn = adoptThread(
+    {
+      threadId: 'torn-2',
+      projectId: 'p-launch',
+      messages: [],
+      permissionMode: { mode: 'default', available: [] },
+      interrupted: 'tool-call-without-result',
+    },
+    (input: string, init?: RequestInit) => {
+      posted.push(`${init?.method} ${input}`)
+      return Promise.resolve(new Response('nothing to continue: the thread ends on a reply', { status: 422 }))
+    },
+  )
+  const [notice] = torn.notifications.get()
+  expect(notice?.message).toContain('Continue picks up from there')
+  expect(notice?.message).toContain('or send a new prompt')
+  const action = torn.notifications.takeAction(notice?.id ?? -1)
+  expect(action?.label).toBe('Continue')
+  // One-shot: taken off the line, so a second press has nothing to run.
+  expect(torn.notifications.takeAction(notice?.id ?? -1)).toBeUndefined()
+  expect(torn.notifications.get()[0]?.action).toBeUndefined()
+
+  const said = Promise.withResolvers<void>()
+  torn.notifications.subscribe(() => {
+    if (torn.notifications.get().length > 1) said.resolve()
+  })
+  action?.run()
+  await said.promise
+  expect(posted).toEqual(['POST /api/threads/torn-2/continue'])
+  expect(torn.notifications.get()[1]).toMatchObject({
+    message: expect.stringContaining('nothing to continue: the thread ends on a reply'),
+    notifyType: 'warning',
+  })
+})
+
 test('history revival drops malformed rows and invalid dates instead of handing them to TanStack', () => {
   const revived = reviveHistoryMessages([
     null,

@@ -192,6 +192,20 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     logs: 'yes',
     factory: { path: FOLLOW_PATH, declaration: 'export async function forkThreadAt' },
   },
+  THREAD_CONTINUE_ROUTE: {
+    method: 'POST',
+    path: '/api/threads/:threadId/continue',
+    handler: 'respondToContinue → continueThread → ThreadRuntime.continueRun',
+    input: 'path: `threadId`; no body',
+    success:
+      '202 empty — the torn tail is continued from the stored state with no new user message; the run arrives on the follow and its `settled` releases the thread',
+    errors:
+      '400 malformed thread id; 403 untrusted origin; 409 thread busy; 422 nothing to continue — the thread does not end on an unanswered prompt or an unfinished tool call; 500 handler failure',
+    routeClass: 'control',
+    builds: 'yes',
+    logs: 'yes',
+    factory: { path: FOLLOW_PATH, declaration: 'export async function continueThread' },
+  },
   PROJECT_ROUTE: {
     method: 'DELETE',
     path: '/api/projects/:projectId',

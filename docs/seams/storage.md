@@ -264,8 +264,9 @@ export const EnsoThreadHistory = Type.Object(
  * result — the server died mid-run, or the run was cut before the reply.
  *
  * Derived on read from the branch, never written to pi's file: deepseek-harness appends a
- * synthetic `turn/end { interrupted }` on resume repair; here the report is the repair, and the
- * next prompt continues from the torn tail as pi would.
+ * synthetic `turn/end { interrupted }` on resume repair; here the report is the repair. The
+ * browser offers Continue on it (#436: `POST …/continue` runs from exactly the stored state, and
+ * closes an orphan call with an error result first); the next prompt also continues from the tail.
  *
  * Never said of a thread whose run is still going here (#412): pi parked on a question ends its
  * branch on the call with no result yet, by construction, and that run has not torn.

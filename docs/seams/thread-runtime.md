@@ -26,6 +26,13 @@ export const ThreadRuntime = Type.Object({
     Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
   ),
   /**
+   * Continue a torn thread from exactly its stored state (#436): no new user message. Shaped like
+   * `prompt` — fire-and-forget, acceptance through `outcome`, completion the thread's own
+   * `settled`. Rejected before anything runs when a run is in flight or the stored tail is not
+   * one a run can continue from (a completed reply); the reason says which.
+   */
+  continueRun: Type.Unsafe<(outcome: PromptOutcome) => void>(Type.Function([Type.Unknown()], Type.Void())),
+  /**
    * Deliver a human's answer (or cancellation) to a pending blocking dialog. Never throws:
    * an unknown or already-settled id is reported through the host's problem channel, so
    * callers do not wrap this in a try/catch.

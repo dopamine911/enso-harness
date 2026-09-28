@@ -249,15 +249,20 @@ function createThreadStores(
 
 /**
  * What a resumed thread says about a turn that never settled (#109) — a durable line at
- * the head of the transcript's notices, never a toast, because the next prompt continues
- * from the torn tail and the user should know that before typing it.
+ * the head of the transcript's notices, never a toast, because the torn tail is where the
+ * thread stands and the user should know that before typing. Its action is **Continue**
+ * (#436): the run picks up from exactly the stored state, with no new user message; a new
+ * prompt stays the alternative, and also continues from the tail.
  */
 const INTERRUPTED_TAIL_NOTICE: Record<EnsoInterruptedTail, string> = {
   'unanswered-prompt':
-    "This session's last prompt was never answered — its run was cut off before a reply. The next prompt continues from there.",
+    "This session's last prompt was never answered — its run was cut off before a reply. Continue picks up from there without a new message, or send a new prompt.",
   'tool-call-without-result':
-    "This session's last turn ended mid-tool-call — the result never arrived. The next prompt continues from there.",
+    "This session's last turn ended mid-tool-call — the result never arrived. Continue picks up from there (the lost result is recorded as an error), or send a new prompt.",
 }
+
+/** The interrupted-tail notice's action (#436): post Continue; the run arrives on the follow, a refusal as a line. */
+const CONTINUE_LABEL = 'Continue'
 
 // ── the page's threads ────────────────────────────────────────────────────────
 
@@ -473,7 +478,13 @@ export function adoptThread(history: EnsoThreadHistory, fetchImpl?: FetchLike, i
   })
   stores.permissionMode.applyReceipt(history.permissionMode)
   if (history.interrupted !== undefined) {
-    stores.notifications.push(INTERRUPTED_TAIL_NOTICE[history.interrupted], 'warning', 'run', ENSO_NOTICE_SOURCE)
+    stores.notifications.pushWithAction({
+      message: INTERRUPTED_TAIL_NOTICE[history.interrupted],
+      notifyType: 'warning',
+      origin: 'run',
+      source: ENSO_NOTICE_SOURCE,
+      action: { label: CONTINUE_LABEL, run: () => void stores.connection.continueRun() },
+    })
   }
   threads.set(stores.threadId, stores)
   summaries.set(stores.threadId, {

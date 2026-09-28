@@ -445,6 +445,39 @@ test('⚠ a mode change while the thread is busy is a 409 — not queued behind 
   fake.emit(SETTLED)
 })
 
+// ── continue: a torn thread resumed from its stored state (#436) ─────────────────────
+
+test("⚠ POST …/continue takes the thread and is released by the run's settle; while it runs a second is a 409 (#436)", async () => {
+  const fake = fakeHost()
+  const url = await startWith(fake)
+  const accepted = await fetch(`${url}/api/threads/t1/continue`, { method: 'POST' })
+  expect(accepted.status).toBe(202)
+  expect(fake.built[0]?.continues).toBe(1)
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: true, generation: 1 })
+
+  const busy = await fetch(`${url}/api/threads/t1/continue`, { method: 'POST' })
+  expect(busy.status).toBe(409)
+  expect(await busy.text()).toContain('is running')
+  expect(fake.built[0]?.continues).toBe(1)
+
+  fake.emit(SETTLED)
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: false, generation: 1 })
+})
+
+test('a continue the runtime refuses is a 422 with its reason, and the thread is released at once (#436)', async () => {
+  const fake = fakeHost([], {
+    continueRun: (outcome: PromptOutcome) => outcome.onRejected('nothing to continue: the thread ends on a reply'),
+  })
+  const url = await startWith(fake)
+  const refused = await fetch(`${url}/api/threads/t1/continue`, { method: 'POST' })
+  expect(refused.status).toBe(422)
+  expect(await refused.text()).toBe('nothing to continue: the thread ends on a reply')
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: false })
+  // Released, not stuck: a prompt takes the thread next.
+  expect((await prompt(url, 't1', 'hello')).status).toBe(202)
+  fake.emit(SETTLED)
+})
+
 // ── 2. a dialog parks nothing ─────────────────────────────────────────────────────────
 
 test('⚠ a blocking dialog is an observation on the follow and a unary answer back — nothing parks, nothing expires', async () => {

@@ -30,6 +30,7 @@ import {
   seedMultiAccountConfig,
   stopRunSettlingDialogs,
 } from '../agent-host.ts'
+import { LOST_TOOL_RESULT_TEXT, NOTHING_TO_CONTINUE } from '../continuation.ts'
 import { readPiccPersistedMode, storedPermissionModeState } from '../permission-mode-adapter.ts'
 
 /**
@@ -1132,6 +1133,8 @@ interface FauxModule {
     streamSimple: NonNullable<ProviderConfig['streamSimple']>
     getModel(): Parameters<ExtensionAPI['setModel']>[0]
     setResponses(responses: unknown[]): void
+    /** How many requests the provider has answered. */
+    readonly state: { readonly callCount: number }
   }
   fauxAssistantMessage(content: unknown, options?: { stopReason?: string; errorMessage?: string }): unknown
   fauxToolCall(name: string, arguments_: Record<string, unknown>): unknown
@@ -1873,4 +1876,205 @@ test('⚠ two forks of one thread, one of them run under a changed context file,
   expect(changedPoint.conditions).toEqual({ ...plainPoint.conditions, runContext: changedContext })
   // A thread held nowhere has no fork point; nothing is built to answer.
   expect(await host.readStoredForkPoint('never-stored')).toBeUndefined()
+})
+
+// ── Continue on a torn tail (#436) ───────────────────────────────────────────
+// ⚠⚠ THESE PIN pi'S PRIVATE RUN LIFECYCLE. `continueRun` calls `AgentSession._runAgentPrompt`
+// through one cast (the host's module header): a pi bump that renames or reshapes it — or a raw
+// `agent.continue()` in its place, which never settles and leaves `isStreaming` false — goes red here.
+
+/** A stored assistant reply: text, then any tool calls — the shape a killed run leaves on disk. */
+function storedReply(text: string, calls: ReadonlyArray<{ id: string; name: string; arguments: object }> = []): never {
+  return {
+    role: 'assistant',
+    content: [{ type: 'text', text }, ...calls.map((call) => ({ type: 'toolCall', ...call }))],
+    api: 'anthropic-messages',
+    provider: 'anthropic',
+    model: 'test',
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: calls.length === 0 ? 'stop' : 'toolUse',
+    timestamp: Date.now(),
+  } as never
+}
+
+/** A cold thread whose last run was cut off as `tail` says: one whole turn, then the torn one. */
+function storeTornThread(tail: 'unanswered-prompt' | 'tool-call-without-result' | 'complete'): {
+  threadId: string
+  file: string
+} {
+  const threadId = crypto.randomUUID()
+  const { file } = storeTurns(threadId, [['first question', 'first answer']])
+  const stored = SessionManager.open(file)
+  if (tail === 'complete') return { threadId, file }
+  stored.appendMessage({ role: 'user', content: 'second question', timestamp: Date.now() })
+  if (tail === 'tool-call-without-result') {
+    stored.appendMessage(
+      storedReply('reading it', [{ id: 'call-torn', name: 'read', arguments: { path: 'package.json', limit: 1 } }]),
+    )
+  }
+  return { threadId, file }
+}
+
+/** What a faux request was sent: each message's role and its text. */
+type SentContext = { messages: Array<{ role: string; content: unknown }> }
+function textOf(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((part: { type?: string; text?: string }) => (part.type === 'text' ? (part.text ?? '') : ''))
+    .join('')
+}
+
+/** The stored branch of `file` as `role[isError]: text` lines — messages only, tool results included. */
+function storedMessages(file: string): string[] {
+  return SessionManager.open(file)
+    .getBranch()
+    .flatMap((entry) => {
+      if (entry.type !== 'message') return []
+      const { message } = entry
+      if (message.role === 'toolResult')
+        return [`toolResult${message.isError ? '[isError]' : ''}: ${textOf(message.content)}`]
+      if (message.role !== 'user' && message.role !== 'assistant') return []
+      return [`${message.role}: ${textOf(message.content)}`]
+    })
+}
+
+/** A cold thread opened by a fresh host under the faux provider — the rail's resume path. */
+async function resumeTorn(threadId: string, core: FauxCore): Promise<HostedThread> {
+  const hosted = await hostWith([fauxModelExtension(core)]).createSession(threadId, () => repoRoot)
+  openSessions.push(hosted)
+  return hosted
+}
+
+test('⚠⚠ Continue answers an unanswered prompt from the stored state: one copy of the prompt, one settled after run-ended, and a prompt enqueued mid-run is answered in the same run (#436)', async () => {
+  const { threadId, file } = storeTornThread('unanswered-prompt')
+  const core = createFauxCore()
+  const asked = Promise.withResolvers<SentContext>()
+  const gate = Promise.withResolvers<void>()
+  core.setResponses([
+    async (context: SentContext) => {
+      asked.resolve(context)
+      await gate.promise
+      return faux.fauxAssistantMessage('continued answer')
+    },
+    faux.fauxAssistantMessage('answer to what was typed'),
+  ])
+  const hosted = await resumeTorn(threadId, core)
+  const seen: EnsoObservation[] = []
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.subscribe((observation) => {
+    seen.push(observation)
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  let accepted = false
+  hosted.runtime.continueRun({ onAccepted: () => (accepted = true), onRejected: settled.reject })
+  expect(accepted).toBe(true)
+
+  // The model sees the stored context exactly: the unanswered prompt last, once, and nothing new.
+  const sent = await asked.promise
+  const userTexts = sent.messages.filter((message) => message.role === 'user').map((message) => textOf(message.content))
+  expect(userTexts).toEqual(['first question', 'second question'])
+  // pi's own system messages (instructions, not turns) may trail it; the last TURN is the prompt.
+  expect(sent.messages.filter((message) => message.role !== 'system').at(-1)?.role).toBe('user')
+
+  // Mid-run the thread is RUNNING to pi: a prompt is queued behind the run, not lost.
+  const queued = Promise.withResolvers<void>()
+  hosted.runtime.prompt(
+    { message: 'typed during continue', admission: 'enqueue' },
+    { onAccepted: queued.resolve, onRejected: queued.reject },
+  )
+  await queued.promise
+  gate.resolve()
+  await settled.promise
+  await nextTick()
+
+  const kinds = seen.map((observation) => observation.kind)
+  expect(kinds.filter((kind) => kind === 'settled')).toHaveLength(1)
+  expect(kinds.indexOf('settled')).toBeGreaterThan(kinds.lastIndexOf('run-ended'))
+  expect(kinds).toContain('run-ended')
+  const messages = storedMessages(file)
+  expect(messages.filter((line) => line === 'user: second question')).toHaveLength(1)
+  expect(messages.slice(-4)).toEqual([
+    'user: second question',
+    'assistant: continued answer',
+    'user: typed during continue',
+    'assistant: answer to what was typed',
+  ])
+})
+
+test('⚠ Continue closes a tool call left without its result with an error result, then runs on (#436)', async () => {
+  const { threadId, file } = storeTornThread('tool-call-without-result')
+  const core = createFauxCore()
+  const asked = Promise.withResolvers<SentContext>()
+  core.setResponses([
+    (context: SentContext) => {
+      asked.resolve(context)
+      return faux.fauxAssistantMessage('continuing after the lost result')
+    },
+  ])
+  const hosted = await resumeTorn(threadId, core)
+  const settled = Promise.withResolvers<void>()
+  hosted.runtime.subscribe((observation) => {
+    if (observation.kind === 'settled') settled.resolve()
+  })
+  hosted.runtime.continueRun({ onAccepted: () => undefined, onRejected: settled.reject })
+  const turns = (await asked.promise).messages.filter((message) => message.role !== 'system')
+  expect(turns.at(-1)?.role).toBe('toolResult')
+  await settled.promise
+  expect(storedMessages(file).slice(-4)).toEqual([
+    'user: second question',
+    'assistant: reading it',
+    `toolResult[isError]: ${LOST_TOOL_RESULT_TEXT}`,
+    'assistant: continuing after the lost result',
+  ])
+})
+
+test('⚠ a thread that ends on a reply is refused — nothing runs, nothing is written (#436)', async () => {
+  const { threadId, file } = storeTornThread('complete')
+  const core = createFauxCore()
+  core.setResponses([faux.fauxAssistantMessage('a second answer to nothing')])
+  const hosted = await resumeTorn(threadId, core)
+  const seen = collectEvents(hosted)
+  const before = readFileSync(file, 'utf8')
+  const refusals: string[] = []
+  hosted.runtime.continueRun({
+    onAccepted: () => refusals.push('accepted'),
+    onRejected: (reason) => refusals.push(reason),
+  })
+  await nextTick()
+  expect(refusals).toEqual([NOTHING_TO_CONTINUE])
+  expect(readFileSync(file, 'utf8')).toBe(before)
+  expect(seen.filter((observation) => observation.kind === 'turn-start' || observation.kind === 'settled')).toEqual([])
+  expect(core.state.callCount).toBe(0)
+})
+
+test('Continue on a thread that is running is refused; the run in flight is untouched (#436)', async () => {
+  const core = createFauxCore()
+  const gate = Promise.withResolvers<void>()
+  const asked = Promise.withResolvers<void>()
+  core.setResponses([
+    async () => {
+      asked.resolve()
+      await gate.promise
+      return faux.fauxAssistantMessage('done')
+    },
+  ])
+  const hosted = await hostedSession([fauxModelExtension(core)])
+  const run = runPrompt(hosted, 'hi')
+  await asked.promise
+  const refusals: string[] = []
+  hosted.runtime.continueRun({
+    onAccepted: () => refusals.push('accepted'),
+    onRejected: (reason) => refusals.push(reason),
+  })
+  expect(refusals).toEqual(['the thread is running; continue when it settles'])
+  gate.resolve()
+  await run
 })

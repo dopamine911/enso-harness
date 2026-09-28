@@ -28,6 +28,7 @@ import {
   answerThreadDialog,
   changeThreadMode,
   configureThread,
+  continueThread,
   type FollowRouteDeps,
   followThread,
   forkThreadAt,
@@ -81,6 +82,8 @@ const THREAD_COMMAND_ROUTE = /^\/api\/threads\/([^/?#]+)\/command$/
 const THREAD_CONFIGURE_ROUTE = /^\/api\/threads\/([^/?#]+)\/configure$/
 /** `POST …/fork` (#433): fork the thread at one of its user messages — a new thread naming this one as its parent. */
 const THREAD_FORK_ROUTE = /^\/api\/threads\/([^/?#]+)\/fork$/
+/** `POST …/continue` (#436): continue a torn thread from its stored state — no new prompt. */
+const THREAD_CONTINUE_ROUTE = /^\/api\/threads\/([^/?#]+)\/continue$/
 /** `DELETE /api/projects/<projectId>` (#395) — the id is sixteen hex digits, so it needs no decoding. */
 const PROJECT_ROUTE = /^\/api\/projects\/([0-9a-f]{16})$/
 
@@ -735,6 +738,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_COMMAND_ROUTE, respond: respondToHostCommand },
     { method: 'POST', route: THREAD_CONFIGURE_ROUTE, respond: respondToConfigure },
     { method: 'POST', route: THREAD_FORK_ROUTE, respond: respondToFork },
+    { method: 'POST', route: THREAD_CONTINUE_ROUTE, respond: idOnly(respondToContinue) },
     {
       method: 'POST',
       route: THREAD_ABORT_ROUTE,
@@ -852,6 +856,19 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     })
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify(outcome.receipt))
+  }
+
+  /** No body: the thread id is the whole request (#436). The run arrives on the follow. */
+  async function respondToContinue(threadId: string, response: ServerResponse): Promise<void> {
+    const outcome = await continueThread(followDeps, threadId)
+    if (outcome.status !== 202) {
+      log.warn('continue refused ({status}): {reason}', { threadId, status: outcome.status, reason: outcome.reason })
+      refuseWith(response, outcome)
+      return
+    }
+    log.info('continue accepted', { threadId })
+    response.writeHead(202)
+    response.end()
   }
 
   async function respondToDialog(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
