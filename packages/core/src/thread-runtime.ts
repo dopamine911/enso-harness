@@ -107,6 +107,31 @@ export const EnsoModelState = Type.Object({
 export type EnsoModelState = Static<typeof EnsoModelState>
 
 /**
+ * What a stored thread's branch RECORDS it last ran on (#434): the last `model_change` and the
+ * last `thinking_level_change` on the path to the leaf — the values pi restores when the session
+ * is opened. Not an `EnsoModelState`: nothing is built for a cold read (#86), so there is no
+ * display name and no available levels, and the page labels it recorded, not live. A half the
+ * branch never recorded is `null`; a branch that records neither has no recorded model at all.
+ *
+ * @group Thread runtime
+ */
+export const EnsoRecordedModel = Type.Object(
+  {
+    model: Type.Union([
+      Type.Object(
+        { provider: Type.String({ minLength: 1 }), modelId: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+      Type.Null(),
+    ]),
+    thinkingLevel: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
+  },
+  { additionalProperties: false },
+)
+/** @group Thread runtime */
+export type EnsoRecordedModel = Static<typeof EnsoRecordedModel>
+
+/**
  * How full the context window is, as pi reckons it (#45): pi's `getContextUsage()`, never a
  * number of ours. `tokens` is pi's estimate — the latest assistant request's usage plus what
  * has been added since — and `null` right after a compaction, until the next response says.
@@ -353,6 +378,13 @@ export const ThreadRuntime = Type.Object({
   prompt: Type.Unsafe<(request: PromptRequest, outcome: PromptOutcome) => void>(
     Type.Function([Type.Unknown(), Type.Unknown()], Type.Void()),
   ),
+  /**
+   * Continue a torn thread from exactly its stored state (#436): no new user message. Shaped like
+   * `prompt` — fire-and-forget, acceptance through `outcome`, completion the thread's own
+   * `settled`. Rejected before anything runs when a run is in flight or the stored tail is not
+   * one a run can continue from (a completed reply); the reason says which.
+   */
+  continueRun: Type.Unsafe<(outcome: PromptOutcome) => void>(Type.Function([Type.Unknown()], Type.Void())),
   /**
    * Deliver a human's answer (or cancellation) to a pending blocking dialog. Never throws:
    * an unknown or already-settled id is reported through the host's problem channel, so

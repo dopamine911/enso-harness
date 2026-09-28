@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import type {
+  EnsoForkPoint,
   EnsoLogLine,
   EnsoThreadEvent,
   EnsoThreadEvents,
@@ -92,6 +93,7 @@ interface RenderOverrides {
   readonly copyState?: CopyState
   readonly bundleState?: BundleState
   readonly events?: EnsoThreadEvents
+  readonly manifest?: EnsoForkPoint
 }
 
 const renderWith = ({
@@ -101,6 +103,7 @@ const renderWith = ({
   copyState = 'idle',
   bundleState = 'idle',
   events,
+  manifest,
 }: RenderOverrides): string =>
   renderToStaticMarkup(
     <ThreadDebugView
@@ -108,6 +111,7 @@ const renderWith = ({
       browser={browser}
       inspection={session}
       events={events}
+      manifest={manifest}
       error={error}
       copyState={copyState}
       bundleState={bundleState}
@@ -116,6 +120,39 @@ const renderWith = ({
       onBundle={noop}
     />,
   )
+
+// #435: the fork point, identity first, then what the thread runs under — hashes shortened.
+test('the fork point lists identity, then the conditions and the run context it records', () => {
+  const point: EnsoForkPoint = {
+    identity: { threadId: 'fork-1', leafEntryId: 'e9', parentThreadId: 'source-1' },
+    conditions: {
+      model: { provider: 'anthropic', modelId: 'claude-x' },
+      thinkingLevel: 'high',
+      mode: 'plan',
+      cwd: '/repo',
+      runContext: {
+        git: { revision: 'a'.repeat(40), dirty: true },
+        config: { hash: 'b'.repeat(64), sources: ['/home/u/.enso/config.json'] },
+        skills: [{ name: 'tdd', path: '/skills/tdd/SKILL.md' }],
+        contextFiles: [{ path: '/repo/AGENTS.md', sha256: 'c'.repeat(64) }],
+        mode: { rulesHash: 'd'.repeat(64) },
+      },
+    },
+  }
+  const rendered = renderWith({ browser: believing('plan'), inspection: undefined, manifest: point })
+  const order = ['fork-1', 'source-1', 'anthropic/claude-x', 'high', '/repo', `${'a'.repeat(12)} dirty`]
+  const positions = order.map((text) => rendered.indexOf(text))
+  expect(positions.every((position) => position >= 0)).toBe(true)
+  expect(positions).toEqual([...positions].sort((first, second) => first - second))
+  expect(rendered).toContain(`/repo/AGENTS.md ${'c'.repeat(12)}`)
+  expect(rendered).not.toContain('c'.repeat(13))
+  const fresh = renderWith({
+    browser: believing('plan'),
+    inspection: undefined,
+    manifest: { ...point, conditions: { ...point.conditions, runContext: null } },
+  })
+  expect(fresh).toContain('none recorded yet')
+})
 
 // ── the mismatch highlight ───────────────────────────────────────────────────
 

@@ -58,6 +58,7 @@ const MODULE_FACTS: Readonly<Record<string, readonly [classification: Classifica
   'permission-mode.ts': ['config/policy', 'Permission'],
   'project.ts': ['wire', 'Thread, Permission'],
   'provider-refusal.ts': ['wire', 'Observation, Record'],
+  'run-context.ts': ['wire', 'Thread, Record'],
   'secrets.ts': ['node-only utility', 'Permission'],
   'thread-inspection.ts': ['wire', 'Thread, Observation'],
   'thread-timeline.ts': ['wire', 'Thread, Observation, Record'],

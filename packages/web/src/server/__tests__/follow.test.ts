@@ -22,6 +22,7 @@ import { takeFirstDeltaMs } from '../run-timing.ts'
 import {
   createFakeAgentHost,
   createFakeHostedThread,
+  type FakeStoredThread,
   type FakeThreadParts,
   type FakeThreadRecord,
 } from './fake-hosted-thread.ts'
@@ -45,8 +46,15 @@ interface FakeHost {
   readonly accept: () => void
 }
 
-/** `overrides`: a test's own answer for one runtime method, over the fake's recording default (L3 step C). */
-function fakeHost(commands: string[] = ['mode'], overrides: Partial<ThreadRuntime> = {}): FakeHost {
+/**
+ * `overrides`: a test's own answer for one runtime method, over the fake's recording default (L3 step C).
+ * `stored`: session files the host lists — a continue needs one to exist (PR #442 review).
+ */
+function fakeHost(
+  commands: string[] = ['mode'],
+  overrides: Partial<ThreadRuntime> = {},
+  stored: Record<string, FakeStoredThread> = {},
+): FakeHost {
   const built: FakeThreadRecord[] = []
   let emit: (observation: EnsoObservation) => void = () => undefined
   let accept: () => void = () => undefined
@@ -66,7 +74,7 @@ function fakeHost(commands: string[] = ['mode'], overrides: Partial<ThreadRuntim
     built.push(fake.record)
     emit = fake.emit
     return Promise.resolve(fake.hosted)
-  })
+  }, stored)
   return { host, built, emit: (observation: EnsoObservation) => emit(observation), accept: () => accept() }
 }
 
@@ -443,6 +451,73 @@ test('⚠ a mode change while the thread is busy is a 409 — not queued behind 
   expect(busy.status).toBe(409)
   expect(fake.built[0]?.modeChanges).toEqual([])
   fake.emit(SETTLED)
+})
+
+// ── continue: a torn thread resumed from its stored state (#436) ─────────────────────
+
+/** A stored thread cut off after its prompt — what a continue is for. */
+const TORN: Record<string, FakeStoredThread> = {
+  t1: { transcript: [], modified: new Date(0), firstMessage: 'the question' },
+}
+
+test("⚠ POST …/continue takes the thread and is released by the run's settle; while it runs a second is a 409 (#436)", async () => {
+  const fake = fakeHost(['mode'], {}, TORN)
+  const url = await startWith(fake)
+  const accepted = await fetch(`${url}/api/threads/t1/continue`, { method: 'POST' })
+  expect(accepted.status).toBe(202)
+  expect(fake.built[0]?.continues).toBe(1)
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: true, generation: 1 })
+
+  const busy = await fetch(`${url}/api/threads/t1/continue`, { method: 'POST' })
+  expect(busy.status).toBe(409)
+  expect(await busy.text()).toContain('is running')
+  expect(fake.built[0]?.continues).toBe(1)
+
+  fake.emit(SETTLED)
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: false, generation: 1 })
+})
+
+test('a continue the runtime refuses is a 422 with its reason, and the thread is released at once (#436)', async () => {
+  const fake = fakeHost(
+    [],
+    { continueRun: (outcome: PromptOutcome) => outcome.onRejected('nothing to continue: the thread ends on a reply') },
+    TORN,
+  )
+  const url = await startWith(fake)
+  const refused = await fetch(`${url}/api/threads/t1/continue`, { method: 'POST' })
+  expect(refused.status).toBe(422)
+  expect(await refused.text()).toBe('nothing to continue: the thread ends on a reply')
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: false })
+  // Released, not stuck: a prompt takes the thread next.
+  expect((await prompt(url, 't1', 'hello')).status).toBe(202)
+  fake.emit(SETTLED)
+})
+
+test('a continue whose runtime faults before accepting or refusing is a 500, and the thread is not left held (#436, PR #442 review)', async () => {
+  const fake = fakeHost(
+    [],
+    {
+      continueRun: () => {
+        throw new TypeError('lifecycle._runAgentPrompt is not a function')
+      },
+    },
+    TORN,
+  )
+  const url = await startWith(fake)
+  const faulted = await fetch(`${url}/api/threads/t1/continue`, { method: 'POST' })
+  expect(faulted.status).toBe(500)
+  expect(await threadSummary(url, 't1')).toMatchObject({ busy: false })
+  expect((await prompt(url, 't1', 'hello')).status).toBe(202)
+  fake.emit(SETTLED)
+})
+
+test('a continue of a thread neither live nor stored is a 404, and nothing is built (#436, PR #442 review)', async () => {
+  const fake = fakeHost()
+  const url = await startWith(fake)
+  const missing = await fetch(`${url}/api/threads/nowhere/continue`, { method: 'POST' })
+  expect(missing.status).toBe(404)
+  expect(await missing.text()).toBe('no thread nowhere to continue')
+  expect(fake.built).toEqual([])
 })
 
 // ── 2. a dialog parks nothing ─────────────────────────────────────────────────────────

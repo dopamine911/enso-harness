@@ -105,8 +105,10 @@ export const EnsoFollowSnapshot = Type.Object(
     /** See `EnsoThreadSummary.generation`. */
     generation: Type.Integer({ minimum: 0 }),
     permissionMode: EnsoPermissionModeState,
-    /** The session's model and thinking level (#338 slice 2); `null` when the thread is not live — a stored thread does not say. */
+    /** The session's model and thinking level (#338 slice 2); `null` when the thread is not live — nothing is built to say what pi would run. */
     model: Type.Union([EnsoModelState, Type.Null()]),
+    /** What a NOT-live thread's branch records it last ran on (#434); absent when live, or when the branch records neither. */
+    recordedModel: Type.Optional(EnsoRecordedModel),
     /**
      * The tree pi reads and writes for this thread (#44), AS OF THIS SNAPSHOT — the live session's
      * own cwd; when the thread is not live, the stored session's (pi fixed it at creation); and
@@ -178,7 +180,7 @@ is assigned: `publishObservation` (line 354) increments the feed's counter, reco
 payload), then publishes. The feed subscribes the runtime once per live thread and routes every event
 through the mapper (lines 332–334); the prompt route's `announce` (line 516) enters the same counter.
 
-**Consumed by the follow route and the browser.** `followThread` (`server/follow.ts` line 156) writes
+**Consumed by the follow route and the browser.** `followThread` (`server/follow.ts` line 161) writes
 one frame per feed frame — `observation` with its `seq`, `status` with `live`/`busy`/`generation`
 (lines 160–170) — after a snapshot taken in the same tick as the subscription, exact as of `asOfSeq`
 (lines 146–150, 178–189). In the browser `packages/web/src/follow-connection.ts` checks every frame

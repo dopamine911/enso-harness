@@ -82,7 +82,7 @@ import type { EnsoRendererMap } from './EnsoToolResult.tsx'
 import { createFixtureChat, fixtureFetch } from './fixture-conversation.ts'
 import type { DialogAnswerOutcome, FollowConnection } from './follow-connection.ts'
 import { ForkContext, forkFromPage } from './fork-thread.ts'
-import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState } from './model-state.tsx'
+import { ModelChip, ModelChoiceDialog, ThinkingLevelSelect, useModelState, useRecordedModel } from './model-state.tsx'
 import { ThreadNotifications } from './notifications.tsx'
 import { PermissionModeSelect, usePermissionMode } from './permission-mode.tsx'
 import { createProjectsStore, projectOf, removeProject } from './project-list.ts'
@@ -417,10 +417,11 @@ function PermissionModeControl(): React.ReactNode {
  */
 function ModelControls({ onHost, onOpenModelDialog }: HostCommandHandlers): React.ReactNode {
   const state = useModelState()
+  const recorded = useRecordedModel()
   return (
     <>
       <ThinkingLevelSelect state={state} onSelect={(level: string): void => onHost('thinking', level)} />
-      <ModelChip state={state} onOpen={(): void => onOpenModelDialog('model')} />
+      <ModelChip state={state} recorded={recorded} onOpen={(): void => onOpenModelDialog('model')} />
     </>
   )
 }

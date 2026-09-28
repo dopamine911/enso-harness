@@ -176,6 +176,7 @@ export {
   providerStatusOf,
   readEnsoProviderRefusal,
 } from './provider-refusal.ts'
+export { ENSO_RUN_CONTEXT_ENTRY, EnsoForkPoint, EnsoRunContext, readEnsoRunContext } from './run-context.ts'
 export {
   ENSO_CONTEXT_ADDITIONS_SHOWN,
   ENSO_CONTEXT_COMMAND,
@@ -218,6 +219,7 @@ export {
   EnsoModelChoice,
   EnsoModelState,
   EnsoPromptAdmission,
+  EnsoRecordedModel,
   EnsoSessionConfiguration,
   EnsoSessionUsage,
   EnsoThreadCommands,

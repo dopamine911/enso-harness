@@ -93,6 +93,12 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     success: "200 `EnsoContextRequestDetail` JSON — one request's context, element by element",
     errors: '400 malformed thread id; 403 untrusted origin; 404 no session or no such turn; 500 handler failure',
   }),
+  THREAD_MANIFEST_ROUTE: threadRead({
+    path: '/api/threads/:threadId/manifest',
+    handler: 'respondWithThreadManifest',
+    success: "200 `EnsoForkPoint` JSON — identity, then run conditions, off pi's branch",
+    errors: '400 malformed thread id; 403 untrusted origin; 404 no session; 500 handler failure',
+  }),
   THREAD_HISTORY_ROUTE: threadRead({
     path: '/api/threads/:threadId/history',
     handler: 'respondWithThreadHistory',
@@ -185,6 +191,20 @@ const REGEX_ROUTE_METADATA: Record<string, RouteMetadata> = {
     builds: 'no',
     logs: 'yes',
     factory: { path: FOLLOW_PATH, declaration: 'export async function forkThreadAt' },
+  },
+  THREAD_CONTINUE_ROUTE: {
+    method: 'POST',
+    path: '/api/threads/:threadId/continue',
+    handler: 'respondToContinue → continueThread → ThreadRuntime.continueRun',
+    input: 'path: `threadId`; no body',
+    success:
+      '202 empty — the torn tail is continued from the stored state with no new user message; the run arrives on the follow and its `settled` releases the thread',
+    errors:
+      '400 malformed thread id; 403 untrusted origin; 409 thread busy; 422 nothing to continue — the thread does not end on an unanswered prompt or an unfinished tool call; 500 handler failure',
+    routeClass: 'control',
+    builds: 'yes',
+    logs: 'yes',
+    factory: { path: FOLLOW_PATH, declaration: 'export async function continueThread' },
   },
   PROJECT_ROUTE: {
     method: 'DELETE',

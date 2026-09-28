@@ -32,11 +32,16 @@ import type { ThreadFeedFrame, ThreadRegistry } from './thread-registry.ts'
 /**
  * The prompt/follow split (#112) — the server↔browser wire.
  *
- * Five routes, none of which is a run:
+ * Six routes, none of which is a run:
  *
  *   POST /api/threads/:id/prompt   unary. Takes the thread, fires the prompt, answers at
  *                                  once with a message id. The thread's own `settled`
  *                                  releases it — not an HTTP response ending.
+ *   POST /api/threads/:id/continue unary (#436). Takes the thread like a prompt and continues
+ *                                  its torn tail from the stored state — no new user message.
+ *                                  202 accepted (the run arrives on the follow, its `settled`
+ *                                  releases the thread), 409 while a run holds it, 422 with the
+ *                                  runtime's reason for a tail there is nothing to continue from.
  *   GET  /api/threads/:id/follow   one snapshot frame, then observations and status
  *                                  frames for as long as the client stays. Observation
  *                                  only: never builds a session; a thread that is not live
@@ -204,6 +209,7 @@ export async function followThread(deps: FollowRouteDeps, threadId: string, resp
     generation: mount.generation,
     permissionMode: mount.permissionMode,
     model: mount.model,
+    ...(mount.recordedModel === undefined ? {} : { recordedModel: mount.recordedModel }),
     cwd: mount.cwd,
     usage: mount.usage,
     messages: mount.messages,
@@ -340,6 +346,64 @@ export async function promptThread(deps: FollowRouteDeps, threadId: string, body
     },
   )
   return { status: 202, receipt: { threadId, messageId, generation: lease.generation, queued: false } }
+}
+
+export type ContinueOutcome =
+  | { readonly status: 202 }
+  | { readonly status: 404; readonly reason: string }
+  | { readonly status: 409; readonly reason: string }
+  | { readonly status: 422; readonly reason: string }
+
+/**
+ * Continue a torn thread from its stored state (#436): no prompt, no new user message — the run the
+ * cut-off one never finished. Taken like a prompt's idle path: refused while a run holds the thread
+ * (409 — there is nothing torn about a thread that is running), else acquired (a resumed thread
+ * BUILDS here, which is the case this exists for) and handed to the runtime. The runtime's refusal —
+ * a tail that is no unanswered prompt or unfinished tool call — is the 422, verbatim, and releases
+ * the lease. Accepted, it answers 202 and the run arrives on the follow like any other; the thread's
+ * own `settled` releases it, as it releases a prompt's.
+ *
+ * A thread neither live here nor stored is a 404 BEFORE anything is built (PR #442 review): there is
+ * nothing to continue by definition, and `acquire` would build a fresh session under the id and hold
+ * it for the idle window only to refuse it — unlike `/command` and `/configure`, which build on purpose.
+ */
+export async function continueThread(deps: FollowRouteDeps, threadId: string): Promise<ContinueOutcome> {
+  const { threads, host } = deps
+  const running = runningRefusal(threads, threadId, 'continue')
+  if (running !== undefined) return running
+  if (threads.peek(threadId) === undefined && (await host.storedThreadDirectory(threadId)) === undefined) {
+    return { status: 404, reason: `no thread ${threadId} to continue` }
+  }
+  const lease = await threads.acquire(threadId)
+  noteRunAdmitted(threadId, lease.generation)
+  const settle = threads.observe(threadId, (frame: ThreadFeedFrame) => {
+    if (frame.kind !== 'observation' || frame.observation.kind !== 'settled') return
+    settle.unsubscribe()
+    lease.release()
+  })
+  /** A refusal, or a fault before either signal: nothing runs, so nothing will settle. */
+  const giveBack = (): void => {
+    forgetRun(threadId, lease.generation)
+    settle.unsubscribe()
+    lease.release()
+  }
+  return new Promise<ContinueOutcome>((resolve, reject) => {
+    // Unlike `promptThread`'s call to pi's public `prompt`, `continueRun` reads pi's private run
+    // state (#436), so a fault before either callback is plausible after a pi bump: the lease goes
+    // back and the route answers 500, rather than leaving the thread held (PR #442 review).
+    try {
+      lease.runtime.continueRun({
+        onAccepted: () => resolve({ status: 202 }),
+        onRejected: (reason: string) => {
+          giveBack()
+          resolve({ status: 422, reason })
+        },
+      })
+    } catch (error) {
+      giveBack()
+      reject(error)
+    }
+  })
 }
 
 /** The dialog body: pi's response shape, keyed by the request id the follow showed. */

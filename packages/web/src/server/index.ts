@@ -28,6 +28,7 @@ import {
   answerThreadDialog,
   changeThreadMode,
   configureThread,
+  continueThread,
   type FollowRouteDeps,
   followThread,
   forkThreadAt,
@@ -47,6 +48,7 @@ import { followLogTail, type LogTailRouteDeps } from './logs-tail-route.ts'
 import { createProjectRegistry, ProjectUnavailable } from './projects.ts'
 import { SSE_KEEPALIVE_MS } from './sse.ts'
 import { createContextRequestRoute, createThreadContextRoute } from './thread-context-route.ts'
+import { createThreadManifestRoute } from './thread-manifest-route.ts'
 import { readThreadMount, type ThreadReadDeps } from './thread-read.ts'
 import { createThreadRegistry, inspectThread, type ThreadView } from './thread-registry.ts'
 import { createThreadStatsRoute } from './thread-stats-route.ts'
@@ -65,6 +67,8 @@ const THREAD_STATS_ROUTE = /^\/api\/threads\/([^/?#]+)\/stats$/
 const THREAD_CONTEXT_ROUTE = /^\/api\/threads\/([^/?#]+)\/context$/
 /** `GET /api/threads/<threadId>/context/<turn|next>` — one request's context, element by element (#361). */
 const THREAD_CONTEXT_REQUEST_ROUTE = /^\/api\/threads\/([^/?#]+)\/context\/([1-9]\d*|next)$/
+/** `GET /api/threads/<threadId>/manifest` — the thread's fork point: identity, then run conditions (#435). */
+const THREAD_MANIFEST_ROUTE = /^\/api\/threads\/([^/?#]+)\/manifest$/
 /** The wire (#112): `POST …/prompt`, `GET …/follow`, `POST …/dialog`, `POST …/abort` (#116). See `follow.ts`. */
 const THREAD_FOLLOW_ROUTE = /^\/api\/threads\/([^/?#]+)\/follow$/
 const THREAD_PROMPT_ROUTE = /^\/api\/threads\/([^/?#]+)\/prompt$/
@@ -78,6 +82,8 @@ const THREAD_COMMAND_ROUTE = /^\/api\/threads\/([^/?#]+)\/command$/
 const THREAD_CONFIGURE_ROUTE = /^\/api\/threads\/([^/?#]+)\/configure$/
 /** `POST …/fork` (#433): fork the thread at one of its user messages — a new thread naming this one as its parent. */
 const THREAD_FORK_ROUTE = /^\/api\/threads\/([^/?#]+)\/fork$/
+/** `POST …/continue` (#436): continue a torn thread from its stored state — no new prompt. */
+const THREAD_CONTINUE_ROUTE = /^\/api\/threads\/([^/?#]+)\/continue$/
 /** `DELETE /api/projects/<projectId>` (#395) — the id is sixteen hex digits, so it needs no decoding. */
 const PROJECT_ROUTE = /^\/api\/projects\/([0-9a-f]{16})$/
 
@@ -582,11 +588,14 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   // One thread's context (#361): pi's branch, request by request; no log is read.
   const threadContext = createThreadContextRoute({ threads, host })
   const contextRequest = createContextRequestRoute({ threads, host })
+  // One thread's fork point (#435): identity and run conditions off pi's branch.
+  const threadManifest = createThreadManifestRoute({ threads, host })
 
   /**
-   * A thread analysis — stats (#45), context (#361) — or 404 for a thread the server holds neither
-   * live nor on disk. The payload is built before the head, as `respondWithStats` builds it: a
-   * day file that fails to read is the 500 `answerOrFail` writes, never a throw after a committed 200.
+   * A thread analysis — stats (#45), context (#361), manifest (#435) — or 404 for a thread the
+   * server holds neither live nor on disk. The payload is built before the head, as
+   * `respondWithStats` builds it: a day file that fails to read is the 500 `answerOrFail`
+   * writes, never a throw after a committed 200.
    */
   function analysisResponder(
     read: (threadId: string) => Promise<object | undefined>,
@@ -606,6 +615,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
   }
   const respondWithThreadStats = analysisResponder(threadStats)
   const respondWithThreadContext = analysisResponder(threadContext)
+  const respondWithThreadManifest = analysisResponder(threadManifest)
   /**
    * One request's context; the request is the route's second capture, a turn or `next` — the
    * dispatcher's own match, so the url is read once. A turn the thread lacks, or a thread held
@@ -704,6 +714,11 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     },
     {
       method: 'GET',
+      route: THREAD_MANIFEST_ROUTE,
+      respond: idOnly(respondWithThreadManifest),
+    },
+    {
+      method: 'GET',
       route: THREAD_CONTEXT_REQUEST_ROUTE,
       respond: respondWithContextRequest,
     },
@@ -723,6 +738,7 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     { method: 'POST', route: THREAD_COMMAND_ROUTE, respond: respondToHostCommand },
     { method: 'POST', route: THREAD_CONFIGURE_ROUTE, respond: respondToConfigure },
     { method: 'POST', route: THREAD_FORK_ROUTE, respond: respondToFork },
+    { method: 'POST', route: THREAD_CONTINUE_ROUTE, respond: idOnly(respondToContinue) },
     {
       method: 'POST',
       route: THREAD_ABORT_ROUTE,
@@ -840,6 +856,19 @@ export function startEnsoServer(options: EnsoServerOptions): EnsoServerHandle {
     })
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify(outcome.receipt))
+  }
+
+  /** No body: the thread id is the whole request (#436). The run arrives on the follow. */
+  async function respondToContinue(threadId: string, response: ServerResponse): Promise<void> {
+    const outcome = await continueThread(followDeps, threadId)
+    if (outcome.status !== 202) {
+      log.warn('continue refused ({status}): {reason}', { threadId, status: outcome.status, reason: outcome.reason })
+      refuseWith(response, outcome)
+      return
+    }
+    log.info('continue accepted', { threadId })
+    response.writeHead(202)
+    response.end()
   }
 
   async function respondToDialog(threadId: string, request: IncomingMessage, response: ServerResponse): Promise<void> {

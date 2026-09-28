@@ -1,6 +1,7 @@
 import type { EnsoNotifyType, EnsoUiRequestOrigin } from '@enso/core'
 import { ChevronRightIcon, InfoIcon, OctagonAlertIcon, TriangleAlertIcon } from 'lucide-react'
 import { cn } from '@/lib/utils.ts'
+import { Button } from './components/ui/button.tsx'
 import { createStore, type Store, useStore, useThreadStores } from './store.ts'
 
 /**
@@ -43,7 +44,18 @@ export interface EnsoNotification {
    * the wording. Absent when nothing names one.
    */
   source?: string | undefined
+  /** The one thing a reader can do about it (#436: Continue on a torn tail); gone once pressed. */
+  action?: NotificationAction | undefined
   at: Date
+}
+
+/**
+ * A line's one action (#436) — a label and what pressing it does. One-shot: pressing takes it off
+ * the line (`takeAction`), so it cannot be pressed twice; what came of it is said as lines of its own.
+ */
+export interface NotificationAction {
+  readonly label: string
+  readonly run: () => void
 }
 
 /**
@@ -53,6 +65,9 @@ export interface EnsoNotification {
  */
 const MAX_KEPT_NOTIFICATIONS = 100
 
+/** A line to add: everything a notification holds but the id and the time the store gives it. */
+type NotificationLineInput = Omit<EnsoNotification, 'id' | 'at'>
+
 export interface NotificationsStore extends Store<ReadonlyArray<EnsoNotification>> {
   readonly push: (
     message: string,
@@ -60,20 +75,44 @@ export interface NotificationsStore extends Store<ReadonlyArray<EnsoNotification
     origin: EnsoUiRequestOrigin,
     source?: string,
   ) => void
+  /** Add a line that carries an action (#436) — the one the reader can press once. Answers the line's id. */
+  readonly pushWithAction: (line: NotificationLineInput & { action: NotificationAction }) => number
+  /** Take a line's action off it and hand it back, or `undefined` when it has none (any more). */
+  readonly takeAction: (id: number) => NotificationAction | undefined
+  /**
+   * Rewrite a line the thread has moved past, as an `info` line with no action (PR #442 review):
+   * a torn-tail warning once a run has answered it. A line already dropped off the bound is gone.
+   */
+  readonly resolveLine: (id: number, message: string) => void
 }
 
 export function createNotificationsStore(): NotificationsStore {
   const store = createStore<ReadonlyArray<EnsoNotification>>([])
   let nextNotificationId = 1
+  const append = (line: NotificationLineInput): number => {
+    const id = nextNotificationId++
+    const appended = [...store.get(), { ...line, id, at: new Date() }]
+    store.set(appended.slice(-MAX_KEPT_NOTIFICATIONS))
+    return id
+  }
+  const rewrite = (id: number, change: (notification: EnsoNotification) => EnsoNotification): void => {
+    store.set(store.get().map((notification) => (notification.id === id ? change(notification) : notification)))
+  }
   return {
     get: store.get,
     subscribe: store.subscribe,
     push: (message: string, notifyType: EnsoNotifyType | undefined, origin: EnsoUiRequestOrigin, source?: string) => {
-      const appended = [
-        ...store.get(),
-        { id: nextNotificationId++, message, notifyType, origin, source, at: new Date() },
-      ]
-      store.set(appended.slice(-MAX_KEPT_NOTIFICATIONS))
+      append({ message, notifyType, origin, source })
+    },
+    pushWithAction: append,
+    takeAction: (id: number) => {
+      const action = store.get().find((notification) => notification.id === id)?.action
+      if (action === undefined) return undefined
+      rewrite(id, (notification) => ({ ...notification, action: undefined }))
+      return action
+    },
+    resolveLine: (id: number, message: string) => {
+      rewrite(id, (notification) => ({ ...notification, message, notifyType: 'info', action: undefined }))
     },
   }
 }
@@ -199,16 +238,32 @@ function LinkedText({ text }: { text: string }): React.ReactNode {
 
 /**
  * One notification as a small transcript line. Takes the notification as a prop so it is testable
- * without the store. The full timestamp lives in `title` (hover) — the visible line stays short.
+ * without the store. The full timestamp lives in `title` (hover) — the visible line stays short. A
+ * line with an action (#436) carries its button after the text; `onAction` is what pressing it does.
  */
-export function NotificationLine({ notification }: { notification: EnsoNotification }): React.ReactNode {
-  return (
+export function NotificationLine({
+  notification,
+  onAction,
+}: {
+  notification: EnsoNotification
+  onAction?: () => void
+}): React.ReactNode {
+  const line = (
     <TranscriptLine
       notifyType={notification.notifyType}
       message={notification.message}
       source={notification.source}
       title={notification.at.toLocaleString()}
     />
+  )
+  if (notification.action === undefined) return line
+  return (
+    <div className="flex flex-col gap-1.5">
+      {line}
+      <Button type="button" size="sm" variant="outline" className="ml-6 self-start" onClick={onAction}>
+        {notification.action.label}
+      </Button>
+    </div>
   )
 }
 
@@ -242,7 +297,8 @@ function StartupNotices({ notifications }: { notifications: readonly EnsoNotific
  * construction: the host replays them before the first prompt), the rest as lines.
  */
 export function ThreadNotifications(): React.ReactNode {
-  const currentNotifications = useStore(useThreadStores().notifications)
+  const { notifications } = useThreadStores()
+  const currentNotifications = useStore(notifications)
   if (currentNotifications.length === 0) return null
   const startup = currentNotifications.filter(isStartupNotice)
   const open = currentNotifications.filter((notification) => !isStartupNotice(notification))
@@ -250,7 +306,11 @@ export function ThreadNotifications(): React.ReactNode {
     <div className="flex flex-col gap-1.5">
       <StartupNotices notifications={startup} />
       {open.map((notification) => (
-        <NotificationLine key={notification.id} notification={notification} />
+        <NotificationLine
+          key={notification.id}
+          notification={notification}
+          onAction={() => notifications.takeAction(notification.id)?.run()}
+        />
       ))}
     </div>
   )
